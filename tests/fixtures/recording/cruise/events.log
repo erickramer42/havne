@@ -1,0 +1,13 @@
+ecuio session recording, format 2 (ADR-0049)
+started  2026-11-09 09:00:00.000 (local time)
+utc  2026-11-09T15:00:00.000Z
+core  0.7.0
+uri  mock://cruise
+profile  test
+frame flags  complete
+signal  Vehicle Speed,number,km/h,1,1,1
+signal  Throttle,number,%,1,2,2
+caller  havne-cli 0.7.0
+columns  local time, seconds since the recording started (host_us / 1e6 in the CSV files), kind, text
+
+09:00:25.000  +25.000  end  havne-cli: seconds: 0 frames, 500 values, 0 records dropped, 0 notes dropped

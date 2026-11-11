@@ -10,7 +10,8 @@
 # made-up logger's map on one line before its file. Each seed is in the harness's own form (fuzz/README.md): the
 # JSON harness's first byte picks its bounds, the OBDb harness's its
 # options, the plugin harness's its form, the recording and export
-# harnesses' a folder ('F'), with the pieces cut at 0x1E bytes. Started from
+# harnesses' a folder ('F'), with the pieces cut at 0x1E bytes, or the
+# stretches' rules ('S') over two fixtures' samples. Started from
 # these, a 60 s run reaches the loaders behind the JSON reader; from
 # nothing, it barely leaves the reader. Built from the fixtures, never
 # copies of them, so the seeds follow the formats as the fixtures do.
@@ -37,6 +38,36 @@ def write(out, harness, name, data):
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, name), "wb") as f:
         f.write(data)
+
+
+def signal_rows(path):
+    """{signal: [(host_us, value)]} of a signals.csv's number rows"""
+    rows = {}
+    for line in read(path).decode("utf-8-sig").splitlines()[1:]:
+        cells = line.split(",")
+        try:
+            rows.setdefault(cells[1], []).append((int(cells[0]), float(cells[2])))
+        except (IndexError, ValueError):
+            pass
+    return rows
+
+
+def stretch_seed(switches, gate, speed, measure):
+    """fuzz_recording's stretches input: the switches, the default rules
+    (indexes into the harness's tables), the whole range, then each
+    signal's samples, at most 255, a time step in 10 ms and a value in
+    halves under 120"""
+    rules = bytes([7, 5, 5, 0, 6, 3, 4, 6])
+    signals = [gate[:255], speed[:255], measure[:255]]
+    out = b"S" + bytes([switches]) + rules + bytes([0, 255])
+    out += bytes(len(s) for s in signals)
+    for s in signals:
+        last = 0
+        for t, v in s:
+            step = min((t - last) // 10000, 199)
+            last += step * 10000
+            out += bytes([step, max(0, min(239, round(v * 2)))])
+    return out
 
 
 def main(argv):
@@ -135,6 +166,17 @@ def main(argv):
     for name, seed in folder_seeds.items():
         write(out, "fuzz_recording", name, seed)
         write(out, "fuzz_export", name, seed)
+    # The stretches' rules ('S'): the pull fixture's throttle and engine
+    # speed (no speed signal, so engine speed measures), and the cruise
+    # fixture's speed and throttle, under the default rules
+    pulls = signal_rows("tests/fixtures/recording/pull-early/signals.csv")
+    write(out, "fuzz_recording", "stretches-pull",
+          stretch_seed(0, pulls.get("Throttle", []), [],
+                       [(t, v / 60) for t, v in pulls.get("RPM", [])]))
+    cruise = signal_rows("tests/fixtures/recording/cruise/signals.csv")
+    write(out, "fuzz_recording", "stretches-cruise",
+          stretch_seed(3, cruise.get("Throttle", []),
+                       cruise.get("Vehicle Speed", []), []))
     vin = b"ZZZFAKE11M0000001"
     ecu = header + (
         b"100000,100000,0x7E8,0x100,49 02 01 " + b" ".join(b"%02X" % c for c in vin) + b"\n"

@@ -65,6 +65,7 @@ def test_text_core_hands_over_stays_a_pointer():
 def test_every_macro_is_declared():
     # <stdint.h>'s limits and string literals too
     assert E.ECUIO_RECORDING_NONE == 2**64 - 1
+    assert E.ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR == 56.32704
     assert E.ECUIO_TIMING_COLUMNS.startswith("t_s,ecu,request,")
     assert "," in E.ECUIO_TIMING_COLUMNS and '"' not in E.ECUIO_TIMING_COLUMNS
 
@@ -94,6 +95,14 @@ def test_a_limit_and_a_string_macro_are_declared(tmp_path):
     text = ctypes_gen.generate(tree)
     assert f"ECUIO_MADE_UP_MIN = {-(2**31) + 1}" in text.splitlines()
     assert "ECUIO_MADE_UP_TEXT = 'a,bc'" in text.splitlines()
+
+
+def test_a_decimal_macro_is_a_float(tmp_path):
+    tree = made_up_tree(tmp_path, "#define ECUIO_MADE_UP_LEVEL 56.32704\n"
+                                  "#define ECUIO_MADE_UP_BAND  2.0")
+    lines = ctypes_gen.generate(tree).splitlines()
+    assert "ECUIO_MADE_UP_LEVEL = 56.32704" in lines
+    assert "ECUIO_MADE_UP_BAND = 2.0" in lines
 
 
 def test_an_owned_result_and_its_release_are_pointers(tmp_path):

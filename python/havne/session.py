@@ -39,7 +39,25 @@ Value.__doc__ = ("A decoded value: its frame's time and ID, its def's id, name a
                  "unit, ECUIO_VALUE_* kind, the number (an enum's raw one) and the "
                  "text (a TEXT or HEX value's, an enum's label), else None")
 
+ModuleSession = namedtuple("ModuleSession", "ecu asked session state nrc entries lost")
+ModuleSession.__doc__ = ("One module's extended session (ADR-0060), in havne-cli's words: its "
+                         "reply ID as \"0x7E8\", the session asked and the one in force "
+                         "(\"03\" or \"01\"), the state (not-asked, entering, entered, refused, "
+                         "unanswered, abandoned), the refusal's NRC as two hex digits (a refused "
+                         "or abandoned session's, else None) and how many times the session was "
+                         "entered and lost")
+
 TEXT_KINDS = (e.ECUIO_VALUE_TEXT, e.ECUIO_VALUE_HEX)
+
+_SESSION_STATES = {
+    e.ECUIO_SESSION_STATE_NOT_ASKED: "not-asked",
+    e.ECUIO_SESSION_STATE_ENTERING: "entering",
+    e.ECUIO_SESSION_STATE_ENTERED: "entered",
+    e.ECUIO_SESSION_STATE_REFUSED: "refused",
+    e.ECUIO_SESSION_STATE_UNANSWERED: "unanswered",
+    e.ECUIO_SESSION_STATE_ABANDONED: "abandoned",
+}
+_EXTENDED = 0x03
 
 
 class _Queue:
@@ -329,6 +347,21 @@ class Session:
         check(lib.ecuio_session_get_channel_support(self._handle(), channel, ctypes.byref(out)),
               "ecuio_session_get_channel_support")
         return out
+
+    def session_state(self, channel=0):
+        """The channel's extended session as words (ADR-0060), the fields of
+        havne-cli's session line; None while no session was asked
+        (no ?session=03) or the module's report has not come in"""
+        s = self.support(channel)
+        if s.session_asked == 0 or s.generation == 0:
+            return None
+        state = _SESSION_STATES.get(s.session_state, "unknown")
+        refused = s.session_state in (e.ECUIO_SESSION_STATE_REFUSED,
+                                      e.ECUIO_SESSION_STATE_ABANDONED)
+        return ModuleSession(f"0x{s.rx_id:X}", "03",
+                             "03" if s.session == _EXTENDED else "01", state,
+                             f"{s.session_nrc:02X}" if refused else None,
+                             s.session_entries, s.session_lost)
 
     def identity(self, channel=0):
         out = e.ecuio_channel_identity_t()

@@ -47,7 +47,9 @@ What the code gives this decision:
   `ECUIO_OBD2_PID_SIG_ID(pid, field)`, append-only. A signal file that
   `extends` `obd2` loads `obd2`'s defs first, with those IDs. A file's
   own defs are numbered by their place (`ECUIO_USER_SIG_ID_BASE` plus
-  the index), which a reordered file changes; ADR-0051 section 2 names
+  the index), which a reordered file changes, except one that replaced a
+  base def by name, which keeps that def's ID (ADR-0051's appendix of
+  2026-11-10); ADR-0051 section 2 names
   `key` as the name a Dashboard's tile refers to, 1 to 31 of `a-z`,
   `0-9` and `_`. A plugin variant's signals are a signal file
   (`ecuio_plugin_variant_file`), keys included. `uds-generic`'s IDs

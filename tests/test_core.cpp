@@ -6249,6 +6249,78 @@ TEST(CoreTest, AFocusThatLeavesNothingToRequestIsRefused)
     ecuio_session_destroy(s);
 }
 
+/* ADR-0051's appendix of 2026-11-10: a computed pick keeps its inputs'
+ * requests in rotation, never among the caller's picks. obd2's Boost alone is
+ * taken and keeps MAP (01 0B) and baro (01 33) asked, parking the rest; under
+ * ?poll=0x0C, which asks neither, it leaves nothing to request. */
+TEST(CoreTest, AComputedPickKeepsItsInputsRequested)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://focus?profile=obd2", &s), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    const uint16_t boost = ECUIO_OBD2_SIG_BOOST_ID;
+    const uint16_t rpm = focus_id_of(set, {0x01, 0x0C});
+    request_params params;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ecuio_focus_seen seen;
+    ecuio_take_focus(s, e.get(), seen);
+
+    ASSERT_EQ(ecuio_session_set_focus(s, &boost, 1), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_take_focus(s, e.get(), seen);
+    int kept = 0;
+    for (uint32_t k = 0; k < e->count; ++k) {
+        const ecuio_request& r = e->requests[k];
+        const bool input = r.len == 2 && r.bytes[0] == 0x01 &&
+                           (r.bytes[1] == 0x0B || r.bytes[1] == 0x33);
+        EXPECT_EQ(r.parked == 0, input)
+            << "PID " << std::hex << int(r.bytes[1]);
+        kept += r.parked == 0 ? 1 : 0;
+    }
+    EXPECT_EQ(kept, 2) << "MAP and baro";
+    {
+        std::lock_guard<std::mutex> lock(s->focus_mutex);
+        EXPECT_EQ(s->focus_ids, std::vector<uint16_t>{boost})
+            << "the caller's picks, never the inputs";
+    }
+    /* A pick beside it adds its own request */
+    const uint16_t both[2] = {boost, rpm};
+    ASSERT_EQ(ecuio_session_set_focus(s, both, 2), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    kept = 0;
+    for (uint32_t k = 0; k < e->count; ++k) {
+        kept += e->requests[k].parked == 0 ? 1 : 0;
+    }
+    EXPECT_EQ(kept, 3);
+    EXPECT_EQ(ecuio_session_set_focus(s, nullptr, 0), ECUIO_OK);
+    ecuio_session_destroy(s);
+
+    /* Inputs nothing asks leave nothing to request */
+    ASSERT_EQ(ecuio_session_create("mock://focus?profile=obd2", &s), ECUIO_OK);
+    set = ecuio_session_signal_set(s);
+    request_params poll;
+    poll.has_poll = true;
+    poll.poll_pid = 0x0C;
+    auto p = std::make_unique<ecuio_request_engine>();
+    ASSERT_EQ(ecuio_build_requests(s, set, poll, s->info.rx_ids,
+                                   s->info.channel_count, p.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    EXPECT_EQ(ecuio_session_set_focus(s, &boost, 1),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the focus leaves nothing to request: none of the picked "
+                 "signals is asked on this session");
+    ecuio_session_destroy(s);
+}
+
 /* ADR-0056 section 4: the call's refusals, each changing nothing, and
  * the minimum reaching the engine with the focus at the worker's take;
  * the focus's end takes it away */

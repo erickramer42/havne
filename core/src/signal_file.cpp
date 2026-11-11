@@ -363,6 +363,9 @@ struct entry {
     std::string key;
     std::string kind;
     uint32_t def = 0;   /* its index in the set's defs */
+    uint16_t id = 0;    /* its def's id: the base def's it replaces, else
+                           ECUIO_USER_SIG_ID_BASE + its place in the list */
+    std::string name;   /* its "name" when that is text, else "" */
 };
 
 /* The expression compiler (ADR-0051 section 2): + - * /, parentheses,
@@ -470,10 +473,8 @@ private:
             if (e->kind == "text" || e->kind == "hex") {
                 fail(at, "reads " + q(name) + ", which is text");
             }
-            /* The id build gives the entry's def (its place in the
-             * list), set or not yet: a later signal's is not */
-            id = static_cast<uint16_t>(ECUIO_USER_SIG_ID_BASE +
-                                       (e - entries_.data()));
+            /* The id is set for every entry before any is compiled */
+            id = e->id;
         }
         for (uint32_t k = 0; k < p_.input_count; ++k) {
             if (p_.input_ids[k] == id) {
@@ -1035,11 +1036,55 @@ void build(const parts& in, ecuio_signal_file& f)
                                   " isn't number, text, hex, enum or computed");
             }
         }
-        e.def = static_cast<uint32_t>(f.defs.size() + entries.size());
+        if (const Value* n = s.find("name")) {
+            if (n->type == Type::string) {
+                e.name = n->text;
+            }
+        }
         entries.push_back(e);
     }
 
-    f.defs.resize(f.defs.size() + entries.size());
+    /* A signal named as a base def replaces it, as a plugin variant's
+     * later file replaces a signal by key: the base def is left out of
+     * the set, with the program a computed one held, and the file's def
+     * stands in its place with its ID, so what reads that ID (a base
+     * program, a layout's cell, a focus) reads the file's. Names are
+     * unique in a set because a recording keys its values by name. */
+    if (base != nullptr) {
+        std::vector<ecuio_signal_def_t> kept;
+        for (const ecuio_signal_def_t& d : f.defs) {
+            const entry* by = nullptr;
+            for (const entry& e : entries) {
+                if (e.name == d.name) {
+                    by = &e;
+                }
+            }
+            if (by == nullptr) {
+                kept.push_back(d);
+            } else {
+                entries[by - entries.data()].id = d.id;
+            }
+        }
+        f.computed.clear();
+        for (ecuio_signal_def_t& d : kept) {
+            if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
+                continue;
+            }
+            const ecuio_computed_t p = base->computed[d.table_first];
+            d.table_first = static_cast<uint16_t>(f.computed.size());
+            f.computed.push_back(p);
+        }
+        f.defs.swap(kept);
+    }
+    const size_t first_own = f.defs.size();
+    for (size_t i = 0; i < entries.size(); ++i) {
+        entries[i].def = static_cast<uint32_t>(first_own + i);
+        if (entries[i].id == 0) {
+            entries[i].id = static_cast<uint16_t>(ECUIO_USER_SIG_ID_BASE + i);
+        }
+    }
+
+    f.defs.resize(first_own + entries.size());
     std::vector<std::pair<const entry*, std::vector<std::string>>> programs;
     for (size_t i = 0; i < entries.size(); ++i) {
         const entry& e = entries[i];
@@ -1047,7 +1092,7 @@ void build(const parts& in, ecuio_signal_file& f)
         const std::string what = "signal " + q(e.key);
         ecuio_signal_def_t& d = f.defs[e.def];
         d = ecuio_signal_def_t{};
-        d.id = static_cast<uint16_t>(ECUIO_USER_SIG_ID_BASE + i);
+        d.id = e.id;
         d.scale = 1.0;
 
         const bool computed = e.kind == "computed";
@@ -1078,6 +1123,13 @@ void build(const parts& in, ecuio_signal_file& f)
         }
         copy_text(d.name, sizeof d.name, text_of(*name_v, 1, 31, what + "'s name"));
         no_formula(*name_v, what + "'s name");
+        for (size_t j = 0; j < i; ++j) {
+            if (entries[j].name == entries[i].name) {
+                refuse(*name_v, what + " has the name " + q(entries[i].name) +
+                                    ", which signal " + q(entries[j].key) +
+                                    " has too: a name names one signal");
+            }
+        }
         if (const Value* unit = s.find("unit")) {
             copy_text(d.unit, sizeof d.unit, text_of(*unit, 0, 15, what + "'s unit"));
             no_formula(*unit, what + "'s unit");
@@ -1165,7 +1217,7 @@ void build(const parts& in, ecuio_signal_file& f)
      * the words name the signal it named */
     ecuio_validation_t why{};
     if (ecuio_validate_signal_set(&f.set, &why) != ECUIO_VALIDATE_OK) {
-        const size_t first = base != nullptr ? base->count : 0;
+        const size_t first = first_own;
         /* Only these codes' index is a def's */
         const bool names_a_def = why.code > 0 ||
                                  why.code == ECUIO_VALIDATE_ERR_DUPLICATE_ID ||
@@ -1191,7 +1243,7 @@ void build(const parts& in, ecuio_signal_file& f)
     uint32_t overflow = UINT32_MAX;
     if (!ecuio_engine_derive(engine.get(), &f.set, rx_ids, f.set.channel_count,
                              &overflow)) {
-        const size_t first = base != nullptr ? base->count : 0;
+        const size_t first = first_own;
         const Value& at = (overflow != UINT32_MAX && overflow >= first &&
                            overflow - first < entries.size())
                               ? *entries[overflow - first].v

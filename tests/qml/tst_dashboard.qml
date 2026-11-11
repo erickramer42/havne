@@ -48,14 +48,13 @@ TestCase {
     }
 
     // Each built-in gauge's label and its key in Bridge.gaugeSignals, with
-    // the name the mock set gives the signal; Boost has no key there, so
-    // its refs are the third item
+    // the name the mock set gives the signal
     readonly property var gaugeSignals: ({
         "Engine speed": ["rpm", "RPM"],
         "Vehicle speed": ["speed", "Vehicle Speed"],
         "Coolant": ["coolant", "Coolant Temp"],
         "Oil temp": ["oil", "Engine Oil Temp"],
-        "Boost": ["", "Boost", ["id:13001"]],
+        "Boost": ["boost", "Boost"],
         "IAT": ["iat", "Intake Air Temp"],
         "MAF": ["maf", "MAF"],
         "Lambda": ["lambda", "Lambda"],
@@ -64,8 +63,7 @@ TestCase {
 
     // The refs the gauge labeled `label` looks up
     function refsOf(label) {
-        const g = gaugeSignals[label]
-        return g.length > 2 ? g[2] : Bridge.gaugeSignals[g[0]]
+        return Bridge.gaugeSignals[gaugeSignals[label][0]]
     }
 
     // A binding error in the app's QML fails the test
@@ -306,13 +304,15 @@ TestCase {
         verify(lambda, "obd2 has the commanded lambda")
         compare(lambda.ref, "id:11544")
         compare(lambda.name, "Commanded Lambda")
-        compare(hub.lookup(refsOf("Boost")), null, "no boost in obd2 yet")
+        const boost = hub.lookup(refsOf("Boost"))
+        verify(boost, "obd2 has the computed boost")
+        compare(boost.ref, "id:7011")
     }
 
     // A gauge binds by ref, never by name: under a signal file extending
-    // obd2 whose own defs take the tach's label ("Engine speed") and the
-    // name obd2 and the mock give its def ("RPM"), the tach reads obd2's
-    // def by its ID, and the file's defs are theirs by key
+    // obd2 whose own defs take the tach's label ("Engine speed") and a
+    // name like obd2's def ("Rpm"), the tach reads obd2's def by its ID, and
+    // the file's defs are theirs by key (a file's "RPM" would replace obd2's)
     function test_aGaugeBindsByRefNotByName() {
         const r = Bridge.importSignalText(JSON.stringify({
             havne_signals: 1, name: "Named alike", source: { name: "t" },
@@ -321,7 +321,7 @@ TestCase {
             signals: [
                 { key: "rpm_too", name: "Engine speed",
                   read: { service: "22", number: "D100" }, field: { byte: 0, bits: 8 } },
-                { key: "rpm_mock", name: "RPM",
+                { key: "rpm_mock", name: "Rpm",
                   read: { service: "22", number: "D101" }, field: { byte: 0, bits: 8 } }
             ]
         }))
@@ -333,12 +333,37 @@ TestCase {
         connect("replay://" + Harness.replayFixtures
                 + "/2026-10-25-engine-start?profile=" + r.profile + "&speed=100")
         compare(hub.byRef["key:rpm_too"].name, "Engine speed")
-        compare(hub.byRef["key:rpm_mock"].name, "RPM")
+        compare(hub.byRef["key:rpm_mock"].name, "Rpm")
         const rpm = hub.lookup(refsOf("Engine speed"))
         compare(rpm.ref, "id:7003", "obd2's def, by its ID")
         tryVerify(() => tach.hasValue, 5000, "the tach reads it")
         compare(tach.valueText,
                 Number(rpm.value).toLocaleString(Qt.locale(), 'f', rpm.decimals))
+    }
+
+    // A file's def that replaced a base one by name has the base's ID: a cell
+    // that named the base def by ID reads the file's def, and so does one that
+    // names it by key
+    function test_aReplacingDefIsFoundByTheBaseIdAndByKey() {
+        const r = Bridge.importSignalText(JSON.stringify({
+            havne_signals: 1, name: "Replaces", source: { name: "t" },
+            extends: "obd2",
+            ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [
+                { key: "revs", name: "RPM",
+                  read: { service: "22", number: "D100" }, field: { byte: 0, bits: 8 } }
+            ]
+        }))
+        verify(r.ok, r.words)
+        Bridge.useSignalFiles([r.sha256])
+        const hub = createTemporaryObject(hubComponent, testCase)
+        connect("replay://" + Harness.replayFixtures
+                + "/2026-10-25-engine-start?profile=" + r.profile + "&speed=100")
+        const byKey = hub.byRef["key:revs"]
+        verify(byKey, "the file's def by its key")
+        compare(byKey.id, 7003, "it has obd2's RPM ID")
+        verify(hub.byRef["id:7003"] === byKey, "a cell naming obd2's RPM by ID reads it")
+        compare(hub.lookup(["id:7003"]).name, "RPM")
     }
 
     // Imperial: the gauges read mph and degrees F, their scales and zones
@@ -513,7 +538,9 @@ TestCase {
         tryVerify(() => view.width > 0, 2000, "the page is laid out")
         compare(view.columns, data.columns)
         const cells = page.pages[0].cells
-        const boxes = DashboardBook.place(cells, data.columns)
+        // Where place puts each cell, its width as the built-in layout is drawn
+        const boxes = DashboardBook.stretched(cells, DashboardBook.place(cells, data.columns),
+                                              data.columns, true)
         const pitchX = view.columnWidth + page.cellGap
         const shown = []
         for (let i = 0; i < cells.length; ++i) {
@@ -1362,6 +1389,55 @@ TestCase {
         fuzzyCompare(short.height, 6 * view.pitch, 1e-6, "edit mode's true size")
         compare(page.doc.pages[0].cells[0].h, 6, "the layout is unchanged")
     }
+    // The squares a page's boxes cover and a dial or ring drawn past its own
+    function emptySquaresOf(view) {
+        const covered = {}
+        let rows = 0
+        for (const b of view.boxes) {
+            rows = Math.max(rows, b.y + b.h)
+            for (let y = b.y; y < b.y + b.h; ++y)
+                for (let x = b.x; x < b.x + b.w; ++x)
+                    covered[x + "," + y] = true
+        }
+        let empty = 0
+        for (let y = 0; y < rows; ++y)
+            for (let x = 0; x < view.columns; ++x)
+                empty += covered[x + "," + y] ? 0 : 1
+        return empty
+    }
+    function stretchedRound(view) {
+        const own = DashboardBook.place(view.placed, view.columns)
+        return view.placed.filter((c, i) => (c.kind === "analog" || c.kind === "ring")
+                                           && (view.boxes[i].w !== own[i].w
+                                               || view.boxes[i].h !== own[i].h)).length
+    }
+
+    // The built-in layout leaves no empty square at any desktop width from 5
+    // to 8 columns, and its dials and rings keep their own boxes; the same
+    // cells saved are drawn as before, gaps and all
+    function test_theBuiltInLayoutIsDrawnWithNoEmptySquare_data() {
+        return [{ tag: "5 columns", w: 1100, columns: 5 },
+                { tag: "6 columns", w: 1280, columns: 6 },
+                { tag: "7 columns", w: 1580, columns: 7 },
+                { tag: "8 columns", w: 1850, columns: 8 }]
+    }
+    function test_theBuiltInLayoutIsDrawnWithNoEmptySquare(data) {
+        const page = createTemporaryObject(pageComponent, testCase,
+                                           { form: "desktop", width: data.w, height: 1400 })
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        compare(view.columns, data.columns)
+        verify(page.builtInShown, "nothing is stored")
+        compare(emptySquaresOf(view), 0, "no empty square")
+        compare(stretchedRound(view), 0, "no dial or ring stretched")
+
+        findChild(page, "dashStore").desktop = DashboardBook.serialize(DashboardBook.builtIn("desktop"))
+        tryVerify(() => !page.builtInShown, 1000, "the same cells, saved")
+        const cells = page.pages[0].cells
+        compare(view.boxes, DashboardBook.stretched(cells, DashboardBook.place(cells, data.columns),
+                                                    data.columns), "a saved layout is drawn as before")
+    }
+
     // The desktop's short cell fills the empty squares under it too, and
     // the stored layout stays
     function test_theDesktopStretchesAShortCellToo() {

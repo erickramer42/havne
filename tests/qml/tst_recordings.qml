@@ -378,6 +378,38 @@ TestCase {
     }
 
     // A refused import keeps the panel and the edits; core's words say why
+    // A worker thread that can't start leaves the panel open and the note
+    // in the danger color, for the guess and for the import alike
+    function test_anImportThatCouldntStartSaysSo() {
+        const page = createPage()
+        const note = find(page, "importNote")
+        Harness.failImportThreads(Bridge.recordingImport, true)
+        try {
+            page.chooseImportFile(Harness.writeScratchFile("nostart.csv",
+                "time (s),rpm\n0,800\n1,900\n"))
+            verify(page.importFailed)
+            verify(!Bridge.recordingImport.busy)
+            verify(note.visible)
+            verify(note.text.indexOf("The file couldn't be read") === 0, note.text)
+            verify(Qt.colorEqual(note.color, Theme.danger))
+
+            page.chooseImportFile(Harness.writeScratchFile("nostart.log",
+                "(1.000000) can0 7E8#01\n"))
+            verify(!note.visible, "a new file, no old words")
+            verify(find(page, "importStart").enabled)
+            find(page, "importStart").clicked()
+            compare(note.text, "Not imported: the import couldn't start")
+            verify(Qt.colorEqual(note.color, Theme.danger))
+            verify(find(page, "importPanel").visible, "the panel stays")
+        } finally {
+            Harness.failImportThreads(Bridge.recordingImport, false)
+        }
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the importer is still usable")
+        verify(!page.importFailed)
+    }
+
     function test_aRefusedGuessImportKeepsItsEdits() {
         const page = createPage()
         page.chooseImportFile(Harness.writeScratchFile("guess-refused.csv",
@@ -569,7 +601,6 @@ TestCase {
         const sweep = findChild(find(panel, "exportRows_sweep"), "intervalSize")
         verify(/^\d[\d,.'\u2019\s]* rows, [\d.,]+ (B|KB|MB)$/.test(sweep.text), sweep.text) // any locale's
         const grid = findChild(find(panel, "exportRows_250"), "intervalSize")
-        verify(/ rows, /.test(grid.text), grid.text)
         verify(sweep.text !== grid.text, sweep.text + " and " + grid.text)
 
         // A custom interval is asked for once typed, and a bad one is said
@@ -584,6 +615,73 @@ TestCase {
         compare(panel.customMs, -1)
         verify(!find(panel, "exportGo").enabled, "not with a bad interval")
         compare(find(panel, "exportCustomProblem").text, "ms, 1 to 86400000")
+        restoreExportChoices(panel)
+    }
+
+    // A recording sampled every 20 ms: each interval thins it, so each line
+    // is a size and none carries the note
+    function test_anIntervalThatThinsTheRecordingIsSizedNotNoted() {
+        const name = "export-fast"
+        const folder = Harness.writeFramesRecording(name, 1, 100000)
+        verify(folder !== "", "the folder is made")
+        let header = "ecuio session recording, format 2 (ADR-0049)
+"
+                     + "started  2026-11-03 10:00:00.000 (local time)
+"
+                     + "utc  2026-11-03T16:00:00.000Z
+core  0.3.6
+"
+                     + "uri  socketcan://vcan0?profile=raw
+profile  raw
+"
+                     + "signal  Signal 1,number,V,0,0
+"
+        let rows = "host_us,signal,value,unit
+"
+        for (let t = 1; t <= 100; ++t)
+            rows += (t * 20000) + ",Signal 1," + t + ",V
+"
+        header += "
+10:00:02.000  +2.000  end  havne-cli: seconds: 2 frames, 100 values, "
+                  + "0 records dropped, 0 notes dropped
+"
+        Harness.writeScratchFile(name + "/events.log", header)
+        Harness.writeScratchFile(name + "/signals.csv", rows)
+        const page = createPage()
+        page.open({ title: "Fast", folder: folder })
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        sizesIn(panel)
+        for (const name of ["exportRows_sweep", "exportRows_100", "exportRows_250"]) {
+            const text = findChild(find(panel, name), "intervalSize").text
+            verify(/ rows?, /.test(text), name + ": " + text)
+        }
+        restoreExportChoices(panel)
+    }
+
+    // An interval the recording is too slow for gives no fewer rows than every sweep, and
+    // its line says so in place of a size that looks like a saving
+    function test_anIntervalSlowerThanTheRecordingSaysItGivesNoFewerRows() {
+        const folder = Harness.importCsvFixture("logger-a", "export-slow")
+        verify(folder !== "", "the fixture imports")
+        const page = createPage()
+        page.open({ title: "Slow", folder: folder })
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        sizesIn(panel)
+        const textOf = name => findChild(find(panel, name), "intervalSize").text
+        verify(/ rows?, /.test(textOf("exportRows_sweep")), textOf("exportRows_sweep"))
+        compare(textOf("exportRows_100"), "no fewer rows than every sweep", "100 ms is faster than 4 Hz")
+        compare(textOf("exportRows_250"), "no fewer rows than every sweep", "250 ms is the recording's own pace")
+        verify(find(panel, "exportRows_100").enabled && find(panel, "exportRows_250").enabled,
+               "still choosable")
+        find(panel, "exportRows_custom").clicked()
+        panel.customText = "1000"
+        tryVerify(() => panel.sizes.length === 4, 10000, "the custom interval sized")
+        verify(/ rows?, /.test(textOf("exportRows_custom")), "a slower interval still saves: "
+               + textOf("exportRows_custom"))
         restoreExportChoices(panel)
     }
 
@@ -1041,9 +1139,12 @@ TestCase {
         verify(header.visible && back.text === "All recordings", "and back")
     }
 
-    // One order on both forms: the chart, its zoom row, the switch and the
-    // filter, the rows, then About this recording. On a phone Replay and
-    // Save report sit in About; on the desktop in the title row
+    // The desktop's one order: the chart, its zoom row, the switch and the
+    // filter, the rows, then About this recording, Replay and Save report in
+    // the title row. A phone upright pins the chart and gives About a view
+    // of its own: the zoom row, the switch and the filter head the rows,
+    // and About's view holds the recording's lines with Replay and Save
+    // report among them
     function test_theViewersOrderIsChartRowsThenAbout_data() {
         return [{ tag: "desktop", w: 1280, h: 720, phone: false },
                 { tag: "phone", w: 384, h: 832, phone: true }]
@@ -1064,20 +1165,41 @@ TestCase {
                 const item = find(page, name)
                 return item.mapToItem(page, 0, item.height / 2).y
             }
-            const order = ["openedTitle", "chartFrame", "chartSplitter", "zoomAll"]
-                .concat(data.phone ? ["detailView_values"] : [])
-                .concat(["recordingFilter", "signalRows", "aboutHeading", "recordingInfo",
-                         "decodeChoice", "compareChoice", "checkSummary"])
-            const ys = order.map(yOf)
-            for (let i = 1; i < order.length; ++i)
-                verify(ys[i] > ys[i - 1],
-                       order[i] + " (" + ys[i] + ") under " + order[i - 1] + " (" + ys[i - 1] + ")")
-            const save = yOf("saveReport")
-            const replay = yOf("replayView")
+            const inOrder = order => {
+                const ys = order.map(yOf)
+                for (let i = 1; i < order.length; ++i)
+                    verify(ys[i] > ys[i - 1],
+                           order[i] + " (" + ys[i] + ") under " + order[i - 1] + " (" + ys[i - 1] + ")")
+            }
             if (data.phone) {
+                verify(page.pinnedViewer, "the phone's viewer is pinned")
+                inOrder(["openedTitle", "chartFrame", "chartSplitter", "zoomAll", "detailView_values",
+                         "recordingFilter"])
+                const rows = find(page, "signalRows")
+                verify(rows.itemAtIndex(0).mapToItem(page, 0, 0).y > yOf("recordingFilter"),
+                       "the first row under the filter")
+                verify(!find(page, "aboutHeading").visible, "the switch names About, no heading does")
+                verify(!find(page, "recordingInfo").visible, "About waits for its view")
+                find(page, "detailView_about").clicked()
+                verify(waitForPolish(page.Window.window), "About laid out")
+                verify(!rows.visible, "the rows give way to About")
+                const findings = find(page, "findingList")
+                tryVerify(() => findings.contentY <= findings.originY + 0.5, 2000, "About's list at its start")
+                inOrder(["chartSplitter", "zoomAll", "detailView_about", "recordingInfo", "decodeChoice",
+                         "compareChoice", "checkSummary"])
+                const save = yOf("saveReport")
                 verify(save > yOf("recordingInfo") && save < yOf("decodeChoice"), "Save report in About")
-                compare(replay, save, "Replay beside it")
+                compare(yOf("replayView"), save, "Replay beside it")
             } else {
+                inOrder(["openedTitle", "chartFrame", "chartSplitter", "zoomAll", "recordingFilter",
+                         "signalRows", "aboutHeading", "recordingInfo", "decodeChoice", "compareChoice",
+                         "checkSummary"])
+                const rows = find(page, "signalRows")
+                compare(rows.itemAtIndex(0).mapToItem(rows, 0, 0).y, 0, "no head over the desktop's rows")
+                verify(rows.contentHeight <= rows.height + 0.5, "the rows hold their list: "
+                       + rows.contentHeight + " in " + rows.height)
+                const save = yOf("saveReport")
+                const replay = yOf("replayView")
                 verify(save < yOf("chartFrame") && replay < yOf("chartFrame"), "both in the title row")
                 const sw = find(page, "detailView_values")
                 verify(sw.visible && Math.abs(middleOf("detailView_values") - middleOf("recordingFilter")) < 3
@@ -1091,13 +1213,35 @@ TestCase {
         }
     }
 
+    // On a page taller than the viewer the room left over goes under it:
+    // the zoom row stays right under the splitter, maximized too
+    function test_theZoomRowStaysUnderTheChart() {
+        const page = openFindings()
+        try {
+            page.height = 2000
+            verify(waitForPolish(page.Window.window), "laid out")
+            const splitter = find(page, "chartSplitter")
+            const zoom = find(page, "zoomAll")
+            const gap = zoom.mapToItem(page, 0, 0).y - splitter.mapToItem(page, 0, splitter.height).y
+            verify(gap >= 0 && gap <= 16, "the zoom row " + gap + " px under the splitter")
+            page.toggleMaximized()
+            verify(waitForPolish(page.Window.window), "maximized")
+            const chart = find(page, "chartFrame")
+            const under = zoom.mapToItem(page, 0, 0).y - chart.mapToItem(page, 0, chart.height).y
+            verify(under >= 0 && under <= 16, "maximized, the zoom row " + under + " px under the chart")
+            page.toggleMaximized()
+        } finally {
+            page.height = 900
+        }
+    }
+
     // The chart's height until the splitter sets one: 45 % of the page on
-    // the desktop, 40 % on a phone, never under 248 there (three panes of
-    // 72 and the time axis)
+    // the desktop, 40 % on a phone, never under what three panes, their
+    // seams and the time axis need there
     function test_theChartTakesAShareOfThePage_data() {
         return [{ tag: "desktop", w: 1280, h: 720, phone: false, want: 0.45 * 720 },
                 { tag: "phone", w: 384, h: 832, phone: true, want: 0.4 * 832 },
-                { tag: "short phone", w: 384, h: 500, phone: true, want: 248 }]
+                { tag: "short phone", w: 384, h: 500, phone: true, want: -1 }]
     }
     function test_theChartTakesAShareOfThePage(data) {
         const page = openFindings()
@@ -1108,9 +1252,14 @@ TestCase {
             page.width = data.w
             page.height = data.h
             const chart = find(page, "chartFrame")
-            tryVerify(() => Math.abs(chart.height - data.want) < 1, 2000,
-                      "the chart is " + data.want)
-            verify(Math.abs(chart.height - data.want) < 1, "the chart is " + chart.height)
+            const want = data.want > 0 ? data.want : page.phoneChartFloor
+            if (data.want < 0) {
+                const room = want - 8 - ChartLayout.top - ChartLayout.axisHCursor - ChartLayout.bottomPad
+                compare(ChartLayout.panesThatFit(room, ChartLayout.paneMinH), 3, "three panes fit the floor")
+                compare(ChartLayout.panesThatFit(room - 1, ChartLayout.paneMinH), 2, "and not a pixel less")
+            }
+            tryVerify(() => Math.abs(chart.height - want) < 1, 2000, "the chart is " + want)
+            verify(Math.abs(chart.height - want) < 1, "the chart is " + chart.height)
         } finally {
             Theme.compact = false
             page.chartHeight = kept
@@ -1151,15 +1300,16 @@ TestCase {
     }
 
     // The Export panel opens under the title row, so the page goes to its
-    // top, wherever it was scrolled
+    // top, wherever it was scrolled; on a phone upright the pinned viewer
+    // gives way to the panel and comes back
     function test_theExportPanelOpensAtThePagesTop() {
         const page = openFindings()
-        Theme.compact = true
         try {
             page.width = 384
             page.height = 600
             verify(waitForPolish(page.Window.window), "laid out")
             const scroll = find(page, "recordingsScroll")
+            verify(!page.pinnedViewer, "a desktop's page scrolls as a whole")
             verify(scroll.contentHeight > scroll.height, "the page scrolls")
             scroll.contentY = scroll.contentHeight - scroll.height
             page.openExport()
@@ -1168,6 +1318,22 @@ TestCase {
             verify(panel.visible, "the panel")
             verify(panel.mapToItem(scroll, 0, 0).y < scroll.height / 2, "on the first screen")
             page.closeExport()
+
+            Theme.compact = true
+            verify(waitForPolish(page.Window.window), "a phone upright")
+            verify(page.pinnedViewer, "upright the viewer is pinned")
+            verify(!scroll.interactive, "the page itself stays put")
+            page.openExport()
+            verify(!page.pinnedViewer, "the panel takes the page")
+            compare(scroll.contentY, 0, "at the top")
+            verify(panel.visible && panel.mapToItem(scroll, 0, 0).y < scroll.height / 2,
+                   "the panel on the first screen")
+            verify(waitForPolish(page.Window.window), "the panel laid out")
+            verify(scroll.contentHeight > scroll.height, "the panel scrolls the page")
+            scroll.contentY = scroll.contentHeight - scroll.height
+            page.closeExport()
+            verify(page.pinnedViewer, "pinned again")
+            compare(scroll.contentY, 0, "the pinned page from its top")
         } finally {
             Theme.compact = false
             page.width = 900
@@ -1323,6 +1489,8 @@ TestCase {
         Theme.compact = true
         try {
             page.width = data.w
+            verify(waitForPolish(page.Window.window), "laid out")
+            find(page, "detailView_about").clicked()   // the pinned form's About holds the rows
             find(page, "compareChoice").activated(1)
             tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
             const seen = []
@@ -1575,6 +1743,664 @@ TestCase {
         tryVerify(() => strip.visible && chart.shownH === open, 2000, "the band is back")
         page.toggleMaximized()
         page.width = 900
+    }
+
+    // The test's window is 200 px: grown to the page so a pointer lands on
+    // the chart; the returned function puts it back
+    function growWindow(page) {
+        const win = page.Window.window
+        const size = [win.width, win.height]
+        win.width = page.width
+        win.height = page.height
+        verify(waitForPolish(win), "the grown window laid out")
+        return () => { win.width = size[0]; win.height = size[1] }
+    }
+    // pull-early's chart with its panes drawn, and a point of pane i's plot
+    // and of its axis in the chart frame's coordinates
+    function panedChart(page) {
+        const chart = find(page, "chart")
+        tryVerify(() => chart.drawn && chart.drawn.panes.length === 3
+                        && page.paneBoxes.length === 3, 5000, "three panes drawn")
+        return chart
+    }
+    // (whole pixels, where a pointer lands)
+    function inPlot(chart, i, share) {
+        const p = chart.drawn.panes[i]
+        return { x: Math.round(chart.x + chart.drawn.left + chart.drawn.plotW / 2),
+                 y: Math.round(chart.y + p.top + p.h * (share === undefined ? 0.5 : share)) }
+    }
+    function onAxis(chart, i) {
+        const p = chart.drawn.panes[i]
+        return { x: Math.round(chart.x + chart.drawn.left / 2), y: Math.round(chart.y + p.top + p.h / 2) }
+    }
+    // Two clicks stamped 100 ms apart: Qt Quick Test's own add the
+    // double-click interval to their stamps after each release. Each pair
+    // later than the last, so it never counts as the second of another
+    property int clickStamp: 100000000
+    function doubleClick(item, x, y) {
+        clickStamp += 10000
+        Harness.clickStamped(item, x, y, clickStamp)
+        Harness.clickStamped(item, x, y, clickStamp + 100)
+    }
+
+    // The viewer's chart is in panes by unit, in the list's order, each
+    // with its axis; a compared recording's traces go to their namesakes'
+    function test_theViewersChartIsInPanesByUnit() {
+        const page = openEarly()
+        const chart = panedChart(page)
+        const l = chart.drawn
+        compare(l.panes.map(p => p.label).join("|"), "rpm|%|°C")
+        verify(l.panes.every(p => p.axis && p.ticks.length >= 2), "an axis each")
+        verify(l.left > 0, "the axes' column")
+        compare(l.seams.length, 2)
+        verify(find(page, "paneSeam_1").visible)
+        verify(find(page, "paneAxis_2").visible)
+        const rows = {}
+        for (const s of find(page, "signalRows").model)
+            rows[s.index] = s
+        for (const tr of l.traces)
+            compare(l.panes[tr.pane].label, rows[tr.row].unit, rows[tr.row].name + " in its unit's pane")
+        page.compareWith(lateRow)
+        tryVerify(() => page.compareAligned && chart.drawn
+                        && chart.drawn.traces.some(t => t.dash !== undefined), 10000, "the compare drawn")
+        for (const tr of chart.drawn.traces.filter(t => t.dash !== undefined))
+            compare(chart.drawn.panes[tr.pane].label, rows[tr.row].unit, "a compared trace in its namesake's pane")
+    }
+
+    // ---- Two cursors and the span's statistics
+
+    function rowOf(page, name) {
+        const rows = find(page, "signalRows")
+        const at = rows.model.findIndex(s => s.name === name)
+        verify(at >= 0, "no row " + name)
+        tryVerify(() => rows.itemAtIndex(at) !== null, 2000, "the row has a delegate")
+        return { item: rows.itemAtIndex(at), index: rows.model[at].index }
+    }
+    // Both cursors placed, their statistics arrived
+    function spanned(page, a, b) {
+        page.setCursor(a)
+        page.setCursorB(b)
+        tryVerify(() => Object.keys(page.spanStats).length > 0, 5000, "the statistics arrive")
+    }
+    function atTime(page, chart, t) {
+        return Math.round(chart.x + chart.drawn.left
+                          + (t - page.viewT0) / (page.viewT1 - page.viewT0) * (chart.drawn.plotW - 1))
+    }
+
+    // Shift+click places the second cursor (the first, while there is
+    // none), each on a sample; a plain click then moves only the first
+    function test_aShiftClickPlacesTheSecondCursorAndAClickKeepsIt() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const y = inPlot(chart, 0).y
+            mouseClick(frame, atTime(page, chart, 5000), y, Qt.LeftButton, Qt.ShiftModifier)
+            verify(page.hasCursor, "with no first cursor it places that")
+            verify(!page.hasCursorB)
+            compare(page.cursorMs % 100, 0, "on a sample")
+
+            mouseClick(frame, atTime(page, chart, 20000), y, Qt.LeftButton, Qt.ShiftModifier)
+            verify(page.hasCursorB, "the second")
+            const b = page.cursorBMs
+            compare(b % 100, 0, "on a sample")
+            verify(Math.abs(b - 20000) < 300, "where it was clicked: " + b)
+
+            wait(Application.styleHints.mouseDoubleClickInterval + 50)
+            mouseClick(frame, atTime(page, chart, 10000), y)
+            verify(Math.abs(page.cursorMs - 10000) < 300, "the first moved: " + page.cursorMs)
+            compare(page.cursorBMs, b, "the second stays")
+        } finally {
+            restore()
+        }
+    }
+
+    // The value labels at the plot's right end follow the readout, by time:
+    // A walked past B, they show what the rows' A column does
+    function test_theLabelsFollowTheReadoutAfterACrossing() {
+        const page = openEarly()
+        const rpm = rowOf(page, "RPM")
+        const labelOf = () => page.series(400).filter(t => t.row === rpm.index)[0]
+        spanned(page, 1000, 3000)
+        compare(labelOf().labelValue, Number(page.readout[rpm.index].text), "A is the earlier")
+        page.setCursor(5000)
+        verify(page.cursorMs > page.cursorBMs, "A is past B")
+        const earlier = Number(page.readoutB[rpm.index].text)
+        verify(earlier !== Number(page.readout[rpm.index].text), "the two cursors read differently")
+        compare(find(rpm.item, "cursorValue").text, page.valueText(earlier, 0, "rpm"),
+                "the rows' A is the earlier one")
+        compare(labelOf().labelValue, earlier, "and so is the label")
+        compare(labelOf().labelMs, page.readoutB[rpm.index].atMs, "its dot too")
+    }
+
+    // The span line, the rows' B and change, and the table: RPM over 1 s
+    // to 3 s of pull-early, by hand from signals.csv
+    function test_theSpanReadsItsStatistics() {
+        const page = openEarly()
+        spanned(page, 1000, 3000)
+        compare(find(page, "spanText").text, "A 1.0 s to B 3.0 s · 2.0 s")
+        verify(find(page, "spanLine").visible)
+        const rpm = rowOf(page, "RPM")
+        compare(find(rpm.item, "cursorValue").text, "2,001 rpm")
+        tryCompare(find(rpm.item, "cursorBValue"), "text", "1,982 rpm")
+        tryCompare(find(rpm.item, "cursorDelta"), "text", "-19 rpm")
+
+        const table = find(page, "spanStats")
+        tryVerify(() => table.visible, 2000, "the table shows with a span")
+        const row = find(table, "statRow_" + rpm.index)
+        compare(find(row, "statChange").text, "-19 rpm")
+        compare(find(row, "statLow").text, "1,982 rpm")
+        compare(find(row, "statHigh").text, "2,012 rpm")
+        compare(find(row, "statMean").text, "2,003 rpm")
+        compare(find(row, "statRate").text, "-9.5 rpm/s")
+        // A rising signal's change and rate carry their sign
+        const up = page.changeText(12.5, 1, "kPa")
+        compare(up, "+12.5 kPa")
+
+        // Text has B and no change; a row not plotted has both
+        const vin = rowOf(page, "VIN")
+        compare(find(vin.item, "cursorDelta").text, "")
+        compare(findChild(table, "statRow_" + vin.index), null, "text isn't in the table")
+        page.togglePlotted(rpm.index)
+        tryVerify(() => findChild(table, "statRow_" + rpm.index) === null, 2000,
+                  "the table is the plotted signals")
+        compare(find(rpm.item, "cursorDelta").text, "-19 rpm", "the row keeps its change")
+    }
+
+    // The readout goes by time, whichever cursor is which
+    function test_theEarlierCursorReadsAsA() {
+        const page = openEarly()
+        spanned(page, 3000, 1000)
+        compare(find(page, "spanText").text, "A 1.0 s to B 3.0 s · 2.0 s")
+        const rpm = rowOf(page, "RPM")
+        compare(find(rpm.item, "cursorValue").text, "2,001 rpm")
+        compare(find(rpm.item, "cursorBValue").text, "1,982 rpm")
+        tryCompare(find(rpm.item, "cursorDelta"), "text", "-19 rpm")
+    }
+
+    // A second cursor on the first is no span: no line, no statistics
+    function test_twoCursorsTogetherAreNoSpan() {
+        const page = openEarly()
+        spanned(page, 2000, 3000)
+        page.setCursor(3000)
+        verify(page.hasCursorB, "the second stays")
+        verify(!page.hasSpan)
+        compare(Object.keys(page.spanStats).length, 0)
+        verify(!find(page, "spanStats").visible)
+    }
+
+    function test_clearRemovesTheSecondCursorAndZoomGoesToTheSpan() {
+        const page = openEarly()
+        spanned(page, 10000, 20000)
+        const zoom = find(page, "zoomToSpan")
+        tryVerify(() => zoom.visible, 2000, "the buttons show")
+        mouseClick(zoom)
+        fuzzyCompare(page.viewT0, 9500, 0.5, "the span with a margin")
+        fuzzyCompare(page.viewT1, 20500, 0.5)
+        page.askSpanStats()
+        mouseClick(find(page, "clearSpan"))
+        verify(!page.hasCursorB, "the second has gone")
+        compare(page.cursorMs, 10000, "the first stays")
+        verify(!find(page, "spanLine").visible)
+        verify(!find(page, "spanStats").visible)
+        wait(200)
+        compare(Object.keys(page.spanStats).length, 0, "an answer on its way is dropped")
+    }
+
+    // A pointer's drag in steps, under Shift when asked
+    function dragAcross(frame, x, y, dx, modifiers) {
+        mousePress(frame, x, y, Qt.LeftButton, modifiers)
+        const parts = 8
+        for (let k = 1; k <= parts; ++k)
+            mouseMove(frame, x + dx * k / parts, y, 10, Qt.LeftButton, modifiers)
+        mouseRelease(frame, x + dx, y, Qt.LeftButton, modifiers)
+    }
+
+    // Shift+drag draws the span's box and leaves a cursor at each end; a
+    // plain drag still pans
+    function test_aShiftDragBoxesTheSpan() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const y = inPlot(chart, 0).y
+            const x = atTime(page, chart, 10000)
+            const dx = atTime(page, chart, 20000) - x
+            const view = [page.viewT0, page.viewT1]
+            dragAcross(frame, x, y, dx, Qt.ShiftModifier)
+            compare([page.viewT0, page.viewT1], view, "the view doesn't pan")
+            verify(page.hasSpan, "both cursors")
+            verify(Math.abs(page.spanFromMs - 10000) < 300, "from " + page.spanFromMs)
+            verify(Math.abs(page.spanToMs - 20000) < 300, "to " + page.spanToMs)
+            compare(page.cursorMs % 100, 0, "the ends on samples")
+            compare(page.cursorBMs % 100, 0)
+            verify(isNaN(page.boxFromMs), "the box has gone")
+
+            page.setView(5000, 25000)
+            const before = page.viewT0
+            dragAcross(frame, x, y, 80, Qt.NoModifier)
+            verify(page.viewT0 < before, "a plain drag pans")
+        } finally {
+            restore()
+        }
+    }
+
+    // On a phone a long press places the second cursor and a drag after it
+    // boxes the span; on the desktop a long press places nothing
+    function test_aLongPressPlacesTheSecondCursorOnAPhone() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        const tap = find(page, "chartTap")
+        tap.longPressThreshold = 0.05
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const y = inPlot(chart, 0).y
+            const x = atTime(page, chart, 15000)
+            page.setCursor(5000)
+            mousePress(frame, x, y)
+            wait(200)
+            mouseRelease(frame, x, y)
+            verify(!page.hasCursorB, "the desktop's long press is nothing")
+
+            Theme.compact = true
+            verify(waitForPolish(page.Window.window), "laid out")
+            const px = atTime(page, chart, 15000)
+            const py = inPlot(chart, 0).y
+            mousePress(frame, px, py)
+            wait(200)
+            verify(page.hasCursorB, "the hold places it")
+            verify(Math.abs(page.cursorBMs - 15000) < 300, "where it was held: " + page.cursorBMs)
+            compare(page.cursorMs, 5000, "the first stays")
+            mouseRelease(frame, px, py)
+
+            page.clearCursorB()
+            const view = [page.viewT0, page.viewT1]
+            const to = atTime(page, chart, 25000)
+            mousePress(frame, px, py)
+            wait(200)
+            for (let k = 1; k <= 8; ++k)
+                mouseMove(frame, px + (to - px) * k / 8, py, 10)
+            verify(!isNaN(page.boxFromMs), "the drag draws the box")
+            mouseRelease(frame, to, py)
+            compare([page.viewT0, page.viewT1], view, "the pan is locked out")
+            verify(Math.abs(page.spanFromMs - 15000) < 300, "from " + page.spanFromMs)
+            verify(Math.abs(page.spanToMs - 25000) < 300, "to " + page.spanToMs)
+        } finally {
+            Theme.compact = false
+            tap.longPressThreshold = -1
+            restore()
+        }
+    }
+
+    // A handle shows its cursor's time and moves it, snapped at the drop;
+    // one dropped on the other removes the second; a press on one places
+    // nothing
+    function test_aHandleMovesItsCursor() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const a = find(page, "cursorHandleA")
+            const b = find(page, "cursorHandleB")
+            verify(!a.visible && !b.visible, "none before a cursor")
+            spanned(page, 10000, 20000)
+            tryVerify(() => a.visible && b.visible, 2000, "both handles")
+            compare(find(a, "handleTime").text, "10.0 s")
+            compare(find(b, "handleTime").text, "20.0 s")
+            verify(b.width >= 24 && b.height >= 24, "a desktop handle: " + b.width + " x " + b.height)
+            fuzzyCompare(b.x + b.width / 2, atTime(page, chart, 20000), 1.5, "under its cursor")
+            fuzzyCompare(b.y + b.height, chart.y + chart.drawn.top + chart.drawn.plotH + chart.drawn.axisH,
+                         0.5, "at the axis's foot")
+
+            const y = b.y + b.height - 6
+            mouseClick(frame, b.x + b.width / 2, y)
+            compare(page.cursorMs, 10000, "a press on a handle places no cursor")
+
+            const samplesBefore = page.spanStats[0].samples
+            const x = b.x + b.width / 2
+            dragAcross(frame, x, y, atTime(page, chart, 25000) - x, Qt.NoModifier)
+            verify(Math.abs(page.cursorBMs - 25000) < 300, "moved: " + page.cursorBMs)
+            compare(page.cursorBMs % 100, 0, "snapped at the drop")
+            compare(page.cursorMs, 10000, "the other stays")
+            tryVerify(() => page.spanStats[0] !== undefined && page.spanStats[0].samples > samplesBefore,
+                      5000, "the statistics follow")
+
+            const from = b.x + b.width / 2
+            dragAcross(frame, from, y, atTime(page, chart, 10000) - from, Qt.NoModifier)
+            verify(!page.hasCursorB, "dropped on the first, the second goes")
+            verify(!b.visible)
+        } finally {
+            restore()
+        }
+    }
+
+    // The arrows step a sample of the first plotted signal, B says which
+    // cursor, Home and End go to the ends, and a step off the view brings
+    // it back
+    function test_theKeysStepTheCursors() {
+        const page = openEarly()
+        page.forceActiveFocus()
+        page.setCursor(1000)
+        keyClick(Qt.Key_Right)
+        tryCompare(page, "cursorMs", 1100, 2000, "a sample on")
+        keyClick(Qt.Key_Left)
+        tryCompare(page, "cursorMs", 1000, 2000, "a sample back")
+
+        keyClick("b")
+        verify(!page.arrowsMoveB, "with no second cursor B does nothing")
+        page.setCursorB(3000)
+        keyClick("b")
+        verify(page.arrowsMoveB)
+        keyClick(Qt.Key_Right)
+        tryCompare(page, "cursorBMs", 3100, 2000, "B moves")
+        compare(page.cursorMs, 1000, "A stays")
+        keyClick("b")
+        verify(!page.arrowsMoveB, "back to A")
+
+        keyClick(Qt.Key_End)
+        tryCompare(page, "cursorMs", 29900, 2000, "the last sample")
+        keyClick(Qt.Key_Right)
+        wait(100)
+        compare(page.cursorMs, 29900, "nothing past the last")
+        keyClick(Qt.Key_Home)
+        tryCompare(page, "cursorMs", 100, 2000, "the first sample")
+
+        page.setView(10000, 12000)
+        page.setCursor(11900)
+        keyClick(Qt.Key_Right)
+        keyClick(Qt.Key_Right)
+        tryVerify(() => page.cursorMs >= 12000 && page.cursorMs <= page.viewT1 && page.viewT0 > 10000,
+                  2000, "a step off the view brings it back")
+        page.clearCursorB()
+    }
+
+    // The first cursor's hint comes once, and the second cursor ends it
+    function test_theSecondCursorsHintComesOnce() {
+        const page = openEarly()
+        page.spanHintSeen = false
+        page.setCursor(1000)
+        verify(page.spanHintUp)
+        verify(find(page, "spanLine").visible)
+        compare(find(page, "spanText").text, "At 1.0 s. Shift+click to place the second cursor")
+        verify(!find(page, "zoomToSpan").visible, "nothing to zoom to yet")
+        page.setCursorB(3000)
+        verify(!page.spanHintUp, "the second cursor ends it")
+        page.clearCursorB()
+        page.cursorMs = NaN
+        page.setCursor(2000)
+        verify(!page.spanHintUp, "not a second time")
+        verify(page.spanHintSeen, "and that's kept")
+        verify(!find(page, "spanLine").visible)
+    }
+
+    // Maximized, each strip's cell gives A, B and the change
+    function test_theStripShowsTheSpanMaximized() {
+        const page = openEarly()
+        spanned(page, 1000, 3000)
+        page.toggleMaximized()
+        try {
+            const strip = find(page, "cursorStrip")
+            tryVerify(() => strip.visible && strip.count > 0, 5000, "the strip shows")
+            compare(strip.cellHeight, 56)
+            tryVerify(() => strip.itemAtIndex(0) !== null, 2000, "a cell")
+            const cell = strip.itemAtIndex(0)
+            compare(find(cell, "stripValue").text, "2,001 rpm")
+            tryCompare(find(cell, "stripSpan"), "text", "B 1,982 rpm · Δ -19 rpm")
+            page.clearCursorB()
+            compare(strip.cellHeight, 40)
+        } finally {
+            page.toggleMaximized()
+        }
+    }
+
+    // A new open has no span, and a change of units asks again
+    function test_theSpanGoesAtAnOpenAndFollowsTheUnits() {
+        const page = openEarly()
+        spanned(page, 1500, 3000)
+        const coolant = rowOf(page, "Coolant")
+        tryCompare(find(coolant.item, "cursorDelta"), "text", "0 °C")
+        const before = page.statsAsk
+        Bridge.unitSystem = 1
+        tryVerify(() => page.statsAsk !== before && page.spanStats[coolant.index] !== undefined
+                        && page.spanStats[coolant.index].unit === "°F", 5000, "asked again in °F")
+        tryCompare(find(rowOf(page, "Coolant").item, "cursorBValue"), "text", "190 °F", 2000,
+                   "the second cursor's too")
+        page.open(lateRow)
+        tryVerify(() => find(page, "signalRows").visible && !page.hasCursor, 10000, "the new open")
+        verify(!page.hasCursorB)
+        compare(Object.keys(page.spanStats).length, 0)
+    }
+
+    // The span's extremes are dots on the trace at their times: filled
+    // for the highest, hollow for the lowest
+    function test_theExtremesAreDotsOnTheTrace() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const chart = panedChart(page)
+            page.setView(0, 5000)
+            spanned(page, 1000, 3000)
+            const rpm = rowOf(page, "RPM")
+            const stat = page.spanStats[rpm.index]
+            tryVerify(() => page.spanDots.some(d => d.row === rpm.index), 3000, "the dots are drawn")
+            const mine = page.spanDots.filter(d => d.row === rpm.index)
+            compare(mine.length, 2)
+            const xAt = t => chart.drawn.left + (t - page.viewT0) / (page.viewT1 - page.viewT0)
+                             * (chart.drawn.plotW - 1)
+            const high = mine.find(d => d.filled), low = mine.find(d => !d.filled)
+            fuzzyCompare(high.x, xAt(stat.highestMs), 0.01)
+            fuzzyCompare(low.x, xAt(stat.lowestMs), 0.01)
+            verify(high.y < low.y, "the highest above the lowest")
+            page.clearCursorB()
+            tryVerify(() => page.spanDots.length === 0, 3000, "gone with the span")
+        } finally {
+            restore()
+        }
+    }
+
+    // A phone's axis strip grows while a cursor exists, and its chart's
+    // floor already holds it; the desktop's stays
+    function test_aPhonesAxisStripGrowsWithACursor() {
+        const page = openEarly()
+        const chart = panedChart(page)
+        compare(chart.drawn.axisH, ChartLayout.axisH)
+        const paints = chart.paints
+        page.setCursor(1000)
+        tryVerify(() => chart.paints > paints, 2000, "drawn with the cursor")
+        compare(chart.drawn.axisH, ChartLayout.axisH, "the desktop's stays")
+        page.cursorMs = NaN
+        Theme.compact = true
+        try {
+            page.setCursor(NaN)
+            page.cursorMs = NaN
+            chart.requestPaint()
+            tryVerify(() => chart.drawn && chart.drawn.axisH === ChartLayout.axisH, 2000, "none yet")
+            page.setCursor(1000)
+            tryVerify(() => chart.drawn && chart.drawn.axisH === ChartLayout.axisHCursor, 2000, "grown")
+        } finally {
+            Theme.compact = false
+        }
+    }
+
+    // The frame test plots a signal of each unit first, so it draws the
+    // most panes the recording gives
+    function test_theFrameTestPlotsOneSignalOfEachUnit() {
+        const page = openEarly()
+        compare(page.frameTestSignals(find(page, "signalRows").model).map(s => s.name).join(","),
+                "RPM,Throttle,Coolant")
+        const s = (name, unit) => ({ name: name, unit: unit, isText: false, samples: 1 })
+        const list = [s("A", "rpm"), s("B", "rpm"), s("C", "%"), s("D", "°C"), s("E", "°F"),
+                      { name: "T", unit: "", isText: true, samples: 1 }, s("F", "V"), s("G", "V")]
+        compare(page.frameTestSignals(list).map(s => s.name).join(","), "A,C,D,F",
+                "a signal of each pane first")
+        compare(page.frameTestSignals(list.slice(0, 3)).map(s => s.name).join(","), "A,C,B",
+                "then the others")
+    }
+
+    // On a phone the axes' strip is a touch wide, past the captions: a
+    // double tap there makes the range automatic again
+    function test_aPhonesAxisStripIsATouchWide() {
+        const page = openEarly()
+        const chart = panedChart(page)
+        page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
+        const p = chart.drawn.panes[1]
+        const x = (chart.drawn.left + Theme.touchTarget) / 2
+        verify(x > chart.drawn.left, "past the captions")
+        Theme.compact = true
+        try {
+            compare(page.doubleTapAt(x, p.top + p.h / 2), "axis")
+            compare(page.paneRanges["unit %"], undefined)
+        } finally {
+            Theme.compact = false
+        }
+        page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
+        compare(page.doubleTapAt(x, p.top + p.h / 2), "maximize", "on the desktop that's the plot")
+        page.toggleMaximized()
+    }
+
+    // A pane's range: Ctrl+wheel zooms it about the pointer, a drag on its
+    // axis pans it, a double click on the axis makes it automatic again; a
+    // plain wheel still zooms the time, and the range goes at a new open
+    function test_aPanesRangeZoomsPansAndComesBack() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const auto = chart.drawn.panes[1]
+            const at = inPlot(chart, 1, 0.25)
+            const span = page.viewT1 - page.viewT0
+            // The plot's edges are the view's: the axes' column is left of it
+            fuzzyCompare(page.timeAt(chart.x + chart.drawn.left), page.viewT0, 1e-6, "the plot's left edge")
+            fuzzyCompare(page.timeAt(chart.x + chart.drawn.left + chart.drawn.plotW - 1), page.viewT1, 1e-6,
+                         "its right edge")
+            mouseWheel(frame, at.x, at.y, 0, 120, Qt.NoButton, Qt.ControlModifier)
+            const zoomed = page.paneRanges["unit %"]
+            verify(zoomed, "the % pane's range is the user's")
+            fuzzyCompare(zoomed.vMax - zoomed.vMin, 0.8 * (auto.vMax - auto.vMin), 1e-6, "one notch in")
+            const v = ChartLayout.valueAt(auto, at.y - chart.y)
+            fuzzyCompare(ChartLayout.valueAt({ top: auto.top, h: auto.h, vMin: zoomed.vMin, vMax: zoomed.vMax },
+                                             at.y - chart.y), v, 1e-6, "about the pointer")
+            compare(page.viewT1 - page.viewT0, span, "the time stays")
+            compare(page.paneRanges["unit rpm"], undefined, "the other panes stay automatic")
+            tryVerify(() => chart.drawn.panes[1].manual, 2000, "drawn with it")
+
+            // A drag down the axis moves the range up by its share
+            const axis = onAxis(chart, 1)
+            mousePress(frame, axis.x, axis.y)
+            for (let dy = 5; dy <= 40; dy += 5)
+                mouseMove(frame, axis.x, axis.y + dy, 10)
+            mouseRelease(frame, axis.x, axis.y + 40)
+            const panned = page.paneRanges["unit %"]
+            fuzzyCompare(panned.vMin - zoomed.vMin, 40 / auto.h * (zoomed.vMax - zoomed.vMin), 1e-6,
+                         "panned by the drag's share of the pane")
+            compare(page.viewT1 - page.viewT0, span, "an axis drag moves no time")
+
+            // A double click on the axis: automatic again, nothing maximized
+            doubleClick(frame, axis.x, axis.y)
+            compare(page.paneRanges["unit %"], undefined, "automatic again")
+            verify(!page.chartMaximized, "an axis's double click maximizes nothing")
+            verify(!page.hasCursor, "a tap on the axes places no cursor")
+
+            mouseWheel(frame, at.x, at.y, 0, 120)
+            verify(page.viewT1 - page.viewT0 < span, "a plain wheel zooms the time")
+            compare(Object.keys(page.paneRanges).length, 0, "and no range")
+
+            mouseWheel(frame, at.x, at.y, 0, 120, Qt.NoButton, Qt.ControlModifier)
+            verify(page.paneRanges["unit %"], "set again")
+            Bridge.unitSystem = 1
+            compare(Object.keys(page.paneRanges).length, 0, "new units drop it")
+            Bridge.unitSystem = 0
+            mouseWheel(frame, at.x, at.y, 0, 120, Qt.NoButton, Qt.ControlModifier)
+            verify(page.paneRanges["unit %"], "and again")
+            page.backToList()
+            page.open(earlyRow)
+            tryVerify(() => find(page, "signalRows").visible, 10000, "open again")
+            compare(Object.keys(page.paneRanges).length, 0, "a range lasts while the recording is open")
+        } finally {
+            restore()
+        }
+    }
+
+    // A seam's drag trades its two panes' heights, kept by the count of
+    // panes between runs; a double click on it evens them
+    function test_aSeamsDragIsKeptAndADoubleClickEvensIt() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const before = chart.drawn.panes.map(p => p.h)
+            const seam = find(page, "paneSeam_0")
+            const at = seam.mapToItem(frame, seam.width / 2, seam.height / 2)
+            mousePress(frame, at.x, at.y)
+            for (let dy = 5; dy <= 30; dy += 5)
+                mouseMove(frame, at.x, at.y + dy, 10)
+            mouseRelease(frame, at.x, at.y + 30)
+            verify(page.paneShares["3"], "the shares kept for three panes")
+            tryVerify(() => Math.abs(chart.drawn.panes[0].h - before[0] - 30) < 0.5, 2000,
+                      "the upper pane 30 px taller: " + JSON.stringify(chart.drawn.panes.map(p => p.h)))
+            fuzzyCompare(chart.drawn.panes[1].h, before[1] - 30, 0.5, "the lower one shorter")
+            fuzzyCompare(chart.drawn.panes[2].h, before[2], 0.5, "the third untouched")
+            const store = Qt.createQmlObject("import QtCore; Settings { category: \"recordings\" }", testCase)
+            tryVerify(() => { store.sync(); return String(store.value("paneShares", "")).indexOf("\"3\"") >= 0 },
+                      3000, "written to the store")
+            store.destroy()
+
+            const evenAt = seam.mapToItem(frame, seam.width / 2, seam.height / 2)
+            doubleClick(frame, evenAt.x, evenAt.y)
+            compare(page.paneShares["3"], undefined, "evened")
+            verify(!page.chartMaximized, "a seam's double click maximizes nothing")
+            tryVerify(() => Math.abs(chart.drawn.panes[0].h - chart.drawn.panes[1].h) < 0.5, 2000, "even")
+        } finally {
+            page.setPaneShares(3, null)
+            restore()
+        }
+    }
+
+    // On a phone a vertical pinch over a pane zooms its range; a sideways
+    // one zooms the time
+    function test_aVerticalPinchZoomsAPanesRange() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const auto = chart.drawn.panes[0]
+            const mid = inPlot(chart, 0)
+            const span = page.viewT1 - page.viewT0
+            const touch = touchEvent(frame)
+            // Fingers moving apart up and down: the pane's range narrows
+            // about the pinch's middle (the handler starts past its drag
+            // threshold, so the factor is the scale from there)
+            touch.press(0, frame, mid.x, mid.y - 4).press(1, frame, mid.x + 4, mid.y + 4).commit()
+            const steps = [8, 12, 16, 20, 24, 28, 32, 36, 40]
+            for (const d of steps)
+                touch.move(0, frame, mid.x, mid.y - d).move(1, frame, mid.x + 4, mid.y + d).commit()
+            touch.release(0, frame, mid.x, mid.y - 40).release(1, frame, mid.x + 4, mid.y + 40).commit()
+            const range = page.paneRanges["unit rpm"]
+            verify(range, "the rpm pane's range is the user's")
+            verify(range.vMax - range.vMin < (auto.vMax - auto.vMin) * 0.95,
+                   "the fingers apart: a narrower range, " + (range.vMax - range.vMin)
+                   + " of " + (auto.vMax - auto.vMin))
+            const y = mid.y - chart.y
+            fuzzyCompare(ChartLayout.valueAt({ top: auto.top, h: auto.h, vMin: range.vMin, vMax: range.vMax }, y),
+                         ChartLayout.valueAt(auto, y), 0.03 * (auto.vMax - auto.vMin), "about the middle")
+            compare(page.viewT1 - page.viewT0, span, "the time stays")
+
+            const t = touchEvent(frame)
+            t.press(0, frame, mid.x - 4, mid.y).press(1, frame, mid.x + 4, mid.y + 4).commit()
+            for (const d of steps)
+                t.move(0, frame, mid.x - d, mid.y).move(1, frame, mid.x + d, mid.y + 4).commit()
+            t.release(0, frame, mid.x - 40, mid.y).release(1, frame, mid.x + 40, mid.y + 4).commit()
+            verify(page.viewT1 - page.viewT0 < span, "a sideways pinch zooms the time")
+        } finally {
+            restore()
+        }
     }
 
     // The view stays inside the recording, no narrower than minSpanMs,
@@ -2028,7 +2854,7 @@ TestCase {
         Bridge.logMessage.disconnect(log)
         Theme.developerMode = false
         const result = find(page, "frameTestResult").text
-        verify(/^Frame test, 1 plotted at \d+ px: [\d.]+ frames\/s shown panning, [\d.]+ zooming; [\d.]+ charts drawn\/s/.test(result),
+        verify(/^Frame test, 1 plotted in 1 pane at \d+ px: [\d.]+ frames\/s shown panning, [\d.]+ zooming; [\d.]+ charts drawn\/s/.test(result),
                result)
         compare(logged, result, "the activity log has it")
         verify(page.plotted[0], "the ticks are back")

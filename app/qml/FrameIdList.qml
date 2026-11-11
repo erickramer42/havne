@@ -20,6 +20,12 @@ Rectangle {
     property string emptyText: ""
     // A row tapped
     signal idTapped(var id, bool extended)
+    // A head over the rows that scrolls with them while headScrolls, the
+    // column names under it (FrameTable's)
+    property Component head: null
+    property bool headScrolls: false
+    property Item namesSlot: null
+    readonly property ListView list: idList
 
     // Frames a second, as the rows show them
     function rateText(rate) {
@@ -56,7 +62,9 @@ Rectangle {
 
     Rectangle {
         id: idHeader
-        anchors { top: parent.top; left: parent.left; right: parent.right }
+        objectName: "idColumnNames"
+        parent: idTable.headScrolls && idTable.namesSlot ? idTable.namesSlot : idTable
+        width: parent ? parent.width : 0
         height: 32
         z: 2
         color: Theme.elevated
@@ -81,10 +89,28 @@ Rectangle {
     ListView {
         id: idList
         objectName: "idList"
-        anchors { top: idHeader.bottom; left: parent.left
+        anchors { top: parent.top; left: parent.left
                   right: parent.right; bottom: parent.bottom }
         anchors.margins: 4
+        anchors.topMargin: idTable.headScrolls ? 4 : idHeader.height + 4
         clip: true
+        header: idTable.head !== null ? idHeadHolder : null
+        Component {
+            id: idHeadHolder
+            Column {
+                width: idList.width
+                Loader {
+                    width: parent.width
+                    sourceComponent: idTable.head
+                }
+                Item {
+                    id: idNames
+                    width: parent.width
+                    height: idTable.headScrolls ? idHeader.height : 0
+                    Component.onCompleted: idTable.namesSlot = idNames
+                }
+            }
+        }
         model: idTable.ids
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 

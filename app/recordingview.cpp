@@ -410,6 +410,17 @@ void RecordingView::stop()
         m_worker.join();
         m_cancel = false;
     }
+    if (m_askWorker.joinable()) {
+        {
+            const std::lock_guard<std::mutex> lock(m_askMutex);
+            m_askStop = true;
+        }
+        m_askWake.notify_all();
+        m_askWorker.join(); // before the close: it may be reading
+        m_askStop = false;
+        m_statsAsk.reset();
+        m_stepAsk.reset();
+    }
     ecuio_recording_close(m_reader);
     m_reader = nullptr;
     m_info = {};
@@ -522,29 +533,27 @@ void RecordingView::finish(const std::shared_ptr<Result>& res,
         ecuio_recording_get_signal(m_reader, i, &m_signals[i].pub);
         ranked = ranked || m_signals[i].pub.plot_rank != 0;
     }
-    // Live's default (SignalListModel::judgePlotted): every number, or in a
-    // ranked recording the DefaultPlotted of the lowest rank, a tie in the
-    // recording's order; a signal with no samples gives its place up
+    // At most ViewerPlotted numbers plot on open, so a phone's chart stays
+    // readable: a ranked recording's lowest ranks (the signals Live plotted),
+    // else the first in the recording's order. A signal with no samples gives
+    // its place up; an unranked one in a ranked recording never plots.
     std::vector<uint32_t> order;
     for (uint32_t i = 0; i < m_info.signal_count; ++i) {
         const ecuio_recording_signal_t& s = m_signals[i].pub;
         const bool number =
             (s.flags & ECUIO_RECORDING_SIGNAL_TEXT) == 0 && s.samples > 0;
-        if (!number) {
-            continue;
-        }
-        if (!ranked) {
-            m_signals[i].plotted = true;
-        } else if (s.plot_rank != 0) {
+        if (number && (!ranked || s.plot_rank != 0)) {
             order.push_back(i);
         }
     }
-    std::stable_sort(
-        order.begin(), order.end(), [this](uint32_t a, uint32_t b) {
-            return m_signals[a].pub.plot_rank < m_signals[b].pub.plot_rank;
-        });
-    if (order.size() > static_cast<size_t>(DefaultPlotted)) {
-        order.resize(DefaultPlotted);
+    if (ranked) {
+        std::stable_sort(
+            order.begin(), order.end(), [this](uint32_t a, uint32_t b) {
+                return m_signals[a].pub.plot_rank < m_signals[b].pub.plot_rank;
+            });
+    }
+    if (order.size() > static_cast<size_t>(ViewerPlotted)) {
+        order.resize(ViewerPlotted);
     }
     for (uint32_t i : order) {
         m_signals[i].plotted = true;
@@ -947,6 +956,162 @@ QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,
         });
     }
     return out;
+}
+
+void RecordingView::startAsks()
+{
+    if (!m_askWorker.joinable()) {
+        m_askWorker = std::thread(&RecordingView::answerAsks, this, m_reader,
+                                  m_generation);
+    }
+}
+
+void RecordingView::answerAsks(ecuio_recording_t* reader, quint64 generation)
+{
+    for (;;) {
+        std::optional<StatsAsk> stats;
+        std::optional<StepAsk> step;
+        {
+            std::unique_lock<std::mutex> lock(m_askMutex);
+            m_askWake.wait(lock, [this] {
+                return m_askStop || m_statsAsk.has_value() ||
+                       m_stepAsk.has_value();
+            });
+            if (m_askStop) {
+                return;
+            }
+            stats.swap(m_statsAsk);
+            step.swap(m_stepAsk);
+        }
+        if (step) {
+            uint64_t at = ECUIO_RECORDING_NONE;
+            const ecuio_status_t rc = ecuio_recording_step(
+                reader, step->signal, step->t, step->direction, &at);
+            QMetaObject::invokeMethod(
+                this,
+                [this, request = step->request, rc, at, generation] {
+                    stepFinished(request, rc, at, generation);
+                },
+                Qt::QueuedConnection);
+        }
+        if (stats) {
+            std::vector<ecuio_recording_stats_t> got(stats->ids.size());
+            const ecuio_status_t rc =
+                ecuio_recording_stats(reader, stats->ids.data(),
+                                      static_cast<uint32_t>(stats->ids.size()),
+                                      stats->t0, stats->t1, got.data());
+            QMetaObject::invokeMethod(
+                this,
+                [this, ask = *stats, rc, got, generation] {
+                    statsFinished(ask, rc, got, generation);
+                },
+                Qt::QueuedConnection);
+        }
+    }
+}
+
+int RecordingView::stats(const QVariantList& signalIndexes, double t0Ms,
+                         double t1Ms)
+{
+    if (m_reader == nullptr || signalIndexes.isEmpty()) {
+        return 0;
+    }
+    StatsAsk ask;
+    for (const QVariant& v : signalIndexes) {
+        uint32_t i = 0;
+        if (!signalIndex(v, &i)) {
+            return 0;
+        }
+        ask.ids.push_back(i);
+    }
+    ask.t0 = fromMs(t0Ms);
+    ask.t1 = fromMs(t1Ms);
+    if (ask.t1 <= ask.t0) {
+        return 0;
+    }
+    ask.request = ++m_lastAsk;
+    m_lastStats = ask.request;
+    {
+        const std::lock_guard<std::mutex> lock(m_askMutex);
+        m_statsAsk = std::move(ask);
+    }
+    startAsks();
+    m_askWake.notify_all();
+    return m_lastStats;
+}
+
+int RecordingView::step(int signal, double tMs, bool forward)
+{
+    uint32_t i = 0;
+    if (m_reader == nullptr || !signalIndex(QVariant(signal), &i)) {
+        return 0;
+    }
+    StepAsk ask;
+    ask.request = ++m_lastAsk;
+    ask.signal = i;
+    ask.t = fromMs(tMs);
+    ask.direction =
+        forward ? ECUIO_RECORDING_STEP_FORWARD : ECUIO_RECORDING_STEP_BACKWARD;
+    m_lastStep = ask.request;
+    {
+        const std::lock_guard<std::mutex> lock(m_askMutex);
+        m_stepAsk = ask;
+    }
+    startAsks();
+    m_askWake.notify_all();
+    return m_lastStep;
+}
+
+void RecordingView::statsFinished(
+    const StatsAsk& ask, ecuio_status_t rc,
+    const std::vector<ecuio_recording_stats_t>& got, quint64 generation)
+{
+    if (generation != m_generation || ask.request != m_lastStats) {
+        return;
+    }
+    if (rc == ECUIO_ERR_RECORDING_CHANGED) {
+        markStale();
+    }
+    QVariantList out;
+    if (rc == ECUIO_OK) {
+        const double seconds = static_cast<double>(ask.t1 - ask.t0) / 1e6;
+        for (size_t k = 0; k < ask.ids.size(); ++k) {
+            const Signal& s = m_signals[ask.ids[k]];
+            const ecuio_recording_stats_t& g = got[k];
+            // Every conversion is a rising line, so a mean converts as a value
+            const ecuio_display_value_t first = shown(s, g.first);
+            const double last = shown(s, g.last).value;
+            const double change = last - first.value;
+            out.append(QVariantMap{
+                {QStringLiteral("index"), static_cast<int>(ask.ids[k])},
+                {QStringLiteral("samples"), static_cast<double>(g.samples)},
+                {QStringLiteral("first"), first.value},
+                {QStringLiteral("last"), last},
+                {QStringLiteral("lowest"), shown(s, g.lowest).value},
+                {QStringLiteral("highest"), shown(s, g.highest).value},
+                {QStringLiteral("mean"), shown(s, g.mean).value},
+                {QStringLiteral("change"), change},
+                {QStringLiteral("rate"), change / seconds},
+                {QStringLiteral("lowestMs"), toMsOrNone(g.lowest_us)},
+                {QStringLiteral("highestMs"), toMsOrNone(g.highest_us)},
+                {QStringLiteral("unit"), QString::fromUtf8(first.unit)},
+                {QStringLiteral("decimals"), first.decimal_places},
+            });
+        }
+    }
+    emit statsReady(ask.request, out);
+}
+
+void RecordingView::stepFinished(int request, ecuio_status_t rc, uint64_t at,
+                                 quint64 generation)
+{
+    if (generation != m_generation || request != m_lastStep) {
+        return;
+    }
+    if (rc == ECUIO_ERR_RECORDING_CHANGED) {
+        markStale();
+    }
+    emit stepReady(request, rc == ECUIO_OK ? toMsOrNone(at) : -1.0);
 }
 
 double RecordingView::nearestSampleMs(int signal, double tMs)

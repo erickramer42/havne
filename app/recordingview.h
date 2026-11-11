@@ -10,7 +10,10 @@
 #include <QVariantMap>
 
 #include <atomic>
+#include <condition_variable>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -24,7 +27,9 @@
 // (host_us / 1000, a double), values in the display units unitSystem
 // names (ADR-0022), as Live's model shows them. The reader answers the
 // queries on the GUI thread: a column of a second or more comes from
-// its per-second summaries.
+// its per-second summaries. A span's statistics and a cursor's step are
+// asked of a thread of their own, which lives from the first ask to the
+// close.
 class RecordingView : public QObject
 {
     Q_OBJECT
@@ -77,9 +82,8 @@ public:
     enum State { Closed, Opening, Open, Failed };
     Q_ENUM(State)
 
-    // A ranked recording's signals plotted by default: Live's count
-    // (SignalListModel::DefaultPlotted)
-    static constexpr int DefaultPlotted = 6;
+    // The most signals a recording plots on open
+    static constexpr int ViewerPlotted = 4;
 
     explicit RecordingView(QObject* parent = nullptr);
     ~RecordingView() override;
@@ -174,6 +178,22 @@ public:
     // time before it, its last after it. -1 for a signal with no
     // samples, a bad index, or a recording not open.
     Q_INVOKABLE double nearestSampleMs(int signal, double tMs);
+    // Each signal's statistics over the closed span [t0Ms, t1Ms]
+    // (ecuio_recording_stats), read off the GUI thread: the ask's number,
+    // or 0 with nothing asked (not open, a bad index, no signals, no span
+    // after the start). statsReady answers with that number unless a later
+    // ask replaced it: one map per signal in signalIndexes' order, { index,
+    // samples, first, last, lowest, highest, mean, change (last - first),
+    // rate (the change per second), lowestMs, highestMs, unit, decimals }
+    // in display units, each number NaN and each time -1 with none. A time
+    // before the start reads from the start. Empty on a failure.
+    Q_INVOKABLE int stats(const QVariantList& signalIndexes, double t0Ms,
+                          double t1Ms);
+    // The signal's next sample after tMs, or its previous before it
+    // (ecuio_recording_step), off the GUI thread: the ask's number, 0 with
+    // nothing asked. stepReady answers with that number unless a later ask
+    // replaced it: the sample's time, -1 at the ends or on a failure.
+    Q_INVOKABLE int step(int signal, double tMs, bool forward);
 
 signals:
     void stateChanged();
@@ -183,9 +203,23 @@ signals:
     void staleChanged();
     void reportingChanged();
     void reportSaved(const QVariantMap& result);
+    void statsReady(int request, const QVariantList& stats);
+    void stepReady(int request, double atMs);
 
 private:
     struct Result;
+    struct StatsAsk {
+        int request = 0;
+        std::vector<uint32_t> ids;
+        uint64_t t0 = 0;
+        uint64_t t1 = 0;
+    };
+    struct StepAsk {
+        int request = 0;
+        uint32_t signal = 0;
+        uint64_t t = 0;
+        uint32_t direction = 0;
+    };
     struct Signal {
         ecuio_recording_signal_t pub;
         bool plotted = false;
@@ -212,6 +246,13 @@ private:
     bool query(const std::vector<uint32_t>& ids, double t0Ms, double t1Ms,
                uint32_t n, std::vector<ecuio_recording_column_t>& cols);
     double found(const ecuio_recording_find_t& what);
+    void startAsks();
+    void answerAsks(ecuio_recording_t* reader, quint64 generation);
+    void statsFinished(const StatsAsk& ask, ecuio_status_t rc,
+                       const std::vector<ecuio_recording_stats_t>& got,
+                       quint64 generation);
+    void stepFinished(int request, ecuio_status_t rc, uint64_t at,
+                      quint64 generation);
 
     int m_state = Closed;
     QString m_folder;
@@ -242,6 +283,17 @@ private:
     bool m_reporting = false;
     bool m_throughProvider = false;
     bool m_failThreadForTesting = false;
+    // The asks' thread: one of each kind waits, a newer ask replacing it,
+    // so a dragged cursor never builds a queue
+    std::thread m_askWorker;
+    std::mutex m_askMutex;
+    std::condition_variable m_askWake;
+    bool m_askStop = false;
+    std::optional<StatsAsk> m_statsAsk;
+    std::optional<StepAsk> m_stepAsk;
+    int m_lastAsk = 0;
+    int m_lastStats = 0;
+    int m_lastStep = 0;
     // Each open's number: a result or progress posted for an earlier one
     // is dropped
     quint64 m_generation = 0;

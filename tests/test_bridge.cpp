@@ -229,6 +229,19 @@ TEST(BridgeTest, LifecycleIsIdempotent)
     bridge.disconnectSession();
 }
 
+/* The built-in layouts name a signal by a key here, one ID for each set the
+ * connection may use: boost is the mock's computed one and obd2's */
+TEST(BridgeTest, GaugeSignalsNameBoostOnTheMockAndObd2)
+{
+    SessionBridge bridge;
+    const QVariantList boost = bridge.gaugeSignals().value("boost").toList();
+    ASSERT_EQ(boost.size(), 2);
+    EXPECT_EQ(boost[0].toString(),
+              QString("id:%1").arg(ECUIO_MOCK_SIG_BOOST_ID));
+    EXPECT_EQ(boost[1].toString(),
+              QString("id:%1").arg(ECUIO_OBD2_SIG_BOOST_ID));
+}
+
 TEST(BridgeTest, InvalidUriReturnsError)
 {
     SessionBridge bridge;
@@ -4835,7 +4848,10 @@ TEST(BridgeTest, LiveHidesTheRowsTheirEcuMarksUnsupported)
     int row5C = -1;
     int row0C = -1;
     for (int r = 0; r < rows; ++r) {
-        const unsigned pid = set->defs[r].mux_key & 0xFFu;
+        const unsigned pid =
+            (set->defs[r].flags & ECUIO_DEF_FLAG_COMPUTED) != 0
+                ? 0x100u /* a computed def has no PID: past every range */
+                : set->defs[r].mux_key & 0xFFu;
         const bool clear = pid <= 0x60 && (bitmaps[(pid - 1) / 8] &
                                            (0x80u >> ((pid - 1) % 8))) == 0;
         const QModelIndex i = model.index(r);
@@ -4967,7 +4983,10 @@ TEST(BridgeTest, LiveHidesTheFieldsCoreReportsAbsent)
     model.applyUnsupported(unsupportedIds(&car, 1));
     int unsupported = 0;
     for (int r = 0; r < rows; ++r) {
-        const unsigned pid = ecuio_obd2_signal_set()->defs[r].mux_key & 0xFFu;
+        const ecuio_signal_def_t& d = ecuio_obd2_signal_set()->defs[r];
+        const unsigned pid = (d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0
+                                 ? 0x100u
+                                 : d.mux_key & 0xFFu;
         unsupported += (pid <= 0x20 && pid != 0x0C) ? 1 : 0;
     }
     ASSERT_GT(unsupported, 0);

@@ -83,6 +83,7 @@ qt_add_qml_module(app_ui
         qml/ThemedCheckBox.qml
         qml/ThemedTextField.qml
         qml/SegmentButton.qml
+        qml/SegmentRow.qml
         qml/CsvGuessPreview.qml
         qml/RecordingExportPanel.qml
         qml/PageHeader.qml

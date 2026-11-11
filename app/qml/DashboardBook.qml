@@ -46,6 +46,9 @@ QtObject {
     // A format 1 phone span times this is the same shape on the 6 and 12
     // column grid; the phone's size control steps by it
     readonly property int phoneSpanScale: 3
+    // The kinds that draw a square face: the built-in layout's drawing
+    // never stretches them (stretched's `keepSquare`)
+    readonly property var squareKinds: ["analog", "ring"]
 
     // Append-only: a name is never reused for another drawing (section 1)
     readonly property var kinds: ["analog", "ring", "bar", "segments", "digital",
@@ -303,13 +306,13 @@ QtObject {
         ]
     }
 
-    // What a driver watches beyond the dials, shared by both forms. Boost has
-    // no obd2 signal, so its ref is the mock's alone. Its range runs from the
+    // What a driver watches beyond the dials, shared by both forms. Boost's refs
+    // are the mock's and obd2's computed one (MAP minus baro). Its range runs from the
     // vacuum an idle pulls to what a turbo makes (about -15 to 25 psi), and
     // lambda's from rich to the lean a fuel cut reads
     function watched() {
         return {
-            boost: ["id:13001"],
+            boost: ["id:13001", "id:7011"],
             battery: ["id:14001", "id:7008"],
             lambda: ["id:10001", "id:11544"],
             boostOptions: { from: -100, to: 200 },
@@ -447,8 +450,13 @@ QtObject {
     // and a lift that moved it sideways would land elsewhere. A blank cell
     // doesn't stretch and nothing stretches over one. For display only:
     // the layout is untouched. `columns` is the grid's; left out, the
-    // boxes' right edge stands in
-    function stretched(placed, boxes, columns) {
+    // boxes' right edge stands in. With `keepSquare` (the built-in layout's
+    // drawing) a dial or ring keeps its own box, and the other gauges fill
+    // what it leaves: down over the empty squares under them, then right
+    // over the empty squares beside them, so no square is empty at any
+    // column count
+    function stretched(placed, boxes, columns, keepSquare) {
+        const square = i => keepSquare === true && squareKinds.indexOf(placed[i].kind) >= 0
         const taken = []   // taken[y][x]
         let rows = 0
         let cols = isFinite(columns) ? Math.max(1, Math.floor(columns)) : 0
@@ -471,7 +479,7 @@ QtObject {
         }
         const down = boxes.map((b, i) => {
             let h = b.h
-            if (placed[i].kind !== "blank") {
+            if (placed[i].kind !== "blank" && !square(i)) {
                 while (b.y + h < rows && emptyRow(b, b.y + h))
                     ++h
             }
@@ -487,6 +495,22 @@ QtObject {
                     drawn[y][x] = true
             }
         }
+        if (keepSquare === true) {
+            // `drawn` grows with each widening, so a later cell sees it
+            down.forEach((b, i) => {
+                if (placed[i].kind === "blank" || square(i))
+                    return
+                for (let free = true; free && b.x + b.w < cols;) {
+                    for (let y = b.y; y < b.y + b.h && free; ++y)
+                        free = !(drawn[y] && drawn[y][b.x + b.w])
+                    if (free) {
+                        for (let y = b.y; y < b.y + b.h; ++y)
+                            drawn[y][b.x + b.w] = true
+                        ++b.w
+                    }
+                }
+            })
+        }
         const aloneInRows = (b) => {
             for (let y = b.y; y < b.y + b.h; ++y) {
                 for (let x = 0; x < cols; ++x) {
@@ -497,7 +521,8 @@ QtObject {
             return true
         }
         return down.map((b, i) => {
-            const w = placed[i].kind !== "blank" && aloneInRows(b) ? cols - b.x : b.w
+            const w = placed[i].kind !== "blank" && !square(i) && aloneInRows(b)
+                      ? cols - b.x : b.w
             return { x: b.x, y: b.y, w: w, h: b.h }
         })
     }

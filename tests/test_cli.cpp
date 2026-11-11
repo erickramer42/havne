@@ -1018,6 +1018,164 @@ TEST(CliViewTest, SecondsAreSignedAndToTheMicrosecond)
     }
 }
 
+TEST(CliViewTest, ASpanIsTwoSecondsInOrder)
+{
+    cli::Span s;
+    ASSERT_TRUE(cli::parse_span("-1.5:2", s));
+    EXPECT_EQ(s.from_us, -1500000);
+    EXPECT_EQ(s.to_us, 2000000);
+    ASSERT_TRUE(cli::parse_span("0:0.000001", s));
+    EXPECT_EQ(s.to_us, 1);
+    for (const char* bad :
+         {"", "5", "5:", ":5", "5:3", "5:5", "a:b", "1:2:3", "1;2"}) {
+        EXPECT_FALSE(cli::parse_span(bad, s)) << bad;
+    }
+}
+
+TEST(CliViewTest, AStatsLineHoldsTheSpanAndNullsWhatIsntThere)
+{
+    char buf[1024];
+    ecuio_recording_signal_t rpm{};
+    std::strcpy(rpm.name, "RPM");
+    cli::Span span;
+    span.from_us = -1000000;
+    span.to_us = 2500000;
+    ecuio_recording_stats_t st = cli::no_stats();
+    st.samples = 3;
+    st.first = 812.5;
+    st.last = 900;
+    st.lowest = 800;
+    st.lowest_us = 400000;
+    st.highest = HUGE_VAL;
+    st.highest_us = 2000000;
+    st.mean = HUGE_VAL;
+    cli::Line l(buf, sizeof buf);
+    cli::stats_line(l, 1, rpm, span, st);
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"stats\",\"recording\":1,\"signal\":\"RPM\","
+              "\"from_us\":-1000000,\"to_us\":2500000,\"samples\":3,"
+              "\"first\":812.5,\"last\":900,\"lowest\":800,"
+              "\"lowest_us\":400000,\"highest\":null,\"highest_us\":2000000,"
+              "\"mean\":null}");
+    cli::Line e(buf, sizeof buf);
+    cli::stats_line(e, 0, rpm, span, cli::no_stats());
+    EXPECT_EQ(std::string(e.data(), e.size()),
+              "{\"type\":\"stats\",\"recording\":0,\"signal\":\"RPM\","
+              "\"from_us\":-1000000,\"to_us\":2500000,\"samples\":0,"
+              "\"first\":null,\"last\":null,\"lowest\":null,"
+              "\"lowest_us\":null,\"highest\":null,\"highest_us\":null,"
+              "\"mean\":null}");
+}
+
+TEST(CliViewTest, AStretchLevelIsAKeyAndAValueInItsUnits)
+{
+    ecuio_stretch_rules_t r = cli::stretch_rules(ECUIO_STRETCH_PULLS);
+    EXPECT_EQ(r.kinds, ECUIO_STRETCH_PULLS);
+    EXPECT_EQ(r.throttle, UINT32_MAX);
+    EXPECT_EQ(r.engine_speed, UINT32_MAX);
+    ASSERT_TRUE(cli::parse_stretch_level("pull-throttle=85", false, r));
+    ASSERT_TRUE(cli::parse_stretch_level("pull-load=70.5", false, r));
+    ASSERT_TRUE(cli::parse_stretch_level("pull-hold=1.5", false, r));
+    ASSERT_TRUE(cli::parse_stretch_level("pull-gap=0.75", false, r));
+    ASSERT_TRUE(cli::parse_stretch_level("cruise-hold=20", false, r));
+    ASSERT_TRUE(cli::parse_stretch_level("cruise-throttle-band=5", true, r));
+    EXPECT_EQ(r.pull_level, 85.0);
+    EXPECT_EQ(r.pull_load_level, 70.5);
+    EXPECT_EQ(r.pull_hold_us, 1500000u);
+    EXPECT_EQ(r.pull_gap_us, 750000u);
+    EXPECT_EQ(r.cruise_hold_us, 20000000u);
+    EXPECT_EQ(r.cruise_throttle_band, 5.0) << "a percentage has no unit system";
+
+    /* Speeds in km/h, or mph under imperial: 40 mph reaches core as km/h */
+    ASSERT_TRUE(cli::parse_stretch_level("cruise-floor=40", true, r));
+    EXPECT_DOUBLE_EQ(r.cruise_floor, 64.37376);
+    ASSERT_TRUE(cli::parse_stretch_level("cruise-speed-band=2", true, r));
+    EXPECT_DOUBLE_EQ(r.cruise_speed_band, 3.218688);
+    ASSERT_TRUE(cli::parse_stretch_level("cruise-floor=60", false, r));
+    EXPECT_EQ(r.cruise_floor, 60.0);
+    ASSERT_TRUE(cli::parse_stretch_level("pull-gap=0", false, r));
+    EXPECT_EQ(r.pull_gap_us, 0u) << "0 takes core's default";
+
+    for (const char* bad :
+         {"pull-gap", "pull-gap=", "pull-gap=-1", "pull-gap=soon", "=1",
+          "pull-speed=1", "cruise-floor=1e10"}) {
+        EXPECT_FALSE(cli::parse_stretch_level(bad, false, r)) << bad;
+    }
+}
+
+TEST(CliViewTest, ARoleAndAKindAreOneOfTheirWords)
+{
+    uint32_t role = 0;
+    std::string name;
+    ASSERT_TRUE(cli::parse_role("speed=Vehicle Speed", role, name));
+    EXPECT_EQ(role, ECUIO_RECORDING_ROLE_VEHICLE_SPEED);
+    EXPECT_EQ(name, "Vehicle Speed");
+    ASSERT_TRUE(cli::parse_role("throttle=Pedal=D", role, name));
+    EXPECT_EQ(role, ECUIO_RECORDING_ROLE_THROTTLE);
+    EXPECT_EQ(name, "Pedal=D") << "the name is all after the first =";
+    ASSERT_TRUE(cli::parse_role("load=Load", role, name));
+    EXPECT_EQ(role, ECUIO_RECORDING_ROLE_ENGINE_LOAD);
+    ASSERT_TRUE(cli::parse_role("rpm=RPM", role, name));
+    EXPECT_EQ(role, ECUIO_RECORDING_ROLE_ENGINE_SPEED);
+    for (const char* bad : {"speed", "speed=", "brake=Pedal", "=RPM"}) {
+        EXPECT_FALSE(cli::parse_role(bad, role, name)) << bad;
+    }
+    ecuio_stretch_rules_t r = cli::stretch_rules(0);
+    cli::role_field(r, ECUIO_RECORDING_ROLE_ENGINE_LOAD) = 7;
+    EXPECT_EQ(r.engine_load, 7u);
+    EXPECT_EQ(r.throttle, UINT32_MAX);
+
+    uint32_t kinds = 0;
+    ASSERT_TRUE(cli::parse_stretch_kinds("pulls", kinds));
+    EXPECT_EQ(kinds, ECUIO_STRETCH_PULLS);
+    ASSERT_TRUE(cli::parse_stretch_kinds("cruises", kinds));
+    EXPECT_EQ(kinds, ECUIO_STRETCH_CRUISES);
+    ASSERT_TRUE(cli::parse_stretch_kinds("all", kinds));
+    EXPECT_EQ(kinds, ECUIO_STRETCH_PULLS | ECUIO_STRETCH_CRUISES);
+    EXPECT_FALSE(cli::parse_stretch_kinds("pull", kinds));
+}
+
+TEST(CliViewTest, TheRolesAndStretchLinesSayWhatWasFoundAndWith)
+{
+    char buf[1024];
+    ecuio_recording_signal_t speed{};
+    std::strcpy(speed.name, "Vehicle Speed");
+    ecuio_recording_signal_t rpm{};
+    std::strcpy(rpm.name, "RPM");
+    const ecuio_recording_signal_t* by_role[4] = {nullptr, nullptr, &speed,
+                                                  &rpm};
+    cli::Line l(buf, sizeof buf);
+    cli::roles_line(l, 1, by_role, cli::stretch_rules(ECUIO_STRETCH_PULLS));
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"roles\",\"recording\":1,\"throttle\":null,"
+              "\"engine_load\":null,\"vehicle_speed\":\"Vehicle Speed\","
+              "\"engine_speed\":\"RPM\",\"cruise_floor\":56.32704,"
+              "\"cruise_speed_band\":2}")
+        << "the defaults core takes, in km/h";
+
+    ecuio_recording_stretch_t s{};
+    s.kind = ECUIO_RECORDING_STRETCH_PULL;
+    s.from_us = 14000000;
+    s.to_us = 19500000;
+    s.start = 40;
+    s.end = 113.5;
+    s.flags = ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED |
+              ECUIO_RECORDING_STRETCH_CUT_END;
+    cli::Line sl(buf, sizeof buf);
+    cli::stretch_line(sl, 0, s, rpm, -14600000);
+    EXPECT_EQ(std::string(sl.data(), sl.size()),
+              "{\"type\":\"stretch\",\"recording\":0,\"kind\":\"pull\","
+              "\"from_us\":-600000,\"to_us\":4900000,\"length_us\":5500000,"
+              "\"signal\":\"RPM\",\"start\":40,\"end\":113.5,"
+              "\"by_load\":false,\"by_engine_speed\":true,"
+              "\"no_throttle\":false,\"cut_start\":false,\"cut_end\":true}");
+    s.kind = ECUIO_RECORDING_STRETCH_CRUISE;
+    cli::Line cl(buf, sizeof buf);
+    cli::stretch_line(cl, 0, s, speed, 0);
+    EXPECT_NE(std::string(cl.data(), cl.size()).find("\"kind\":\"cruise\""),
+              std::string::npos);
+}
+
 TEST(CliViewTest, TheAxisRoundsOutToWholeColumns)
 {
     cli::Axis a;
@@ -1438,20 +1596,18 @@ TEST(CliSignalFileTest, KindsAndUnitsAreTheFilesWords)
     EXPECT_STREQ(cli::kind_word(d), "computed");
 
     ecuio_signal_def_t u{};
-    u.id = ECUIO_USER_SIG_ID_BASE;
     std::strcpy(u.unit, "km/h");
     EXPECT_TRUE(cli::unit_converts(u));
-    EXPECT_FALSE(cli::unit_kept(u));
+    EXPECT_FALSE(cli::unit_kept(u, true));
     std::strcpy(u.unit, "kph");
     EXPECT_FALSE(cli::unit_converts(u));
-    EXPECT_TRUE(cli::unit_kept(u));
+    EXPECT_TRUE(cli::unit_kept(u, true));
     std::strcpy(u.unit, "%");
-    EXPECT_TRUE(cli::unit_kept(u));
+    EXPECT_TRUE(cli::unit_kept(u, true));
     u.unit[0] = '\0';
-    EXPECT_FALSE(cli::unit_kept(u)) << "no unit, nothing to convert";
+    EXPECT_FALSE(cli::unit_kept(u, true)) << "no unit, nothing to convert";
     std::strcpy(u.unit, "%");
-    u.id = ECUIO_USER_SIG_ID_BASE - 1;
-    EXPECT_FALSE(cli::unit_kept(u)) << "the base set's, not the file's";
+    EXPECT_FALSE(cli::unit_kept(u, false)) << "the base set's, not the file's";
 }
 
 // Each line says what the loader read, in the file's own terms: a reply's
@@ -1491,8 +1647,7 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
         return std::string(l.data(), l.size());
     };
     EXPECT_EQ(text([&](cli::Line& l) {
-                  cli::signal_file_line(l, ecuio_signal_file_name(file),
-                                        ecuio_signal_file_profile(file), set);
+                  cli::signal_file_line(l, file, set);
               }),
               "{\"type\":\"signal_file\",\"name\":\"Unit test\","
               "\"profile\":\"user.unit-test\",\"signals\":4,\"base\":0,"
@@ -1524,7 +1679,7 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
     };
     for (uint32_t i = 0; i < 4; ++i) {
         SCOPED_TRACE(i);
-        EXPECT_TRUE(cli::own_signal(set.defs[i]));
+        EXPECT_TRUE(cli::own_signal(file, set.defs[i]));
         EXPECT_LE(expected[i].size(), cli::def_line_bytes(set, set.defs[i]));
         EXPECT_EQ(text([&](cli::Line& l) {
                       cli::def_line(l, set, set.defs[i], nullptr);
@@ -1546,6 +1701,38 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
 
 // A def's gauge field: nothing for a def with none, else min and max and
 // only the levels given (cli::gauge_field)
+// A def that replaced a base one by name has the base's ID (7002 here), so
+// the ID range no longer says whose it is: the file's key does, and the
+// line and the count follow it
+TEST(CliSignalFileTest, AReplacingDefIsTheFilesOwnWhateverItsId)
+{
+    const std::string json =
+        "{\"havne_signals\":1,\"name\":\"Replaces\","
+        "\"source\":{\"name\":\"test\"},\"extends\":\"obd2\",\"signals\":["
+        "{\"key\":\"temp\",\"name\":\"Coolant Temp\","
+        "\"read\":{\"service\":\"22\",\"number\":\"1E1C\"},"
+        "\"field\":{\"byte\":1},\"unit\":\"kph\"}]}";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
+    const ecuio_signal_def_t* temp = ecuio_signal_file_find(file, "temp");
+    ASSERT_NE(temp, nullptr);
+    ASSERT_LT(temp->id, ECUIO_USER_SIG_ID_BASE) << "the base def's ID";
+    EXPECT_TRUE(cli::own_signal(file, *temp));
+    for (uint32_t i = 0; i < set.count; ++i) {
+        if (&set.defs[i] != temp) {
+            EXPECT_FALSE(cli::own_signal(file, set.defs[i])) << set.defs[i].name;
+        }
+    }
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::signal_file_line(l, file, set);
+    const std::string line(l.data(), l.size());
+    EXPECT_NE(line.find("\"signals\":1,"), std::string::npos) << line;
+    ecuio_signal_file_free(file);
+}
+
 TEST(CliSignalFileTest, AGaugeFieldHoldsOnlyTheLevelsGiven)
 {
     const auto field = [](const ecuio_signal_gauge_t* g) {
@@ -1712,7 +1899,8 @@ TEST(CliPluginTest, AVariantLineCountsItsOwnSignals)
     const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(pk.p, 0);
     char buf[1024];
     cli::Line l(buf, sizeof buf);
-    cli::variant_line(l, "base", "plugin.p.base", set);
+    cli::variant_line(l, "base", "plugin.p.base",
+                      ecuio_plugin_variant_file(pk.p, 0), set);
     EXPECT_EQ(text_of(l),
               "{\"type\":\"variant\",\"id\":\"base\",\"profile\":"
               "\"plugin.p.base\",\"signals\":1,\"base\":0,\"ecus\":[{\"rx\":"

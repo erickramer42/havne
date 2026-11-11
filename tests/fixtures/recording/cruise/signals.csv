@@ -1,0 +1,501 @@
+﻿host_us,signal,value,unit
+0,Vehicle Speed,80,km/h
+1000,Throttle,22,%
+100000,Vehicle Speed,80.4,km/h
+101000,Throttle,22.5,%
+200000,Vehicle Speed,80.8,km/h
+201000,Throttle,22,%
+300000,Vehicle Speed,80.4,km/h
+301000,Throttle,22.5,%
+400000,Vehicle Speed,80,km/h
+401000,Throttle,22,%
+500000,Vehicle Speed,80.4,km/h
+501000,Throttle,22.5,%
+600000,Vehicle Speed,80.8,km/h
+601000,Throttle,22,%
+700000,Vehicle Speed,80.4,km/h
+701000,Throttle,22.5,%
+800000,Vehicle Speed,80,km/h
+801000,Throttle,22,%
+900000,Vehicle Speed,80.4,km/h
+901000,Throttle,22.5,%
+1000000,Vehicle Speed,80.8,km/h
+1001000,Throttle,22,%
+1100000,Vehicle Speed,80.4,km/h
+1101000,Throttle,22.5,%
+1200000,Vehicle Speed,80,km/h
+1201000,Throttle,22,%
+1300000,Vehicle Speed,80.4,km/h
+1301000,Throttle,22.5,%
+1400000,Vehicle Speed,80.8,km/h
+1401000,Throttle,22,%
+1500000,Vehicle Speed,80.4,km/h
+1501000,Throttle,22.5,%
+1600000,Vehicle Speed,80,km/h
+1601000,Throttle,22,%
+1700000,Vehicle Speed,80.4,km/h
+1701000,Throttle,22.5,%
+1800000,Vehicle Speed,80.8,km/h
+1801000,Throttle,22,%
+1900000,Vehicle Speed,80.4,km/h
+1901000,Throttle,22.5,%
+2000000,Vehicle Speed,80,km/h
+2001000,Throttle,22,%
+2100000,Vehicle Speed,80.4,km/h
+2101000,Throttle,22.5,%
+2200000,Vehicle Speed,80.8,km/h
+2201000,Throttle,22,%
+2300000,Vehicle Speed,80.4,km/h
+2301000,Throttle,22.5,%
+2400000,Vehicle Speed,80,km/h
+2401000,Throttle,22,%
+2500000,Vehicle Speed,80.4,km/h
+2501000,Throttle,22.5,%
+2600000,Vehicle Speed,80.8,km/h
+2601000,Throttle,22,%
+2700000,Vehicle Speed,80.4,km/h
+2701000,Throttle,22.5,%
+2800000,Vehicle Speed,80,km/h
+2801000,Throttle,22,%
+2900000,Vehicle Speed,80.4,km/h
+2901000,Throttle,22.5,%
+3000000,Vehicle Speed,80.8,km/h
+3001000,Throttle,22,%
+3100000,Vehicle Speed,80.4,km/h
+3101000,Throttle,22.5,%
+3200000,Vehicle Speed,80,km/h
+3201000,Throttle,22,%
+3300000,Vehicle Speed,80.4,km/h
+3301000,Throttle,22.5,%
+3400000,Vehicle Speed,80.8,km/h
+3401000,Throttle,22,%
+3500000,Vehicle Speed,80.4,km/h
+3501000,Throttle,22.5,%
+3600000,Vehicle Speed,80,km/h
+3601000,Throttle,22,%
+3700000,Vehicle Speed,80.4,km/h
+3701000,Throttle,22.5,%
+3800000,Vehicle Speed,80.8,km/h
+3801000,Throttle,22,%
+3900000,Vehicle Speed,80.4,km/h
+3901000,Throttle,22.5,%
+4000000,Vehicle Speed,80,km/h
+4001000,Throttle,22,%
+4100000,Vehicle Speed,80.4,km/h
+4101000,Throttle,22.5,%
+4200000,Vehicle Speed,80.8,km/h
+4201000,Throttle,22,%
+4300000,Vehicle Speed,80.4,km/h
+4301000,Throttle,22.5,%
+4400000,Vehicle Speed,80,km/h
+4401000,Throttle,22,%
+4500000,Vehicle Speed,80.4,km/h
+4501000,Throttle,22.5,%
+4600000,Vehicle Speed,80.8,km/h
+4601000,Throttle,22,%
+4700000,Vehicle Speed,80.4,km/h
+4701000,Throttle,22.5,%
+4800000,Vehicle Speed,80,km/h
+4801000,Throttle,22,%
+4900000,Vehicle Speed,80.4,km/h
+4901000,Throttle,22.5,%
+5000000,Vehicle Speed,80.8,km/h
+5001000,Throttle,22,%
+5100000,Vehicle Speed,80.4,km/h
+5101000,Throttle,22.5,%
+5200000,Vehicle Speed,80,km/h
+5201000,Throttle,22,%
+5300000,Vehicle Speed,80.4,km/h
+5301000,Throttle,22.5,%
+5400000,Vehicle Speed,80.8,km/h
+5401000,Throttle,22,%
+5500000,Vehicle Speed,80.4,km/h
+5501000,Throttle,22.5,%
+5600000,Vehicle Speed,80,km/h
+5601000,Throttle,22,%
+5700000,Vehicle Speed,80.4,km/h
+5701000,Throttle,22.5,%
+5800000,Vehicle Speed,80.8,km/h
+5801000,Throttle,22,%
+5900000,Vehicle Speed,80.4,km/h
+5901000,Throttle,22.5,%
+6000000,Vehicle Speed,80,km/h
+6001000,Throttle,22,%
+6100000,Vehicle Speed,80.4,km/h
+6101000,Throttle,22.5,%
+6200000,Vehicle Speed,80.8,km/h
+6201000,Throttle,22,%
+6300000,Vehicle Speed,80.4,km/h
+6301000,Throttle,22.5,%
+6400000,Vehicle Speed,80,km/h
+6401000,Throttle,22,%
+6500000,Vehicle Speed,80.4,km/h
+6501000,Throttle,22.5,%
+6600000,Vehicle Speed,80.8,km/h
+6601000,Throttle,22,%
+6700000,Vehicle Speed,80.4,km/h
+6701000,Throttle,22.5,%
+6800000,Vehicle Speed,80,km/h
+6801000,Throttle,22,%
+6900000,Vehicle Speed,80.4,km/h
+6901000,Throttle,22.5,%
+7000000,Vehicle Speed,80.8,km/h
+7001000,Throttle,22,%
+7100000,Vehicle Speed,80.4,km/h
+7101000,Throttle,22.5,%
+7200000,Vehicle Speed,80,km/h
+7201000,Throttle,22,%
+7300000,Vehicle Speed,80.4,km/h
+7301000,Throttle,22.5,%
+7400000,Vehicle Speed,80.8,km/h
+7401000,Throttle,22,%
+7500000,Vehicle Speed,80.4,km/h
+7501000,Throttle,22.5,%
+7600000,Vehicle Speed,80,km/h
+7601000,Throttle,22,%
+7700000,Vehicle Speed,80.4,km/h
+7701000,Throttle,22.5,%
+7800000,Vehicle Speed,80.8,km/h
+7801000,Throttle,22,%
+7900000,Vehicle Speed,80.4,km/h
+7901000,Throttle,22.5,%
+8000000,Vehicle Speed,80,km/h
+8001000,Throttle,22,%
+8100000,Vehicle Speed,80.4,km/h
+8101000,Throttle,22.5,%
+8200000,Vehicle Speed,80.8,km/h
+8201000,Throttle,22,%
+8300000,Vehicle Speed,80.4,km/h
+8301000,Throttle,22.5,%
+8400000,Vehicle Speed,80,km/h
+8401000,Throttle,22,%
+8500000,Vehicle Speed,80.4,km/h
+8501000,Throttle,22.5,%
+8600000,Vehicle Speed,80.8,km/h
+8601000,Throttle,22,%
+8700000,Vehicle Speed,80.4,km/h
+8701000,Throttle,22.5,%
+8800000,Vehicle Speed,80,km/h
+8801000,Throttle,22,%
+8900000,Vehicle Speed,80.4,km/h
+8901000,Throttle,22.5,%
+9000000,Vehicle Speed,80.8,km/h
+9001000,Throttle,22,%
+9100000,Vehicle Speed,80.4,km/h
+9101000,Throttle,22.5,%
+9200000,Vehicle Speed,80,km/h
+9201000,Throttle,22,%
+9300000,Vehicle Speed,80.4,km/h
+9301000,Throttle,22.5,%
+9400000,Vehicle Speed,80.8,km/h
+9401000,Throttle,22,%
+9500000,Vehicle Speed,80.4,km/h
+9501000,Throttle,22.5,%
+9600000,Vehicle Speed,80,km/h
+9601000,Throttle,22,%
+9700000,Vehicle Speed,80.4,km/h
+9701000,Throttle,22.5,%
+9800000,Vehicle Speed,80.8,km/h
+9801000,Throttle,22,%
+9900000,Vehicle Speed,80.4,km/h
+9901000,Throttle,22.5,%
+10000000,Vehicle Speed,80,km/h
+10001000,Throttle,22,%
+10100000,Vehicle Speed,80.4,km/h
+10101000,Throttle,22.5,%
+10200000,Vehicle Speed,80.8,km/h
+10201000,Throttle,22,%
+10300000,Vehicle Speed,80.4,km/h
+10301000,Throttle,22.5,%
+10400000,Vehicle Speed,80,km/h
+10401000,Throttle,22,%
+10500000,Vehicle Speed,80.4,km/h
+10501000,Throttle,22.5,%
+10600000,Vehicle Speed,80.8,km/h
+10601000,Throttle,22,%
+10700000,Vehicle Speed,80.4,km/h
+10701000,Throttle,22.5,%
+10800000,Vehicle Speed,80,km/h
+10801000,Throttle,22,%
+10900000,Vehicle Speed,80.4,km/h
+10901000,Throttle,22.5,%
+11000000,Vehicle Speed,80.8,km/h
+11001000,Throttle,22,%
+11100000,Vehicle Speed,80.4,km/h
+11101000,Throttle,22.5,%
+11200000,Vehicle Speed,80,km/h
+11201000,Throttle,22,%
+11300000,Vehicle Speed,80.4,km/h
+11301000,Throttle,22.5,%
+11400000,Vehicle Speed,80.8,km/h
+11401000,Throttle,22,%
+11500000,Vehicle Speed,80.4,km/h
+11501000,Throttle,22.5,%
+11600000,Vehicle Speed,80,km/h
+11601000,Throttle,22,%
+11700000,Vehicle Speed,80.4,km/h
+11701000,Throttle,22.5,%
+11800000,Vehicle Speed,80.8,km/h
+11801000,Throttle,22,%
+11900000,Vehicle Speed,80.4,km/h
+11901000,Throttle,22.5,%
+12000000,Vehicle Speed,83,km/h
+12001000,Throttle,22,%
+12100000,Vehicle Speed,83.4,km/h
+12101000,Throttle,22.5,%
+12200000,Vehicle Speed,83.8,km/h
+12201000,Throttle,22,%
+12300000,Vehicle Speed,83.4,km/h
+12301000,Throttle,22.5,%
+12400000,Vehicle Speed,83,km/h
+12401000,Throttle,22,%
+12500000,Vehicle Speed,83.4,km/h
+12501000,Throttle,22.5,%
+12600000,Vehicle Speed,83.8,km/h
+12601000,Throttle,22,%
+12700000,Vehicle Speed,83.4,km/h
+12701000,Throttle,22.5,%
+12800000,Vehicle Speed,83,km/h
+12801000,Throttle,22,%
+12900000,Vehicle Speed,83.4,km/h
+12901000,Throttle,22.5,%
+13000000,Vehicle Speed,83.8,km/h
+13001000,Throttle,22,%
+13100000,Vehicle Speed,83.4,km/h
+13101000,Throttle,22.5,%
+13200000,Vehicle Speed,83,km/h
+13201000,Throttle,22,%
+13300000,Vehicle Speed,83.4,km/h
+13301000,Throttle,22.5,%
+13400000,Vehicle Speed,83.8,km/h
+13401000,Throttle,22,%
+13500000,Vehicle Speed,83.4,km/h
+13501000,Throttle,22.5,%
+13600000,Vehicle Speed,83,km/h
+13601000,Throttle,22,%
+13700000,Vehicle Speed,83.4,km/h
+13701000,Throttle,22.5,%
+13800000,Vehicle Speed,83.8,km/h
+13801000,Throttle,22,%
+13900000,Vehicle Speed,83.4,km/h
+13901000,Throttle,22.5,%
+14000000,Vehicle Speed,83,km/h
+14001000,Throttle,22,%
+14100000,Vehicle Speed,83.4,km/h
+14101000,Throttle,22.5,%
+14200000,Vehicle Speed,83.8,km/h
+14201000,Throttle,22,%
+14300000,Vehicle Speed,83.4,km/h
+14301000,Throttle,22.5,%
+14400000,Vehicle Speed,83,km/h
+14401000,Throttle,22,%
+14500000,Vehicle Speed,83.4,km/h
+14501000,Throttle,22.5,%
+14600000,Vehicle Speed,83.8,km/h
+14601000,Throttle,22,%
+14700000,Vehicle Speed,83.4,km/h
+14701000,Throttle,22.5,%
+14800000,Vehicle Speed,83,km/h
+14801000,Throttle,22,%
+14900000,Vehicle Speed,83.4,km/h
+14901000,Throttle,22.5,%
+15000000,Vehicle Speed,83.8,km/h
+15001000,Throttle,22,%
+15100000,Vehicle Speed,83.4,km/h
+15101000,Throttle,22.5,%
+15200000,Vehicle Speed,83,km/h
+15201000,Throttle,22,%
+15300000,Vehicle Speed,83.4,km/h
+15301000,Throttle,22.5,%
+15400000,Vehicle Speed,83.8,km/h
+15401000,Throttle,22,%
+15500000,Vehicle Speed,83.4,km/h
+15501000,Throttle,22.5,%
+15600000,Vehicle Speed,83,km/h
+15601000,Throttle,22,%
+15700000,Vehicle Speed,83.4,km/h
+15701000,Throttle,22.5,%
+15800000,Vehicle Speed,83.8,km/h
+15801000,Throttle,22,%
+15900000,Vehicle Speed,83.4,km/h
+15901000,Throttle,22.5,%
+16000000,Vehicle Speed,83,km/h
+16001000,Throttle,22,%
+16100000,Vehicle Speed,83.4,km/h
+16101000,Throttle,22.5,%
+16200000,Vehicle Speed,83.8,km/h
+16201000,Throttle,22,%
+16300000,Vehicle Speed,83.4,km/h
+16301000,Throttle,22.5,%
+16400000,Vehicle Speed,83,km/h
+16401000,Throttle,22,%
+16500000,Vehicle Speed,83.4,km/h
+16501000,Throttle,22.5,%
+16600000,Vehicle Speed,83.8,km/h
+16601000,Throttle,22,%
+16700000,Vehicle Speed,83.4,km/h
+16701000,Throttle,22.5,%
+16800000,Vehicle Speed,83,km/h
+16801000,Throttle,22,%
+16900000,Vehicle Speed,83.4,km/h
+16901000,Throttle,22.5,%
+17000000,Vehicle Speed,83.8,km/h
+17001000,Throttle,22,%
+17100000,Vehicle Speed,83.4,km/h
+17101000,Throttle,22.5,%
+17200000,Vehicle Speed,83,km/h
+17201000,Throttle,22,%
+17300000,Vehicle Speed,83.4,km/h
+17301000,Throttle,22.5,%
+17400000,Vehicle Speed,83.8,km/h
+17401000,Throttle,22,%
+17500000,Vehicle Speed,83.4,km/h
+17501000,Throttle,22.5,%
+17600000,Vehicle Speed,83,km/h
+17601000,Throttle,22,%
+17700000,Vehicle Speed,83.4,km/h
+17701000,Throttle,22.5,%
+17800000,Vehicle Speed,83.8,km/h
+17801000,Throttle,22,%
+17900000,Vehicle Speed,83.4,km/h
+17901000,Throttle,22.5,%
+18000000,Vehicle Speed,83,km/h
+18001000,Throttle,22,%
+18100000,Vehicle Speed,83.4,km/h
+18101000,Throttle,22.5,%
+18200000,Vehicle Speed,83.8,km/h
+18201000,Throttle,22,%
+18300000,Vehicle Speed,83.4,km/h
+18301000,Throttle,22.5,%
+18400000,Vehicle Speed,83,km/h
+18401000,Throttle,22,%
+18500000,Vehicle Speed,83.4,km/h
+18501000,Throttle,22.5,%
+18600000,Vehicle Speed,83.8,km/h
+18601000,Throttle,22,%
+18700000,Vehicle Speed,83.4,km/h
+18701000,Throttle,22.5,%
+18800000,Vehicle Speed,83,km/h
+18801000,Throttle,22,%
+18900000,Vehicle Speed,83.4,km/h
+18901000,Throttle,22.5,%
+19000000,Vehicle Speed,83.8,km/h
+19001000,Throttle,22,%
+19100000,Vehicle Speed,83.4,km/h
+19101000,Throttle,22.5,%
+19200000,Vehicle Speed,83,km/h
+19201000,Throttle,22,%
+19300000,Vehicle Speed,83.4,km/h
+19301000,Throttle,22.5,%
+19400000,Vehicle Speed,83.8,km/h
+19401000,Throttle,22,%
+19500000,Vehicle Speed,83.4,km/h
+19501000,Throttle,22.5,%
+19600000,Vehicle Speed,83,km/h
+19601000,Throttle,22,%
+19700000,Vehicle Speed,83.4,km/h
+19701000,Throttle,22.5,%
+19800000,Vehicle Speed,83.8,km/h
+19801000,Throttle,22,%
+19900000,Vehicle Speed,83.4,km/h
+19901000,Throttle,22.5,%
+20000000,Vehicle Speed,83,km/h
+20001000,Throttle,22,%
+20100000,Vehicle Speed,83.4,km/h
+20101000,Throttle,22.5,%
+20200000,Vehicle Speed,83.8,km/h
+20201000,Throttle,22,%
+20300000,Vehicle Speed,83.4,km/h
+20301000,Throttle,22.5,%
+20400000,Vehicle Speed,83,km/h
+20401000,Throttle,22,%
+20500000,Vehicle Speed,83.4,km/h
+20501000,Throttle,22.5,%
+20600000,Vehicle Speed,83.8,km/h
+20601000,Throttle,22,%
+20700000,Vehicle Speed,83.4,km/h
+20701000,Throttle,22.5,%
+20800000,Vehicle Speed,83,km/h
+20801000,Throttle,22,%
+20900000,Vehicle Speed,83.4,km/h
+20901000,Throttle,22.5,%
+21000000,Vehicle Speed,83.8,km/h
+21001000,Throttle,22,%
+21100000,Vehicle Speed,83.4,km/h
+21101000,Throttle,22.5,%
+21200000,Vehicle Speed,83,km/h
+21201000,Throttle,22,%
+21300000,Vehicle Speed,83.4,km/h
+21301000,Throttle,22.5,%
+21400000,Vehicle Speed,83.8,km/h
+21401000,Throttle,22,%
+21500000,Vehicle Speed,83.4,km/h
+21501000,Throttle,22.5,%
+21600000,Vehicle Speed,83,km/h
+21601000,Throttle,22,%
+21700000,Vehicle Speed,83.4,km/h
+21701000,Throttle,22.5,%
+21800000,Vehicle Speed,83.8,km/h
+21801000,Throttle,22,%
+21900000,Vehicle Speed,83.4,km/h
+21901000,Throttle,22.5,%
+22000000,Vehicle Speed,83,km/h
+22001000,Throttle,22,%
+22100000,Vehicle Speed,83.4,km/h
+22101000,Throttle,22.5,%
+22200000,Vehicle Speed,83.8,km/h
+22201000,Throttle,22,%
+22300000,Vehicle Speed,83.4,km/h
+22301000,Throttle,22.5,%
+22400000,Vehicle Speed,83,km/h
+22401000,Throttle,22,%
+22500000,Vehicle Speed,83.4,km/h
+22501000,Throttle,22.5,%
+22600000,Vehicle Speed,83.8,km/h
+22601000,Throttle,22,%
+22700000,Vehicle Speed,83.4,km/h
+22701000,Throttle,22.5,%
+22800000,Vehicle Speed,83,km/h
+22801000,Throttle,22,%
+22900000,Vehicle Speed,83.4,km/h
+22901000,Throttle,22.5,%
+23000000,Vehicle Speed,83.8,km/h
+23001000,Throttle,22,%
+23100000,Vehicle Speed,83.4,km/h
+23101000,Throttle,22.5,%
+23200000,Vehicle Speed,83,km/h
+23201000,Throttle,22,%
+23300000,Vehicle Speed,83.4,km/h
+23301000,Throttle,22.5,%
+23400000,Vehicle Speed,83.8,km/h
+23401000,Throttle,22,%
+23500000,Vehicle Speed,83.4,km/h
+23501000,Throttle,22.5,%
+23600000,Vehicle Speed,83,km/h
+23601000,Throttle,22,%
+23700000,Vehicle Speed,83.4,km/h
+23701000,Throttle,22.5,%
+23800000,Vehicle Speed,83.8,km/h
+23801000,Throttle,22,%
+23900000,Vehicle Speed,83.4,km/h
+23901000,Throttle,22.5,%
+24000000,Vehicle Speed,83,km/h
+24001000,Throttle,22,%
+24100000,Vehicle Speed,83.4,km/h
+24101000,Throttle,22.5,%
+24200000,Vehicle Speed,83.8,km/h
+24201000,Throttle,22,%
+24300000,Vehicle Speed,83.4,km/h
+24301000,Throttle,22.5,%
+24400000,Vehicle Speed,83,km/h
+24401000,Throttle,22,%
+24500000,Vehicle Speed,83.4,km/h
+24501000,Throttle,22.5,%
+24600000,Vehicle Speed,83.8,km/h
+24601000,Throttle,22,%
+24700000,Vehicle Speed,83.4,km/h
+24701000,Throttle,22.5,%
+24800000,Vehicle Speed,83,km/h
+24801000,Throttle,22,%
+24900000,Vehicle Speed,83.4,km/h
+24901000,Throttle,22.5,%

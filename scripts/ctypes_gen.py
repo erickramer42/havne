@@ -6,8 +6,8 @@
 # The havne package's declarations (ADR-0053 section 1): every public
 # header's functions with their argument and result types, the structs
 # and the callback typedefs as ctypes types, the enumerators and the
-# ECUIO_ macros (numbers, <stdint.h>'s limits among them, and string
-# literals) as constants, written to python/havne/_ecuio.py.
+# ECUIO_ macros (numbers, <stdint.h>'s limits among them, decimal
+# literals, and string literals) as constants, written to python/havne/_ecuio.py.
 # The headers are core/CMakeLists.txt's ECUIO_PUBLIC_HEADERS, read as
 # scripts/api_check.py reads them, so the package declares exactly what
 # the shared core exports (scripts/ecuio_exports.py).
@@ -96,6 +96,17 @@ def int_value(text, macros, seen=()):
     except (SyntaxError, TypeError, ZeroDivisionError, NameError):
         return None
     return v if isinstance(v, int) else None
+
+
+def float_value(text):
+    """A macro's text as a float when it is one decimal literal (a point,
+    an exponent or both, no suffix), else None"""
+    t = text.strip()
+    if not re.fullmatch(r"\d+(\.\d*)?([eE][+-]?\d+)?|\.\d+([eE][+-]?\d+)?", t):
+        return None
+    if "." not in t and "e" not in t.lower():
+        return None
+    return float(t)
 
 
 def string_value(text):
@@ -270,6 +281,10 @@ def generate(tree=ROOT):
         v = int_value(m.macros[name], m.macros)
         if v is not None:
             lines.append(f"{name} = {v:#x}" if v > 255 else f"{name} = {v}")
+            continue
+        f = float_value(m.macros[name])
+        if f is not None:
+            lines.append(f"{name} = {f!r}")
             continue
         s = string_value(m.macros[name])
         if s is None:

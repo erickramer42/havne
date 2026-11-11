@@ -8,7 +8,8 @@ import App
 
 // A strip chart: what ChartLayout.layout returns for the series its
 // fetch() gives. Live and the Recordings page each make one. The Canvas
-// draws the background, the grid, the captions and the labels; the traces
+// draws the background, the grid, the captions, the panes' axes and seams
+// and the labels; the traces
 // are a Shape over it, which the scene graph draws on the GPU (rasterized
 // on the Canvas, a phone's full-resolution strokes and bands held the GUI
 // thread about 150 ms a paint), and a page's marks a Canvas over that.
@@ -102,6 +103,11 @@ Canvas {
             joinStyle: ShapePath.MiterJoin
             PathMultiline { paths: [] }
         }
+    }
+
+    // Only a page's marks again, for a mark that moves while the traces rest
+    function repaintMarks() {
+        marks.requestPaint()
     }
 
     function pathsFor(i) {
@@ -200,13 +206,14 @@ Canvas {
             return
         }
 
-        // Grid: quarter lines, and one vertical per time tick
+        // Grid: a pane's value ticks (quarter lines without an axis), and
+        // one vertical per time tick through every pane
         ctx.strokeStyle = Theme.bg
         ctx.lineWidth = 1
         ctx.beginPath()
         for (const gy of l.hGrid) {
-            ctx.moveTo(0, gy)
-            ctx.lineTo(l.plotW, gy)
+            ctx.moveTo(l.left, gy)
+            ctx.lineTo(l.left + l.plotW, gy)
         }
         for (const tick of l.ticks) {
             ctx.moveTo(tick.x, l.top)
@@ -214,13 +221,38 @@ Canvas {
         }
         ctx.stroke()
 
-        // Captions under the ticks
+        // The seams between panes, a hairline across the plot
+        if (l.seams.length > 0) {
+            ctx.strokeStyle = Theme.outline
+            ctx.beginPath()
+            for (const sy of l.seams) {
+                ctx.moveTo(0, Math.round(sy) + 0.5)
+                ctx.lineTo(l.left + l.plotW, Math.round(sy) + 0.5)
+            }
+            ctx.stroke()
+        }
+
+        // Captions under the time ticks; each pane's name at its axis's
+        // top and its value captions right-aligned against the plot
         ctx.fillStyle = Theme.textDim
         ctx.textBaseline = "top"
         for (const tick of l.ticks) {
             if (!tick.captioned) continue
             ctx.textAlign = tick.align
             ctx.fillText(tick.caption, tick.x, l.top + l.plotH + 3)
+        }
+        for (const pane of l.panes) {
+            if (pane.label !== "") {
+                ctx.textAlign = "left"
+                ctx.textBaseline = "top"
+                ctx.fillText(pane.label, 0, pane.top)
+            }
+            ctx.textAlign = "right"
+            ctx.textBaseline = "middle"
+            for (const tick of pane.ticks) {
+                if (tick.captioned)
+                    ctx.fillText(tick.caption, l.left - ChartLayout.axisGap, tick.y)
+            }
         }
 
         // Traces, each piece its own polyline (a gap is a break); a band

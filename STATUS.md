@@ -195,8 +195,8 @@ background too ([roadmap](#roadmap)).
     `10 03` to each module first, tester present in quiet gaps, `10 01`
     at the close; a module that refuses is read in the default session
     with its code named, and each module's report, the Log page,
-    `havne-cli stream`'s `session` line and Python say which session it was
-    read in
+    `havne-cli`'s `session` line (in `stream` and `log` alike) and
+    Python's `session_state` say which session it was read in
     ([ADR-0060](docs/adr/0060-extended-session-reads.md)). Run only
     against the fakes and the simulated ECU so far.
   - **Your own signals** ([ADR-0051](docs/adr/0051-signal-files.md)):

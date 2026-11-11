@@ -715,6 +715,25 @@ void poll_scan(Output& out, ecuio_session_t* session, uint32_t channels,
     }
 }
 
+// A session line per ECU whose session changed (cli/scan_line.h), as
+// poll_scan writes it, for the commands that write no scan lines
+void poll_sessions(Output& out, ecuio_session_t* session, uint32_t channels,
+                   cli::SessionSeen* seen)
+{
+    for (uint32_t c = 0; c < channels; ++c) {
+        ecuio_channel_support_t s;
+        if (ecuio_session_get_channel_support(session, c, &s) != ECUIO_OK) {
+            continue;
+        }
+        if (cli::session_due(s, seen[c])) {
+            char buf[512];
+            cli::Line l(buf, sizeof buf);
+            cli::session_line(l, s);
+            write_line(out, l);
+        }
+    }
+}
+
 // The car's model year, from the first channel's VIN (the vehicle's,
 // ADR-0027 section 3) decoded as the identity line decodes it; 0 with
 // none
@@ -1230,12 +1249,11 @@ void write_check_lines(Output& out, const ecuio_signal_file_t* file)
     const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
     {
         BigLine b(1024 + size_t{set.channel_count} * 64);
-        cli::signal_file_line(b.line, ecuio_signal_file_name(file),
-                              ecuio_signal_file_profile(file), set);
+        cli::signal_file_line(b.line, file, set);
         write_line(out, b.line);
     }
     for (uint32_t i = 0; i < set.count; ++i) {
-        if (cli::own_signal(set.defs[i])) {
+        if (cli::own_signal(file, set.defs[i])) {
             BigLine b(cli::def_line_bytes(set, set.defs[i]));
             cli::def_line(b.line, set, set.defs[i],
                           ecuio_signal_file_gauge(file, &set.defs[i]));
@@ -1243,7 +1261,7 @@ void write_check_lines(Output& out, const ecuio_signal_file_t* file)
         }
     }
     for (uint32_t i = 0; i < set.count; ++i) {
-        if (cli::unit_kept(set.defs[i])) {
+        if (cli::unit_kept(set.defs[i], cli::own_signal(file, set.defs[i]))) {
             char buf[512];
             cli::Line l(buf, sizeof buf);
             cli::unit_line(l, set.defs[i]);
@@ -1737,11 +1755,12 @@ int run_plugins_check(const char* path, const char* on)
         {
             BigLine b(1024 + size_t{set.channel_count} * 64);
             cli::variant_line(b.line, id.c_str(),
-                              cli::plugin_profile(info.id, id.c_str()), set);
+                              cli::plugin_profile(info.id, id.c_str()),
+                              ecuio_plugin_variant_file(p, v), set);
             write_line(out, b.line);
         }
         for (uint32_t i = 0; i < set.count; ++i) {
-            if (cli::own_signal(set.defs[i])) {
+            if (cli::own_signal(ecuio_plugin_variant_file(p, v), set.defs[i])) {
                 const ecuio_signal_gauge_t* gauge = ecuio_signal_file_gauge(
                     ecuio_plugin_variant_file(p, v), &set.defs[i]);
                 uses_gauge = uses_gauge || gauge != nullptr;
@@ -2040,7 +2059,12 @@ void usage(FILE* to)
         "                      [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli view <recording>... [--signal <name>]... [--from S]\n"
         "                      [--to S] [--columns N] [--at S]\n"
-        "                      [--align-on <what>] [--hysteresis H]\n"
+        "                      [--span A:B]... [--align-on <what>]\n"
+        "                      [--hysteresis H]\n"
+        "                      [--stretches [pulls|cruises|all]\n"
+        "                      [--stretch-level <key>=<value>]...\n"
+        "                      [--role <role>=<name>]...\n"
+        "                      [--units metric|imperial]]\n"
         "                      [--frames [--profile <name>]\n"
         "                      [--signals <file> | --plugin <pkg>]]\n"
         "       havne-cli info <recording> [--gap S] [--rate-drop X] "
@@ -2144,7 +2168,18 @@ void usage(FILE* to)
         "         the app write): what each holds, then each signal's lowest,\n"
         "         highest and count in N columns (100) from --from to --to\n"
         "         seconds; the plotted signals unless --signal names them,\n"
-        "         and with --at the values in force then. --align-on puts\n"
+        "         with --at the values in force then, and with --span\n"
+        "         each signal's samples, first, last, lowest, highest and\n"
+        "         mean from A to B seconds, both ends counted.\n"
+        "         --stretches lists the pulls (throttle at 80 %% for 1 s\n"
+        "         while speed rises) and cruises (speed within 2 km/h and\n"
+        "         throttle within 3 %% for 10 s, above 35 mph (56.33 km/h)),\n"
+        "         each signal's role named on a roles line; --stretch-level\n"
+        "         pull-throttle=, pull-load=, pull-hold=, pull-gap=,\n"
+        "         cruise-hold=, cruise-speed-band=, cruise-throttle-band= and\n"
+        "         cruise-floor= change them (seconds, %%, speeds in --units),\n"
+        "         and --role throttle=, load=, speed= or rpm= names a\n"
+        "         signal. --align-on puts\n"
         "         several on one axis, its zero at rise:<signal>:<level>\n"
         "         (reaching it after being --hysteresis below),\n"
         "         fall:<signal>:<level>, marker:<label>, utc (their\n"
@@ -2223,6 +2258,12 @@ void usage(FILE* to)
         "         check digit (49 CFR 565, NHTSA vPIC's manufacturer codes).\n"
         "dtc      names a trouble code (P0301): SAE J2012's title for a\n"
         "         generic powertrain or network code.\n"
+        "\n"
+        "Ctrl+C or SIGTERM stops an export, an import or a health report\n"
+        "from a recording and removes what it had made. A second one ends\n"
+        "the process at once and can leave a file or folder named\n"
+        "<out>.partial-<pid>-<n> beside <out>: it holds nothing the run\n"
+        "needs, so delete it once no havne-cli is still writing there.\n"
         "\n"
         "Exit: 0 the stream ended, 1 the CLI or its recording failed, 2 "
         "usage,\n"
@@ -2945,6 +2986,11 @@ int run_log(const cli::LogArgs& args)
     const bool replay_ends = info.backend == ECUIO_BACKEND_REPLAY &&
                              !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
     write_session(out, info);
+    const uint32_t channels =
+        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
+            ? info.channel_count
+            : ECUIO_SESSION_INFO_MAX_CHANNELS;
+    cli::SessionSeen session_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     // The focus before the recorder attaches: the header's focus line is
     // the focus at the attach
     st = ecuio_session_set_focus_with(
@@ -3030,6 +3076,7 @@ int run_log(const cli::LogArgs& args)
         }
         poll_recording(out, recorder, nullptr, &recording_failed);
         poll_health(out, session, &last_error, &episodes);
+        poll_sessions(out, session, channels, session_seen);
         reason = cli::log_end_reason(
             g_interrupted.load(), recording_failed,
             replay_ends &&
@@ -3073,6 +3120,7 @@ int run_log(const cli::LogArgs& args)
     }
     closer.join();
 
+    poll_sessions(out, session, channels, session_seen);
     int code = kExitOk;
     wait_for_writer(recorder, frames.covered.load(std::memory_order_acquire));
     poll_recording(out, recorder, nullptr, &recording_failed);
@@ -3623,6 +3671,12 @@ struct ViewArgs {
     int64_t from_us = 0;
     int64_t to_us = 0;
     int64_t at_us = 0;
+    std::vector<cli::Span> spans; // --span, in order
+    // --stretches: the rules (--stretch-level's, in km/h), and --role's
+    // names, each a role and a signal every recording holds as a number
+    bool stretches = false;
+    ecuio_stretch_rules_t rules = cli::stretch_rules(0);
+    std::vector<std::pair<uint32_t, std::string>> roles;
     uint32_t columns = 100;
     const char* align_text = nullptr;
     cli::AlignOn align;
@@ -3675,6 +3729,7 @@ struct Viewed {
     uint64_t align_host_us = ECUIO_RECORDING_NONE;
     int64_t offset_us = 0;
     std::string decoded; // --frames: the profile, or "signals.json"
+    ecuio_stretch_rules_t rules{}; // --stretches: --role's indexes in
 
     // The index of a signal by name, or UINT32_MAX
     uint32_t find(const std::string& name) const
@@ -3891,6 +3946,24 @@ int run_view(ViewArgs& args)
         }
     }
 
+    // --role's names, each a number signal of every recording
+    for (Viewed& v : views) {
+        v.rules = args.rules;
+        for (const auto& role : args.roles) {
+            const uint32_t k = v.find(role.second);
+            if (k == UINT32_MAX ||
+                (v.signals[k].flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0) {
+                std::fprintf(stderr,
+                             "havne-cli: --role names '%s', which recording %u "
+                             "has no number signal of\n",
+                             role.second.c_str(),
+                             static_cast<unsigned>(&v - views.data()));
+                return kExitUsage;
+            }
+            cli::role_field(v.rules, role.first) = k;
+        }
+    }
+
     // The signals each shows: those named, in order, or its ranked ones by
     // rank
     for (Viewed& v : views) {
@@ -3998,6 +4071,16 @@ int run_view(ViewArgs& args)
                              "on the recordings' axis\n");
         return kExitUsage;
     }
+    for (const cli::Span& span : args.spans) {
+        if (span.from_us < axis.from_us || span.to_us > axis.to_us) {
+            std::fprintf(stderr,
+                         "havne-cli: a --span lies outside the axis, %.6g s "
+                         "to %.6g s\n",
+                         static_cast<double>(axis.from_us) / 1e6,
+                         static_cast<double>(axis.to_us) / 1e6);
+            return kExitUsage;
+        }
+    }
 
     write_start(out);
     char buf[2048];
@@ -4025,6 +4108,51 @@ int run_view(ViewArgs& args)
             cli::align_line(b.line, i, args.align_text, v.aligned,
                             v.align_host_us, v.offset_us);
             write_line(out, b.line);
+        }
+    }
+    for (uint32_t i = 0; args.stretches && i < views.size(); ++i) {
+        const Viewed& v = views[i];
+        const ecuio_recording_signal_t* by_role[4] = {};
+        const uint32_t order[4] = {ECUIO_RECORDING_ROLE_THROTTLE,
+                                   ECUIO_RECORDING_ROLE_ENGINE_LOAD,
+                                   ECUIO_RECORDING_ROLE_VEHICLE_SPEED,
+                                   ECUIO_RECORDING_ROLE_ENGINE_SPEED};
+        for (size_t n = 0; n < 4; ++n) {
+            ecuio_stretch_rules_t rules = v.rules;
+            uint32_t k = cli::role_field(rules, order[n]);
+            if (k == UINT32_MAX) {
+                ecuio_recording_role_signal(v.r.get(), order[n], &k);
+            }
+            by_role[n] = k != UINT32_MAX ? &v.signals[k] : nullptr;
+        }
+        cli::Line l(buf, sizeof buf);
+        cli::roles_line(l, i, by_role, v.rules);
+        write_line(out, l);
+        /* The axis in the recording's own time; nothing before its start */
+        const int64_t t0 = (std::max<int64_t>)(axis.from_us - v.offset_us, 0);
+        const int64_t t1 = axis.to_us - v.offset_us;
+        if (!v.aligned || t1 <= t0) {
+            continue;
+        }
+        uint32_t count = 0;
+        ecuio_status_t rc = ecuio_recording_stretches(
+            v.r.get(), &v.rules, static_cast<uint64_t>(t0),
+            static_cast<uint64_t>(t1), nullptr, 0, &count);
+        std::vector<ecuio_recording_stretch_t> found(count);
+        if (rc == ECUIO_OK && count != 0) {
+            rc = ecuio_recording_stretches(
+                v.r.get(), &v.rules, static_cast<uint64_t>(t0),
+                static_cast<uint64_t>(t1), found.data(), count, &count);
+            found.resize((std::min<size_t>)(found.size(), count));
+        }
+        if (rc != ECUIO_OK) {
+            write_error(out, rc, "the recording changed while it was read");
+            return ended(out, kExitConnect);
+        }
+        for (const ecuio_recording_stretch_t& s : found) {
+            cli::Line sl(buf, sizeof buf);
+            cli::stretch_line(sl, i, s, v.signals[s.signal], v.offset_us);
+            write_line(out, sl);
         }
     }
     {
@@ -4111,6 +4239,42 @@ int run_view(ViewArgs& args)
             }
             cli::at_end(b.line);
             write_line(out, b.line);
+        }
+    }
+    for (const cli::Span& span : args.spans) {
+        for (uint32_t i = 0; i < views.size(); ++i) {
+            const Viewed& v = views[i];
+            if (!v.aligned || v.shown.empty()) {
+                continue;
+            }
+            /* The span in the recording's own time: a part before its
+             * start holds nothing, and nothing is in force there */
+            const int64_t t0 = span.from_us - v.offset_us;
+            const int64_t t1 = span.to_us - v.offset_us;
+            std::vector<ecuio_recording_stats_t> st(v.shown.size(),
+                                                    cli::no_stats());
+            if (t1 > 0) {
+                const ecuio_status_t rc = ecuio_recording_stats(
+                    v.r.get(), v.shown.data(),
+                    static_cast<uint32_t>(v.shown.size()),
+                    static_cast<uint64_t>((std::max<int64_t>)(t0, 0)),
+                    static_cast<uint64_t>(t1), st.data());
+                if (rc != ECUIO_OK) {
+                    write_error(out, rc,
+                                "the recording changed while it was read");
+                    return ended(out, kExitConnect);
+                }
+                for (ecuio_recording_stats_t& s : st) {
+                    if (t0 < 0) {
+                        s.first = NAN;
+                    }
+                }
+            }
+            for (size_t n = 0; n < v.shown.size(); ++n) {
+                cli::Line l(buf, sizeof buf);
+                cli::stats_line(l, i, v.signals[v.shown[n]], span, st[n]);
+                write_line(out, l);
+            }
         }
     }
     return ended(out, kExitOk);
@@ -4555,6 +4719,10 @@ int run(int argc, char** argv)
     }
     if (command == "view") {
         ViewArgs view;
+        std::vector<const char*>
+            levels; // --stretch-level, read once --units is
+        bool imperial = false;
+        bool has_units = false;
         for (int i = 2; i < argc; ++i) {
             const std::string a = argv[i];
             const bool has_value = i + 1 < argc;
@@ -4578,6 +4746,43 @@ int run(int argc, char** argv)
                     view.at_us = us;
                     view.has_at = true;
                 }
+            } else if (a == "--stretches") {
+                view.stretches = true;
+                uint32_t kinds = ECUIO_STRETCH_PULLS | ECUIO_STRETCH_CRUISES;
+                if (has_value && cli::parse_stretch_kinds(argv[i + 1], kinds)) {
+                    ++i;
+                }
+                view.rules.kinds = kinds;
+            } else if (a == "--stretch-level" && has_value) {
+                levels.push_back(argv[++i]);
+            } else if (a == "--role" && has_value) {
+                uint32_t role = 0;
+                std::string name;
+                if (!cli::parse_role(argv[++i], role, name)) {
+                    std::fprintf(stderr,
+                                 "havne-cli: --role takes throttle=, load=, "
+                                 "speed= or rpm= and a signal's name\n");
+                    return kExitUsage;
+                }
+                view.roles.emplace_back(role, name);
+            } else if (a == "--units" && has_value) {
+                const std::string u = argv[++i];
+                if (u != "metric" && u != "imperial") {
+                    std::fprintf(
+                        stderr,
+                        "havne-cli: --units takes metric or imperial\n");
+                    return kExitUsage;
+                }
+                imperial = u == "imperial";
+                has_units = true;
+            } else if (a == "--span" && has_value) {
+                cli::Span span;
+                if (!cli::parse_span(argv[++i], span)) {
+                    std::fprintf(stderr, "havne-cli: --span takes A:B, two "
+                                         "seconds with A before B\n");
+                    return kExitUsage;
+                }
+                view.spans.push_back(span);
             } else if (a == "--columns" && has_value) {
                 uint64_t n = 0;
                 if (!parse_count(argv[++i], n) || n > 10000) {
@@ -4625,6 +4830,23 @@ int run(int argc, char** argv)
                          "havne-cli: view needs a recording's folder\n");
             usage(stderr);
             return kExitUsage;
+        }
+        if (!view.stretches &&
+            (!levels.empty() || !view.roles.empty() || has_units)) {
+            std::fprintf(stderr, "havne-cli: --stretch-level, --role and "
+                                 "--units go with --stretches\n");
+            return kExitUsage;
+        }
+        for (const char* level : levels) {
+            if (!cli::parse_stretch_level(level, imperial, view.rules)) {
+                std::fprintf(
+                    stderr,
+                    "havne-cli: --stretch-level takes <key>=<value>, 0 or "
+                    "more: pull-throttle, pull-load, pull-hold, pull-gap, "
+                    "cruise-hold, cruise-speed-band, cruise-throttle-band or "
+                    "cruise-floor\n");
+                return kExitUsage;
+            }
         }
         if (view.has_hysteresis && view.align.kind != cli::AlignOn::rise &&
             view.align.kind != cli::AlignOn::fall) {

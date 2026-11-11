@@ -62,10 +62,9 @@ TestCase {
         return d
     }
 
-    // Boost has no key in Bridge.gaugeSignals: the demo's signal alone
     function refsOf(key) {
         const out = []
-        for (const r of key === "boost" ? ["id:13001"] : Bridge.gaugeSignals[key])
+        for (const r of Bridge.gaugeSignals[key])
             out.push(String(r))
         return out
     }
@@ -156,14 +155,15 @@ TestCase {
         compare(c[9].options, { from: 10, to: 16 })
     }
 
-    // No empty square on a grid of 5 columns (the desktop at 1280 x 800)
-    // or 8 (1920 x 1080), or the phone's 6 or 12: every square is covered
-    // by a cell as a joined panel draws it, and no dial or ring is stretched
-    // past its square, since it would draw the gauge with blank space around
+    // No empty square on a desktop grid of 5 to 8 columns (1280 x 800 is 5,
+    // 1920 x 1080 is 8), or the phone's 6 or 12: every square is covered by
+    // a cell as the built-in layout is drawn (`keepSquare`), and no dial or
+    // ring is stretched past its square, since it would draw the gauge with
+    // blank space around it
     function emptySquares(form, columns) {
         const cells = DashboardBook.builtIn(form).pages[0].cells
         const boxes = DashboardBook.place(cells, columns)
-        const drawn = DashboardBook.stretched(cells, boxes, columns)
+        const drawn = DashboardBook.stretched(cells, boxes, columns, true)
         const covered = {}
         let stretchedRound = 0
         cells.forEach((c, i) => {
@@ -187,6 +187,8 @@ TestCase {
     function test_theBuiltInLayoutLeavesNoEmptySquare_data() {
         return [
             { tag: "desktop at 1280 x 800", form: "desktop", columns: 5 },
+            { tag: "desktop at 6 columns", form: "desktop", columns: 6 },
+            { tag: "desktop at 7 columns", form: "desktop", columns: 7 },
             { tag: "desktop at 1920 x 1080", form: "desktop", columns: 8 },
             { tag: "phone", form: "phone", columns: 6 },
             { tag: "phone on its side", form: "phone", columns: 12 }
@@ -1197,6 +1199,32 @@ TestCase {
         const boxes = DashboardBook.place(cells, 6)
         compare(DashboardBook.stretched(cells, boxes, 6)[0].w, 6)
         compare(DashboardBook.stretched(cells, boxes)[0].w, 2)
+    }
+
+    // The built-in layout's drawing (`keepSquare`): a dial or ring keeps its
+    // box, and a gauge fills down and then right over what it leaves. Without
+    // it every cell stretches down, and only one alone in its rows runs right
+    function test_stretchedKeepingTheSquares() {
+        const cell = (kind, w, h) => ({ kind: kind, w: w, h: h })
+        const cells = [cell("ring", 1, 4), cell("digital", 1, 4), cell("digital", 1, 4)]
+        const boxes = [{ x: 0, y: 0, w: 1, h: 4 }, { x: 1, y: 0, w: 1, h: 4 },
+                       { x: 0, y: 4, w: 1, h: 4 }]
+        compare(DashboardBook.stretched(cells, boxes, 4).map(b => [b.w, b.h]),
+                [[1, 4], [1, 8], [1, 4]], "as before")
+        compare(DashboardBook.stretched(cells, boxes, 4, true).map(b => [b.w, b.h]),
+                [[1, 4], [3, 8], [1, 4]], "the second runs down, then right to the edge")
+        compare(DashboardBook.stretched(cells, boxes, 4, false).map(b => [b.w, b.h]),
+                [[1, 4], [1, 8], [1, 4]], "false is the same as left out")
+        // The dial keeps its box even with empty squares under it
+        const dial = [cell("analog", 1, 4)]
+        const room = [{ x: 0, y: 0, w: 1, h: 4 }, { x: 1, y: 0, w: 1, h: 8 }]
+        compare(DashboardBook.stretched(dial.concat([cell("digital", 1, 8)]), room, 4, true)
+                    .map(b => [b.w, b.h]), [[1, 4], [3, 8]], "a dial is never stretched")
+        // A blank beside it stops the fill, as one under it does
+        const withBlank = [cell("digital", 1, 4), cell("blank", 1, 4)]
+        compare(DashboardBook.stretched(withBlank, [{ x: 0, y: 0, w: 1, h: 4 },
+                                                     { x: 1, y: 0, w: 1, h: 4 }], 4, true)
+                    .map(b => [b.w, b.h]), [[1, 4], [1, 4]], "never over a blank")
     }
 
     function test_digitsFor_data() {

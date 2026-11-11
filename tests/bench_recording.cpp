@@ -71,7 +71,7 @@ Hour dense_hour()
     return h;
 }
 
-/* Section 5's bound: 32 bytes per number signal per second it has samples
+/* Section 5's bound: 40 bytes per number signal per second it has samples
  * in, 16 per text signal's, 16 per second for the index */
 uint64_t bound_of(const Hour& h)
 {
@@ -80,7 +80,7 @@ uint64_t bound_of(const Hour& h)
     uint64_t bytes = 0;
     for (const Sample& s : h.samples) {
         if (signal_seconds.emplace(s.signal, s.us / 1000000).second) {
-            bytes += h.defs[s.signal].text ? 16 : 32;
+            bytes += h.defs[s.signal].text ? 16 : 40;
         }
         if (seconds.insert(s.us / 1000000).second) {
             bytes += 16;
