@@ -115,13 +115,88 @@ Page {
         // The maximized chart's strip of the cursor's values folded to a
         // tab, so the plot has the width
         property bool stripFolded: false
+        // The panes' heights once a seam is dragged, as JSON: a share per
+        // pane, kept by the count of panes ({ "3": [0.5, 0.25, 0.25] })
+        property string paneShares: "{}"
     }
     property alias chartHeight: viewerSettings.chartHeight
     property alias stripFolded: viewerSettings.stripFolded
     // The chart's height until the splitter sets one: on a phone 40 % of
-    // the page, no less than three panes of 72 and the time axis
-    readonly property real defaultChartHeight: phoneShape ? Math.max(248, scroller.height * 0.4)
+    // the page, no less than three panes and the time axis
+    readonly property real phoneChartFloor: 3 * ChartLayout.paneMinH + 2 * ChartLayout.paneGap
+                                            + ChartLayout.top + ChartLayout.axisH
+                                            + ChartLayout.bottomPad + 8
+    readonly property real defaultChartHeight: phoneShape ? Math.max(phoneChartFloor, scroller.height * 0.4)
                                                           : Math.max(200, scroller.height * 0.45)
+
+    // The chart's panes (ADR-0049's viewer, panes by unit): at most 3 on a
+    // phone's page, 4 maximized or on the desktop. A pane's range is the
+    // user's once zoomed or panned (paneRanges, by pane key, dropped at an
+    // open, a close and a change of units); the heights' shares are kept
+    readonly property int paneLimit: phoneShape && !chartMaximized ? 3 : ChartLayout.paneMax
+    property var paneRanges: ({})
+    readonly property var paneShares: {
+        try {
+            const v = JSON.parse(viewerSettings.paneShares)
+            return v !== null && typeof v === "object" && !Array.isArray(v) ? v : {}
+        } catch (e) {
+            return {}
+        }
+    }
+    function setPaneRange(key, range) {
+        const next = Object.assign({}, paneRanges)
+        if (range)
+            next[key] = { vMin: range.vMin, vMax: range.vMax }
+        else
+            delete next[key]
+        paneRanges = next
+        chart.requestPaint()
+    }
+    function setPaneShares(count, shares) {
+        const next = Object.assign({}, paneShares)
+        if (shares)
+            next[count] = shares
+        else
+            delete next[count]
+        viewerSettings.paneShares = JSON.stringify(next)
+        chart.requestPaint()
+    }
+    // The drawn panes' places, assigned only when they change, so the
+    // seams' and axes' handlers aren't made again at every paint
+    property var paneBoxes: []
+    function notePanes(l) {
+        const boxes = !l ? [] : l.panes.map((p, i) => ({ index: i, key: p.key, axis: p.axis,
+                                                          top: p.top, h: p.h, left: l.left,
+                                                          plotW: l.plotW }))
+        if (JSON.stringify(boxes) !== JSON.stringify(paneBoxes))
+            paneBoxes = boxes
+    }
+    // What a double tap at x, y on the chart means: a pane's axis (a touch
+    // wide on a phone) returns its range to automatic, a seam's band evens
+    // the heights, anywhere else maximizes
+    function axisStripWidth(l) {
+        return phoneShape ? Math.max(l.left, Theme.touchTarget) : l.left
+    }
+    function doubleTapAt(x, y) {
+        const l = chart.drawn
+        if (l && l.panes.length > 1) {
+            for (const sy of l.seams) {
+                if (Math.abs(y - sy) <= ChartLayout.paneGap / 2 + 8 && x >= l.left) {
+                    setPaneShares(l.panes.length, null)
+                    return "seam"
+                }
+            }
+        }
+        if (l && l.left > 0 && x < axisStripWidth(l)) {
+            const i = ChartLayout.paneAt(l, y)
+            if (i >= 0 && l.panes[i].axis) {
+                setPaneRange(l.panes[i].key, null)
+                return "axis"
+            }
+        }
+        toggleMaximized()
+        return "maximize"
+    }
 
     // The part of the axis in view, in ms since the recording started
     // (before it too, with a compared recording that starts earlier), and
@@ -221,11 +296,32 @@ Page {
     property var frameTest: null
     readonly property bool frameTesting: frameTest !== null
 
+    // Four signals of four panes where the recording has them, so the test
+    // draws the most panes the chart shows, then the first others
+    function frameTestSignals(list) {
+        const numbers = list.filter(s => !s.isText && s.samples > 0)
+        const keys = []
+        const picked = []
+        for (const s of numbers) {
+            const key = ChartLayout.paneKey(s.unit)
+            if (keys.indexOf(key) < 0 && picked.length < 4) {
+                keys.push(key)
+                picked.push(s)
+            }
+        }
+        for (const s of numbers) {
+            if (picked.length < 4 && picked.indexOf(s) < 0)
+                picked.push(s)
+        }
+        return picked
+    }
+
     function startFrameTest() {
         const four = {}
-        for (const s of recording.signalList.filter(s => !s.isText && s.samples > 0).slice(0, 4))
+        for (const s of frameTestSignals(recording.signalList))
             four[s.index] = true
-        frameTest = { begun: Date.now(), frames: [0, 0], plotted: plotted, signals: Object.keys(four).length }
+        frameTest = { begun: Date.now(), frames: [0, 0], plotted: plotted, signals: Object.keys(four).length,
+                      panes: 0 }
         plotted = four
         chart.paints = 0
         chart.paintMs = 0
@@ -252,17 +348,18 @@ Page {
     function finishFrameTest() {
         const t = frameTest
         const seconds = (Date.now() - t.begun) / 1000
+        const panes = chart.drawn ? chart.drawn.panes.length : 0
         frameTest = null
         plotted = t.plotted
         showAll()
         // Frames shown in each half, panning then zooming
         const half = seconds / 2
-        frameTestResult = qsTr("Frame test, %1 plotted at %2 px: %3 frames/s shown panning, %4 zooming; "
-                               + "%5 charts drawn/s, %6 ms a chart on average, %7 ms at most")
+        frameTestResult = qsTr("Frame test, %1 plotted in %8 at %2 px: %3 frames/s shown panning, "
+                               + "%4 zooming; %5 charts drawn/s, %6 ms a chart on average, %7 ms at most")
             .arg(t.signals).arg(Math.round(chart.shownW))
             .arg((t.frames[0] / half).toFixed(1)).arg((t.frames[1] / half).toFixed(1))
             .arg((chart.paints / seconds).toFixed(1))
-            .arg((chart.paintMs / Math.max(1, chart.paints)).toFixed(1)).arg(chart.paintMaxMs)
+            .arg((chart.paintMs / Math.max(1, chart.paints)).toFixed(1)).arg(chart.paintMaxMs).arg(panes === 1 ? qsTr("1 pane") : qsTr("%1 panes").arg(panes))
         Bridge.logEvent(frameTestResult)
     }
 
@@ -511,8 +608,12 @@ Page {
     function plotWidth() {
         return chart.drawn ? chart.drawn.plotW : chart.shownW
     }
+    // The plot's left edge in the chart: the panes' axes are left of it
+    function plotLeft() {
+        return chart.drawn ? chart.drawn.left : 0
+    }
     function timeAt(x) {
-        return viewT0 + (x - chart.x) / Math.max(1, plotWidth() - 1) * (viewT1 - viewT0)
+        return viewT0 + (x - chart.x - plotLeft()) / Math.max(1, plotWidth() - 1) * (viewT1 - viewT0)
     }
 
     // The chart's series: each plotted number's columns over the view, its
@@ -947,6 +1048,8 @@ Page {
             root.showAll()
         }
         onSignalListChanged: {
+            // An open, a close or new units: a range set before means nothing
+            root.paneRanges = ({})
             if (root.hasCursor)
                 root.setCursor(root.cursorMs)
             chart.requestPaint()
@@ -1590,18 +1693,23 @@ Page {
                 layoutOpts: ({
                     gapMs: Theme.staleMs, minSpanUnits: 20, format: root.valueText,
                     span: { t0: root.viewT0, t1: root.viewT1 }, absolute: true,
-                    caption: root.captionOf })
+                    caption: root.captionOf,
+                    panes: { max: root.paneLimit, minH: ChartLayout.paneMinH,
+                             shares: root.paneShares, ranges: root.paneRanges,
+                             mixedLabel: qsTr("mixed") } })
+                onDrawnChanged: root.notePanes(drawn)
                 // Findings as bars along the plot's foot, markers as dashed
                 // lines with their labels, the cursor as a solid line
                 decorate: function(ctx, l) {
                     const span = root.viewT1 - root.viewT0
-                    const xOf = t => (t - root.viewT0) / span * (l.plotW - 1)
+                    const xOf = t => l.left + (t - root.viewT0) / span * (l.plotW - 1)
+                    const plotEnd = l.left + l.plotW
                     for (const f of recording.findings) {
                         const x0 = xOf(f.atMs), x1 = xOf(f.atMs + f.lengthMs)
-                        if (x1 < 0 || x0 > l.plotW) continue
+                        if (x1 < l.left || x0 > plotEnd) continue
                         ctx.fillStyle = root.findingColor(f.kind)
-                        const left = Math.max(0, x0)
-                        ctx.fillRect(left, l.top + l.plotH - 4, Math.max(2, Math.min(l.plotW, x1) - left), 4)
+                        const left = Math.max(l.left, x0)
+                        ctx.fillRect(left, l.top + l.plotH - 4, Math.max(2, Math.min(plotEnd, x1) - left), 4)
                     }
                     ctx.strokeStyle = Theme.textDim
                     ctx.fillStyle = Theme.textDim
@@ -1611,7 +1719,7 @@ Page {
                     ctx.textBaseline = "top"
                     for (const m of recording.markers) {
                         const x = xOf(m.timeMs)
-                        if (x < 0 || x > l.plotW) continue
+                        if (x < l.left || x > plotEnd) continue
                         ctx.beginPath()
                         ctx.moveTo(x, l.top)
                         ctx.lineTo(x, l.top + l.plotH)
@@ -1631,7 +1739,7 @@ Page {
                         if (!isFinite(tr.labelMs))
                             continue
                         const x = xOf(tr.labelMs)
-                        if (x < 0 || x > l.plotW)
+                        if (x < l.left || x > plotEnd)
                             continue
                         ctx.fillStyle = Theme.seriesColor(tr.row)
                         ctx.beginPath()
@@ -1665,39 +1773,163 @@ Page {
                     root.setView(t0, t0 + span)
                 }
             }
+            // A pinch zooms the time about its middle; one whose fingers
+            // lie more up and down than across as it starts, over a pane
+            // with an axis, zooms that pane's range about its middle instead
             PinchHandler {
                 id: pinch
                 objectName: "chartPinch"
                 target: null
                 property real lastScale: 1
                 property double endedAt: 0
+                // The pane a vertical pinch zooms, -1 for a time zoom
+                property int pane: -1
+                property var startPane: null
+                property real startY: 0
                 onActiveChanged: {
                     lastScale = 1
-                    if (!active)
+                    pane = -1
+                    if (!active) {
                         endedAt = Date.now()
+                        return
+                    }
+                    const l = chart.drawn
+                    const a = fingerA.point.position, b = fingerB.point.position
+                    if (!l || !fingerA.active || !fingerB.active
+                            || Math.abs(b.y - a.y) <= Math.abs(b.x - a.x))
+                        return
+                    startY = centroid.position.y - chart.y
+                    const i = ChartLayout.paneAt(l, startY)
+                    if (i < 0 || !l.panes[i].axis)
+                        return
+                    pane = i
+                    startPane = Object.assign({}, l.panes[i])
                 }
                 onActiveScaleChanged: {
                     if (!active || activeScale <= 0) return
+                    if (pane >= 0) {
+                        root.setPaneRange(startPane.key,
+                                          ChartLayout.scaledRange(startPane, startY, 1 / activeScale))
+                        return
+                    }
                     root.zoomAt(root.timeAt(centroid.position.x), lastScale / activeScale)
                     lastScale = activeScale
                 }
             }
+            // The pinch's two fingers, for which way it runs as it starts
+            PointHandler {
+                id: fingerA
+                acceptedDevices: PointerDevice.TouchScreen
+            }
+            PointHandler {
+                id: fingerB
+                acceptedDevices: PointerDevice.TouchScreen
+            }
             // A notch (120) in shows 0.8 of the span, out 1.25; a
             // high-resolution wheel's or a touchpad's parts of a notch zoom
-            // by their share of it, and a sideways scroll doesn't zoom
+            // by their share of it, and a sideways scroll doesn't zoom.
+            // With Ctrl, over a pane with an axis, it zooms the pane's range
+            // about the pointer instead
             WheelHandler {
                 target: null
                 onWheel: event => {
                     const dy = event.angleDelta.y
-                    if (dy !== 0)
-                        root.zoomAt(root.timeAt(event.x), Math.pow(0.8, dy / 120))
+                    if (dy === 0)
+                        return
+                    const factor = Math.pow(0.8, dy / 120)
+                    if (event.modifiers & Qt.ControlModifier) {
+                        const l = chart.drawn
+                        const i = l ? ChartLayout.paneAt(l, event.y - chart.y) : -1
+                        if (i >= 0 && l.panes[i].axis)
+                            root.setPaneRange(l.panes[i].key,
+                                              ChartLayout.scaledRange(l.panes[i], event.y - chart.y, factor))
+                        return
+                    }
+                    root.zoomAt(root.timeAt(event.x), factor)
                 }
             }
             DoubleTapHandler {
-                onTapped: (eventPoint, button) => root.setCursor(root.snapped(root.timeAt(eventPoint.position.x)))
+                objectName: "chartTap"
+                property point lastAt: Qt.point(0, 0)
+                onTapped: (eventPoint, button) => {
+                    lastAt = eventPoint.position
+                    // A tap on the axes' column places no cursor
+                    if (eventPoint.position.x - chart.x >= root.plotLeft())
+                        root.setCursor(root.snapped(root.timeAt(eventPoint.position.x)))
+                }
                 // A double-click or double-tap maximizes it, or gives the
-                // signals back; the two taps of a thumb may land a little apart
-                onDoubleTap: root.toggleMaximized()
+                // signals back (on an axis or a seam, root.doubleTapAt);
+                // the two taps of a thumb may land a little apart
+                onDoubleTap: root.doubleTapAt(lastAt.x - chart.x, lastAt.y - chart.y)
+            }
+
+            // On the desktop a drag on a pane's axis pans its range (a
+            // double click there, the handler above, makes it automatic again)
+            Repeater {
+                model: Theme.mobile ? 0 : root.paneBoxes.length
+                delegate: Item {
+                    id: paneAxis
+                    required property int index
+                    readonly property var box: root.paneBoxes[index]
+                    objectName: "paneAxis_" + index
+                    visible: box !== undefined && box.axis
+                    x: chart.x
+                    y: chart.y + (box ? box.top : 0)
+                    width: box ? box.left : 0
+                    height: box ? box.h : 0
+                    HoverHandler { cursorShape: Qt.SizeVerCursor }
+                    DragHandler {
+                        target: null
+                        xAxis.enabled: false
+                        property var startRange: null
+                        onActiveChanged: {
+                            const p = active && chart.drawn ? chart.drawn.panes[paneAxis.index] : null
+                            startRange = p ? { vMin: p.vMin, vMax: p.vMax, key: p.key, h: p.h } : null
+                        }
+                        onActiveTranslationChanged: {
+                            if (active && startRange)
+                                root.setPaneRange(startRange.key, ChartLayout.pannedRange(
+                                    startRange, startRange.h, activeTranslation.y))
+                        }
+                    }
+                }
+            }
+            // The seams between panes: a drag trades two neighbors' heights,
+            // kept by the count of panes; a double tap evens them (above).
+            // A count for a model, so a drag's own resize keeps its handler
+            Repeater {
+                model: Math.max(0, root.paneBoxes.length - 1)
+                delegate: Item {
+                    id: seam
+                    required property int index
+                    readonly property var box: root.paneBoxes[index]
+                    objectName: "paneSeam_" + index
+                    x: chart.x + (box ? box.left : 0)
+                    y: chart.y + (box ? box.top + box.h + ChartLayout.paneGap / 2 : 0) - height / 2
+                    width: box ? box.plotW : 0
+                    height: 24
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 40
+                        height: 4
+                        radius: 2
+                        color: seamDrag.active || seamHover.hovered ? Theme.textDim : Theme.outline
+                    }
+                    HoverHandler { id: seamHover; cursorShape: Qt.SizeVerCursor }
+                    DragHandler {
+                        id: seamDrag
+                        objectName: "seamDrag"
+                        target: null
+                        xAxis.enabled: false
+                        property var startHeights: []
+                        onActiveChanged: if (active) startHeights = root.paneBoxes.map(b => b.h)
+                        onActiveTranslationChanged: {
+                            if (active && startHeights.length > seam.index + 1)
+                                root.setPaneShares(startHeights.length, ChartLayout.seamShares(
+                                    startHeights, seam.index, activeTranslation.y, ChartLayout.paneMinH))
+                        }
+                    }
+                }
             }
 
             ThemedButton {

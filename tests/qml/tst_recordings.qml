@@ -1061,12 +1061,12 @@ TestCase {
     }
 
     // The chart's height until the splitter sets one: 45 % of the page on
-    // the desktop, 40 % on a phone, never under 248 there (three panes of
-    // 72 and the time axis)
+    // the desktop, 40 % on a phone, never under what three panes, their
+    // seams and the time axis need there
     function test_theChartTakesAShareOfThePage_data() {
         return [{ tag: "desktop", w: 1280, h: 720, phone: false, want: 0.45 * 720 },
                 { tag: "phone", w: 384, h: 832, phone: true, want: 0.4 * 832 },
-                { tag: "short phone", w: 384, h: 500, phone: true, want: 248 }]
+                { tag: "short phone", w: 384, h: 500, phone: true, want: -1 }]
     }
     function test_theChartTakesAShareOfThePage(data) {
         const page = openFindings()
@@ -1077,9 +1077,14 @@ TestCase {
             page.width = data.w
             page.height = data.h
             const chart = find(page, "chartFrame")
-            tryVerify(() => Math.abs(chart.height - data.want) < 1, 2000,
-                      "the chart is " + data.want)
-            verify(Math.abs(chart.height - data.want) < 1, "the chart is " + chart.height)
+            const want = data.want > 0 ? data.want : page.phoneChartFloor
+            if (data.want < 0) {
+                const room = want - 8 - ChartLayout.top - ChartLayout.axisH - ChartLayout.bottomPad
+                compare(ChartLayout.panesThatFit(room, ChartLayout.paneMinH), 3, "three panes fit the floor")
+                compare(ChartLayout.panesThatFit(room - 1, ChartLayout.paneMinH), 2, "and not a pixel less")
+            }
+            tryVerify(() => Math.abs(chart.height - want) < 1, 2000, "the chart is " + want)
+            verify(Math.abs(chart.height - want) < 1, "the chart is " + chart.height)
         } finally {
             Theme.compact = false
             page.chartHeight = kept
@@ -1546,6 +1551,245 @@ TestCase {
         page.width = 900
     }
 
+    // The test's window is 200 px: grown to the page so a pointer lands on
+    // the chart; the returned function puts it back
+    function growWindow(page) {
+        const win = page.Window.window
+        const size = [win.width, win.height]
+        win.width = page.width
+        win.height = page.height
+        verify(waitForPolish(win), "the grown window laid out")
+        return () => { win.width = size[0]; win.height = size[1] }
+    }
+    // pull-early's chart with its panes drawn, and a point of pane i's plot
+    // and of its axis in the chart frame's coordinates
+    function panedChart(page) {
+        const chart = find(page, "chart")
+        tryVerify(() => chart.drawn && chart.drawn.panes.length === 3
+                        && page.paneBoxes.length === 3, 5000, "three panes drawn")
+        return chart
+    }
+    // (whole pixels, where a pointer lands)
+    function inPlot(chart, i, share) {
+        const p = chart.drawn.panes[i]
+        return { x: Math.round(chart.x + chart.drawn.left + chart.drawn.plotW / 2),
+                 y: Math.round(chart.y + p.top + p.h * (share === undefined ? 0.5 : share)) }
+    }
+    function onAxis(chart, i) {
+        const p = chart.drawn.panes[i]
+        return { x: Math.round(chart.x + chart.drawn.left / 2), y: Math.round(chart.y + p.top + p.h / 2) }
+    }
+    // Two clicks stamped 100 ms apart: Qt Quick Test's own add the
+    // double-click interval to their stamps after each release. Each pair
+    // later than the last, so it never counts as the second of another
+    property int clickStamp: 100000000
+    function doubleClick(item, x, y) {
+        clickStamp += 10000
+        Harness.clickStamped(item, x, y, clickStamp)
+        Harness.clickStamped(item, x, y, clickStamp + 100)
+    }
+
+    // The viewer's chart is in panes by unit, in the list's order, each
+    // with its axis; a compared recording's traces go to their namesakes'
+    function test_theViewersChartIsInPanesByUnit() {
+        const page = openEarly()
+        const chart = panedChart(page)
+        const l = chart.drawn
+        compare(l.panes.map(p => p.label).join("|"), "rpm|%|°C")
+        verify(l.panes.every(p => p.axis && p.ticks.length >= 2), "an axis each")
+        verify(l.left > 0, "the axes' column")
+        compare(l.seams.length, 2)
+        verify(find(page, "paneSeam_1").visible)
+        verify(find(page, "paneAxis_2").visible)
+        const rows = {}
+        for (const s of find(page, "signalRows").model)
+            rows[s.index] = s
+        for (const tr of l.traces)
+            compare(l.panes[tr.pane].label, rows[tr.row].unit, rows[tr.row].name + " in its unit's pane")
+        page.compareWith(lateRow)
+        tryVerify(() => page.compareAligned && chart.drawn
+                        && chart.drawn.traces.some(t => t.dash !== undefined), 10000, "the compare drawn")
+        for (const tr of chart.drawn.traces.filter(t => t.dash !== undefined))
+            compare(chart.drawn.panes[tr.pane].label, rows[tr.row].unit, "a compared trace in its namesake's pane")
+    }
+
+    // The frame test plots a signal of each unit first, so it draws the
+    // most panes the recording gives
+    function test_theFrameTestPlotsOneSignalOfEachUnit() {
+        const page = openEarly()
+        compare(page.frameTestSignals(find(page, "signalRows").model).map(s => s.name).join(","),
+                "RPM,Throttle,Coolant")
+        const s = (name, unit) => ({ name: name, unit: unit, isText: false, samples: 1 })
+        const list = [s("A", "rpm"), s("B", "rpm"), s("C", "%"), s("D", "°C"), s("E", "°F"),
+                      { name: "T", unit: "", isText: true, samples: 1 }, s("F", "V"), s("G", "V")]
+        compare(page.frameTestSignals(list).map(s => s.name).join(","), "A,C,D,F",
+                "a signal of each pane first")
+        compare(page.frameTestSignals(list.slice(0, 3)).map(s => s.name).join(","), "A,C,B",
+                "then the others")
+    }
+
+    // On a phone the axes' strip is a touch wide, past the captions: a
+    // double tap there makes the range automatic again
+    function test_aPhonesAxisStripIsATouchWide() {
+        const page = openEarly()
+        const chart = panedChart(page)
+        page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
+        const p = chart.drawn.panes[1]
+        const x = (chart.drawn.left + Theme.touchTarget) / 2
+        verify(x > chart.drawn.left, "past the captions")
+        Theme.compact = true
+        try {
+            compare(page.doubleTapAt(x, p.top + p.h / 2), "axis")
+            compare(page.paneRanges["unit %"], undefined)
+        } finally {
+            Theme.compact = false
+        }
+        page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
+        compare(page.doubleTapAt(x, p.top + p.h / 2), "maximize", "on the desktop that's the plot")
+        page.toggleMaximized()
+    }
+
+    // A pane's range: Ctrl+wheel zooms it about the pointer, a drag on its
+    // axis pans it, a double click on the axis makes it automatic again; a
+    // plain wheel still zooms the time, and the range goes at a new open
+    function test_aPanesRangeZoomsPansAndComesBack() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const auto = chart.drawn.panes[1]
+            const at = inPlot(chart, 1, 0.25)
+            const span = page.viewT1 - page.viewT0
+            // The plot's edges are the view's: the axes' column is left of it
+            fuzzyCompare(page.timeAt(chart.x + chart.drawn.left), page.viewT0, 1e-6, "the plot's left edge")
+            fuzzyCompare(page.timeAt(chart.x + chart.drawn.left + chart.drawn.plotW - 1), page.viewT1, 1e-6,
+                         "its right edge")
+            mouseWheel(frame, at.x, at.y, 0, 120, Qt.NoButton, Qt.ControlModifier)
+            const zoomed = page.paneRanges["unit %"]
+            verify(zoomed, "the % pane's range is the user's")
+            fuzzyCompare(zoomed.vMax - zoomed.vMin, 0.8 * (auto.vMax - auto.vMin), 1e-6, "one notch in")
+            const v = ChartLayout.valueAt(auto, at.y - chart.y)
+            fuzzyCompare(ChartLayout.valueAt({ top: auto.top, h: auto.h, vMin: zoomed.vMin, vMax: zoomed.vMax },
+                                             at.y - chart.y), v, 1e-6, "about the pointer")
+            compare(page.viewT1 - page.viewT0, span, "the time stays")
+            compare(page.paneRanges["unit rpm"], undefined, "the other panes stay automatic")
+            tryVerify(() => chart.drawn.panes[1].manual, 2000, "drawn with it")
+
+            // A drag down the axis moves the range up by its share
+            const axis = onAxis(chart, 1)
+            mousePress(frame, axis.x, axis.y)
+            for (let dy = 5; dy <= 40; dy += 5)
+                mouseMove(frame, axis.x, axis.y + dy, 10)
+            mouseRelease(frame, axis.x, axis.y + 40)
+            const panned = page.paneRanges["unit %"]
+            fuzzyCompare(panned.vMin - zoomed.vMin, 40 / auto.h * (zoomed.vMax - zoomed.vMin), 1e-6,
+                         "panned by the drag's share of the pane")
+            compare(page.viewT1 - page.viewT0, span, "an axis drag moves no time")
+
+            // A double click on the axis: automatic again, nothing maximized
+            doubleClick(frame, axis.x, axis.y)
+            compare(page.paneRanges["unit %"], undefined, "automatic again")
+            verify(!page.chartMaximized, "an axis's double click maximizes nothing")
+            verify(!page.hasCursor, "a tap on the axes places no cursor")
+
+            mouseWheel(frame, at.x, at.y, 0, 120)
+            verify(page.viewT1 - page.viewT0 < span, "a plain wheel zooms the time")
+            compare(Object.keys(page.paneRanges).length, 0, "and no range")
+
+            mouseWheel(frame, at.x, at.y, 0, 120, Qt.NoButton, Qt.ControlModifier)
+            verify(page.paneRanges["unit %"], "set again")
+            Bridge.unitSystem = 1
+            compare(Object.keys(page.paneRanges).length, 0, "new units drop it")
+            Bridge.unitSystem = 0
+            mouseWheel(frame, at.x, at.y, 0, 120, Qt.NoButton, Qt.ControlModifier)
+            verify(page.paneRanges["unit %"], "and again")
+            page.backToList()
+            page.open(earlyRow)
+            tryVerify(() => find(page, "signalRows").visible, 10000, "open again")
+            compare(Object.keys(page.paneRanges).length, 0, "a range lasts while the recording is open")
+        } finally {
+            restore()
+        }
+    }
+
+    // A seam's drag trades its two panes' heights, kept by the count of
+    // panes between runs; a double click on it evens them
+    function test_aSeamsDragIsKeptAndADoubleClickEvensIt() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const before = chart.drawn.panes.map(p => p.h)
+            const seam = find(page, "paneSeam_0")
+            const at = seam.mapToItem(frame, seam.width / 2, seam.height / 2)
+            mousePress(frame, at.x, at.y)
+            for (let dy = 5; dy <= 30; dy += 5)
+                mouseMove(frame, at.x, at.y + dy, 10)
+            mouseRelease(frame, at.x, at.y + 30)
+            verify(page.paneShares["3"], "the shares kept for three panes")
+            tryVerify(() => Math.abs(chart.drawn.panes[0].h - before[0] - 30) < 0.5, 2000,
+                      "the upper pane 30 px taller: " + JSON.stringify(chart.drawn.panes.map(p => p.h)))
+            fuzzyCompare(chart.drawn.panes[1].h, before[1] - 30, 0.5, "the lower one shorter")
+            fuzzyCompare(chart.drawn.panes[2].h, before[2], 0.5, "the third untouched")
+            const store = Qt.createQmlObject("import QtCore; Settings { category: \"recordings\" }", testCase)
+            tryVerify(() => { store.sync(); return String(store.value("paneShares", "")).indexOf("\"3\"") >= 0 },
+                      3000, "written to the store")
+            store.destroy()
+
+            const evenAt = seam.mapToItem(frame, seam.width / 2, seam.height / 2)
+            doubleClick(frame, evenAt.x, evenAt.y)
+            compare(page.paneShares["3"], undefined, "evened")
+            verify(!page.chartMaximized, "a seam's double click maximizes nothing")
+            tryVerify(() => Math.abs(chart.drawn.panes[0].h - chart.drawn.panes[1].h) < 0.5, 2000, "even")
+        } finally {
+            page.setPaneShares(3, null)
+            restore()
+        }
+    }
+
+    // On a phone a vertical pinch over a pane zooms its range; a sideways
+    // one zooms the time
+    function test_aVerticalPinchZoomsAPanesRange() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const auto = chart.drawn.panes[0]
+            const mid = inPlot(chart, 0)
+            const span = page.viewT1 - page.viewT0
+            const touch = touchEvent(frame)
+            // Fingers moving apart up and down: the pane's range narrows
+            // about the pinch's middle (the handler starts past its drag
+            // threshold, so the factor is the scale from there)
+            touch.press(0, frame, mid.x, mid.y - 4).press(1, frame, mid.x + 4, mid.y + 4).commit()
+            const steps = [8, 12, 16, 20, 24, 28, 32, 36, 40]
+            for (const d of steps)
+                touch.move(0, frame, mid.x, mid.y - d).move(1, frame, mid.x + 4, mid.y + d).commit()
+            touch.release(0, frame, mid.x, mid.y - 40).release(1, frame, mid.x + 4, mid.y + 40).commit()
+            const range = page.paneRanges["unit rpm"]
+            verify(range, "the rpm pane's range is the user's")
+            verify(range.vMax - range.vMin < (auto.vMax - auto.vMin) * 0.95,
+                   "the fingers apart: a narrower range, " + (range.vMax - range.vMin)
+                   + " of " + (auto.vMax - auto.vMin))
+            const y = mid.y - chart.y
+            fuzzyCompare(ChartLayout.valueAt({ top: auto.top, h: auto.h, vMin: range.vMin, vMax: range.vMax }, y),
+                         ChartLayout.valueAt(auto, y), 0.03 * (auto.vMax - auto.vMin), "about the middle")
+            compare(page.viewT1 - page.viewT0, span, "the time stays")
+
+            const t = touchEvent(frame)
+            t.press(0, frame, mid.x - 4, mid.y).press(1, frame, mid.x + 4, mid.y + 4).commit()
+            for (const d of steps)
+                t.move(0, frame, mid.x - d, mid.y).move(1, frame, mid.x + d, mid.y + 4).commit()
+            t.release(0, frame, mid.x - 40, mid.y).release(1, frame, mid.x + 40, mid.y + 4).commit()
+            verify(page.viewT1 - page.viewT0 < span, "a sideways pinch zooms the time")
+        } finally {
+            restore()
+        }
+    }
+
     // The view stays inside the recording, no narrower than minSpanMs,
     // however it's moved
     function test_theViewStaysInsideTheRecording() {
@@ -1997,7 +2241,7 @@ TestCase {
         Bridge.logMessage.disconnect(log)
         Theme.developerMode = false
         const result = find(page, "frameTestResult").text
-        verify(/^Frame test, 1 plotted at \d+ px: [\d.]+ frames\/s shown panning, [\d.]+ zooming; [\d.]+ charts drawn\/s/.test(result),
+        verify(/^Frame test, 1 plotted in 1 pane at \d+ px: [\d.]+ frames\/s shown panning, [\d.]+ zooming; [\d.]+ charts drawn\/s/.test(result),
                result)
         compare(logged, result, "the activity log has it")
         verify(page.plotted[0], "the ticks are back")
