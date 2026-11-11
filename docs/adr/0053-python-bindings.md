@@ -722,3 +722,31 @@ already declares. Nothing in core changes.
   each export, the sizing and a recording's report against
   `havne-cli`'s own file, byte for byte, and its line's counts; the
   cancel's cases as the imports'; each refusal; a replay session's report.
+
+## Appendix: the offline lookups and the session's words (2026-11-10)
+
+Two small wraps where `havne-cli` has a command and Python had none, over
+calls `_ecuio.py` already declares. Nothing in core changes.
+
+- **`havne.decode_vin(vin, latest_model_year=None)`** is `havne-cli vin`:
+  spaces dropped and upper case, a `VinInfo` with the line's fields (`vin`,
+  `decoded`, `model_year` or `None`, `year_earlier`, `make` or `None`, `wmi`,
+  `check_digit`, `check_matches`, `source`). Text that is no VIN is a
+  `ValueError`, where the CLI exits 2. The latest year defaults to this
+  year plus one, as the CLI and the app pass it.
+- **`havne.dtc_title(code)`** is `havne-cli dtc`: a `DtcTitle` of the code as
+  core writes it, its title (`None` for a code the table lacks) and the
+  table's source; not a code is a `ValueError`.
+- **`Session.session_state(channel)`** is the `session` line (ADR-0060's
+  appendix of 2026-11-10).
+- **Still not wrapped**, through `havne.c`: the readiness verdict
+  (`ecuio_diag_inspect`) and the words of a report's monitors and codes
+  (`ecuio_monitor_name`, `ecuio_dtc_format`), which `Session.diagnostics()`
+  hands over as core's struct; `ecuio_enum_label`, `ecuio_def_range`,
+  `ecuio_display_convert` and the group names; `ecuio_can_interfaces`,
+  `ecuio_serial_ports` and J2534 discovery (`havne-cli devices`); the
+  simulated ECU's stats line; and the plugin calls the earlier appendix
+  lists. A script that needs one calls it as `havne.c`'s names do.
+- **Tests:** `PythonTest.test_lookup` (each against `havne-cli vin` and `dtc`
+  field for field, the refusals), `PythonTest.test_session`'s no-session
+  case and `test_j2534`'s parity case.
