@@ -1351,6 +1351,9 @@ Page {
             readonly property SignalHub.Entry entry: hub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
             readonly property bool phone: root.form === "phone"
             readonly property bool hasSignal: kind !== "blank"
+            // Every kind but the shift lights draws the value's text and tone, which
+            // the zones, the decimals and the color shape; the lights read only the range
+            readonly property bool drawsValue: hasSignal && kind !== "shift-light"
             // The cell's label, or its kind's name when it has none
             readonly property string name: cell && cell.label ? cell.label
                                            : (root.kindNames[kind] ?? kind)
@@ -1477,21 +1480,21 @@ Page {
                         text: qsTr("The lights fill green, amber, red between the two and flash at the shift point.")
                     }
 
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Cold below") }
-                    OptionField { objectName: "panelColdBelow"; visible: panelCard.hasSignal; option: "coldBelow" }
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Warning below") }
-                    OptionField { objectName: "panelWarnBelow"; visible: panelCard.hasSignal; option: "warnBelow" }
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Danger below") }
-                    OptionField { objectName: "panelDangerBelow"; visible: panelCard.hasSignal; option: "dangerBelow" }
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Warning from") }
-                    OptionField { objectName: "panelWarnFrom"; visible: panelCard.hasSignal; option: "warnFrom" }
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Danger from") }
-                    OptionField { objectName: "panelDangerFrom"; visible: panelCard.hasSignal; option: "dangerFrom" }
+                    Caption { objectName: "panelColdBelowCaption"; visible: panelCard.drawsValue; text: qsTr("Cold below") }
+                    OptionField { objectName: "panelColdBelow"; visible: panelCard.drawsValue; option: "coldBelow" }
+                    Caption { objectName: "panelWarnBelowCaption"; visible: panelCard.drawsValue; text: qsTr("Warning below") }
+                    OptionField { objectName: "panelWarnBelow"; visible: panelCard.drawsValue; option: "warnBelow" }
+                    Caption { objectName: "panelDangerBelowCaption"; visible: panelCard.drawsValue; text: qsTr("Danger below") }
+                    OptionField { objectName: "panelDangerBelow"; visible: panelCard.drawsValue; option: "dangerBelow" }
+                    Caption { objectName: "panelWarnFromCaption"; visible: panelCard.drawsValue; text: qsTr("Warning from") }
+                    OptionField { objectName: "panelWarnFrom"; visible: panelCard.drawsValue; option: "warnFrom" }
+                    Caption { objectName: "panelDangerFromCaption"; visible: panelCard.drawsValue; text: qsTr("Danger from") }
+                    OptionField { objectName: "panelDangerFrom"; visible: panelCard.drawsValue; option: "dangerFrom" }
 
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Decimals") }
+                    Caption { objectName: "panelDecimalsCaption"; visible: panelCard.drawsValue; text: qsTr("Decimals") }
                     SpinBox {
                         objectName: "panelDecimals"
-                        visible: panelCard.hasSignal
+                        visible: panelCard.drawsValue
                         Accessible.name: qsTr("Decimals")
                         Layout.preferredHeight: Theme.touchTarget
                         from: 0
@@ -1689,7 +1692,7 @@ Page {
                 // Shift lights keep their own green, amber and red
                 RowLayout {
                     Layout.fillWidth: true
-                    visible: panelCard.hasSignal && panelCard.kind !== "shift-light"
+                    visible: panelCard.drawsValue
                     spacing: 8
 
                     Caption { Layout.alignment: Qt.AlignTop; Layout.topMargin: 10; text: qsTr("Color") }
@@ -1744,7 +1747,7 @@ Page {
                 Caption {
                     objectName: "panelColorNight"
                     Layout.fillWidth: true
-                    visible: panelCard.hasSignal && panelCard.kind !== "shift-light" && Theme.nightActive
+                    visible: panelCard.drawsValue && Theme.nightActive
                     wrapMode: Text.Wrap
                     text: qsTr("Night draws every gauge in its own tint")
                 }

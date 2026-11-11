@@ -317,7 +317,7 @@ TestCase {
         compare([cell.options.from, cell.options.to], [4500, 6500], "rpm takes the band")
         verify(cell.options.dangerFrom === undefined, "and no zones")
         compare(find(page, "panelShiftHint").visible, true, "the hint shows")
-        compare(find(page, "panelDangerFrom").visible, true)
+        compare(find(page, "panelDangerFrom").visible, false, "the lights read no zones")
         compare([find(page, "panelFromCaption").text, find(page, "panelToCaption").text],
                 ["First light at (RPM)", "Shift at (RPM)"], "the shift light's captions")
         cell = addGauge(page, "analog", "rpm")
@@ -2035,6 +2035,90 @@ TestCase {
         verify(flow.height > Theme.touchTarget * 1.5, "the swatches wrap onto more than one row")
         for (const name of Theme.gaugeColorNames)
             inside(find(page, "panelColor_" + name), name)
+    }
+
+    // ---- What each kind's panel shows
+
+    // Every field the panel makes, as objectNames: the Color swatches and
+    // Night's note are a row's parts, so the row (panelColors) stands for them
+    function panelFields(page) {
+        const found = []
+        const walk = item => {
+            const n = item.objectName
+            if (n.startsWith("panel") && !(n.startsWith("panelColor") && n !== "panelColors"))
+                found.push({ name: n, shown: item.visible })
+            for (const c of item.children)
+                walk(c)
+        }
+        walk(find(page, "dashCellPanel"))
+        return found
+    }
+    readonly property var anyCell: ["panelClose", "panelCopy", "panelPaste", "panelW", "panelH",
+                                    "panelEarlier", "panelLater", "panelStart", "panelEnd", "panelRemove"]
+    readonly property var withSignal: ["panelLabel", "panelSignal", "panelKind", "panelFrom",
+                                       "panelFromCaption", "panelTo", "panelToCaption"]
+    // What the value's text and tone read: every kind that draws a value
+    readonly property var valueDrawn: ["panelColdBelow", "panelWarnBelow", "panelDangerBelow",
+                                       "panelWarnFrom", "panelDangerFrom", "panelDecimals", "panelColors",
+                                       "panelColdBelowCaption", "panelWarnBelowCaption",
+                                       "panelDangerBelowCaption", "panelWarnFromCaption",
+                                       "panelDangerFromCaption", "panelDecimalsCaption"]
+    // A new kind or field fails test_eachKindsPanelShowsOnlyItsFields until it is listed here
+    readonly property var fieldsOfKind: ({
+        "analog": anyCell.concat(withSignal, valueDrawn, ["panelPeak", "panelMajorStep", "panelCaption"]),
+        "ring": anyCell.concat(withSignal, valueDrawn, ["panelPeak"]),
+        "bar": anyCell.concat(withSignal, valueDrawn, ["panelPeak", "panelVertical", "panelMarks"]),
+        "segments": anyCell.concat(withSignal, valueDrawn, ["panelPeak", "panelCells", "panelRise"]),
+        "digital": anyCell.concat(withSignal, valueDrawn, ["panelDescription"]),
+        "seven-segment": anyCell.concat(withSignal, valueDrawn, ["panelDigits"]),
+        "sparkline": anyCell.concat(withSignal, valueDrawn, ["panelWindow"]),
+        "shift-light": anyCell.concat(withSignal, ["panelShiftHint", "panelCount"]),
+        "blank": anyCell
+    })
+
+    function test_everyDrawnKindIsInTheFieldTable() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        compare(Object.keys(fieldsOfKind).sort(), page.drawnKinds.slice().sort())
+    }
+
+    function test_eachKindsPanelShowsOnlyItsFields_data() {
+        return Object.keys(fieldsOfKind).map(k => ({ tag: k, kind: k }))
+    }
+    function test_eachKindsPanelShowsOnlyItsFields(data) {
+        const cell = data.kind === "blank" ? { kind: "blank", w: 2, h: 4, refs: [] }
+                                           : cellOf("A", data.kind)
+        const page = pageOf({}, docOf([cell, cellOf("B")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        compare(page.panel, "cell")
+        const found = panelFields(page)
+        const shown = found.filter(f => f.shown).map(f => f.name).sort()
+        compare(shown, fieldsOfKind[data.kind].slice().sort())
+        const listed = Object.values(fieldsOfKind).reduce((all, l) => all.concat(l), [])
+        for (const f of found)
+            verify(listed.indexOf(f.name) >= 0, f.name + " is in the table for some kind")
+    }
+
+    function test_aHiddenFieldKeepsItsStoredValueThroughAKindChange() {
+        const own = cellOf("Coolant", "analog")
+        own.options = { from: 0, to: 8000, coldBelow: 500, warnBelow: 800, dangerBelow: 400,
+                        warnFrom: 6000, dangerFrom: 7000, decimals: 2 }
+        const page = pageOf({}, docOf([own]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelKind")
+        click(page, "addKind_shift-light")
+        compare(page.doc.pages[0].cells[0].kind, "shift-light")
+        verify(!find(page, "panelColdBelow").visible && !find(page, "panelDecimals").visible)
+        for (const name of ["coldBelow", "warnBelow", "dangerBelow", "warnFrom", "dangerFrom", "decimals"])
+            compare(page.doc.pages[0].cells[0].options[name], own.options[name], name + " stays stored")
+        click(page, "panelKind")
+        click(page, "addKind_analog")
+        verify(find(page, "panelColdBelow").visible, "and shows again")
+        compare(find(page, "panelDecimals").value, 2)
+        compare(find(page, "panelDangerFrom").text, "7000")
+        for (const name of ["coldBelow", "warnBelow", "dangerBelow", "warnFrom", "dangerFrom", "decimals"])
+            compare(page.doc.pages[0].cells[0].options[name], own.options[name], name + " is back")
     }
 
     // ---- The blank cell
