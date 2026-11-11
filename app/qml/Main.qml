@@ -104,6 +104,15 @@ ApplicationWindow {
     readonly property int recordingsPage: 5
     readonly property int settingsPage: 6
 
+    // The tab bar's pages, in its order
+    readonly property var tabs: [
+        { label: qsTr("Dash"), page: dashboardPage },
+        { label: qsTr("Live"), page: livePage },
+        { label: qsTr("Codes"), page: 3 },
+        { label: qsTr("Recs"), page: recordingsPage },
+        { label: qsTr("Settings"), page: settingsPage }
+    ]
+
     function gotoPage(index) { stack.currentIndex = index }
     // The tab bar lists no Home: a phone opens on Dash, and a window
     // narrowed past the sidebar's width leaves Home for it
@@ -163,6 +172,12 @@ ApplicationWindow {
     function openLog() {
         logView.showActivityEnd()
         gotoPage(logPage)
+    }
+    // The Log's back arrow goes where Back goes, and to Dash from no tab
+    readonly property var logBackTab: tabs.find(t => t.page === cameFrom) ?? tabs[0]
+    function logBack() {
+        if (logBackTab.page !== cameFrom || !goBack())
+            gotoPage(dashboardPage)
     }
     // Dash's "Other address...": Back returns to Dash, not to Settings' list
     function openConnectFromDash() {
@@ -673,6 +688,9 @@ ApplicationWindow {
                     LogPage {
                         id: logView
                         objectName: "logPage"
+                        backShown: root.isCompact
+                        backName: qsTr("Back to %1").arg(root.logBackTab.label)
+                        onBackRequested: root.logBack()
                     }
                     RecordingsPage {
                         id: recordingsView
@@ -728,13 +746,7 @@ ApplicationWindow {
                     // The page decides the mark: on the Log no tab is marked, and
                     // TabBar's index at -1 leaves the last checked and deaf to a tap
                     Repeater {
-                        model: [
-                            { label: qsTr("Dash"), page: root.dashboardPage },
-                            { label: qsTr("Live"), page: 2 },
-                            { label: qsTr("Codes"), page: 3 },
-                            { label: qsTr("Recs"), page: root.recordingsPage },
-                            { label: qsTr("Settings"), page: root.settingsPage }
-                        ]
+                        model: root.tabs
                         delegate: TabButton {
                             id: btn
                             required property var modelData

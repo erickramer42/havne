@@ -2,7 +2,8 @@
 // Testing: ThemedButton's four ranks (primary, secondary, quiet, selected):
 //          their fills and text colors from Theme's roles, a selection
 //          that stays the page's state through a click, and the touch
-//          size and compact bounds on every rank. No session.
+//          size and compact bounds on every rank, a disabled primary drawn
+//          as a secondary. No session.
 
 import QtQuick
 import QtTest
@@ -98,6 +99,28 @@ TestCase {
         verify(!Qt.colorEqual(h.primary.hoverColor, Theme.primary), "primary hover differs")
         const lighter = h.primary.hoverColor.hslLightness > Theme.primary.hslLightness
         compare(lighter, Theme.primary.hslLightness <= 0.5, "hover direction")
+    }
+
+    // A disabled primary drops its rank: a secondary's fill and text at
+    // the disabled opacity, in every palette, and its rank again once enabled
+    function test_aDisabledPrimaryDrawsAsADisabledSecondary_data() {
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
+    }
+    function test_aDisabledPrimaryDrawsAsADisabledSecondary(data) {
+        const night = Theme.nightPalettes.indexOf(data.name) >= 0
+        Theme.night = night ? "on" : "off"
+        if (night)
+            Theme.nightStyle = data.name === "nightRed" ? "red" : "amber"
+        else
+            Theme.look = data.name
+        const h = host(0)
+        h.primary.enabled = false
+        sameColor(h.primary.background.color, Theme.elevated, "a disabled primary's fill")
+        sameColor(h.primary.contentItem.color, Theme.text, "its text")
+        fuzzyCompare(h.primary.opacity, 0.45, 0.001, "the disabled opacity")
+        h.primary.enabled = true
+        sameColor(h.primary.background.color, Theme.primary, "enabled, a primary again")
+        sameColor(h.primary.contentItem.color, Theme.textOnPrimary, "its text")
     }
 
     function cleanup() {

@@ -2059,7 +2059,11 @@ Page {
             visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.framesShown
             Layout.fillWidth: true
             Layout.preferredHeight: count * root.rowHeight
-            Layout.maximumHeight: Math.max(root.rowHeight, column.height * 0.3)
+            // On the tab-bar form five rows at most and under 40 % of the
+            // screen, so a swipe always finds more page than list
+            Layout.maximumHeight: Theme.compact
+                                  ? Math.max(root.rowHeight, Math.min(5 * root.rowHeight, scroller.height * 0.4))
+                                  : Math.max(root.rowHeight, column.height * 0.3)
             clip: true
             currentIndex: -1
             highlightFollowsCurrentItem: false

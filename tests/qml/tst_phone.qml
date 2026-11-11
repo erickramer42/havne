@@ -462,6 +462,50 @@ TestCase {
         }
     }
 
+    // A recording folder of twelve number signals, three samples each
+    function wideRecording(name) {
+        const folder = Harness.writeFramesRecording(name, 1, 100000)
+        verify(folder !== "", "the folder is made")
+        let header = "ecuio session recording, format 2 (ADR-0049)\n"
+                     + "started  2026-11-03 10:00:00.000 (local time)\n"
+                     + "utc  2026-11-03T16:00:00.000Z\ncore  0.3.6\n"
+                     + "uri  socketcan://vcan0?profile=raw\nprofile  raw\n"
+        let rows = "host_us,signal,value,unit\n"
+        for (let s = 1; s <= 12; ++s)
+            header += "signal  Signal " + s + ",number,V,0,0\n"
+        for (let t = 1; t <= 3; ++t) {
+            for (let s = 1; s <= 12; ++s)
+                rows += (t * 100000) + ",Signal " + s + "," + s + ",V\n"
+        }
+        header += "\n10:00:01.000  +1.000  end  havne-cli: seconds: 1 frames, 36 values, "
+                  + "0 records dropped, 0 notes dropped\n"
+        Harness.writeScratchFile(name + "/events.log", header)
+        Harness.writeScratchFile(name + "/signals.csv", rows)
+        return folder
+    }
+
+    // The test phone upright: twelve signals' rows stop at five, under
+    // 40 % of the screen, so there is always more page than list to swipe
+    function test_theViewersRowsStopAtFiveOnAPhone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Twelve", uri: "replay://x?profile=raw", source: "",
+                    folder: wideRecording("twelve-signals"), profile: "raw" })
+        const rows = find(page, "signalRows")
+        tryVerify(() => rows.visible && rows.count === 12, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const scroll = find(page, "recordingsScroll")
+        verify(rows.height <= 5 * page.rowHeight + 0.5,
+               "the rows are " + rows.height + " for rows of " + page.rowHeight)
+        verify(rows.height <= 0.4 * scroll.height + 0.5, "the rows are " + rows.height + " of " + scroll.height)
+        verify(rows.height >= 4 * page.rowHeight, "four rows show at least: " + rows.height)
+    }
+
     // On its side the viewer gives the page to the view the switch names:
     // Values the chart, Frames the table, and the switch leads the zoom
     // row in both, so either leads back
@@ -2062,6 +2106,74 @@ TestCase {
             Theme.developerMode = false
             log.view = "activity"
         }
+    }
+
+    // The Log's back arrow on the tab-bar form: a touch's size at the left
+    // edge, back to the page that opened the Log, and Dash from no tab
+    function test_theLogsBackArrowReturnsWhereTheLogCameFrom_data() {
+        return [{ tag: "Settings", from: 6, name: "Back to Settings" },
+                { tag: "Dash", from: 1, name: "Back to Dash" },
+                { tag: "no tab", from: 0, name: "Back to Dash" }]
+    }
+    function test_theLogsBackArrowReturnsWhereTheLogCameFrom(data) {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const log = find(main.contentItem, "logPage")
+        main.gotoPage(data.from)
+        main.openLog()
+        compare(main.currentPage, main.logPage, "the Log")
+        verify(waitForPolish(main), "laid out")
+        const back = find(log, "logBack")
+        verify(back.visible, "the arrow beside the tab bar")
+        compare(back.Accessible.name, data.name)
+        const top = back.mapToItem(main.contentItem, 0, 0)
+        const bottom = back.mapToItem(main.contentItem, back.width, back.height)
+        verify(bottom.y - top.y >= 47.5 && bottom.x - top.x >= 47.5,
+               "a touch's size: " + (bottom.x - top.x) + " x " + (bottom.y - top.y))
+        verify(top.x < 24, "at the left edge: " + top.x)
+        mouseClick(back)
+        compare(main.currentPage, data.from > 0 ? data.from : main.dashboardPage, "back")
+        if (data.from === main.settingsPage)
+            compare(settings.pageKey, "", "Settings' list")
+    }
+
+    // Beside the sidebar the Log is a listed page: nothing to go back to
+    function test_theLogsBackArrowHidesBesideTheSidebar() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 720
+        main.height = 800
+        main.openLog()
+        verify(waitForPolish(main), "laid out")
+        verify(!find(main.contentItem, "logBack").visible, "no arrow beside the sidebar")
+        main.width = 384
+        tryVerify(() => find(main.contentItem, "logBack").visible, 2000, "the arrow with the tab bar")
+    }
+
+    // At 320 px in developer mode the arrow, the title and a compact Copy
+    // share the title row and the Activity | Frames switch takes a row of
+    // its own under it
+    function test_theLogsHeaderFitsTheNarrowestPhone() {
+        const main = phoneMain()
+        main.width = 320
+        Theme.developerMode = true
+        const log = find(main.contentItem, "logPage")
+        main.openLog()
+        verify(waitForPolish(main), "laid out")
+        const row = find(log, "logTitleRow")
+        verify(row.implicitWidth <= log.availableWidth + 0.5,
+               "the title row needs " + row.implicitWidth + " of " + log.availableWidth)
+        verify(find(log, "copyLog").compact, "Copy is compact")
+        const rowBottom = row.mapToItem(main.contentItem, 0, row.height).y
+        for (const name of ["logBack", "copyLog", "view_activity", "view_frames"]) {
+            const item = find(log, name)
+            const right = item.mapToItem(main.contentItem, item.width, 0).x
+            verify(item.visible && right <= main.contentItem.width + 0.5, name + " ends at " + right)
+        }
+        const toggle = find(log, "logViewSwitch")
+        verify(toggle.mapToItem(main.contentItem, 0, 0).y >= rowBottom - 0.5,
+               "the switch under the title row")
+        compare(pastTheEdge(log, main.contentItem, []).length, 0, "nothing past the edge")
     }
 
     function test_aFailedConnectFromTheListSaysWhyAndChangesNothing() {
