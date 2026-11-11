@@ -378,6 +378,38 @@ TestCase {
     }
 
     // A refused import keeps the panel and the edits; core's words say why
+    // A worker thread that can't start leaves the panel open and the note
+    // in the danger color, for the guess and for the import alike
+    function test_anImportThatCouldntStartSaysSo() {
+        const page = createPage()
+        const note = find(page, "importNote")
+        Harness.failImportThreads(Bridge.recordingImport, true)
+        try {
+            page.chooseImportFile(Harness.writeScratchFile("nostart.csv",
+                "time (s),rpm\n0,800\n1,900\n"))
+            verify(page.importFailed)
+            verify(!Bridge.recordingImport.busy)
+            verify(note.visible)
+            verify(note.text.indexOf("The file couldn't be read") === 0, note.text)
+            verify(Qt.colorEqual(note.color, Theme.danger))
+
+            page.chooseImportFile(Harness.writeScratchFile("nostart.log",
+                "(1.000000) can0 7E8#01\n"))
+            verify(!note.visible, "a new file, no old words")
+            verify(find(page, "importStart").enabled)
+            find(page, "importStart").clicked()
+            compare(note.text, "Not imported: the import couldn't start")
+            verify(Qt.colorEqual(note.color, Theme.danger))
+            verify(find(page, "importPanel").visible, "the panel stays")
+        } finally {
+            Harness.failImportThreads(Bridge.recordingImport, false)
+        }
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the importer is still usable")
+        verify(!page.importFailed)
+    }
+
     function test_aRefusedGuessImportKeepsItsEdits() {
         const page = createPage()
         page.chooseImportFile(Harness.writeScratchFile("guess-refused.csv",

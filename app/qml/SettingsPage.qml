@@ -850,12 +850,16 @@ Pane {
     // The tab-bar form has no sidebar to list the Log: its row, last, opens
     // the Log page itself, as does Show log beside a failed connect
     signal logRequested()
-    // The newest activity line, the Log row's summary: the Log's first line
-    // until another comes
+    // The newest session event, the Log row's summary: the Log's first line
+    // until one comes. The display's inset lines are about the screen, not
+    // the session, so they don't take it
     property string lastActivity: qsTr("Ready.")
     Connections {
         target: Bridge
-        function onLogMessage(message) { page.lastActivity = message }
+        function onLogMessage(message) {
+            if (!message.startsWith("Display:"))
+                page.lastActivity = message
+        }
     }
 
     function open(key) {

@@ -23,6 +23,18 @@ Item {
     property string note: ""        // why there is no value, e.g. "not in profile"
     // The card's note line: why there is no value, or that the one shown is old
     readonly property string shownNote: !hasValue ? note : stale ? qsTr("no new data") : ""
+    // A note for a missing value shares the title's line while it fits whole
+    // beside it; if not, it takes the line (two at most), led by the title
+    TextMetrics {
+        id: noteMetrics
+        text: base.shownNote
+        font.pixelSize: 11
+    }
+    function noteTakesLine(titleWidth, room) {
+        return !hasValue && shownNote !== "" && room - titleWidth - 10 < noteMetrics.advanceWidth
+    }
+    readonly property string titledNote: shownNote === "" || label === "" || shownNote.indexOf(label) >= 0
+                                         ? shownNote : qsTr("%1: %2").arg(label).arg(shownNote)
     property int decimals: 0
 
     // Zones in value units; NaN disables one
