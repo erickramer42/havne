@@ -190,7 +190,7 @@ background too ([roadmap](#roadmap)).
     `10 03` to each module first, tester present in quiet gaps, `10 01`
     at the close; a module that refuses is read in the default session
     with its code named, and each module's report, the Log page,
-    `havne-cli`'s `session` line and Python say which session it was
+    `havne-cli stream`'s `session` line and Python say which session it was
     read in
     ([ADR-0060](docs/adr/0060-extended-session-reads.md)). Run only
     against the fakes and the simulated ECU so far.
@@ -648,7 +648,7 @@ PATCH may carry"): the C ABI grows, append-only
     between sweeps as built"); no real adapter has run it;
   - reads in the extended session, `?session=03` on `uds-generic`
     ([ADR-0060](docs/adr/0060-extended-session-reads.md)), with each
-    module's session on the Log page, in `havne-cli` and in Python; run
+    module's session on the Log page, in `havne-cli stream` and in Python; run
     against the fakes and the simulated ECU only;
   - the Recordings page sized for a phone's touch, and each gauge one
     screen-reader item on Android.

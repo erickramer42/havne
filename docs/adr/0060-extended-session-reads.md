@@ -164,7 +164,7 @@ extended session. The generation moves with each change, so the
 publish that support already does carries it.
 
 - **havne-cli (schema 1, grows):** a `session` line per module when its
-  state, code or counts change, `{"type":"session","ecu":"7E8","asked":"03",
+  state, code or counts change, `{"type":"session","ecu":"0x7E8","asked":"03",
   "session":"03","state":"entered","nrc":null,"entries":1,"lost":0}`
   (`state` in words: `entering`, `entered`, `refused`, `unanswered`,
   `abandoned`; `nrc` a hex byte or null), and the `scan` line gains
@@ -222,3 +222,10 @@ knob's code (`ECUIO_FAKE_SESSION_NRC`, default 0x12).
   module refusing or misbehaving.
 - A module that answers `7F 22 7F` to a DID it holds back for more than
   the session costs one re-entry before the DID drops.
+
+## Appendix: the close's line (2026-11-10)
+
+Section 6's Disconnect line for a module that entered reads "returning to the
+default session (10 01)", written as the close starts: the `10 01` goes out
+on core's teardown thread, which the bridge can't see, so the line says what
+the close is about to do and not that it did.

@@ -21,7 +21,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - A signal file can give a signal a gauge: its range and its low and high
   warning levels, in the signal's own unit. `havne-cli` and the Python
   package report it; the app's dials don't read it yet. A file that uses
-  it needs Havne 0.7.2 or later.
+  it needs Havne 0.7.2 or later. The C API adds `ecuio_signal_file_gauge`
+  (an `ecuio_signal_gauge_t`) and `ecuio_plugin_requires_core`.
 - The demo connection (`mock://`) reads a battery voltage: about 12.45 V
   with the key on, a dip while the engine cranks, and the alternator's
   14.1-14.6 V once it runs. A Dashboard gauge added for Battery Voltage
@@ -42,7 +43,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   `estimate_csv` and `health_report` write what `havne-cli export` and
   `health` write, and `Session.health_report` writes a connected car's
   report. Each long call stops on `cancel=` or Ctrl+C with nothing left
-  behind.
+  behind. `Plugin.requires_core` gives the core a plugin needs as
+  (major, minor, patch).
 - Phone: a Log row at the end of Settings' list, showing the newest
   activity line, opens the Log. A connect that fails, on Dash's list or
   in Settings, offers Show log beside its words.
@@ -74,6 +76,12 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   stops while Home is hidden or the app is in the background.
 - A button that can't be pressed yet, such as Connect while it connects,
   draws as a dimmed ordinary button in every look, not as a gray block.
+- The recordings viewer opens onto a recording's chart and signals; what
+  applies to the whole recording (its info, Replay and Save report, the
+  decode choice, the baseline, Compare and the frames check) follows under
+  an "About this recording" heading. Maximized, its side view follows the
+  Values | Frames switch: Frames gives the frames table the page, Values the
+  chart.
 
 ### Fixed
 
@@ -85,6 +93,14 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   cleanly on Ctrl+C, and Python's
   `import_csv` and `import_candump` take a `cancel` and stop on Ctrl+C.
   The C API adds `ecuio_import_with` and `ecuio_health_export_with`.
+- `havne-cli export`, `import` and `health` over a recording end at once
+  on a second Ctrl+C, with the interrupted end line and exit 1.
+- A Save report or an export on a phone that fails or is stopped, or can't
+  start, no longer leaves an empty document where you picked it, and an
+  import that can't start says so. A temporary folder an import or a report
+  left behind is removed at the next start, as an export's was.
+- The C API's `ecuio_export` and `ecuio_export_with` leave `report` zeroed
+  but for `failed_class` when they fail or are canceled.
 - Recordings on a phone: the signal list stops at five rows, so a swipe
   above or below it scrolls the page.
 - The Log page on a phone has a back arrow, as Settings' pages have. In

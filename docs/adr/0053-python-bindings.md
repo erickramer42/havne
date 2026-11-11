@@ -722,3 +722,16 @@ already declares. Nothing in core changes.
   each export, the sizing and a recording's report against
   `havne-cli`'s own file, byte for byte, and its line's counts; the
   cancel's cases as the imports'; each refusal; a replay session's report.
+
+## Appendix: what Python doesn't wrap, and a plugin's required core (2026-11-10)
+
+The package wraps what a script that reads, records and exports needs.
+It doesn't wrap, and a script reaches through `havne.c` (the declared
+functions), these inspection and lookup calls: `info`'s check
+(`ecuio_recording_check`), the VIN decode (`ecuio_vin_decode`), a trouble
+code's title (`ecuio_dtc_title`), `devices`' discovery
+(`ecuio_serial_ports`, `ecuio_can_interfaces` and the J2534 DLLs), the
+viewer's engine-start alignment, and the checks `havne-cli signals check`
+and `plugins check` make. A plugin's `requires.core` is wrapped:
+`Plugin.requires_core` is `(major, minor, patch)`. A manifest always names
+one, since core refuses a plugin that doesn't, so it is never `None`.

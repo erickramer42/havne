@@ -3,7 +3,10 @@
 Every page of Havne on the desktop and the phone, all on the simulated
 vehicle (`mock://demo`) in US units. Dark is the default look; Night
 dims it for a dark cabin in amber or red (Settings, Display). The
-README shows a few of these.
+gallery shows those three: Dark, and Night in amber and red. Display's
+Look row also offers Daylight, dark text on white, and the desktop's
+Dashboard is one panel with its pages as tabs, neither of which these
+shots show. The README shows a few of these.
 
 - **Desktop:** the Windows app at 1280x800.
 - **Phone:** Live, Codes, the Log and Settings are from the test phone
