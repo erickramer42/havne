@@ -19,7 +19,9 @@ Button {
     // what the binding reads. A checkable button whose `checked` is not
     // bound un-toggles itself on every click.
     readonly property bool quiet: control.flat && !control.checked
-    readonly property bool primary: control.highlighted
+    // A disabled primary draws as a disabled secondary: the primary's fill
+    // at the disabled opacity is the page's heaviest block, on a dead button
+    readonly property bool primary: control.highlighted && control.enabled
 
     // Exposed so callers can tweak if needed
     property color baseColor: control.checked ? Theme.elevatedLight
