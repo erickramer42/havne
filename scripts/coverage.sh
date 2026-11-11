@@ -167,4 +167,11 @@ tests=$(grep -oE '[0-9]+% tests passed.* out of [0-9]+' "$LOGDIR/coverage.log" |
 line coverage ok "$dur" "$(head -n 1 <<<"$summary"); ${tests:-no ctest summary}"
 tail -n +2 <<<"$summary"
 sed -n '/The following tests FAILED:/,$p' "$LOGDIR/coverage.log" | sed -n '2,25p'
+# Where the time goes under the tool: each suite's summed seconds, then the slowest cases
+times=$(sed -nE 's/.*Test +#[0-9]+: ([^ ]+) .* ([0-9.]+) sec$/\2 \1/p' "$LOGDIR/coverage.log")
+echo "time by suite (s, summed over cases):"
+awk '{ split($2, p, "."); t[p[1]] += $1 } END { for (s in t) printf "  %7.0f  %s\n", t[s], s }' <<<"$times" \
+    | sort -rn | head -n 8
+echo "slowest cases (s):"
+sort -rn <<<"$times" | head -n 12 | awk '{ printf "  %7.1f  %s\n", $1, $2 }'
 echo "report: $LOGDIR/html/index.html"
