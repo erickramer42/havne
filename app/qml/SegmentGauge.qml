@@ -1,5 +1,6 @@
 // File/layer: app/qml/SegmentGauge.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard,
+//          QmlTest.dashedit
 
 import QtQuick
 
@@ -83,7 +84,7 @@ GaugeBase {
             font.weight: Font.Bold
             font.family: Theme.valueFamily
             font.features: Theme.valueFeatures
-            color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
+            color: gauge.hasValue ? gauge.zoneColor(gauge.value, gauge.readoutColor) : Theme.textDim
         }
         // Past dangerFrom, beside the value; its slot stays
         DangerMark {

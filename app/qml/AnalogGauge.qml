@@ -1,5 +1,6 @@
 // File/layer: app/qml/AnalogGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.gauges, QmlTest.kinds, QmlTest.accessibility;
+// Testing: QML: QmlTest.gauges, QmlTest.kinds, QmlTest.accessibility,
+//          QmlTest.dashedit;
 //          manual smoke: DashboardPage under mock://demo at 160 px
 //          (numerals shrink, then thin out) through 480 px; sweep on
 //          connect; tap clears the peak marker
@@ -236,7 +237,7 @@ GaugeBase {
                 font.weight: Font.Bold
                 font.family: Theme.valueFamily
                 font.features: Theme.valueFeatures
-                color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
+                color: gauge.hasValue ? gauge.zoneColor(gauge.value, gauge.readoutColor) : Theme.textDim
             }
             // Past dangerFrom, beside the value
             DangerMark {

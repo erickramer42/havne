@@ -1,5 +1,5 @@
 // File/layer: app/qml/Theme.qml | Qt6 Quick singleton, UI layer
-// Testing: QML: QmlTest.theme, QmlTest.settings, QmlTest.dashboard,
+// Testing: QML: QmlTest.theme, QmlTest.dashedit, QmlTest.settings, QmlTest.dashboard,
 //          QmlTest.liveview, QmlTest.log, QmlTest.phone (test_qml); Manual smoke
 pragma Singleton
 import QtCore
@@ -322,6 +322,42 @@ QtObject {
         }
     })
     readonly property var colors: palettes[active]
+
+    // A gauge's picked colors (a stored name, never a hex): each at least
+    // 3:1 on its look's surface. Night has none, so a pick draws in its tint
+    // None is near the zones' colors (warning, danger, cold), which keep their meaning
+    readonly property var gaugeColorNames: ["teal", "green", "lime", "cyan", "pink", "magenta", "stone"]
+    readonly property var gaugePalettes: ({
+        dark: { teal: "#3fd1c0", green: "#4ade80", lime: "#b5e04a", cyan: "#5ad8e8",
+                pink: "#f48fb1", magenta: "#e879c8", stone: "#a8a8b3" },
+        daylight: { teal: "#0f7f84", green: "#1e7d3f", lime: "#4f7a0a", cyan: "#0a7d95",
+                    pink: "#b83a73", magenta: "#a81f8c", stone: "#5b5b66" }
+    })
+    // A name as the picker says it
+    function gaugeColorLabel(name) {
+        switch (name) {
+        case "teal": return qsTr("Teal")
+        case "green": return qsTr("Green")
+        case "lime": return qsTr("Lime")
+        case "cyan": return qsTr("Cyan")
+        case "pink": return qsTr("Pink")
+        case "magenta": return qsTr("Magenta")
+        case "stone": return qsTr("Stone")
+        default: return name
+        }
+    }
+    // The picked color for a stored name in the look shown, "" for none: the
+    // default, a name this version doesn't know, or Night
+    function gaugeColor(name) {
+        const set = gaugePalettes[active]
+        return set !== undefined && typeof name === "string"
+               && Object.prototype.hasOwnProperty.call(set, name) ? set[name] : ""
+    }
+    // A name as the picker shows it, in the palette's look (Dark's when Night is on)
+    function gaugeSwatch(name) {
+        const set = gaugePalettes[active] ?? gaugePalettes[nightActive ? "dark" : active]
+        return set !== undefined && Object.prototype.hasOwnProperty.call(set, name) ? set[name] : "transparent"
+    }
 
     readonly property color bg:             colors.bg
     readonly property color surface:        colors.surface

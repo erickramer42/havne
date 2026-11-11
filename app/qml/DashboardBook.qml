@@ -75,7 +75,8 @@ QtObject {
         caption: { type: "text", max: 40 },
         description: { type: "text", max: 80 },
         peakLabel: { type: "text", max: 8 },
-        accent: { type: "string" }
+        accent: { type: "string" },
+        color: { type: "string" }
     })
 
     // A new gauge's range by the unit it decodes to (section 6)

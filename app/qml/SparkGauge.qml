@@ -1,5 +1,6 @@
 // File/layer: app/qml/SparkGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard,
+//          QmlTest.dashedit
 
 import QtQuick
 import QtQuick.Shapes
@@ -131,7 +132,7 @@ GaugeBase {
             font.weight: Font.Bold
             font.family: Theme.valueFamily
             font.features: Theme.valueFeatures
-            color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
+            color: gauge.hasValue ? gauge.zoneColor(gauge.value, gauge.readoutColor) : Theme.textDim
         }
         DangerMark {
             visible: !isNaN(gauge.dangerFrom)

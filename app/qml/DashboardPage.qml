@@ -146,7 +146,7 @@ Page {
     readonly property var optionWords: ({
         "from": qsTr("range"), "to": qsTr("range"), "coldBelow": qsTr("zones"),
         "warnFrom": qsTr("zones"), "dangerFrom": qsTr("zones"), "decimals": qsTr("decimals"),
-        "peak": qsTr("peak hold"), "majorStep": qsTr("major step"),
+        "peak": qsTr("peak hold"), "color": qsTr("color"), "majorStep": qsTr("major step"),
         "minorStep": qsTr("major step"), "labelDivisor": qsTr("major step"),
         "caption": qsTr("caption"), "description": qsTr("description"), "cells": qsTr("cells"),
         "rise": qsTr("curve"), "digits": qsTr("digits"), "window": qsTr("window"),
@@ -1057,11 +1057,18 @@ Page {
         readonly property real coldBelow: zone("coldBelow")
         readonly property real warnFrom: zone("warnFrom")
         readonly property real dangerFrom: zone("dangerFrom")
+        // A picked color (options.color) takes the normal zone's place; the
+        // zones, and Night, still win
+        readonly property string picked: Theme.gaugeColor(opt("color", ""))
         // A stored "info" draws as the value's own color: blue means cold alone
         readonly property color accent: {
+            if (picked !== "")
+                return picked
             const a = opt("accent", "accent")
             return a === "success" ? Theme.success : Theme.gaugeValue
         }
+        readonly property color readoutColor: picked !== "" ? picked : Theme.gaugeReadout
+        readonly property color needleColor: picked !== "" ? picked : Theme.gaugeNeedle
 
         // Each kind's own
         readonly property real labelDivisor: opt("labelDivisor", 1)
@@ -1093,10 +1100,11 @@ Page {
 
         readonly property var shared: ["value", "windowHigh", "windowLow", "hasValue", "stale",
                                        "from", "to", "label", "unit", "note", "decimals",
-                                       "coldBelow", "warnFrom", "dangerFrom", "accent", "showPeak"]
+                                       "coldBelow", "warnFrom", "dangerFrom", "accent", "readoutColor",
+                                       "showPeak"]
         readonly property var own: ({
             "analog": ["majorStep", "minorStep", "labelDivisor", "caption", "peakLabel",
-                       "showProgress"],
+                       "showProgress", "needleColor"],
             "bar": ["scaleMarks", "vertical", "marks"],
             "segments": ["cells", "rise"],
             "seven-segment": ["digits"],
@@ -1609,6 +1617,60 @@ Page {
                                && panelCard.cell.options.count !== undefined
                                ? panelCard.cell.options.count : root.selectedCount
                         onValueModified: root.setOptions({ count: value })
+                    }
+                }
+
+                // The value's color from a fixed set; zones and Night still win.
+                // Shift lights keep their own green, amber and red
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: panelCard.hasSignal && panelCard.kind !== "shift-light"
+                    spacing: 8
+
+                    Caption { Layout.alignment: Qt.AlignTop; Layout.topMargin: 10; text: qsTr("Color") }
+                    Flow {
+                        id: colorRow
+                        objectName: "panelColors"
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 0
+                        Layout.minimumWidth: 0
+                        spacing: 8
+                        // A name this version doesn't know reads as Default, as it draws
+                        readonly property string current: panelCard.cell && panelCard.cell.options
+                                                          && Theme.gaugeColorNames.indexOf(panelCard.cell.options.color) >= 0
+                                                          ? panelCard.cell.options.color : ""
+                        ThemedButton {
+                            objectName: "panelColor_default"
+                            text: qsTr("Default")
+                            Accessible.name: qsTr("Default color")
+                            checkable: true
+                            checked: colorRow.current === ""
+                            onClicked: root.setOptions({ color: null })
+                        }
+                        Repeater {
+                            model: Theme.gaugeColorNames
+                            AbstractButton {
+                                id: swatch
+                                required property string modelData
+                                objectName: "panelColor_" + modelData
+                                width: Theme.touchTarget
+                                height: Theme.touchTarget
+                                checkable: true
+                                checked: colorRow.current === modelData
+                                Accessible.name: qsTr("Color %1").arg(Theme.gaugeColorLabel(modelData))
+                                onToggled: { toggle(); root.setOptions({ color: modelData }) }
+                                contentItem: Item {}
+                                background: Rectangle {
+                                    anchors.centerIn: parent
+                                    width: Math.min(parent.width, 32)
+                                    height: width
+                                    radius: 6
+                                    color: Theme.gaugeSwatch(swatch.modelData)
+                                    border.width: swatch.checked ? 3 : 1
+                                    border.color: swatch.checked ? Theme.text : Theme.outline
+                                }
+                            }
+                        }
                     }
                 }
 

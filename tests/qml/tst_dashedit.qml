@@ -48,6 +48,8 @@ TestCase {
     }
 
     function cleanup() {
+        Theme.night = "off"
+        Theme.look = "dark"
         Bridge.unitSystem = 0
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -1481,6 +1483,344 @@ TestCase {
         compare(labels(page), ["A", "B"])
         page.copySelected()
         verify(find(page, "panelPaste").enabled, "a copy on this form replaces it")
+    }
+
+    // ---- Change kind
+
+    function test_changingAKindKeepsTheSignalRangeZonesAndSteps() {
+        const own = cellOf("Coolant", "analog")
+        own.options = { from: 0, to: 8000, coldBelow: 500, warnFrom: 6000, dangerFrom: 7000,
+                        decimals: 1, majorStep: 1000, peak: true }
+        const page = storedPageOf({}, docOf([own, cellOf("B")]))
+        const before = storedText(page)
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelKind")
+        compare(page.panel, "add", "Add's list")
+        verify(!findChild(page, "addKind_blank"), "a blank has no signal to keep")
+        const own_ = find(page, "addKind_analog")
+        verify(own_.checked, "the cell's own kind is marked")
+        verify(!find(page, "addKind_ring").checked)
+        click(page, "addKind_digital")
+        compare(page.panel, "cell", "back to the cell")
+        compare(page.selected, 0)
+        const c = page.doc.pages[0].cells[0]
+        compare(c.kind, "digital")
+        compare([c.label, c.unit, c.w, c.h, c.refs], ["Coolant", "RPM", 2, 4, ["id:1001"]])
+        compare(c.options, own.options, "zones, range and the dial's step all stay")
+        compare(page.doc.pages[0].cells.length, 2, "no cell added")
+        click(page, "panelKind")
+        click(page, "addKind_analog")
+        compare(page.doc.pages[0].cells[0].options.majorStep, 1000, "the way back finds its step")
+        click(page, "dashUndo")
+        compare(page.doc.pages[0].cells[0].kind, "digital", "one undo is one change")
+        compare(find(page, "dashUndo").Accessible.name, "Undo: changed Coolant's kind")
+        click(page, "dashUndo")
+        compare(page.doc.pages[0].cells[0].kind, "analog")
+        compare(storedText(page), before, "and stored as it was")
+    }
+
+    function test_thePhonesPanelOffersChangeKindBesideChangeSignal() {
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, docOf([cellOf("A")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        const signal = find(page, "panelSignal")
+        const kind = find(page, "panelKind")
+        verify(signal.visible && kind.visible, "both buttons")
+        verify(kind.height >= Theme.touchTarget && signal.height >= Theme.touchTarget, "a touch's size")
+        const a = signal.mapToItem(page, 0, 0)
+        const b = kind.mapToItem(page, 0, 0)
+        verify(a.x + signal.width <= b.x && b.x + kind.width <= page.width, "side by side, inside the page")
+        click(page, "panelKind")
+        compare(page.panel, "add")
+        click(page, "addKind_ring")
+        compare(page.doc.pages[0].cells[0].kind, "ring")
+        compare(page.panel, "cell")
+    }
+
+    function test_aShiftBandIsNotADialsRange() {
+        const dial = cellOf("Tach", "analog")
+        dial.options.warnFrom = 6000
+        const speed = cellOf("Speed", "analog")
+        speed.unit = "mph"
+        speed.options = { from: 0, to: 160 }
+        const page = pageOf({}, docOf([dial, speed]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelKind")
+        click(page, "addKind_shift-light")
+        let c = page.doc.pages[0].cells[0]
+        compare([c.kind, c.options.from, c.options.to, c.options.warnFrom], ["shift-light", 4500, 6500, 6000],
+                "rpm takes the built-in's band, other options carry")
+        click(page, "panelKind")
+        click(page, "addKind_analog")
+        c = page.doc.pages[0].cells[0]
+        const back = DashboardBook.defaultRange("RPM")
+        compare([c.kind, c.options.from, c.options.to], ["analog", back.from, back.to],
+                "leaving takes the signal's default range")
+        press(find(page, "dashCell_0_1"))
+        click(page, "panelKind")
+        click(page, "addKind_shift-light")
+        c = page.doc.pages[0].cells[1]
+        compare([c.kind, c.options.from, c.options.to], ["shift-light", 0, 160], "another signal keeps its range")
+        click(page, "panelKind")
+        click(page, "addKind_analog")
+        c = page.doc.pages[0].cells[1]
+        compare([c.kind, c.options.from, c.options.to], ["analog", 0, 160], "and leaving keeps it too")
+    }
+
+    function test_aBlankCellHasNoChangeKind() {
+        const page = pageOf({}, docOf([{ kind: "blank", w: 2, h: 4, refs: [] }, cellOf("B")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        verify(!find(page, "panelKind").visible)
+        press(find(page, "dashCell_0_1"))
+        verify(find(page, "panelKind").visible)
+    }
+
+    function test_theKindListBacksOutWithNoChange() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        const before = JSON.stringify(page.doc)
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelKind")
+        click(page, "addClose")
+        compare(page.panel, "cell")
+        click(page, "panelKind")
+        click(page, "addKind_digital")
+        compare(page.panel, "add", "the cell's own kind changes nothing")
+        compare(JSON.stringify(page.doc), before)
+        page.startAdd()
+        verify(findChild(page, "addKind_blank"), "Add still offers a blank")
+    }
+
+    // ---- A gauge's color
+
+    function relativeLuminance(c) {
+        const lin = v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+        return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+    }
+    function contrast(a, b) {
+        const x = relativeLuminance(a), y = relativeLuminance(b)
+        return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
+    }
+    // CIE L*a*b* distance (the 1976 formula): how far apart two colors look
+    function lab(c) {
+        const lin = v => v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+        const r = lin(c.r), g = lin(c.g), b = lin(c.b)
+        const x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
+        const y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        const z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+        const f = t => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116
+        return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))]
+    }
+    function apart(a, b) {
+        const p = lab(a), q = lab(b)
+        return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2])
+    }
+
+    function test_everyNamedColorIsReadableAndApartFromTheZones() {
+        for (const look of ["dark", "daylight"]) {
+            const p = Theme.palettes[look]
+            const surface = Qt.color(p.surface)
+            const zones = [p.gaugeWarn, p.gaugeDanger, p.info, p.gaugeNeedle].map(c => Qt.color(c))
+            for (const name of Theme.gaugeColorNames) {
+                const c = Qt.color(Theme.gaugePalettes[look][name])
+                verify(contrast(c, surface) >= 3, name + " on " + look + ": " + contrast(c, surface))
+                for (const z of zones)
+                    verify(apart(c, z) >= 25, name + " on " + look + " is " + apart(c, z) + " from a zone color")
+            }
+        }
+        verify(Theme.gaugeColorNames.length >= 6 && Theme.gaugeColorNames.length <= 8)
+    }
+
+    function test_aStoredNameIsOnlyAFixedOne() {
+        for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty", "", "Teal", 5, null])
+            compare(Theme.gaugeColor(name), "", String(name))
+        compare(Theme.gaugeColor("teal"), Theme.gaugePalettes.dark.teal)
+        Theme.look = "daylight"
+        compare(Theme.gaugeColor("teal"), Theme.gaugePalettes.daylight.teal)
+        Theme.night = "on"
+        compare(Theme.gaugeColor("teal"), "", "Night has none")
+        compare(Theme.gaugeSwatch("constructor"), "transparent")
+    }
+
+    function colored(kind, look, color, extra) {
+        Theme.night = "off"
+        Theme.look = look
+        const cell = cellOf("A", kind)
+        cell.options.color = color
+        Object.assign(cell.options, extra || {})
+        const page = pageOf({}, docOf([cell]))
+        const gauge = find(find(page, "dashCell_0_0"), "gauge")
+        tryVerify(() => gauge.item !== null, 5000, kind + " loads")
+        const g = gauge.item
+        // A value in no zone, set on the drawn gauge
+        g.hasValue = true
+        g.value = 10
+        return g
+    }
+
+    // What each kind draws in the picked color, read off the drawn items:
+    // the readout's text (and the hub pin, the number) for a dial, the
+    // trace's stroke for a sparkline
+    function drawnColors(kind, g) {
+        const found = {}
+        if (kind === "analog") {
+            found.hubPin = find(g, "hubPin").color
+            found.readout = find(g, "readout").color
+        } else if (kind === "sparkline") {
+            const paths = find(g, "trace").data.filter(d => d.strokeWidth === 1.5)
+            verify(paths.length === 1, "the trace's path")
+            found.trace = paths[0].strokeColor
+            found.readout = find(g, "readout").color
+        } else if (kind === "seven-segment") {
+            found.digits = g.digitColor
+        } else {
+            found.readout = find(g, "readout").color
+        }
+        return found
+    }
+
+    function test_aPickedColorPaintsTheValueMarks_data() {
+        const rows = []
+        for (const look of ["dark", "daylight"])
+            for (const kind of ["analog", "ring", "bar", "digital", "segments", "seven-segment", "sparkline"])
+                rows.push({ tag: kind + " " + look, kind: kind, look: look })
+        return rows
+    }
+    function test_aPickedColorPaintsTheValueMarks(data) {
+        const g = colored(data.kind, data.look, "teal")
+        const teal = Theme.gaugePalettes[data.look].teal
+        const plain = colored(data.kind, data.look, "")
+        const wasPlain = drawnColors(data.kind, plain)
+        const drawn = drawnColors(data.kind, g)
+        for (const part in drawn) {
+            verify(Qt.colorEqual(drawn[part], teal), data.kind + "'s " + part + " is " + drawn[part])
+            verify(!Qt.colorEqual(wasPlain[part], teal), "and the default's " + part + " is not")
+        }
+        Theme.look = "dark"
+    }
+
+    function test_aZoneBeatsThePickedColor() {
+        const g = colored("analog", "dark", "teal", { warnFrom: 6000, dangerFrom: 7000 })
+        g.value = 6500
+        tryVerify(() => Qt.colorEqual(find(g, "readout").color, Theme.gaugeWarn), 3000, "warn")
+        g.value = 7500
+        tryVerify(() => Qt.colorEqual(find(g, "readout").color, Theme.gaugeDanger), 3000, "danger")
+        g.value = 10
+        tryVerify(() => Qt.colorEqual(find(g, "readout").color, Theme.gaugePalettes.dark.teal), 3000,
+                  "and back to the pick")
+    }
+
+    function test_nightIgnoresThePickedColor() {
+        const g = colored("analog", "dark", "teal")
+        Theme.night = "on"
+        tryVerify(() => Qt.colorEqual(find(g, "readout").color, Theme.gaugeReadout), 3000, "Night's own tint")
+        verify(Qt.colorEqual(find(g, "hubPin").color, Theme.gaugeNeedle))
+    }
+
+    function test_anUnknownColorNameDrawsAsDefault() {
+        const g = colored("digital", "dark", "chartreuse9")
+        verify(Qt.colorEqual(find(g, "readout").color, Theme.gaugeReadout))
+        const odd = colored("digital", "dark", "constructor")
+        verify(Qt.colorEqual(find(odd, "readout").color, Theme.gaugeReadout), "an inherited name too")
+    }
+
+    function test_thePanelPicksAColorOneUndoStepAndChangeKindKeepsIt() {
+        const page = storedPageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        verify(find(page, "panelColor_default").checked)
+        click(page, "panelColor_teal")
+        compare(page.doc.pages[0].cells[0].options.color, "teal")
+        verify(find(page, "panelColor_teal").checked)
+        verify(!find(page, "panelColor_default").checked)
+        compare(find(page, "dashUndo").Accessible.name, "Undo: changed A's color")
+        click(page, "panelKind")
+        click(page, "addKind_bar")
+        compare(page.doc.pages[0].cells[0].options.color, "teal", "kept across Change kind")
+        click(page, "dashUndo")
+        click(page, "dashUndo")
+        compare(page.doc.pages[0].cells[0].options.color, undefined, "undo restores")
+        click(page, "panelColor_pink")
+        click(page, "panelColor_default")
+        compare(page.doc.pages[0].cells[0].options.color, undefined, "Default removes it")
+        verify(find(page, "panelColor_default").checked)
+        click(page, "panelColor_default")
+        verify(find(page, "panelColor_default").checked, "a second tap on Default leaves it chosen")
+        compare(page.doc.pages[0].cells[0].options.color, undefined)
+        click(page, "panelColor_pink")
+        click(page, "panelColor_pink")
+        verify(find(page, "panelColor_pink").checked, "a second tap on a color leaves it chosen")
+    }
+
+    function test_theColorRowReadsTheStoredNameAtNightAndForAnUnknownOne() {
+        const own = cellOf("A", "analog")
+        own.options.color = "teal"
+        const page = pageOf({}, docOf([own, cellOf("B")]))
+        page.startEditing()
+        Theme.night = "on"
+        press(find(page, "dashCell_0_0"))
+        verify(find(page, "panelColor_teal").checked, "the stored color is marked at Night")
+        verify(!find(page, "panelColor_default").checked)
+        Theme.night = "off"
+        const later = pageOf({}, docOf([Object.assign(cellOf("C"), { options: { from: 0, to: 100, color: "chartreuse9" } })]))
+        later.startEditing()
+        press(find(later, "dashCell_0_0"))
+        verify(find(later, "panelColor_default").checked, "an unknown name reads as Default")
+    }
+
+    function test_aBlankCellHasNoColorRow() {
+        const page = pageOf({}, docOf([{ kind: "blank", w: 2, h: 4, refs: [] }]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        verify(!find(page, "panelColors").visible)
+    }
+
+    function test_shiftLightsHaveNoColorRow() {
+        const page = pageOf({}, docOf([cellOf("A", "shift-light"), cellOf("B")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        verify(!find(page, "panelColors").visible, "their own green, amber and red")
+        press(find(page, "dashCell_0_1"))
+        verify(find(page, "panelColors").visible)
+    }
+
+    // The cell's panel on a phone: the Change signal and Change kind row and the
+    // color row stay inside the panel, each target a touch's size, none on another
+    function test_thePhonesPanelFitsItsColorRowAndChangeButtons_data() {
+        return [{ tag: "320", w: 320, h: 760 }, { tag: "384", w: 384, h: 832 }]
+    }
+    function test_thePhonesPanelFitsItsColorRowAndChangeButtons(data) {
+        const page = pageOf({ form: "phone", width: data.w, height: data.h }, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        const panel = find(page, "dashPanel")
+        verify(waitForPolish(panel.Window.window), "laid out")
+        const inside = (item, what) => {
+            const at = item.mapToItem(panel, 0, 0)
+            verify(at.x >= -0.5 && at.x + item.width <= panel.width + 0.5, what + " inside the panel: "
+                   + at.x + " + " + item.width + " of " + panel.width)
+            return at
+        }
+        const boxes = []
+        for (const name of ["panelSignal", "panelKind", "panelColor_default", "panelColor_teal", "panelColor_stone"]) {
+            const item = find(page, name)
+            const at = inside(item, name)
+            verify(item.height >= Theme.touchTarget - 0.5, name + " is " + item.height + " high")
+            boxes.push({ name: name, x: at.x, y: at.y, r: at.x + item.width, b: at.y + item.height })
+        }
+        for (let i = 0; i < boxes.length; ++i)
+            for (let j = i + 1; j < boxes.length; ++j) {
+                const a = boxes[i], b = boxes[j]
+                verify(a.r <= b.x + 0.5 || b.r <= a.x + 0.5 || a.b <= b.y + 0.5 || b.b <= a.y + 0.5,
+                       a.name + " overlaps " + b.name)
+            }
+        const flow = find(page, "panelColors")
+        verify(flow.height > Theme.touchTarget * 1.5, "the swatches wrap onto more than one row")
+        for (const name of Theme.gaugeColorNames)
+            inside(find(page, "panelColor_" + name), name)
     }
 
     // ---- The blank cell
