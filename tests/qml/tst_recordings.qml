@@ -1010,9 +1010,12 @@ TestCase {
         verify(header.visible && back.text === "All recordings", "and back")
     }
 
-    // One order on both forms: the chart, its zoom row, the switch and the
-    // filter, the rows, then About this recording. On a phone Replay and
-    // Save report sit in About; on the desktop in the title row
+    // The desktop's one order: the chart, its zoom row, the switch and the
+    // filter, the rows, then About this recording, Replay and Save report in
+    // the title row. A phone upright pins the chart and gives About a view
+    // of its own: the zoom row, the switch and the filter head the rows,
+    // and About's view holds the recording's lines with Replay and Save
+    // report among them
     function test_theViewersOrderIsChartRowsThenAbout_data() {
         return [{ tag: "desktop", w: 1280, h: 720, phone: false },
                 { tag: "phone", w: 384, h: 832, phone: true }]
@@ -1033,20 +1036,41 @@ TestCase {
                 const item = find(page, name)
                 return item.mapToItem(page, 0, item.height / 2).y
             }
-            const order = ["openedTitle", "chartFrame", "chartSplitter", "zoomAll"]
-                .concat(data.phone ? ["detailView_values"] : [])
-                .concat(["recordingFilter", "signalRows", "aboutHeading", "recordingInfo",
-                         "decodeChoice", "compareChoice", "checkSummary"])
-            const ys = order.map(yOf)
-            for (let i = 1; i < order.length; ++i)
-                verify(ys[i] > ys[i - 1],
-                       order[i] + " (" + ys[i] + ") under " + order[i - 1] + " (" + ys[i - 1] + ")")
-            const save = yOf("saveReport")
-            const replay = yOf("replayView")
+            const inOrder = order => {
+                const ys = order.map(yOf)
+                for (let i = 1; i < order.length; ++i)
+                    verify(ys[i] > ys[i - 1],
+                           order[i] + " (" + ys[i] + ") under " + order[i - 1] + " (" + ys[i - 1] + ")")
+            }
             if (data.phone) {
+                verify(page.pinnedViewer, "the phone's viewer is pinned")
+                inOrder(["openedTitle", "chartFrame", "chartSplitter", "zoomAll", "detailView_values",
+                         "recordingFilter"])
+                const rows = find(page, "signalRows")
+                verify(rows.itemAtIndex(0).mapToItem(page, 0, 0).y > yOf("recordingFilter"),
+                       "the first row under the filter")
+                verify(!find(page, "aboutHeading").visible, "the switch names About, no heading does")
+                verify(!find(page, "recordingInfo").visible, "About waits for its view")
+                find(page, "detailView_about").clicked()
+                verify(waitForPolish(page.Window.window), "About laid out")
+                verify(!rows.visible, "the rows give way to About")
+                const findings = find(page, "findingList")
+                tryVerify(() => findings.contentY <= findings.originY + 0.5, 2000, "About's list at its start")
+                inOrder(["chartSplitter", "zoomAll", "detailView_about", "recordingInfo", "decodeChoice",
+                         "compareChoice", "checkSummary"])
+                const save = yOf("saveReport")
                 verify(save > yOf("recordingInfo") && save < yOf("decodeChoice"), "Save report in About")
-                compare(replay, save, "Replay beside it")
+                compare(yOf("replayView"), save, "Replay beside it")
             } else {
+                inOrder(["openedTitle", "chartFrame", "chartSplitter", "zoomAll", "recordingFilter",
+                         "signalRows", "aboutHeading", "recordingInfo", "decodeChoice", "compareChoice",
+                         "checkSummary"])
+                const rows = find(page, "signalRows")
+                compare(rows.itemAtIndex(0).mapToItem(rows, 0, 0).y, 0, "no head over the desktop's rows")
+                verify(rows.contentHeight <= rows.height + 0.5, "the rows hold their list: "
+                       + rows.contentHeight + " in " + rows.height)
+                const save = yOf("saveReport")
+                const replay = yOf("replayView")
                 verify(save < yOf("chartFrame") && replay < yOf("chartFrame"), "both in the title row")
                 const sw = find(page, "detailView_values")
                 verify(sw.visible && Math.abs(middleOf("detailView_values") - middleOf("recordingFilter")) < 3
@@ -1056,6 +1080,28 @@ TestCase {
         } finally {
             Theme.compact = false
             page.width = 900
+            page.height = 900
+        }
+    }
+
+    // On a page taller than the viewer the room left over goes under it:
+    // the zoom row stays right under the splitter, maximized too
+    function test_theZoomRowStaysUnderTheChart() {
+        const page = openFindings()
+        try {
+            page.height = 2000
+            verify(waitForPolish(page.Window.window), "laid out")
+            const splitter = find(page, "chartSplitter")
+            const zoom = find(page, "zoomAll")
+            const gap = zoom.mapToItem(page, 0, 0).y - splitter.mapToItem(page, 0, splitter.height).y
+            verify(gap >= 0 && gap <= 16, "the zoom row " + gap + " px under the splitter")
+            page.toggleMaximized()
+            verify(waitForPolish(page.Window.window), "maximized")
+            const chart = find(page, "chartFrame")
+            const under = zoom.mapToItem(page, 0, 0).y - chart.mapToItem(page, 0, chart.height).y
+            verify(under >= 0 && under <= 16, "maximized, the zoom row " + under + " px under the chart")
+            page.toggleMaximized()
+        } finally {
             page.height = 900
         }
     }
@@ -1125,15 +1171,16 @@ TestCase {
     }
 
     // The Export panel opens under the title row, so the page goes to its
-    // top, wherever it was scrolled
+    // top, wherever it was scrolled; on a phone upright the pinned viewer
+    // gives way to the panel and comes back
     function test_theExportPanelOpensAtThePagesTop() {
         const page = openFindings()
-        Theme.compact = true
         try {
             page.width = 384
             page.height = 600
             verify(waitForPolish(page.Window.window), "laid out")
             const scroll = find(page, "recordingsScroll")
+            verify(!page.pinnedViewer, "a desktop's page scrolls as a whole")
             verify(scroll.contentHeight > scroll.height, "the page scrolls")
             scroll.contentY = scroll.contentHeight - scroll.height
             page.openExport()
@@ -1142,6 +1189,22 @@ TestCase {
             verify(panel.visible, "the panel")
             verify(panel.mapToItem(scroll, 0, 0).y < scroll.height / 2, "on the first screen")
             page.closeExport()
+
+            Theme.compact = true
+            verify(waitForPolish(page.Window.window), "a phone upright")
+            verify(page.pinnedViewer, "upright the viewer is pinned")
+            verify(!scroll.interactive, "the page itself stays put")
+            page.openExport()
+            verify(!page.pinnedViewer, "the panel takes the page")
+            compare(scroll.contentY, 0, "at the top")
+            verify(panel.visible && panel.mapToItem(scroll, 0, 0).y < scroll.height / 2,
+                   "the panel on the first screen")
+            verify(waitForPolish(page.Window.window), "the panel laid out")
+            verify(scroll.contentHeight > scroll.height, "the panel scrolls the page")
+            scroll.contentY = scroll.contentHeight - scroll.height
+            page.closeExport()
+            verify(page.pinnedViewer, "pinned again")
+            compare(scroll.contentY, 0, "the pinned page from its top")
         } finally {
             Theme.compact = false
             page.width = 900
@@ -1297,6 +1360,8 @@ TestCase {
         Theme.compact = true
         try {
             page.width = data.w
+            verify(waitForPolish(page.Window.window), "laid out")
+            find(page, "detailView_about").clicked()   // the pinned form's About holds the rows
             find(page, "compareChoice").activated(1)
             tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
             const seen = []
