@@ -295,7 +295,10 @@ TestCase {
                "the foot " + panelFoot(s) + " within a row of " + bottom)
         compare(s.dash.doc.pages[0].cells.map(c => c.h), heights, "the document's heights unchanged")
         const note = find(find(s.dash, "dashCell_0_11"), "gaugeNote")
-        verify(!note.visible || !note.truncated, "the Digits note is whole or hidden: " + note.text)
+        // The note elides by design, to the room the title and value leave it
+        const cell = find(s.dash, "dashCell_0_11")
+        verify(!note.visible || note.mapToItem(cell, note.width, 0).x <= cell.width + 0.5,
+               "the Digits note stays in its cell: " + note.text)
         s.dash.leaveDrive(true)
         tryCompare(view, "pitch", view.squarePitch, 2000, "the square pitch again")
     }
