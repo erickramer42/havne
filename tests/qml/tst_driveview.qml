@@ -255,6 +255,76 @@ TestCase {
         compare(swipe.y, 28, "right under the status line")
     }
 
+    // A page of twelve 3 x 6 cells: 36 rows upright (six columns), 18 on its
+    // side (twelve), short of the screen at the square pitch either way.
+    // Its last cell is Digits with no signal, so its note shows
+    function fillingPage() {
+        const cells = []
+        for (let i = 0; i < 12; ++i)
+            cells.push({ kind: i === 11 ? "seven-segment" : "digital", w: 3, h: 6, label: "Cell " + i,
+                         refs: [i === 11 ? "id:9999" : "id:1001"], unit: "RPM",
+                         options: { from: 0, to: 8000 } })
+        return { format: 2, pages: [{ name: "P", cells: cells }] }
+    }
+    // The panel's foot, in the window
+    function panelFoot(s) {
+        const surface = find(s.dash, "dashPanelSurface")
+        return surface.mapToItem(s.main.contentItem, 0, surface.height).y
+    }
+
+    function test_thePanelFillsTheHeightInTheView_data() {
+        return [{ tag: "upright", w: 384, h: 832 }, { tag: "on its side", w: 832, h: 384 }]
+    }
+    function test_thePanelFillsTheHeightInTheView(data) {
+        const s = driven()
+        s.main.width = data.w
+        s.main.height = data.h
+        s.dash.doc = fillingPage()
+        const heights = s.dash.doc.pages[0].cells.map(c => c.h)
+        const view = find(s.dash, "dashPage_0")
+        verify(waitForPolish(s.main), "laid out")
+        tryVerify(() => view.columnWidth > 0, 2000, "laid out")
+        compare(view.pitch, view.squarePitch, "outside the view the square pitch")
+        enterOn(s)
+        tryVerify(() => view.pitch > view.squarePitch, 2000, "taller rows in the view")
+        verify(view.pitch <= 2 * view.squarePitch + 0.01, "at most twice the square")
+        const bottom = s.main.contentItem.height - s.dash.driveInsetBottom
+        verify(Math.abs(panelFoot(s) - bottom) <= view.pitch,
+               "the foot " + panelFoot(s) + " within a row of " + bottom)
+        compare(s.dash.doc.pages[0].cells.map(c => c.h), heights, "the document's heights unchanged")
+        const note = find(find(s.dash, "dashCell_0_11"), "gaugeNote")
+        verify(!note.visible || !note.truncated, "the Digits note is whole or hidden: " + note.text)
+        s.dash.leaveDrive(true)
+        tryCompare(view, "pitch", view.squarePitch, 2000, "the square pitch again")
+    }
+
+    // A page of one short row stops at twice the square, and the ground shows under it
+    function test_aShortPageStopsAtTwiceTheSquare() {
+        const s = driven()
+        const page = fillingPage()
+        page.pages[0].cells = page.pages[0].cells.slice(0, 2)
+        s.dash.doc = page
+        enterOn(s)
+        const view = find(s.dash, "dashPage_0")
+        tryVerify(() => view.columnWidth > 0, 2000, "laid out")
+        fuzzyCompare(view.pitch, 2 * view.squarePitch, 0.01)
+        verify(panelFoot(s) < s.main.contentItem.height / 2, "the panel stops: " + panelFoot(s))
+    }
+
+    // A page taller than the screen keeps its pitch in the view, and scrolls
+    function test_aLongPageKeepsItsPitch() {
+        const s = driven()
+        const page = fillingPage()
+        page.pages[0].cells = page.pages[0].cells.concat(fillingPage().pages[0].cells)
+        s.dash.doc = page
+        const view = find(s.dash, "dashPage_0")
+        enterOn(s)
+        tryVerify(() => view.columnWidth > 0, 2000, "laid out")
+        verify(waitForPolish(s.main), "laid out")
+        compare(view.pitch, view.squarePitch, "no squeeze to fit")
+        verify(view.contentHeight > view.height, "it scrolls")
+    }
+
     readonly property int holdMs: Application.styleHints.mousePressAndHoldInterval
 
     function test_editModeIsNotReachable() {

@@ -2487,9 +2487,16 @@ Page {
                 // square; never so tall that the tallest cell overflows
                 // what the page shows, down to a floor of 160 px, below
                 // which the page scrolls instead
-                readonly property real pitch: Math.max(1, Math.min(
-                    (columnWidth + root.cellGap) / 4,
+                readonly property real squarePitch: (columnWidth + root.cellGap) / 4
+                readonly property real pagePitch: Math.max(1, Math.min(squarePitch,
                     (Math.max(160, height - root.gridTop - root.panelMargin) + root.cellGap) / tallest))
+                // The drive view's panel reaches the screen's foot, its rows
+                // up to twice the square; a page that already scrolls keeps its pitch
+                readonly property bool fills: root.driving && root.phoneForm && rows > 0
+                readonly property real pitch: fills
+                    ? Math.max(pagePitch, Math.min(2 * squarePitch,
+                                                   (height - root.gridTop + root.cellGap) / rows))
+                    : pagePitch
                 readonly property int rows: boxes.reduce((m, b) => Math.max(m, b.y + b.h), 0)
                 // The drop's places are measured on this grid
                 onColumnsChanged: root.cancelHold()
