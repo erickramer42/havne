@@ -78,7 +78,7 @@ GaugeBase {
         DangerMark {
             // The slot stays once a gauge has a danger zone, so the readout
             // never moves as the mark appears
-            visible: !isNaN(gauge.dangerFrom)
+            visible: gauge.hasDangerZone
             opacity: gauge.inDanger ? 1 : 0
             size: 18
             anchors.verticalCenter: valueLabel.verticalCenter
@@ -118,9 +118,8 @@ GaugeBase {
 
                 // The danger zone's segments carry an outline: heavier than
                 // the others, so the zone reads apart by more than its hue
-                readonly property bool inDangerZone: !isNaN(gauge.dangerFrom)
-                    && gauge.from + (index + 0.5) / gauge.segments * (gauge.to - gauge.from)
-                       >= gauge.dangerFrom
+                readonly property bool inDangerZone: gauge.inDangerAt(
+                    gauge.from + (index + 0.5) / gauge.segments * (gauge.to - gauge.from))
 
                 readonly property real along: (gauge.barLength
                     - (gauge.segments - 1) * gauge.segmentGap) / gauge.segments

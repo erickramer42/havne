@@ -863,7 +863,10 @@ public:
     // decimals and range in the current unit system, the range NaN for
     // none (RangeLowRole); and decodedUnit, decodedLow, decodedHigh, the
     // def's own unit and range as core decodes them in any unit system
-    // (what a dashboard cell stores, ADR-0057 section 6), NaN for none.
+    // (what a dashboard cell stores, ADR-0057 section 6), NaN for none;
+    // and gauge, the signal file's own gauge for the def in that same unit
+    // ({ min, max, warnLow, warnHigh }, the levels only when the file gives
+    // them), {} when there is none.
     // [] when profileOfUri gives "" (a scheme or profile= core refuses),
     // for an unknown profile, and for a profile whose set is a session's
     // own (uds-generic) or none (raw); a URI core refuses for another

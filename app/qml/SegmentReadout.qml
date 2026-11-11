@@ -186,7 +186,7 @@ GaugeBase {
         }
         // Past dangerFrom, beside the unit; its slot stays
         DangerMark {
-            visible: !isNaN(gauge.dangerFrom)
+            visible: gauge.hasDangerZone
             opacity: gauge.inDanger ? 1 : 0
             size: gauge.markPx
         }

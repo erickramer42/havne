@@ -9123,6 +9123,57 @@ TEST(BridgeTest, ASetWithNoFileHasNoRefs)
     EXPECT_EQ(ecuio_profile_unregister("copied-mock"), ECUIO_OK);
 }
 
+/* The Dashboard starts a dial from the file's gauge: profileSignals' row
+ * carries its range and levels in the decoded unit, and {} for a signal
+ * with none or a level the file leaves out */
+TEST(BridgeTest, AProfileRowCarriesTheFilesGauge)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    QByteArray gauged = signalFile(QStringLiteral("Gauged"));
+    gauged.replace(
+        R"("field":{"byte":0,"bits":8}})",
+        R"("field":{"byte":0,"bits":8},)"
+        R"("gauge":{"min":10,"max":16,"warn_low":11.5,"warn_high":15.25}})");
+    const QString profile = useFile(bridge, from.path(), gauged);
+    ASSERT_FALSE(profile.isEmpty());
+    const QVariantList rows =
+        bridge.profileSignals(QStringLiteral("mock://demo?profile=") + profile);
+    const QVariantMap gauge = rowNamed(rows, QStringLiteral("A"))
+                                  .value(QStringLiteral("gauge"))
+                                  .toMap();
+    EXPECT_EQ(gauge.value(QStringLiteral("min")).toDouble(), 10.0);
+    EXPECT_EQ(gauge.value(QStringLiteral("max")).toDouble(), 16.0);
+    EXPECT_EQ(gauge.value(QStringLiteral("warnLow")).toDouble(), 11.5);
+    EXPECT_EQ(gauge.value(QStringLiteral("warnHigh")).toDouble(), 15.25);
+
+    QByteArray lowOnly =
+        signalFile(QStringLiteral("LowOnly"), QStringLiteral("D101"));
+    lowOnly.replace(R"("field":{"byte":0,"bits":8}})",
+                    R"("field":{"byte":0,"bits":8},)"
+                    R"("gauge":{"min":0,"max":100,"warn_low":20}})");
+    const QString lowProfile = useFile(bridge, from.path(), lowOnly);
+    ASSERT_FALSE(lowProfile.isEmpty());
+    const QVariantMap low =
+        rowNamed(bridge.profileSignals(QStringLiteral("mock://demo?profile=") +
+                                       lowProfile),
+                 QStringLiteral("A"))
+            .value(QStringLiteral("gauge"))
+            .toMap();
+    EXPECT_TRUE(low.contains(QStringLiteral("warnLow")));
+    EXPECT_FALSE(low.contains(QStringLiteral("warnHigh")));
+
+    const QVariantList plain =
+        bridge.profileSignals(QStringLiteral("mock://demo"));
+    ASSERT_FALSE(plain.isEmpty());
+    for (const QVariant& row : plain) {
+        EXPECT_TRUE(
+            row.toMap().value(QStringLiteral("gauge")).toMap().isEmpty());
+    }
+}
+
 /* A signal file's own defs are theirs by key, its extends base's by
  * the base's ID; a file extending nothing has keys alone */
 TEST(BridgeTest, ASignalFilesRowsAreReferencedByTheirKeys)

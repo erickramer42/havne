@@ -2068,6 +2068,22 @@ QVariantList SessionBridge::profileSignals(const QString& uri) const
             displayed(def.unit, def.decimal_places, 0.0, units);
         const std::pair<double, double> range = displayedRange(
             def.unit, def.decimal_places, f.rangeLow, f.rangeHigh, units);
+        // The file's own gauge for this def, in its decoded unit (the unit
+        // a cell stores); empty when the file gives none
+        QVariantMap gauge;
+        if (file != nullptr) {
+            if (const ecuio_signal_gauge_t* g =
+                    ecuio_signal_file_gauge(file, &def)) {
+                gauge.insert(QStringLiteral("min"), g->min);
+                gauge.insert(QStringLiteral("max"), g->max);
+                if ((g->flags & ECUIO_GAUGE_WARN_LOW) != 0) {
+                    gauge.insert(QStringLiteral("warnLow"), g->warn_low);
+                }
+                if ((g->flags & ECUIO_GAUGE_WARN_HIGH) != 0) {
+                    gauge.insert(QStringLiteral("warnHigh"), g->warn_high);
+                }
+            }
+        }
         rows.append(QVariantMap{
             {QStringLiteral("id"), static_cast<int>(def.id)},
             {QStringLiteral("ref"), f.ref},
@@ -2084,6 +2100,7 @@ QVariantList SessionBridge::profileSignals(const QString& uri) const
             {QStringLiteral("decodedUnit"), QString::fromUtf8(def.unit)},
             {QStringLiteral("decodedLow"), f.rangeLow},
             {QStringLiteral("decodedHigh"), f.rangeHigh},
+            {QStringLiteral("gauge"), gauge},
         });
     }
     return rows;
