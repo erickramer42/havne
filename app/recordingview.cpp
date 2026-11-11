@@ -522,29 +522,27 @@ void RecordingView::finish(const std::shared_ptr<Result>& res,
         ecuio_recording_get_signal(m_reader, i, &m_signals[i].pub);
         ranked = ranked || m_signals[i].pub.plot_rank != 0;
     }
-    // Live's default (SignalListModel::judgePlotted): every number, or in a
-    // ranked recording the DefaultPlotted of the lowest rank, a tie in the
-    // recording's order; a signal with no samples gives its place up
+    // At most ViewerPlotted numbers plot on open, so a phone's chart stays
+    // readable: a ranked recording's lowest ranks (the signals Live plotted),
+    // else the first in the recording's order. A signal with no samples gives
+    // its place up; an unranked one in a ranked recording never plots.
     std::vector<uint32_t> order;
     for (uint32_t i = 0; i < m_info.signal_count; ++i) {
         const ecuio_recording_signal_t& s = m_signals[i].pub;
         const bool number =
             (s.flags & ECUIO_RECORDING_SIGNAL_TEXT) == 0 && s.samples > 0;
-        if (!number) {
-            continue;
-        }
-        if (!ranked) {
-            m_signals[i].plotted = true;
-        } else if (s.plot_rank != 0) {
+        if (number && (!ranked || s.plot_rank != 0)) {
             order.push_back(i);
         }
     }
-    std::stable_sort(
-        order.begin(), order.end(), [this](uint32_t a, uint32_t b) {
-            return m_signals[a].pub.plot_rank < m_signals[b].pub.plot_rank;
-        });
-    if (order.size() > static_cast<size_t>(DefaultPlotted)) {
-        order.resize(DefaultPlotted);
+    if (ranked) {
+        std::stable_sort(
+            order.begin(), order.end(), [this](uint32_t a, uint32_t b) {
+                return m_signals[a].pub.plot_rank < m_signals[b].pub.plot_rank;
+            });
+    }
+    if (order.size() > static_cast<size_t>(ViewerPlotted)) {
+        order.resize(ViewerPlotted);
     }
     for (uint32_t i : order) {
         m_signals[i].plotted = true;

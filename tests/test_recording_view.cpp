@@ -273,10 +273,10 @@ QStringList plottedNames(const RecordingView& v)
 
 } // namespace
 
-// Live's rule: in a ranked recording the DefaultPlotted numbers of the
-// lowest ranks, a signal with no samples giving its place up and an
-// unranked one never in; with no rank anywhere, every number
-TEST(RecordingViewTest, TheDefaultIsLivesRule)
+// At most ViewerPlotted (4) plot on open: in a ranked recording the numbers
+// of the lowest ranks, a signal with no samples giving its place up and an
+// unranked one never in; with no rank anywhere, the first numbers in order
+TEST(RecordingViewTest, AtMostFourPlotOnOpen)
 {
     QTemporaryDir ranked;
     ASSERT_TRUE(ranked.isValid());
@@ -297,7 +297,7 @@ TEST(RecordingViewTest, TheDefaultIsLivesRule)
     ASSERT_TRUE(waitFor([&] { return settled(v); }));
     ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
     EXPECT_EQ(plottedNames(v),
-              QStringList({"S3", "S4", "S5", "S6", "S7", "S8"}));
+              QStringList({"S5", "S6", "S7", "S8"}));
 
     QTemporaryDir unranked;
     ASSERT_TRUE(unranked.isValid());
@@ -308,7 +308,7 @@ TEST(RecordingViewTest, TheDefaultIsLivesRule)
     v.open(unranked.path());
     ASSERT_TRUE(waitFor([&] { return settled(v); }));
     ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
-    EXPECT_EQ(plottedNames(v), QStringList({"A", "B", "C", "D", "E", "F"}));
+    EXPECT_EQ(plottedNames(v), QStringList({"A", "B", "C", "D"}));
 }
 
 // Each column's lowest and highest in display units, a column with no
