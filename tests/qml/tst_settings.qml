@@ -615,7 +615,7 @@ TestCase {
         compare(rows.length, 1, "one row: "
                 + rows.map(r => r.map(b => b.objectName + " " + b.width + "@" + b.x).join("+")).join(" / "))
         // Under the caption, which has the row above to itself
-        const caption = modes[0].parent.children[0]
+        const caption = modes[0].parent.parent.parent.children[0]
         compare(caption.text, "Night:")
         verify(modes[0].mapToItem(column, 0, 0).y >= caption.mapToItem(column, 0, caption.height).y - 0.5,
                "the modes start under the caption")
@@ -779,9 +779,9 @@ TestCase {
             verify(b.visible, name + " is offered")
             b.clicked()
             compare(Theme.night, name)
-            verify(b.checked, name + " is chosen")
+            verify(b.selected, name + " is chosen")
             for (const other of Theme.nightModes.filter(n => n !== name))
-                verify(!find(page, "night_" + other).checked, other + " is not")
+                verify(!find(page, "night_" + other).selected, other + " is not")
         }
         compare(find(page, "night_off").text, "Off")
         compare(find(page, "night_on").text, "On")
@@ -798,8 +798,8 @@ TestCase {
             verify(b.visible && b.enabled, name + " is offered")
             b.clicked()
             compare(Theme.nightStyle, name)
-            verify(b.checked, name + " is chosen")
-            verify(!find(page, "nightStyle_" + (name === "red" ? "amber" : "red")).checked)
+            verify(b.selected, name + " is chosen")
+            verify(!find(page, "nightStyle_" + (name === "red" ? "amber" : "red")).selected)
         }
         compare(find(page, "nightStyle_amber").text, "Amber")
         compare(find(page, "nightStyle_red").text, "Red")
@@ -819,8 +819,8 @@ TestCase {
             b.clicked()
             compare(Theme.look, name)
             compare(Theme.active, name)
-            verify(b.checked, name + " is chosen")
-            verify(!find(page, "look_" + (name === "dark" ? "daylight" : "dark")).checked)
+            verify(b.selected, name + " is chosen")
+            verify(!find(page, "look_" + (name === "dark" ? "daylight" : "dark")).selected)
         }
         compare(find(page, "look_dark").text, "Dark")
         compare(find(page, "look_daylight").text, "Daylight")
@@ -839,13 +839,13 @@ TestCase {
         Theme.night = "nonsense"
         Theme.nightStyle = "nonsense"
         Theme.look = "nonsense"
-        verify(find(page, "look_dark").checked, "Dark is shown as the look in use")
-        verify(!find(page, "look_daylight").checked)
-        verify(find(page, "night_off").checked, "off is shown as the mode in use")
-        verify(!find(page, "night_on").checked)
-        verify(!find(page, "night_schedule").checked)
-        verify(find(page, "nightStyle_amber").checked)
-        verify(!find(page, "nightStyle_red").checked)
+        verify(find(page, "look_dark").selected, "Dark is shown as the look in use")
+        verify(!find(page, "look_daylight").selected)
+        verify(find(page, "night_off").selected, "off is shown as the mode in use")
+        verify(!find(page, "night_on").selected)
+        verify(!find(page, "night_schedule").selected)
+        verify(find(page, "nightStyle_amber").selected)
+        verify(!find(page, "nightStyle_red").selected)
     }
 
     // From and Until show under Scheduled and nowhere else; a valid time is
@@ -949,16 +949,16 @@ TestCase {
         const metric = find(page, "units_metric")
         const imperial = find(page, "units_imperial")
         compare(Bridge.unitSystem, 0)
-        verify(metric.checked && !imperial.checked)
+        verify(metric.selected && !imperial.selected)
         press(page, "units_imperial")
         compare(Bridge.unitSystem, 1)
-        verify(imperial.checked && !metric.checked)
+        verify(imperial.selected && !metric.selected)
 
         compare(Bridge.connectSession("mock://demo"), "", "connects")
         verify(metric.enabled, "units change while connected")
         press(page, "units_metric")
         compare(Bridge.unitSystem, 0)
-        verify(metric.checked)
+        verify(metric.selected)
     }
 
     function test_presetsProfilesAndDidsComposeTheUri() {

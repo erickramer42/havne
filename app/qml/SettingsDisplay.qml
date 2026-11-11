@@ -31,6 +31,45 @@ ColumnLayout {
     readonly property int driveHideMs: driveSettings.driveHideMs
     readonly property string driveOrientation: driveSettings.driveOrientation
 
+    // A closed choice: a caption, then a segment row under it. On a phone
+    // the segments take equal shares of the width and their words wrap, so
+    // no word can widen the page
+    component ChoiceRow: ColumnLayout {
+        id: choice
+        property string caption
+        property string prefix
+        property var choices: []
+        property var current
+        signal picked(var key)
+        readonly property bool shares: width < 560
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+        Label {
+            text: choice.caption
+            color: Theme.textDim
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+        SegmentRow {
+            Layout.fillWidth: choice.shares
+            Repeater {
+                model: choice.choices
+                SegmentButton {
+                    required property var modelData
+                    objectName: choice.prefix + modelData.key
+                    share: choice.shares
+                    labelSize: Theme.fontBody
+                    wrapMode: choice.shares ? Text.Wrap : Text.NoWrap
+                    tapHeight: Theme.touchTarget
+                    Layout.preferredHeight: Math.max(Theme.touchTarget, implicitContentHeight)
+                    text: modelData.label
+                    selected: choice.current === modelData.key
+                    onClicked: choice.picked(modelData.key)
+                }
+            }
+        }
+    }
+
     // The whole UI's zoom; Main.qml applies and stores it
     // One row of four: a button never wraps alone onto a second line
     ColumnLayout {
@@ -86,78 +125,42 @@ ColumnLayout {
     // The look (ADR-0058): Dark, or Daylight for a screen read in sun.
     // Night shows over either; Theme.qml stores it. Shown while there is
     // more than one look to choose
-    LabeledFlow {
+    ChoiceRow {
         visible: Theme.lookNames.length > 1
-        label: qsTr("Look:")
-        Repeater {
-            model: [
-                { look: "dark", label: qsTr("Dark") },
-                { look: "daylight", label: qsTr("Daylight") }
-            ]
-            ThemedButton {
-                required property var modelData
-                objectName: "look_" + modelData.look
-                text: modelData.label
-                checkable: true
-                checked: Theme.clampLook(Theme.look) === modelData.look
-                onClicked: Theme.look = modelData.look
-            }
-        }
+        caption: qsTr("Look:")
+        prefix: "look_"
+        choices: [
+            { key: "dark", label: qsTr("Dark") },
+            { key: "daylight", label: qsTr("Daylight") }
+        ]
+        current: Theme.clampLook(Theme.look)
+        onPicked: key => Theme.look = key
     }
 
     // Night (ADR-0058): off, on, or on a schedule; and its style, amber or
     // red on near black, for a cabin after dark. Each takes effect at once;
     // Theme.qml stores it. The Dashboard's switch is the same control
-    // Wide, the caption and the three modes share a row; on a phone the
-    // caption takes a row and the three split the next, so none wraps alone
-    GridLayout {
-        id: nightRow
-        Layout.fillWidth: true
-        columnSpacing: Theme.spacing
-        rowSpacing: Theme.spacing
-        readonly property bool oneRow: root.width >= 560
-        columns: oneRow ? 4 : 3
-        Label {
-            text: qsTr("Night:")
-            color: Theme.textDim
-            topPadding: 8
-            Layout.columnSpan: nightRow.oneRow ? 1 : 3
-        }
-        Repeater {
-            model: [
-                { mode: "off", label: qsTr("Off") },
-                { mode: "on", label: qsTr("On") },
-                { mode: "schedule", label: qsTr("Scheduled") }
-            ]
-            ThemedButton {
-                required property var modelData
-                objectName: "night_" + modelData.mode
-                Layout.fillWidth: true
-                Layout.maximumWidth: nightRow.oneRow ? implicitWidth : Number.POSITIVE_INFINITY
-                text: modelData.label
-                checkable: true
-                checked: Theme.clampNight(Theme.night) === modelData.mode
-                onClicked: Theme.night = modelData.mode
-            }
-        }
+    ChoiceRow {
+        caption: qsTr("Night:")
+        prefix: "night_"
+        choices: [
+            { key: "off", label: qsTr("Off") },
+            { key: "on", label: qsTr("On") },
+            { key: "schedule", label: qsTr("Scheduled") }
+        ]
+        current: Theme.clampNight(Theme.night)
+        onPicked: key => Theme.night = key
     }
     // Chosen ahead of the evening too; the Dashboard's switch shows the result
-    LabeledFlow {
-        label: qsTr("Night style:")
-        Repeater {
-            model: [
-                { style: "amber", label: qsTr("Amber") },
-                { style: "red", label: qsTr("Red") }
-            ]
-            ThemedButton {
-                required property var modelData
-                objectName: "nightStyle_" + modelData.style
-                text: modelData.label
-                checkable: true
-                checked: Theme.clampStyle(Theme.nightStyle) === modelData.style
-                onClicked: Theme.nightStyle = modelData.style
-            }
-        }
+    ChoiceRow {
+        caption: qsTr("Night style:")
+        prefix: "nightStyle_"
+        choices: [
+            { key: "amber", label: qsTr("Amber") },
+            { key: "red", label: qsTr("Red") }
+        ]
+        current: Theme.clampStyle(Theme.nightStyle)
+        onPicked: key => Theme.nightStyle = key
     }
     // The schedule's window: a masked field takes a phone's numeric
     // keyboard and the desktop's alike (a popup picker would draw outside
@@ -236,95 +239,42 @@ ColumnLayout {
     // Units: what the pages show, converted in core (ADR-0022);
     // recordings keep the decoded values. Main.qml stores it.
     // Takes effect at once, connected or not.
-    LabeledFlow {
-        label: qsTr("Units:")
-        Repeater {
-            model: [
-                { system: 0, name: "metric", label: qsTr("Metric (km/h, °C)") },
-                { system: 1, name: "imperial", label: qsTr("Imperial (mph, °F)") }
-            ]
-            ThemedButton {
-                required property var modelData
-                // A long label wraps rather than run past a phone's edge
-                width: Math.min(implicitWidth, parent.width)
-                objectName: "units_" + modelData.name
-                text: modelData.label
-                checkable: true
-                checked: Bridge.unitSystem === modelData.system
-                onClicked: Bridge.unitSystem = modelData.system
-            }
-        }
+    ChoiceRow {
+        caption: qsTr("Units:")
+        prefix: "units_"
+        choices: [
+            { key: "metric", label: qsTr("Metric (km/h, °C)") },
+            { key: "imperial", label: qsTr("Imperial (mph, °F)") }
+        ]
+        current: Bridge.unitSystem === 0 ? "metric" : "imperial"
+        onPicked: key => Bridge.unitSystem = key === "metric" ? 0 : 1
     }
 
-    // A segment per value, each an equal share of the row and its words
-    // wrapped, so no word can widen the page
-    ColumnLayout {
+    ChoiceRow {
         objectName: "driveHideRow"
         visible: root.driveShown
-        Layout.fillWidth: true
-        spacing: Theme.spacing
-        Label {
-            text: qsTr("Hide the drive view's bars after:")
-            color: Theme.textDim
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-        }
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 0
-            Repeater {
-                model: [
-                    { ms: 2000, label: qsTr("2 s") },
-                    { ms: 4000, label: qsTr("4 s") },
-                    { ms: 8000, label: qsTr("8 s") },
-                    { ms: 0, label: qsTr("Never") }
-                ]
-                SegmentButton {
-                    required property var modelData
-                    objectName: "driveHide_" + modelData.ms
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 0
-                    Layout.preferredHeight: Math.max(Theme.touchTarget, implicitContentHeight)
-                    wrapMode: Text.Wrap
-                    text: modelData.label
-                    selected: driveSettings.driveHideMs === modelData.ms
-                    onClicked: driveSettings.driveHideMs = modelData.ms
-                }
-            }
-        }
+        caption: qsTr("Hide the drive view's bars after:")
+        prefix: "driveHide_"
+        choices: [
+            { key: 2000, label: qsTr("2 s") },
+            { key: 4000, label: qsTr("4 s") },
+            { key: 8000, label: qsTr("8 s") },
+            { key: 0, label: qsTr("Never") }
+        ]
+        current: driveSettings.driveHideMs
+        onPicked: key => driveSettings.driveHideMs = key
     }
-    ColumnLayout {
+    ChoiceRow {
         objectName: "driveOrientationRow"
         visible: root.driveShown && root.orientationShown
-        Layout.fillWidth: true
-        spacing: Theme.spacing
-        Label {
-            text: qsTr("Drive view orientation:")
-            color: Theme.textDim
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-        }
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 0
-            Repeater {
-                model: [
-                    { mode: "follow", label: qsTr("Follow the phone") },
-                    { mode: "upright", label: qsTr("Upright") },
-                    { mode: "side", label: qsTr("On the side") }
-                ]
-                SegmentButton {
-                    required property var modelData
-                    objectName: "driveOrientation_" + modelData.mode
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 0
-                    Layout.preferredHeight: Math.max(Theme.touchTarget, implicitContentHeight)
-                    wrapMode: Text.Wrap
-                    text: modelData.label
-                    selected: driveSettings.driveOrientation === modelData.mode
-                    onClicked: driveSettings.driveOrientation = modelData.mode
-                }
-            }
-        }
+        caption: qsTr("Drive view orientation:")
+        prefix: "driveOrientation_"
+        choices: [
+            { key: "follow", label: qsTr("Follow the phone") },
+            { key: "upright", label: qsTr("Upright") },
+            { key: "side", label: qsTr("On the side") }
+        ]
+        current: driveSettings.driveOrientation
+        onPicked: key => driveSettings.driveOrientation = key
     }
 }
