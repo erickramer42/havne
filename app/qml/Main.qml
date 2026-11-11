@@ -364,7 +364,8 @@ ApplicationWindow {
             spacing: 0
 
             // The bar's place in the column: the drive view gives it to the
-            // page, and the bar slides in over the gauges
+            // page and never shows the bar (its controls rise from the
+            // bottom in the page's sheet)
             Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: root.driving ? 0 : headerBar.height
@@ -374,8 +375,7 @@ ApplicationWindow {
                     objectName: "headerBar"
                     width: parent.width
                     height: Theme.toolBarHeight + zoomRoot.insetTop
-                    y: root.driving ? -height * (1 - root.barsShown) : 0
-                    visible: !root.driving || root.barsShown > 0
+                    visible: !root.driving
                     // The row below pads the inset itself; the style would pad it too
                     topPadding: 0
                     background: Rectangle {
@@ -585,7 +585,6 @@ ApplicationWindow {
                         }
                     }
                 }
-                BarTouch { y: headerBar.y; width: headerBar.width; height: headerBar.height; visible: headerBar.visible }
             }
 
             RowLayout {
@@ -655,7 +654,7 @@ ApplicationWindow {
                         onLogRequested: root.openLog()
                         driveHideMs: settingsView.driveHideMs
                         driveOrientation: settingsView.driveOrientation
-                        driveHeaderHeight: headerBar.height
+                        driveTabBarHeight: tabBar.height
                         driveInsetTop: zoomRoot.insetTop
                         driveInsetBottom: zoomRoot.insetBottom
                         driveLogTime: root.logTimeText(Bridge.logElapsedMs)

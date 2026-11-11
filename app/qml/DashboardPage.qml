@@ -397,11 +397,11 @@ Page {
     property bool driving: false
     property bool barsUp: false          // the reveal
     property bool barsHeld: false        // a fault or a log's notice keeps them up
-    // What Main hands over: Settings' two values, the header's height and
-    // the system's insets
+    // What Main hands over: Settings' two values, the tab bar's height (the
+    // sheet rises above it) and the system's insets
     property int driveHideMs: 4000
     property string driveOrientation: "follow"
-    property real driveHeaderHeight: 0
+    property real driveTabBarHeight: 0
     property real driveInsetTop: 0
     property real driveInsetBottom: 0
     property string driveLogTime: ""
@@ -448,23 +448,6 @@ Page {
         PhoneWindow.lockOrientation("follow")
     }
     Component.onDestruction: leaveDrive(false)
-
-    // Above the revealed tool row: a press restarts the hide delay and goes
-    // on to the buttons
-    MouseArea {
-        objectName: "driveToolsTouch"
-        enabled: root.driving
-        visible: topBar.visible && root.driving
-        z: 3
-        x: topBar.x
-        y: topBar.y
-        width: topBar.width
-        height: topBar.height
-        onPressed: mouse => {
-            root.barTouched()
-            mouse.accepted = false
-        }
-    }
 
     // A tap on the gauges: the bars in or out, and a held reveal is over
     function driveTap() {
@@ -544,11 +527,11 @@ Page {
                 root.driveLogEnded = true
         }
     }
+    // The bars rise from the bottom, so the status line is never covered
     Timer {
         objectName: "driveLogEndedTimer"
         interval: root.driveHideMs > 0 ? root.driveHideMs : 4000
-        // The header covers the status line while the bars are up
-        running: root.driveLogEnded && !root.barsUp
+        running: root.driveLogEnded
         onTriggered: root.driveLogEnded = false
     }
 
@@ -1959,43 +1942,196 @@ Page {
         }
     }
 
-    // Behind the revealed tool row, so the gauges don't show through it.
-    // A touch on it counts as a touch on the bars
+    // What the log did without being asked: Start log's refusal, or an
+    // end the user didn't ask for (a failed write, the session's end), in
+    // words beside a warning dot, until Dismiss or the next log. Start log
+    // sits in Main's header, so the bridge holds the words
+    // (Bridge.logNotice); the header and the drive view's sheet show them
+    component LogNotice: RowLayout {
+        id: notice
+        required property string name
+        objectName: name
+        Layout.fillWidth: true
+        visible: Bridge.logNotice !== ""
+        spacing: 10
+        Rectangle {
+            implicitWidth: 8; implicitHeight: 8   // layout-managed
+            radius: 4
+            color: Theme.warning
+        }
+        Label {
+            objectName: notice.name + "Text"
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.text
+            font.pixelSize: Theme.fontCaption
+            text: Bridge.logNotice
+        }
+        ThemedButton {
+            objectName: notice.name + "Dismiss"
+            compact: true
+            text: qsTr("Dismiss")
+            Accessible.name: qsTr("Dismiss the log's notice")
+            onClicked: Bridge.clearLogNotice()
+        }
+    }
+
+    // ---- The drive view's controls (ADR-0059's appendix "the reveal from
+    // the bottom"): a sheet that rises with the tab bar, over the panel's
+    // foot, so the top row and the status line stay in view. Upright the
+    // session's row over the view's, Exit drive nearest the tabs; on its
+    // side one row, the view's controls first. Its ground keeps the gauges
+    // from showing through, and a touch anywhere on it restarts the delay
     Rectangle {
+        id: driveSheet
         objectName: "driveToolsBackdrop"
-        visible: topBar.visible && root.driving
-        z: 1
+        readonly property bool wide: root.width > root.height
+        visible: root.driving && root.barsShown > 0
+        z: 3
         x: 0
-        y: topBar.y - root.gap / 2
+        y: root.height - root.barsShown * (root.driveTabBarHeight + height)
         width: root.width
-        height: topBar.height + root.gap
+        height: sheetGrid.implicitHeight + 2 * Theme.barGap
         color: Theme.bg
+        // Keeps a press between the controls off the gauges; driveToolsTouch counts it
         MouseArea {
             anchors.fill: parent
             enabled: root.driving
-            onPressed: root.barTouched()
         }
         Rectangle {
-            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            anchors { left: parent.left; right: parent.right; top: parent.top }
             height: root.hairlineWidth
             color: Theme.hairline
         }
+        GridLayout {
+            id: sheetGrid
+            objectName: "driveSheet"
+            readonly property real touchMin: Theme.touchTarget
+            x: root.margin
+            y: Theme.barGap
+            width: parent.width - 2 * root.margin
+            columns: driveSheet.wide ? 2 : 1
+            columnSpacing: Theme.barGap
+            rowSpacing: Theme.barGap
+
+            LogNotice {
+                name: "driveLogNotice"
+                Layout.row: 0
+                Layout.column: 0
+                Layout.columnSpan: sheetGrid.columns
+            }
+            RowLayout {
+                objectName: "driveSessionRow"
+                Layout.row: 1
+                Layout.column: driveSheet.wide ? 1 : 0
+                Layout.fillWidth: true
+                spacing: Theme.barGap
+                Item { Layout.fillWidth: true; visible: driveSheet.wide }
+                SheetButton {
+                    objectName: "driveStartLog"
+                    highlighted: true
+                    visible: Bridge.connected && !Bridge.recordingActive
+                             && !root.isReplay(Bridge.currentUri)
+                    enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
+                    text: qsTr("Start log")
+                    Accessible.name: qsTr("Start a log of the ticked signals")
+                    onClicked: Bridge.startLog()
+                }
+                Label {
+                    objectName: "driveLogReadout"
+                    visible: Bridge.logActive
+                    font.family: Theme.valueFamily
+                    font.features: { "tnum": 1 }
+                    font.pixelSize: Theme.fontBody
+                    color: Theme.text
+                    text: root.driveLogSize === "" ? root.driveLogTime
+                        : qsTr("%1 · %2").arg(root.driveLogTime).arg(root.driveLogSize)
+                }
+                SheetButton {
+                    objectName: "driveStopLog"
+                    highlighted: true
+                    visible: Bridge.logActive
+                    enabled: !Bridge.disconnecting
+                    text: qsTr("Stop log")
+                    onClicked: Bridge.stopLog()
+                }
+                SheetButton {
+                    objectName: "driveMark"
+                    visible: Bridge.recordingActive && !Bridge.logActive
+                    text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount) : qsTr("Mark")
+                    Accessible.name: qsTr("Mark the recording")
+                    onClicked: Bridge.mark()
+                }
+                Item { Layout.fillWidth: true; visible: !driveSheet.wide }
+                // Stop log takes its place while a log runs, as in the header
+                SheetButton {
+                    objectName: "driveDisconnect"
+                    flat: true
+                    visible: !Bridge.logActive
+                    enabled: !Bridge.connecting && !Bridge.disconnecting
+                    text: Bridge.disconnecting ? qsTr("Disconnecting…") : qsTr("Disconnect")
+                    onClicked: Bridge.disconnectSession()
+                }
+            }
+            RowLayout {
+                objectName: "driveViewRow"
+                Layout.row: driveSheet.wide ? 1 : 2
+                Layout.column: 0
+                Layout.fillWidth: true
+                spacing: Theme.barGap
+                SheetButton {
+                    objectName: "driveExit"
+                    flat: true
+                    text: qsTr("Exit drive")
+                    Accessible.name: qsTr("Exit drive: leave the full-screen gauges")
+                    onClicked: root.leaveDrive(true)
+                }
+                Item { Layout.fillWidth: true; visible: !driveSheet.wide }
+                SheetButton {
+                    objectName: "driveResetPeaks"
+                    flat: true
+                    text: qsTr("Reset peaks")
+                    onClicked: root.resetPeaks()
+                }
+                Loader {
+                    objectName: "driveNight"
+                    active: root.driving
+                    sourceComponent: toolNight
+                }
+                Item { Layout.fillWidth: true; visible: driveSheet.wide }
+            }
+        }
+        // Over the controls: a press restarts the delay and goes on to them
+        MouseArea {
+            objectName: "driveToolsTouch"
+            anchors.fill: parent
+            z: 1
+            enabled: root.driving
+            onPressed: mouse => {
+                root.barTouched()
+                mouse.accepted = false
+            }
+        }
+    }
+    // A touch's size each way, drawn compact, as the header's buttons
+    component SheetButton: ThemedButton {
+        compact: !flat
+        Layout.minimumWidth: Theme.touchTarget
     }
 
     // ---- The header: on the desktop the title, the link state and the
     // tools, on the phone the tools alone (the tab bar names the page and
     // the top bar has the link state); why the stored layout isn't shown;
-    // last, the desktop's page strip, on the panel's upper edge
+    // last, the desktop's page strip, on the panel's upper edge. The drive
+    // view shows none of it: its controls are in the sheet
 
     ColumnLayout {
         id: topBar
-        readonly property real revealedY: root.driveHeaderHeight + root.gap / 2
-        visible: !root.driving || root.barsShown > 0
+        visible: !root.driving
         // Over the pages, so the shown tab covers the panel's top line
-        z: root.driving ? 2 : 1
+        z: 1
         x: (root.width - width) / 2
-        // In the drive view it comes down from under the header's edge
-        y: root.driving ? revealedY - (1 - root.barsShown) * (revealedY + height + root.gap) : root.topGap
+        y: root.topGap
         width: Math.max(0, root.width - 2 * root.margin)
         spacing: root.gap / 2
 
@@ -2090,37 +2226,7 @@ Page {
             }
         }
 
-        // What the log did without being asked: Start log's refusal, or
-        // an end the user didn't ask for (a failed write, the session's
-        // end), in words beside a warning dot, until Dismiss or the next
-        // log. Start log sits in Main's header, so the bridge holds the
-        // words (Bridge.logNotice) and this page shows them
-        RowLayout {
-            objectName: "dashLogNotice"
-            Layout.fillWidth: true
-            visible: Bridge.logNotice !== ""
-            spacing: 10
-            Rectangle {
-                implicitWidth: 8; implicitHeight: 8   // layout-managed
-                radius: 4
-                color: Theme.warning
-            }
-            Label {
-                objectName: "dashLogNoticeText"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: Theme.text
-                font.pixelSize: Theme.fontCaption
-                text: Bridge.logNotice
-            }
-            ThemedButton {
-                objectName: "dashLogNoticeDismiss"
-                compact: true
-                text: qsTr("Dismiss")
-                Accessible.name: qsTr("Dismiss the log's notice")
-                onClicked: Bridge.clearLogNotice()
-            }
-        }
+        LogNotice { name: "dashLogNotice" }
 
         // Edit mode's bar: Undo and Redo where Drive stands outside edit
         // mode, Add and Page, and Done in Edit's place at the end. Compact

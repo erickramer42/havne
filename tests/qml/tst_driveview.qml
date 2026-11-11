@@ -130,9 +130,10 @@ TestCase {
         verify(waitForPolish(s.main), "laid out")
     }
 
+    // Main's header and tab bar, and the view's sheet
     function bars(s) {
         return { head: find(s.main.contentItem, "headerBar"), tab: find(s.main.contentItem, "tabBar"),
-                 tools: find(s.dash, "resetPeaks") }
+                 tools: find(s.dash, "driveSheet"), sheet: find(s.dash, "driveToolsBackdrop") }
     }
 
     function revealedOn(s) {
@@ -225,7 +226,8 @@ TestCase {
         verify(s.dash.driving, "Drive enters")
         tryCompare(b.head, "visible", false, 2000, "the top bar goes")
         tryCompare(b.tab, "visible", false, 2000, "the tab bar goes")
-        verify(!b.tools.visible, "the tool row goes")
+        verify(!find(s.dash, "resetPeaks").visible, "the tool row goes")
+        verify(!b.tools.visible, "no sheet")
         verify(!find(s.dash, "dashIndicator").visible, "the page indicator goes")
         const line = find(s.dash, "driveStatusLine")
         verify(line.visible, "the status line stays")
@@ -411,8 +413,8 @@ TestCase {
         verify(!run.visible, "then it goes")
     }
 
-    // Pressed in the revealed bars, where the header covers the status line
-    function test_stopLogFromTheBarsWaitsForThemToGo() {
+    // Pressed in the sheet: the status line above it says so at once
+    function test_stopLogFromTheSheetSaysSoAtOnce() {
         const s = driven()
         enterOn(s)
         tryVerify(() => Bridge.signalModel.subscribedCount > 0, 3000, "signals ticked")
@@ -421,16 +423,12 @@ TestCase {
         revealedOn(s)
         const timer = find(s.dash, "driveLogEndedTimer")
         const run = find(s.dash, "driveStatusRun")
-        Bridge.stopLog()
+        mouseClick(find(s.dash, "driveStopLog"))
         tryVerify(() => s.dash.driveLogEnded, 5000, "said")
         verify(s.dash.barsUp, "the bars stay")
-        verify(!timer.running, "no time spent behind the header")
-        s.dash.driveTap()
-        verify(timer.running, "it starts as they go")
+        verify(timer.running, "its time runs while the bars are up")
         compare(run.text, qsTr("Log ended"))
         verify(run.visible)
-        s.dash.driveTap()
-        verify(!timer.running, "and waits again behind them")
     }
 
     // A full disk: the driver didn't ask, so it comes with the notice and the bars
@@ -498,9 +496,10 @@ TestCase {
         mouseClick(find(s.dash, "dashCell_0_0"))
         verify(s.dash.barsUp, "a tap on a gauge reveals")
         tryCompare(s.dash, "barsShown", 1, 2000)
-        verify(b.head.visible && b.tab.visible && b.tools.visible, "every bar shows")
+        verify(b.tab.visible && b.tools.visible, "the tab bar and the sheet show")
+        verify(!b.head.visible, "the header stays hidden")
         compare(swipe.height, height, "the gauges don't reflow")
-        compare(find(s.dash, "dashDrive").text, qsTr("Exit drive"))
+        compare(find(s.dash, "driveExit").text, qsTr("Exit drive"))
     }
 
     function test_aTapOffTheCellsAlsoReveals() {
@@ -535,7 +534,7 @@ TestCase {
         const timer = hideTimer(s)
         let resets = 0
         s.dash.peaksResetRequested.connect(() => ++resets)
-        const reset = find(s.dash, "resetPeaks")
+        const reset = find(s.dash, "driveResetPeaks")
         const spy = createTemporaryObject(spyComponent, testCase,
                                           { target: timer, signalName: "runningChanged" })
         mouseClick(reset)
@@ -573,8 +572,8 @@ TestCase {
         const b = bars(s)
         verify(waitForPolish(s.main), "laid out")
         const before = s.dash.barTouches
-        mouseClick(b.head, b.head.width / 2, b.head.height / 2)
-        compare(s.dash.barTouches, before + 1, "the top bar")
+        mouseClick(b.sheet, b.sheet.width / 2, 2)
+        compare(s.dash.barTouches, before + 1, "the sheet")
         mouseClick(b.tab, b.tab.width / 2, b.tab.height - 3)
         compare(s.dash.barTouches, before + 2, "the tab bar")
         verify(s.dash.driving, "neither is an exit")
@@ -625,7 +624,8 @@ TestCase {
         tryCompare(s.dash, "barsUp", true, 2000, "a notice raises them")
         verify(!hideTimer(s).running, "held")
         tryCompare(s.dash, "barsShown", 1, 2000)
-        verify(find(s.dash, "dashLogNotice").visible, "with its row and Dismiss")
+        verify(find(s.dash, "driveLogNotice").visible, "with its row and Dismiss, in the sheet")
+        verify(find(s.dash, "driveLogNoticeDismiss").visible)
         Bridge.clearLogNotice()
         tryCompare(s.dash, "barsHeld", false, 2000, "its end lets the delay run")
         verify(hideTimer(s).running)
@@ -668,6 +668,132 @@ TestCase {
         verify(s.dash.driving)
     }
 
+    // ---- The sheet (ADR-0059's appendix "the reveal from the bottom")
+
+    // The delay at Never, so a long case's presses find the sheet still up
+    function neverHide() {
+        uiStore.setValue("driveHideMs", 0)
+        uiStore.sync()
+    }
+    function withTheBarsHeld() {
+        neverHide()
+        return driven()
+    }
+
+    // The top row and the status line stay in view: the sheet rises from
+    // the foot and the header never comes down
+    function test_theRevealCoversNoTopRow_data() {
+        return [{ tag: "upright", w: 384, h: 832 }, { tag: "on its side", w: 832, h: 384 }]
+    }
+    function test_theRevealCoversNoTopRow(data) {
+        const s = withTheBarsHeld()
+        s.main.width = data.w
+        s.main.height = data.h
+        enterOn(s)
+        revealedOn(s)
+        const b = bars(s)
+        verify(waitForPolish(s.main), "laid out")
+        const top = item => item.mapToItem(s.main.contentItem, 0, 0).y
+        const first = find(s.dash, "dashCell_0_0")
+        const line = find(s.dash, "driveStatusLine")
+        verify(line.visible, "the status line shows")
+        verify(top(first) + first.height <= top(b.sheet),
+               "the first cell " + top(first) + " ends above the sheet at " + top(b.sheet))
+        verify(top(line) + line.height <= top(b.sheet), "nothing covers the status line")
+        verify(!b.head.visible, "no header")
+        fuzzyCompare(top(b.sheet) + b.sheet.height, top(b.tab), 0.5, "the sheet sits on the tab bar")
+    }
+
+    // Upright the session's row over the view's, Exit drive nearest the
+    // tabs; on its side one row. Each control is the header's or the tool
+    // row's, bound to the same calls
+    function test_theSheetHoldsTheSessionAndTheView_data() {
+        return [{ tag: "upright", w: 384, h: 832, rows: 2 }, { tag: "on its side", w: 832, h: 384, rows: 1 }]
+    }
+    function test_theSheetHoldsTheSessionAndTheView(data) {
+        const s = withTheBarsHeld()
+        s.main.width = data.w
+        s.main.height = data.h
+        enterOn(s)
+        revealedOn(s)
+        verify(waitForPolish(s.main), "laid out")
+        const y = n => find(s.dash, n).mapToItem(s.main.contentItem, 0, 0).y
+        if (data.rows === 2)
+            verify(y("driveSessionRow") < y("driveViewRow"), "the view's row nearest the tabs")
+        else
+            fuzzyCompare(y("driveSessionRow"), y("driveViewRow"), 0.5, "one row")
+        for (const n of ["driveStartLog", "driveDisconnect", "driveExit", "driveResetPeaks", "driveNight"])
+            verify(find(s.dash, n).visible, n + " shows")
+        verify(!find(s.dash, "driveStopLog").visible && !find(s.dash, "driveMark").visible)
+        tryVerify(() => Bridge.signalModel.subscribedCount > 0, 3000, "signals ticked")
+        mouseClick(find(s.dash, "driveStartLog"))
+        tryCompare(Bridge, "logActive", true, 3000)
+        verify(waitForPolish(s.main), "laid out")
+        verify(find(s.dash, "driveStopLog").visible && find(s.dash, "driveLogReadout").visible)
+        compare(find(s.dash, "driveLogReadout").text.indexOf(s.dash.driveLogTime), 0, "the log's time")
+        verify(!find(s.dash, "driveStartLog").visible, "Stop log in its place")
+        verify(!find(s.dash, "driveDisconnect").visible, "and in Disconnect's, as in the header")
+        verify(s.dash.driving, "Start log is no exit")
+        Bridge.stopLog()
+        tryCompare(Bridge, "logActive", false, 5000)
+        verify(find(s.dash, "driveDisconnect").visible, "Disconnect comes back")
+        verify(waitForPolish(s.main), "laid out")
+        const d = find(s.dash, "driveDisconnect")
+        mouseClick(d)
+        tryCompare(s.dash, "driving", false, 5000, "Disconnect ends the session and the view")
+    }
+
+    function test_theSheetMarksARecording() {
+        neverHide()
+        const s = phoneMain()
+        Bridge.recording = true
+        connect("mock://demo")
+        tryCompare(Bridge, "recordingActive", true, 3000)
+        enterOn(s)
+        revealedOn(s)
+        const mark = find(s.dash, "driveMark")
+        verify(mark.visible, "Mark stands where Start log would")
+        verify(!find(s.dash, "driveStartLog").visible)
+        mouseClick(mark)
+        tryCompare(Bridge, "markCount", 1, 3000)
+        compare(mark.text, "Mark (1)")
+    }
+
+    // Each control a touch's size on the glass, 8 from its neighbor, inside the window
+    function test_theSheetsTargetsAreATouchsSize_data() {
+        return [{ tag: "upright", w: 384, h: 832 }, { tag: "on its side", w: 832, h: 384 }]
+    }
+    function test_theSheetsTargetsAreATouchsSize(data) {
+        const s = withTheBarsHeld()
+        s.main.width = data.w
+        s.main.height = data.h
+        enterOn(s)
+        revealedOn(s)
+        verify(waitForPolish(s.main), "laid out")
+        waitForRendering(s.main.contentItem)
+        const shown = []
+        for (const row of ["driveSessionRow", "driveViewRow"]) {
+            for (const c of find(s.dash, row).children) {
+                if (!c.visible || c.objectName === "")
+                    continue
+                const item = c.objectName === "driveNight" ? c.item : c
+                const at = item.mapToItem(s.main.contentItem, 0, 0)
+                verify(item.width * Theme.zoom >= 47.5 && item.height * Theme.zoom >= 47.5,
+                       c.objectName + " is " + item.width + " x " + item.height)
+                verify(at.x >= 0 && at.x + item.width <= s.main.contentItem.width + 0.5,
+                       c.objectName + " inside the window: " + at.x)
+                shown.push({ name: c.objectName, x: at.x, y: at.y, right: at.x + item.width })
+            }
+        }
+        shown.sort((a, b) => a.y - b.y || a.x - b.x)
+        for (let i = 1; i < shown.length; ++i) {
+            if (Math.abs(shown[i].y - shown[i - 1].y) > 0.5)
+                continue
+            verify(shown[i].x - shown[i - 1].right >= 7.5,
+                   shown[i - 1].name + " and " + shown[i].name + " are 8 apart")
+        }
+    }
+
     // ---- Leaving (sections 3 and 4)
 
     function test_disconnectingEndsTheViewAndKeepsTheSetting() {
@@ -700,7 +826,7 @@ TestCase {
         const s = driven()
         enterOn(s)
         revealedOn(s)
-        mouseClick(find(s.dash, "dashDrive"))
+        mouseClick(find(s.dash, "driveExit"))
         compare(s.dash.driving, false)
         compare(s.stand.visibility, Window.Maximized)
         verify(!dashSaved(s), "Exit drive clears it")
@@ -722,15 +848,6 @@ TestCase {
         compare(s.dash.driving, false, "a tab is Exit drive")
         compare(s.main.currentPage, data.page)
         verify(!dashSaved(s))
-    }
-
-    function test_theStatusOpensTheLogAndLeaves() {
-        const s = driven()
-        enterOn(s)
-        revealedOn(s)
-        mouseClick(find(s.main.contentItem, "linkPill"))
-        compare(s.dash.driving, false)
-        compare(s.main.currentPage, s.main.logPage)
     }
 
     function test_backRevealsThenLeaves() {
