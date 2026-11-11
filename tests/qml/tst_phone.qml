@@ -37,6 +37,8 @@ TestCase {
         Relay.stop()
         Theme.developerMode = false
         Theme.night = "off"
+        Theme.nightStyle = "amber"
+        Theme.look = "dark"
         Theme.zoom = 1.0
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -266,6 +268,59 @@ TestCase {
         }
         if (data.tag === "diagnosticsPage")
             find(page, "clearCancel").clicked()
+    }
+
+    // Every page, and each of Settings' pages, in each look at the two
+    // narrowest phone widths: nothing paints past the right edge, whatever
+    // the palette (a look changes the text and the summaries it shows)
+    function test_everyPageFitsAPhonesWidthInEachLook_data() {
+        const looks = [{ name: "dark", look: "dark", night: "off", style: "amber" },
+                       { name: "daylight", look: "daylight", night: "off", style: "amber" },
+                       { name: "nightAmber", look: "dark", night: "on", style: "amber" },
+                       { name: "nightRed", look: "dark", night: "on", style: "red" }]
+        const rows = []
+        for (const l of looks) {
+            for (const w of [384, 320])
+                rows.push({ tag: l.name + " " + w, look: l.look, night: l.night, style: l.style, w: w })
+        }
+        return rows
+    }
+
+    function test_everyPageFitsAPhonesWidthInEachLook(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        Theme.look = data.look
+        Theme.nightStyle = data.style
+        Theme.night = data.night
+        compare(Theme.active, data.night === "on" ? (data.style === "red" ? "nightRed" : "nightAmber")
+                                                  : data.look, "the look in force")
+        main.width = data.w
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const walked = []
+        const over = []
+        const walk = (page, what) => {
+            main.gotoPage(Array.from(page.parent.children).indexOf(page))
+            verify(page.visible, what + " is on screen")
+            wait(100)
+            verify(waitForPolish(main), what + " laid out")
+            const out = pastTheEdge(page, main.contentItem, [])
+            if (out.length > 0)
+                over.push(what + " past " + main.contentItem.width + " px: " + out.slice(0, 4).join(", "))
+            walked.push(what)
+        }
+        for (const name of ["homePage", "dashboardPage", "livePage", "diagnosticsPage", "logPage",
+                            "recordingsPage"])
+            walk(find(main.contentItem, name), name)
+        const settings = find(main.contentItem, "settingsPage")
+        for (const key of ["", "connection", "vehicle", "signals", "recording", "display", "advanced"]) {
+            settings.pageKey = key
+            walk(settings, "settings " + (key || "list"))
+        }
+        settings.pageKey = ""
+        compare(walked.length, 13, "every page was walked")
+        compare(over, [], "nothing past the edge")
     }
 
     // A value too long for its row (a refusal's words, a text) is bounded by

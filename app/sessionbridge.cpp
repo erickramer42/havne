@@ -399,6 +399,14 @@ int FrameListModel::rowOfSeq(quint64 seq) const
     return m_newestFirst ? count() - 1 - age : age;
 }
 
+double FrameListModel::timestampAt(int row) const
+{
+    if (row < 0 || row >= count()) {
+        return -1;
+    }
+    return static_cast<double>(rowAt(row).timestampUs);
+}
+
 void FrameListModel::notifySelected(int first, int last)
 {
     emit dataChanged(index(first, 0), index(last, 0), {SelectedRole});

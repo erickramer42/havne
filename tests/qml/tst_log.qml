@@ -149,13 +149,71 @@ TestCase {
         Bridge.logPaused = true
         list.follow = false
         list.positionViewAtIndex(20, ListView.Beginning)
-        tryCompare(list, "keptTop", 20, 2000, "noted while shown")
+        const table = find(page, "frameTable")
+        tryCompare(list, "keptTimeUs", table.timeAt(20), 2000, "noted while shown")
         find(page, "view_activity").clicked()
         compare(list.count, 0, "hidden: no rows")
         find(page, "view_frames").clicked()
         tryVerify(() => list.count > 0 && list.indexAt(1, list.contentY + 1) === 20, 2000,
                   "the same first row")
         verify(!list.follow, "and it doesn't follow")
+    }
+
+    // The place is the first row's time, not its index: frames that arrive
+    // while the table is hidden land above it (newest first), so the same
+    // index is another frame. Shown again, the same frame leads the view
+    function test_aHiddenTableKeepsItsPlaceByTimeWhileFramesArrive() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        const list = find(page, "frameList")
+        const table = find(page, "frameTable")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => list.count >= 60, 10000, "frames to scroll through")
+        Bridge.logPaused = true
+        list.follow = false
+        list.positionViewAtIndex(20, ListView.Beginning)
+        const kept = table.timeAt(20)
+        tryCompare(list, "keptTimeUs", kept, 2000, "noted while shown")
+        find(page, "view_activity").clicked()
+        compare(list.count, 0, "hidden: no rows")
+        const held = Bridge.model.count
+        Bridge.logPaused = false
+        tryVerify(() => Bridge.model.count >= held + 30, 10000, "frames arrive while hidden")
+        Bridge.logPaused = true
+        find(page, "view_frames").clicked()
+        tryVerify(() => list.count > 0, 2000, "shown again")
+        tryVerify(() => table.timeAt(list.indexAt(1, list.contentY + 1)) === kept, 2000,
+                  "the same frame leads the view")
+        verify(list.indexAt(1, list.contentY + 1) >= 50, "its index moved down past the new rows")
+        verify(!list.follow, "and it doesn't follow")
+    }
+
+    // A place whose row the filter leaves out comes back at the next row in
+    // the view's order, not at its old index
+    function test_aHiddenTablesPlaceWithItsRowFilteredOutFallsToTheNext() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        const list = find(page, "frameList")
+        const table = find(page, "frameTable")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => list.count >= 60, 10000, "frames to scroll through")
+        Bridge.logPaused = true
+        Bridge.model.newestFirst = false
+        list.follow = false
+        list.positionViewAtIndex(20, ListView.Beginning)
+        const kept = table.timeAt(20)
+        tryCompare(list, "keptTimeUs", kept, 2000, "noted while shown")
+        find(page, "view_activity").clicked()
+        // Only the frames after the kept one: from a microsecond on
+        const from = ((kept + 1) / 1e6).toFixed(6)
+        compare(Bridge.model.setFilter("", "", 0, 0, "", from + "-").times, "")
+        find(page, "view_frames").clicked()
+        tryVerify(() => list.count > 0, 2000, "shown again")
+        tryVerify(() => table.timeAt(list.indexAt(1, list.contentY + 1)) > kept, 2000,
+                  "the first row at or after the kept time")
+        compare(table.timeAt(list.indexAt(1, list.contentY + 1)), table.timeAt(0), "the oldest shown")
     }
 
     // Clear forgets the place a hidden table keeps: scrolled up, cleared,
@@ -170,7 +228,7 @@ TestCase {
         Bridge.logPaused = true
         list.follow = false
         list.positionViewAtIndex(20, ListView.Beginning)
-        tryCompare(list, "keptTop", 20, 2000, "noted while shown")
+        tryVerify(() => list.keptTimeUs > 0, 2000, "noted while shown")
         find(page, "clearFrames").clicked()
         tryCompare(list, "count", 0, 2000, "cleared")
         compare(list.follow, true, "following again")

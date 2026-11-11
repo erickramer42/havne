@@ -1737,6 +1737,26 @@ TEST(BridgeTest, FrameLogOrdersByArrivalNotTimestamp)
     bridge.disconnectSession();
 }
 
+TEST(BridgeTest, AFrameRowsTimeIsReadByItsViewRow)
+{
+    SessionBridge bridge;
+    FrameListModel* proxy = bridge.model();
+    EXPECT_EQ(proxy->timestampAt(0), -1) << "no rows";
+    for (quint64 t : {100u, 200u, 300u}) {
+        ecuio_frame_t f{};
+        f.timestamp_us = t;
+        f.arbitration_id = 0x123;
+        f.data_length = 1;
+        proxy->appendFrame(f, 1);
+    }
+    EXPECT_EQ(proxy->timestampAt(0), 300) << "newest first";
+    EXPECT_EQ(proxy->timestampAt(2), 100);
+    proxy->setNewestFirst(false);
+    EXPECT_EQ(proxy->timestampAt(0), 100) << "oldest first";
+    EXPECT_EQ(proxy->timestampAt(-1), -1);
+    EXPECT_EQ(proxy->timestampAt(3), -1);
+}
+
 TEST(BridgeTest, FrameLogOrdersNewestFirstByDefault)
 {
     SessionBridge bridge;
