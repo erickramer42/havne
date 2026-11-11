@@ -41,17 +41,19 @@ namespace ecuio_mock {
  *   Stop        brake to a standstill, clutch in near idle
  *   Stage       idle at the line
  *   Launch      launch control: WOT, clutch in, ~4000 rpm two-step
- *   DragRun     standing 1/4 mile: clutch dump, wheelspin the driver
- *               feathers out, upshifts at 6800 rpm through 4th
+ *   DragRun     standing 1/4 mile: off the two-step on its boost, the
+ *               clutch slipping with the tires at their peak, then
+ *               traction control holding them at their grip; upshifts
+ *               at 6800 rpm through 4th
  *   Shutdown    lift past the line, brake to a stop
  *   Cooldown    idle, then the engine stops: back to KeyOn
  *
  * Only the first loop starts cold. Each later one starts from where the
  * last ended, so the first loop's runs are on a cold engine and the
  * second warms it through the thermostat. From the third on the coolant
- * runs 88-102 C (190-216 F), the fan taking over at 102 C on the quarter
- * mile, and the oil builds over the next two loops to 108-117 C
- * (226-243 F) under the repeated pulls.
+ * runs 87-102 C (189-216 F), the fan taking over at 102 C on the quarter
+ * mile, and the oil builds over the next two loops to 107-117 C
+ * (225-243 F) under the repeated pulls and the turbo's heat.
  *
  * Where the values come from. The cold start (fast idle hunting around
  * 1430 rpm for about 20 s, then 850-900 rpm), warm idle airflow and
@@ -59,12 +61,16 @@ namespace ecuio_mock {
  * (docs/bench-sessions/2026-10-22-vehicle.md), scaled to this engine's
  * 4.5 L. No car has been logged at WOT or on the limiter through
  * Havne; those states follow the model's physics and the usual
- * signatures (fuel cut leaves airflow up and lambda lean, a NA engine's
- * intake air stays near ambient at speed). So does the manifold's
- * pressure, worked out from load (manifold_kpa). So do the warm temperatures:
- * a thermostat that opens at 84 C, coolant climbing past 210 F on a hard
- * run until the fan cuts in, and oil at what an NA engine without an
- * oil cooler reaches on a track.
+ * signatures (fuel cut leaves airflow up and lambda lean). So does the
+ * manifold's pressure, worked out from load (manifold_kpa), and so does
+ * the turbo: a street turbo's spool, a wastegate holding 17 psi, a
+ * blow-off valve venting the charge on a lift, a compressor and
+ * intercooler of typical efficiency setting the charge's density and the
+ * heat the intake air carries, and the richer mixture a tune runs on
+ * boost (boost_target_kpa, charge_fill, update_boost). So do the warm
+ * temperatures: a thermostat that opens at 84 C, coolant climbing past
+ * 210 F on a hard run until the fan cuts in, and oil at what an engine
+ * without an oil cooler reaches on a track.
  *
  * Nothing a real car reports holds dead still, so neither does this
  * one. The idle controller hunts, the driver's foot can't hold a speed
@@ -82,8 +88,8 @@ constexpr float kTickS = 0.05f;
 constexpr float kPi = 3.14159265f;
 constexpr float kG = 9.81f;
 
-/* Vehicle: a ~1500 kg, ~330 hp rear-drive coupe, manual transmission, on
- * street tires. */
+/* Vehicle: a ~1500 kg, ~600 hp rear-drive coupe, manual transmission, on
+ * street tires, with traction control. */
 constexpr float kMassKg = 1500.0f;
 constexpr float kTireRadiusM = 0.33f;
 constexpr float kFinalDrive = 3.73f;
@@ -106,7 +112,8 @@ constexpr float kPeakSlip = 0.12f;
 constexpr float kEngineInertia = 0.20f;
 constexpr float kWheelInertia = 3.0f;
 
-/* Engine: 4.5 L NA, 400 N*m at 4500 rpm, ~330 hp at 7000. */
+/* Engine: 4.5 L turbocharged; 400 N*m at 4500 rpm without boost
+ * (torque_nm), about 750 N*m on full boost, ~600 hp at 6000. */
 constexpr float kDisplacementL = 4.5f;
 constexpr float kAirDensityGpl = 1.18f;
 constexpr float kIdleRpm = 780.0f;           /* warm */
@@ -181,6 +188,29 @@ constexpr float kMapResidualKpa = 15.0f;
 constexpr float kIntakeLossKpa = 3.0f;
 constexpr float kIntakeLossAtGs = 250.0f;
 constexpr float kMapPumpRpm = 600.0f;
+
+/* The turbo (boost_target_kpa, charge_fill): the most boost the wastegate
+ * holds, 17 psi; the rpm below which the exhaust can't drive the turbine;
+ * the compressor's and the intercooler's efficiencies, typical of a
+ * street turbo; the share of the denser charge the cylinders take past
+ * the exhaust's back-pressure; the richer mixture a tune runs at full
+ * boost; and the share of boost launch control's retarded spark builds
+ * on the two-step. */
+constexpr float kBoostMaxKpa = 118.0f;
+constexpr float kSpoolRpm = 1800.0f;
+constexpr float kCompressorEff = 0.72f;
+constexpr float kIntercoolerEff = 0.80f;
+constexpr float kBoostFillEff = 0.80f;
+constexpr float kLambdaBoost = 0.82f;
+constexpr float kLaunchBoostShare = 0.45f;
+/* How fast the cooling jacket's share of the fuel's heat falls with the
+ * fill past WOT's (update_temperatures) */
+constexpr float kJacketBoostExp = 0.8f;
+/* The turbo's oil-fed bearing housing: the share of the heat the jacket
+ * gives up on boost that it takes, and how long, in s, it takes to pass
+ * that heat on to the oil */
+constexpr float kTurboOilShare = 0.12f;
+constexpr float kTurboSoakS = 60.0f;
 
 /* The driver's pedal, percent per tick: a stab to WOT and a lift are
  * quick, anything else about half the travel a second. */
@@ -299,8 +329,8 @@ inline float airflow_frac(float blade, float rpm)
  * WOT's pressure: the outside air less the intake's loss, which grows
  * with the square of the flow. A stopped engine pumps nothing, so its
  * manifold reads the outside air; one turning slower than an idle (the
- * starter, a run-down) pulls part of the vacuum. Naturally aspirated:
- * never above the outside air, so boost is a vacuum or zero. */
+ * starter, a run-down) pulls part of the vacuum. This is the throttle's
+ * part, never above the outside air: the turbo's boost adds to it. */
 inline float manifold_kpa(float baro_kpa, float rpm, float load_pct,
                           float maf_gs)
 {
@@ -310,6 +340,41 @@ inline float manifold_kpa(float baro_kpa, float rpm, float load_pct,
     const float filled = kMapResidualKpa + (wot - kMapResidualKpa) * fill;
     const float pumping = clampf(rpm / kMapPumpRpm, 0.0f, 1.0f);
     return clampf(baro_kpa + pumping * (filled - baro_kpa), 0.0f, baro_kpa);
+}
+
+/* The boost the wastegate holds at WOT, kPa over the outside air: none
+ * below kSpoolRpm, where the exhaust can't drive the turbine, building
+ * through the spool to kBoostMaxKpa near peak torque, and tapering as
+ * the turbo runs out of flow toward the limiter. */
+inline float boost_target_kpa(float rpm)
+{
+    static const float kRpm[] = {0.0f,    kSpoolRpm, 2500.0f, 3300.0f,
+                                 4500.0f, 6000.0f,   7000.0f};
+    static const float kKpa[] = {0.0f,         0.0f,   35.0f, 112.0f,
+                                 kBoostMaxKpa, 112.0f, 100.0f};
+    return curve(kRpm, kKpa, rpm);
+}
+
+/* The charge's heating, degC: the compressor's adiabatic rise over its
+ * efficiency, of which the intercooler takes back its share. */
+inline float charge_rise_c(float boost_kpa, float baro_kpa)
+{
+    const float pr = (baro_kpa + std::fmax(boost_kpa, 0.0f)) / baro_kpa;
+    const float t_k = kAmbientC + 273.15f;
+    const float rise = t_k * (std::pow(pr, 0.2857f) - 1.0f) / kCompressorEff;
+    return rise * (1.0f - kIntercoolerEff);
+}
+
+/* How much more the cylinders take under boost than at WOT without it:
+ * the charge's density over the outside air's (the pressure ratio, less
+ * the heat the intercooler left in it), of which the exhaust's
+ * back-pressure lets kBoostFillEff of the gain in. 1 with no boost. */
+inline float charge_fill(float boost_kpa, float baro_kpa)
+{
+    const float pr = (baro_kpa + std::fmax(boost_kpa, 0.0f)) / baro_kpa;
+    const float t_k = kAmbientC + 273.15f;
+    const float density = pr * t_k / (t_k + charge_rise_c(boost_kpa, baro_kpa));
+    return 1.0f + kBoostFillEff * (density - 1.0f);
 }
 
 /* Torque with fuel cut: friction and pumping, rising with rpm. */
@@ -420,7 +485,9 @@ struct DriveCycle {
     float wheel_mps = 0.0f;    /* driven-wheel surface speed */
     float accel_mps2 = 0.0f;
     float blade = 0.0f;        /* throttle blade opening, 0..1 */
-    float airflow = 0.0f;      /* airflow fraction of WOT, 0..1 */
+    float airflow = 0.0f;      /* the throttle's share of WOT's airflow, 0..1 */
+    float boost_kpa = 0.0f;    /* the turbo's boost over the outside air */
+    float fill = 0.0f;         /* airflow times charge_fill, past 1 on boost */
     float block_c = kColdStartC;
     float underhood_c = kColdStartC;
     float thermostat_open = 0.0f;   /* 0..1 */
@@ -466,6 +533,7 @@ private:
     bool dfco_ = false;
     uint32_t lift_ticks_ = 0;  /* consecutive ticks with the pedal released */
     float pedal_ = 0.0f;       /* the driver's pedal, percent */
+    bool closing_ = false;     /* the blade is closing: the blow-off opens */
     float hold_i_ = 0.0f;      /* the speed hold's integral, percent of blade */
     float slip_gain_ = 0.4f;   /* how fast the slipping clutch pulls rpm */
     float slip_rise_ = 0.0f;   /* rpm/s the driver lets the slip rpm climb */
@@ -473,6 +541,7 @@ private:
     uint32_t shift_len_ = kShiftTicks;
     float shift_from_rpm_ = 0.0f;
     float odo_m_ = 0.0f;       /* distance along the road, for its grade */
+    float turbo_oil_ = 0.0f;   /* kW the turbo's housing gives the oil */
     uint64_t catch_tick_ = 0;  /* the tick the engine last caught */
     uint64_t first_catch_tick_ = 0;
     bool caught_ = false;      /* caught once: the cold start's clock runs */
@@ -654,7 +723,7 @@ private:
             break;
         case Phase::Cruise4th:
             thr = hold(100.0f, 40.0f);
-            if (phase_ticks >= ticks_for(15.0f)) {
+            if (phase_ticks >= ticks_for(20.0f)) {
                 enter(Phase::Stop);
             }
             break;
@@ -741,12 +810,52 @@ private:
                4.0f * drift(t, 0.4f, 32) + 8.0f * tick_noise(tick, 33);
     }
 
+    /* Power enrichment: richer as the boost builds */
+    float power_lambda() const
+    {
+        return kLambdaWot + (kLambdaBoost - kLambdaWot) *
+                                clampf(boost_kpa / kBoostMaxKpa, 0.0f, 1.0f);
+    }
+
+    /* The turbo. Its boost needs the throttle open past 60 % (every shift
+     * lifts it shut) and follows boost_target_kpa: up at the spool's
+     * rate, quicker at high rpm where the exhaust flows more; down with
+     * the exhaust's energy when the fuel is cut; and at once when the
+     * blade shuts on it, through the blow-off valve. */
+    void update_boost()
+    {
+        const float open = clampf((blade - 0.6f) / 0.3f, 0.0f, 1.0f);
+        float target = boost_target_kpa(rpm) * open;
+        if (!running) {
+            target = 0.0f;
+        } else if (phase == Phase::Launch) {
+            target *= kLaunchBoostShare;
+        } else if (fuel_cut) {
+            target *= 0.5f;
+        }
+        if (target >= boost_kpa) {
+            const float rate =
+                0.10f + 0.10f * clampf((rpm - 2500.0f) / 3000.0f, 0.0f, 1.0f);
+            boost_kpa += (target - boost_kpa) * rate;
+        } else if (closing_) {
+            boost_kpa *= 0.3f;
+        } else {
+            boost_kpa += (target - boost_kpa) * 0.25f;
+        }
+        if (boost_kpa < 0.05f) {
+            boost_kpa = 0.0f;
+        }
+    }
+
     /* Drivetrain, airflow, fueling and temperatures for one tick. */
     void update_vehicle(float thr_req)
     {
         /* Blade travel: a full sweep takes 0.25 s. */
         const float req = clampf(thr_req / 100.0f, 0.0f, 1.0f);
+        const float was = blade;
         blade += clampf(req - blade, -0.2f, 0.2f);
+        closing_ = blade < was;
+        update_boost();
 
         const bool limiter = phase == Phase::Limiter2nd || phase == Phase::Limiter3rd;
         float fuel_duty = 1.0f;   /* share of the airflow that's fueled */
@@ -805,9 +914,13 @@ private:
             fuel_cut = phase_ticks < 2 || (phase_ticks - 2) % 3 != 0;
             airflow = clampf(0.985f - 0.015f * (rpm - 6928.0f) / 70.0f, 0.0f, 1.0f);
             const float road_kw = resist * v_mps / 1000.0f;
-            const float wot_kw = torque_nm(rpm) * rpm * 2.0f * kPi / 60.0f / 1000.0f;
+            const float zl = zero_torque_load(rpm);
+            const float boosted =
+                (airflow * charge_fill(boost_kpa, baro_kpa) - zl) / (1.0f - zl);
+            const float wot_kw =
+                torque_nm(rpm) * boosted * rpm * 2.0f * kPi / 60.0f / 1000.0f;
             fuel_duty = clampf(road_kw / (wot_kw * kDrivelineEff), 0.05f, 1.0f);
-            lambda_cmd = fuel_cut ? kLambdaLean : kLambdaWot;
+            lambda_cmd = fuel_cut ? kLambdaLean : power_lambda();
         } else if (gear == 0 || shifting()) {
             /* Neutral, clutch in, or mid-shift: rpm follows the blade and
              * the idle controller; the car rolls on its own. */
@@ -858,7 +971,7 @@ private:
                 airflow = airflow_frac(blade, rpm);
             }
             lambda_cmd = fuel_cut ? kLambdaLean
-                       : (airflow > 0.85f ? kLambdaWot : 1.0f);
+                                  : (airflow > 0.85f ? power_lambda() : 1.0f);
             /* Rolling with no drive: road load and brakes only, the
              * wheels' inertia but not the engine's */
             const float m = kMassKg + kWheelInertia / (kTireRadiusM * kTireRadiusM);
@@ -872,7 +985,7 @@ private:
         } else {
             drive_in_gear();
             lambda_cmd = fuel_cut ? kLambdaLean
-                       : (airflow > 0.85f ? kLambdaWot : 1.0f);
+                                  : (airflow > 0.85f ? power_lambda() : 1.0f);
         }
 
         if (rpm < 0.0f) {
@@ -886,13 +999,22 @@ private:
         }
 
         /* Calculated load is the airflow over the WOT airflow at this
-         * rpm (J1979 PID 0x04). MAF has a little sensor noise, more at
-         * high flow, and the ECU computes load from it, so load carries
-         * some of the same noise. */
-        const float noise = (0.005f + 0.015f * airflow) * tick_noise(tick, 3);
-        load_pct = clampf(airflow * (1.0f + 0.5f * noise) * 100.0f, 0.0f, 100.0f);
-        maf_gs = maf_wot_gs(rpm) * airflow * (1.0f + noise);
-        map_kpa = manifold_kpa(baro_kpa, rpm, load_pct, maf_gs);
+         * rpm without boost (J1979 PID 0x04), so boost reads 100 %, as
+         * on most turbo cars, and MAF and MAP carry what it adds. MAF has
+         * a little sensor noise, more at high flow, and the ECU computes
+         * load from it, so load carries some of the same noise. */
+        fill = airflow * charge_fill(boost_kpa, baro_kpa);
+        const float noise =
+            (0.005f + 0.015f * std::fmin(fill, 1.0f)) * tick_noise(tick, 3);
+        load_pct = clampf(fill * (1.0f + 0.5f * noise) * 100.0f, 0.0f, 100.0f);
+        maf_gs = maf_wot_gs(rpm) * fill * (1.0f + noise);
+        /* The throttle's part of the manifold, as without a turbo, plus
+         * the boost behind it in the share the blade lets through */
+        const float throttled_pct =
+            clampf(airflow * (1.0f + 0.5f * noise) * 100.0f, 0.0f, 100.0f);
+        map_kpa = manifold_kpa(baro_kpa, rpm, throttled_pct,
+                               maf_wot_gs(rpm) * airflow * (1.0f + noise)) +
+                  boost_kpa * airflow;
         throttle_pct = kTpClosedPct + (kTpWotPct - kTpClosedPct) * blade;
 
         update_lambda(lambda_cmd);
@@ -900,7 +1022,7 @@ private:
 
         /* Fuel burned, kW. On the limiter the refires burn at the WOT
          * mixture for the share of the time road load needs. */
-        const float fuel_lambda = limiter ? kLambdaWot : lambda_cmd;
+        const float fuel_lambda = limiter ? power_lambda() : lambda_cmd;
         const float fuel_kw = (fuel_cut && !limiter)
             ? 0.0f
             : fuel_duty * maf_gs / (kAfrStoich * fuel_lambda) * kFuelKjPerG;
@@ -932,7 +1054,8 @@ private:
             tq = -fuel_cut_drag_nm(rpm);
         } else {
             const float zl = zero_torque_load(rpm);
-            tq = torque_nm(rpm) * (airflow - zl) / (1.0f - zl);
+            fill = airflow * charge_fill(boost_kpa, baro_kpa);
+            tq = torque_nm(rpm) * (fill - zl) / (1.0f - zl);
         }
         float drive_n = (tq >= 0.0f)
             ? tq * wheel_n_per_nm(gear)
@@ -943,6 +1066,11 @@ private:
         const float rear_n = kMassKg * (kG * kRearStaticFrac +
                                         std::fmax(accel_mps2, 0.0f) * kCgOverWheelbase);
         const float grip_n = kMuPeak * rear_n;
+        /* Traction control: once the clutch is in, the ECU retards the
+         * spark until the tires take the drive */
+        if (!clutch_slip && drive_n > grip_n) {
+            drive_n = grip_n;
+        }
         /* A slipping clutch leaves the engine's inertia out of it */
         const float m_rot = clutch_slip
             ? kWheelInertia / (kTireRadiusM * kTireRadiusM)
@@ -1024,8 +1152,8 @@ private:
                          ? kLambdaColdOpenLoop + 0.003f * drift(t, 1.1f, 41)
                          : 1.0f + 0.012f * drift(t, 0.7f, 42) +
                                0.004f * tick_noise(tick, 43);
-        } else if (cmd == kLambdaWot) {
-            target = kLambdaWot + 0.01f * drift(t, 0.9f, 44);
+        } else if (cmd < 1.0f) {
+            target = cmd + 0.01f * drift(t, 0.9f, 44); /* power enrichment */
         }
         lambda += (target - lambda) * 0.7f;
     }
@@ -1043,7 +1171,13 @@ private:
      * the intake draws from at low speed. */
     void update_temperatures(float fuel_kw)
     {
-        const float heat_kw = 0.24f * fuel_kw;
+        /* The jacket's share falls as the fill rises past WOT's: more of
+         * the heat leaves with the exhaust, some through the turbine */
+        const float heat_kw =
+            0.24f * fuel_kw / std::pow(std::fmax(fill, 1.0f), kJacketBoostExp);
+        turbo_oil_ +=
+            (kTurboOilShare * (0.24f * fuel_kw - heat_kw) - turbo_oil_) *
+            kTickS / kTurboSoakS;
         const float speed = clampf(v_mps * 3.6f, 0.0f, 160.0f);
         /* Friction power, a share of which heats the oil directly. Fueled,
          * that share is part of the fuel's heat and comes out of the
@@ -1084,8 +1218,8 @@ private:
             (kBlockHeatShare * heat_kw - (fueled ? oil_friction_kw : 0.0f) -
              q_bc - q_bo - q_block_loss) *
             kTickS / 60.0f;
-        oil_c += (q_bo + kOilHeatShare * heat_kw + oil_friction_kw -
-                  (0.06f + 0.001f * speed) * (oil_c - kAmbientC)) *
+        oil_c += (q_bo + kOilHeatShare * heat_kw + oil_friction_kw +
+                  turbo_oil_ - (0.06f + 0.001f * speed) * (oil_c - kAmbientC)) *
                  kTickS / kOilKjK;
 
         /* The bay: the block, the exhaust manifold and part of the
@@ -1096,10 +1230,12 @@ private:
 
         /* Intake air: drawn partly from the bay (less at speed, when the
          * intake gets fresh air), plus heat picked up in the manifold,
-         * more when the airflow is slow. The sensor lags ~4 s. */
+         * more when the airflow is slow, plus the charge's heat the
+         * intercooler leaves under boost. The sensor lags ~4 s. */
         const float mix = 0.8f - 0.45f * clampf(speed / 80.0f, 0.0f, 1.0f);
         const float pickup = 0.04f * (block_c - kAmbientC) / (1.0f + maf_gs / 30.0f);
-        const float iat_target = kAmbientC + mix * (underhood_c - kAmbientC) + pickup;
+        const float iat_target = kAmbientC + mix * (underhood_c - kAmbientC) +
+                                 pickup + charge_rise_c(boost_kpa, baro_kpa);
         iat_c += (iat_target - iat_c) * (kTickS / 4.0f);
     }
 };

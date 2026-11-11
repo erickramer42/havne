@@ -1061,21 +1061,24 @@ constexpr float kMockRpmMin = 0.0f; /* key on, the engine stopped */
 constexpr float kMockRpmMax = 7100.0f;
 constexpr float kMockCoolantMin = 15.0f;
 constexpr float kMockCoolantMax = 110.0f;
-constexpr float kMockSpeedMax = 200.0f;
+/* 4th gear's limiter speed, 233 km/h, under the wire's 255 */
+constexpr float kMockSpeedMax = 240.0f;
 constexpr float kMockIatMin = 15.0f;
 constexpr float kMockIatMax = 80.0f;
-constexpr float kMockMafMax = 300.0f;   /* WOT near the limiter peaks ~255 */
+constexpr float kMockMafMax =
+    500.0f; /* full boost near peak power reads ~445 */
 constexpr float kMockOilMin = 15.0f;    /* cold start reads 20 */
 constexpr float kMockOilMax = 140.0f;
-constexpr float kMockLambdaMin = 0.8f;  /* WOT enrichment reads ~0.86 */
+constexpr float kMockLambdaMin = 0.8f; /* full boost's enrichment reads ~0.82 */
 constexpr float kMockLambdaMax = 2.0f;  /* fuel cut pegs the sensor lean */
 constexpr float kMockMapMin = 15.0f;    /* a closed throttle's most vacuum */
 constexpr float kMockBaroMin = 95.0f;   /* the outside air near sea level */
 constexpr float kMockBaroMax = 105.0f;
-/* Boost, MAP minus baro: an NA engine's vacuum, never above the outside
- * air, never under a closed throttle's most vacuum */
+/* Boost, MAP minus baro: never under a closed throttle's most vacuum,
+ * never above what the wastegate holds */
 constexpr float kMockBoostMin = kMockMapMin - kMockBaroMax;
-constexpr float kMockBoostMax = 0.0f;
+constexpr float kMockBoostMax = ecuio_mock::kBoostMaxKpa;
+constexpr float kMockMapMax = kMockBaroMax + kMockBoostMax;
 /* Battery voltage: the starter's deepest sag to a cold alternator's output */
 constexpr float kMockBatteryMin = 9.0f;
 constexpr float kMockBatteryMax = 14.8f;
@@ -1443,11 +1446,15 @@ TEST(CoreTest, MockDriveCycleThirdGearPullIsLongerFasterAndHotter)
     const float oil3 = std::fmax(pull3.peak_oil, lim3.peak_oil);
     const float iat3 = std::fmax(pull3.peak_iat, lim3.peak_iat);
     /* The longer pull puts more heat into the cold engine. The intake
-     * air doesn't follow: with no turbo, and ram air at speed, it stays
-     * near ambient. */
+     * air warms only by the charge's heat the intercooler leaves, the
+     * sensor lagging it, and ram air at speed keeps the bay's out */
     EXPECT_GT(coolant3, coolant2 + 4.0f);
     EXPECT_GT(oil3, oil2 + 4.0f);
-    EXPECT_LE(iat3, ecuio_mock::kAmbientC + 10.0f);
+    EXPECT_GT(iat3, ecuio_mock::kAmbientC + 5.0f) << "no charge heat";
+    EXPECT_LE(iat3, ecuio_mock::kAmbientC +
+                        ecuio_mock::charge_rise_c(ecuio_mock::kBoostMaxKpa,
+                                                  ecuio_mock::kBaroKpa) +
+                        5.0f);
 }
 
 TEST(CoreTest, MockDriveCycleDragRunCoversAQuarterMile)
@@ -1468,10 +1475,15 @@ TEST(CoreTest, MockDriveCycleDragRunCoversAQuarterMile)
     /* The run ends on the tick that crosses the line */
     EXPECT_GE(r.end.distance_m, ecuio_mock::kQuarterMileM);
     EXPECT_LT(r.end.distance_m, ecuio_mock::kQuarterMileM + 5.0f);
-    EXPECT_GE(r.end.drag_et_s, 11.0f);
-    EXPECT_LE(r.end.drag_et_s, 15.0f);
-    EXPECT_GE(r.end.drag_trap_kmh, 150.0f);
-    EXPECT_LE(r.end.drag_trap_kmh, 200.0f);
+    /* Traction-limited off the line on street tires, so the boost shows
+     * more in the trap speed than in the time; under 4th gear's limiter
+     * speed, which the run never reaches */
+    EXPECT_GE(r.end.drag_et_s, 11.5f);
+    EXPECT_LE(r.end.drag_et_s, 13.5f);
+    EXPECT_GE(r.end.drag_trap_kmh, 190.0f);
+    EXPECT_LE(r.end.drag_trap_kmh,
+              ecuio_mock::kRevLimitRpm /
+                  ecuio_mock::rpm_per_mps(ecuio_mock::kTopGear) * 3.6f);
 }
 
 TEST(CoreTest, MockDriveCycleLaterLoopsRunAtOperatingTemperature)
@@ -1685,7 +1697,7 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
             EXPECT_GE(lo[i], kMockLambdaMin); EXPECT_LE(hi[i], kMockLambdaMax); break;
         case ECUIO_MOCK_SIG_MAP_ID:
             EXPECT_GE(lo[i], kMockMapMin);
-            EXPECT_LE(hi[i], kMockBaroMax);
+            EXPECT_LE(hi[i], kMockMapMax);
             break;
         case ECUIO_MOCK_SIG_BARO_ID:
             EXPECT_GE(lo[i], kMockBaroMin);
@@ -1809,23 +1821,45 @@ TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
             EXPECT_LE(dc.slip(), 0.5f) << "tick " << dc.tick;
         }
 
-        const float estimate = ecuio_mock::maf_wot_gs(dc.rpm) * dc.load_pct / 100.0f;
-        EXPECT_NEAR(dc.maf_gs, estimate, 0.1f * estimate + 0.5f) << "tick " << dc.tick;
+        /* Below full load the load is the fill, so MAF is WOT's airflow
+         * times it; at full load (boost reads 100 %) MAF carries the rest,
+         * at least WOT's airflow and at most what the boost's charge adds */
+        const float wot = ecuio_mock::maf_wot_gs(dc.rpm);
+        if (dc.load_pct < 99.0f) {
+            const float estimate = wot * dc.load_pct / 100.0f;
+            EXPECT_NEAR(dc.maf_gs, estimate, 0.1f * estimate + 0.5f)
+                << "tick " << dc.tick;
+        } else {
+            EXPECT_GE(dc.maf_gs, 0.9f * wot) << "tick " << dc.tick;
+            EXPECT_LE(dc.maf_gs,
+                      1.1f * wot *
+                          ecuio_mock::charge_fill(dc.boost_kpa, dc.baro_kpa))
+                << "tick " << dc.tick;
+        }
         if (dc.running && dc.rpm >= 600.0f) {
             EXPECT_GT(dc.maf_gs, 5.0f) << "engine running, tick " << dc.tick;
         }
 
-        /* The manifold: never above the outside air (an NA engine), the
-         * outside air itself with the engine stopped, and once it pumps
-         * a full vacuum, the residual plus load's share of the outside
-         * air, less the intake's loss; near the outside air at WOT, a
-         * deep vacuum at idle */
-        EXPECT_LE(dc.map_kpa, dc.baro_kpa) << "tick " << dc.tick;
+        /* The manifold: never above the outside air plus the most boost
+         * the wastegate holds, and above the outside air only on boost,
+         * which needs full load above the spool rpm; the outside air
+         * itself with the engine stopped; with no boost, once it pumps a
+         * full vacuum, the residual plus load's share of the outside air,
+         * less the intake's loss; near the outside air at WOT, a deep
+         * vacuum at idle */
+        EXPECT_LE(dc.map_kpa, dc.baro_kpa + ecuio_mock::kBoostMaxKpa)
+            << "tick " << dc.tick;
+        if (dc.map_kpa > dc.baro_kpa) {
+            EXPECT_GE(dc.load_pct, 95.0f)
+                << "boost without load, tick " << dc.tick;
+            EXPECT_GE(dc.rpm, ecuio_mock::kSpoolRpm)
+                << "boost below the spool, tick " << dc.tick;
+        }
         if (dc.rpm == 0.0f) {
             EXPECT_FLOAT_EQ(dc.map_kpa, dc.baro_kpa)
                 << "stopped, tick " << dc.tick;
         }
-        if (dc.rpm >= ecuio_mock::kMapPumpRpm) {
+        if (dc.rpm >= ecuio_mock::kMapPumpRpm && dc.boost_kpa == 0.0f) {
             const float fill = ecuio_mock::kMapResidualKpa +
                                (dc.baro_kpa - ecuio_mock::kMapResidualKpa) *
                                    dc.load_pct / 100.0f;
@@ -1976,13 +2010,12 @@ TEST(CoreTest, MockDriveCycleEachLoopStartsWithTheEngineStopped)
 
 TEST(CoreTest, MockDriveCycleLimiterCutsFuelNotAir)
 {
-    /* On the limiter the blade stays open, airflow stays near WOT and the
+    /* On the limiter the blade stays open, airflow stays at WOT's or
+     * above (the cut starves the turbine, so boost sags but holds) and the
      * fuel is cut most of each cycle: lambda reads lean, load pegged.
      * Road speed holds while rpm saws. */
-    float pull_maf = 0.0f;
-    for_each_tick_of(Phase::Pull2nd, [&](const DriveCycle& dc) {
-        pull_maf = std::fmax(pull_maf, dc.maf_gs);
-    });
+    const float wot_maf =
+        ecuio_mock::maf_wot_gs(ecuio_mock::kRevLimitRpm - 200.0f);
     float min_load = 100.0f, min_maf = 1e9f, max_lambda = 0.0f;
     float min_kmh = 1e9f, max_kmh = 0.0f;
     uint32_t cut = 0, ticks = 0;
@@ -2000,7 +2033,7 @@ TEST(CoreTest, MockDriveCycleLimiterCutsFuelNotAir)
     });
     ASSERT_EQ(ticks, ecuio_mock::ticks_for(5.0f));
     EXPECT_GE(min_load, 94.0f) << "near WOT air, less the MAF noise";
-    EXPECT_GE(min_maf, 0.9f * pull_maf);
+    EXPECT_GE(min_maf, 0.9f * wot_maf);
     EXPECT_GT(max_lambda, 1.6f);
     EXPECT_GT(cut, ticks / 2) << "the limiter should spend most of its time in cut";
     EXPECT_LE(max_kmh - min_kmh, 1.0f) << "speed should hold on the limiter";
@@ -2034,7 +2067,7 @@ TEST(CoreTest, MockDriveCycleHighwayCruiseHoldsSpeed)
     EXPECT_GE(lo_rpm, 2850.0f);
     EXPECT_LE(hi_rpm, 3100.0f);
     EXPECT_LE(hi_load, 35.0f);
-    EXPECT_LE(hi_maf, 35.0f);
+    EXPECT_LE(hi_maf, 37.0f);
     EXPECT_GE(lo_lambda, 0.97f);
     EXPECT_LE(hi_lambda, 1.03f);
 }
@@ -2069,33 +2102,104 @@ TEST(CoreTest, MockDriveCycleColdStartIdlesFastThenSettles)
 
 TEST(CoreTest, MockDriveCycleLaunchSpinsTheTiresAndHooksUp)
 {
-    /* Off the line the clutch slips while the tires sit near peak slip;
-     * once it locks in 1st the driver feathers the throttle with the
-     * tires spinning a few hundred rpm above road speed. From 2nd the
-     * drive is below the grip and the tires hook up. */
-    float flare_hi = 0.0f;
+    /* Off the line the clutch slips while the tires sit near their peak
+     * slip; once it locks, traction control holds the drive to the grip,
+     * so the tires come back to road speed in 1st and never spin again,
+     * and the engine is locked to the wheels from there on */
     float slip_hi = 0.0f;
     float clutch_rpm_lo = 1e9f;
-    bool spun_in_second = false;
+    bool hooked = false;
+    bool spun_after = false;
     for_each_tick_of(Phase::DragRun, [&](const DriveCycle& dc) {
         if (dc.clutch_slip) {
             clutch_rpm_lo = std::fmin(clutch_rpm_lo, dc.rpm);
-        }
-        if (dc.gear == 1 && !dc.clutch_slip && !dc.shifting()) {
-            const float ground_rpm = dc.v_mps * ecuio_mock::rpm_per_mps(1);
-            flare_hi = std::fmax(flare_hi, dc.rpm - ground_rpm);
             slip_hi = std::fmax(slip_hi, dc.slip());
+        } else if (!dc.spinning) {
+            hooked = true;
         }
-        if (dc.gear >= 2 && dc.spinning) {
-            spun_in_second = true;
+        if (hooked && dc.spinning) {
+            spun_after = true;
         }
     });
     EXPECT_GE(clutch_rpm_lo, 3000.0f) << "the engine bogged off the line";
-    EXPECT_GE(flare_hi, 300.0f);
-    EXPECT_LE(flare_hi, 800.0f);
-    EXPECT_GT(slip_hi, 0.05f);
-    EXPECT_LT(slip_hi, 0.3f);
-    EXPECT_FALSE(spun_in_second);
+    EXPECT_GT(slip_hi, 0.05f)
+        << "the clutch never took the tires to their slip";
+    EXPECT_LT(slip_hi, 0.2f);
+    EXPECT_TRUE(hooked) << "the tires never hooked up";
+    EXPECT_FALSE(spun_after) << "traction control let the tires spin";
+}
+
+TEST(CoreTest, MockDriveCycleEachWotPullBoostsAndALiftVentsIt)
+{
+    /* Three loops. In each WOT pull (2nd, 3rd, the quarter mile) boost,
+     * MAP over the outside air as a gauge reads it, passes 12 psi above
+     * the spool rpm, trailing the throttle (none in a road pull's first
+     * ticks); and a lift from WOT (off the limiters, past the line, each
+     * of the strip's upshifts) vents it through the blow-off valve: MAP
+     * below the outside air within three ticks of the blade starting to
+     * close. At 12 psi the charge's density puts MAF well past WOT's and
+     * the fueling runs rich, lambda 0.80-0.85 */
+    constexpr float k12Psi = 82.7f;
+    constexpr uint32_t kVentTicks = 3;
+    float peak[3][3] = {};
+    float first_ticks_hi = -1e9f;
+    uint32_t vents = 0;
+    uint32_t on_boost = 0;
+    DriveCycle dc;
+    float prev_blade = 0.0f;
+    uint32_t closing = 0;
+    while (dc.loops < 3 && dc.tick < ecuio_mock::ticks_for(1200.0f)) {
+        dc.step();
+        if (dc.loops >= 3) {
+            break;
+        }
+        const float boost = dc.map_kpa - dc.baro_kpa;
+        const int pull = dc.phase == Phase::Pull2nd   ? 0
+                         : dc.phase == Phase::Pull3rd ? 1
+                         : dc.phase == Phase::DragRun ? 2
+                                                      : -1;
+        if (pull >= 0 && dc.rpm >= ecuio_mock::kSpoolRpm) {
+            float& p = peak[dc.loops][pull];
+            p = std::fmax(p, boost);
+        }
+        if (pull >= 0 && pull < 2 && dc.phase_ticks <= 2) {
+            first_ticks_hi = std::fmax(first_ticks_hi, boost);
+        }
+        if (pull >= 0 && boost >= k12Psi && !dc.fuel_cut) {
+            EXPECT_GE(dc.maf_gs, 1.4f * ecuio_mock::maf_wot_gs(dc.rpm))
+                << "tick " << dc.tick;
+            EXPECT_GE(dc.lambda, 0.80f) << "tick " << dc.tick;
+            EXPECT_LE(dc.lambda, 0.85f) << "tick " << dc.tick;
+            ++on_boost;
+        }
+        /* A blade closing from WOT and still closing (a lift, not the
+         * strip's feathering, which eases it and holds) */
+        if (dc.blade < prev_blade && prev_blade >= 0.99f) {
+            closing = 1;
+        } else if (closing > 0 && dc.blade < prev_blade) {
+            ++closing;
+        } else {
+            closing = 0;
+        }
+        if (closing == kVentTicks) {
+            EXPECT_LT(dc.map_kpa, dc.baro_kpa)
+                << "the boost wasn't vented, tick " << dc.tick;
+            closing = 0;
+            ++vents;
+        }
+        prev_blade = dc.blade;
+    }
+    ASSERT_EQ(dc.loops, 3u);
+    for (uint32_t loop = 0; loop < 3; ++loop) {
+        for (int pull = 0; pull < 3; ++pull) {
+            EXPECT_GE(peak[loop][pull], k12Psi)
+                << "loop " << loop + 1 << ", pull " << pull;
+        }
+    }
+    EXPECT_LT(first_ticks_hi, 5.0f) << "boost came with the throttle, no lag";
+    EXPECT_GE(vents, 3u * 6u) << "too few lifts seen";
+    EXPECT_GE(on_boost, ecuio_mock::ticks_for(30.0f))
+        << "too little boost seen";
 }
 
 namespace {

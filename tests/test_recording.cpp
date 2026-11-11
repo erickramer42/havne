@@ -2572,15 +2572,17 @@ TEST(RecordingStretchesTest, TheMockDriveCyclesPullsAndCruiseAreFound)
         EXPECT_EQ(s.flags, 0u);
     }
 
-    /* Each gear's pull ends where the limiter's flat speed begins */
+    /* Each gear's pull ends where the limiter's flat speed begins: in
+     * whole km/h, up to a tick before rpm meets the limit */
+    const uint64_t tick = 50000;
     EXPECT_EQ(found[0].kind, ECUIO_RECORDING_STRETCH_PULL);
     EXPECT_TRUE(within(found[0], span(Phase::Pull2nd).first,
                        span(Phase::Limiter2nd).first));
-    EXPECT_GE(found[0].to_us, span(Phase::Pull2nd).second);
+    EXPECT_GE(found[0].to_us + tick, span(Phase::Pull2nd).second);
     EXPECT_EQ(found[1].kind, ECUIO_RECORDING_STRETCH_PULL);
     EXPECT_TRUE(within(found[1], span(Phase::Pull3rd).first,
                        span(Phase::Limiter3rd).first));
-    EXPECT_GE(found[1].to_us, span(Phase::Pull3rd).second);
+    EXPECT_GE(found[1].to_us + tick, span(Phase::Pull3rd).second);
     EXPECT_GT(found[1].end, found[0].end) << "third gear runs faster";
 
     /* The cruise in fourth, at its 100 km/h */
@@ -2599,16 +2601,19 @@ TEST(RecordingStretchesTest, TheMockDriveCyclesPullsAndCruiseAreFound)
                        span(Phase::DragRun).first));
     EXPECT_LT(found[3].end - found[3].start, 5.0);
 
-    /* The quarter mile is one pull once the tires stop spinning: every
-     * upshift's lift (about 0.55 s under the level) inside the gap */
+    /* The quarter mile is one pull once the clutch locks (the throttle is
+     * feathered under the level while it slips): every upshift's lift
+     * (about 0.55 s under the level) inside the gap. It ends at its top
+     * speed, which can be read a tick past the line, the pedal still down */
     EXPECT_EQ(found[4].kind, ECUIO_RECORDING_STRETCH_PULL);
     EXPECT_TRUE(within(found[4], span(Phase::DragRun).first,
-                       span(Phase::DragRun).second));
+                       span(Phase::DragRun).second + tick));
     EXPECT_GT(found[4].to_us - found[4].from_us, 10000000u);
 
-    /* The gap ADR-0056 first wrote, 500 ms, splits it at each shift */
+    /* The gap ADR-0056 first wrote, 500 ms, splits it at each of its three
+     * upshifts */
     ecuio_stretch_rules_t short_gap = both_kinds();
     short_gap.pull_gap_us = 500000;
     EXPECT_EQ(stretches_of(r, short_gap, 0, r.info().duration_us + 1).size(),
-              7u);
+              8u);
 }
