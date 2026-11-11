@@ -2968,6 +2968,45 @@ TestCase {
         tryVerify(() => findChild(dash, "dashConnectList") === null, 2000, "the desktop keeps Home")
     }
 
+    // Edit mode's panel and the More row use the themed field: a touch's
+    // height on the glass, and inside the phone's width
+    function test_theDashboardsFieldsAreThemedAndATouchsSize_data() {
+        return [{ tag: "384 upright", w: 384, h: 832 }, { tag: "320 upright", w: 320, h: 640 }]
+    }
+
+    function test_theDashboardsFieldsAreThemedAndATouchsSize(data) {
+        const main = phoneMain()
+        main.width = data.w
+        main.height = data.h
+        verify(waitForPolish(main), "laid out")
+        const dash = find(main.contentItem, "dashboardPage")
+        dash.form = "phone"
+        dash.startEditing()
+        dash.select(1)
+        verify(waitForPolish(main), "panel laid out")
+        waitForRendering(main.contentItem)
+        const names = ["panelLabel", "panelCaption", "panelWarnFrom", "panelDangerFrom"]
+        let shown = 0
+        for (const n of names) {
+            const f = find(dash, n)
+            verify(f, n + " exists")
+            verify(f.touchMin !== undefined, n + " is the themed field")
+            if (!f.visible)
+                continue
+            ++shown
+            verify(f.height >= Theme.touchTarget - 0.5, n + " is " + f.height + " tall")
+            tryVerify(() => f.mapToItem(main.contentItem, f.width, 0).x
+                            <= main.contentItem.width + 0.5, 2000,
+                      n + " is past the right edge: " + f.mapToItem(main.contentItem, f.width, 0).x + " of " + main.contentItem.width)
+        }
+        verify(shown >= 2, "fields shown: " + shown)
+        dash.moreShown = true
+        waitForRendering(main.contentItem)
+        const rename = find(dash, "moreRename")
+        verify(rename.touchMin !== undefined, "moreRename is the themed field")
+        verify(rename.height >= Theme.touchTarget - 0.5, "moreRename is " + rename.height + " tall")
+    }
+
     // Five rows of long addresses fit a phone's width, every target a
     // touch's size on the glass, and the page scrolls to the gauges
     function test_theConnectListFitsAPhone_data() {

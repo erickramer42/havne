@@ -1302,7 +1302,7 @@ Page {
 
     // A number option, typed in the unit shown when `converted`; empty
     // removes it when `clearable`, else puts the shown value back
-    component OptionField: TextField {
+    component OptionField: ThemedTextField {
         id: field
         required property string option
         property bool converted: true
@@ -1409,7 +1409,7 @@ Page {
                     rowSpacing: 8
 
                     Caption { visible: panelCard.hasSignal; text: qsTr("Label") }
-                    TextField {
+                    ThemedTextField {
                         id: labelField
                         objectName: "panelLabel"
                         visible: panelCard.hasSignal
@@ -1557,7 +1557,7 @@ Page {
                         converted: false
                     }
                     Caption { visible: panelCard.kind === "analog"; text: qsTr("Caption") }
-                    TextField {
+                    ThemedTextField {
                         objectName: "panelCaption"
                         visible: panelCard.kind === "analog"
                         Layout.fillWidth: true
@@ -1573,7 +1573,7 @@ Page {
                         }
                     }
                     Caption { visible: panelCard.kind === "digital"; text: qsTr("Description") }
-                    TextField {
+                    ThemedTextField {
                         objectName: "panelDescription"
                         visible: panelCard.kind === "digital"
                         Layout.fillWidth: true
@@ -2506,7 +2506,7 @@ Page {
             Layout.preferredWidth: 1
             visible: root.editing && root.moreShown && !root.confirmReset && !root.confirmRemovePage
             spacing: 8
-            TextField {
+            ThemedTextField {
                 id: pageName
                 objectName: "moreRename"
                 width: Math.min(220, topBar.width)
