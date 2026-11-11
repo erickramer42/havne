@@ -79,9 +79,13 @@ Page {
                                         && !Bridge.disconnecting && !Relay.running
     // Replay's words: what to do first, or plain while a session starts or
     // ends (connected is false once a disconnect begins)
-    readonly property string replayText: Relay.running ? qsTr("Stop the relay to replay")
-                                       : Bridge.connected ? qsTr("Disconnect to replay")
-                                                          : qsTr("Replay")
+    readonly property string replayWhy: Relay.running ? qsTr("Stop the relay to replay")
+                                      : Bridge.connected ? qsTr("Disconnect to replay") : ""
+    readonly property string replayText: replayWhy !== "" ? replayWhy : qsTr("Replay")
+    // A Replay button's spoken name: its own, then the reason it is off
+    function replayName(name) {
+        return replayWhy !== "" ? qsTr("%1: %2").arg(name).arg(replayWhy) : name
+    }
 
     // The chart maximized: it takes the page but for the zoom row, and the
     // cursor's values move to a strip beside it. Kept apart for a short
@@ -1407,7 +1411,7 @@ Page {
                         baseColor: Theme.surface
                         enabled: root.sessionIdle
                         Layout.maximumWidth: enabled ? 96 : 160
-                        Accessible.name: qsTr("Replay %1").arg(recordingRow.modelData.title)
+                        Accessible.name: root.replayName(qsTr("Replay %1").arg(recordingRow.modelData.title))
                         onClicked: root.replayRequested(recordingRow.modelData.uri)
                     }
                 }
@@ -1462,7 +1466,7 @@ Page {
                         Layout.preferredWidth: Theme.compact ? 1 : -1
                         enabled: root.sessionIdle
                         text: root.replayText
-                        Accessible.name: qsTr("Replay the part in view as a session")
+                        Accessible.name: root.replayName(qsTr("Replay the part in view as a session"))
                         onClicked: root.replayRequested(root.stretchUri())
                     }
                     ThemedButton {

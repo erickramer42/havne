@@ -26,6 +26,7 @@ TestCase {
     }
 
     function cleanup() {
+        Relay.stop()   // a failed case must not leave Replay off for the next
         Bridge.unitSystem = 0
         Theme.developerMode = false
         Bridge.recording = false
@@ -469,10 +470,13 @@ TestCase {
         const button = find(list.itemAtIndex(0), "replayButton")
         verify(button.enabled)
         compare(button.text, "Replay")
+        const name = button.Accessible.name
+        verify(name.indexOf("Replay ") === 0 && name.indexOf("to replay") < 0, "its own name: " + name)
 
         compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
         tryVerify(() => !button.enabled, 2000, "off while relaying")
         compare(button.text, "Stop the relay to replay")
+        compare(button.Accessible.name, name + ": Stop the relay to replay", "spoken with its reason")
         Relay.stop()
         tryVerify(() => button.enabled, 2000, "on again")
 
@@ -482,13 +486,16 @@ TestCase {
         compare(button.text, "Replay", "nothing to disconnect yet")
         tryVerify(() => Bridge.connected, 10000, "the mock connects")
         compare(button.text, "Disconnect to replay")
+        compare(button.Accessible.name, name + ": Disconnect to replay", "spoken with its reason")
         Bridge.disconnectSession()
         verify(Bridge.disconnecting, "the teardown is under way")
         verify(!button.enabled)
         compare(button.text, "Replay", "already disconnecting")
+        compare(button.Accessible.name, name, "and nothing to add")
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
         verify(button.enabled, "on again")
         compare(button.text, "Replay")
+        compare(button.Accessible.name, name)
     }
 
     // The viewer's Replay view hands on the part in view as a stretch of
@@ -690,6 +697,30 @@ TestCase {
         compare(panel.sizes.length, 0, "no size in the other units")
         sizesIn(panel)
         restoreExportChoices(panel)
+    }
+
+    // A sizing for the old columns that ends before the 300 ms timer asks
+    // again leaves no sizes beside the new choice (the first sizing is held
+    // 120 ms at core's first ask; the switch comes while it is held)
+    function test_aSizingForTheOldColumnsLeavesNoSizes() {
+        const page = openEarlyViewer()
+        verify(page.plottedNames.length > 0, "some plotted")
+        const exporter = find(page, "exporter")
+        Harness.holdExports(exporter, 120)
+        try {
+            const panel = openExport(page)
+            restoreExportChoices(panel)
+            tryVerify(() => Harness.heldExports(exporter) >= 1, 10000, "the sizing is held")
+            panel.columnChoice = "plotted"
+            verify(panel.usePlotted)
+            wait(200)   // past the held sizing's end, short of the timer's 300 ms
+            compare(panel.sizes.length, 0, "the old columns' sizes didn't arrive")
+            Harness.holdExports(exporter, 0)
+            sizesIn(panel)
+            restoreExportChoices(panel)
+        } finally {
+            Harness.holdExports(exporter, 0)
+        }
     }
 
     function test_aRecordingOfFramesAloneExportsNoCsv() {
