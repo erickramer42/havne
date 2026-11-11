@@ -170,7 +170,8 @@ ApplicationWindow {
         logView.showActivityEnd()
         gotoPage(logPage)
     }
-    // Dash's "Other address...": Back returns to Dash, not to Settings' list
+    // A connect list's "Other address..." (Dash's, Home's): Back returns to
+    // that page, not to Settings' list
     function openConnectFromDash() {
         openConnect()
         settingsView.backLeaves = true
@@ -648,7 +649,14 @@ ApplicationWindow {
                     clip: true
                     HomePage {
                         objectName: "homePage"
-                        onConnectRequested: root.openConnect()
+                        recents: settingsView.connectUris
+                        vehicleUri: settingsView.vehicleUri
+                        adapters: settingsView.connectAdapters
+                        onConnectToUri: uri => settingsView.connectFromList(uri)
+                        onOtherAddressRequested: root.openConnectFromDash()
+                        onLogRequested: root.openLog()
+                        onListShown: root.listAdapters()
+                        onDashboardRequested: root.gotoPage(root.dashboardPage)
                     }
                     DashboardPage {
                         id: dashboardView

@@ -92,9 +92,13 @@ TestCase {
         if (Bridge.connected)
             compare(address.text, "· " + shown, "header pill's address")
 
+        // Home's card shows a session; with none, Home is the connect list
         const home = showPage(main, "homePage")
-        sameColor(find(home, "linkDot").color, tone, "Home dot")
-        compare(find(home, "linkLabel").text, label, "Home label")
+        compare(find(home, "homeSession").visible, Bridge.connected, "Home's session card")
+        if (Bridge.connected) {
+            sameColor(find(home, "linkDot").color, tone, "Home dot")
+            compare(find(home, "linkLabel").text, label, "Home label")
+        }
 
         const dashboard = showPage(main, "dashboardPage")
         sameColor(find(dashboard, "linkDot").color, tone, "Dashboard dot")

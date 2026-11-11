@@ -1698,6 +1698,25 @@ TestCase {
         return list
     }
 
+    // The desktop's Home connects the chosen row through Settings, as
+    // Dash's list does: the address in its field, then the session
+    function test_homeConnectsThroughSettings() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1280
+        main.height = 720
+        const settings = find(main.contentItem, "settingsPage")
+        const home = find(main.contentItem, "homePage")
+        main.gotoPage(Array.from(home.parent.children).indexOf(home))
+        settings.recentUris = ["mock://demo"]
+        const list = find(home, "homeConnectList")
+        tryCompare(list, "chosen", "mock://demo", 2000, "the recent address")
+        find(list, "connectGo").clicked()
+        tryVerify(() => Bridge.connected, 5000, "it connects")
+        compare(settings.uriField.text, "mock://demo", "through Settings' field")
+        tryVerify(() => find(home, "homeSession").visible, 2000, "the session's card")
+    }
+
     // A fresh phone: no recent address, the paired adapter and a BLE one
     // on the list, neither chosen while there are two
     function test_aFreshPhoneListsItsPairedAdapters() {
