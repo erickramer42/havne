@@ -248,6 +248,9 @@ TestCase {
         }
         wait(300)
         waitForRendering(main.contentItem)
+        // A value that changed since the last frame lays out on the next polish:
+        // read the geometry after it, not between a text and its layout
+        verify(waitForPolish(main), "laid out")
         const out = pastTheEdge(page, main.contentItem, [])
         compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
         // Live's window buttons keep their text on one line: a wrapped
@@ -260,6 +263,38 @@ TestCase {
         }
         if (data.tag === "diagnosticsPage")
             find(page, "clearCancel").clicked()
+    }
+
+    // A value too long for its row (a refusal's words, a text) is bounded by
+    // its column, whatever its text: the name keeps its third and the value
+    // ends at the row's margin, at 384 px and the narrowest phone's 320
+    function test_aLongValueStaysInItsRowOnAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_aLongValueStaysInItsRowOnAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const page = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        const list = find(page, "signalList")
+        tryVerify(() => list.itemAtIndex(0) !== null && list.itemAtIndex(0).hasValue, 5000,
+                  "a row has a value")
+        const row = list.itemAtIndex(0)
+        const value = find(row, "valueLabel")
+        // The text assigned here ends the binding, so no later value
+        // brings the short text back
+        value.text = "W".repeat(300)
+        verify(waitForPolish(main), "laid out")
+        const name = find(row, "nameLabel")
+        const right = value.mapToItem(row, value.width, 0).x
+        verify(right <= row.width - 12 + 0.5, "the value ends at " + right + " of " + row.width)
+        verify(value.x >= name.x + Math.min(name.implicitWidth, Math.round(row.width / 3)) - 0.5,
+               "the value starts at " + value.x + ", the name at " + name.x)
+        verify(value.width <= Math.round(row.width * 0.6) + 0.5, "the value is " + value.width)
     }
 
     // The drive view's settings on the narrowest phone, also at the top

@@ -528,6 +528,7 @@ Page {
                     }
                     Label {
                         id: nameLabel
+                        objectName: "nameLabel"
                         text: signalDelegate.name
                         color: Theme.text
                         Layout.fillWidth: true
