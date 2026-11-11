@@ -55,9 +55,10 @@ A walkthrough in the app, for a DID you don't know yet, with the
 `havne-cli` form of each step after it. Every step reads; none writes
 to the car.
 
-1. **Find what a module answers.** In Settings, under **What to read**,
-   pick **uds-generic (DIDs)**, and give the DID field a range, with the
-   module's reply ID before it for any module but the engine's:
+1. **Find what a module answers.** In Settings, Connection, under
+   **Profile**, pick **uds-generic (DIDs)**, and give the DID field a
+   range, with the module's reply ID before it for any module but the
+   engine's:
    `7E9:D800-D8FF`. Add `&scan=first` to the URI, so the range is asked
    before anything is polled, and connect. Each DID that answers joins
    Live as a row, `0x7E9 DID D8xx`, showing its reply's bytes in hex,
@@ -83,7 +84,7 @@ to the car.
    change the field or the scaling and read again. **Save** adds it to
    the vehicle's own file, `<vehicle> own`.
 4. **Read it in a session.** With the vehicle picked, its file is a
-   profile under **What to read** (`user.daily-driver-own` for the
+   profile under **Profile** (`user.daily-driver-own` for the
    vehicle "Daily driver"), and Live shows the signal by its name, in
    its unit. A signal the module refuses shows as refused, with the
    code by name ("Refused: requestOutOfRange (7F 22 31)").
@@ -495,8 +496,8 @@ written, and `signals check` says it won't convert.
   adds a file to the picked vehicle. A file the loader refuses shows its
   words, and so does one whose profile another file makes already, in
   any vehicle: one profile names one file. Each file the vehicle has is
-  then a profile under **What to read**, named as the file's profile
-  (`?profile=user.daily-driver-extras`), and **Duplicate** copies the
+  then a profile under Connection's **Profile**, named as the file's
+  profile (`?profile=user.daily-driver-extras`), and **Duplicate** copies the
   vehicle's files with the rest of it. **Remove** takes a file from the
   vehicle. On an adapter (`j2534://`, `elm327://`), where **Default**
   reads `obd2`, a file that extends `obd2` takes its place: its button

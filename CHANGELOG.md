@@ -43,6 +43,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   `health` write, and `Session.health_report` writes a connected car's
   report. Each long call stops on `cancel=` or Ctrl+C with nothing left
   behind.
+- A user guide, task by task ([docs/user-guide.md](docs/user-guide.md)),
+  and a reference of every address and option, each with its default and
+  an example ([docs/addresses.md](docs/addresses.md)).
 - Phone: a Log row at the end of Settings' list, showing the newest
   activity line, opens the Log. A connect that fails, on Dash's list or
   in Settings, offers Show log beside its words.

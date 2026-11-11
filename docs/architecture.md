@@ -630,6 +630,8 @@ Detail and gaps: [testing.md](testing.md).
 | Question | Document |
 |---|---|
 | What works, what's broken, what's next | [STATUS.md](../STATUS.md) |
+| How to do each task in the app: connect, read, log, view, clear codes | [user-guide.md](user-guide.md) |
+| Every address form and option, with its default | [addresses.md](addresses.md) |
 | Why was it built this way | [adr/](adr/README.md) |
 | How the J2534 stack works, op by op | [j2534.md](j2534.md) |
 | How the ELM327 transport works, and the adapters it has run on | [elm327.md](elm327.md) |

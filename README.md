@@ -145,6 +145,8 @@ v0.7.1, a more modern look, phone first, is the latest release. Next:
 
 | Document | What's in it |
 |---|---|
+| [docs/user-guide.md](docs/user-guide.md) | Using the app, task by task: connecting, live values, the Dashboard, logs, recordings, codes, vehicles, the drive view |
+| [docs/addresses.md](docs/addresses.md) | Every address form and option, with its default and an example |
 | [docs/architecture.md](docs/architecture.md) | How the parts fit together and why, and a map of the other docs |
 | [docs/adr/](docs/adr/README.md) | The architecture decision records |
 | [docs/testing.md](docs/testing.md) | Test tiers, what each test pins, and what isn't verified |
