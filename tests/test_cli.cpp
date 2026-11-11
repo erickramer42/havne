@@ -1596,20 +1596,18 @@ TEST(CliSignalFileTest, KindsAndUnitsAreTheFilesWords)
     EXPECT_STREQ(cli::kind_word(d), "computed");
 
     ecuio_signal_def_t u{};
-    u.id = ECUIO_USER_SIG_ID_BASE;
     std::strcpy(u.unit, "km/h");
     EXPECT_TRUE(cli::unit_converts(u));
-    EXPECT_FALSE(cli::unit_kept(u));
+    EXPECT_FALSE(cli::unit_kept(u, true));
     std::strcpy(u.unit, "kph");
     EXPECT_FALSE(cli::unit_converts(u));
-    EXPECT_TRUE(cli::unit_kept(u));
+    EXPECT_TRUE(cli::unit_kept(u, true));
     std::strcpy(u.unit, "%");
-    EXPECT_TRUE(cli::unit_kept(u));
+    EXPECT_TRUE(cli::unit_kept(u, true));
     u.unit[0] = '\0';
-    EXPECT_FALSE(cli::unit_kept(u)) << "no unit, nothing to convert";
+    EXPECT_FALSE(cli::unit_kept(u, true)) << "no unit, nothing to convert";
     std::strcpy(u.unit, "%");
-    u.id = ECUIO_USER_SIG_ID_BASE - 1;
-    EXPECT_FALSE(cli::unit_kept(u)) << "the base set's, not the file's";
+    EXPECT_FALSE(cli::unit_kept(u, false)) << "the base set's, not the file's";
 }
 
 // Each line says what the loader read, in the file's own terms: a reply's
@@ -1649,8 +1647,7 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
         return std::string(l.data(), l.size());
     };
     EXPECT_EQ(text([&](cli::Line& l) {
-                  cli::signal_file_line(l, ecuio_signal_file_name(file),
-                                        ecuio_signal_file_profile(file), set);
+                  cli::signal_file_line(l, file, set);
               }),
               "{\"type\":\"signal_file\",\"name\":\"Unit test\","
               "\"profile\":\"user.unit-test\",\"signals\":4,\"base\":0,"
@@ -1682,7 +1679,7 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
     };
     for (uint32_t i = 0; i < 4; ++i) {
         SCOPED_TRACE(i);
-        EXPECT_TRUE(cli::own_signal(set.defs[i]));
+        EXPECT_TRUE(cli::own_signal(file, set.defs[i]));
         EXPECT_LE(expected[i].size(), cli::def_line_bytes(set, set.defs[i]));
         EXPECT_EQ(text([&](cli::Line& l) {
                       cli::def_line(l, set, set.defs[i], nullptr);
@@ -1704,6 +1701,38 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
 
 // A def's gauge field: nothing for a def with none, else min and max and
 // only the levels given (cli::gauge_field)
+// A def that replaced a base one by name has the base's ID (7002 here), so
+// the ID range no longer says whose it is: the file's key does, and the
+// line and the count follow it
+TEST(CliSignalFileTest, AReplacingDefIsTheFilesOwnWhateverItsId)
+{
+    const std::string json =
+        "{\"havne_signals\":1,\"name\":\"Replaces\","
+        "\"source\":{\"name\":\"test\"},\"extends\":\"obd2\",\"signals\":["
+        "{\"key\":\"temp\",\"name\":\"Coolant Temp\","
+        "\"read\":{\"service\":\"22\",\"number\":\"1E1C\"},"
+        "\"field\":{\"byte\":1},\"unit\":\"kph\"}]}";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
+    const ecuio_signal_def_t* temp = ecuio_signal_file_find(file, "temp");
+    ASSERT_NE(temp, nullptr);
+    ASSERT_LT(temp->id, ECUIO_USER_SIG_ID_BASE) << "the base def's ID";
+    EXPECT_TRUE(cli::own_signal(file, *temp));
+    for (uint32_t i = 0; i < set.count; ++i) {
+        if (&set.defs[i] != temp) {
+            EXPECT_FALSE(cli::own_signal(file, set.defs[i])) << set.defs[i].name;
+        }
+    }
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::signal_file_line(l, file, set);
+    const std::string line(l.data(), l.size());
+    EXPECT_NE(line.find("\"signals\":1,"), std::string::npos) << line;
+    ecuio_signal_file_free(file);
+}
+
 TEST(CliSignalFileTest, AGaugeFieldHoldsOnlyTheLevelsGiven)
 {
     const auto field = [](const ecuio_signal_gauge_t* g) {
@@ -1870,7 +1899,8 @@ TEST(CliPluginTest, AVariantLineCountsItsOwnSignals)
     const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(pk.p, 0);
     char buf[1024];
     cli::Line l(buf, sizeof buf);
-    cli::variant_line(l, "base", "plugin.p.base", set);
+    cli::variant_line(l, "base", "plugin.p.base",
+                      ecuio_plugin_variant_file(pk.p, 0), set);
     EXPECT_EQ(text_of(l),
               "{\"type\":\"variant\",\"id\":\"base\",\"profile\":"
               "\"plugin.p.base\",\"signals\":1,\"base\":0,\"ecus\":[{\"rx\":"

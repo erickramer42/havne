@@ -271,3 +271,19 @@ Section 6's Disconnect line for a module that entered reads "returning to the
 default session (10 01)", written as the close starts: the `10 01` goes out
 on core's teardown thread, which the bridge can't see, so the line says what
 the close is about to do and not that it did.
+
+## Appendix: the session line in the log, and Python (2026-11-10)
+
+`havne-cli log` writes `stream`'s `session` line, on each change of a
+module's session, from the same rule (`cli/scan_line.h`'s `session_due`),
+and once more after the session closes, before the end line, so a log that
+ended between polls still says where each module stood. Without `?session=03`
+neither writes one. Python reads the same fields through
+`Session.session_state(channel)`: the module's reply ID, the session asked
+and in force, the state in the line's words, the refusal's NRC as two hex
+digits for a refused or abandoned session, and the entry and loss counts;
+`None` while no session was asked or the module has no report yet.
+`CliLogRunTest.ALogWritesTheSessionLineStreamDoes` pins the line against
+`golden/cli/log-session.jsonl` (the fake DLL's engine ECU, Windows), and
+`PythonTest.test_j2534` pins Python against `havne-cli stream` for the same
+URI.

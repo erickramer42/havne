@@ -25,6 +25,7 @@ from .recording import (Column, GuessedMap, Imported, Marker, RecordedFrame, Rec
 from .export import (Estimate, EstimatedSize, Exported, LeftOut, estimate_csv, export_csv,
                      export_folder, export_pcapng)
 from .health import HealthReport, health_report
+from .lookup import DtcTitle, VinInfo, decode_vin, dtc_title
 from .sim import Reply, Sim
 from .signals import Gauge, Plugin, SignalFile
 from . import _ecuio as c
@@ -38,5 +39,6 @@ __all__ = [
     "guess_csv_map", "GuessedMap",
     "export_pcapng", "export_csv", "export_folder", "Exported", "LeftOut",
     "estimate_csv", "Estimate", "EstimatedSize", "health_report", "HealthReport",
+    "decode_vin", "VinInfo", "dtc_title", "DtcTitle",
     "Sim", "Reply", "SignalFile", "Plugin", "Gauge",
 ]

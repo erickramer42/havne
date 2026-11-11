@@ -306,13 +306,13 @@ QtObject {
         ]
     }
 
-    // What a driver watches beyond the dials, shared by both forms. Boost has
-    // no obd2 signal, so its ref is the mock's alone. Its range runs from the
+    // What a driver watches beyond the dials, shared by both forms. Boost's refs
+    // are the mock's and obd2's computed one (MAP minus baro). Its range runs from the
     // vacuum an idle pulls to what a turbo makes (about -15 to 25 psi), and
     // lambda's from rich to the lean a fuel cut reads
     function watched() {
         return {
-            boost: ["id:13001"],
+            boost: ["id:13001", "id:7011"],
             battery: ["id:14001", "id:7008"],
             lambda: ["id:10001", "id:11544"],
             boostOptions: { from: -100, to: 200 },

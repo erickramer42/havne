@@ -146,7 +146,9 @@ fills the block as above, and a file you share keeps it
 
 `"extends": "obd2"` loads the `obd2` set first and your signals after
 it, so one session shows both. Without it the file is a set of its own,
-and a session on it reads only your signals.
+and a session on it reads only your signals. A signal of yours named as one
+of `obd2`'s (`Boost`, say) replaces it: the session shows yours, in its
+place, and a gauge or layout that named `obd2`'s signal reads yours.
 
 ### `ecus`
 
@@ -193,7 +195,7 @@ Each entry of `signals` is one signal. A number read from a reply:
 | Key | Required | What it holds |
 |---|---|---|
 | `key` | yes | The signal's stable name: lower-case letters, digits and `_`, unique in the file. Computed signals refer to it, and later a Dashboard's tile will |
-| `name` | yes | What Live, the Dashboard and the logs show: 1 to 31 bytes |
+| `name` | yes | What Live, the Dashboard and the logs show: 1 to 31 bytes, one signal each in the file (a name twice is refused) |
 | `kind` | no | `number` (the default), `text`, `hex`, `enum` or `computed` |
 | `ecu` | no | Which module answers: an `id` from `ecus` |
 | `read` | all but computed | The request (below) |

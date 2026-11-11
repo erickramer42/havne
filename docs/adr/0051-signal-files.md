@@ -171,9 +171,10 @@ the locale, as the recordings' reader does. JSON has no comments: a
   starting `x-` are ignored, so a tool can carry its own data.
 - **Bounds**: 1 MiB a file, 1024 signals (`ECUIO_ENGINE_SCAN_MAX`).
 - **IDs**: each def's `id` is `ECUIO_USER_SIG_ID_BASE` (30000) plus its
-  place in the file. `key` is the stable name: computed signals and,
-  later, a Dashboard's tile refer to it, since a reordered file
-  renumbers.
+  place in the file, except a signal that replaces a base def by name,
+  which keeps that def's ID (the appendix of 2026-11-10). `key` is the
+  stable name: computed signals and, later, a Dashboard's tile refer to
+  it, since a reordered file renumbers.
 
 Scale and offset in `?did=` (`1E05:u16*0.1-40:degC`) aren't added:
 they would be a second syntax for what a signal file says. If they
@@ -709,3 +710,47 @@ levels it warns at:
 - **Not done here:** a dial starting from it (the app's bridge and QML),
   and OBDb's `min` and `max`, which section 7's appendix settles as limits
   on a value, kept as notes.
+
+## Appendix: boost in the obd2 set (2026-11-10)
+
+The `obd2` set gains the computed Boost the demo set has: MAP (PID 0B)
+minus baro (PID 33), `ECUIO_OBD2_SIG_BOOST_ID` 7011 in the first band, the
+set's last def, so no other def moves. The two inputs are the set's own
+defs, so its program is a table row like any file's. Baro keeps 30 s
+as an input (it moves with the weather, and the request loop may come
+round to it more slowly than the default 3 s); MAP keeps the default.
+
+- **It asks nothing itself.** A computed def has no request, so the probe
+  and the rotation ignore it. A focus that picks a computed def keeps its
+  inputs' requests in rotation (`ecuio_session_set_focus` adds each
+  input's def to the picked defs the worker resolves, never to the
+  caller's ids, so the recorder's `focus` line names what was picked), so
+  a focus naming Boost alone is taken and Boost computes. A focus whose
+  picks have no askable request, inputs included, is still refused with
+  "the focus leaves nothing to request".
+- **A file that extends `obd2` takes the base's programs first.** Its own
+  computed signals follow them in the set's table, so a file's `table_first`
+  moves past the base's.
+- **A signal named as a base def replaces it, and keeps its ID.** A file
+  that extends `obd2` and has a signal with the same name as one of the
+  base's leaves that def out of its set and stands in its place, as a
+  plugin variant's later file replaces a signal by key, with the base def's
+  ID: section 5's example, with its own Boost, loads with one Boost, the
+  file's, whose ID is 7011, and obd2's program is left out with it. What
+  reads that ID reads the file's def: obd2's own Boost, if MAP or baro is
+  replaced (the validator refuses a replacement that can't be an input,
+  such as a text), a computed signal's `obd2.<key>`, a layout's cell naming
+  `id:7011` (the app's signal hub finds a keyed def with a built-in ID by
+  both its `key:` and its `id:`), a focus and a recording's values. The
+  ID says nothing about whose a def is, so consumers ask the file
+  (`ecuio_signal_file_key`: a key means the file's own, none the base's);
+  `havne-cli`'s `signal_def` lines and counts do.
+- **Names are one each in a set.** Two signals of a file with one name are
+  refused, naming both, because a recording keys its values by name. The
+  built-in sets already are (`Obd2SetTest.EachBuiltInSetNamesEachSignalOnce`),
+  `uds-generic` keeps a repeated DID once, a plugin variant is built
+  by the same loader, and the OBDb import numbers a repeated name (` 2`) and
+  keeps obd2's names out of its own, so a converted set never replaces a
+  base def.
+- **The built-in layouts** name the signal by its ID beside the mock's
+  (`Bridge.gaugeSignals`' `boost`), as for the others.

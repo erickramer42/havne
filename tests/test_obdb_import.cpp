@@ -521,6 +521,27 @@ TEST(ObdbImportTest, WhatIsntASetIsRefusedAndACallbackCancels)
     ecuio_obdb_free(nullptr);
 }
 
+// A signal named as one of obd2's would replace it in the file's set, which a
+// converted set never means to: its name takes a number, and the change is said
+TEST(ObdbImportTest, ANameLikeObd2sTakesANumber)
+{
+    const std::string set =
+        "{\"commands\":[" + one("", "0101", sig("RPM", kByte)) + "]}";
+    Imported im;
+    import(im, set);
+    ASSERT_EQ(im.status, ECUIO_OK) << im.detail;
+    const ecuio_signal_def_t* d = im.def("rpm");
+    ASSERT_NE(d, nullptr);
+    EXPECT_STREQ(d->name, "RPM 2");
+    EXPECT_GE(d->id, ECUIO_USER_SIG_ID_BASE) << "obd2's RPM is still obd2's";
+    const ecuio_signal_set_t* s = ecuio_signal_file_set(im.file);
+    int rpms = 0;
+    for (uint32_t i = 0; i < s->count; ++i) {
+        rpms += std::strcmp(s->defs[i].name, "RPM") == 0 ? 1 : 0;
+    }
+    EXPECT_EQ(rpms, 1);
+}
+
 // The caller's name, URL and commit go in the file; keys come from OBDb's
 // ids, camel case split, a letter first, each once
 TEST(ObdbImportTest, TheCallersSourceAndKeysFromTheIds)

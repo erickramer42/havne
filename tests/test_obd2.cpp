@@ -73,7 +73,8 @@ TEST(Obd2SetTest, SetIsValidAndComplete) {
     const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
     ASSERT_NE(set, nullptr);
     EXPECT_EQ(ecuio_validate_signal_set(set, nullptr), ECUIO_VALIDATE_OK);
-    EXPECT_EQ(set->count, 130u) << "every linear field of J1979's table";
+    EXPECT_EQ(set->count, 131u)
+        << "every linear field of J1979's table and the computed boost";
 }
 
 /* The ten keep 7001-7010, first and in their order; every other def's
@@ -96,6 +97,10 @@ TEST(Obd2SetTest, IdsFollowTheRule)
     for (uint32_t i = 10; i < obd2->count; ++i) {
         const ecuio_signal_def_t& d = obd2->defs[i];
         SCOPED_TRACE(d.name);
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+            EXPECT_EQ(i + 1, obd2->count) << "a computed def comes last";
+            continue;
+        }
         const unsigned pid = d.mux_key & 0xFFu;
         ASSERT_GE(pid, last_pid) << "the rest in PID order";
         field = (pid == last_pid) ? field + 1 : 0;
@@ -196,6 +201,39 @@ TEST(Obd2SetTest, GroupsEachSignalByThePartOfTheCarItReads)
             }
         }
         EXPECT_EQ(m.group, expected) << m.name;
+    }
+}
+
+/* ADR-0051 section 5: boost is MAP (PID 0B) minus baro (PID 33), the mock's
+ * computed def over obd2's inputs */
+TEST(Obd2SetTest, BoostIsComputedFromMapAndBaro)
+{
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    const ecuio_signal_def_t* d = find_def(obd2, ECUIO_OBD2_SIG_BOOST_ID);
+    ASSERT_NE(d, nullptr);
+    EXPECT_STREQ(d->name, "Boost");
+    EXPECT_STREQ(d->unit, "kPa");
+    EXPECT_NE(d->flags & ECUIO_DEF_FLAG_COMPUTED, 0u);
+    EXPECT_EQ(d->plot_rank, 0u);
+    ASSERT_LT(d->table_first, obd2->computed_count);
+    const ecuio_computed_t& c = obd2->computed[d->table_first];
+    ASSERT_EQ(c.input_count, 2u);
+    EXPECT_EQ(c.input_ids[0], ECUIO_OBD2_PID_SIG_ID(0x0B, 0));
+    EXPECT_EQ(c.input_ids[1], ECUIO_OBD2_PID_SIG_ID(0x33, 0));
+    EXPECT_EQ(ecuio_validate_signal_set(obd2, nullptr), 0);
+}
+
+/* A set's names are one each (a recording keys values by name, and a signal
+ * file's signal named as a def replaces it): the built-in sets already are */
+TEST(Obd2SetTest, EachBuiltInSetNamesEachSignalOnce)
+{
+    for (const ecuio_signal_set_t* set :
+         {ecuio_obd2_signal_set(), ecuio_mock_signal_set()}) {
+        for (uint32_t i = 0; i < set->count; ++i) {
+            for (uint32_t j = i + 1; j < set->count; ++j) {
+                EXPECT_STRNE(set->defs[i].name, set->defs[j].name);
+            }
+        }
     }
 }
 
@@ -2511,6 +2549,9 @@ TEST_F(Obd2TableTest, EveryObd2DefMatchesItsRow)
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& d = set->defs[i];
         SCOPED_TRACE(d.name);
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+            continue; /* no PID, so no row */
+        }
         ASSERT_EQ(d.mux_offset, 0u);
         ASSERT_EQ(d.mux_length, 2u);
         ASSERT_EQ(d.mux_key >> 8, 0x41u) << "a Service 01 reply";
@@ -2611,6 +2652,9 @@ TEST_F(Obd2TableTest, TheFakeEcuAnswersEachSupportedPidWithItsLength)
     }
     const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
     for (uint32_t i = 0; i < set->count; ++i) {
+        if ((set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+            continue;
+        }
         EXPECT_TRUE(fake_ecu::supports_pid(set->defs[i].mux_key & 0xFFu))
             << set->defs[i].name;
     }
@@ -4684,7 +4728,10 @@ TEST(PidSupportTest, TheBitmapsMarkTheirClearPidsUnsupported)
     std::vector<uint16_t> expected;
     int pastTheRanges = 0;
     for (uint32_t i = 0; i < set->count; ++i) {
-        const unsigned pid = set->defs[i].mux_key & 0xFFu;
+        const unsigned pid =
+            (set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) != 0
+                ? 0x100u /* a computed def has no PID */
+                : set->defs[i].mux_key & 0xFFu;
         if (pid <= 0x60 &&
             (bitmaps[(pid - 1) / 8] & (0x80u >> ((pid - 1) % 8))) == 0) {
             expected.push_back(set->defs[i].id);

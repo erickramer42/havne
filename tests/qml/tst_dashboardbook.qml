@@ -62,10 +62,9 @@ TestCase {
         return d
     }
 
-    // Boost has no key in Bridge.gaugeSignals: the demo's signal alone
     function refsOf(key) {
         const out = []
-        for (const r of key === "boost" ? ["id:13001"] : Bridge.gaugeSignals[key])
+        for (const r of Bridge.gaugeSignals[key])
             out.push(String(r))
         return out
     }

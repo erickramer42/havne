@@ -135,6 +135,7 @@ signal  Intake Air Temp Sensor 2,number,°C,0,0,2
 signal  Engine Friction Torque,number,%,0,0,1
 signal  Cylinder Fuel Rate,number,mg/stroke,2,0,3
 signal  Odometer,number,km,1,0,6
+signal  Boost,number,kPa,0,0,2
 caller  havne-cli 0.3.6
 columns  local time, seconds since the recording started (host_us / 1e6 in the CSV files), kind, text
 
