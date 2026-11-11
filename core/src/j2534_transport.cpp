@@ -379,6 +379,107 @@ uint32_t read_timeout_ms(int64_t next_us)
     return (ms < 1) ? 1u : static_cast<uint32_t>(ms);
 }
 
+/* The close's waits, each the engine's reply wait (P2 plus the adapter's
+ * margin): a request in flight, then 10 01's answer, whatever a 78 says. */
+constexpr int64_t J2534_LEAVE_WAIT_US = ECUIO_ENGINE_WAIT_US;
+constexpr int64_t J2534_CLOSE_US = 2 * J2534_LEAVE_WAIT_US;
+
+/* A read at the close: true when the link failed hard, which ends it. */
+bool close_read(ecuio_j2534_transport* t, int64_t left_us, read_outcome* o)
+{
+    const int64_t ms = (left_us + 999) / 1000;
+    const uint32_t timeout_ms = (ms < 1) ? 1u
+                                : (ms > J2534_READ_SLICE_MS)
+                                    ? J2534_READ_SLICE_MS
+                                    : static_cast<uint32_t>(ms);
+    const auto start = std::chrono::steady_clock::now();
+    *o = pump_one(t, timeout_ms);
+    if (o->status != ECUIO_OK && o->status != ECUIO_ERR_VEHICLE_TIMEOUT) {
+        return true;
+    }
+    if (!o->got) {
+        /* a vendor that returns at once mustn't make this a spin */
+        std::this_thread::sleep_until(start +
+                                      std::chrono::milliseconds(timeout_ms));
+    }
+    return false;
+}
+
+/* Whether payload ends a 10 01: 50 01, or 7F 10 with any code but 78
+ * (still working). */
+bool ends_leave(const uint8_t* p, uint16_t len)
+{
+    if (len >= 2 && p[0] == ECUIO_SESSION_CONTROL + 0x40 &&
+        p[1] == ECUIO_SESSION_DEFAULT) {
+        return true;
+    }
+    return len >= 3 && p[0] == ECUIO_NEGATIVE_RESPONSE &&
+           p[1] == ECUIO_SESSION_CONTROL && p[2] != ECUIO_NRC_RESPONSE_PENDING;
+}
+
+/* ADR-0060's close: 10 01 to each channel in the extended session, its
+ * answer read before the filter stops (docs/bench-sessions/2026-11-11-ext-session-car.md). */
+void leave_sessions(ecuio_j2534_transport* t, link_health& h)
+{
+    ecuio_request_engine& e = t->engine;
+    ecuio_request q[ECUIO_MAX_CHANNELS];
+    bool leave[ECUIO_MAX_CHANNELS] = {};
+    bool any = false;
+    for (uint32_t c = 0; c < e.chan_count; ++c) {
+        leave[c] = ecuio_engine_session_leave(&e, c, &q[c]);
+        any = any || leave[c];
+    }
+    if (!any) {
+        return;
+    }
+    const int64_t start = engine_now_us(t);
+    const int64_t close_by = start + J2534_CLOSE_US;
+    read_outcome o;
+    for (;;) {
+        const int64_t now = engine_now_us(t);
+        int64_t until = 0;
+        for (uint32_t c = 0; c < e.chan_count; ++c) {
+            const ecuio_engine_channel& ch = e.chans[c];
+            if (leave[c] && ch.outstanding != ECUIO_ENGINE_NONE &&
+                ch.deadline_us > until) {
+                until = ch.deadline_us;
+            }
+        }
+        if (until > start + J2534_LEAVE_WAIT_US) {
+            until = start + J2534_LEAVE_WAIT_US;
+        }
+        if (until <= now) {
+            break;
+        }
+        if (close_read(t, until - now, &o)) {
+            return;
+        }
+        if (o.matched) {
+            (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
+                                        engine_now_us(t), nullptr);
+        }
+    }
+    bool awaiting[ECUIO_MAX_CHANNELS] = {};
+    for (uint32_t c = 0; c < e.chan_count; ++c) {
+        awaiting[c] = leave[c] && send_request(t, q[c], h);
+    }
+    int64_t until = engine_now_us(t) + J2534_LEAVE_WAIT_US;
+    until = (until < close_by) ? until : close_by;
+    for (;;) {
+        bool waiting = false;
+        for (uint32_t c = 0; c < e.chan_count; ++c) {
+            waiting = waiting || awaiting[c];
+        }
+        const int64_t now = engine_now_us(t);
+        if (!waiting || now >= until || close_read(t, until - now, &o)) {
+            return;
+        }
+        if (o.matched && ends_leave(o.payload, o.len)) {
+            awaiting[o.chan] = false;
+        }
+    }
+}
+
 /* Worker entrypoint: mirrors mock_worker's discipline: impl-owned
  * state, dispatch through the session snapshot path, stop via atom.
  *
@@ -507,13 +608,8 @@ void j2534_worker(ecuio_j2534_transport* t)
             }
         }
     }
-    /* ADR-0060: each channel that entered the extended session goes back
-     * to the default one; its reply is left to the disconnect */
-    for (uint32_t c = 0; requests && c < e.chan_count; ++c) {
-        ecuio_request q;
-        if (ecuio_engine_session_leave(&e, c, &q)) {
-            (void)send_request(t, q, h);
-        }
+    if (requests) {
+        leave_sessions(t, h);
     }
     ecuio_publish_timing(t->session, e, nullptr, engine_now_us(t), timing_at,
                          true);

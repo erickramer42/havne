@@ -31,6 +31,15 @@
 //                one, and the answer never prints (an adapter that
 //                doesn't wait past a pending reply)
 //   reply_delay_ms  each request's reply and prompt this long after it
+//   input_stops  a byte from the host while a request's reply is still
+//                due stops it, as the datasheet's adapter does: what's
+//                left of the reply is dropped, the byte and the rest of
+//                its write discarded (an assumption: the MX+ never ran
+//                the command typed into its reply,
+//                docs/bench-sessions/2026-11-11-ext-session-car.md), and
+//                STOPPED and the prompt follow; counted in interrupts
+//   stopped_once one command, without its CR ("1001"), answered STOPPED
+//                once and not run
 //   unsupported_nrc fake_ecu::answer's (-1 the ECU's codes, 0 silence)
 //   four_digit_ids  11-bit IDs printed as two bytes (07E8)
 //   pp2a, pp2a_on   AT PPS's parameter 2A
@@ -96,6 +105,8 @@ struct knobs {
     uint32_t pending_gap_ms = 0;
     bool pending_counted = false;
     uint32_t reply_delay_ms = 0;
+    bool input_stops = false;
+    const char* stopped_once = nullptr;
     long unsupported_nrc = -1;
     bool four_digit_ids = false;
     uint8_t pp2a = 0x04;
@@ -142,6 +153,7 @@ public:
     uint32_t bare_crs = 0; /* a CR alone, which repeats a command */
     uint32_t stops = 0;    /* bytes that stopped a monitor */
     uint8_t last_stop = 0; /* the last of them */
+    uint32_t interrupts = 0; /* replies a byte stopped (input_stops) */
     int64_t monitor_us = 0; /* when the last AT MA came, steady_us */
     int64_t stop_us = 0;    /* when the last stop came */
     int64_t first_stop_us = 0;         /* when the first stop came */
@@ -157,6 +169,7 @@ public:
         in_len_ = 0;
         commands = requests = packs = resets = bare_crs = stops = 0;
         last_stop = 0;
+        interrupts = 0;
         monitor_us = stop_us = first_stop_us = monitor_after_stop_us = 0;
         second_stop_us = 0;
         held_ = late_reset_ = false;
@@ -275,6 +288,15 @@ public:
                 }
                 continue;
             }
+            if (k.input_stops && reply_due(now_us)) {
+                ++interrupts;
+                while (tail_ != head_ && due_[before(tail_)] > now_us) {
+                    tail_ = before(tail_);
+                }
+                in_len_ = 0;
+                reply("STOPPED", now_us);
+                return;
+            }
             if (echo_ && c != '\r') {
                 put(&data[i], 1, now_us);
             }
@@ -388,6 +410,14 @@ private:
     }
 
     bool ext29() const { return protocol_ == '7' || protocol_ == '9'; }
+
+    static size_t before(size_t i) { return (i + kOutDepth - 1) % kOutDepth; }
+
+    /* Whether a reply is still being printed: its last byte not yet due */
+    bool reply_due(int64_t now_us) const
+    {
+        return head_ != tail_ && due_[before(tail_)] > now_us;
+    }
 
     /* Whether the receive filter passes CAN ID id */
     bool passes(uint32_t id) const
@@ -506,6 +536,11 @@ private:
             return;
         }
         record(cmd);
+        if (k.stopped_once != nullptr && strcmp(cmd, k.stopped_once) == 0) {
+            k.stopped_once = nullptr;
+            reply("STOPPED", now);
+            return;
+        }
         if (k.refuse != nullptr && strcmp(cmd, k.refuse) == 0) {
             reply("?", now);
             return;

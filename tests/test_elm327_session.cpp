@@ -1466,6 +1466,162 @@ TEST_F(Elm327SessionTest, AnExtendedSessionIsEnteredFirstAndLeftAtClose)
     EXPECT_FALSE(fake_ecu::in_extended(0x7E8)) << "left at the close";
 }
 
+namespace {
+
+constexpr char kExtendedQuery[] =
+    "?profile=uds-generic&did=1E1C&session=03&identify=0&diagnose=0";
+
+/* A session in the extended one, its first DID read */
+void entered(Session& s)
+{
+    ASSERT_EQ(s.create(uri(kExtendedQuery)), ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("62 1E 1C") >= 1; }, 5000));
+}
+
+/* What a loaded machine may add to a close's bound */
+constexpr long long kCloseMarginMs = 3000;
+
+uint32_t interrupts()
+{
+    return on_fake<uint32_t>(
+        [](fake_elm327::adapter& a) { return a.interrupts; });
+}
+
+long long close_ms(Session& s);
+
+/* The close comes just after a request whose reply takes delay_ms, input
+ * stopping a reply as the adapter's does */
+void close_mid_reply(Session& s, uint32_t delay_ms, long long* ms = nullptr)
+{
+    uint32_t asked = 0;
+    fake_elm327::with([&](fake_elm327::adapter& a) {
+        a.k.input_stops = true;
+        a.k.reply_delay_ms = delay_ms;
+        asked = a.requests;
+    });
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return on_fake<uint32_t>([](fake_elm327::adapter& a) {
+                       return a.requests;
+                   }) > asked;
+        },
+        3000));
+    const long long took = close_ms(s);
+    if (ms != nullptr) {
+        *ms = took;
+    }
+}
+
+long long close_ms(Session& s)
+{
+    const auto t0 = std::chrono::steady_clock::now();
+    EXPECT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now() - t0)
+        .count();
+}
+
+} // namespace
+
+/* A close while a reply is under way waits for its prompt before 10 01:
+ * a byte typed into the reply would stop it, and the 10 01 with it
+ * (docs/bench-sessions/2026-11-11-ext-session-car.md). The reply takes
+ * 600 ms, longer than any wait counted from the close's start would give
+ * it; the module answers 50 01 and leaves the session */
+TEST_F(Elm327SessionTest, TheCloseWaitsForTheReplyUnderWayBefore1001)
+{
+    SessionsReset reset;
+    LogDir logs("close-waits");
+    Session s;
+    ASSERT_NO_FATAL_FAILURE(entered(s));
+    ASSERT_NO_FATAL_FAILURE(close_mid_reply(s, 600));
+    EXPECT_EQ(interrupts(), 0u) << "a byte went into a reply under way";
+    const std::vector<std::string> sent = fake_commands();
+    ASSERT_FALSE(sent.empty());
+    EXPECT_EQ(sent.back(), "1001");
+    EXPECT_EQ(fake_count("1001"), 1u);
+    EXPECT_FALSE(fake_ecu::in_extended(0x7E8)) << "left at the close";
+    EXPECT_TRUE(in_order(logs.only_log(),
+                         {"the close waits for ", "'s prompt",
+                          "the close returns 7E8 to the default session",
+                          "7E8 is back in the default session (50 01)"}));
+}
+
+/* A reply still running at its wait (ELM327_LEAVE_MS from its send) is
+ * stopped with a space, which the adapter answers STOPPED, and 10 01
+ * follows the prompt */
+TEST_F(Elm327SessionTest, AReplyStillRunningAtTheCloseIsStoppedBefore1001)
+{
+    SessionsReset reset;
+    LogDir logs("close-stops");
+    Session s;
+    ASSERT_NO_FATAL_FAILURE(entered(s));
+    ASSERT_NO_FATAL_FAILURE(close_mid_reply(s, 1500));
+    EXPECT_EQ(interrupts(), 1u) << "the space stops the reply, once";
+    const std::vector<std::string> sent = fake_commands();
+    ASSERT_FALSE(sent.empty());
+    EXPECT_EQ(sent.back(), "1001");
+    EXPECT_FALSE(fake_ecu::in_extended(0x7E8)) << "left at the close";
+    EXPECT_TRUE(in_order(logs.only_log(),
+                         {"the close stops ", "'s reply with a space",
+                          "the close returns 7E8 to the default session"}));
+}
+
+/* An adapter printing 7F 22 78 every 50 ms holds no read at the close
+ * past its wait: the close ends within ELM327_CLOSE_MS (2 s), not at the
+ * answer 4 s on */
+TEST_F(Elm327SessionTest, AChattyReplyCantStretchTheClose)
+{
+    SessionsReset reset;
+    Session s;
+    ASSERT_NO_FATAL_FAILURE(entered(s));
+    set_knobs([](fake_elm327::knobs& k) {
+        k.pending = true;
+        k.pending_count = 80;
+        k.pending_gap_ms = 50;
+    });
+    long long ms = 0;
+    ASSERT_NO_FATAL_FAILURE(close_mid_reply(s, 4000, &ms));
+    EXPECT_LT(ms, 2000 + kCloseMarginMs) << "the lines kept the close waiting";
+    EXPECT_EQ(fake_commands().back(), "1001");
+}
+
+/* 10 01 answered STOPPED is sent once more, and the second leaves the
+ * session */
+TEST_F(Elm327SessionTest, A1001AnsweredStoppedIsSentOnceMore)
+{
+    SessionsReset reset;
+    Session s;
+    ASSERT_NO_FATAL_FAILURE(entered(s));
+    set_knobs([](fake_elm327::knobs& k) { k.stopped_once = "1001"; });
+    (void)close_ms(s);
+    EXPECT_EQ(fake_count("1001"), 2u);
+    EXPECT_FALSE(fake_ecu::in_extended(0x7E8)) << "left at the close";
+}
+
+/* An adapter that stops answering holds the close no longer than
+ * ELM327_CLOSE_MS (2 s), and one whose port fails closes at once */
+TEST_F(Elm327SessionTest, ACloseOnASilentOrDeadAdapterEndsWithinItsWaits)
+{
+    SessionsReset reset;
+    {
+        Session s;
+        ASSERT_NO_FATAL_FAILURE(entered(s));
+        set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
+        EXPECT_LT(close_ms(s), 2000 + kCloseMarginMs)
+            << "a silent adapter held the close";
+    }
+    set_knobs([](fake_elm327::knobs& k) { k.silent = false; });
+    {
+        Session s;
+        ASSERT_NO_FATAL_FAILURE(entered(s));
+        set_knobs([](fake_elm327::knobs& k) { k.dropped = true; });
+        EXPECT_LT(close_ms(s), kCloseMarginMs) << "a dead port held the close";
+    }
+}
+
 /* Without ?session=03 the engine ECU stays in the default session: D200
  * is refused (7F 22 31), never answered, while 1E1C reads */
 TEST_F(Elm327SessionTest, WithoutASessionD200IsRefused)
