@@ -995,10 +995,14 @@ requests and quiet states
   VX found 16 DIDs, its values named by their `0x7E9` prefix
   ([2026-11-04-two-ecu-car](bench-sessions/2026-11-04-two-ecu-car.md)).
   Other refusal codes (`11`, `33`) are tested against the fake only.
-- **The extended session has met no car.** `?session=03` has run against
-  the fake DLL's ECU and the simulated ECU only: no module has answered a
-  real `10 03`, taken tester present past S3 or read a DID that exists
-  only in the extended session (BENCH prep #36 in
+- **The extended session has met one module.** The test car's engine
+  ECU answered `10 03` and read in the session through the VX and the
+  MX+ ([2026-11-11-ext-session-car](bench-sessions/2026-11-11-ext-session-car.md)).
+  Tester present held it through quiet gaps
+  ([2026-11-11-quiet-session-car](bench-sessions/2026-11-11-quiet-session-car.md)),
+  but no module's session has been read back and no DID that exists
+  only in the extended session has been read, and the closes don't
+  surely return the module (Known Issue #44; BENCH prep #36 in
   [bench-prep.md](bench-sessions/bench-prep.md)).
 - **Listening to another tester has met two adapters.** The MX+'s
   `AT MA` beside the VX on a Y-splitter passed the engine ECU's replies,
