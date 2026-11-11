@@ -93,6 +93,15 @@ def main(argv):
                "signals": leaves + [{"key": "e%d" % n, "name": "E%d" % n, "kind": "computed",
                                      "expr": e} for n, e in enumerate(exprs)]}
     write(out, "fuzz_signal_file", "grammar_format2.json", json.dumps(grammar).encode())
+    # A chain (ADR-0062) listed top first, so its depth order isn't the
+    # set's: the harness's decode checks the batch keeps the set's
+    chain_exprs = [("top", "mid * 2 + side"), ("side", "low - d"), ("mid", "low + b"),
+                   ("low", "a + c")]
+    chain = {"havne_signals": 2, "name": "Chain", "source": {"name": "Havne's seeds"},
+             "ecus": [{"id": "pcm", "rx": "7E8"}],
+             "signals": leaves + [{"key": k, "name": k.upper(), "kind": "computed", "expr": e}
+                                  for k, e in chain_exprs]}
+    write(out, "fuzz_signal_file", "chain_format2.json", json.dumps(chain).encode())
 
     # The OBDb import: no year extending obd2 (0x00), and alone in 2019
     # (0x80 | (2019 - 1990))

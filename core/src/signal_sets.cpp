@@ -7,6 +7,9 @@
 #include "computed.h"
 #include <string.h>
 
+#include <memory>
+#include <new>
+
 /* Bounded copy into a fixed-width buffer, always null-terminated.
  * Portable stand-in for strncpy_s, which is MSVC-only. */
 static void copy_str(char* dst, size_t dst_size, const char* src)
@@ -176,24 +179,97 @@ static bool label_ok(const ecuio_enum_entry_t& e)
     return !label_like_formula(e.label);
 }
 
-/* Whether id names a def of the set a program can read: a number */
-static bool numeric_input(const ecuio_signal_set_t* set, uint16_t id)
+/* The def id names, or NULL */
+static const ecuio_signal_def_t* def_named(const ecuio_signal_set_t* set,
+                                           uint16_t id)
 {
     for (uint32_t i = 0; i < set->count; ++i) {
-        const ecuio_signal_def_t& d = set->defs[i];
-        if (d.id != id) {
-            continue;
+        if (set->defs[i].id == id) {
+            return &set->defs[i];
         }
-        return (d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0 &&
-               (d.kind == ECUIO_VALUE_UINT || d.kind == ECUIO_VALUE_INT ||
-                d.kind == ECUIO_VALUE_FLOAT || d.kind == ECUIO_VALUE_ENUM);
     }
-    return false;
+    return nullptr;
+}
+
+/* Whether a program can read the def id names with this age bound: a
+ * number, or a computed def, which takes no bound of its own */
+static bool input_ok(const ecuio_signal_set_t* set, uint16_t id,
+                     uint32_t max_age_us)
+{
+    const ecuio_signal_def_t* d = def_named(set, id);
+    if (d == nullptr) {
+        return false;
+    }
+    if (d->flags & ECUIO_DEF_FLAG_COMPUTED) {
+        return max_age_us == 0;
+    }
+    return d->kind == ECUIO_VALUE_UINT || d->kind == ECUIO_VALUE_INT ||
+           d->kind == ECUIO_VALUE_FLOAT || d->kind == ECUIO_VALUE_ENUM;
+}
+
+/* No circle and no chain past ECUIO_COMPUTED_MAX_DEPTH (ADR-0062): each
+ * program's depth settles once its computed inputs' have, so after
+ * MAX_DEPTH passes an unsettled one is on a circle, reads one, or is too
+ * deep. A byte per program from the heap, only for a set with a chain. */
+static int check_chains(const ecuio_signal_set_t* set, uint32_t* index)
+{
+    bool chained = false;
+    for (uint32_t p = 0; p < set->computed_count && !chained; ++p) {
+        const ecuio_computed_t& c = set->computed[p];
+        for (uint32_t k = 0; k < c.input_count && !chained; ++k) {
+            const ecuio_signal_def_t* d = def_named(set, c.input_ids[k]);
+            chained = (d->flags & ECUIO_DEF_FLAG_COMPUTED) != 0;
+        }
+    }
+    if (!chained) {
+        return ECUIO_VALIDATE_OK;
+    }
+    std::unique_ptr<uint8_t[]> depth(new (std::nothrow)
+                                         uint8_t[set->computed_count]);
+    if (!depth) {
+        return ECUIO_VALIDATE_ERR_OUT_OF_MEMORY;
+    }
+    memset(depth.get(), 0, set->computed_count);
+    for (uint32_t pass = 0; pass < ECUIO_COMPUTED_MAX_DEPTH; ++pass) {
+        bool settled_one = false;
+        for (uint32_t p = 0; p < set->computed_count; ++p) {
+            if (depth[p] != 0) {
+                continue;
+            }
+            const ecuio_computed_t& c = set->computed[p];
+            uint32_t d = 1;
+            bool ready = true;
+            for (uint32_t k = 0; k < c.input_count && ready; ++k) {
+                const ecuio_signal_def_t* in = def_named(set, c.input_ids[k]);
+                if ((in->flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
+                    continue;
+                }
+                const uint8_t under = depth[in->table_first];
+                ready = under != 0;
+                d = ready && under + 1u > d ? under + 1u : d;
+            }
+            if (ready && d <= ECUIO_COMPUTED_MAX_DEPTH) {
+                depth[p] = static_cast<uint8_t>(d);
+                settled_one = true;
+            }
+        }
+        if (!settled_one) {
+            break;
+        }
+    }
+    for (uint32_t p = 0; p < set->computed_count; ++p) {
+        if (depth[p] == 0) {
+            *index = p;
+            return ECUIO_VALIDATE_ERR_COMPUTED_CHAIN;
+        }
+    }
+    return ECUIO_VALIDATE_OK;
 }
 
 /* The tables (ADR-0051): NULL only when empty, each def's range within
  * its table, each enum def's raw values strictly ascending, each label
- * and each program, then each program's inputs */
+ * and each program, then each program's inputs and the chains they
+ * make */
 static int check_tables(const ecuio_signal_set_t* set, uint32_t* index)
 {
     if ((set->enum_count > 0 && !set->enums) ||
@@ -238,13 +314,13 @@ static int check_tables(const ecuio_signal_set_t* set, uint32_t* index)
     for (uint32_t p = 0; p < set->computed_count; ++p) {
         const ecuio_computed_t& c = set->computed[p];
         for (uint32_t k = 0; k < c.input_count; ++k) {
-            if (!numeric_input(set, c.input_ids[k])) {
+            if (!input_ok(set, c.input_ids[k], c.max_age_us[k])) {
                 *index = p;
                 return ECUIO_VALIDATE_ERR_COMPUTED_INPUT;
             }
         }
     }
-    return ECUIO_VALIDATE_OK;
+    return check_chains(set, index);
 }
 
 /* The set checks, in order. A code that names one def, channel, entry

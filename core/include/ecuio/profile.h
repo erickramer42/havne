@@ -56,7 +56,8 @@ extern "C" {
  * profile, like "raw". Returns ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for
  * a NULL name; ECUIO_ERR_INVALID_ARGUMENT for a malformed or built-in
  * name, an invalid set or one with too many requests, leaving the
- * registry unchanged.
+ * registry unchanged; ECUIO_ERR_OUT_OF_MEMORY when the validator had
+ * no room to check the set's chains (ECUIO_VALIDATE_ERR_OUT_OF_MEMORY).
  *
  * out may be NULL. Otherwise it receives the validator's result when
  * the set was checked: which check failed, and on which def or

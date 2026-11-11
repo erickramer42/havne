@@ -142,6 +142,17 @@ inline const ecuio_computed_t* def_program(const ecuio_signal_set_t& set,
     return set.computed + d.table_first;
 }
 
+// Whether the set's def with this id is a computed signal
+inline bool input_is_computed(const ecuio_signal_set_t& set, uint16_t id)
+{
+    for (uint32_t i = 0; i < set.count; ++i) {
+        if (set.defs[i].id == id) {
+            return (set.defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) != 0;
+        }
+    }
+    return false;
+}
+
 // A gauge's field: its key and braces, and four numbers of 24 at most
 inline constexpr size_t kGaugeBytes = 256;
 
@@ -252,8 +263,13 @@ inline void def_line(Line& l, const ecuio_signal_set_t& set,
             l.raw("{\"id\":");
             l.u64(p->input_ids[i]);
             l.key("max_age_us");
-            l.u64(p->max_age_us[i] != 0 ? p->max_age_us[i]
-                                        : ECUIO_VALUE_STALE_US);
+            if (input_is_computed(set, p->input_ids[i])) {
+                // ADR-0062: no bound of its own, its leaves' ages apply
+                l.raw("null,\"computed\":true");
+            } else {
+                l.u64(p->max_age_us[i] != 0 ? p->max_age_us[i]
+                                            : ECUIO_VALUE_STALE_US);
+            }
             l.ch('}');
         }
         l.raw("]}");

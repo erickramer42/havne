@@ -1,6 +1,6 @@
 // File/layer: core/src/computed.h | C++17, Qt-free, every platform, pure
-// Testing: UNIT: ComputedTest (test_signals); CoreTest (test_core); FUZZ:
-//          fuzz_computed
+// Testing: UNIT: ComputedTest, SignalTablesTest (test_signals); CoreTest
+//          (test_core); FUZZ: fuzz_computed
 //
 // A computed def's program (ADR-0051 section 5, ecuio_computed_t in
 // signals.h): the checker the validator runs once, and the stack
@@ -8,6 +8,7 @@
 // step is exact or correctly rounded under IEEE 754, so a program gives
 // the same bits on every platform; min and max are comparisons here,
 // never fmin and fmax, whose answer for -0 against +0 is the library's.
+// And the walk from a computed def to the number defs under it.
 
 #ifndef ECUIO_COMPUTED_H
 #define ECUIO_COMPUTED_H
@@ -261,6 +262,42 @@ inline bool ecuio_computed_run(const ecuio_computed_t& program,
     }
     *out = stack[0].value;
     return true;
+}
+
+/* Marks in place (a byte per def of set) the defs each marked computed
+ * def reads, and theirs in turn, down to the number defs under it
+ * (ADR-0062): what a focus on a computed signal keeps asked. A marked
+ * def stays marked. At most ECUIO_COMPUTED_MAX_DEPTH passes, no
+ * recursion and no allocation; a set the validator passed is walked
+ * whole. */
+inline void ecuio_computed_mark_leaves(const ecuio_signal_set_t* set,
+                                       uint8_t* marks)
+{
+    if (set == nullptr || set->defs == nullptr || marks == nullptr) {
+        return;
+    }
+    for (uint32_t pass = 0; pass < ECUIO_COMPUTED_MAX_DEPTH; ++pass) {
+        bool more = false;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if (marks[i] == 0 || (d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0 ||
+                d.table_first >= set->computed_count) {
+                continue;
+            }
+            const ecuio_computed_t& c = set->computed[d.table_first];
+            for (uint32_t k = 0; k < c.input_count; ++k) {
+                for (uint32_t j = 0; j < set->count; ++j) {
+                    if (set->defs[j].id == c.input_ids[k] && marks[j] == 0) {
+                        marks[j] = 1;
+                        more = true;
+                    }
+                }
+            }
+        }
+        if (!more) {
+            break;
+        }
+    }
 }
 
 #endif /* ECUIO_COMPUTED_H */

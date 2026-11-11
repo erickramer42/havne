@@ -418,7 +418,8 @@ ecuio_status_t ecuio_recording_open(const char* folder_utf8,
  * second with frames, 24 for each computed signal's input in each such
  * second, and 256 each time a packed reply's lengths change.
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL folder, set or out;
- * ECUIO_ERR_INVALID_ARGUMENT for a set ecuio_validate_signal_set refuses;
+ * ECUIO_ERR_INVALID_ARGUMENT for a set ecuio_validate_signal_set refuses
+ * (ECUIO_ERR_OUT_OF_MEMORY when it had no room to check the chains);
  * ECUIO_ERR_LOAD_FAILED for a folder with no frames.csv or a file the
  * reader refuses ("frames.csv line 12: ...", never the path);
  * ECUIO_ERR_CANCELED and ECUIO_ERR_OUT_OF_MEMORY as for

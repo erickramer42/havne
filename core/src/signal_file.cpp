@@ -493,9 +493,10 @@ private:
             if (e == nullptr) {
                 fail(at, "reads " + q(name) + ", which no signal is");
             }
-            if (e->kind == "computed") {
+            if (e->kind == "computed" && format_ < 2) {
                 fail(at, "reads " + q(name) +
-                             ", a computed signal: one can't read another");
+                             ", a computed signal, which needs "
+                             "\"havne_signals\": 2");
             }
             if (e->kind == "text" || e->kind == "hex") {
                 fail(at, "reads " + q(name) + ", which is text");
@@ -1253,6 +1254,103 @@ void read_file(const Value& root, ecuio_signal_file& f)
     build(p, f);
 }
 
+/* Computed signals reading each other (ADR-0062): no circle and no
+ * chain past ECUIO_COMPUTED_MAX_DEPTH, refused at the first signal of
+ * either in the file's order, at its expr. Depths settle pass by pass;
+ * one left unsettled is on a circle or reads one. */
+void check_chains(const std::vector<entry>& entries, const ecuio_signal_file& f)
+{
+    const size_t n = entries.size();
+    /* Each signal's computed inputs, as entry indexes */
+    std::vector<std::vector<size_t>> reads(n);
+    bool chained = false;
+    for (size_t i = 0; i < n; ++i) {
+        if (entries[i].kind != "computed") {
+            continue;
+        }
+        const ecuio_computed_t& c =
+            f.computed[f.defs[entries[i].def].table_first];
+        for (uint32_t k = 0; k < c.input_count; ++k) {
+            const uint32_t id = c.input_ids[k];
+            if (id >= ECUIO_USER_SIG_ID_BASE &&
+                id - ECUIO_USER_SIG_ID_BASE < n &&
+                entries[id - ECUIO_USER_SIG_ID_BASE].kind == "computed") {
+                reads[i].push_back(id - ECUIO_USER_SIG_ID_BASE);
+                chained = true;
+            }
+        }
+    }
+    if (!chained) {
+        return;
+    }
+    std::vector<uint32_t> depth(n, 0);
+    for (bool more = true; more;) {
+        more = false;
+        for (size_t i = 0; i < n; ++i) {
+            if (entries[i].kind != "computed" || depth[i] != 0) {
+                continue;
+            }
+            uint32_t d = 1;
+            for (const size_t j : reads[i]) {
+                d = depth[j] == 0 ? 0 : std::max(d, depth[j] + 1);
+                if (d == 0) {
+                    break;
+                }
+            }
+            if (d != 0) {
+                depth[i] = d;
+                more = true;
+            }
+        }
+    }
+    for (size_t i = 0; i < n; ++i) {
+        if (entries[i].kind != "computed") {
+            continue;
+        }
+        const Value& expr = *entries[i].v->find("expr");
+        if (depth[i] > ECUIO_COMPUTED_MAX_DEPTH) {
+            refuse(expr, "signal " + q(entries[i].key) + " sits " +
+                             std::to_string(depth[i]) +
+                             " computed signals deep: a chain goes " +
+                             std::to_string(ECUIO_COMPUTED_MAX_DEPTH) +
+                             " deep at most");
+        }
+        if (depth[i] != 0) {
+            continue;
+        }
+        /* The shortest way back to i, if i is on a circle */
+        std::vector<size_t> from(n, n);
+        std::vector<size_t> queue(reads[i]);
+        for (const size_t j : reads[i]) {
+            from[j] = i;
+        }
+        for (size_t at = 0; at < queue.size() && from[i] == n; ++at) {
+            for (const size_t j : reads[queue[at]]) {
+                if (from[j] == n) {
+                    from[j] = queue[at];
+                    queue.push_back(j);
+                }
+            }
+        }
+        if (from[i] == n) {
+            continue; /* it reads a circle: a later signal is on it */
+        }
+        std::vector<size_t> path{i};
+        for (size_t j = from[i]; j != i; j = from[j]) {
+            path.push_back(j);
+        }
+        std::string words = "signal " + q(entries[i].key);
+        for (size_t k = path.size(); k-- > 1;) {
+            words += (k + 1 == path.size() ? " reads " : ", which reads ") +
+                     q(entries[path[k]].key);
+        }
+        words += (path.size() == 1 ? " reads " : ", which reads ") +
+                 q(entries[i].key) +
+                 ": computed signals can't read in a circle";
+        refuse(expr, words);
+    }
+}
+
 void build(const parts& in, ecuio_signal_file& f)
 {
     f.name = in.name;
@@ -1405,6 +1503,13 @@ void build(const parts& in, ecuio_signal_file& f)
                         refuse(m, what + "'s max_age names " + q(m.key) +
                                       ", which its expr doesn't read");
                     }
+                    for (const entry& x : entries) {
+                        if (x.key == m.key && x.kind == "computed") {
+                            refuse(m, what + "'s max_age names " + q(m.key) +
+                                          ", a computed signal: its own "
+                                          "inputs carry their ages");
+                        }
+                    }
                     const double seconds = finite_of(m.value, what + "'s max_age");
                     if (seconds < 0.1 || seconds > 60.0) {
                         refuse(m.value, what + "'s max_age for " + q(m.key) +
@@ -1439,6 +1544,7 @@ void build(const parts& in, ecuio_signal_file& f)
             read_gauge(s, d, e.def, f, what);
         }
     }
+    check_chains(entries, f);
     for (const entry& e : entries) {
         f.keys.emplace_back(e.key, e.def);
     }
@@ -1456,7 +1562,11 @@ void build(const parts& in, ecuio_signal_file& f)
     /* The rules above leave the validator nothing to refuse; if it does,
      * the words name the signal it named */
     ecuio_validation_t why{};
-    if (ecuio_validate_signal_set(&f.set, &why) != ECUIO_VALIDATE_OK) {
+    if (ecuio_validate_signal_set(&f.set, &why) ==
+        ECUIO_VALIDATE_ERR_OUT_OF_MEMORY) {
+        throw std::bad_alloc();
+    }
+    if (why.code != ECUIO_VALIDATE_OK) {
         const size_t first = base != nullptr ? base->count : 0;
         /* Only these codes' index is a def's */
         const bool names_a_def = why.code > 0 ||

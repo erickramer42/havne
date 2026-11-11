@@ -1,7 +1,7 @@
 // File/layer: core/src/frame_decoder.cpp | C++17, Qt-free; a frame's decode
 //             against a set (ADR-0024 section 4)
-// Testing: UNIT: CoreTest (test_core), the computed inputs in
-//          CoreTest.AStaleInputIsNoValueOnlyWhereTheProgramReadsIt
+// Testing: UNIT: CoreTest, RecordingFramesTest (test_core); FUZZ:
+//          fuzz_validate_set, fuzz_signal_file
 
 #include "frame_decoder.h"
 
@@ -108,12 +108,97 @@ void decode_frame(ecuio_frame_decoder& d, const ecuio_frame_t* frame,
     }
 }
 
+/* A number def's newest value, if no older than bound at the frame's
+ * time, else no value (NaN), which only the steps that read it see */
+double leaf_value(const ecuio_frame_decoder& d, uint32_t def, uint64_t bound,
+                  uint64_t frame_us)
+{
+    const ecuio_frame_decoder::latest_value& l = d.latest[def];
+    const bool fresh =
+        l.decode != 0 && l.time_us <= frame_us && frame_us - l.time_us <= bound;
+    return fresh ? l.value : std::numeric_limits<double>::quiet_NaN();
+}
+
+/* A chain's decode state per plan */
+constexpr uint8_t kFed = 0x1;
+constexpr uint8_t kNeeded = 0x2;
+constexpr uint8_t kHas = 0x4;
+
+/* A set with a chain (ADR-0062), in three passes over the plans by depth.
+ * Fed: a number input decoded this frame, or a computed input fed.
+ * Needed, from the deepest down: fed, or read by a needed plan. Worked
+ * out, from depth 1 up: each needed plan, a computed input giving the
+ * value just worked out from the number defs under it. Then each fed
+ * plan with a value joins the batch in the set's order. */
+void compute_chains(ecuio_frame_decoder& d, const ecuio_frame_t* frame,
+                    uint32_t& n)
+{
+    using plan = ecuio_frame_decoder::computed_plan;
+    uint8_t* state = d.chain_state.data();
+    for (const uint32_t p : d.by_depth) {
+        const plan& c = d.computed[p];
+        bool fed = false;
+        for (uint32_t k = 0; k < c.program->input_count && !fed; ++k) {
+            fed = c.plan_of[k] == plan::kLeaf
+                      ? d.latest[c.inputs[k]].decode == d.decodes
+                      : (state[c.plan_of[k]] & kFed) != 0;
+        }
+        state[p] = fed ? (kFed | kNeeded) : 0;
+    }
+    for (size_t i = d.by_depth.size(); i-- > 0;) {
+        const plan& c = d.computed[d.by_depth[i]];
+        if ((state[d.by_depth[i]] & kNeeded) == 0) {
+            continue;
+        }
+        for (uint32_t k = 0; k < c.program->input_count; ++k) {
+            if (c.plan_of[k] != plan::kLeaf) {
+                state[c.plan_of[k]] |= kNeeded;
+            }
+        }
+    }
+    for (const uint32_t p : d.by_depth) {
+        const plan& c = d.computed[p];
+        if ((state[p] & kNeeded) == 0) {
+            continue;
+        }
+        double in[ECUIO_COMPUTED_MAX_INPUTS] = {};
+        for (uint32_t k = 0; k < c.program->input_count; ++k) {
+            const uint32_t q = c.plan_of[k];
+            in[k] = q == plan::kLeaf
+                        ? leaf_value(d, c.inputs[k], c.max_age_us[k],
+                                     frame->timestamp_us)
+                    : (state[q] & kHas) != 0
+                        ? d.chain_value[q]
+                        : std::numeric_limits<double>::quiet_NaN();
+        }
+        if (ecuio_computed_run(*c.program, in, &d.chain_value[p])) {
+            state[p] |= kHas;
+        }
+    }
+    for (uint32_t p = 0; p < d.computed.size(); ++p) {
+        if ((state[p] & (kFed | kHas)) != (kFed | kHas)) {
+            continue;
+        }
+        const ecuio_signal_def_t& def = d.set->defs[d.computed[p].def];
+        ecuio_value_t v{};
+        v.signal_id = def.id;
+        v.kind = def.kind;
+        v.value = d.chain_value[p];
+        d.values[n++] = v;
+    }
+}
+
 /* Appends each computed value a frame value feeds (ADR-0051 section 5).
  * Each input is its newest value no older than its bound at the frame's
- * time, else no value (NaN), which only the steps that read it see. */
+ * time, else no value (NaN), which only the steps that read it see. A
+ * set with no chain takes this one pass. */
 void compute_values(ecuio_frame_decoder& d, const ecuio_frame_t* frame,
                     uint32_t& n)
 {
+    if (d.chained) {
+        compute_chains(d, frame, n);
+        return;
+    }
     for (const ecuio_frame_decoder::computed_plan& c : d.computed) {
         const uint32_t inputs = c.program->input_count;
         bool fed = false;
@@ -138,17 +223,27 @@ void compute_values(ecuio_frame_decoder& d, const ecuio_frame_t* frame,
 }
 
 /* The computed defs' plans (ADR-0051 section 5), from a set the
- * validator passed: each input's def index and age bound */
+ * validator passed: each input's def index, age bound and, for a
+ * computed input, its plan; then each plan's depth, settled in at most
+ * ECUIO_COMPUTED_MAX_DEPTH passes, and the plans by depth */
 void plan_computed(ecuio_frame_decoder& d, const ecuio_signal_set_t* set)
 {
+    using plan = ecuio_frame_decoder::computed_plan;
+    std::vector<uint32_t> plan_of_def(set->count, plan::kLeaf);
     for (uint32_t i = 0; i < set->count; ++i) {
-        const ecuio_signal_def_t& def = set->defs[i];
-        if ((def.flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
-            continue;
+        if (set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) {
+            plan_of_def[i] = static_cast<uint32_t>(d.computed.size());
+            plan c;
+            c.def = i;
+            c.program = &set->computed[set->defs[i].table_first];
+            d.computed.push_back(c);
         }
-        ecuio_frame_decoder::computed_plan c;
-        c.def = i;
-        c.program = &set->computed[def.table_first];
+    }
+    if (d.computed.empty()) {
+        return;
+    }
+    d.latest.resize(set->count);
+    for (plan& c : d.computed) {
         for (uint32_t k = 0; k < c.program->input_count; ++k) {
             for (uint32_t j = 0; j < set->count; ++j) {
                 if (set->defs[j].id == c.program->input_ids[k]) {
@@ -156,14 +251,44 @@ void plan_computed(ecuio_frame_decoder& d, const ecuio_signal_set_t* set)
                     break;
                 }
             }
+            c.plan_of[k] = plan_of_def[c.inputs[k]];
+            d.chained = d.chained || c.plan_of[k] != plan::kLeaf;
             const uint32_t age = c.program->max_age_us[k];
             c.max_age_us[k] = age != 0 ? age : ECUIO_VALUE_STALE_US;
         }
-        d.computed.push_back(c);
     }
-    if (!d.computed.empty()) {
-        d.latest.resize(set->count);
+    for (uint32_t pass = 0; pass < ECUIO_COMPUTED_MAX_DEPTH; ++pass) {
+        for (plan& c : d.computed) {
+            if (c.depth != 0) {
+                continue;
+            }
+            uint32_t depth = 1;
+            for (uint32_t k = 0; k < c.program->input_count && depth != 0;
+                 ++k) {
+                if (c.plan_of[k] != plan::kLeaf) {
+                    const uint8_t under = d.computed[c.plan_of[k]].depth;
+                    depth = under == 0 ? 0 : std::max(depth, under + 1u);
+                }
+            }
+            if (depth <= ECUIO_COMPUTED_MAX_DEPTH) {
+                c.depth = static_cast<uint8_t>(depth);
+            }
+        }
     }
+    if (!d.chained) {
+        return;
+    }
+    for (uint32_t p = 0; p < d.computed.size(); ++p) {
+        if (d.computed[p].depth != 0) {
+            d.by_depth.push_back(p);
+        }
+    }
+    std::stable_sort(d.by_depth.begin(), d.by_depth.end(),
+                     [&](uint32_t a, uint32_t b) {
+                         return d.computed[a].depth < d.computed[b].depth;
+                     });
+    d.chain_state.assign(d.computed.size(), 0);
+    d.chain_value.assign(d.computed.size(), 0.0);
 }
 
 } // namespace

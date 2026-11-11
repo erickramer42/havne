@@ -175,11 +175,13 @@ typedef struct ecuio_enum_entry {
 } ecuio_enum_entry_t;
 
 /* A computed def's program (ADR-0051 section 5): a stack machine over
- * up to four inputs, each another def's newest value no older than its
- * age bound, and up to 16 constants. Each step pushes an input or a
- * constant, or pops one, two or three values and pushes one; a program
- * runs to one number. The low four bits of a push step are the input's
- * or the constant's index.
+ * up to four inputs and up to 16 constants. An input is a number def's
+ * newest value no older than its age bound, or a computed def's value
+ * worked out at the same frame from the number defs under it (a chain,
+ * ADR-0062), which takes no age bound of its own. Each step pushes an
+ * input or a constant, or pops one, two or three values and pushes one;
+ * a program runs to one number. The low four bits of a push step are
+ * the input's or the constant's index.
  *
  * A value is a number or a truth, and the validator checks each step's
  * types: a step given the wrong type, a truth left at the end or a step
@@ -192,6 +194,9 @@ typedef struct ecuio_enum_entry {
 #define ECUIO_COMPUTED_MAX_INPUTS    4u
 #define ECUIO_COMPUTED_MAX_CONSTANTS 16u
 #define ECUIO_COMPUTED_MAX_STEPS     33u   /* 16 operations and their 17 operands */
+/* A chain's most levels: a computed def reading only number defs is 1
+ * deep, one reading it 2 */
+#define ECUIO_COMPUTED_MAX_DEPTH     8u
 
 /* Numbers to a number */
 #define ECUIO_COMPUTED_PUSH_INPUT    0x00u  /* | the input's index */
@@ -243,7 +248,8 @@ typedef struct ecuio_computed {
     uint32_t max_age_us[4];       /* each input's age bound: 0 for
                                      ECUIO_VALUE_STALE_US, else
                                      ECUIO_COMPUTED_MIN_AGE_US to _MAX_;
-                                     zero after input_count */
+                                     0 for a computed input; zero after
+                                     input_count */
     uint8_t  input_count;         /* 1 to ECUIO_COMPUTED_MAX_INPUTS */
     uint8_t  step_count;          /* 1 to ECUIO_COMPUTED_MAX_STEPS */
     uint8_t  constant_count;      /* 0 to ECUIO_COMPUTED_MAX_CONSTANTS */
@@ -478,18 +484,31 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
 #define ECUIO_VALIDATE_ERR_COMPUTED_INPUT   (-22)  /* an input id that isn't
                                                       a numeric def of the
                                                       set (UINT, INT, FLOAT
-                                                      or ENUM, not
-                                                      COMPUTED) */
+                                                      or ENUM) or a COMPUTED
+                                                      def, or a COMPUTED
+                                                      input with an age
+                                                      bound */
+#define ECUIO_VALIDATE_ERR_COMPUTED_CHAIN   (-23)  /* computed defs reading
+                                                      each other in a
+                                                      circle, or a chain
+                                                      past
+                                                      ECUIO_COMPUTED_MAX_DEPTH
+                                                      */
+#define ECUIO_VALIDATE_ERR_OUT_OF_MEMORY    (-24)  /* no room to check the
+                                                      chains: the set may
+                                                      be valid */
 
 /* Why a set failed validation, and where. index names the element the
  * code is about: the failing def; for a duplicate id, the second def
  * of the pair; for a bad channel id, the channel; for a duplicate rx,
  * the second channel of the pair; for too many requests, the first def
  * whose request didn't fit; for a table range, the def; for an enum
- * entry, the entry; for a program or its input, the program. It is
- * UINT32_MAX for ECUIO_VALIDATE_OK and for a code that names no single
- * element: a NULL, the layout version, the set's reserved fields, the
- * channel count, a NULL table. */
+ * entry, the entry; for a program or its input, the program; for a
+ * chain, the first program in the table it couldn't settle (on a
+ * circle, reading one, or past the depth). It is UINT32_MAX for
+ * ECUIO_VALIDATE_OK and for a code that names no single element: a
+ * NULL, the layout version, the set's reserved fields, the channel
+ * count, a NULL table, no memory. */
 typedef struct ecuio_validation {
     int32_t  code;                /* ECUIO_VALIDATE_*; 0 = OK */
     uint32_t index;               /* the def or channel, or UINT32_MAX */
@@ -533,7 +552,10 @@ const ecuio_signal_set_t* ecuio_obd2_signal_set(void); /* ADR-0013 obd2 profile 
  * reserved fields; every def (ecuio_validate_signal; the first failing
  * def's code); unique def ids; the channel declarations; then the
  * tables: each NULL only when empty, each def's range in them, each
- * enum entry, each program and its inputs. A set with count 0 may
+ * enum entry, each program and its inputs, then the chains (no circle,
+ * none past ECUIO_COMPUTED_MAX_DEPTH; checked with a byte per program
+ * from the heap, only when one computed def reads another, so a set
+ * with no chain allocates nothing). A set with count 0 may
  * leave defs NULL. Returns ECUIO_VALIDATE_OK or a
  * ECUIO_VALIDATE_ERR_* code. When out isn't NULL, it receives the same
  * code and the index of the element at fault; a caller that only needs

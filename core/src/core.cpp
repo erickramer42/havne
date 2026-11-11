@@ -12,6 +12,7 @@
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, for the names */
 #include "diagnostics.h"      /* the trouble codes' and monitors' words */
 #include "pid_support.h"     /* the signals their ECU doesn't support */
+#include "computed.h"        /* a computed pick's leaves, for a focus */
 #include "uri_query.h"
 #include "error_detail.h"
 #include "probes.h"
@@ -505,6 +506,12 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
                              session->info.profile);
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
+    }
+    /* A computed pick carries no request: the number defs under it are
+     * what the worker keeps asked (ADR-0062). focus_ids keeps the picks
+     * as given. */
+    if (defs > 0) {
+        ecuio_computed_mark_leaves(set, picked.data());
     }
     {
         std::lock_guard<std::mutex> lock(session->focus_mutex);

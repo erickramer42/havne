@@ -1059,3 +1059,36 @@ TEST(PluginTest, AVariantTakesTheNewestFormatOfItsFiles)
         std::string::npos)
         << got;
 }
+
+/* A later file's signal that closes a circle through the earlier file's
+ * chain is refused in the later file's place (ADR-0062) */
+TEST(PluginTest, AReplacementThatClosesACircleIsRefusedInItsFile)
+{
+    Folder f;
+    f.files["manifest.json"] =
+        R"json({"havne_plugin":1,"id":"circle","name":"Circle",
+      "version":"1.0.0","requires":{"core":"0.1.0"},"source":{"name":"Havne's tests"},
+      "tiers":["data"],"ecus":[{"id":"pcm","rx":"7E8"}],
+      "variants":[{"id":"chain","files":["a.json"]},
+                  {"id":"closed","files":["a.json","b.json"]}]})json";
+    f.files["a.json"] =
+        R"j({"havne_signals":2,"signals":[{"key":"p","name":"P","field":{"byte":0},)j"
+        R"j("read":{"service":"22","number":"D100"}},)j"
+        R"j({"key":"x","name":"X","kind":"computed","expr":"p + 1"},)j"
+        R"j({"key":"y","name":"Y","kind":"computed","expr":"x * 2"}]})j";
+    f.files["b.json"] =
+        R"j({"havne_signals":2,"signals":[{"key":"x","name":"X","kind":"computed",)j"
+        R"j("expr":"y - 1"}]})j";
+    const std::string got = folder_refusal(f);
+    EXPECT_EQ(got.rfind("b.json, line 1, column ", 0), 0u) << got;
+    EXPECT_NE(
+        got.find("signal 'x' reads 'y', which reads 'x': computed signals "
+                 "can't read in a circle"),
+        std::string::npos)
+        << got;
+    f.files["manifest.json"].replace(
+        f.files["manifest.json"].find(R"(,"b.json"])"),
+        std::strlen(R"(,"b.json"])"), "]");
+    Plugin p = load_folder(f);
+    EXPECT_TRUE(p) << "the chain alone loads: " << ecuio_last_error_detail();
+}

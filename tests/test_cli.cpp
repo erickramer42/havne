@@ -2707,3 +2707,43 @@ TEST(CliElm327Test, AddressesAndLines)
               "{\"type\":\"client\",\"event\":\"refused\","
               "\"peer\":\"127.0.0.1:50123\"}");
 }
+
+// A computed input has no age bound of its own (ADR-0062): its ages are the
+// number signals' under it, so its line says so instead of the stale age
+TEST(CliSignalFileTest, AComputedInputIsNamedComputedWithNoAge)
+{
+    const std::string json =
+        "{\"havne_signals\":2,\"name\":\"Chain\","
+        "\"source\":{\"name\":\"test\"},"
+        "\"ecus\":[{\"id\":\"tcm\",\"rx\":\"7E9\"}],\"signals\":["
+        "{\"key\":\"temp\",\"name\":\"Temp\",\"ecu\":\"tcm\","
+        "\"read\":{\"service\":\"22\",\"number\":\"1E1C\"},"
+        "\"field\":{\"byte\":0}},"
+        "{\"key\":\"half\",\"name\":\"Half\",\"kind\":\"computed\","
+        "\"expr\":\"temp / 2\",\"max_age\":{\"temp\":1.5}},"
+        "{\"key\":\"sum\",\"name\":\"Sum\",\"kind\":\"computed\","
+        "\"expr\":\"half + temp\"}]}";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
+    ASSERT_EQ(set.count, 3u);
+    char buf[4096];
+    const auto line = [&](uint32_t i) {
+        cli::Line l(buf, sizeof buf);
+        cli::def_line(l, set, set.defs[i], nullptr);
+        return std::string(l.data(), l.size());
+    };
+    const std::string half = line(1);
+    EXPECT_NE(half.find("\"inputs\":[{\"id\":30000,\"max_age_us\":1500000}]"),
+              std::string::npos)
+        << half;
+    const std::string sum = line(2);
+    EXPECT_NE(sum.find("\"inputs\":[{\"id\":30001,\"max_age_us\":null,"
+                       "\"computed\":true},{\"id\":30000,"
+                       "\"max_age_us\":3000000}]"),
+              std::string::npos)
+        << sum;
+    EXPECT_LE(sum.size(), cli::def_line_bytes(set, set.defs[2]));
+    ecuio_signal_file_free(file);
+}

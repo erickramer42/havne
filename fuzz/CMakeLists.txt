@@ -45,7 +45,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
         # ISO-TP, fuzz_sim the simulated ECU, fuzz_recording a
         # recording's rows, fuzz_candump a candump log's lines,
         # fuzz_json the JSON reader, fuzz_csv_import a CSV and its
-        # column map, fuzz_computed a computed program's machine, all
+        # column map, fuzz_computed a computed program's machine,
+        # fuzz_validate_set and fuzz_signal_file the frame decoder, all
         # internal
         # (the tests' precedent)
         target_include_directories(${_t} PRIVATE ${CMAKE_SOURCE_DIR}/core/src)

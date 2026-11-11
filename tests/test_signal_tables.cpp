@@ -327,7 +327,6 @@ TEST(SignalTablesTest, AProgramMustRunAndReadNumbersOfTheSet)
         EXPECT_EQ(v.index, 0u) << what;
     };
     input(99, "not a def of the set");
-    input(4, "the computed def itself");
     Tables text;
     text.defs[1].kind = ECUIO_VALUE_TEXT;
     text.defs[1].bit_length = 0;
@@ -335,6 +334,133 @@ TEST(SignalTablesTest, AProgramMustRunAndReadNumbersOfTheSet)
     Tables en;
     en.computed[0].input_ids[1] = 3;
     EXPECT_EQ(en.check().code, ECUIO_VALIDATE_OK) << "an enum's number is a number";
+}
+
+namespace {
+
+/* Number defs 1 and 2, then computed defs 101 to 100 + depth, each
+ * reading the one below (101 reads def 1) plus def 2: a chain depth
+ * deep. reversed lists the computed defs and their programs top first. */
+struct Chain {
+    ecuio_signal_def_t defs[2 + 16];
+    ecuio_computed_t computed[16];
+    ecuio_signal_set_t set{};
+
+    explicit Chain(uint32_t depth, bool reversed = false)
+    {
+        defs[0] = number_def(1, 0x123);
+        defs[1] = number_def(2, 0x124);
+        for (uint32_t k = 0; k < depth; ++k) {
+            /* level k + 1, in the place reversed puts it */
+            const uint32_t at = reversed ? depth - 1 - k : k;
+            const uint16_t below = k == 0 ? 1 : static_cast<uint16_t>(100 + k);
+            defs[2 + at] = computed_def(static_cast<uint16_t>(101 + k),
+                                        static_cast<uint16_t>(at));
+            computed[at] = difference(below, 2, 0);
+        }
+        set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        set.count = 2 + depth;
+        set.defs = defs;
+        set.computed_count = depth;
+        set.computed = computed;
+    }
+    Chain(const Chain&) = delete;
+    Chain& operator=(const Chain&) = delete;
+
+    ecuio_validation_t check() const
+    {
+        ecuio_validation_t v{};
+        ecuio_validate_signal_set(&set, &v);
+        return v;
+    }
+};
+
+} // namespace
+
+/* ADR-0062: a computed def may read another, ECUIO_COMPUTED_MAX_DEPTH
+ * deep at most, listed in any order */
+TEST(SignalTablesTest, AChainPassesToItsDepthInAnyOrder)
+{
+    for (const bool reversed : {false, true}) {
+        const Chain at(ECUIO_COMPUTED_MAX_DEPTH, reversed);
+        EXPECT_EQ(at.check().code, ECUIO_VALIDATE_OK) << reversed;
+        const Chain past(ECUIO_COMPUTED_MAX_DEPTH + 1, reversed);
+        const ecuio_validation_t v = past.check();
+        EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_COMPUTED_CHAIN) << reversed;
+        /* only the top level is past the depth: its program */
+        EXPECT_EQ(v.index, reversed ? 0u : ECUIO_COMPUTED_MAX_DEPTH)
+            << reversed;
+        EXPECT_EQ(v.reserved[0], 0u);
+    }
+}
+
+TEST(SignalTablesTest, ACircleIsRefusedAtTheFirstProgramItLeavesUnsettled)
+{
+    /* 101 reads 102 and 102 reads 101 */
+    Chain two(2);
+    two.computed[0].input_ids[0] = 102;
+    ecuio_validation_t v = two.check();
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_COMPUTED_CHAIN);
+    EXPECT_EQ(v.index, 0u);
+
+    /* one reading itself */
+    Chain self(1);
+    self.computed[0].input_ids[0] = 101;
+    v = self.check();
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_COMPUTED_CHAIN);
+    EXPECT_EQ(v.index, 0u);
+
+    /* 101 reads the circle of 102 and 103, listed first: it is the first
+     * program left unsettled */
+    Chain reader(3);
+    reader.computed[0].input_ids[0] = 102;
+    reader.computed[1].input_ids[0] = 103;
+    reader.computed[2].input_ids[0] = 102;
+    v = reader.check();
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_COMPUTED_CHAIN);
+    EXPECT_EQ(v.index, 0u);
+}
+
+TEST(SignalTablesTest, AComputedInputTakesNoAgeBound)
+{
+    Chain c(2);
+    c.computed[1].max_age_us[0] = 1000000; /* 102's input 101 */
+    const ecuio_validation_t v = c.check();
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_COMPUTED_INPUT);
+    EXPECT_EQ(v.index, 1u);
+    c.computed[1].max_age_us[0] = 0;
+    c.computed[1].max_age_us[1] = 1000000; /* def 2, a number: a bound */
+    EXPECT_EQ(c.check().code, ECUIO_VALIDATE_OK);
+}
+
+/* The walk a focus takes: a computed def's leaves, down a whole chain,
+ * the defs between them marked too, nothing else */
+TEST(SignalTablesTest, TheLeavesWalkReachesTheNumbersUnderAChain)
+{
+    for (const bool reversed : {false, true}) {
+        const Chain c(ECUIO_COMPUTED_MAX_DEPTH, reversed);
+        ASSERT_EQ(c.check().code, ECUIO_VALIDATE_OK);
+        uint8_t marks[2 + 16] = {};
+        const uint32_t top = reversed ? 0u : ECUIO_COMPUTED_MAX_DEPTH - 1;
+        marks[2 + top] = 1;
+        ecuio_computed_mark_leaves(&c.set, marks);
+        for (uint32_t i = 0; i < c.set.count; ++i) {
+            EXPECT_EQ(marks[i], 1u) << "def " << i << " reversed " << reversed;
+        }
+        uint8_t none[2 + 16] = {};
+        none[0] = 1; /* a number def marks nothing more */
+        ecuio_computed_mark_leaves(&c.set, none);
+        for (uint32_t i = 1; i < c.set.count; ++i) {
+            EXPECT_EQ(none[i], 0u) << i;
+        }
+    }
+    const Chain c(3);
+    uint8_t mid[5] = {0, 0, 0, 1, 0}; /* 102: 101, defs 1 and 2, not 103 */
+    ecuio_computed_mark_leaves(&c.set, mid);
+    EXPECT_EQ(mid[0], 1u);
+    EXPECT_EQ(mid[1], 1u);
+    EXPECT_EQ(mid[2], 1u);
+    EXPECT_EQ(mid[4], 0u);
 }
 
 TEST(ComputedTest, TheCheckerAcceptsAProgramThatRunsToOneValue)

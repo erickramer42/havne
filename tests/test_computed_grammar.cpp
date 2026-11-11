@@ -437,12 +437,15 @@ TEST(SignalFileTest, EveryGrammarRefusalSaysWhereAndWhy)
         "line 9, column 14: expr 'if(rpm, 1, 0)' gives if() a number where "
         "a comparison should be (at character 4)");
 
-    /* A computed input stays refused in format 2 */
-    File chained = load(file_of(2, {"a + 1", "e * 2"}));
-    EXPECT_EQ(chained, nullptr);
+    /* A computed input is format 2's: refused in format 1, read in 2 */
+    File one = load(file_of(1, {"a + 1", "e * 2"}));
+    EXPECT_EQ(one, nullptr);
     EXPECT_NE(std::string(ecuio_last_error_detail())
-                  .find("a computed signal: one can't read another"),
+                  .find("expr 'e * 2' reads 'e', a computed signal, which "
+                        "needs \"havne_signals\": 2 (at character 1)"),
               std::string::npos)
+        << ecuio_last_error_detail();
+    EXPECT_NE(load(file_of(2, {"a + 1", "e * 2"})), nullptr)
         << ecuio_last_error_detail();
 }
 
@@ -800,4 +803,78 @@ TEST(SignalFileTest, RandomTreesComputeAsAWalkOfThem)
     }
     EXPECT_GE(compiled, 1000u) << "most trees fit a program";
     EXPECT_GE(compared, 7000u);
+}
+
+namespace {
+
+/* line 1, column C: the place of expr's value in a one-line file */
+std::string at_expr(const std::string& text, const std::string& expr)
+{
+    const size_t at = text.find("\"expr\":\"" + expr + "\"");
+    return "line 1, column " + std::to_string(at + 8) + ": ";
+}
+
+} // namespace
+
+/* ADR-0062: a computed signal reads another in format 2; a circle, a
+ * chain past 8 deep and an age bound on a computed input are refused at
+ * the first signal of each in the file's order, at its expr */
+TEST(SignalFileTest, AChainLoadsAndItsRefusalsNameTheSignal)
+{
+    const std::string chain = file_of(2, {"a + 1", "e * 2", "e1 + b"});
+    File f = load(chain);
+    ASSERT_TRUE(f) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+    const ecuio_signal_def_t* e = ecuio_signal_file_find(f.get(), "e");
+    const ecuio_signal_def_t* e2 = ecuio_signal_file_find(f.get(), "e2");
+    EXPECT_EQ(set->computed[e2->table_first].input_ids[0],
+              ecuio_signal_file_find(f.get(), "e1")->id);
+    EXPECT_EQ(set->computed[e2->table_first].max_age_us[0], 0u);
+    EXPECT_NE(e, nullptr);
+
+    const auto refused = [](const std::string& text) {
+        File g = load(text);
+        EXPECT_FALSE(g) << text;
+        return std::string(ecuio_last_error_detail());
+    };
+    std::string text = file_of(2, {"e1 + 1", "e * 2"});
+    EXPECT_EQ(refused(text),
+              at_expr(text, "e1 + 1") +
+                  "signal 'e' reads 'e1', which reads 'e': computed signals "
+                  "can't read in a circle");
+    text = file_of(2, {"e + 1"});
+    EXPECT_EQ(refused(text),
+              at_expr(text, "e + 1") +
+                  "signal 'e' reads 'e': computed signals can't read in a "
+                  "circle");
+    /* e reads the circle e1, e2, e3 without being on it: e1 is named */
+    text = file_of(2, {"e1 + a", "e2 + 1", "e3 * 2", "e1 - 1"});
+    EXPECT_EQ(refused(text),
+              at_expr(text, "e2 + 1") +
+                  "signal 'e1' reads 'e2', which reads 'e3', which reads "
+                  "'e1': computed signals can't read in a circle");
+
+    /* 8 deep loads; 9 deep is refused at the signal 9 deep */
+    std::vector<std::string> deep = {"a + 1"};
+    for (int k = 1; k < 8; ++k) {
+        deep.push_back(
+            (k == 1 ? std::string("e") : "e" + std::to_string(k - 1)) + " + 1");
+    }
+    EXPECT_TRUE(load(file_of(2, deep))) << ecuio_last_error_detail();
+    deep.push_back("e7 + 1");
+    text = file_of(2, deep);
+    EXPECT_EQ(refused(text),
+              at_expr(text, "e7 + 1") +
+                  "signal 'e8' sits 9 computed signals deep: a chain goes 8 "
+                  "deep at most");
+
+    /* A computed input's ages are its own inputs' */
+    text = file_of(2, {"a + 1"},
+                   R"({"key":"p","name":"P","kind":"computed","expr":"e + a",)"
+                   R"("max_age":{"a":1,"e":1}},)");
+    const std::string got = refused(text);
+    EXPECT_NE(got.find("signal 'p''s max_age names 'e', a computed signal: its "
+                       "own inputs carry their ages"),
+              std::string::npos)
+        << got;
 }
