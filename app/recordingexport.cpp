@@ -283,6 +283,7 @@ QVariantMap runFile(const Job& job, Stop& stop)
             QFile::remove(target);
         }
     };
+    // removeStaleCopies finds this folder by its name
     QTemporaryDir temp(QDir::tempPath() +
                        QStringLiteral("/havne-export-XXXXXX"));
     if (!temp.isValid()) {
@@ -439,12 +440,13 @@ bool RecordingExport::holdsValues(const QString& folder)
 int RecordingExport::removeStaleCopies(const QString& tempPath,
                                        const QDateTime& now)
 {
-    // QTemporaryDir's name for runFile's and runFolder's template
+    // QTemporaryDir's name for the templates of an export's copy, an
+    // import's and a health report's (each names itself in a comment)
     static const QRegularExpression name(
-        QStringLiteral("^havne-export-[A-Za-z0-9]{6}$"));
+        QStringLiteral("^havne-(export|import|health)-[A-Za-z0-9]{6}$"));
     int removed = 0;
     const QFileInfoList found = QDir(tempPath).entryInfoList(
-        {QStringLiteral("havne-export-*")},
+        {QStringLiteral("havne-*")},
         QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks | QDir::Hidden);
     for (const QFileInfo& folder : found) {
         if (name.match(folder.fileName()).hasMatch() &&
@@ -568,8 +570,17 @@ bool RecordingExport::start(const QVariantMap& options, const QUrl& target)
 {
     const int format = options.value(QStringLiteral("format")).toInt();
     const QString folder = options.value(QStringLiteral("folder")).toString();
+    // A picker has already made the document a file export would fill: a
+    // start that refuses, or can't run, leaves none (never a folder target)
+    const auto dropPicked = [&] {
+        if (format != Folder && !target.isEmpty() &&
+            (m_throughProvider || !target.isLocalFile())) {
+            QFile::remove(whereOf(target));
+        }
+    };
     if (m_busy || folder.isEmpty() || target.isEmpty() ||
         (format != Folder && format != Csv && format != Pcapng)) {
+        dropPicked();
         return false;
     }
     if (m_worker.joinable()) {
@@ -590,6 +601,10 @@ bool RecordingExport::start(const QVariantMap& options, const QUrl& target)
     job.failCopy = m_failCopyForTesting;
     m_cancelExport.store(false);
     try {
+        if (m_failThreadForTesting) {
+            throw std::system_error(std::make_error_code(
+                std::errc::resource_unavailable_try_again));
+        }
         Stop stop{&m_stopping, &m_cancelExport, m_holdForTesting,
                   m_holdMsForTesting, &m_heldForTesting};
         m_worker = std::thread([this, job, stop,
@@ -617,6 +632,7 @@ bool RecordingExport::start(const QVariantMap& options, const QUrl& target)
                 Qt::QueuedConnection);
         });
     } catch (const std::system_error&) {
+        dropPicked();
         return false;
     }
     m_busy = true;

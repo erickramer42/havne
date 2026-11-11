@@ -6,11 +6,11 @@ import QtQuick
 pragma ComponentBehavior: Bound
 
 // The desktop Dashboard's pages as tabs on the panel's upper edge
-// (ADR-0057's appendix of 2026-11-10). The shown tab is the open sheet:
-// its fill and edge run down over the panel's top hairline, so tab and
-// panel read as one. In edit mode a "+" tab ends the row and adds a page.
-// A row wider than the strip scrolls sideways, by the wheel too, and
-// follows the shown tab; there is no second row.
+// (ADR-0057's appendix "the desktop takes the panel"). The shown tab is
+// the open sheet: its fill and edge run down over the panel's top
+// hairline, so tab and panel read as one. In edit mode a "+" tab ends the
+// row and adds a page. A row wider than the strip scrolls sideways, by
+// the wheel too, and follows the shown tab; there is no second row.
 Item {
     id: strip
     objectName: "dashPageStrip"

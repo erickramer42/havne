@@ -299,6 +299,16 @@ The full reference is [j2534.md](j2534.md).
   busy ECU: each channel starts a sweep of the picks at most that often,
   and only the rotation waits. A session that asks nothing (the mock, a
   replay, a listener) takes a focus and changes nothing.
+- **The extended session is on request** ([ADR-0060](adr/0060-extended-session-reads.md)):
+  with `?session=03` on `uds-generic`, each module's `10 03` goes out
+  first, and nothing else to that module until it answers. Tester present
+  (`3E 00`) fills a quiet gap to keep the session past S3, a `7E` or `7F`
+  to a read enters the session again and asks the request again, and
+  three losses within 60 s fall back to the default session with the
+  module's reads going on there. The close sends `10 01` to each module
+  that entered. The session requests are allowed apart from the service
+  table, which stays reads only: `10 01`, `10 03` and `3E 00` are all the
+  engine sends beyond it.
 - **Teardown order is a hard contract:** join the worker, then stop the
   filters, disconnect, close and unload. The worker calls vendor code
   through pointers that dangle once the DLL unmaps.
@@ -511,7 +521,9 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   alike, so neither page formats a unit, converts a value or picks a
   precision of its own. The bridge converts on the way out; its
   history and recordings keep the decoded values.
-- **Pages:** **Home** (status), **Dashboard** (pages of gauges and
+- **Pages:** **Home** (with no session, the connect list: the recent
+  addresses and the adapters on hand, the chosen row connecting through
+  Settings; once connected, the session's status), **Dashboard** (pages of gauges and
   shift lights that the user builds in its edit mode,
   [ADR-0057](adr/0057-dashboards.md); the header's Start log and Stop
   log write an analysis log, [ADR-0056](adr/0056-analysis-log.md)),
@@ -530,8 +542,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   rule in `app/signalfilter.h`, [ADR-0050](adr/0050-finding-a-signal.md)):
   words over the name and unit, plotted only, and the groups core
   gives each def. Settings is
-  the one place a session is connected; the header and Home open it,
-  and Dash's connect list hands it an address to connect.
+  the one place a session is connected; the header opens it, and the
+  connect lists on Home and on Dash hand it the address of the row chosen.
   It composes the URI from a preset or a device (a J2534 interface or
   a serial port), a profile row
   (default, `raw`, `uds-generic`, the picked vehicle's signal files and
@@ -542,7 +554,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   its words.
   Navigation is a sidebar of all seven pages at 720 px and wider, and
   below that a tab bar of five (Dash, Live, Codes, Recs, Settings): the
-  Log opens from the status in the top bar. On a phone, Android's Back
+  Log opens from the status in the top bar, from the Log row at the end
+  of Settings' list on a phone, and from a failed connect's Show log. On a phone, Android's Back
   takes one route across the pages ([ADR-0059](adr/0059-drive-view.md)).
 - **`Theme`** resolves one of four palettes (the looks `dark` and
   `daylight`, and `nightAmber` and `nightRed`) from three kept controls: the look, Night (off, on or

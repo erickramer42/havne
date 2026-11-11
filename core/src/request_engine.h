@@ -533,8 +533,9 @@ static_assert(
 /* Section 4: what a negative reply's code says of its request, as
  * ECUIO_DROP_*: NOT_SUPPORTED for 0x12 (the first vehicle's answer to an
  * unsupported PID) and 0x31; SERVICE for 0x11; ACCESS for 0x33 and 0x7F,
- * since the engine never unlocks or changes the session; 0 for any code
- * that can pass, like 0x22 (conditions not correct) or 0x21 (busy). */
+ * since the engine never unlocks, and enters only the extended session it
+ * was asked for; 0 for any code that can pass, like 0x22 (conditions not
+ * correct) or 0x21 (busy). */
 inline uint8_t ecuio_engine_drop_reason(uint8_t nrc)
 {
     switch (nrc) {

@@ -60,7 +60,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 
 *Live on the desktop: a 3rd-gear pull onto the limiter, lambda swinging lean on each fuel cut.*
 
-Every page on the desktop and the phone, in each theme: [docs/screenshots.md](docs/screenshots.md).
+Every page on the desktop and the phone, in Dark and in Night's amber and red: [docs/screenshots.md](docs/screenshots.md).
 
 ## Architecture
 

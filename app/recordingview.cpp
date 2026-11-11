@@ -17,6 +17,7 @@
 #include <cmath>
 #include <limits>
 #include <new>
+#include <system_error>
 
 #include "ecuio/core.h"
 #include "ecuio/profile.h"
@@ -439,18 +440,35 @@ bool RecordingView::saveHealthReport(const QUrl& url, int filterIndex,
     const quint64 generation = m_generation;
     const QByteArray folder = m_folder.toUtf8();
     const QByteArray baseline = healthBaselineArgument(baselineFolder);
+    const bool provider = m_throughProvider;
+    try {
+        if (m_failThreadForTesting) {
+            throw std::system_error(std::make_error_code(
+                std::errc::resource_unavailable_try_again));
+        }
+        m_reportWorker = std::thread(
+            [this, o, folder, baseline, url, generation, provider]() mutable {
+                o.folder_utf8 = folder.constData();
+                o.baseline_folder_utf8 =
+                    baseline.isEmpty() ? nullptr : baseline.constData();
+                const QVariantMap result =
+                    writeHealthReport(o, url, &m_reportStop, provider);
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, result, generation] {
+                        reportFinished(result, generation);
+                    },
+                    Qt::QueuedConnection);
+            });
+    } catch (const std::system_error&) {
+        // The picker made the document the report would have filled
+        if (provider || !url.isLocalFile()) {
+            QFile::remove(url.isLocalFile() ? url.toLocalFile()
+                                            : url.toString());
+        }
+        return false;
+    }
     m_reporting = true;
-    m_reportWorker = std::thread([this, o, folder, baseline, url,
-                                  generation]() mutable {
-        o.folder_utf8 = folder.constData();
-        o.baseline_folder_utf8 =
-            baseline.isEmpty() ? nullptr : baseline.constData();
-        const QVariantMap result = writeHealthReport(o, url, &m_reportStop);
-        QMetaObject::invokeMethod(
-            this,
-            [this, result, generation] { reportFinished(result, generation); },
-            Qt::QueuedConnection);
-    });
     emit reportingChanged();
     return true;
 }

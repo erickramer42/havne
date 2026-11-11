@@ -100,7 +100,7 @@ constexpr ecuio_sim_module_did ECUIO_SIM_MODULE_DIDS[] = {
 };
 
 /* The engine ECU's DIDs that answer only in its extended session
- * (ADR-0060): D200 to D203, two made-up bytes each (no maker's) */
+ * (ADR-0060): D200 to D203, two made-up bytes each (no manufacturer's) */
 struct ecuio_sim_extended_did {
     uint16_t did;
     uint8_t data[2];

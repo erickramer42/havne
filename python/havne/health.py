@@ -93,7 +93,8 @@ def health_report(folder, out, format, *, units="metric", from_us=0, to_us=None,
     nothing written. cancel, a callable taking no arguments, is asked on
     the calling thread as core reads: true stops the call with Error
     ECUIO_ERR_CANCELED; an exception it raises, or a Ctrl+C on the main
-    thread, stops it at core's next ask and is raised again."""
+    thread, stops it at core's next ask and is raised again; a Ctrl+C
+    after the last ask raises once the report is whole and in place."""
     folder = _path("folder", folder)
     o, baseline, _, _ = options_for(out, format, units, baseline, utc_us, latest_model_year)
     o.from_us, o.to_us = range_us(from_us, to_us)

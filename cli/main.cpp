@@ -183,14 +183,28 @@ uint64_t log_every_us()
 }
 
 std::atomic<bool> g_interrupted{false};
+// Set by install_handlers(true): a second interrupt ends the process at
+// once, for the commands whose stop has nothing to close (export, import,
+// a recording's health report), never `log`'s recorder
+std::atomic<bool> g_second_ends{false};
+
+// What a second interrupt writes, whole and flushed before the exit
+constexpr char kSecondEnd[] = "{\"type\":\"end\",\"reason\":\"interrupted\"}\n";
 
 #ifdef _WIN32
 std::atomic<bool> g_done{false};
 
 BOOL WINAPI on_console_event(DWORD event)
 {
-    g_interrupted.store(true);
+    const bool again = g_interrupted.exchange(true);
     if (event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT) {
+        if (again && g_second_ends.load()) {
+            DWORD wrote = 0;
+            (void)WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), kSecondEnd,
+                            static_cast<DWORD>(sizeof kSecondEnd - 1), &wrote,
+                            nullptr);
+            TerminateProcess(GetCurrentProcess(), 1);
+        }
         return TRUE;
     }
     // A closed console ends the process when this returns: give the
@@ -203,12 +217,21 @@ BOOL WINAPI on_console_event(DWORD event)
 #else
 void on_signal(int)
 {
-    g_interrupted.store(true);
+    if (g_interrupted.exchange(true) && g_second_ends.load()) {
+        // write and _exit are async-signal-safe; stdio's buffer is not
+        // flushed, which the commands that set this keep empty
+        const ssize_t wrote = write(1, kSecondEnd, sizeof kSecondEnd - 1);
+        (void)wrote;
+        _exit(1);
+    }
 }
 #endif
 
-void install_handlers()
+// secondEnds: a second interrupt ends the process at once, with the end
+// line and exit 1, for a command whose stop leaves nothing to close
+void install_handlers(bool secondEnds = false)
 {
+    g_second_ends.store(secondEnds);
 #ifdef _WIN32
     SetConsoleCtrlHandler(on_console_event, TRUE);
 #else
@@ -360,7 +383,8 @@ int ended(Output& out, int code)
 // (ecuio_health_export_with): Ctrl+C or SIGTERM stops it, and core removes
 // what it had begun. HAVNE_CLI_EXPORT_HOLD_MS (tests only) holds the
 // run's first ask that long, naming whose it is on stderr, so a test's
-// interrupt lands there
+// interrupt lands there; with HAVNE_CLI_EXPORT_HOLD_DEAF set the hold
+// ignores the interrupt, so a second one can arrive while the run waits
 int interrupted_at(bool* asked, const char* where)
 {
     if (!*asked) {
@@ -372,7 +396,8 @@ int interrupted_at(bool* asked, const char* where)
             std::fflush(stderr);
         }
         const uint64_t until = ecuio_clock_us() + hold_ms * 1000ULL;
-        while (!g_interrupted.load() && ecuio_clock_us() < until) {
+        const bool deaf = env_ms("HAVNE_CLI_EXPORT_HOLD_DEAF", 0) > 0;
+        while ((deaf || !g_interrupted.load()) && ecuio_clock_us() < until) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
@@ -3211,8 +3236,9 @@ int write_health_result(Output& out, const cli::HealthArgs& a,
 int run_health_recording(cli::HealthArgs& a)
 {
     Output out;
-    install_handlers();
+    install_handlers(true);
     write_start(out);
+    out.flush(); // a second interrupt leaves no half line behind
     a.options.utc_us = utc_now_us();
     a.options.latest_model_year = latest_model_year();
     ecuio_health_report_t r{};
@@ -4738,8 +4764,9 @@ int run(int argc, char** argv)
             return missing.size();
         };
         Output out;
-        install_handlers();
+        install_handlers(true);
         write_start(out);
+        out.flush(); // a second interrupt leaves no half line behind
         bool asked = false;
         if (ex.options.format == ECUIO_EXPORT_CSV &&
             ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty() &&
@@ -4799,8 +4826,9 @@ int run(int argc, char** argv)
         Output out;
         // Before the guess, so a Ctrl+C during it stops the import at its
         // first ask
-        install_handlers();
+        install_handlers(true);
         write_start(out);
+        out.flush(); // a second interrupt leaves no half line behind
         // A CSV's column map: core takes its text, up to the JSON reader's
         // 1 MiB, and refuses a larger one in its own words
         std::string map;
@@ -4818,6 +4846,7 @@ int run(int argc, char** argv)
                 BigLine g(cli::guessed_line_bytes(text));
                 cli::guessed_line(g.line, text);
                 write_line(out, g.line);
+                out.flush();
             }
             if ((guess.flags & ECUIO_CSV_GUESS_TIME_UNIT_KNOWN) == 0) {
                 // --time-unit gives a unit only to plain numbers

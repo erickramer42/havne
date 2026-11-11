@@ -395,6 +395,15 @@ if(TARGET havne-cli)
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt PROPERTIES
             TIMEOUT 120 SKIP_RETURN_CODE 77)
+        # A second interrupt, with the first held off, ends an export, an
+        # import and a recording's health report at once: the end line,
+        # exit 1
+        add_test(NAME CliTransferRunTest.interrupt-twice
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    interrupt-twice $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliTransferRunTest.interrupt-twice PROPERTIES
+            TIMEOUT 120 SKIP_RETURN_CODE 77)
         # The made-up loggers' CSVs imported by their column maps and
         # viewed; a missing map, a refused one, a folder already there
         add_test(NAME CliTransferRunTest.csv-import
@@ -475,6 +484,13 @@ if(TARGET havne-cli)
                         fake-more $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
             set_tests_properties(CliRefusedRunTest.ARefusalPastTheBitmapsDropsIsNamed
                 CliRefusedRunTest.RefusalsPastTheListAreCounted PROPERTIES TIMEOUT 60)
+            # With ?session=03 the stream names each module's session
+            # (ADR-0060): the engine's entered, a second module's refused
+            add_test(NAME CliSessionRunTest.TheStreamNamesEachModulesSession
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
+                        session $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
+            set_tests_properties(CliSessionRunTest.TheStreamNamesEachModulesSession
+                PROPERTIES TIMEOUT 60)
         elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             add_test(NAME CliRefusedRunTest.ADidTheSimulatedEcuRefusesIsNamed
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py

@@ -1,7 +1,8 @@
 # File/layer: tests/cli_refused.py | test-only, Python 3.8+
-# Testing: HARNESS: CliRefusedRunTest (ctest)
+# Testing: HARNESS: CliRefusedRunTest, CliSessionRunTest (ctest)
 #
 #   python tests/cli_refused.py fake <havne-cli> <fake_j2534.dll>          (Windows)
+#   python tests/cli_refused.py session <havne-cli> <fake_j2534.dll>       (Windows)
 #   python tests/cli_refused.py fake-bitmap <havne-cli> <fake_j2534.dll>   (Windows)
 #   python tests/cli_refused.py fake-more <havne-cli> <fake_j2534.dll>     (Windows)
 #   python3 tests/cli_refused.py sim <havne-cli>                           (Linux)
@@ -14,6 +15,10 @@
 # named, the refusals coming before the bitmap's drops in the report.
 # fake-more: ten DIDs the fake refuses, two past the report's list of
 # eight: eight named, and "more" counts the two on 0x7E8.
+# session: with ?session=03 the fake's engine ECU enters the extended
+# session and a second module refuses it, each a `session` line with its
+# state (and the refusal's code, 0x12 by default, ECUIO_FAKE_SESSION_NRC
+# otherwise), and every `scan` line ends with its session (ADR-0060).
 # sim: the simulated ECU (havne-cli sim, no profile) on vcan0 refuses
 # every DID (7F 22 31); skips (77) without the interface unless
 # ECUIO_VCAN_REQUIRED=1, as test_vcan does.
@@ -138,6 +143,46 @@ def fake_more(cli, dll):
     return 1 if why else 0
 
 
+def session_lines(cli, dll, nrc=None):
+    """stream's lines with ?session=03 over the engine ECU and a second
+    module that has no extended session"""
+    env = dict(os.environ, ECUIO_FAKE_MODULE_DIDS="7E9:D801=00 12")
+    if nrc is not None:
+        env["ECUIO_FAKE_SESSION_NRC"] = nrc
+    uri = ("j2534://%s?profile=uds-generic&did=1E1C,D800-D803,7E9:D801"
+           "&session=03&identify=0&diagnose=0" % dll)
+    return stream(cli, uri, env=env)
+
+
+def session(cli, dll):
+    why = []
+    for nrc, code in ((None, "12"), ("0x22", "22")):
+        run, lines = session_lines(cli, dll, nrc)
+        if run.returncode != 0:
+            why.append("exit %d: %s" % (run.returncode, run.stderr.strip()))
+        sessions = {}
+        for l in lines:
+            if l.get("type") == "session" and "ecu" in l:
+                sessions[l["ecu"]] = l
+        engine, module = sessions.get("0x7E8"), sessions.get("0x7E9")
+        if engine is None or (engine["asked"], engine["session"], engine["state"],
+                              engine["nrc"], engine["entries"]) != ("03", "03", "entered", None, 1):
+            why.append("the engine's session line is %r" % engine)
+        if module is None or (module["asked"], module["session"], module["state"],
+                              module["nrc"]) != ("03", "01", "refused", code):
+            why.append("the second module's session line (nrc %s) is %r" % (code, module))
+        scans = [l for l in lines if l.get("type") == "scan"]
+        if not scans or any("session" not in l for l in scans):
+            why.append("a scan line lacks its session: %r" % scans)
+        elif [l["session"] for l in scans if l["ecu"] == "0x7E8"][-1] != "03":
+            why.append("the engine's scan lines don't end in the extended session: %r" % scans)
+        if why:
+            print("\n".join(json.dumps(l) for l in lines[:14]))
+    for w in why:
+        print(w)
+    return 1 if why else 0
+
+
 def sim(cli):
     vcan = os.environ.get("ECUIO_VCAN_IF", "vcan0")
     if not os.path.exists("/sys/class/net/" + vcan):
@@ -165,6 +210,8 @@ def main():
         return fake_bitmap(sys.argv[2], sys.argv[3])
     if len(sys.argv) == 4 and sys.argv[1] == "fake-more":
         return fake_more(sys.argv[2], sys.argv[3])
+    if len(sys.argv) == 4 and sys.argv[1] == "session":
+        return session(sys.argv[2], sys.argv[3])
     if len(sys.argv) == 3 and sys.argv[1] == "sim":
         return sim(sys.argv[2])
     print(__doc__ or "usage: cli_refused.py fake <cli> <dll> | sim <cli>")

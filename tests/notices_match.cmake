@@ -131,10 +131,12 @@ elseif(MODE STREQUAL "fonts")
     foreach(_notice packaging/notices/THIRD_PARTY_NOTICES.txt
                     packaging/windows/THIRD_PARTY_NOTICES.txt)
         file(READ "${ROOT}/${_notice}" _text)
-        string(REPLACE " " "" _text "${_text}")
         foreach(_family IN LISTS _families)
-            string(FIND "${_text}" "${_family}" _found)
-            if(_found LESS 0)
+            # The file's family as the notice words it ("BarlowSemiCondensed"
+            # is "Barlow Semi Condensed"), found as a whole word: "Bar" is no
+            # mention in "Barlow"
+            string(REGEX REPLACE "([a-z])([A-Z])" "\\1 \\2" _spaced "${_family}")
+            if(NOT _text MATCHES "(^|[^A-Za-z0-9])${_spaced}([^A-Za-z0-9]|$)")
                 list(APPEND _missing "${_notice} doesn't name ${_family}")
             endif()
         endforeach()

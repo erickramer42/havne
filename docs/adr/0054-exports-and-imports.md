@@ -1747,3 +1747,15 @@ wait.
 health report, each with the imports' `cancel=` and Ctrl+C
 ([ADR-0053](0053-python-bindings.md)'s appendix "exports and the health
 report from Python").
+
+*Note of 2026-11-10:* a second Ctrl+C (or SIGTERM) during `havne-cli export`,
+`import` or `health` over a recording ends the process at once: the
+interrupted end line, written whole, and exit 1. The first interrupt is the
+cancel, which core answers at its next ask; the second is for a run that
+isn't getting there. `log` and `stream` don't take it, since their stop
+closes a recording. `HAVNE_CLI_EXPORT_HOLD_DEAF` (tests only) makes the
+hold ignore the first interrupt, so a test can send two.
+
+*Note of 2026-11-10:* a failed or stopped `ecuio_export_with` leaves
+`report` zeroed but for `failed_class`, as `ecuio_health_export_with`
+does, so a caller never reads the counts of a file that isn't there.

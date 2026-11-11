@@ -162,5 +162,14 @@ class Plugin:
         return _gauge(lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)),
                       key)
 
+    @property
+    def requires_core(self):
+        """The manifest's requires.core, the oldest core that reads the
+        plugin, as (major, minor, patch); a manifest always names one"""
+        parts = [ctypes.c_uint16() for _ in range(3)]
+        check(lib.ecuio_plugin_requires_core(self._handle, *(ctypes.byref(p) for p in parts)),
+              "ecuio_plugin_requires_core")
+        return tuple(p.value for p in parts)
+
     def __repr__(self):
         return f"Plugin({self.id!r} {self.version}, variants {self.variants})"

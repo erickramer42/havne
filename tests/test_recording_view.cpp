@@ -1111,6 +1111,118 @@ TEST(RecordingViewTest, AReportStopsWhenTheViewerGoes)
     EXPECT_FALSE(QFile::exists(stopped.toLocalFile()));
 }
 
+// A report the picker's document (a provider's, which the picker has made
+// already) doesn't end up holding removes the document, as a failed export
+// does: one core refuses, and one stopped under way
+TEST(RecordingViewTest, AFailedReportLeavesAPickedDocumentGone)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.setThroughProviderForTesting(true);
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    {
+        QFile frames(folder + QStringLiteral("/frames.csv"));
+        ASSERT_TRUE(frames.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        frames.write("not a frames file\n");
+    }
+    const QString picked = root.path() + QStringLiteral("/picked.txt");
+    {
+        QFile f(picked);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    QList<QVariantMap> saved;
+    QObject::connect(&v, &RecordingView::reportSaved,
+                     [&](const QVariantMap& r) { saved << r; });
+    ASSERT_TRUE(v.saveHealthReport(QUrl::fromLocalFile(picked), 0));
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_FALSE(saved[0].value(QStringLiteral("ok")).toBool());
+    EXPECT_FALSE(QFile::exists(picked)) << "the empty document goes";
+
+    // A local file's picker is the file dialog's, which asked about
+    // replacing: nothing is removed there
+    v.setThroughProviderForTesting(false);
+    {
+        QFile f(picked);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    saved.clear();
+    ASSERT_TRUE(v.saveHealthReport(QUrl::fromLocalFile(picked), 0));
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_FALSE(saved[0].value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(QFile::exists(picked));
+}
+
+TEST(RecordingViewTest, AStoppedReportLeavesAPickedDocumentGone)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    ASSERT_FALSE(folder.isEmpty());
+    {
+        QFile frames(folder + QStringLiteral("/frames.csv"));
+        ASSERT_TRUE(frames.open(QIODevice::Append));
+        QByteArray rows;
+        for (int i = 0; i < 200000; ++i) {
+            const QByteArray us = QByteArray::number(400000 + i * 100);
+            rows += us + ',' + us + ",0x7E8,0x0,04 41 0C 0C 90 00 00 00\n";
+        }
+        ASSERT_EQ(frames.write(rows), rows.size());
+    }
+    auto v = std::make_unique<RecordingView>();
+    v->setThroughProviderForTesting(true);
+    v->open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(*v); }, 30000));
+    ASSERT_EQ(v->state(), RecordingView::Open) << v->error().toStdString();
+    const QString picked = root.path() + QStringLiteral("/picked.txt");
+    {
+        QFile f(picked);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    ASSERT_TRUE(v->saveHealthReport(QUrl::fromLocalFile(picked), 0));
+    v.reset();
+    EXPECT_FALSE(QFile::exists(picked)) << "the empty document goes";
+}
+
+// A report thread the system can't start says no, with nothing reporting,
+// and the picker's document goes
+TEST(RecordingViewTest, AReportWhoseThreadCantStartSaysSo)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.setThroughProviderForTesting(true);
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    const QString picked = root.path() + QStringLiteral("/picked.txt");
+    {
+        QFile f(picked);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    int changes = 0;
+    QObject::connect(&v, &RecordingView::reportingChanged, [&] { ++changes; });
+    v.setFailThreadForTesting(true);
+    EXPECT_FALSE(v.saveHealthReport(QUrl::fromLocalFile(picked), 0));
+    EXPECT_FALSE(v.reporting());
+    EXPECT_EQ(changes, 0);
+    EXPECT_FALSE(QFile::exists(picked));
+
+    v.setFailThreadForTesting(false);
+    QList<QVariantMap> saved;
+    QObject::connect(&v, &RecordingView::reportSaved,
+                     [&](const QVariantMap& r) { saved << r; });
+    ASSERT_TRUE(v.saveHealthReport(QUrl::fromLocalFile(picked), 0));
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_TRUE(saved[0].value(QStringLiteral("ok")).toBool());
+}
+
 // A CSV import holds values alone, and Save report stays offered on it:
 // core's report takes a folder with no frames.csv, which has no ECU and
 // says so, so the save ends and succeeds rather than failing on frames

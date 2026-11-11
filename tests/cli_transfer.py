@@ -11,6 +11,7 @@
 #   python tests/cli_transfer.py csv-import <havne-cli> <csv fixtures>
 #   python tests/cli_transfer.py csv-guess <havne-cli> <csv fixtures>
 #   python tests/cli_transfer.py interrupt <havne-cli> <recording>
+#   python tests/cli_transfer.py interrupt-twice <havne-cli> <recording>
 #
 # roundtrip: a candump log imported, its frames read through obd2 by view
 # --frames, exported to pcapng and read back with the standard library's
@@ -716,6 +717,89 @@ HOLD_MS = 20000
 HELD_WAIT_S = 30
 
 
+# The run's deadline after its second interrupt
+TWICE_WITHIN_S = 2
+
+
+def twice(cli, args, where):
+    """args run held at the first ask, deaf to the first interrupt
+    (HAVNE_CLI_EXPORT_HOLD_DEAF), then interrupted twice half a second
+    apart: the second ends the process at once, exit 1, its last line the
+    end line. None, a failure's words, or "skip" with no console"""
+    env = dict(os.environ)
+    env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
+    env["HAVNE_CLI_EXPORT_HOLD_DEAF"] = "1000"
+    kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
+          "stdin": subprocess.DEVNULL, "env": env}
+    if os.name == "nt":
+        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    p = subprocess.Popen([cli] + args, **kw)
+    held = []
+    reader = threading.Thread(target=lambda: held.append(p.stderr.readline()))
+    reader.start()
+    reader.join(HELD_WAIT_S)
+    if reader.is_alive() or not held or \
+            not held[0].startswith(b"havne-cli: holding the " + where + b"'s"):
+        p.kill()
+        p.communicate()
+        reader.join()
+        return f"didn't hold at the {where.decode()} within {HELD_WAIT_S} s"
+    interrupt_with = signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT
+    try:
+        p.send_signal(interrupt_with)
+        time.sleep(0.5)
+        if p.poll() is not None:
+            return f"the first interrupt ended it (exit {p.returncode}): the hold isn't deaf"
+        p.send_signal(interrupt_with)
+    except OSError as e:
+        p.kill()
+        p.communicate()
+        print(f"skip  no console to send the interrupt through: {e}")
+        return "skip"
+    sent = time.monotonic()
+    try:
+        out, err = p.communicate(timeout=TWICE_WITHIN_S)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        return f"still running {TWICE_WITHIN_S} s after the second interrupt"
+    lines = [json.loads(l) for l in out.decode("utf-8").splitlines()]
+    if p.returncode != 1 or not lines or \
+            lines[-1] != {"type": "end", "reason": "interrupted"}:
+        return (f"exit {p.returncode}, lines {lines}, "
+                f"{err.decode('utf-8', 'replace')}")
+    print(f"ok    {case_name(args)}: a second interrupt ended it "
+          f"{time.monotonic() - sent:.2f} s after it")
+    return None
+
+
+def interrupt_twice(cli, recording):
+    with tempfile.TemporaryDirectory(prefix="havne-cli-int2-") as root:
+        log = os.path.join(root, "bus.log")
+        with open(log, "w", encoding="utf-8", newline="\n") as f:
+            f.write(LOG)
+        cases = [
+            (["import", "candump", log, os.path.join(root, "from-log")], b"import"),
+            (["export", recording, os.path.join(root, "out.pcapng"),
+              "--format", "pcapng"], b"export"),
+            (["health", recording, os.path.join(root, "report.json"),
+              "--format", "json"], b"health report"),
+        ]
+        failed = 0
+        for args, where in cases:
+            why = twice(cli, args, where)
+            if why == "skip":
+                return 77
+            if why is not None:
+                print(f"FAIL  {case_name(args)}: {why}")
+                failed += 1
+    if failed:
+        return 1
+    print("ok    a second interrupt ends an export, an import and a "
+          "recording's health report at once")
+    return 0
+
+
 def interrupted(cli, args, where):
     """args run held at the first ask, which must be where's (b"export",
     b"column check", b"import" or b"health report"), then interrupted:
@@ -775,6 +859,11 @@ def case_name(args):
 
 
 def interrupt(cli, recording):
+    """Each long command interrupted at its first ask. Core has made
+    nothing by then, so the leftover check here is that first ask's alone;
+    what a stop at each later ask leaves is
+    ExportCancelTest.AStopAtEachAskInTurnLeavesNothingBehind's and
+    ImportCancelTest's"""
     with tempfile.TemporaryDirectory(prefix="havne-cli-int-") as root:
         log = os.path.join(root, "bus.log")
         with open(log, "w", encoding="utf-8", newline="\n") as f:
@@ -837,6 +926,8 @@ if __name__ == "__main__":
         sys.exit(csv_guess(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 4 and sys.argv[1] == "interrupt":
         sys.exit(interrupt(sys.argv[2], sys.argv[3]))
+    if len(sys.argv) == 4 and sys.argv[1] == "interrupt-twice":
+        sys.exit(interrupt_twice(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 4 and sys.argv[1] == "csv":
         sys.exit(csv_export(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 5 and sys.argv[1] == "folder":

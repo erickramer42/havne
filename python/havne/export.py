@@ -6,7 +6,8 @@
 # and 5; ecuio_export_with, ecuio_export_estimate_with). Each file is what
 # havne-cli export writes for the same options, byte for byte. A cancel or
 # a Ctrl+C stops a call at core's next ask with nothing left behind
-# (ADR-0053's appendix "exports and the health report from Python"). The
+# (ADR-0053's appendix "exports and the health report from Python"); one
+# after core's last ask raises once the file is whole and in place. The
 # range is host_us, both ends included; the file's name is never replaced.
 
 import ctypes
@@ -236,7 +237,8 @@ def export_pcapng(folder, out, *, raw=False, from_us=0, to_us=None, cancel=None)
     nothing written. cancel, a callable taking no arguments, is asked on
     the calling thread as core reads: true stops the call with Error
     ECUIO_ERR_CANCELED; an exception it raises, or a Ctrl+C on the main
-    thread, stops it at core's next ask and is raised again."""
+    thread, stops it at core's next ask and is raised again; a Ctrl+C
+    after the last ask raises once the file is whole and in place."""
     return _write(e.ECUIO_EXPORT_PCAPNG, "pcapng", folder, out, raw, from_us, to_us, cancel)
 
 
