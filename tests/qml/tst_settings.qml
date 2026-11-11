@@ -168,6 +168,7 @@ TestCase {
         id: logSpy
         signalName: "logRequested"
     }
+    Component { id: logSpyComponent; SignalSpy {} }
 
     // On the tab-bar form the list ends with the Log, its summary the
     // newest activity line; a tap asks Main for the Log page, no subpage
@@ -190,6 +191,24 @@ TestCase {
         compare(logSpy.count, 1, "the Log asked for")
         compare(page.pageKey, "", "no subpage")
         verify(find(page, "settingsListPage").visible, "the list stays")
+    }
+
+    // The display's inset lines come after a connect and say nothing about
+    // the session, so the row keeps the connect
+    function test_theLogRowSummarizesTheSessionNotTheDisplay() {
+        Theme.compact = true
+        const page = createPage(true)
+        page.width = 384
+        const summary = () => find(find(find(page, "settingsList"), "settingsRow_log"),
+                                   "settingsRowSummary")
+        const spy = createTemporaryObject(logSpyComponent, testCase,
+                                          { target: Bridge, signalName: "logMessage" })
+        Bridge.logEvent("Connected: mock://demo")
+        tryCompare(spy, "count", 1)
+        compare(summary().text, "Connected: mock://demo")
+        Bridge.logEvent("Display: screen 1080 x 2400 (portrait, dpr 2.8), available 1080 x 2300")
+        tryCompare(spy, "count", 2)
+        compare(summary().text, "Connected: mock://demo", "the Display line doesn't take it")
     }
 
     // Beside the sidebar, which lists the Log, the row isn't there
