@@ -63,6 +63,28 @@ TestCase {
         verify(log.text.includes("Session: mock transport; profile mock"))
     }
 
+    // Show log lands on the newest activity line, whichever view was up and
+    // wherever the log was scrolled to
+    function test_showActivityEndLandsOnTheNewestLine() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        for (let i = 0; i < 150; ++i)
+            page.appendLog("line " + i)
+        find(page, "view_frames").clicked()
+        verify(page.showingFrames, "the Frames view is up")
+        find(page, "view_activity").clicked()
+        const view = find(page, "activityView")
+        const flick = view.contentItem
+        tryVerify(() => flick.contentHeight > flick.height * 2, 2000, "a log to scroll")
+        flick.contentY = 0
+        find(page, "view_frames").clicked()
+        page.showActivityEnd()
+        verify(!page.showingFrames, "the activity view is shown")
+        verify(view.visible, "visible")
+        tryVerify(() => flick.atYEnd, 2000, "scrolled to its end")
+        verify(flick.contentY > 0, "not left at the top")
+    }
+
     function test_theActivityLogKeepsItsNewestLines() {
         const page = create(logComponent)
         const log = find(page, "activityLog")
@@ -134,6 +156,33 @@ TestCase {
         tryVerify(() => list.count > 0 && list.indexAt(1, list.contentY + 1) === 20, 2000,
                   "the same first row")
         verify(!list.follow, "and it doesn't follow")
+    }
+
+    // Clear forgets the place a hidden table keeps: scrolled up, cleared,
+    // with rows again, the table comes back following, not at the old row
+    function test_clearForgetsAHiddenTablesPlace() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        find(page, "view_frames").clicked()
+        const list = find(page, "frameList")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => list.count >= 60, 10000, "frames to scroll through")
+        Bridge.logPaused = true
+        list.follow = false
+        list.positionViewAtIndex(20, ListView.Beginning)
+        tryCompare(list, "keptTop", 20, 2000, "noted while shown")
+        find(page, "clearFrames").clicked()
+        tryCompare(list, "count", 0, 2000, "cleared")
+        compare(list.follow, true, "following again")
+        Bridge.logPaused = false
+        tryVerify(() => list.count >= 5, 10000, "rows again")
+        Bridge.logPaused = true
+        find(page, "view_activity").clicked()
+        compare(list.count, 0, "hidden: no rows")
+        find(page, "view_frames").clicked()
+        tryVerify(() => list.count > 0, 2000, "shown again")
+        verify(list.follow, "it follows, not at the old index")
+        verify(!find(page, "latestButton").visible, "and Latest is hidden")
     }
 
     // The list is one named node; its rows' labels are kept out of the tree

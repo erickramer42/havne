@@ -156,7 +156,10 @@ Rectangle {
             if (!table.visible) {
                 rebinding = true   // unbound while hidden, not cleared
             } else if (count === 0) {
-                follow = true   // cleared or new session
+                // Cleared or a new session: the place noted before is gone too
+                follow = true
+                keptFollow = true
+                keptTop = 0
             } else if (rebinding) {
                 rebinding = false
                 follow = keptFollow
