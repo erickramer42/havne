@@ -1125,7 +1125,7 @@ TestCase {
             const chart = find(page, "chartFrame")
             const want = data.want > 0 ? data.want : page.phoneChartFloor
             if (data.want < 0) {
-                const room = want - 8 - ChartLayout.top - ChartLayout.axisH - ChartLayout.bottomPad
+                const room = want - 8 - ChartLayout.top - ChartLayout.axisHCursor - ChartLayout.bottomPad
                 compare(ChartLayout.panesThatFit(room, ChartLayout.paneMinH), 3, "three panes fit the floor")
                 compare(ChartLayout.panesThatFit(room - 1, ChartLayout.paneMinH), 2, "and not a pixel less")
             }
@@ -1676,6 +1676,407 @@ TestCase {
                         && chart.drawn.traces.some(t => t.dash !== undefined), 10000, "the compare drawn")
         for (const tr of chart.drawn.traces.filter(t => t.dash !== undefined))
             compare(chart.drawn.panes[tr.pane].label, rows[tr.row].unit, "a compared trace in its namesake's pane")
+    }
+
+    // ---- Two cursors and the span's statistics
+
+    function rowOf(page, name) {
+        const rows = find(page, "signalRows")
+        const at = rows.model.findIndex(s => s.name === name)
+        verify(at >= 0, "no row " + name)
+        tryVerify(() => rows.itemAtIndex(at) !== null, 2000, "the row has a delegate")
+        return { item: rows.itemAtIndex(at), index: rows.model[at].index }
+    }
+    // Both cursors placed, their statistics arrived
+    function spanned(page, a, b) {
+        page.setCursor(a)
+        page.setCursorB(b)
+        tryVerify(() => Object.keys(page.spanStats).length > 0, 5000, "the statistics arrive")
+    }
+    function atTime(page, chart, t) {
+        return Math.round(chart.x + chart.drawn.left
+                          + (t - page.viewT0) / (page.viewT1 - page.viewT0) * (chart.drawn.plotW - 1))
+    }
+
+    // Shift+click places the second cursor (the first, while there is
+    // none), each on a sample; a plain click then moves only the first
+    function test_aShiftClickPlacesTheSecondCursorAndAClickKeepsIt() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const y = inPlot(chart, 0).y
+            mouseClick(frame, atTime(page, chart, 5000), y, Qt.LeftButton, Qt.ShiftModifier)
+            verify(page.hasCursor, "with no first cursor it places that")
+            verify(!page.hasCursorB)
+            compare(page.cursorMs % 100, 0, "on a sample")
+
+            mouseClick(frame, atTime(page, chart, 20000), y, Qt.LeftButton, Qt.ShiftModifier)
+            verify(page.hasCursorB, "the second")
+            const b = page.cursorBMs
+            compare(b % 100, 0, "on a sample")
+            verify(Math.abs(b - 20000) < 300, "where it was clicked: " + b)
+
+            wait(Application.styleHints.mouseDoubleClickInterval + 50)
+            mouseClick(frame, atTime(page, chart, 10000), y)
+            verify(Math.abs(page.cursorMs - 10000) < 300, "the first moved: " + page.cursorMs)
+            compare(page.cursorBMs, b, "the second stays")
+        } finally {
+            restore()
+        }
+    }
+
+    // The span line, the rows' B and change, and the table: RPM over 1 s
+    // to 3 s of pull-early, by hand from signals.csv
+    function test_theSpanReadsItsStatistics() {
+        const page = openEarly()
+        spanned(page, 1000, 3000)
+        compare(find(page, "spanText").text, "A 1.0 s to B 3.0 s · 2.0 s")
+        verify(find(page, "spanLine").visible)
+        const rpm = rowOf(page, "RPM")
+        compare(find(rpm.item, "cursorValue").text, "2,001 rpm")
+        tryCompare(find(rpm.item, "cursorBValue"), "text", "1,982 rpm")
+        tryCompare(find(rpm.item, "cursorDelta"), "text", "-19 rpm")
+
+        const table = find(page, "spanStats")
+        tryVerify(() => table.visible, 2000, "the table shows with a span")
+        const row = find(table, "statRow_" + rpm.index)
+        compare(find(row, "statChange").text, "-19 rpm")
+        compare(find(row, "statLow").text, "1,982 rpm")
+        compare(find(row, "statHigh").text, "2,012 rpm")
+        compare(find(row, "statMean").text, "2,003 rpm")
+        compare(find(row, "statRate").text, "-9.5 rpm/s")
+        // A rising signal's change and rate carry their sign
+        const up = page.changeText(12.5, 1, "kPa")
+        compare(up, "+12.5 kPa")
+
+        // Text has B and no change; a row not plotted has both
+        const vin = rowOf(page, "VIN")
+        compare(find(vin.item, "cursorDelta").text, "")
+        compare(findChild(table, "statRow_" + vin.index), null, "text isn't in the table")
+        page.togglePlotted(rpm.index)
+        tryVerify(() => findChild(table, "statRow_" + rpm.index) === null, 2000,
+                  "the table is the plotted signals")
+        compare(find(rpm.item, "cursorDelta").text, "-19 rpm", "the row keeps its change")
+    }
+
+    // The readout goes by time, whichever cursor is which
+    function test_theEarlierCursorReadsAsA() {
+        const page = openEarly()
+        spanned(page, 3000, 1000)
+        compare(find(page, "spanText").text, "A 1.0 s to B 3.0 s · 2.0 s")
+        const rpm = rowOf(page, "RPM")
+        compare(find(rpm.item, "cursorValue").text, "2,001 rpm")
+        compare(find(rpm.item, "cursorBValue").text, "1,982 rpm")
+        tryCompare(find(rpm.item, "cursorDelta"), "text", "-19 rpm")
+    }
+
+    // A second cursor on the first is no span: no line, no statistics
+    function test_twoCursorsTogetherAreNoSpan() {
+        const page = openEarly()
+        spanned(page, 2000, 3000)
+        page.setCursor(3000)
+        verify(page.hasCursorB, "the second stays")
+        verify(!page.hasSpan)
+        compare(Object.keys(page.spanStats).length, 0)
+        verify(!find(page, "spanStats").visible)
+    }
+
+    function test_clearRemovesTheSecondCursorAndZoomGoesToTheSpan() {
+        const page = openEarly()
+        spanned(page, 10000, 20000)
+        const zoom = find(page, "zoomToSpan")
+        tryVerify(() => zoom.visible, 2000, "the buttons show")
+        mouseClick(zoom)
+        fuzzyCompare(page.viewT0, 9500, 0.5, "the span with a margin")
+        fuzzyCompare(page.viewT1, 20500, 0.5)
+        page.askSpanStats()
+        mouseClick(find(page, "clearSpan"))
+        verify(!page.hasCursorB, "the second has gone")
+        compare(page.cursorMs, 10000, "the first stays")
+        verify(!find(page, "spanLine").visible)
+        verify(!find(page, "spanStats").visible)
+        wait(200)
+        compare(Object.keys(page.spanStats).length, 0, "an answer on its way is dropped")
+    }
+
+    // A pointer's drag in steps, under Shift when asked
+    function dragAcross(frame, x, y, dx, modifiers) {
+        mousePress(frame, x, y, Qt.LeftButton, modifiers)
+        const parts = 8
+        for (let k = 1; k <= parts; ++k)
+            mouseMove(frame, x + dx * k / parts, y, 10, Qt.LeftButton, modifiers)
+        mouseRelease(frame, x + dx, y, Qt.LeftButton, modifiers)
+    }
+
+    // Shift+drag draws the span's box and leaves a cursor at each end; a
+    // plain drag still pans
+    function test_aShiftDragBoxesTheSpan() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const y = inPlot(chart, 0).y
+            const x = atTime(page, chart, 10000)
+            const dx = atTime(page, chart, 20000) - x
+            const view = [page.viewT0, page.viewT1]
+            dragAcross(frame, x, y, dx, Qt.ShiftModifier)
+            compare([page.viewT0, page.viewT1], view, "the view doesn't pan")
+            verify(page.hasSpan, "both cursors")
+            verify(Math.abs(page.spanFromMs - 10000) < 300, "from " + page.spanFromMs)
+            verify(Math.abs(page.spanToMs - 20000) < 300, "to " + page.spanToMs)
+            compare(page.cursorMs % 100, 0, "the ends on samples")
+            compare(page.cursorBMs % 100, 0)
+            verify(isNaN(page.boxFromMs), "the box has gone")
+
+            page.setView(5000, 25000)
+            const before = page.viewT0
+            dragAcross(frame, x, y, 80, Qt.NoModifier)
+            verify(page.viewT0 < before, "a plain drag pans")
+        } finally {
+            restore()
+        }
+    }
+
+    // On a phone a long press places the second cursor and a drag after it
+    // boxes the span; on the desktop a long press places nothing
+    function test_aLongPressPlacesTheSecondCursorOnAPhone() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        const tap = find(page, "chartTap")
+        tap.longPressThreshold = 0.05
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const y = inPlot(chart, 0).y
+            const x = atTime(page, chart, 15000)
+            page.setCursor(5000)
+            mousePress(frame, x, y)
+            wait(200)
+            mouseRelease(frame, x, y)
+            verify(!page.hasCursorB, "the desktop's long press is nothing")
+
+            Theme.compact = true
+            verify(waitForPolish(page.Window.window), "laid out")
+            const px = atTime(page, chart, 15000)
+            const py = inPlot(chart, 0).y
+            mousePress(frame, px, py)
+            wait(200)
+            verify(page.hasCursorB, "the hold places it")
+            verify(Math.abs(page.cursorBMs - 15000) < 300, "where it was held: " + page.cursorBMs)
+            compare(page.cursorMs, 5000, "the first stays")
+            mouseRelease(frame, px, py)
+
+            page.clearCursorB()
+            const view = [page.viewT0, page.viewT1]
+            const to = atTime(page, chart, 25000)
+            mousePress(frame, px, py)
+            wait(200)
+            for (let k = 1; k <= 8; ++k)
+                mouseMove(frame, px + (to - px) * k / 8, py, 10)
+            verify(!isNaN(page.boxFromMs), "the drag draws the box")
+            mouseRelease(frame, to, py)
+            compare([page.viewT0, page.viewT1], view, "the pan is locked out")
+            verify(Math.abs(page.spanFromMs - 15000) < 300, "from " + page.spanFromMs)
+            verify(Math.abs(page.spanToMs - 25000) < 300, "to " + page.spanToMs)
+        } finally {
+            Theme.compact = false
+            tap.longPressThreshold = -1
+            restore()
+        }
+    }
+
+    // A handle shows its cursor's time and moves it, snapped at the drop;
+    // one dropped on the other removes the second; a press on one places
+    // nothing
+    function test_aHandleMovesItsCursor() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const frame = find(page, "chartFrame")
+            const chart = panedChart(page)
+            const a = find(page, "cursorHandleA")
+            const b = find(page, "cursorHandleB")
+            verify(!a.visible && !b.visible, "none before a cursor")
+            spanned(page, 10000, 20000)
+            tryVerify(() => a.visible && b.visible, 2000, "both handles")
+            compare(find(a, "handleTime").text, "10.0 s")
+            compare(find(b, "handleTime").text, "20.0 s")
+            verify(b.width >= 24 && b.height >= 24, "a desktop handle: " + b.width + " x " + b.height)
+            fuzzyCompare(b.x + b.width / 2, atTime(page, chart, 20000), 1.5, "under its cursor")
+            fuzzyCompare(b.y + b.height, chart.y + chart.drawn.top + chart.drawn.plotH + chart.drawn.axisH,
+                         0.5, "at the axis's foot")
+
+            const y = b.y + b.height - 6
+            mouseClick(frame, b.x + b.width / 2, y)
+            compare(page.cursorMs, 10000, "a press on a handle places no cursor")
+
+            const samplesBefore = page.spanStats[0].samples
+            const x = b.x + b.width / 2
+            dragAcross(frame, x, y, atTime(page, chart, 25000) - x, Qt.NoModifier)
+            verify(Math.abs(page.cursorBMs - 25000) < 300, "moved: " + page.cursorBMs)
+            compare(page.cursorBMs % 100, 0, "snapped at the drop")
+            compare(page.cursorMs, 10000, "the other stays")
+            tryVerify(() => page.spanStats[0] !== undefined && page.spanStats[0].samples > samplesBefore,
+                      5000, "the statistics follow")
+
+            const from = b.x + b.width / 2
+            dragAcross(frame, from, y, atTime(page, chart, 10000) - from, Qt.NoModifier)
+            verify(!page.hasCursorB, "dropped on the first, the second goes")
+            verify(!b.visible)
+        } finally {
+            restore()
+        }
+    }
+
+    // The arrows step a sample of the first plotted signal, B says which
+    // cursor, Home and End go to the ends, and a step off the view brings
+    // it back
+    function test_theKeysStepTheCursors() {
+        const page = openEarly()
+        page.forceActiveFocus()
+        page.setCursor(1000)
+        keyClick(Qt.Key_Right)
+        tryCompare(page, "cursorMs", 1100, 2000, "a sample on")
+        keyClick(Qt.Key_Left)
+        tryCompare(page, "cursorMs", 1000, 2000, "a sample back")
+
+        keyClick("b")
+        verify(!page.arrowsMoveB, "with no second cursor B does nothing")
+        page.setCursorB(3000)
+        keyClick("b")
+        verify(page.arrowsMoveB)
+        keyClick(Qt.Key_Right)
+        tryCompare(page, "cursorBMs", 3100, 2000, "B moves")
+        compare(page.cursorMs, 1000, "A stays")
+        keyClick("b")
+        verify(!page.arrowsMoveB, "back to A")
+
+        keyClick(Qt.Key_End)
+        tryCompare(page, "cursorMs", 29900, 2000, "the last sample")
+        keyClick(Qt.Key_Right)
+        wait(100)
+        compare(page.cursorMs, 29900, "nothing past the last")
+        keyClick(Qt.Key_Home)
+        tryCompare(page, "cursorMs", 100, 2000, "the first sample")
+
+        page.setView(10000, 12000)
+        page.setCursor(11900)
+        keyClick(Qt.Key_Right)
+        keyClick(Qt.Key_Right)
+        tryVerify(() => page.cursorMs >= 12000 && page.cursorMs <= page.viewT1 && page.viewT0 > 10000,
+                  2000, "a step off the view brings it back")
+        page.clearCursorB()
+    }
+
+    // The first cursor's hint comes once, and the second cursor ends it
+    function test_theSecondCursorsHintComesOnce() {
+        const page = openEarly()
+        page.spanHintSeen = false
+        page.setCursor(1000)
+        verify(page.spanHintUp)
+        verify(find(page, "spanLine").visible)
+        compare(find(page, "spanText").text, "At 1.0 s. Shift+click to place the second cursor")
+        verify(!find(page, "zoomToSpan").visible, "nothing to zoom to yet")
+        page.setCursorB(3000)
+        verify(!page.spanHintUp, "the second cursor ends it")
+        page.clearCursorB()
+        page.cursorMs = NaN
+        page.setCursor(2000)
+        verify(!page.spanHintUp, "not a second time")
+        verify(page.spanHintSeen, "and that's kept")
+        verify(!find(page, "spanLine").visible)
+    }
+
+    // Maximized, each strip's cell gives A, B and the change
+    function test_theStripShowsTheSpanMaximized() {
+        const page = openEarly()
+        spanned(page, 1000, 3000)
+        page.toggleMaximized()
+        try {
+            const strip = find(page, "cursorStrip")
+            tryVerify(() => strip.visible && strip.count > 0, 5000, "the strip shows")
+            compare(strip.cellHeight, 56)
+            tryVerify(() => strip.itemAtIndex(0) !== null, 2000, "a cell")
+            const cell = strip.itemAtIndex(0)
+            compare(find(cell, "stripValue").text, "2,001 rpm")
+            tryCompare(find(cell, "stripSpan"), "text", "B 1,982 rpm · Δ -19 rpm")
+            page.clearCursorB()
+            compare(strip.cellHeight, 40)
+        } finally {
+            page.toggleMaximized()
+        }
+    }
+
+    // A new open has no span, and a change of units asks again
+    function test_theSpanGoesAtAnOpenAndFollowsTheUnits() {
+        const page = openEarly()
+        spanned(page, 1500, 3000)
+        const coolant = rowOf(page, "Coolant")
+        tryCompare(find(coolant.item, "cursorDelta"), "text", "0 °C")
+        const before = page.statsAsk
+        Bridge.unitSystem = 1
+        tryVerify(() => page.statsAsk !== before && page.spanStats[coolant.index] !== undefined
+                        && page.spanStats[coolant.index].unit === "°F", 5000, "asked again in °F")
+        tryCompare(find(rowOf(page, "Coolant").item, "cursorBValue"), "text", "190 °F", 2000,
+                   "the second cursor's too")
+        page.open(lateRow)
+        tryVerify(() => find(page, "signalRows").visible && !page.hasCursor, 10000, "the new open")
+        verify(!page.hasCursorB)
+        compare(Object.keys(page.spanStats).length, 0)
+    }
+
+    // The span's extremes are dots on the trace at their times: filled
+    // for the highest, hollow for the lowest
+    function test_theExtremesAreDotsOnTheTrace() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const chart = panedChart(page)
+            page.setView(0, 5000)
+            spanned(page, 1000, 3000)
+            const rpm = rowOf(page, "RPM")
+            const stat = page.spanStats[rpm.index]
+            tryVerify(() => page.spanDots.some(d => d.row === rpm.index), 3000, "the dots are drawn")
+            const mine = page.spanDots.filter(d => d.row === rpm.index)
+            compare(mine.length, 2)
+            const xAt = t => chart.drawn.left + (t - page.viewT0) / (page.viewT1 - page.viewT0)
+                             * (chart.drawn.plotW - 1)
+            const high = mine.find(d => d.filled), low = mine.find(d => !d.filled)
+            fuzzyCompare(high.x, xAt(stat.highestMs), 0.01)
+            fuzzyCompare(low.x, xAt(stat.lowestMs), 0.01)
+            verify(high.y < low.y, "the highest above the lowest")
+            page.clearCursorB()
+            tryVerify(() => page.spanDots.length === 0, 3000, "gone with the span")
+        } finally {
+            restore()
+        }
+    }
+
+    // A phone's axis strip grows while a cursor exists, and its chart's
+    // floor already holds it; the desktop's stays
+    function test_aPhonesAxisStripGrowsWithACursor() {
+        const page = openEarly()
+        const chart = panedChart(page)
+        compare(chart.drawn.axisH, ChartLayout.axisH)
+        const paints = chart.paints
+        page.setCursor(1000)
+        tryVerify(() => chart.paints > paints, 2000, "drawn with the cursor")
+        compare(chart.drawn.axisH, ChartLayout.axisH, "the desktop's stays")
+        page.cursorMs = NaN
+        Theme.compact = true
+        try {
+            page.setCursor(NaN)
+            page.cursorMs = NaN
+            chart.requestPaint()
+            tryVerify(() => chart.drawn && chart.drawn.axisH === ChartLayout.axisH, 2000, "none yet")
+            page.setCursor(1000)
+            tryVerify(() => chart.drawn && chart.drawn.axisH === ChartLayout.axisHCursor, 2000, "grown")
+        } finally {
+            Theme.compact = false
+        }
     }
 
     // The frame test plots a signal of each unit first, so it draws the

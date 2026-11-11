@@ -105,6 +105,11 @@ Canvas {
         }
     }
 
+    // Only a page's marks again, for a mark that moves while the traces rest
+    function repaintMarks() {
+        marks.requestPaint()
+    }
+
     function pathsFor(i) {
         while (tracePaths.length <= i) {
             const set = { line: tracePath.createObject(traceShape),

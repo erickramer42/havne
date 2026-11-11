@@ -278,6 +278,85 @@ TestCase {
         }
     }
 
+    // The two cursors on a phone's width: each handle a touch wide and
+    // tall, the span line inside the window with its targets a touch's
+    // size, the rows still a touch tall with B and the change on their
+    // second line, and the statistics' grid under the span line
+    function test_theTwoCursorsFitAPhone_data() {
+        return [{ tag: "320", w: 320 }, { tag: "384", w: 384 }]
+    }
+    function test_theTwoCursorsFitAPhone(data) {
+        const v = uprightViewer({ title: "Early", uri: "replay://x?profile=obd2", source: "",
+                                  folder: Harness.recordingFixtures + "/pull-early", profile: "obd2" })
+        const main = v.main
+        const page = v.page
+        main.width = data.w
+        verify(waitForPolish(main), "laid out")
+        page.setCursor(1000)
+        page.setCursorB(3000)
+        tryVerify(() => Object.keys(page.spanStats).length > 0, 5000, "the statistics arrive")
+        verify(waitForPolish(main), "laid out with the span")
+        verify(page.pinnedViewer, "pinned")
+
+        for (const name of ["cursorHandleA", "cursorHandleB"]) {
+            const h = find(page, name)
+            tryVerify(() => h.visible, 2000, name + " shows")
+            verify(h.width >= Theme.touchTarget - 0.5, name + " is " + h.width + " wide")
+            verify(h.height >= Theme.touchTarget - 0.5, name + " is " + h.height + " tall")
+            verify(h.mapToItem(main.contentItem, h.width, 0).x <= data.w + 0.5, name + " inside the window")
+        }
+        const chart = find(page, "chart")
+        compare(chart.drawn.axisH, ChartLayout.axisHCursor)
+
+        const line = find(page, "spanLine")
+        tryVerify(() => line.visible, 2000, "the span line shows")
+        compare(find(page, "spanText").text, "A 1.0 s to B 3.0 s · 2.0 s")
+        for (const name of ["zoomToSpan", "clearSpan"]) {
+            const b = find(page, name)
+            verify(b.height >= Theme.touchTarget - 0.5, name + " is " + b.height + " tall")
+            verify(b.mapToItem(main.contentItem, b.width, 0).x <= data.w + 0.5, name + " inside the window")
+        }
+        const text = find(page, "spanText")
+        verify(text.contentWidth <= text.width + 0.5, "the span's words fit their box")
+
+        const grid = find(page, "spanStats")
+        tryVerify(() => grid.visible, 2000, "the grid shows")
+        const zoomRow = find(page, "zoomAll")
+        const lineY = line.mapToItem(main.contentItem, 0, 0).y
+        verify(lineY > zoomRow.mapToItem(main.contentItem, 0, 0).y, "the span line under the zoom row")
+        verify(grid.mapToItem(main.contentItem, 0, 0).y >= lineY + line.height - 0.5, "the grid under the line")
+        const rows = find(page, "signalRows")
+        const first = rows.itemAtIndex(0)
+        verify(first !== null, "a row")
+        verify(grid.mapToItem(main.contentItem, 0, grid.height).y
+               <= first.mapToItem(main.contentItem, 0, 0).y + 0.5, "the grid above the rows")
+
+        const plotted = page.spanRows
+        verify(plotted.length >= 2, "plotted: " + plotted.length)
+        const cards = plotted.map(s => find(grid, "statCard_" + s.index))
+        for (const c of cards) {
+            verify(c.height >= Theme.touchTarget - 0.5, "a card is " + c.height + " tall")
+            verify(c.mapToItem(main.contentItem, c.width, 0).x <= data.w + 0.5, "a card inside the window")
+        }
+        fuzzyCompare(cards[0].width, cards[1].width, 1, "two even columns")
+        verify(cards[1].x > cards[0].x, "side by side")
+        compare(cards[0].y, cards[1].y)
+        const rpm = plotted.find(s => s.name === "RPM")
+        const card = find(grid, "statCard_" + rpm.index)
+        compare(find(card, "statChange").text, "-19 rpm")
+        compare(find(card, "statLine").text, "1,982 · 2,012 · 2,003")
+
+        const at = rows.model.findIndex(s => s.name === "RPM")
+        tryVerify(() => rows.itemAtIndex(at) !== null, 2000, "the RPM row")
+        const row = rows.itemAtIndex(at)
+        verify(row.height >= Theme.touchTarget - 0.5 && row.height <= Theme.touchTarget + 0.5,
+               "a row stays a touch tall: " + row.height)
+        const second = find(row, "cursorSpanLine")
+        verify(second.visible, "the row's second line")
+        compare(second.text, "B 1,982 rpm · Δ -19 rpm")
+        verify(second.mapToItem(row, 0, second.height).y <= row.height + 0.5, "inside the row")
+    }
+
     // On a phone upright and on its side, the viewer's page scrolls to all
     // of it: the chart a readable height, the frames check's line inside
     // the page once scrolled to its end, and the filter's options inside

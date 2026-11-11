@@ -16,7 +16,8 @@ pragma ComponentBehavior: Bound
 // viewer's Replay the part in view (?from=&to=). The
 // viewer: the recording's signals (ticked ones plotted, the cursor's
 // values beside each), the chart over the part in view (drag to pan, the
-// wheel or a pinch to zoom, a tap to place the cursor), markers and the
+// wheel or a pinch to zoom, a tap to place the cursor, a long press or
+// Shift+click the second, whose span gets its statistics), markers and the
 // frames check's findings on it, and the findings listed. A second
 // recording can be overlaid, its traces dashed in the first's colors,
 // lined up as havne-cli view --align-on lines two up. The vehicle picked
@@ -106,6 +107,35 @@ Page {
         enabled: root.visible && recording.state === RecordingView.Open && !Theme.mobile
         onActivated: root.toggleMaximized()
     }
+    // The arrows step a cursor a sample of the snap's signal, B says which
+    // cursor they move, Home and End go to the recording's ends
+    readonly property bool cursorKeys: root.visible && recording.state === RecordingView.Open
+                                       && !Theme.mobile
+    Shortcut {
+        sequence: "Left"
+        enabled: root.cursorKeys
+        onActivated: root.stepCursor(false)
+    }
+    Shortcut {
+        sequence: "Right"
+        enabled: root.cursorKeys
+        onActivated: root.stepCursor(true)
+    }
+    Shortcut {
+        sequence: "Home"
+        enabled: root.cursorKeys
+        onActivated: root.cursorToEnd(false)
+    }
+    Shortcut {
+        sequence: "End"
+        enabled: root.cursorKeys
+        onActivated: root.cursorToEnd(true)
+    }
+    Shortcut {
+        sequence: "B"
+        enabled: root.cursorKeys
+        onActivated: root.arrowsMoveB = root.hasCursorB && !root.arrowsMoveB
+    }
     // The splitter below the chart: its height once dragged, -1 for the
     // page's own (the default), kept between runs
     Settings {
@@ -118,13 +148,16 @@ Page {
         // The panes' heights once a seam is dragged, as JSON: a share per
         // pane, kept by the count of panes ({ "3": [0.5, 0.25, 0.25] })
         property string paneShares: "{}"
+        // The second cursor's hint has been shown
+        property bool spanHintSeen: false
     }
     property alias chartHeight: viewerSettings.chartHeight
     property alias stripFolded: viewerSettings.stripFolded
+    property alias spanHintSeen: viewerSettings.spanHintSeen
     // The chart's height until the splitter sets one: on a phone 40 % of
-    // the page, no less than three panes and the time axis
+    // the page, no less than three panes and the time axis, its handles' height
     readonly property real phoneChartFloor: 3 * ChartLayout.paneMinH + 2 * ChartLayout.paneGap
-                                            + ChartLayout.top + ChartLayout.axisH
+                                            + ChartLayout.top + ChartLayout.axisHCursor
                                             + ChartLayout.bottomPad + 8
     readonly property real defaultChartHeight: phoneShape ? Math.max(phoneChartFloor, scroller.height * 0.4)
                                                           : Math.max(200, scroller.height * 0.45)
@@ -228,6 +261,44 @@ Page {
     }
     property real cursorMs: NaN
     readonly property bool hasCursor: !isNaN(cursorMs)
+    // The second cursor (NaN for none). Each keeps its own place, so one can
+    // be anchored while the other walks past it; what reads out of the two
+    // goes by time, the earlier as A
+    property real cursorBMs: NaN
+    readonly property bool hasCursorB: !isNaN(cursorBMs)
+    readonly property bool hasSpan: hasCursor && hasCursorB && cursorMs !== cursorBMs
+    readonly property real spanFromMs: Math.min(cursorMs, cursorBMs)
+    readonly property real spanToMs: Math.max(cursorMs, cursorBMs)
+    // Which cursor the keys move
+    property bool arrowsMoveB: false
+    // Signal index -> { text, unit } at the second cursor
+    property var readoutB: ({})
+    // The span's ends' values, by time
+    readonly property var readoutFrom: hasSpan && cursorBMs < cursorMs ? readoutB : readout
+    readonly property var readoutTo: hasSpan && cursorBMs < cursorMs ? readout : readoutB
+    // Signal index -> RecordingView.stats' map over the span
+    property var spanStats: ({})
+    property int statsAsk: 0
+    // Which cursor the step under way moves
+    property bool stepsB: false
+    // The extremes' dots as last drawn
+    property var spanDots: []
+    // The box a Shift+drag or a long-press drag draws, NaN between drags
+    property real boxFromMs: NaN
+    property real boxToMs: NaN
+    // The plotted numbers: the statistics' rows and the extremes' dots
+    readonly property var spanRows: hasSpan
+        ? recording.signalList.filter(s => !s.isText && root.plotted[s.index] === true) : []
+    // The first cursor's hint for the second, shown once
+    property bool spanHintUp: false
+    readonly property bool spanLineUp: recording.state === RecordingView.Open && !exportShown
+                                       && (hasSpan || (spanHintUp && hasCursor))
+    Timer {
+        objectName: "spanHintTimer"
+        interval: 6000
+        running: root.spanHintUp
+        onTriggered: root.spanHintUp = false
+    }
     // Signal index -> plotted, from the recording's default at the open
     property var plotted: ({})
     // The signal rows the filter leaves (ADR-0050): the recording's own
@@ -664,24 +735,148 @@ Page {
     // A tapped time moved to the nearest sample of the first signal
     // plotted, so the cursor stands where the line has a sample and reads
     // the value drawn there; as it is with nothing plotted
+    function snapSignal() {
+        return recording.signalList.find(s => !s.isText && root.plotted[s.index] === true)
+    }
     function snapped(t) {
-        const first = recording.signalList.find(s => !s.isText && root.plotted[s.index] === true)
+        const first = snapSignal()
         if (!first)
             return t
         const at = recording.nearestSampleMs(first.index, t)
         return at >= 0 ? at : t
     }
-    function setCursor(t) {
-        cursorMs = Math.min(Math.max(axisStart(), t), axisEnd())
+    function valuesAtTime(t) {
         const values = {}
-        const indexes = recording.signalList.map(s => s.index)
-        if (cursorMs >= 0) {
-            for (const v of recording.valuesAt(indexes, cursorMs))
+        if (t >= 0) {
+            for (const v of recording.valuesAt(recording.signalList.map(s => s.index), t))
                 values[v.index] = v
         }
-        readout = values
+        return values
+    }
+    function setCursor(t) {
+        cursorMs = Math.min(Math.max(axisStart(), t), axisEnd())
+        readout = valuesAtTime(cursorMs)
         compareReadout = compareValuesAt(cursorMs)
+        if (!hasCursorB && !spanHintSeen) {
+            spanHintSeen = true
+            spanHintUp = true
+        }
+        askSpanStats()
         chart.requestPaint()
+    }
+    function setCursorB(t) {
+        cursorBMs = Math.min(Math.max(axisStart(), t), axisEnd())
+        readoutB = valuesAtTime(cursorBMs)
+        spanHintUp = false
+        askSpanStats()
+        chart.requestPaint()
+    }
+    function clearCursorB() {
+        cursorBMs = NaN
+        readoutB = ({})
+        spanStats = ({})
+        statsAsk = 0
+        arrowsMoveB = false
+        chart.requestPaint()
+    }
+    // The second gesture at time t: with no first cursor yet it places that
+    function placeSecond(t) {
+        if (hasCursor)
+            setCursorB(t)
+        else
+            setCursor(t)
+    }
+    function askSpanStats() {
+        if (!hasSpan) {
+            statsAsk = 0
+            spanStats = ({})
+            return
+        }
+        statsAsk = recording.stats(recording.signalList.map(s => s.index), spanFromMs, spanToMs)
+        if (statsAsk === 0)
+            spanStats = ({})
+    }
+    function zoomToSpan() {
+        const pad = (spanToMs - spanFromMs) * 0.05
+        setView(spanFromMs - pad, spanToMs + pad)
+    }
+    // Keeps a cursor a key moved in the view
+    function bringIntoView(t) {
+        if (t < viewT0 || t > viewT1)
+            centerOn(t)
+    }
+    function moveKeyed(t, isB) {
+        if (isB)
+            setCursorB(t)
+        else
+            setCursor(t)
+        bringIntoView(t)
+    }
+    function stepCursor(forward) {
+        const s = snapSignal()
+        const from = arrowsMoveB ? cursorBMs : cursorMs
+        if (!s || isNaN(from))
+            return
+        stepsB = arrowsMoveB
+        recording.step(s.index, from, forward)
+    }
+    function cursorToEnd(last) {
+        moveKeyed(snapped(last ? durationMs() : 0), arrowsMoveB)
+    }
+    // A cursor's handle let go: on a sample, and one dropped on the other
+    // leaves a single cursor
+    function dropHandle(isB) {
+        const t = snapped(isB ? cursorBMs : cursorMs)
+        if (isB)
+            setCursorB(t)
+        else
+            setCursor(t)
+        if (hasCursorB && Math.abs(xOfTime(cursorMs) - xOfTime(cursorBMs)) <= handleDropPx)
+            clearCursorB()
+    }
+    readonly property real handleDropPx: 4
+    // A time's x in the chart's frame
+    function xOfTime(t) {
+        return chart.x + plotLeft() + (t - viewT0) / (viewT1 - viewT0) * Math.max(1, plotWidth() - 1)
+    }
+    function finishBox() {
+        const a = snapped(Math.min(boxFromMs, boxToMs))
+        const b = snapped(Math.max(boxFromMs, boxToMs))
+        boxFromMs = NaN
+        boxToMs = NaN
+        setCursor(a)
+        if (b !== a)
+            setCursorB(b)
+        else if (hasCursorB)
+            clearCursorB()
+    }
+    // A change, signed, in a signal's decimals
+    function changeText(v, decimals, unit) {
+        return v > 0 ? "+" + valueText(v, decimals, unit) : valueText(v, decimals, unit)
+    }
+    // A statistic of a row, or a dash with none
+    function statText(v, s) {
+        return isFinite(v) ? valueText(v, s.decimals, s.unit) : qsTr("—")
+    }
+    function statChange(s) {
+        return s && isFinite(s.change) ? changeText(s.change, s.decimals, s.unit) : qsTr("—")
+    }
+    function statRate(s) {
+        return s && isFinite(s.rate)
+               ? changeText(s.rate, s.decimals + 1, s.unit !== "" ? s.unit + "/s" : "/s") : qsTr("—")
+    }
+    // A value at one of the span's ends, as the rows show it
+    function atText(at, s) {
+        return !at || at.atMs < 0 ? qsTr("—")
+               : s.isText ? at.text
+               : at.label ? at.label
+               : valueText(Number(at.text), s.decimals, at.unit)
+    }
+    // The second line a row and a strip's cell show with a span
+    function spanCaption(s) {
+        const stat = spanStats[s.index]
+        return s.isText ? qsTr("B %1").arg(atText(readoutTo[s.index], s))
+                        : qsTr("B %1 · Δ %2").arg(atText(readoutTo[s.index], s)).arg(statChange(stat))
     }
 
     function togglePlotted(index) {
@@ -1114,6 +1309,19 @@ Page {
         id: recording
         unitSystem: Bridge.unitSystem
         onReportSaved: result => root.reportSaved(result)
+        onStatsReady: (request, stats) => {
+            if (request !== root.statsAsk)
+                return
+            const byIndex = {}
+            for (const s of stats)
+                byIndex[s.index] = s
+            root.spanStats = byIndex
+            chart.repaintMarks()
+        }
+        onStepReady: (request, atMs) => {
+            if (atMs >= 0)
+                root.moveKeyed(atMs, root.stepsB)
+        }
         onStateChanged: {
             root.reportNote = ""
             root.reportFailed = false
@@ -1129,6 +1337,8 @@ Page {
                 rows += s.samples
             root.rowsPerSecond = rows / (root.durationMs() / 1000)
             root.cursorMs = NaN
+            root.spanHintUp = false
+            root.clearCursorB()
             // A decode chosen in the pinned form's About reopens into About
             root.detailView = root.decodeReopen && root.detailView === "about" ? "about" : "values"
             root.decodeReopen = false
@@ -1142,6 +1352,8 @@ Page {
             root.paneRanges = ({})
             if (root.hasCursor)
                 root.setCursor(root.cursorMs)
+            if (root.hasCursorB)
+                root.setCursorB(root.cursorBMs)
             chart.requestPaint()
         }
     }
@@ -1770,8 +1982,10 @@ Page {
             readonly property real stripHeight: !stripShown || !stripBelow ? 0
                 : viewerSettings.stripFolded ? stripFold.height + 8
                 : Math.max(stripFold.height + 8,
-                           Math.min(Math.ceil(stripModel.length / stripColumns) * 40 + 8,
+                           Math.min(Math.ceil(stripModel.length / stripColumns) * stripCellH + 8,
                                     Math.round(height * 0.4)))
+            // A cell's height: a third line with a span
+            readonly property real stripCellH: root.hasSpan ? 56 : 40
 
             StripChart {
                 id: chart
@@ -1787,12 +2001,14 @@ Page {
                     gapMs: Theme.staleMs, minSpanUnits: 20, format: root.valueText,
                     span: { t0: root.viewT0, t1: root.viewT1 }, absolute: true,
                     caption: root.captionOf,
+                    axisH: root.phoneShape && root.hasCursor ? ChartLayout.axisHCursor : ChartLayout.axisH,
                     panes: { max: root.paneLimit, minH: ChartLayout.paneMinH,
                              shares: root.paneShares, ranges: root.paneRanges,
                              mixedLabel: qsTr("mixed") } })
                 onDrawnChanged: root.notePanes(drawn)
                 // Findings as bars along the plot's foot, markers as dashed
-                // lines with their labels, the cursor as a solid line
+                // lines with their labels, the cursors as solid lines over
+                // their span's tint, the extremes' dots on the traces
                 decorate: function(ctx, l) {
                     const span = root.viewT1 - root.viewT0
                     const xOf = t => l.left + (t - root.viewT0) / span * (l.plotW - 1)
@@ -1820,12 +2036,42 @@ Page {
                         ctx.fillText(m.label, x + 3, l.top + 1)
                     }
                     ctx.setLineDash([])
-                    if (root.cursorMs >= root.viewT0 && root.cursorMs <= root.viewT1) {
-                        ctx.strokeStyle = Theme.text
+                    const tint = (from, to, alpha) => {
+                        const x0 = Math.max(l.left, xOf(from))
+                        const x1 = Math.min(plotEnd, xOf(to))
+                        if (x1 <= x0)
+                            return
+                        const c = Qt.color(Theme.text)
+                        ctx.fillStyle = Qt.rgba(c.r, c.g, c.b, alpha)
+                        ctx.fillRect(x0, l.top, x1 - x0, l.plotH)
+                    }
+                    if (root.hasSpan)
+                        tint(root.spanFromMs, root.spanToMs, 0.06)
+                    if (!isNaN(root.boxFromMs))
+                        tint(Math.min(root.boxFromMs, root.boxToMs),
+                             Math.max(root.boxFromMs, root.boxToMs), 0.14)
+                    ctx.strokeStyle = Theme.text
+                    for (const t of [root.cursorMs, root.cursorBMs]) {
+                        if (!(t >= root.viewT0 && t <= root.viewT1))
+                            continue
                         ctx.beginPath()
-                        ctx.moveTo(xOf(root.cursorMs), l.top)
-                        ctx.lineTo(xOf(root.cursorMs), l.top + l.plotH)
+                        ctx.moveTo(xOf(t), l.top)
+                        ctx.lineTo(xOf(t), l.top + l.plotH)
                         ctx.stroke()
+                    }
+                    // The span's lowest hollow, its highest filled
+                    root.spanDots = root.hasSpan
+                        ? ChartLayout.extremeDots(l, root.spanStats, root.viewT0, root.viewT1) : []
+                    for (const d of root.spanDots) {
+                        ctx.beginPath()
+                        ctx.arc(d.x, d.y, root.cursorDotR, 0, 2 * Math.PI)
+                        if (d.filled) {
+                            ctx.fillStyle = Theme.seriesColor(d.row)
+                            ctx.fill()
+                        } else {
+                            ctx.strokeStyle = Theme.seriesColor(d.row)
+                            ctx.stroke()
+                        }
                     }
                     // A dot on each trace at the sample its value comes from
                     for (const tr of l.traces) {
@@ -1845,7 +2091,8 @@ Page {
             // Drag pans, the wheel and a pinch zoom about the pointer, a
             // tap places the cursor. A drag is sideways only, so the page
             // scrolls up and down; one that starts while a pinch is on or
-            // just after is the pinch's last finger, and moves nothing
+            // just after is the pinch's last finger, and moves nothing.
+            // Under Shift or after a long press it draws the span's box
             DragHandler {
                 id: pan
                 objectName: "chartPan"
@@ -1853,14 +2100,29 @@ Page {
                 yAxis.enabled: false
                 property real startT0: 0
                 property bool fromPinch: false
+                property bool boxing: false
                 onActiveChanged: {
-                    if (!active)
+                    if (!active) {
+                        if (boxing)
+                            root.finishBox()
+                        boxing = false
                         return
+                    }
                     startT0 = root.viewT0
                     fromPinch = pinch.active || Date.now() - pinch.endedAt < 300
+                    boxing = !fromPinch && (chartTap.held || (centroid.modifiers & Qt.ShiftModifier) !== 0)
+                    if (boxing) {
+                        root.boxFromMs = root.timeAt(centroid.pressPosition.x)
+                        root.boxToMs = root.boxFromMs
+                    }
                 }
                 onActiveTranslationChanged: {
                     if (!active || fromPinch) return
+                    if (boxing) {
+                        root.boxToMs = Math.min(root.viewT1, Math.max(root.viewT0, root.timeAt(centroid.position.x)))
+                        chart.repaintMarks()
+                        return
+                    }
                     const span = root.viewT1 - root.viewT0
                     const t0 = startT0 - activeTranslation.x / Math.max(1, root.plotWidth() - 1) * span
                     root.setView(t0, t0 + span)
@@ -1942,13 +2204,29 @@ Page {
                 }
             }
             DoubleTapHandler {
+                id: chartTap
                 objectName: "chartTap"
                 property point lastAt: Qt.point(0, 0)
+                // A long press fired in this press, so its drag draws a box
+                property bool held: false
+                onPressedChanged: if (pressed) held = false
+                onLongPressed: {
+                    const at = chartTap.point.position
+                    if (!root.phoneShape || at.x - chart.x < root.plotLeft())
+                        return
+                    held = true
+                    root.placeSecond(root.snapped(root.timeAt(at.x)))
+                }
                 onTapped: (eventPoint, button) => {
                     lastAt = eventPoint.position
                     // A tap on the axes' column places no cursor
-                    if (eventPoint.position.x - chart.x >= root.plotLeft())
-                        root.setCursor(root.snapped(root.timeAt(eventPoint.position.x)))
+                    if (eventPoint.position.x - chart.x < root.plotLeft())
+                        return
+                    const t = root.snapped(root.timeAt(eventPoint.position.x))
+                    if ((chartTap.point.modifiers & Qt.ShiftModifier) !== 0)
+                        root.placeSecond(t)
+                    else
+                        root.setCursor(t)
                 }
                 // A double-click or double-tap maximizes it, or gives the
                 // signals back (on an axis or a seam, root.doubleTapAt);
@@ -2025,6 +2303,72 @@ Page {
                 }
             }
 
+            // A cursor's handle at the axis's foot, its time on it; a drag
+            // moves its cursor. It reaches up over the plot to a touch's
+            // height, and takes the press from the chart's own gestures
+            component CursorHandle: Item {
+                id: handle
+                required property bool isB
+                readonly property real at: isB ? root.cursorBMs : root.cursorMs
+                readonly property real minWidth: root.phoneShape ? Theme.touchTarget : 24
+                readonly property real tabH: chart.drawn ? chart.drawn.axisH : ChartLayout.axisH
+                visible: chart.drawn !== null && at >= root.viewT0 && at <= root.viewT1
+                width: Math.max(minWidth, handleText.implicitWidth + 8)
+                height: root.phoneShape ? Theme.touchTarget : 24
+                x: Math.min(Math.max(0, root.xOfTime(at) - width / 2), chartFrame.width - width)
+                y: chart.y + (chart.drawn ? chart.drawn.top + chart.drawn.plotH + tabH : 0) - height
+                Accessible.role: Accessible.Slider
+                Accessible.name: qsTr("Cursor at %1").arg(handleText.text)
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: handle.tabH
+                    radius: 2
+                    readonly property bool moved: handle.isB === root.arrowsMoveB
+                    color: moved ? Theme.text : Theme.elevated
+                    border.width: 1
+                    border.color: Theme.text
+                    Label {
+                        id: handleText
+                        objectName: "handleTime"
+                        anchors.centerIn: parent
+                        text: root.timeText(handle.at, true)
+                        color: parent.moved ? Theme.bg : Theme.text
+                        font.pixelSize: ChartLayout.labelPx
+                        font.family: Theme.monoFamily
+                    }
+                }
+                MouseArea {
+                    objectName: "handleDrag"
+                    anchors.fill: parent
+                    cursorShape: Qt.SizeHorCursor
+                    preventStealing: true
+                    property real pressX: 0
+                    property bool dragging: false
+                    function frameX(x) {
+                        return mapToItem(chartFrame, x, 0).x
+                    }
+                    onPressed: mouse => {
+                        pressX = frameX(mouse.x)
+                        dragging = false
+                    }
+                    onPositionChanged: mouse => {
+                        const x = frameX(mouse.x)
+                        if (!dragging && Math.abs(x - pressX) < Application.styleHints.startDragDistance)
+                            return
+                        dragging = true
+                        if (handle.isB)
+                            root.setCursorB(root.timeAt(x))
+                        else
+                            root.setCursor(root.timeAt(x))
+                    }
+                    onReleased: if (dragging) root.dropHandle(handle.isB)
+                }
+            }
+            CursorHandle { id: handleA; objectName: "cursorHandleA"; isB: false }
+            CursorHandle { id: handleB; objectName: "cursorHandleB"; isB: true }
+
             ThemedButton {
                 id: stripFold
                 objectName: "stripFold"
@@ -2050,16 +2394,16 @@ Page {
                 width: chartFrame.stripBelow ? stripFold.x - 8 : chartFrame.stripWidth - 4
                 height: chartFrame.stripBelow ? chartFrame.stripHeight - 8 : parent.height - 4 - y
                 cellWidth: chartFrame.stripBelow ? Math.floor(width / chartFrame.stripColumns) : width
-                cellHeight: 40
+                cellHeight: chartFrame.stripCellH
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 model: visible ? chartFrame.stripModel : []
                 delegate: Item {
                     id: stripRow
                     required property var modelData
-                    readonly property var at: root.readout[modelData.index]
+                    readonly property var at: root.readoutFrom[modelData.index]
                     width: GridView.view.cellWidth
-                    height: 40
+                    height: chartFrame.stripCellH
                     Rectangle {
                         x: 0
                         y: 6
@@ -2088,6 +2432,18 @@ Page {
                               : root.valueText(Number(stripRow.at.text), stripRow.modelData.decimals,
                                                stripRow.at.unit)
                         color: Theme.text
+                        font.family: Theme.monoFamily
+                        elide: Text.ElideRight
+                    }
+                    Label {
+                        objectName: "stripSpan"
+                        visible: root.hasSpan
+                        x: 12
+                        y: 34
+                        width: parent.width - 12
+                        text: visible ? root.spanCaption(stripRow.modelData) : ""
+                        color: Theme.textDim
+                        font.pixelSize: Theme.fontCaption
                         font.family: Theme.monoFamily
                         elide: Text.ElideRight
                     }
@@ -2129,6 +2485,51 @@ Page {
         RowLayout {
             id: switchRowSlot
             visible: root.chartMaximized && recording.hasFrames && !root.switchInZoomRow
+        }
+
+        // The span line: where the two cursors are and how far apart, or
+        // once, the first cursor's hint for the second. Under the zoom row
+        // on a phone, at its right on the desktop
+        RowLayout {
+            id: spanLine
+            objectName: "spanLine"
+            parent: root.phoneShape ? spanRowPhone : spanRowDesktop
+            visible: root.spanLineUp
+            Layout.fillWidth: true
+            spacing: 6
+            Label {
+                objectName: "spanText"
+                Layout.fillWidth: true
+                horizontalAlignment: root.phoneShape ? Text.AlignLeft : Text.AlignRight
+                verticalAlignment: Text.AlignVCenter
+                wrapMode: root.phoneShape ? Text.WordWrap : Text.NoWrap
+                maximumLineCount: root.phoneShape ? 2 : 1
+                elide: Text.ElideRight
+                font.pixelSize: root.phoneShape ? Theme.fontCaption : Theme.fontBody
+                color: Theme.textDim
+                text: root.hasSpan ? qsTr("A %1 to B %2 · %3").arg(root.timeText(root.spanFromMs, true))
+                                       .arg(root.timeText(root.spanToMs, true))
+                                       .arg(root.timeText(root.spanToMs - root.spanFromMs, true))
+                      : root.phoneShape ? qsTr("Hold to place the second cursor")
+                      : qsTr("At %1. Shift+click to place the second cursor")
+                            .arg(root.timeText(root.cursorMs, true))
+            }
+            ThemedButton {
+                objectName: "zoomToSpan"
+                visible: root.hasSpan
+                compact: true
+                text: root.phoneShape ? qsTr("Zoom") : qsTr("Zoom to span")
+                Accessible.name: qsTr("Zoom to the span")
+                onClicked: root.zoomToSpan()
+            }
+            ThemedButton {
+                objectName: "clearSpan"
+                visible: root.hasSpan
+                flat: true
+                text: qsTr("Clear")
+                Accessible.name: qsTr("Remove the second cursor")
+                onClicked: root.clearCursorB()
+            }
         }
 
         // The zoom row's place on the page; on the pinned form it leads the
@@ -2194,6 +2595,7 @@ Page {
                     // row leaves it little width, instead of eliding to "Tap for …"
                     Label {
                         objectName: "cursorTime"
+                        visible: root.phoneShape || !root.spanLineUp
                         Layout.fillWidth: true
                         horizontalAlignment: Text.AlignRight
                         verticalAlignment: Text.AlignVCenter
@@ -2206,6 +2608,11 @@ Page {
                                                                : qsTr("Click the chart for values"))
                                               : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
                     }
+                    RowLayout {
+                        id: spanRowDesktop
+                        visible: !root.phoneShape && root.spanLineUp
+                        Layout.fillWidth: true
+                    }
                     ThemedButton {
                         objectName: "maximizeChart"
                         text: root.chartMaximized ? qsTr("Signals") : qsTr("Chart")
@@ -2216,6 +2623,19 @@ Page {
                                                              : qsTr("Give the chart the page")
                         onClicked: root.toggleMaximized()
                     }
+                }
+
+                // The span line, under the zoom row on a phone
+                RowLayout {
+                    id: spanRowPhone
+                    visible: root.phoneShape && root.spanLineUp
+                    Layout.fillWidth: true
+                }
+                ColumnLayout {
+                    id: spanStatsPinned
+                    visible: spanStatsBlock.parent === spanStatsPinned && spanStatsBlock.shown
+                    Layout.fillWidth: true
+                    Layout.fillHeight: false
                 }
 
                 Label {
@@ -2473,7 +2893,7 @@ Page {
                 required property var modelData
                 required property int index
                 readonly property int signalIndex: modelData.index
-                readonly property var at: root.readout[signalIndex]
+                readonly property var at: root.readoutFrom[signalIndex]
                 width: signalRows.width
                 height: root.rowHeight
                 color: index % 2 === 0 ? Theme.surface : Theme.bg
@@ -2499,22 +2919,60 @@ Page {
                         border.color: Theme.seriesColor(signalRow.signalIndex)
                         opacity: shown ? 1.0 : 0.5
                     }
-                    Label {
-                        text: signalRow.modelData.name
-                        color: Theme.text
-                        elide: Text.ElideRight
+                    ColumnLayout {
                         Layout.fillWidth: true
+                        spacing: 0
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                text: signalRow.modelData.name
+                                color: Theme.text
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Label {
+                                objectName: "cursorValue"
+                                text: root.atText(signalRow.at, signalRow.modelData)
+                                Layout.maximumWidth: Math.round(signalRow.width * (root.compareAligned ? 0.3 : 0.5))
+                                elide: Text.ElideRight
+                                color: Theme.text
+                                font.family: Theme.monoFamily
+                            }
+                        }
+                        // On a phone B and the change have a line of their own
+                        Label {
+                            objectName: "cursorSpanLine"
+                            visible: root.phoneShape && root.hasSpan
+                            text: visible ? root.spanCaption(signalRow.modelData) : ""
+                            Layout.fillWidth: true
+                            horizontalAlignment: Text.AlignRight
+                            elide: Text.ElideLeft
+                            color: Theme.textDim
+                            font.pixelSize: Theme.fontCaption
+                            font.family: Theme.monoFamily
+                            font.features: Theme.valueFeatures
+                        }
+                    }
+                    // On the desktop, two more columns
+                    Label {
+                        objectName: "cursorBValue"
+                        visible: !root.phoneShape && root.hasSpan
+                        text: visible ? root.atText(root.readoutTo[signalRow.signalIndex], signalRow.modelData) : ""
+                        Layout.preferredWidth: Math.round(signalRow.width * 0.18)
+                        horizontalAlignment: Text.AlignRight
+                        elide: Text.ElideRight
+                        color: Theme.text
+                        font.family: Theme.monoFamily
                     }
                     Label {
-                        objectName: "cursorValue"
-                        text: !signalRow.at || signalRow.at.atMs < 0 ? qsTr("—")
-                              : signalRow.modelData.isText ? signalRow.at.text
-                              : signalRow.at.label ? signalRow.at.label
-                              : root.valueText(Number(signalRow.at.text), signalRow.modelData.decimals,
-                                               signalRow.at.unit)
-                        Layout.maximumWidth: Math.round(signalRow.width * (root.compareAligned ? 0.3 : 0.5))
+                        objectName: "cursorDelta"
+                        visible: !root.phoneShape && root.hasSpan
+                        text: visible && !signalRow.modelData.isText
+                              ? root.statChange(root.spanStats[signalRow.signalIndex]) : ""
+                        Layout.preferredWidth: Math.round(signalRow.width * 0.18)
+                        horizontalAlignment: Text.AlignRight
                         elide: Text.ElideRight
-                        color: Theme.text
+                        color: Theme.textDim
                         font.family: Theme.monoFamily
                     }
                     // The compared recording's, at the cursor
@@ -2557,6 +3015,143 @@ Page {
                                      : qsTr("Showing %1 of %2 signals · plotting %3"))
                       .arg(root.shownSignals.length).arg(recording.signalList.length)
                       .arg(recording.signalList.filter(s => root.plotted[s.index] === true).length)
+            }
+        }
+
+        // The statistics' place on the page; on the pinned form they follow
+        // the span line in the list's head
+        ColumnLayout {
+            id: spanStatsHome
+            visible: spanStatsBlock.parent === spanStatsHome && spanStatsBlock.shown
+            Layout.fillWidth: true
+            Layout.fillHeight: false
+            // Each plotted signal over the span: a table on the desktop, a
+            // grid of cards on a phone, whose rate the span line's length gives
+            ColumnLayout {
+                id: spanStatsBlock
+                objectName: "spanStats"
+                readonly property bool shown: root.spanRows.length > 0 && !root.chartMaximized
+                                              && !root.framesShown && !root.aboutShown
+                parent: root.pinnedViewer ? spanStatsPinned : spanStatsHome
+                visible: shown
+                Layout.fillWidth: true
+                spacing: 0
+                component StatCell: Label {
+                    // Shares, not widths: a width read from the page would
+                    // make the column lay itself out again as it sizes
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 10
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideRight
+                    color: Theme.text
+                    font.family: Theme.monoFamily
+                    font.features: Theme.valueFeatures
+                }
+                RowLayout {
+                    visible: !root.phoneShape
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 8
+                    Layout.rightMargin: 12
+                    Label { text: qsTr("Signal"); color: Theme.textDim; Layout.fillWidth: true; Layout.preferredWidth: 30 }
+                    StatCell { text: qsTr("Change"); color: Theme.textDim }
+                    StatCell { text: qsTr("Low"); color: Theme.textDim }
+                    StatCell { text: qsTr("High"); color: Theme.textDim }
+                    StatCell { text: qsTr("Mean"); color: Theme.textDim }
+                    StatCell { text: qsTr("Rate"); color: Theme.textDim }
+                }
+                Repeater {
+                    model: root.phoneShape ? [] : root.spanRows
+                    delegate: RowLayout {
+                        id: statRow
+                        required property var modelData
+                        readonly property var stat: root.spanStats[modelData.index]
+                        objectName: "statRow_" + modelData.index
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 8
+                        Layout.rightMargin: 12
+                        Label {
+                            text: statRow.modelData.name
+                            color: Theme.text
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 30
+                        }
+                        StatCell { objectName: "statChange"; text: root.statChange(statRow.stat) }
+                        StatCell {
+                            objectName: "statLow"
+                            text: statRow.stat ? root.statText(statRow.stat.lowest, statRow.stat) : qsTr("—")
+                        }
+                        StatCell {
+                            objectName: "statHigh"
+                            text: statRow.stat ? root.statText(statRow.stat.highest, statRow.stat) : qsTr("—")
+                        }
+                        StatCell {
+                            objectName: "statMean"
+                            text: statRow.stat ? root.statText(statRow.stat.mean, statRow.stat) : qsTr("—")
+                        }
+                        StatCell { objectName: "statRate"; text: root.statRate(statRow.stat) }
+                    }
+                }
+                GridLayout {
+                    visible: root.phoneShape
+                    Layout.fillWidth: true
+                    columns: 2
+                    columnSpacing: 4
+                    rowSpacing: 4
+                    Repeater {
+                        model: root.phoneShape ? root.spanRows : []
+                        delegate: Rectangle {
+                            id: statCard
+                            required property var modelData
+                            readonly property var stat: root.spanStats[modelData.index]
+                            objectName: "statCard_" + modelData.index
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 1
+                            Layout.preferredHeight: Theme.touchTarget
+                            color: Theme.surface
+                            radius: 4
+                            border.color: Theme.hairline
+                            border.width: 1
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 6
+                                anchors.rightMargin: 6
+                                spacing: 0
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: statCard.modelData.name
+                                        color: Theme.textDim
+                                        elide: Text.ElideRight
+                                        font.pixelSize: Theme.fontCaption
+                                        Layout.fillWidth: true
+                                    }
+                                    Label {
+                                        objectName: "statChange"
+                                        text: root.statChange(statCard.stat)
+                                        color: Theme.text
+                                        font.pixelSize: Theme.fontCaption
+                                        font.family: Theme.monoFamily
+                                        font.features: Theme.valueFeatures
+                                    }
+                                }
+                                Label {
+                                    objectName: "statLine"
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    color: Theme.textDim
+                                    font.pixelSize: Theme.fontCaption
+                                    font.family: Theme.monoFamily
+                                    font.features: Theme.valueFeatures
+                                    text: !statCard.stat ? qsTr("—")
+                                          : [statCard.stat.lowest, statCard.stat.highest, statCard.stat.mean]
+                                            .map(v => isFinite(v) ? Number(v).toLocaleString(Qt.locale(), 'f', statCard.stat.decimals)
+                                                                  : qsTr("—")).join(" · ")
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

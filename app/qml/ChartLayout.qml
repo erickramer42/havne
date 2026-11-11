@@ -15,6 +15,7 @@ QtObject {
     readonly property int lineH: 14      // a value label's row, room permitting
     readonly property int swatchW: 12    // the stroke sample before a label
     readonly property int axisH: 16      // the time axis under the plot
+    readonly property int axisHCursor: 24 // a phone's, with a cursor's handle in it
     readonly property int top: 6         // above the plot
     readonly property int bottomPad: 4
     readonly property int labelGap: 14   // between the plot and the labels' column
@@ -247,6 +248,31 @@ QtObject {
                 return i
         }
         return -1
+    }
+    // Where a trace draws value v, null outside its pane
+    function traceYAt(l, tr, v) {
+        const pane = l.panes[tr.pane]
+        const norm = tr.flat ? tr.lane : (v - tr.vMin) / (tr.vMax - tr.vMin)
+        return norm >= 0 && norm <= 1 ? pane.top + (1 - norm) * pane.h : null
+    }
+    // A span's extremes as dots on their traces, in view and in their
+    // panes: [{ row, x, y, filled }], filled for the highest. stats by row
+    // (RecordingView.stats' maps); a compared trace has none
+    function extremeDots(l, stats, t0, t1) {
+        const dots = []
+        const xOf = t => l.left + (t - t0) / (t1 - t0) * (l.plotW - 1)
+        for (const tr of l.traces) {
+            const s = tr.dash === undefined ? stats[tr.row] : undefined
+            if (!s)
+                continue
+            for (const e of [{ at: s.lowestMs, v: s.lowest, filled: false },
+                             { at: s.highestMs, v: s.highest, filled: true }]) {
+                const y = traceYAt(l, tr, e.v)
+                if (e.at >= 0 && e.at >= t0 && e.at <= t1 && y !== null)
+                    dots.push({ row: tr.row, x: xOf(e.at), y: y, filled: e.filled })
+            }
+        }
+        return dots
     }
     // The value a pane's axis puts at y
     function valueAt(pane, y) {
@@ -527,12 +553,14 @@ QtObject {
     //   "center") }] newest first, or in time order when absolute,
     //   traces: [{ row, dash, pane, segments: [[{x, y}]], pieces (what's
     //              drawn, each a segment's line or, crowded, bandPieces'),
-    //              endY, label, labeled, labelY, labelMs }]
+    //              endY, label, labeled, labelY, labelMs, and for
+    //              traceYAt vMin, vMax, flat, lane }]
     //   in label order top down, labelX,
     //   panes: [{ key, label, axis, manual, top, h, vMin, vMax, ticks: [{
     //             y, value, caption, captioned }] }] top down (one, with
     //             no axis and no label, without the panes option),
-    //   seams: [y] between them }
+    //   seams: [y] between them, axisH (the time axis's height: opts.axisH
+    //   or the usual) }
     function layout(series, width, height, opts) {
         if (!series || series.length === 0)
             return null
@@ -596,7 +624,8 @@ QtObject {
 
         // The panes, top down: by unit with the panes option, else one
         // holding every trace on its own scale
-        const room = Math.max(1, height - axisH - top - bottomPad)
+        const axisRoom = opts.axisH > 0 ? opts.axisH : axisH
+        const room = Math.max(1, height - axisRoom - top - bottomPad)
         const po = opts.panes
         const groups = po ? paneGroups(traces, room, po)
                           : [{ key: "", units: [], axis: false, traces: traces }]
@@ -767,7 +796,8 @@ QtObject {
                            pieces: columnPieces(sampled, Math.floor(opts.gapMs / colMs), swing),
                            endY: traceY(tr.value),
                            label: tr.label,
-                           labelMs: tr.labelMs })
+                           labelMs: tr.labelMs,
+                           vMin: tr.vMin, vMax: tr.vMax, flat: tr.flat, lane: tr.lane })
                 continue
             }
             // Its points' mean spacing across the time they cover
@@ -788,7 +818,8 @@ QtObject {
                        pieces: pieces,
                        endY: traceY(tr.sp[tr.sp.length - 1]),
                        label: tr.label,
-                       labelMs: tr.labelMs })
+                       labelMs: tr.labelMs,
+                       vMin: tr.vMin, vMax: tr.vMax, flat: tr.flat, lane: tr.lane })
         }
 
         // A range the user set can leave a trace past its pane: cut to it.
@@ -807,6 +838,7 @@ QtObject {
         }
 
         return { left: left, plotW: plotW, plotH: plotH, top: top, hGrid: hGrid, ticks: ticks,
-                 traces: placed, labelX: left + plotW + 6, panes: panes, seams: seams }
+                 traces: placed, labelX: left + plotW + 6, panes: panes, seams: seams,
+                 axisH: axisRoom }
     }
 }

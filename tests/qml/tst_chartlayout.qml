@@ -846,6 +846,70 @@ TestCase {
     }
 
     // The chart draws a paned layout: its panes are what it drew
+    // The time axis's height is the page's to grow: the plot gives way
+    function test_theAxisStripTakesItsHeightFromTheOption() {
+        const s = [series(0, [[0, 0], [1000, 10]], 0, "rpm")]
+        const plain = layout(s, { span: { t0: 0, t1: 1000 } })
+        compare(plain.axisH, ChartLayout.axisH)
+        const grown = layout(s, { span: { t0: 0, t1: 1000 }, axisH: ChartLayout.axisHCursor })
+        compare(grown.axisH, ChartLayout.axisHCursor)
+        compare(plain.plotH - grown.plotH, ChartLayout.axisHCursor - ChartLayout.axisH)
+    }
+
+    // A value's height on its trace: where the trace ends for its end
+    // value, null outside a pane a user's range has narrowed, a flat
+    // trace's lane for anything
+    function test_aValuesHeightOnItsTrace() {
+        const s = [series(0, [[0, 0], [500, 40], [1000, 100]], 0, "rpm")]
+        const panes = { span: { t0: 0, t1: 1000 }, panes: { max: 4, minH: 72 } }
+        const l = layout(s, panes)
+        const tr = l.traces[0]
+        fuzzyCompare(ChartLayout.traceYAt(l, tr, 100), tr.endY, 0.001)
+        const p = l.panes[tr.pane]
+        fuzzyCompare(ChartLayout.traceYAt(l, tr, (p.vMin + p.vMax) / 2), p.top + p.h / 2, 0.001)
+
+        const narrow = layout(s, { span: { t0: 0, t1: 1000 },
+                                   panes: { max: 4, minH: 72, ranges: { "unit rpm": { vMin: 20, vMax: 60 } } } })
+        compare(ChartLayout.traceYAt(narrow, narrow.traces[0], 100), null, "over the range")
+        compare(ChartLayout.traceYAt(narrow, narrow.traces[0], 0), null, "under the range")
+        verify(ChartLayout.traceYAt(narrow, narrow.traces[0], 40) !== null, "inside it")
+
+        const flat = layout([series(0, [[0, 5], [1000, 5]], 0, "")], { span: { t0: 0, t1: 1000 } })
+        const f = flat.traces[0]
+        verify(f.flat, "a flat trace")
+        fuzzyCompare(ChartLayout.traceYAt(flat, f, 5), f.endY, 0.001)
+    }
+
+    // The extremes' dots: on the trace at their times, the highest filled;
+    // out of view or past a user's range none; none on a compared trace
+    function test_theExtremesDotsAreOnTheirTraces() {
+        const s = [series(0, [[0, 0], [500, 40], [1000, 100]], 0, "rpm")]
+        const l = layout(s, { span: { t0: 0, t1: 1000 }, panes: { max: 4, minH: 72 } })
+        const stat = { 0: { lowestMs: 0, lowest: 0, highestMs: 1000, highest: 100 } }
+        const dots = ChartLayout.extremeDots(l, stat, 0, 1000)
+        compare(dots.length, 2)
+        compare(dots[0].filled, false, "the lowest hollow")
+        compare(dots[1].filled, true, "the highest filled")
+        compare(dots[0].row, 0)
+        fuzzyCompare(dots[0].x, l.left, 0.001)
+        fuzzyCompare(dots[1].x, l.left + l.plotW - 1, 0.001)
+        fuzzyCompare(dots[1].y, ChartLayout.traceYAt(l, l.traces[0], 100), 0.001)
+
+        compare(ChartLayout.extremeDots(l, { 0: { lowestMs: -1, lowest: NaN, highestMs: -1, highest: NaN } },
+                                        0, 1000).length, 0, "none with no samples")
+        compare(ChartLayout.extremeDots(l, { 0: { lowestMs: 2000, lowest: 0, highestMs: 3000, highest: 100 } },
+                                        0, 1000).length, 0, "none out of view")
+        compare(ChartLayout.extremeDots(l, {}, 0, 1000).length, 0, "none with no statistics")
+
+        const narrow = layout(s, { span: { t0: 0, t1: 1000 },
+                                   panes: { max: 4, minH: 72, ranges: { "unit rpm": { vMin: 20, vMax: 60 } } } })
+        compare(ChartLayout.extremeDots(narrow, stat, 0, 1000).length, 0, "none past the range")
+
+        const dashed = [{ row: 0, samples: [0, 0, 1000, 100], decimals: 0, unit: "rpm", dash: [3, 3] }]
+        const d = layout(dashed, { span: { t0: 0, t1: 1000 }, panes: { max: 4, minH: 72 } })
+        compare(ChartLayout.extremeDots(d, stat, 0, 1000).length, 0, "none on a compared trace")
+    }
+
     function test_aStripChartDrawsPanes() {
         const chart = createTemporaryObject(stripChart, this, {
             shownH: 400,
