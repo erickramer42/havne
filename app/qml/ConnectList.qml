@@ -266,8 +266,7 @@ Rectangle {
                     wrapMode: Text.WordWrap
                     font.pixelSize: Theme.fontCaption
                     color: Theme.textDim
-                    text: qsTr("No paired adapter. Pair one in Android's Bluetooth settings, "
-                               + "or scan")
+                    text: qsTr("Pair an adapter in Android's Bluetooth settings, or scan")
                 }
                 ThemedButton {
                     objectName: "connectScan"
