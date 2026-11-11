@@ -13,6 +13,24 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- An OBD-II connection reads Boost, the intake manifold pressure minus the
+  barometric pressure, as the demo connection does, so a gauge for Boost
+  reads on either.
+- A signal file that extends OBD-II and gives a signal the name of one of
+  OBD-II's replaces it: the session shows the file's, with the same ID, so a
+  gauge or layout that named OBD-II's signal reads it. Two signals in one
+  file with the same name are refused, since a recording keeps its values by
+  name; a file with a repeated name needs one renamed. The OBDb import
+  numbers a repeated name (`Name 2`) and never takes an OBD-II signal's.
+- A log that picks a computed signal, such as Boost, asks the signals it is
+  computed from, and records only the pick.
+- `havne-cli log` writes the `session` line `stream` writes when a connection
+  asks for the extended session, so a log's output says which session each
+  module was read in.
+- Python reads each module's extended session as words
+  (`Session.session_state()`), and looks up a VIN's decode and a trouble
+  code's title offline (`havne.decode_vin`, `havne.dtc_title`), as
+  `havne-cli vin` and `dtc` do.
 - The Recordings viewer's Export panel has a Cancel button while an export runs:
   it stops at once and leaves nothing half written.
 - A Daylight look, dark text on white for reading the screen in sun, chosen
