@@ -177,20 +177,56 @@ typedef struct ecuio_enum_entry {
 /* A computed def's program (ADR-0051 section 5): a stack machine over
  * up to four inputs, each another def's newest value no older than its
  * age bound, and up to 16 constants. Each step pushes an input or a
- * constant, or pops two values and pushes one; a program runs to one
- * value. The low four bits of a push step are the input's or the
- * constant's index. */
+ * constant, or pops one, two or three values and pushes one; a program
+ * runs to one number. The low four bits of a push step are the input's
+ * or the constant's index.
+ *
+ * A value is a number or a truth, and the validator checks each step's
+ * types: a step given the wrong type, a truth left at the end or a step
+ * value not listed here is refused. Any value may instead be no value:
+ * an input with none within its age bound, or a step whose number isn't
+ * finite. A step with no value in gives no value out, but for
+ * ECUIO_COMPUTED_IF, ALL and ANY, as their comments say. "a" is the
+ * second from the top and "b" the top; a run of steps over more parts
+ * (min of three, clamp) is a run of these. */
 #define ECUIO_COMPUTED_MAX_INPUTS    4u
 #define ECUIO_COMPUTED_MAX_CONSTANTS 16u
 #define ECUIO_COMPUTED_MAX_STEPS     33u   /* 16 operations and their 17 operands */
 
+/* Numbers to a number */
 #define ECUIO_COMPUTED_PUSH_INPUT    0x00u  /* | the input's index */
 #define ECUIO_COMPUTED_PUSH_CONSTANT 0x10u  /* | the constant's index */
 #define ECUIO_COMPUTED_ADD           0x20u
-#define ECUIO_COMPUTED_SUBTRACT      0x21u  /* the second from the top minus the top */
+#define ECUIO_COMPUTED_SUBTRACT      0x21u  /* a - b */
 #define ECUIO_COMPUTED_MULTIPLY      0x22u
-#define ECUIO_COMPUTED_DIVIDE        0x23u  /* the second from the top over the top;
-                                               a zero top gives no value */
+#define ECUIO_COMPUTED_DIVIDE        0x23u  /* a / b; a zero b gives no value */
+#define ECUIO_COMPUTED_MIN           0x24u  /* b when b < a, else a */
+#define ECUIO_COMPUTED_MAX           0x25u  /* b when b > a, else a */
+#define ECUIO_COMPUTED_ABS           0x26u  /* one number: its distance from zero */
+#define ECUIO_COMPUTED_SQRT          0x27u  /* one number; below zero gives no value */
+#define ECUIO_COMPUTED_ROUND         0x28u  /* one number; a half goes away from zero */
+#define ECUIO_COMPUTED_FLOOR         0x29u  /* one number */
+#define ECUIO_COMPUTED_CEIL          0x2Au  /* one number */
+
+/* Two numbers to a truth */
+#define ECUIO_COMPUTED_LESS          0x30u  /* a < b */
+#define ECUIO_COMPUTED_LESS_EQUAL    0x31u  /* a <= b */
+#define ECUIO_COMPUTED_GREATER       0x32u  /* a > b */
+#define ECUIO_COMPUTED_GREATER_EQUAL 0x33u  /* a >= b */
+#define ECUIO_COMPUTED_EQUAL         0x34u  /* a == b, exactly */
+#define ECUIO_COMPUTED_NOT_EQUAL     0x35u  /* a != b, exactly */
+
+/* Truths to a truth, and the one conditional */
+#define ECUIO_COMPUTED_ALL           0x38u  /* false when either is false, else
+                                               no value when either has none */
+#define ECUIO_COMPUTED_ANY           0x39u  /* true when either is true, else
+                                               no value when either has none */
+#define ECUIO_COMPUTED_NOT           0x3Au  /* one truth */
+#define ECUIO_COMPUTED_IF            0x3Bu  /* a truth p (third from the top),
+                                               then numbers a and b: a when p
+                                               holds, else b; no value when p
+                                               has none or the one picked
+                                               has none */
 
 /* The age past which a value is stale: the app dims it and a computed
  * input older than this, with no max_age of its own, gives no value
@@ -424,12 +460,16 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
                                                       not strictly
                                                       ascending */
 #define ECUIO_VALIDATE_ERR_PROGRAM          (-21)  /* a program that doesn't
-                                                      run to one value: a
+                                                      run to one number: a
                                                       count out of range,
                                                       an unknown step, an
                                                       index past its count,
-                                                      too few values for an
-                                                      operation, a constant
+                                                      too few values for a
+                                                      step, a step given a
+                                                      truth for a number or
+                                                      a number for a truth,
+                                                      a truth at the end,
+                                                      a constant
                                                       not finite, an age
                                                       bound out of range,
                                                       or a nonzero byte

@@ -402,7 +402,8 @@ TEST(ComputedTest, TheCheckerRefusesAProgramThatDoesntRun)
             "an input past the count");
     refused([](ecuio_computed_t& c) { c.steps[0] = ECUIO_COMPUTED_PUSH_CONSTANT | 1u; },
             "a constant past the count");
-    refused([](ecuio_computed_t& c) { c.steps[2] = 0x24; }, "an unknown operation");
+    refused([](ecuio_computed_t& c) { c.steps[2] = 0x2B; },
+            "an unknown operation");
     refused([](ecuio_computed_t& c) { c.steps[1] = ECUIO_COMPUTED_ADD; },
             "an operation on one value");
     refused([](ecuio_computed_t& c) {
