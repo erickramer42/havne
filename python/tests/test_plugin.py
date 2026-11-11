@@ -65,9 +65,9 @@ def test_a_packed_plugin_loads_with_no_read_callback():
 
 def test_a_plugin_names_the_core_it_requires():
     """requires.core as (major, minor, patch): the packed fixture's
-    manifest says 0.1.0, the example's is read from its own manifest"""
+    manifest says 0.7.2, the example's is read from its own manifest"""
     packed = havne.Plugin(os.path.join(ROOT, "tests", "fixtures", "plugins", "packed.json"))
-    assert packed.requires_core == (0, 1, 0)
+    assert packed.requires_core == (0, 7, 2)
     folder = os.path.join(PLUGINS, "example-sim")
     with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as f:
         said = json.load(f)["requires"]["core"]

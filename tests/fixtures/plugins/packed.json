@@ -3,7 +3,7 @@
   "id": "packed",
   "name": "A packed plugin, which carries no fixtures",
   "version": "1.0.0",
-  "requires": { "core": "0.1.0" },
+  "requires": { "core": "0.7.2" },
   "source": { "name": "Havne's tests", "license": "MIT" },
   "tiers": ["data"],
   "match": [ { "wmi": ["ZZZ"], "years": [2015, 2030] } ],
