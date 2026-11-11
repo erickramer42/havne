@@ -291,6 +291,9 @@ TestCase {
         // a night palette's dim fill being no brighter than it was
         const textOnPrimary = contrast(Theme.textOnPrimary, Theme.primary)
         verify(textOnPrimary >= 4.2, "textOnPrimary on primary is " + textOnPrimary.toFixed(2) + ":1 in " + data.name)
+        // The label on a danger fill (Clear codes), night palettes included
+        const textOnDanger = contrast(Theme.textOnDanger, Theme.danger)
+        verify(textOnDanger >= 4.5, "textOnDanger on danger is " + textOnDanger.toFixed(2) + ":1 in " + data.name)
         // Control borders and the lit color against what they sit on: 3:1
         for (const [fg, bgName] of [["outline", "bg"], ["gaugeValue", "surface"],
                                     ["gaugeNeedle", "surface"]]) {

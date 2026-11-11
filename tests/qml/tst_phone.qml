@@ -1670,6 +1670,55 @@ TestCase {
         verify(header.highlighted, "primary elsewhere")
     }
 
+    // Show log beside a refusal and the Log's back arrow return to Connection
+    // with Back still going to the page that sent it
+    function test_aLogRoundTripKeepsBackGoingToTheSender() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        main.gotoPage(main.dashboardPage)
+        main.openConnectFromDash()
+        compare(main.currentPage, main.settingsPage)
+        verify(settings.backLeaves, "Back leaves for Dash")
+        settings.requestConnect("mock://demo?profile=no-such-profile")
+        tryVerify(() => find(settings, "errorShowLog").visible, 5000, "the refusal")
+        settings.logRequested()
+        compare(main.currentPage, main.logPage)
+        main.logBack()
+        compare(main.currentPage, main.settingsPage, "the Log's back arrow")
+        verify(settings.backLeaves, "still leaving for Dash")
+        verify(main.goBack(), "Back is taken")
+        compare(main.currentPage, main.dashboardPage, "where it came from, not the Log")
+        verify(!settings.backLeaves, "and the flag is spent")
+    }
+
+    // The zoom badge is a small rounded rectangle, not a capsule
+    function test_theZoomBadgeIsNotACapsule() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const badge = find(main.contentItem, "zoomBadge")
+        verify(badge.radius <= Theme.radiusCard, "radius " + badge.radius)
+    }
+
+    // The desktop's Home is a connect list too, so the header's Connect...
+    // is secondary there while no session runs: one primary a page
+    function test_theHeadersConnectGivesWayToHomesList() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1280
+        main.height = 720
+        const settings = find(main.contentItem, "settingsPage")
+        settings.recentUris = ["mock://demo"]
+        main.gotoPage(main.homePage)
+        const header = find(main.contentItem, "disconnectButton")
+        const list = find(main.contentItem, "homeConnectList")
+        tryCompare(list, "chosen", "mock://demo", 2000, "a recent row is chosen")
+        verify(header.visible, "the header's Connect... shows")
+        verify(!header.highlighted, "secondary on Home's list")
+        verify(find(list, "connectGo").highlighted, "the list's Connect is the primary")
+        main.gotoPage(main.livePage)
+        verify(header.highlighted, "primary elsewhere")
+    }
+
     // The header at the narrowest phone and the top zoom: the pill's word
     // elides inside the pill, and the pill stays inside the page. The
     // header's Connect... passes the edge there (160 layout units hold no
@@ -1990,6 +2039,20 @@ TestCase {
         list.bluetoothPermission = "unavailable"
     }
 
+    // Where to pair stays within the helper text's two lines at the
+    // narrowest phone, beside Scan
+    function test_theNoPairedAdapterWordsFitTwoLinesAt320() {
+        const main = phoneMain()
+        main.width = 320
+        const list = connectListOn(main, ["elm327://COM1"])
+        list.bluetoothAvailable = true
+        list.bluetoothPermission = "granted"
+        verify(waitForPolish(main), "laid out")
+        const words = find(list, "connectBluetoothNone")
+        verify(words.visible, "nothing paired")
+        verify(words.lineCount <= 2, "the words take " + words.lineCount + " lines at 320")
+    }
+
     // With no recent address and exactly one adapter, it is chosen; the
     // developer's demo row doesn't count
     function test_aSoleAdapterIsChosen() {
@@ -2138,10 +2201,15 @@ TestCase {
         const list = connectListOn(main, ["mock://demo"])
         const go = find(list, "connectGo")
         verify(go.enabled)
+        const note = find(list, "connectRelayNote")
+        verify(!note.visible, "nothing to say before the relay")
         compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
         tryVerify(() => !go.enabled, 2000, "no connect while it runs")
+        tryVerify(() => note.visible, 2000, "and the list says why")
+        compare(note.text, "Stop the relay to connect")
         Relay.stop()
         tryVerify(() => go.enabled, 2000, "and again after")
+        verify(!note.visible, "the words go with the relay")
     }
 
     function test_aRelayLeavesTheLoneConnectToSettings() {

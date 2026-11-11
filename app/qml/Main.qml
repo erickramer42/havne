@@ -98,6 +98,7 @@ ApplicationWindow {
     readonly property real barsShown: dashboardView.barsShown
 
     // Page indices, in the order of the sidebar and the stack
+    readonly property int homePage: 0
     readonly property int dashboardPage: 1
     readonly property int livePage: 2
     readonly property int logPage: 4
@@ -124,9 +125,20 @@ ApplicationWindow {
     // The page the one shown was reached from, for Back
     property int cameFrom: -1
     property int lastPage: 0
+    // Where Settings was reached from while the Log, opened from it, is up:
+    // the Log's way back must not make the Log what Settings goes back to
+    property int cameFromBeforeLog: -1
     onCurrentPageChanged: {
-        cameFrom = lastPage
+        const backFromLog = lastPage === logPage && currentPage === settingsPage
+                            && cameFrom === settingsPage
+        if (currentPage === logPage && lastPage === settingsPage)
+            cameFromBeforeLog = cameFrom
+        cameFrom = backFromLog ? cameFromBeforeLog : lastPage
         lastPage = currentPage
+        // Settings' Back leaving for the page that sent it survives a trip
+        // to the Log (Show log beside a refusal), and nothing else
+        if (settingsView && currentPage !== logPage && currentPage !== settingsPage)
+            settingsView.backLeaves = false
         // A hidden page can keep the key focus, and then Back reaches nothing
         if (Theme.mobile || testMobile)
             zoomRoot.forceActiveFocus()
@@ -590,10 +602,12 @@ ApplicationWindow {
                         HeaderButton {
                             objectName: "disconnectButton"
                             // Ending a session is quiet; Connect... is primary, unless
-                            // Dash shows its connect list, whose Connect is the primary
+                            // Dash or Home shows its connect list, whose Connect is the primary
                             flat: Bridge.connected || Bridge.disconnecting
                             highlighted: !flat && !(root.currentPage === root.dashboardPage
                                                     && dashboardView.connectShown)
+                                         && !(root.currentPage === root.homePage
+                                              && !Bridge.connected)
                             visible: !Bridge.logActive
                                      && (Bridge.connected || root.currentPage !== root.settingsPage)
                             // A teardown can take seconds with a wedged adapter; no
@@ -833,6 +847,7 @@ ApplicationWindow {
     // The zoom level, for a moment after it changes
     Rectangle {
         id: zoomBadge
+        objectName: "zoomBadge"
         function show() { opacity = 1; zoomBadgeTimer.restart() }
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
@@ -840,7 +855,7 @@ ApplicationWindow {
         anchors.bottomMargin: 24
         width: zoomBadgeLabel.implicitWidth + 32
         height: 36
-        radius: 18
+        radius: Theme.radius
         color: Theme.elevatedLight
         border.color: Theme.outline
         opacity: 0

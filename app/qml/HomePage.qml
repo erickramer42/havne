@@ -146,17 +146,10 @@ Rectangle {
                         }
                     }
 
-                    // Idle hunts a few r/min either side
-                    Timer {
-                        running: logo.live && logo.swept && !logo.sweeping && !release.running
-                        interval: 650
-                        repeat: true
-                        onTriggered: logo.target = logo.idle + (Math.random() - 0.5) * 50
-                    }
-
                     // A blip every few seconds, mostly small, now and then into the red
                     Timer {
                         id: blip
+                        objectName: "logoBlip"
                         running: logo.live && logo.swept && !logo.sweeping
                         interval: 3500
                         repeat: true

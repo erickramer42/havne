@@ -817,6 +817,24 @@ TestCase {
         tryVerify(() => a.history.length === 0 || a.history.length <= 1, 2000, "the page left starts again")
     }
 
+    // Dismiss is a touch's size on the phone: the line's words are the only
+    // way to learn the log ended, and Dismiss the only way to clear them
+    function test_theLogNoticesDismissIsATouchTarget() {
+        Bridge.clearLogNotice()
+        Theme.compact = true
+        try {
+            const page = pageOf({ form: "phone", width: 384, height: 800 }, undefined, true)
+            compare(Bridge.startLog(), false)
+            const dismiss = findChild(page, "dashLogNoticeDismiss")
+            tryVerify(() => dismiss.visible && dismiss.height > 0, 2000, "the line shows")
+            verify(dismiss.height >= Theme.touchTarget,
+                   "Dismiss is " + dismiss.height + " tall, a touch is " + Theme.touchTarget)
+        } finally {
+            Theme.compact = false
+            Bridge.clearLogNotice()
+        }
+    }
+
     // The header's line about the log (Bridge.logNotice): a refusal of
     // Start log and an end the user didn't ask for show in words, whole
     // at a phone's width, until Dismiss or the next log

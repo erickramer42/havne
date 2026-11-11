@@ -257,7 +257,7 @@ QtObject {
             // Near-neutral graphite; the accent is the text color as a fill
             bg: "#141416", surface: "#1b1b1e", elevated: "#26262b", elevatedLight: "#323238",
             outline: "#65656f",   // control borders; 3:1 on bg
-            primary: "#ebebee", textOnPrimary: "#141416", text: "#ebebee", textDim: "#9a9aa3",
+            primary: "#ebebee", textOnPrimary: "#141416", textOnDanger: "#141416", text: "#ebebee", textDim: "#9a9aa3",
             success: "#4ade80", warning: "#ffd166", danger: "#f87171", info: "#60a5fa",
             gaugeValue: "#ebebee",
             gaugeReadout: "#ebebee", gaugeNeedle: "#ff5a5f", gaugeTick: "#ebebee",
@@ -276,7 +276,7 @@ QtObject {
         },
         nightAmber: {
             bg: "#0d0a07", surface: "#18120c", elevated: "#261c12", elevatedLight: "#31241a",
-            outline: "#85694a", primary: "#7f440d", textOnPrimary: "#f3c895", text: "#f3c895", textDim: "#b58f64",
+            outline: "#85694a", primary: "#7f440d", textOnPrimary: "#f3c895", textOnDanger: "#0d0a07", text: "#f3c895", textDim: "#b58f64",
             success: "#f0a53a", warning: "#ff8a3a", danger: "#ff4a38", info: "#d2a86a",
             gaugeValue: "#f0a53a",
             gaugeReadout: "#f3c895", gaugeNeedle: "#ff7a2e", gaugeTick: "#e9bf8a",
@@ -287,7 +287,7 @@ QtObject {
         },
         nightRed: {
             bg: "#080404", surface: "#130909", elevated: "#201010", elevatedLight: "#2b1616",
-            outline: "#934a44", primary: "#7a241c", textOnPrimary: "#ff9484", text: "#ff9484", textDim: "#c46a5e",
+            outline: "#934a44", primary: "#7a241c", textOnPrimary: "#ff9484", textOnDanger: "#080404", text: "#ff9484", textDim: "#c46a5e",
             // Success is a quiet warm tint, apart from the dim text and from
             // danger's full red, so Live and No session differ at a glance
             success: "#e08a6e", warning: "#ff8a4a", danger: "#ff3030", info: "#d98a78",
@@ -303,7 +303,7 @@ QtObject {
             // on white, so the warning is a dark amber
             bg: "#f3f3f1", surface: "#ffffff", elevated: "#e4e4e8", elevatedLight: "#d3d3da",
             outline: "#5f5f6a",
-            primary: "#141416", textOnPrimary: "#f3f3f1", text: "#141416", textDim: "#5b5b66",
+            primary: "#141416", textOnPrimary: "#f3f3f1", textOnDanger: "#f3f3f1", text: "#141416", textDim: "#5b5b66",
             success: "#1b7a3e", warning: "#8c5a00", danger: "#b9262b", info: "#2458b8",
             gaugeValue: "#141416",
             gaugeReadout: "#141416", gaugeNeedle: "#d2232a", gaugeTick: "#141416",
@@ -332,6 +332,9 @@ QtObject {
     // The label on a primary fill: the page color in a look (primary is the
     // text color there), the text color at night (the fill stays dim)
     readonly property color textOnPrimary:      colors.textOnPrimary
+    // The label on a danger fill (Clear codes): the page color at night,
+    // where the text color is too dim against the red
+    readonly property color textOnDanger:       colors.textOnDanger
     readonly property color text:           colors.text
     readonly property color textDim:        colors.textDim
     readonly property color success:        colors.success

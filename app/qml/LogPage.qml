@@ -85,6 +85,11 @@ Pane {
     function showActivityEnd() {
         page.view = "activity"
         activityLog.cursorPosition = activityLog.length
+        // The cursor is already there after a line, so it may not scroll
+        Qt.callLater(() => {
+            const flick = activityScroll.contentItem
+            flick.contentY = Math.max(0, flick.contentHeight - flick.height)
+        })
     }
 
     // The Frames view's selected rows to the clipboard, a header line
@@ -211,6 +216,7 @@ Pane {
         // ---- The activity log: every connect, link change, ECU and
         // session line the bridge logs ----
         ScrollView {
+            id: activityScroll
             objectName: "activityView"
             visible: !page.showingFrames
             Layout.fillWidth: true

@@ -78,6 +78,7 @@ ColumnLayout {
     }
     // Other columns: every interval's size goes until the new ones come
     function newColumns() {
+        exporter.dropEstimate()   // a sizing for the old columns must not answer
         sizes = []
         sizeTimer.restart()
     }
@@ -245,7 +246,7 @@ ColumnLayout {
                 objectName: "intervalSize"
                 Layout.rightMargin: Theme.spacing
                 color: Theme.textDim
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: intervalRow.size
             }
         }
@@ -375,7 +376,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.textDim
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         text: (panel.format === "pcapng" ? qsTr("Its frames, for Wireshark.")
                : panel.format === "folder" ? qsTr("A copy to send, without the vehicle's name.")
                : panel.longLayout ? qsTr("A row a value, as recorded.")

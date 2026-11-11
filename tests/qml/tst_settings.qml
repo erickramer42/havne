@@ -164,8 +164,6 @@ TestCase {
                 "nothing past the edge once connected")
     }
 
-    // A URI isn't prose: no capital first letter, no predicted words
-    // ("Replay://" is a scheme core doesn't know)
     SignalSpy {
         id: logSpy
         signalName: "logRequested"
@@ -180,13 +178,14 @@ TestCase {
         logSpy.target = page
         logSpy.clear()
         compare(page.pageList[page.pageList.length - 1].key, "log", "last, after Advanced")
-        // A new summary remakes the list's rows: each read finds the row again
         const row = () => find(find(page, "settingsList"), "settingsRow_log")
         verify(row().visible, "the row shows")
+        const before = row()
         compare(find(row(), "settingsRowSummary").text, "Ready.", "the Log's first line until another")
         Bridge.logEvent("Connect failed: no reply from the adapter")
         tryVerify(() => find(row(), "settingsRowSummary").text
                         === "Connect failed: no reply from the adapter", 2000, "the newest line")
+        verify(row() === before, "a log line doesn't remake the list's rows")
         tap(row())
         compare(logSpy.count, 1, "the Log asked for")
         compare(page.pageKey, "", "no subpage")
@@ -215,6 +214,39 @@ TestCase {
         compare(logSpy.count, 1, "the Log asked for")
     }
 
+    // The connect lists offer the addresses Connection offers, no others:
+    // both read the same rows, so the URI, the title and the kind agree
+    function test_theConnectListsOfferConnectionsAddresses() {
+        const page = createPage()
+        page.j2534Devices = [{ vendorName: "Vendor X", architecture: "x64", dllPath: "C:/x.dll" }]
+        page.serialPorts = [{ name: "COM5", device: "" }]
+        page.canInterfaces = [{ name: "can0", kind: "can", up: true }]
+        page.bluetoothAdapters = [{ name: "", address: "00:11:22:33:44:55", kind: "bt" },
+                                  { name: "Scope", address: "AA:BB:CC:DD:EE:FF", kind: "ble" }]
+        compare(page.connectAdapters.map(a => a.uri), page.devices.map(d => d.base))
+        compare(page.connectAdapters.map(a => a.uri),
+                ["j2534://Vendor X", "elm327://COM5", "socketcan://can0",
+                 "elm327://bt:00:11:22:33:44:55", "elm327://ble:AA:BB:CC:DD:EE:FF"])
+        compare(page.connectAdapters.map(a => a.title),
+                ["Vendor X  (x64)", "COM5", "can0", "00:11:22:33:44:55", "Scope"])
+        compare(page.connectAdapters.map(a => a.kind),
+                ["J2534 adapter", "Serial port", "CAN interface", "Bluetooth", "Bluetooth LE"])
+    }
+
+    // A relay's refusal is not a connect's: the Log has nothing for it
+    function test_aRelayRefusalLeavesTheLogOut() {
+        const page = createPage()
+        const show = find(page, "errorShowLog")
+        page.requestConnect("mock://demo?profile=no-such-profile")
+        tryVerify(() => show.visible, 5000, "a connect's refusal offers the Log")
+        page.errorLabel.text = "Stop first"   // as SettingsAdapter's Relay writes its own
+        page.logExplains = false
+        verify(!show.visible, "no Show log beside the relay's words")
+        verify(page.errorLabel.text !== "")
+    }
+
+    // A URI isn't prose: no capital first letter, no predicted words
+    // ("Replay://" is a scheme core doesn't know)
     function test_theUriFieldTakesAUriNotProse() {
         const page = createPage()
         for (const name of ["uriField", "didField"]) {
@@ -866,6 +898,10 @@ TestCase {
         from.editingFinished()
         compare(Theme.nightFrom, "20:30", "a valid time is stored")
         compare(problem.visible, false)
+        from.text = "25:00"
+        from.editingFinished()
+        compare(Theme.nightFrom, "20:30", "a bad From is refused")
+        compare(from.text, "20:30", "and the field shows the stored time again")
         until.text = "25:00"
         until.editingFinished()
         compare(Theme.nightUntil, "07:00", "a bad time is refused")
@@ -1405,26 +1441,10 @@ TestCase {
         compare(find(page, "connectButton").text, "Disconnect")
     }
 
-    // A restart gets back the last URI that connected and the Record
-    // switch. Recording is switched on only after the connects, so no
-    // session here records
-    // The mock is never kept, so the URI half needs the fake DLL
-    function test_theLastConnectedUriAndTheRecordSwitchComeBack() {
-        const fake = Harness.fakeDllPath === "" ? ""
-                   : "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
+    // A restart gets back the Record switch. Recording is switched on only
+    // after any connect, so no session here records
+    function test_theRecordSwitchComesBack() {
         let page = createPage()
-        const error = find(page, "errorLabel")
-        if (fake !== "") {
-            find(page, "uriField").text = fake + "&profile=raw"
-            press(page, "connectButton")
-            tryVerify(() => Bridge.connected, 10000, "the URI connects")
-            Bridge.disconnectSession()
-            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
-
-            find(page, "uriField").text = fake + "&profile=uds-generic"
-            press(page, "connectButton")
-            tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
-        }
         Bridge.recording = true
         verify(find(page, "recordBox").checked)
 
@@ -1434,13 +1454,36 @@ TestCase {
         Bridge.recording = false   // a fresh bridge starts with it off
 
         page = createPage()
-        if (fake !== "") {
-            compare(find(page, "uriField").text, fake + "&profile=raw",
-                    "the URI that connected, not the refused one")
-            verify(find(page, "profile_raw").checked, "read back into the row")
-        }
         verify(Bridge.recording, "the Record switch comes back")
         verify(find(page, "recordBox").checked)
+    }
+
+    // A restart gets back the last URI that connected, not a refused one.
+    // The mock is never kept, so this needs the fake DLL
+    function test_theLastConnectedUriComesBack() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const fake = "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
+        let page = createPage()
+        const error = find(page, "errorLabel")
+        find(page, "uriField").text = fake + "&profile=raw"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "the URI connects")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+
+        find(page, "uriField").text = fake + "&profile=uds-generic"
+        press(page, "connectButton")
+        tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
+
+        // The page's store writes when the page goes, as at a quit
+        page.destroy()
+        wait(10)
+
+        page = createPage()
+        compare(find(page, "uriField").text, fake + "&profile=raw",
+                "the URI that connected, not the refused one")
+        verify(find(page, "profile_raw").checked, "read back into the row")
     }
 
     function sameList(a, b, what) {
