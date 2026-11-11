@@ -927,11 +927,15 @@ Page {
         let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
         if (spanS * (rowsPerSecond + (compareAligned ? compareRowsPerSecond : 0)) > rawRowsPerFrame)
             n = Math.max(1, Math.min(n, Math.floor(spanS)))
+        // The labels follow the readout's A, the earlier of the two cursors
+        // (the compared recording's readout is the first cursor's alone)
         const inView = cursorMs >= viewT0 && cursorMs <= viewT1
-        const labelOf = at => inView && at && at.text !== "" ? Number(at.text) : NaN
+        const fromMs = hasSpan ? spanFromMs : cursorMs
+        const fromInView = fromMs >= viewT0 && fromMs <= viewT1
+        const labelOf = (at, shown) => shown && at && at.text !== "" ? Number(at.text) : NaN
         // Where that value's sample lies on the axis: a dot marks it
-        const labelMsOf = (at, offset) => inView && at && at.text !== "" && at.atMs >= 0
-                                          ? at.atMs + offset : NaN
+        const labelMsOf = (at, offset, shown) => shown && at && at.text !== "" && at.atMs >= 0
+                                                 ? at.atMs + offset : NaN
         // The columns lie on a grid from time 0, not from the view's
         // start, so a pan carries each column's samples along with it
         // rather than regrouping them, and a noisy trace's peaks hold
@@ -945,8 +949,8 @@ Page {
             const s = sigs[c.index]
             return { columns: { lows: c.lows, highs: c.highs, t0: g0, t1: g1 }, row: c.index,
                      scaleKey: c.index, decimals: s.decimals, unit: s.unit,
-                     labelValue: labelOf(root.readout[c.index]),
-                     labelMs: labelMsOf(root.readout[c.index], 0) }
+                     labelValue: labelOf(root.readoutFrom[c.index], fromInView),
+                     labelMs: labelMsOf(root.readoutFrom[c.index], 0, fromInView) }
         })
         if (!compareAligned)
             return out
@@ -964,8 +968,8 @@ Page {
             out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs, t0: g0, t1: g1 },
                        row: mine,
                        scaleKey: mine, dash: Theme.seriesCompareDash(mine), decimals: s.decimals,
-                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine]),
-                       labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs) })
+                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine], inView),
+                       labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs, inView) })
         }
         return out
     }

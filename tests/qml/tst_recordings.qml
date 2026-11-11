@@ -1790,6 +1790,24 @@ TestCase {
         }
     }
 
+    // The value labels at the plot's right end follow the readout, by time:
+    // A walked past B, they show what the rows' A column does
+    function test_theLabelsFollowTheReadoutAfterACrossing() {
+        const page = openEarly()
+        const rpm = rowOf(page, "RPM")
+        const labelOf = () => page.series(400).filter(t => t.row === rpm.index)[0]
+        spanned(page, 1000, 3000)
+        compare(labelOf().labelValue, Number(page.readout[rpm.index].text), "A is the earlier")
+        page.setCursor(5000)
+        verify(page.cursorMs > page.cursorBMs, "A is past B")
+        const earlier = Number(page.readoutB[rpm.index].text)
+        verify(earlier !== Number(page.readout[rpm.index].text), "the two cursors read differently")
+        compare(find(rpm.item, "cursorValue").text, page.valueText(earlier, 0, "rpm"),
+                "the rows' A is the earlier one")
+        compare(labelOf().labelValue, earlier, "and so is the label")
+        compare(labelOf().labelMs, page.readoutB[rpm.index].atMs, "its dot too")
+    }
+
     // The span line, the rows' B and change, and the table: RPM over 1 s
     // to 3 s of pull-early, by hand from signals.csv
     function test_theSpanReadsItsStatistics() {
