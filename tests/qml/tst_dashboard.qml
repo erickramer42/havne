@@ -391,7 +391,7 @@ TestCase {
         fuzzyCompare(coolant.to, 266, 1e-9)
         fuzzyCompare(coolant.dangerFrom, 239, 1e-9)
         compare(all["MAF"].unit, "lb/min")
-        fuzzyCompare(all["MAF"].to, 300 * 0.132277357312033, 1e-9)
+        fuzzyCompare(all["MAF"].to, 500 * 0.132277357312033, 1e-9)
         compare(all["Engine speed"].unit, "RPM", "a unit with no imperial form stays")
         compare(all["Battery"].unit, "V")
         compare(all["Lambda"].unit, "\u03BB")

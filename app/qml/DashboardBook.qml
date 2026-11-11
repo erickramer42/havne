@@ -318,7 +318,7 @@ QtObject {
             gaugeCell("digital", 2, 6, qsTr("Oil temp"), ["id:9001", "id:7010"], degC,
                       Object.assign({ from: 0, to: 160 }, zonesFor("oil"))),
             gaugeCell("digital", 3, 9, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
-                      { from: 0, to: 300, description: qsTr("Mass air flow") }),
+                      { from: 0, to: 500, description: qsTr("Mass air flow") }),
             gaugeCell("digital", 3, 9, qsTr("Boost"), boost.slice(), "kPa", boostOptions),
             gaugeCell("digital", 2, 6, qsTr("IAT"), ["id:5001", "id:7005"], degC,
                       Object.assign({ from: 0, to: 120,
@@ -372,7 +372,7 @@ QtObject {
                       Object.assign({ from: 0, to: 120,
                                      description: qsTr("Intake air temperature") }, zonesFor("iat"))),
             gaugeCell("digital", 1, 4, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
-                      { from: 0, to: 300, description: qsTr("Mass air flow") }),
+                      { from: 0, to: 500, description: qsTr("Mass air flow") }),
             gaugeCell("digital", 1, 4, qsTr("Lambda"), lambda.slice(), "\u03BB", lambdaOptions),
             gaugeCell("digital", 1, 4, qsTr("Battery"), battery.slice(), "V",
                       Object.assign({ from: 10, to: 16 }, zonesFor("battery")))
