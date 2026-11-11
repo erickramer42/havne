@@ -3,10 +3,10 @@
 Every page of Havne on the desktop and the phone, all on the simulated
 vehicle (`mock://demo`) in US units. Dark is the default look; Night
 dims it for a dark cabin in amber or red (Settings, Display). The
-gallery shows those three: Dark, and Night in amber and red. Display's
-Look row also offers Light, dark text on white, and the desktop's
-Dashboard is one panel with its pages as tabs, neither of which these
-shots show. The README shows a few of these.
+gallery shows those looks on the Dashboard: Dark, Light (dark text on
+white, from Display's Look row) and Night in amber and red. The desktop's
+Dashboard is one panel with its pages as tabs, which these shots don't
+show. The README shows a few of these.
 
 - **Desktop:** the Windows app at 1280x800.
 - **Phone:** Live, Codes, the Log and Settings are from the test phone
@@ -23,9 +23,9 @@ shots show. The README shows a few of these.
 *A quarter mile on the warmed-up vehicle: the launch, each upshift, and
 coolant and oil climbing toward the fan's cut-in.*
 
-| Night, amber | Night, red |
-|---|---|
-| [![The Dashboard in Night's amber style in a 2nd-gear pull at 5,925 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 6,642 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
+| Light | Night, amber | Night, red |
+|---|---|---|
+| [![The Dashboard in the Light look in a 2nd-gear pull at 5,849 rpm](images/desktop-dashboard-light.png)](images/desktop-dashboard-light.png) | [![The Dashboard in Night's amber style in a 2nd-gear pull at 6,051 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 6,336 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
 
 ### Live
 
