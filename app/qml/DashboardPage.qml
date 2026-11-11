@@ -2623,6 +2623,7 @@ Page {
                 property point finger: Qt.point(0, 0)
                 property real dragX: 0
                 property real dragY: 0
+                property bool leftHome: false    // the drop place went past the cell's own
 
                 function lift(i, scene) {
                     root.commitTyping()
@@ -2635,6 +2636,7 @@ Page {
                                     Math.max(0, Math.min(at.y - boxTop(b), heldSize.height)))
                     pressedAt = scene
                     finger = scene
+                    leftHome = false
                     dropCenters = DashboardBook.dropBoxes(cells, i, columns).map(
                         d => ({ x: boxLeft(d) + boxWidth(d) / 2, y: boxTop(d) + boxHeight(d) / 2 }))
                     root.held = i
@@ -2649,13 +2651,17 @@ Page {
                     dragY = at.y - grab.y
                     root.dropAt = DashboardBook.nearest(dropCenters, dragX + heldSize.width / 2,
                                                         dragY + heldSize.height / 2)
+                    if (root.dropAt !== root.held)
+                        leftHome = true
                 }
                 function letGo(canceled) {
-                    const from = root.held, to = root.dropAt
+                    const from = root.held, to = root.dropAt, strayed = leftHome
                     root.cancelHold()
                     if (canceled)
                         return
-                    if (to < 0)
+                    // A tremble past the slop that never left its own place: the
+                    // menu; a drag elsewhere and back changes nothing
+                    if (to < 0 || (to === from && !strayed))
                         root.select(from)
                     else if (root.edit(DashboardBook.moveCell(root.doc, root.pageIndex, from, to),
                                        root.stepOf("", qsTr("moved %1").arg(root.cellName(pageView.cells[from])),

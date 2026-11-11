@@ -1066,6 +1066,28 @@ TestCase {
         compare(page.selected, data.edit ? 1 : -1, "only edit mode keeps a selection")
     }
 
+    // A held finger that drifts past the drag distance and lets go over the
+    // cell's own place opens the menu, as a still one does: a thumb's tremble
+    // on the phone, or a finger on a phone in a holder in a moving car
+    function test_aDriftBackOnItsOwnPlaceOpensTheMenu_data() {
+        return [{ tag: "phone", phone: true }, { tag: "desktop", phone: false }]
+    }
+    function test_aDriftBackOnItsOwnPlaceOpensTheMenu(data) {
+        const page = pageOf(data.phone ? { form: "phone", width: 384, height: 832 } : {},
+                            docOf([cellOf("A"), cellOf("B")]))
+        const cell = find(page, "dashCell_0_1")
+        hold(page, cell)
+        verify(cell.lifted, "the cell lifts")
+        const drift = Application.styleHints.startDragDistance * 3
+        mouseMove(cell, cell.width / 2 + drift, cell.height / 2 + drift / 2, -1, Qt.LeftButton)
+        compare(page.dropAt, 1, "past the drag distance, the drop place is its own")
+        mouseRelease(cell)
+        compare(page.held, -1)
+        compare(page.selected, 1)
+        compare(page.panel, "cell", "the menu opens")
+        compare(page.doc.pages[0].cells.map(c => c.label), ["A", "B"], "nothing moved")
+    }
+
     // A cell drawn stretched lifts at its true size with the finger on it:
     // a lone cell fills its row on the joined panel, and a hold at its
     // middle is past its true width
