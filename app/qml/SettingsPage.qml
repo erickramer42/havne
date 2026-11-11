@@ -1383,6 +1383,7 @@ Pane {
 
         SettingsList {
             objectName: "settingsSideList"
+            stacked: true
             visible: page.twoPane
             Layout.preferredWidth: 200
             // A nested layout fills its row by default, which would leave

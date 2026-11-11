@@ -389,6 +389,27 @@ TestCase {
         verify(find(page, "settingsSideList").visible, "the list stays")
     }
 
+    // The side list's value reads whole at the default zoom: the Display row
+    // goes under its title on up to two lines, in a row that holds it, and elides nothing
+    function test_theSideListsDisplayValueIsWhole() {
+        const page = createPage(true)
+        page.width = 1000
+        // A look changes the summary, which makes the rows again: find them each time
+        const row = () => find(find(page, "settingsSideList"), "settingsRow_display")
+        const summary = () => find(row(), "settingsRowSummary")
+        compare(Theme.zoom, 1, "the default zoom")
+        for (const look of ["dark", "daylight"]) {
+            Theme.look = look
+            tryVerify(() => summary().text.indexOf("100 %") === 0 && summary().visible, 2000,
+                      "the summary shows: " + summary().text)
+            verify(!summary().truncated, look + ": " + summary().text + " is cut")
+            verify(summary().lineCount <= 2, look + ": two lines at most")
+            verify(row().height >= summary().mapToItem(row(), 0, summary().height).y,
+                   look + ": the row holds it")
+        }
+        Theme.look = "dark"
+    }
+
     // The list keeps its 200 and the page beside it gets the rest: a layout
     // fills its row by default, and the list once took the whole width and
     // pushed the pages past the edge. Geometry, since the window is 200 px
