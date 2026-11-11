@@ -22,7 +22,8 @@ ColumnLayout {
     // s, ms or us for a time of plain numbers; "" until one is chosen
     property string timeUnit: ""
     // One entry a header column but the time's, in the header's order:
-    // { column, include, used, why, canPutBack, name, unit, kind, samples }.
+    // { column, label, include, used, why, canPutBack, name, unit, kind,
+    // samples }; label is the header's text without its padding.
     // Edited in place by the rows below; replaced by load()
     property var columns: []
     property int included: 0
@@ -61,7 +62,7 @@ ColumnLayout {
                 time = c
                 continue
             }
-            list.push({ column: c.column, include: c.used, used: c.used, why: c.why,
+            list.push({ column: c.column, label: c.label, include: c.used, used: c.used, why: c.why,
                         canPutBack: c.canPutBack, name: c.name, unit: c.unit,
                         kind: c.kind, samples: c.samples })
         }
@@ -120,7 +121,7 @@ ColumnLayout {
         wrapMode: Text.WrapAnywhere
         color: Theme.text
         text: preview.timeColumn === null ? ""
-              : qsTr("Time: %1").arg(preview.timeColumn.column)
+              : qsTr("Time: %1").arg(preview.timeColumn.label)
     }
     Label {
         objectName: "guessTimeSamples"
@@ -219,7 +220,7 @@ ColumnLayout {
                         preview.recount()
                     }
                     contentItem: Label {
-                        text: row.col.column === "" ? qsTr("(no header)") : row.col.column
+                        text: row.col.label === "" ? qsTr("(no header)") : row.col.label
                         color: Theme.text
                         wrapMode: Text.WrapAnywhere
                         verticalAlignment: Text.AlignVCenter
@@ -268,7 +269,7 @@ ColumnLayout {
                         Layout.minimumWidth: Theme.touchTarget
                         property string kind: row.col.kind
                         text: kind
-                        Accessible.name: qsTr("Kind of %1: %2, press to change").arg(row.col.column).arg(kind)
+                        Accessible.name: qsTr("Kind of %1: %2, press to change").arg(row.col.label === "" ? qsTr("(no header)") : row.col.label).arg(kind)
                         onClicked: {
                             kind = kind === "number" ? "text" : "number"
                             row.col.kind = kind

@@ -570,6 +570,15 @@ public:
      * end) */
     uint64_t lines() const { return lines_; }
 
+    /* From the next record on, an unquoted field loses the spaces and tabs
+     * at its ends (" " is then empty), as a logger that writes ", "
+     * between fields pads them. The import and the guess turn it on for
+     * the rows below the header, so a header keeps its text and a map
+     * naming it still finds it. Padding before a quoted field's opening
+     * quote and after its closing one is taken in every record, the
+     * header's too; the quoted text itself is kept exactly (RFC 4180). */
+    void trim_padding(bool on) { padding_ = on; }
+
     /* Skips a preamble row, as text: false at the end, with *why set on
      * a refusal */
     bool skip_line(std::string* why)
@@ -661,7 +670,7 @@ public:
                         }
                         (void)take();
                     }
-                    if (!push(fields, field, *line_no, why)) {
+                    if (!push(fields, field, quoted, *line_no, why)) {
                         return -1;
                     }
                     field.clear();
@@ -674,14 +683,18 @@ public:
                     c = take();
                     continue;
                 } else if (closed) {
-                    return refuse(why, lines_ + 1,
-                                  "text after a quoted field's closing quote");
+                    if (!pad(ch)) {
+                        return refuse(why, lines_ + 1,
+                                      "text after a quoted field's closing "
+                                      "quote");
+                    }
                 } else if (ch == '"') {
-                    if (!at_start) {
+                    if (!at_start && !only_padding(field)) {
                         return refuse(why, lines_ + 1,
                                       "a quote inside a field that isn't "
                                       "quoted");
                     }
+                    field.clear();
                     quoted = true;
                 } else {
                     field += ch;
@@ -689,7 +702,7 @@ public:
                 at_start = false;
                 c = take();
             }
-            if (!push(fields, field, *line_no, why)) {
+            if (!push(fields, field, quoted, *line_no, why)) {
                 return -1;
             }
             return 1;
@@ -741,9 +754,32 @@ private:
 
     bool peek_lf() { return peek() == '\n'; }
 
-    bool push(std::vector<std::string>& fields, std::string& field,
+    static bool pad(char c) { return c == ' ' || c == '\t'; }
+
+    static bool only_padding(const std::string& s)
+    {
+        for (char c : s) {
+            if (!pad(c)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool push(std::vector<std::string>& fields, std::string& field, bool quoted,
               uint64_t line_no, std::string* why)
     {
+        if (padding_ && !quoted) {
+            size_t a = 0;
+            size_t b = field.size();
+            while (a < b && pad(field[a])) {
+                ++a;
+            }
+            while (b > a && pad(field[b - 1])) {
+                --b;
+            }
+            field = field.substr(a, b - a);
+        }
         if (fields.size() == kColumnsMax) {
             return refuse(why, line_no, "the row has more than 1024 columns") >=
                    0;
@@ -779,6 +815,7 @@ private:
     int pend_at_ = 0;
     bool have_ = false;
     int held_ = -1;
+    bool padding_ = false;
 };
 
 /* ---- the pass ---- */
@@ -893,6 +930,7 @@ bool run(Source& src, const column_map& m, Sink& sink, outcome& out,
         }
         return false;
     }
+    r.trim_padding(true);
     /* Each column the map reads, by the header's text */
     auto index_of = [&](const std::string& name, size_t* at) {
         size_t found = 0;

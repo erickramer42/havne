@@ -224,23 +224,21 @@ def test_without_a_map_the_guess_is_imported(tmp_path):
         assert r.text_at("gear", 3_500_000) == ("3", 3_500_000)
 
 
-def test_a_time_with_no_unit_imports_only_with_one(tmp_path):
+def test_a_time_of_plain_numbers_with_no_unit_reads_as_ms(tmp_path):
     plain = tmp_path / "plain.csv"
     plain.write_text("time,A\n0,1\n1,2\n", encoding="utf-8", newline="\n")
     g = havne.guess_csv_map(plain)
-    assert "unit" not in g.map["time"]
-    assert not g.flags & havne.c.ECUIO_CSV_GUESS_TIME_UNIT_KNOWN
+    assert g.map["time"]["unit"] == "ms"
+    assert g.flags & havne.c.ECUIO_CSV_GUESS_TIME_UNIT_KNOWN
     assert g.flags & havne.c.ECUIO_CSV_GUESS_TIME_NUMBERS
-    assert "'time' is the time, its unit not known: say s, ms or us" in g.notes
+    assert ("the time column 'time' has no unit: read as ms; change it if it isn't"
+            in g.notes)
     folder = tmp_path / "rec"
-    with pytest.raises(havne.Error) as e:
-        havne.import_csv(plain, folder)
-    assert e.value.status == havne.c.ECUIO_ERR_LOAD_FAILED
-    assert "time_unit" in e.value.detail
-    assert not os.path.exists(folder)
-    assert havne.guess_csv_map(plain, time_unit="us").map["time"]["unit"] == "us"
-    got = havne.import_csv(plain, folder, time_unit="ms")
+    got = havne.import_csv(plain, folder)
     assert (got.values, got.duration_us) == (2, 1000)
+    assert havne.guess_csv_map(plain, time_unit="us").map["time"]["unit"] == "us"
+    got = havne.import_csv(plain, tmp_path / "rec-s", time_unit="s")
+    assert (got.values, got.duration_us) == (2, 1_000_000)
 
 
 def test_a_time_no_unit_can_read_names_a_map(tmp_path):

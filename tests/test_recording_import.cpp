@@ -537,6 +537,43 @@ TEST(BridgeTest, ImportShowsTheFirstRowsAsTheFileHasThem)
         EXPECT_FALSE(v.toString().contains(path));
 }
 
+/* A padded file's cells show as the import reads them: an unquoted cell
+ * trimmed (a blank one empty), a quoted one exact; a label is the header
+ * without its padding, and a header of spaces is an empty one */
+TEST(BridgeTest, ImportShowsPaddedCellsAsTheImportReadsThem)
+{
+    QTemporaryDir dir;
+    RecordingImport im([] { return QString(); });
+    const QVariantMap g =
+        guessed(im, fileUrl(write(dir, "padded.csv",
+                                  "Time, \"Engine speed (rpm)\" , Mode, \n"
+                                  "0,  900, \" OL \", \n"
+                                  "250, 910, , \n"
+                                  "500,\t950 , OL, \n")));
+    ASSERT_TRUE(ok({g}))
+        << g.value(QStringLiteral("words")).toString().toStdString();
+    ASSERT_EQ(g.value(QStringLiteral("columns")).toList().size(), 4);
+    EXPECT_EQ(column(g, 1).value(QStringLiteral("column")).toString(),
+              QStringLiteral("Engine speed (rpm)"));
+    EXPECT_EQ(column(g, 1).value(QStringLiteral("samples")).toStringList(),
+              (QStringList{QStringLiteral("900"), QStringLiteral("910"),
+                           QStringLiteral("950")}));
+    EXPECT_EQ(column(g, 2).value(QStringLiteral("column")).toString(),
+              QStringLiteral(" Mode"));
+    EXPECT_EQ(column(g, 2).value(QStringLiteral("label")).toString(),
+              QStringLiteral("Mode"));
+    EXPECT_EQ(column(g, 2).value(QStringLiteral("samples")).toStringList(),
+              (QStringList{QStringLiteral(" OL "), QString(),
+                           QStringLiteral("OL")}));
+    const QVariantMap blank = column(g, 3);
+    EXPECT_EQ(blank.value(QStringLiteral("label")).toString(), QString());
+    EXPECT_EQ(blank.value(QStringLiteral("why")).toString(),
+              QStringLiteral("its header cell is empty"));
+    EXPECT_FALSE(blank.value(QStringLiteral("canPutBack")).toBool());
+    EXPECT_EQ(blank.value(QStringLiteral("samples")).toStringList(),
+              (QStringList{QString(), QString(), QString()}));
+}
+
 /* A left-out column can be put back unless its header can't name it: an
  * empty header, or one the file has twice (core refuses a map naming it) */
 TEST(BridgeTest, ImportGuessPutsBackOnlyAColumnAMapCanName)
@@ -586,7 +623,7 @@ TEST(BridgeTest, ImportCutsNamesAndCellsOnWholeCharacters)
         QString(28, QLatin1Char('x')) + QStringLiteral("..."));
 }
 
-/* A time of plain numbers has no unit until one is given, and the one the
+/* A time named so, of whole numbers with no unit, reads as ms; the unit the
  * caller gives wins; a file with no header is refused in core's words */
 TEST(BridgeTest, ImportGuessTakesTheTimeUnitTheCallerGives)
 {
@@ -596,9 +633,15 @@ TEST(BridgeTest, ImportGuessTakesTheTimeUnitTheCallerGives)
         fileUrl(write(dir, "plain.csv", "time,rpm\n0,800\n1,900\n2,1000\n"));
     QVariantMap g = guessed(im, plain);
     ASSERT_TRUE(ok({g}));
-    EXPECT_FALSE(g.value(QStringLiteral("unitKnown")).toBool());
+    EXPECT_TRUE(g.value(QStringLiteral("unitKnown")).toBool());
     EXPECT_TRUE(g.value(QStringLiteral("timeNumbers")).toBool());
-    EXPECT_EQ(g.value(QStringLiteral("timeUnit")).toString(), QString());
+    EXPECT_EQ(g.value(QStringLiteral("timeUnit")).toString(),
+              QStringLiteral("ms"));
+
+    g = guessed(im, plain, QStringLiteral("s"));
+    ASSERT_TRUE(ok({g}));
+    EXPECT_EQ(g.value(QStringLiteral("timeUnit")).toString(),
+              QStringLiteral("s"));
 
     g = guessed(im, plain, QStringLiteral("ms"));
     ASSERT_TRUE(ok({g}));

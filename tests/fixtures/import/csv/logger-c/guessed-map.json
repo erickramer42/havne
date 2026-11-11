@@ -1,0 +1,24 @@
+{
+  "havne_column_map": 1,
+  "header_row": 1,
+  "delimiter": ",",
+  "decimal": ".",
+  "time": {"column": "Time", "unit": "ms"},
+  "signals": [
+    {"column": " Engine speed (rpm)", "name": "Engine speed", "unit": "rpm", "kind": "number", "decimals": 0},
+    {"column": " Boost (bar)", "name": "Boost", "unit": "bar", "kind": "number", "decimals": 2},
+    {"column": " Coolant (C)", "name": "Coolant", "unit": "C", "kind": "number", "decimals": 1},
+    {"column": " Widget pressure (kPa)", "name": "Widget pressure", "unit": "kPa", "kind": "number", "decimals": 1},
+    {"column": " Gizmo duty (%)", "name": "Gizmo duty", "unit": "%", "kind": "number", "decimals": 1},
+    {"column": " Throttle angle (%)", "name": "Throttle angle", "unit": "%", "kind": "number", "decimals": 1},
+    {"column": " throttle angle (ratio)", "name": "throttle angle", "unit": "ratio", "kind": "number", "decimals": 3},
+    {"column": " Intake manifold absolute pressure sensor A (kPa)", "name": "Intake manifold absolute pressu", "unit": "kPa", "kind": "number", "decimals": 1},
+    {"column": " Intake manifold absolute pressure sensor B (kPa)", "name": "Intake manifold absolute pres 2", "unit": "kPa", "kind": "number", "decimals": 1},
+    {"column": " Flux counter", "name": "Flux counter", "kind": "number", "decimals": 0},
+    {"column": " Stage", "name": "Stage", "kind": "number", "decimals": 0},
+    {"column": " Mode (OL/CL)", "name": "Mode", "unit": "OL/CL", "kind": "text"},
+    {"column": " Air-fuel ratio (AFR)", "name": "Air-fuel ratio", "unit": "AFR", "kind": "number", "decimals": 2},
+    {"column": " Battery (V)", "name": "Battery", "unit": "V", "kind": "number", "decimals": 2},
+    {"column": " Ignition advance (deg)", "name": "Ignition advance", "unit": "deg", "kind": "number", "decimals": 1}
+  ]
+}

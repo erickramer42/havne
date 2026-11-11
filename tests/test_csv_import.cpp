@@ -437,6 +437,56 @@ TEST(CsvImportTest, EmptyCellsAndTheMapsMissingTextsAreNoSample)
               std::string::npos);
 }
 
+/* A logger that pads each field with a space writes an empty one as " ":
+ * below the header an unquoted cell's spaces and tabs around it are
+ * padding, so " " is no sample (never a refusal or a zero), " N" is "N"
+ * and " ---" a placeholder; a quoted cell keeps its text exactly, and
+ * padding may stand around its quotes; a time of spaces alone is none */
+TEST(CsvImportTest, PaddingAroundACellIsDropped)
+{
+    Pass p(map_of("t", "ms", kRpm + "," + kGear, "\"missing\": [\"---\"]"),
+           "t,Engine Speed,Gear\n0, 800, N\n250, , 1\n500,  \t, \t\n"
+           "750, ---, 2 \n1000, 900, \" CL \" \n1250, 950,\"\"\n");
+    ASSERT_TRUE(p.ok) << p.why;
+    ASSERT_EQ(p.got.size(), 7u);
+    EXPECT_EQ(p.got[0].number, 800.0);
+    EXPECT_EQ(p.got[1].value, "N");
+    EXPECT_EQ(p.got[2].value, "1");
+    EXPECT_EQ(p.got[3].value, "2");
+    EXPECT_EQ(p.got[4].number, 900.0);
+    EXPECT_EQ(p.got[4].us, 1000000u);
+    EXPECT_EQ(p.got[5].value, " CL ") << "a quoted cell is kept exactly";
+    EXPECT_EQ(p.got[6].number, 950.0);
+    EXPECT_EQ(p.out.values, 7u);
+    EXPECT_EQ(
+        refused(map_of("t", "ms", kRpm), "t,Engine Speed\n0,800\n  ,900\n"),
+        "line 3: the row has no time");
+    /* Padding is spaces and tabs alone */
+    EXPECT_EQ(refused(map_of("t", "ms", kGear), "t,Gear\n0, \"N\" x\n"),
+              "line 2: text after a quoted field's closing quote");
+    EXPECT_EQ(refused(map_of("t", "ms", kGear), "t,Gear\n0, a\"N\"\n"),
+              "line 2: a quote inside a field that isn't quoted");
+    /* A quoted space is text, so a number column refuses it */
+    EXPECT_NE(refused(map_of("t", "ms", kRpm), "t,Engine Speed\n0,\" \"\n")
+                  .find("isn't a number"),
+              std::string::npos);
+    /* The header keeps its text: a map names a padded column as it is */
+    Pass header(
+        map_of("t", "ms", R"({"column": " Engine Speed", "name": "RPM"})"),
+        "t, Engine Speed\n0, 800\n");
+    ASSERT_TRUE(header.ok) << header.why;
+    ASSERT_EQ(header.got.size(), 1u);
+    EXPECT_EQ(header.got[0].number, 800.0);
+    /* Padding around a header's quotes is taken; the quoted text names it */
+    Pass quoted(
+        map_of("t", "ms",
+               R"json({"column": "Engine speed (rpm)", "name": "RPM"})json"),
+        "t, \"Engine speed (rpm)\" \n0, 800\n");
+    ASSERT_TRUE(quoted.ok) << quoted.why;
+    ASSERT_EQ(quoted.got.size(), 1u);
+    EXPECT_EQ(quoted.got[0].number, 800.0);
+}
+
 TEST(CsvImportTest, ADecimalCommaReadsAndAPointIsRefused)
 {
     const std::string m =

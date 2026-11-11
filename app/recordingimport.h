@@ -66,8 +66,9 @@ public:
     // guessFinished() follows, on this thread, with { ok, words, mapText
     // (the map core wrote), unitKnown, timeNumbers, decimalComma,
     // preamble, delimiter, headerRow, timeColumn, timeUnit ("" for
-    // none), columns: [{ index, column, used, why, isTime, name, unit,
-    // kind, canPutBack, samples }], notes }. samples are the file's first
+    // none), columns: [{ index, column, label (the header's text without
+    // its padding), used, why, isTime, name, unit, kind, canPutBack,
+    // samples }], notes }. samples are the file's first
     // rows below the header for display, read here and never judged:
     // core's reader is the import's, this one only shows rows.
     Q_INVOKABLE bool guess(const QUrl& file, const QString& timeUnit);

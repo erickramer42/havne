@@ -236,10 +236,14 @@ def main(argv):
           b"(1.005000) can0 7E8#2144454647484950\n"
           b"(1.005500) can0 7E8#2251525354555657\n")
 
-    # The CSV import: the first line a column map's JSON, the rest the file
-    for cmap_path in sorted(glob.glob(os.path.join(ROOT, "tests", "fixtures", "import",
-                                                   "csv", "*", "map.json"))):
-        folder = os.path.dirname(cmap_path)
+    # The CSV import: the first line a column map's JSON (the logger's own,
+    # else its guessed one), the rest the file
+    for log_path in sorted(glob.glob(os.path.join(ROOT, "tests", "fixtures", "import",
+                                                  "csv", "*", "log.csv"))):
+        folder = os.path.dirname(log_path)
+        cmap_path = os.path.join(folder, "map.json")
+        if not os.path.exists(cmap_path):
+            cmap_path = os.path.join(folder, "guessed-map.json")
         with open(cmap_path, encoding="utf-8") as f:
             cmap = json.dumps(json.load(f), separators=(",", ":")).encode("utf-8")
         with open(os.path.join(folder, "log.csv"), "rb") as f:

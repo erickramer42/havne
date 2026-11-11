@@ -166,7 +166,7 @@ TestCase {
         compare(find(page, "importMapName").text, "Guessed from the header")
         verify(!find(page, "importInterface").visible)
         tryVerify(() => !Bridge.recordingImport.busy, 10000, "the guess ends")
-        verify(!find(page, "importStart").enabled, "its time has no unit yet")
+        verify(!find(page, "importStart").enabled, "a time with fractions has no unit yet")
         page.chooseImportMap(map)
         verify(!find(page, "guessPreview").visible, "a map file skips the guess")
         compare(find(page, "importMapName").text, "import-map.json")
@@ -279,36 +279,58 @@ TestCase {
         verify(!find(page, "importPanel").visible, "done with the file")
     }
 
-    // A time of plain numbers has no unit to guess: Import waits for the
-    // choice and says so
-    function test_aTimeWithoutAUnitWaitsForOne() {
+    // A time named so, of whole numbers with no unit, reads as ms: Import is ready,
+    // the unit shows chosen and changes with a tap
+    function test_aTimeWithoutAUnitReadsAsMilliseconds() {
         const page = createPage()
         page.chooseImportFile(Harness.writeScratchFile("guess-plain.csv",
             "time,rpm\n0,800\n1,900\n2,950\n"))
         const preview = guessed(page)
-        verify(find(preview, "guessWaiting").visible)
-        compare(find(preview, "guessWaiting").text, "Choose the time column's unit to import")
-        verify(!find(page, "importStart").enabled)
-        find(preview, "guessTimeUnit_ms").clicked()
         verify(!find(preview, "guessWaiting").visible)
+        verify(find(preview, "guessTimeUnit_ms").visible)
+        verify(find(preview, "guessTimeUnit_ms").selected, "ms, as the guess read it")
         verify(find(page, "importStart").enabled)
         compare(JSON.parse(preview.mapText()).time.unit, "ms")
         find(preview, "guessTimeUnit_us").clicked()
         compare(JSON.parse(preview.mapText()).time.unit, "us")
+        verify(find(page, "importStart").enabled)
     }
 
-    // Save as map is enabled exactly when Import would be: a map with no
-    // time unit is one every later import refuses
-    function test_saveWaitsForATimeUnitToo() {
+    // A time with fractions may be seconds: Import waits for the choice
+    // and says so
+    function test_aTimeWithFractionsWaitsForAUnit() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("guess-fraction.csv",
+            "time,rpm
+0.0,800
+0.5,900
+1.0,950
+"))
+        const preview = guessed(page)
+        verify(find(preview, "guessWaiting").visible)
+        compare(find(preview, "guessWaiting").text, "Choose the time column's unit to import")
+        verify(!find(page, "importStart").enabled)
+        find(preview, "guessTimeUnit_s").clicked()
+        verify(!find(preview, "guessWaiting").visible)
+        verify(find(page, "importStart").enabled)
+        compare(JSON.parse(preview.mapText()).time.unit, "s")
+    }
+
+    // Save as map is enabled exactly when Import would be: a time no unit
+    // can fix (dates with no zone) leaves both waiting
+    function test_saveWaitsForATimeImportCanRead() {
         const page = createPage()
         page.chooseImportFile(Harness.writeScratchFile("guess-save-unit.csv",
             "time,rpm\n0,800\n1,900\n2,950\n"))
-        const preview = guessed(page)
+        let preview = guessed(page)
+        verify(preview.ready)
+        verify(find(preview, "saveMapButton").enabled, "ms, as the guess read it")
+        page.chooseImportFile(Harness.writeScratchFile("guess-save-zone.csv",
+            "time,rpm\n2026-11-05T22:03:22,800\n2026-11-05T22:03:23,900\n"))
+        preview = guessed(page)
         verify(!preview.ready)
         verify(preview.included > 0)
-        verify(!find(preview, "saveMapButton").enabled, "no unit chosen")
-        find(preview, "guessTimeUnit_ms").clicked()
-        verify(find(preview, "saveMapButton").enabled, "unit chosen")
+        verify(!find(preview, "saveMapButton").enabled, "no zone to read it by")
     }
 
     // A column whose header the file has twice is left out for good
@@ -1414,7 +1436,7 @@ profile  raw
         try {
             page.width = data.w
             verify(waitForPolish(page.Window.window), "laid out")
-            verify(find(preview, "guessWaiting").visible, "the unit is asked for")
+            verify(find(preview, "guessTimeUnit_ms").selected, "the unit shows, changeable")
             const b = walkTargets(page)
             for (const name of ["importKind_csv", "guessTimeUnit_ms"])
                 verify(b.seen.indexOf(name) >= 0, name + " is seen: " + b.seen.join(", "))

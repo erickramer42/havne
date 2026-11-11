@@ -1282,7 +1282,9 @@ _Static_assert(offsetof(ecuio_import_report_t, values) == 48,
  * A CSV (section 5) through options->column_map_utf8: RFC 4180, strict
  * and bounded, checked whole before anything is written; signals.csv
  * with the mapped columns' samples (an empty cell, or one of the map's
- * "missing" texts, no sample) and a format 3 events.log whose signal
+ * "missing" texts, no sample; below the header an unquoted cell's spaces
+ * and tabs around it are padding, dropped, so " " is empty, and a quoted
+ * one's text is kept exactly) and a format 3 events.log whose signal
  * lines are the map's, its utc line the map's start or the file's first
  * time (none for a relative time with no start); no frames.csv. A row up
  * to 100 ms before the one before it takes that one's time; further back
@@ -1315,7 +1317,8 @@ ecuio_status_t ecuio_import_with(const ecuio_import_options_t* options,
 /* ecuio_csv_guess_t.flags: TIME_UNIT_KNOWN the map's time has a unit;
  * DECIMAL_COMMA its decimal mark is a comma; PREAMBLE lines above the
  * header are left out (the map's header_row is above 1); TIME_NUMBERS
- * the time column holds plain numbers, which time_unit can give a unit */
+ * the time column holds plain numbers, which time_unit can give another
+ * unit than the guess's */
 #define ECUIO_CSV_GUESS_TIME_UNIT_KNOWN 0x00000001u
 #define ECUIO_CSV_GUESS_DECIMAL_COMMA   0x00000002u
 #define ECUIO_CSV_GUESS_PREAMBLE        0x00000004u
@@ -1360,14 +1363,18 @@ _Static_assert(offsetof(ecuio_csv_guess_t, reserved) == 24,
  * is complete JSON, to print, save or pass as column_map_utf8. Imports
  * nothing and writes no file; the same file always gives the same text.
  * It reads the first 1000 rows within 1 MiB for the header, then up to
- * 200 rows or 64 KiB below it. Notes and words name columns as the header
- * has them, never a cell's value or the file's path.
+ * 200 rows or 64 KiB below it. Notes and words name columns by the
+ * header's text without its padding (the map's column keeps it exactly),
+ * never a cell's value or the file's path.
  *
  * A time column of numbers takes time_unit ("s", "ms" or "us") when it
  * is given, else the unit its header names ("Time (s)", "[ms]"); with
- * neither the map's time has no unit and the flag is clear, and the
- * import refuses the map until one is given. ISO 8601 times with their
- * offset are "iso8601" whatever time_unit says. Any other time
+ * neither, a column named as a time whose cells are all whole numbers is
+ * read as "ms", the convention of loggers that name no unit, and a note
+ * says so (TIME_UNIT_KNOWN set: a front end shows the unit, changeable,
+ * by TIME_NUMBERS); a first column that only rises, or a time with
+ * fractions, has no unit until time_unit gives one. ISO 8601 times with
+ * their offset are "iso8601" whatever time_unit says. Any other time
  * (ISO 8601 with no offset, times of day, cells not all times) needs a
  * column map with the zone (or the date and offset): no time_unit gives
  * it a unit, and TIME_NUMBERS is clear. The start is never guessed.

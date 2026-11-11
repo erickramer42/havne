@@ -221,8 +221,28 @@ constexpr int kShownRows = 5;
 constexpr int kShownBytes = 64 * 1024;
 constexpr int kShownCellChars = 32;
 
+bool isPadding(char c)
+{
+    return c == ' ' || c == '\t';
+}
+
+// Spaces and tabs off both ends, as the import trims an unquoted cell
+QByteArray trimPadding(const QByteArray& text)
+{
+    qsizetype a = 0;
+    qsizetype b = text.size();
+    while (a < b && isPadding(text[a])) {
+        ++a;
+    }
+    while (b > a && isPadding(text[b - 1])) {
+        --b;
+    }
+    return text.mid(a, b - a);
+}
+
 // RFC 4180 records of the text's first bytes (quotes, doubled quotes, CRLF
-// or LF); a record the read cut short is left out
+// or LF), each cell as the import reads it: an unquoted one trimmed of
+// padding, a quoted one exact; a record the read cut short is left out
 QList<QStringList> splitRecords(const QByteArray& bytes, char delimiter,
                                 bool cut, int wanted)
 {
@@ -230,10 +250,12 @@ QList<QStringList> splitRecords(const QByteArray& bytes, char delimiter,
     QStringList row;
     QByteArray cell;
     bool quoted = false;
-    bool any = false; // the record under way has a byte
+    bool wasQuoted = false; // the cell under way opened with a quote
+    bool any = false;       // the record under way has a byte
     auto endCell = [&] {
-        row << QString::fromUtf8(cell);
+        row << QString::fromUtf8(wasQuoted ? cell : trimPadding(cell));
         cell.clear();
+        wasQuoted = false;
     };
     auto endRecord = [&] {
         if (any) {
@@ -254,9 +276,13 @@ QList<QStringList> splitRecords(const QByteArray& bytes, char delimiter,
             } else {
                 cell += c;
             }
-        } else if (c == '"') {
+        } else if (c == '"' && !wasQuoted && trimPadding(cell).isEmpty()) {
+            cell.clear();
             quoted = true;
+            wasQuoted = true;
             any = true;
+        } else if (wasQuoted && isPadding(c)) {
+            any = true; // padding after the closing quote
         } else if (c == delimiter) {
             endCell();
             any = true;
@@ -437,14 +463,16 @@ QVariantMap runGuess(const QUrl& file, const QString& timeUnit, bool copyLocal)
         QVariantMap col;
         col.insert(QStringLiteral("index"), static_cast<int>(i));
         col.insert(QStringLiteral("column"), header);
+        col.insert(QStringLiteral("label"),
+                   QString::fromUtf8(trimPadding(header.toUtf8())));
         col.insert(QStringLiteral("used"), used);
         col.insert(QStringLiteral("why"),
                    c.value(QStringLiteral("why")).toString());
         col.insert(QStringLiteral("isTime"), isTime);
-        // A column with an empty header, or a header the file has twice,
-        // can't be named in a map
+        // A column with an empty header (spaces alone too), or a header the
+        // file has twice, can't be named in a map
         col.insert(QStringLiteral("canPutBack"),
-                   !used && !header.isEmpty() &&
+                   !used && !trimPadding(header.toUtf8()).isEmpty() &&
                        headerCount.value(header) == 1);
         const bool signal = used && !isTime;
         col.insert(QStringLiteral("name"),

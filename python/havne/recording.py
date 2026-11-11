@@ -299,8 +299,11 @@ def guess_csv_map(path, time_unit=None):
     """The column map core guesses from the header of the CSV at path
     (ADR-0054's appendix "a column map guessed from the header"), as a
     GuessedMap. A time column of plain numbers takes time_unit ('s', 'ms'
-    or 'us') when given, else the unit its header names; with neither the
-    map's time has no unit and flags lacks ECUIO_CSV_GUESS_TIME_UNIT_KNOWN.
+    or 'us') when given, else the unit its header names, else 'ms' for a
+    column named as a time with whole numbers alone, which a note says;
+    otherwise (a first column that only rises, a time with fractions, ISO
+    8601 with no offset, times of day) the time has none and flags lacks
+    ECUIO_CSV_GUESS_TIME_UNIT_KNOWN.
     Reads the file only; a file it can't guess raises Error with core's
     words."""
     raw, report = _guessed(path, time_unit)
