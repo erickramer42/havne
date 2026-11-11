@@ -1091,9 +1091,6 @@ TEST(BridgeTest, StartLogIsRefusedWithItsReason)
     EXPECT_EQ(recordingFolders(root.path()).size(), 1);
 }
 
-/* A start the session refuses after its focus took (a recorder of the
- * test's own holds the session's one slot): the whole set is asked
- * again, and the folder the start made, holding no frame, is gone. */
 /* An attach the session refuses, with a folder core can't give whole:
  * the bridge removes nothing, so the working folder (QDir("") is it) is
  * left alone. The working folder is a scratch one of the case's own, so
@@ -1136,6 +1133,9 @@ TEST(BridgeTest, ARecorderFolderCoreCantGiveRemovesNothing)
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
+/* A start the session refuses after its focus took (a recorder of the
+ * test's own holds the session's one slot): the whole set is asked
+ * again, and the folder the start made, holding no frame, is gone. */
 TEST(BridgeTest, AStartLogTheSessionRefusesLeavesNoFolderAndNoFocus)
 {
     QTemporaryDir root;
@@ -3662,7 +3662,7 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
 /* ADR-0060 in the app: with ?session=03 each module's session has a line
  * of its own, once; the module with none is named with its refusal and
  * read in the default session; the support lines end with the session in
- * force; Disconnect names the module returned to the default session; a
+ * force; Disconnect names the module returning to the default session; a
  * recording keeps every one of them as a note */
 TEST(BridgeTest, AnExtendedSessionNamesEachModulesSessionOnce)
 {
@@ -3720,10 +3720,10 @@ TEST(BridgeTest, AnExtendedSessionNamesEachModulesSessionOnce)
     const QString folder = bridge.recordingFolder();
     ASSERT_TRUE(disconnectAndWait(bridge));
     const QString returned =
-        QStringLiteral("ECU 0x7E8: returned to the default session (10 01)");
+        QStringLiteral("ECU 0x7E8: returning to the default session (10 01)");
     EXPECT_EQ(log.count(returned), 1) << log.join('\n').toStdString();
     EXPECT_FALSE(
-        log.join('\n').contains(QStringLiteral("ECU 0x7E9: returned")));
+        log.join('\n').contains(QStringLiteral("ECU 0x7E9: returning")));
     const QByteArray events =
         readFile(folder + QStringLiteral("/events.log")).replace("\r\n", "\n");
     for (const QString& line : {entered, refused, returned}) {
@@ -3758,7 +3758,7 @@ TEST(BridgeTest, WithoutASessionNoSessionIsNamed)
     EXPECT_FALSE(all.contains(QStringLiteral("session (")));
     EXPECT_FALSE(all.contains(QStringLiteral("; extended session")));
     EXPECT_FALSE(all.contains(QStringLiteral("; default session")));
-    EXPECT_FALSE(all.contains(QStringLiteral("returned to the default")));
+    EXPECT_FALSE(all.contains(QStringLiteral("returning to the default")));
 }
 
 /* A second connect from the same bridge names the session again: what was
@@ -4754,8 +4754,8 @@ TEST(BridgeTest, LiveListFollowsItsFilter)
     const int rows = model.rowCount();
     ASSERT_EQ(live.rowCount(), rows);
     EXPECT_EQ(live.shownCount(), rows);
-    EXPECT_EQ(live.groups(), (QVariantList{1, 2, 4, 6}))
-        << "Engine, Air, Oxygen sensors, Vehicle";
+    EXPECT_EQ(live.groups(), (QVariantList{1, 2, 4, 6, 7}))
+        << "Engine, Air, Oxygen sensors, Vehicle, Electrical";
     const auto names = [&live]() {
         QStringList n;
         for (int r = 0; r < live.rowCount(); ++r) {
@@ -5087,7 +5087,7 @@ TEST(BridgeTest, ChannelSessionTextSaysEachState)
     EXPECT_TRUE(SessionBridge::sessionReturnedText(r).isEmpty());
     r.session_entries = 1;
     EXPECT_EQ(SessionBridge::sessionReturnedText(r).toStdString(),
-              "ECU 0x7E9: returned to the default session (10 01)");
+              "ECU 0x7E9: returning to the default session (10 01)");
     r.session_asked = 0;
     EXPECT_TRUE(SessionBridge::sessionReturnedText(r).isEmpty());
 
@@ -11544,6 +11544,20 @@ TEST(BridgeTest, WindowThemeAppliesOncePerChangeOfEachColor)
     EXPECT_EQ(applied, 2);
     theme.setText(Qt::blue);
     EXPECT_EQ(applied, 3);
+}
+
+// A light look's page gets dark bar icons and the Light scheme; Dark and
+// the night palettes keep light ones. The line is HSL lightness 0.5
+TEST(BridgeTest, WindowThemeLightBarsFollowTheBackground)
+{
+    for (const char* dark : {"#141416", "#0d0a07", "#080404", "#7f7f7f"}) {
+        EXPECT_FALSE(WindowTheme::lightBars(QColor(QLatin1String(dark))))
+            << dark;
+    }
+    for (const char* light : {"#f3f3f1", "#ffffff", "#808080"}) {
+        EXPECT_TRUE(WindowTheme::lightBars(QColor(QLatin1String(light))))
+            << light;
+    }
 }
 
 // A property the theme lacks, or does not notify, is a warning: a rename

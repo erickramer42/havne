@@ -142,13 +142,41 @@ inline const ecuio_computed_t* def_program(const ecuio_signal_set_t& set,
     return set.computed + d.table_first;
 }
 
-// The bytes a def's line takes at most: its fields, and its labels
+// A gauge's field: its key and braces, and four numbers of 24 at most
+inline constexpr size_t kGaugeBytes = 256;
+
+// ,"gauge":{min, max, then warn_low and warn_high where given}, in the
+// signal's own unit; nothing for a def with none
+inline void gauge_field(Line& l, const ecuio_signal_gauge_t* g)
+{
+    if (g == nullptr) {
+        return;
+    }
+    l.key("gauge");
+    l.ch('{');
+    l.key("min");
+    l.number(g->min);
+    l.key("max");
+    l.number(g->max);
+    if ((g->flags & ECUIO_GAUGE_WARN_LOW) != 0) {
+        l.key("warn_low");
+        l.number(g->warn_low);
+    }
+    if ((g->flags & ECUIO_GAUGE_WARN_HIGH) != 0) {
+        l.key("warn_high");
+        l.number(g->warn_high);
+    }
+    l.ch('}');
+}
+
+// The bytes a def's line takes at most: its fields, its gauge and its
+// labels
 inline size_t def_line_bytes(const ecuio_signal_set_t& set,
                              const ecuio_signal_def_t& d)
 {
     uint32_t count = 0;
     def_labels(set, d, &count);
-    return 1024 + labels_bytes(count);
+    return 1024 + kGaugeBytes + labels_bytes(count);
 }
 
 // {"type":"signal_file", name, profile, signals (the file's own), base
@@ -185,15 +213,16 @@ inline void signal_file_line(Line& l, const char* name, const char* profile,
     l.raw("]}");
 }
 
-// {"type":"signal_def", id, name, kind, unit, decimals, group, rank, then
-// by kind: a reply's rx, read {service, number} as the file writes them
-// and byte (after the echo, as the file's field); a number's and an
-// enum's bits, bit (little-endian only), order and signed, a number's
-// scale and offset, an enum's labels; a text's bytes (0: to the end);
-// a computed signal's inputs [{id, max_age_us}] (the stale age where
-// the file gives none)}
+// {"type":"signal_def", id, name, kind, unit, decimals, group, rank, its
+// gauge when it gives one (NULL: none), then by kind: a reply's rx, read
+// {service, number} as the file writes them and byte (after the echo, as
+// the file's field); a number's and an enum's bits, bit (little-endian
+// only), order and signed, a number's scale and offset, an enum's labels;
+// a text's bytes (0: to the end); a computed signal's inputs [{id,
+// max_age_us}] (the stale age where the file gives none)}
 inline void def_line(Line& l, const ecuio_signal_set_t& set,
-                     const ecuio_signal_def_t& d)
+                     const ecuio_signal_def_t& d,
+                     const ecuio_signal_gauge_t* gauge)
 {
     const char* kind = kind_word(d);
     l.raw("{\"type\":\"signal_def\"");
@@ -212,6 +241,7 @@ inline void def_line(Line& l, const ecuio_signal_set_t& set,
     l.string(group, std::strlen(group));
     l.key("rank");
     l.u64(d.plot_rank);
+    gauge_field(l, gauge);
     if (const ecuio_computed_t* p = def_program(set, d)) {
         l.key("inputs");
         l.ch('[');

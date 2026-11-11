@@ -18,6 +18,7 @@ Pane {
     readonly property string driveOrientation: settingsDisplay.driveOrientation
     property alias uriField: settingsConnect.uriField
     property alias errorLabel: settingsConnect.errorLabel
+    property alias logExplains: settingsConnect.logExplains
     property alias vehicleLabelField: settingsVehiclePicker.vehicleLabelField
     property alias obdbYearField: settingsSignalFiles.obdbYearField
     property alias saveDialog: settingsSignalFiles.saveDialog
@@ -68,25 +69,29 @@ Pane {
     property var seenVersions: ({})
 
     // The device list's rows, the interfaces, the ports, then the
-    // Bluetooth adapters: { title, detail, base, versions }, base being
-    // what a click puts in the URI field
+    // Bluetooth adapters: { title, detail, kind, base, versions }, base being
+    // what a click puts in the URI field and kind the connect lists' word
     readonly property var devices: j2534Devices.map(d => withVersions({
             title: d.vendorName + (d.architecture ? "  (" + d.architecture + ")" : ""),
             detail: d.dllPath,
+            kind: qsTr("J2534 adapter"),
             base: "j2534://" + d.vendorName
         })).concat(serialPorts.map(p => withVersions({
             title: p.name,
             detail: p.device !== "" ? qsTr("Serial port, for elm327:// · %1").arg(p.device)
                                     : qsTr("Serial port, for elm327://"),
+            kind: qsTr("Serial port"),
             base: "elm327://" + p.name
         }))).concat(canInterfaces.map(c => withVersions({
             title: c.name,
             detail: canDetail(c),
+            kind: qsTr("CAN interface"),
             base: "socketcan://" + c.name
         }))).concat(bluetoothAdapters.map(a => withVersions({
             title: a.name !== "" ? a.name : a.address,
             detail: a.kind === "ble" ? qsTr("Bluetooth LE · %1").arg(a.address)
                                      : qsTr("Bluetooth, paired · %1").arg(a.address),
+            kind: a.kind === "ble" ? qsTr("Bluetooth LE") : qsTr("Bluetooth"),
             base: "elm327://" + a.kind + ":" + a.address
         })))
 
@@ -836,12 +841,28 @@ Pane {
         { key: "display", title: qsTr("Display"),
           summary: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
                    + (Bridge.unitSystem === 1 ? qsTr(" · imperial") : qsTr(" · metric"))
+                   + (Theme.lookSummary() !== "" ? " · " + Theme.lookSummary() : "")
                    + " · " + Theme.nightSummary() },
         { key: "advanced", title: qsTr("Advanced"),
           summary: Theme.developerMode ? qsTr("developer mode") : qsTr("off") }
-    ]
+    ].concat(Theme.compact ? [{ key: "log", title: qsTr("Log"), summary: "" }] : [])
+
+    // The tab-bar form has no sidebar to list the Log: its row, last, opens
+    // the Log page itself, as does Show log beside a failed connect
+    signal logRequested()
+    // The newest activity line, the Log row's summary: the Log's first line
+    // until another comes
+    property string lastActivity: qsTr("Ready.")
+    Connections {
+        target: Bridge
+        function onLogMessage(message) { page.lastActivity = message }
+    }
 
     function open(key) {
+        if (key === "log") {
+            logRequested()
+            return
+        }
         pageKey = key
     }
     // Back from a page: the form returns to Signals, the rest to the list
@@ -884,14 +905,11 @@ Pane {
     }
     // qmllint enable missing-property
     onShownKeyChanged: askBluetoothIfSeen()
-    onVisibleChanged: {
-        askBluetoothIfSeen()
-        if (!visible)
-            backLeaves = false
-    }
+    onVisibleChanged: askBluetoothIfSeen()
 
     // Back from Connection opened through Dash's "Other address..." or a
-    // refused Replay: Main goes back to that page instead of this list
+    // refused Replay: Main goes back to that page instead of this list, and
+    // clears it when another page than the Log is shown
     property bool backLeaves: false
     onPageKeyChanged: if (pageKey !== "connection") backLeaves = false
     // The back key repeats the back arrow, and answers whether it had a page to close
@@ -1237,6 +1255,12 @@ Pane {
         return vehicle === "" || recents.includes(vehicle) ? recents : [vehicle].concat(recents)
     }
     readonly property var connectUris: connectRows(recentUris, vehicleUri)
+    // What the connect lists offer besides the recent addresses: the J2534
+    // interfaces, the serial ports, the CAN interfaces and the phone's
+    // Bluetooth adapters, as Connection's device list has them
+    readonly property var connectAdapters: devices.map(d => ({
+            uri: d.base, title: d.title, kind: d.kind
+        }))
     // Dash's Connect: the field shows it as typed text, before the connect
     function connectFromList(uri) {
         uriField.text = uri
@@ -1298,6 +1322,7 @@ Pane {
         function onConnectResult(uri, error) {
             page.errorLabel.text = error
             page.errorLabel.visible = (error !== "")
+            page.logExplains = (error !== "")
             if (error === "") {
                 if (page.keptUri(uri)) {
                     sessionSettings.uri = uri
@@ -1382,6 +1407,7 @@ Pane {
                     objectName: "settingsList"
                     Layout.fillWidth: true
                     pages: page.pageList
+                    logSummary: page.lastActivity
                     onChosen: key => page.open(key)
                 }
 

@@ -13,8 +13,9 @@ pragma ComponentBehavior: Bound
 // The viewer's Export (ADR-0056 sections 5 and 7): the whole recording as a
 // CSV, wide or long, pcapng or a folder copy, scrubbed by core unless Raw is
 // ticked in Developer mode. The wide CSV's row interval is chosen with the
-// file's exact size beside each choice. The row interval is kept between
-// runs; everything else starts over at each open.
+// file's exact size beside each choice. While it writes, Cancel stands in
+// Save as...'s place. The row interval is kept between runs; everything
+// else starts over at each open.
 ColumnLayout {
     id: panel
     spacing: Theme.spacing
@@ -77,6 +78,7 @@ ColumnLayout {
     }
     // Other columns: every interval's size goes until the new ones come
     function newColumns() {
+        exporter.dropEstimate()   // a sizing for the old columns must not answer
         sizes = []
         sizeTimer.restart()
     }
@@ -186,8 +188,9 @@ ColumnLayout {
             Bridge.logEvent(result.line)
             if (result.folder !== panel.view.folder)
                 return
-            panel.failed = !result.ok
-            panel.note = !result.ok ? qsTr("Not exported: %1").arg(result.words)
+            panel.failed = !result.ok && !result.canceled
+            panel.note = result.canceled ? qsTr("Export canceled: nothing was written.")
+                       : !result.ok ? qsTr("Not exported: %1").arg(result.words)
                        : result.name !== "" ? qsTr("Saved as %1: %2").arg(result.name).arg(result.summary)
                        : qsTr("Saved: %1").arg(result.summary)
         }
@@ -243,7 +246,7 @@ ColumnLayout {
                 objectName: "intervalSize"
                 Layout.rightMargin: Theme.spacing
                 color: Theme.textDim
-                font.pixelSize: 13
+                font.pixelSize: Theme.fontCaption
                 text: intervalRow.size
             }
         }
@@ -262,11 +265,22 @@ ColumnLayout {
         spacing: Theme.spacing
         ThemedButton {
             objectName: "exportGo"
+            visible: !exporter.busy
             Layout.preferredHeight: Theme.touchTarget
             highlighted: true
             enabled: panel.ready
             text: panel.format === "folder" ? qsTr("Choose a folder...") : qsTr("Save as...")
             onClicked: panel.go()
+        }
+        ThemedButton {
+            objectName: "exportCancel"
+            visible: exporter.busy
+            Layout.preferredHeight: Theme.touchTarget
+            text: qsTr("Cancel")
+            onClicked: {
+                panel.note = qsTr("Canceling...")
+                exporter.cancel()
+            }
         }
         ThemedButton {
             objectName: "exportClose"
@@ -362,7 +376,7 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.textDim
-        font.pixelSize: 13
+        font.pixelSize: Theme.fontCaption
         text: (panel.format === "pcapng" ? qsTr("Its frames, for Wireshark.")
                : panel.format === "folder" ? qsTr("A copy to send, without the vehicle's name.")
                : panel.longLayout ? qsTr("A row a value, as recorded.")

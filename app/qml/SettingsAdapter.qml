@@ -212,6 +212,7 @@ ColumnLayout {
                     const why = Relay.start(root.host.uriField.text)
                     root.host.errorLabel.text = why
                     root.host.errorLabel.visible = why !== ""
+                    root.host.logExplains = false   // the relay writes no log line
                 }
             }
         }

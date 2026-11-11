@@ -985,6 +985,13 @@ Section 10's step 6: `app/qml/DashboardPage.qml`'s edit mode, over step
   `BridgeTest.ARowsRangeIsShownInTheUnitSystem` checks the three
   decoded keys under both unit systems.
 
+*Note of 2026-11-10:* the cell's panel ends with Remove, which removes at
+once, in edit mode and from a hold's menu outside it; Undo takes the gauge
+back (the appendix "undo in edit mode as built"). Edit mode's remove box
+keeps its one tap and draws as a button. Every gauge kind says
+"no new data" while its value is stale, beside the 45 % dimming; the
+Number gauge's status dot is gone.
+
 ## Appendix: the edit-mode mark for unfilled cells (2026-11-08)
 
 Section 3 says a cell in state 2 or 3 carries a mark in edit mode. The
@@ -1313,3 +1320,77 @@ readings at 17 sp and above take Barlow Semi Condensed Bold with
 fixed-width digits (`Theme.valueFamily`, `Theme.valueFeatures`). A
 bundled face draws the same on every platform, and Barlow gives the app
 an automotive feel.
+
+## Appendix: the desktop takes the panel (2026-11-10)
+
+`joined` is true on both forms: the desktop's cells meet on one surface
+with hairline seams and stretch over empty squares outside edit mode, as
+section 3 of the appendix "six columns, the panel, one gesture, copy and
+paste" describes for the phone. This supersedes the desktop's cards in
+the renderer appendix and in the appendix "the phone's panel, the gauges
+under the S2 look and the fit, as built".
+
+The desktop's pages are tabs on the panel's upper edge
+(`DashPageStrip.qml`): shown with two pages or more, or in edit mode,
+where a "+" tab ends the row and adds a page. The shown tab's sheet runs
+over the panel's top line, and the panel's corner under the first tab is
+square. A row wider than the strip scrolls sideways and follows the shown
+tab; there is no second row. Tabs are 36 px tall, or the touch size where
+`Theme.compact` asks for it. An edit panel open puts the panel a gap under
+the strip. Section 4's page buttons in the header are superseded.
+
+The phone keeps Add page in its Page row, since it has no strip; the
+button reads "Page" on both forms. No document changes: a stored desktop
+layout places every cell where it did, drawn on the panel.
+
+## Appendix: undo in edit mode as built (2026-11-10)
+
+Edit mode keeps an undo history. Each write through `edit(next, step)`
+that changes the document is a step, and the entry it pushes holds the
+text the store held before it: "" while nothing was stored, so an undo
+back past the first change stores nothing again and a later version's
+built-in layout still reaches the form. Reset is a step too; Undo after
+it stores the replaced pages. A run of steps with one key (a stepped or
+toggled option of one cell, or a resize of one cell) within 1.5 s is one
+entry; a run that ends where it began leaves none. Typed fields never
+group. The history holds 50 entries, lives as long as the page, and Done
+and a change of form empty it. Copy, a selection, a panel, a page change,
+Edit, Done and the drive view are not steps.
+
+The bar reads Undo, Redo, a gap, Add gauge ("Add" under 600 px), Page,
+Done on both forms; Undo and Redo are quiet, shown disabled with nothing
+to take. Their accessible names carry the step ("Undo: removed Oil temp").
+On the desktop form Ctrl+Z undoes and Ctrl+Shift+Z or Ctrl+Y redoes, in
+edit mode or out of it, never while a text field has the focus. A line
+under the bar gives the step's words for 5 s: after an undo or a redo in
+edit mode (with the keys on the desktop), and after every step outside
+it, with an Undo button, since there is no bar. Paste leaves the bar:
+while a cell is copied the "+" cell splits into "+" and Paste, which
+appends. The cell panel's Remove removes at once. The cell panel follows
+an undone or redone step's cell when it was on that cell, and closes
+otherwise.
+
+This amends the appendix "edit mode as built": the bar holds five
+buttons, and Done also ends the undo history.
+
+## Appendix: the built-in layout by what people watch (2026-11-10)
+
+The built-in layout's cells after the dials change: Throttle and Engine
+load leave, and Boost, Lambda and Battery join, in the library's refs. The
+desktop's order is Shift lights, Engine speed, Vehicle speed, Coolant, Oil
+temp, Boost, IAT, MAF, Lambda, Battery: after the two 2 x 8 dials every cell
+is a 1 x 4 square (Boost an `analog`, the rest `ring` or `digital`), so the
+cells fill the squares beside the dials and then whole rows, and no square is
+left empty on 5 columns (a 1280 x 800 window) or 8 (1920 x 1080). The phone's
+order is the shift lights, the dial with Speed, Coolant and Oil temp beside it,
+MAF and Boost at 3 x 9, then IAT, Battery and Lambda at 2 x 6.
+
+| Cell | Refs | Unit | Options |
+|---|---|---|---|
+| Boost | `id:13001` | kPa | -100 to 200; the desktop dial has the caption "Boost" |
+| Battery | `id:14001`, `id:7008` | V | 10 to 16 |
+| Lambda | `id:10001`, `id:11544` | the lambda sign | 0.5 to 2, a description |
+
+Boost has no obd2 ref until the profile computes it, so it reads "no signal"
+on a real car. A stored layout never changes; only `builtIn` and `reset` do.
+`gaugeSignals` gains `lambda`.

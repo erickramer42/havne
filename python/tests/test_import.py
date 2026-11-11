@@ -7,18 +7,22 @@
 # candump log imported and its frames decoded through obd2; refusals carry
 # core's words and leave no folder. The same CSVs' maps guessed from their
 # headers (each its committed guessed-map.json) and imported without a map;
-# a time with no unit imported only with time_unit. An OBDb set converted
-# through the declarations, its text freed by core.
+# a time with no unit imported only with time_unit. A cancel stopping each
+# kind at each of its asks in turn, raising, or a Ctrl+C: nothing left
+# made, the exception reaching the caller. An OBDb set converted through
+# the declarations, its text freed by core.
 
 import ctypes
 import json
 import os
+import signal
+import threading
 
 import pytest
 
 import havne
 from havne._core import lib
-from conftest import ROOT
+from conftest import ROOT, Asks, nothing_made, partials
 
 CSV = os.path.join(ROOT, "tests", "fixtures", "import", "csv")
 LOG = (
@@ -43,11 +47,6 @@ def test_an_obdb_import_through_the_declarations_is_freed_by_core():
         lib.ecuio_obdb_free(out)
     assert json.loads(converted)["havne_signals"] == 1
     havne.SignalFile(converted)
-
-
-def partials(folder, name):
-    """Entries of folder named <name>.partial-...: core's own file or folder left behind"""
-    return [e for e in os.listdir(folder) if e.startswith(name + ".partial-")]
 
 
 def column_map(name):
@@ -107,6 +106,96 @@ def test_a_candump_log_imports_and_decodes_through_obd2(tmp_path):
     with havne.Recording(folder, profile="obd2") as r:
         rpm = r.signal("RPM")
         assert (rpm.samples, rpm.lowest) == (1, 1726.0)
+
+
+def candump_import(tmp_path, name, cancel):
+    log = tmp_path / "bus.log"
+    log.write_text(LOG, encoding="utf-8", newline="\n")
+    return havne.import_candump(log, tmp_path / name, interface="can0", cancel=cancel)
+
+
+def csv_import(tmp_path, name, cancel):
+    return havne.import_csv(os.path.join(CSV, "logger-a", "log.csv"), tmp_path / name,
+                            column_map("logger-a"), cancel=cancel)
+
+
+IMPORTS = [candump_import, csv_import]
+
+
+@pytest.mark.parametrize("run", IMPORTS)
+def test_a_cancel_that_never_stops_imports_the_same(tmp_path, run):
+    asks = Asks()
+    with_cancel = run(tmp_path, "with", asks)
+    without = run(tmp_path, "without", None)
+    assert asks.asked >= 2
+    assert with_cancel._replace(folder="") == without._replace(folder="")
+    for f in os.listdir(tmp_path / "with"):
+        assert (tmp_path / "with" / f).read_bytes() == (tmp_path / "without" / f).read_bytes()
+
+
+@pytest.mark.parametrize("run", IMPORTS)
+def test_a_stop_at_each_ask_in_turn_leaves_nothing(tmp_path, run):
+    whole = Asks()
+    run(tmp_path, "whole", whole)
+    for at in range(1, whole.asked + 1):
+        asks = Asks(at)
+        with pytest.raises(havne.Error) as e:
+            run(tmp_path, f"stop-{at}", asks)
+        assert e.value.status == havne.c.ECUIO_ERR_CANCELED
+        assert e.value.detail == "the import was canceled"
+        assert asks.asked == at
+        assert nothing_made(tmp_path, f"stop-{at}")
+
+
+@pytest.mark.parametrize("run", IMPORTS)
+def test_an_exception_in_the_cancel_reaches_the_caller(tmp_path, run):
+    asks = Asks(1, RuntimeError("the caller's own"))
+    with pytest.raises(RuntimeError, match="the caller's own"):
+        run(tmp_path, "raised", asks)
+    assert asks.asked == 1
+    assert nothing_made(tmp_path, "raised")
+    asks = Asks(2, KeyboardInterrupt())
+    with pytest.raises(KeyboardInterrupt):
+        run(tmp_path, "interrupted", asks)
+    assert asks.asked == 2
+    assert nothing_made(tmp_path, "interrupted")
+
+
+@pytest.mark.parametrize("run", IMPORTS)
+def test_a_ctrl_c_stops_the_import_at_its_next_ask(tmp_path, run):
+    # Python's own handler would raise on a callback's entry, outside its
+    # try: the import's stands in while core runs. raise_signal runs it
+    # before it returns, and core's next ask reads its flag
+    during = []
+
+    def ctrl_c():
+        during.append(signal.getsignal(signal.SIGINT))
+        signal.raise_signal(signal.SIGINT)
+        return False
+
+    asks = Asks(1, ctrl_c)
+    with pytest.raises(KeyboardInterrupt):
+        run(tmp_path, "ctrl-c", asks)
+    assert asks.asked == 1
+    assert nothing_made(tmp_path, "ctrl-c")
+    assert during[0] is not signal.default_int_handler
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+    with pytest.raises(TypeError):
+        run(tmp_path, "not-callable", 3)
+    assert nothing_made(tmp_path, "not-callable")
+
+
+@pytest.mark.parametrize("run", IMPORTS)
+def test_an_import_off_the_main_thread_leaves_the_handler_alone(tmp_path, run):
+    # Only the main thread may set a handler, and only it is interrupted
+    got = []
+    asks = Asks()
+    thread = threading.Thread(target=lambda: got.append(run(tmp_path, "thread", asks)))
+    thread.start()
+    thread.join()
+    assert len(got) == 1 and asks.asked >= 2
+    assert os.path.isdir(tmp_path / "thread")
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
 
 
 def guessed_map(name):

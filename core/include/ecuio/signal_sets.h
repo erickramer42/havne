@@ -21,13 +21,15 @@ extern "C" {
 #define ECUIO_MOCK_SIG_BARO_ID     12001
 /* Computed from the two above, MAP minus baro (ADR-0051 section 5) */
 #define ECUIO_MOCK_SIG_BOOST_ID    13001
+/* The battery or alternator voltage; the obd2 set's 7008 under the same name */
+#define ECUIO_MOCK_SIG_BATTERY_V_ID 14001
 /* CAN arbitration ID carrying the mock telemetry payload. SHARED by
  * mock_transport.cpp (encoder) and signal_sets.cpp (signal defs) so
  * the two halves of the round-trip contract cannot drift apart. */
 #define ECUIO_MOCK_TELEMETRY_ARB_ID  0x0C0u
-/* Mock telemetry payload length. The signals need 14 bytes and classic
+/* Mock telemetry payload length. The signals need 16 bytes and classic
  * CAN carries 8, so mock frames are CAN FD (ECUIO_FRAME_FLAG_FD) at
- * 16 bytes, the next valid FD length, the last two zero. Shared by the
+ * 16 bytes, an FD length with no padding. Shared by the
  * encoder, the worker and the tests. */
 #define ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN  16u
 

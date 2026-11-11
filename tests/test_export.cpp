@@ -2025,6 +2025,34 @@ TEST(FolderExportTest, AMocksLabelIsLeftOutOfItsUri)
     EXPECT_EQ(e.files["events.log"].find("Daily"), std::string::npos);
 }
 
+/* The session keys are core's own, kept in the copy's URI; a value that
+ * isn't plain is dropped with its key */
+TEST(FolderExportTest, TheSessionKeysAreKeptInTheUri)
+{
+    Folder f;
+    recording(f, row(1000, 0x7E8, 0, {0x02, 0x41, 0x00}), "",
+              "uri  elm327://COM3?profile=uds-generic&did=F40C&session=03&"
+              "keepalive_ms=2000\nprofile  uds-generic\n");
+    FolderExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_NE(e.files["events.log"].find(
+                  "\nuri  elm327://<address>?profile=uds-generic&did=F40C&"
+                  "session=03&keepalive_ms=2000\n"),
+              std::string::npos)
+        << e.files["events.log"];
+
+    Folder g;
+    recording(g, row(1000, 0x7E8, 0, {0x02, 0x41, 0x00}), "",
+              "uri  elm327://COM3?profile=uds-generic&session=0 3\n"
+              "profile  uds-generic\n");
+    FolderExported d(g);
+    ASSERT_EQ(d.rc, ECUIO_OK) << d.detail;
+    EXPECT_NE(d.files["events.log"].find(
+                  "\nuri  elm327://<address>?profile=uds-generic\n"),
+              std::string::npos)
+        << d.files["events.log"];
+}
+
 /* A log of another format (format 1's, before ADR-0049) is a file the
  * export doesn't know: left out and counted, the frames still copied */
 TEST(FolderExportTest, AnEventsLogOfAnotherFormatIsLeftOut)
@@ -3165,7 +3193,8 @@ const Kind kKinds[] = {{"pcapng", ECUIO_EXPORT_PCAPNG, 0, 3},
 /* f's recording exported as k to <name>, through ecuio_export_with when
  * asks is given, else ecuio_export */
 ecuio_status_t export_as(const Folder& f, const Kind& k,
-                         const std::string& name, Asks* asks)
+                         const std::string& name, Asks* asks,
+                         ecuio_export_report_t* report = nullptr)
 {
     const std::string folder = f.utf8("rec");
     const std::string out = f.utf8(name);
@@ -3174,8 +3203,8 @@ ecuio_status_t export_as(const Folder& f, const Kind& k,
     o.layout = k.layout;
     o.folder_utf8 = folder.c_str();
     o.out_path_utf8 = out.c_str();
-    return asks != nullptr ? ecuio_export_with(&o, ask, asks, nullptr)
-                           : ecuio_export(&o, nullptr);
+    return asks != nullptr ? ecuio_export_with(&o, ask, asks, report)
+                           : ecuio_export(&o, report);
 }
 
 /* f's recording sized as the wide CSV at a sweep and a 250 ms grid */
@@ -3290,6 +3319,34 @@ TEST(ExportCancelTest, AStopAtEachAskInTurnLeavesNothingBehind)
         EXPECT_EQ(asks.count, n);
         for (const ecuio_export_estimate_t& e : out) {
             EXPECT_EQ(e.rows | e.bytes | e.columns, 0u) << "at " << n;
+        }
+    }
+}
+
+/* A stopped export's report counts nothing, whatever it had written */
+TEST(ExportCancelTest, ACanceledExportsReportIsZeroed)
+{
+    Folder f;
+    whole_recording(f);
+    for (const Kind& k : kKinds) {
+        SCOPED_TRACE(k.name);
+        Asks all;
+        ASSERT_EQ(export_as(f, k, "counted", &all), ECUIO_OK);
+        std::error_code ec;
+        fs::remove_all(f.path / "counted", ec);
+        for (unsigned long n = 1; n <= all.count; ++n) {
+            Asks asks;
+            asks.stop_at = n;
+            ecuio_export_report_t report;
+            std::memset(&report, 0xAB, sizeof report);
+            ASSERT_EQ(export_as(f, k, "stopped", &asks, &report),
+                      ECUIO_ERR_CANCELED)
+                << "at " << n;
+            const unsigned char* b =
+                reinterpret_cast<const unsigned char*>(&report);
+            for (size_t i = 0; i < sizeof report; ++i) {
+                ASSERT_EQ(b[i], 0u) << "byte " << i << " at " << n;
+            }
         }
     }
 }

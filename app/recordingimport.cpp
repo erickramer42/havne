@@ -17,6 +17,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#include <system_error>
+
 #include "ecuio/core.h"
 #include "ecuio/recording.h"
 
@@ -35,8 +37,10 @@ QVariantMap refused(const QString& words)
 }
 
 // The file's bytes into path, a chunk at a time: a log can be larger than
-// the memory a phone gives the app
-bool copyTo(const QUrl& url, const QString& path, bool* readable)
+// the memory a phone gives the app. stop, when given, ends it between
+// chunks
+bool copyTo(const QUrl& url, const QString& path, bool* readable,
+            const std::atomic<bool>* stop = nullptr)
 {
     QFile in(openable(url));
     *readable = in.open(QIODevice::ReadOnly);
@@ -46,6 +50,9 @@ bool copyTo(const QUrl& url, const QString& path, bool* readable)
     }
     QByteArray chunk(1024 * 1024, Qt::Uninitialized);
     for (;;) {
+        if (stop != nullptr && stop->load()) {
+            return false;
+        }
         const qint64 n = in.read(chunk.data(), chunk.size());
         if (n < 0) {
             *readable = false;
@@ -70,7 +77,14 @@ struct Job {
     QString root;
     QString stamp;
     bool copyLocal = false;
+    std::atomic<bool>* stop = nullptr;
 };
+
+// ecuio_import_with's cancel: the importer's destruction
+int stopAsked(void* user)
+{
+    return static_cast<const std::atomic<bool>*>(user)->load() ? 1 : 0;
+}
 
 QVariantMap run(const Job& job)
 {
@@ -125,6 +139,7 @@ QVariantMap run(const Job& job)
     // Core reads a path: a file a provider hands out is copied first, into
     // a folder removed when the import is done
     QString in;
+    // removeStaleCopies finds this folder by its name
     QTemporaryDir copy(QDir::tempPath() +
                        QStringLiteral("/havne-import-XXXXXX"));
     if (job.file.isLocalFile() && !job.copyLocal) {
@@ -136,7 +151,7 @@ QVariantMap run(const Job& job)
         }
         in = copy.filePath(QStringLiteral("input"));
         bool readable = false;
-        if (!copyTo(job.file, in, &readable)) {
+        if (!copyTo(job.file, in, &readable, job.stop)) {
             return refused(
                 readable
                     ? QStringLiteral(
@@ -155,7 +170,8 @@ QVariantMap run(const Job& job)
     o.interface_utf8 = !csv && !iface.isEmpty() ? iface.constData() : nullptr;
     o.column_map_utf8 = csv ? map.constData() : nullptr;
     ecuio_import_report_t r{};
-    const ecuio_status_t status = ecuio_import(&o, &r);
+    const ecuio_status_t status =
+        ecuio_import_with(&o, stopAsked, job.stop, &r);
     if (status != ECUIO_OK) {
         const QString detail = QString::fromUtf8(ecuio_last_error_detail());
         return refused(
@@ -351,6 +367,7 @@ QByteArray guessText(const QString& path, const QByteArray& unit,
 QVariantMap runGuess(const QUrl& file, const QString& timeUnit, bool copyLocal)
 {
     QString in;
+    // removeStaleCopies finds this folder by its name
     QTemporaryDir copy(QDir::tempPath() +
                        QStringLiteral("/havne-import-XXXXXX"));
     if (file.isLocalFile() && !copyLocal) {
@@ -492,6 +509,7 @@ RecordingImport::RecordingImport(std::function<QString()> root, QObject* parent)
 
 RecordingImport::~RecordingImport()
 {
+    m_stop = true;
     if (m_worker.joinable()) {
         m_worker.join();
     }
@@ -547,6 +565,7 @@ bool RecordingImport::beginImport(const QUrl& file, int kind, const QUrl& map,
     job.stamp = QDateTime::currentDateTime().toString(
         QStringLiteral("yyyyMMdd-HHmmss"));
     job.copyLocal = m_copyLocal;
+    job.stop = &m_stop;
     return launch(false, [job] { return run(job); });
 }
 
@@ -566,13 +585,21 @@ bool RecordingImport::launch(bool isGuess, std::function<QVariantMap()> work)
     if (m_worker.joinable()) {
         m_worker.join(); // ended: its post is what cleared m_busy
     }
+    try {
+        if (m_failThreadForTesting) {
+            throw std::system_error(std::make_error_code(
+                std::errc::resource_unavailable_try_again));
+        }
+        m_worker = std::thread([this, isGuess, work = std::move(work)] {
+            const QVariantMap result = work();
+            QMetaObject::invokeMethod(
+                this, [this, result, isGuess] { done(result, isGuess); },
+                Qt::QueuedConnection);
+        });
+    } catch (const std::system_error&) {
+        return false;
+    }
     m_busy = true;
-    m_worker = std::thread([this, isGuess, work = std::move(work)] {
-        const QVariantMap result = work();
-        QMetaObject::invokeMethod(
-            this, [this, result, isGuess] { done(result, isGuess); },
-            Qt::QueuedConnection);
-    });
     emit busyChanged();
     return true;
 }

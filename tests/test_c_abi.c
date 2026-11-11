@@ -92,6 +92,10 @@ typedef char abi_computed_ages_check[(offsetof(ecuio_computed_t, max_age_us) == 
 typedef char abi_computed_steps_check[(offsetof(ecuio_computed_t, steps) == 28) ? 1 : -1];
 typedef char abi_computed_constants_check[(offsetof(ecuio_computed_t, constants) == 64) ? 1 : -1];
 typedef char abi_computed_reserved_check[(offsetof(ecuio_computed_t, reserved) == 192) ? 1 : -1];
+typedef char abi_gauge_size_check[(sizeof(ecuio_signal_gauge_t) == 48) ? 1 : -1];
+typedef char abi_gauge_warn_high_check[(offsetof(ecuio_signal_gauge_t, warn_high) == 24) ? 1 : -1];
+typedef char abi_gauge_flags_check[(offsetof(ecuio_signal_gauge_t, flags) == 32) ? 1 : -1];
+typedef char abi_gauge_reserved_check[(offsetof(ecuio_signal_gauge_t, reserved) == 36) ? 1 : -1];
 typedef char abi_validation_size_check[(sizeof(ecuio_validation_t) == 16) ? 1 : -1];
 typedef char abi_validation_index_check[(offsetof(ecuio_validation_t, index) == 4) ? 1 : -1];
 typedef char abi_validation_reserved_check[(offsetof(ecuio_validation_t, reserved) == 8) ? 1 : -1];
@@ -221,6 +225,9 @@ int main(void)
     uint64_t reading_at = 0;
     uint32_t reading_pick = 0;
     char reading_text[8];
+    uint16_t core_major = 0;
+    uint16_t core_minor = 0;
+    uint16_t core_patch = 0;
     ecuio_check_options_t check_options;
     ecuio_check_summary_t check_summary;
     ecuio_export_options_t export_options;
@@ -312,7 +319,74 @@ int main(void)
         if (ecuio_def_range(&byte_def, &lo, &hi) != ECUIO_DECODE_OK ||
             lo != -40.0 || hi != 215.0 ||
             ecuio_def_range(NULL, &lo, &hi) != ECUIO_DECODE_ERR_NULL ||
-            strcmp(ecuio_signal_file_key(NULL, &byte_def), "") != 0) {
+            strcmp(ecuio_signal_file_key(NULL, &byte_def), "") != 0 ||
+            ecuio_signal_file_gauge(NULL, &byte_def) != NULL) {
+            return 1;
+        }
+    }
+    {
+        /* A gauge read from C: a def with one, a def without, a NULL def;
+         * then a packed plugin's requires.core, its patch past a byte */
+        static const char kGauged[] =
+            "{\"havne_signals\":1,\"name\":\"C gauges\","
+            "\"source\":{\"name\":\"Havne's tests\"},"
+            "\"ecus\":[{\"id\":\"pcm\",\"rx\":\"7E8\"}],\"signals\":["
+            "{\"key\":\"volts\",\"name\":\"Module Volts\","
+            "\"read\":{\"service\":\"01\",\"number\":\"42\"},"
+            "\"field\":{\"byte\":0,\"bits\":16},\"scale\":0.001,\"unit\":\"V\","
+            "\"gauge\":{\"min\":10,\"max\":16,\"warn_low\":11.5,"
+            "\"warn_high\":15.25}},"
+            "{\"key\":\"load\",\"name\":\"Load Share\","
+            "\"read\":{\"service\":\"01\",\"number\":\"04\"},"
+            "\"field\":{\"byte\":0,\"bits\":8},\"unit\":\"%\"}]}";
+        static const char kPacked[] =
+            "{\"havne_plugin\":1,\"id\":\"c-abi\",\"name\":\"C ABI\","
+            "\"version\":\"1.0.0\",\"requires\":{\"core\":\"0.5.258\"},"
+            "\"source\":{\"name\":\"Havne's tests\"},\"tiers\":[\"data\"],"
+            "\"ecus\":[{\"id\":\"pcm\",\"rx\":\"7E8\"}],"
+            "\"variants\":[{\"id\":\"base\",\"files\":[\"a.json\"]}],"
+            "\"files\":{\"a.json\":{\"havne_signals\":1,\"signals\":["
+            "{\"key\":\"rpm\",\"name\":\"Engine Speed\",\"ecu\":\"pcm\","
+            "\"read\":{\"service\":\"22\",\"number\":\"F40C\"},"
+            "\"field\":{\"byte\":0,\"bits\":16},\"unit\":\"rpm\"}]}}}";
+        ecuio_signal_file_t* file = NULL;
+        ecuio_plugin_t* plugin = NULL;
+        const ecuio_signal_gauge_t* gauge = NULL;
+        const ecuio_signal_def_t* volts = NULL;
+        const ecuio_signal_def_t* load = NULL;
+        uint16_t major = 1;
+        uint16_t minor = 1;
+        uint16_t patch = 1;
+        if (ecuio_signal_file_load(kGauged, sizeof kGauged - 1, &file) !=
+            ECUIO_OK) {
+            return 1;
+        }
+        volts = ecuio_signal_file_find(file, "volts");
+        load = ecuio_signal_file_find(file, "load");
+        gauge = ecuio_signal_file_gauge(file, volts);
+        if (volts == NULL || load == NULL || gauge == NULL ||
+            gauge->min != 10.0 || gauge->max != 16.0 ||
+            gauge->warn_low != 11.5 || gauge->warn_high != 15.25 ||
+            gauge->flags != (ECUIO_GAUGE_WARN_LOW | ECUIO_GAUGE_WARN_HIGH) ||
+            gauge->reserved[0] != 0u || gauge->reserved[1] != 0u ||
+            gauge->reserved[2] != 0u ||
+            ecuio_signal_file_gauge(file, load) != NULL ||
+            ecuio_signal_file_gauge(file, NULL) != NULL) {
+            ecuio_signal_file_free(file);
+            return 1;
+        }
+        ecuio_signal_file_free(file);
+        if (ecuio_plugin_load(kPacked, sizeof kPacked - 1, NULL, NULL,
+                              &plugin) != ECUIO_OK) {
+            return 1;
+        }
+        if (ecuio_plugin_requires_core(plugin, &major, &minor, &patch) !=
+                ECUIO_OK ||
+            major != 0u || minor != 5u || patch != 258u) {
+            ecuio_plugin_free(plugin);
+            return 1;
+        }
+        if (ecuio_plugin_free(plugin) != ECUIO_OK) {
             return 1;
         }
     }
@@ -456,6 +530,8 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recorder_signal_file(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_plugin_variant_file(NULL, 0) != NULL ||
+        ecuio_plugin_requires_core(NULL, &core_major, &core_minor,
+                                   &core_patch) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_get_signal(NULL, 0, &reading_signal) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_get_marker(NULL, 0, &reading_marker) !=
@@ -528,7 +604,9 @@ int main(void)
         ecuio_scrub_frames(0, NULL, NULL, NULL, 0, NULL, &export_report) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_import(NULL, &import_report) != ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_import(&import_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
+        ecuio_import(&import_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_import_with(NULL, never_cancel, NULL, &import_report) !=
+            ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
     /* Frames read back (ADR-0049's appendix): the summary's layout, zeroed
@@ -576,7 +654,9 @@ int main(void)
         ECUIO_HEALTH_TEXT != 2u || ECUIO_HEALTH_VIN_DECODED != 1u ||
         ECUIO_HEALTH_BASELINE_READ != 2u ||
         ecuio_health_export(NULL, &health_report) != ECUIO_ERR_NULL_ARGUMENT ||
-        ecuio_health_export(&health_options, NULL) != ECUIO_ERR_NULL_ARGUMENT) {
+        ecuio_health_export(&health_options, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_health_export_with(NULL, never_cancel, NULL, &health_report) !=
+            ECUIO_ERR_NULL_ARGUMENT) {
         return 1;
     }
     if (ecuio_obdb_import("{}", 2, NULL, NULL, NULL, NULL, NULL) !=

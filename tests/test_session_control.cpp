@@ -729,3 +729,221 @@ TEST(SessionControlTest, ARefusalStraightAfterTheEntryIsTheReadsOwn)
     EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
     EXPECT_EQ(e.chans[0].session_lost, 0);
 }
+
+namespace {
+
+/* D1A0 to D1AF: refused 7F 22 7F in either session */
+constexpr uint16_t kHeldDid = 0xD1A0;
+
+/* One channel, no scan: a rotation of each DID given, in order */
+void rotation_engine(ecuio_request_engine* e,
+                     std::initializer_list<uint16_t> dids)
+{
+    ecuio_engine_init(e, 1);
+    for (const uint16_t did : dids) {
+        const uint8_t q[3] = {0x22, static_cast<uint8_t>(did >> 8),
+                              static_cast<uint8_t>(did & 0xFF)};
+        ASSERT_EQ(ecuio_engine_add(e, 0, q, 3), ecuio_engine_add_result::added);
+    }
+}
+
+/* Ecu, but the held DIDs are kept to a session core never enters, and
+ * D110 to D11F answer in either session */
+Bytes holds_back(Ecu& ecu, const Bytes& q)
+{
+    if (q.size() == 3 && q[0] == 0x22 && q[1] == 0xD1) {
+        if ((q[2] & 0xF0) == 0xA0) {
+            return {0x7F, 0x22, 0x7F};
+        }
+        if ((q[2] & 0xF0) == 0x10) {
+            return {0x62, q[1], q[2], 0x01};
+        }
+    }
+    return ecu(q);
+}
+
+int index_of(const ecuio_request_engine& e, uint16_t did)
+{
+    for (uint32_t i = 0; i < e.count; ++i) {
+        if (e.requests[i].bytes[1] == (did >> 8) &&
+            e.requests[i].bytes[2] == (did & 0xFF)) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+} // namespace
+
+/* A DID the module refuses 7F in the session while its other DIDs answer
+ * there: the DID's own answer, not a lost session. It costs one re-entry,
+ * whose loss is given back, and drops alone; the session stands. */
+TEST(SessionControlTest, ADidRefusedInTheSessionIsDroppedAlone)
+{
+    static ecuio_request_engine e;
+    rotation_engine(&e, {kDid, kExtDid, kHeldDid});
+    ASSERT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
+    ecuio_engine_probe(&e, 0);
+    Ecu ecu;
+    const Responder respond = [&](const Bytes& q) {
+        return holds_back(ecu, q);
+    };
+    int64_t now = 0;
+    const std::vector<Bytes> sent = steps(&e, 0, &now, respond, 60);
+    ASSERT_LT(now, ECUIO_ENGINE_LOSS_WINDOW_US);
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
+    EXPECT_EQ(count_of(sent, {0x10, 0x03}), 2u);
+    EXPECT_EQ(e.chans[0].session_entries, 2u);
+    EXPECT_EQ(e.chans[0].session_lost, 0u);
+    const int held = index_of(e, kHeldDid);
+    ASSERT_GE(held, 0);
+    EXPECT_EQ(e.requests[held].dropped, ECUIO_DROP_ACCESS);
+    EXPECT_EQ(e.requests[held].nrc, 0x7F);
+    EXPECT_EQ(e.requests[index_of(e, kDid)].dropped, 0);
+    EXPECT_EQ(e.requests[index_of(e, kExtDid)].dropped, 0);
+    EXPECT_EQ(count_of(sent, {0x22, kHeldDid >> 8, kHeldDid & 0xFF}), 2u);
+    /* the extended-only DID still reads in the session */
+    EXPECT_GE(count_of(sent, {0x22, kExtDid >> 8, kExtDid & 0xFF}), 20u);
+    ecuio_channel_support_t s;
+    ecuio_engine_support(&e, 0, &s);
+    EXPECT_EQ(s.session, ECUIO_SESSION_EXTENDED);
+    EXPECT_EQ(s.session_lost, 0u);
+}
+
+/* The session-loss rule stands for a module whose reads all refuse once
+ * it leaves the session: the same DID refused at each loss, but answered
+ * after each re-entry, is a loss each time, and the bound abandons it */
+TEST(SessionControlTest, AModuleWhoseReadsAllRefuseStillFallsBack)
+{
+    static ecuio_request_engine e;
+    constexpr uint16_t kA = 0xD110;
+    constexpr uint16_t kB = 0xD111;
+    constexpr uint16_t kC = 0xD112;
+    rotation_engine(&e, {kA, kB, kC});
+    ASSERT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
+    /* in the session, out of it after three reads: with three DIDs in
+     * turn and the refused one asked first once back in, A is the read
+     * refused each time, and answered in between */
+    bool in = false;
+    int answered = 0;
+    const Responder leaves = [&](const Bytes& q) -> Bytes {
+        if (q.size() == 2 && q[0] == 0x10) {
+            in = q[1] == 0x03;
+            answered = 0;
+            return {0x50, q[1], 0x00, 0x32, 0x01, 0xF4};
+        }
+        if (q.size() == 3 && q[0] == 0x22) {
+            if (!in) {
+                return {0x7F, 0x22, 0x7F};
+            }
+            if (++answered == 3) {
+                in = false;
+            }
+            return {0x62, q[1], q[2], 0x01};
+        }
+        return {0x7F, q.empty() ? uint8_t{0} : q[0], 0x11};
+    };
+    int64_t now = 0;
+    const std::vector<Bytes> sent = steps(&e, 0, &now, leaves, 40);
+    ASSERT_LT(now, ECUIO_ENGINE_LOSS_WINDOW_US);
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ABANDONED);
+    EXPECT_EQ(e.chans[0].session_nrc, 0x7F);
+    EXPECT_EQ(count_of(sent, {0x10, 0x03}), ECUIO_SESSION_LOSSES_MAX);
+    EXPECT_EQ(e.chans[0].session_lost, ECUIO_SESSION_LOSSES_MAX - 1);
+}
+
+/* With the probe off nothing drops: the DID kept to another session is
+ * asked on in each sweep, its own answer each time, and its loss is given
+ * back once, never again for a later loss */
+TEST(SessionControlTest, ADidRefusedInTheSessionWithTheProbeOffCostsOneEntry)
+{
+    static ecuio_request_engine e;
+    rotation_engine(&e, {kDid, kHeldDid});
+    ASSERT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
+    Ecu ecu;
+    const Responder respond = [&](const Bytes& q) {
+        return holds_back(ecu, q);
+    };
+    int64_t now = 0;
+    std::vector<Bytes> sent = steps(&e, 0, &now, respond, 40);
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
+    EXPECT_EQ(count_of(sent, {0x10, 0x03}), 2u);
+    EXPECT_EQ(e.chans[0].session_lost, 0u);
+    EXPECT_GE(count_of(sent, {0x22, kHeldDid >> 8, kHeldDid & 0xFF}), 10u);
+    EXPECT_EQ(e.requests[index_of(e, kHeldDid)].dropped, 0);
+    /* a real loss (S3 run out) counts, and the DID's next refusals take
+     * nothing from it */
+    now = e.chans[0].last_sent_us + ECUIO_ENGINE_S3_US;
+    sent = steps(&e, 0, &now, respond, 20);
+    EXPECT_EQ(count_of(sent, {0x10, 0x03}), 1u);
+    EXPECT_GE(count_of(sent, {0x22, kHeldDid >> 8, kHeldDid & 0xFF}), 5u);
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
+    EXPECT_EQ(e.chans[0].session_lost, 1u);
+}
+
+/* As many held DIDs as the bound, each between answered ones: each is
+ * asked again first once back in, so each drops alone before the next
+ * refusal can add to the window's losses */
+TEST(SessionControlTest, SeveralHeldDidsEachDropAlone)
+{
+    static ecuio_request_engine e;
+    rotation_engine(
+        &e, {0xD110, kHeldDid, 0xD111, kHeldDid + 1, 0xD112, kHeldDid + 2});
+    ASSERT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
+    ecuio_engine_probe(&e, 0);
+    Ecu ecu;
+    const Responder respond = [&](const Bytes& q) {
+        return holds_back(ecu, q);
+    };
+    int64_t now = 0;
+    const std::vector<Bytes> sent = steps(&e, 0, &now, respond, 40);
+    ASSERT_LT(now, ECUIO_ENGINE_LOSS_WINDOW_US);
+    EXPECT_EQ(e.chans[0].session_step, ECUIO_SESSION_STATE_ENTERED);
+    EXPECT_EQ(count_of(sent, {0x10, 0x03}), 4u);
+    EXPECT_EQ(e.chans[0].session_lost, 0u);
+    for (uint16_t k = 0; k < 3; ++k) {
+        const int held = index_of(e, static_cast<uint16_t>(kHeldDid + k));
+        ASSERT_GE(held, 0);
+        EXPECT_EQ(e.requests[held].dropped, ECUIO_DROP_ACCESS) << k;
+        const int read = index_of(e, static_cast<uint16_t>(0xD110 + k));
+        ASSERT_GE(read, 0);
+        EXPECT_EQ(e.requests[read].dropped, 0) << k;
+    }
+}
+
+/* A focus's sweep counts each row once: the read a lost session refused
+ * and the one asked again after the entry are one ask, so the sweep
+ * holds until the row after it has been asked too */
+TEST(SessionControlTest, AReadAskedAgainAfterAnEntryCountsOnceTowardTheSweep)
+{
+    static ecuio_request_engine e;
+    rotation_engine(&e, {0xD110, 0xD111, 0xD112});
+    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {1, 1, 1};
+    ecuio_engine_focus(&e, keep, 1000 * kMs);
+    ASSERT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
+    Ecu ecu;
+    bool lost = false;
+    const Responder respond = [&](const Bytes& q) -> Bytes {
+        if (lost && q.size() == 3 && q[0] == 0x22) {
+            lost = false;
+            return {0x7F, 0x22, 0x7F};
+        }
+        return holds_back(ecu, q);
+    };
+    int64_t now = 0;
+    std::vector<Bytes> sent = steps(&e, 0, &now, respond, 4); /* one sweep */
+    ASSERT_EQ(sent.size(), 4u);
+    ASSERT_TRUE(is(sent[0], {0x10, 0x03}));
+    now = e.chans[0].next_sweep_us; /* the next sweep's time */
+    sent = steps(&e, 0, &now, respond, 1);
+    ASSERT_EQ(sent.size(), 1u);
+    ASSERT_TRUE(is(sent[0], {0x22, 0xD1, 0x10}));
+    lost = true; /* the ECU leaves the session before the second read */
+    sent = steps(&e, 0, &now, respond, 4);
+    ASSERT_EQ(sent.size(), 4u);
+    EXPECT_TRUE(is(sent[0], {0x22, 0xD1, 0x11}));
+    EXPECT_TRUE(is(sent[1], {0x10, 0x03}));
+    EXPECT_TRUE(is(sent[2], {0x22, 0xD1, 0x11}));
+    EXPECT_TRUE(is(sent[3], {0x22, 0xD1, 0x12}));
+    EXPECT_EQ(e.chans[0].session_lost, 1u);
+}

@@ -164,7 +164,7 @@ extended session. The generation moves with each change, so the
 publish that support already does carries it.
 
 - **havne-cli (schema 1, grows):** a `session` line per module when its
-  state, code or counts change, `{"type":"session","ecu":"7E8","asked":"03",
+  state, code or counts change, `{"type":"session","ecu":"0x7E8","asked":"03",
   "session":"03","state":"entered","nrc":null,"entries":1,"lost":0}`
   (`state` in words: `entering`, `entered`, `refused`, `unanswered`,
   `abandoned`; `nrc` a hex byte or null), and the `scan` line gains
@@ -222,3 +222,52 @@ knob's code (`ECUIO_FAKE_SESSION_NRC`, default 0x12).
   module refusing or misbehaving.
 - A module that answers `7F 22 7F` to a DID it holds back for more than
   the session costs one re-entry before the DID drops.
+
+## Appendix: a DID refused alone in the session (2026-11-10)
+
+This amends section 2's "A lost session is entered again" and "A bound
+on re-entry". A module may keep a DID to another session (programming,
+or a manufacturer's own) and answer it `7F 22 7F` while its other DIDs
+read in the extended session. Section 2 took that refusal, once other
+reads had answered, as a lost session each time it came round, so one
+such DID abandoned its whole module's session within three sweeps.
+
+- **The refused request goes first once back in.** After a re-entry,
+  the request the 7E or 7F answered is asked again before the channel's
+  next one: a one-shot as before, and now a rotation request too (its
+  class's cursor goes back to it; a focus's sweep counts it once).
+- **Refused again before it has answered, it is its own answer.** Each
+  channel keeps the request whose refusal made the last re-entry. The
+  same code from that request again, before it has answered positively,
+  is the request's answer whatever else answered between: with the
+  probe on it drops (`ECUIO_DROP_ACCESS`), and the loss its first refusal
+  counted is given back once, so `session_lost` and the window's count
+  each fall by one. Its first refusal still costs one `10 03`, as the
+  Consequences say.
+- **A loss stays a loss.** A 7E or 7F from any other request, or from
+  that request after it has answered, is a lost session as section 2
+  says. A module whose reads all refuse once it leaves the session, and
+  answer again once it is entered, still meets the bound and is
+  abandoned.
+- **7E** is judged the same way, but drops nothing (ADR-0015 section 4
+  drops 0x7F, not 0x7E): a request refused 7E alone stays in turn, its
+  own answer each time, with no loss counted.
+- **With the probe off** nothing drops, and the remembered request is
+  one per channel: one DID kept to another session is its own answer in
+  every sweep after the first, but two or more take turns as the one
+  remembered, and each such DID then costs one `10 03` per sweep. None
+  of them counts toward the bound.
+
+`SessionControlTest.ADidRefusedInTheSessionIsDroppedAlone`,
+`.SeveralHeldDidsEachDropAlone`,
+`.ADidRefusedInTheSessionWithTheProbeOffCostsOneEntry`,
+`.AModuleWhoseReadsAllRefuseStillFallsBack` and
+`.AReadAskedAgainAfterAnEntryCountsOnceTowardTheSweep` pin it, at the
+unit tier only: no car has answered `7F 22 7F` in the session yet.
+
+## Appendix: the close's line (2026-11-10)
+
+Section 6's Disconnect line for a module that entered reads "returning to the
+default session (10 01)", written as the close starts: the `10 01` goes out
+on core's teardown thread, which the bridge can't see, so the line says what
+the close is about to do and not that it did.

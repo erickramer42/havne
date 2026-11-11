@@ -18,6 +18,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -191,6 +192,50 @@ inline void fixture_line(Line& l, const char* file, const char* variant,
         l.key("why");
         l.string(why, std::strlen(why));
     }
+    l.ch('}');
+}
+
+// The oldest core that reads a signal file's "gauge" (ADR-0051)
+constexpr uint16_t kGaugeCore[3] = {0, 7, 2};
+
+// Whether a plugin whose data files use "gauge" (uses_gauge) declares
+// a requires.core (ecuio_plugin_requires_core's X, Y, Z) older than
+// kGaugeCore: an older core passes the manifest's check, then refuses
+// those files
+inline bool gauge_needs_newer_core(const uint16_t declared[3], bool uses_gauge)
+{
+    if (!uses_gauge) {
+        return false;
+    }
+    for (int i = 0; i < 3; ++i) {
+        if (declared[i] != kGaugeCore[i]) {
+            return declared[i] < kGaugeCore[i];
+        }
+    }
+    return false;
+}
+
+// {"type":"requires_core", declared, needs, warning}, written before
+// checked when gauge_needs_newer_core
+inline void requires_core_line(Line& l, const uint16_t declared[3])
+{
+    char version[24];
+    std::snprintf(version, sizeof version, "%u.%u.%u", unsigned{declared[0]},
+                  unsigned{declared[1]}, unsigned{declared[2]});
+    l.raw("{\"type\":\"requires_core\"");
+    l.key("declared");
+    l.string(version, std::strlen(version));
+    std::snprintf(version, sizeof version, "%u.%u.%u", unsigned{kGaugeCore[0]},
+                  unsigned{kGaugeCore[1]}, unsigned{kGaugeCore[2]});
+    l.key("needs");
+    l.string(version, std::strlen(version));
+    l.key("warning");
+    const std::string why =
+        std::string("the data files use \"gauge\", which core reads from ") +
+        version + " on: raise the manifest's \"requires\" core to " + version +
+        ", so an older Havne names that version instead of refusing a "
+        "signal file";
+    l.string(why.c_str(), why.size());
     l.ch('}');
 }
 

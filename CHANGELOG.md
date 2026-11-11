@@ -11,6 +11,115 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-11
+
+### Added
+
+- The Recordings viewer's Export panel has a Cancel button while an export runs:
+  it stops at once and leaves nothing half written.
+- A Light look, dark text on white for reading the screen in sun, chosen
+  on Settings' Display page. Night still shows over it when it's on, and on
+  Android the status and navigation bar icons turn dark to match.
+- A signal file can give a signal a gauge: its range and its low and high
+  warning levels, in the signal's own unit. `havne-cli` and the Python
+  package report it; the app's dials don't read it yet. A file that uses
+  it needs Havne 0.7.2 or later. The C API adds `ecuio_signal_file_gauge`
+  (an `ecuio_signal_gauge_t`) and `ecuio_plugin_requires_core`.
+- The demo connection (`mock://`) reads a battery voltage: about 12.45 V
+  with the key on, a dip while the engine cranks, and the alternator's
+  14.1-14.6 V once it runs. A Dashboard gauge added for Battery Voltage
+  on the demo or on an OBD-II connection reads on the other too. A battery
+  gauge added before 0.7.2 reads only on the connection it was added on,
+  until its signal is chosen again.
+- Dashboard: the gauge's panel (a long press, or a tap in edit mode) has
+  Remove; Undo brings the gauge back.
+- Dashboard: Undo and Redo in edit mode, at the start of the bar, back to
+  the first change since Edit (at most 50 steps). On the desktop Ctrl+Z
+  undoes and Ctrl+Shift+Z or Ctrl+Y redoes, in edit mode or out of it. A
+  change made from a gauge's panel outside edit mode shows a line for 5
+  seconds with Undo, and Edit then Undo takes it back too. A run of steps
+  on one control (a stepper held, a switch flipped) is one Undo.
+- Dashboard: a gauge whose value has stopped updating says "no new data"
+  beside its dimmed value.
+- Python: `havne.export_pcapng`, `export_csv`, `export_folder`,
+  `estimate_csv` and `health_report` write what `havne-cli export` and
+  `health` write, and `Session.health_report` writes a connected car's
+  report. Each long call stops on `cancel=` or Ctrl+C with nothing left
+  behind. `Plugin.requires_core` gives the core a plugin needs as
+  (major, minor, patch).
+- A user guide, task by task ([docs/user-guide.md](docs/user-guide.md)),
+  and a reference of every address and option, each with its default and
+  an example ([docs/addresses.md](docs/addresses.md)).
+- Phone: a Log row at the end of Settings' list, showing the newest
+  activity line, opens the Log. A connect that fails, on Dash's list or
+  in Settings, offers Show log beside its words.
+
+### Changed
+
+- Dashboard: edit mode's remove box draws as a button, and stays inside a
+  short cell such as the shift lights.
+- Dashboard: the Number gauge has no status dot; a value that stops
+  updating dims and says so, as on every other kind.
+- Dashboard on the desktop: the gauges sit on one panel with hairlines
+  between them, as on the phone, and a short gauge fills the empty space
+  under it. The pages are tabs on the panel's upper edge, with a "+" tab in
+  edit mode; a long row of tabs scrolls sideways, by the wheel too. Edit
+  mode's "Pages" button reads "Page".
+- Dashboard: the built-in layouts show Boost, Lambda and Battery in place of
+  Throttle and Engine load, and on the desktop leave no empty square at 5 or
+  8 columns. Boost reads on the demo (`mock://`) only until a later version;
+  a layout you've edited keeps its gauges.
+- Dashboard: Paste is in the "+" cell, beside the "+" while a gauge is
+  copied, and no longer on the bar. Done is at the bar's end, and on a
+  narrow screen Add gauge reads "Add".
+- Drive view: the gauges fill the screen, and a tap brings the controls up
+  from the bottom with the tab bar, leaving the top row and the status line
+  in view. Start log, Stop log, Mark and Disconnect are there too, so the
+  view no longer shows the top bar.
+- Dash's connect list on a phone, and the desktop's Home, which is now the
+  same list, show your paired and plugged-in adapters beside the recent
+  addresses, so a first connect takes a tap or two. On a phone, Bluetooth's
+  permission is asked only when you tap Allow there.
+- Home on the desktop shows the session once connected, with Dashboard
+  and Disconnect. Its tachometer sweeps once when Home first shows, and
+  stops while Home is hidden or the app is in the background.
+- A button that can't be pressed yet, such as Connect while it connects,
+  draws as a dimmed ordinary button in every look, not as a gray block.
+- The recordings viewer opens onto a recording's chart and signals; what
+  applies to the whole recording (its info, Replay and Save report, the
+  decode choice, the baseline, Compare and the frames check) follows under
+  an "About this recording" heading. Maximized, its side view follows the
+  Values | Frames switch: Frames gives the frames table the page, Values the
+  chart.
+
+### Fixed
+
+- Holding a Dashboard gauge opens its menu even when the finger drifts a
+  little while it's held, as a thumb or a finger on a phone in a holder
+  does; dragging it to another place and back still changes nothing.
+- `havne-cli log` no longer ends a short replay with a values count of 0 (or
+  short) in its end line; the recording itself was always whole.
+- Quitting during an import or while the log viewer writes a health
+  report no longer waits for it to finish: it stops, and nothing half
+  made is left. `havne-cli import`, and `havne-cli health` over a recording, stop
+  cleanly on Ctrl+C, and Python's
+  `import_csv` and `import_candump` take a `cancel` and stop on Ctrl+C.
+  The C API adds `ecuio_import_with` and `ecuio_health_export_with`.
+- `havne-cli export`, `import` and `health` over a recording end at once
+  on a second Ctrl+C, with the interrupted end line and exit 1.
+- A Save report or an export on a phone that fails or is stopped, or can't
+  start, no longer leaves an empty document where you picked it. A temporary folder an import or a report
+  left behind is removed at the next start, as an export's was.
+- The C API's `ecuio_export` and `ecuio_export_with` leave `report` zeroed
+  but for `failed_class` when they fail or are canceled.
+- At night, the red Clear codes buttons on Diagnostics draw their words in
+  the page's color, so they stay readable.
+- Recordings on a phone: the signal list stops at five rows, so a swipe
+  above or below it scrolls the page.
+- The Log page on a phone has a back arrow, as Settings' pages have. In
+  developer mode its Activity | Frames switch sits under the title, so the
+  title row fits a narrow screen.
+
 ## [0.7.1] - 2026-11-10
 
 ### Added
@@ -1262,7 +1371,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/erickramer42/havne/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/erickramer42/havne/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/erickramer42/havne/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/erickramer42/havne/compare/v0.5.1...v0.6.0

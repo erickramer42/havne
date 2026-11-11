@@ -27,7 +27,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 
 ## What it does
 
-- **Live data:** a Dashboard built from eight kinds of gauge, Live's table and chart, and a Night mode in amber or red, on a schedule if you like; on a phone, a drive view with every bar hidden ([ADR-0057](docs/adr/0057-dashboards.md), [ADR-0059](docs/adr/0059-drive-view.md)).
+- **Live data:** a Dashboard built from eight kinds of gauge, Live's table and chart, a Light look for the sun and a Night mode in amber or red, on a schedule if you like; on a phone, a drive view with every bar hidden ([ADR-0057](docs/adr/0057-dashboards.md), [ADR-0059](docs/adr/0059-drive-view.md)).
 - **Adapters:** J2534 on Windows; ELM327 over serial, Bluetooth or WiFi, kept running in the background on Android; SocketCAN on Linux, asking so far on a virtual bus ([docs/linux.md](docs/linux.md)).
 - **Diagnose:** each ECU's stored, pending and permanent codes with titles, readiness, the freeze frame and an inspection verdict; a clear asks first and saves the report ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
 - **Profiles, chosen by the URI:** `obd2` polls every Service 01 reading the car supports, `uds-generic` the identifiers you name, `raw` logs frames ([ADR-0039](docs/adr/0039-full-service01-coverage.md)).
@@ -38,16 +38,29 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 - **`havne-cli` and Python:** any session as JSON lines or iterators, recordings viewed and exported offline, the simulated car served as an ELM327 adapter ([ADR-0031](docs/adr/0031-command-line-client.md), [ADR-0053](docs/adr/0053-python-bindings.md)).
 - **A simulated vehicle:** a modeled car through a cold start, pulls onto the limiter and a quarter mile, so every page runs with no hardware.
 
-| Dashboard | Live | Dashboard at night |
-|---|---|---|
-| [![The phone layout's Dashboard in a 2nd-gear pull at 6,252 rpm](docs/images/phone-dashboard-dark.png)](docs/images/phone-dashboard-dark.png) | [![Live on the test phone on the limiter: rpm, speed, MAF and lambda over a minute of the chart](docs/images/phone-live.png)](docs/images/phone-live.png) | [![The phone layout's Dashboard with Night on in red](docs/images/phone-dashboard-night.png)](docs/images/phone-dashboard-night.png) |
-| The phone layout in a 2nd-gear pull, the shift lights filling | Live on the test phone, on the rev limiter | Night in red, for a dark cabin |
+<table>
+<thead>
+<tr><th width="33%">Drive view</th><th width="33%">Codes</th><th width="33%">Dashboard at night</th></tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="docs/images/phone-drive-view.png"><img src="docs/images/phone-drive-view.png" alt="The phone layout's drive view: every bar hidden, the gauges filling the screen in a pull at 6,510 rpm" width="240"></a></td>
+<td><a href="docs/images/phone-codes.png"><img src="docs/images/phone-codes.png" alt="Codes on the test phone: the inspection verdict, the check-engine light, and stored, pending and permanent codes with their titles" width="240"></a></td>
+<td><a href="docs/images/phone-dashboard-night.png"><img src="docs/images/phone-dashboard-night.png" alt="The phone layout's Dashboard with Night on in red" width="240"></a></td>
+</tr>
+<tr>
+<td>The drive view: every bar hidden, the gauges filling the screen in a pull</td>
+<td>Reading and clearing codes on the test phone</td>
+<td>Night in red, for a dark cabin</td>
+</tr>
+</tbody>
+</table>
 
 ![Live on the desktop: rpm, speed, MAF and lambda through a 3rd-gear pull onto the limiter](docs/images/live.png)
 
 *Live on the desktop: a 3rd-gear pull onto the limiter, lambda swinging lean on each fuel cut.*
 
-Every page on the desktop and the phone, in each theme: [docs/screenshots.md](docs/screenshots.md).
+Every page on the desktop and the phone, in Dark and in Night's amber and red: [docs/screenshots.md](docs/screenshots.md).
 
 ## Architecture
 
@@ -118,12 +131,11 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Status
 
-v0.7.1, a more modern look, phone first, is the latest release. Next:
+v0.7.2, the Dashboard and signals finished, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.7.2 | The Dashboard and signals finished: the desktop's panel, undo, a Daylight look, gauge ranges from signal files, a short user guide |
-| v0.7.3-v0.10.0 | The analysis viewer; triggered logging and alerts; discovery of every module; the scan tool |
+| v0.7.3-v0.11.0 | The analysis viewer; triggered logging and alerts; the whole car through plugins; discovery of the whole bus; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known issues and the roadmap; [CHANGELOG.md](CHANGELOG.md) what each release changed.
@@ -132,6 +144,8 @@ v0.7.1, a more modern look, phone first, is the latest release. Next:
 
 | Document | What's in it |
 |---|---|
+| [docs/user-guide.md](docs/user-guide.md) | Using the app, task by task: connecting, live values, the Dashboard, logs, recordings, codes, vehicles, the drive view |
+| [docs/addresses.md](docs/addresses.md) | Every address form and option, with its default and an example |
 | [docs/architecture.md](docs/architecture.md) | How the parts fit together and why, and a map of the other docs |
 | [docs/adr/](docs/adr/README.md) | The architecture decision records |
 | [docs/testing.md](docs/testing.md) | Test tiers, what each test pins, and what isn't verified |

@@ -8,8 +8,11 @@
 # recording holding the variant's file as signals.json. Two threads
 # loading at once each read their own folder; a read that raises is a
 # file core can't read; a file is read no further than core's bound. A
-# packed plugin (one file, no read callback) loads too.
+# packed plugin (one file, no read callback) loads too. A folder plugin's
+# variants each give their own signal's gauge. A plugin names the core it
+# requires.
 
+import json
 import os
 import shutil
 import threading
@@ -58,6 +61,17 @@ def test_a_packed_plugin_loads_with_no_read_callback():
     assert p.id == "packed"
     assert p.variants == ["base"]
     assert oil_name(p) == "Oil Temp"
+
+
+def test_a_plugin_names_the_core_it_requires():
+    """requires.core as (major, minor, patch): the packed fixture's
+    manifest says 0.7.2, the example's is read from its own manifest"""
+    packed = havne.Plugin(os.path.join(ROOT, "tests", "fixtures", "plugins", "packed.json"))
+    assert packed.requires_core == (0, 7, 2)
+    folder = os.path.join(PLUGINS, "example-sim")
+    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as f:
+        said = json.load(f)["requires"]["core"]
+    assert havne.Plugin(folder).requires_core == tuple(int(n) for n in said.split("."))
 
 
 def copy_of_the_example(folder, plugin_id, oil_name):
@@ -161,3 +175,22 @@ def test_a_folder_with_no_plugin_is_refused(tmp_path):
         havne.Plugin(str(tmp_path))
     assert e.value.name == "INVALID_ARGUMENT"
     assert "manifest.json" in e.value.detail
+
+
+def test_a_plugin_says_a_variant_s_gauge(tmp_path):
+    signal = ('{"key": "oil", "name": "Oil", "read": {"service": "22", "number": "F40D"}, '
+              '"field": {"byte": 0}, "offset": -40, "unit": "degC"%s}')
+    (tmp_path / "manifest.json").write_text(
+        '{"havne_plugin": 1, "id": "gauged", "name": "Gauged", "version": "1.0.0", '
+        '"requires": {"core": "0.1.0"}, "source": {"name": "Havne\'s tests"}, '
+        '"tiers": ["data"], "ecus": [{"id": "pcm", "rx": "7E8"}], '
+        '"variants": [{"id": "plain", "files": ["a.json"]}, '
+        '{"id": "gauged", "files": ["b.json"]}]}')
+    (tmp_path / "a.json").write_text('{"havne_signals": 1, "signals": [%s]}' % (signal % ""))
+    (tmp_path / "b.json").write_text(
+        '{"havne_signals": 1, "signals": [%s]}'
+        % (signal % ', "gauge": {"min": 40, "max": 150, "warn_high": 130}'))
+    plugin = havne.Plugin(str(tmp_path))
+    assert plugin.gauge("oil") is None, "the first variant's, when none is named"
+    assert plugin.gauge("oil", "gauged") == havne.Gauge(40.0, 150.0, None, 130.0)
+    assert plugin.gauge("no_such_signal", "gauged") is None

@@ -98,11 +98,21 @@ ApplicationWindow {
     readonly property real barsShown: dashboardView.barsShown
 
     // Page indices, in the order of the sidebar and the stack
+    readonly property int homePage: 0
     readonly property int dashboardPage: 1
     readonly property int livePage: 2
     readonly property int logPage: 4
     readonly property int recordingsPage: 5
     readonly property int settingsPage: 6
+
+    // The tab bar's pages, in its order
+    readonly property var tabs: [
+        { label: qsTr("Dash"), page: dashboardPage },
+        { label: qsTr("Live"), page: livePage },
+        { label: qsTr("Codes"), page: 3 },
+        { label: qsTr("Recs"), page: recordingsPage },
+        { label: qsTr("Settings"), page: settingsPage }
+    ]
 
     function gotoPage(index) { stack.currentIndex = index }
     // The tab bar lists no Home: a phone opens on Dash, and a window
@@ -115,9 +125,20 @@ ApplicationWindow {
     // The page the one shown was reached from, for Back
     property int cameFrom: -1
     property int lastPage: 0
+    // Where Settings was reached from while the Log, opened from it, is up:
+    // the Log's way back must not make the Log what Settings goes back to
+    property int cameFromBeforeLog: -1
     onCurrentPageChanged: {
-        cameFrom = lastPage
+        const backFromLog = lastPage === logPage && currentPage === settingsPage
+                            && cameFrom === settingsPage
+        if (currentPage === logPage && lastPage === settingsPage)
+            cameFromBeforeLog = cameFrom
+        cameFrom = backFromLog ? cameFromBeforeLog : lastPage
         lastPage = currentPage
+        // Settings' Back leaving for the page that sent it survives a trip
+        // to the Log (Show log beside a refusal), and nothing else
+        if (settingsView && currentPage !== logPage && currentPage !== settingsPage)
+            settingsView.backLeaves = false
         // A hidden page can keep the key focus, and then Back reaches nothing
         if (Theme.mobile || testMobile)
             zoomRoot.forceActiveFocus()
@@ -158,7 +179,26 @@ ApplicationWindow {
         settingsView.showAdapters()
         gotoPage(settingsPage)
     }
-    // Dash's "Other address...": Back returns to Dash, not to Settings' list
+    // A connect list on screen: the ports, interfaces and Bluetooth adapters
+    // read again, Bluetooth's without asking for its permission
+    function listAdapters() {
+        settingsView.refreshDevices()
+        Bluetooth.refresh(false)
+    }
+    // Settings' Log row and Show log beside a failed connect: the Log at its
+    // newest line; Back returns to the page that asked
+    function openLog() {
+        logView.showActivityEnd()
+        gotoPage(logPage)
+    }
+    // The Log's back arrow goes where Back goes, and to Dash from no tab
+    readonly property var logBackTab: tabs.find(t => t.page === cameFrom) ?? tabs[0]
+    function logBack() {
+        if (logBackTab.page !== cameFrom || !goBack())
+            gotoPage(dashboardPage)
+    }
+    // A connect list's "Other address..." (Dash's, Home's): Back returns to
+    // that page, not to Settings' list
     function openConnectFromDash() {
         openConnect()
         settingsView.backLeaves = true
@@ -358,7 +398,8 @@ ApplicationWindow {
             spacing: 0
 
             // The bar's place in the column: the drive view gives it to the
-            // page, and the bar slides in over the gauges
+            // page and never shows the bar (its controls rise from the
+            // bottom in the page's sheet)
             Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: root.driving ? 0 : headerBar.height
@@ -368,8 +409,7 @@ ApplicationWindow {
                     objectName: "headerBar"
                     width: parent.width
                     height: Theme.toolBarHeight + zoomRoot.insetTop
-                    y: root.driving ? -height * (1 - root.barsShown) : 0
-                    visible: !root.driving || root.barsShown > 0
+                    visible: !root.driving
                     // The row below pads the inset itself; the style would pad it too
                     topPadding: 0
                     background: Rectangle {
@@ -562,10 +602,12 @@ ApplicationWindow {
                         HeaderButton {
                             objectName: "disconnectButton"
                             // Ending a session is quiet; Connect... is primary, unless
-                            // Dash shows its connect list, whose Connect is the primary
+                            // Dash or Home shows its connect list, whose Connect is the primary
                             flat: Bridge.connected || Bridge.disconnecting
                             highlighted: !flat && !(root.currentPage === root.dashboardPage
                                                     && dashboardView.connectShown)
+                                         && !(root.currentPage === root.homePage
+                                              && !Bridge.connected)
                             visible: !Bridge.logActive
                                      && (Bridge.connected || root.currentPage !== root.settingsPage)
                             // A teardown can take seconds with a wedged adapter; no
@@ -579,7 +621,6 @@ ApplicationWindow {
                         }
                     }
                 }
-                BarTouch { y: headerBar.y; width: headerBar.width; height: headerBar.height; visible: headerBar.visible }
             }
 
             RowLayout {
@@ -636,7 +677,14 @@ ApplicationWindow {
                     clip: true
                     HomePage {
                         objectName: "homePage"
-                        onConnectRequested: root.openConnect()
+                        recents: settingsView.connectUris
+                        vehicleUri: settingsView.vehicleUri
+                        adapters: settingsView.connectAdapters
+                        onConnectToUri: uri => settingsView.connectFromList(uri)
+                        onOtherAddressRequested: root.openConnectFromDash()
+                        onLogRequested: root.openLog()
+                        onListShown: root.listAdapters()
+                        onDashboardRequested: root.gotoPage(root.dashboardPage)
                     }
                     DashboardPage {
                         id: dashboardView
@@ -644,11 +692,14 @@ ApplicationWindow {
                         offlineUri: settingsView.offlineUri
                         connectUris: settingsView.connectUris
                         connectVehicleUri: settingsView.vehicleUri
+                        connectAdapters: settingsView.connectAdapters
+                        onConnectListShown: root.listAdapters()
                         onConnectToUri: uri => settingsView.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()
+                        onLogRequested: root.openLog()
                         driveHideMs: settingsView.driveHideMs
                         driveOrientation: settingsView.driveOrientation
-                        driveHeaderHeight: headerBar.height
+                        driveTabBarHeight: tabBar.height
                         driveInsetTop: zoomRoot.insetTop
                         driveInsetBottom: zoomRoot.insetBottom
                         driveLogTime: root.logTimeText(Bridge.logElapsedMs)
@@ -664,7 +715,13 @@ ApplicationWindow {
                         vehicles: settingsView.vehicles
                         onConnectRequested: root.openConnect()
                     }
-                    LogPage { objectName: "logPage" }
+                    LogPage {
+                        id: logView
+                        objectName: "logPage"
+                        backShown: root.isCompact
+                        backName: qsTr("Back to %1").arg(root.logBackTab.label)
+                        onBackRequested: root.logBack()
+                    }
                     RecordingsPage {
                         id: recordingsView
                         objectName: "recordingsPage"
@@ -676,6 +733,7 @@ ApplicationWindow {
                     SettingsPage {
                         id: settingsView
                         objectName: "settingsPage"
+                        onLogRequested: root.openLog()
                     }
                 }
             }
@@ -718,13 +776,7 @@ ApplicationWindow {
                     // The page decides the mark: on the Log no tab is marked, and
                     // TabBar's index at -1 leaves the last checked and deaf to a tap
                     Repeater {
-                        model: [
-                            { label: qsTr("Dash"), page: root.dashboardPage },
-                            { label: qsTr("Live"), page: 2 },
-                            { label: qsTr("Codes"), page: 3 },
-                            { label: qsTr("Recs"), page: root.recordingsPage },
-                            { label: qsTr("Settings"), page: root.settingsPage }
-                        ]
+                        model: root.tabs
                         delegate: TabButton {
                             id: btn
                             required property var modelData
@@ -795,6 +847,7 @@ ApplicationWindow {
     // The zoom level, for a moment after it changes
     Rectangle {
         id: zoomBadge
+        objectName: "zoomBadge"
         function show() { opacity = 1; zoomBadgeTimer.restart() }
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
@@ -802,7 +855,7 @@ ApplicationWindow {
         anchors.bottomMargin: 24
         width: zoomBadgeLabel.implicitWidth + 32
         height: 36
-        radius: 18
+        radius: Theme.radius
         color: Theme.elevatedLight
         border.color: Theme.outline
         opacity: 0

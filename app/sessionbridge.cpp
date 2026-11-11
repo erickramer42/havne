@@ -1961,6 +1961,10 @@ QVariantMap SessionBridge::gaugeSignals() const
          ids(ECUIO_MOCK_SIG_THROTTLE_ID, ECUIO_OBD2_SIG_THROTTLE_ID)},
         {QStringLiteral("load"),
          ids(ECUIO_MOCK_SIG_LOAD_ID, ECUIO_OBD2_SIG_ENGINE_LOAD_ID)},
+        {QStringLiteral("battery"),
+         ids(ECUIO_MOCK_SIG_BATTERY_V_ID, ECUIO_OBD2_SIG_BATTERY_V_ID)},
+        {QStringLiteral("lambda"),
+         ids(ECUIO_MOCK_SIG_LAMBDA_ID, ECUIO_OBD2_PID_SIG_ID(0x44, 0))},
     };
 }
 
@@ -4025,7 +4029,7 @@ QString SessionBridge::sessionReturnedText(const ecuio_channel_support_t& s)
     if (s.session_asked == 0 || s.session_entries == 0) {
         return QString();
     }
-    return QStringLiteral("ECU %1: returned to the default session (10 01)")
+    return QStringLiteral("ECU %1: returning to the default session (10 01)")
         .arg(hexId(s.rx_id));
 }
 

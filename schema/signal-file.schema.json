@@ -3,7 +3,7 @@
   "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/signal-file.schema.json",
   "title": "Havne signal file",
   "description": "A Havne signal file (format 1, ADR-0051): a set of your own signals, read from a module's replies or computed from other signals. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
-  "$comment": "The loader (core/src/signal_file.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets. The loader alone checks: \"havne_signals\" as the first key; a file's size (1 MiB) and its JSON's rules (duplicate keys, depth 32); lengths in UTF-8 bytes (a schema counts characters, so non-ASCII text can pass here and be refused there); whole numbers written with no fraction or exponent (1.0 and 1e0 are refused); the profile name made from \"name\" (\"user.\" and the name in lower case, other runs of characters one \"-\") at most 63 characters; ECU ids and rx IDs given once each, a tx of the same width as its rx, one ID width across the file's ECUs and the base set's (obd2's are 11-bit), at most 4 ECUs with the base set's, an rx shared with the base set sharing its tx too; a signal's \"ecu\" listed in \"ecus\", and an ECU for every signal that reads a reply; signal keys given once each; a field ending within a reply's 4096 bytes; an enum's raw values within its field's bits; an expression's grammar (+ - * /, parentheses, unary minus, decimal constants, signals by key), its inputs (signals of the file that are neither computed nor text, or obd2.<key> with \"extends\": \"obd2\"), at most 4 inputs, 16 constants, 16 operations and 16 levels of nesting; \"max_age\" naming only inputs its expression reads; the signal set's validator; at most 256 requests with the base set's.",
+  "$comment": "The loader (core/src/signal_file.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets. The loader alone checks: \"havne_signals\" as the first key; a file's size (1 MiB) and its JSON's rules (duplicate keys, depth 32); lengths in UTF-8 bytes (a schema counts characters, so non-ASCII text can pass here and be refused there); whole numbers written with no fraction or exponent (1.0 and 1e0 are refused); the profile name made from \"name\" (\"user.\" and the name in lower case, other runs of characters one \"-\") at most 63 characters; ECU ids and rx IDs given once each, a tx of the same width as its rx, one ID width across the file's ECUs and the base set's (obd2's are 11-bit), at most 4 ECUs with the base set's, an rx shared with the base set sharing its tx too; a signal's \"ecu\" listed in \"ecus\", and an ECU for every signal that reads a reply; signal keys given once each; a field ending within a reply's 4096 bytes; an enum's raw values within its field's bits; an expression's grammar (+ - * /, parentheses, unary minus, decimal constants, signals by key), its inputs (signals of the file that are neither computed nor text, or obd2.<key> with \"extends\": \"obd2\"), at most 4 inputs, 16 constants, 16 operations and 16 levels of nesting; \"max_age\" naming only inputs its expression reads; a gauge's min below its max, its levels within them and in order, and its range meeting what the signal's field can read; the signal set's validator; at most 256 requests with the base set's.",
   "type": "object",
   "required": ["havne_signals", "name", "source", "signals"],
   "properties": {
@@ -318,6 +318,37 @@
       "description": "The part of the car the signal belongs to; left out, other.",
       "enum": ["other", "engine", "air", "fuel", "oxygen sensors", "emissions", "vehicle", "electrical", "diagnostics"]
     },
+    "gauge": {
+      "title": "Gauge",
+      "description": "The range a dial shows for this signal and the levels it warns at, in the signal's own unit.",
+      "type": "object",
+      "required": ["min", "max"],
+      "properties": {
+        "min": {
+          "title": "Lowest",
+          "description": "The dial's lowest value, below max.",
+          "type": "number"
+        },
+        "max": {
+          "title": "Highest",
+          "description": "The dial's highest value.",
+          "type": "number"
+        },
+        "warn_low": {
+          "title": "Warn at or below",
+          "description": "Optional, within min and max, below warn_high.",
+          "type": "number"
+        },
+        "warn_high": {
+          "title": "Warn at or above",
+          "description": "Optional, within min and max.",
+          "type": "number"
+        },
+        "notes": { "$ref": "#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
+      "additionalProperties": false
+    },
     "plot": {
       "title": "Plot rank",
       "description": "The signal's place among those a chart plots first: 1 first, 0 (the default) unranked.",
@@ -395,6 +426,7 @@
         "decimals": { "$ref": "#/$defs/decimals" },
         "group": { "$ref": "#/$defs/group" },
         "plot": { "$ref": "#/$defs/plot" },
+        "gauge": { "$ref": "#/$defs/gauge" },
         "notes": { "$ref": "#/$defs/notes" }
       },
       "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },
@@ -484,6 +516,7 @@
         "decimals": { "$ref": "#/$defs/decimals" },
         "group": { "$ref": "#/$defs/group" },
         "plot": { "$ref": "#/$defs/plot" },
+        "gauge": { "$ref": "#/$defs/gauge" },
         "notes": { "$ref": "#/$defs/notes" }
       },
       "patternProperties": { "^x-": { "$ref": "#/$defs/tool" } },

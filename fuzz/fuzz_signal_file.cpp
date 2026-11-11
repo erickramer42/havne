@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <cmath>
 #include <string>
 
 namespace {
@@ -18,6 +19,33 @@ void check(bool ok)
 {
     if (!ok) {
         abort();
+    }
+}
+
+/* What any gauge the loader keeps must be: a dial for this def */
+void check_gauge(const ecuio_signal_gauge_t* g, const ecuio_signal_def_t& d)
+{
+    if (g == nullptr) {
+        return;
+    }
+    const bool computed = (d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0;
+    check(computed || d.kind == ECUIO_VALUE_UINT || d.kind == ECUIO_VALUE_INT);
+    check(std::isfinite(g->min) && std::isfinite(g->max) && g->min < g->max);
+    check((g->flags & ~(ECUIO_GAUGE_WARN_LOW | ECUIO_GAUGE_WARN_HIGH)) == 0);
+    check(g->reserved[0] == 0 && g->reserved[1] == 0 && g->reserved[2] == 0);
+    const bool low = (g->flags & ECUIO_GAUGE_WARN_LOW) != 0;
+    const bool high = (g->flags & ECUIO_GAUGE_WARN_HIGH) != 0;
+    check(low ? (std::isfinite(g->warn_low) && g->warn_low >= g->min &&
+                 g->warn_low <= g->max)
+              : g->warn_low == 0.0);
+    check(high ? (std::isfinite(g->warn_high) && g->warn_high >= g->min &&
+                  g->warn_high <= g->max)
+               : g->warn_high == 0.0);
+    check(!(low && high) || g->warn_low < g->warn_high);
+    double lo = 0.0;
+    double hi = 0.0;
+    if (ecuio_def_range(&d, &lo, &hi) == ECUIO_DECODE_OK) {
+        check(g->max >= lo && g->min <= hi);
     }
 }
 
@@ -62,6 +90,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     uint8_t payload[ECUIO_FRAME_DATA_MAX] = {};
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& d = set->defs[i];
+        check_gauge(ecuio_signal_file_gauge(a, &d), d);
         for (uint32_t k = 0; k < d.mux_length; ++k) {
             payload[d.mux_offset + k] =
                 static_cast<uint8_t>(d.mux_key >> (8u * (d.mux_length - 1u - k)));

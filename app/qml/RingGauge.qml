@@ -192,8 +192,9 @@ GaugeBase {
         Text {
             Accessible.ignored: true
             anchors.horizontalCenter: parent.horizontalCenter
-            visible: !gauge.hasValue && text !== ""
-            text: gauge.note
+            objectName: "gaugeNote"
+            visible: text !== ""
+            text: gauge.shownNote
             font.pixelSize: Math.max(9, gauge.rr * 0.12)
             color: Qt.alpha(Theme.textDim, 0.7)
         }

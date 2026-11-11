@@ -3,13 +3,16 @@
 Every page of Havne on the desktop and the phone, all on the simulated
 vehicle (`mock://demo`) in US units. Dark is the default look; Night
 dims it for a dark cabin in amber or red (Settings, Display). The
-README shows a few of these.
+gallery shows those looks on the Dashboard: Dark, Light (dark text on
+white, from Display's Look row) and Night in amber and red. The desktop's
+Dashboard is one panel with its pages as tabs, which these shots don't
+show. The README shows a few of these.
 
 - **Desktop:** the Windows app at 1280x800.
 - **Phone:** Live, Codes, the Log and Settings are from the test phone
-  (Android 16). The Dashboard is the phone layout with its built-in
-  default page, the same page drawn by the desktop build in the phone's
-  form at the phone's width.
+  (Android 16). The Dashboard and the drive view are the phone layout
+  with its built-in default page, the same page drawn by the desktop
+  build in the phone's form at the phone's width.
 
 ## Desktop
 
@@ -20,9 +23,9 @@ README shows a few of these.
 *A quarter mile on the warmed-up vehicle: the launch, each upshift, and
 coolant and oil climbing toward the fan's cut-in.*
 
-| Night, amber | Night, red |
-|---|---|
-| [![The Dashboard in Night's amber style in a 2nd-gear pull at 5,925 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 6,642 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
+| Light | Night, amber | Night, red |
+|---|---|---|
+| [![The Dashboard in the Light look in a 2nd-gear pull at 5,849 rpm](images/desktop-dashboard-light.png)](images/desktop-dashboard-light.png) | [![The Dashboard in Night's amber style in a 2nd-gear pull at 6,051 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 6,336 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
 
 ### Live
 
@@ -77,10 +80,23 @@ pulls, coolant and oil warming from the cold start.*
 
 | Dark | Night, amber | Night, red |
 |---|---|---|
-| [![The phone layout's Dashboard in a 2nd-gear pull at 6,252 rpm](images/phone-dashboard-dark.png)](images/phone-dashboard-dark.png) | [![The phone layout's Dashboard in Night's amber style at 5,359 rpm](images/phone-dashboard-amber.png)](images/phone-dashboard-amber.png) | [![The phone layout's Dashboard in Night's red style at 6,475 rpm](images/phone-dashboard-night.png)](images/phone-dashboard-night.png) |
+| [![The phone layout's Dashboard in a pull at 6,762 rpm](images/phone-dashboard-dark.png)](images/phone-dashboard-dark.png) | [![The phone layout's Dashboard in Night's amber style at 6,609 rpm](images/phone-dashboard-amber.png)](images/phone-dashboard-amber.png) | [![The phone layout's Dashboard in Night's red style at 6,568 rpm](images/phone-dashboard-night.png)](images/phone-dashboard-night.png) |
 
 *The phone's joined panel: the tach beside speed, coolant and oil, MAF
-with its trace, then intake air, load and throttle.*
+and boost with their traces, then intake air, battery and lambda.*
+
+### Dashboard in Light
+
+<a href="images/phone-dashboard-light.png"><img src="images/phone-dashboard-light.png" alt="The phone layout's Dashboard in the Light look at 6,517 rpm" width="240"></a>
+
+*Light: dark text on white, for the sun (Settings, Display, Look).*
+
+### Drive view
+
+<a href="images/phone-drive-view.png"><img src="images/phone-drive-view.png" alt="The phone layout's drive view: every bar hidden, the gauges filling the screen in a pull at 6,510 rpm" width="240"></a>
+
+*The drive view: the status line alone at the top and the panel filling
+the screen; a tap raises the controls from the bottom with the tab bar.*
 
 ### Live
 

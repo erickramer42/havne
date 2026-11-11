@@ -1,0 +1,6 @@
+{"schema": 1, "type": "start"}
+{"backend": "replay", "baud": 0, "channels": [], "profile": "user.gauged-extras", "protocol_id": 0, "replay": {"frames": 57, "loop": false, "span_ms": 1985, "speed_milli": 0}, "type": "session"}
+{"signals": [{"decimals": 0, "gauge": {"max": 130, "min": 40, "warn_high": 110}, "group": "Engine", "id": 30000, "name": "Coolant", "unit": "\u00b0C"}, {"decimals": 1, "gauge": {"max": 16, "min": 10, "warn_high": 15.25, "warn_low": 11.5}, "group": "Electrical", "id": 30001, "name": "Module Volts", "unit": "V"}, {"decimals": 1, "group": "Engine", "id": 30002, "name": "Load Share", "unit": "%"}, {"computed": true, "decimals": 2, "gauge": {"max": 8, "min": 5}, "group": "Electrical", "id": 30003, "name": "Half Volts", "unit": "V"}], "type": "signals"}
+{"ch": 0, "data": "41 42 34 12", "flags": 0, "id": "0x7E8", "t_us": 0, "type": "frame"}
+{"id": "0x7E8", "t_us": 0, "type": "values", "values": [{"id": 30001, "value": 13.33}, {"id": 30003, "value": 6.665}]}
+{"dropped_frames": 0, "dropped_values": 0, "frames": 1, "reason": "count", "type": "end"}

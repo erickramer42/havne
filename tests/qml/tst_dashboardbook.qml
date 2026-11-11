@@ -62,9 +62,10 @@ TestCase {
         return d
     }
 
+    // Boost has no key in Bridge.gaugeSignals: the demo's signal alone
     function refsOf(key) {
         const out = []
-        for (const r of Bridge.gaugeSignals[key])
+        for (const r of key === "boost" ? ["id:13001"] : Bridge.gaugeSignals[key])
             out.push(String(r))
         return out
     }
@@ -92,10 +93,11 @@ TestCase {
                 ["Speed", "digital", "speed", "km/h", [2, 6]],
                 ["Coolant", "digital", "coolant", degC, [2, 6]],
                 ["Oil temp", "digital", "oil", degC, [2, 6]],
-                ["MAF", "digital", "maf", "g/s", [6, 9]],
+                ["MAF", "digital", "maf", "g/s", [3, 9]],
+                ["Boost", "digital", "boost", "kPa", [3, 9]],
                 ["IAT", "digital", "iat", degC, [2, 6]],
-                ["Load", "digital", "load", "%", [2, 6]],
-                ["Throttle", "digital", "throttle", "%", [2, 6]]
+                ["Battery", "digital", "battery", "V", [2, 6]],
+                ["Lambda", "digital", "lambda", "\u03BB", [2, 6]]
             ] },
             { tag: "desktop", form: "desktop", count: 15, want: [
                 ["Shift lights", "shift-light", "rpm", "RPM", [12, 1]],
@@ -103,10 +105,11 @@ TestCase {
                 ["Vehicle speed", "analog", "speed", "km/h", [2, 8]],
                 ["Coolant", "ring", "coolant", degC, [1, 4]],
                 ["Oil temp", "ring", "oil", degC, [1, 4]],
+                ["Boost", "analog", "boost", "kPa", [1, 4]],
                 ["IAT", "digital", "iat", degC, [1, 4]],
                 ["MAF", "digital", "maf", "g/s", [1, 4]],
-                ["Throttle", "bar", "throttle", "%", [2, 2]],
-                ["Engine load", "bar", "load", "%", [2, 2]]
+                ["Lambda", "digital", "lambda", "\u03BB", [1, 4]],
+                ["Battery", "digital", "battery", "V", [1, 4]]
             ] }
         ]
     }
@@ -143,12 +146,54 @@ TestCase {
         compare(c[2].options, { from: 0, to: 260, majorStep: 20, minorStep: 10, peak: true })
         compare(c[3].options, { from: 0, to: 130, coldBelow: 60, warnFrom: 105, dangerFrom: 115 })
         compare(c[4].options, { from: 0, to: 160, coldBelow: 70, warnFrom: 125, dangerFrom: 140 })
-        compare(c[5].options, { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
+        // Vacuum to about 25 psi, the ends in kPa
+        compare(c[5].options, { caption: "Boost", from: -100, to: 200 })
+        compare(c[6].options, { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
                                 description: "Intake air temperature" })
         // No accent: blue means cold, nothing else
-        compare(c[6].options, { from: 0, to: 300, description: "Mass air flow" })
-        compare(c[7].options, { from: 0, to: 100, accent: "success" })
-        compare(c[8].options, { from: 0, to: 100 })
+        compare(c[7].options, { from: 0, to: 300, description: "Mass air flow" })
+        compare(c[8].options, { from: 0.5, to: 2, description: "Equivalence ratio" })
+        compare(c[9].options, { from: 10, to: 16 })
+    }
+
+    // No empty square on a grid of 5 columns (the desktop at 1280 x 800)
+    // or 8 (1920 x 1080), or the phone's 6 or 12: every square is covered
+    // by a cell as a joined panel draws it, and no dial or ring is stretched
+    // past its square, since it would draw the gauge with blank space around
+    function emptySquares(form, columns) {
+        const cells = DashboardBook.builtIn(form).pages[0].cells
+        const boxes = DashboardBook.place(cells, columns)
+        const drawn = DashboardBook.stretched(cells, boxes, columns)
+        const covered = {}
+        let stretchedRound = 0
+        cells.forEach((c, i) => {
+            if ((c.kind === "analog" || c.kind === "ring")
+                    && (drawn[i].w !== boxes[i].w || drawn[i].h !== boxes[i].h))
+                ++stretchedRound
+        })
+        let rows = 0
+        for (const b of drawn) {
+            rows = Math.max(rows, b.y + b.h)
+            for (let y = b.y; y < b.y + b.h; ++y)
+                for (let x = b.x; x < b.x + b.w; ++x)
+                    covered[x + "," + y] = true
+        }
+        let empty = 0
+        for (let y = 0; y < rows; ++y)
+            for (let x = 0; x < columns; ++x)
+                empty += covered[x + "," + y] ? 0 : 1
+        return empty + stretchedRound
+    }
+    function test_theBuiltInLayoutLeavesNoEmptySquare_data() {
+        return [
+            { tag: "desktop at 1280 x 800", form: "desktop", columns: 5 },
+            { tag: "desktop at 1920 x 1080", form: "desktop", columns: 8 },
+            { tag: "phone", form: "phone", columns: 6 },
+            { tag: "phone on its side", form: "phone", columns: 12 }
+        ]
+    }
+    function test_theBuiltInLayoutLeavesNoEmptySquare(data) {
+        compare(emptySquares(data.form, data.columns), 0)
     }
 
     // ---- Format 1, read and upgraded (ADR-0057's appendix on the six columns)
@@ -616,24 +661,28 @@ TestCase {
     function test_placementOfTheBuiltInLayouts() {
         const phone = DashboardBook.builtIn("phone").pages[0].cells
         const desktop = DashboardBook.builtIn("desktop").pages[0].cells
-        // Upright: the dial with its three readouts stacked beside it, a
-        // trace across, three readouts across
+        // Upright: the dial with its three readouts stacked beside it, two
+        // traces across, three readouts across
         compare(spots(DashboardBook.place(phone, 6)), [
             [0, 0, 6, 3], [0, 3, 4, 18], [4, 3, 2, 6], [4, 9, 2, 6], [4, 15, 2, 6],
-            [0, 21, 6, 9], [0, 30, 2, 6], [2, 30, 2, 6], [4, 30, 2, 6]])
+            [0, 21, 3, 9], [3, 21, 3, 9], [0, 30, 2, 6], [2, 30, 2, 6], [4, 30, 2, 6]])
         compare(spots(DashboardBook.place(phone, 12)), [
             [0, 0, 12, 3], [0, 3, 4, 18], [4, 3, 2, 6], [6, 3, 2, 6], [8, 3, 2, 6],
-            [4, 9, 6, 9], [10, 3, 2, 6], [10, 9, 2, 6], [10, 15, 2, 6]])
+            [4, 9, 3, 9], [7, 9, 3, 9], [10, 3, 2, 6], [10, 9, 2, 6], [10, 15, 2, 6]])
         compare(spots(DashboardBook.place(desktop, 12)), [
             [0, 0, 12, 1], [0, 1, 2, 8], [2, 1, 2, 8], [4, 1, 1, 4], [5, 1, 1, 4],
-            [6, 1, 1, 4], [7, 1, 1, 4], [8, 1, 2, 2], [10, 1, 2, 2]])
+            [6, 1, 1, 4], [7, 1, 1, 4], [8, 1, 1, 4], [9, 1, 1, 4], [10, 1, 1, 4]])
         // A desktop window narrowed keeps the desktop pages at fewer columns
         compare(spots(DashboardBook.place(desktop, 4)), [
             [0, 0, 4, 1], [0, 1, 2, 8], [2, 1, 2, 8], [0, 9, 1, 4], [1, 9, 1, 4],
-            [2, 9, 1, 4], [3, 9, 1, 4], [0, 13, 2, 2], [2, 13, 2, 2]])
-        // The rings and tiles beside the dials from 5 columns up
+            [2, 9, 1, 4], [3, 9, 1, 4], [0, 13, 1, 4], [1, 13, 1, 4], [2, 13, 1, 4]])
+        // The rings and the readouts beside the dials from 5 columns up; at 5,
+        // Battery, the last cell, lands under Oil temp
         compare(spots(DashboardBook.place(desktop, 6)).slice(3, 7), [
             [4, 1, 1, 4], [5, 1, 1, 4], [4, 5, 1, 4], [5, 5, 1, 4]])
+        compare(spots(DashboardBook.place(desktop, 5)).slice(3), [
+            [4, 1, 1, 4], [4, 5, 1, 4], [0, 9, 1, 4], [1, 9, 1, 4], [2, 9, 1, 4],
+            [3, 9, 1, 4], [4, 9, 1, 4]])
     }
 
     // Each cell goes to the first free block, so a later small cell fills

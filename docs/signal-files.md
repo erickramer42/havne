@@ -55,9 +55,10 @@ A walkthrough in the app, for a DID you don't know yet, with the
 `havne-cli` form of each step after it. Every step reads; none writes
 to the car.
 
-1. **Find what a module answers.** In Settings, under **What to read**,
-   pick **uds-generic (DIDs)**, and give the DID field a range, with the
-   module's reply ID before it for any module but the engine's:
+1. **Find what a module answers.** In Settings, Connection, under
+   **Profile**, pick **uds-generic (DIDs)**, and give the DID field a
+   range, with the module's reply ID before it for any module but the
+   engine's:
    `7E9:D800-D8FF`. Add `&scan=first` to the URI, so the range is asked
    before anything is polled, and connect. Each DID that answers joins
    Live as a row, `0x7E9 DID D8xx`, showing its reply's bytes in hex,
@@ -83,7 +84,7 @@ to the car.
    change the field or the scaling and read again. **Save** adds it to
    the vehicle's own file, `<vehicle> own`.
 4. **Read it in a session.** With the vehicle picked, its file is a
-   profile under **What to read** (`user.daily-driver-own` for the
+   profile under **Profile** (`user.daily-driver-own` for the
    vehicle "Daily driver"), and Live shows the signal by its name, in
    its unit. A signal the module refuses shows as refused, with the
    code by name ("Refused: requestOutOfRange (7F 22 31)").
@@ -202,6 +203,7 @@ Each entry of `signals` is one signal. A number read from a reply:
 | `decimals` | no | 0 to 3, how many Live shows |
 | `group` | no | The part of the car it reads, which Live and the viewer group by: `engine`, `air`, `fuel`, `oxygen sensors`, `emissions`, `vehicle`, `electrical` or `diagnostics`; left out, Other |
 | `plot` | no | 0 to 255: 0 not plotted when a session starts, otherwise its place among the signals that are, 1 first |
+| `gauge` | no | Number and computed signals: the range a dial shows and its warning levels (below) |
 
 A `key` is 1 to 31 of `a`-`z`, `0`-`9` and `_`, unique in the file,
 and an ECU's `id` the same. A group is spelled as the table lists it,
@@ -366,6 +368,44 @@ Any other unit (`%`, `V`, `rpm`, `ms`) loads, shows as written and
 never converts; `signals check` lists them, so a misspelled `kph`
 doesn't pass for `km/h`.
 
+### Gauges
+
+A number or computed signal can say how a dial should show it:
+
+```json
+"gauge": { "min": 40, "max": 130, "warn_low": 60, "warn_high": 110 }
+```
+
+| Key | Required | What it holds |
+|---|---|---|
+| `min`, `max` | yes | The dial's range, `min` below `max` |
+| `warn_low` | no | The level at or below which it warns, within the range |
+| `warn_high` | no | The level at or above which it warns, within the range, above `warn_low` |
+
+The numbers are in the signal's own `unit`, the ones its value has after
+`scale` and `offset`. A front end converts them as it converts the value
+([Units](#units)).
+
+A range may be wider than the field can read, or narrower. One that
+shares nothing with what the field can read is refused, since the needle
+could never move: the usual cause is numbers in another unit. A computed
+signal has no field, so its range isn't judged against one.
+
+`havne-cli` reports a gauge on the `signal_def` lines of `signals check`
+and `plugins check` and on the `signals` line of `stream`, and the Python
+package through `SignalFile.gauge(key)` and `Plugin.gauge(key)`. The
+app's dials don't read it: each still starts from the range the field
+decodes to.
+
+`gauge` needs Havne 0.7.2 or later; an older one refuses a file that uses
+it as a key it doesn't know, and loads every other file as before. A
+plugin whose data files use it names 0.7.2 or later in `requires.core`,
+so an older Havne says which version it needs. A recording made through
+such a file keeps the key in its `signals.json`, so an older Havne
+refuses that recording's scrubbed export too, its `signals.json` being a
+file it can't load. `havne-cli plugins check` says when a plugin's data
+files use `gauge` and its `requires.core` names an older version.
+
 ## Bounds
 
 | What | Bound |
@@ -406,7 +446,10 @@ A file is refused for:
   field, `bits` out of range); a text or hex field with `bits`; an
   `ecu` the file doesn't list; an enumeration's label too long; an
   `expr` that doesn't parse, names an input that doesn't exist, takes
-  a computed signal as an input, or passes 4 inputs or 16 operations.
+  a computed signal as an input, or passes 4 inputs or 16 operations;
+  a `gauge` on a text, hex or enumeration signal, whose `min` isn't below
+  its `max`, whose level is outside its range or out of order, or whose
+  range the field can't reach.
 - **A name, a unit or a label a spreadsheet would run as a formula:**
   one starting with `=`, `+`, `-`, `@`, a tab or a carriage return.
   Recordings are CSV, often opened in a spreadsheet
@@ -453,8 +496,8 @@ written, and `signals check` says it won't convert.
   adds a file to the picked vehicle. A file the loader refuses shows its
   words, and so does one whose profile another file makes already, in
   any vehicle: one profile names one file. Each file the vehicle has is
-  then a profile under **What to read**, named as the file's profile
-  (`?profile=user.daily-driver-extras`), and **Duplicate** copies the
+  then a profile under Connection's **Profile**, named as the file's
+  profile (`?profile=user.daily-driver-extras`), and **Duplicate** copies the
   vehicle's files with the rest of it. **Remove** takes a file from the
   vehicle. On an adapter (`j2534://`, `elm327://`), where **Default**
   reads `obd2`, a file that extends `obd2` takes its place: its button

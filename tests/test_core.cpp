@@ -1076,6 +1076,9 @@ constexpr float kMockBaroMax = 105.0f;
  * air, never under a closed throttle's most vacuum */
 constexpr float kMockBoostMin = kMockMapMin - kMockBaroMax;
 constexpr float kMockBoostMax = 0.0f;
+/* Battery voltage: the starter's deepest sag to a cold alternator's output */
+constexpr float kMockBatteryMin = 9.0f;
+constexpr float kMockBatteryMax = 14.8f;
 
 struct MockCapture {
     static constexpr size_t kMaxFrames = 20;
@@ -1164,6 +1167,10 @@ TEST(CoreTest, MockFramesDecodeAgainstMockSignalSet) {
             case ECUIO_MOCK_SIG_BARO_ID:
                 EXPECT_GE(val, kMockBaroMin);
                 EXPECT_LE(val, kMockBaroMax);
+                break;
+            case ECUIO_MOCK_SIG_BATTERY_V_ID:
+                EXPECT_GE(val, kMockBatteryMin);
+                EXPECT_LE(val, kMockBatteryMax);
                 break;
             default:
                 FAIL() << "unknown signal id in mock set: " << def.id;
@@ -1593,7 +1600,6 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
     DriveCycle dc;
     uint32_t steps = 0;
     double boost_lo = 1e9, boost_hi = -1e9;
-    uint32_t padded = 0;
     while (dc.loops < 3 && steps < ecuio_mock::ticks_for(1200.0f)) {
         dc.step();
         ++steps;
@@ -1628,6 +1634,9 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
                 phys = dc.baro_kpa;
                 baro = val;
                 break;
+            case ECUIO_MOCK_SIG_BATTERY_V_ID:
+                phys = dc.battery_v;
+                break;
             default: FAIL() << "unknown signal id in mock set: " << def.id;
             }
             worst_err[i] = std::fmax(worst_err[i], std::fabs(val - phys));
@@ -1637,10 +1646,7 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
         /* Boost as the wire's two whole kPa give it */
         boost_lo = std::fmin(boost_lo, map - baro);
         boost_hi = std::fmax(boost_hi, map - baro);
-        /* The padding to CAN FD's length, zero */
-        padded += (payload[14] != 0 || payload[15] != 0) ? 1u : 0u;
     }
-    EXPECT_EQ(padded, 0u) << "ticks whose padding wasn't zero";
     ASSERT_EQ(dc.loops, 3u) << "three loops never completed";
     EXPECT_GE(boost_lo, kMockBoostMin);
     EXPECT_LE(boost_hi, kMockBoostMax);
@@ -1685,6 +1691,10 @@ TEST(CoreTest, MockDriveCycleEveryTickRoundTripsThroughTheMockSet)
             EXPECT_GE(lo[i], kMockBaroMin);
             EXPECT_LE(hi[i], kMockBaroMax);
             break;
+        case ECUIO_MOCK_SIG_BATTERY_V_ID:
+            EXPECT_GE(lo[i], kMockBatteryMin);
+            EXPECT_LE(hi[i], kMockBatteryMax);
+            break;
         default:
             EXPECT_GE(lo[i], 0.0f);            EXPECT_LE(hi[i], 100.0f); break;
         }
@@ -1712,6 +1722,52 @@ void for_each_tick_of(Phase phase, F visit)
 }
 
 } // namespace
+
+TEST(CoreTest, MockBatteryDipsUnderTheStarterAndChargesOnceRunning)
+{
+    /* Key on, the battery alone near 12.4 V; the starter pulls it under
+     * 10 V and it settles under 10.5 V; the alternator then holds it
+     * between 13.7 and 14.8 V on every running tick from the warm-up to
+     * the end of the first loop */
+    float key_on_lo = 1e9f, key_on_hi = -1e9f;
+    for_each_tick_of(Phase::KeyOn, [&](const DriveCycle& dc) {
+        key_on_lo = std::fmin(key_on_lo, dc.battery_v);
+        key_on_hi = std::fmax(key_on_hi, dc.battery_v);
+    });
+    EXPECT_GE(key_on_lo, 12.3f);
+    EXPECT_LE(key_on_hi, 12.6f);
+
+    float crank_lo = 1e9f, crank_last = 0.0f;
+    for_each_tick_of(Phase::Start, [&](const DriveCycle& dc) {
+        if (!dc.running) {
+            crank_lo = std::fmin(crank_lo, dc.battery_v);
+            crank_last = dc.battery_v;
+        }
+    });
+    EXPECT_LT(crank_lo, 10.0f) << "the dip as the starter engages";
+    EXPECT_GE(crank_last, 9.5f);
+    EXPECT_LT(crank_last, 10.5f) << "still turning over, settled under 10.5 V";
+
+    /* The rest of the first loop, the pulls and the cruise included, from
+     * the warm-up on: the smoothing after the start is over by then */
+    float run_lo = 1e9f, run_hi = -1e9f;
+    uint32_t running_ticks = 0;
+    DriveCycle dc;
+    bool warm = false;
+    for (uint32_t i = 0; i < ecuio_mock::ticks_for(600.0f) && dc.loops == 0;
+         ++i) {
+        dc.step();
+        warm = warm || dc.phase == Phase::WarmUp;
+        if (warm && dc.running) {
+            run_lo = std::fmin(run_lo, dc.battery_v);
+            run_hi = std::fmax(run_hi, dc.battery_v);
+            ++running_ticks;
+        }
+    }
+    EXPECT_GT(running_ticks, ecuio_mock::ticks_for(60.0f)) << "the loop ran";
+    EXPECT_GE(run_lo, 13.7f);
+    EXPECT_LE(run_hi, 14.8f);
+}
 
 TEST(CoreTest, MockDriveCycleSignalsStayPhysical)
 {

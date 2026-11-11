@@ -312,3 +312,82 @@ phone, not in CI; iOS's have no device to run on.
 9. The Dash's connect list holds the recent addresses with one chosen;
    "Other address..." opens Settings' connect field.
 10. The "Tap for the controls" hint shows on the first three entries.
+
+## Appendix: the fill and the reveal from the bottom (2026-11-10)
+
+**The fill.** In the view the panel's row pitch is the larger of the
+page's own pitch and the smaller of twice the square pitch and the height
+under the status line divided by the page's rows: the panel reaches the
+screen's foot, a page of one short row stops at twice the square with the
+ground under it, and a page taller than the screen keeps its pitch and
+scrolls. It is a drawn height, as `stretched` is: the document's `h`
+never changes, and outside the view the square pitch stays.
+
+**The reveal.** A tap raises one sheet from the bottom edge with the tab
+bar, over the panel's foot; the top bar is not revealed and the tool row
+stays hidden. Upright the sheet holds the session's row (Start log, or the
+log's time and Stop log; Mark while Record sessions records; Disconnect,
+quiet, hidden while a log runs) over the view's (Exit drive and Reset
+peaks, quiet, and Night), Exit drive nearest the tabs; on its side, one
+row with the view's controls first. A log's notice heads the sheet. Its
+ground is `Theme.bg` with a hairline on its top edge, and a touch anywhere
+on it restarts the delay. A fault raises and holds it. The
+status line is never covered, so Stop log's "Log ended" shows at once.
+
+**Why the bottom:** a layout's top row is where a user puts what matters,
+the status line already sits at the top, and the bottom is where a thumb
+is. One row on top fit on its side but not upright (six controls past the
+three-button rule in 364 dp), and a panel that reflowed around the bars
+would move every gauge on each tap, in the driver's line of sight.
+
+This amends section 3: the header no longer comes down in the view, and
+the link pill's way to the Log is reached after Exit drive.
+
+## Appendix: the connect list's adapters and the desktop's Home (2026-11-10)
+
+Section 7's connect list gains what the machine or the phone can connect
+to, and the desktop's Home becomes the same list (`app/qml/ConnectList.qml`,
+used by Dash on the phone form and by Home), so section 7's "the phone
+form's alone" no longer holds.
+
+- **Two groups.** Recent, as section 7 has it, then Adapters: the J2534
+  interfaces by name, the serial ports, the CAN interfaces, and on the
+  phone the paired Bluetooth adapters and the last scan's BLE ones, as
+  Settings' Connection lists them (`connectAdapters`). Each row names its
+  kind ("J2534 adapter", "Serial port", "CAN interface", "Bluetooth",
+  "Bluetooth LE"). An adapter that is also a recent address (the same
+  address before its `?`) shows once, under Recent. At most six adapter
+  rows show; the rest, a WiFi adapter, a typed address and a profile are
+  "Other address...". In developer mode a Demo data row (`mock://demo`)
+  ends the group, as Settings' mock preset is.
+- **The chosen row:** a tapped row; else the picked vehicle's saved
+  address; else the newest recent; else the one adapter when there is
+  exactly one (the demo row doesn't count); else none, and Connect waits
+  under the line "Pick an adapter, then connect". With no row at all
+  Connect reads "Connect..." and opens Settings. The tap is
+  kept by the page that shows the list, since Dash makes the list again
+  each time it shows.
+- **Bluetooth's permission is never asked at launch.** Without it the
+  Adapters group says "Havne needs Android's permission to list paired
+  adapters" beside Allow, which asks on a tap (or opens Havne's page in
+  Android's settings once Android won't ask again). With it and nothing
+  paired, the group says where to pair one, beside Scan for a BLE
+  adapter. `Bluetooth.permission` ("granted", "denied", "undetermined",
+  or "unavailable" in a build without Bluetooth) is read without asking:
+  a list on screen reads the devices again and the permission with
+  `Bluetooth.refresh(false)`.
+- **A fresh phone with a paired adapter** connects in three taps on Dash
+  (Allow, Android's Allow, Connect, the one adapter being chosen); a
+  returning user's Connect is one.
+- **The desktop's Home** is the list in a column 560 wide under the
+  logo, the app's name and core version, with "Connect from here, or
+  from Settings > Connection to choose a profile" under it. With a
+  session the list gives way to the session's card: the link state, the
+  address, the profile, the vehicle and when it connected, then
+  Dashboard (secondary) and Disconnect (quiet); the logo stays above it.
+- **The logo's needle** sweeps to the redline and back once, the first
+  time Home shows (about 1.2 s), then follows a target through a spring:
+  blips a few seconds apart, of varied heights, rise stiffly and fall
+  off softly, and idle hunts a few r/min. It runs only while Home shows
+  and the app is active (`Qt.application.state`); `HomePage.animated`
+  holds it still for tests.

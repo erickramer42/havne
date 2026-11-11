@@ -7,8 +7,9 @@
 # force at a time, and finding a threshold's crossing or a marker. Times
 # are the recording's host_us, microseconds from its start. import_csv and
 # import_candump make a recording's folder from a logger's file
-# (ADR-0054, ecuio_import); guess_csv_map guesses a CSV's column map from
-# its header (ecuio_import_csv_guess), which import_csv uses without one.
+# (ADR-0054, ecuio_import_with), stopped by a cancel or a Ctrl+C with
+# nothing left made; guess_csv_map guesses a CSV's column map from its
+# header (ecuio_import_csv_guess), which import_csv uses without one.
 # read_frames reads its frames.csv back as recorded (ADR-0049's appendix
 # "frames read back").
 
@@ -19,6 +20,7 @@ from collections import namedtuple
 
 from . import _ecuio as e
 from ._core import check, lib, text, utf8
+from ._asks import _Asks
 from .errors import Error
 
 Signal = namedtuple("Signal", "index name unit kind samples lowest highest first_us last_us "
@@ -47,9 +49,11 @@ class Recording:
     """The recording in folder, opened once. With profile (a registered
     profile's name) or signals (a SignalFile), its values are decoded from
     its frames.csv through that set instead of read from signals.csv
-    (ecuio_recording_open_frames). A context manager."""
+    (ecuio_recording_open_frames). folder is the folder as given, as a str
+    (what the export functions take). A context manager."""
 
     def __init__(self, folder, profile=None, signals=None):
+        self.folder = str(folder)
         self._r = ctypes.POINTER(e.ecuio_recording_t)()
         if signals is not None and profile is not None:
             raise ValueError("a recording decodes through one set: profile or signals")
@@ -162,9 +166,11 @@ class Recording:
         return None if at.value == NONE else at.value
 
 
-def _import(options, folder):
+def _import(options, folder, cancel):
     report = e.ecuio_import_report_t()
-    check(lib.ecuio_import(ctypes.byref(options), ctypes.byref(report)), "ecuio_import")
+    asks = _Asks(cancel)
+    check(asks.run(lambda callback: lib.ecuio_import_with(
+        ctypes.byref(options), callback, None, ctypes.byref(report))), "ecuio_import_with")
     return Imported(folder, report.lines, report.frames, report.error_frames,
                     report.interfaces, report.values, report.columns_ignored,
                     report.utc_start_us or None, report.duration_us)
@@ -205,7 +211,7 @@ def guess_csv_map(path, time_unit=None):
     return GuessedMap(whole["map"], whole["notes"], report.flags, whole["columns"])
 
 
-def import_csv(path, folder, column_map=None, time_unit=None):
+def import_csv(path, folder, column_map=None, time_unit=None, cancel=None):
     """A logger's CSV at path made into a recording's folder (signals.csv
     and events.log) at folder, which must not exist yet, by column_map: a
     dict or its JSON text (ADR-0054's column map: the time column and each
@@ -213,7 +219,13 @@ def import_csv(path, folder, column_map=None, time_unit=None):
     guess_csv_map(path, time_unit) gives, taken as core wrote it; one whose
     time has no unit raises Error before anything is made. Returns an
     Imported; a refused file or map raises Error with core's words, leaving
-    nothing made."""
+    nothing made.
+    cancel, a callable taking no arguments, is asked on the calling
+    thread as core reads: true stops the import with Error
+    ECUIO_ERR_CANCELED. An exception it raises, or a Ctrl+C on the main
+    thread (KeyboardInterrupt), stops it at core's next ask and is raised
+    again. Stopped either way, nothing is left made; a Ctrl+C after the
+    import's last ask raises once the recording is whole."""
     if column_map is None:
         raw, report = _guessed(path, time_unit)
         if not report.flags & e.ECUIO_CSV_GUESS_TIME_UNIT_KNOWN:
@@ -238,20 +250,26 @@ def import_csv(path, folder, column_map=None, time_unit=None):
     o.in_path_utf8 = utf8(str(path))
     o.out_folder_utf8 = utf8(str(folder))
     o.column_map_utf8 = utf8(column_map)
-    return _import(o, str(folder))
+    return _import(o, str(folder), cancel)
 
 
-def import_candump(path, folder, interface=None):
+def import_candump(path, folder, interface=None, cancel=None):
     """A candump -L log at path made into a recording's folder (frames.csv
     and events.log) at folder, which must not exist yet; interface names
     the bus when the log holds several. Returns an Imported; a refused log
-    raises Error with core's words, leaving nothing made."""
+    raises Error with core's words, leaving nothing made.
+    cancel, a callable taking no arguments, is asked on the calling
+    thread as core reads: true stops the import with Error
+    ECUIO_ERR_CANCELED. An exception it raises, or a Ctrl+C on the main
+    thread (KeyboardInterrupt), stops it at core's next ask and is raised
+    again. Stopped either way, nothing is left made; a Ctrl+C after the
+    import's last ask raises once the recording is whole."""
     o = e.ecuio_import_options_t()
     o.format = e.ECUIO_IMPORT_CANDUMP
     o.in_path_utf8 = utf8(str(path))
     o.out_folder_utf8 = utf8(str(folder))
     o.interface_utf8 = None if interface is None else utf8(interface)
-    return _import(o, str(folder))
+    return _import(o, str(folder), cancel)
 
 
 def read_frames(folder, from_us=0, to_us=0, limit=None):

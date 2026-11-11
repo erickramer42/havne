@@ -16,6 +16,7 @@
 #include <QUrl>
 #include <QVariantMap>
 
+#include <atomic>
 #include <cstdint>
 
 #include "ecuio/recording.h"
@@ -46,5 +47,11 @@ QString healthSavedLine(const ecuio_health_report_t& report);
 // read the baseline named (the report says why not), words "" on success
 // and never a path, a
 // folder's name or a value; summary healthSummary's ("" on failure);
-// line the log's, in the same words
-QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url);
+// line the log's, in the same words. stop, when given, ends a report
+// from a recording's folder at core's next ask (ecuio_health_export_with),
+// with nothing written. A report that isn't written removes the document a
+// picker made at url when it is a provider's (not a local file, or
+// throughProvider, which a test sets)
+QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url,
+                              std::atomic<bool>* stop = nullptr,
+                              bool throughProvider = false);

@@ -59,6 +59,7 @@ TestCase {
     function cleanup() {
         Theme.compact = false
         Theme.dense = false
+        Theme.look = "dark"
         Theme.night = "off"
         Theme.nightStyle = "amber"
         Theme.nightFrom = "19:00"
@@ -161,6 +162,87 @@ TestCase {
         waitForPolish(column)
         compare(pastTheEdge(column, column, []).join("; "), "",
                 "nothing past the edge once connected")
+    }
+
+    SignalSpy {
+        id: logSpy
+        signalName: "logRequested"
+    }
+
+    // On the tab-bar form the list ends with the Log, its summary the
+    // newest activity line; a tap asks Main for the Log page, no subpage
+    function test_aLogRowOpensTheLogOnThePhone() {
+        Theme.compact = true
+        const page = createPage(true)
+        page.width = 384
+        logSpy.target = page
+        logSpy.clear()
+        compare(page.pageList[page.pageList.length - 1].key, "log", "last, after Advanced")
+        const row = () => find(find(page, "settingsList"), "settingsRow_log")
+        verify(row().visible, "the row shows")
+        const before = row()
+        compare(find(row(), "settingsRowSummary").text, "Ready.", "the Log's first line until another")
+        Bridge.logEvent("Connect failed: no reply from the adapter")
+        tryVerify(() => find(row(), "settingsRowSummary").text
+                        === "Connect failed: no reply from the adapter", 2000, "the newest line")
+        verify(row() === before, "a log line doesn't remake the list's rows")
+        tap(row())
+        compare(logSpy.count, 1, "the Log asked for")
+        compare(page.pageKey, "", "no subpage")
+        verify(find(page, "settingsListPage").visible, "the list stays")
+    }
+
+    // Beside the sidebar, which lists the Log, the row isn't there
+    function test_theLogRowIsHiddenBesideTheSidebar() {
+        const page = createPage(true)
+        verify(!Theme.compact, "the desktop form")
+        verify(page.pageList.every(p => p.key !== "log"), "no Log in the list")
+        compare(findChild(find(page, "settingsSideList"), "settingsRow_log"), null)
+    }
+
+    // A refusal's words have the Log beside them
+    function test_aRefusalOffersTheLog() {
+        const page = createPage()
+        logSpy.target = page
+        logSpy.clear()
+        const show = find(page, "errorShowLog")
+        verify(!show.visible, "no refusal, no Show log")
+        page.requestConnect("mock://demo?profile=no-such-profile")
+        tryVerify(() => find(page, "errorLabel").visible, 5000, "the refusal")
+        verify(show.visible, "Show log beside it")
+        tap(show)
+        compare(logSpy.count, 1, "the Log asked for")
+    }
+
+    // The connect lists offer the addresses Connection offers, no others:
+    // both read the same rows, so the URI, the title and the kind agree
+    function test_theConnectListsOfferConnectionsAddresses() {
+        const page = createPage()
+        page.j2534Devices = [{ vendorName: "Vendor X", architecture: "x64", dllPath: "C:/x.dll" }]
+        page.serialPorts = [{ name: "COM5", device: "" }]
+        page.canInterfaces = [{ name: "can0", kind: "can", up: true }]
+        page.bluetoothAdapters = [{ name: "", address: "00:11:22:33:44:55", kind: "bt" },
+                                  { name: "Scope", address: "AA:BB:CC:DD:EE:FF", kind: "ble" }]
+        compare(page.connectAdapters.map(a => a.uri), page.devices.map(d => d.base))
+        compare(page.connectAdapters.map(a => a.uri),
+                ["j2534://Vendor X", "elm327://COM5", "socketcan://can0",
+                 "elm327://bt:00:11:22:33:44:55", "elm327://ble:AA:BB:CC:DD:EE:FF"])
+        compare(page.connectAdapters.map(a => a.title),
+                ["Vendor X  (x64)", "COM5", "can0", "00:11:22:33:44:55", "Scope"])
+        compare(page.connectAdapters.map(a => a.kind),
+                ["J2534 adapter", "Serial port", "CAN interface", "Bluetooth", "Bluetooth LE"])
+    }
+
+    // A relay's refusal is not a connect's: the Log has nothing for it
+    function test_aRelayRefusalLeavesTheLogOut() {
+        const page = createPage()
+        const show = find(page, "errorShowLog")
+        page.requestConnect("mock://demo?profile=no-such-profile")
+        tryVerify(() => show.visible, 5000, "a connect's refusal offers the Log")
+        page.errorLabel.text = "Stop first"   // as SettingsAdapter's Relay writes its own
+        page.logExplains = false
+        verify(!show.visible, "no Show log beside the relay's words")
+        verify(page.errorLabel.text !== "")
     }
 
     // A URI isn't prose: no capital first letter, no predicted words
@@ -758,13 +840,39 @@ TestCase {
         compare(Theme.active, "nightRed")
     }
 
-    // A stored mode or style outside the lists reads as the default, and
-    // the buttons agree
+    // The Display page's Look buttons set Theme.look at once, the chosen
+    // one is chosen, and Night still wins over the look
+    function test_theLookButtonsSetTheLook() {
+        const page = createPage()
+        page.open("display")
+        for (const name of ["daylight", "dark"]) {
+            const b = find(page, "look_" + name)
+            verify(b.visible, name + " is offered")
+            b.clicked()
+            compare(Theme.look, name)
+            compare(Theme.active, name)
+            verify(b.checked, name + " is chosen")
+            verify(!find(page, "look_" + (name === "dark" ? "daylight" : "dark")).checked)
+        }
+        compare(find(page, "look_dark").text, "Dark")
+        compare(find(page, "look_daylight").text, "Light")
+        find(page, "night_on").clicked()
+        find(page, "look_daylight").clicked()
+        compare(Theme.active, "nightAmber", "Night over Light")
+        find(page, "night_off").clicked()
+        compare(Theme.active, "daylight")
+    }
+
+    // A stored mode, style or look outside the lists reads as the default,
+    // and the buttons agree
     function test_anUnknownNightValueHighlightsTheDefault() {
         const page = createPage()
         page.open("display")
         Theme.night = "nonsense"
         Theme.nightStyle = "nonsense"
+        Theme.look = "nonsense"
+        verify(find(page, "look_dark").checked, "Dark is shown as the look in use")
+        verify(!find(page, "look_daylight").checked)
         verify(find(page, "night_off").checked, "off is shown as the mode in use")
         verify(!find(page, "night_on").checked)
         verify(!find(page, "night_schedule").checked)
@@ -790,6 +898,10 @@ TestCase {
         from.editingFinished()
         compare(Theme.nightFrom, "20:30", "a valid time is stored")
         compare(problem.visible, false)
+        from.text = "25:00"
+        from.editingFinished()
+        compare(Theme.nightFrom, "20:30", "a bad From is refused")
+        compare(from.text, "20:30", "and the field shows the stored time again")
         until.text = "25:00"
         until.editingFinished()
         compare(Theme.nightUntil, "07:00", "a bad time is refused")
@@ -817,7 +929,7 @@ TestCase {
         compare(problem.visible, false, "the words went with the schedule")
     }
 
-    // The list's row says the night state
+    // The list's row says the night state, and the look when it isn't Dark
     function test_theDisplayRowSaysTheNightState() {
         const page = createPage()
         const summary = () => page.pageList.find(p => p.key === "display").summary
@@ -829,6 +941,11 @@ TestCase {
         compare(summary(), "100 % · metric · Night on, amber")
         Theme.night = "schedule"
         compare(summary(), "100 % · metric · Night scheduled 19:00 to 07:00")
+        Theme.night = "off"
+        Theme.look = "daylight"
+        compare(summary(), "100 % · metric · Light · Night off", "the look when it isn't Dark")
+        Theme.look = "dark"
+        compare(summary(), "100 % · metric · Night off")
     }
 
     // A preset or row of another scheme keeps the query's keys that
@@ -1324,26 +1441,10 @@ TestCase {
         compare(find(page, "connectButton").text, "Disconnect")
     }
 
-    // A restart gets back the last URI that connected and the Record
-    // switch. Recording is switched on only after the connects, so no
-    // session here records
-    // The mock is never kept, so the URI half needs the fake DLL
-    function test_theLastConnectedUriAndTheRecordSwitchComeBack() {
-        const fake = Harness.fakeDllPath === "" ? ""
-                   : "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
+    // A restart gets back the Record switch. Recording is switched on only
+    // after any connect, so no session here records
+    function test_theRecordSwitchComesBack() {
         let page = createPage()
-        const error = find(page, "errorLabel")
-        if (fake !== "") {
-            find(page, "uriField").text = fake + "&profile=raw"
-            press(page, "connectButton")
-            tryVerify(() => Bridge.connected, 10000, "the URI connects")
-            Bridge.disconnectSession()
-            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
-
-            find(page, "uriField").text = fake + "&profile=uds-generic"
-            press(page, "connectButton")
-            tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
-        }
         Bridge.recording = true
         verify(find(page, "recordBox").checked)
 
@@ -1353,13 +1454,36 @@ TestCase {
         Bridge.recording = false   // a fresh bridge starts with it off
 
         page = createPage()
-        if (fake !== "") {
-            compare(find(page, "uriField").text, fake + "&profile=raw",
-                    "the URI that connected, not the refused one")
-            verify(find(page, "profile_raw").checked, "read back into the row")
-        }
         verify(Bridge.recording, "the Record switch comes back")
         verify(find(page, "recordBox").checked)
+    }
+
+    // A restart gets back the last URI that connected, not a refused one.
+    // The mock is never kept, so this needs the fake DLL
+    function test_theLastConnectedUriComesBack() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const fake = "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
+        let page = createPage()
+        const error = find(page, "errorLabel")
+        find(page, "uriField").text = fake + "&profile=raw"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "the URI connects")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+
+        find(page, "uriField").text = fake + "&profile=uds-generic"
+        press(page, "connectButton")
+        tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
+
+        // The page's store writes when the page goes, as at a quit
+        page.destroy()
+        wait(10)
+
+        page = createPage()
+        compare(find(page, "uriField").text, fake + "&profile=raw",
+                "the URI that connected, not the refused one")
+        verify(find(page, "profile_raw").checked, "read back into the row")
     }
 
     function sameList(a, b, what) {

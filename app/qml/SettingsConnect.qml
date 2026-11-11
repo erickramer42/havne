@@ -16,6 +16,8 @@ ColumnLayout {
 
     property alias uriField: uriField
     property alias errorLabel: errorLabel
+    // Set where the words are a connect's refusal, which the Log explains
+    property bool logExplains: false
 
     Label {
         objectName: "sessionStatus"
@@ -76,6 +78,8 @@ ColumnLayout {
                 if (Bridge.connected) {
                     Bridge.disconnectSession()
                     errorLabel.visible = false
+                    root.logExplains = false
+                    errorLabel.text = ""
                 } else {
                     root.host.requestConnect(uriField.text)
                 }
@@ -83,13 +87,28 @@ ColumnLayout {
         }
     }
 
-    Label {
-        id: errorLabel
-        objectName: "errorLabel"
-        visible: false
-        color: Theme.danger
-        wrapMode: Text.WrapAnywhere
+    // A refusal's words, and the Log beside them: the moment it's wanted.
+    // The row follows the words: a child's visible reads false in a hidden row
+    RowLayout {
+        visible: errorLabel.text !== ""
         Layout.fillWidth: true
-        text: ""
+        spacing: Theme.spacing
+        Label {
+            id: errorLabel
+            objectName: "errorLabel"
+            visible: false
+            color: Theme.danger
+            wrapMode: Text.WrapAnywhere
+            Layout.fillWidth: true
+            text: ""
+        }
+        ThemedButton {
+            objectName: "errorShowLog"
+            visible: root.logExplains
+            flat: true
+            text: qsTr("Show log")
+            Layout.alignment: Qt.AlignTop
+            onClicked: root.host.logRequested()
+        }
     }
 }

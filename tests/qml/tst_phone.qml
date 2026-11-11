@@ -109,7 +109,8 @@ TestCase {
         return [{ tag: "homePage" }, { tag: "dashboardPage" },
                 { tag: "dashboardPhone" }, { tag: "dashboardPhoneCell" },
                 { tag: "dashboardPhoneAdd" }, { tag: "dashboardPhoneSignal" },
-                { tag: "dashboardPhoneReset" }, { tag: "livePage" },
+                { tag: "dashboardPhoneReset" }, { tag: "dashboardPhoneUndo" },
+                { tag: "livePage" },
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
                 { tag: "recordingsPage" }, { tag: "recordingsOpened" }, { tag: "recordingsViewer" },
                 { tag: "recordingsCompare" }, { tag: "recordingsImportCsv" },
@@ -134,7 +135,7 @@ TestCase {
         const importing = data.tag.startsWith("recordingsImport")
         // dashboardPage is the desktop form at a phone's width;
         // dashboardPhone* the phone's, in edit mode with each of its
-        // panels (none of which stores anything)
+        // panels, and outside it with the undo line (nothing left stored)
         const dashPhone = data.tag.startsWith("dashboardPhone")
         const name = data.tag === "logFrames" ? "logPage"
                    : viewer || importing ? "recordingsPage"
@@ -156,6 +157,11 @@ TestCase {
             } else if (data.tag === "dashboardPhoneReset") {
                 page.moreShown = true
                 page.confirmReset = true
+            } else if (data.tag === "dashboardPhoneUndo") {
+                page.stopEditing()
+                page.removeCell(1)
+                page.undo()
+                verify(find(page, "dashUndoLineUndo").visible, "the line with its Undo")
             }
         }
         if (data.tag === "logFrames")
@@ -405,6 +411,181 @@ TestCase {
         verify(right <= main.contentItem.width + 0.5,
                "the filter's options end at " + right + " of " + main.contentItem.width)
         bar.options.close()
+    }
+
+    // The test phone upright: a recording opens onto its chart, under the
+    // title row, and the rows that drive it start on the first screen;
+    // what's on it is a touch's size
+    function test_theViewersDataIsOnTheFirstScreen() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        const kept = page.chartHeight
+        page.chartHeight = -1
+        page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "obd2" })
+        const rows = find(page, "signalRows")
+        tryVerify(() => rows.visible && rows.itemAtIndex(0) !== null, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        try {
+            const scroll = find(page, "recordingsScroll")
+            compare(scroll.contentY, 0, "the page's top")
+            verify(!find(page, "recordingsHeader").visible, "no page heading while viewing")
+            const chart = find(page, "chartFrame")
+            const chartTop = chart.mapToItem(scroll, 0, 0).y
+            verify(chartTop <= 120, "the chart starts at " + chartTop)
+            verify(chart.height >= 248, "the chart is " + chart.height)
+            const first = rows.itemAtIndex(0)
+            const rowTop = first.mapToItem(scroll, 0, 0).y
+            const rowBottom = first.mapToItem(scroll, 0, first.height).y
+            verify(rowBottom <= scroll.height + 0.5,
+                   "the first row ends at " + rowBottom + " of " + scroll.height)
+            verify(rowTop > chartTop + chart.height, "under the chart")
+            for (const name of ["backToList", "exportButton", "zoomAll", "zoomOut", "zoomIn",
+                                "maximizeChart", "detailView_values", "detailView_frames"]) {
+                const item = find(page, name)
+                const top = item.mapToItem(main.contentItem, 0, 0).y
+                const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+                verify(item.visible && bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+                const right = item.mapToItem(main.contentItem, item.width, 0).x
+                verify(right <= main.contentItem.width + 0.5, name + " ends at " + right)
+            }
+            const back = find(page, "backToList")
+            compare(back.Accessible.name, "All recordings")
+            verify(back.mapToItem(main.contentItem, 0, 0).x < 24, "the back arrow at the left edge")
+        } finally {
+            page.chartHeight = kept
+        }
+    }
+
+    // A recording folder of twelve number signals, three samples each
+    function wideRecording(name) {
+        const folder = Harness.writeFramesRecording(name, 1, 100000)
+        verify(folder !== "", "the folder is made")
+        let header = "ecuio session recording, format 2 (ADR-0049)\n"
+                     + "started  2026-11-03 10:00:00.000 (local time)\n"
+                     + "utc  2026-11-03T16:00:00.000Z\ncore  0.3.6\n"
+                     + "uri  socketcan://vcan0?profile=raw\nprofile  raw\n"
+        let rows = "host_us,signal,value,unit\n"
+        for (let s = 1; s <= 12; ++s)
+            header += "signal  Signal " + s + ",number,V,0,0\n"
+        for (let t = 1; t <= 3; ++t) {
+            for (let s = 1; s <= 12; ++s)
+                rows += (t * 100000) + ",Signal " + s + "," + s + ",V\n"
+        }
+        header += "\n10:00:01.000  +1.000  end  havne-cli: seconds: 1 frames, 36 values, "
+                  + "0 records dropped, 0 notes dropped\n"
+        Harness.writeScratchFile(name + "/events.log", header)
+        Harness.writeScratchFile(name + "/signals.csv", rows)
+        return folder
+    }
+
+    // The test phone upright: twelve signals' rows stop at five, under
+    // 40 % of the screen, so there is always more page than list to swipe
+    function test_theViewersRowsStopAtFiveOnAPhone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Twelve", uri: "replay://x?profile=raw", source: "",
+                    folder: wideRecording("twelve-signals"), profile: "raw" })
+        const rows = find(page, "signalRows")
+        tryVerify(() => rows.visible && rows.count === 12, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const scroll = find(page, "recordingsScroll")
+        verify(rows.height <= 5 * page.rowHeight + 0.5,
+               "the rows are " + rows.height + " for rows of " + page.rowHeight)
+        verify(rows.height <= 0.4 * scroll.height + 0.5, "the rows are " + rows.height + " of " + scroll.height)
+        verify(rows.height >= 4 * page.rowHeight, "four rows show at least: " + rows.height)
+    }
+
+    // On its side the viewer gives the page to the view the switch names:
+    // Values the chart, Frames the table, and the switch leads the zoom
+    // row in both, so either leads back
+    function test_theSideViewFollowsTheSwitch() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 832
+        main.height = 384
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        const chart = find(page, "chartFrame")
+        tryVerify(() => chart.visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        verify(Theme.shortLayout && page.chartMaximized, "on its side the chart has the page")
+        const table = find(page, "viewerFrameTable")
+        const frames = find(page, "detailView_frames")
+        const values = find(page, "detailView_values")
+        const scroll = find(page, "recordingsScroll")
+        verify(!table.visible, "Values: no table")
+        verify(frames.visible, "the switch shows on its side")
+        verify(frames.mapToItem(scroll, 0, 0).y > chart.mapToItem(scroll, 0, 0).y + chart.height - 1,
+               "in the zoom row, under the chart")
+        tap(frames, frames.width / 2, frames.height / 2)
+        tryVerify(() => page.framesShown && table.visible, 2000, "Frames: the table")
+        verify(waitForPolish(main), "laid out")
+        verify(!chart.visible, "and no chart")
+        verify(page.chartMaximized, "still the side view")
+        tryVerify(() => find(table, "frameList").count > 0, 10000, "the rows")
+        const foot = table.mapToItem(scroll, 0, table.height).y
+        verify(foot >= scroll.height - Theme.pageMargin - 1 && foot <= scroll.height + 0.5,
+               "the table runs to the page's foot: " + foot + " of " + scroll.height)
+        verify(table.height >= 3 * Theme.touchTarget, "the table is " + table.height)
+        verify(values.visible && frames.mapToItem(scroll, 0, 0).y < table.mapToItem(scroll, 0, 0).y,
+               "the switch above the table")
+        tap(values, values.width / 2, values.height / 2)
+        tryVerify(() => !page.framesShown && chart.visible, 2000, "Values: the chart again")
+        verify(!table.visible, "no table")
+    }
+
+    // Upright on the narrowest phone, the maximized viewer's switch has a
+    // row of its own above the zoom row, which would otherwise push the
+    // page past the glass
+    function test_aNarrowMaximizedViewerKeepsTheSwitchInARow() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 320
+        main.height = 800
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        const chart = find(page, "chartFrame")
+        tryVerify(() => chart.visible, 10000, "the recording opens")
+        if (!page.chartMaximized)
+            page.toggleMaximized()
+        try {
+            verify(waitForPolish(main), "laid out")
+            const frames = find(page, "detailView_frames")
+            const zoom = find(page, "zoomAll")
+            verify(frames.visible, "the switch shows maximized")
+            verify(frames.mapToItem(main.contentItem, 0, frames.height).y
+                   <= zoom.mapToItem(main.contentItem, 0, 0).y + 0.5, "in a row above the zoom row")
+            const over = []
+            pastTheEdge(page, main.contentItem, over)
+            compare(over, [], "past the edge: " + over.join(", "))
+            tap(frames, frames.width / 2, frames.height / 2)
+            const table = find(page, "viewerFrameTable")
+            tryVerify(() => page.framesShown && table.visible && !chart.visible, 2000,
+                      "Frames: the table has the page")
+            verify(waitForPolish(main), "laid out")
+            pastTheEdge(page, main.contentItem, over)
+            compare(over, [], "past the edge in Frames: " + over.join(", "))
+        } finally {
+            page.detailView = "values"
+            if (page.chartMaximized)
+                page.toggleMaximized()
+        }
     }
 
     // The Import panel's preview on a phone: every control in it is a
@@ -791,9 +972,6 @@ TestCase {
         page.chartHeight = 300
         const chartSplitter = find(page, "chartSplitter")
         tryVerify(() => chartSplitter.visible, 2000, "the viewer's splitter shows")
-        // The name's own line on a phone pushes the splitter down: scroll to it
-        const scroll = find(page, "recordingsScroll")
-        scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
         verify(waitForPolish(main), "laid out")
         tap(chartSplitter, chartSplitter.width / 2 - 15, chartSplitter.height / 2)
         tap(chartSplitter, chartSplitter.width / 2 + 15, chartSplitter.height / 2)
@@ -994,8 +1172,8 @@ TestCase {
             Bridge.disconnectSession()
     }
 
-    // Edit mode's controls on the phone: each a touch target, the bar at
-    // most three buttons
+    // Edit mode's controls on the phone: each a touch target, the bar
+    // five buttons
     function test_thePhonesEditControlsAreTouchTargets() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
@@ -1014,8 +1192,8 @@ TestCase {
                    n + " is " + find(dash, n).height + " px tall")
         dash.startEditing()
         const bar = find(dash, "dashEditBar")
-        compare(Array.from(bar.children).filter(c => c.visible && c.objectName !== "").length, 3,
-                "three on the bar")
+        compare(Array.from(bar.children).filter(c => c.visible && c.objectName !== "").length, 5,
+                "five on the bar")
         const tall = names => {
             waitForRendering(main.contentItem)
             for (const n of names) {
@@ -1025,7 +1203,7 @@ TestCase {
                        n + " is " + item.height + " px tall")
             }
         }
-        tall(["dashDone", "dashAdd", "dashMore", "dashAddCell_0"])
+        tall(["dashUndo", "dashRedo", "dashAdd", "dashMore", "dashDone", "dashAddCell_0"])
         find(dash, "dashMore").clicked()
         // Move page left and right show only with pages to move among
         tall(["moreRename", "moreAddPage", "moreRemovePage", "moreReset"])
@@ -1042,15 +1220,60 @@ TestCase {
         dash.select(1)
         tall(["cellRemove", "panelClose", "panelLabel", "panelSignal", "panelFrom", "panelTo",
               "panelDecimals", "panelW", "panelH", "panelPeak", "panelEarlier", "panelLater",
-              "panelStart", "panelEnd", "panelCopy", "panelPaste"])
+              "panelStart", "panelEnd", "panelCopy", "panelPaste", "panelRemove"])
         dash.copySelected()
-        tall(["dashPaste"])
-        compare(pastTheEdge(find(dash, "dashEditBar"), main.contentItem, []).length, 0,
-                "Paste fits the edit bar")
+        tall(["dashAddCell_0", "dashPasteCell_0"])
         dash.startAdd()
         tall(["addClose", "addKind_analog", "addKind_digital"])
         dash.pickKind("analog")
         tall(["signalBack", "pickSignal_" + Bridge.gaugeSignals["rpm"][0]])
+        dash.stopEditing()
+    }
+
+    // The edit bar holds its five controls at a phone's widths, at the test
+    // font and at 1.3 of it, each on one line; the "+" cell's halves are a
+    // touch's size
+    function test_theEditBarFitsAPhone_data() {
+        const rows = []
+        for (const w of [320, 364, 384])
+            for (const scale of [1, 1.3])
+                rows.push({ tag: w + " at " + scale, w: w, scale: scale })
+        return rows
+    }
+    function test_theEditBarFitsAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 800
+        const dash = find(main.contentItem, "dashboardPage")
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.form = "phone"
+        tryVerify(() => dash.compact && Theme.dense, 3000, "the phone's density")
+        dash.startEditing()
+        dash.copied = { form: "phone", cell: { kind: "blank", w: 3, h: 6, refs: [] } }
+        const names = ["dashUndo", "dashRedo", "dashAdd", "dashMore", "dashDone"]
+        for (const n of names) {
+            const words = find(dash, n).contentItem
+            words.font.pixelSize = Math.round(Theme.fontBody * data.scale)
+        }
+        verify(waitForPolish(main), "laid out")
+        waitForRendering(main.contentItem)
+        const bar = find(dash, "dashEditBar")
+        const out = pastTheEdge(bar, main.contentItem, [])
+        compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+        for (const n of names) {
+            const b = find(dash, n)
+            compare(b.contentItem.lineCount, 1, n + " on one line")
+            verify(b.contentItem.contentWidth <= b.width + 0.5, n + " keeps its words")
+        }
+        compare(find(dash, "dashAdd").text, "Add")
+        compare(find(dash, "dashAdd").Accessible.name, "Add a gauge")
+        for (const n of ["dashAddCell_0", "dashPasteCell_0"]) {
+            const half = find(dash, n)
+            verify(half.visible, n + " shows")
+            verify(half.width >= Theme.touchTarget - 0.5 && half.height >= Theme.touchTarget - 0.5,
+                   n + " is " + half.width + " x " + half.height)
+        }
         dash.stopEditing()
     }
 
@@ -1447,6 +1670,55 @@ TestCase {
         verify(header.highlighted, "primary elsewhere")
     }
 
+    // Show log beside a refusal and the Log's back arrow return to Connection
+    // with Back still going to the page that sent it
+    function test_aLogRoundTripKeepsBackGoingToTheSender() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        main.gotoPage(main.dashboardPage)
+        main.openConnectFromDash()
+        compare(main.currentPage, main.settingsPage)
+        verify(settings.backLeaves, "Back leaves for Dash")
+        settings.requestConnect("mock://demo?profile=no-such-profile")
+        tryVerify(() => find(settings, "errorShowLog").visible, 5000, "the refusal")
+        settings.logRequested()
+        compare(main.currentPage, main.logPage)
+        main.logBack()
+        compare(main.currentPage, main.settingsPage, "the Log's back arrow")
+        verify(settings.backLeaves, "still leaving for Dash")
+        verify(main.goBack(), "Back is taken")
+        compare(main.currentPage, main.dashboardPage, "where it came from, not the Log")
+        verify(!settings.backLeaves, "and the flag is spent")
+    }
+
+    // The zoom badge is a small rounded rectangle, not a capsule
+    function test_theZoomBadgeIsNotACapsule() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const badge = find(main.contentItem, "zoomBadge")
+        verify(badge.radius <= Theme.radiusCard, "radius " + badge.radius)
+    }
+
+    // The desktop's Home is a connect list too, so the header's Connect...
+    // is secondary there while no session runs: one primary a page
+    function test_theHeadersConnectGivesWayToHomesList() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1280
+        main.height = 720
+        const settings = find(main.contentItem, "settingsPage")
+        settings.recentUris = ["mock://demo"]
+        main.gotoPage(main.homePage)
+        const header = find(main.contentItem, "disconnectButton")
+        const list = find(main.contentItem, "homeConnectList")
+        tryCompare(list, "chosen", "mock://demo", 2000, "a recent row is chosen")
+        verify(header.visible, "the header's Connect... shows")
+        verify(!header.highlighted, "secondary on Home's list")
+        verify(find(list, "connectGo").highlighted, "the list's Connect is the primary")
+        main.gotoPage(main.livePage)
+        verify(header.highlighted, "primary elsewhere")
+    }
+
     // The header at the narrowest phone and the top zoom: the pill's word
     // elides inside the pill, and the pill stays inside the page. The
     // header's Connect... passes the edge there (160 layout units hold no
@@ -1673,14 +1945,185 @@ TestCase {
 
     // Dash with no session on the phone: the recent addresses, the newest
     // chosen, and one Connect; the list goes once a session runs
-    function connectListOn(main, uris) {
+    // Dash's list with these recent addresses, and these Bluetooth adapters
+    // in place of the machine's own interfaces and ports (none by default),
+    // which a list on screen reads again
+    function connectListOn(main, uris, bluetooth) {
         const dash = find(main.contentItem, "dashboardPage")
+        const settings = find(main.contentItem, "settingsPage")
         dash.form = "phone"
-        find(main.contentItem, "settingsPage").recentUris = uris
+        settings.recentUris = uris
         tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "the list loads")
         const list = findChild(dash, "dashConnectList")
+        settings.j2534Devices = []
+        settings.serialPorts = []
+        settings.canInterfaces = []
+        settings.bluetoothAdapters = bluetooth || []
         verify(waitForPolish(main), "laid out")
         return list
+    }
+
+    // The desktop's Home connects the chosen row through Settings, as
+    // Dash's list does: the address in its field, then the session
+    function test_homeConnectsThroughSettings() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1280
+        main.height = 720
+        const settings = find(main.contentItem, "settingsPage")
+        const home = find(main.contentItem, "homePage")
+        main.gotoPage(Array.from(home.parent.children).indexOf(home))
+        settings.recentUris = ["mock://demo"]
+        const list = find(home, "homeConnectList")
+        tryCompare(list, "chosen", "mock://demo", 2000, "the recent address")
+        find(list, "connectGo").clicked()
+        tryVerify(() => Bridge.connected, 5000, "it connects")
+        compare(settings.uriField.text, "mock://demo", "through Settings' field")
+        tryVerify(() => find(home, "homeSession").visible, 2000, "the session's card")
+    }
+
+    // A fresh phone: no recent address, the paired adapter and a BLE one
+    // on the list, neither chosen while there are two
+    function test_aFreshPhoneListsItsPairedAdapters() {
+        const main = phoneMain()
+        const list = connectListOn(main, [], [
+            { name: "OBD adapter", address: "00:11:22:33:44:55", kind: "bt" },
+            { name: "", address: "AA:BB:CC:DD:EE:FF", kind: "ble" }])
+        tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "two rows")
+        const first = find(list, "connectRow_0")
+        compare(find(first, "connectRowAddress").text, "OBD adapter")
+        compare(find(first, "connectRowKind").text, "Bluetooth")
+        const second = find(list, "connectRow_1")
+        compare(find(second, "connectRowAddress").text, "AA:BB:CC:DD:EE:FF", "no name: the address")
+        compare(find(second, "connectRowKind").text, "Bluetooth LE")
+        verify(!find(list, "connectRecent").visible, "no Recent group")
+        verify(find(list, "connectAdapters").visible, "the Adapters group")
+        compare(list.chosen, "", "two adapters: none chosen")
+        verify(find(list, "connectPickHint").visible, "says to pick one")
+        const go = find(list, "connectGo")
+        verify(!go.enabled, "Connect waits for a pick")
+        mouseClick(first)
+        tryCompare(list, "chosen", "elm327://bt:00:11:22:33:44:55", 2000, "the tap")
+        verify(go.enabled && go.highlighted, "then Connect is the primary")
+        verify(!find(list, "connectPickHint").visible)
+    }
+
+    // Without the permission the Adapters group says why and offers Allow,
+    // which asks only when tapped; with it and nothing paired, where to pair
+    // one and a scan
+    function test_withoutThePermissionTheListAsks() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["elm327://COM1"])
+        compare(list.bluetoothAsks, 0, "nothing asked at the list's first show")
+        list.bluetoothAvailable = true
+        list.bluetoothPermission = "undetermined"
+        verify(waitForPolish(main), "laid out")
+        const allow = find(list, "connectAllow")
+        verify(allow.visible && find(list, "connectBluetoothWhy").visible, "Allow, and why")
+        compare(allow.text, "Allow")
+        compare(list.bluetoothAsks, 0, "still nothing asked")
+        mouseClick(allow)
+        compare(list.bluetoothAsks, 1, "a tap asks")
+        list.bluetoothNeedsSettings = true
+        compare(allow.text, "Open settings", "asked no more: the settings")
+        list.bluetoothNeedsSettings = false
+        list.bluetoothPermission = "granted"
+        verify(waitForPolish(main), "laid out")
+        verify(!allow.visible, "allowed: no Allow")
+        verify(find(list, "connectBluetoothNone").visible && find(list, "connectScan").visible,
+               "nothing paired: where to pair, and Scan")
+        find(main.contentItem, "settingsPage").bluetoothAdapters =
+            [{ name: "OBD adapter", address: "00:11:22:33:44:55", kind: "bt" }]
+        tryVerify(() => !find(list, "connectBluetoothNone").visible, 2000, "one paired: its row instead")
+        list.bluetoothAvailable = false
+        list.bluetoothPermission = "unavailable"
+    }
+
+    // Where to pair stays within the helper text's two lines at the
+    // narrowest phone, beside Scan
+    function test_theNoPairedAdapterWordsFitTwoLinesAt320() {
+        const main = phoneMain()
+        main.width = 320
+        const list = connectListOn(main, ["elm327://COM1"])
+        list.bluetoothAvailable = true
+        list.bluetoothPermission = "granted"
+        verify(waitForPolish(main), "laid out")
+        const words = find(list, "connectBluetoothNone")
+        verify(words.visible, "nothing paired")
+        verify(words.lineCount <= 2, "the words take " + words.lineCount + " lines at 320")
+    }
+
+    // With no recent address and exactly one adapter, it is chosen; the
+    // developer's demo row doesn't count
+    function test_aSoleAdapterIsChosen() {
+        const main = phoneMain()
+        const list = connectListOn(main, [])
+        Theme.developerMode = true
+        try {
+            find(main.contentItem, "settingsPage").serialPorts = [{ name: "COM9", device: "" }]
+            tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "the port and the demo")
+            compare(find(find(list, "connectRow_1"), "connectRowKind").text, "Demo data")
+            compare(list.chosen, "elm327://COM9", "the one adapter")
+            verify(find(list, "connectRow_0").checked, "its row marked")
+            const go = find(list, "connectGo")
+            verify(go.enabled && go.highlighted && go.text === "Connect", "one tap connects")
+            Theme.developerMode = false
+            tryVerify(() => findChild(list, "connectRow_1") === null, 2000, "no demo row off developer mode")
+            find(main.contentItem, "settingsPage").serialPorts =
+                [{ name: "COM9", device: "" }, { name: "COM8", device: "" }]
+            tryCompare(list, "chosen", "", 2000, "two: none chosen")
+        } finally {
+            Theme.developerMode = false
+        }
+    }
+
+    // An adapter that is also a recent address shows once, under Recent
+    function test_anAdapterAlsoRecentShowsOnce() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["elm327://COM9?profile=obd2"])
+        find(main.contentItem, "settingsPage").serialPorts =
+            [{ name: "COM9", device: "" }, { name: "COM8", device: "" }]
+        tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "the recent and COM8")
+        compare(find(find(list, "connectRow_1"), "connectRowAddress").text, "COM8")
+        compare(findChild(list, "connectRow_2"), null, "COM9 once")
+        compare(list.chosen, "elm327://COM9?profile=obd2", "the recent one")
+    }
+
+    // At most six adapter rows; the rest are Other address...'s
+    function test_atMostSixAdaptersShow() {
+        const main = phoneMain()
+        const list = connectListOn(main, [])
+        const ports = []
+        for (let i = 1; i <= 8; ++i)
+            ports.push({ name: "COM" + i, device: "" })
+        find(main.contentItem, "settingsPage").serialPorts = ports
+        tryVerify(() => findChild(list, "connectRow_5") !== null, 2000, "six rows")
+        compare(findChild(list, "connectRow_6"), null, "no seventh")
+        verify(find(list, "connectOther").visible, "the rest through Other address")
+    }
+
+    // Every row and button on the list is a touch's size, inside the glass
+    function test_theListsTargetsAreATouchsSize() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["elm327://COM1"],
+                                   [{ name: "OBD adapter", address: "00:11:22:33:44:55", kind: "bt" }])
+        list.bluetoothAvailable = true
+        list.bluetoothPermission = "undetermined"
+        verify(waitForPolish(main), "laid out")
+        try {
+            for (const name of ["connectRow_0", "connectRow_1", "connectAllow", "connectOther", "connectGo"]) {
+                const item = find(list, name)
+                const top = item.mapToItem(main.contentItem, 0, 0).y
+                const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+                verify(item.visible && bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+            }
+            const over = []
+            pastTheEdge(list, main.contentItem, over)
+            compare(over, [], "past the edge: " + over.join(", "))
+        } finally {
+            list.bluetoothAvailable = false
+            list.bluetoothPermission = "unavailable"
+        }
     }
 
     function test_dashsConnectListConnectsTheChosenAddress() {
@@ -1758,10 +2201,15 @@ TestCase {
         const list = connectListOn(main, ["mock://demo"])
         const go = find(list, "connectGo")
         verify(go.enabled)
+        const note = find(list, "connectRelayNote")
+        verify(!note.visible, "nothing to say before the relay")
         compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
         tryVerify(() => !go.enabled, 2000, "no connect while it runs")
+        tryVerify(() => note.visible, 2000, "and the list says why")
+        compare(note.text, "Stop the relay to connect")
         Relay.stop()
         tryVerify(() => go.enabled, 2000, "and again after")
+        verify(!note.visible, "the words go with the relay")
     }
 
     function test_aRelayLeavesTheLoneConnectToSettings() {
@@ -1835,6 +2283,129 @@ TestCase {
         settings.recentUris = ["mock://third", "mock://first", "mock://second"]
         tryVerify(() => rowIs(list, 0, "mock://third"), 2000, "the newest again")
         compare(list.chosen, "mock://third")
+    }
+
+    // A build without Bluetooth has no permission to ask for: a list
+    // reading it offers no Allow (Android's answers are the phone's)
+    function test_aComputerHasNoBluetoothPermissionToAsk() {
+        verify(!Bluetooth.available, "no Bluetooth in this build")
+        compare(Bluetooth.permission, "unavailable")
+    }
+
+    // Settings' Log row opens the Log page itself, and Back returns to
+    // Settings' list
+    function test_backFromTheLogReturnsToSettings() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        main.gotoPage(main.settingsPage)
+        const row = find(find(settings, "settingsList"), "settingsRow_log")
+        tryVerify(() => row.visible && row.height > 0, 2000, "the Log row")
+        verify(waitForPolish(main), "laid out")
+        const at = row.mapToItem(main.contentItem, row.width / 2, row.height / 2)
+        verify(at.y > 0 && at.y < main.contentItem.height, "the row on the glass at " + at.y)
+        mouseClick(row)
+        tryCompare(main, "currentPage", main.logPage, 2000, "the Log")
+        verify(main.goBack(), "Back is taken")
+        compare(main.currentPage, main.settingsPage, "back on Settings")
+        compare(settings.pageKey, "", "its list")
+    }
+
+    // A failed connect on Dash's list offers the Log beside its words; the
+    // Log opens on its activity at the newest line, in developer mode too,
+    // and Back returns to Dash
+    function test_aFailedConnectOffersTheLog() {
+        const main = phoneMain()
+        Theme.developerMode = true
+        const log = find(main.contentItem, "logPage")
+        log.view = "frames"
+        try {
+            const list = connectListOn(main, ["mock://demo?profile=no-such-profile"])
+            const show = find(list, "connectShowLog")
+            verify(!show.visible, "no failure, no Show log")
+            mouseClick(find(list, "connectGo"))
+            tryVerify(() => show.visible, 5000, "Show log beside the bridge's words")
+            verify(show.height >= Theme.touchTarget - 0.5, "a touch's size: " + show.height)
+            const right = show.mapToItem(main.contentItem, show.width, 0).x
+            verify(right <= main.contentItem.width + 0.5, "inside the glass: " + right)
+            mouseClick(show)
+            tryCompare(main, "currentPage", main.logPage, 2000, "the Log")
+            verify(!log.showingFrames, "the activity, not the frames")
+            const text = find(log, "activityLog")
+            compare(text.cursorPosition, text.length, "at its newest line")
+            verify(main.goBack(), "Back is taken")
+            compare(main.currentPage, main.dashboardPage, "back on Dash")
+        } finally {
+            Theme.developerMode = false
+            log.view = "activity"
+        }
+    }
+
+    // The Log's back arrow on the tab-bar form: a touch's size at the left
+    // edge, back to the page that opened the Log, and Dash from no tab
+    function test_theLogsBackArrowReturnsWhereTheLogCameFrom_data() {
+        return [{ tag: "Settings", from: 6, name: "Back to Settings" },
+                { tag: "Dash", from: 1, name: "Back to Dash" },
+                { tag: "no tab", from: 0, name: "Back to Dash" }]
+    }
+    function test_theLogsBackArrowReturnsWhereTheLogCameFrom(data) {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const log = find(main.contentItem, "logPage")
+        main.gotoPage(data.from)
+        main.openLog()
+        compare(main.currentPage, main.logPage, "the Log")
+        verify(waitForPolish(main), "laid out")
+        const back = find(log, "logBack")
+        verify(back.visible, "the arrow beside the tab bar")
+        compare(back.Accessible.name, data.name)
+        const top = back.mapToItem(main.contentItem, 0, 0)
+        const bottom = back.mapToItem(main.contentItem, back.width, back.height)
+        verify(bottom.y - top.y >= 47.5 && bottom.x - top.x >= 47.5,
+               "a touch's size: " + (bottom.x - top.x) + " x " + (bottom.y - top.y))
+        verify(top.x < 24, "at the left edge: " + top.x)
+        mouseClick(back)
+        compare(main.currentPage, data.from > 0 ? data.from : main.dashboardPage, "back")
+        if (data.from === main.settingsPage)
+            compare(settings.pageKey, "", "Settings' list")
+    }
+
+    // Beside the sidebar the Log is a listed page: nothing to go back to
+    function test_theLogsBackArrowHidesBesideTheSidebar() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 720
+        main.height = 800
+        main.openLog()
+        verify(waitForPolish(main), "laid out")
+        verify(!find(main.contentItem, "logBack").visible, "no arrow beside the sidebar")
+        main.width = 384
+        tryVerify(() => find(main.contentItem, "logBack").visible, 2000, "the arrow with the tab bar")
+    }
+
+    // At 320 px in developer mode the arrow, the title and a compact Copy
+    // share the title row and the Activity | Frames switch takes a row of
+    // its own under it
+    function test_theLogsHeaderFitsTheNarrowestPhone() {
+        const main = phoneMain()
+        main.width = 320
+        Theme.developerMode = true
+        const log = find(main.contentItem, "logPage")
+        main.openLog()
+        verify(waitForPolish(main), "laid out")
+        const row = find(log, "logTitleRow")
+        verify(row.implicitWidth <= log.availableWidth + 0.5,
+               "the title row needs " + row.implicitWidth + " of " + log.availableWidth)
+        verify(find(log, "copyLog").compact, "Copy is compact")
+        const rowBottom = row.mapToItem(main.contentItem, 0, row.height).y
+        for (const name of ["logBack", "copyLog", "view_activity", "view_frames"]) {
+            const item = find(log, name)
+            const right = item.mapToItem(main.contentItem, item.width, 0).x
+            verify(item.visible && right <= main.contentItem.width + 0.5, name + " ends at " + right)
+        }
+        const toggle = find(log, "logViewSwitch")
+        verify(toggle.mapToItem(main.contentItem, 0, 0).y >= rowBottom - 0.5,
+               "the switch under the title row")
+        compare(pastTheEdge(log, main.contentItem, []).length, 0, "nothing past the edge")
     }
 
     function test_aFailedConnectFromTheListSaysWhyAndChangesNothing() {

@@ -129,6 +129,67 @@ double finite_of(const Value& v, const std::string& what)
     return v.number;
 }
 
+/* A signal's "gauge", in the signal's own unit: refused when its numbers
+ * can't be a dial for this def, stored as written otherwise */
+void read_gauge(const Value& s, const ecuio_signal_def_t& d, uint32_t def,
+                ecuio_signal_file& f, const std::string& what)
+{
+    const Value* v = s.find("gauge");
+    if (v == nullptr) {
+        return;
+    }
+    const std::string gauge = what + "'s gauge";
+    expect(*v, Type::object, gauge);
+    only_keys(*v, {"min", "max", "warn_low", "warn_high"}, what + "'s gauge");
+    const Value* min_v = v->find("min");
+    const Value* max_v = v->find("max");
+    if (min_v == nullptr || max_v == nullptr) {
+        refuse(*v, gauge + " needs \"min\" and \"max\"");
+    }
+    using ecuio_json::number_text;
+    ecuio_signal_gauge_t g{};
+    g.min = finite_of(*min_v, gauge + " min");
+    g.max = finite_of(*max_v, gauge + " max");
+    if (!(g.min < g.max)) {
+        refuse(*max_v, gauge + " max " + number_text(g.max) +
+                           " isn't above its min " + number_text(g.min));
+    }
+    const std::string span = number_text(g.min) + " to " + number_text(g.max);
+    const auto level = [&](const char* key, uint32_t flag, double& out) {
+        const Value* w = v->find(key);
+        if (w != nullptr) {
+            out = finite_of(*w, gauge + " " + key);
+            if (out < g.min || out > g.max) {
+                refuse(*w, gauge + " " + key + " " + number_text(out) +
+                               " is outside its range, " + span);
+            }
+            g.flags |= flag;
+        }
+        return w;
+    };
+    level("warn_low", ECUIO_GAUGE_WARN_LOW, g.warn_low);
+    const Value* high = level("warn_high", ECUIO_GAUGE_WARN_HIGH, g.warn_high);
+    if (g.flags == (ECUIO_GAUGE_WARN_LOW | ECUIO_GAUGE_WARN_HIGH) &&
+        !(g.warn_low < g.warn_high)) {
+        refuse(*high, gauge + " warn_high " + number_text(g.warn_high) +
+                          " isn't above its warn_low " +
+                          number_text(g.warn_low));
+    }
+    /* A wider range than the field's is a choice; none in common is a
+     * needle that never moves, a computed def having no field to judge */
+    double lo = 0.0;
+    double hi = 0.0;
+    if (ecuio_def_range(&d, &lo, &hi) == ECUIO_DECODE_OK &&
+        (g.max < lo || g.min > hi)) {
+        const std::string unit =
+            d.unit[0] != '\0' ? q(d.unit) : std::string("the signal's");
+        refuse(*v, gauge + " runs " + span + ", but its field reads only " +
+                       number_text(lo) + " to " + number_text(hi) +
+                       ": is the gauge in another unit than " + unit + "?");
+    }
+    f.gauges.emplace_back(def, g);
+}
+
 /* Hex digits only, digits_lo to digits_hi of them */
 uint32_t hex_of(const Value& v, size_t digits_lo, size_t digits_hi,
                 const std::string& what)
@@ -992,8 +1053,9 @@ void build(const parts& in, ecuio_signal_file& f)
         const bool computed = e.kind == "computed";
         const bool text = e.kind == "text" || e.kind == "hex";
         if (computed) {
-            only_keys(s, {"key", "name", "kind", "expr", "max_age", "unit",
-                          "decimals", "group", "plot"},
+            only_keys(s,
+                      {"key", "name", "kind", "expr", "max_age", "unit",
+                       "decimals", "group", "plot", "gauge"},
                       what);
         } else if (text) {
             only_keys(s, {"key", "name", "kind", "ecu", "read", "field", "group",
@@ -1004,8 +1066,9 @@ void build(const parts& in, ecuio_signal_file& f)
                           "group", "plot"},
                       what);
         } else {
-            only_keys(s, {"key", "name", "kind", "ecu", "read", "field", "scale",
-                          "offset", "unit", "decimals", "group", "plot"},
+            only_keys(s,
+                      {"key", "name", "kind", "ecu", "read", "field", "scale",
+                       "offset", "unit", "decimals", "group", "plot", "gauge"},
                       what);
         }
 
@@ -1064,6 +1127,7 @@ void build(const parts& in, ecuio_signal_file& f)
             }
             d.table_first = static_cast<uint16_t>(f.computed.size());
             f.computed.push_back(p);
+            read_gauge(s, d, e.def, f, what);
             continue;
         }
 
@@ -1080,6 +1144,7 @@ void build(const parts& in, ecuio_signal_file& f)
             if (const Value* offset = s.find("offset")) {
                 d.offset = finite_of(*offset, what + "'s offset");
             }
+            read_gauge(s, d, e.def, f, what);
         }
     }
     for (const entry& e : entries) {
@@ -1233,6 +1298,21 @@ const char* ecuio_signal_file_key(const ecuio_signal_file_t* file,
         }
     }
     return "";
+}
+
+const ecuio_signal_gauge_t*
+ecuio_signal_file_gauge(const ecuio_signal_file_t* file,
+                        const ecuio_signal_def_t* def)
+{
+    if (file == nullptr || def == nullptr) {
+        return nullptr;
+    }
+    for (const auto& g : file->gauges) {
+        if (&file->defs[g.first] == def) {
+            return &g.second;
+        }
+    }
+    return nullptr;
 }
 
 void ecuio_signal_file_free(ecuio_signal_file_t* file)

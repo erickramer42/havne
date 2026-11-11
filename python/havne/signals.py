@@ -15,6 +15,7 @@
 # one in its place (the registry's last wins); a session already open
 # keeps the set it opened with.
 
+import collections
 import ctypes
 import itertools
 import os
@@ -22,6 +23,23 @@ import threading
 
 from . import _ecuio as e
 from ._core import check, lib, text, utf8
+
+
+Gauge = collections.namedtuple("Gauge", "min max warn_low warn_high")
+Gauge.__doc__ = """A signal's gauge, in the signal's own unit: the range a
+dial shows and the levels past which it warns, None for one not given"""
+
+
+def _gauge(file, key):
+    """The Gauge of file's signal named key; None for no such signal, or
+    one that gives no gauge"""
+    found = lib.ecuio_signal_file_gauge(file, lib.ecuio_signal_file_find(file, utf8(key)))
+    if not found:
+        return None
+    g = found.contents
+    return Gauge(g.min, g.max,
+                 g.warn_low if g.flags & e.ECUIO_GAUGE_WARN_LOW else None,
+                 g.warn_high if g.flags & e.ECUIO_GAUGE_WARN_HIGH else None)
 
 
 class SignalFile:
@@ -45,6 +63,11 @@ class SignalFile:
         check(lib.ecuio_profile_register(utf8(self.profile),
                                          lib.ecuio_signal_file_set(self._handle), None),
               "ecuio_profile_register")
+
+    def gauge(self, key):
+        """The Gauge of the signal named key; None for no such signal, or
+        one that gives no gauge"""
+        return _gauge(self._handle, key)
 
     def __repr__(self):
         return f"SignalFile({self.name!r}, profile {self.profile!r})"
@@ -132,6 +155,21 @@ class Plugin:
         check(lib.ecuio_plugin_register(self._handle, index, buf, len(buf)),
               "ecuio_plugin_register")
         return text(buf.raw)
+
+    def gauge(self, key, variant=None):
+        """The Gauge of a variant's signal named key (the first variant
+        when None); None for no such signal, or one that gives no gauge"""
+        return _gauge(lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)),
+                      key)
+
+    @property
+    def requires_core(self):
+        """The manifest's requires.core, the oldest core that reads the
+        plugin, as (major, minor, patch); a manifest always names one"""
+        parts = [ctypes.c_uint16() for _ in range(3)]
+        check(lib.ecuio_plugin_requires_core(self._handle, *(ctypes.byref(p) for p in parts)),
+              "ecuio_plugin_requires_core")
+        return tuple(p.value for p in parts)
 
     def __repr__(self):
         return f"Plugin({self.id!r} {self.version}, variants {self.variants})"

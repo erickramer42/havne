@@ -103,6 +103,9 @@ static const ecuio_signal_def_t kMockDefs[] = {
      * 0x0B and 0x33 */
     mk(ECUIO_MOCK_SIG_MAP_ID,       "Intake Manifold Pressure", ECUIO_VALUE_UINT, 12, 0, 8, 1.0, 0.0, "kPa", 0, ECUIO_SIGNAL_GROUP_AIR),
     mk(ECUIO_MOCK_SIG_BARO_ID,      "Barometric Pressure", ECUIO_VALUE_UINT, 13, 0, 8, 1.0, 0.0, "kPa", 0, ECUIO_SIGNAL_GROUP_AIR),
+    /* Battery voltage at bytes 14-15, LE, in millivolts as J1979's 0x42
+     * carries it (that one is big-endian); two decimals, like the obd2 set's */
+    mk(ECUIO_MOCK_SIG_BATTERY_V_ID, "Battery Voltage",   ECUIO_VALUE_UINT, 14, 0, 16, 0.001, 0.0, "V", 2, ECUIO_SIGNAL_GROUP_ELECTRICAL),
     computed_def(ECUIO_MOCK_SIG_BOOST_ID, "Boost", "kPa", 0, ECUIO_SIGNAL_GROUP_AIR, 0),
 };
 // clang-format on

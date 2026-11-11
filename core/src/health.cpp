@@ -1,7 +1,7 @@
 // File/layer: core/src/health.cpp | C++17, Qt-free; a car's health as one
 //             scrubbed report (ADR-0054's appendix "the health report as
 //             built")
-// Testing: UNIT: HealthTest (test_core)
+// Testing: UNIT: HealthTest, HealthCancelTest (test_core)
 //
 // One model of the facts, built once from the inputs (health.h), then
 // written as JSON or text by two writers that read only the model. The
@@ -9,7 +9,10 @@
 // vehicle is the VIN's decode, an item its name and outcome. The file is
 // then checked for those texts and for the VIN's shape, as an export's
 // (scrub.h), under a name of its own beside <out> (folder_files.h's
-// partial_name), renamed into place once it passes.
+// partial_name), renamed into place once it passes. A recording's report
+// asks the caller's cancel (ecuio_health_export_with) as the frames' pass
+// begins and every kCancelRows of its rows, and the reader's open asks it
+// as it reads; a stop ends it before anything is written.
 
 #include "health.h"
 
@@ -1305,6 +1308,48 @@ baseline_facts baseline_of(const ecuio_health_options_t& o)
     return read_baseline(o.baseline_folder_utf8);
 }
 
+/* Rows read between two asks of the caller's cancel */
+constexpr uint32_t kCancelRows = 1024;
+
+/* The caller's cancel: asked now, or once kCancelRows rows have gone by;
+ * once it says stop, every ask says so */
+struct canceler {
+    ecuio_cancel_t cancel = nullptr;
+    void* user = nullptr;
+    bool stopped = false;
+    uint32_t unasked = 0;
+
+    bool now()
+    {
+        if (!stopped && cancel != nullptr && cancel(user) != 0) {
+            stopped = true;
+        }
+        return stopped;
+    }
+
+    bool row()
+    {
+        if (stopped || ++unasked >= kCancelRows) {
+            unasked = 0;
+            return now();
+        }
+        return false;
+    }
+};
+
+/* The reader's open asks the same cancel (ecuio_open_progress_t) */
+int open_asked(uint64_t, uint64_t, void* user)
+{
+    return static_cast<canceler*>(user)->now() ? 1 : 0;
+}
+
+bool canceled(ecuio_status_t* status)
+{
+    *status = ECUIO_ERR_CANCELED;
+    ecuio_detail_set("the report was canceled");
+    return false;
+}
+
 /* A recording's report: each ECU's reports from the replies in frames.csv
  * that end in the range (health_replies.h), and each of the set's number
  * defs the value in force at the range's end, aged from it: signals.csv's,
@@ -1313,7 +1358,7 @@ baseline_facts baseline_of(const ecuio_health_options_t& o)
  * to the check, in the range or not. False with the detail set; *status
  * the failure's. */
 bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
-                 ecuio_status_t* status)
+                 canceler& c, ecuio_status_t* status)
 {
     namespace fr = ecuio_frame_reassembly;
     namespace rs = ecuio_recording_set;
@@ -1348,6 +1393,9 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
         }
     };
     if (has_frames) {
+        if (c.now()) {
+            return canceled(status);
+        }
         ecuio_frame_rows::frame_rows rows;
         if (!rows.open(folder)) {
             return false;
@@ -1357,6 +1405,9 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
         uint64_t index = 0;
         int got = 0;
         while ((got = rows.next()) == 1) {
+            if (c.row()) {
+                return canceled(status);
+            }
             const ecuio_frame_t& f = rows.frame();
             const uint64_t host_us = rows.host_us();
             end_us = host_us;
@@ -1395,12 +1446,16 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
 
     std::unique_ptr<ecuio_recording_t, recording_closer> rec;
     if (has_values || set != nullptr) {
+        // The open's progress asks at its start, as it reads and at its end
         ecuio_recording_t* opened = nullptr;
         const ecuio_status_t st =
-            has_values ? ecuio_recording_open(folder.c_str(), nullptr, nullptr,
-                                              &opened)
-                       : ecuio_recording_open_frames(folder.c_str(), set,
-                                                     nullptr, nullptr, &opened);
+            has_values
+                ? ecuio_recording_open(folder.c_str(), open_asked, &c, &opened)
+                : ecuio_recording_open_frames(folder.c_str(), set, open_asked,
+                                              &c, &opened);
+        if (st == ECUIO_ERR_CANCELED && c.stopped) {
+            return canceled(status);
+        }
         if (st != ECUIO_OK) {
             *status = st;
             return false;
@@ -1551,6 +1606,14 @@ extern "C" ecuio_status_t
 ecuio_health_export(const ecuio_health_options_t* options,
                     ecuio_health_report_t* report)
 {
+    return ecuio_health_export_with(options, nullptr, nullptr, report);
+}
+
+extern "C" ecuio_status_t
+ecuio_health_export_with(const ecuio_health_options_t* options,
+                         ecuio_cancel_t cancel, void* user_data,
+                         ecuio_health_report_t* report)
+{
     if (report != nullptr) {
         *report = ecuio_health_report_t{};
     }
@@ -1596,7 +1659,10 @@ ecuio_health_export(const ecuio_health_options_t* options,
     };
     try {
         if (o.folder_utf8 != nullptr) {
-            ok = ecuio_health::from_folder(o, r, &failed);
+            ecuio_health::canceler c;
+            c.cancel = cancel;
+            c.user = user_data;
+            ok = ecuio_health::from_folder(o, r, c, &failed);
             return outcome();
         }
         ecuio_session_info_t info{};

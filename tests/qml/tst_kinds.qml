@@ -11,9 +11,12 @@ TestCase {
 
     // A palette by its name: Dark is Night off, the others Night on in a style
     function usePalette(name) {
-        Theme.night = name === "dark" ? "off" : "on"
-        if (name !== "dark")
+        const night = Theme.nightPalettes.indexOf(name) >= 0
+        Theme.night = night ? "on" : "off"
+        if (night)
             Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+        else
+            Theme.look = name
     }
     when: windowShown
 
@@ -23,6 +26,8 @@ TestCase {
     Component { id: digitalC;  DigitalGauge { width: 180; height: 122; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: barC;      BarGauge { width: 300; height: 72; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
     Component { id: ringC;     RingGauge { width: 240; height: 220; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
+    Component { id: analogC;   AnalogGauge { width: 260; height: 260; from: 0; to: 100; warnFrom: 60; dangerFrom: 80 } }
+    Component { id: shiftC;    ShiftLightBar { width: 600; height: 30; from: 0; to: 100 } }
 
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
@@ -91,6 +96,72 @@ TestCase {
             verify(g.brief, "a short tile")
             verify(left >= value.mapToItem(g, 0, 0).x + value.width, "beside the value")
         }
+    }
+
+    // A value older than Theme.staleMs dims and says so on the card's note
+    // line, inside the card at a narrow width too; fresh, the line is empty
+    function test_aStaleValueSaysSo_data() {
+        return [{ tag: "digits", c: readoutC, narrow: 125 },
+                { tag: "number", c: digitalC, narrow: 120 },
+                { tag: "number, short", c: digitalC, narrow: 120, height: 60 },
+                { tag: "dial", c: analogC, narrow: 120 },
+                { tag: "ring", c: ringC, narrow: 120 },
+                { tag: "bar", c: barC, narrow: 190 },
+                { tag: "cells", c: segmentsC, narrow: 190 },
+                { tag: "sparkline", c: sparkC, narrow: 190 }]
+    }
+    function test_aStaleValueSaysSo(data) {
+        // 400 holds the word whole in any face (CI's DejaVu Sans is wider
+        // than Windows' sans); the narrow width only keeps it in the card
+        const wide = 400
+        for (const width of [wide, data.narrow]) {
+            const props = { label: "Coolant", unit: "mph", hasValue: true, value: 50, width: width }
+            if (data.height !== undefined)
+                props.height = data.height
+            const g = make(data.c, props)
+            const n = find(g, "gaugeNote")
+            verify(!n.visible || n.text === "", "fresh, no word: " + n.text)
+            g.stale = true
+            compare(n.text, "no new data")
+            verify(g.Accessible.name.endsWith(", no new data"), g.Accessible.name)
+            if (width === wide) {
+                verify(n.visible, "shown when there's room")
+                verify(!n.truncated, "whole when there's room")
+            }
+            if (n.visible) {
+                const at = n.mapToItem(g, 0, 0)
+                verify(at.x >= -0.5 && at.x + Math.min(n.width, n.contentWidth) <= g.width + 0.5,
+                       "inside the card across: " + at.x + " + " + n.width + " in " + g.width)
+                verify(at.y >= -0.5 && at.y + n.height <= g.height + 0.5,
+                       "inside the card down: " + at.y + " + " + n.height + " in " + g.height)
+            }
+            if (data.c === digitalC && !g.brief) {
+                const holds = find(g, "footer")
+                verify(n.mapToItem(g, 0, 0).x >= holds.mapToItem(g, holds.width, 0).x,
+                       "after the holds, off the trace")
+            }
+            g.stale = false
+            verify(!n.visible || n.text === "", "fresh again, no word")
+        }
+    }
+
+    // The shift lights dim while stale, with the word where the strip
+    // leaves room at its end and none where it doesn't
+    function test_staleShiftLightsDimAndSaySoWhereThereIsRoom() {
+        const wide = make(shiftC, { hasValue: true, value: 50 })
+        wide.stale = true
+        const note = find(wide, "gaugeNote")
+        verify(note.visible, "room at the end of a wide strip")
+        compare(note.text, "no new data")
+        compare(find(wide, "lights").opacity, 0.45)
+        verify(note.mapToItem(wide, 0, 0).x >= find(wide, "lights").mapToItem(wide, find(wide, "lights").width, 0).x,
+               "past the last light")
+        const narrow = make(shiftC, { width: 300, height: 40, hasValue: true, value: 50 })
+        narrow.stale = true
+        verify(!find(narrow, "gaugeNote").visible, "no room on a narrow strip")
+        compare(find(narrow, "lights").opacity, 0.45, "it still dims")
+        narrow.stale = false
+        compare(find(narrow, "lights").opacity, 1)
     }
 
     // ---- SegmentReadout's shape

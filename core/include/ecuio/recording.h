@@ -829,7 +829,8 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * latency.csv and signals.json, each file through the check; a file it
  * doesn't know is left out and counted (files_left_out).
  * Deterministic: the same recording and options give the same bytes.
- * report may be NULL. ECUIO_OK;
+ * report may be NULL; on any failure it holds zeros but failed_class.
+ * ECUIO_OK;
  * ECUIO_ERR_NULL_ARGUMENT for a NULL options or path, a column_count
  * with NULL columns_utf8 or a NULL name among them;
  * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, layout or units, a
@@ -1080,6 +1081,19 @@ _Static_assert(offsetof(ecuio_import_report_t, values) == 48,
 ecuio_status_t ecuio_import(const ecuio_import_options_t* options,
                             ecuio_import_report_t* report);
 
+/*
+ * ecuio_import with a way to stop it (ecuio_cancel_t): cancel, when not
+ * NULL, is asked as each pass over the file begins and as its bytes are
+ * read. A nonzero answer ends the call with ECUIO_ERR_CANCELED ("the
+ * import was canceled" in the detail) and report zeroed: nothing is at
+ * out_folder_utf8, and the folder written under a name of its own beside
+ * it is removed, as for any failure. A NULL cancel is ecuio_import. The
+ * thread and safety rules are ecuio_export_with's.
+ */
+ecuio_status_t ecuio_import_with(const ecuio_import_options_t* options,
+                                 ecuio_cancel_t cancel, void* user_data,
+                                 ecuio_import_report_t* report);
+
 /* ecuio_csv_guess_t.flags: TIME_UNIT_KNOWN the map's time has a unit;
  * DECIMAL_COMMA its decimal mark is a comma; PREAMBLE lines above the
  * header are left out (the map's header_row is above 1); TIME_NUMBERS
@@ -1309,6 +1323,20 @@ _Static_assert(offsetof(ecuio_health_report_t, failed_class) == 80,
  */
 ecuio_status_t ecuio_health_export(const ecuio_health_options_t* options,
                                    ecuio_health_report_t* report);
+
+/*
+ * ecuio_health_export with a way to stop a recording's report
+ * (ecuio_cancel_t): cancel, when not NULL, is asked as each pass over the
+ * recording's frames.csv and signals.csv begins and as their rows are
+ * read. A nonzero answer ends the call with ECUIO_ERR_CANCELED ("the
+ * report was canceled" in the detail) and report zeroed, before anything
+ * is written. A session's report reads no file and never asks. A NULL
+ * cancel is ecuio_health_export. The thread and safety rules are
+ * ecuio_export_with's.
+ */
+ecuio_status_t ecuio_health_export_with(const ecuio_health_options_t* options,
+                                        ecuio_cancel_t cancel, void* user_data,
+                                        ecuio_health_report_t* report);
 
 #ifdef __cplusplus
 }

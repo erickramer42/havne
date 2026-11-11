@@ -3,7 +3,7 @@
 //
 // Another logger's file made a recording (ADR-0054 sections 4 and 5): a
 // candump log, or a CSV through its column map, imported by core's
-// ecuio_import into the recordings folder, on a thread of its own. The
+// ecuio_import_with into the recordings folder, on a thread of its own. The
 // Recordings page's Import picks the file; this class reads of it only the
 // first line (to guess its kind) and, for a CSV, core's guess of its column
 // map with the first rows, for the panel to show.
@@ -17,6 +17,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <atomic>
 #include <functional>
 #include <thread>
 
@@ -33,7 +34,8 @@ public:
     // root gives the folder recordings are kept in, read at each import
     explicit RecordingImport(std::function<QString()> root,
                              QObject* parent = nullptr);
-    // Waits for an import under way: core's has no cancel
+    // Stops an import under way at core's next ask, leaving nothing made,
+    // and waits for it; a guess is short and runs to its end
     ~RecordingImport() override;
     RecordingImport(const RecordingImport&) = delete;
     RecordingImport& operator=(const RecordingImport&) = delete;
@@ -94,6 +96,8 @@ public:
 
     // A local file copied as a content:// one is, so a test reaches the copy
     void setCopyLocalFilesForTesting(bool copy) { m_copyLocal = copy; }
+    // The next worker can't be started, as when the system is out of threads
+    void setFailThreadForTesting(bool on) { m_failThreadForTesting = on; }
 
     // The largest column map read, as havne-cli reads one
     static constexpr qint64 MapMaxBytes = 1024 * 1024;
@@ -115,7 +119,10 @@ private:
 
     std::function<QString()> m_root;
     std::thread m_worker;
+    // Set at destruction: the worker's copy and core's import stop
+    std::atomic<bool> m_stop{false};
     bool m_busy = false;
     bool m_copyLocal = false;
+    bool m_failThreadForTesting = false;
     QString m_mapsRoot;
 };

@@ -1,5 +1,5 @@
 // File/layer: tests/test_health.cpp | test_core, Qt-free, C++17
-// Testing: UNIT: HealthTest (test_core)
+// Testing: UNIT: HealthTest, HealthCancelTest (test_core)
 //
 // The health report (ADR-0054's appendix "the health report as built"):
 // reports built by hand through health.h, both formats holding the same
@@ -301,6 +301,26 @@ TEST(HealthTest, BothFormatsHoldTheSameFactsAndNeitherTheVin)
                   .find("state")
                   ->text,
               "reading");
+}
+
+/* The session keys are core's own: the URI keeps them, and a value that
+ * isn't plain is dropped with its key */
+TEST(HealthTest, TheSessionKeysAreKeptInTheUri)
+{
+    Car car;
+    car.in.uri =
+        "elm327://"
+        "COM3?profile=uds-generic&did=F40C&session=03&keepalive_ms=2000";
+    const std::string kept =
+        "elm327://<address>?profile=uds-generic&did=F40C&session=03&"
+        "keepalive_ms=2000";
+    EXPECT_NE(car.write(ECUIO_HEALTH_JSON).find(kept), std::string::npos);
+    EXPECT_NE(car.write(ECUIO_HEALTH_TEXT).find(kept), std::string::npos);
+    car.in.uri = "elm327://COM3?profile=uds-generic&session=0 3";
+    const std::string text = car.write(ECUIO_HEALTH_TEXT);
+    EXPECT_NE(text.find("elm327://<address>?profile=uds-generic "),
+              std::string::npos)
+        << text;
 }
 
 /* The since-cleared PIDs sit with their ECU, ranked or not, and aren't
@@ -1611,6 +1631,183 @@ TEST(HealthTest, ABaselinesEventsLogIsReadAsTheReadersIs)
     EXPECT_EQ(b->find("started")->type, ecuio_json::Type::null);
     EXPECT_EQ(b->find("length_s")->type, ecuio_json::Type::null);
     EXPECT_EQ(b->find("backend")->text, "unknown");
+}
+
+// ---- a cancel (ecuio_health_export_with) ----
+
+/* Counts its asks and stops the report at the stop_at-th (0: never) */
+struct Asks {
+    unsigned long count = 0;
+    unsigned long stop_at = 0;
+};
+
+int ask(void* user)
+{
+    auto* a = static_cast<Asks*>(user);
+    ++a->count;
+    return a->stop_at != 0 && a->count >= a->stop_at ? 1 : 0;
+}
+
+/* f's <folder> reported as JSON to <name>, through
+ * ecuio_health_export_with with asks (NULL: a NULL cancel) */
+ecuio_status_t report_with(const Folder& f, const std::string& folder,
+                           const std::string& name, Asks* asks,
+                           ecuio_health_report_t* r = nullptr)
+{
+    const std::string in = f.utf8(folder);
+    const std::string out = f.utf8(name);
+    ecuio_health_options_t o{};
+    o.format = ECUIO_HEALTH_JSON;
+    o.folder_utf8 = in.c_str();
+    o.out_path_utf8 = out.c_str();
+    o.latest_model_year = 2027;
+    o.utc_us = kUtc;
+    return ecuio_health_export_with(&o, asks != nullptr ? ask : nullptr, asks,
+                                    r);
+}
+
+/* The replay fixture's frames under obd2, at <name> */
+void fixture_recording(const Folder& f, const std::string& name)
+{
+    std::error_code ec;
+    fs::create_directories(f.path / name, ec);
+    fs::copy_file(fs::u8path(ECUIO_REPLAY_FIXTURES) /
+                      "2026-10-25-engine-start" / "frames.csv",
+                  f.path / name / "frames.csv", ec);
+    ASSERT_FALSE(ec) << ec.message();
+    f.write(name + "/events.log",
+            "ecuio session recording, format 2 (ADR-0049)\n"
+            "profile  obd2\n"
+            "\n");
+}
+
+/* A cancel that never stops changes nothing: the same bytes as
+ * ecuio_health_export's, and a NULL cancel is ecuio_health_export */
+TEST(HealthCancelTest, ACancelThatNeverStopsWritesTheSameReport)
+{
+    Folder f;
+    car_recording(f);
+    const Reported plain(f, f.utf8("rec"), ECUIO_HEALTH_JSON);
+    ASSERT_EQ(plain.status, ECUIO_OK) << plain.detail;
+    Asks asks;
+    ASSERT_EQ(report_with(f, "rec", "asked.json", &asks), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_GE(asks.count, 2u) << "the frames' pass and the values' open";
+    EXPECT_EQ(read_file(f.path / "asked.json"), plain.bytes);
+    ASSERT_EQ(report_with(f, "rec", "null.json", nullptr), ECUIO_OK);
+    EXPECT_EQ(read_file(f.path / "null.json"), plain.bytes);
+}
+
+/* A stop at each ask in turn: CANCELED with its words and the report
+ * zeroed, no ask after the one that stopped it, and no file at the name
+ * or beside it */
+TEST(HealthCancelTest, AStopAtEachAskInTurnWritesNothing)
+{
+    Folder f;
+    car_recording(f);
+    ASSERT_NO_FATAL_FAILURE(fixture_recording(f, "fixture"));
+    for (const char* folder : {"rec", "fixture"}) {
+        SCOPED_TRACE(folder);
+        Asks all;
+        ASSERT_EQ(
+            report_with(f, folder, std::string(folder) + "-whole.json", &all),
+            ECUIO_OK)
+            << ecuio_last_error_detail();
+        ASSERT_GE(all.count, 2u);
+        for (unsigned long n = 1; n <= all.count; ++n) {
+            Asks asks;
+            asks.stop_at = n;
+            ecuio_health_report_t r{};
+            r.ecus = 7;
+            ASSERT_EQ(report_with(f, folder, "stopped.json", &asks, &r),
+                      ECUIO_ERR_CANCELED)
+                << "at " << n;
+            EXPECT_STREQ(ecuio_last_error_detail(), "the report was canceled");
+            EXPECT_EQ(asks.count, n) << "asked again after it stopped";
+            EXPECT_EQ(r.ecus | r.values | r.codes | r.failed_class, 0u)
+                << "at " << n;
+            ASSERT_FALSE(fs::exists(f.path / "stopped.json")) << "at " << n;
+            ASSERT_FALSE(partial_left(f.path, "stopped.json")) << "at " << n;
+        }
+    }
+}
+
+/* The frames' pass is asked as its rows are read: the fixture's frames
+ * (thousands of rows) add an ask each 1024 rows over the hand-written
+ * recording's few (the report's own rule; the header promises no
+ * interval) */
+TEST(HealthCancelTest, TheFramesPassIsAskedAsItsRowsAreRead)
+{
+    Folder f;
+    car_recording(f);
+    ASSERT_NO_FATAL_FAILURE(fixture_recording(f, "fixture"));
+    Asks few;
+    ASSERT_EQ(report_with(f, "rec", "few.json", &few), ECUIO_OK);
+    Asks many;
+    ASSERT_EQ(report_with(f, "fixture", "many.json", &many), ECUIO_OK);
+    const std::string frames = read_file(f.path / "fixture" / "frames.csv");
+    const unsigned long rows = static_cast<unsigned long>(
+        std::count(frames.begin(), frames.end(), '\n') - 1);
+    ASSERT_GE(rows, 4096u);
+    EXPECT_GE(many.count, rows / 1024) << rows << " rows";
+    EXPECT_GT(many.count, few.count);
+}
+
+/* Where the report asks today (the report's own rule; the header names
+ * the points, not a count): once as the frames' pass begins, before a
+ * row is read, once each kCancelRows rows, and the reader's open at its
+ * start and its end (a file under 4 MiB: none between). Over the car's
+ * recording that open is signals.csv's, over the fixture's frames.csv's */
+TEST(HealthCancelTest, EachPassIsAskedAtItsStartAndTheOpenAsItReads)
+{
+    Folder f;
+    car_recording(f);
+    ASSERT_NO_FATAL_FAILURE(fixture_recording(f, "fixture"));
+    for (const char* folder : {"rec", "fixture"}) {
+        SCOPED_TRACE(folder);
+        const std::string frames = read_file(f.path / folder / "frames.csv");
+        ASSERT_LT(frames.size(), 4u << 20);
+        const unsigned long rows = static_cast<unsigned long>(
+            std::count(frames.begin(), frames.end(), '\n') - 1);
+        Asks asks;
+        ASSERT_EQ(
+            report_with(f, folder, std::string(folder) + "-asked.json", &asks),
+            ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(asks.count, 1 + rows / 1024 + 2) << rows << " rows";
+    }
+
+    // The first ask comes before frames.csv is read: a refused first row
+    // is never reached
+    f.write("rec/frames.csv",
+            "host_us,timestamp_us,id,flags,data\nnot a row\n");
+    Asks first;
+    first.stop_at = 1;
+    EXPECT_EQ(report_with(f, "rec", "first.json", &first), ECUIO_ERR_CANCELED);
+    EXPECT_EQ(report_with(f, "rec", "first.json", nullptr),
+              ECUIO_ERR_LOAD_FAILED);
+}
+
+/* A session's report reads no file: its cancel is never asked */
+TEST(HealthCancelTest, ASessionsReportNeverAsks)
+{
+    Folder f;
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://cancel", &s), ECUIO_OK);
+    const std::string out = f.utf8("session.json");
+    ecuio_health_options_t o{};
+    o.format = ECUIO_HEALTH_JSON;
+    o.session = s;
+    o.out_path_utf8 = out.c_str();
+    o.latest_model_year = 2027;
+    o.utc_us = kUtc;
+    Asks asks;
+    asks.stop_at = 1;
+    EXPECT_EQ(ecuio_health_export_with(&o, ask, &asks, nullptr), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(asks.count, 0u);
+    EXPECT_TRUE(fs::exists(f.path / "session.json"));
+    ecuio_session_destroy(s);
 }
 
 } // namespace

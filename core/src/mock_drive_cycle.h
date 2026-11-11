@@ -202,6 +202,13 @@ constexpr uint32_t kShiftTicks = ticks_for(0.3f);
 constexpr uint32_t kRoadShiftTicks = ticks_for(0.7f);
 constexpr uint32_t kDfcoDelayTicks = ticks_for(0.5f);
 constexpr uint32_t kLimiterTicks = ticks_for(5.0f);
+/* Battery voltage: at rest, under the starter (deepest as it engages,
+ * easing as the engine turns), and the alternator's regulated output, a
+ * little higher cold than hot and a little lower with the engine at idle */
+constexpr float kBatteryRestV = 12.45f;
+constexpr float kBatteryCrankV = 9.9f;
+constexpr float kAlternatorColdV = 14.55f;
+constexpr float kAlternatorHotV = 14.15f;
 /* Key on with the engine stopped, cranking before it catches, and the
  * start's whole phase */
 constexpr uint32_t kKeyOnTicks = ticks_for(15.0f);
@@ -396,6 +403,7 @@ struct DriveCycle {
     float lambda = kLambdaLean; /* no exhaust: the sensor reads air */
     float map_kpa = kBaroKpa;   /* PID 0x0B: stopped, the outside air */
     float baro_kpa = kBaroKpa;  /* PID 0x33 */
+    float battery_v = kBatteryRestV; /* PID 0x42: key on, the battery */
     /* The engine turning on its own: false stopped or cranking */
     bool running = false;
 
@@ -888,6 +896,7 @@ private:
         throttle_pct = kTpClosedPct + (kTpWotPct - kTpClosedPct) * blade;
 
         update_lambda(lambda_cmd);
+        update_battery();
 
         /* Fuel burned, kW. On the limiter the refires burn at the WOT
          * mixture for the share of the time road load needs. */
@@ -975,6 +984,31 @@ private:
              * pulse jitter even with the driveline locked */
             rpm = std::fmin(wheel_mps * k + 4.0f * tick_noise(tick, 7), kRevLimitRpm);
         }
+    }
+
+    /* Battery voltage follows what feeds it: the starter's load while it
+     * cranks (the first ticks the deepest), the alternator once the engine
+     * runs (regulated lower as the engine warms, and a touch lower at idle,
+     * where it is turned slowly), the battery alone otherwise. It gets
+     * there in a few ticks, not at once. */
+    void update_battery()
+    {
+        const float t = run_time_s();
+        float target;
+        if (running) {
+            const float warm = clampf((coolant_c - 20.0f) / 70.0f, 0.0f, 1.0f);
+            target = kAlternatorColdV +
+                     (kAlternatorHotV - kAlternatorColdV) * warm -
+                     0.15f * clampf((1500.0f - rpm) / 700.0f, 0.0f, 1.0f) +
+                     0.04f * drift(t, 0.8f, 81) + 0.01f * tick_noise(tick, 82);
+        } else if (phase == Phase::Start) {
+            target = kBatteryCrankV -
+                     0.5f * clampf(1.0f - phase_s() / 0.3f, 0.0f, 1.0f) +
+                     0.1f * tick_noise(tick, 83);
+        } else {
+            target = kBatteryRestV + 0.02f * drift(t, 3.0f, 84);
+        }
+        battery_v += (target - battery_v) * 0.45f;
     }
 
     /* Wideband lambda: a command, and a sensor that follows it in about
@@ -1097,7 +1131,7 @@ inline uint16_t clamp_u16(float v)
  *   [10..11] lambda   LE uint16, scale 1/32768 (J1979's equivalence ratio)
  *   [12]     MAP      uint8, kPa
  *   [13]     baro     uint8, kPa
- *   [14..15] zero, to CAN FD's 16-byte length
+ *   [14..15] battery  LE uint16, scale 0.001 V
  * The transport never decodes (rule 2); the tests round-trip every
  * tick of the cycle through ecuio_mock_signal_set(). */
 inline void encode_payload(const DriveCycle& s, uint8_t out[ECUIO_MOCK_TELEMETRY_PAYLOAD_LEN])
@@ -1124,8 +1158,10 @@ inline void encode_payload(const DriveCycle& s, uint8_t out[ECUIO_MOCK_TELEMETRY
 
     out[12] = clamp_u8(s.map_kpa);
     out[13] = clamp_u8(s.baro_kpa);
-    out[14] = 0;
-    out[15] = 0;
+
+    const uint16_t battery_raw = clamp_u16(s.battery_v / 0.001f);
+    out[14] = static_cast<uint8_t>(battery_raw & 0xFF);
+    out[15] = static_cast<uint8_t>((battery_raw >> 8) & 0xFF);
 }
 
 } // namespace ecuio_mock

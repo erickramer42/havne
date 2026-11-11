@@ -271,11 +271,12 @@ QtObject {
     }
 
     // On 6 columns: the dial 4 wide with three readouts stacked beside it,
-    // a trace across, then three readouts across. Every height is a multiple
-    // of phoneSpanScale, the step the Height control takes
+    // two traces across, then three readouts across. Every height is a
+    // multiple of phoneSpanScale, the step the Height control takes
     function phoneCells() {
         const rpm = ["id:1001", "id:7003"]
         const degC = "\u00B0C"
+        const { boost, battery, lambda, boostOptions, lambdaOptions } = watched()
         return [
             gaugeCell("shift-light", 12, 3, qsTr("Shift lights"), rpm.slice(), "RPM",
                       { from: 4500, to: 6500, count: 11 }),
@@ -289,21 +290,39 @@ QtObject {
                       { from: 0, to: 130, coldBelow: 60, warnFrom: 105, dangerFrom: 115 }),
             gaugeCell("digital", 2, 6, qsTr("Oil temp"), ["id:9001", "id:7010"], degC,
                       { from: 0, to: 160, coldBelow: 70, warnFrom: 125, dangerFrom: 140 }),
-            gaugeCell("digital", 6, 9, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
+            gaugeCell("digital", 3, 9, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
                       { from: 0, to: 300, description: qsTr("Mass air flow") }),
+            gaugeCell("digital", 3, 9, qsTr("Boost"), boost.slice(), "kPa", boostOptions),
             gaugeCell("digital", 2, 6, qsTr("IAT"), ["id:5001", "id:7005"], degC,
                       { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
                         description: qsTr("Intake air temperature") }),
-            gaugeCell("digital", 2, 6, qsTr("Load"), ["id:6001", "id:7001"], "%",
-                      { from: 0, to: 100 }),
-            gaugeCell("digital", 2, 6, qsTr("Throttle"), ["id:4001", "id:7006"], "%",
-                      { from: 0, to: 100 })
+            gaugeCell("digital", 2, 6, qsTr("Battery"), battery.slice(), "V",
+                      { from: 10, to: 16 }),
+            gaugeCell("digital", 2, 6, qsTr("Lambda"), lambda.slice(), "\u03BB",
+                      lambdaOptions)
         ]
     }
 
+    // What a driver watches beyond the dials, shared by both forms. Boost has
+    // no obd2 signal, so its ref is the mock's alone. Its range runs from the
+    // vacuum an idle pulls to what a turbo makes (about -15 to 25 psi), and
+    // lambda's from rich to the lean a fuel cut reads
+    function watched() {
+        return {
+            boost: ["id:13001"],
+            battery: ["id:14001", "id:7008"],
+            lambda: ["id:10001", "id:11544"],
+            boostOptions: { from: -100, to: 200 },
+            lambdaOptions: { from: 0.5, to: 2, description: qsTr("Equivalence ratio") }
+        }
+    }
+
+    // On a grid of 5 to 8 columns the cells after the two dials fill the
+    // squares beside them and then whole rows, so none is left empty
     function desktopCells() {
         const rpm = ["id:1001", "id:7003"]
         const degC = "\u00B0C"
+        const { boost, battery, lambda, boostOptions, lambdaOptions } = watched()
         return [
             gaugeCell("shift-light", 12, 1, qsTr("Shift lights"), rpm.slice(), "RPM",
                       { from: 4500, to: 6500, count: 15 }),
@@ -318,15 +337,17 @@ QtObject {
                       { from: 0, to: 130, coldBelow: 60, warnFrom: 105, dangerFrom: 115 }),
             gaugeCell("ring", 1, 4, qsTr("Oil temp"), ["id:9001", "id:7010"], degC,
                       { from: 0, to: 160, coldBelow: 70, warnFrom: 125, dangerFrom: 140 }),
+            // A dial this small has no room for a label: its caption names it
+            gaugeCell("analog", 1, 4, qsTr("Boost"), boost.slice(), "kPa",
+                      Object.assign({ caption: qsTr("Boost") }, boostOptions)),
             gaugeCell("digital", 1, 4, qsTr("IAT"), ["id:5001", "id:7005"], degC,
                       { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
                         description: qsTr("Intake air temperature") }),
             gaugeCell("digital", 1, 4, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
                       { from: 0, to: 300, description: qsTr("Mass air flow") }),
-            gaugeCell("bar", 2, 2, qsTr("Throttle"), ["id:4001", "id:7006"], "%",
-                      { from: 0, to: 100, accent: "success" }),
-            gaugeCell("bar", 2, 2, qsTr("Engine load"), ["id:6001", "id:7001"], "%",
-                      { from: 0, to: 100 })
+            gaugeCell("digital", 1, 4, qsTr("Lambda"), lambda.slice(), "\u03BB", lambdaOptions),
+            gaugeCell("digital", 1, 4, qsTr("Battery"), battery.slice(), "V",
+                      { from: 10, to: 16 })
         ]
     }
 

@@ -2,7 +2,8 @@
 //             included by j2534_transport.cpp (its driver) and
 //             profile_registry.cpp (the request limit)
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT: RequestEngineTest, DiagnosticsTest, ClearTest (test_obd2);
+// Testing: UNIT: RequestEngineTest, DiagnosticsTest, ClearTest,
+//          SessionControlTest (test_obd2);
 //          HARNESS: J2534AdoptionTest (test_j2534_stream); J2534HealthTest
 //          (test_j2534_health); BENCH
 
@@ -357,16 +358,20 @@ struct ecuio_engine_channel {
     /* Session control (ADR-0060): the one-shot carries 10 xx or 3E 00
      * while sessioning. session_fresh: no reply but the session's since it
      * was entered, so a 7E or 7F then isn't a lost session. last_sent_us:
-     * the channel's last request, which S3 runs from. */
+     * the channel's last request, which S3 runs from. session_refused: the
+     * request whose 7E or 7F made the last re-entry (len 0: none), until
+     * it answers; refused_own once its loss was given back. */
     uint8_t session_step = ECUIO_SESSION_STATE_NOT_ASKED;
     uint8_t session_nrc = 0;
     bool sessioning = false;
     bool session_fresh = false;
+    bool refused_own = false;
     uint16_t session_entries = 0; /* each 50 03 */
     uint16_t session_lost = 0;    /* each re-entry */
     uint32_t refused_losses = 0;  /* 7E or 7F re-entries in this window */
     int64_t loss_window_us = 0;   /* when that window started */
     int64_t last_sent_us = 0;
+    ecuio_request session_refused = {};
 };
 
 struct ecuio_request_engine {
@@ -528,8 +533,9 @@ static_assert(
 /* Section 4: what a negative reply's code says of its request, as
  * ECUIO_DROP_*: NOT_SUPPORTED for 0x12 (the first vehicle's answer to an
  * unsupported PID) and 0x31; SERVICE for 0x11; ACCESS for 0x33 and 0x7F,
- * since the engine never unlocks or changes the session; 0 for any code
- * that can pass, like 0x22 (conditions not correct) or 0x21 (busy). */
+ * since the engine never unlocks, and enters only the extended session it
+ * was asked for; 0 for any code that can pass, like 0x22 (conditions not
+ * correct) or 0x21 (busy). */
 inline uint8_t ecuio_engine_drop_reason(uint8_t nrc)
 {
     switch (nrc) {
@@ -1811,11 +1817,32 @@ inline void ecuio_engine_session_settle(ecuio_request_engine* e, uint32_t c,
     ++ch.generation;
 }
 
+/* Whether a and b ask the same thing: the session's memory of a refused
+ * request, which may have been a one-shot then and a rotation row now */
+inline bool ecuio_engine_same_request(const ecuio_request& a,
+                                      const ecuio_request& b)
+{
+    if (a.len == 0 || a.len != b.len) {
+        return false;
+    }
+    for (uint8_t k = 0; k < a.len; ++k) {
+        if (a.bytes[k] != b.bytes[k]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* A 7E or 7F reply on channel c in its session, to a request other than
  * the session's: the ECU has left the session (a reset, S3 run out on its
- * side), unless it was entered and has answered nothing else since. Then
- * the session is entered again and the request isn't counted against
- * itself: a one-shot goes back unasked and a rotation request stays. The
+ * side), unless it was entered and has answered nothing else since, or
+ * the request is the one whose refusal made the last re-entry and hasn't
+ * answered since: then it's the request's own answer, and the loss that
+ * refusal counted is given back once. Otherwise the session is entered
+ * again and the request isn't counted against itself: it's asked first
+ * once back in (a one-shot goes back unasked, a rotation request's
+ * cursor goes back to it), so each DID kept to another session is
+ * settled before the next can add a loss. The
  * ECUIO_SESSION_LOSSES_MAX-th within the window abandons the session
  * instead: a module that keeps leaving it reads in default. True when it
  * was entered again; false leaves the reply to the usual rules. */
@@ -1825,10 +1852,24 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
 {
     ecuio_engine_channel& ch = e->chans[c];
     if (e->session == 0 || ch.session_step != ECUIO_SESSION_STATE_ENTERED ||
-        ch.session_fresh || ch.sessioning || ch.clearing ||
-        out == ECUIO_ENGINE_PACK ||
+        ch.sessioning || ch.clearing || out == ECUIO_ENGINE_PACK ||
         (code != ECUIO_NRC_SUBFUNCTION_NOT_IN_ACTIVE_SESSION &&
          code != ECUIO_NRC_NOT_IN_ACTIVE_SESSION)) {
+        return false;
+    }
+    const ecuio_request& r = ecuio_engine_request_of(e, c, out);
+    const bool again = ecuio_engine_same_request(ch.session_refused, r);
+    if (ch.session_fresh || again) {
+        if (again && !ch.refused_own) {
+            ch.refused_own = true;
+            if (ch.refused_losses > 0) {
+                --ch.refused_losses;
+            }
+            if (ch.session_lost > 0 && ch.session_lost < UINT16_MAX) {
+                --ch.session_lost; /* a saturated count stays */
+            }
+            ++ch.generation;
+        }
         return false;
     }
     if (ch.refused_losses == 0 ||
@@ -1842,11 +1883,20 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
         ++ch.generation;
         return false;
     }
+    ch.session_refused = r;
+    ch.refused_own = false;
     ch.outstanding = ECUIO_ENGINE_NONE;
     ch.session_step = ECUIO_SESSION_STATE_ENTERING;
     ecuio_engine_count16(ch.session_lost);
     ++ch.generation;
     if (out != ECUIO_ENGINE_ONCE) {
+        ecuio_request& row = e->requests[out];
+        (row.slow != 0 ? ch.slow_cursor : ch.cursor) =
+            static_cast<uint32_t>(out);
+        if (row.swept != 0 && ch.sweep_asked > 0) {
+            row.swept = 0; /* counted at its ask after the entry instead */
+            --ch.sweep_asked;
+        }
         return true;
     }
     if (ch.scanning) {
@@ -2287,6 +2337,9 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
             return ecuio_reply::positive;
         }
         ch.session_fresh = false;
+        if (ecuio_engine_same_request(ch.session_refused, r)) {
+            ch.session_refused = ecuio_request{}; /* the loss was real */
+        }
         if (out == ECUIO_ENGINE_ONCE && ch.clearing) {
             ecuio_engine_clear_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len);
         } else if (out == ECUIO_ENGINE_ONCE && ch.identifying) {

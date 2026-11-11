@@ -1,7 +1,8 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
 // Testing: UNIT: CliGoldenTest, CliUsageTest, CliConnectTest, CliSignalTest,
 //          CliReplayTest, CliRecordTest, CliViewRunTest, CliPathTest,
-//          CliTransferRunTest, CliExitTest, CliObdbImportTest (ctest);
+//          CliTransferRunTest, CliExitTest, CliObdbImportTest, CliLogRunTest
+//          (ctest);
 //          CliTimingTest, CliVinTest, CliSimTest, CliMarkLinesTest,
 //          CliViewTest, CliInfoTest, CliSignalFileTest, CliHealthTest,
 //          CliPartialTest
@@ -182,14 +183,28 @@ uint64_t log_every_us()
 }
 
 std::atomic<bool> g_interrupted{false};
+// Set by install_handlers(true): a second interrupt ends the process at
+// once, for the commands whose stop has nothing to close (export, import,
+// a recording's health report), never `log`'s recorder
+std::atomic<bool> g_second_ends{false};
+
+// What a second interrupt writes, whole and flushed before the exit
+constexpr char kSecondEnd[] = "{\"type\":\"end\",\"reason\":\"interrupted\"}\n";
 
 #ifdef _WIN32
 std::atomic<bool> g_done{false};
 
 BOOL WINAPI on_console_event(DWORD event)
 {
-    g_interrupted.store(true);
+    const bool again = g_interrupted.exchange(true);
     if (event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT) {
+        if (again && g_second_ends.load()) {
+            DWORD wrote = 0;
+            (void)WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), kSecondEnd,
+                            static_cast<DWORD>(sizeof kSecondEnd - 1), &wrote,
+                            nullptr);
+            TerminateProcess(GetCurrentProcess(), 1);
+        }
         return TRUE;
     }
     // A closed console ends the process when this returns: give the
@@ -202,12 +217,21 @@ BOOL WINAPI on_console_event(DWORD event)
 #else
 void on_signal(int)
 {
-    g_interrupted.store(true);
+    if (g_interrupted.exchange(true) && g_second_ends.load()) {
+        // write and _exit are async-signal-safe; stdio's buffer is not
+        // flushed, which the commands that set this keep empty
+        const ssize_t wrote = write(1, kSecondEnd, sizeof kSecondEnd - 1);
+        (void)wrote;
+        _exit(1);
+    }
 }
 #endif
 
-void install_handlers()
+// secondEnds: a second interrupt ends the process at once, with the end
+// line and exit 1, for a command whose stop leaves nothing to close
+void install_handlers(bool secondEnds = false)
 {
+    g_second_ends.store(secondEnds);
 #ifdef _WIN32
     SetConsoleCtrlHandler(on_console_event, TRUE);
 #else
@@ -354,10 +378,13 @@ int ended(Output& out, int code)
     return out.ok() ? code : kExitFailed;
 }
 
-// export's cancel (ecuio_export_with) and its column check's: Ctrl+C or
-// SIGTERM stops it, and core removes what it had begun.
-// HAVNE_CLI_EXPORT_HOLD_MS (tests only) holds the run's first ask that
-// long, naming whose it is on stderr, so a test's interrupt lands there
+// export's cancel (ecuio_export_with), its column check's, import's
+// (ecuio_import_with) and a recording's health report's
+// (ecuio_health_export_with): Ctrl+C or SIGTERM stops it, and core removes
+// what it had begun. HAVNE_CLI_EXPORT_HOLD_MS (tests only) holds the
+// run's first ask that long, naming whose it is on stderr, so a test's
+// interrupt lands there; with HAVNE_CLI_EXPORT_HOLD_DEAF set the hold
+// ignores the interrupt, so a second one can arrive while the run waits
 int interrupted_at(bool* asked, const char* where)
 {
     if (!*asked) {
@@ -369,7 +396,8 @@ int interrupted_at(bool* asked, const char* where)
             std::fflush(stderr);
         }
         const uint64_t until = ecuio_clock_us() + hold_ms * 1000ULL;
-        while (!g_interrupted.load() && ecuio_clock_us() < until) {
+        const bool deaf = env_ms("HAVNE_CLI_EXPORT_HOLD_DEAF", 0) > 0;
+        while ((deaf || !g_interrupted.load()) && ecuio_clock_us() < until) {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
@@ -381,14 +409,25 @@ int export_interrupted(void* user)
     return interrupted_at(static_cast<bool*>(user), "export");
 }
 
+int import_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "import");
+}
+
+int health_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "health report");
+}
+
 // The column check's open (ecuio_open_progress_t) asks as the export does
 int open_interrupted(uint64_t, uint64_t, void* user)
 {
     return interrupted_at(static_cast<bool*>(user), "column check");
 }
 
-// An export or its sizing stopped by an interrupt: the end line the other
-// commands write on one, and exit 1, as clear's, since nothing was written
+// An export, its sizing, an import or a recording's health report stopped
+// by an interrupt: the end line the other commands write on one, and
+// exit 1, as clear's, since nothing was written
 int ended_interrupted(Output& out)
 {
     char buf[64];
@@ -855,9 +894,11 @@ void poll_refused(Output& out, const ecuio_signal_set_t* set,
 }
 
 // The session's signals: each def's id, name, unit, decimals and group,
-// then for an enum "enum":true and its "labels" ({"<raw>": label}, as a
-// signal file's "values"), for a computed def "computed":true
-void write_signals(Output& out, const ecuio_signal_set_t* set)
+// its "gauge" when the session's signal file gives one, then for an enum
+// "enum":true and its "labels" ({"<raw>": label}, as a signal file's
+// "values"), for a computed def "computed":true
+void write_signals(Output& out, const ecuio_signal_set_t* set,
+                   const ecuio_signal_file_t* file)
 {
     const uint32_t count = set ? set->count : 0;
     size_t bytes = 256 + size_t{count} * 512;
@@ -865,6 +906,9 @@ void write_signals(Output& out, const ecuio_signal_set_t* set)
         uint32_t labels = 0;
         cli::def_labels(*set, set->defs[i], &labels);
         bytes += cli::labels_bytes(labels);
+        if (ecuio_signal_file_gauge(file, &set->defs[i]) != nullptr) {
+            bytes += cli::kGaugeBytes;
+        }
     }
     BigLine b(bytes);
     cli::Line& l = b.line;
@@ -888,6 +932,7 @@ void write_signals(Output& out, const ecuio_signal_set_t* set)
         l.key("group");
         const char* group = ecuio_signal_group_name(d.group);
         l.string(group, std::strlen(group));
+        cli::gauge_field(l, ecuio_signal_file_gauge(file, &d));
         if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
             l.key("computed");
             l.raw("true");
@@ -1192,7 +1237,8 @@ void write_check_lines(Output& out, const ecuio_signal_file_t* file)
     for (uint32_t i = 0; i < set.count; ++i) {
         if (cli::own_signal(set.defs[i])) {
             BigLine b(cli::def_line_bytes(set, set.defs[i]));
-            cli::def_line(b.line, set, set.defs[i]);
+            cli::def_line(b.line, set, set.defs[i],
+                          ecuio_signal_file_gauge(file, &set.defs[i]));
             write_line(out, b.line);
         }
     }
@@ -1234,6 +1280,16 @@ int run_signals_check(const char* path)
 // command's return, so it is never freed, as g_signal_file isn't
 ecuio_plugin_t* g_plugin = nullptr;
 uint32_t g_plugin_variant = 0; // the variant the URI's profile= selects
+
+// The signal file decoding the session: the --signals file or a
+// recording's copy, the --plugin variant's files merged into one, or NULL
+const ecuio_signal_file_t* session_signal_file()
+{
+    return g_signal_file != nullptr ? g_signal_file
+           : g_plugin != nullptr
+               ? ecuio_plugin_variant_file(g_plugin, g_plugin_variant)
+               : nullptr;
+}
 
 // Whether path names a folder (a plugin's); otherwise it's read as a file
 bool is_folder(const char* path)
@@ -1674,6 +1730,7 @@ int run_plugins_check(const char* path, const char* on)
         cli::plugin_line(b.line, 0, p, info);
         write_line(out, b.line);
     }
+    bool uses_gauge = false;
     for (uint32_t v = 0; v < info.variant_count; ++v) {
         const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, v);
         const std::string id = variant_of(p, v);
@@ -1685,8 +1742,11 @@ int run_plugins_check(const char* path, const char* on)
         }
         for (uint32_t i = 0; i < set.count; ++i) {
             if (cli::own_signal(set.defs[i])) {
+                const ecuio_signal_gauge_t* gauge = ecuio_signal_file_gauge(
+                    ecuio_plugin_variant_file(p, v), &set.defs[i]);
+                uses_gauge = uses_gauge || gauge != nullptr;
                 BigLine b(cli::def_line_bytes(set, set.defs[i]));
-                cli::def_line(b.line, set, set.defs[i]);
+                cli::def_line(b.line, set, set.defs[i], gauge);
                 write_line(out, b.line);
             }
         }
@@ -1763,6 +1823,14 @@ int run_plugins_check(const char* path, const char* on)
             b.line, r.file.c_str(), variant.c_str(), r.value, r.result, r.have,
             r.got,
             r.result == cli::FixtureResult::passed ? nullptr : r.why.c_str());
+        write_line(out, b.line);
+    }
+    uint16_t declared[3] = {};
+    if (ecuio_plugin_requires_core(p, &declared[0], &declared[1],
+                                   &declared[2]) == ECUIO_OK &&
+        cli::gauge_needs_newer_core(declared, uses_gauge)) {
+        BigLine b(512);
+        cli::requires_core_line(b.line, declared);
         write_line(out, b.line);
     }
     {
@@ -2331,13 +2399,8 @@ bool open_recording(Output& out, ecuio_session_t* session, const char* root,
                         *detail ? detail : ecuio_status_string(st));
         return false;
     }
-    // The signal file decoding the session goes in as signals.json: the
-    // --signals file, or the --plugin variant's files merged into one
-    const ecuio_signal_file_t* file =
-        g_signal_file != nullptr ? g_signal_file
-        : g_plugin != nullptr
-            ? ecuio_plugin_variant_file(g_plugin, g_plugin_variant)
-            : nullptr;
+    // The signal file decoding the session goes in as signals.json
+    const ecuio_signal_file_t* file = session_signal_file();
     if (file != nullptr) {
         st = ecuio_recorder_signal_file(*recorder, file);
     }
@@ -2545,7 +2608,7 @@ int run_stream(const StreamArgs& args)
     cli::TimingSnapshots timing_snaps;
     std::vector<ecuio_request_timing_t> timing_rows(ECUIO_PROFILE_MAX_REQUESTS);
     if (args.values) {
-        write_signals(out, set);
+        write_signals(out, set, session_signal_file());
     }
     out.flush();
 
@@ -2828,6 +2891,22 @@ cli::LogReadout log_readout(uint64_t started, const std::string& folder,
     return r;
 }
 
+// The writer drains on a timer of its own (100 ms when idle), so a readout
+// right after the close can count none of a replay's rows: wait, at most
+// kRecordingCloseWait, until each frame put is written or dropped
+void wait_for_writer(const ecuio_recorder_t* recorder, uint64_t frames)
+{
+    const auto give_up = std::chrono::steady_clock::now() + kRecordingCloseWait;
+    ecuio_recorder_state_t st;
+    while (recorder != nullptr &&
+           ecuio_recorder_get_state(recorder, &st) == ECUIO_OK &&
+           st.state != ECUIO_RECORDING_FAILED &&
+           st.frame_rows + st.records_dropped < frames &&
+           std::chrono::steady_clock::now() < give_up) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+}
+
 // The analysis log from the command line (ADR-0056 section 7): the
 // session, the focus on the signals named (core asks those alone, as
 // often as the bus allows), a recorder attached before start so the
@@ -2995,6 +3074,7 @@ int run_log(const cli::LogArgs& args)
     closer.join();
 
     int code = kExitOk;
+    wait_for_writer(recorder, frames.covered.load(std::memory_order_acquire));
     poll_recording(out, recorder, nullptr, &recording_failed);
     const cli::LogReadout last = log_readout(started, folder, recorder);
     BigLine end(cli::log_end_line_bytes(folder.c_str()));
@@ -3151,15 +3231,23 @@ int write_health_result(Output& out, const cli::HealthArgs& a,
     return ended(out, kExitOk);
 }
 
-// A recording's report: core reads the folder, the CLI gives the time
+// A recording's report: core reads the folder, the CLI gives the time; a
+// Ctrl+C stops the read at core's next ask, nothing written
 int run_health_recording(cli::HealthArgs& a)
 {
     Output out;
+    install_handlers(true);
     write_start(out);
+    out.flush(); // a second interrupt leaves no half line behind
     a.options.utc_us = utc_now_us();
     a.options.latest_model_year = latest_model_year();
     ecuio_health_report_t r{};
-    const ecuio_status_t rc = ecuio_health_export(&a.options, &r);
+    bool asked = false;
+    const ecuio_status_t rc =
+        ecuio_health_export_with(&a.options, health_interrupted, &asked, &r);
+    if (rc == ECUIO_ERR_CANCELED) {
+        return ended_interrupted(out);
+    }
     return write_health_result(out, a, rc, r, true);
 }
 
@@ -4676,8 +4764,9 @@ int run(int argc, char** argv)
             return missing.size();
         };
         Output out;
-        install_handlers();
+        install_handlers(true);
         write_start(out);
+        out.flush(); // a second interrupt leaves no half line behind
         bool asked = false;
         if (ex.options.format == ECUIO_EXPORT_CSV &&
             ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty() &&
@@ -4735,7 +4824,11 @@ int run(int argc, char** argv)
             return print_guessed_map(im);
         }
         Output out;
+        // Before the guess, so a Ctrl+C during it stops the import at its
+        // first ask
+        install_handlers(true);
         write_start(out);
+        out.flush(); // a second interrupt leaves no half line behind
         // A CSV's column map: core takes its text, up to the JSON reader's
         // 1 MiB, and refuses a larger one in its own words
         std::string map;
@@ -4753,6 +4846,7 @@ int run(int argc, char** argv)
                 BigLine g(cli::guessed_line_bytes(text));
                 cli::guessed_line(g.line, text);
                 write_line(out, g.line);
+                out.flush();
             }
             if ((guess.flags & ECUIO_CSV_GUESS_TIME_UNIT_KNOWN) == 0) {
                 // --time-unit gives a unit only to plain numbers
@@ -4778,7 +4872,12 @@ int run(int argc, char** argv)
             im.options.column_map_utf8 = map.c_str();
         }
         ecuio_import_report_t report{};
-        const ecuio_status_t rc = ecuio_import(&im.options, &report);
+        bool asked = false;
+        const ecuio_status_t rc =
+            ecuio_import_with(&im.options, import_interrupted, &asked, &report);
+        if (rc == ECUIO_ERR_CANCELED) {
+            return ended_interrupted(out);
+        }
         if (rc != ECUIO_OK) {
             write_error(out, rc);
             return ended(out, kExitConnect);

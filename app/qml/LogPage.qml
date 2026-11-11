@@ -21,6 +21,12 @@ Pane {
     readonly property bool showingFrames: Theme.developerMode && view === "frames"
     readonly property int maxLogLines: 200
 
+    // The tab-bar form's back arrow, where no tab is marked while the Log
+    // shows; Main says where it leads
+    property bool backShown: false
+    property string backName: qsTr("Back")
+    signal backRequested
+
     // ---- The Frames view's table (framefilter.h) ----
     // By ID instead of the frames; the filter's panel open
     property bool byId: false
@@ -74,6 +80,18 @@ Pane {
         function onLogMessage(message) { page.appendLog(message) }
     }
 
+    // The activity at its newest line: where Show log and Settings' Log row
+    // land, the developer's Frames view included
+    function showActivityEnd() {
+        page.view = "activity"
+        activityLog.cursorPosition = activityLog.length
+        // The cursor is already there after a line, so it may not scroll
+        Qt.callLater(() => {
+            const flick = activityScroll.contentItem
+            flick.contentY = Math.max(0, flick.contentHeight - flick.height)
+        })
+    }
+
     // The Frames view's selected rows to the clipboard, a header line
     // first and one tab-separated line each (FrameListModel::selectedText)
     function copySelectedFrames() {
@@ -98,12 +116,62 @@ Pane {
         anchors.fill: parent
         spacing: Theme.spacing
 
-        PageHeader {
-            title: qsTr("Log")
+        RowLayout {
+            objectName: "logTitleRow"
+            Layout.fillWidth: true
+            spacing: 10
 
-            // Beside the title, so it stays put when the buttons on the
-            // right change with the view
+            // Quiet, at the left edge, as Settings' subpages have it
+            ThemedButton {
+                objectName: "logBack"
+                visible: page.backShown
+                flat: true
+                text: "←"   // a left arrow
+                Accessible.name: page.backName
+                implicitWidth: Theme.touchTarget
+                implicitHeight: Theme.touchTarget
+                onClicked: page.backRequested()
+            }
+
+            PageHeader {
+                title: qsTr("Log")
+
+                // Beside the title, so it stays put when the buttons on the
+                // right change with the view; on the tab-bar form a row of its own
+                RowLayout {
+                    id: wideSwitchSlot
+                    visible: Theme.developerMode && !Theme.compact
+                    spacing: 0
+                }
+
+                Item { Layout.fillWidth: true }
+
+                // The whole activity log to the clipboard: a phone can't
+                // select it (docs/bench-sessions/2026-10-28-android-2.md)
+                ThemedButton {
+                    objectName: "copyLog"
+                    visible: !page.showingFrames
+                    compact: Theme.compact
+                    text: qsTr("Copy")
+                    onClicked: {
+                        activityLog.selectAll()
+                        activityLog.copy()
+                        activityLog.deselect()
+                    }
+                }
+            }
+        }
+
+        // Developer mode's switch: under the title row on the tab-bar form,
+        // where the arrow, the title, the switch and Copy don't fit 320 px
+        RowLayout {
+            id: narrowSwitchSlot
+            visible: Theme.developerMode && Theme.compact
+            spacing: 0
+
             Rectangle {
+                objectName: "logViewSwitch"
+                parent: Theme.compact ? narrowSwitchSlot : wideSwitchSlot
                 visible: Theme.developerMode
                 implicitWidth: viewSwitch.implicitWidth + 4
                 implicitHeight: viewSwitch.implicitHeight + 4
@@ -129,21 +197,6 @@ Pane {
                     }
                 }
             }
-
-            Item { Layout.fillWidth: true }
-
-            // The whole activity log to the clipboard: a phone can't
-            // select it (docs/bench-sessions/2026-10-28-android-2.md)
-            ThemedButton {
-                objectName: "copyLog"
-                visible: !page.showingFrames
-                text: qsTr("Copy")
-                onClicked: {
-                    activityLog.selectAll()
-                    activityLog.copy()
-                    activityLog.deselect()
-                }
-            }
         }
 
         // QML has no clipboard of its own: the rows go through a text
@@ -163,6 +216,7 @@ Pane {
         // ---- The activity log: every connect, link change, ECU and
         // session line the bridge logs ----
         ScrollView {
+            id: activityScroll
             objectName: "activityView"
             visible: !page.showingFrames
             Layout.fillWidth: true

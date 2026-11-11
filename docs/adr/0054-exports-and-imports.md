@@ -1720,3 +1720,42 @@ reader's open does (ADR-0049 section 5):
   the same cancel, so an interrupt during it leaves nothing written; its
   stderr lines come after the export.
 - **Python** has no export wrapper. `_ecuio.py` binds both calls.
+
+*Note of 2026-11-09:* the import and the health report take the same
+cancel. `ecuio_import_with` is asked as each pass begins and as bytes are
+read (every 64 KiB); `ecuio_health_export_with` is asked, for a
+recording's folder, as the frames pass begins and every 1024 of its
+rows, and through the reader's open as it reads. A session's report
+never asks. Each stop is `ECUIO_ERR_CANCELED` ("the import was
+canceled", "the report was canceled") with nothing left made.
+`RecordingImport` and `RecordingView` set a stop in their destructors
+before they join; a close or another open still lets a report run out,
+so the file the user picked is written. `havne-cli import` stops on
+Ctrl+C with the interrupted end line and exit 1. Python's `import_csv`
+and `import_candump` take `cancel=`, and a Ctrl+C on the main thread
+stops core at its next ask and is raised again as `KeyboardInterrupt`.
+`ecuio_import_csv_guess` takes no cancel: it reads at most 1.25 MiB.
+
+*Note of 2026-11-10:* `havne-cli health` over a recording stops the same
+way: the handlers go in before the read, `ecuio_health_export_with` asks
+the interrupt, and a stop is the interrupted end line and exit 1 with
+nothing at the path. `HAVNE_CLI_EXPORT_HOLD_MS` names its first ask the
+health report's. A session's report already ended on Ctrl+C through its
+wait.
+
+*Note of 2026-11-10:* Python wraps the exports, the sizing and the
+health report, each with the imports' `cancel=` and Ctrl+C
+([ADR-0053](0053-python-bindings.md)'s appendix "exports and the health
+report from Python").
+
+*Note of 2026-11-10:* a second Ctrl+C (or SIGTERM) during `havne-cli export`,
+`import` or `health` over a recording ends the process at once: the
+interrupted end line, written whole, and exit 1. The first interrupt is the
+cancel, which core answers at its next ask; the second is for a run that
+isn't getting there. `log` and `stream` don't take it, since their stop
+closes a recording. `HAVNE_CLI_EXPORT_HOLD_DEAF` (tests only) makes the
+hold ignore the first interrupt, so a test can send two.
+
+*Note of 2026-11-10:* a failed or stopped `ecuio_export_with` leaves
+`report` zeroed but for `failed_class`, as `ecuio_health_export_with`
+does, so a caller never reads the counts of a file that isn't there.

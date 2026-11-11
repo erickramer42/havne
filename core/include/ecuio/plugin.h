@@ -86,6 +86,14 @@ static_assert(offsetof(ecuio_plugin_info_t, variant_count) == 120,
 ecuio_status_t ecuio_plugin_info(const ecuio_plugin_t* plugin,
                                  ecuio_plugin_info_t* out);
 
+/* The manifest's requires.core, the oldest core that reads the plugin,
+ * as X, Y and Z (each 0 to 65535); ECUIO_ERR_NULL_ARGUMENT for a NULL
+ * plugin or part, nothing written. Any thread may call it while the
+ * plugin lives: it only reads. */
+ecuio_status_t ecuio_plugin_requires_core(const ecuio_plugin_t* plugin,
+                                          uint16_t* major, uint16_t* minor,
+                                          uint16_t* patch);
+
 /* Variant index's id, or fixture index's path, into a buffer of cap
  * bytes; ECUIO_ERR_INVALID_ARGUMENT for an index past the count or a
  * buffer too small for the whole text and its NUL */

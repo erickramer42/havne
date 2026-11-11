@@ -25,13 +25,19 @@ Page {
     // among them (header.holdsResetPeaks)
     readonly property real toolRowFull: 272
     readonly property real gap: compact ? 10 : 16
-    // The phone's gauges are one panel (ADR-0057's appendix, section 3):
-    // the cells meet, the grid draws the surface, the edge and the
-    // hairlines between neighbors, and no cell paints its own
-    readonly property bool joined: phoneForm
+    // The gauges are one panel on both forms (ADR-0057's appendix,
+    // section 3): the cells meet, the grid draws the surface, the edge and
+    // the hairlines between neighbors, and no cell paints its own
+    readonly property bool joined: true
     readonly property real cellGap: joined ? 0 : gap
-    // The space above the header and above the panel
-    readonly property real topGap: driving ? 0 : joined ? 12 : margin
+    // The space above the header
+    readonly property real topGap: driving ? 0 : phoneForm ? 12 : margin
+    // The desktop's page strip shows, and its shown tab meets the panel:
+    // not with an edit panel open, which sits a gap under the strip
+    readonly property bool stripShown: !phoneForm && (pages.length > 1 || editing)
+    readonly property bool stripMeetsPanel: !phoneForm && stripShown && panel === "" && !driving
+    // The space above the panel, or above an edit panel over it
+    readonly property real gridTop: stripMeetsPanel ? 0 : topGap
     // The panel's distance from the page's sides; none in the drive view
     readonly property real panelMargin: driving ? 0 : margin
     // One pixel of the display in the layout's units, and a hairline
@@ -90,7 +96,8 @@ Page {
     onStoredTextChanged: problemDismissed = false
 
     // ---- Edit mode (section 5). Each edit is stored as it's made, so
-    // Done only leaves edit mode and nothing waits to be saved
+    // Done leaves edit mode and ends the undo history, and nothing waits
+    // to be saved
 
     property bool editing: false
     property int selected: -1        // the cell edited, on the page shown
@@ -110,6 +117,142 @@ Page {
     property var copied: null        // { form, cell }
     readonly property bool canPaste: copied !== null && copied.form === form
                                      && DashboardBook.canAddCell(doc, pageIndex)
+
+    // ---- Undo (ADR-0057's appendix "undo in edit mode as built"). An
+    // entry keeps the text stored before its step, so an undo stores what
+    // was there: "" (nothing, the built-in layout) included
+
+    property var undoStack: []       // [{ text, step }], the newest last
+    property var redoStack: []
+    property string lastKey: ""      // the last step's grouping key
+    property double lastAt: 0        // when it was made (Date.now())
+    readonly property int undoLimit: 50
+    readonly property int groupMs: 1500
+    property int undoLineMs: 5000    // the line's time; a test shortens it
+    property string undoLine: ""     // the line's words; "" hides it
+    readonly property bool canUndo: undoStack.length > 0
+    readonly property bool canRedo: redoStack.length > 0
+    readonly property string undoWords: canUndo ? undoStack[undoStack.length - 1].step.words : ""
+    readonly property string redoWords: canRedo ? redoStack[redoStack.length - 1].step.words : ""
+    // The options whose control steps or toggles: a run of them is one step
+    readonly property var steppedOptions: ["decimals", "peak", "cells", "digits", "window",
+                                           "count", "marks", "vertical"]
+    // An option's word in a step's words, as its caption on the panel says it
+    readonly property var optionWords: ({
+        "from": qsTr("range"), "to": qsTr("range"), "coldBelow": qsTr("zones"),
+        "warnFrom": qsTr("zones"), "dangerFrom": qsTr("zones"), "decimals": qsTr("decimals"),
+        "peak": qsTr("peak hold"), "majorStep": qsTr("major step"),
+        "minorStep": qsTr("major step"), "labelDivisor": qsTr("major step"),
+        "caption": qsTr("caption"), "description": qsTr("description"), "cells": qsTr("cells"),
+        "rise": qsTr("curve"), "digits": qsTr("digits"), "window": qsTr("window"),
+        "vertical": qsTr("standing up"), "marks": qsTr("scale marks"), "count": qsTr("lights")
+    })
+    onFormChanged: clearHistory()
+
+    // A step on the page shown: its grouping key ("" never groups), its
+    // words, and its cell before and after (-1 for none)
+    function stepOf(key, words, cell, cellAfter, pageAfter) {
+        return { key: key, words: words, page: pageIndex,
+                 pageAfter: pageAfter ?? pageIndex, cell: cell, cellAfter: cellAfter }
+    }
+    // A cell's name in a step's words: its label, or its kind's name
+    function cellName(c) {
+        return c && c.label ? c.label : c ? (kindNames[c.kind] ?? c.kind) : ""
+    }
+    // The text the store holds for what's shown
+    function shownText() {
+        return store[formKey] === "" ? "" : DashboardBook.serialize(doc)
+    }
+    function record(before, after, step) {
+        const now = Date.now()
+        const n = undoStack.length
+        if (n > 0 && step.key !== "" && step.key === lastKey && now - lastAt <= groupMs) {
+            // A run: the top already holds the text from before it
+            const top = undoStack[n - 1]
+            const rest = undoStack.slice(0, n - 1)
+            if (after === top.text) {
+                // Back where the run began, so an Undo would change nothing
+                undoStack = rest
+                lastKey = ""
+            } else {
+                undoStack = rest.concat([{ text: top.text, step: Object.assign({}, top.step,
+                    { pageAfter: step.pageAfter, cellAfter: step.cellAfter }) }])
+                lastKey = step.key
+            }
+        } else {
+            undoStack = undoStack.concat([{ text: before, step: step }]).slice(-undoLimit)
+            lastKey = step.key
+        }
+        lastAt = now
+        redoStack = []
+        // Edit mode's bar has Undo; outside it the line is the only way back
+        if (editing)
+            undoLine = ""
+        else
+            showLine(step.words.charAt(0).toUpperCase() + step.words.slice(1))
+    }
+    function restore(text) {
+        store[formKey] = text
+        doc = text === "" ? DashboardBook.reset(form) : DashboardBook.parse(text, form).doc
+    }
+    // An undo or a redo goes from (page, cell) to (toPage, toCell). The
+    // cell panel follows only when it was on the step's cell, so it never
+    // shows another cell at a moved index; Add's and a signal's close
+    function travel(text, page, cell, toPage, toCell) {
+        const shown = panel
+        const follows = selected >= 0 && selected === cell && page === pageIndex
+                        && (shown === "cell" || shown === "")
+        restore(text)
+        goTo(toPage)
+        if (follows && toCell >= 0 && toCell < shownCells.length) {
+            selected = toCell
+            panel = shown
+            return
+        }
+        panel = ""
+        addKind = ""
+        selected = -1
+    }
+    function undo() {
+        // A field still open commits as its own step, which this then takes back
+        commitTyping()
+        if (!canUndo)
+            return
+        const top = undoStack[undoStack.length - 1]
+        const s = top.step
+        undoStack = undoStack.slice(0, -1)
+        redoStack = redoStack.concat([{ text: shownText(), step: s }])
+        travel(top.text, s.pageAfter, s.cellAfter, s.page, s.cell)
+        lastKey = ""
+        showLine(qsTr("Undid: %1").arg(s.words))
+    }
+    function redo() {
+        commitTyping()
+        if (!canRedo)
+            return
+        const top = redoStack[redoStack.length - 1]
+        const s = top.step
+        redoStack = redoStack.slice(0, -1)
+        undoStack = undoStack.concat([{ text: shownText(), step: s }])
+        travel(top.text, s.page, s.cell, s.pageAfter, s.cellAfter)
+        lastKey = ""
+        showLine(qsTr("Redid: %1").arg(s.words))
+    }
+    function clearHistory() {
+        undoStack = []
+        redoStack = []
+        lastKey = ""
+        undoLine = ""
+    }
+    function showLine(words) {
+        undoLine = words
+        undoLineTimer.restart()
+    }
+    Timer {
+        id: undoLineTimer
+        interval: root.undoLineMs
+        onTriggered: root.undoLine = ""
+    }
 
     // The kinds this page draws, in the order Add offers them, and the
     // component that makes each (a cell's and Add's preview); null for
@@ -171,6 +314,7 @@ Page {
         moreShown = false
         confirmReset = false
         confirmRemovePage = false
+        clearHistory()
     }
 
     // Takes the focus off a text field, so the field commits what was
@@ -191,11 +335,16 @@ Page {
     }
 
     // Stores next as this form's document, unless it's the same (a
-    // refused write gives an equal copy). The first edit after a stored
+    // refused write gives an equal copy), and makes `step` an undo step
+    // (none: a write that can't be undone). The first edit after a stored
     // text that couldn't be used keeps that text in <form>Unread
-    function edit(next) {
-        if (DashboardBook.serialize(next) === DashboardBook.serialize(doc))
+    function edit(next, step) {
+        const now = DashboardBook.serialize(doc)
+        const after = DashboardBook.serialize(next)
+        if (after === now)
             return false
+        if (step)
+            record(store[formKey] === "" || problem !== "" ? "" : now, after, step)
         const texts = DashboardBook.saveTexts(problem, store[formKey], next)
         if (texts.unread !== "")
             store[formKey + "Unread"] = texts.unread
@@ -205,8 +354,10 @@ Page {
     }
 
     // Back to the built-in layout: nothing stored, so a later version's
-    // built-in layout reaches it
+    // built-in layout reaches it. Undo stores the replaced pages again
     function resetForm() {
+        if (store[formKey] !== "")
+            record(shownText(), "", stepOf("", qsTr("reset the layout"), -1, -1, 0))
         const texts = DashboardBook.saveTexts(problem, store[formKey], doc)
         if (texts.unread !== "")
             store[formKey + "Unread"] = texts.unread
@@ -246,11 +397,11 @@ Page {
     property bool driving: false
     property bool barsUp: false          // the reveal
     property bool barsHeld: false        // a fault or a log's notice keeps them up
-    // What Main hands over: Settings' two values, the header's height and
-    // the system's insets
+    // What Main hands over: Settings' two values, the tab bar's height (the
+    // sheet rises above it) and the system's insets
     property int driveHideMs: 4000
     property string driveOrientation: "follow"
-    property real driveHeaderHeight: 0
+    property real driveTabBarHeight: 0
     property real driveInsetTop: 0
     property real driveInsetBottom: 0
     property string driveLogTime: ""
@@ -297,23 +448,6 @@ Page {
         PhoneWindow.lockOrientation("follow")
     }
     Component.onDestruction: leaveDrive(false)
-
-    // Above the revealed tool row: a press restarts the hide delay and goes
-    // on to the buttons
-    MouseArea {
-        objectName: "driveToolsTouch"
-        enabled: root.driving
-        visible: topBar.visible && root.driving
-        z: 3
-        x: topBar.x
-        y: topBar.y
-        width: topBar.width
-        height: topBar.height
-        onPressed: mouse => {
-            root.barTouched()
-            mouse.accepted = false
-        }
-    }
 
     // A tap on the gauges: the bars in or out, and a held reveal is over
     function driveTap() {
@@ -393,11 +527,11 @@ Page {
                 root.driveLogEnded = true
         }
     }
+    // The bars rise from the bottom, so the status line is never covered
     Timer {
         objectName: "driveLogEndedTimer"
         interval: root.driveHideMs > 0 ? root.driveHideMs : 4000
-        // The header covers the status line while the bars are up
-        running: root.driveLogEnded && !root.barsUp
+        running: root.driveLogEnded
         onTriggered: root.driveLogEnded = false
     }
 
@@ -412,7 +546,8 @@ Page {
         if (!canPaste)
             return
         commitTyping()
-        edit(DashboardBook.pasteCell(doc, pageIndex, i, copied.cell))
+        edit(DashboardBook.pasteCell(doc, pageIndex, i, copied.cell),
+             stepOf("", qsTr("pasted %1").arg(cellName(copied.cell)), -1, i + 1))
     }
 
     // ---- Add: a kind, then a signal
@@ -437,7 +572,8 @@ Page {
     function pickKind(kind) {
         if (kind === "blank") {
             const span = newSpans[kind]
-            if (edit(DashboardBook.addCell(doc, pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] })))
+            if (edit(DashboardBook.addCell(doc, pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] }),
+                     stepOf("", qsTr("added %1").arg(kindNames[kind]), -1, shownCells.length)))
                 select(shownCells.length - 1)
             return
         }
@@ -474,7 +610,9 @@ Page {
     }
     function pickSignal(row) {
         if (addKind !== "") {
-            if (edit(DashboardBook.addCell(doc, pageIndex, newCell(addKind, row)))) {
+            const cell = newCell(addKind, row)
+            if (edit(DashboardBook.addCell(doc, pageIndex, cell),
+                     stepOf("", qsTr("added %1").arg(cellName(cell)), -1, shownCells.length))) {
                 addKind = ""
                 select(shownCells.length - 1)
             }
@@ -491,7 +629,7 @@ Page {
             from: r.from, to: r.to, coldBelow: null, warnFrom: null, dangerFrom: null,
             majorStep: null, minorStep: null, labelDivisor: null, caption: null,
             description: null, peakLabel: null, decimals: null })
-        edit(next)
+        edit(next, stepOf("", qsTr("changed %1's signal").arg(cellName(selectedCell)), selected, selected))
         panel = "cell"
     }
     Connections {
@@ -503,26 +641,40 @@ Page {
 
     // ---- The cell's panel
 
-    function setOptions(changes) {
-        return edit(DashboardBook.setOptions(doc, pageIndex, selected, changes))
+    // The selected cell's options, on `base` when given (a write already
+    // composed for the same step). A run of a stepped option on one cell
+    // is one undo step; a typed one never groups, since a field commits once
+    function setOptions(changes, base) {
+        const names = Object.keys(changes).sort()
+        const key = names.every(n => steppedOptions.indexOf(n) >= 0)
+            ? "opt/" + pageIndex + "/" + selected + "/" + names.join(",") : ""
+        const word = optionWords[names[0]] ?? names[0]
+        return edit(DashboardBook.setOptions(base ?? doc, pageIndex, selected, changes),
+                    stepOf(key, qsTr("changed %1's %2").arg(cellName(selectedCell)).arg(word),
+                           selected, selected))
     }
     function setLabel(text) {
         return edit(DashboardBook.setCell(doc, pageIndex, selected,
-                                          { label: text === "" ? null : text }))
+                                          { label: text === "" ? null : text }),
+                    stepOf("", qsTr("changed %1's label").arg(cellName(selectedCell)), selected, selected))
     }
     function resize(w, h) {
-        return edit(DashboardBook.resizeCell(doc, pageIndex, selected, w, h))
+        return edit(DashboardBook.resizeCell(doc, pageIndex, selected, w, h),
+                    stepOf("size/" + pageIndex + "/" + selected,
+                           qsTr("resized %1").arg(cellName(selectedCell)), selected, selected))
     }
     // Earlier, later, to the start and to the end: the cell's place in
     // the order, which both forms' grids follow
     function moveTo(to) {
         const t = Math.max(0, Math.min(shownCells.length - 1, to))
-        if (edit(DashboardBook.moveCell(doc, pageIndex, selected, t)))
+        if (edit(DashboardBook.moveCell(doc, pageIndex, selected, t),
+                 stepOf("", qsTr("moved %1").arg(cellName(selectedCell)), selected, t)))
             selected = t
     }
     function removeCell(i) {
         commitTyping()
-        if (!edit(DashboardBook.removeCell(doc, pageIndex, i)))
+        if (!edit(DashboardBook.removeCell(doc, pageIndex, i),
+                  stepOf("", qsTr("removed %1").arg(cellName(shownCells[i])), i, -1)))
             return
         if (selected === i) {
             selected = -1
@@ -535,13 +687,17 @@ Page {
     // ---- The pages' edits
 
     function addPage() {
-        if (edit(DashboardBook.addPage(doc, qsTr("Page %1").arg(pages.length + 1))))
+        if (edit(DashboardBook.addPage(doc, qsTr("Page %1").arg(pages.length + 1)),
+                 stepOf("", qsTr("added a page"), -1, -1, pages.length)))
             goTo(pages.length - 1)
     }
     function movePage(by) {
         const to = pageIndex + by
-        if (edit(DashboardBook.movePage(doc, pageIndex, to)))
+        if (edit(DashboardBook.movePage(doc, pageIndex, to), stepOf("", qsTr("moved the page"), -1, -1, to)))
             goTo(to)
+    }
+    function renamePage(name) {
+        edit(DashboardBook.renamePage(doc, pageIndex, name), stepOf("", qsTr("renamed the page"), -1, -1))
     }
     // Another page takes this one's index, so nothing stays selected
     function removePage() {
@@ -549,7 +705,11 @@ Page {
         selected = -1
         panel = ""
         addKind = ""
-        edit(DashboardBook.removePage(doc, pageIndex))
+        const p = pages[pageIndex]
+        const name = p && p.name ? p.name : qsTr("Page %1").arg(pageIndex + 1)
+        edit(DashboardBook.removePage(doc, pageIndex),
+             stepOf("", qsTr("removed the page %1").arg(name), -1, -1,
+                    Math.max(0, Math.min(pageIndex, pages.length - 2))))
     }
 
     // ---- Pages
@@ -572,6 +732,10 @@ Page {
         addKind = ""
         if (swipe.count > pageIndex && swipe.currentIndex !== pageIndex)
             swipe.setCurrentIndex(pageIndex)
+        // A tab with the focus hands it on, so the ring is on the page shown
+        const strip = stripHost.item as DashPageStrip
+        if (strip && strip.holdsFocus())
+            strip.focusTab(pageIndex)
         if (!restored) return
         if (form === "phone") store.phonePage = pageIndex
         else store.desktopPage = pageIndex
@@ -594,6 +758,26 @@ Page {
         sequence: "Right"
         enabled: root.pageKeys
         onActivated: root.goTo(root.pageIndex + 1)
+    }
+    // Undo and Redo on the desktop form, in edit mode or out of it; a
+    // field with the focus keeps its own
+    readonly property bool undoKeys: visible && form === "desktop" && !typing && !driving
+    Shortcut {
+        id: undoKey
+        sequence: "Ctrl+Z"
+        enabled: root.undoKeys && root.canUndo
+        onActivated: root.undo()
+    }
+    Shortcut {
+        id: redoKey
+        sequence: "Ctrl+Shift+Z"
+        enabled: root.undoKeys && root.canRedo
+        onActivated: root.redo()
+    }
+    Shortcut {
+        sequence: "Ctrl+Y"
+        enabled: root.undoKeys && root.canRedo
+        onActivated: root.redo()
     }
 
     // ---- The sweep and the peaks, on every page
@@ -624,9 +808,13 @@ Page {
     function resetPeaks() { peaksResetRequested() }
     onVisibleChanged: {
         maybeSweep()
-        // Any page but Dash ends the view for good: a tab, the status's Log
-        if (!visible)
+        // Any page but Dash ends the view for good: a tab, the status's Log,
+        // and the history, as Done does: a step from outside edit mode
+        // isn't undone by a Ctrl+Z days later
+        if (!visible) {
             leaveDrive(true)
+            clearHistory()
+        }
     }
     Component.onCompleted: {
         goTo(form === "phone" ? store.phonePage : store.desktopPage)
@@ -972,11 +1160,36 @@ Page {
             width: Theme.touchTarget
             height: Theme.touchTarget
             sourceComponent: ThemedButton {
+                id: removeBox
                 objectName: "cellRemove"
                 compact: true
                 text: "\u00D7"
                 Accessible.name: qsTr("Remove %1").arg(card.label)
                 onClicked: root.removeCell(card.cellIndex)
+                // A touch's size drawn as a smaller raised square with an edge:
+                // a button, not an empty tile, and inside a short cell
+                background: Item {
+                    Rectangle {
+                        objectName: "cellRemoveFace"
+                        anchors.centerIn: parent
+                        width: 32
+                        height: 32
+                        radius: Theme.radius
+                        color: removeBox.down ? removeBox.pressedColor
+                             : removeBox.hovered ? removeBox.hoverColor
+                             : removeBox.baseColor
+                        border.width: removeBox.visualFocus ? 2 : 1
+                        border.color: removeBox.visualFocus ? Theme.text : Theme.outline
+                    }
+                }
+                contentItem: Text {
+                    text: removeBox.text
+                    font.pixelSize: Theme.fontBody + 6
+                    font.weight: Font.DemiBold
+                    color: Theme.text
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
         }
 
@@ -1047,6 +1260,9 @@ Page {
             readonly property SignalHub.Entry entry: hub.lookup(cell && cell.refs ? cell.refs : [])
             readonly property bool phone: root.form === "phone"
             readonly property bool hasSignal: kind !== "blank"
+            // The cell's label, or its kind's name when it has none
+            readonly property string name: cell && cell.label ? cell.label
+                                           : (root.kindNames[kind] ?? kind)
             implicitHeight: panelColumn.implicitHeight + 2 * padding
             padding: 12
 
@@ -1304,16 +1520,17 @@ Page {
                         onToggled: {
                             // Standing up is a tall, narrow bar: the default
                             // span follows the toggle, and a size the user
-                            // chose stays
-                            // (the resize rebinds this switch, so its state is read first)
+                            // chose stays; one write, so one undo step
+                            // (the write rebinds this switch, so its state is read first)
                             const on = checked
                             const c = panelCard.cell
                             const s = root.spanScale
+                            let base = root.doc
                             if (c && on && c.w === 2 * s && c.h === 2 * s)
-                                root.resize(s, 4 * s)
+                                base = DashboardBook.resizeCell(base, root.pageIndex, root.selected, s, 4 * s)
                             else if (c && !on && c.w === s && c.h === 4 * s)
-                                root.resize(2 * s, 2 * s)
-                            root.setOptions({ vertical: on })
+                                base = DashboardBook.resizeCell(base, root.pageIndex, root.selected, 2 * s, 2 * s)
+                            root.setOptions({ vertical: on }, base)
                         }
                     }
                     Caption { visible: panelCard.kind === "bar"; text: qsTr("Scale marks") }
@@ -1376,6 +1593,16 @@ Page {
                         text: qsTr("To the end")
                         onClicked: root.moveTo(root.shownCells.length - 1)
                     }
+                }
+
+                // Remove, last and quiet, in edit mode or out of it; Undo
+                // takes it back, so it asks nothing
+                ThemedButton {
+                    objectName: "panelRemove"
+                    flat: true
+                    text: qsTr("Remove")
+                    Accessible.name: qsTr("Remove %1").arg(panelCard.name)
+                    onClicked: root.removeCell(root.selected)
                 }
             }
         }
@@ -1549,37 +1776,33 @@ Page {
     }
 
     // No session on the phone: the connect list, in the panel's place above
-    // the gauges, on every page. Settings owns connecting
+    // the gauges, on every page. Settings owns connecting; ConnectList the
+    // chosen row and the last failure's words
     property var connectUris: []
     property string connectVehicleUri: ""
-    // A tapped row is the user's choice; else the picked vehicle's address
+    property var connectAdapters: []
+    // A tapped row outlives the list, which the Loader makes again each show
     property string connectTapped: ""
-    readonly property int connectPick: {
-        const wanted = connectTapped !== "" ? connectTapped : connectVehicleUri
-        return Math.max(0, connectUris.indexOf(wanted))
-    }
-    property string connectError: ""
     readonly property bool connectShown: form === "phone" && !Bridge.connected && !editing
     signal connectToUri(string uri)
     signal otherAddressRequested()
+    signal logRequested()
+    signal connectListShown()
     onConnectUrisChanged: connectTapped = ""
     onConnectVehicleUriChanged: connectTapped = ""
-    Connections {
-        target: Bridge
-        function onConnectResult(uri, error) { root.connectError = error }
-    }
     Component {
         id: connectPanel
-        DashConnectList {
-            uris: root.connectUris
-            selected: root.connectPick
-            errorText: root.connectError
-            onPicked: index => root.connectTapped = root.connectUris[index]
-            onConnectTo: uri => {
-                root.connectError = ""
-                root.connectToUri(uri)
-            }
+        ConnectList {
+            objectName: "dashConnectList"
+            recents: root.connectUris
+            vehicleUri: root.connectVehicleUri
+            adapters: root.connectAdapters
+            tapped: root.connectTapped
+            onPicked: uri => root.connectTapped = uri
+            onConnectTo: uri => root.connectToUri(uri)
             onOtherAddress: root.otherAddressRequested()
+            onShowLog: root.logRequested()
+            onShown: root.connectListShown()
         }
     }
 
@@ -1717,42 +1940,197 @@ Page {
         }
     }
 
-    // Behind the revealed tool row, so the gauges don't show through it.
-    // A touch on it counts as a touch on the bars
+    // What the log did without being asked: Start log's refusal, or an
+    // end the user didn't ask for (a failed write, the session's end), in
+    // words beside a warning dot, until Dismiss or the next log. Start log
+    // sits in Main's header, so the bridge holds the words
+    // (Bridge.logNotice); the header and the drive view's sheet show them
+    component LogNotice: RowLayout {
+        id: notice
+        required property string name
+        readonly property real touchMin: Theme.touchTarget
+        objectName: name
+        Layout.fillWidth: true
+        visible: Bridge.logNotice !== ""
+        spacing: 10
+        Rectangle {
+            implicitWidth: 8; implicitHeight: 8   // layout-managed
+            radius: 4
+            color: Theme.warning
+        }
+        Label {
+            objectName: notice.name + "Text"
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.text
+            font.pixelSize: Theme.fontCaption
+            text: Bridge.logNotice
+        }
+        ThemedButton {
+            objectName: notice.name + "Dismiss"
+            compact: true
+            text: qsTr("Dismiss")
+            Accessible.name: qsTr("Dismiss the log's notice")
+            onClicked: Bridge.clearLogNotice()
+        }
+    }
+
+    // ---- The drive view's controls (ADR-0059's appendix "the reveal from
+    // the bottom"): a sheet that rises with the tab bar, over the panel's
+    // foot, so the top row and the status line stay in view. Upright the
+    // session's row over the view's, Exit drive nearest the tabs; on its
+    // side one row, the view's controls first. Its ground keeps the gauges
+    // from showing through, and a touch anywhere on it restarts the delay
     Rectangle {
+        id: driveSheet
         objectName: "driveToolsBackdrop"
-        visible: topBar.visible && root.driving
-        z: 1
+        readonly property bool wide: root.width > root.height
+        visible: root.driving && root.barsShown > 0
+        z: 3
         x: 0
-        y: topBar.y - root.gap / 2
+        y: root.height - root.barsShown * (root.driveTabBarHeight + height)
         width: root.width
-        height: topBar.height + root.gap
+        height: sheetGrid.implicitHeight + 2 * Theme.barGap
         color: Theme.bg
+        // Keeps a press between the controls off the gauges; driveToolsTouch counts it
         MouseArea {
             anchors.fill: parent
             enabled: root.driving
-            onPressed: root.barTouched()
         }
         Rectangle {
-            anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+            anchors { left: parent.left; right: parent.right; top: parent.top }
             height: root.hairlineWidth
             color: Theme.hairline
         }
+        GridLayout {
+            id: sheetGrid
+            objectName: "driveSheet"
+            readonly property real touchMin: Theme.touchTarget
+            x: root.margin
+            y: Theme.barGap
+            width: parent.width - 2 * root.margin
+            columns: driveSheet.wide ? 2 : 1
+            columnSpacing: Theme.barGap
+            rowSpacing: Theme.barGap
+
+            LogNotice {
+                name: "driveLogNotice"
+                Layout.row: 0
+                Layout.column: 0
+                Layout.columnSpan: sheetGrid.columns
+            }
+            RowLayout {
+                objectName: "driveSessionRow"
+                Layout.row: 1
+                Layout.column: driveSheet.wide ? 1 : 0
+                Layout.fillWidth: true
+                spacing: Theme.barGap
+                Item { Layout.fillWidth: true; visible: driveSheet.wide }
+                SheetButton {
+                    objectName: "driveStartLog"
+                    highlighted: true
+                    visible: Bridge.connected && !Bridge.recordingActive
+                             && !root.isReplay(Bridge.currentUri)
+                    enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
+                    text: qsTr("Start log")
+                    Accessible.name: qsTr("Start a log of the ticked signals")
+                    onClicked: Bridge.startLog()
+                }
+                Label {
+                    objectName: "driveLogReadout"
+                    visible: Bridge.logActive
+                    font.family: Theme.valueFamily
+                    font.features: { "tnum": 1 }
+                    font.pixelSize: Theme.fontBody
+                    color: Theme.text
+                    text: root.driveLogSize === "" ? root.driveLogTime
+                        : qsTr("%1 · %2").arg(root.driveLogTime).arg(root.driveLogSize)
+                }
+                SheetButton {
+                    objectName: "driveStopLog"
+                    highlighted: true
+                    visible: Bridge.logActive
+                    enabled: !Bridge.disconnecting
+                    text: qsTr("Stop log")
+                    onClicked: Bridge.stopLog()
+                }
+                SheetButton {
+                    objectName: "driveMark"
+                    visible: Bridge.recordingActive && !Bridge.logActive
+                    text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount) : qsTr("Mark")
+                    Accessible.name: qsTr("Mark the recording")
+                    onClicked: Bridge.mark()
+                }
+                Item { Layout.fillWidth: true; visible: !driveSheet.wide }
+                // Stop log takes its place while a log runs, as in the header
+                SheetButton {
+                    objectName: "driveDisconnect"
+                    flat: true
+                    visible: !Bridge.logActive
+                    enabled: !Bridge.connecting && !Bridge.disconnecting
+                    text: Bridge.disconnecting ? qsTr("Disconnecting…") : qsTr("Disconnect")
+                    onClicked: Bridge.disconnectSession()
+                }
+            }
+            RowLayout {
+                objectName: "driveViewRow"
+                Layout.row: driveSheet.wide ? 1 : 2
+                Layout.column: 0
+                Layout.fillWidth: true
+                spacing: Theme.barGap
+                SheetButton {
+                    objectName: "driveExit"
+                    flat: true
+                    text: qsTr("Exit drive")
+                    Accessible.name: qsTr("Exit drive: leave the full-screen gauges")
+                    onClicked: root.leaveDrive(true)
+                }
+                Item { Layout.fillWidth: true; visible: !driveSheet.wide }
+                SheetButton {
+                    objectName: "driveResetPeaks"
+                    flat: true
+                    text: qsTr("Reset peaks")
+                    onClicked: root.resetPeaks()
+                }
+                Loader {
+                    objectName: "driveNight"
+                    active: root.driving
+                    sourceComponent: toolNight
+                }
+                Item { Layout.fillWidth: true; visible: driveSheet.wide }
+            }
+        }
+        // Over the controls: a press restarts the delay and goes on to them
+        MouseArea {
+            objectName: "driveToolsTouch"
+            anchors.fill: parent
+            z: 1
+            enabled: root.driving
+            onPressed: mouse => {
+                root.barTouched()
+                mouse.accepted = false
+            }
+        }
+    }
+    // A touch's size each way, drawn compact, as the header's buttons
+    component SheetButton: ThemedButton {
+        compact: !flat
+        Layout.minimumWidth: Theme.touchTarget
     }
 
     // ---- The header: on the desktop the title, the link state and the
     // tools, on the phone the tools alone (the tab bar names the page and
-    // the top bar has the link state); the desktop's page buttons; why
-    // the stored layout isn't shown
+    // the top bar has the link state); why the stored layout isn't shown;
+    // last, the desktop's page strip, on the panel's upper edge. The drive
+    // view shows none of it: its controls are in the sheet
 
     ColumnLayout {
         id: topBar
-        readonly property real revealedY: root.driveHeaderHeight + root.gap / 2
-        visible: !root.driving || root.barsShown > 0
-        z: root.driving ? 2 : 0
+        visible: !root.driving
+        // Over the pages, so the shown tab covers the panel's top line
+        z: 1
         x: (root.width - width) / 2
-        // In the drive view it comes down from under the header's edge
-        y: root.driving ? revealedY - (1 - root.barsShown) * (revealedY + height + root.gap) : root.topGap
+        y: root.topGap
         width: Math.max(0, root.width - 2 * root.margin)
         spacing: root.gap / 2
 
@@ -1847,46 +2225,57 @@ Page {
             }
         }
 
-        // What the log did without being asked: Start log's refusal, or
-        // an end the user didn't ask for (a failed write, the session's
-        // end), in words beside a warning dot, until Dismiss or the next
-        // log. Start log sits in Main's header, so the bridge holds the
-        // words (Bridge.logNotice) and this page shows them
-        RowLayout {
-            objectName: "dashLogNotice"
-            Layout.fillWidth: true
-            visible: Bridge.logNotice !== ""
-            spacing: 10
-            Rectangle {
-                implicitWidth: 8; implicitHeight: 8   // layout-managed
-                radius: 4
-                color: Theme.warning
-            }
-            Label {
-                objectName: "dashLogNoticeText"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: Theme.text
-                font.pixelSize: Theme.fontCaption
-                text: Bridge.logNotice
-            }
-            ThemedButton {
-                objectName: "dashLogNoticeDismiss"
-                compact: true
-                text: qsTr("Dismiss")
-                Accessible.name: qsTr("Dismiss the log's notice")
-                onClicked: Bridge.clearLogNotice()
-            }
-        }
+        LogNotice { name: "dashLogNotice" }
 
-        // Edit mode's bar: three buttons, compact on the phone, so its
-        // row holds them
+        // Edit mode's bar: Undo and Redo where Drive stands outside edit
+        // mode, Add and Page, and Done in Edit's place at the end. Compact
+        // on the phone, and Add's words shortened on a narrow page, so the
+        // row holds them at a 320 px width and a large font
         RowLayout {
             objectName: "dashEditBar"
             readonly property real touchMin: Theme.touchTarget
             Layout.fillWidth: true
             visible: root.editing
-            spacing: 8
+            // Tighter on a phone, where a wider face and a large font need the room
+            spacing: root.form === "phone" ? 4 : 8
+            // Disabled rather than hidden with nothing to take back, so the row never moves
+            ThemedButton {
+                objectName: "dashUndo"
+                flat: true
+                enabled: root.canUndo
+                text: qsTr("Undo")
+                Accessible.name: root.canUndo ? qsTr("Undo: %1").arg(root.undoWords) : qsTr("Undo")
+                onClicked: root.undo()
+            }
+            ThemedButton {
+                objectName: "dashRedo"
+                flat: true
+                enabled: root.canRedo
+                text: qsTr("Redo")
+                Accessible.name: root.canRedo ? qsTr("Redo: %1").arg(root.redoWords) : qsTr("Redo")
+                onClicked: root.redo()
+            }
+            Item { Layout.fillWidth: true }
+            ThemedButton {
+                objectName: "dashAdd"
+                compact: root.form === "phone"
+                enabled: DashboardBook.canAddCell(root.doc, root.pageIndex)
+                text: root.compact ? qsTr("Add") : qsTr("Add gauge")
+                Accessible.name: qsTr("Add a gauge")
+                onClicked: root.startAdd()
+            }
+            ThemedButton {
+                objectName: "dashMore"
+                compact: root.form === "phone"
+                checkable: true
+                checked: root.moreShown
+                text: qsTr("Page")
+                onClicked: {
+                    root.moreShown = !root.moreShown
+                    root.confirmReset = false
+                    root.confirmRemovePage = false
+                }
+            }
             ThemedButton {
                 objectName: "dashDone"
                 compact: root.form === "phone"
@@ -1894,34 +2283,40 @@ Page {
                 text: qsTr("Done")
                 onClicked: root.stopEditing()
             }
-            ThemedButton {
-                objectName: "dashAdd"
-                compact: root.form === "phone"
-                enabled: DashboardBook.canAddCell(root.doc, root.pageIndex)
-                text: qsTr("Add gauge")
-                onClicked: root.startAdd()
+        }
+
+        // After an undo or a redo, the step's words; outside edit mode,
+        // after each step too, with an Undo, since there is no bar there
+        RowLayout {
+            objectName: "dashUndoLine"
+            readonly property real touchMin: Theme.touchTarget
+            Layout.fillWidth: true
+            visible: root.undoLine !== "" && !root.driving
+            spacing: 10
+            Label {
+                objectName: "dashUndoLineText"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.text
+                font.pixelSize: Theme.fontCaption
+                text: root.undoLine
+            }
+            Label {
+                objectName: "dashUndoLineKeys"
+                visible: root.editing && root.form === "desktop"
+                color: Theme.textDim
+                font.pixelSize: Theme.fontCaption
+                text: undoKey.nativeText + "  " + redoKey.nativeText
             }
             ThemedButton {
-                objectName: "dashPaste"
-                compact: root.form === "phone"
-                visible: root.copied !== null
-                enabled: root.canPaste
-                text: qsTr("Paste")
-                onClicked: root.pasteAfter(root.shownCells.length - 1)
+                objectName: "dashUndoLineUndo"
+                compact: true
+                visible: !root.editing
+                enabled: root.canUndo
+                text: qsTr("Undo")
+                Accessible.name: root.canUndo ? qsTr("Undo: %1").arg(root.undoWords) : qsTr("Undo")
+                onClicked: root.undo()
             }
-            ThemedButton {
-                objectName: "dashMore"
-                compact: root.form === "phone"
-                checkable: true
-                checked: root.moreShown
-                text: qsTr("Pages")
-                onClicked: {
-                    root.moreShown = !root.moreShown
-                    root.confirmReset = false
-                    root.confirmRemovePage = false
-                }
-            }
-            Item { Layout.fillWidth: true }
         }
 
         // The pages' controls, then a gap, then Reset (it replaces every page,
@@ -1945,14 +2340,16 @@ Page {
                 placeholderText: qsTr("Page name")
                 Accessible.name: qsTr("This page's name")
                 onEditingFinished: {
-                    root.edit(DashboardBook.renamePage(root.doc, root.pageIndex, text))
+                    root.renamePage(text)
                     text = Qt.binding(() => root.pages[root.pageIndex]
                                             ? root.pages[root.pageIndex].name : "")
                 }
             }
+            // The phone's only way to a new page; the desktop's is the strip's "+"
             ThemedButton {
                 id: moreAddPage
                 objectName: "moreAddPage"
+                visible: root.phoneForm
                 enabled: DashboardBook.canAddPage(root.doc)
                 text: qsTr("Add page")
                 onClicked: root.addPage()
@@ -1985,9 +2382,9 @@ Page {
                 objectName: "moreResetGap"
                 // The bar's width and the controls' own, never the flow's: a
                 // hidden flow sizes itself from its children, and would loop
-                readonly property real used: pageName.width + moreAddPage.width + moreRemovePage.width
+                readonly property real used: pageName.width + moreRemovePage.width + moreRow.spacing
+                    + (moreAddPage.visible ? moreAddPage.width + moreRow.spacing : 0)
                     + (moreLeft.visible ? moreLeft.width + moreRight.width + 2 * moreRow.spacing : 0)
-                    + 2 * moreRow.spacing
                 readonly property real tail: moreReset.width
                     + (moreResetPeaks.visible ? moreResetPeaks.width + moreRow.spacing : 0)
                 width: Math.max(16, topBar.width - used - tail - 2 * moreRow.spacing)
@@ -2068,26 +2465,6 @@ Page {
             }
         }
 
-        Flow {
-            objectName: "dashPageButtons"
-            Layout.fillWidth: true
-            visible: root.form === "desktop" && root.pages.length > 1
-            spacing: 6
-            Repeater {
-                model: root.pages.length
-                ThemedButton {
-                    required property int index
-                    objectName: "dashPageButton_" + index
-                    compact: true
-                    checkable: true
-                    checked: index === root.pageIndex
-                    text: root.pages[index] && root.pages[index].name
-                          ? root.pages[index].name : qsTr("Page %1").arg(index + 1)
-                    onClicked: root.goTo(index)
-                }
-            }
-        }
-
         RowLayout {
             objectName: "dashProblem"
             Layout.fillWidth: true
@@ -2115,10 +2492,32 @@ Page {
                 onClicked: root.problemDismissed = true
             }
         }
+
+        // The desktop's pages as tabs, with two or more or in edit mode;
+        // last in the column, so the panel starts at its foot
+        Loader {
+            id: stripHost
+            objectName: "dashPageStripHost"
+            Layout.fillWidth: true
+            Layout.preferredHeight: item ? (item as DashPageStrip).implicitHeight : 0
+            active: !root.phoneForm
+            visible: root.stripShown
+            sourceComponent: Component {
+                DashPageStrip {
+                    pages: root.pages
+                    current: root.pageIndex
+                    editing: root.editing
+                    canAddPage: DashboardBook.canAddPage(root.doc)
+                    hairlineWidth: root.hairlineWidth
+                    onPageChosen: (i) => root.goTo(i)
+                    onAddRequested: root.addPage()
+                }
+            }
+        }
     }
 
     // ---- The pages: one SwipeView, swiped on the phone form, moved by
-    // the buttons and keys on the desktop form
+    // the strip's tabs and the keys on the desktop form
 
     SwipeView {
         id: swipe
@@ -2195,9 +2594,16 @@ Page {
                 // square; never so tall that the tallest cell overflows
                 // what the page shows, down to a floor of 160 px, below
                 // which the page scrolls instead
-                readonly property real pitch: Math.max(1, Math.min(
-                    (columnWidth + root.cellGap) / 4,
-                    (Math.max(160, height - root.topGap - root.panelMargin) + root.cellGap) / tallest))
+                readonly property real squarePitch: (columnWidth + root.cellGap) / 4
+                readonly property real pagePitch: Math.max(1, Math.min(squarePitch,
+                    (Math.max(160, height - root.gridTop - root.panelMargin) + root.cellGap) / tallest))
+                // The drive view's panel reaches the screen's foot, its rows
+                // up to twice the square; a page that already scrolls keeps its pitch
+                readonly property bool fills: root.driving && root.phoneForm && rows > 0
+                readonly property real pitch: fills
+                    ? Math.max(pagePitch, Math.min(2 * squarePitch,
+                                                   (height - root.gridTop + root.cellGap) / rows))
+                    : pagePitch
                 readonly property int rows: boxes.reduce((m, b) => Math.max(m, b.y + b.h), 0)
                 // The drop's places are measured on this grid
                 onColumnsChanged: root.cancelHold()
@@ -2217,6 +2623,7 @@ Page {
                 property point finger: Qt.point(0, 0)
                 property real dragX: 0
                 property real dragY: 0
+                property bool leftHome: false    // the drop place went past the cell's own
 
                 function lift(i, scene) {
                     root.commitTyping()
@@ -2229,6 +2636,7 @@ Page {
                                     Math.max(0, Math.min(at.y - boxTop(b), heldSize.height)))
                     pressedAt = scene
                     finger = scene
+                    leftHome = false
                     dropCenters = DashboardBook.dropBoxes(cells, i, columns).map(
                         d => ({ x: boxLeft(d) + boxWidth(d) / 2, y: boxTop(d) + boxHeight(d) / 2 }))
                     root.held = i
@@ -2243,15 +2651,21 @@ Page {
                     dragY = at.y - grab.y
                     root.dropAt = DashboardBook.nearest(dropCenters, dragX + heldSize.width / 2,
                                                         dragY + heldSize.height / 2)
+                    if (root.dropAt !== root.held)
+                        leftHome = true
                 }
                 function letGo(canceled) {
-                    const from = root.held, to = root.dropAt
+                    const from = root.held, to = root.dropAt, strayed = leftHome
                     root.cancelHold()
                     if (canceled)
                         return
-                    if (to < 0)
+                    // A tremble past the slop that never left its own place: the
+                    // menu; a drag elsewhere and back changes nothing
+                    if (to < 0 || (to === from && !strayed))
                         root.select(from)
-                    else if (root.edit(DashboardBook.moveCell(root.doc, root.pageIndex, from, to))
+                    else if (root.edit(DashboardBook.moveCell(root.doc, root.pageIndex, from, to),
+                                       root.stepOf("", qsTr("moved %1").arg(root.cellName(pageView.cells[from])),
+                                                   from, to))
                              && root.selected >= 0)
                         root.selected = DashboardBook.movedIndex(root.selected, from, to)
                 }
@@ -2289,7 +2703,7 @@ Page {
                     id: panelHost
                     objectName: "dashPanel"
                     x: (pageView.width - width) / 2
-                    y: root.topGap
+                    y: root.gridTop
                     width: pageView.gridWidth
                     active: (pageView.shown && root.panel !== "") || root.connectShown
                     sourceComponent: root.panel === "cell" ? cellPanel
@@ -2314,7 +2728,7 @@ Page {
                     id: grid
                     // On whole pixels of the display, so the seams snapped inside it are
                     x: root.snap((pageView.width - width) / 2)
-                    y: root.snap(swipe.y + root.topGap + (panelHost.item ? (panelHost.item as Item).height + root.gap : 0)) - swipe.y
+                    y: root.snap(swipe.y + root.gridTop + (panelHost.item ? (panelHost.item as Item).height + root.gap : 0)) - swipe.y
                     width: pageView.gridWidth
                     height: Math.max(0, pageView.rows * pageView.pitch - root.cellGap)
 
@@ -2326,6 +2740,8 @@ Page {
                         visible: root.joined && pageView.rows > 0
                         color: Theme.surface
                         radius: root.driving ? 0 : Theme.radiusCard
+                        // Under the first tab while it's shown: its sheet runs straight in
+                        topLeftRadius: root.stripMeetsPanel && root.pageIndex === 0 ? 0 : radius
                         border.color: Theme.hairline
                         border.width: root.driving ? 0 : root.hairlineWidth
                     }
@@ -2386,21 +2802,41 @@ Page {
                         }
                     }
 
-                    ThemedButton {
+                    // The "+" cell, split with Paste while a copy exists
+                    Item {
+                        id: addBox
                         readonly property var box: pageView.boxes[pageView.cells.length]
                         // Off the joined panel's hairlines
                         readonly property real inset: root.joined ? 4 : 0
-                        objectName: "dashAddCell_" + pageView.index
+                        readonly property bool split: root.copied !== null
+                        readonly property real half: (width - 8) / 2
+                        objectName: "dashAddCellBox_" + pageView.index
                         visible: pageView.addCell
                         x: box ? pageView.boxLeft(box) + inset : 0
                         y: box ? pageView.boxTop(box) + inset : 0
                         width: box ? pageView.boxWidth(box) - 2 * inset : 0
                         height: box ? Math.max(Theme.touchTarget,
                                                pageView.boxHeight(box) - 2 * inset) : 0
-                        text: "+"
-                        font.pixelSize: Theme.fontHero
-                        Accessible.name: qsTr("Add a gauge")
-                        onClicked: root.startAdd()
+                        ThemedButton {
+                            objectName: "dashAddCell_" + pageView.index
+                            width: addBox.split ? addBox.half : addBox.width
+                            height: addBox.height
+                            text: "+"
+                            font.pixelSize: Theme.fontHero
+                            Accessible.name: qsTr("Add a gauge")
+                            onClicked: root.startAdd()
+                        }
+                        ThemedButton {
+                            objectName: "dashPasteCell_" + pageView.index
+                            visible: addBox.split
+                            x: addBox.width - width
+                            width: addBox.half
+                            height: addBox.height
+                            enabled: root.canPaste
+                            text: qsTr("Paste")
+                            Accessible.name: qsTr("Paste the copied gauge")
+                            onClicked: root.pasteAfter(root.shownCells.length - 1)
+                        }
                     }
                 }
             }

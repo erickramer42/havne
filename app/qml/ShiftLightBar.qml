@@ -1,5 +1,5 @@
 // File/layer: app/qml/ShiftLightBar.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.gauges, QmlTest.accessibility;
+// Testing: QML: QmlTest.gauges, QmlTest.kinds, QmlTest.accessibility;
 //          manual smoke: DashboardPage under mock://demo; LEDs fill
 //          green -> amber -> red through the band and flash at the shift
 //          point (the 2nd/3rd-gear limiter holds show it for 5 s)
@@ -34,8 +34,11 @@ GaugeBase {
         (width - (count - 1) * ledSpacing) / count))
 
     Row {
+        id: lights
+        objectName: "lights"
         anchors.centerIn: parent
         spacing: gauge.ledSpacing
+        opacity: gauge.stale ? 0.45 : 1.0
 
         Repeater {
             model: gauge.count
@@ -74,5 +77,16 @@ GaugeBase {
                 }
             }
         }
+    }
+
+    // A stale value's word, where the strip leaves room at its end
+    Text {
+        objectName: "gaugeNote"
+        Accessible.ignored: true
+        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+        visible: gauge.hasValue && gauge.stale && implicitWidth + 8 <= (gauge.width - lights.width) / 2
+        text: gauge.shownNote
+        font.pixelSize: 11
+        color: Qt.alpha(Theme.textDim, 0.8)
     }
 }

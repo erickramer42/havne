@@ -87,7 +87,8 @@ qt_add_qml_module(app_ui
         qml/RecordingExportPanel.qml
         qml/PageHeader.qml
         qml/DashboardPage.qml
-        qml/DashConnectList.qml
+        qml/ConnectList.qml
+        qml/DashPageStrip.qml
         qml/LogPage.qml
         qml/FrameFilterPanel.qml
         qml/FrameTable.qml

@@ -8,9 +8,9 @@
 // (ecuio_export_estimate), each on a thread of its own. Core writes paths and
 // refuses one that exists, while a picker hands back a content:// URI on
 // Android, so a file is written into a temporary folder and copied to the
-// place picked. The object's end stops both through core's cancel
-// (ecuio_export_with) and the copy's own check, so quitting mid-export, or
-// Android closing the app, waits only for the next ask.
+// place picked. cancel() stops an export, a newer sizing the one running,
+// and the object's end both, each through core's cancel (ecuio_export_with)
+// and the copy's own check, so a stop waits only for the next ask.
 
 #pragma once
 
@@ -55,21 +55,23 @@ public:
     Q_INVOKABLE static QString fileStem(const QString& folder);
     // Whether the folder holds a signals.csv, what a CSV export reads
     Q_INVOKABLE static bool holdsValues(const QString& folder);
-    // At startup: removes the folders an export killed mid-way left in
-    // tempPath (raw, they can hold a VIN), each named havne-export- and six
-    // letters or digits and last changed more than a day before now, and
-    // nothing else; the count removed
+    // At startup: removes the folders an export, an import or a health
+    // report killed mid-way left in tempPath (raw, they can hold a VIN), each
+    // named havne-export-, havne-import- or havne-health- and six letters or
+    // digits and last changed more than a day before now, and nothing else;
+    // the count removed
     static int removeStaleCopies(const QString& tempPath, const QDateTime& now);
 
     // Sizes the wide CSV for each of rowMs (0 a row a sweep, at most 64), the
     // columns named (none: core's rule). One runs at a time: a newer call
-    // replaces one still waiting, and a call made while one runs drops that
-    // one's answer. False for an empty folder or list. estimated() follows,
-    // on this thread, with { ok, words, columns, sizes: [{ rowMs, rows, bytes
-    // }] }
+    // replaces one still waiting and stops one running at core's next ask,
+    // dropping its answer. False for an empty folder or list. estimated()
+    // follows, on this thread, with { ok, words, columns, sizes: [{ rowMs,
+    // rows, bytes }] }
     Q_INVOKABLE bool estimate(const QString& folder, const QVariantList& rowMs,
                               int units, const QStringList& columns);
-    // Forgets an estimate waiting or running: no estimated() for it
+    // Forgets an estimate waiting, and stops one running: no estimated() for
+    // either
     Q_INVOKABLE void dropEstimate();
 
     // Starts the export options describes: { folder, format (Format),
@@ -81,10 +83,17 @@ public:
     // core's refusal or the app's, summary and line what was written, none
     // holding a path
     Q_INVOKABLE bool start(const QVariantMap& options, const QUrl& target);
+    // Stops the export under way at core's next ask, or its copy between
+    // chunks; what it had begun is removed, a picked document too.
+    // finished() follows with { ok false, canceled true, words, folder,
+    // line }. Nothing when none runs, or once it has written everything.
+    Q_INVOKABLE void cancel();
 
     // A local target written as a content:// one is, so a test reaches that
     // path
     void setThroughProviderForTesting(bool on) { m_throughProvider = on; }
+    // The next worker can't be started, as when the system is out of threads
+    void setFailThreadForTesting(bool on) { m_failThreadForTesting = on; }
     // The workers run out of memory at once
     void setFailWorkerForTesting(bool on) { m_failWorkerForTesting = on; }
     // Where a worker waits, up to ms or until the stop, as a long export
@@ -122,6 +131,10 @@ private:
     std::thread m_estimateWorker;
     // Set once, by the destructor; read by the workers
     std::atomic<bool> m_stopping{false};
+    // Each worker's own stop: cancel()'s, and a superseded sizing's; cleared
+    // as its next worker launches
+    std::atomic<bool> m_cancelExport{false};
+    std::atomic<bool> m_cancelEstimate{false};
     std::optional<EstimateJob> m_waitingEstimate;
     quint64 m_estimateGeneration = 0;
     quint64 m_waitingGeneration = 0;
@@ -129,6 +142,7 @@ private:
     bool m_sizing = false;
     bool m_throughProvider = false;
     bool m_failWorkerForTesting = false;
+    bool m_failThreadForTesting = false;
     HoldForTesting m_holdForTesting = HoldForTesting::None;
     int m_holdMsForTesting = 0;
     std::atomic<int> m_heldForTesting{0};
