@@ -5,6 +5,7 @@
 #
 #   python tests/cli_view.py once <havne-cli> <pull-early> <pull-late>
 #   python tests/cli_view.py agree <havne-cli> <pull-early> <pull-late>
+#   python tests/cli_view.py stats <havne-cli> <pull-early> <pull-late>
 #
 # once: over many zooms and alignments, a signal's columns count each of
 # its samples once when the axis covers the recording (the default axis
@@ -13,9 +14,14 @@
 # rise, the two recordings' columns are equal wherever both have samples,
 # in raw columns (under a second) and in whole-second ones (the
 # fixtures' pulls are whole seconds apart: wider columns place whole
-# seconds).
+# seconds). stats: each --span's stats line, both ends counted, is a pass
+# over the recording's own signals.csv: the samples, the first and last in
+# force, the extremes and their first times, and the mean.
 
+import csv
 import json
+import math
+import os
 import subprocess
 import sys
 
@@ -80,12 +86,82 @@ def agree(cli, folders):
     return 1 if bad else 0
 
 
+def samples_of(folder):
+    """Each number signal's (host_us, value) in signals.csv's order"""
+    out = {}
+    with open(os.path.join(folder, "signals.csv"), encoding="utf-8-sig",
+              newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                value = float(row["value"])
+            except ValueError:
+                continue
+            out.setdefault(row["signal"], []).append(
+                (int(row["host_us"]), value))
+    return out
+
+
+def by_hand(points, t0, t1):
+    """What a stats line owes over [t0, t1]"""
+    inside = [(t, v) for t, v in points if t0 <= t <= t1]
+    before = [v for t, v in points if t <= t0]
+    upto = [v for t, v in points if t <= t1]
+    want = {"samples": len(inside),
+            "first": before[-1] if before else None,
+            "last": upto[-1] if upto else None}
+    if inside:
+        low = min(v for _, v in inside)
+        high = max(v for _, v in inside)
+        want.update(lowest=low, highest=high,
+                    lowest_us=next(t for t, v in inside if v == low),
+                    highest_us=next(t for t, v in inside if v == high),
+                    mean=sum(v for _, v in inside) / len(inside),
+                    magnitude=sum(abs(v) for _, v in inside) / len(inside))
+    return want
+
+
+def stats(cli, folders):
+    spans = ["0:1", "0.1:0.1001", "2.5:7.25", "11:12.3", "0:15", "14.9:15"]
+    bad = checked = 0
+    for k, folder in enumerate(folders):
+        points = samples_of(folder)
+        args = ["--signal", "RPM", "--signal", "Throttle"]
+        for s in spans:
+            args += ["--span", s]
+        rows = view(cli, [folder], args)
+        for r in (r for r in rows if r["type"] == "stats"):
+            t0, t1 = r["from_us"], r["to_us"]
+            want = by_hand(points[r["signal"]], t0, t1)
+            got_mean = r["mean"]
+            for key in ("samples", "first", "last", "lowest", "highest",
+                        "lowest_us", "highest_us"):
+                if r[key] != want.get(key):
+                    print(f"FAIL  recording {k} {r['signal']} {t0}-{t1}: "
+                          f"{key} {r[key]}, by hand {want.get(key)}")
+                    bad += 1
+            if want["samples"] == 0:
+                if got_mean is not None:
+                    print(f"FAIL  {r['signal']} {t0}-{t1}: a mean of nothing")
+                    bad += 1
+            elif got_mean is None or not math.isclose(
+                    got_mean, want["mean"], rel_tol=0,
+                    abs_tol=1e-12 * want["magnitude"]):
+                print(f"FAIL  {r['signal']} {t0}-{t1}: mean {got_mean}, by "
+                      f"hand {want['mean']}")
+                bad += 1
+            checked += 1
+    if bad == 0 and checked == len(folders) * len(spans) * 2:
+        print(f"ok    {checked} stats lines are their samples")
+        return 0
+    return 1
+
+
 def main(argv):
-    if len(argv) != 5 or argv[1] not in ("once", "agree"):
+    modes = {"once": once, "agree": agree, "stats": stats}
+    if len(argv) != 5 or argv[1] not in modes:
         print(__doc__ or "see the header", file=sys.stderr)
         return 2
-    cli, folders = argv[2], argv[3:5]
-    return once(cli, folders) if argv[1] == "once" else agree(cli, folders)
+    return modes[argv[1]](argv[2], argv[3:5])
 
 
 if __name__ == "__main__":

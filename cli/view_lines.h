@@ -4,10 +4,12 @@
 // `havne-cli view`'s lines, read through the reader (recording.h): what
 // each recording holds, where an --align-on puts it, then each signal's
 // lowest, highest and count per column on one axis, the min/max shape a
-// chart draws. Times named host_us (and a signal's first_us and last_us)
-// are the recording's own; the axis's (from_us, to_us, an at line's t_us)
-// are host_us plus the recording's offset_us, so aligned recordings share
-// them.
+// chart draws, a --span's statistics and --stretches' pulls and
+// cruises. Times named host_us (and a signal's first_us and last_us, a
+// stats line's lowest_us and highest_us) are the recording's own; the
+// axis's (from_us and to_us, on the axis, stats and stretch lines; an at
+// line's t_us) are host_us plus the recording's offset_us, so aligned
+// recordings share them.
 
 #ifndef HAVNE_CLI_VIEW_LINES_H
 #define HAVNE_CLI_VIEW_LINES_H
@@ -95,6 +97,23 @@ inline bool parse_seconds(const char* text, int64_t& us)
     }
     us = static_cast<int64_t>(std::llround(s * 1e6));
     return true;
+}
+
+// --span A:B, seconds on the axis as --at takes them, A before B
+struct Span {
+    int64_t from_us = 0;
+    int64_t to_us = 0;
+};
+
+inline bool parse_span(const char* text, Span& out)
+{
+    const char* colon = std::strchr(text, ':');
+    if (colon == nullptr || std::strchr(colon + 1, ':') != nullptr) {
+        return false;
+    }
+    const std::string from(text, static_cast<size_t>(colon - text));
+    return parse_seconds(from.c_str(), out.from_us) &&
+           parse_seconds(colon + 1, out.to_us) && out.from_us < out.to_us;
 }
 
 // The axis: `columns` columns of column_us each from from_us, to_us
@@ -518,6 +537,236 @@ inline void at_value(Line& l, bool first, const ecuio_recording_signal_t& s,
 inline void at_end(Line& l)
 {
     l.raw("]}");
+}
+
+// A span's statistics for one signal (ecuio_recording_stats):
+// {"type":"stats", recording, signal, from_us, to_us, samples, first,
+// last, lowest, lowest_us, highest, highest_us, mean}; from_us and to_us
+// the span on the axis, both ends counted; the values as signals.csv
+// holds them, null with none (and for an inf, which JSON can't hold); a
+// text signal's samples alone, the rest null
+inline void stats_line(Line& l, uint32_t recording,
+                       const ecuio_recording_signal_t& s, const Span& span,
+                       const ecuio_recording_stats_t& st)
+{
+    l.raw("{\"type\":\"stats\"");
+    l.key("recording");
+    l.u64(recording);
+    l.key("signal");
+    l.string(s.name, sizeof s.name);
+    l.key("from_us");
+    signed_us(l, span.from_us);
+    l.key("to_us");
+    signed_us(l, span.to_us);
+    l.key("samples");
+    l.u64(st.samples);
+    l.key("first");
+    l.number(st.first);
+    l.key("last");
+    l.number(st.last);
+    l.key("lowest");
+    l.number(st.lowest);
+    l.key("lowest_us");
+    us_or_null(l, st.lowest_us);
+    l.key("highest");
+    l.number(st.highest);
+    l.key("highest_us");
+    us_or_null(l, st.highest_us);
+    l.key("mean");
+    l.number(st.mean);
+    l.ch('}');
+}
+
+// A span's statistics with nothing in it: before a recording's start
+inline ecuio_recording_stats_t no_stats()
+{
+    ecuio_recording_stats_t st{};
+    st.first = st.last = st.lowest = st.highest = st.mean = NAN;
+    st.lowest_us = st.highest_us = ECUIO_RECORDING_NONE;
+    return st;
+}
+
+// --- --stretches (ADR-0056's appendix "the navigation aids") -----------
+
+// km/h in a mile per hour, by definition
+constexpr double kKmhPerMph = 1.609344;
+
+// --stretches' word: pulls, cruises or all
+inline bool parse_stretch_kinds(const char* word, uint32_t& kinds)
+{
+    if (std::strcmp(word, "pulls") == 0) {
+        kinds = ECUIO_STRETCH_PULLS;
+    } else if (std::strcmp(word, "cruises") == 0) {
+        kinds = ECUIO_STRETCH_CRUISES;
+    } else if (std::strcmp(word, "all") == 0) {
+        kinds = ECUIO_STRETCH_PULLS | ECUIO_STRETCH_CRUISES;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+// The rules core's defaults fill, kinds as given, every role core's pick
+inline ecuio_stretch_rules_t stretch_rules(uint32_t kinds)
+{
+    ecuio_stretch_rules_t r{};
+    r.kinds = kinds;
+    r.throttle = r.engine_load = r.vehicle_speed = r.engine_speed = UINT32_MAX;
+    return r;
+}
+
+// --stretch-level <key>=<value>: pull-throttle and pull-load in %,
+// pull-hold, pull-gap and cruise-hold in seconds, cruise-speed-band and
+// cruise-floor in km/h (mph with imperial, converted), and
+// cruise-throttle-band in %; 0 or more, 0 the default
+inline bool parse_stretch_level(const char* text, bool imperial,
+                                ecuio_stretch_rules_t& r)
+{
+    const char* eq = std::strchr(text, '=');
+    double v = 0;
+    if (eq == nullptr || !parse_decimal(eq + 1, v) || v < 0 || v > 1e9) {
+        return false;
+    }
+    const std::string key(text, static_cast<size_t>(eq - text));
+    const double speed = imperial ? v * kKmhPerMph : v;
+    const auto us = static_cast<uint64_t>(std::llround(v * 1e6));
+    if (key == "pull-throttle") {
+        r.pull_level = v;
+    } else if (key == "pull-load") {
+        r.pull_load_level = v;
+    } else if (key == "pull-hold") {
+        r.pull_hold_us = us;
+    } else if (key == "pull-gap") {
+        r.pull_gap_us = us;
+    } else if (key == "cruise-hold") {
+        r.cruise_hold_us = us;
+    } else if (key == "cruise-speed-band") {
+        r.cruise_speed_band = speed;
+    } else if (key == "cruise-throttle-band") {
+        r.cruise_throttle_band = v;
+    } else if (key == "cruise-floor") {
+        r.cruise_floor = speed;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+// --role <role>=<name>: throttle, load, speed or rpm, and a signal's name
+inline bool parse_role(const char* text, uint32_t& role, std::string& name)
+{
+    const char* eq = std::strchr(text, '=');
+    if (eq == nullptr || eq[1] == '\0') {
+        return false;
+    }
+    const std::string key(text, static_cast<size_t>(eq - text));
+    if (key == "throttle") {
+        role = ECUIO_RECORDING_ROLE_THROTTLE;
+    } else if (key == "load") {
+        role = ECUIO_RECORDING_ROLE_ENGINE_LOAD;
+    } else if (key == "speed") {
+        role = ECUIO_RECORDING_ROLE_VEHICLE_SPEED;
+    } else if (key == "rpm") {
+        role = ECUIO_RECORDING_ROLE_ENGINE_SPEED;
+    } else {
+        return false;
+    }
+    name = eq + 1;
+    return true;
+}
+
+// The rules' field for a role
+inline uint32_t& role_field(ecuio_stretch_rules_t& r, uint32_t role)
+{
+    switch (role) {
+    case ECUIO_RECORDING_ROLE_THROTTLE:
+        return r.throttle;
+    case ECUIO_RECORDING_ROLE_ENGINE_LOAD:
+        return r.engine_load;
+    case ECUIO_RECORDING_ROLE_VEHICLE_SPEED:
+        return r.vehicle_speed;
+    default:
+        return r.engine_speed;
+    }
+}
+
+inline void name_or_null(Line& l, const ecuio_recording_signal_t* s)
+{
+    if (s == nullptr) {
+        l.raw("null");
+    } else {
+        l.string(s->name, sizeof s->name);
+    }
+}
+
+// Each role's signal for a recording, and what the cruise was sought
+// with, in km/h: {"type":"roles", recording, throttle, engine_load,
+// vehicle_speed, engine_speed (names, or null for none), cruise_floor,
+// cruise_speed_band}. by_role holds the four in that order.
+inline void roles_line(Line& l, uint32_t recording,
+                       const ecuio_recording_signal_t* const by_role[4],
+                       const ecuio_stretch_rules_t& r)
+{
+    l.raw("{\"type\":\"roles\"");
+    l.key("recording");
+    l.u64(recording);
+    l.key("throttle");
+    name_or_null(l, by_role[0]);
+    l.key("engine_load");
+    name_or_null(l, by_role[1]);
+    l.key("vehicle_speed");
+    name_or_null(l, by_role[2]);
+    l.key("engine_speed");
+    name_or_null(l, by_role[3]);
+    l.key("cruise_floor");
+    l.number(r.cruise_floor != 0 ? r.cruise_floor
+                                 : ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR);
+    l.key("cruise_speed_band");
+    l.number(r.cruise_speed_band != 0
+                 ? r.cruise_speed_band
+                 : ECUIO_STRETCH_DEFAULT_CRUISE_SPEED_BAND);
+    l.ch('}');
+}
+
+inline void flag(Line& l, const char* key, uint32_t flags, uint32_t bit)
+{
+    l.key(key);
+    l.raw((flags & bit) != 0 ? "true" : "false");
+}
+
+// A stretch found: {"type":"stretch", recording, kind pull|cruise,
+// from_us, to_us (on the axis), length_us, signal (the one measured),
+// start, end (a pull's two ends, a cruise's mean in both), by_load,
+// by_engine_speed, no_throttle, cut_start, cut_end}
+inline void stretch_line(Line& l, uint32_t recording,
+                         const ecuio_recording_stretch_t& s,
+                         const ecuio_recording_signal_t& measured,
+                         int64_t offset_us)
+{
+    l.raw("{\"type\":\"stretch\"");
+    l.key("recording");
+    l.u64(recording);
+    l.key("kind");
+    l.raw(s.kind == ECUIO_RECORDING_STRETCH_PULL ? "\"pull\"" : "\"cruise\"");
+    l.key("from_us");
+    signed_us(l, static_cast<int64_t>(s.from_us) + offset_us);
+    l.key("to_us");
+    signed_us(l, static_cast<int64_t>(s.to_us) + offset_us);
+    l.key("length_us");
+    l.u64(s.to_us - s.from_us);
+    l.key("signal");
+    l.string(measured.name, sizeof measured.name);
+    l.key("start");
+    l.number(s.start);
+    l.key("end");
+    l.number(s.end);
+    flag(l, "by_load", s.flags, ECUIO_RECORDING_STRETCH_BY_LOAD);
+    flag(l, "by_engine_speed", s.flags,
+         ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED);
+    flag(l, "no_throttle", s.flags, ECUIO_RECORDING_STRETCH_NO_THROTTLE);
+    flag(l, "cut_start", s.flags, ECUIO_RECORDING_STRETCH_CUT_START);
+    flag(l, "cut_end", s.flags, ECUIO_RECORDING_STRETCH_CUT_END);
+    l.ch('}');
 }
 
 } // namespace cli

@@ -26,7 +26,7 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_recorder.cpp test_recording.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
-    test_frames_read.cpp test_csv_guess.cpp)
+    test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -751,6 +751,29 @@ if(TARGET havne-cli)
                ${_cli_pulls}/start-late ${_cli_pulls}/pull-early
                --align-on engine-start --from -6 --to 4 --columns 10
                --at 0.5 --signal RPM)
+        # A span's statistics (the chart's ADR, section 5): two pulls
+        # aligned on their rise, two spans, a text signal's samples alone
+        app_cli_golden(ViewSpanGivesEachSignalsStatistics view-span.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               ${_cli_pulls}/pull-late --align-on rise:RPM:4000 --hysteresis 500
+               --from -2 --to 8 --columns 2 --signal RPM --signal VIN
+               --span -1:1 --span 0:5)
+        # The navigation aids (ADR-0056's appendix): the two pulls aligned on
+        # their rise, found by throttle with engine speed's rise (the
+        # fixtures have no speed); a hand-written cruise, a 3 km/h step
+        # between two; and its floor in mph, which only the second clears
+        app_cli_golden(ViewStretchesFindsThePulls view-stretches-pulls.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               ${_cli_pulls}/pull-late --align-on rise:RPM:4000 --hysteresis 500
+               --columns 2 --signal RPM --stretches)
+        app_cli_golden(ViewStretchesFindsTwoCruises view-stretches-cruise.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/cruise --columns 1
+               --stretches cruises)
+        app_cli_golden(ViewStretchesTakeTheirLevelsInImperial
+            view-stretches-imperial.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/cruise --columns 1
+               --stretches --units imperial --stretch-level cruise-floor=51
+               --role "speed=Vehicle Speed")
         app_cli_golden(ViewRefusesAFolderWithNoRecording view-no-recording.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_pulls})
         # view --frames (ADR-0049's appendix of 2026-11-06): a SocketCAN
@@ -791,8 +814,13 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py agree
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
                     ${_cli_pulls}/pull-late)
+        add_test(NAME CliViewRunTest.SpanStatisticsAreTheSamples
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py stats
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
+                    ${_cli_pulls}/pull-late)
         set_tests_properties(CliViewRunTest.ColumnsCountEverySampleOnce
-            CliViewRunTest.AlignedPullsAgree PROPERTIES TIMEOUT 60)
+            CliViewRunTest.AlignedPullsAgree
+            CliViewRunTest.SpanStatisticsAreTheSamples PROPERTIES TIMEOUT 60)
         # info (ADR-0049 section 6) on a recording with one of each finding
         # (tests/fixtures/recording/findings, wire frames written by hand: a
         # gap, a rate drop, a sleep, a late ID, an overflow, a cut First
@@ -964,6 +992,21 @@ if(TARGET havne-cli)
     app_cli_usage(ViewAnEngineStartOnASignalIsUsage "view|x|--align-on|engine-start:RPM")
     app_cli_usage(ViewFromNotBeforeToIsUsage "view|x|--from|5|--to|5")
     app_cli_usage(ViewSecondsThatArentAreUsage "view|x|--at|soon")
+    app_cli_usage(ViewASpanWithoutItsEndIsUsage "view|x|--span|5")
+    app_cli_usage(ViewASpanBackwardsIsUsage "view|x|--span|5:3")
+    app_cli_usage(ViewASpanOfNoLengthIsUsage "view|x|--span|5:5")
+    app_cli_usage(ViewASpanOfWordsIsUsage "view|x|--span|soon:later")
+    app_cli_usage(ViewASpanWithThreePartsIsUsage "view|x|--span|1:2:3")
+    app_cli_usage(ViewAStretchLevelWithoutStretchesIsUsage
+        "view|x|--stretch-level|pull-gap=1")
+    app_cli_usage(ViewARoleWithoutStretchesIsUsage "view|x|--role|rpm=RPM")
+    app_cli_usage(ViewUnitsWithoutStretchesIsUsage "view|x|--units|imperial")
+    app_cli_usage(ViewAnUnknownStretchLevelIsUsage
+        "view|x|--stretches|--stretch-level|pull-speed=1")
+    app_cli_usage(ViewANegativeStretchLevelIsUsage
+        "view|x|--stretches|--stretch-level|pull-gap=-1")
+    app_cli_usage(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal")
+    app_cli_usage(ViewUnitsThatArentAreUsage "view|x|--stretches|--units|furlongs")
     app_cli_usage(ViewAnUnknownOptionIsUsage "view|x|--fast")
     set(_cli_pull_early ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/pull-early)
     app_cli_usage(ViewASignalNoRecordingHasIsUsage
@@ -973,6 +1016,12 @@ if(TARGET havne-cli)
     app_cli_usage(ViewARiseOnTextIsUsage "view|${_cli_pull_early}|--align-on|rise:VIN:1")
     app_cli_usage(ViewFromAfterTheDefaultEndIsUsage
         "view|${_cli_pull_early}|--from|100")
+    app_cli_usage(ViewASpanOutsideTheAxisIsUsage
+        "view|${_cli_pull_early}|--span|1:1000")
+    app_cli_usage(ViewARoleNoRecordingHasIsUsage
+        "view|${_cli_pull_early}|--stretches|--role|speed=Speed")
+    app_cli_usage(ViewARoleOnTextIsUsage
+        "view|${_cli_pull_early}|--stretches|--role|throttle=VIN")
     app_cli_usage(ViewAProfileWithoutFramesIsUsage "view|x|--profile|obd2")
     app_cli_usage(ViewSignalsWithoutFramesIsUsage "view|x|--signals|a.json")
     app_cli_usage(ViewAPluginWithoutFramesIsUsage "view|x|--plugin|a")
