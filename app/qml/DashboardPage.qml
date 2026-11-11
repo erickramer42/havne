@@ -2166,6 +2166,11 @@ Page {
                 Label {
                     objectName: "driveLogReadout"
                     visible: Bridge.logActive
+                    // Gives way first, so Stop log and Mark keep their size
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0
+                    Layout.minimumWidth: 0
+                    elide: Text.ElideRight
                     font.family: Theme.valueFamily
                     font.features: { "tnum": 1 }
                     font.pixelSize: Theme.fontBody
@@ -2183,7 +2188,7 @@ Page {
                 }
                 SheetButton {
                     objectName: "driveMark"
-                    visible: Bridge.recordingActive && !Bridge.logActive
+                    visible: Bridge.recordingActive
                     text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount) : qsTr("Mark")
                     Accessible.name: qsTr("Mark the recording")
                     onClicked: Bridge.mark()

@@ -711,7 +711,8 @@ TestCase {
     // tabs; on its side one row. Each control is the header's or the tool
     // row's, bound to the same calls
     function test_theSheetHoldsTheSessionAndTheView_data() {
-        return [{ tag: "upright", w: 384, h: 832, rows: 2 }, { tag: "on its side", w: 832, h: 384, rows: 1 }]
+        return [{ tag: "upright", w: 384, h: 832, rows: 2 }, { tag: "narrowest", w: 320, h: 832, rows: 2 },
+                { tag: "on its side", w: 832, h: 384, rows: 1 }]
     }
     function test_theSheetHoldsTheSessionAndTheView(data) {
         const s = withTheBarsHeld()
@@ -737,8 +738,47 @@ TestCase {
         verify(!find(s.dash, "driveStartLog").visible, "Stop log in its place")
         verify(!find(s.dash, "driveDisconnect").visible, "and in Disconnect's, as in the header")
         verify(s.dash.driving, "Start log is no exit")
+        // Mark offers itself during a log, and the row holds the readout, Stop log and
+        // Mark inside the window, a touch's size and apart
+        const mark = find(s.dash, "driveMark")
+        verify(mark.visible, "Mark shows during a log")
+        // The readout gives way first: Stop log and Mark keep their natural width
+        const checkRow = () => {
+            const placed = []
+            for (const c of find(s.dash, "driveSessionRow").children) {
+                if (!c.visible || c.objectName === "")
+                    continue
+                const at = c.mapToItem(s.main.contentItem, 0, 0)
+                verify(at.x >= -0.5 && at.x + c.width <= s.main.contentItem.width + 0.5,
+                       c.objectName + " inside the window: " + at.x + " + " + c.width)
+                if (c.objectName !== "driveLogReadout") {
+                    verify(c.width * Theme.zoom >= 47.5 && c.height * Theme.zoom >= 47.5,
+                           c.objectName + " is " + c.width + " x " + c.height)
+                    verify(c.width >= c.implicitWidth - 0.5, c.objectName + " keeps its width: "
+                           + c.width + " of " + c.implicitWidth)
+                }
+                placed.push({ name: c.objectName, x: at.x, right: at.x + c.width })
+            }
+            placed.sort((a, b) => a.x - b.x)
+            for (let i = 1; i < placed.length; ++i)
+                verify(placed[i].x >= placed[i - 1].right - 0.5,
+                       placed[i].name + " clear of " + placed[i - 1].name)
+        }
+        checkRow()
+        compare(Bridge.markCount, 0, "a log starts from no marks")
+        mouseClick(mark)
+        tryCompare(Bridge, "markCount", 1, 3000)
+        compare(mark.text, "Mark (1)")
+        verify(waitForPolish(s.main), "laid out")
+        checkRow()
+        // A long readout (hours and a size) is the part that gives way
+        s.dash.driveLogTime = "12:34:56"
+        s.dash.driveLogSize = "1234.5 MB"
+        verify(waitForPolish(s.main), "laid out")
+        checkRow()
         Bridge.stopLog()
         tryCompare(Bridge, "logActive", false, 5000)
+        verify(!find(s.dash, "driveMark").visible, "Mark goes with the log")
         verify(find(s.dash, "driveDisconnect").visible, "Disconnect comes back")
         verify(waitForPolish(s.main), "laid out")
         const d = find(s.dash, "driveDisconnect")
