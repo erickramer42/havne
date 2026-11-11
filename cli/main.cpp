@@ -1205,12 +1205,11 @@ void write_check_lines(Output& out, const ecuio_signal_file_t* file)
     const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
     {
         BigLine b(1024 + size_t{set.channel_count} * 64);
-        cli::signal_file_line(b.line, ecuio_signal_file_name(file),
-                              ecuio_signal_file_profile(file), set);
+        cli::signal_file_line(b.line, file, set);
         write_line(out, b.line);
     }
     for (uint32_t i = 0; i < set.count; ++i) {
-        if (cli::own_signal(set.defs[i])) {
+        if (cli::own_signal(file, set.defs[i])) {
             BigLine b(cli::def_line_bytes(set, set.defs[i]));
             cli::def_line(b.line, set, set.defs[i],
                           ecuio_signal_file_gauge(file, &set.defs[i]));
@@ -1218,7 +1217,7 @@ void write_check_lines(Output& out, const ecuio_signal_file_t* file)
         }
     }
     for (uint32_t i = 0; i < set.count; ++i) {
-        if (cli::unit_kept(set.defs[i])) {
+        if (cli::unit_kept(set.defs[i], cli::own_signal(file, set.defs[i]))) {
             char buf[512];
             cli::Line l(buf, sizeof buf);
             cli::unit_line(l, set.defs[i]);
@@ -1712,11 +1711,12 @@ int run_plugins_check(const char* path, const char* on)
         {
             BigLine b(1024 + size_t{set.channel_count} * 64);
             cli::variant_line(b.line, id.c_str(),
-                              cli::plugin_profile(info.id, id.c_str()), set);
+                              cli::plugin_profile(info.id, id.c_str()),
+                              ecuio_plugin_variant_file(p, v), set);
             write_line(out, b.line);
         }
         for (uint32_t i = 0; i < set.count; ++i) {
-            if (cli::own_signal(set.defs[i])) {
+            if (cli::own_signal(ecuio_plugin_variant_file(p, v), set.defs[i])) {
                 const ecuio_signal_gauge_t* gauge = ecuio_signal_file_gauge(
                     ecuio_plugin_variant_file(p, v), &set.defs[i]);
                 uses_gauge = uses_gauge || gauge != nullptr;

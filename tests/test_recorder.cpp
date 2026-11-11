@@ -2335,15 +2335,24 @@ std::string recorded_header(const std::string& name, const std::string& signals)
 
 } // namespace
 
-// A number and an enum of one name: the reader keeps the first signal
-// line of a name, so the enum's labels, under the number's, are left out
-TEST(RecorderTest, ANumberAndAnEnumOfOneNameOpen)
+// A number and an enum of one name can't be made in a signal file (a set's
+// names are one each, so a recording keys its values by name): the file is
+// refused at load, and a number beside an enum of another name opens
+TEST(RecorderTest, ANumberAndAnEnumOfOneNameAreRefusedAtLoad)
 {
+    const std::string same =
+        R"({"havne_signals":1,"name":"Recorder gear","source":{"name":"t"},)"
+        R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+        R"({"key":"g1","name":"Gear","read":{"service":"22","number":"D100"},"field":{"byte":0}},)"
+        R"({"key":"g2","name":"Gear","read":{"service":"22","number":"D101"},"field":{"byte":0},)"
+        R"("kind":"enum","values":{"1":"First","2":"Second"}}]})";
+    ecuio_signal_file_t* f = nullptr;
+    EXPECT_EQ(ecuio_signal_file_load(same.data(), same.size(), &f),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(f, nullptr);
     const std::string events = recorded_header(
         "Recorder gear",
         R"({"key":"g1","name":"Gear","read":{"service":"22","number":"D100"},"field":{"byte":0}},)"
-        R"({"key":"g2","name":"Gear","read":{"service":"22","number":"D101"},"field":{"byte":0},)"
-        R"("kind":"enum","values":{"1":"First","2":"Second"}},)"
         R"({"key":"m","name":"Mode","read":{"service":"22","number":"D102"},"field":{"byte":0},)"
         R"("kind":"enum","values":{"1":"Eco"}})");
     EXPECT_NE(events.find("\nsignal  Gear,number,"), std::string::npos)

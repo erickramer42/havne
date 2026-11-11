@@ -291,9 +291,9 @@ TestCase {
     }
 
     // A gauge binds by ref, never by name: under a signal file extending
-    // obd2 whose own defs take the tach's label ("Engine speed") and the
-    // name obd2 and the mock give its def ("RPM"), the tach reads obd2's
-    // def by its ID, and the file's defs are theirs by key
+    // obd2 whose own defs take the tach's label ("Engine speed") and a
+    // name like obd2's def ("Rpm"), the tach reads obd2's def by its ID, and
+    // the file's defs are theirs by key (a file's "RPM" would replace obd2's)
     function test_aGaugeBindsByRefNotByName() {
         const r = Bridge.importSignalText(JSON.stringify({
             havne_signals: 1, name: "Named alike", source: { name: "t" },
@@ -302,7 +302,7 @@ TestCase {
             signals: [
                 { key: "rpm_too", name: "Engine speed",
                   read: { service: "22", number: "D100" }, field: { byte: 0, bits: 8 } },
-                { key: "rpm_mock", name: "RPM",
+                { key: "rpm_mock", name: "Rpm",
                   read: { service: "22", number: "D101" }, field: { byte: 0, bits: 8 } }
             ]
         }))
@@ -314,12 +314,37 @@ TestCase {
         connect("replay://" + Harness.replayFixtures
                 + "/2026-10-25-engine-start?profile=" + r.profile + "&speed=100")
         compare(hub.byRef["key:rpm_too"].name, "Engine speed")
-        compare(hub.byRef["key:rpm_mock"].name, "RPM")
+        compare(hub.byRef["key:rpm_mock"].name, "Rpm")
         const rpm = hub.lookup(refsOf("Engine speed"))
         compare(rpm.ref, "id:7003", "obd2's def, by its ID")
         tryVerify(() => tach.hasValue, 5000, "the tach reads it")
         compare(tach.valueText,
                 Number(rpm.value).toLocaleString(Qt.locale(), 'f', rpm.decimals))
+    }
+
+    // A file's def that replaced a base one by name has the base's ID: a cell
+    // that named the base def by ID reads the file's def, and so does one that
+    // names it by key
+    function test_aReplacingDefIsFoundByTheBaseIdAndByKey() {
+        const r = Bridge.importSignalText(JSON.stringify({
+            havne_signals: 1, name: "Replaces", source: { name: "t" },
+            extends: "obd2",
+            ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [
+                { key: "revs", name: "RPM",
+                  read: { service: "22", number: "D100" }, field: { byte: 0, bits: 8 } }
+            ]
+        }))
+        verify(r.ok, r.words)
+        Bridge.useSignalFiles([r.sha256])
+        const hub = createTemporaryObject(hubComponent, testCase)
+        connect("replay://" + Harness.replayFixtures
+                + "/2026-10-25-engine-start?profile=" + r.profile + "&speed=100")
+        const byKey = hub.byRef["key:revs"]
+        verify(byKey, "the file's def by its key")
+        compare(byKey.id, 7003, "it has obd2's RPM ID")
+        verify(hub.byRef["id:7003"] === byKey, "a cell naming obd2's RPM by ID reads it")
+        compare(hub.lookup(["id:7003"]).name, "RPM")
     }
 
     // Imperial: the gauges read mph and degrees F, their scales and zones

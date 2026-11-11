@@ -11,6 +11,7 @@
 #define HAVNE_CLI_PLUGIN_LINES_H
 
 #include "jsonl.h"
+#include "signal_file_lines.h"
 
 #include "ecuio/plugin.h"
 #include "ecuio/signal_sets.h"
@@ -40,13 +41,14 @@ inline bool fixture_passes(const ecuio_signal_def_t& d, double want, double got)
     return std::fabs(got - want) <= step / 2 + slack;
 }
 
-// A variant's own signals: its defs from ECUIO_USER_SIG_ID_BASE up, the
+// A variant's own signals: the defs its files made (they have keys), the
 // rest its base set's (signal_file_lines.h's rule)
-inline uint32_t own_signals(const ecuio_signal_set_t& set)
+inline uint32_t own_signals(const ecuio_signal_file_t* file,
+                            const ecuio_signal_set_t& set)
 {
     uint32_t own = 0;
     for (uint32_t i = 0; i < set.count; ++i) {
-        own += set.defs[i].id >= ECUIO_USER_SIG_ID_BASE ? 1u : 0u;
+        own += own_signal(file, set.defs[i]) ? 1u : 0u;
     }
     return own;
 }
@@ -92,9 +94,10 @@ inline void plugin_line(Line& l, uint32_t package, const ecuio_plugin_t* p,
 // {"type":"variant", id, profile, signals (its own), base (its base
 // set's), ecus [{rx, tx}]}
 inline void variant_line(Line& l, const char* id, const std::string& profile,
+                         const ecuio_signal_file_t* file,
                          const ecuio_signal_set_t& set)
 {
-    const uint32_t own = own_signals(set);
+    const uint32_t own = own_signals(file, set);
     l.raw("{\"type\":\"variant\"");
     l.key("id");
     l.string(id, std::strlen(id));

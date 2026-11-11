@@ -48,6 +48,9 @@ extern "C" {
 #define ECUIO_OBD2_SIG_BATTERY_V_ID    7008
 #define ECUIO_OBD2_SIG_MAF_ID          7009
 #define ECUIO_OBD2_SIG_OIL_TEMP_ID     7010
+/* Computed from PIDs 0B and 33, MAP minus baro (ADR-0051 section 5); the mock's
+ * 13001 under the same name */
+#define ECUIO_OBD2_SIG_BOOST_ID        7011
 /* Every other field of J1979's Service 01 table (ADR-0039 section 4): the PID,
  * and the field's place among the PID's fields from 0, so 11000 to
  * 13047. The ten above keep their IDs. */
@@ -63,7 +66,8 @@ extern "C" {
 
 /* ---- Signal files (ADR-0051) ----
  * A file's signals take ids from this band, the base plus each one's
- * place in the file, so they never meet the bands above. */
+ * place in the file, so they never meet the bands above; a signal named as
+ * an extended base set's def replaces it and keeps its id instead. */
 #define ECUIO_USER_SIG_ID_BASE  30000u
 
 /* OBD-II ECU #1 physical response ID, paired with the tester request
