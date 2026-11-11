@@ -1,12 +1,14 @@
 // File/layer: tests/qml/tst_theme.qml | Qt Quick Test, QML tier
 // Testing: Theme's link-state color and label for every state the
 //          bridge publishes and an unknown one, the chart trace
-//          palette, and the stale age as core's. No session.
+//          palette, the stale age as core's, and the window's color
+//          scheme following the look. No session.
 
 import QtCore
 import QtQuick
 import QtTest
 import App
+import AppTest
 TestCase {
     id: testCase
     name: "Theme"
@@ -362,6 +364,26 @@ TestCase {
         compare(Theme.active, "nightAmber", "Night over Daylight")
         Theme.night = "off"
         compare(Theme.active, "daylight", "Daylight again")
+    }
+
+    // The window's color scheme follows the look: a light page is Light,
+    // a dark one (Dark, Night) Dark
+    function test_theWindowsColorSchemeFollowsTheLook_data() {
+        return [
+            { tag: "dark",       name: "dark",       scheme: 2 },
+            { tag: "daylight",   name: "daylight",   scheme: 1 },
+            { tag: "nightAmber", name: "nightAmber", scheme: 2 },
+        ]
+    }
+    function test_theWindowsColorSchemeFollowsTheLook(data) {
+        usePalette(data.name)
+        const scheme = Harness.colorSchemeFollowing(Theme)
+        // The offscreen platform has no scheme to override: it reads
+        // Unknown (0) whatever is set, so only a platform that takes the
+        // override can fail this
+        if (scheme === 0)
+            skip("this platform ignores the color scheme override")
+        compare(scheme, data.scheme)
     }
 
     // At night the readout is the text color, so nothing outshines the text

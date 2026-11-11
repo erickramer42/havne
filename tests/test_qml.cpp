@@ -4,6 +4,8 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
+#include <QGuiApplication>
+#include <QStyleHints>
 #include <QKeyEvent>
 #include <QObject>
 #include <QQmlEngine>
@@ -22,6 +24,7 @@
 #include "pluginstore.h"
 #include "recordingexport.h"
 #include "signalstore.h"
+#include "windowtheme.h"
 
 #include <cstdio>
 #include <cstring>
@@ -191,6 +194,19 @@ public:
     {
         const auto* e = qobject_cast<RecordingExport*>(exporter);
         return e != nullptr ? e->heldForTesting() : -1;
+    }
+
+    // The color scheme (Qt::ColorScheme as an int: 1 Light, 2 Dark) a
+    // WindowTheme sets on a real window that follows theme, as main() makes
+    // one; the platform's own scheme is put back after
+    Q_INVOKABLE int colorSchemeFollowing(QObject* theme)
+    {
+        QQuickWindow window;
+        const WindowTheme follower(theme, &window);
+        const int scheme =
+            static_cast<int>(QGuiApplication::styleHints()->colorScheme());
+        QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Unknown);
+        return scheme;
     }
 
     // The running recording's next write fails, as on a full disk
