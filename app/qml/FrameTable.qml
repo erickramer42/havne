@@ -37,6 +37,14 @@ Rectangle {
     // A row tapped: its index, the keyboard modifiers held and its time in
     // microseconds, as the table shows it
     signal rowClicked(int index, int modifiers, real timestampUs)
+    // A head over the rows (the viewer's controls on a phone), and whether
+    // it shows: then it and the column names scroll with the rows, so the
+    // table is the one thing that scrolls
+    property Component head: null
+    property bool headScrolls: false
+    // Where the column names go while the head scrolls: made with the head
+    property Item namesSlot: null
+    readonly property ListView list: frameList
 
     Layout.fillWidth: true
     Layout.fillHeight: true
@@ -44,10 +52,12 @@ Rectangle {
     color: Theme.surface
     clip: true
 
-    // Column header
+    // Column header: at the top, or under the head while it scrolls
     Rectangle {
         id: columnHeader
-        anchors { top: parent.top; left: parent.left; right: parent.right }
+        objectName: "frameColumnNames"
+        parent: table.headScrolls && table.namesSlot ? table.namesSlot : table
+        width: parent ? parent.width : 0
         height: Math.max(32, table.touchMin)
         z: 2
         color: Theme.elevated
@@ -106,10 +116,28 @@ Rectangle {
     ListView {
         id: frameList
         objectName: "frameList"
-        anchors { top: columnHeader.bottom; left: parent.left
+        anchors { top: parent.top; left: parent.left
                   right: parent.right; bottom: parent.bottom }
         anchors.margins: 4
+        anchors.topMargin: table.headScrolls ? 4 : columnHeader.height + 4
         clip: true
+        header: table.head !== null ? headHolder : null
+        Component {
+            id: headHolder
+            Column {
+                width: frameList.width
+                Loader {
+                    width: parent.width
+                    sourceComponent: table.head
+                }
+                Item {
+                    id: names
+                    width: parent.width
+                    height: table.headScrolls ? columnHeader.height : 0
+                    Component.onCompleted: table.namesSlot = names
+                }
+            }
+        }
         // Bound only while shown: each live frame inserts a row, and a hidden
         // table would make and destroy a delegate for it on every page
         model: table.visible ? table.frames : null

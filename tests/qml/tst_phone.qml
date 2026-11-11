@@ -313,6 +313,85 @@ TestCase {
         }
     }
 
+    // The two cursors on a phone's width: each handle a touch wide and
+    // tall, the span line inside the window with its targets a touch's
+    // size, the rows still a touch tall with B and the change on their
+    // second line, and the statistics' grid under the span line
+    function test_theTwoCursorsFitAPhone_data() {
+        return [{ tag: "320", w: 320 }, { tag: "384", w: 384 }]
+    }
+    function test_theTwoCursorsFitAPhone(data) {
+        const v = uprightViewer({ title: "Early", uri: "replay://x?profile=obd2", source: "",
+                                  folder: Harness.recordingFixtures + "/pull-early", profile: "obd2" })
+        const main = v.main
+        const page = v.page
+        main.width = data.w
+        verify(waitForPolish(main), "laid out")
+        page.setCursor(1000)
+        page.setCursorB(3000)
+        tryVerify(() => Object.keys(page.spanStats).length > 0, 5000, "the statistics arrive")
+        verify(waitForPolish(main), "laid out with the span")
+        verify(page.pinnedViewer, "pinned")
+
+        for (const name of ["cursorHandleA", "cursorHandleB"]) {
+            const h = find(page, name)
+            tryVerify(() => h.visible, 2000, name + " shows")
+            verify(h.width >= Theme.touchTarget - 0.5, name + " is " + h.width + " wide")
+            verify(h.height >= Theme.touchTarget - 0.5, name + " is " + h.height + " tall")
+            verify(h.mapToItem(main.contentItem, h.width, 0).x <= data.w + 0.5, name + " inside the window")
+        }
+        const chart = find(page, "chart")
+        compare(chart.drawn.axisH, ChartLayout.axisHCursor)
+
+        const line = find(page, "spanLine")
+        tryVerify(() => line.visible, 2000, "the span line shows")
+        compare(find(page, "spanText").text, "A 1.0 s to B 3.0 s · 2.0 s")
+        for (const name of ["zoomToSpan", "clearSpan"]) {
+            const b = find(page, name)
+            verify(b.height >= Theme.touchTarget - 0.5, name + " is " + b.height + " tall")
+            verify(b.mapToItem(main.contentItem, b.width, 0).x <= data.w + 0.5, name + " inside the window")
+        }
+        const text = find(page, "spanText")
+        verify(text.contentWidth <= text.width + 0.5, "the span's words fit their box")
+
+        const grid = find(page, "spanStats")
+        tryVerify(() => grid.visible, 2000, "the grid shows")
+        const zoomRow = find(page, "zoomAll")
+        const lineY = line.mapToItem(main.contentItem, 0, 0).y
+        verify(lineY > zoomRow.mapToItem(main.contentItem, 0, 0).y, "the span line under the zoom row")
+        verify(grid.mapToItem(main.contentItem, 0, 0).y >= lineY + line.height - 0.5, "the grid under the line")
+        const rows = find(page, "signalRows")
+        const first = rows.itemAtIndex(0)
+        verify(first !== null, "a row")
+        verify(grid.mapToItem(main.contentItem, 0, grid.height).y
+               <= first.mapToItem(main.contentItem, 0, 0).y + 0.5, "the grid above the rows")
+
+        const plotted = page.spanRows
+        verify(plotted.length >= 2, "plotted: " + plotted.length)
+        const cards = plotted.map(s => find(grid, "statCard_" + s.index))
+        for (const c of cards) {
+            verify(c.height >= Theme.touchTarget - 0.5, "a card is " + c.height + " tall")
+            verify(c.mapToItem(main.contentItem, c.width, 0).x <= data.w + 0.5, "a card inside the window")
+        }
+        fuzzyCompare(cards[0].width, cards[1].width, 1, "two even columns")
+        verify(cards[1].x > cards[0].x, "side by side")
+        compare(cards[0].y, cards[1].y)
+        const rpm = plotted.find(s => s.name === "RPM")
+        const card = find(grid, "statCard_" + rpm.index)
+        compare(find(card, "statChange").text, "-19 rpm")
+        compare(find(card, "statLine").text, "1,982 · 2,012 · 2,003")
+
+        const at = rows.model.findIndex(s => s.name === "RPM")
+        tryVerify(() => rows.itemAtIndex(at) !== null, 2000, "the RPM row")
+        const row = rows.itemAtIndex(at)
+        verify(row.height >= Theme.touchTarget - 0.5 && row.height <= Theme.touchTarget + 0.5,
+               "a row stays a touch tall: " + row.height)
+        const second = find(row, "cursorSpanLine")
+        verify(second.visible, "the row's second line")
+        compare(second.text, "B 1,982 rpm · Δ -19 rpm")
+        verify(second.mapToItem(row, 0, second.height).y <= row.height + 0.5, "inside the row")
+    }
+
     // On a phone upright and on its side, the viewer's page scrolls to all
     // of it: the chart a readable height, the frames check's line inside
     // the page once scrolled to its end, and the filter's options inside
@@ -428,12 +507,41 @@ TestCase {
         verify(chart.height >= 200, "the chart is " + chart.height + " px")
 
         const scroll = find(page, "recordingsScroll")
-        scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
-        verify(waitForPolish(main), "scrolled")
         const check = find(page, "checkSummary")
-        const bottom = check.mapToItem(scroll, 0, check.height).y
-        verify(check.visible && bottom <= scroll.height + 0.5,
-               "the frames check's line ends at " + bottom + " of " + scroll.height)
+        compare(page.pinnedViewer, !page.chartMaximized && data.h >= 480, "pinned upright")
+        if (page.pinnedViewer) {
+            // Upright the page stays put and About's list scrolls to its last finding
+            find(page, "detailView_about").clicked()
+            verify(waitForPolish(main), "About laid out")
+            const findings = find(page, "findingList")
+            verify(findings.visible && findings.count > 0, "About's list holds the findings")
+            verify(findings.interactive, "About's list scrolls")
+            const listBottom = findings.mapToItem(scroll, 0, findings.height).y
+            verify(listBottom <= scroll.height + 0.5, "the list ends at " + listBottom + " of " + scroll.height)
+            // Scrolled until the check's line is in the list's last row of view
+            findings.contentY = Math.max(findings.originY, check.mapToItem(findings.contentItem, 0, check.height).y
+                                                           - findings.height)
+            verify(waitForPolish(main), "scrolled to the check")
+            const checkBottom = check.mapToItem(scroll, 0, check.height).y
+            verify(check.visible && checkBottom <= listBottom + 0.5,
+                   "the frames check's line ends at " + checkBottom + " of " + listBottom)
+            findings.positionViewAtEnd()
+            verify(waitForPolish(main), "scrolled")
+            const last = findings.itemAtIndex(findings.count - 1)
+            verify(last !== null, "the last finding has a row")
+            const lastBottom = last.mapToItem(scroll, 0, last.height).y
+            verify(lastBottom <= listBottom + 0.5 && listBottom <= scroll.height + 0.5,
+                   "the last finding ends at " + lastBottom + " of " + listBottom)
+            findings.positionViewAtBeginning()
+            find(page, "detailView_values").clicked()
+            verify(waitForPolish(main), "Values laid out")
+        } else {
+            scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
+            verify(waitForPolish(main), "scrolled")
+            const bottom = check.mapToItem(scroll, 0, check.height).y
+            verify(check.visible && bottom <= scroll.height + 0.5,
+                   "the frames check's line ends at " + bottom + " of " + scroll.height)
+        }
 
         const bar = find(page, "recordingFilter")
         find(bar, "filterButton").clicked()
@@ -495,8 +603,10 @@ TestCase {
         }
     }
 
-    // A recording folder of twelve number signals, three samples each
-    function wideRecording(name) {
+    // A recording folder of number signals (twelve unless given), three
+    // samples each
+    function wideRecording(name, count) {
+        const n = count || 12
         const folder = Harness.writeFramesRecording(name, 1, 100000)
         verify(folder !== "", "the folder is made")
         let header = "ecuio session recording, format 2 (ADR-0049)\n"
@@ -504,22 +614,22 @@ TestCase {
                      + "utc  2026-11-03T16:00:00.000Z\ncore  0.3.6\n"
                      + "uri  socketcan://vcan0?profile=raw\nprofile  raw\n"
         let rows = "host_us,signal,value,unit\n"
-        for (let s = 1; s <= 12; ++s)
+        for (let s = 1; s <= n; ++s)
             header += "signal  Signal " + s + ",number,V,0,0\n"
         for (let t = 1; t <= 3; ++t) {
-            for (let s = 1; s <= 12; ++s)
+            for (let s = 1; s <= n; ++s)
                 rows += (t * 100000) + ",Signal " + s + "," + s + ",V\n"
         }
-        header += "\n10:00:01.000  +1.000  end  havne-cli: seconds: 1 frames, 36 values, "
+        header += "\n10:00:01.000  +1.000  end  havne-cli: seconds: 1 frames, " + (3 * n) + " values, "
                   + "0 records dropped, 0 notes dropped\n"
         Harness.writeScratchFile(name + "/events.log", header)
         Harness.writeScratchFile(name + "/signals.csv", rows)
         return folder
     }
 
-    // The test phone upright: twelve signals' rows stop at five, under
-    // 40 % of the screen, so there is always more page than list to swipe
-    function test_theViewersRowsStopAtFiveOnAPhone() {
+    // Main on the test phone upright, the Recordings page shown with a
+    // recording open at the chart's default height
+    function uprightViewer(row) {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
         main.width = 384
@@ -527,16 +637,215 @@ TestCase {
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
-        page.open({ title: "Twelve", uri: "replay://x?profile=raw", source: "",
-                    folder: wideRecording("twelve-signals"), profile: "raw" })
-        const rows = find(page, "signalRows")
-        tryVerify(() => rows.visible && rows.count === 12, 10000, "the recording opens")
+        page.chartHeight = -1
+        page.open(row)
+        tryVerify(() => find(page, "signalRows").visible && find(page, "signalRows").itemAtIndex(0) !== null,
+                  10000, "the recording opens")
         verify(waitForPolish(main), "laid out")
+        return { main: main, page: page }
+    }
+
+    // The scrollers the page shows that a swipe moves: visible, interactive
+    // and holding more than their height
+    function scrollersOf(page) {
+        const found = []
+        const walk = item => {
+            for (const child of item.children) {
+                if (!child.visible)
+                    continue
+                if (child.flickableDirection !== undefined && child.interactive
+                        && child.contentHeight > child.height + 0.5)
+                    found.push(child.objectName || String(child))
+                walk(child)
+            }
+        }
+        walk(page)
+        return found
+    }
+
+    // A phone upright pins the title row, the chart and its splitter, and
+    // under them one list scrolls in each view: Values' rows, the Frames
+    // table and About's findings, each with its view's controls at its head
+    function test_aPhoneUprightPinsTheChartAndScrollsOneList() {
+        const v = uprightViewer({ title: "Wide", uri: "socketcan://vcan0?profile=raw", source: "",
+                                  folder: wideRecording("pv-a-wide", 100), profile: "raw" })
+        const main = v.main
+        const page = v.page
         const scroll = find(page, "recordingsScroll")
-        verify(rows.height <= 5 * page.rowHeight + 0.5,
-               "the rows are " + rows.height + " for rows of " + page.rowHeight)
-        verify(rows.height <= 0.4 * scroll.height + 0.5, "the rows are " + rows.height + " of " + scroll.height)
-        verify(rows.height >= 4 * page.rowHeight, "four rows show at least: " + rows.height)
+        const rows = find(page, "signalRows")
+        verify(page.pinnedViewer, "the viewer is pinned")
+        verify(!scroll.interactive, "the page itself never scrolls")
+        const glass = name => find(page, name).mapToItem(main.contentItem, 0, 0).y
+        const pinned = ["openedTitle", "chartFrame", "chartSplitter"]
+        const before = pinned.map(glass)
+        const splitter = find(page, "chartSplitter")
+        const pinnedFoot = splitter.mapToItem(main.contentItem, 0, splitter.height).y
+        const listTop = rows.mapToItem(main.contentItem, 0, 0).y
+        const listFoot = rows.mapToItem(main.contentItem, 0, rows.height).y
+        const pageFoot = scroll.mapToItem(main.contentItem, 0, scroll.height).y
+        const firstTop = rows.itemAtIndex(0).mapToItem(main.contentItem, 0, 0).y
+        console.log("pinned view at 384 x 832: the pinned part ends at " + pinnedFoot
+                    + ", the list runs " + listTop + " to " + listFoot + " of " + pageFoot
+                    + ", rows at first sight " + ((listFoot - firstTop) / page.rowHeight).toFixed(1)
+                    + ", with the head scrolled off " + ((listFoot - listTop) / page.rowHeight).toFixed(1))
+        verify(listTop >= pinnedFoot, "the list under the splitter")
+        verify(listFoot >= pageFoot - Theme.pageMargin - 1 && listFoot <= pageFoot + 0.5,
+               "the list's foot is the page's: " + listFoot + " of " + pageFoot)
+        verify(firstTop > glass("recordingFilter"), "the head over the rows")
+        verify(!find(page, "recordingInfo").visible, "About waits for its view")
+        compare(scrollersOf(page).join(", "), "signalRows", "Values: the rows alone scroll")
+
+        // The splitter dragged past the page stops with two rows under it
+        const kept = page.chartHeight
+        page.chartHeight = 2000
+        verify(waitForPolish(main), "a tall chart")
+        const tallFoot = splitter.mapToItem(main.contentItem, 0, splitter.height).y
+        verify(tallFoot <= pageFoot - 2 * page.rowHeight + 0.5, "the splitter ends at " + tallFoot)
+        verify(rows.height >= 2 * page.rowHeight - 1, "two rows still show: " + rows.height)
+        compare(scroll.contentY, 0, "the page stays")
+        page.chartHeight = kept
+        verify(waitForPolish(main), "the chart's height again")
+        compare(splitter.mapToItem(main.contentItem, 0, splitter.height).y, pinnedFoot, "as it was")
+
+        // A swipe on the rows moves the rows alone
+        mouseDrag(rows, rows.width / 2, rows.height - 30, 0, -250)
+        tryVerify(() => rows.contentY > rows.originY + 40, 3000, "the swipe scrolls the rows")
+        tryVerify(() => !rows.moving, 5000, "the rows settle")
+        compare(pinned.map(glass).join(", "), before.join(", "), "the title row and the chart stay")
+        compare(scroll.contentY, 0, "the page stays")
+        rows.positionViewAtEnd()
+        verify(waitForPolish(main), "at the end")
+        const last = rows.itemAtIndex(rows.count - 1)
+        verify(last !== null && last.mapToItem(main.contentItem, 0, last.height).y <= listFoot + 0.5,
+               "the last row is reached")
+        compare(pinned.map(glass).join(", "), before.join(", "), "the title row and the chart stay at the end")
+        rows.positionViewAtBeginning()
+        verify(waitForPolish(main), "back at the start")
+
+        // Filtered, the count closes the rows' list and the list keeps the page's foot
+        const signalFilter = find(page, "recordingFilter").filter
+        signalFilter.text = "Signal 1"
+        const count = find(page, "filterCount")
+        tryVerify(() => count.visible && rows.count > 0 && rows.count < 100, 2000, "the filter narrows the rows")
+        verify(waitForPolish(main), "filtered")
+        rows.positionViewAtEnd()
+        verify(waitForPolish(main), "at the filtered end")
+        const countTop = count.mapToItem(main.contentItem, 0, 0).y
+        const lastShown = rows.itemAtIndex(rows.count - 1)
+        verify(countTop >= lastShown.mapToItem(main.contentItem, 0, lastShown.height).y - 0.5
+               && count.mapToItem(main.contentItem, 0, count.height).y <= listFoot + 0.5,
+               "the count under the last row, inside the list: " + countTop)
+        compare(rows.mapToItem(main.contentItem, 0, rows.height).y, listFoot, "the list keeps its foot")
+        signalFilter.text = ""
+        tryVerify(() => !count.visible && rows.count === 100, 2000, "the filter cleared")
+        rows.positionViewAtBeginning()
+        verify(waitForPolish(main), "back at the start again")
+
+        find(page, "detailView_frames").clicked()
+        const table = find(page, "viewerFrameTable")
+        tryVerify(() => table.visible && find(table, "frameList").count > 0, 10000, "Frames: the table")
+        verify(waitForPolish(main), "Frames laid out")
+        verify(!rows.visible, "the rows give way to the table")
+        verify(scrollersOf(page).length <= 1, "Frames: one list at most: " + scrollersOf(page).join(", "))
+        const tableFoot = table.mapToItem(main.contentItem, 0, table.height).y
+        verify(tableFoot >= pageFoot - Theme.pageMargin - 1 && tableFoot <= pageFoot + 0.5,
+               "the table's foot is the page's: " + tableFoot + " of " + pageFoot)
+        const names = find(table, "frameColumnNames")
+        const firstFrame = find(table, "frameList").itemAtIndex(0)
+        verify(names.mapToItem(main.contentItem, 0, 0).y > glass("framesFilterToggle"),
+               "the column names under the head's tools")
+        const namesGap = firstFrame.mapToItem(main.contentItem, 0, 0).y
+                         - names.mapToItem(main.contentItem, 0, names.height).y
+        verify(namesGap >= -0.5 && namesGap <= 4.5, "and right over the first frame: " + namesGap)
+        const listInTable = find(table, "frameList").mapToItem(table, 0, 0).y
+        verify(listInTable <= 4.5, "the names left no gap at the table's top: " + listInTable)
+
+        find(page, "detailView_about").clicked()
+        const findings = find(page, "findingList")
+        tryVerify(() => findings.visible && findings.contentY <= findings.originY + 0.5, 2000, "About")
+        verify(waitForPolish(main), "About laid out")
+        verify(!rows.visible && !table.visible, "the rows and the table give way to About")
+        const info = find(page, "recordingInfo")
+        const infoTop = info.mapToItem(main.contentItem, 0, 0).y
+        const infoFoot = info.mapToItem(main.contentItem, 0, info.height).y
+        verify(info.visible && infoTop >= pinnedFoot && infoFoot <= pageFoot + 0.5,
+               "the recording's line on screen with no scroll: " + infoTop + " to " + infoFoot)
+        verify(!find(page, "aboutHeading").visible, "the switch names About, no heading does")
+        verify(scrollersOf(page).length <= 1, "About: one list at most: " + scrollersOf(page).join(", "))
+        compare(pinned.map(glass).join(", "), before.join(", "), "the chart stays in every view")
+        find(page, "detailView_values").clicked()
+        verify(waitForPolish(main), "Values again")
+        verify(rows.visible && !info.visible, "Values: the rows, About gone")
+    }
+
+    // A head that grows keeps its list at the start when it was there, and
+    // leaves a list scrolled on where it was
+    function test_aGrowingHeadKeepsItsListsPlace() {
+        const v = uprightViewer({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                                  folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        const page = v.page
+        find(page, "detailView_frames").clicked()
+        const table = find(page, "viewerFrameTable")
+        const list = find(table, "frameList")
+        tryVerify(() => table.visible && list.count > 20, 10000, "the frames")
+        verify(waitForPolish(v.main), "laid out")
+        tryVerify(() => list.contentY <= list.originY + 0.5, 2000, "the table at its start")
+        page.framesFilterOpen = true
+        tryVerify(() => find(page, "filterPanel").visible && list.contentY <= list.originY + 0.5,
+                  2000, "the grown head shows from its top")
+        page.framesFilterOpen = false
+        tryVerify(() => list.contentY <= list.originY + 0.5, 2000, "and when it shrinks")
+        list.positionViewAtEnd()
+        verify(waitForPolish(v.main), "scrolled to the end")
+        const scrolled = list.contentY
+        page.framesFilterOpen = true
+        verify(waitForPolish(v.main), "grown")
+        wait(50)
+        verify(list.contentY > list.originY + 100, "a list scrolled on stays scrolled: " + list.contentY)
+        compare(list.contentY, scrolled, "where it was")
+        page.framesFilterOpen = false
+    }
+
+    // A recording of values alone has no Frames view: Values | About
+    function test_aRecordingWithoutFramesShowsTwoViews() {
+        const folder = Harness.importCsvFixture("logger-a", "20261105-220324 Logger A")
+        verify(folder !== "", "the fixture imports")
+        const v = uprightViewer({ title: "Logger A", uri: "", source: "", folder: folder, profile: "" })
+        verify(v.page.pinnedViewer, "pinned")
+        verify(!find(v.page, "detailView_frames").visible, "no Frames")
+        verify(find(v.page, "detailView_values").visible && find(v.page, "detailView_about").visible,
+               "Values and About")
+        find(v.page, "detailView_about").clicked()
+        verify(waitForPolish(v.main), "About laid out")
+        verify(find(v.page, "recordingInfo").visible, "About shows the recording's line")
+    }
+
+    // Upright, a decode chosen in About reopens the recording and leaves the
+    // viewer in About with the choice kept
+    function test_aDecodeChosenInAboutStaysInAbout() {
+        const v = uprightViewer({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                                  folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        const page = v.page
+        find(page, "detailView_about").clicked()
+        verify(waitForPolish(v.main), "About laid out")
+        const choice = find(page, "decodeChoice")
+        verify(choice.visible, "the decode choice in About")
+        const obd2 = choice.indexOfValue("obd2")
+        verify(obd2 > 0, "obd2 is offered")
+        choice.activated(obd2)
+        const info = find(page, "recordingInfo")
+        tryVerify(() => info.visible && info.text.indexOf("through obd2") > 0, 10000, "decoded through obd2")
+        verify(page.aboutShown, "still About")
+        compare(choice.currentIndex, obd2, "the choice kept")
+        find(page, "detailView_values").clicked()
+        verify(!choice.visible, "Values: no choice")
+        find(page, "detailView_about").clicked()
+        tryCompare(choice, "currentIndex", obd2, 2000, "the choice as decoded when About shows again")
+        page.backToList()
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        tryVerify(() => find(page, "signalRows").visible, 10000, "a recording opened from the list")
+        compare(page.detailView, "values", "opens at Values")
     }
 
     // On its side the viewer gives the page to the view the switch names:
