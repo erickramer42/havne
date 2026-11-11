@@ -1,6 +1,7 @@
 // File/layer: core/src/frame_decoder.cpp | C++17, Qt-free; a frame's decode
 //             against a set (ADR-0024 section 4)
-// Testing: UNIT: CoreTest (test_core)
+// Testing: UNIT: CoreTest (test_core), the computed inputs in
+//          CoreTest.AStaleInputIsNoValueOnlyWhereTheProgramReadsIt
 
 #include "frame_decoder.h"
 
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 namespace {
 
@@ -106,29 +108,26 @@ void decode_frame(ecuio_frame_decoder& d, const ecuio_frame_t* frame,
     }
 }
 
-/* Appends each computed value a frame value feeds (ADR-0051 section 5),
- * from each input's newest value, when every input has one no older than
- * its bound at the frame's time. A division by zero or a non-finite
- * result gives none. */
+/* Appends each computed value a frame value feeds (ADR-0051 section 5).
+ * Each input is its newest value no older than its bound at the frame's
+ * time, else no value (NaN), which only the steps that read it see. */
 void compute_values(ecuio_frame_decoder& d, const ecuio_frame_t* frame,
                     uint32_t& n)
 {
     for (const ecuio_frame_decoder::computed_plan& c : d.computed) {
         const uint32_t inputs = c.program->input_count;
         bool fed = false;
-        bool fresh = true;
         double in[ECUIO_COMPUTED_MAX_INPUTS] = {};
         for (uint32_t k = 0; k < inputs; ++k) {
             const ecuio_frame_decoder::latest_value& l = d.latest[c.inputs[k]];
             fed = fed || l.decode == d.decodes;
-            if (l.decode == 0 || l.time_us > frame->timestamp_us ||
-                frame->timestamp_us - l.time_us > c.max_age_us[k]) {
-                fresh = false;
-            }
-            in[k] = l.value;
+            const bool fresh =
+                l.decode != 0 && l.time_us <= frame->timestamp_us &&
+                frame->timestamp_us - l.time_us <= c.max_age_us[k];
+            in[k] = fresh ? l.value : std::numeric_limits<double>::quiet_NaN();
         }
         ecuio_value_t v{};
-        if (!fed || !fresh || !ecuio_computed_run(*c.program, in, &v.value)) {
+        if (!fed || !ecuio_computed_run(*c.program, in, &v.value)) {
             continue;
         }
         const ecuio_signal_def_t& def = d.set->defs[c.def];

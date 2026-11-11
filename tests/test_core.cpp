@@ -5035,6 +5035,101 @@ TEST(CoreTest, AComputedInputAtItsBoundStillCounts)
     EXPECT_EQ(ecuio_profile_unregister("test-computed-age"), ECUIO_OK);
 }
 
+/* Each input past its bound or never seen reaches the program as no
+ * value, so an if's branch not taken can hold one (ADR-0051 section 5's
+ * format 2 rule), and a format 1 program over a stale input still gives
+ * none, as it did when any stale input blanked it. A registered set: no
+ * file writes these steps yet. */
+TEST(CoreTest, AStaleInputIsNoValueOnlyWhereTheProgramReadsIt)
+{
+    static ecuio_signal_def_t defs[4];
+    static ecuio_computed_t computed[2];
+    static ecuio_signal_set_t set{};
+    defs[0] = value_def(1, ECUIO_VALUE_UINT, 0x123); /* a gear */
+    defs[0].bit_length = 8;
+    defs[1] = value_def(3, ECUIO_VALUE_UINT, 0x124); /* a speed */
+    defs[1].bit_length = 8;
+    for (uint16_t i = 2; i < 4; ++i) {
+        defs[i] = value_def(static_cast<uint16_t>(i + 2), ECUIO_VALUE_UINT, 0);
+        defs[i].flags = ECUIO_DEF_FLAG_COMPUTED;
+        defs[i].table_first = static_cast<uint16_t>(i - 2);
+    }
+    for (ecuio_computed_t& c : computed) {
+        c = ecuio_computed_t{};
+        c.input_ids[0] = 1;
+        c.input_ids[1] = 3;
+        c.input_count = 2;
+    }
+    /* if(gear == 0, 0, speed) */
+    const uint8_t pick[] = {
+        ECUIO_COMPUTED_PUSH_INPUT | 0u, ECUIO_COMPUTED_PUSH_CONSTANT | 0u,
+        ECUIO_COMPUTED_EQUAL,           ECUIO_COMPUTED_PUSH_CONSTANT | 0u,
+        ECUIO_COMPUTED_PUSH_INPUT | 1u, ECUIO_COMPUTED_IF};
+    std::memcpy(computed[0].steps, pick, sizeof pick);
+    computed[0].step_count = sizeof pick;
+    computed[0].constant_count = 1;
+    /* gear - speed, format 1 */
+    computed[1].steps[0] = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+    computed[1].steps[1] = ECUIO_COMPUTED_PUSH_INPUT | 1u;
+    computed[1].steps[2] = ECUIO_COMPUTED_SUBTRACT;
+    computed[1].step_count = 3;
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 4;
+    set.defs = defs;
+    set.computed_count = 2;
+    set.computed = computed;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("test-computed-stale", &set, &why),
+              ECUIO_OK)
+        << "code " << why.code << " at " << why.index;
+
+    const auto run = [](bool speed_seen) {
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create("mock://t?profile=test-computed-stale",
+                                       &session),
+                  ECUIO_OK);
+        ValuesCapture cap;
+        EXPECT_EQ(
+            ecuio_register_values_callback(session, values_capture_cb, &cap),
+            ECUIO_OK);
+        const auto send = [&](uint32_t id, uint8_t byte, double seconds) {
+            const ecuio_frame_t f =
+                value_frame(id, {byte}, static_cast<uint64_t>(seconds * 1e6));
+            ecuio_session_dispatch_callbacks(session, &f);
+        };
+        if (speed_seen) {
+            send(0x124, 50, 0.0);
+        }
+        send(0x123, 1, 1.0); /* the speed 1 s old */
+        send(0x123, 1, 5.0); /* 5 s old: past the stale age */
+        send(0x123, 0, 6.0); /* in neutral, the speed not read */
+        ecuio_session_destroy(session);
+        return cap.batches;
+    };
+
+    const std::vector<SeenBatch> seen = run(true);
+    ASSERT_EQ(seen.size(), 4u);
+    ASSERT_NE(value_of(seen[1], 4), nullptr);
+    EXPECT_EQ(value_of(seen[1], 4)->value, 50.0) << "in gear, the speed";
+    ASSERT_NE(value_of(seen[1], 5), nullptr);
+    EXPECT_EQ(value_of(seen[1], 5)->value, -49.0);
+    EXPECT_EQ(value_of(seen[2], 4), nullptr) << "the branch taken is stale";
+    EXPECT_EQ(value_of(seen[2], 5), nullptr) << "format 1, as before";
+    ASSERT_NE(value_of(seen[3], 4), nullptr) << "the stale branch not taken";
+    EXPECT_EQ(value_of(seen[3], 4)->value, 0.0);
+    EXPECT_EQ(value_of(seen[3], 5), nullptr) << "format 1, as before";
+    EXPECT_EQ(seen[3].values.size(), 2u) << "the gear and the pick";
+
+    const std::vector<SeenBatch> never = run(false);
+    ASSERT_EQ(never.size(), 3u);
+    EXPECT_EQ(value_of(never[0], 4), nullptr) << "never seen, taken";
+    EXPECT_EQ(value_of(never[0], 5), nullptr);
+    ASSERT_NE(value_of(never[2], 4), nullptr) << "never seen, not taken";
+    EXPECT_EQ(value_of(never[2], 4)->value, 0.0);
+    EXPECT_EQ(value_of(never[2], 5), nullptr);
+    EXPECT_EQ(ecuio_profile_unregister("test-computed-stale"), ECUIO_OK);
+}
+
 /* Computing allocates nothing on the worker, as decoding doesn't
  * (CoreTest.WorkersAllocateNothingPerFrame's rule) */
 TEST(CoreTest, ComputingValuesAllocatesNothing)
