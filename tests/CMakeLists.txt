@@ -593,6 +593,13 @@ if(TARGET havne-cli)
                         $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
             set_tests_properties(CliLogRunTest.AFocusTheSessionCantAskIsAnError
                 PROPERTIES TIMEOUT 60)
+            # An extended session's state: the session line stream writes
+            add_test(NAME CliLogRunTest.ALogWritesTheSessionLineStreamDoes
+                COMMAND ${Python3_EXECUTABLE} ${_cli_log} session
+                        $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>
+                        ${CMAKE_CURRENT_SOURCE_DIR}/golden/cli/log-session.jsonl)
+            set_tests_properties(CliLogRunTest.ALogWritesTheSessionLineStreamDoes
+                PROPERTIES TIMEOUT 60)
         endif()
         # view (ADR-0049 section 5) on two recordings of one pull, written
         # by hand (tests/fixtures/recording/: pull-late's starts 10 s later

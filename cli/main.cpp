@@ -690,6 +690,25 @@ void poll_scan(Output& out, ecuio_session_t* session, uint32_t channels,
     }
 }
 
+// A session line per ECU whose session changed (cli/scan_line.h), as
+// poll_scan writes it, for the commands that write no scan lines
+void poll_sessions(Output& out, ecuio_session_t* session, uint32_t channels,
+                   cli::SessionSeen* seen)
+{
+    for (uint32_t c = 0; c < channels; ++c) {
+        ecuio_channel_support_t s;
+        if (ecuio_session_get_channel_support(session, c, &s) != ECUIO_OK) {
+            continue;
+        }
+        if (cli::session_due(s, seen[c])) {
+            char buf[512];
+            cli::Line l(buf, sizeof buf);
+            cli::session_line(l, s);
+            write_line(out, l);
+        }
+    }
+}
+
 // The car's model year, from the first channel's VIN (the vehicle's,
 // ADR-0027 section 3) decoded as the identity line decodes it; 0 with
 // none
@@ -2920,6 +2939,11 @@ int run_log(const cli::LogArgs& args)
     const bool replay_ends = info.backend == ECUIO_BACKEND_REPLAY &&
                              !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
     write_session(out, info);
+    const uint32_t channels =
+        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
+            ? info.channel_count
+            : ECUIO_SESSION_INFO_MAX_CHANNELS;
+    cli::SessionSeen session_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     // The focus before the recorder attaches: the header's focus line is
     // the focus at the attach
     st = ecuio_session_set_focus_with(
@@ -3005,6 +3029,7 @@ int run_log(const cli::LogArgs& args)
         }
         poll_recording(out, recorder, nullptr, &recording_failed);
         poll_health(out, session, &last_error, &episodes);
+        poll_sessions(out, session, channels, session_seen);
         reason = cli::log_end_reason(
             g_interrupted.load(), recording_failed,
             replay_ends &&
@@ -3048,6 +3073,7 @@ int run_log(const cli::LogArgs& args)
     }
     closer.join();
 
+    poll_sessions(out, session, channels, session_seen);
     int code = kExitOk;
     wait_for_writer(recorder, frames.covered.load(std::memory_order_acquire));
     poll_recording(out, recorder, nullptr, &recording_failed);
