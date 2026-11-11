@@ -4,6 +4,7 @@
 # line per step, as in verify.sh; logs and reports go to Testing/coverage/.
 #
 # Usage: scripts/coverage.sh [--tests-only] [--no-devices] [-R <ctest regex>]
+#                            [-E <ctest regex to leave out>]
 #
 #   configure   build-coverage, once, if it doesn't exist: the app and the
 #               tests, RelWithDebInfo with /Od /Ob0, so there are PDBs and
@@ -32,11 +33,13 @@ mkdir -p "$LOGDIR"
 tests_only=0
 devices=1
 regex=""
+exclude=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --tests-only) tests_only=1 ;;
         --no-devices) devices=0 ;;
         -R) regex="${2:-}"; shift ;;
+        -E) exclude="${2:-}"; shift ;;
         -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
@@ -99,6 +102,7 @@ fi
 root=$(cygpath -w "$PWD")
 ctest_args=(--test-dir "$TREE" -C RelWithDebInfo --output-on-failure --no-tests=error)
 [ -n "$regex" ] && ctest_args+=(-R "$regex")
+[ -n "$exclude" ] && ctest_args+=(-E "$exclude")
 rm -rf "$LOGDIR/html" "$LOGDIR/raw.xml" "$LOGDIR/cobertura.xml"
 run coverage "$tool" --quiet --cover_children \
     --modules "$root\\$TREE" \
