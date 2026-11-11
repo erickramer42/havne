@@ -27,7 +27,7 @@ Rectangle {
     property string bluetoothPermission: Bluetooth.permission
     property bool bluetoothNeedsSettings: Bluetooth.needsSettings
     property bool bluetoothScanning: Bluetooth.scanning
-    // A phone's rows are a touch's size; the desktop's Home sets its own
+    // The rows are a touch's size; a list can set another height
     property real rowHeight: Theme.touchTarget
     // More adapters than this go behind Other address...
     readonly property int maxAdapterRows: 6
@@ -266,8 +266,8 @@ Rectangle {
                     wrapMode: Text.WordWrap
                     font.pixelSize: Theme.fontCaption
                     color: Theme.textDim
-                    text: qsTr("No paired adapter. Pair it in Android's Bluetooth settings, "
-                               + "or scan for a BLE adapter")
+                    text: qsTr("No paired adapter. Pair one in Android's Bluetooth settings, "
+                               + "or scan")
                 }
                 ThemedButton {
                     objectName: "connectScan"
@@ -287,6 +287,17 @@ Rectangle {
             font.pixelSize: Theme.fontCaption
             color: Theme.textDim
             text: qsTr("Pick an adapter, then connect")
+        }
+
+        // A relay holds the adapter, so Connect waits for it to stop
+        Label {
+            objectName: "connectRelayNote"
+            visible: list.rows.length > 0 && list.chosen !== "" && Relay.running
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            font.pixelSize: Theme.fontCaption
+            color: Theme.textDim
+            text: qsTr("Stop the relay to connect")
         }
 
         // The bridge's words for a connect that failed, and the Log beside

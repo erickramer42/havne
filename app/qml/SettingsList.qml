@@ -14,6 +14,9 @@ ColumnLayout {
     id: list
     property var pages: []
     property string current: ""
+    // The Log row's summary: a line of its own, so a new one doesn't remake
+    // the rows `pages` makes (a press in flight, the focus)
+    property string logSummary: ""
     signal chosen(string key)
     spacing: 0
 
@@ -42,7 +45,7 @@ ColumnLayout {
                 Label {
                     objectName: "settingsRowSummary"
                     visible: row.width >= 200
-                    text: row.modelData.summary
+                    text: row.modelData.key === "log" ? list.logSummary : row.modelData.summary
                     color: Theme.textDim
                     elide: Text.ElideRight
                     horizontalAlignment: Text.AlignRight

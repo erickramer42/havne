@@ -16,6 +16,8 @@ ColumnLayout {
 
     property alias uriField: uriField
     property alias errorLabel: errorLabel
+    // Set where the words are a connect's refusal, which the Log explains
+    property bool logExplains: false
 
     Label {
         objectName: "sessionStatus"
@@ -76,6 +78,7 @@ ColumnLayout {
                 if (Bridge.connected) {
                     Bridge.disconnectSession()
                     errorLabel.visible = false
+                    root.logExplains = false
                     errorLabel.text = ""
                 } else {
                     root.host.requestConnect(uriField.text)
@@ -101,6 +104,7 @@ ColumnLayout {
         }
         ThemedButton {
             objectName: "errorShowLog"
+            visible: root.logExplains
             flat: true
             text: qsTr("Show log")
             Layout.alignment: Qt.AlignTop
