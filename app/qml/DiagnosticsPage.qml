@@ -416,6 +416,7 @@ Page {
                                 highlighted: true
                                 text: qsTr("Clear codes")
                                 baseColor: Theme.danger
+                                textColor: Theme.textOnDanger
                                 hoverColor: Qt.lighter(Theme.danger, 1.15)
                                 pressedColor: Qt.darker(Theme.danger, 1.2)
                                 enabled: root.canClear
@@ -478,6 +479,7 @@ Page {
                                 objectName: "clearMovingConfirm"
                                 text: qsTr("Clear while moving")
                                 baseColor: Theme.danger
+                                textColor: Theme.textOnDanger
                                 hoverColor: Qt.lighter(Theme.danger, 1.15)
                                 pressedColor: Qt.darker(Theme.danger, 1.2)
                                 onClicked: Bridge.clearDiagnosticsMoving()
