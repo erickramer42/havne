@@ -2231,7 +2231,8 @@ Page {
             readonly property real touchMin: Theme.touchTarget
             Layout.fillWidth: true
             visible: root.editing
-            spacing: 8
+            // Tighter on a phone, where a wider face and a large font need the room
+            spacing: root.form === "phone" ? 4 : 8
             // Disabled rather than hidden with nothing to take back, so the row never moves
             ThemedButton {
                 objectName: "dashUndo"
