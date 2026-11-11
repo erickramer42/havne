@@ -23,7 +23,11 @@ Page {
     readonly property var chartWindows: [10, 30, 60, 120]
     readonly property int chartWindowS: chartWindows.includes(liveSettings.chartWindowS)
                                         ? liveSettings.chartWindowS : 30
-    onChartWindowSChanged: chart.requestPaint()
+    onChartWindowSChanged: {
+        if (paused)
+            viewEndMs = clampedEnd(viewEndMs)
+        chart.requestPaint()
+    }
     // One window along: direction > 0 a longer one, < 0 a shorter one,
     // stopping at either end. A pinch and the wheel step through them,
     // since Live's chart always ends at now
@@ -39,6 +43,8 @@ Page {
         // The splitter's place: the list's share of the page's height,
         // or -1 for the list sized to its rows (the default)
         property real listShare: -1
+        // The first pause's hint has shown
+        property bool pauseHintSeen: false
     }
 
     // The chart maximized: it takes the page but for the link banner and
@@ -61,6 +67,207 @@ Page {
         sequence: "F"
         enabled: root.visible && !Theme.mobile
         onActivated: root.toggleMaximized()
+    }
+
+    // The pause (L2): the plotted signals' history as it stood, kept in the
+    // page, so the chart holds still while the rows and the session go on.
+    // Its times are ms before the pause's newest sample, which is 0
+    property var snapshot: null
+    readonly property bool paused: snapshot !== null
+    property double snapshotEndMs: 0     // the newest sample's session time
+    property double snapshotStartMs: 0   // the oldest sample's time (<= 0)
+    property double viewEndMs: 0         // the paused view's right edge (<= 0)
+    property double cursorMs: NaN        // the tapped time, NaN for none
+    property double pausedAt: 0          // Date.now() at the pause, for its age
+    property double clockNow: 0
+    // This pause shows the hint: the first pause of all, once
+    property bool hintShown: false
+
+    function pause() {
+        if (paused || !Bridge.connected)
+            return
+        const series = Bridge.signalModel.chartData(0, 0)
+        let start = Infinity, end = -Infinity
+        for (const s of series) {
+            if (s.samples.length < 2)
+                continue
+            start = Math.min(start, s.samples[0])
+            end = Math.max(end, s.samples[s.samples.length - 2])
+        }
+        if (!isFinite(end))
+            return
+        const kept = []
+        for (const s of series) {
+            const samples = []
+            for (let i = 0; i + 1 < s.samples.length; i += 2)
+                samples.push(s.samples[i] - end, s.samples[i + 1])
+            kept.push({ row: s.row, unit: s.unit, decimals: s.decimals, samples: samples })
+        }
+        snapshotEndMs = end
+        snapshotStartMs = start - end
+        viewEndMs = 0
+        cursorMs = NaN
+        pausedAt = Date.now()
+        clockNow = pausedAt
+        hintShown = !liveSettings.pauseHintSeen
+        if (hintShown) {
+            // Stored at once, not on the store's timer: a page made next reads it
+            liveSettings.pauseHintSeen = true
+            liveSettings.setValue("pauseHintSeen", true)
+        }
+        snapshot = kept
+        chart.requestPaint()
+    }
+    // Follows now again, the snapshot dropped
+    function resume() {
+        if (!paused)
+            return
+        snapshot = null
+        cursorMs = NaN
+        hintShown = false
+        chart.requestPaint()
+    }
+    // The view's end, kept so the window stays inside the snapshot (or
+    // starts at its start, when it's shorter) and never past the pause
+    function clampedEnd(end) {
+        const least = Math.min(0, snapshotStartMs + chartWindowS * 1000)
+        return Math.max(least, Math.min(0, end))
+    }
+    function setViewEnd(end) {
+        viewEndMs = clampedEnd(end)
+        chart.requestPaint()
+    }
+    function plotWidth() {
+        return chart.drawn ? chart.drawn.plotW : Math.max(1, chart.shownW)
+    }
+    // The paused view's time at x in chartFrame's coordinates
+    function timeAt(x) {
+        const w = chartWindowS * 1000
+        const t = viewEndMs - w + (x - chart.x) / Math.max(1, plotWidth() - 1) * w
+        return Math.max(viewEndMs - w, Math.min(viewEndMs, t))
+    }
+    function setCursor(t) {
+        cursorMs = t
+        chart.requestPaint()
+    }
+    // The sample nearest the cursor, as an index into samples; -1 without a
+    // cursor or a sample within staleMs of it
+    function cursorSample(samples) {
+        if (isNaN(cursorMs))
+            return -1
+        let best = -1
+        for (let i = 0; i + 1 < samples.length; i += 2) {
+            if (best < 0 || Math.abs(samples[i] - cursorMs) < Math.abs(samples[best] - cursorMs))
+                best = i
+        }
+        return best >= 0 && Math.abs(samples[best] - cursorMs) <= staleMs ? best : -1
+    }
+    // The snapshot's samples in view, thinned to each column's lowest,
+    // highest and newest, as chartData() thins the live window
+    function pausedSeries(widthPx) {
+        const w = chartWindowS * 1000
+        const t1 = viewEndMs, t0 = t1 - w
+        const columns = Math.max(1, widthPx)
+        const out = []
+        for (const s of snapshot) {
+            const sp = s.samples
+            const picked = []
+            let col = -1, lo = -1, hi = -1, last = -1
+            const flush = () => {
+                const keep = [lo, hi, last].filter((v, k, all) => all.indexOf(v) === k)
+                for (const i of keep.sort((a, b) => a - b))
+                    picked.push(sp[i], sp[i + 1])
+            }
+            for (let i = 0; i + 1 < sp.length; i += 2) {
+                if (sp[i] < t0 || sp[i] > t1)
+                    continue
+                const c = Math.min(columns - 1, Math.floor((sp[i] - t0) / w * columns))
+                if (c !== col) {
+                    if (col >= 0)
+                        flush()
+                    col = c
+                    lo = hi = last = i
+                    continue
+                }
+                if (sp[i + 1] < sp[lo + 1]) lo = i
+                if (sp[i + 1] > sp[hi + 1]) hi = i
+                last = i
+            }
+            if (col >= 0)
+                flush()
+            const series = { row: s.row, unit: s.unit, decimals: s.decimals, samples: picked }
+            const at = cursorSample(sp)
+            if (at >= 0) {
+                series.labelValue = sp[at + 1]
+                series.labelMs = sp[at]
+            }
+            out.push(series)
+        }
+        return out
+    }
+    // The cursor over the paused chart: a line, and a dot on each trace at
+    // the sample its label reads
+    function cursorMarks(ctx, l) {
+        const w = chartWindowS * 1000
+        const xOf = t => (t - (viewEndMs - w)) / w * (l.plotW - 1)
+        const x = xOf(cursorMs)
+        if (x < 0 || x > l.plotW)
+            return
+        ctx.strokeStyle = Theme.text
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(x, l.top)
+        ctx.lineTo(x, l.top + l.plotH)
+        ctx.stroke()
+        for (const tr of l.traces) {
+            if (tr.labelMs === undefined)
+                continue
+            const at = xOf(tr.labelMs)
+            let near = null
+            for (const seg of tr.segments) {
+                for (const p of seg) {
+                    if (!near || Math.abs(p.x - at) < Math.abs(near.x - at))
+                        near = p
+                }
+            }
+            if (!near)
+                continue
+            ctx.fillStyle = Theme.seriesColor(tr.row)
+            ctx.beginPath()
+            ctx.arc(near.x, near.y, 3.5, 0, 2 * Math.PI)
+            ctx.fill()
+        }
+    }
+    function pausedText() {
+        const line = qsTr("Paused · %1 s ago").arg(Math.max(0, Math.round((clockNow - pausedAt) / 1000)))
+        if (isNaN(cursorMs))
+            return line
+        return line + " · " + qsTr("cursor at −%1 s")
+                                  .arg(Number(-cursorMs / 1000).toLocaleString(Qt.locale(), 'f', 1))
+    }
+    Timer {
+        interval: 1000
+        repeat: true
+        running: root.paused && root.visible
+        onTriggered: root.clockNow = Date.now()
+    }
+    // Space on a keyboard pauses and resumes; a text field takes it first
+    Shortcut {
+        sequence: "Space"
+        enabled: root.visible && !Theme.mobile
+        onActivated: root.paused ? root.resume() : root.pause()
+    }
+    // The snapshot goes with what it was taken of: the session, its signal
+    // set, the units it was converted to, and the page
+    onVisibleChanged: if (!visible) resume()
+    Connections {
+        target: Bridge
+        function onConnectedChanged() { root.resume() }
+        function onUnitSystemChanged() { root.resume() }
+    }
+    Connections {
+        target: Bridge.signalModel
+        function onModelReset() { root.resume() }
     }
 
     readonly property int rowHeight: Theme.rowHeight
@@ -91,6 +298,7 @@ Page {
     }
 
     function statusText() {
+        if (root.paused) return root.pausedText()
         if (Bridge.connecting) return qsTr("Connecting…")
         if (Bridge.disconnecting) return qsTr("Disconnecting…")
         if (!Bridge.connected) return qsTr("Connect a session to read live values")
@@ -179,9 +387,10 @@ Page {
             }
         }
 
-        // Status line; disconnected, the empty state with a way to connect
+        // Status line; disconnected, the empty state with a way to connect.
+        // Paused, it shows over a maximized chart too
         RowLayout {
-            visible: !root.chartMaximized
+            visible: !root.chartMaximized || root.paused
             Layout.fillWidth: true
             spacing: Theme.spacing
 
@@ -198,6 +407,15 @@ Page {
                 text: qsTr("Connect…")
                 onClicked: root.connectRequested()
             }
+        }
+        // The first pause's hint, once: a paused chart isn't a recording
+        Label {
+            objectName: "pauseHint"
+            visible: root.paused && root.hintShown
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: qsTr("Start log records the session for the viewer")
         }
 
         // Sized to its rows, capped at about half the page and at what
@@ -390,9 +608,15 @@ Page {
         RowLayout {
             id: windowRow
             objectName: "chartWindowRow"
+            // Every button a touch's height on a phone (ThemedButton's touchMin)
+            readonly property real touchMin: Theme.touchTarget
+            // Paused on a phone, Live takes the row's end: the label gives way
+            // and the window buttons show their numbers alone
+            readonly property bool tight: root.paused && Theme.compact
             Layout.fillWidth: true
-            spacing: 6
+            spacing: tight ? 4 : 6
             Label {
+                visible: !windowRow.tight
                 text: qsTr("Window")
                 color: Theme.textDim
             }
@@ -407,22 +631,35 @@ Page {
                     // line only with the sides kept narrow
                     horizontalPadding: Theme.dense ? 4 : 8
                     objectName: "chartWindow_" + modelData
-                    text: qsTr("%1 s").arg(modelData)
+                    text: windowRow.tight ? String(modelData) : qsTr("%1 s").arg(modelData)
                     checkable: true
                     checked: root.chartWindowS === modelData
                     Accessible.name: qsTr("Show the last %1 seconds").arg(modelData)
                     onClicked: liveSettings.chartWindowS = modelData
                 }
             }
-            Item { Layout.fillWidth: true }
+            Item { Layout.fillWidth: true; visible: !windowRow.tight }
             ThemedButton {
                 objectName: "maximizeChart"
                 text: root.chartMaximized ? qsTr("List") : qsTr("Chart")
-                Layout.minimumWidth: 52
+                compact: windowRow.tight
+                Layout.minimumWidth: windowRow.tight ? 48 : 52
                 Layout.maximumWidth: 72
                 Accessible.name: root.chartMaximized ? qsTr("Show the list again")
                                                      : qsTr("Give the chart the page")
                 onClicked: root.toggleMaximized()
+            }
+            // Paused only: the chart follows now again
+            ThemedButton {
+                objectName: "liveButton"
+                visible: root.paused
+                highlighted: true
+                compact: windowRow.tight
+                text: qsTr("Live")
+                Layout.minimumWidth: Math.max(48, Theme.touchTarget)
+                Layout.maximumWidth: 96
+                Accessible.name: qsTr("Follow the live values again")
+                onClicked: root.resume()
             }
         }
 
@@ -448,18 +685,30 @@ Page {
                 shownW: parent.width - 8
                 shownH: parent.height - 8
                 emptyText: root.chartEmptyText()
+                moving: pan.active
                 fetch: function(widthPx) {
-                    return Bridge.signalModel.chartData(root.chartWindowS * 1000, widthPx)
+                    return root.paused ? root.pausedSeries(widthPx)
+                                       : Bridge.signalModel.chartData(root.chartWindowS * 1000, widthPx)
                 }
-                layoutOpts: ({
-                    gapMs: root.staleMs, minSpanUnits: root.minSpanUnits,
-                    format: root.valueText,
-                    windowMs: root.chartWindowS * 1000,
-                    caption: s => s === 0 ? qsTr("now") : qsTr("−%1 s").arg(s) })
+                // Paused, the axis is the view's span, its ticks seconds before the pause
+                layoutOpts: root.paused
+                    ? ({ gapMs: root.staleMs, minSpanUnits: root.minSpanUnits,
+                         format: root.valueText,
+                         span: { t0: root.viewEndMs - root.chartWindowS * 1000, t1: root.viewEndMs },
+                         absolute: true,
+                         caption: s => s === 0 ? qsTr("paused") : qsTr("−%1 s").arg(-s) })
+                    : ({ gapMs: root.staleMs, minSpanUnits: root.minSpanUnits,
+                         format: root.valueText,
+                         windowMs: root.chartWindowS * 1000,
+                         caption: s => s === 0 ? qsTr("now") : qsTr("−%1 s").arg(s) })
+                decorate: root.paused && !isNaN(root.cursorMs) ? root.cursorMarks : null
 
                 Connections {
                     target: Bridge.signalModel
-                    function onValuesUpdated() { chart.requestPaint() }
+                    function onValuesUpdated() {
+                        if (!root.paused)
+                            chart.requestPaint()
+                    }
                     function onSubscribedCountChanged() { chart.requestPaint() }
                 }
                 Connections {
@@ -468,8 +717,46 @@ Page {
                 }
             }
             // A double-click or double-tap maximizes it, or gives the list
-            // back; the two taps of a thumb may land a little apart
-            DoubleTapHandler { objectName: "chartDoubleTap"; onDoubleTap: root.toggleMaximized() }
+            // back; the two taps of a thumb may land a little apart. Paused,
+            // a tap places the cursor
+            DoubleTapHandler {
+                objectName: "chartDoubleTap"
+                onTapped: eventPoint => {
+                    if (root.paused)
+                        root.setCursor(root.timeAt(eventPoint.position.x))
+                }
+                onDoubleTap: root.toggleMaximized()
+            }
+            // A drag pauses the chart and pans it back through the snapshot;
+            // pushed past the snapshot's right edge, it follows now again.
+            // Sideways only; a pinch's last finger moves nothing
+            DragHandler {
+                id: pan
+                objectName: "chartPan"
+                target: null
+                yAxis.enabled: false
+                property real startEnd: 0
+                property bool fromPinch: false
+                onActiveChanged: {
+                    if (!active)
+                        return
+                    fromPinch = windowPinch.active || Date.now() - windowPinch.endedAt < 300
+                    if (fromPinch)
+                        return
+                    root.pause()
+                    startEnd = root.viewEndMs
+                }
+                onActiveTranslationChanged: {
+                    if (!active || fromPinch || !root.paused)
+                        return
+                    const end = startEnd - activeTranslation.x / Math.max(1, root.plotWidth() - 1)
+                                * root.chartWindowS * 1000
+                    if (end > 0)
+                        root.resume()
+                    else
+                        root.setViewEnd(end)
+                }
+            }
             // Fingers spreading show a shorter window, closing a longer
             // one: a step each time the scale moves by kPinchStep since the
             // last step, so one pinch can cross several windows
@@ -479,7 +766,12 @@ Page {
                 target: null
                 readonly property real kPinchStep: 1.35
                 property real fromScale: 1
-                onActiveChanged: fromScale = 1
+                property double endedAt: 0
+                onActiveChanged: {
+                    fromScale = 1
+                    if (!active)
+                        endedAt = Date.now()
+                }
                 onActiveScaleChanged: {
                     if (!active || activeScale <= 0)
                         return

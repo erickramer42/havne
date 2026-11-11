@@ -1726,6 +1726,60 @@ TestCase {
             live.stepWindow(1)
     }
 
+    // Live's window row on a phone, following and paused: Live takes the
+    // row's end while paused, the window buttons compact to make room,
+    // nothing passes the edge or overlaps, each label keeps one line, and
+    // every button is a touch's height (Live a touch's width too)
+    function test_livesWindowRowFitsWhilePaused_data() {
+        return [{ tag: "384 following", w: 384, paused: false },
+                { tag: "384 paused", w: 384, paused: true },
+                { tag: "320 paused", w: 320, paused: true }]
+    }
+    function test_livesWindowRowFitsWhilePaused(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const live = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(live.parent.children).indexOf(live))
+        tryCompare(Theme, "compact", true)
+        if (data.paused) {
+            tryVerify(() => {
+                const s = Bridge.signalModel.chartData(0, 0)
+                return s.length > 0 && s[0].samples.length >= 2
+            }, 5000, "a history to pause on")
+            live.pause()
+            verify(live.paused, "paused")
+        }
+        verify(waitForPolish(main), "laid out")
+        waitForRendering(main.contentItem)
+        const row = find(live, "chartWindowRow")
+        const button = find(live, "liveButton")
+        compare(button.visible, data.paused, "Live shows while paused only")
+        const out = pastTheEdge(row, main.contentItem, [])
+        compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+
+        const buttons = live.chartWindows.map(s => find(live, "chartWindow_" + s))
+            .concat([find(live, "maximizeChart")]).concat(data.paused ? [button] : [])
+        const glass = item => {
+            const a = item.mapToItem(main.contentItem, 0, 0)
+            const b = item.mapToItem(main.contentItem, item.width, item.height)
+            return { x0: a.x, x1: b.x, h: b.y - a.y, w: b.x - a.x }
+        }
+        let right = -Infinity
+        for (const b of buttons) {
+            const g = glass(b)
+            verify(g.h >= Theme.touchTarget - 0.5, b.objectName + " is " + g.h + " tall")
+            verify(g.x0 >= right - 0.5, b.objectName + " overlaps the one before")
+            right = g.x1
+            compare(b.contentItem.lineCount, 1, b.objectName + " on " + b.contentItem.lineCount + " lines")
+        }
+        if (data.paused)
+            verify(glass(button).w >= Theme.touchTarget - 0.5, "Live is " + glass(button).w + " wide")
+    }
+
     // Developer mode's frame-rate readout: in the header, so it covers no
     // page; hidden otherwise, and counting the frames the window draws
     // while a session moves the page
