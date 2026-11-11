@@ -462,6 +462,50 @@ TestCase {
         }
     }
 
+    // A recording folder of twelve number signals, three samples each
+    function wideRecording(name) {
+        const folder = Harness.writeFramesRecording(name, 1, 100000)
+        verify(folder !== "", "the folder is made")
+        let header = "ecuio session recording, format 2 (ADR-0049)\n"
+                     + "started  2026-11-03 10:00:00.000 (local time)\n"
+                     + "utc  2026-11-03T16:00:00.000Z\ncore  0.3.6\n"
+                     + "uri  socketcan://vcan0?profile=raw\nprofile  raw\n"
+        let rows = "host_us,signal,value,unit\n"
+        for (let s = 1; s <= 12; ++s)
+            header += "signal  Signal " + s + ",number,V,0,0\n"
+        for (let t = 1; t <= 3; ++t) {
+            for (let s = 1; s <= 12; ++s)
+                rows += (t * 100000) + ",Signal " + s + "," + s + ",V\n"
+        }
+        header += "\n10:00:01.000  +1.000  end  havne-cli: seconds: 1 frames, 36 values, "
+                  + "0 records dropped, 0 notes dropped\n"
+        Harness.writeScratchFile(name + "/events.log", header)
+        Harness.writeScratchFile(name + "/signals.csv", rows)
+        return folder
+    }
+
+    // The test phone upright: twelve signals' rows stop at five, under
+    // 40 % of the screen, so there is always more page than list to swipe
+    function test_theViewersRowsStopAtFiveOnAPhone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Twelve", uri: "replay://x?profile=raw", source: "",
+                    folder: wideRecording("twelve-signals"), profile: "raw" })
+        const rows = find(page, "signalRows")
+        tryVerify(() => rows.visible && rows.count === 12, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const scroll = find(page, "recordingsScroll")
+        verify(rows.height <= 5 * page.rowHeight + 0.5,
+               "the rows are " + rows.height + " for rows of " + page.rowHeight)
+        verify(rows.height <= 0.4 * scroll.height + 0.5, "the rows are " + rows.height + " of " + scroll.height)
+        verify(rows.height >= 4 * page.rowHeight, "four rows show at least: " + rows.height)
+    }
+
     // On its side the viewer gives the page to the view the switch names:
     // Values the chart, Frames the table, and the switch leads the zoom
     // row in both, so either leads back
