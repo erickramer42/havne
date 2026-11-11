@@ -102,7 +102,9 @@ TestCase {
     function faulted() {
         const s = drivenOnTheFake("ECUIO_FAKE_READ_STATUS", "7", "?profile=raw&filter=0x7E8")
         enterOn(s)
-        verify(!s.dash.barsUp, "hidden at first")
+        // The fault can land before or after the entry (the polish wait
+        // under load decides), so only the end state is judged; a fault
+        // up at the entry has its own case
         tryCompare(Bridge, "linkState", "fault", 5000)
         tryVerify(() => s.dash.barsUp, 2000, "the fault raises them")
         return s
