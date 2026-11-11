@@ -2265,6 +2265,80 @@ TestCase {
         verify(keys.visible && keys.text.indexOf("Z") >= 0, "the keys: " + keys.text)
     }
 
+    // The line floats over the pages' foot: the grid sits where it sat
+    // before the line came and after it goes
+    function test_theLineMovesNothing() {
+        const page = storedPageOf({ form: "phone", width: 384, height: 832, undoLineMs: 60000 },
+                                  twoPages())
+        const cell = find(page, "dashCell_0_0")
+        tryVerify(() => cell.width > 0, 3000, "laid out")
+        verify(waitForPolish(page.Window.window), "laid out")
+        const line = find(page, "dashUndoLine")
+        const at = () => cell.mapToItem(page, 0, 0).y
+        const before = at()
+        verify(!line.visible)
+        page.showLine("Undid: removed A")
+        verify(line.visible)
+        verify(waitForPolish(page.Window.window), "laid out")
+        compare(at(), before, "no jump with the line")
+        page.undoLine = ""
+        verify(waitForPolish(page.Window.window), "laid out")
+        compare(at(), before, "no jump without it")
+    }
+
+    // A cell whose signal the session lacks says why, inside a narrow cell
+    // at the title's width too, and a cell made under obd2 reads under mock
+    // through its counterpart
+    function test_aCellWithoutItsSignalSaysWhy() {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const battery = Bridge.gaugeSignals["battery"]
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, docOf([
+            { kind: "seven-segment", w: 2, h: 6, label: "Battery Voltage", refs: [battery[1]],
+              unit: "V", options: {} },
+            { kind: "seven-segment", w: 2, h: 6, label: "Engine oil pressure",
+              refs: ["key:user_oil_pressure"], unit: "kPa", options: {} }]))
+        const battCell = find(page, "dashCell_0_0")
+        const oilCell = find(page, "dashCell_0_1")
+        tryVerify(() => battCell.hasValue, 5000, "the counterpart gives the value")
+        verify(!find(battCell, "gaugeNote").visible, "no note with a value")
+        const note = find(oilCell, "gaugeNote")
+        tryVerify(() => oilCell.width > 0, 3000, "laid out")
+        verify(note.visible, "says why")
+        verify(note.text.indexOf("not in this profile") >= 0, note.text)
+        const right = note.mapToItem(oilCell, note.width, 0).x
+        verify(right <= oilCell.width + 0.5, "inside its cell: " + right + " of " + oilCell.width)
+        verify(note.contentWidth <= note.width + 0.5, "whole: " + note.contentWidth + " in " + note.width)
+        verify(!note.truncated || note.lineCount === 2, "two lines at most")
+    }
+
+    // In Edit a title stops short of its cell's Remove button, cut with an
+    // ellipsis, in each kind that has a title line
+    function test_aTitleElidesBeforeItsRemoveButton_data() {
+        return [{ tag: "digits", kind: "seven-segment" }, { tag: "bar", kind: "bar" },
+                { tag: "cells", kind: "segments" }, { tag: "sparkline", kind: "sparkline" }]
+    }
+    function test_aTitleElidesBeforeItsRemoveButton(data) {
+        // With a value the title has its line to itself
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const cells = ["Engine oil pressure", "Battery Voltage", "Transmission fluid temp"].map(
+            l => ({ kind: data.kind, w: 2, h: 6, label: l, refs: Bridge.gaugeSignals["rpm"],
+                    unit: "RPM", options: { from: 0, to: 8000 } }))
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, docOf(cells))
+        page.startEditing()
+        for (let i = 0; i < 3; ++i) {
+            const card = find(page, "dashCell_0_" + i)
+            tryVerify(() => card.width > 0 && card.hasValue, 5000, "laid out with a value")
+            const remove = find(card, "cellRemove")
+            const title = findChild(card, "readoutTitle") || find(card, "gaugeTitle")
+            verify(title.visible, "the title shows")
+            const edge = title.mapToItem(page, title.width, 0).x
+            const button = remove.mapToItem(page, 0, 0).x
+            verify(edge <= button, cells[i].label + ": the title ends at " + edge
+                   + ", the button begins at " + button)
+            verify(title.truncated, cells[i].label + " is cut with an ellipsis")
+        }
+    }
+
     // Ctrl+Z, Ctrl+Shift+Z and Ctrl+Y on the desktop form, in edit mode or
     // out of it; never on the phone form or in a field with the focus
     function test_theKeys() {

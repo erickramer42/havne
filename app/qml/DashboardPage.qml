@@ -596,6 +596,14 @@ Page {
         }
         return [ref]
     }
+    // A cell's refs with the counterparts of each in the built-in sets, its
+    // own first: a cell made under one profile reads under another
+    function lookupRefs(refs) {
+        let all = refs ?? []
+        for (const ref of refs ?? [])
+            all = all.concat(counterparts(ref).filter(r => all.indexOf(r) < 0))
+        return all
+    }
     function labelFor(row) {
         return Array.from(String(row.name)).slice(0, DashboardBook.maxLabel).join("")
     }
@@ -929,7 +937,7 @@ Page {
         readonly property var options: cell && cell.options ? cell.options : ({})
         readonly property string cellUnit: cell && typeof cell.unit === "string" ? cell.unit : ""
         readonly property string label: cell && typeof cell.label === "string" ? cell.label : ""
-        readonly property SignalHub.Entry entry: hub.lookup(cell && cell.refs ? cell.refs : [])
+        readonly property SignalHub.Entry entry: hub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
 
         readonly property bool hasValue: Bridge.connected && entry !== null && entry.hasValue
         readonly property real value: entry ? entry.value : 0
@@ -1257,7 +1265,7 @@ Page {
             readonly property string unitShown: cell ? root.shownUnit(cell.unit ?? "") : ""
             readonly property var range: DashboardBook.defaultRange(cell ? cell.unit ?? "" : "")
             // The row the cell shows, whose decimals it uses until it has its own
-            readonly property SignalHub.Entry entry: hub.lookup(cell && cell.refs ? cell.refs : [])
+            readonly property SignalHub.Entry entry: hub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
             readonly property bool phone: root.form === "phone"
             readonly property bool hasSignal: kind !== "blank"
             // The cell's label, or its kind's name when it has none
@@ -2285,40 +2293,6 @@ Page {
             }
         }
 
-        // After an undo or a redo, the step's words; outside edit mode,
-        // after each step too, with an Undo, since there is no bar there
-        RowLayout {
-            objectName: "dashUndoLine"
-            readonly property real touchMin: Theme.touchTarget
-            Layout.fillWidth: true
-            visible: root.undoLine !== "" && !root.driving
-            spacing: 10
-            Label {
-                objectName: "dashUndoLineText"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: Theme.text
-                font.pixelSize: Theme.fontCaption
-                text: root.undoLine
-            }
-            Label {
-                objectName: "dashUndoLineKeys"
-                visible: root.editing && root.form === "desktop"
-                color: Theme.textDim
-                font.pixelSize: Theme.fontCaption
-                text: undoKey.nativeText + "  " + redoKey.nativeText
-            }
-            ThemedButton {
-                objectName: "dashUndoLineUndo"
-                compact: true
-                visible: !root.editing
-                enabled: root.canUndo
-                text: qsTr("Undo")
-                Accessible.name: root.canUndo ? qsTr("Undo: %1").arg(root.undoWords) : qsTr("Undo")
-                onClicked: root.undo()
-            }
-        }
-
         // The pages' controls, then a gap, then Reset (it replaces every page,
         // so it stands apart) and Reset peaks where the tool row has no room
         Flow {
@@ -2512,6 +2486,54 @@ Page {
                     onPageChosen: (i) => root.goTo(i)
                     onAddRequested: root.addPage()
                 }
+            }
+        }
+    }
+
+    // After an undo or a redo, the step's words; outside edit mode, after each
+    // step too, with an Undo, since there is no bar there. It floats over the
+    // pages' foot, so its coming and going moves nothing
+    Rectangle {
+        id: undoOverlay
+        z: 2
+        x: (root.width - width) / 2
+        anchors.bottom: swipe.bottom
+        width: Math.max(0, root.width - 2 * root.margin)
+        height: Theme.touchTarget + 8
+        visible: root.undoLine !== "" && !root.driving
+        color: Theme.surface
+        border.width: 1
+        border.color: Theme.hairline
+        radius: Theme.radiusCard
+        RowLayout {
+            objectName: "dashUndoLine"
+            readonly property real touchMin: Theme.touchTarget
+            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
+                      leftMargin: 8; rightMargin: 8 }
+            spacing: 10
+            Label {
+                objectName: "dashUndoLineText"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.text
+                font.pixelSize: Theme.fontCaption
+                text: root.undoLine
+            }
+            Label {
+                objectName: "dashUndoLineKeys"
+                visible: root.editing && root.form === "desktop"
+                color: Theme.textDim
+                font.pixelSize: Theme.fontCaption
+                text: undoKey.nativeText + "  " + redoKey.nativeText
+            }
+            ThemedButton {
+                objectName: "dashUndoLineUndo"
+                compact: true
+                visible: !root.editing
+                enabled: root.canUndo
+                text: qsTr("Undo")
+                Accessible.name: root.canUndo ? qsTr("Undo: %1").arg(root.undoWords) : qsTr("Undo")
+                onClicked: root.undo()
             }
         }
     }

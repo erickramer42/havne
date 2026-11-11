@@ -30,21 +30,30 @@ GaugeBase {
 
     Text {
         id: title
+        objectName: "gaugeTitle"
         Accessible.ignored: true
         anchors { left: parent.left; verticalCenter: readout.verticalCenter }
         text: gauge.label
         font.pixelSize: 12
         font.weight: Font.DemiBold
         color: Theme.textDim
+        elide: Text.ElideRight
+        width: Math.max(0, Math.min(implicitWidth, gauge.width - readout.width - 8))
+        visible: !gauge.noteAlone
     }
+    readonly property bool noteAlone: noteTakesLine(title.implicitWidth, width - readout.width - 8)
     Text {
         objectName: "gaugeNote"
         Accessible.ignored: true
-        anchors { left: title.right; leftMargin: 10; right: readout.left; rightMargin: 8
-                  baseline: title.baseline }
-        visible: (!gauge.hasValue || gauge.stale) && width > 0
+        anchors { left: gauge.noteAlone ? parent.left : title.right
+                  leftMargin: gauge.noteAlone ? 0 : 10
+                  right: readout.left; rightMargin: 8 }
+        y: gauge.noteAlone ? 0 : title.y + title.baselineOffset - baselineOffset
+        visible: (!gauge.hasValue || gauge.stale) && (gauge.noteAlone || width > 0)
         elide: Text.ElideRight
-        text: gauge.shownNote
+        wrapMode: gauge.noteAlone ? Text.WordWrap : Text.NoWrap
+        maximumLineCount: gauge.noteAlone ? 2 : 1
+        text: gauge.noteAlone ? gauge.titledNote : gauge.shownNote
         font.pixelSize: 11
         color: Qt.alpha(Theme.textDim, 0.7)
     }
