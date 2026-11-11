@@ -4027,7 +4027,7 @@ QString SessionBridge::sessionReturnedText(const ecuio_channel_support_t& s)
     if (s.session_asked == 0 || s.session_entries == 0) {
         return QString();
     }
-    return QStringLiteral("ECU %1: returned to the default session (10 01)")
+    return QStringLiteral("ECU %1: returning to the default session (10 01)")
         .arg(hexId(s.rx_id));
 }
 
