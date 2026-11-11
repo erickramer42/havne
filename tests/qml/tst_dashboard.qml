@@ -47,22 +47,25 @@ TestCase {
         }
     }
 
-    // Each gauge's label and its key in Bridge.gaugeSignals, with the
-    // name the mock set gives the signal
+    // Each built-in gauge's label and its key in Bridge.gaugeSignals, with
+    // the name the mock set gives the signal; Boost has no key there, so
+    // its refs are the third item
     readonly property var gaugeSignals: ({
         "Engine speed": ["rpm", "RPM"],
         "Vehicle speed": ["speed", "Vehicle Speed"],
         "Coolant": ["coolant", "Coolant Temp"],
         "Oil temp": ["oil", "Engine Oil Temp"],
+        "Boost": ["", "Boost", ["id:13001"]],
         "IAT": ["iat", "Intake Air Temp"],
         "MAF": ["maf", "MAF"],
-        "Throttle": ["throttle", "Throttle Position"],
-        "Engine load": ["load", "Engine Load"]
+        "Lambda": ["lambda", "Lambda"],
+        "Battery": ["battery", "Battery Voltage"]
     })
 
     // The refs the gauge labeled `label` looks up
     function refsOf(label) {
-        return Bridge.gaugeSignals[gaugeSignals[label][0]]
+        const g = gaugeSignals[label]
+        return g.length > 2 ? g[2] : Bridge.gaugeSignals[g[0]]
     }
 
     // A binding error in the app's QML fails the test
@@ -290,6 +293,22 @@ TestCase {
         }
     }
 
+    // Under obd2 the built-in Battery and Lambda gauges read obd2's own
+    // defs (voltage and PID 0x44's commanded ratio), by ID; Boost, which
+    // obd2 has no signal for, reads nothing there
+    function test_theBuiltInBatteryAndLambdaPairWithObd2() {
+        const hub = createTemporaryObject(hubComponent, testCase)
+        connect("mock://demo?profile=obd2")
+        const battery = hub.lookup(refsOf("Battery"))
+        verify(battery, "obd2 has the battery voltage")
+        compare(battery.ref, "id:7008")
+        const lambda = hub.lookup(refsOf("Lambda"))
+        verify(lambda, "obd2 has the commanded lambda")
+        compare(lambda.ref, "id:11544")
+        compare(lambda.name, "Commanded Lambda")
+        compare(hub.lookup(refsOf("Boost")), null, "no boost in obd2 yet")
+    }
+
     // A gauge binds by ref, never by name: under a signal file extending
     // obd2 whose own defs take the tach's label ("Engine speed") and the
     // name obd2 and the mock give its def ("RPM"), the tach reads obd2's
@@ -349,7 +368,12 @@ TestCase {
         compare(all["MAF"].unit, "lb/min")
         fuzzyCompare(all["MAF"].to, 300 * 0.132277357312033, 1e-9)
         compare(all["Engine speed"].unit, "RPM", "a unit with no imperial form stays")
-        compare(all["Throttle"].unit, "%")
+        compare(all["Battery"].unit, "V")
+        compare(all["Lambda"].unit, "\u03BB")
+        compare(all["Boost"].unit, "psi")
+        // -14.5 and 29 psi, the dial's ends snapped to its tick step
+        compare(all["Boost"].from, -15)
+        compare(all["Boost"].to, 30)
 
         Bridge.unitSystem = 0
         compare(speedo.unit, "km/h")
