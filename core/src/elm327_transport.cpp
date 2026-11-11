@@ -68,8 +68,10 @@ constexpr uint32_t ELM327_WAIT_SLICE_MS = 10;
 constexpr uint32_t ELM327_MONITOR_CHECK_MS = 5000;
 constexpr uint32_t ELM327_MONITOR_DETACH_MS = 1000;
 
-/* At the close, 10 01's prompt (ADR-0060) is waited for this long. */
-constexpr uint32_t ELM327_LEAVE_MS = 500;
+/* At the close (ADR-0060) each reply is read to its prompt within this
+ * of its send, and the whole close ends within ELM327_CLOSE_MS. */
+constexpr uint32_t ELM327_LEAVE_MS = 1000;
+constexpr uint32_t ELM327_CLOSE_MS = 2000;
 
 /* ecuio_elm327_set_timeouts_ms's waits; 0 is the constant */
 std::atomic<uint32_t> g_prompt_timeout_ms{0};
@@ -201,8 +203,12 @@ struct ecuio_elm327_transport {
     elm327_log log; /* the wire log (elm327_log.h) */
     std::atomic<bool> stop_requested{false};
     /* The close's 10 01 is under way (leave_sessions): a command waits
-     * for its prompt, ELM327_LEAVE_MS at most, whatever the stop */
+     * for its prompt whatever the stop, until close_by at the latest */
     bool leaving = false;
+    std::chrono::steady_clock::time_point close_by{};
+    /* The stop ended owed_cmd before its prompt: its reply still comes */
+    bool prompt_owed = false;
+    char owed_cmd[ELM327_CMD_MAX] = {};
     /* A request's exchange, or a monitor, is under way: the wire log
      * takes its lines only with frame logging */
     bool in_ask = false;
@@ -348,6 +354,69 @@ elm327_io drain(transport* t, uint32_t timeout_ms)
     return reset ? elm327_io::reset : elm327_io::prompt;
 }
 
+/* Reads the reply to sent (sent without its CR) to the prompt, calling
+ * on_line for each line but its echo; a stop first leaves it owed. */
+template <typename OnLine>
+elm327_io reply_to(transport* t, const char* sent, OnLine& on_line)
+{
+    auto last = std::chrono::steady_clock::now();
+    for (;;) {
+        bool line = false;
+        if (take_bytes(t, sent, on_line, &line)) {
+            return elm327_io::prompt;
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (line) {
+            last = now;
+        }
+        if (t->stop_requested.load() && !t->leaving) {
+            t->prompt_owed = true;
+            copy_text(t->owed_cmd, sizeof(t->owed_cmd), sent);
+            return elm327_io::stopped;
+        }
+        uint32_t left = 0;
+        if (t->leaving) {
+            /* At the close a reply's wait runs from its send, lines or none */
+            const uint32_t ms = (prompt_timeout_ms() < ELM327_LEAVE_MS)
+                                    ? prompt_timeout_ms()
+                                    : ELM327_LEAVE_MS;
+            auto by = t->sent_at + std::chrono::milliseconds(ms);
+            by = (by < t->close_by) ? by : t->close_by;
+            if (now >= by) {
+                elm327_log_write(t->log, "no prompt for %s by the close's wait",
+                                 sent);
+                return elm327_io::silent;
+            }
+            left = static_cast<uint32_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(by - now)
+                    .count() +
+                1);
+        } else {
+            const auto quiet =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now -
+                                                                      last)
+                    .count();
+            const uint32_t timeout = prompt_timeout_ms();
+            if (quiet >= timeout) {
+                elm327_log_write(t->log, "no line and no prompt for %s (%s)",
+                                 words_of(timeout).text, sent);
+                return elm327_io::silent;
+            }
+            left = timeout - static_cast<uint32_t>(quiet);
+        }
+        const int32_t n = t->port.ops->read(
+            t->port.impl, t->rx_buf, sizeof(t->rx_buf),
+            (left < ELM327_READ_SLICE_MS) ? left : ELM327_READ_SLICE_MS);
+        if (n < 0) {
+            elm327_log_write(t->log,
+                             "the port failed (reading the reply to %s)", sent);
+            return elm327_io::failed;
+        }
+        t->rx_len = static_cast<uint32_t>(n);
+        t->rx_pos = 0;
+    }
+}
+
 /* Sends cmd (CR included) and reads its reply to the prompt, calling
  * on_line for each line but its echo. watch_reset: an unsolicited reset
  * found before sending ends it (reset) and nothing is sent. */
@@ -355,6 +424,7 @@ template <typename OnLine>
 elm327_io command(transport* t, const char* cmd, bool watch_reset,
                   OnLine&& on_line)
 {
+    t->prompt_owed = false;
     const elm327_io before = drain(t, 0);
     if (before == elm327_io::failed ||
         (watch_reset && before == elm327_io::reset)) {
@@ -371,43 +441,7 @@ elm327_io command(transport* t, const char* cmd, bool watch_reset,
         elm327_log_write(t->log, "the port failed (writing %s)", sent);
         return elm327_io::failed;
     }
-    auto last = std::chrono::steady_clock::now();
-    for (;;) {
-        bool line = false;
-        if (take_bytes(t, sent, on_line, &line)) {
-            return elm327_io::prompt;
-        }
-        const auto now = std::chrono::steady_clock::now();
-        if (line) {
-            last = now;
-        }
-        if (t->stop_requested.load() && !t->leaving) {
-            return elm327_io::stopped;
-        }
-        const auto quiet =
-            std::chrono::duration_cast<std::chrono::milliseconds>(now - last)
-                .count();
-        const uint32_t timeout =
-            (t->leaving && prompt_timeout_ms() > ELM327_LEAVE_MS)
-                ? ELM327_LEAVE_MS
-                : prompt_timeout_ms();
-        if (quiet >= timeout) {
-            elm327_log_write(t->log, "no line and no prompt for %s (%s)",
-                             words_of(timeout).text, sent);
-            return elm327_io::silent;
-        }
-        const uint32_t left = timeout - static_cast<uint32_t>(quiet);
-        const int32_t n = t->port.ops->read(
-            t->port.impl, t->rx_buf, sizeof(t->rx_buf),
-            (left < ELM327_READ_SLICE_MS) ? left : ELM327_READ_SLICE_MS);
-        if (n < 0) {
-            elm327_log_write(t->log,
-                             "the port failed (reading the reply to %s)", sent);
-            return elm327_io::failed;
-        }
-        t->rx_len = static_cast<uint32_t>(n);
-        t->rx_pos = 0;
-    }
+    return reply_to(t, sent, on_line);
 }
 
 /* A line for a detail: one line, cut to ELM327_QUOTE_MAX. */
@@ -1170,31 +1204,129 @@ bool backoff_sleep(transport* t, uint32_t ms)
     return true;
 }
 
+/* How a channel answered the close's 10 01. */
+struct leave_answer {
+    bool stopped = false; /* STOPPED: a byte interrupted the adapter */
+    bool positive = false;
+    bool refused = false;
+    uint8_t nrc = 0;
+};
+
+/* 10 01 on channel c, sent once more if the adapter answers STOPPED.
+ * prompt when the adapter took it, whatever the ECU said. */
+elm327_io leave_one(transport* t, uint32_t c, const char* cmd)
+{
+    leave_answer a;
+    elm327_io io = elm327_io::prompt;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        a = leave_answer{};
+        io = command(t, cmd, false, [&](const elm327_reader& r) {
+            elm327_can_line f;
+            const elm327_line kind = elm327_classify(r, t->ext29, &f);
+            if (kind == elm327_line::stopped) {
+                a.stopped = true;
+                return;
+            }
+            /* A Single Frame from the channel's ECU: 50 01, or 7F 10 xx
+             * (78 says it's still working, not how it ended) */
+            const uint8_t n = f.data[0];
+            if (kind != elm327_line::frame || f.id != t->rx_ids[c] ||
+                (n & 0xF0u) != 0 || n < 2 || f.len < n + 1u) {
+                return;
+            }
+            if (f.data[1] == ECUIO_SESSION_CONTROL + 0x40 &&
+                f.data[2] == ECUIO_SESSION_DEFAULT) {
+                a.positive = true;
+            } else if (n >= 3 && f.data[1] == ECUIO_NEGATIVE_RESPONSE &&
+                       f.data[2] == ECUIO_SESSION_CONTROL &&
+                       f.data[3] != ECUIO_NRC_RESPONSE_PENDING) {
+                a.refused = true;
+                a.nrc = f.data[3];
+            }
+        });
+        if (io != elm327_io::prompt || !a.stopped) {
+            break;
+        }
+        elm327_log_write(t->log, "10 01 was answered STOPPED: sent again");
+    }
+    if (io != elm327_io::prompt) {
+        return io;
+    }
+    const auto rx = static_cast<unsigned>(t->rx_ids[c]);
+    if (a.positive) {
+        elm327_log_write(t->log, "%X is back in the default session (50 01)",
+                         rx);
+    } else if (a.refused) {
+        elm327_log_write(t->log, "%X refused 10 01 (7F 10 %02X)", rx,
+                         static_cast<unsigned>(a.nrc));
+    } else {
+        elm327_log_write(t->log, "%X didn't answer 10 01", rx);
+    }
+    return io;
+}
+
+/* The reply the stop cut off, read to its prompt; one still running at
+ * its wait is stopped by a space, which the adapter answers STOPPED. */
+bool finish_owed(transport* t)
+{
+    auto skip = [](const elm327_reader&) {};
+    elm327_log_write(t->log, "the close waits for %s's prompt", t->owed_cmd);
+    const elm327_io io = reply_to(t, t->owed_cmd, skip);
+    if (io != elm327_io::silent) {
+        return io == elm327_io::prompt;
+    }
+    elm327_log_write(t->log, "the close stops %s's reply with a space",
+                     t->owed_cmd);
+    t->sent_at = std::chrono::steady_clock::now();
+    const uint8_t stop = ' ';
+    if (!t->port.ops->write(t->port.impl, &stop, 1)) {
+        elm327_log_write(t->log, "the port failed (writing the close's stop)");
+        return false;
+    }
+    return reply_to(t, " ", skip) == elm327_io::prompt;
+}
+
 /* At the close (ADR-0060): 10 01 to each channel that entered the
- * extended session, so its ECU doesn't wait out S3 in it. The adapter
- * takes no command before the last one's prompt, so each is waited for. */
+ * extended session, after any reply the stop cut off (typed into, it's lost). */
 void leave_sessions(transport* t)
 {
+    const bool owed = t->prompt_owed;
+    t->prompt_owed = false;
     if (!t->configured || !t->port_open) {
         return;
     }
-    t->leaving = true;
+    ecuio_request q[ECUIO_MAX_CHANNELS];
+    bool leave[ECUIO_MAX_CHANNELS] = {};
+    bool any = false;
     for (uint32_t c = 0; c < t->chan_count; ++c) {
-        ecuio_request q;
-        if (!ecuio_engine_session_leave(&t->engine, c, &q)) {
+        leave[c] = ecuio_engine_session_leave(&t->engine, c, &q[c]);
+        any = any || leave[c];
+    }
+    if (!any) {
+        return;
+    }
+    t->leaving = true;
+    t->close_by = std::chrono::steady_clock::now() +
+                  std::chrono::milliseconds(ELM327_CLOSE_MS);
+    if (owed && !finish_owed(t)) {
+        t->leaving = false;
+        return;
+    }
+    for (uint32_t c = 0; c < t->chan_count; ++c) {
+        if (!leave[c]) {
             continue;
         }
         char failed[ELM327_CMD_MAX];
         char cmd[ELM327_CMD_MAX];
         if (!set_header(t, t->tx_ids[c], failed).ok ||
-            elm327_format_request(q.bytes, q.len, 0, cmd, sizeof(cmd)) == 0) {
+            elm327_format_request(q[c].bytes, q[c].len, 0, cmd, sizeof(cmd)) ==
+                0) {
             break;
         }
         elm327_log_write(t->log,
                          "the close returns %X to the default session (10 01)",
                          static_cast<unsigned>(t->rx_ids[c]));
-        if (command(t, cmd, false, [](const elm327_reader&) {}) !=
-            elm327_io::prompt) {
+        if (leave_one(t, c, cmd) != elm327_io::prompt) {
             break;
         }
     }
