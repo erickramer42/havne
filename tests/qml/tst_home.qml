@@ -163,14 +163,32 @@ TestCase {
         verify(!logo.live, "held still")
         page.animated = true
         verify(logo.live, "on screen and in front")
+        const blip = find(logo, "logoBlip")
+        tryVerify(() => logo.swept && !logo.sweeping, 3000, "the sweep ends")
+        verify(blip.running, "the blips run while it shows")
         logo.appActive = false
         verify(!logo.live && !logo.sweeping, "behind another app")
+        verify(!blip.running, "no blip behind another app")
         compare(logo.rpm, logo.idle, "at idle behind another app")
         logo.appActive = true
+        verify(blip.running, "and again in front")
         page.visible = false
         verify(!logo.live && !logo.sweeping, "off screen")
-        wait(300)
+        verify(!blip.running, "no blip off screen")
         compare(logo.rpm, logo.idle, "still while off screen")
+    }
+
+    // Between blips the needle holds still at idle: nothing hunts
+    function test_homesLogoHoldsStillAtIdleBetweenBlips() {
+        const page = stillPage()
+        const logo = find(page, "homeLogo")
+        page.animated = true
+        tryVerify(() => logo.swept && !logo.sweeping, 3000, "the sweep ends")
+        tryVerify(() => Math.abs(logo.rpm - logo.idle) < 1, 1500, "at idle")
+        const start = logo.target
+        wait(1500)   // two ticks of the old hunt; the first blip is 3.5 s out
+        compare(logo.target, start, "the target hasn't moved")
+        compare(logo.rpm, logo.idle, "still at idle")
     }
 
     function test_uprightEverythingFitsTheWidth() {
