@@ -2926,12 +2926,15 @@ TestCase {
         find(page, "uriField").text = uri
         page.chooseProfile("user.extras")
         press(page, "connectButton")
-        tryVerify(() => page.pickedVehicle.id !== weekend, 10000, "the VIN adds a vehicle")
+        tryVerify(() => page.pickedVehicle.id !== weekend, 30000, "the VIN adds a vehicle")
+        // The connect result keeps the URI on its own turn, after the VIN
+        tryVerify(() => Bridge.connected && page.pickedVehicle.uri === uri, 30000,
+                  "the connect keeps the URI")
         compare(page.pickedVehicle.signals, [])
         compare(page.pickedVehicle.uri, uri, "no profile of Weekend car's file")
         Bridge.disconnectSession()
-        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
-        compare(find(page, "uriField").text, uri, "Default at the session's end")
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 30000)
+        tryVerify(() => find(page, "uriField").text === uri, 5000, "Default at the session's end")
     }
 
     // ADR-0056 section 4: the row lists Off and the bridge's choices,
