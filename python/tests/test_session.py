@@ -343,3 +343,36 @@ def test_a_focus_id_outside_a_uint16_or_not_an_int_is_a_value_error():
             with pytest.raises(ValueError):
                 s.set_focus([bad])
         s.set_focus([sid])
+
+
+
+def test_a_session_asks_no_extended_session_unless_the_uri_does():
+    """ADR-0060: no ?session=03, no session state, as havne-cli writes no
+    session line"""
+    with havne.Session("mock://demo") as s:
+        s.start()
+        assert s.session_state(0) is None
+
+
+def test_session_state_gives_a_refusal_its_code_and_nothing_else_does(monkeypatch):
+    """A refused or abandoned session carries the module's NRC as two hex
+    digits, as havne-cli's session line does; an entered one has none"""
+    report = c.ecuio_channel_support_t()
+    report.rx_id = 0x7E9
+    report.generation = 1
+    report.session_asked = 3
+    report.session = 1
+    report.session_state = c.ECUIO_SESSION_STATE_REFUSED
+    report.session_nrc = 0x12
+    report.session_entries = 2
+    report.session_lost = 1
+    with havne.Session("mock://demo") as s:
+        monkeypatch.setattr(s, "support", lambda channel=0: report)
+        state = s.session_state(0)
+        assert state == ("0x7E9", "03", "01", "refused", "12", 2, 1)
+        report.session_state = c.ECUIO_SESSION_STATE_ABANDONED
+        assert s.session_state(0).state == "abandoned" and s.session_state(0).nrc == "12"
+        report.session_state = c.ECUIO_SESSION_STATE_ENTERED
+        report.session = 3
+        entered = s.session_state(0)
+        assert entered.state == "entered" and entered.session == "03" and entered.nrc is None
