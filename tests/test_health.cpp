@@ -303,6 +303,26 @@ TEST(HealthTest, BothFormatsHoldTheSameFactsAndNeitherTheVin)
               "reading");
 }
 
+/* The session keys are core's own: the URI keeps them, and a value that
+ * isn't plain is dropped with its key */
+TEST(HealthTest, TheSessionKeysAreKeptInTheUri)
+{
+    Car car;
+    car.in.uri =
+        "elm327://"
+        "COM3?profile=uds-generic&did=F40C&session=03&keepalive_ms=2000";
+    const std::string kept =
+        "elm327://<address>?profile=uds-generic&did=F40C&session=03&"
+        "keepalive_ms=2000";
+    EXPECT_NE(car.write(ECUIO_HEALTH_JSON).find(kept), std::string::npos);
+    EXPECT_NE(car.write(ECUIO_HEALTH_TEXT).find(kept), std::string::npos);
+    car.in.uri = "elm327://COM3?profile=uds-generic&session=0 3";
+    const std::string text = car.write(ECUIO_HEALTH_TEXT);
+    EXPECT_NE(text.find("elm327://<address>?profile=uds-generic "),
+              std::string::npos)
+        << text;
+}
+
 /* The since-cleared PIDs sit with their ECU, ranked or not, and aren't
  * repeated among the key values; the key values come in rank order,
  * each with its age, stale past ECUIO_VALUE_STALE_US */
