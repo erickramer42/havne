@@ -576,14 +576,15 @@ an issue is resolved it is removed, and its number is not reused.
     and the ECU's Consecutive Frames after a First Frame. A multi-frame
     reply never completes, so it is dropped and nothing is delivered for
     it. No setup tried changes that (`AT CAF0` or `CAF1`, `AT CFC0`, with
-    or without `AT CRA`, `AT MA` or `STMA`, `STCSEGR1`), and the frames
+    or without `AT CRA`, `AT MA` or `STMA`, `STCSEGR1`, `STCMM2`), and the frames
     are on the bus: a SocketCAN listener on the same splitter hears
     them (BENCH prep #19,
     [2026-11-04-two-ecu-car](docs/bench-sessions/2026-11-04-two-ecu-car.md),
-    [2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
+    [2026-11-05-two-ecu-car-rerun](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md),
+    [2026-11-11-monitor-car](docs/bench-sessions/2026-11-11-monitor-car.md)).
     A listening session needs no flow control, so its setup still
-    turns it off (`AT CFC0`). Untried: `STCMM`'s other modes
-    (some acknowledge on the bus) and `STM`'s filters. To listen to
+    turns it off (`AT CFC0`). Untried: `STCMM1`, which acknowledges on
+    the bus, and `STM`'s filters. To listen to
     multi-frame replies, use a SocketCAN controller in listen-only mode,
     or the VX in ELM mode, which hears them (BENCH prep #19,
     [2026-11-08-linux-car](docs/bench-sessions/2026-11-08-linux-car.md)).
@@ -596,7 +597,11 @@ an issue is resolved it is removed, and its number is not reused.
     frames. Each write was accepted and no reply came late; with one DID
     asked of each module, and through the MX+, none was lost
     ([2026-11-06-own-signals-car](docs/bench-sessions/2026-11-06-own-signals-car.md),
-    BENCH prep #35). The request goes out again on its next turn, so a
+    BENCH prep #35). The lost replies are on the bus: a SocketCAN
+    listener on the splitter recorded every one, and with one DID on
+    each module, the engine's reply segmented, the VX lost about a fifth
+    ([2026-11-11-monitor-car](docs/bench-sessions/2026-11-11-monitor-car.md)).
+    The request goes out again on its next turn, so a
     signal still updates, less often. For a session that asks two
     modules through the VX, `?pack=0` keeps the losses near 1%.
 - **#43. On a phone with gesture navigation, leaving the drive view
