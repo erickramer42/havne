@@ -29,7 +29,13 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   gauge added before 0.7.2 reads only on the connection it was added on,
   until its signal is chosen again.
 - Dashboard: the gauge's panel (a long press, or a tap in edit mode) has
-  Remove, which asks before it removes the gauge.
+  Remove; Undo brings the gauge back.
+- Dashboard: Undo and Redo in edit mode, at the start of the bar, back to
+  the first change since Edit (at most 50 steps). On the desktop Ctrl+Z
+  undoes and Ctrl+Shift+Z or Ctrl+Y redoes, in edit mode or out of it. A
+  change made from a gauge's panel outside edit mode shows a line for 5
+  seconds with Undo, and Edit then Undo takes it back too. A run of steps
+  on one control (a stepper held, a switch flipped) is one Undo.
 - Dashboard: a gauge whose value has stopped updating says "no new data"
   beside its dimmed value.
 - Python: `havne.export_pcapng`, `export_csv`, `export_folder`,
@@ -37,6 +43,9 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   `health` write, and `Session.health_report` writes a connected car's
   report. Each long call stops on `cancel=` or Ctrl+C with nothing left
   behind.
+- Phone: a Log row at the end of Settings' list, showing the newest
+  activity line, opens the Log. A connect that fails, on Dash's list or
+  in Settings, offers Show log beside its words.
 
 ### Changed
 
@@ -44,6 +53,27 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   short cell such as the shift lights.
 - Dashboard: the Number gauge has no status dot; a value that stops
   updating dims and says so, as on every other kind.
+- Dashboard on the desktop: the gauges sit on one panel with hairlines
+  between them, as on the phone, and a short gauge fills the empty space
+  under it. The pages are tabs on the panel's upper edge, with a "+" tab in
+  edit mode; a long row of tabs scrolls sideways, by the wheel too. Edit
+  mode's "Pages" button reads "Page".
+- Dashboard: Paste is in the "+" cell, beside the "+" while a gauge is
+  copied, and no longer on the bar. Done is at the bar's end, and on a
+  narrow screen Add gauge reads "Add".
+- Drive view: the gauges fill the screen, and a tap brings the controls up
+  from the bottom with the tab bar, leaving the top row and the status line
+  in view. Start log, Stop log, Mark and Disconnect are there too, so the
+  view no longer shows the top bar.
+- Dash's connect list on a phone, and the desktop's Home, which is now the
+  same list, show your paired and plugged-in adapters beside the recent
+  addresses, so a first connect takes a tap or two. On a phone, Bluetooth's
+  permission is asked only when you tap Allow there.
+- Home on the desktop shows the session once connected, with Dashboard
+  and Disconnect. Its tachometer sweeps once when Home first shows, and
+  stops while Home is hidden or the app is in the background.
+- A button that can't be pressed yet, such as Connect while it connects,
+  draws as a dimmed ordinary button in every look, not as a gray block.
 
 ### Fixed
 
@@ -55,6 +85,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   cleanly on Ctrl+C, and Python's
   `import_csv` and `import_candump` take a `cancel` and stop on Ctrl+C.
   The C API adds `ecuio_import_with` and `ecuio_health_export_with`.
+- Recordings on a phone: the signal list stops at five rows, so a swipe
+  above or below it scrolls the page.
+- The Log page on a phone has a back arrow, as Settings' pages have. In
+  developer mode its Activity | Frames switch sits under the title, so the
+  title row fits a narrow screen.
 
 ## [0.7.1] - 2026-11-10
 
