@@ -438,6 +438,20 @@ TestCase {
         Theme.developerMode = false
     }
 
+    // True once the item's place on the glass has held for `polls` checks
+    // in a row (use with tryVerify): the page's chart takes its height from
+    // the window and the fonts, so the layout can move after the rows show
+    function holdsStill(item, root, polls) {
+        let last = null
+        let still = 0
+        return () => {
+            const y = item.mapToItem(root, 0, 0).y
+            still = last !== null && y === last ? still + 1 : 0
+            last = y
+            return still >= polls
+        }
+    }
+
     function test_theViewersFramesViewFitsAPhone() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
@@ -464,6 +478,7 @@ TestCase {
         const edge = table.mapToItem(scroll, table.width, 0).x
         verify(edge <= scroll.width + 0.5, "the table ends at " + edge + " of " + scroll.width)
         const toggle = find(page, "framesFilterToggle")
+        tryVerify(holdsStill(toggle, main.contentItem, 5), 10000, "the layout holds still")
         tap(toggle, toggle.width / 2, toggle.height / 2)
         tryVerify(() => find(page, "filterPanel").visible, 2000, "the filter opens")
         verify(waitForPolish(main), "laid out")
