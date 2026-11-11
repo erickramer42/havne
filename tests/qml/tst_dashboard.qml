@@ -513,7 +513,9 @@ TestCase {
         tryVerify(() => view.width > 0, 2000, "the page is laid out")
         compare(view.columns, data.columns)
         const cells = page.pages[0].cells
-        const boxes = DashboardBook.place(cells, data.columns)
+        // Where place puts each cell, its width as the built-in layout is drawn
+        const boxes = DashboardBook.stretched(cells, DashboardBook.place(cells, data.columns),
+                                              data.columns, true)
         const pitchX = view.columnWidth + page.cellGap
         const shown = []
         for (let i = 0; i < cells.length; ++i) {
@@ -1362,6 +1364,55 @@ TestCase {
         fuzzyCompare(short.height, 6 * view.pitch, 1e-6, "edit mode's true size")
         compare(page.doc.pages[0].cells[0].h, 6, "the layout is unchanged")
     }
+    // The squares a page's boxes cover and a dial or ring drawn past its own
+    function emptySquaresOf(view) {
+        const covered = {}
+        let rows = 0
+        for (const b of view.boxes) {
+            rows = Math.max(rows, b.y + b.h)
+            for (let y = b.y; y < b.y + b.h; ++y)
+                for (let x = b.x; x < b.x + b.w; ++x)
+                    covered[x + "," + y] = true
+        }
+        let empty = 0
+        for (let y = 0; y < rows; ++y)
+            for (let x = 0; x < view.columns; ++x)
+                empty += covered[x + "," + y] ? 0 : 1
+        return empty
+    }
+    function stretchedRound(view) {
+        const own = DashboardBook.place(view.placed, view.columns)
+        return view.placed.filter((c, i) => (c.kind === "analog" || c.kind === "ring")
+                                           && (view.boxes[i].w !== own[i].w
+                                               || view.boxes[i].h !== own[i].h)).length
+    }
+
+    // The built-in layout leaves no empty square at any desktop width from 5
+    // to 8 columns, and its dials and rings keep their own boxes; the same
+    // cells saved are drawn as before, gaps and all
+    function test_theBuiltInLayoutIsDrawnWithNoEmptySquare_data() {
+        return [{ tag: "5 columns", w: 1100, columns: 5 },
+                { tag: "6 columns", w: 1280, columns: 6 },
+                { tag: "7 columns", w: 1580, columns: 7 },
+                { tag: "8 columns", w: 1850, columns: 8 }]
+    }
+    function test_theBuiltInLayoutIsDrawnWithNoEmptySquare(data) {
+        const page = createTemporaryObject(pageComponent, testCase,
+                                           { form: "desktop", width: data.w, height: 1400 })
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        compare(view.columns, data.columns)
+        verify(page.builtInShown, "nothing is stored")
+        compare(emptySquaresOf(view), 0, "no empty square")
+        compare(stretchedRound(view), 0, "no dial or ring stretched")
+
+        findChild(page, "dashStore").desktop = DashboardBook.serialize(DashboardBook.builtIn("desktop"))
+        tryVerify(() => !page.builtInShown, 1000, "the same cells, saved")
+        const cells = page.pages[0].cells
+        compare(view.boxes, DashboardBook.stretched(cells, DashboardBook.place(cells, data.columns),
+                                                    data.columns), "a saved layout is drawn as before")
+    }
+
     // The desktop's short cell fills the empty squares under it too, and
     // the stored layout stays
     function test_theDesktopStretchesAShortCellToo() {
