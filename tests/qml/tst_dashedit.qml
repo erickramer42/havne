@@ -1793,6 +1793,28 @@ TestCase {
         verify(find(later, "panelColor_default").checked, "an unknown name reads as Default")
     }
 
+    function test_atNightTheColorRowDimsAndSaysWhy() {
+        const own = cellOf("A", "analog")
+        own.options.color = "teal"
+        const page = pageOf({}, docOf([own]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        const row = find(page, "panelColors")
+        const note = find(page, "panelColorNight")
+        compare(row.opacity, 1, "not dimmed by day")
+        verify(!note.visible, "and no note")
+        Theme.night = "on"
+        tryCompare(row, "opacity", 0.45, 3000, "dimmed at Night")
+        verify(note.visible, "the note shows")
+        compare(note.text, "Night draws every gauge in its own tint")
+        verify(find(page, "panelColor_teal").checked, "the stored name stays marked")
+        click(page, "panelColor_pink")
+        compare(page.doc.pages[0].cells[0].options.color, "pink", "and the row stays choosable")
+        Theme.night = "off"
+        tryCompare(row, "opacity", 1, 3000)
+        verify(!note.visible)
+    }
+
     function test_aBlankCellHasNoColorRow() {
         const page = pageOf({}, docOf([{ kind: "blank", w: 2, h: 4, refs: [] }]))
         page.startEditing()
