@@ -601,7 +601,6 @@ TestCase {
         const sweep = findChild(find(panel, "exportRows_sweep"), "intervalSize")
         verify(/^\d[\d,.'\u2019\s]* rows, [\d.,]+ (B|KB|MB)$/.test(sweep.text), sweep.text) // any locale's
         const grid = findChild(find(panel, "exportRows_250"), "intervalSize")
-        verify(/ rows, /.test(grid.text), grid.text)
         verify(sweep.text !== grid.text, sweep.text + " and " + grid.text)
 
         // A custom interval is asked for once typed, and a bad one is said
@@ -616,6 +615,73 @@ TestCase {
         compare(panel.customMs, -1)
         verify(!find(panel, "exportGo").enabled, "not with a bad interval")
         compare(find(panel, "exportCustomProblem").text, "ms, 1 to 86400000")
+        restoreExportChoices(panel)
+    }
+
+    // A recording sampled every 20 ms: each interval thins it, so each line
+    // is a size and none carries the note
+    function test_anIntervalThatThinsTheRecordingIsSizedNotNoted() {
+        const name = "export-fast"
+        const folder = Harness.writeFramesRecording(name, 1, 100000)
+        verify(folder !== "", "the folder is made")
+        let header = "ecuio session recording, format 2 (ADR-0049)
+"
+                     + "started  2026-11-03 10:00:00.000 (local time)
+"
+                     + "utc  2026-11-03T16:00:00.000Z
+core  0.3.6
+"
+                     + "uri  socketcan://vcan0?profile=raw
+profile  raw
+"
+                     + "signal  Signal 1,number,V,0,0
+"
+        let rows = "host_us,signal,value,unit
+"
+        for (let t = 1; t <= 100; ++t)
+            rows += (t * 20000) + ",Signal 1," + t + ",V
+"
+        header += "
+10:00:02.000  +2.000  end  havne-cli: seconds: 2 frames, 100 values, "
+                  + "0 records dropped, 0 notes dropped
+"
+        Harness.writeScratchFile(name + "/events.log", header)
+        Harness.writeScratchFile(name + "/signals.csv", rows)
+        const page = createPage()
+        page.open({ title: "Fast", folder: folder })
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        sizesIn(panel)
+        for (const name of ["exportRows_sweep", "exportRows_100", "exportRows_250"]) {
+            const text = findChild(find(panel, name), "intervalSize").text
+            verify(/ rows?, /.test(text), name + ": " + text)
+        }
+        restoreExportChoices(panel)
+    }
+
+    // An interval the recording is too slow for gives no fewer rows than every sweep, and
+    // its line says so in place of a size that looks like a saving
+    function test_anIntervalSlowerThanTheRecordingSaysItGivesNoFewerRows() {
+        const folder = Harness.importCsvFixture("logger-a", "export-slow")
+        verify(folder !== "", "the fixture imports")
+        const page = createPage()
+        page.open({ title: "Slow", folder: folder })
+        tryVerify(() => find(page, "signalRows").visible, 10000, "it opens")
+        const panel = openExport(page)
+        restoreExportChoices(panel)
+        sizesIn(panel)
+        const textOf = name => findChild(find(panel, name), "intervalSize").text
+        verify(/ rows?, /.test(textOf("exportRows_sweep")), textOf("exportRows_sweep"))
+        compare(textOf("exportRows_100"), "no fewer rows than every sweep", "100 ms is faster than 4 Hz")
+        compare(textOf("exportRows_250"), "no fewer rows than every sweep", "250 ms is the recording's own pace")
+        verify(find(panel, "exportRows_100").enabled && find(panel, "exportRows_250").enabled,
+               "still choosable")
+        find(panel, "exportRows_custom").clicked()
+        panel.customText = "1000"
+        tryVerify(() => panel.sizes.length === 4, 10000, "the custom interval sized")
+        verify(/ rows?, /.test(textOf("exportRows_custom")), "a slower interval still saves: "
+               + textOf("exportRows_custom"))
         restoreExportChoices(panel)
     }
 
