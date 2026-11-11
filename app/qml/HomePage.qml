@@ -21,6 +21,8 @@ Rectangle {
     property var adapters: []
     // The tapped row, until the recent list changes
     property string tapped: ""
+    // False holds the logo still; tests set its rpm
+    property bool animated: true
     onRecentsChanged: tapped = ""
     onVehicleUriChanged: tapped = ""
 
@@ -86,31 +88,92 @@ Rectangle {
                     readonly property color litColor: rpm >= redline ? Theme.gaugeDanger
                                                     : rpm >= 4500 ? Theme.gaugeWarn
                                                     : Theme.success
-                    property real rpm: 800
+                    readonly property real idle: 800
+                    property real rpm: idle
+                    // Where the needle is headed; the spring below takes it there
+                    property real target: idle
+                    onTargetChanged: rpm = target
+
+                    // Hidden pages stay alive in the StackLayout, so it runs only
+                    // while Home is on screen and the app is in front
+                    // qmllint disable missing-property
+                    property bool appActive: Qt.application.state === Qt.ApplicationActive
+                    // qmllint enable missing-property
+                    readonly property bool live: home.animated && home.visible && appActive
+                    property bool swept: false
+                    readonly property bool sweeping: sweep.running
+                    onLiveChanged: startOrStop()
+                    Component.onCompleted: startOrStop()
+                    function startOrStop() {
+                        if (live && !swept) {
+                            swept = true
+                            sweep.start()
+                        } else if (!live) {
+                            sweep.complete()
+                            release.stop()
+                            target = idle
+                            rpm = idle
+                        }
+                    }
 
                     // Degrees; 0 = 3 o'clock, clockwise, as GaugeArc takes them
                     function angleOf(v) { return 135 + v / maxRpm * 270 }
 
-                    // Idle hunting, a blip into the red and a smaller one. The
-                    // throttle snaps open, the revs fall off slower and idle
-                    // control catches the dip. Hidden pages stay alive in the
-                    // StackLayout, so it stops while Home isn't on screen.
-                    SequentialAnimation on rpm {
-                        running: home.visible
-                        loops: Animation.Infinite
-                        NumberAnimation { to: 870; duration: 400; easing.type: Easing.InOutSine }
-                        NumberAnimation { to: 810; duration: 450; easing.type: Easing.InOutSine }
-                        NumberAnimation { to: 860; duration: 400; easing.type: Easing.InOutSine }
-                        NumberAnimation { to: 800; duration: 400; easing.type: Easing.InOutSine }
-                        NumberAnimation { to: 6800; duration: 380; easing.type: Easing.OutQuad }
-                        PauseAnimation { duration: 80 }
-                        NumberAnimation { to: 760; duration: 1300; easing.type: Easing.OutQuad }
-                        NumberAnimation { to: 830; duration: 300; easing.type: Easing.InOutSine }
-                        NumberAnimation { to: 860; duration: 600; easing.type: Easing.InOutSine }
-                        NumberAnimation { to: 810; duration: 600; easing.type: Easing.InOutSine }
-                        NumberAnimation { to: 4200; duration: 280; easing.type: Easing.OutQuad }
-                        NumberAnimation { to: 780; duration: 1100; easing.type: Easing.OutQuad }
-                        NumberAnimation { to: 820; duration: 300; easing.type: Easing.InOutSine }
+                    // Once, the first time Home shows: up to the redline and
+                    // back, as a cluster does at ignition
+                    SequentialAnimation {
+                        id: sweep
+                        NumberAnimation {
+                            target: logo; property: "rpm"; to: logo.redline
+                            duration: 550; easing.type: Easing.InOutCubic
+                        }
+                        PauseAnimation { duration: 100 }
+                        NumberAnimation {
+                            target: logo; property: "rpm"; to: logo.idle
+                            duration: 550; easing.type: Easing.InOutCubic
+                        }
+                    }
+
+                    // The revs rise stiffly and fall off softly, so a blip
+                    // overshoots a little, and the fall dips under idle before
+                    // idle control catches it
+                    Behavior on rpm {
+                        enabled: logo.live && !logo.sweeping
+                        SpringAnimation {
+                            spring: logo.target > logo.rpm ? 4.5 : 1.6
+                            damping: 0.3
+                            epsilon: 1
+                        }
+                    }
+
+                    // Idle hunts a few r/min either side
+                    Timer {
+                        running: logo.live && logo.swept && !logo.sweeping && !release.running
+                        interval: 650
+                        repeat: true
+                        onTriggered: logo.target = logo.idle + (Math.random() - 0.5) * 50
+                    }
+
+                    // A blip every few seconds, mostly small, now and then into the red
+                    Timer {
+                        id: blip
+                        running: logo.live && logo.swept && !logo.sweeping
+                        interval: 3500
+                        repeat: true
+                        onTriggered: {
+                            const roll = Math.random()
+                            logo.target = roll < 0.15 ? 6600 + Math.random() * 400
+                                        : roll < 0.5 ? 3500 + Math.random() * 1500
+                                        : 1800 + Math.random() * 1200
+                            release.interval = 150 + Math.random() * 150
+                            release.start()
+                            interval = 2500 + Math.random() * 4000
+                        }
+                    }
+                    // The throttle closes
+                    Timer {
+                        id: release
+                        onTriggered: logo.target = logo.idle
                     }
 
                     // Face, lit from above

@@ -129,6 +129,50 @@ TestCase {
         tryVerify(() => !card.visible && find(page, "homeConnectList").visible, 5000, "the list again")
     }
 
+    // Held still, in front of the user (the offscreen window may not count
+    // as active)
+    function stillPage() {
+        const page = createTemporaryObject(pageComponent, testCase.parent,
+                                           { width: 1280, height: 720, animated: false })
+        verify(page, "Home loads")
+        find(page, "homeLogo").appActive = true
+        return page
+    }
+
+    // The first time Home shows, the logo sweeps to the redline and back
+    // to idle, as a cluster does at ignition; never again after
+    function test_homesLogoSweepsOnceThenIdles() {
+        const page = stillPage()
+        const logo = find(page, "homeLogo")
+        compare(logo.rpm, logo.idle, "held still at idle")
+        page.animated = true
+        verify(logo.sweeping, "the sweep starts")
+        tryVerify(() => logo.rpm >= logo.redline - 1, 1000, "up to the redline")
+        tryVerify(() => !logo.sweeping, 1500, "the sweep ends")
+        verify(Math.abs(logo.rpm - logo.idle) < 1, "back at idle")
+        page.visible = false
+        page.visible = true
+        verify(logo.live && !logo.sweeping, "shown again: no second sweep")
+    }
+
+    // The logo moves only while Home shows, the app is in front and nothing
+    // holds it still
+    function test_homesLogoRunsOnlyOnScreenAndInFront() {
+        const page = stillPage()
+        const logo = find(page, "homeLogo")
+        verify(!logo.live, "held still")
+        page.animated = true
+        verify(logo.live, "on screen and in front")
+        logo.appActive = false
+        verify(!logo.live && !logo.sweeping, "behind another app")
+        compare(logo.rpm, logo.idle, "at idle behind another app")
+        logo.appActive = true
+        page.visible = false
+        verify(!logo.live && !logo.sweeping, "off screen")
+        wait(300)
+        compare(logo.rpm, logo.idle, "still while off screen")
+    }
+
     function test_uprightEverythingFitsTheWidth() {
         Theme.developerMode = true
         const page = createPage(380, 800)
