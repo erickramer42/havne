@@ -197,8 +197,11 @@ background too ([roadmap](#roadmap)).
     with its code named, and each module's report, the Log page,
     `havne-cli stream`'s `session` line and Python say which session it was
     read in
-    ([ADR-0060](docs/adr/0060-extended-session-reads.md)). Run only
-    against the fakes and the simulated ECU so far.
+    ([ADR-0060](docs/adr/0060-extended-session-reads.md)). Run parked on
+    the test car through the VX and the MX+: the engine ECU entered it
+    (P2 50 ms, P2* 5000 ms) and read in it; tester present past S3 is
+    unchecked on a car, and the ELM327 close's `10 01` doesn't reach the
+    bus ([2026-11-11-ext-session-car](docs/bench-sessions/2026-11-11-ext-session-car.md)).
   - **Your own signals** ([ADR-0051](docs/adr/0051-signal-files.md)):
     signal files, JSON that core reads from bytes and refuses at load
     where it's wrong, holding Service 01 PIDs and Service 22 DIDs on up

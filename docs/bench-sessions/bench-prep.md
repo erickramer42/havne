@@ -121,7 +121,7 @@ which has no bench session):
 
 | # | Assumption in the code | State | Evidence |
 |---|---|---|---|
-| 36 | **The extended session on a real ECU:** a module takes `10 03` and answers `50 03` with its P2 and P2* times; `3E 00` every 2 s keeps it in the session past S3; a DID that reads only in the extended session answers there; `10 01` at the close returns the module to the default session | STILL UNKNOWN | None yet: the fake DLL's ECU and the simulated ECU only |
+| 36 | **The extended session on a real ECU:** a module takes `10 03` and answers `50 03` with its P2 and P2* times; `3E 00` every 2 s keeps it in the session past S3; a DID that reads only in the extended session answers there; `10 01` at the close returns the module to the default session | CONFIRMED: the entry, P2 and P2*, reads in the session; STILL UNKNOWN: tester present past S3, a DID that reads only in the extended session; REFUTED: the ELM327 close's `10 01` | [2026-11-11-ext-session-car](2026-11-11-ext-session-car.md): `50 03 00 32 01 F4` (P2 50 ms, P2* 5000 ms) through the VX and the MX+, engine idling and off; a DID refused on 2026-11-09 read in both sessions; no `3E 00`, since the DID poll never left `keepalive_ms` quiet; a 256-DID range answered the same 3 in both sessions; J2534 wrote `10 01` at the close, while the MX+ answered the typed `1001` with `STOPPED` (3 of 3), so it never went out |
 
 ## Still open
 
@@ -136,10 +136,10 @@ which has no bench session):
   appendix of 2026-11-04), with the ELM327 adapter's session against it.
 - **#19, listening to another tester's multi-frame replies:** the MX+ on the Y-splitter again, with the monitor's setup changed.
 - **#25, a BLE adapter's service:** needs a BLE adapter.
-- **#36, the extended session on a car:** a parked run with
-  `?session=03` on `uds-generic`, a module's `50 03`, its P2 and P2*,
-  tester present past S3, a DID that only the extended session reads, and
-  `10 01` at the close.
+- **#36, the extended session on a car:** tester present past S3 (a
+  parked run whose requests leave `keepalive_ms` quiet), a DID that only
+  the extended session reads, and the ELM327 close's `10 01` once it
+  waits for the adapter (`STOPPED` on 2026-11-11).
 - **#35, two modules through the VX:** a SocketCAN controller in
   listen-only mode on the Y-splitter while the VX asks both modules,
   packed: whether the 0x7E9 replies the VX loses are on the bus.
