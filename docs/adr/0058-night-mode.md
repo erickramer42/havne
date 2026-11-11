@@ -579,3 +579,7 @@ and the dim text at 4.5:1 on a secondary fill. The platform window
 follows the look: the color scheme is Light under a background lighter
 than half (Windows 10's title bar, which refuses a caption color, takes
 it), and Android's status and navigation icons turn dark.
+
+Note (2026-11-10): the look is named Light where it is seen (the Look
+row and the Display row's summary). Its stored key and palette name stay
+`daylight`, so a saved choice carries over.

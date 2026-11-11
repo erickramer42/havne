@@ -27,7 +27,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 
 ## What it does
 
-- **Live data:** a Dashboard built from eight kinds of gauge, Live's table and chart, a Daylight look for the sun and a Night mode in amber or red, on a schedule if you like; on a phone, a drive view with every bar hidden ([ADR-0057](docs/adr/0057-dashboards.md), [ADR-0059](docs/adr/0059-drive-view.md)).
+- **Live data:** a Dashboard built from eight kinds of gauge, Live's table and chart, a Light look for the sun and a Night mode in amber or red, on a schedule if you like; on a phone, a drive view with every bar hidden ([ADR-0057](docs/adr/0057-dashboards.md), [ADR-0059](docs/adr/0059-drive-view.md)).
 - **Adapters:** J2534 on Windows; ELM327 over serial, Bluetooth or WiFi, kept running in the background on Android; SocketCAN on Linux, asking so far on a virtual bus ([docs/linux.md](docs/linux.md)).
 - **Diagnose:** each ECU's stored, pending and permanent codes with titles, readiness, the freeze frame and an inspection verdict; a clear asks first and saves the report ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
 - **Profiles, chosen by the URI:** `obd2` polls every Service 01 reading the car supports, `uds-generic` the identifiers you name, `raw` logs frames ([ADR-0039](docs/adr/0039-full-service01-coverage.md)).
@@ -135,7 +135,7 @@ v0.7.1, a more modern look, phone first, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.7.2 | The Dashboard and signals finished: the desktop's panel, undo, a Daylight look, gauge ranges from signal files, a short user guide |
+| v0.7.2 | The Dashboard and signals finished: the desktop's panel, undo, a Light look, gauge ranges from signal files, a short user guide |
 | v0.7.3-v0.10.0 | The analysis viewer; triggered logging and alerts; discovery of every module; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 

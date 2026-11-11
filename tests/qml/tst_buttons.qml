@@ -73,7 +73,7 @@ TestCase {
         sameColor(h.chosen.contentItem.color, Theme.text, "a chosen choice's text")
     }
 
-    // The ranks' fills follow the palette: Dark's light primary, Daylight's
+    // The ranks' fills follow the palette: Dark's light primary, Light's
     // dark one and the night palettes' dim ones
     function test_theRanksDrawTheirFillsInEveryPalette_data() {
         return Theme.paletteNames.map(n => ({ tag: n, name: n }))

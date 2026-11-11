@@ -6,7 +6,7 @@ import QtCore
 import QtQuick
 
 // Central palette: four palettes, the one in `active` read through the
-// roles below. Two are looks: Dark, the default, and Daylight, dark text on
+// roles below. Two are looks: Dark, the default, and Light, dark text on
 // white for a screen read in sun. The two night palettes (amber and orange,
 // or red, on near black) override either look and keep the light low for a
 // car's cabin after dark; red is the danger color there too, so danger is
@@ -24,7 +24,7 @@ QtObject {
     id: theme
     // ---- The look, Night and its style (ADR-0058). Three controls give
     // the palette on screen, `active`, which every role reads through:
-    // the look (Dark or Daylight), Night (off, on, or on a
+    // the look (Dark or Light), Night (off, on, or on a
     // schedule) and the style Night takes (amber or red). All are kept
     // between runs under the `ui` settings and read here, when the
     // singleton is made, so the first frame already has the palette. A
@@ -152,7 +152,7 @@ QtObject {
     }
     // Settings' list row: the look named only when it isn't the default
     function lookSummary() {
-        return clampLook(look) === "daylight" ? qsTr("Daylight") : ""
+        return clampLook(look) === "daylight" ? qsTr("Light") : ""
     }
     function nightSummary() {
         const mode = clampNight(night)

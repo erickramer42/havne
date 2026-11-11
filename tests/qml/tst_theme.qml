@@ -94,7 +94,7 @@ TestCase {
         }
     }
 
-    // ---- Palettes: the looks Dark (the default) and Daylight, and Night's two
+    // ---- Palettes: the looks Dark (the default) and Light, and Night's two
 
     // A palette by its name: a look is Night off and that look, a night
     // palette Night on in its style
@@ -158,7 +158,7 @@ TestCase {
         sameColor(Theme.gaugeNeedle, "#ff5a5f", "the analog needle")
     }
 
-    // Daylight is Paper: near-black on off-white, the panel white, the
+    // Light is Paper: near-black on off-white, the panel white, the
     // accent the text color as a fill, the zones the warning and danger
     function test_daylightIsThePaperPalette() {
         usePalette("daylight")
@@ -364,9 +364,9 @@ TestCase {
         compare(Theme.active, "daylight")
         Theme.nightStyle = "amber"
         Theme.night = "on"
-        compare(Theme.active, "nightAmber", "Night over Daylight")
+        compare(Theme.active, "nightAmber", "Night over Light")
         Theme.night = "off"
-        compare(Theme.active, "daylight", "Daylight again")
+        compare(Theme.active, "daylight", "Light again")
     }
 
     // The window's color scheme follows the look: a light page is Light,

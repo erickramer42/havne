@@ -598,7 +598,7 @@ an issue is resolved it is removed, and its number is not reused.
 |---|---|---|
 | v0.7.0 | The dashboard and the UI: gauges built by hand from a library, an analysis log and a wide CSV, import in the app, themes for the dark, a phone-first Settings | Released |
 | v0.7.1 | A more modern look, phone first: Night as its own control, the S2 look and shared controls, the phone's five tabs, joined panel and drive view, the viewer's Export, the log's minimum time between sweeps and reads in the extended session | Released |
-| v0.7.2-v0.10.0 | v0.7.2, finishing the Dashboard and signals: the desktop's gauges in the new design, undo in edit mode, a Daylight look, a signal file's dial range and warning levels, Python's exports and health report. v0.7.3, the analysis viewer: the log's navigation aids, chart panes with two cursors, Live's pause. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
+| v0.7.2-v0.10.0 | v0.7.2, finishing the Dashboard and signals: the desktop's gauges in the new design, undo in edit mode, a Light look, a signal file's dial range and warning levels, Python's exports and health report. v0.7.3, the analysis viewer: the log's navigation aids, chart panes with two cursors, Live's pause. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning

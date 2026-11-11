@@ -855,10 +855,10 @@ TestCase {
             verify(!find(page, "look_" + (name === "dark" ? "daylight" : "dark")).checked)
         }
         compare(find(page, "look_dark").text, "Dark")
-        compare(find(page, "look_daylight").text, "Daylight")
+        compare(find(page, "look_daylight").text, "Light")
         find(page, "night_on").clicked()
         find(page, "look_daylight").clicked()
-        compare(Theme.active, "nightAmber", "Night over Daylight")
+        compare(Theme.active, "nightAmber", "Night over Light")
         find(page, "night_off").clicked()
         compare(Theme.active, "daylight")
     }
@@ -943,7 +943,7 @@ TestCase {
         compare(summary(), "100 % · metric · Night scheduled 19:00 to 07:00")
         Theme.night = "off"
         Theme.look = "daylight"
-        compare(summary(), "100 % · metric · Daylight · Night off", "the look when it isn't Dark")
+        compare(summary(), "100 % · metric · Light · Night off", "the look when it isn't Dark")
         Theme.look = "dark"
         compare(summary(), "100 % · metric · Night off")
     }
