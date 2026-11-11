@@ -142,26 +142,17 @@ ColumnLayout {
             color: Theme.textDim
             font.pixelSize: Theme.fontCaption
         }
-        Rectangle {
-            implicitWidth: unitSwitch.implicitWidth + 4
-            implicitHeight: unitSwitch.implicitHeight + 4
-            radius: Theme.radius
-            color: Theme.surface
-            Row {
-                id: unitSwitch
-                anchors.centerIn: parent
-                spacing: 2
-                Repeater {
-                    model: ["s", "ms", "us"]
-                    SegmentButton {
-                        required property string modelData
-                        objectName: "guessTimeUnit_" + modelData
-                        text: modelData
-                        implicitWidth: Math.max(Theme.touchTarget, implicitContentWidth + 24)
-                        implicitHeight: Theme.touchTarget
-                        selected: preview.timeUnit === modelData
-                        onClicked: preview.timeUnit = modelData
-                    }
+        SegmentRow {
+            Repeater {
+                model: ["s", "ms", "us"]
+                SegmentButton {
+                    required property string modelData
+                    objectName: "guessTimeUnit_" + modelData
+                    text: modelData
+                    implicitWidth: Math.max(Theme.touchTarget, implicitContentWidth + 24)
+                    implicitHeight: Theme.touchTarget
+                    selected: preview.timeUnit === modelData
+                    onClicked: preview.timeUnit = modelData
                 }
             }
         }

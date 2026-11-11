@@ -12,6 +12,8 @@ import QtQuick.Layouts
 
 Pane {
     id: page
+    // Buttons and segments reach a phone's touch size; the buttons read it up their parents
+    readonly property real touchMin: Theme.touchTarget
     padding: Theme.pageMargin
     background: Rectangle { color: Theme.bg }
 
@@ -169,32 +171,23 @@ Pane {
             visible: Theme.developerMode && Theme.compact
             spacing: 0
 
-            Rectangle {
+            SegmentRow {
                 objectName: "logViewSwitch"
                 parent: Theme.compact ? narrowSwitchSlot : wideSwitchSlot
                 visible: Theme.developerMode
-                implicitWidth: viewSwitch.implicitWidth + 4
-                implicitHeight: viewSwitch.implicitHeight + 4
-                radius: Theme.radius
-                color: Theme.surface
-
-                Row {
-                    id: viewSwitch
-                    anchors.centerIn: parent
-                    spacing: 2
-
-                    SegmentButton {
-                        objectName: "view_activity"
-                        text: qsTr("Activity")
-                        selected: !page.showingFrames
-                        onClicked: page.view = "activity"
-                    }
-                    SegmentButton {
-                        objectName: "view_frames"
-                        text: qsTr("Frames")
-                        selected: page.showingFrames
-                        onClicked: page.view = "frames"
-                    }
+                SegmentButton {
+                    tapHeight: page.touchMin
+                    objectName: "view_activity"
+                    text: qsTr("Activity")
+                    selected: !page.showingFrames
+                    onClicked: page.view = "activity"
+                }
+                SegmentButton {
+                    tapHeight: page.touchMin
+                    objectName: "view_frames"
+                    text: qsTr("Frames")
+                    selected: page.showingFrames
+                    onClicked: page.view = "frames"
                 }
             }
         }
@@ -339,28 +332,20 @@ Pane {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
 
-                Rectangle {
-                    implicitWidth: tableSwitch.implicitWidth + 4
-                    implicitHeight: tableSwitch.implicitHeight + 4
-                    radius: Theme.radius
-                    color: Theme.surface
-
-                    Row {
-                        id: tableSwitch
-                        anchors.centerIn: parent
-                        spacing: 2
-                        SegmentButton {
-                            objectName: "table_frames"
-                            text: qsTr("Frames")
-                            selected: !page.byId
-                            onClicked: page.byId = false
-                        }
-                        SegmentButton {
-                            objectName: "table_byId"
-                            text: qsTr("By ID")
-                            selected: page.byId
-                            onClicked: page.showById()
-                        }
+                SegmentRow {
+                    SegmentButton {
+                        tapHeight: page.touchMin
+                        objectName: "table_frames"
+                        text: qsTr("Frames")
+                        selected: !page.byId
+                        onClicked: page.byId = false
+                    }
+                    SegmentButton {
+                        tapHeight: page.touchMin
+                        objectName: "table_byId"
+                        text: qsTr("By ID")
+                        selected: page.byId
+                        onClicked: page.showById()
                     }
                 }
                 ThemedButton {
