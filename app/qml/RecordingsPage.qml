@@ -383,6 +383,7 @@ Page {
                 head.listAtStart = head.list.contentY <= head.list.originY + 1
             }
             function onHeightChanged() { Qt.callLater(head.toStart) }
+            function onOriginYChanged() { Qt.callLater(head.toStart) }
             function onVisibleChanged() { Qt.callLater(head.toStart) }
         }
         ColumnLayout {

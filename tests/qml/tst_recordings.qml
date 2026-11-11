@@ -1209,7 +1209,9 @@ profile  raw
                 verify(waitForPolish(page.Window.window), "About laid out")
                 verify(!rows.visible, "the rows give way to About")
                 const findings = find(page, "findingList")
-                tryVerify(() => findings.contentY <= findings.originY + 0.5, 2000, "About's list at its start")
+                // the head is the list's first item, whatever height the font gives it
+                tryVerify(() => findings.headerItem.mapToItem(findings, 0, 0).y >= -0.5, 2000,
+                          "About's list at its start")
                 inOrder(["chartSplitter", "zoomAll", "detailView_about", "recordingInfo", "decodeChoice",
                          "compareChoice", "checkSummary"])
                 const save = yOf("saveReport")
@@ -2267,23 +2269,30 @@ profile  raw
     }
 
     // On a phone the axes' strip is a touch wide, past the captions: a
-    // double tap there makes the range automatic again
+    // double tap there makes the range automatic again. The captions' width
+    // is the font's, so where they already reach a touch the strip ends
+    // with them and the tap lands inside them.
     function test_aPhonesAxisStripIsATouchWide() {
         const page = openEarly()
         const chart = panedChart(page)
         page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
         const p = chart.drawn.panes[1]
-        const x = (chart.drawn.left + Theme.touchTarget) / 2
-        verify(x > chart.drawn.left, "past the captions")
+        const left = chart.drawn.left
+        const wider = Theme.touchTarget > left
+        const x = wider ? (left + Theme.touchTarget) / 2 : left / 2
+        const y = p.top + p.h / 2
         Theme.compact = true
         try {
-            compare(page.doubleTapAt(x, p.top + p.h / 2), "axis")
+            compare(page.doubleTapAt(x, y), "axis")
             compare(page.paneRanges["unit %"], undefined)
         } finally {
             Theme.compact = false
         }
         page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
-        compare(page.doubleTapAt(x, p.top + p.h / 2), "maximize", "on the desktop that's the plot")
+        // On the desktop the strip is the captions alone, so a point past
+        // them, and past a touch where that is wider, is the plot
+        compare(page.doubleTapAt(Math.max(left, Theme.touchTarget) + 1, y), "maximize",
+                "on the desktop that's the plot")
         page.toggleMaximized()
     }
 
