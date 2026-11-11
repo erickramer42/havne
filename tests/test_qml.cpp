@@ -7,6 +7,7 @@
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QKeyEvent>
+#include <QLocale>
 #include <QObject>
 #include <QQmlEngine>
 #include <QQmlExtensionPlugin>
@@ -386,6 +387,11 @@ public:
 public slots:
     void applicationAvailable()
     {
+        // HAVNE_TEST_LOCALE (for example "C") runs a file under that locale, as CI
+        // does; the readouts group digits with the default locale
+        if (qEnvironmentVariableIsSet("HAVNE_TEST_LOCALE")) {
+            QLocale::setDefault(QLocale(qEnvironmentVariable("HAVNE_TEST_LOCALE")));
+        }
         // Main.qml stores its zoom with Settings; here that goes to a
         // scratch ini file, never the user's Havne settings
         QCoreApplication::setOrganizationName(QStringLiteral("Havne"));

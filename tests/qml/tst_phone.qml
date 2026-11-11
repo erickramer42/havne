@@ -44,6 +44,9 @@ TestCase {
         Bridge.minSweepMs = 0
     }
 
+    // The readouts group digits with the system locale, as Live and the gauges do.
+    function grouped(n) { return Number(n).toLocaleString(Qt.locale(), 'f', 0) }
+
     function find(within, name) {
         const item = findChild(within, name)
         verify(item, name + " is there")
@@ -414,7 +417,7 @@ TestCase {
         const rpm = plotted.find(s => s.name === "RPM")
         const card = find(grid, "statCard_" + rpm.index)
         compare(find(card, "statChange").text, "-19 rpm")
-        compare(find(card, "statLine").text, "1,982 · 2,012 · 2,003")
+        compare(find(card, "statLine").text, grouped(1982) + " · " + grouped(2012) + " · " + grouped(2003))
 
         const at = rows.model.findIndex(s => s.name === "RPM")
         tryVerify(() => rows.itemAtIndex(at) !== null, 2000, "the RPM row")
@@ -423,7 +426,7 @@ TestCase {
                "a row stays a touch tall: " + row.height)
         const second = find(row, "cursorSpanLine")
         verify(second.visible, "the row's second line")
-        compare(second.text, "B 1,982 rpm · Δ -19 rpm")
+        compare(second.text, "B " + grouped(1982) + " rpm · Δ -19 rpm")
         verify(second.mapToItem(row, 0, second.height).y <= row.height + 0.5, "inside the row")
     }
 

@@ -41,6 +41,9 @@ TestCase {
         return page
     }
 
+    // The readouts group digits with the system locale, as Live and the gauges do.
+    function grouped(n) { return Number(n).toLocaleString(Qt.locale(), 'f', 0) }
+
     function find(item, name) {
         const found = findChild(item, name)
         verify(found, "no " + name)
@@ -1904,17 +1907,17 @@ profile  raw
         compare(find(page, "spanText").text, "A 1.0 s to B 3.0 s · 2.0 s")
         verify(find(page, "spanLine").visible)
         const rpm = rowOf(page, "RPM")
-        compare(find(rpm.item, "cursorValue").text, "2,001 rpm")
-        tryCompare(find(rpm.item, "cursorBValue"), "text", "1,982 rpm")
+        compare(find(rpm.item, "cursorValue").text, grouped(2001) + " rpm")
+        tryCompare(find(rpm.item, "cursorBValue"), "text", grouped(1982) + " rpm")
         tryCompare(find(rpm.item, "cursorDelta"), "text", "-19 rpm")
 
         const table = find(page, "spanStats")
         tryVerify(() => table.visible, 2000, "the table shows with a span")
         const row = find(table, "statRow_" + rpm.index)
         compare(find(row, "statChange").text, "-19 rpm")
-        compare(find(row, "statLow").text, "1,982 rpm")
-        compare(find(row, "statHigh").text, "2,012 rpm")
-        compare(find(row, "statMean").text, "2,003 rpm")
+        compare(find(row, "statLow").text, grouped(1982) + " rpm")
+        compare(find(row, "statHigh").text, grouped(2012) + " rpm")
+        compare(find(row, "statMean").text, grouped(2003) + " rpm")
         compare(find(row, "statRate").text, "-9.5 rpm/s")
         // A rising signal's change and rate carry their sign
         const up = page.changeText(12.5, 1, "kPa")
@@ -1936,8 +1939,8 @@ profile  raw
         spanned(page, 3000, 1000)
         compare(find(page, "spanText").text, "A 1.0 s to B 3.0 s · 2.0 s")
         const rpm = rowOf(page, "RPM")
-        compare(find(rpm.item, "cursorValue").text, "2,001 rpm")
-        compare(find(rpm.item, "cursorBValue").text, "1,982 rpm")
+        compare(find(rpm.item, "cursorValue").text, grouped(2001) + " rpm")
+        compare(find(rpm.item, "cursorBValue").text, grouped(1982) + " rpm")
         tryCompare(find(rpm.item, "cursorDelta"), "text", "-19 rpm")
     }
 
@@ -2170,8 +2173,8 @@ profile  raw
             compare(strip.cellHeight, 56)
             tryVerify(() => strip.itemAtIndex(0) !== null, 2000, "a cell")
             const cell = strip.itemAtIndex(0)
-            compare(find(cell, "stripValue").text, "2,001 rpm")
-            tryCompare(find(cell, "stripSpan"), "text", "B 1,982 rpm · Δ -19 rpm")
+            compare(find(cell, "stripValue").text, grouped(2001) + " rpm")
+            tryCompare(find(cell, "stripSpan"), "text", "B " + grouped(1982) + " rpm · Δ -19 rpm")
             page.clearCursorB()
             compare(strip.cellHeight, 40)
         } finally {
