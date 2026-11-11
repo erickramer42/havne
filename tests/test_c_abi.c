@@ -320,12 +320,15 @@ int main(void)
             lo != -40.0 || hi != 215.0 ||
             ecuio_def_range(NULL, &lo, &hi) != ECUIO_DECODE_ERR_NULL ||
             strcmp(ecuio_signal_file_key(NULL, &byte_def), "") != 0 ||
-            ecuio_signal_file_gauge(NULL, &byte_def) != NULL) {
+            ecuio_signal_file_gauge(NULL, &byte_def) != NULL ||
+            ecuio_signal_file_format(NULL) != 0u ||
+            strcmp(ecuio_signal_file_expr(NULL, &byte_def), "") != 0) {
             return 1;
         }
     }
     {
-        /* A gauge read from C: a def with one, a def without, a NULL def;
+        /* A gauge read from C: a def with one, a def without, a NULL def,
+         * and the file's format and its signals' expressions;
          * then a packed plugin's requires.core, its patch past a byte */
         static const char kGauged[] =
             "{\"havne_signals\":1,\"name\":\"C gauges\","
@@ -338,7 +341,9 @@ int main(void)
             "\"warn_high\":15.25}},"
             "{\"key\":\"load\",\"name\":\"Load Share\","
             "\"read\":{\"service\":\"01\",\"number\":\"04\"},"
-            "\"field\":{\"byte\":0,\"bits\":8},\"unit\":\"%\"}]}";
+            "\"field\":{\"byte\":0,\"bits\":8},\"unit\":\"%\"},"
+            "{\"key\":\"half\",\"name\":\"Half Volts\",\"kind\":\"computed\","
+            "\"expr\":\"volts / 2\"}]}";
         static const char kPacked[] =
             "{\"havne_plugin\":1,\"id\":\"c-abi\",\"name\":\"C ABI\","
             "\"version\":\"1.0.0\",\"requires\":{\"core\":\"0.5.258\"},"
@@ -371,7 +376,13 @@ int main(void)
             gauge->reserved[0] != 0u || gauge->reserved[1] != 0u ||
             gauge->reserved[2] != 0u ||
             ecuio_signal_file_gauge(file, load) != NULL ||
-            ecuio_signal_file_gauge(file, NULL) != NULL) {
+            ecuio_signal_file_gauge(file, NULL) != NULL ||
+            ecuio_signal_file_format(file) != ECUIO_SIGNAL_FILE_FORMAT_OLDEST ||
+            ECUIO_SIGNAL_FILE_FORMAT < ECUIO_SIGNAL_FILE_FORMAT_OLDEST ||
+            strcmp(ecuio_signal_file_expr(file, volts), "") != 0 ||
+            strcmp(ecuio_signal_file_expr(file,
+                                          ecuio_signal_file_find(file, "half")),
+                   "volts / 2") != 0) {
             ecuio_signal_file_free(file);
             return 1;
         }

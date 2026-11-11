@@ -599,8 +599,11 @@ int ecuio_display_convert(const char* unit, uint8_t decimal_places,
 /* A file's bounds */
 #define ECUIO_SIGNAL_FILE_MAX_BYTES   1048576u   /* 1 MiB */
 #define ECUIO_SIGNAL_FILE_MAX_SIGNALS 1024u
-/* The format this core reads: a file's "havne_signals" */
-#define ECUIO_SIGNAL_FILE_FORMAT      1u
+/* The formats this core reads, a file's "havne_signals": the newest and
+ * the oldest. Format 2 adds the computed grammar's functions,
+ * comparisons and conditional; a format 1 file is held to format 1. */
+#define ECUIO_SIGNAL_FILE_FORMAT        2u
+#define ECUIO_SIGNAL_FILE_FORMAT_OLDEST 1u
 
 typedef struct ecuio_signal_file ecuio_signal_file_t;
 
@@ -645,6 +648,18 @@ const ecuio_signal_def_t* ecuio_signal_file_find(const ecuio_signal_file_t* file
  * ecuio_signal_file_free. */
 const char* ecuio_signal_file_key(const ecuio_signal_file_t* file,
                                   const ecuio_signal_def_t* def);
+
+/* The file's format, its "havne_signals" (ECUIO_SIGNAL_FILE_FORMAT_OLDEST
+ * to ECUIO_SIGNAL_FILE_FORMAT); a plugin variant's, the newest among its
+ * files. 0 for NULL. */
+uint32_t ecuio_signal_file_format(const ecuio_signal_file_t* file);
+
+/* A computed def's "expr" as the file wrote it, found by the def's
+ * address as ecuio_signal_file_key finds its key. "" for any other def,
+ * a base set's def, a def that isn't the file's, or a NULL argument.
+ * Valid until ecuio_signal_file_free. */
+const char* ecuio_signal_file_expr(const ecuio_signal_file_t* file,
+                                   const ecuio_signal_def_t* def);
 
 /* A gauge's warning levels (ecuio_signal_gauge_t's flags). Values are
  * append-only. */

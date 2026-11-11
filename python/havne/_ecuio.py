@@ -266,7 +266,8 @@ ECUIO_SESSION_STATE_NOT_ASKED = 0
 ECUIO_SESSION_STATE_REFUSED = 3
 ECUIO_SESSION_STATE_UNANSWERED = 4
 ECUIO_SET_MAX_TABLE = 0x10000
-ECUIO_SIGNAL_FILE_FORMAT = 1
+ECUIO_SIGNAL_FILE_FORMAT = 2
+ECUIO_SIGNAL_FILE_FORMAT_OLDEST = 1
 ECUIO_SIGNAL_FILE_MAX_BYTES = 0x100000
 ECUIO_SIGNAL_FILE_MAX_SIGNALS = 0x400
 ECUIO_SIGNAL_GROUP_AIR = 2
@@ -1287,8 +1288,10 @@ FUNCTIONS = {
     'ecuio_session_signal_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_session_t)]),  # profile.h
     'ecuio_session_start': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_shutdown': (None, []),  # core.h
+    'ecuio_signal_file_expr': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_extends': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_find': (POINTER(ecuio_signal_def_t), [POINTER(ecuio_signal_file_t), c_char_p]),  # signals.h
+    'ecuio_signal_file_format': (c_uint32, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_free': (None, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_gauge': (POINTER(ecuio_signal_gauge_t), [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_key': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h

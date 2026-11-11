@@ -156,7 +156,7 @@ CASES = [
     ("notes that aren't text", SIGNAL_FILE, ["notes"], 1, False),
     ("a tool's own key", SIGNAL_FILE, S0 + ["x-tool"], {"any": [1]}, True),
     ("extends something other than obd2", SIGNAL_FILE, ["extends"], "uds", False),
-    ("format 2", SIGNAL_FILE, ["havne_signals"], 2, False),
+    ("format 3", SIGNAL_FILE, ["havne_signals"], 3, False),
     ("a $schema key", SIGNAL_FILE, ["$schema"], "signal-file.schema.json", False),
     ("the base packed plugin", PACKED, [], None, True),
     ("an id with a dash first", PACKED, ["id"], "-edge", False),

@@ -78,6 +78,24 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     check(set->count == ecuio_signal_file_set(b)->count);
     check(strcmp(ecuio_signal_file_profile(a), ecuio_signal_file_profile(b)) == 0);
 
+    /* A format 1 file compiles format 1's steps alone (ADR-0062), and
+     * each computed def keeps its expression */
+    const uint32_t format = ecuio_signal_file_format(a);
+    check(format >= ECUIO_SIGNAL_FILE_FORMAT_OLDEST &&
+          format <= ECUIO_SIGNAL_FILE_FORMAT);
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
+            check(ecuio_signal_file_expr(a, &d)[0] == '\0');
+            continue;
+        }
+        check(ecuio_signal_file_expr(a, &d)[0] != '\0');
+        const ecuio_computed_t& p = set->computed[d.table_first];
+        for (uint32_t s = 0; format == 1 && s < p.step_count; ++s) {
+            check(p.steps[s] <= ECUIO_COMPUTED_DIVIDE);
+        }
+    }
+
     /* The profile name is one the registry takes, and the set registers */
     const char* profile = ecuio_signal_file_profile(a);
     check(strncmp(profile, "user.", 5) == 0);

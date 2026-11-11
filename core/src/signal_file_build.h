@@ -31,6 +31,8 @@ struct ecuio_signal_file {
     std::vector<std::pair<std::string, uint32_t>> keys; /* key, def index */
     std::vector<std::pair<uint32_t, ecuio_signal_gauge_t>>
         gauges; /* def index */
+    std::vector<std::pair<uint32_t, std::string>> exprs; /* def index */
+    uint32_t format = ECUIO_SIGNAL_FILE_FORMAT_OLDEST;
     ecuio_signal_set_t set{};
     /* The bytes a recording copies as signals.json (ADR-0051 section 4):
      * those ecuio_signal_file_load read, or a plugin variant's files
@@ -66,7 +68,16 @@ struct parts {
      * whose items follow signals */
     const ecuio_json::Value* signals_at = nullptr;
     bool own_list = false;
+    /* The set's format: the file's, or the newest of a variant's files;
+     * each of signals compiles at its own file's (formats, one each),
+     * the own list's at format */
+    uint32_t format = ECUIO_SIGNAL_FILE_FORMAT_OLDEST;
+    std::vector<uint32_t> formats;
 };
+
+/* A file's "havne_signals", checked first: its first key, a format this
+ * core reads. what names the file in the words ("a signal file"). */
+uint32_t format_of(const ecuio_json::Value& root, const char* what);
 
 /* The set from in into f, or a refused thrown (std::bad_alloc too) */
 void build(const parts& in, ecuio_signal_file& f);

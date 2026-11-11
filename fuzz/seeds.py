@@ -81,6 +81,18 @@ def main(argv):
               read(os.path.relpath(path, ROOT)))
     for path in data_files:
         write(out, "fuzz_signal_file", "plugin_" + os.path.basename(path), read(plugin + "/" + path))
+    # Format 2's grammar (ADR-0062), which no fixture holds yet: each
+    # function and comparison once, over four DIDs
+    leaves = [{"key": k, "name": k.upper(), "read": {"service": "22", "number": "D10%d" % n},
+               "field": {"byte": 0}} for n, k in enumerate("abcd")]
+    exprs = ["min(a, b, c)", "max(a, b) - abs(c)", "clamp(a, 0, 100)",
+             "sqrt(round(a) + floor(b) * ceil(c))",
+             "if(all(a > b, b >= c, c < d), a, if(any(a <= 1, not(b == 2), c != 3), b, -c))"]
+    grammar = {"havne_signals": 2, "name": "Grammar", "source": {"name": "Havne's seeds"},
+               "ecus": [{"id": "pcm", "rx": "7E8"}],
+               "signals": leaves + [{"key": "e%d" % n, "name": "E%d" % n, "kind": "computed",
+                                     "expr": e} for n, e in enumerate(exprs)]}
+    write(out, "fuzz_signal_file", "grammar_format2.json", json.dumps(grammar).encode())
 
     # The OBDb import: no year extending obd2 (0x00), and alone in 2019
     # (0x80 | (2019 - 1990))

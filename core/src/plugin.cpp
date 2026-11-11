@@ -15,6 +15,7 @@
 #include "profile_hold.h"
 #include "signal_file_build.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -67,6 +68,7 @@ struct data_file {
     std::string path;
     const Value* root = nullptr;  /* into the manifest when packed */
     std::unique_ptr<Value> owned; /* a folder's file */
+    uint32_t format = 0;          /* its "havne_signals", once checked */
 };
 
 } // namespace
@@ -551,7 +553,7 @@ private:
             }
         }
 
-        for (const data_file& f : files_) {
+        for (data_file& f : files_) {
             check_data_file(f);
         }
         for (size_t i = 0; i < p.variants.size(); ++i) {
@@ -667,22 +669,11 @@ private:
     }
 
     /* A data file is a signal file that names the manifest's ECUs */
-    static void check_data_file(const data_file& f)
+    static void check_data_file(data_file& f)
     {
         const Value& root = *f.root;
         expect(root, Type::object, "a data file");
-        if (root.members.empty() ||
-            root.members.front().key != "havne_signals") {
-            refuse(root, "a data file starts with \"havne_signals\"");
-        }
-        const Value& version = root.members.front().value;
-        expect(version, Type::number, "\"havne_signals\"");
-        if (!version.integer || version.whole != ECUIO_SIGNAL_FILE_FORMAT) {
-            refuse(version, "\"havne_signals\" is format " +
-                                (version.integer ? std::to_string(version.whole)
-                                                 : std::string("?")) +
-                                ", and this Havne reads format 1");
-        }
+        f.format = ecuio_sf::format_of(root, "a data file");
         if (const Value* ecus = root.find("ecus")) {
             refuse(*ecus,
                    "a plugin's data file declares no \"ecus\": it names the "
@@ -718,6 +709,7 @@ private:
         std::unordered_map<std::string, size_t> slot_of;
         for (size_t n = 0; n < list.size(); ++n) {
             const Value& root = *list[n]->root;
+            parts.format = std::max(parts.format, list[n]->format);
             if (const Value* extends = root.find("extends")) {
                 if (n != 0) {
                     refuse(*extends,
@@ -734,6 +726,7 @@ private:
                     s.type == Type::object ? s.find("key") : nullptr;
                 if (key == nullptr || key->type != Type::string) {
                     parts.signals.push_back(&s); /* build says why */
+                    parts.formats.push_back(list[n]->format);
                     continue;
                 }
                 for (const std::string& k : mine) {
@@ -745,9 +738,11 @@ private:
                 auto it = slot_of.find(key->text);
                 if (it != slot_of.end()) {
                     parts.signals[it->second] = &s;
+                    parts.formats[it->second] = list[n]->format;
                 } else {
                     slot_of.emplace(key->text, parts.signals.size());
                     parts.signals.push_back(&s);
+                    parts.formats.push_back(list[n]->format);
                 }
             }
         }
@@ -785,8 +780,10 @@ private:
         format.type = Type::number;
         format.integer = true;
         format.in_int64 = true;
-        format.whole = ECUIO_SIGNAL_FILE_FORMAT;
-        format.number = ECUIO_SIGNAL_FILE_FORMAT;
+        /* The newest of the variant's files: each signal reads alike in
+         * it, since no format 1 expression changes its meaning in 2 */
+        format.whole = parts.format;
+        format.number = parts.format;
         add("havne_signals", format);
         Value text;
         text.type = Type::string;
