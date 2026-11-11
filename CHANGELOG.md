@@ -63,6 +63,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   under it. The pages are tabs on the panel's upper edge, with a "+" tab in
   edit mode; a long row of tabs scrolls sideways, by the wheel too. Edit
   mode's "Pages" button reads "Page".
+- Dashboard: the built-in layouts show Boost, Lambda and Battery in place of
+  Throttle and Engine load, and on the desktop leave no empty square at 5 or
+  8 columns. Boost reads on the demo (`mock://`) only until a later version;
+  a layout you've edited keeps its gauges.
 - Dashboard: Paste is in the "+" cell, beside the "+" while a gauge is
   copied, and no longer on the bar. Done is at the bar's end, and on a
   narrow screen Add gauge reads "Add".
@@ -99,11 +103,12 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - `havne-cli export`, `import` and `health` over a recording end at once
   on a second Ctrl+C, with the interrupted end line and exit 1.
 - A Save report or an export on a phone that fails or is stopped, or can't
-  start, no longer leaves an empty document where you picked it, and an
-  import that can't start says so. A temporary folder an import or a report
+  start, no longer leaves an empty document where you picked it. A temporary folder an import or a report
   left behind is removed at the next start, as an export's was.
 - The C API's `ecuio_export` and `ecuio_export_with` leave `report` zeroed
   but for `failed_class` when they fail or are canceled.
+- At night, the red Clear codes buttons on Diagnostics draw their words in
+  the page's color, so they stay readable.
 - Recordings on a phone: the signal list stops at five rows, so a swipe
   above or below it scrolls the page.
 - The Log page on a phone has a back arrow, as Settings' pages have. In

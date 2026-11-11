@@ -14,8 +14,12 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.7.1, a more modern look, phone first, is
-out** (its section below): Night as its own control, the S2 look, the
+**Current phase: v0.7.2, finishing the Dashboard and signals, is
+built and in its release passes** (its section below): the desktop's
+gauges on one panel with the pages as tabs, undo in edit mode, a Light
+look, built-in layouts by what people watch, a signal file's dial range,
+and Python's exports and health report. v0.7.1, a more modern look,
+phone first, is out: Night as its own control, the S2 look, the
 phone's five tabs, joined panel and drive view, the viewer's Export, the
 log's minimum time between sweeps and reads in the extended session.
 v0.7.0, the dashboard and the UI, is out: the Dashboard is built by hand
@@ -457,7 +461,7 @@ background too ([roadmap](#roadmap)).
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 1931 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 1982 ctest cases on Windows (both trees rebuilt,
   2026-11-10), all passing but six skips (the cross-arch case and
   the real-car recordings' diff, run locally; three cases that run on
   Linux only, Read once over SocketCAN and the Python package's vcan
@@ -591,6 +595,14 @@ an issue is resolved it is removed, and its number is not reused.
     BENCH prep #35). The request goes out again on its next turn, so a
     signal still updates, less often. For a session that asks two
     modules through the VX, `?pack=0` keeps the losses near 1%.
+- **#43. On a phone with gesture navigation, leaving the drive view
+    takes three back swipes.** The view hides Android's bars, and
+    Android spends the first swipe from the edge showing them; the
+    second shows Havne's controls, as Back does in the view
+    ([ADR-0059](docs/adr/0059-drive-view.md)), and the third leaves.
+    With three-button navigation it takes two presses. A tap on the
+    gauges, then **Exit drive**, leaves at once in either mode. Checked
+    on the test phone (Android 16) with the mock.
 
 ## Roadmap
 
@@ -598,7 +610,8 @@ an issue is resolved it is removed, and its number is not reused.
 |---|---|---|
 | v0.7.0 | The dashboard and the UI: gauges built by hand from a library, an analysis log and a wide CSV, import in the app, themes for the dark, a phone-first Settings | Released |
 | v0.7.1 | A more modern look, phone first: Night as its own control, the S2 look and shared controls, the phone's five tabs, joined panel and drive view, the viewer's Export, the log's minimum time between sweeps and reads in the extended session | Released |
-| v0.7.2-v0.10.0 | v0.7.2, finishing the Dashboard and signals: the desktop's gauges in the new design, undo in edit mode, a Light look, a signal file's dial range and warning levels, Python's exports and health report. v0.7.3, the analysis viewer: the log's navigation aids, chart panes with two cursors, Live's pause. v0.8.0, conditions: triggered logging and alerts. v0.9.0, the whole vehicle: discovery and extended sessions. v0.10.0, the scan tool, the last feature release | Planned |
+| v0.7.2 | Finishing the Dashboard and signals: the desktop's gauges in the new design, undo in edit mode, a Light look, built-in layouts by what people watch, a signal file's dial range and warning levels, Python's exports and health report | Built, in its release passes |
+| v0.7.3-v0.11.0 | v0.7.3, the analysis viewer: the log's navigation aids, chart panes with two cursors, a recording's statistics, Live's pause, and the phone pass's fixes. v0.8.0, conditions: triggered logging, alerts and a fuller grammar for computed signals. v0.9.0, the whole car through plugins: a profile sized for every module, sessions a plugin declares, and a plugin's own conversation with a module, security access to unlock reads among it. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning
@@ -610,54 +623,45 @@ carry"). Earlier releases are in [CHANGELOG.md](CHANGELOG.md). The
 planned releases are in order and hold about three features each; a
 release's detail comes in here when its work starts.
 
-### v0.7.1: a more modern look, phone first
+### v0.7.2: finishing the Dashboard and signals
 
-For people who read the Dashboard in a car, and anyone who wants a
-recording's values out of the app. A patch on v0.7.0's theme
+For people who build their own Dashboard and script their recordings. A
+patch on v0.7.1's theme
 ([ADR-0048](docs/adr/0048-semantic-versioning.md)'s appendix "what a
 PATCH may carry"): the C ABI grows, append-only
-(`ecuio_session_set_focus_with`, `ecuio_export_with`,
-`ecuio_export_estimate_with`, the session fields of
-`ecuio_channel_support_t`).
+(`ecuio_signal_file_gauge`, `ecuio_plugin_requires_core`,
+`ecuio_import_with`, `ecuio_health_export_with`).
 - **Built:**
-  - Night as its own control, off, on or scheduled, in an amber or a
-    red style, with a one-tap switch on the Dashboard
-    ([ADR-0058](docs/adr/0058-night-mode.md));
-  - the S2 look: a graphite palette, Barlow type with fixed-width
-    digits for readings, flat cards and gauges, button ranks, one type
-    scale, and shared text fields and check boxes;
-  - the phone's Dashboard on 6 columns upright and 12 on its side, with
-    a stored v0.7.0 layout upgraded in memory, one joined panel, one
-    tool row, a gauge's press and hold for its menu or a drag, copy and
-    paste, a blank cell, and cells that fill the empty squares under
-    them ([ADR-0057](docs/adr/0057-dashboards.md)'s appendices);
-  - the phone's five tabs, the address in the top bar's status, and
-    Dash's list of recent addresses with no session;
-  - the drive view: the gauges to the screen's edges with every bar
-    hidden, revealed by a tap, kept awake while connected on external
-    power or with Dash showing, entered again at the next connect, and
-    Android's Back as one route across the app
-    ([ADR-0059](docs/adr/0059-drive-view.md)); on the test phone with
-    the mock, three-button and gesture navigation, not on a car;
-  - the viewer's Export ([ADR-0056](docs/adr/0056-analysis-log.md)'s
-    appendix "the viewer's Export as built") and `havne-cli export
-    --estimate`, both stopped cleanly when the app quits or on Ctrl+C
-    (ADR-0054's appendix "an export canceled");
-  - a focus's minimum time between sweeps, in the app, `havne-cli log
-    --min-sweep` and Python (ADR-0056's appendix "the minimum time
-    between sweeps as built"); no real adapter has run it;
-  - reads in the extended session, `?session=03` on `uds-generic`
-    ([ADR-0060](docs/adr/0060-extended-session-reads.md)), with each
-    module's session on the Log page, in `havne-cli stream` and in Python; run
-    against the fakes and the simulated ECU only;
-  - the Recordings page sized for a phone's touch, and each gauge one
-    screen-reader item on Android.
-- **Left:** README's screenshots in the new look, and the review and
-  docs passes.
+  - the desktop's gauges on one panel with the pages as tabs, as on the
+    phone ([ADR-0057](docs/adr/0057-dashboards.md)'s appendix "the
+    desktop takes the panel"), and built-in layouts by what people
+    watch, with no empty square at 5 or 8 columns (its appendix "the
+    built-in layout by what people watch");
+  - undo and redo in edit mode, Remove on a gauge's panel, and "no new
+    data" beside a value that has stopped updating (ADR-0057's appendix
+    "undo in edit mode as built");
+  - a Light look, dark text on white, with Night over it
+    ([ADR-0058](docs/adr/0058-night-mode.md)'s appendix "Daylight, the
+    second look");
+  - the drive view's gauges to the screen's height and its controls
+    from the bottom, and Dash's connect list and the desktop's Home
+    showing paired and plugged-in adapters
+    ([ADR-0059](docs/adr/0059-drive-view.md)'s appendices);
+  - the Log opened from Settings and from a failed connect, and the
+    viewer opening onto a recording's chart and signals;
+  - a signal file's dial range and warning levels, which `havne-cli`
+    and Python report ([signal-files.md](docs/signal-files.md));
+  - Python's exports, the CSV's size and a car's health report, and
+    imports and health reports that stop on a cancel or Ctrl+C;
+  - a user guide ([docs/user-guide.md](docs/user-guide.md)) and a
+    reference of every address ([docs/addresses.md](docs/addresses.md)).
 
-**Done when:** the phone's pages use the shared controls in all three
-palettes, with no cut text at the test phone's width, and the README
-shows them.
+  Run on the test phone with the mock, not on a car.
+- **Left:** README's desktop Dashboard and Home shots in the new design
+  and the drive view's phone shot, then the release.
+
+**Done when:** the README and the gallery show the desktop's panel and
+the drive view.
 
 ### Waiting on a tester: an iPhone download
 
@@ -670,17 +674,17 @@ notes' Try it points at [docs/ios.md](docs/ios.md).
 
 ### 1.0.0: the finished reader
 
-After v0.10.0 the formats freeze (the C ABI, `havne-cli`'s schema, the
+After v0.11.0 the formats freeze (the C ABI, `havne-cli`'s schema, the
 plugin formats, the recording format) and the releases are fixes
-alone, as 0.10.x: a second car and testers other than the developer,
+alone, as 0.11.x: a second car and testers other than the developer,
 every adapter class on a car, the release on a PC without Visual
-Studio, Linux on real hardware, accessibility and a user guide, and
+Studio, Linux on real hardware, accessibility, and
 hour-long runs on every transport. 1.0.0 follows once those runs are
-filed and the 0.10.x releases have gone a stated stretch with no
+filed and the 0.11.x releases have gone a stated stretch with no
 high-severity issue: full featured on Windows, Linux and Android, as
 much macOS and iOS as is manageable, with a signed Windows executable
-and an installer that checks for updates. Writing to a car (security
-access, flashing) is 2.0.
+and an installer that checks for updates. Writing to a car (unlocking
+a module for writes, flashing) is 2.0.
 
 ## Backlog
 
@@ -694,29 +698,12 @@ less, **M** a few days, **L** a week or more or an ADR first.
 - **Per-signal unit overrides (S):** one quantity in the other system
   (deg F with km/h); whole-UI units are built
   ([ADR-0022](docs/adr/0022-display-units.md)).
-- **Chart panes, two cursors and the span's statistics (L, an ADR
-  first):** traces in stacked panes on one time axis, each pane with a
-  y-axis in its units and its own vertical zoom; a second cursor, with
-  the time between the two and each signal's change, lowest, highest
-  and mean over the span; a drag that boxes a span to zoom to, and the
-  arrow keys stepping the cursor a sample at a time; on Live, a pause
-  that scrolls back through the buffer while the session runs. v0.5.0's
-  computed signals want panes too.
 - **In-vehicle displays, Android Auto and CarPlay (L, research
   first):** a native front end over the C ABI, only if a live-gauge
   app qualifies.
 
 ### Vehicle coverage
 
-- **Custom derived channels (M):** a user's expression per channel, in
-  core, on v0.5.0's derived-signal stage.
-- **Every refusal named (M, an ABI addition):** a DID `uds-generic`'s
-  scan finds refused, and any refusal in a replay, show no value where
-  a live session's polled request reads Refused: the scan's refusals
-  are only counted in the support report, and a recording keeps a
-  refusal as a note's words
-  ([ADR-0051](docs/adr/0051-signal-files.md)'s appendix "a refused
-  signal shown as refused").
 - **A scanned DID answered "response pending" on a real adapter (S):**
   tested against the fake only; needs an ECU that sends it (BENCH prep
   #17).

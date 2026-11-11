@@ -226,7 +226,8 @@ hidden, and keeps the screen on.
 
 1. Connect, open Dash and press **Drive**.
 2. Tap the gauges to bring the controls up from the bottom: Start log or
-   Stop log, Mark while a recording runs, Disconnect, Reset peaks,
+   Stop log, Mark while Record sessions records (not during a log),
+   Disconnect, Reset peaks,
    Night and **Exit drive**. They slide away again by themselves.
 3. Press **Exit drive** to leave the view.
 

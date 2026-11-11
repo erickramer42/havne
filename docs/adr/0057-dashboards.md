@@ -1372,3 +1372,25 @@ otherwise.
 
 This amends the appendix "edit mode as built": the bar holds five
 buttons, and Done also ends the undo history.
+
+## Appendix: the built-in layout by what people watch (2026-11-10)
+
+The built-in layout's cells after the dials change: Throttle and Engine
+load leave, and Boost, Lambda and Battery join, in the library's refs. The
+desktop's order is Shift lights, Engine speed, Vehicle speed, Coolant, Oil
+temp, Boost, IAT, MAF, Lambda, Battery: after the two 2 x 8 dials every cell
+is a 1 x 4 square (Boost an `analog`, the rest `ring` or `digital`), so the
+cells fill the squares beside the dials and then whole rows, and no square is
+left empty on 5 columns (a 1280 x 800 window) or 8 (1920 x 1080). The phone's
+order is the shift lights, the dial with Speed, Coolant and Oil temp beside it,
+MAF and Boost at 3 x 9, then IAT, Battery and Lambda at 2 x 6.
+
+| Cell | Refs | Unit | Options |
+|---|---|---|---|
+| Boost | `id:13001` | kPa | -100 to 200; the desktop dial has the caption "Boost" |
+| Battery | `id:14001`, `id:7008` | V | 10 to 16 |
+| Lambda | `id:10001`, `id:11544` | the lambda sign | 0.5 to 2, a description |
+
+Boost has no obd2 ref until the profile computes it, so it reads "no signal"
+on a real car. A stored layout never changes; only `builtIn` and `reset` do.
+`gaugeSignals` gains `lambda`.
