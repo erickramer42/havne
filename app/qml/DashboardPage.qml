@@ -1635,6 +1635,8 @@ Page {
                         Layout.preferredWidth: 0
                         Layout.minimumWidth: 0
                         spacing: 8
+                        // Night draws no pick: the row dims, and stays choosable
+                        opacity: Theme.nightActive ? 0.45 : 1
                         // A name this version doesn't know reads as Default, as it draws
                         readonly property string current: panelCard.cell && panelCard.cell.options
                                                           && Theme.gaugeColorNames.indexOf(panelCard.cell.options.color) >= 0
@@ -1672,6 +1674,14 @@ Page {
                             }
                         }
                     }
+                }
+
+                Caption {
+                    objectName: "panelColorNight"
+                    Layout.fillWidth: true
+                    visible: panelCard.hasSignal && panelCard.kind !== "shift-light" && Theme.nightActive
+                    wrapMode: Text.Wrap
+                    text: qsTr("Night draws every gauge in its own tint")
                 }
 
                 // The order: both forms' grids follow it
