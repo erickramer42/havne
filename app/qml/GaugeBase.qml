@@ -1,5 +1,6 @@
 // File/layer: app/qml/GaugeBase.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard,
+//          QmlTest.dashedit
 
 import QtQuick
 
@@ -42,6 +43,8 @@ Item {
     property real warnFrom: NaN
     property real dangerFrom: NaN
     property color accent: Theme.gaugeValue   // normal-zone color
+    // The big value's color outside a zone: the look's, or the cell's picked one
+    property color readoutColor: Theme.gaugeReadout
     // The hold shown: a kind with a scale marks its peak on it (the dial's
     // tell-tale, the bar's and the ring's mark, the cells' notch); off by
     // default. Reset peaks clears it

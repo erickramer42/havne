@@ -75,7 +75,8 @@ QtObject {
         caption: { type: "text", max: 40 },
         description: { type: "text", max: 80 },
         peakLabel: { type: "text", max: 8 },
-        accent: { type: "string" }
+        accent: { type: "string" },
+        color: { type: "string" }
     })
 
     // A new gauge's range by the unit it decodes to (section 6)
@@ -692,6 +693,21 @@ QtObject {
                 else
                     c[k] = fields[k]
             }
+            return true
+        })
+    }
+
+    // The cell drawn as another kind, everything else kept: refs, unit,
+    // label, span and every option (a kind's own options stay stored for
+    // the way back). A blank has no signal, so neither side is blank
+    function setKind(doc, page, index, kind) {
+        return write(doc, d => {
+            if (!hasCell(d, page, index) || !knownKind(kind) || kind === "blank")
+                return false
+            const c = d.pages[page].cells[index]
+            if (c.kind === "blank" || c.kind === kind)
+                return false
+            c.kind = kind
             return true
         })
     }

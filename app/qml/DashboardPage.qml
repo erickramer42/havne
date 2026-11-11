@@ -109,6 +109,7 @@ Page {
     property int selectedCount: 15   // the selected Shift lights card's lights
     property string panel: ""        // "", "cell", "add", "signal"
     property string addKind: ""      // Add's kind; "" when changing a cell's signal
+    property bool changingKind: false  // the kind list picks the selected cell's kind
     property bool moreShown: false
     property bool confirmReset: false
     property bool confirmRemovePage: false
@@ -145,7 +146,7 @@ Page {
     readonly property var optionWords: ({
         "from": qsTr("range"), "to": qsTr("range"), "coldBelow": qsTr("zones"),
         "warnFrom": qsTr("zones"), "dangerFrom": qsTr("zones"), "decimals": qsTr("decimals"),
-        "peak": qsTr("peak hold"), "majorStep": qsTr("major step"),
+        "peak": qsTr("peak hold"), "color": qsTr("color"), "majorStep": qsTr("major step"),
         "minorStep": qsTr("major step"), "labelDivisor": qsTr("major step"),
         "caption": qsTr("caption"), "description": qsTr("description"), "cells": qsTr("cells"),
         "rise": qsTr("curve"), "digits": qsTr("digits"), "window": qsTr("window"),
@@ -571,9 +572,35 @@ Page {
         commitTyping()
         selected = -1
         addKind = ""
+        changingKind = false
+        panel = "add"
+    }
+    // The cell's own kind list, Add's with the cell's kind marked
+    function changeKind() {
+        commitTyping()
+        addKind = ""
+        changingKind = true
         panel = "add"
     }
     function pickKind(kind) {
+        if (changingKind) {
+            if (selected < 0)
+                return
+            let next = DashboardBook.setKind(doc, pageIndex, selected, kind)
+            // A shift band isn't a dial's range: on an rpm signal, going to
+            // Shift lights takes the band and leaving takes the default range
+            // (another signal keeps its range both ways)
+            if ((kind === "shift-light") !== (selectedCell.kind === "shift-light")
+                    && (selectedCell.unit ?? "").toLowerCase() === "rpm") {
+                const range = kind === "shift-light" ? { from: 4500, to: 6500 }
+                                                     : DashboardBook.defaultRange(selectedCell.unit)
+                next = DashboardBook.setOptions(next, pageIndex, selected, range)
+            }
+            if (edit(next, stepOf("", qsTr("changed %1's kind").arg(cellName(selectedCell)),
+                                  selected, selected)))
+                leaveKindList()
+            return
+        }
         if (kind === "blank") {
             const span = newSpans[kind]
             if (edit(DashboardBook.addCell(doc, pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] }),
@@ -584,6 +611,10 @@ Page {
         addKind = kind
         refreshRows()
         panel = "signal"
+    }
+    function leaveKindList() {
+        changingKind = false
+        panel = "cell"
     }
     function changeSignal() {
         addKind = ""
@@ -1026,11 +1057,18 @@ Page {
         readonly property real coldBelow: zone("coldBelow")
         readonly property real warnFrom: zone("warnFrom")
         readonly property real dangerFrom: zone("dangerFrom")
+        // A picked color (options.color) takes the normal zone's place; the
+        // zones, and Night, still win
+        readonly property string picked: Theme.gaugeColor(opt("color", ""))
         // A stored "info" draws as the value's own color: blue means cold alone
         readonly property color accent: {
+            if (picked !== "")
+                return picked
             const a = opt("accent", "accent")
             return a === "success" ? Theme.success : Theme.gaugeValue
         }
+        readonly property color readoutColor: picked !== "" ? picked : Theme.gaugeReadout
+        readonly property color needleColor: picked !== "" ? picked : Theme.gaugeNeedle
 
         // Each kind's own
         readonly property real labelDivisor: opt("labelDivisor", 1)
@@ -1062,10 +1100,11 @@ Page {
 
         readonly property var shared: ["value", "windowHigh", "windowLow", "hasValue", "stale",
                                        "from", "to", "label", "unit", "note", "decimals",
-                                       "coldBelow", "warnFrom", "dangerFrom", "accent", "showPeak"]
+                                       "coldBelow", "warnFrom", "dangerFrom", "accent", "readoutColor",
+                                       "showPeak"]
         readonly property var own: ({
             "analog": ["majorStep", "minorStep", "labelDivisor", "caption", "peakLabel",
-                       "showProgress"],
+                       "showProgress", "needleColor"],
             "bar": ["scaleMarks", "vertical", "marks"],
             "segments": ["cells", "rise"],
             "seven-segment": ["digits"],
@@ -1342,12 +1381,22 @@ Page {
                         }
                     }
                     Caption { visible: panelCard.hasSignal; text: qsTr("Signal") }
-                    ThemedButton {
-                        objectName: "panelSignal"
+                    RowLayout {
                         visible: panelCard.hasSignal
                         Layout.fillWidth: true
-                        text: qsTr("Change signal")
-                        onClicked: root.changeSignal()
+                        spacing: 8
+                        ThemedButton {
+                            objectName: "panelSignal"
+                            Layout.fillWidth: true
+                            text: qsTr("Change signal")
+                            onClicked: root.changeSignal()
+                        }
+                        ThemedButton {
+                            objectName: "panelKind"
+                            Layout.fillWidth: true
+                            text: qsTr("Change kind")
+                            onClicked: root.changeKind()
+                        }
                     }
 
                     Caption { visible: panelCard.hasSignal; text: qsTr("From (%1)").arg(panelCard.unitShown) }
@@ -1571,6 +1620,60 @@ Page {
                     }
                 }
 
+                // The value's color from a fixed set; zones and Night still win.
+                // Shift lights keep their own green, amber and red
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: panelCard.hasSignal && panelCard.kind !== "shift-light"
+                    spacing: 8
+
+                    Caption { Layout.alignment: Qt.AlignTop; Layout.topMargin: 10; text: qsTr("Color") }
+                    Flow {
+                        id: colorRow
+                        objectName: "panelColors"
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 0
+                        Layout.minimumWidth: 0
+                        spacing: 8
+                        // A name this version doesn't know reads as Default, as it draws
+                        readonly property string current: panelCard.cell && panelCard.cell.options
+                                                          && Theme.gaugeColorNames.indexOf(panelCard.cell.options.color) >= 0
+                                                          ? panelCard.cell.options.color : ""
+                        ThemedButton {
+                            objectName: "panelColor_default"
+                            text: qsTr("Default")
+                            Accessible.name: qsTr("Default color")
+                            checkable: true
+                            checked: colorRow.current === ""
+                            onClicked: root.setOptions({ color: null })
+                        }
+                        Repeater {
+                            model: Theme.gaugeColorNames
+                            AbstractButton {
+                                id: swatch
+                                required property string modelData
+                                objectName: "panelColor_" + modelData
+                                width: Theme.touchTarget
+                                height: Theme.touchTarget
+                                checkable: true
+                                checked: colorRow.current === modelData
+                                Accessible.name: qsTr("Color %1").arg(Theme.gaugeColorLabel(modelData))
+                                onToggled: { toggle(); root.setOptions({ color: modelData }) }
+                                contentItem: Item {}
+                                background: Rectangle {
+                                    anchors.centerIn: parent
+                                    width: Math.min(parent.width, 32)
+                                    height: width
+                                    radius: 6
+                                    color: Theme.gaugeSwatch(swatch.modelData)
+                                    border.width: swatch.checked ? 3 : 1
+                                    border.color: swatch.checked ? Theme.text : Theme.outline
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // The order: both forms' grids follow it
                 GridLayout {
                     Layout.fillWidth: true
@@ -1639,12 +1742,17 @@ Page {
                         font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
-                        text: qsTr("Add a gauge: its kind")
+                        text: root.changingKind ? qsTr("Change this gauge's kind")
+                                                : qsTr("Add a gauge: its kind")
                     }
                     ThemedButton {
                         objectName: "addClose"
-                        text: qsTr("Close")
+                        text: root.changingKind ? qsTr("Back") : qsTr("Close")
                         onClicked: {
+                            if (root.changingKind) {
+                                root.leaveKindList()
+                                return
+                            }
                             root.commitTyping()
                             root.panel = ""
                         }
@@ -1654,7 +1762,9 @@ Page {
                     Layout.fillWidth: true
                     spacing: 8
                     Repeater {
-                        model: root.drawnKinds
+                        // A blank has no signal to keep, so a change never offers it
+                        model: root.changingKind ? root.drawnKinds.filter(k => k !== "blank")
+                                                 : root.drawnKinds
                         ColumnLayout {
                             id: kindTile
                             required property string modelData
@@ -1698,6 +1808,11 @@ Page {
                                 objectName: "addKind_" + kindTile.modelData
                                 Layout.fillWidth: true
                                 text: root.kindNames[kindTile.modelData]
+                                // The cell's own kind is marked, and no change to it
+                                readonly property bool current: root.changingKind && root.selectedCell
+                                                                && root.selectedCell.kind === kindTile.modelData
+                                checkable: current
+                                checked: current
                                 onClicked: root.pickKind(kindTile.modelData)
                             }
                         }
@@ -2051,6 +2166,11 @@ Page {
                 Label {
                     objectName: "driveLogReadout"
                     visible: Bridge.logActive
+                    // Gives way first, so Stop log and Mark keep their size
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0
+                    Layout.minimumWidth: 0
+                    elide: Text.ElideRight
                     font.family: Theme.valueFamily
                     font.features: { "tnum": 1 }
                     font.pixelSize: Theme.fontBody
@@ -2068,7 +2188,7 @@ Page {
                 }
                 SheetButton {
                     objectName: "driveMark"
-                    visible: Bridge.recordingActive && !Bridge.logActive
+                    visible: Bridge.recordingActive
                     text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount) : qsTr("Mark")
                     Accessible.name: qsTr("Mark the recording")
                     onClicked: Bridge.mark()
