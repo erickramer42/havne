@@ -77,6 +77,10 @@ Page {
     readonly property var parsed: DashboardBook.parse(storedText, form)
     property var doc: parsed.doc
     readonly property string problem: parsed.problem
+    // The built-in layout is what's shown: nothing stored, or what is stored
+    // can't be read. A saved layout is drawn as it was saved
+    readonly property bool builtInShown: doc === parsed.doc && problem !== ""
+                                         && problem !== "dropped"
     // What a "dropped" read left out, in words
     readonly property string droppedWords: {
         const d = parsed.dropped
@@ -2607,7 +2611,7 @@ Page {
                 readonly property var boxes: {
                     const b = DashboardBook.place(placed, columns)
                     return root.joined && !root.editing && root.held < 0
-                        ? DashboardBook.stretched(placed, b, columns) : b
+                        ? DashboardBook.stretched(placed, b, columns, root.builtInShown) : b
                 }
                 readonly property var seams: root.joined
                     ? DashboardBook.seams(placed, boxes, columns) : []
