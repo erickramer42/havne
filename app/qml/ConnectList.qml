@@ -1,5 +1,5 @@
 // File/layer: app/qml/ConnectList.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.phone, QmlTest.home (test_qml)
 
 import QtQuick
 import QtQuick.Controls
@@ -8,28 +8,56 @@ import QtQuick.Shapes
 
 pragma ComponentBehavior: Bound
 
-// Dash with no session, on the phone: the addresses that connected, one
-// chosen, and the one Connect. Connecting stays Settings' (the page signals)
+// With no session, what can be connected to: the addresses that connected
+// (Recent), then the adapters the machine or the phone lists (Adapters),
+// one row chosen and the one Connect. Dash's card on the phone and the
+// desktop's Home. Connecting stays Settings' (the list signals)
 Rectangle {
     id: list
     objectName: "connectList"
 
-    property var uris: []
-    property int selected: 0
-    property string errorText: ""
+    // The addresses that connected, newest first, with the picked
+    // vehicle's saved one first when absent (Settings' connectUris)
+    property var recents: []
+    property string vehicleUri: ""
+    // [{ uri, title, kind }]: Settings' connectAdapters
+    property var adapters: []
+    // The phone's Bluetooth, read from the singleton; a test sets them
+    property bool bluetoothAvailable: Bluetooth.available
+    property string bluetoothPermission: Bluetooth.permission
+    property bool bluetoothNeedsSettings: Bluetooth.needsSettings
+    property bool bluetoothScanning: Bluetooth.scanning
+    // A phone's rows are a touch's size; the desktop's Home sets its own
+    property real rowHeight: Theme.touchTarget
+    // More adapters than this go behind Other address...
+    readonly property int maxAdapterRows: 6
 
-    signal picked(int index)
     signal connectTo(string uri)
     signal otherAddress()
     signal showLog()
+    // On screen again: Main lists the adapters anew
+    signal shown()
+    // A row tapped: the owner keeps it in `tapped`, since Dash's Loader
+    // makes the list again each time it shows
+    signal picked(string uri)
+    property string tapped: ""
+    onVisibleChanged: if (visible) shown()
+    Component.onCompleted: if (visible) shown()
 
     // Every row and button a touch's size (ThemedButton reads this)
-    readonly property real touchMin: Theme.touchTarget
+    readonly property real touchMin: rowHeight
     readonly property bool busy: Bridge.connecting || Bridge.disconnecting
-    readonly property string chosen: uris.length > 0
-        ? uris[Math.min(selected, uris.length - 1)] : ""
 
-    // What a row's address is, in words a driver knows
+    // The bridge's words for the last connect that failed
+    property string errorText: ""
+    Connections {
+        target: Bridge
+        function onConnectResult(uri, error) { list.errorText = error }
+    }
+    // Allow's asks: never one at the list's first show
+    property int bluetoothAsks: 0
+
+    // What a recent address is, in words a driver knows
     function kindOf(uri) {
         return uri.startsWith("mock://") ? qsTr("Demo data")
              : uri.startsWith("replay://") ? qsTr("Recording")
@@ -38,12 +66,119 @@ Rectangle {
              : uri.startsWith("socketcan://") ? qsTr("CAN interface")
              : ""
     }
+    function baseOf(uri) {
+        const query = uri.indexOf("?")
+        return query < 0 ? uri : uri.substring(0, query)
+    }
+
+    readonly property var recentRows: recents.map(u => ({
+        uri: u, title: Bridge.uriLabelFor(u), kind: kindOf(u), adapter: false }))
+    // An adapter that is also a recent address shows once, under Recent
+    readonly property var adapterRows: {
+        const taken = recents.map(baseOf)
+        const rows = adapters.filter(a => taken.indexOf(a.uri) < 0).slice(0, maxAdapterRows)
+            .map(a => ({ uri: a.uri, title: a.title, kind: a.kind, adapter: true }))
+        if (Theme.developerMode)
+            rows.push({ uri: "mock://demo", title: Bridge.uriLabelFor("mock://demo"),
+                        kind: qsTr("Demo data"), adapter: true, demo: true })
+        return rows
+    }
+    readonly property var rows: recentRows.concat(adapterRows)
+    // A tapped row; else the vehicle's saved address; else the newest
+    // recent; else the one adapter when there is exactly one; else none
+    readonly property string chosen: {
+        const uris = rows.map(r => r.uri)
+        if (tapped !== "" && uris.indexOf(tapped) >= 0)
+            return tapped
+        if (vehicleUri !== "" && uris.indexOf(vehicleUri) >= 0)
+            return vehicleUri
+        if (recents.length > 0)
+            return recents[0]
+        const real = adapterRows.filter(r => r.demo !== true)
+        return real.length === 1 ? real[0].uri : ""
+    }
+
+    // Bluetooth's line in Adapters: the permission first, asked only on
+    // a tap; then, with none paired or found, where to pair one
+    readonly property bool bluetoothAsk: bluetoothAvailable && bluetoothPermission !== "granted"
+    readonly property bool bluetoothNone: bluetoothAvailable && bluetoothPermission === "granted"
+        && !adapters.some(a => a.uri.startsWith("elm327://bt:") || a.uri.startsWith("elm327://ble:"))
+    function askBluetooth() {
+        ++bluetoothAsks
+        if (bluetoothNeedsSettings)
+            Bluetooth.openSettings()
+        else
+            Bluetooth.userRefresh()
+    }
 
     implicitHeight: column.implicitHeight + 24
     color: Theme.surface
     radius: Theme.radiusCard
     border.width: 1
     border.color: Theme.hairline
+
+    // A row: a check mark when chosen, the name, its kind
+    Component {
+        id: rowDelegate
+        ThemedButton {
+            id: row
+            required property var modelData
+            required property int index
+            readonly property bool isChosen: list.chosen === modelData.uri
+            objectName: "connectRow_" + (modelData.adapter ? list.recentRows.length + index : index)
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.preferredHeight: list.rowHeight
+            enabled: !list.busy
+            checkable: true
+            checked: isChosen
+            leftPadding: 12
+            rightPadding: 12
+            Accessible.name: modelData.kind !== "" ? qsTr("%1, %2").arg(modelData.title).arg(modelData.kind)
+                                                   : modelData.title
+            onClicked: list.picked(modelData.uri)
+            contentItem: RowLayout {
+                spacing: 10
+                // A mark, so the choice doesn't rest on the fill alone
+                Item {
+                    implicitWidth: 18; implicitHeight: 18   // layout-managed
+                    Shape {
+                        objectName: "connectRowMark"
+                        visible: row.isChosen
+                        anchors.centerIn: parent
+                        width: 24; height: 24
+                        scale: 0.75
+                        preferredRendererType: Shape.CurveRenderer
+                        ShapePath {
+                            strokeColor: Theme.text
+                            strokeWidth: 2.5
+                            fillColor: "transparent"
+                            capStyle: ShapePath.SquareCap
+                            startX: 5; startY: 12
+                            PathLine { x: 10; y: 17 }
+                            PathLine { x: 19; y: 7 }
+                        }
+                    }
+                }
+                Label {
+                    objectName: "connectRowAddress"
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    elide: Text.ElideRight
+                    font.pixelSize: Theme.fontEmphasis
+                    color: Theme.text
+                    text: row.modelData.title
+                }
+                Label {
+                    objectName: "connectRowKind"
+                    visible: text !== ""
+                    font.pixelSize: Theme.fontCaption
+                    color: Theme.textDim
+                    text: row.modelData.kind
+                }
+            }
+        }
+    }
 
     ColumnLayout {
         id: column
@@ -65,77 +200,93 @@ Rectangle {
                 wrapMode: Text.WordWrap
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textDim
-                text: list.uris.length > 0
+                text: list.rows.length > 0
                       ? qsTr("The gauges fill when a session runs. Pick a source, then connect.")
                       : qsTr("The gauges fill when a session runs. Choose what to connect to in Settings.")
             }
         }
 
         ColumnLayout {
+            objectName: "connectRecent"
             Layout.fillWidth: true
             spacing: 4
-            visible: list.uris.length > 0
-
+            visible: list.recentRows.length > 0
+            Label {
+                text: qsTr("Recent")
+                font.pixelSize: Theme.fontCaption
+                color: Theme.textDim
+            }
             Repeater {
-                model: list.uris
-                delegate: ThemedButton {
-                    id: row
-                    required property string modelData
-                    required property int index
-                    readonly property bool isChosen: list.selected === index
-                    objectName: "connectRow_" + index
+                model: list.recentRows
+                delegate: rowDelegate
+            }
+        }
+
+        ColumnLayout {
+            objectName: "connectAdapters"
+            Layout.fillWidth: true
+            spacing: 4
+            visible: list.adapterRows.length > 0 || list.bluetoothAsk || list.bluetoothNone
+            Label {
+                text: qsTr("Adapters")
+                font.pixelSize: Theme.fontCaption
+                color: Theme.textDim
+            }
+            Repeater {
+                model: list.adapterRows
+                delegate: rowDelegate
+            }
+            // Never asked at launch: a tap on Allow asks
+            RowLayout {
+                visible: list.bluetoothAsk
+                Layout.fillWidth: true
+                spacing: 8
+                Label {
+                    objectName: "connectBluetoothWhy"
                     Layout.fillWidth: true
-                    Layout.minimumWidth: 0
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontCaption
+                    color: Theme.textDim
+                    text: qsTr("Havne needs Android's permission to list paired adapters")
+                }
+                ThemedButton {
+                    objectName: "connectAllow"
+                    text: list.bluetoothNeedsSettings ? qsTr("Open settings") : qsTr("Allow")
                     enabled: !list.busy
-                    checkable: true
-                    checked: isChosen
-                    leftPadding: 12
-                    rightPadding: 12
-                    Accessible.name: qsTr("%1, %2").arg(address.text).arg(list.kindOf(modelData))
-                    onClicked: list.picked(index)
-                    contentItem: RowLayout {
-                        spacing: 10
-                        // A mark, so the choice doesn't rest on the fill alone
-                        Item {
-                            implicitWidth: 18; implicitHeight: 18   // layout-managed
-                            Shape {
-                                objectName: "connectRowMark"
-                                visible: row.isChosen
-                                anchors.centerIn: parent
-                                width: 24; height: 24
-                                scale: 0.75
-                                preferredRendererType: Shape.CurveRenderer
-                                ShapePath {
-                                    strokeColor: Theme.text
-                                    strokeWidth: 2.5
-                                    fillColor: "transparent"
-                                    capStyle: ShapePath.SquareCap
-                                    startX: 5; startY: 12
-                                    PathLine { x: 10; y: 17 }
-                                    PathLine { x: 19; y: 7 }
-                                }
-                            }
-                        }
-                        Label {
-                            id: address
-                            objectName: "connectRowAddress"
-                            Layout.fillWidth: true
-                            Layout.minimumWidth: 0
-                            elide: Text.ElideRight
-                            font.pixelSize: Theme.fontEmphasis
-                            color: Theme.text
-                            text: Bridge.uriLabelFor(row.modelData)
-                        }
-                        Label {
-                            objectName: "connectRowKind"
-                            visible: text !== ""
-                            font.pixelSize: Theme.fontCaption
-                            color: Theme.textDim
-                            text: list.kindOf(row.modelData)
-                        }
-                    }
+                    onClicked: list.askBluetooth()
                 }
             }
+            RowLayout {
+                visible: list.bluetoothNone
+                Layout.fillWidth: true
+                spacing: 8
+                Label {
+                    objectName: "connectBluetoothNone"
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: Theme.fontCaption
+                    color: Theme.textDim
+                    text: qsTr("No paired adapter. Pair it in Android's Bluetooth settings, "
+                               + "or scan for a BLE adapter")
+                }
+                ThemedButton {
+                    objectName: "connectScan"
+                    flat: true
+                    enabled: !list.bluetoothScanning && !list.busy
+                    text: list.bluetoothScanning ? qsTr("Scanning…") : qsTr("Scan")
+                    onClicked: Bluetooth.scan()
+                }
+            }
+        }
+
+        Label {
+            objectName: "connectPickHint"
+            visible: list.rows.length > 0 && list.chosen === ""
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            font.pixelSize: Theme.fontCaption
+            color: Theme.textDim
+            text: qsTr("Pick an adapter, then connect")
         }
 
         // The bridge's words for a connect that failed, and the Log beside
@@ -169,24 +320,30 @@ Rectangle {
             ThemedButton {
                 objectName: "connectOther"
                 flat: true
-                visible: list.uris.length > 0
+                visible: list.rows.length > 0
                 enabled: !list.busy
                 text: qsTr("Other address…")
                 onClicked: list.otherAddress()
             }
-            // Primary with a row to connect; with none it opens Settings,
-            // a secondary step
+            // Primary with a row chosen; with no row at all it opens
+            // Settings, a secondary step; with rows but none chosen it waits
             ThemedButton {
                 objectName: "connectGo"
                 highlighted: list.chosen !== ""
                 // A relay holds the adapter (ADR-0047); Settings' page doesn't connect
-                enabled: !list.busy && (list.chosen === "" || !Relay.running)
+                enabled: !list.busy && (list.chosen !== "" ? !Relay.running : list.rows.length === 0)
                 text: Bridge.connecting ? qsTr("Connecting…")
                     : Bridge.disconnecting ? qsTr("Disconnecting…")
-                    : list.chosen !== "" ? qsTr("Connect")
-                    : qsTr("Connect…")
-                onClicked: list.chosen !== "" ? list.connectTo(list.chosen)
-                                              : list.otherAddress()
+                    : list.rows.length === 0 ? qsTr("Connect…")
+                    : qsTr("Connect")
+                onClicked: {
+                    if (list.chosen === "") {
+                        list.otherAddress()
+                        return
+                    }
+                    list.errorText = ""
+                    list.connectTo(list.chosen)
+                }
             }
         }
     }
