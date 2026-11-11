@@ -998,10 +998,11 @@ requests and quiet states
 - **The extended session has met one module.** The test car's engine
   ECU answered `10 03` and read in the session through the VX and the
   MX+ ([2026-11-11-ext-session-car](bench-sessions/2026-11-11-ext-session-car.md)).
-  No module has taken tester present past S3 (the run's DID poll never
-  left `keepalive_ms` quiet) or read a DID that exists only in the
-  extended session, and the ELM327 close's `10 01` was cut off by the
-  adapter (`STOPPED`) every time (BENCH prep #36 in
+  Tester present held it through quiet gaps
+  ([2026-11-11-quiet-session-car](bench-sessions/2026-11-11-quiet-session-car.md)),
+  but no module's session has been read back and no DID that exists
+  only in the extended session has been read, and the closes don't
+  surely return the module (Known Issue #44; BENCH prep #36 in
   [bench-prep.md](bench-sessions/bench-prep.md)).
 - **Listening to another tester has met two adapters.** The MX+'s
   `AT MA` beside the VX on a Y-splitter passed the engine ECU's replies,

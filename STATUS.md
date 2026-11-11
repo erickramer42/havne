@@ -199,9 +199,11 @@ background too ([roadmap](#roadmap)).
     read in
     ([ADR-0060](docs/adr/0060-extended-session-reads.md)). Run parked on
     the test car through the VX and the MX+: the engine ECU entered it
-    (P2 50 ms, P2* 5000 ms) and read in it; tester present past S3 is
-    unchecked on a car, and the ELM327 close's `10 01` doesn't reach the
-    bus ([2026-11-11-ext-session-car](docs/bench-sessions/2026-11-11-ext-session-car.md)).
+    (P2 50 ms, P2* 5000 ms), read in it and took tester present in quiet
+    gaps with no loss; the closes don't yet return it surely (Known
+    Issue #44;
+    [2026-11-11-ext-session-car](docs/bench-sessions/2026-11-11-ext-session-car.md),
+    [2026-11-11-quiet-session-car](docs/bench-sessions/2026-11-11-quiet-session-car.md)).
   - **Your own signals** ([ADR-0051](docs/adr/0051-signal-files.md)):
     signal files, JSON that core reads from bytes and refuses at load
     where it's wrong, holding Service 01 PIDs and Service 22 DIDs on up
@@ -612,6 +614,18 @@ an issue is resolved it is removed, and its number is not reused.
     With three-button navigation it takes two presses. A tap on the
     gauges, then **Exit drive**, leaves at once in either mode. Checked
     on the test phone (Android 16) with the mock.
+- **#44. The extended session's close doesn't surely return a module
+    to the default session.** Through an ELM327 adapter, a close that
+    lands while a read is in flight types `1001` into the adapter's
+    reply and gets `STOPPED`, so `10 01` never goes out (3 of 3 on the
+    MX+; with nothing in flight it got `50 01`). Through J2534 the close
+    writes `10 01` and disconnects about 10 ms later; a `50 01` that
+    comes after that, with no other node on the bus to acknowledge it,
+    is sent again by the module until one does (about 13.5 s on the test
+    car, until the next session opened), though the module did return.
+    Through the ELM327 the module drops back by itself once S3 lapses
+    ([2026-11-11-ext-session-car](docs/bench-sessions/2026-11-11-ext-session-car.md),
+    [2026-11-11-quiet-session-car](docs/bench-sessions/2026-11-11-quiet-session-car.md)).
 
 ## Roadmap
 
