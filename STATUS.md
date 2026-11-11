@@ -232,10 +232,14 @@ background too ([roadmap](#roadmap)).
     numeric signal of the profile, each with its label, range, zones,
     decimals, size and place, saved as made, one set for every vehicle,
     the phone's and the desktop's apart, with peak hold and stale
-    dimming; Night (off, on or scheduled, in an amber or a red style)
-    beside the Dark look; on the phone, five tabs, a joined panel of
-    gauges and a drive view with the bars hidden
-    ([ADR-0059](docs/adr/0059-drive-view.md)); Settings as a list of
+    dimming, on one panel on both forms (the desktop's pages are tabs on
+    its upper edge) and with undo and redo in edit mode; Night (off, on
+    or scheduled, in an amber or a red style) beside the Dark look; on
+    the phone, five tabs and a drive view whose gauges fill the screen,
+    its controls on a sheet from the bottom
+    ([ADR-0059](docs/adr/0059-drive-view.md)); a connect list of the
+    recent addresses and the adapters on hand, on Dash on the phone and
+    on the desktop's Home (ADR-0059's appendix); Settings as a list of
     pages; Live's table and strip chart, the Log page's activity log, the
     Recordings page's viewer (pan, zoom, a cursor, the frames check's
     findings, two runs overlaid and aligned, a vehicle's baseline
