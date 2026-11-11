@@ -2108,6 +2108,74 @@ TestCase {
         }
     }
 
+    // The Log's back arrow on the tab-bar form: a touch's size at the left
+    // edge, back to the page that opened the Log, and Dash from no tab
+    function test_theLogsBackArrowReturnsWhereTheLogCameFrom_data() {
+        return [{ tag: "Settings", from: 6, name: "Back to Settings" },
+                { tag: "Dash", from: 1, name: "Back to Dash" },
+                { tag: "no tab", from: 0, name: "Back to Dash" }]
+    }
+    function test_theLogsBackArrowReturnsWhereTheLogCameFrom(data) {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        const log = find(main.contentItem, "logPage")
+        main.gotoPage(data.from)
+        main.openLog()
+        compare(main.currentPage, main.logPage, "the Log")
+        verify(waitForPolish(main), "laid out")
+        const back = find(log, "logBack")
+        verify(back.visible, "the arrow beside the tab bar")
+        compare(back.Accessible.name, data.name)
+        const top = back.mapToItem(main.contentItem, 0, 0)
+        const bottom = back.mapToItem(main.contentItem, back.width, back.height)
+        verify(bottom.y - top.y >= 47.5 && bottom.x - top.x >= 47.5,
+               "a touch's size: " + (bottom.x - top.x) + " x " + (bottom.y - top.y))
+        verify(top.x < 24, "at the left edge: " + top.x)
+        mouseClick(back)
+        compare(main.currentPage, data.from > 0 ? data.from : main.dashboardPage, "back")
+        if (data.from === main.settingsPage)
+            compare(settings.pageKey, "", "Settings' list")
+    }
+
+    // Beside the sidebar the Log is a listed page: nothing to go back to
+    function test_theLogsBackArrowHidesBesideTheSidebar() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 720
+        main.height = 800
+        main.openLog()
+        verify(waitForPolish(main), "laid out")
+        verify(!find(main.contentItem, "logBack").visible, "no arrow beside the sidebar")
+        main.width = 384
+        tryVerify(() => find(main.contentItem, "logBack").visible, 2000, "the arrow with the tab bar")
+    }
+
+    // At 320 px in developer mode the arrow, the title and a compact Copy
+    // share the title row and the Activity | Frames switch takes a row of
+    // its own under it
+    function test_theLogsHeaderFitsTheNarrowestPhone() {
+        const main = phoneMain()
+        main.width = 320
+        Theme.developerMode = true
+        const log = find(main.contentItem, "logPage")
+        main.openLog()
+        verify(waitForPolish(main), "laid out")
+        const row = find(log, "logTitleRow")
+        verify(row.implicitWidth <= log.availableWidth + 0.5,
+               "the title row needs " + row.implicitWidth + " of " + log.availableWidth)
+        verify(find(log, "copyLog").compact, "Copy is compact")
+        const rowBottom = row.mapToItem(main.contentItem, 0, row.height).y
+        for (const name of ["logBack", "copyLog", "view_activity", "view_frames"]) {
+            const item = find(log, name)
+            const right = item.mapToItem(main.contentItem, item.width, 0).x
+            verify(item.visible && right <= main.contentItem.width + 0.5, name + " ends at " + right)
+        }
+        const toggle = find(log, "logViewSwitch")
+        verify(toggle.mapToItem(main.contentItem, 0, 0).y >= rowBottom - 0.5,
+               "the switch under the title row")
+        compare(pastTheEdge(log, main.contentItem, []).length, 0, "nothing past the edge")
+    }
+
     function test_aFailedConnectFromTheListSaysWhyAndChangesNothing() {
         const main = phoneMain()
         const settings = find(main.contentItem, "settingsPage")
