@@ -40,16 +40,16 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 
 <table>
 <thead>
-<tr><th width="33%">Dashboard</th><th width="33%">Codes</th><th width="33%">Dashboard at night</th></tr>
+<tr><th width="33%">Drive view</th><th width="33%">Codes</th><th width="33%">Dashboard at night</th></tr>
 </thead>
 <tbody>
 <tr>
-<td><a href="docs/images/phone-dashboard-dark.png"><img src="docs/images/phone-dashboard-dark.png" alt="The phone layout's Dashboard in a 2nd-gear pull at 6,252 rpm" width="240"></a></td>
+<td><a href="docs/images/phone-drive-view.png"><img src="docs/images/phone-drive-view.png" alt="The phone layout's drive view: every bar hidden, the gauges filling the screen in a pull at 6,510 rpm" width="240"></a></td>
 <td><a href="docs/images/phone-codes.png"><img src="docs/images/phone-codes.png" alt="Codes on the test phone: the inspection verdict, the check-engine light, and stored, pending and permanent codes with their titles" width="240"></a></td>
 <td><a href="docs/images/phone-dashboard-night.png"><img src="docs/images/phone-dashboard-night.png" alt="The phone layout's Dashboard with Night on in red" width="240"></a></td>
 </tr>
 <tr>
-<td>The phone layout in a 2nd-gear pull, the shift lights filling</td>
+<td>The drive view: every bar hidden, the gauges filling the screen in a pull</td>
 <td>Reading and clearing codes on the test phone</td>
 <td>Night in red, for a dark cabin</td>
 </tr>

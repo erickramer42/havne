@@ -10,9 +10,9 @@ shots show. The README shows a few of these.
 
 - **Desktop:** the Windows app at 1280x800.
 - **Phone:** Live, Codes, the Log and Settings are from the test phone
-  (Android 16). The Dashboard is the phone layout with its built-in
-  default page, the same page drawn by the desktop build in the phone's
-  form at the phone's width.
+  (Android 16). The Dashboard and the drive view are the phone layout
+  with its built-in default page, the same page drawn by the desktop
+  build in the phone's form at the phone's width.
 
 ## Desktop
 
@@ -80,10 +80,23 @@ pulls, coolant and oil warming from the cold start.*
 
 | Dark | Night, amber | Night, red |
 |---|---|---|
-| [![The phone layout's Dashboard in a 2nd-gear pull at 6,252 rpm](images/phone-dashboard-dark.png)](images/phone-dashboard-dark.png) | [![The phone layout's Dashboard in Night's amber style at 5,359 rpm](images/phone-dashboard-amber.png)](images/phone-dashboard-amber.png) | [![The phone layout's Dashboard in Night's red style at 6,475 rpm](images/phone-dashboard-night.png)](images/phone-dashboard-night.png) |
+| [![The phone layout's Dashboard in a pull at 6,762 rpm](images/phone-dashboard-dark.png)](images/phone-dashboard-dark.png) | [![The phone layout's Dashboard in Night's amber style at 6,609 rpm](images/phone-dashboard-amber.png)](images/phone-dashboard-amber.png) | [![The phone layout's Dashboard in Night's red style at 6,568 rpm](images/phone-dashboard-night.png)](images/phone-dashboard-night.png) |
 
 *The phone's joined panel: the tach beside speed, coolant and oil, MAF
-with its trace, then intake air, load and throttle.*
+and boost with their traces, then intake air, battery and lambda.*
+
+### Dashboard in Light
+
+<a href="images/phone-dashboard-light.png"><img src="images/phone-dashboard-light.png" alt="The phone layout's Dashboard in the Light look at 6,517 rpm" width="240"></a>
+
+*Light: dark text on white, for the sun (Settings, Display, Look).*
+
+### Drive view
+
+<a href="images/phone-drive-view.png"><img src="images/phone-drive-view.png" alt="The phone layout's drive view: every bar hidden, the gauges filling the screen in a pull at 6,510 rpm" width="240"></a>
+
+*The drive view: the status line alone at the top and the panel filling
+the screen; a tap raises the controls from the bottom with the tab bar.*
 
 ### Live
 
