@@ -83,7 +83,7 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
-    // The look (ADR-0058): Dark, or Daylight for a screen read in sun.
+    // The look (ADR-0058): Dark, or Light for a screen read in sun.
     // Night shows over either; Theme.qml stores it. Shown while there is
     // more than one look to choose
     LabeledFlow {
@@ -92,7 +92,7 @@ ColumnLayout {
         Repeater {
             model: [
                 { look: "dark", label: qsTr("Dark") },
-                { look: "daylight", label: qsTr("Daylight") }
+                { look: "daylight", label: qsTr("Light") }
             ]
             ThemedButton {
                 required property var modelData

@@ -15,7 +15,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 - The Recordings viewer's Export panel has a Cancel button while an export runs:
   it stops at once and leaves nothing half written.
-- A Daylight look, dark text on white for reading the screen in sun, chosen
+- A Light look, dark text on white for reading the screen in sun, chosen
   on Settings' Display page. Night still shows over it when it's on, and on
   Android the status and navigation bar icons turn dark to match.
 - A signal file can give a signal a gauge: its range and its low and high
