@@ -2709,7 +2709,7 @@ Page {
 
                 Label {
                     objectName: "dashEmptyPage"
-                    visible: pageView.cells.length === 0 && !root.editing
+                    visible: pageView.cells.length === 0 && !root.editing && !root.connectShown
                     x: root.margin
                     y: root.topGap
                     width: pageView.gridWidth

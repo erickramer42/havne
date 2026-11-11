@@ -579,6 +579,15 @@ TestCase {
         compare(storedText(page), DashboardBook.serialize(page.doc))
     }
 
+    // On the phone with no session the connect list owns the page's top: the
+    // empty-page note waits until a session runs, so it never overdraws the list
+    function test_theEmptyPageNoteYieldsToTheConnectList() {
+        verify(!Bridge.connected, "no session")
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, docOf([]))
+        verify(page.connectShown, "the list shows")
+        verify(!find(page, "dashEmptyPage").visible, "the note stays off while the list shows")
+    }
+
     // A page that's full has no + cell and Add is off
     function test_aFullPageTakesNoMore() {
         const cells = []
