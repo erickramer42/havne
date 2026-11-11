@@ -96,6 +96,8 @@ public:
 
     // A local file copied as a content:// one is, so a test reaches the copy
     void setCopyLocalFilesForTesting(bool copy) { m_copyLocal = copy; }
+    // The next worker can't be started, as when the system is out of threads
+    void setFailThreadForTesting(bool on) { m_failThreadForTesting = on; }
 
     // The largest column map read, as havne-cli reads one
     static constexpr qint64 MapMaxBytes = 1024 * 1024;
@@ -121,5 +123,6 @@ private:
     std::atomic<bool> m_stop{false};
     bool m_busy = false;
     bool m_copyLocal = false;
+    bool m_failThreadForTesting = false;
     QString m_mapsRoot;
 };

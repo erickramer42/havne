@@ -123,6 +123,30 @@ const QRegularExpression
 
 } // namespace
 
+/* A worker that can't be started (the system out of threads) is a start
+ * that says no, with nothing busy and nothing made, for an import and for a
+ * guess alike */
+TEST(BridgeTest, AnImportWhoseThreadCantStartSaysSo)
+{
+    QTemporaryDir dir;
+    RecordingImport im([&] { return dir.path(); });
+    im.setFailThreadForTesting(true);
+    int busyChanges = 0;
+    QObject::connect(&im, &RecordingImport::busyChanged,
+                     [&busyChanges] { ++busyChanges; });
+    const QString log = write(dir, "two.log", kTwoBuses);
+    EXPECT_FALSE(
+        im.start(fileUrl(log), RecordingImport::Candump, QUrl(), QString()));
+    EXPECT_FALSE(im.guess(fileUrl(fixture("logger-a/log.csv")), QString()));
+    EXPECT_FALSE(im.busy());
+    EXPECT_EQ(busyChanges, 0);
+    EXPECT_EQ(entries(dir.path()), QStringList{QStringLiteral("two.log")});
+
+    im.setFailThreadForTesting(false);
+    const Imported ran = import(im, fileUrl(log), RecordingImport::Candump);
+    EXPECT_TRUE(ran.started) << "the importer is still usable";
+}
+
 /* The kind from the file's first line that isn't blank: candump's
  * "(seconds) interface ID#data" is candump, anything else a CSV */
 TEST(BridgeTest, ImportGuessesTheKindFromTheFirstLine)

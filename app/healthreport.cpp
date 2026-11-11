@@ -84,13 +84,24 @@ int stopAsked(void* user)
 } // namespace
 
 QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url,
-                              std::atomic<bool>* stop)
+                              std::atomic<bool>* stop, bool throughProvider)
 {
-    // Core's own name in a folder of the app's: never the vehicle's label
+    // A picker has already made the document it names: one that ends up
+    // holding no report goes
+    const bool provider = throughProvider || !url.isLocalFile();
+    const auto refused = [&](const QString& words) {
+        if (provider) {
+            QFile::remove(url.isLocalFile() ? url.toLocalFile()
+                                            : url.toString());
+        }
+        return failed(words);
+    };
+    // Core's own name in a folder of the app's: never the vehicle's label;
+    // removeStaleCopies finds the folder by its name
     QTemporaryDir dir(QDir::tempPath() +
                       QStringLiteral("/havne-health-XXXXXX"));
     if (!dir.isValid()) {
-        return failed(QStringLiteral("Couldn't make a temporary folder"));
+        return refused(QStringLiteral("Couldn't make a temporary folder"));
     }
     const QString path = dir.filePath(options.format == ECUIO_HEALTH_JSON
                                           ? QStringLiteral("health.json")
@@ -106,20 +117,20 @@ QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url,
     if (rc != ECUIO_OK) {
         // Core's words name no path and no value
         const QString detail = QString::fromUtf8(ecuio_last_error_detail());
-        return failed(detail.isEmpty()
-                          ? QStringLiteral("the report couldn't be written "
-                                           "(status %1)")
-                                .arg(static_cast<int>(rc))
-                          : detail);
+        return refused(detail.isEmpty()
+                           ? QStringLiteral("the report couldn't be written "
+                                            "(status %1)")
+                                 .arg(static_cast<int>(rc))
+                           : detail);
     }
     QFile written(path);
     if (!written.open(QIODevice::ReadOnly)) {
-        return failed(QStringLiteral("Couldn't read the report back"));
+        return refused(QStringLiteral("Couldn't read the report back"));
     }
     const QByteArray bytes = written.readAll();
     written.close();
     if (!writeToUrl(url, bytes)) {
-        return failed(QStringLiteral("Couldn't write the file"));
+        return refused(QStringLiteral("Couldn't write the file"));
     }
 
     const qulonglong leftOut =

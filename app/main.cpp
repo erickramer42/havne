@@ -118,7 +118,8 @@ int main(int argc, char *argv[])
 
     QQuickStyle::setStyle("Basic");
 
-    // An export killed mid-way leaves its temporary copy behind
+    // An export, import or report killed mid-way leaves its temporary copy
+    // behind
     RecordingExport::removeStaleCopies(QDir::tempPath(),
                                        QDateTime::currentDateTimeUtc());
 

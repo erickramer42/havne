@@ -405,9 +405,62 @@ TEST(RecordingExportTest, ARefusedExportLeavesAPickedDocumentGone)
     EXPECT_FALSE(QFileInfo::exists(picked)) << "the empty document goes";
 }
 
-/* Startup's sweep: an export's own temporary folder a day old goes, and
- * nothing else there, however near its name or however old */
-TEST(RecordingExportTest, StartupRemovesOnlyStaleExportFolders)
+/* A start that refuses (a start under way, no folder, a format it doesn't
+ * know) or whose thread can't start leaves no picked document, as a failed
+ * export does; a folder target is never removed */
+TEST(RecordingExportTest, ARefusedStartLeavesAPickedDocumentGone)
+{
+    QTemporaryDir dir;
+    RecordingExport e;
+    e.setThroughProviderForTesting(true);
+    const QString picked = dir.filePath(QStringLiteral("picked.csv"));
+    const auto pick = [&] { writeFile(picked, QByteArray()); };
+
+    pick();
+    EXPECT_FALSE(
+        e.start(asMap(QString(), Options{}), QUrl::fromLocalFile(picked)))
+        << "an empty folder";
+    EXPECT_FALSE(QFileInfo::exists(picked)) << "no folder";
+
+    pick();
+    Options odd;
+    odd.format = 99;
+    EXPECT_FALSE(e.start(asMap(fixture("pull-early"), odd),
+                         QUrl::fromLocalFile(picked)));
+    EXPECT_FALSE(QFileInfo::exists(picked)) << "a bad format";
+
+    pick();
+    e.setFailThreadForTesting(true);
+    EXPECT_FALSE(e.start(asMap(fixture("pull-early"), Options{}),
+                         QUrl::fromLocalFile(picked)));
+    EXPECT_FALSE(e.busy());
+    EXPECT_FALSE(QFileInfo::exists(picked)) << "a thread that can't start";
+    e.setFailThreadForTesting(false);
+
+    const QString folder = dir.filePath(QStringLiteral("target"));
+    ASSERT_TRUE(QDir().mkpath(folder));
+    Options copy;
+    copy.format = RecordingExport::Folder;
+    EXPECT_FALSE(e.start(asMap(QString(), copy), QUrl::fromLocalFile(folder)));
+    EXPECT_TRUE(QFileInfo(folder).isDir()) << "a folder target stays";
+
+    // A start under way (busy until its result is taken) refuses another,
+    // which leaves its own document
+    Options o;
+    pick();
+    const QString second = dir.filePath(QStringLiteral("second.csv"));
+    writeFile(second, QByteArray());
+    ASSERT_TRUE(
+        e.start(asMap(fixture("pull-early"), o), QUrl::fromLocalFile(picked)));
+    EXPECT_FALSE(
+        e.start(asMap(fixture("pull-early"), o), QUrl::fromLocalFile(second)));
+    EXPECT_FALSE(QFileInfo::exists(second)) << "the second pick";
+}
+
+/* Startup's sweep: the temporary folder of an export, an import or a health
+ * report a day old goes, and nothing else there, however near its name or
+ * however old */
+TEST(RecordingExportTest, StartupRemovesOnlyStaleCopies)
 {
     QTemporaryDir temp;
     ASSERT_TRUE(temp.isValid());
@@ -415,12 +468,19 @@ TEST(RecordingExportTest, StartupRemovesOnlyStaleExportFolders)
     const QStringList kept = {QStringLiteral("havne-export-Ab12C"),
                               QStringLiteral("havne-export-Ab12Cd7"),
                               QStringLiteral("havne-exporter-Ab12Cd"),
+                              QStringLiteral("havne-imports-Ab12Cd"),
+                              QStringLiteral("havne-other-Ab12Cd"),
                               QStringLiteral("other")};
     for (const QString& n : kept) {
         ASSERT_TRUE(t.mkpath(n));
     }
-    ASSERT_TRUE(t.mkpath(QStringLiteral("havne-export-Ab12Cd")));
-    writeFile(t.filePath(QStringLiteral("havne-export-Ab12Cd/export")), "copy");
+    const QStringList stale = {QStringLiteral("havne-export-Ab12Cd"),
+                               QStringLiteral("havne-import-Ab12Cd"),
+                               QStringLiteral("havne-health-Ab12Cd")};
+    for (const QString& n : stale) {
+        ASSERT_TRUE(t.mkpath(n));
+        writeFile(t.filePath(n + QStringLiteral("/copy")), "copy");
+    }
     writeFile(t.filePath(QStringLiteral("havne-export-Zz99Yy")), "a file");
 
     const QDateTime now = QDateTime::currentDateTimeUtc();
@@ -429,11 +489,15 @@ TEST(RecordingExportTest, StartupRemovesOnlyStaleExportFolders)
                                                  now.addSecs(23 * 60 * 60)),
               0)
         << "under a day old";
-    EXPECT_TRUE(t.exists(QStringLiteral("havne-export-Ab12Cd")));
+    for (const QString& n : stale) {
+        EXPECT_TRUE(t.exists(n)) << n.toStdString();
+    }
 
     EXPECT_EQ(RecordingExport::removeStaleCopies(temp.path(), now.addDays(2)),
-              1);
-    EXPECT_FALSE(t.exists(QStringLiteral("havne-export-Ab12Cd")));
+              3);
+    for (const QString& n : stale) {
+        EXPECT_FALSE(t.exists(n)) << n.toStdString();
+    }
     for (const QString& n : kept) {
         EXPECT_TRUE(t.exists(n)) << n.toStdString();
     }

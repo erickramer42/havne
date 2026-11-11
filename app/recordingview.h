@@ -116,6 +116,11 @@ public:
     Q_INVOKABLE bool
     saveHealthReport(const QUrl& url, int filterIndex,
                      const QString& baselineFolder = QString());
+    // A local target written as a content:// one is, so a test reaches the
+    // picked document's removal
+    void setThroughProviderForTesting(bool on) { m_throughProvider = on; }
+    // The next report's thread can't be started
+    void setFailThreadForTesting(bool on) { m_failThreadForTesting = on; }
 
     // Opens the recording in folder (the one holding signals.csv), closing
     // any open or opening one first. The state goes to Opening at once,
@@ -235,6 +240,8 @@ private:
     std::thread m_reportWorker;
     std::atomic<bool> m_reportStop{false};
     bool m_reporting = false;
+    bool m_throughProvider = false;
+    bool m_failThreadForTesting = false;
     // Each open's number: a result or progress posted for an earlier one
     // is dropped
     quint64 m_generation = 0;

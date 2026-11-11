@@ -55,10 +55,11 @@ public:
     Q_INVOKABLE static QString fileStem(const QString& folder);
     // Whether the folder holds a signals.csv, what a CSV export reads
     Q_INVOKABLE static bool holdsValues(const QString& folder);
-    // At startup: removes the folders an export killed mid-way left in
-    // tempPath (raw, they can hold a VIN), each named havne-export- and six
-    // letters or digits and last changed more than a day before now, and
-    // nothing else; the count removed
+    // At startup: removes the folders an export, an import or a health
+    // report killed mid-way left in tempPath (raw, they can hold a VIN), each
+    // named havne-export-, havne-import- or havne-health- and six letters or
+    // digits and last changed more than a day before now, and nothing else;
+    // the count removed
     static int removeStaleCopies(const QString& tempPath, const QDateTime& now);
 
     // Sizes the wide CSV for each of rowMs (0 a row a sweep, at most 64), the
@@ -91,6 +92,8 @@ public:
     // A local target written as a content:// one is, so a test reaches that
     // path
     void setThroughProviderForTesting(bool on) { m_throughProvider = on; }
+    // The next worker can't be started, as when the system is out of threads
+    void setFailThreadForTesting(bool on) { m_failThreadForTesting = on; }
     // The workers run out of memory at once
     void setFailWorkerForTesting(bool on) { m_failWorkerForTesting = on; }
     // Where a worker waits, up to ms or until the stop, as a long export
@@ -139,6 +142,7 @@ private:
     bool m_sizing = false;
     bool m_throughProvider = false;
     bool m_failWorkerForTesting = false;
+    bool m_failThreadForTesting = false;
     HoldForTesting m_holdForTesting = HoldForTesting::None;
     int m_holdMsForTesting = 0;
     std::atomic<int> m_heldForTesting{0};
