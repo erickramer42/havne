@@ -496,9 +496,10 @@ ecuio_status_t ecuio_session_get_replay_faults(
 #define ECUIO_DROP_SERVICE               3u   /* 7F <service> 11: not the
                                                  request, its whole service */
 #define ECUIO_DROP_ACCESS                4u   /* 7F <service> 33 or 7F: it
-                                                 needs security access or
-                                                 another diagnostic session,
-                                                 which core never asks for */
+                                                 needs security access or a
+                                                 session other than the
+                                                 extended one core enters on
+                                                 request (ADR-0060) */
 
 /* POD, 8 bytes */
 typedef struct ecuio_dropped_request {

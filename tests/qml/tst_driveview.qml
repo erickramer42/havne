@@ -668,7 +668,7 @@ TestCase {
         verify(s.dash.driving)
     }
 
-    // ---- The sheet (ADR-0059's appendix "the reveal from the bottom")
+    // ---- The sheet (ADR-0059's appendix "the fill and the reveal from the bottom")
 
     // The delay at Never, so a long case's presses find the sheet still up
     function neverHide() {

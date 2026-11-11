@@ -6,9 +6,10 @@
 // Colors the platform's own window from Theme's bg, surface and text, so a
 // night theme never sits under a bright title bar or a white strip, and a
 // light look never under a dark one. The class builds on every platform;
-// only its apply step differs: the color scheme follows the look's
-// lightness, Android colors its window and its bars' icons, Windows
-// colors the title bar, elsewhere the scheme alone.
+// main() makes one only on Windows and Android, so the color scheme follows
+// the look there and stays Dark, as main() sets it, elsewhere. Its apply
+// step: the scheme follows the look's lightness, Android colors its window
+// and its bars' icons, Windows colors the title bar.
 
 #pragma once
 
