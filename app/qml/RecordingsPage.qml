@@ -301,6 +301,10 @@ Page {
         if (importKind !== RecordingImport.Csv || importMap.toString() !== "")
             return
         importGuessing = Bridge.recordingImport.guess(importFile, "")
+        if (!importGuessing) {
+            importFailed = true
+            importNote = qsTr("The file couldn't be read. Column map... picks a map instead.")
+        }
     }
 
     // A map file chosen (the dialog, or one saved earlier) instead of the
@@ -327,13 +331,15 @@ Page {
     function startImport() {
         importNote = ""
         importFailed = false
-        if (importUsesGuess) {
-            Bridge.recordingImport.startWithMap(importFile, guessPreview.mapText())
-            return
+        const started = importUsesGuess
+            ? Bridge.recordingImport.startWithMap(importFile, guessPreview.mapText())
+            : Bridge.recordingImport.start(importFile, importKind, importMap,
+                                           importKind === RecordingImport.Candump
+                                           ? importInterface.text : "")
+        if (!started) {
+            importFailed = true
+            importNote = qsTr("Not imported: the import couldn't start")
         }
-        Bridge.recordingImport.start(importFile, importKind, importMap,
-                                     importKind === RecordingImport.Candump
-                                     ? importInterface.text : "")
     }
 
     // What an import made, in words

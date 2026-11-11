@@ -23,6 +23,7 @@
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "recordingexport.h"
+#include "recordingimport.h"
 #include "signalstore.h"
 #include "windowtheme.h"
 
@@ -194,6 +195,15 @@ public:
     {
         const auto* e = qobject_cast<RecordingExport*>(exporter);
         return e != nullptr ? e->heldForTesting() : -1;
+    }
+
+    // The importer (Bridge.recordingImport) can't start its worker thread
+    // while on, as a system out of threads
+    Q_INVOKABLE void failImportThreads(QObject* importer, bool on)
+    {
+        if (auto* i = qobject_cast<RecordingImport*>(importer)) {
+            i->setFailThreadForTesting(on);
+        }
     }
 
     // The color scheme (Qt::ColorScheme as an int: 1 Light, 2 Dark) a
