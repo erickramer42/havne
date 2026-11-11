@@ -33,7 +33,7 @@ TestCase {
     Component { id: shiftC;  ShiftLightBar { width: 400; height: 40; from: 0; to: 100 } }
     Component { id: sparkC; SparkGauge { width: 300; height: 120; from: 0; to: 100; value: 50; hasValue: true } }
     Component { id: segmentC; SegmentGauge { width: 300; height: 120; from: 0; to: 100; value: 50; hasValue: true } }
-    Component { id: homeC;   HomePage    { width: 400; height: 800 } }
+    Component { id: homeC;   HomePage    { width: 400; height: 800; animated: false } }
 
     readonly property var kinds: [
         { tag: "analog", c: analogC }, { tag: "bar", c: barC },
@@ -326,7 +326,6 @@ TestCase {
         same(hues[8].hue, "#ffd166", "the middle")
         same(hues[14].hue, "#f87171", "the last")
         const home = createTemporaryObject(homeC, testCase.parent)
-        home.visible = false
         const logo = find(home, "homeLogo")
         logo.rpm = 800
         same(logo.litColor, "#4ade80", "the logo's idle color")
@@ -387,7 +386,6 @@ TestCase {
     function test_homesLogoFollowsTheTheme() {
         const home = createTemporaryObject(homeC, testCase.parent)
         verify(home, "Home loads")
-        home.visible = false   // the idle animation runs only while Home shows
         const logo = find(home, "homeLogo")
         logo.rpm = 800
         for (const name of Theme.paletteNames) {

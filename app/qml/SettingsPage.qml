@@ -1253,6 +1253,22 @@ Pane {
         return vehicle === "" || recents.includes(vehicle) ? recents : [vehicle].concat(recents)
     }
     readonly property var connectUris: connectRows(recentUris, vehicleUri)
+    // What the connect lists offer besides the recent addresses: the J2534
+    // interfaces, the serial ports, the CAN interfaces and the phone's
+    // Bluetooth adapters, as Connection's device list has them
+    readonly property var connectAdapters: j2534Devices.map(d => ({
+            uri: "j2534://" + d.vendorName,
+            title: d.vendorName + (d.architecture ? "  (" + d.architecture + ")" : ""),
+            kind: qsTr("J2534 adapter")
+        })).concat(serialPorts.map(p => ({
+            uri: "elm327://" + p.name, title: p.name, kind: qsTr("Serial port")
+        }))).concat(canInterfaces.map(c => ({
+            uri: "socketcan://" + c.name, title: c.name, kind: qsTr("CAN interface")
+        }))).concat(bluetoothAdapters.map(a => ({
+            uri: "elm327://" + a.kind + ":" + a.address,
+            title: a.name !== "" ? a.name : a.address,
+            kind: a.kind === "ble" ? qsTr("Bluetooth LE") : qsTr("Bluetooth")
+        })))
     // Dash's Connect: the field shows it as typed text, before the connect
     function connectFromList(uri) {
         uriField.text = uri

@@ -1772,39 +1772,33 @@ Page {
     }
 
     // No session on the phone: the connect list, in the panel's place above
-    // the gauges, on every page. Settings owns connecting
+    // the gauges, on every page. Settings owns connecting; ConnectList the
+    // chosen row and the last failure's words
     property var connectUris: []
     property string connectVehicleUri: ""
-    // A tapped row is the user's choice; else the picked vehicle's address
+    property var connectAdapters: []
+    // A tapped row outlives the list, which the Loader makes again each show
     property string connectTapped: ""
-    readonly property int connectPick: {
-        const wanted = connectTapped !== "" ? connectTapped : connectVehicleUri
-        return Math.max(0, connectUris.indexOf(wanted))
-    }
-    property string connectError: ""
     readonly property bool connectShown: form === "phone" && !Bridge.connected && !editing
     signal connectToUri(string uri)
     signal otherAddressRequested()
     signal logRequested()
+    signal connectListShown()
     onConnectUrisChanged: connectTapped = ""
     onConnectVehicleUriChanged: connectTapped = ""
-    Connections {
-        target: Bridge
-        function onConnectResult(uri, error) { root.connectError = error }
-    }
     Component {
         id: connectPanel
-        DashConnectList {
-            uris: root.connectUris
-            selected: root.connectPick
-            errorText: root.connectError
-            onPicked: index => root.connectTapped = root.connectUris[index]
-            onConnectTo: uri => {
-                root.connectError = ""
-                root.connectToUri(uri)
-            }
+        ConnectList {
+            objectName: "dashConnectList"
+            recents: root.connectUris
+            vehicleUri: root.connectVehicleUri
+            adapters: root.connectAdapters
+            tapped: root.connectTapped
+            onPicked: uri => root.connectTapped = uri
+            onConnectTo: uri => root.connectToUri(uri)
             onOtherAddress: root.otherAddressRequested()
             onShowLog: root.logRequested()
+            onShown: root.connectListShown()
         }
     }
 

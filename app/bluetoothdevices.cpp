@@ -1,6 +1,6 @@
 // File/layer: app/bluetoothdevices.cpp | Qt6 Core/Qml (+ Bluetooth on
 //             Android), app layer, C++17
-// Testing: QML: QmlTest.settings (test_qml); BENCH
+// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml); BENCH
 
 #include "bluetoothdevices.h"
 #include "sessionbridge.h"
@@ -134,6 +134,15 @@ bool BluetoothDevices::available() const
 #endif
 }
 
+QString BluetoothDevices::permission() const
+{
+#ifdef APP_BLUETOOTH
+    return m_permission;
+#else
+    return QStringLiteral("unavailable");
+#endif
+}
+
 QVariantList BluetoothDevices::adapters() const
 {
     QVariantList all = m_paired;
@@ -221,6 +230,28 @@ void BluetoothDevices::deniedStatus()
     emit statusChanged();
 }
 
+// Qt's answer as the permission property's word
+static QString permissionWord(Qt::PermissionStatus status)
+{
+    switch (status) {
+    case Qt::PermissionStatus::Granted:
+        return QStringLiteral("granted");
+    case Qt::PermissionStatus::Denied:
+        return QStringLiteral("denied");
+    case Qt::PermissionStatus::Undetermined:
+        break;
+    }
+    return QStringLiteral("undetermined");
+}
+
+void BluetoothDevices::setPermission(const QString& permission)
+{
+    if (m_permission != permission) {
+        m_permission = permission;
+        emit statusChanged();
+    }
+}
+
 // Android's answer on the Nearby devices permission (BLUETOOTH_CONNECT and
 // BLUETOOTH_SCAN, declared never for location: app/CMakeLists.txt). With
 // ask, an undecided one is asked, and the list or the scan runs on a yes.
@@ -232,7 +263,9 @@ bool BluetoothDevices::permitted(bool ask, bool forScan, bool user)
 {
     QBluetoothPermission permission;
     permission.setCommunicationModes(QBluetoothPermission::Access);
-    switch (qApp->checkPermission(permission)) {
+    const Qt::PermissionStatus status = qApp->checkPermission(permission);
+    setPermission(permissionWord(status));
+    switch (status) {
     case Qt::PermissionStatus::Granted:
         return true;
     case Qt::PermissionStatus::Denied:
@@ -249,6 +282,7 @@ bool BluetoothDevices::permitted(bool ask, bool forScan, bool user)
     }
     qApp->requestPermission(
         permission, this, [this, forScan](const QPermission& answer) {
+            setPermission(permissionWord(answer.status()));
             if (answer.status() == Qt::PermissionStatus::Granted) {
                 if (forScan) {
                     scanNow();

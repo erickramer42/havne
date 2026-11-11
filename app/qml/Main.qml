@@ -167,6 +167,12 @@ ApplicationWindow {
         settingsView.showAdapters()
         gotoPage(settingsPage)
     }
+    // A connect list on screen: the ports, interfaces and Bluetooth adapters
+    // read again, Bluetooth's without asking for its permission
+    function listAdapters() {
+        settingsView.refreshDevices()
+        Bluetooth.refresh(false)
+    }
     // Settings' Log row and Show log beside a failed connect: the Log at its
     // newest line; Back returns to the page that asked
     function openLog() {
@@ -179,7 +185,8 @@ ApplicationWindow {
         if (logBackTab.page !== cameFrom || !goBack())
             gotoPage(dashboardPage)
     }
-    // Dash's "Other address...": Back returns to Dash, not to Settings' list
+    // A connect list's "Other address..." (Dash's, Home's): Back returns to
+    // that page, not to Settings' list
     function openConnectFromDash() {
         openConnect()
         settingsView.backLeaves = true
@@ -656,7 +663,14 @@ ApplicationWindow {
                     clip: true
                     HomePage {
                         objectName: "homePage"
-                        onConnectRequested: root.openConnect()
+                        recents: settingsView.connectUris
+                        vehicleUri: settingsView.vehicleUri
+                        adapters: settingsView.connectAdapters
+                        onConnectToUri: uri => settingsView.connectFromList(uri)
+                        onOtherAddressRequested: root.openConnectFromDash()
+                        onLogRequested: root.openLog()
+                        onListShown: root.listAdapters()
+                        onDashboardRequested: root.gotoPage(root.dashboardPage)
                     }
                     DashboardPage {
                         id: dashboardView
@@ -664,6 +678,8 @@ ApplicationWindow {
                         offlineUri: settingsView.offlineUri
                         connectUris: settingsView.connectUris
                         connectVehicleUri: settingsView.vehicleUri
+                        connectAdapters: settingsView.connectAdapters
+                        onConnectListShown: root.listAdapters()
                         onConnectToUri: uri => settingsView.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()
                         onLogRequested: root.openLog()

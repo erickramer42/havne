@@ -1896,14 +1896,171 @@ TestCase {
 
     // Dash with no session on the phone: the recent addresses, the newest
     // chosen, and one Connect; the list goes once a session runs
-    function connectListOn(main, uris) {
+    // Dash's list with these recent addresses, and these Bluetooth adapters
+    // in place of the machine's own interfaces and ports (none by default),
+    // which a list on screen reads again
+    function connectListOn(main, uris, bluetooth) {
         const dash = find(main.contentItem, "dashboardPage")
+        const settings = find(main.contentItem, "settingsPage")
         dash.form = "phone"
-        find(main.contentItem, "settingsPage").recentUris = uris
+        settings.recentUris = uris
         tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "the list loads")
         const list = findChild(dash, "dashConnectList")
+        settings.j2534Devices = []
+        settings.serialPorts = []
+        settings.canInterfaces = []
+        settings.bluetoothAdapters = bluetooth || []
         verify(waitForPolish(main), "laid out")
         return list
+    }
+
+    // The desktop's Home connects the chosen row through Settings, as
+    // Dash's list does: the address in its field, then the session
+    function test_homeConnectsThroughSettings() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1280
+        main.height = 720
+        const settings = find(main.contentItem, "settingsPage")
+        const home = find(main.contentItem, "homePage")
+        main.gotoPage(Array.from(home.parent.children).indexOf(home))
+        settings.recentUris = ["mock://demo"]
+        const list = find(home, "homeConnectList")
+        tryCompare(list, "chosen", "mock://demo", 2000, "the recent address")
+        find(list, "connectGo").clicked()
+        tryVerify(() => Bridge.connected, 5000, "it connects")
+        compare(settings.uriField.text, "mock://demo", "through Settings' field")
+        tryVerify(() => find(home, "homeSession").visible, 2000, "the session's card")
+    }
+
+    // A fresh phone: no recent address, the paired adapter and a BLE one
+    // on the list, neither chosen while there are two
+    function test_aFreshPhoneListsItsPairedAdapters() {
+        const main = phoneMain()
+        const list = connectListOn(main, [], [
+            { name: "OBD adapter", address: "00:11:22:33:44:55", kind: "bt" },
+            { name: "", address: "AA:BB:CC:DD:EE:FF", kind: "ble" }])
+        tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "two rows")
+        const first = find(list, "connectRow_0")
+        compare(find(first, "connectRowAddress").text, "OBD adapter")
+        compare(find(first, "connectRowKind").text, "Bluetooth")
+        const second = find(list, "connectRow_1")
+        compare(find(second, "connectRowAddress").text, "AA:BB:CC:DD:EE:FF", "no name: the address")
+        compare(find(second, "connectRowKind").text, "Bluetooth LE")
+        verify(!find(list, "connectRecent").visible, "no Recent group")
+        verify(find(list, "connectAdapters").visible, "the Adapters group")
+        compare(list.chosen, "", "two adapters: none chosen")
+        verify(find(list, "connectPickHint").visible, "says to pick one")
+        const go = find(list, "connectGo")
+        verify(!go.enabled, "Connect waits for a pick")
+        mouseClick(first)
+        tryCompare(list, "chosen", "elm327://bt:00:11:22:33:44:55", 2000, "the tap")
+        verify(go.enabled && go.highlighted, "then Connect is the primary")
+        verify(!find(list, "connectPickHint").visible)
+    }
+
+    // Without the permission the Adapters group says why and offers Allow,
+    // which asks only when tapped; with it and nothing paired, where to pair
+    // one and a scan
+    function test_withoutThePermissionTheListAsks() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["elm327://COM1"])
+        compare(list.bluetoothAsks, 0, "nothing asked at the list's first show")
+        list.bluetoothAvailable = true
+        list.bluetoothPermission = "undetermined"
+        verify(waitForPolish(main), "laid out")
+        const allow = find(list, "connectAllow")
+        verify(allow.visible && find(list, "connectBluetoothWhy").visible, "Allow, and why")
+        compare(allow.text, "Allow")
+        compare(list.bluetoothAsks, 0, "still nothing asked")
+        mouseClick(allow)
+        compare(list.bluetoothAsks, 1, "a tap asks")
+        list.bluetoothNeedsSettings = true
+        compare(allow.text, "Open settings", "asked no more: the settings")
+        list.bluetoothNeedsSettings = false
+        list.bluetoothPermission = "granted"
+        verify(waitForPolish(main), "laid out")
+        verify(!allow.visible, "allowed: no Allow")
+        verify(find(list, "connectBluetoothNone").visible && find(list, "connectScan").visible,
+               "nothing paired: where to pair, and Scan")
+        find(main.contentItem, "settingsPage").bluetoothAdapters =
+            [{ name: "OBD adapter", address: "00:11:22:33:44:55", kind: "bt" }]
+        tryVerify(() => !find(list, "connectBluetoothNone").visible, 2000, "one paired: its row instead")
+        list.bluetoothAvailable = false
+        list.bluetoothPermission = "unavailable"
+    }
+
+    // With no recent address and exactly one adapter, it is chosen; the
+    // developer's demo row doesn't count
+    function test_aSoleAdapterIsChosen() {
+        const main = phoneMain()
+        const list = connectListOn(main, [])
+        Theme.developerMode = true
+        try {
+            find(main.contentItem, "settingsPage").serialPorts = [{ name: "COM9", device: "" }]
+            tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "the port and the demo")
+            compare(find(find(list, "connectRow_1"), "connectRowKind").text, "Demo data")
+            compare(list.chosen, "elm327://COM9", "the one adapter")
+            verify(find(list, "connectRow_0").checked, "its row marked")
+            const go = find(list, "connectGo")
+            verify(go.enabled && go.highlighted && go.text === "Connect", "one tap connects")
+            Theme.developerMode = false
+            tryVerify(() => findChild(list, "connectRow_1") === null, 2000, "no demo row off developer mode")
+            find(main.contentItem, "settingsPage").serialPorts =
+                [{ name: "COM9", device: "" }, { name: "COM8", device: "" }]
+            tryCompare(list, "chosen", "", 2000, "two: none chosen")
+        } finally {
+            Theme.developerMode = false
+        }
+    }
+
+    // An adapter that is also a recent address shows once, under Recent
+    function test_anAdapterAlsoRecentShowsOnce() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["elm327://COM9?profile=obd2"])
+        find(main.contentItem, "settingsPage").serialPorts =
+            [{ name: "COM9", device: "" }, { name: "COM8", device: "" }]
+        tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "the recent and COM8")
+        compare(find(find(list, "connectRow_1"), "connectRowAddress").text, "COM8")
+        compare(findChild(list, "connectRow_2"), null, "COM9 once")
+        compare(list.chosen, "elm327://COM9?profile=obd2", "the recent one")
+    }
+
+    // At most six adapter rows; the rest are Other address...'s
+    function test_atMostSixAdaptersShow() {
+        const main = phoneMain()
+        const list = connectListOn(main, [])
+        const ports = []
+        for (let i = 1; i <= 8; ++i)
+            ports.push({ name: "COM" + i, device: "" })
+        find(main.contentItem, "settingsPage").serialPorts = ports
+        tryVerify(() => findChild(list, "connectRow_5") !== null, 2000, "six rows")
+        compare(findChild(list, "connectRow_6"), null, "no seventh")
+        verify(find(list, "connectOther").visible, "the rest through Other address")
+    }
+
+    // Every row and button on the list is a touch's size, inside the glass
+    function test_theListsTargetsAreATouchsSize() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["elm327://COM1"],
+                                   [{ name: "OBD adapter", address: "00:11:22:33:44:55", kind: "bt" }])
+        list.bluetoothAvailable = true
+        list.bluetoothPermission = "undetermined"
+        verify(waitForPolish(main), "laid out")
+        try {
+            for (const name of ["connectRow_0", "connectRow_1", "connectAllow", "connectOther", "connectGo"]) {
+                const item = find(list, name)
+                const top = item.mapToItem(main.contentItem, 0, 0).y
+                const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+                verify(item.visible && bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+            }
+            const over = []
+            pastTheEdge(list, main.contentItem, over)
+            compare(over, [], "past the edge: " + over.join(", "))
+        } finally {
+            list.bluetoothAvailable = false
+            list.bluetoothPermission = "unavailable"
+        }
     }
 
     function test_dashsConnectListConnectsTheChosenAddress() {
@@ -2058,6 +2215,13 @@ TestCase {
         settings.recentUris = ["mock://third", "mock://first", "mock://second"]
         tryVerify(() => rowIs(list, 0, "mock://third"), 2000, "the newest again")
         compare(list.chosen, "mock://third")
+    }
+
+    // A build without Bluetooth has no permission to ask for: a list
+    // reading it offers no Allow (Android's answers are the phone's)
+    function test_aComputerHasNoBluetoothPermissionToAsk() {
+        verify(!Bluetooth.available, "no Bluetooth in this build")
+        compare(Bluetooth.permission, "unavailable")
     }
 
     // Settings' Log row opens the Log page itself, and Back returns to
