@@ -1,4 +1,4 @@
-// File/layer: app/qml/DashConnectList.qml | Qt6 Quick + Shapes, UI layer
+// File/layer: app/qml/ConnectList.qml | Qt6 Quick + Shapes, UI layer
 // Testing: QML: QmlTest.phone (test_qml)
 
 import QtQuick
@@ -12,7 +12,7 @@ pragma ComponentBehavior: Bound
 // chosen, and the one Connect. Connecting stays Settings' (the page signals)
 Rectangle {
     id: list
-    objectName: "dashConnectList"
+    objectName: "connectList"
 
     property var uris: []
     property int selected: 0

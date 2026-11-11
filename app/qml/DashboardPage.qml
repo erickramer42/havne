@@ -1641,7 +1641,8 @@ Page {
     }
     Component {
         id: connectPanel
-        DashConnectList {
+        ConnectList {
+            objectName: "dashConnectList"
             uris: root.connectUris
             selected: root.connectPick
             errorText: root.connectError
