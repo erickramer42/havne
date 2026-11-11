@@ -299,38 +299,29 @@ ColumnLayout {
         text: panel.note
     }
 
-    Rectangle {
-        implicitWidth: formatSwitch.implicitWidth + 4
-        implicitHeight: formatSwitch.implicitHeight + 4
-        radius: Theme.radius
-        color: Theme.surface
-        Row {
-            id: formatSwitch
-            anchors.centerIn: parent
-            spacing: 2
-            SegmentButton {
-                objectName: "exportFormat_csv"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("CSV")
-                selected: panel.format === "csv"
-                enabled: panel.hasValues
-                onClicked: panel.format = "csv"
-            }
-            SegmentButton {
-                objectName: "exportFormat_pcapng"
-                implicitHeight: Theme.touchTarget
-                visible: panel.view.hasFrames
-                text: qsTr("pcapng")
-                selected: panel.format === "pcapng"
-                onClicked: panel.format = "pcapng"
-            }
-            SegmentButton {
-                objectName: "exportFormat_folder"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("Folder")
-                selected: panel.format === "folder"
-                onClicked: panel.format = "folder"
-            }
+    SegmentRow {
+        SegmentButton {
+            objectName: "exportFormat_csv"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("CSV")
+            selected: panel.format === "csv"
+            enabled: panel.hasValues
+            onClicked: panel.format = "csv"
+        }
+        SegmentButton {
+            objectName: "exportFormat_pcapng"
+            implicitHeight: Theme.touchTarget
+            visible: panel.view.hasFrames
+            text: qsTr("pcapng")
+            selected: panel.format === "pcapng"
+            onClicked: panel.format = "pcapng"
+        }
+        SegmentButton {
+            objectName: "exportFormat_folder"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("Folder")
+            selected: panel.format === "folder"
+            onClicked: panel.format = "folder"
         }
     }
 
@@ -343,30 +334,21 @@ ColumnLayout {
         text: qsTr("No CSV: this recording has frames alone, no values were recorded.")
     }
 
-    Rectangle {
+    SegmentRow {
         visible: panel.format === "csv"
-        implicitWidth: layoutSwitch.implicitWidth + 4
-        implicitHeight: layoutSwitch.implicitHeight + 4
-        radius: Theme.radius
-        color: Theme.surface
-        Row {
-            id: layoutSwitch
-            anchors.centerIn: parent
-            spacing: 2
-            SegmentButton {
-                objectName: "exportLayout_wide"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("Wide")
-                selected: !panel.longLayout
-                onClicked: panel.longLayout = false
-            }
-            SegmentButton {
-                objectName: "exportLayout_long"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("Long")
-                selected: panel.longLayout
-                onClicked: panel.longLayout = true
-            }
+        SegmentButton {
+            objectName: "exportLayout_wide"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("Wide")
+            selected: !panel.longLayout
+            onClicked: panel.longLayout = false
+        }
+        SegmentButton {
+            objectName: "exportLayout_long"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("Long")
+            selected: panel.longLayout
+            onClicked: panel.longLayout = true
         }
     }
 
@@ -455,30 +437,21 @@ ColumnLayout {
         text: qsTr("Signals:")
         color: Theme.textDim
     }
-    Rectangle {
+    SegmentRow {
         visible: panel.wideCsv && panel.hasValues && panel.plottedOffered
-        implicitWidth: columnSwitch.implicitWidth + 4
-        implicitHeight: columnSwitch.implicitHeight + 4
-        radius: Theme.radius
-        color: Theme.surface
-        Row {
-            id: columnSwitch
-            anchors.centerIn: parent
-            spacing: 2
-            SegmentButton {
-                objectName: "exportColumns_own"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("The log's own")
-                selected: !panel.usePlotted
-                onClicked: panel.columnChoice = "own"
-            }
-            SegmentButton {
-                objectName: "exportColumns_plotted"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("The %1 plotted").arg(panel.plottedNames.length)
-                selected: panel.usePlotted
-                onClicked: panel.columnChoice = "plotted"
-            }
+        SegmentButton {
+            objectName: "exportColumns_own"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("The log's own")
+            selected: !panel.usePlotted
+            onClicked: panel.columnChoice = "own"
+        }
+        SegmentButton {
+            objectName: "exportColumns_plotted"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("The %1 plotted").arg(panel.plottedNames.length)
+            selected: panel.usePlotted
+            onClicked: panel.columnChoice = "plotted"
         }
     }
 

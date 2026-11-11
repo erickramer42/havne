@@ -103,6 +103,36 @@ TestCase {
         + "Intake air temperature after the intercooler (deg C),Always empty\n"
         + "0,800.5,31.5,\n1,900.25,31.75,\n2,950,32,\n"
 
+    // The Log's buttons and segments reach a phone's touch size, in both
+    // views, so a thumb never meets a 30 px switch
+    function test_theLogsControlsReachATouchTarget() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        Theme.developerMode = true
+        main.width = 384
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const page = find(main.contentItem, "logPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        verify(waitForPolish(main), "laid out")
+        verify(Theme.touchTarget >= 48, "the phone's target")
+        page.view = "activity"
+        for (const n of ["copyLog", "view_activity", "view_frames"]) {
+            const b = find(page, n)
+            verify(b.visible, n + " shows")
+            verify(b.height >= Theme.touchTarget - 0.5, n + " is " + b.height + " high")
+        }
+        page.view = "frames"
+        verify(waitForPolish(main), "laid out")
+        for (const n of ["pauseFrames", "clearFrames", "exportFrames", "table_frames", "table_byId",
+                         "filterToggle"]) {
+            const b = find(page, n)
+            verify(b.visible, n + " shows")
+            verify(b.height >= Theme.touchTarget - 0.5, n + " is " + b.height + " high")
+        }
+    }
+
     // The test phone upright, in device-independent pixels (1440 px
     // at 600 dpi)
     function test_everyPageFitsAPhonesWidth_data() {
@@ -256,6 +286,8 @@ TestCase {
         display.orientationShown = true
         find(page, "driveHide_0").text = "W".repeat(60)
         find(page, "driveOrientation_follow").text = "W".repeat(60)
+        for (const name of ["look_dark", "night_off", "nightStyle_amber", "units_metric"])
+            find(page, name).text = "W".repeat(60)
         wait(300)
         // Geometry alone is read below; a render waits out 5 s at 100 % when no frame is due
         verify(waitForPolish(main), "laid out")
@@ -270,7 +302,8 @@ TestCase {
         }
         for (const name of ["driveHide_2000", "driveHide_4000", "driveHide_8000", "driveHide_0",
                             "driveOrientation_follow", "driveOrientation_upright",
-                            "driveOrientation_side"]) {
+                            "driveOrientation_side", "look_dark", "night_off", "nightStyle_amber",
+                            "units_metric"]) {
             const seg = find(page, name)
             const label = seg.contentItem
             verify(label.contentWidth <= label.width + 0.5,
