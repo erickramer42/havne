@@ -696,6 +696,21 @@ QtObject {
         })
     }
 
+    // The cell drawn as another kind, everything else kept: refs, unit,
+    // label, span and every option (a kind's own options stay stored for
+    // the way back). A blank has no signal, so neither side is blank
+    function setKind(doc, page, index, kind) {
+        return write(doc, d => {
+            if (!hasCell(d, page, index) || !knownKind(kind) || kind === "blank")
+                return false
+            const c = d.pages[page].cells[index]
+            if (c.kind === "blank" || c.kind === kind)
+                return false
+            c.kind = kind
+            return true
+        })
+    }
+
     // Merged into the cell's options; null removes a key, and a key
     // holding undefined is left out of the change. Keys this version
     // doesn't know are kept, as read

@@ -109,6 +109,7 @@ Page {
     property int selectedCount: 15   // the selected Shift lights card's lights
     property string panel: ""        // "", "cell", "add", "signal"
     property string addKind: ""      // Add's kind; "" when changing a cell's signal
+    property bool changingKind: false  // the kind list picks the selected cell's kind
     property bool moreShown: false
     property bool confirmReset: false
     property bool confirmRemovePage: false
@@ -571,9 +572,35 @@ Page {
         commitTyping()
         selected = -1
         addKind = ""
+        changingKind = false
+        panel = "add"
+    }
+    // The cell's own kind list, Add's with the cell's kind marked
+    function changeKind() {
+        commitTyping()
+        addKind = ""
+        changingKind = true
         panel = "add"
     }
     function pickKind(kind) {
+        if (changingKind) {
+            if (selected < 0)
+                return
+            let next = DashboardBook.setKind(doc, pageIndex, selected, kind)
+            // A shift band isn't a dial's range: on an rpm signal, going to
+            // Shift lights takes the band and leaving takes the default range
+            // (another signal keeps its range both ways)
+            if ((kind === "shift-light") !== (selectedCell.kind === "shift-light")
+                    && (selectedCell.unit ?? "").toLowerCase() === "rpm") {
+                const range = kind === "shift-light" ? { from: 4500, to: 6500 }
+                                                     : DashboardBook.defaultRange(selectedCell.unit)
+                next = DashboardBook.setOptions(next, pageIndex, selected, range)
+            }
+            if (edit(next, stepOf("", qsTr("changed %1's kind").arg(cellName(selectedCell)),
+                                  selected, selected)))
+                leaveKindList()
+            return
+        }
         if (kind === "blank") {
             const span = newSpans[kind]
             if (edit(DashboardBook.addCell(doc, pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] }),
@@ -584,6 +611,10 @@ Page {
         addKind = kind
         refreshRows()
         panel = "signal"
+    }
+    function leaveKindList() {
+        changingKind = false
+        panel = "cell"
     }
     function changeSignal() {
         addKind = ""
@@ -1342,12 +1373,22 @@ Page {
                         }
                     }
                     Caption { visible: panelCard.hasSignal; text: qsTr("Signal") }
-                    ThemedButton {
-                        objectName: "panelSignal"
+                    RowLayout {
                         visible: panelCard.hasSignal
                         Layout.fillWidth: true
-                        text: qsTr("Change signal")
-                        onClicked: root.changeSignal()
+                        spacing: 8
+                        ThemedButton {
+                            objectName: "panelSignal"
+                            Layout.fillWidth: true
+                            text: qsTr("Change signal")
+                            onClicked: root.changeSignal()
+                        }
+                        ThemedButton {
+                            objectName: "panelKind"
+                            Layout.fillWidth: true
+                            text: qsTr("Change kind")
+                            onClicked: root.changeKind()
+                        }
                     }
 
                     Caption { visible: panelCard.hasSignal; text: qsTr("From (%1)").arg(panelCard.unitShown) }
@@ -1639,12 +1680,17 @@ Page {
                         font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
-                        text: qsTr("Add a gauge: its kind")
+                        text: root.changingKind ? qsTr("Change this gauge's kind")
+                                                : qsTr("Add a gauge: its kind")
                     }
                     ThemedButton {
                         objectName: "addClose"
-                        text: qsTr("Close")
+                        text: root.changingKind ? qsTr("Back") : qsTr("Close")
                         onClicked: {
+                            if (root.changingKind) {
+                                root.leaveKindList()
+                                return
+                            }
                             root.commitTyping()
                             root.panel = ""
                         }
@@ -1654,7 +1700,9 @@ Page {
                     Layout.fillWidth: true
                     spacing: 8
                     Repeater {
-                        model: root.drawnKinds
+                        // A blank has no signal to keep, so a change never offers it
+                        model: root.changingKind ? root.drawnKinds.filter(k => k !== "blank")
+                                                 : root.drawnKinds
                         ColumnLayout {
                             id: kindTile
                             required property string modelData
@@ -1698,6 +1746,11 @@ Page {
                                 objectName: "addKind_" + kindTile.modelData
                                 Layout.fillWidth: true
                                 text: root.kindNames[kindTile.modelData]
+                                // The cell's own kind is marked, and no change to it
+                                readonly property bool current: root.changingKind && root.selectedCell
+                                                                && root.selectedCell.kind === kindTile.modelData
+                                checkable: current
+                                checked: current
                                 onClicked: root.pickKind(kindTile.modelData)
                             }
                         }

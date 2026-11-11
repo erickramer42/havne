@@ -808,6 +808,35 @@ TestCase {
         compare(DashboardBook.labelOf(e.pages[0].cells[0]), "")
     }
 
+    // A new kind keeps the signal, the label, the span and every option,
+    // the old kind's own included, so the way back finds them
+    function test_setKindKeepsEverythingElse() {
+        const own = cell("IAT", "analog")
+        own.options = { from: 0, to: 8000, warnFrom: 6000, majorStep: 1000, caption: "x" }
+        const d = DashboardBook.addCell(book(), 0, own)
+        const at = d.pages[0].cells.length - 1
+        const ring = DashboardBook.setKind(d, 0, at, "ring")
+        const c = ring.pages[0].cells[at]
+        compare(c.kind, "ring")
+        compare([c.label, c.refs, c.unit, c.w, c.h], [own.label, own.refs, own.unit, own.w, own.h])
+        compare(c.options, own.options, "every option, the dial's own included")
+        compare(JSON.stringify(DashboardBook.setKind(ring, 0, at, d.pages[0].cells[at].kind).pages[0].cells[at]),
+                JSON.stringify(d.pages[0].cells[at]), "and back is the cell it was")
+    }
+
+    function test_setKindRefusesWhatItCannotDraw() {
+        const d = DashboardBook.addCell(book(), 0, { kind: "blank", w: 1, h: 4, refs: [] })
+        const s = JSON.stringify
+        for (const [what, doc, i, kind] of [
+                ["a blank target", book(), 0, "blank"],
+                ["an unknown kind", book(), 0, "gauge9"],
+                ["the same kind", book(), 0, "digital"],
+                ["a blank cell", d, 2, "ring"],
+                ["no cell", book(), 5, "ring"],
+                ["no page", book(), -1, "ring"]])
+            compare(s(DashboardBook.setKind(doc, what === "no page" ? 9 : 0, i, kind)), s(doc), what)
+    }
+
     function test_thePageFunctions() {
         const added = DashboardBook.addPage(book(), "  Laps  ")
         compare(added.pages.map(p => p.name), ["Engine", "Track", "Laps"])

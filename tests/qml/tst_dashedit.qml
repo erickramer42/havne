@@ -112,6 +112,21 @@ TestCase {
                           3000, item.objectName + "'s page has slid in")
             }
         }
+        // A cell below a tall panel is scrolled into the page's view first,
+        // and the page put back after the press
+        let scrolled = null
+        let was = 0
+        for (let up = item.parent; up; up = up.parent) {
+            if (up.objectName.startsWith("dashPage_")) {
+                const at = item.mapToItem(up, item.width / 2, item.height / 2)
+                if (at.y > up.height - 24) {
+                    was = up.contentY
+                    up.contentY = Math.max(0, Math.min(up.contentHeight - up.height,
+                                                       up.contentY + at.y - up.height / 2))
+                    scrolled = up
+                }
+            }
+        }
         let last = null
         tryVerify(() => {
             const at = item.mapToItem(null, 0, 0)
@@ -120,6 +135,8 @@ TestCase {
             return still
         }, 3000, item.objectName + " stops moving")
         mouseClick(item)
+        if (scrolled)
+            scrolled.contentY = was
     }
     // Text typed into a field and the field left
     function type(field, text) {
