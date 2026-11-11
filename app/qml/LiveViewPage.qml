@@ -496,6 +496,7 @@ Page {
                 color: signalDelegate.index % 2 === 0 ? Theme.surface : Theme.bg
 
                 RowLayout {
+                    id: rowLayout
                     anchors.fill: parent
                     anchors.leftMargin: 12
                     anchors.rightMargin: 12
@@ -503,6 +504,7 @@ Page {
                     // Plots the row on the chart; the value keeps
                     // updating either way, here and on the Dashboard
                     ThemedCheckBox {
+                        id: plotBox
                         objectName: "plotCheck"
                         checked: signalDelegate.subscribed
                         enabled: !signalDelegate.isText   // nothing to plot
@@ -571,7 +573,12 @@ Page {
                                                signalDelegate.unit)
                         // A text value can run to kilobytes: the name
                         // keeps its room
-                        Layout.maximumWidth: Math.round(signalDelegate.width * 0.6)
+                        // and, on a row too narrow for its cap beside the
+                        // box, the swatch and the name's least, what is left
+                        Layout.maximumWidth: Math.max(0, Math.min(
+                            Math.round(signalDelegate.width * 0.6),
+                            signalDelegate.width - 24 - plotBox.width - swatch.width
+                            - nameLabel.Layout.minimumWidth - 3 * rowLayout.spacing))
                         elide: Text.ElideRight
                         color: signalDelegate.refused !== "" ? Theme.textDim : Theme.text
                         font.pixelSize: Theme.fontEmphasis
@@ -616,8 +623,10 @@ Page {
             readonly property bool tight: root.paused && Theme.compact
             Layout.fillWidth: true
             spacing: tight ? 4 : 6
+            // The caption gives way under 360 px: with it the row's least
+            // width is past the narrowest phone's
             Label {
-                visible: !windowRow.tight
+                visible: !windowRow.tight && root.width >= 360
                 text: qsTr("Window")
                 color: Theme.textDim
             }
