@@ -2188,6 +2188,11 @@ ecuio_export_with(const ecuio_export_options_t* options, ecuio_cancel_t cancel,
         }
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
+    if (!ok) {
+        const uint32_t failed_class = r.failed_class;
+        r = ecuio_export_report_t{};
+        r.failed_class = failed_class;
+    }
     if (report != nullptr) {
         *report = r;
     }

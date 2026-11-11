@@ -829,7 +829,8 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * latency.csv and signals.json, each file through the check; a file it
  * doesn't know is left out and counted (files_left_out).
  * Deterministic: the same recording and options give the same bytes.
- * report may be NULL. ECUIO_OK;
+ * report may be NULL; on any failure it holds zeros but failed_class.
+ * ECUIO_OK;
  * ECUIO_ERR_NULL_ARGUMENT for a NULL options or path, a column_count
  * with NULL columns_utf8 or a NULL name among them;
  * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, layout or units, a
