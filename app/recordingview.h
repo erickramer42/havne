@@ -77,9 +77,8 @@ public:
     enum State { Closed, Opening, Open, Failed };
     Q_ENUM(State)
 
-    // A ranked recording's signals plotted by default: Live's count
-    // (SignalListModel::DefaultPlotted)
-    static constexpr int DefaultPlotted = 6;
+    // The most signals a recording plots on open
+    static constexpr int ViewerPlotted = 4;
 
     explicit RecordingView(QObject* parent = nullptr);
     ~RecordingView() override;
