@@ -1,6 +1,6 @@
 # File/layer: python/havne/recording.py | Python 3.11+, the havne package
 # Testing: PythonTest.test_recording, PythonTest.test_import,
-#          PythonTest.test_frames_read
+#          PythonTest.test_frames_read, PythonTest.test_recording_aids
 #
 # A recording read offline (ADR-0049 section 5, recording.h): its
 # signals with their ranges, its markers, range queries, the value in
@@ -11,7 +11,8 @@
 # nothing left made; guess_csv_map guesses a CSV's column map from its
 # header (ecuio_import_csv_guess), which import_csv uses without one.
 # read_frames reads its frames.csv back as recorded (ADR-0049's appendix
-# "frames read back").
+# "frames read back"). stats, step, role_signal and stretches are the
+# chart's span statistics and cursor step and ADR-0056's navigation aids.
 
 import ctypes
 import json
@@ -42,7 +43,33 @@ GuessedMap.__doc__ = ("A CSV's column map as core guessed it: map the column map
                       "import_csv takes), notes its lines of words, flags ECUIO_CSV_GUESS_*, "
                       "columns each header column as {'column', 'used'} and, left out, 'why'")
 
+Stats = namedtuple("Stats", "samples first last lowest highest lowest_us highest_us mean")
+Stats.__doc__ = ("A signal's statistics over a span: first and last the values in force at "
+                 "its ends; lowest, highest and mean leaving a NaN out, each NaN with no "
+                 "sample; lowest_us and highest_us the first sample at each, or None")
+Stretch = namedtuple("Stretch", "kind signal from_us to_us start end flags")
+Stretch.__doc__ = ("A pull or a cruise: kind 'pull' or 'cruise', signal the measured one's "
+                   "name, start and end a pull's two ends (a cruise's mean in both), flags "
+                   "ECUIO_RECORDING_STRETCH_*")
+
 NONE = e.ECUIO_RECORDING_NONE
+_NO_INDEX = 0xFFFFFFFF
+_ROLES = {"rpm": e.ECUIO_RECORDING_ROLE_ENGINE_SPEED,
+          "speed": e.ECUIO_RECORDING_ROLE_VEHICLE_SPEED,
+          "throttle": e.ECUIO_RECORDING_ROLE_THROTTLE,
+          "load": e.ECUIO_RECORDING_ROLE_ENGINE_LOAD}
+_ROLE_FIELDS = {"rpm": "engine_speed", "speed": "vehicle_speed", "throttle": "throttle",
+                "load": "engine_load"}
+_KINDS = {"pulls": e.ECUIO_STRETCH_PULLS, "cruises": e.ECUIO_STRETCH_CRUISES,
+          "all": e.ECUIO_STRETCH_PULLS | e.ECUIO_STRETCH_CRUISES}
+_LEVELS = ("pull_level", "pull_load_level", "pull_hold_us", "pull_gap_us", "cruise_hold_us",
+           "cruise_speed_band", "cruise_throttle_band", "cruise_floor")
+
+
+def _role(word):
+    if word not in _ROLES:
+        raise ValueError(f"a role is 'throttle', 'load', 'speed' or 'rpm', not {word!r}")
+    return _ROLES[word]
 
 
 class Recording:
@@ -164,6 +191,76 @@ class Recording:
         check(lib.ecuio_recording_find(self._r, ctypes.byref(what), from_us, ctypes.byref(at)),
               "ecuio_recording_find")
         return None if at.value == NONE else at.value
+
+    def stats(self, signals, t0_us, t1_us):
+        """Each signal's (names or indexes) Stats over the closed span
+        [t0_us, t1_us], a sample at t1_us counted; a text signal's has its
+        samples alone, the numbers NaN"""
+        ids = [self.signal(s).index for s in signals]
+        idx = (ctypes.c_uint32 * len(ids))(*ids)
+        out = (e.ecuio_recording_stats_t * len(ids))()
+        check(lib.ecuio_recording_stats(self._r, idx, len(ids), t0_us, t1_us, out),
+              "ecuio_recording_stats")
+        return [Stats(s.samples, s.first, s.last, s.lowest, s.highest,
+                      None if s.lowest_us == NONE else s.lowest_us,
+                      None if s.highest_us == NONE else s.highest_us, s.mean) for s in out]
+
+    def step(self, signal, t_us, forward=True):
+        """The signal's first sample strictly after t_us (or before it,
+        forward False); None past the last or before the first"""
+        at = ctypes.c_uint64()
+        way = e.ECUIO_RECORDING_STEP_FORWARD if forward else e.ECUIO_RECORDING_STEP_BACKWARD
+        check(lib.ecuio_recording_step(self._r, self.signal(signal).index, t_us, way,
+                                       ctypes.byref(at)),
+              "ecuio_recording_step")
+        return None if at.value == NONE else at.value
+
+    def role_signal(self, role):
+        """The Signal core picks for a role ('throttle', 'load', 'speed' or
+        'rpm') by its unit and name; None if none plays it"""
+        index = ctypes.c_uint32()
+        check(lib.ecuio_recording_role_signal(self._r, _role(role), ctypes.byref(index)),
+              "ecuio_recording_role_signal")
+        return None if index.value == _NO_INDEX else self.signals[index.value]
+
+    def stretches(self, kinds="all", from_us=0, to_us=None, roles=None, **levels):
+        """The pulls and cruises (kinds 'pulls', 'cruises' or 'all') within
+        the closed range [from_us, to_us] (to_us the recording's end by
+        default), in time order, as Stretch. roles maps a role ('throttle',
+        'load', 'speed', 'rpm') to the signal that plays it, in place of
+        core's pick; levels are ecuio_stretch_rules_t's own fields in its
+        units (pull_level=85, pull_gap_us=750_000, cruise_floor in km/h),
+        each left out taking core's default"""
+        rules = e.ecuio_stretch_rules_t()
+        if kinds not in _KINDS:
+            raise ValueError(f"kinds is 'pulls', 'cruises' or 'all', not {kinds!r}")
+        rules.kinds = _KINDS[kinds]
+        for field in _ROLE_FIELDS.values():
+            setattr(rules, field, _NO_INDEX)
+        for role, signal in (roles or {}).items():
+            _role(role)
+            setattr(rules, _ROLE_FIELDS[role], self.signal(signal).index)
+        for name, value in levels.items():
+            if name not in _LEVELS:
+                raise TypeError(f"stretches() has no level {name!r}")
+            setattr(rules, name, value)
+        if to_us is None:
+            to_us = self.info.duration_us
+        count = ctypes.c_uint32()
+        check(lib.ecuio_recording_stretches(self._r, ctypes.byref(rules), from_us, to_us,
+                                            None, 0, ctypes.byref(count)),
+              "ecuio_recording_stretches")
+        if count.value == 0:
+            return []
+        capacity = count.value
+        out = (e.ecuio_recording_stretch_t * capacity)()
+        check(lib.ecuio_recording_stretches(self._r, ctypes.byref(rules), from_us, to_us,
+                                            out, capacity, ctypes.byref(count)),
+              "ecuio_recording_stretches")
+        return [Stretch("pull" if s.kind == e.ECUIO_RECORDING_STRETCH_PULL else "cruise",
+                        self.signals[s.signal].name, s.from_us, s.to_us, s.start, s.end,
+                        s.flags)
+                for s in out[:min(count.value, capacity)]]
 
 
 def _import(options, folder, cancel):
