@@ -1330,16 +1330,16 @@ TEST(ConditionFileTest, ADefNamedAsABaseDefIsFoundByTheBaseIdAndByItsKey)
     EXPECT_EQ(by_id.signal_id[0], uint32_t{map.id});
     EXPECT_EQ(by_key.why, ECUIO_CONDITION_WHY_NONE);
     EXPECT_EQ(by_key.signal_id[0], uint32_t{own->id});
-    if (own->id < ECUIO_USER_SIG_ID_BASE) {
-        EXPECT_EQ(own->id, map.id);
-        EXPECT_EQ(by_id.signal_id[0], by_key.signal_id[0])
-            << "the replacement answers to the base's id and to its key";
-        uint32_t with_id = 0;
-        for (uint32_t i = 0; i < set->count; ++i) {
-            with_id += set->defs[i].id == map.id ? 1u : 0u;
-        }
-        EXPECT_EQ(with_id, 1u);
+    ASSERT_LT(own->id, ECUIO_USER_SIG_ID_BASE)
+        << "a def named as a base one replaces it";
+    EXPECT_EQ(own->id, map.id);
+    EXPECT_EQ(by_id.signal_id[0], by_key.signal_id[0])
+        << "the replacement answers to the base's id and to its key";
+    uint32_t with_id = 0;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        with_id += set->defs[i].id == map.id ? 1u : 0u;
     }
+    EXPECT_EQ(with_id, 1u);
 }
 
 TEST(ConditionFileTest, ADisabledConditionSaysSoAndStillResolves)
