@@ -501,6 +501,27 @@ TEST(CsvGuessTest, ACellOfSpacesIsEmpty)
     Guessed half("Time (ms), A\n0, 1\n1, \n");
     ASSERT_TRUE(half.ok) << half.why;
     EXPECT_FALSE(half.noted("holds a value")) << "one in two is not under half";
+    /* A value in under one row in kSparseTimes (16) is far sparser: a
+     * sweep holds it in the others' rows; one in 16 still sets the pace */
+    const auto one_in = [](int rows) {
+        std::string t = "Time (ms), A, B\n0, 1, 1\n";
+        for (int i = 1; i < rows; ++i) {
+            t += std::to_string(i) + ", " + std::to_string(i) + ", \n";
+        }
+        return t;
+    };
+    Guessed far(one_in(17));
+    ASSERT_TRUE(far.ok) << far.why;
+    EXPECT_TRUE(far.noted("'B' holds a value in 1 of 17 rows read: a wide "
+                          "export by sweep holds its newest value in the "
+                          "rows the other columns set"))
+        << notes_of(far);
+    Guessed close(one_in(16));
+    ASSERT_TRUE(close.ok) << close.why;
+    EXPECT_TRUE(close.noted("'B' holds a value in 1 of 16 rows read: a wide "
+                            "export by sweep follows its rate; pick a row "
+                            "interval"))
+        << notes_of(close);
     EXPECT_EQ(g.column(" A"), "it is empty in every row");
     EXPECT_TRUE(g.noted("'A' is left out: it is empty in every row"))
         << "the header's text without its padding: " << notes_of(g);
@@ -1177,8 +1198,8 @@ TEST(CsvGuessTest, TheMadeUpLoggersAreGuessedAndImported)
             << notes_of(g);
         EXPECT_EQ(g.sig(" Flux counter", "kind"), "number");
         EXPECT_TRUE(g.noted("'Flux counter' holds a value in 3 of 200 rows "
-                            "read: a wide export by sweep follows its rate; "
-                            "pick a row interval"))
+                            "read: a wide export by sweep holds its newest "
+                            "value in the rows the other columns set"))
             << notes_of(g);
         EXPECT_EQ(g.sig(" Stage", "kind"), "number");
         EXPECT_EQ(g.sig(" Stage", "unit"), "");
