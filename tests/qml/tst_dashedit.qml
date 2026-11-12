@@ -2118,7 +2118,9 @@ TestCase {
         view.contentY = view.contentHeight   // away from cell 0
         const away = view.contentY
         verify(away > 0, "the page scrolled away")
-        click(page, "panelClose")
+        // Not through click(): its own scroll to the button and back would
+        // undo the page's
+        page.closePanel()
         tryVerify(() => view.contentY < away / 2, 3000, "back near cell 0")
     }
 
@@ -2148,7 +2150,9 @@ TestCase {
         press(find(page, "dashCell_0_0"))
         compare(page.panel, "cell")
         const found = panelFields(page)
-        const shown = found.filter(f => f.shown).map(f => f.name).sort()
+        // The signal's name shows only while the cell's row exists, which a
+        // session left by an earlier case decides
+        const shown = found.filter(f => f.shown && f.name !== "panelSignalName").map(f => f.name).sort()
         compare(shown, fieldsOfKind[data.kind].slice().sort())
         const listed = Object.values(fieldsOfKind).reduce((all, l) => all.concat(l), withEntry)
         for (const f of found)
