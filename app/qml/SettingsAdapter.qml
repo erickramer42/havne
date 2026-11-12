@@ -27,7 +27,7 @@ ColumnLayout {
                   ? qsTr("None found: install a Pass-Thru driver (Windows), plug in "
                          + "or pair an ELM327 adapter, or pick one below")
                   : Theme.mobile
-                    ? qsTr("Bluetooth: %1 paired; tap one, then Connect")
+                    ? qsTr("Bluetooth: %1 found; tap one, then Connect")
                           .arg(root.host.bluetoothAdapters.length)
                   : qsTr("J2534 interfaces: %1, serial ports: %2%3; select one to "
                          + "put its address in the field above, then Connect")

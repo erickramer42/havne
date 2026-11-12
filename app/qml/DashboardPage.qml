@@ -199,7 +199,15 @@ Page {
     }
     function restore(text) {
         store[formKey] = text
-        doc = text === "" ? DashboardBook.reset(form) : DashboardBook.parse(text, form).doc
+        if (text === "")
+            showStoredLayout()
+        else
+            doc = DashboardBook.parse(text, form).doc
+    }
+    // With nothing stored the document is the stored read itself, so the
+    // built-in layout is drawn as at first run (builtInShown)
+    function showStoredLayout() {
+        doc = Qt.binding(() => root.parsed.doc)
     }
     // An undo or a redo goes from (page, cell) to (toPage, toCell). The
     // cell panel follows only when it was on the step's cell, so it never
@@ -368,7 +376,7 @@ Page {
         if (texts.unread !== "")
             store[formKey + "Unread"] = texts.unread
         store[formKey] = ""
-        doc = DashboardBook.reset(form)
+        showStoredLayout()
         confirmReset = false
         moreShown = false
         selected = -1
@@ -890,11 +898,13 @@ Page {
     onVisibleChanged: {
         maybeSweep()
         // Any page but Dash ends the view for good: a tab, the status's Log,
-        // and the history, as Done does: a step from outside edit mode
-        // isn't undone by a Ctrl+Z days later
+        // and the history outside edit mode, as Done does: a step from
+        // outside edit mode isn't undone by a Ctrl+Z days later. Edit mode
+        // stays open while hidden, so its history stays with it
         if (!visible) {
             leaveDrive(true)
-            clearHistory()
+            if (!editing)
+                clearHistory()
         }
     }
     Component.onCompleted: {
