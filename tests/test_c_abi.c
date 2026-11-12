@@ -525,7 +525,9 @@ int main(void)
         sizeof(ecuio_stretch_rules_t) != 120 ||
         offsetof(ecuio_stretch_rules_t, cruise_floor) != 64 ||
         offsetof(ecuio_stretch_rules_t, throttle) != 72 ||
-        offsetof(ecuio_stretch_rules_t, reserved) != 88 ||
+        offsetof(ecuio_stretch_rules_t, pull_min_rise) != 88 ||
+        offsetof(ecuio_stretch_rules_t, pull_min_gain) != 96 ||
+        offsetof(ecuio_stretch_rules_t, reserved) != 104 ||
         sizeof(ecuio_recording_stretch_t) != 64 ||
         offsetof(ecuio_recording_stretch_t, start) != 24 ||
         offsetof(ecuio_recording_stretch_t, flags) != 40 ||

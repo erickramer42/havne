@@ -2284,6 +2284,140 @@ uint32_t role_of(const Reader& r, uint32_t role)
     return at;
 }
 
+/* A road log's shape: every signal read in one poll loop at 3 to 4 Hz,
+ * its steps uneven. The instants the cases measure from are sampled
+ * exactly, the loop's own sample within 100 ms of one left out. */
+const uint64_t kLogInstants[] = {12000, 13300, 20000, 24000, 24925, 28000,
+                                 34000, 37000, 38400, 41000, 43200, 47000};
+
+std::vector<uint64_t> log_times(uint64_t end_ms)
+{
+    static const uint64_t kSteps[] = {250, 330, 290, 310, 270};
+    std::vector<uint64_t> out(std::begin(kLogInstants), std::end(kLogInstants));
+    size_t n = 0;
+    for (uint64_t ms = 0; ms <= end_ms; ms += kSteps[n++ % 5]) {
+        bool near = false;
+        for (uint64_t at : kLogInstants) {
+            near = near || (ms > at ? ms - at : at - ms) < 100;
+        }
+        if (!near) {
+            out.push_back(ms);
+        }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+void write_log(const Folder& f, const std::vector<Track>& tracks,
+               uint64_t end_ms)
+{
+    std::vector<std::string> lines;
+    for (const Track& t : tracks) {
+        lines.push_back(std::string(t.name) + ",number," + t.unit + ",1," +
+                        std::to_string(t.rank));
+    }
+    f.write("events.log", events_v2(lines));
+    std::string csv = std::string(kBom) + rows::kSignalsHeader + "\n";
+    for (uint64_t ms : log_times(end_ms)) {
+        for (const Track& t : tracks) {
+            csv += std::to_string(ms * 1000) + "," + t.name + ",";
+            rows::append_value(csv, t.at(ms));
+            csv += std::string(",") + t.unit + "\n";
+        }
+    }
+    f.write("signals.csv", csv);
+}
+
+/* The value at ms on the line through knots, held past its ends */
+double along(const std::vector<std::pair<uint64_t, double>>& knots, uint64_t ms)
+{
+    if (ms <= knots.front().first) {
+        return knots.front().second;
+    }
+    for (size_t i = 1; i < knots.size(); ++i) {
+        if (ms <= knots[i].first) {
+            const double span =
+                static_cast<double>(knots[i].first - knots[i - 1].first);
+            return knots[i - 1].second +
+                   (knots[i].second - knots[i - 1].second) *
+                       static_cast<double>(ms - knots[i - 1].first) / span;
+        }
+    }
+    return knots.back().second;
+}
+
+/* The log's drive. Part throttle through 3000 rpm from 4 s to 9 s; a
+ * stab at the throttle from 12 s to 13.3 s (+8 km/h, +180 rpm); a pull
+ * through an upshift from 20 s to 28 s, the lift between its gears 925 ms
+ * from its first sample to the next at the level, engine speed ending
+ * under where it began; a pull from 34 s whose lift is 1.4 s; and 2.2 s
+ * after that one's throttle closes, a pull in top gear from 43.2 s to
+ * 47 s (+15 km/h, +2000 rpm). */
+double log_throttle(uint64_t ms)
+{
+    if (ms >= 12000 && ms <= 13300) {
+        return 90.0;
+    }
+    if ((ms >= 20000 && ms < 24000) || (ms >= 24925 && ms <= 28000) ||
+        (ms >= 34000 && ms < 37000) || (ms >= 38400 && ms < 41000) ||
+        (ms >= 43200 && ms <= 47000)) {
+        return 95.0;
+    }
+    if (ms >= 4000 && ms < 9000) {
+        return 45.0;
+    }
+    return (ms >= 24000 && ms < 24925) || (ms >= 37000 && ms < 38400) ? 20.0
+                                                                      : 12.0;
+}
+
+double log_speed(uint64_t ms)
+{
+    return along({{4000, 50.0},
+                  {9000, 65.0},
+                  {12000, 65.0},
+                  {13300, 73.0},
+                  {20000, 90.0},
+                  {24000, 112.0},
+                  {24925, 114.0},
+                  {28000, 130.0},
+                  {34000, 80.0},
+                  {37000, 100.0},
+                  {38400, 101.0},
+                  {41000, 118.0},
+                  {43200, 120.0},
+                  {47000, 135.0}},
+                 ms);
+}
+
+double log_rpm(uint64_t ms)
+{
+    return along({{4000, 2400.0},
+                  {9000, 3300.0},
+                  {12000, 2500.0},
+                  {13300, 2680.0},
+                  {19000, 2700.0},
+                  {20000, 5500.0},
+                  {24000, 6500.0},
+                  {24925, 4600.0},
+                  {28000, 5200.0},
+                  {34000, 3000.0},
+                  {37000, 5800.0},
+                  {38400, 4000.0},
+                  {41000, 5200.0},
+                  {43200, 4300.0},
+                  {47000, 6300.0}},
+                 ms);
+}
+
+const uint64_t kLogEndMs = 52000;
+
+ecuio_stretch_rules_t pulls_only()
+{
+    ecuio_stretch_rules_t r = both_kinds();
+    r.kinds = ECUIO_STRETCH_PULLS;
+    return r;
+}
+
 } // namespace
 
 TEST(RecordingStretchesTest, EachRoleIsPickedByItsUnitAndName)
@@ -2496,7 +2630,16 @@ TEST(RecordingStretchesTest, StretchesRefuseRulesTheyCantRun)
     refused([](ecuio_stretch_rules_t& b) { b.kinds = 0; }, "no kind");
     refused([](ecuio_stretch_rules_t& b) { b.kinds = 0x4; }, "unknown kind");
     refused([](ecuio_stretch_rules_t& b) { b.flags = 1; }, "a flag");
-    refused([](ecuio_stretch_rules_t& b) { b.reserved[3] = 1; }, "reserved");
+    refused([](ecuio_stretch_rules_t& b) { b.reserved[0] = 1; }, "reserved");
+    refused([](ecuio_stretch_rules_t& b) { b.reserved[1] = 1; }, "reserved");
+    refused([](ecuio_stretch_rules_t& b) { b.pull_min_rise = -1; },
+            "a negative rise");
+    refused([](ecuio_stretch_rules_t& b) { b.pull_min_rise = NAN; },
+            "a NaN rise");
+    refused([](ecuio_stretch_rules_t& b) { b.pull_min_gain = -0.5; },
+            "a negative gain");
+    refused([](ecuio_stretch_rules_t& b) { b.pull_min_gain = NAN; },
+            "a NaN gain");
     refused([](ecuio_stretch_rules_t& b) { b.pull_level = -1; }, "negative");
     refused([](ecuio_stretch_rules_t& b) { b.cruise_speed_band = NAN; }, "NaN");
     refused([](ecuio_stretch_rules_t& b) { b.cruise_floor = -0.5; },
@@ -2508,6 +2651,157 @@ TEST(RecordingStretchesTest, StretchesRefuseRulesTheyCantRun)
     EXPECT_EQ(ecuio_recording_stretches(r.r, &text, 0, 1, &one, 1, &n),
               ECUIO_ERR_INVALID_ARGUMENT)
         << "a text signal in a role";
+}
+
+TEST(RecordingStretchesTest, ARoadLogsPullsAreFoundAndItsStabIsnt)
+{
+    Folder f;
+    write_log(f,
+              {{"Throttle Position", "%", 0, log_throttle},
+               {"Vehicle Speed", "km/h", 0, log_speed},
+               {"RPM", "rpm", 0, log_rpm}},
+              kLogEndMs);
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    const uint64_t end = kLogEndMs * 1000 + 1;
+    const std::vector<ecuio_recording_stretch_t> found =
+        stretches_of(r, pulls_only(), 0, end);
+    ASSERT_EQ(found.size(), 3u)
+        << "neither the part throttle nor the stab is a pull";
+
+    /* The 925 ms lift between two gears stays inside its pull */
+    EXPECT_EQ(found[0].from_us, 20000000u);
+    EXPECT_EQ(found[0].to_us, 28000000u);
+    EXPECT_EQ(found[0].start, 90.0);
+    EXPECT_EQ(found[0].end, 130.0);
+    EXPECT_EQ(found[0].flags, 0u);
+
+    /* So does a 1.4 s one; the pull ends at the last sample before its
+     * throttle closes at 41 s */
+    EXPECT_EQ(found[1].from_us, 34000000u);
+    EXPECT_GE(found[1].to_us, 40600000u);
+    EXPECT_LT(found[1].to_us, 41000000u);
+
+    /* 2.2 s on, the next pull is its own: in top gear, 15 km/h gained */
+    EXPECT_EQ(found[2].from_us, 43200000u);
+    EXPECT_EQ(found[2].to_us, 47000000u);
+    EXPECT_EQ(found[2].start, 120.0);
+    EXPECT_EQ(found[2].end, 135.0);
+
+    /* Where the gap's default sits: a second splits the 1.4 s lift, and
+     * 2.5 s joins the two pulls 2.2 s apart */
+    ecuio_stretch_rules_t rules = pulls_only();
+    rules.pull_gap_us = 1000000;
+    EXPECT_EQ(stretches_of(r, rules, 0, end).size(), 4u);
+    rules.pull_gap_us = 2500000;
+    EXPECT_EQ(stretches_of(r, rules, 0, end).size(), 2u);
+    rules.pull_gap_us = ECUIO_STRETCH_DEFAULT_PULL_GAP_US;
+    EXPECT_EQ(stretches_of(r, rules, 0, end).size(), 3u);
+
+    /* The rise the user sets: 150 rpm lets the stab in (+180), 2500 keeps
+     * only the pull that climbs 2800 */
+    rules = pulls_only();
+    rules.pull_min_rise = 150.0;
+    const std::vector<ecuio_recording_stretch_t> with_stab =
+        stretches_of(r, rules, 0, end);
+    ASSERT_EQ(with_stab.size(), 4u);
+    EXPECT_EQ(with_stab[0].from_us, 12000000u);
+    EXPECT_EQ(with_stab[0].to_us, 13300000u);
+    EXPECT_EQ(with_stab[0].end - with_stab[0].start, 8.0);
+    rules.pull_min_rise = 2500.0;
+    const std::vector<ecuio_recording_stretch_t> steep =
+        stretches_of(r, rules, 0, end);
+    ASSERT_EQ(steep.size(), 1u);
+    EXPECT_EQ(steep[0].from_us, 34000000u);
+    rules.pull_min_rise = ECUIO_STRETCH_DEFAULT_PULL_RISE;
+    EXPECT_EQ(stretches_of(r, rules, 0, end).size(), 3u);
+
+    /* With engine speed in the log, the gain is no floor at all: one past
+     * the top-gear pull's 15 km/h drops nothing */
+    rules = pulls_only();
+    rules.pull_min_gain = 16.0;
+    EXPECT_EQ(stretches_of(r, rules, 0, end).size(), 3u);
+
+    /* A range cutting the top-gear pull at 45.95 s leaves over its hold
+     * and under 730 rpm to climb, counting from the sample in force there:
+     * what is left is no pull; from 45.2 s, over 900 rpm, it is */
+    EXPECT_EQ(stretches_of(r, pulls_only(), 45950000, end).size(), 0u);
+    const std::vector<ecuio_recording_stretch_t> cut =
+        stretches_of(r, pulls_only(), 45200000, end);
+    ASSERT_EQ(cut.size(), 1u);
+    EXPECT_EQ(cut[0].flags, ECUIO_RECORDING_STRETCH_CUT_START);
+}
+
+TEST(RecordingStretchesTest, WithNoEngineSpeedAPullGainsItsSpeed)
+{
+    Folder f;
+    write_log(f,
+              {{"Throttle Position", "%", 0, log_throttle},
+               {"Vehicle Speed", "km/h", 0, log_speed}},
+              kLogEndMs);
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    const uint64_t end = kLogEndMs * 1000 + 1;
+    const std::vector<ecuio_recording_stretch_t> found =
+        stretches_of(r, pulls_only(), 0, end);
+    ASSERT_EQ(found.size(), 3u) << "the stab's 8 km/h is under the gain";
+    EXPECT_EQ(found[0].from_us, 20000000u);
+    EXPECT_EQ(found[2].from_us, 43200000u);
+
+    /* The gain the user sets: 5 km/h lets the stab in, 16 drops the pull
+     * in top gear, which is why engine speed's climb is the floor
+     * wherever the log has it */
+    ecuio_stretch_rules_t rules = pulls_only();
+    rules.pull_min_gain = 5.0;
+    EXPECT_EQ(stretches_of(r, rules, 0, end).size(), 4u);
+    rules.pull_min_gain = 16.0;
+    const std::vector<ecuio_recording_stretch_t> fast =
+        stretches_of(r, rules, 0, end);
+    ASSERT_EQ(fast.size(), 2u);
+    EXPECT_EQ(fast[1].from_us, 34000000u);
+    rules.pull_min_gain = ECUIO_STRETCH_DEFAULT_PULL_GAIN;
+    EXPECT_EQ(stretches_of(r, rules, 0, end).size(), 3u);
+
+    /* The rise is engine speed's: with none it changes nothing */
+    rules = pulls_only();
+    rules.pull_min_rise = 1e6;
+    EXPECT_EQ(stretches_of(r, rules, 0, end).size(), 3u);
+
+    /* The gain is in km/h: the same numbers in mph make the stab's 8 mph
+     * 12.9 km/h, past it */
+    Folder m;
+    write_log(m,
+              {{"Throttle Position", "%", 0, log_throttle},
+               {"Vehicle Speed", "mph", 0, log_speed}},
+              kLogEndMs);
+    Reader mph(m.utf8());
+    ASSERT_EQ(mph.rc, ECUIO_OK);
+    EXPECT_EQ(stretches_of(mph, pulls_only(), 0, end).size(), 4u);
+    rules = pulls_only();
+    rules.pull_min_gain = 13.0;
+    EXPECT_EQ(stretches_of(mph, rules, 0, end).size(), 3u);
+}
+
+TEST(RecordingStretchesTest, APullThroughAnUpshiftCountsByEngineSpeedAlone)
+{
+    Folder f;
+    write_log(f,
+              {{"Throttle Position", "%", 0, log_throttle},
+               {"RPM", "rpm", 0, log_rpm}},
+              kLogEndMs);
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    const std::vector<ecuio_recording_stretch_t> found =
+        stretches_of(r, pulls_only(), 0, kLogEndMs * 1000 + 1);
+    ASSERT_EQ(found.size(), 3u) << "the stab climbs 180 rpm";
+    for (const ecuio_recording_stretch_t& s : found) {
+        EXPECT_EQ(s.flags, ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED);
+    }
+    EXPECT_EQ(found[0].from_us, 20000000u);
+    EXPECT_EQ(found[0].to_us, 28000000u);
+    EXPECT_EQ(found[0].start, 5500.0);
+    EXPECT_EQ(found[0].end, 5200.0)
+        << "it ends under where it began, having climbed 1000 rpm";
 }
 
 TEST(RecordingStretchesTest, TheMockDriveCyclesPullsAndCruiseAreFound)
@@ -2567,7 +2861,7 @@ TEST(RecordingStretchesTest, TheMockDriveCyclesPullsAndCruiseAreFound)
                            uint64_t hi) {
         return s.from_us >= lo && s.to_us <= hi;
     };
-    ASSERT_EQ(found.size(), 5u);
+    ASSERT_EQ(found.size(), 4u);
     for (const ecuio_recording_stretch_t& s : found) {
         EXPECT_EQ(s.flags, 0u);
     }
@@ -2593,27 +2887,33 @@ TEST(RecordingStretchesTest, TheMockDriveCyclesPullsAndCruiseAreFound)
               ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US);
     EXPECT_NEAR(found[2].start, 100.0, 2.0);
 
-    /* The two-step's launch at a standstill passes for a pull of its own
-     * (a 2 km/h creep): a known false positive until a real log settles a
-     * minimum gain */
-    EXPECT_EQ(found[3].kind, ECUIO_RECORDING_STRETCH_PULL);
-    EXPECT_TRUE(within(found[3], span(Phase::Launch).first,
-                       span(Phase::DragRun).first));
-    EXPECT_LT(found[3].end - found[3].start, 5.0);
-
     /* The quarter mile is one pull once the clutch locks (the throttle is
      * feathered under the level while it slips): every upshift's lift
      * (about 0.55 s under the level) inside the gap. It ends at its top
      * speed, which can be read a tick past the line, the pedal still down */
-    EXPECT_EQ(found[4].kind, ECUIO_RECORDING_STRETCH_PULL);
-    EXPECT_TRUE(within(found[4], span(Phase::DragRun).first,
+    EXPECT_EQ(found[3].kind, ECUIO_RECORDING_STRETCH_PULL);
+    EXPECT_TRUE(within(found[3], span(Phase::DragRun).first,
                        span(Phase::DragRun).second + tick));
-    EXPECT_GT(found[4].to_us - found[4].from_us, 10000000u);
+    EXPECT_GT(found[3].to_us - found[3].from_us, 10000000u);
 
-    /* The gap ADR-0056 first wrote, 500 ms, splits it at each of its three
+    /* The two-step's launch at a standstill is no pull: a full-throttle
+     * run of its own, 1.7 s before the quarter mile's, creeping 2 km/h
+     * while engine speed climbs some 540 rpm onto the two-step. A rise of
+     * 400 rpm lets it in. */
+    ecuio_stretch_rules_t low_rise = both_kinds();
+    low_rise.pull_min_rise = 400.0;
+    const std::vector<ecuio_recording_stretch_t> with_launch =
+        stretches_of(r, low_rise, 0, r.info().duration_us + 1);
+    ASSERT_EQ(with_launch.size(), 5u);
+    EXPECT_EQ(with_launch[3].kind, ECUIO_RECORDING_STRETCH_PULL);
+    EXPECT_TRUE(within(with_launch[3], span(Phase::Launch).first,
+                       span(Phase::DragRun).first));
+    EXPECT_LT(with_launch[3].end - with_launch[3].start, 5.0);
+
+    /* A gap of 500 ms splits the quarter mile at each of its three
      * upshifts */
     ecuio_stretch_rules_t short_gap = both_kinds();
     short_gap.pull_gap_us = 500000;
     EXPECT_EQ(stretches_of(r, short_gap, 0, r.info().duration_us + 1).size(),
-              8u);
+              7u);
 }

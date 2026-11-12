@@ -14,5 +14,5 @@
 {"found": true, "host_us": 11500000, "offset_us": -11500000, "on": "marker:pull", "recording": 0, "type": "align"}
 {"found": true, "host_us": 21500000, "offset_us": -21500000, "on": "marker:pull", "recording": 1, "type": "align"}
 {"column_us": 5000000, "columns": 8, "from_us": -21500000, "to_us": 18500000, "type": "axis"}
-{"highest": [null, null, 16.5, 16.5, 100, 100, 16.5, 15.5], "lowest": [null, null, 13.5, 13.5, 13.5, 0, 0, 13.5], "recording": 0, "samples": [0, 0, 49, 50, 50, 50, 50, 50], "signal": "Throttle", "type": "columns"}
-{"highest": [15.8, 16.5, 16.5, 16.5, 100, 100, 16.5, 15.5], "lowest": [13.5, 13.8, 13.5, 13.5, 13.5, 0, 0, 13.5], "recording": 1, "samples": [49, 50, 50, 50, 50, 50, 50, 50], "signal": "Throttle", "type": "columns"}
+{"highest": [null, null, 16.5, 16.5, 100, 100, 16.5, 15.5], "lowest": [null, null, 13.5, 13.5, 13.5, 0, 0, 13.5], "mean": [null, null, 14.695918367346938, 15.036000000000001, 62.23, 60, 12.828000000000001, 14.172000000000002], "recording": 0, "samples": [0, 0, 49, 50, 50, 50, 50, 50], "signal": "Throttle", "type": "columns"}
+{"delta": [null, null, -0.019918367346939192, 0, 0, 0, 0, 0], "delta_from": 0, "highest": [15.8, 16.5, 16.5, 16.5, 100, 100, 16.5, 15.5], "lowest": [13.5, 13.8, 13.5, 13.5, 13.5, 0, 0, 13.5], "mean": [14.23673469387755, 15.572000000000001, 14.675999999999998, 15.036000000000001, 62.23, 60, 12.828000000000001, 14.172000000000002], "recording": 1, "samples": [49, 50, 50, 50, 50, 50, 50, 50], "signal": "Throttle", "type": "columns"}
