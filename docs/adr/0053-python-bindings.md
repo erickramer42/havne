@@ -763,3 +763,11 @@ calls `_ecuio.py` already declares. Nothing in core changes.
 - **Tests:** `PythonTest.test_lookup` (each against `havne-cli vin` and `dtc`
   field for field, the refusals), `PythonTest.test_session`'s no-session
   case and `test_j2534`'s parity case.
+
+## Note: the VIN decode and the code title are wrapped (2026-11-12)
+
+The appendix "what Python doesn't wrap" lists the VIN decode
+(`ecuio_vin_decode`) and a trouble code's title (`ecuio_dtc_title`) among the
+calls a script reaches through `havne.c`; the appendix "the offline lookups
+and the session's words" wraps both as `havne.decode_vin` and
+`havne.dtc_title`. The rest of the first list stands.

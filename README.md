@@ -34,7 +34,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 - **Your own signals:** signal files and plugins for Service 01 PIDs and Service 22 DIDs on up to four modules, written in Settings or imported from an OBDb set ([signal-files.md](docs/signal-files.md)).
 - **Record and review:** every frame and value of a session; the Recordings page pans, zooms, overlays a second run and shows the frames; `replay://` plays one back ([ADR-0049](docs/adr/0049-recordings-in-core.md)).
 - **Analysis log:** Start log records the picked signals at the bus's own rate, and `havne-cli export` writes them as a wide CSV, a row a sweep ([ADR-0056](docs/adr/0056-analysis-log.md)).
-- **Share:** `havne-cli` exports a recording scrubbed as pcapng, CSV or a folder; the app saves a health report; candump logs and other loggers' CSVs import in both ([ADR-0054](docs/adr/0054-exports-and-imports.md)).
+- **Share:** `havne-cli` and the app's viewer export a recording scrubbed as pcapng, CSV or a folder; the app also saves a health report; candump logs and other loggers' CSVs import in both ([ADR-0054](docs/adr/0054-exports-and-imports.md)).
 - **`havne-cli` and Python:** any session as JSON lines or iterators, recordings viewed and exported offline, the simulated car served as an ELM327 adapter ([ADR-0031](docs/adr/0031-command-line-client.md), [ADR-0053](docs/adr/0053-python-bindings.md)).
 - **A simulated vehicle:** a modeled car through a cold start, pulls onto the limiter and a quarter mile, so every page runs with no hardware.
 
@@ -117,7 +117,7 @@ Download from the [latest release](https://github.com/erickramer42/havne/release
 - **Linux (x86_64 or 64-bit ARM; glibc 2.39 or later):** make the AppImage executable and run it ([docs/linux.md](docs/linux.md)).
 - **Python 3.11 or later:** `pip install` the wheel for your platform, then `python read_pids.py mock://demo` ([`read_pids.py`](python/examples/read_pids.py)) prints the simulated car's readings.
 
-Then in Settings, tick **Developer mode** under Advanced, press the `mock://demo` preset on Connection and **Connect**; with **Record sessions** on, each run opens afterward on the Recordings page.
+Then press **Demo data** on Home (or `mock://demo` under **WiFi and other addresses** on Settings' Connection page) and **Connect**; with **Record sessions** on, each run opens afterward on the Recordings page.
 
 To build from source you need CMake 3.21+, Qt 6.12 and a C++17 compiler:
 
@@ -154,7 +154,7 @@ v0.7.2, the Dashboard and signals finished, is the latest release. Next:
 | [docs/j2534.md](docs/j2534.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
 | [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
 | [docs/ios.md](docs/ios.md) | Havne on iPhone: installing CI's unsigned build with your own Apple ID, what works there |
-| [docs/screenshots.md](docs/screenshots.md) | Every page on the desktop and the phone, in each theme |
+| [docs/screenshots.md](docs/screenshots.md) | Every page on the desktop and the phone, in Dark and in Night's amber and red |
 | [docs/development.md](docs/development.md) | Builds, tests, CI, releases, troubleshooting |
 | [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and what only hardware can confirm |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestones and lessons learned |

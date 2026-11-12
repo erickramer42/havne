@@ -71,7 +71,7 @@ that signed copy to yourself.
 
 | Connection | On iOS |
 |---|---|
-| `mock://demo`, a simulated car | Works with no hardware. Turn on Settings > Advanced > Developer mode in Havne to show its preset |
+| `mock://demo`, a simulated car | Works with no hardware. Home's list ends with its Demo data row |
 | A WiFi ELM327 adapter | Join the adapter's WiFi, then pick its preset in Havne's Settings: "WiFi: OBDX (192.168.4.1:23)" or "WiFi: most others (192.168.0.10:35000)". iOS asks once whether Havne may find devices on the local network: allow it |
 | A Bluetooth adapter (the OBDLink MX+ and others) | Not on iOS: Havne's Bluetooth is Android's alone, and iOS opens classic Bluetooth serial links only to Apple-certified (MFi) accessories |
 | J2534 and SocketCAN | Windows and Linux only |

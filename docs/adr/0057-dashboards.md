@@ -1431,3 +1431,11 @@ red, amber, orange (zone look-alikes) and blue (the cold color); the least
 distance in the set is 29 (pink from danger in Dark).
 `QmlTest.dashedit`'s `test_everyNamedColorIsReadableAndApartFromTheZones`
 holds it.
+
+## Note: Boost's refs (2026-11-12)
+
+The built-in Boost cell's refs are `id:13001` (the demo's) and `id:7011`
+(`obd2`'s computed Boost, the manifold pressure less the barometric
+pressure), so a gauge for Boost reads on a car as on the demo; the table in
+"the built-in layout by what people watch" listing `id:13001` alone is the
+demo's half.
