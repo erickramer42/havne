@@ -2196,6 +2196,40 @@ TEST(RecordingViewTest, AFailedReportLeavesAPickedDocumentGone)
     EXPECT_TRUE(QFile::exists(picked));
 }
 
+TEST(RecordingViewTest, ARefusedReportLeavesAReplacedDocumentAlone)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.setThroughProviderForTesting(true);
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    {
+        QFile frames(folder + QStringLiteral("/frames.csv"));
+        ASSERT_TRUE(frames.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        frames.write("not a frames file\n");
+    }
+    const QString picked = root.path() + QStringLiteral("/picked.txt");
+    const QByteArray theirs("the user's earlier report\n");
+    {
+        QFile f(picked);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(theirs);
+    }
+    QList<QVariantMap> saved;
+    QObject::connect(&v, &RecordingView::reportSaved,
+                     [&](const QVariantMap& r) { saved << r; });
+    ASSERT_TRUE(v.saveHealthReport(QUrl::fromLocalFile(picked), 0));
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_FALSE(saved[0].value(QStringLiteral("ok")).toBool());
+    QFile after(picked);
+    ASSERT_TRUE(after.open(QIODevice::ReadOnly));
+    EXPECT_EQ(after.readAll(), theirs) << "the replaced document stays";
+}
+
 TEST(RecordingViewTest, AStoppedReportLeavesAPickedDocumentGone)
 {
     QTemporaryDir root;

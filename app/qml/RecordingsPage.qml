@@ -2964,6 +2964,8 @@ Page {
                         id: seamDrag
                         objectName: "seamDrag"
                         target: null
+                        // A touch's height on a phone, drawn as it is
+                        margin: root.phoneShape ? Math.max(0, (Theme.touchTarget - seam.height) / 2) : 0
                         xAxis.enabled: false
                         property var startHeights: []
                         onActiveChanged: if (active) startHeights = root.paneBoxes.map(b => b.h)
@@ -3150,6 +3152,7 @@ Page {
             DragHandler {
                 id: chartDrag
                 target: null
+                margin: root.phoneShape ? Math.max(0, (Theme.touchTarget - parent.height) / 2) : 0
                 xAxis.enabled: false
                 property real startHeight: 0
                 onActiveChanged: if (active) startHeight = chartFrame.height

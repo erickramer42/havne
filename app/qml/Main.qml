@@ -339,26 +339,17 @@ ApplicationWindow {
     Shortcut { sequences: [StandardKey.ZoomOut]; onActivated: Theme.stepZoom(-1) }
     Shortcut { sequence: "Ctrl+0"; onActivated: Theme.zoom = 1 }
 
-    // ---- A phone in developer mode logs its display: the screen, the
-    // window and the safe area's margins, once they settle after a change.
-    // After a rotation the window stopped short of the screen
-    // (docs/bench-sessions/2026-10-28-android-3.md); this says which
-    // size didn't follow
+    // ---- A phone in developer mode logs its display's form and
+    // orientation when either changes; sizes, scale and insets stay out
+    // (a shared log or report would narrow the device)
     function orientationName(o) {
         return o === Qt.PortraitOrientation ? "portrait"
              : o === Qt.LandscapeOrientation ? "landscape"
              : o === Qt.InvertedPortraitOrientation ? "portrait, inverted"
              : o === Qt.InvertedLandscapeOrientation ? "landscape, inverted" : "unknown"
     }
-    readonly property string displayLine: {
-        const s = root.insets
-        return "Display: screen " + Screen.width + " × " + Screen.height
-             + " (" + orientationName(Screen.orientation) + ", " + Screen.devicePixelRatio + "x)"
-             + ", available " + Screen.desktopAvailableWidth + " × " + Screen.desktopAvailableHeight
-             + ", window " + root.width + " × " + root.height + " at " + root.x + ", " + root.y
-             + ", safe area left " + Math.round(s.left) + ", top " + Math.round(s.top)
-             + ", right " + Math.round(s.right) + ", bottom " + Math.round(s.bottom)
-    }
+    readonly property string displayLine: "Display: " + (root.phoneForm ? "phone" : "desktop")
+        + " form, " + orientationName(Screen.orientation)
     onDisplayLineChanged: if (Theme.mobile && Theme.developerMode) displayTimer.restart()
     Timer {
         id: displayTimer

@@ -219,7 +219,10 @@ ColumnLayout {
                     const why = Relay.start(root.host.uriField.text)
                     root.host.errorLabel.text = why
                     root.host.errorLabel.visible = why !== ""
-                    root.host.logExplains = false   // the relay writes no log line
+                    // A refusal goes to the log, so Show log has it to show
+                    if (why !== "")
+                        Bridge.logEvent(qsTr("Relay: %1").arg(why))
+                    root.host.logExplains = why !== ""
                 }
             }
         }
