@@ -2688,6 +2688,107 @@ profile  raw
         compare(page.alignLabel, "")
     }
 
+    // A road log with two pulls (a stab at the throttle and a part-throttle
+    // rise that are none), each chosen in turn against pull-early's one:
+    // where havne-cli view --align-on pull:2,1 lines them up
+    // (tests/golden/cli/view-align-pull.jsonl)
+    readonly property var twiceRow: ({
+        title: "2026-11-11 09:00:00 · Twice", uri: "", folder: Harness.recordingFixtures + "/pull-twice",
+        source: "", profile: "test" })
+
+    function test_aComparisonAlignsOnAPullChosenInEach() {
+        const page = createPage()
+        page.recordings = [twiceRow, earlyRow]
+        openRow(page, twiceRow)
+        page.compareWith(earlyRow)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        const status = find(page, "compareStatus")
+        const here = find(page, "alignPullHere")
+        const there = find(page, "alignPullThere")
+        verify(!here.visible && !there.visible, "no pull to choose until asked for")
+
+        const choice = find(page, "alignChoice")
+        choice.currentIndex = choice.indexOfValue("pull")
+        verify(choice.currentIndex >= 0, "Align a pull is offered")
+        choice.activated(choice.currentIndex)
+        compare(page.alignOn, "pull")
+        tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
+        compare(page.pullsHere.length, 2, "the stab and the part throttle are no pulls")
+        compare(page.pullsThere.length, 1)
+        verify(here.visible && there.visible)
+        compare(here.count, 2)
+        compare(here.textAt(1), "Pull 2 here · 31.0 s · 4.0 s")
+        compare(there.textAt(0), "Pull 1 there · 12.3 s · 5.6 s")
+
+        // The first of each to begin with: 18.002 s here on 12.301 s there
+        verify(page.compareAligned)
+        compare(page.compareOffsetMs, 18002 - 12301)
+        verify(status.text.indexOf("aligned on pull 1 here and pull 1 there, at 18.0 s here and 12.3 s there") > 0,
+               status.text)
+
+        // The box shows the page's place before any pick is made in it
+        page.alignPullHere = 1
+        compare(here.currentIndex, 1)
+        compare(page.compareOffsetMs, 31002 - 12301)
+        page.alignPullHere = 0
+        compare(here.currentIndex, 0)
+        compare(page.compareOffsetMs, 18002 - 12301)
+
+        // The second here, the pull in top gear: the golden's two starts
+        here.currentIndex = 1
+        here.activated(1)
+        compare(page.alignPullHere, 1)
+        verify(page.compareAligned)
+        compare(page.compareOffsetMs, 31002 - 12301)
+        verify(status.text.indexOf("pull 2 here and pull 1 there, at 31.0 s here") > 0, status.text)
+        // The boxes follow the page's choice, set from anywhere
+        page.alignPullHere = 0
+        compare(here.currentIndex, 0)
+        compare(page.compareOffsetMs, 18002 - 12301)
+        page.alignPullHere = 1
+        compare(here.currentIndex, 1)
+        compare(here.currentText, "Pull 2 here · 31.0 s · 4.0 s")
+        compare(page.compareOffsetMs, 31002 - 12301)
+        // An ask that failed is said as that, never as a recording with
+        // no pull
+        page.pullsThereFailed = true
+        page.align()
+        verify(!page.compareAligned)
+        compare(status.text, earlyRow.title + " isn't drawn: its pulls couldn't be read")
+        page.pullsHereFailed = true
+        page.align()
+        compare(status.text, earlyRow.title + " isn't drawn: neither recording's pulls could be read")
+        page.pullsThereFailed = false
+        page.align()
+        compare(status.text, earlyRow.title + " isn't drawn: this recording's pulls couldn't be read")
+        page.pullsHereFailed = false
+        page.align()
+        verify(page.compareAligned)
+        // At the pulls' start the compared one reads its own start
+        const rpm = find(page, "signalRows").model.find(s => s.name === "RPM").index
+        page.setCursor(31002)
+        compare(page.compareReadout[rpm].atMs, 12300, "pull-early's sample in force at its pull's start")
+
+        // A recording with no pull says so and isn't drawn: the cruise
+        page.stopComparing()
+        page.compareWith({ title: "Cruise", uri: "", folder: Harness.recordingFixtures + "/cruise",
+                           source: "", profile: "test" })
+        tryVerify(() => page.pullsThere !== null && page.pullsHere !== null, 10000, "its pulls are looked for")
+        verify(!page.compareAligned)
+        compare(status.text, "Cruise isn't drawn: it has no pull (full throttle for a second while it accelerates)")
+        verify(!there.enabled, "nothing to choose there")
+        compare(page.alignPullHere, 1, "this recording's choice is kept")
+
+        // Another alignment leaves the pulls; back to the list forgets them
+        page.setAlignOn("start")
+        verify(page.compareAligned)
+        verify(!here.visible)
+        find(page, "backToList").clicked()
+        compare(page.pullsHere, null)
+        compare(page.pullsThere, null)
+        compare(page.alignPullHere, 0)
+    }
+
     // Two key ons and their engine starts, 5.6 s and 12.6 s in
     // (tests/golden/cli/view-engine-start.jsonl)
     readonly property var startEarlyRow: ({
