@@ -206,6 +206,17 @@ judges nothing.
 > bridge hands Live those IDs. A range never answered still judges
 > nothing, and a rescan that finds a PID takes its defs off the list.
 
+> **Amended 2026-11-12:** a range the chain rules out counts as
+> answered with nothing set. When the walk is complete and the last
+> answered bitmap's link to the next one is clear, J1979 has the ECU
+> supporting no later PID, so `ecuio_pid_marked_unsupported` lists the
+> defs of those PIDs too, and a car whose chain ends early shows them as
+> not sent rather than waiting. The request engine already dropped their
+> requests by the bitmap. A walk that didn't finish judges no range it
+> didn't reach, and a link that is set judges nothing past an unanswered
+> bitmap. `PidSupportTest.AChainEndedEarlyMarksEveryLaterPidUnsupported`,
+> `.AnUnfinishedWalkJudgesNoRangeItDidntAnswer`.
+
 > **Amended 2026-11-03 (recordings in core):** the decode also runs
 > while a session records ([ADR-0049](0049-recordings-in-core.md)
 > section 1), and the absent signals' judgment follows it: a recording
@@ -515,3 +526,22 @@ Tests: `PidSupportTest.AComputedSignalFollowsItsInputs`,
 `.AComputedSignalWithAnAbsentInputIsAbsentToo`,
 `BridgeTest.TheMockDisclaimsThePidsItNeverSends`, and `QmlTest.dashboard`'s
 `test_theMocksGaugesSayWhatItNeverSends`.
+
+Note of 2026-11-12, the demo car under `obd2`: the mock answers Service
+01 from its drive cycle. Under a profile that reads PIDs its ECU is the
+simulated ECU of [ADR-0046](0046-simulated-ecu.md) over the mock's own
+drive cycle (`core/src/sim_ecu.h`): the walk asks it, its bitmaps list
+the PIDs it answers and end at 0x40, and each tick the worker hands on a
+whole reply (`REASSEMBLED`) for each of the set's PIDs among them
+(`core/src/mock_pids.h`), after the set's DIDs. So `mock://demo?profile=obd2`
+fills the `obd2` layout, Boost from MAP and baro; the set's other
+Service 01 signals are listed as not sent, those past 0x60 by section
+6's amendment of this date. A clear zeroes the counts since a clear in
+the values as in the report. The tests named above became
+`CoreTest.TheMockSendsTheDemoCarsPidsAndDisclaimsTheRest`,
+`.TheDemoCarUnderObd2SendsItsValues`,
+`.TheDemoCarsCountsSinceAClearFollowTheClear`, `MockPidsTest` (a case
+for each group of the PIDs it answers),
+`BridgeTest.TheMockSendsTheDemoCarsPidsAndHidesTheRest` and
+`QmlTest.dashboard`'s `test_theDemoCarsGaugesGetValuesUnderObd2`. The
+limit above, one channel, stands.
