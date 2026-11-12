@@ -203,6 +203,24 @@ TestCase {
         compare(l.plotW, chartW - chartW * 0.4)
     }
 
+    // A label wider than its column loses its unit from the end, never a
+    // digit: with room for part of the unit that part and an ellipsis, with
+    // less room than the number alone the number whole
+    function test_aLabelsCutTakesTheUnitAndKeepsTheNumberWhole() {
+        // 138 px of label room at 7 px a character: 19 characters
+        const wide = layout([series(0, [[0, 1], [1000, 2]], 0, "a very long unit name indeed")])
+        compare(wide.traces[0].label, "2 a very long unit…")
+        // 100 px wide the column is capped at 40, which leaves the label 18:
+        // less than "123456.789", let alone its unit
+        const narrow = ChartLayout.layout([series(0, [[0, 1], [1000, 123456.789]], 3, "kPa")],
+                                          100, chartH, opts())
+        compare(narrow.traces[0].label, "123456.789", "the number whole, the unit gone")
+        // Room for the number and an ellipsis, none for a letter of the unit
+        const between = ChartLayout.layout([series(0, [[0, 1], [1000, 1234.5]], 1, "kPa")],
+                                           160, chartH, opts())
+        compare(between.traces[0].label, "1234.5", "no ellipsis stands for a unit wholly cut")
+    }
+
     // A trace spans the plot's height from its own minimum to its maximum
     function test_eachTraceScalesToItsOwnRange() {
         const l = layout([series(0, [[0, 0], [1000, 100], [2000, 50]]),
