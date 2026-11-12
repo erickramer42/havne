@@ -70,6 +70,19 @@ TestCase {
         return found
     }
 
+    // A row of the recordings list to press, once the page is laid out: where the empty
+    // list's hint wraps, a new page owes its column a pass and the list has no height yet
+    function listRow(page, index) {
+        const list = find(page, "recordingList")
+        tryVerify(() => list.itemAtIndex(index) !== null, 2000, "the row has a delegate")
+        verify(waitForPolish(page.Window.window), "the list laid out")
+        const row = list.itemAtIndex(index)
+        const middle = row.mapToItem(list, row.width / 2, row.height / 2).y
+        verify(middle >= 0 && middle < list.height,
+               "the row's middle is inside the list: " + middle + " of " + list.height)
+        return row
+    }
+
     readonly property var findingsRow: ({
         title: "2026-11-03 10:00:00 · Findings", uri: "replay://x?profile=obd2",
         folder: Harness.recordingFixtures + "/findings", source: "socketcan://vcan0?profile=obd2",
@@ -108,8 +121,7 @@ TestCase {
         const page = createPage()
         page.recordings = [findingsRow]
         const list = find(page, "recordingList")
-        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
-        mouseClick(find(list.itemAtIndex(0), "recordingRowArea"))
+        mouseClick(find(listRow(page, 0), "recordingRowArea"))
         verify(page.viewing, "the viewer replaces the list")
         verify(!list.visible)
         tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
@@ -175,9 +187,7 @@ TestCase {
         verify(at >= 0, "the import is listed")
         compare(page.recordings[at].title, "2026-11-05 22:03:22 · Logger A")
         compare(page.recordings[at].frames, false)
-        const list = find(page, "recordingList")
-        tryVerify(() => list.itemAtIndex(at) !== null, 2000, "the row has a delegate")
-        const row = list.itemAtIndex(at)
+        const row = listRow(page, at)
         compare(find(row, "recordingDetail").text,
                 "values alone: the recording has no frames to replay")
         verify(!find(row, "replayButton").visible, "nothing to replay")
@@ -709,9 +719,7 @@ TestCase {
         page.recordings = [findingsRow]
         replaySpy.target = page
         replaySpy.clear()
-        const list = find(page, "recordingList")
-        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
-        mouseClick(find(list.itemAtIndex(0), "replayButton"))
+        mouseClick(find(listRow(page, 0), "replayButton"))
         compare(replaySpy.count, 1)
         compare(replaySpy.signalArguments[0][0], findingsRow.uri)
         verify(!page.viewing, "Replay doesn't open the viewer")
