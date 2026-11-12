@@ -440,13 +440,20 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
                                                       set (UINT, INT, FLOAT
                                                       or ENUM, not
                                                       COMPUTED) */
+/* -23 and -24 are reserved. */
+#define ECUIO_VALIDATE_ERR_DUPLICATE_NAME   (-25)  /* two defs share a name,
+                                                      byte for byte, an
+                                                      empty one too: a
+                                                      recording keys its
+                                                      values by name */
 
 /* Why a set failed validation, and where. index names the element the
- * code is about: the failing def; for a duplicate id, the second def
- * of the pair; for a bad channel id, the channel; for a duplicate rx,
- * the second channel of the pair; for too many requests, the first def
- * whose request didn't fit; for a table range, the def; for an enum
- * entry, the entry; for a program or its input, the program. It is
+ * code is about: the failing def; for a duplicate id or name, the
+ * second def of the pair; for a bad channel id, the channel; for a
+ * duplicate rx, the second channel of the pair; for too many requests,
+ * the first def whose request didn't fit; for a table range, the def;
+ * for an enum entry, the entry; for a program or its input, the
+ * program. It is
  * UINT32_MAX for ECUIO_VALIDATE_OK and for a code that names no single
  * element: a NULL, the layout version, the set's reserved fields, the
  * channel count, a NULL table. */
@@ -491,10 +498,10 @@ const ecuio_signal_set_t* ecuio_obd2_signal_set(void); /* ADR-0013 obd2 profile 
 
 /* The layout version, before any other member is read; the set's
  * reserved fields; every def (ecuio_validate_signal; the first failing
- * def's code); unique def ids; the channel declarations; then the
- * tables: each NULL only when empty, each def's range in them, each
- * enum entry, each program and its inputs. A set with count 0 may
- * leave defs NULL. Returns ECUIO_VALIDATE_OK or a
+ * def's code); unique def ids; unique def names; the channel
+ * declarations; then the tables: each NULL only when empty, each def's
+ * range in them, each enum entry, each program and its inputs. A set
+ * with count 0 may leave defs NULL. Returns ECUIO_VALIDATE_OK or a
  * ECUIO_VALIDATE_ERR_* code. When out isn't NULL, it receives the same
  * code and the index of the element at fault; a caller that only needs
  * pass or fail passes NULL. */
