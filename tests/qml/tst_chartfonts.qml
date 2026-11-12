@@ -34,6 +34,20 @@ TestCase {
         }
     }
 
+    // The same, with a unit that is free text
+    function longSeries(widthPx) {
+        return seriesFor(widthPx).map(s => Object.assign({}, s, { unit: "degrees BTDC" }))
+    }
+    Component {
+        id: longMaker
+        StripChart {
+            fetch: longSeries
+            layoutOpts: ({ gapMs: 3000, minSpanUnits: 20,
+                           panes: { max: 3, minH: ChartLayout.paneMinH },
+                           format: (v, d, u) => Number(v).toFixed(d) + (u !== "" ? " " + u : "") })
+        }
+    }
+
     function chartAt(w, h) {
         const c = createTemporaryObject(chartMaker, this, { shownW: w, shownH: h })
         verify(c)
@@ -87,6 +101,26 @@ TestCase {
                || Math.abs(ctx.measureText("é").width - ctx.measureText("e").width
                            - ctx.measureText("́").width) > 0.01,
                "the face kerns or composes in these labels")
+    }
+
+    // An imported column's unit is free text: a pane's name and a value's
+    // label are cut to their columns, never drawn past them
+    function test_aLongUnitIsCutToItsColumn() {
+        for (const w of [200, 320, 384, 600]) {
+            const c = createTemporaryObject(longMaker, this, { shownW: w, shownH: 320 })
+            tryVerify(() => c.drawn !== null && c.drawn.traces.length === 2, 2000, "drawn at " + w)
+            const l = c.drawn
+            for (const tr of l.traces) {
+                if (!tr.labeled) continue
+                const right = l.labelX + ChartLayout.swatchW + 4 + widthOf(c, tr.label)
+                verify(right <= w + 0.5, "label '" + tr.label + "' ends at " + right + " of " + w)
+            }
+            for (const pane of l.panes) {
+                if (pane.label !== "")
+                    verify(widthOf(c, pane.label) <= l.left + 0.5,
+                           "pane label '" + pane.label + "' is " + widthOf(c, pane.label) + " of " + l.left + " at " + w)
+            }
+        }
     }
 
     function test_labelsFitEveryWidth() {

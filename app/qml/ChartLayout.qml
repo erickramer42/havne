@@ -490,6 +490,16 @@ QtObject {
         return pieces
     }
 
+    // `text` cut from its end, with an ellipsis, to fit `room` px
+    function fitText(text, room, measure) {
+        if (measure(text) <= room)
+            return text
+        let s = text
+        while (s.length > 0 && measure(s + "…") > room)
+            s = s.slice(0, -1)
+        return s.length > 0 ? s + "…" : (measure("…") <= room ? "…" : "")
+    }
+
     // Label rows pushed apart where traces end close together, and kept
     // inside the plot's height. traces have endY; each gets labeled, and
     // a labeled one labelY. Rows are lineH apart while they fit, closer
@@ -718,6 +728,15 @@ QtObject {
         const plotW = Math.max(1, width - left - Math.min(Math.ceil(labelW) + swatchW + labelGap,
                                                           width * 0.4))
         const xOf = t => left + (t - tMin) / (tMax - tMin) * (plotW - 1)
+        // Free text (an imported column's unit) can outrun its column: a pane's
+        // name is cut to the axes' column, a value's label to its own
+        const labelRoom = Math.max(0, width - (left + plotW + 6) - swatchW - 4)
+        for (const tr of traces)
+            tr.label = fitText(tr.label, labelRoom, opts.measure)
+        for (const pane of panes) {
+            if (pane.label !== "")
+                pane.label = fitText(pane.label, left, opts.measure)
+        }
 
         const hGrid = []
         for (const pane of panes) {
