@@ -309,6 +309,27 @@ jobs:
           clang-tidy --version
           & "$env:ProgramFiles\Git\bin\bash.exe" scripts/tidy.sh --qt ($env:QT_PREFIX -replace '\\', '/') build-tidy
 
+  # The Visual Studio generator is what release.yml builds with, but win-build
+  # and win-coverage use Ninja (a compiler cache needs it). This keeps the
+  # generator, the multi-config layout and /Zi in CI at a minute or two:
+  # core, the shared library, the surrogate and test_core, no Qt.
+  win-vs-generator:
+    if: ${{ !inputs.smoke_only }}
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure and build with the Visual Studio generator
+        run: |
+          cmake -B build-vs -DHAVNE_BUILD_CORE_ONLY=ON
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build-vs --config Release --target ecuio ecuio-j2534-surrogate test_core
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Run test_core
+        run: build-vs/tests/Release/test_core.exe
+
   win-build:
     name: win-build (${{ matrix.shard }}/2)
     if: ${{ !inputs.smoke_only }}
