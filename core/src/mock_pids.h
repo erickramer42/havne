@@ -62,9 +62,10 @@ inline void ecuio_mock_pids_of(const ecuio_signal_set_t* set,
     }
 }
 
-/* Each PID's reply now, into frame (the caller's: 4 KB) and through
- * deliver(frame): 41 <PID> <data> on the ECU's reply ID at timestamp_us,
- * whole (REASSEMBLED), as an adapter hands on an ISO-TP message */
+/* Each PID's reply at the ECU's present state, into frame (the caller's:
+ * 4 KB) and through deliver(frame): 41 <PID> <data> on the ECU's reply ID
+ * at timestamp_us, whole (REASSEMBLED), as an adapter hands on an ISO-TP
+ * message */
 template <typename Deliver>
 inline void ecuio_mock_pid_replies(ecuio_sim_ecu& ecu,
                                    const ecuio_mock_pids& pids,

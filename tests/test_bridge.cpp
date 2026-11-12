@@ -9423,7 +9423,30 @@ TEST(BridgeTest, TheMockSendsTheDemoCarsPidsAndHidesTheRest)
         },
         3000));
 
-    // obd2's rows the ECU doesn't send are hidden, the rest shown in Live
+    // obd2's rows the ECU doesn't send are hidden, the rest shown in Live:
+    // each field of a PID the demo car doesn't answer (sim_ecu.h's drive
+    // PIDs and its diagnostics' readiness and counts since a clear)
+    static const uint8_t kDemoPids[] = {
+        0x01, 0x04, 0x05, 0x0B, 0x0C, 0x0D, 0x0F, 0x10, 0x11, 0x1F, 0x21,
+        0x24, 0x30, 0x31, 0x33, 0x41, 0x42, 0x44, 0x46, 0x4D, 0x4E, 0x5C};
+    const ecuio_signal_set_t* obd2 = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("obd2", &obd2), ECUIO_OK);
+    int notSent = 0;
+    for (uint32_t i = 0; i < obd2->count; ++i) {
+        const ecuio_signal_def_t& d = obd2->defs[i];
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+            continue; /* Boost: MAP and baro are sent */
+        }
+        const auto pid = static_cast<uint8_t>(d.mux_key);
+        notSent += std::find(std::begin(kDemoPids), std::end(kDemoPids), pid) ==
+                           std::end(kDemoPids)
+                       ? 1
+                       : 0;
+    }
+    uint32_t unsupported = 0;
+    ASSERT_EQ(ecuio_session_get_unsupported_signals(bridge.sessionForTesting(),
+                                                    nullptr, 0, &unsupported),
+              ECUIO_OK);
     int byId = 0;
     int byIdHidden = 0;
     for (const QVariant& r : rows) {
@@ -9436,9 +9459,9 @@ TEST(BridgeTest, TheMockSendsTheDemoCarsPidsAndHidesTheRest)
         }
     }
     ASSERT_GT(byId, 100);
-    EXPECT_GT(byIdHidden, 50);
-    EXPECT_LT(byIdHidden, byId - 15) << "the demo car's PIDs are shown";
-    EXPECT_EQ(model->hiddenCount(), byIdHidden + 2);
+    EXPECT_EQ(byIdHidden, notSent);
+    EXPECT_EQ(model->hiddenCount(), byIdHidden + 2) << "Own PID and Of PID";
+    EXPECT_EQ(model->hiddenCount(), static_cast<int>(unsupported));
     EXPECT_EQ(bridge.liveSignalModel()->rowCount(),
               model->rowCount() - model->hiddenCount());
 

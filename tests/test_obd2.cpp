@@ -4806,8 +4806,10 @@ TEST(PidSupportTest, AChainEndedEarlyMarksEveryLaterPidUnsupported)
     EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0x61));
     EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0xA6));
     EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0xFF));
-    EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0x5C)) << "as before";
-    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x0C)) << "as before";
+    EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0x5C))
+        << "clear in 40's answered bitmap";
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x0C))
+        << "set in 00's answered bitmap";
     EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x00));
 
     /* A chain whose last answered link is set judges nothing past it: the
