@@ -43,6 +43,12 @@ TestCase {
         }
     }
 
+    // Whatever a case sets of the shared Theme, put back, pass or fail
+    function cleanup() {
+        Theme.night = "off"
+        Theme.look = "dark"
+    }
+
     function sameColor(actual, expected, what) {
         verify(Qt.colorEqual(actual, expected), what + ": " + actual + ", expected " + expected)
     }
@@ -75,7 +81,18 @@ TestCase {
         compare(h.picked, "b")
         sameColor(h.second.background.color, Theme.elevatedLight, "picked moves")
         compare(h.first.background.border.width, 0)
-        Theme.look = "dark"
+    }
+
+    // A locked row draws dim, as the buttons under it do
+    function test_aLockedRowDims() {
+        const h = createTemporaryObject(rowMaker, testCase.parent)
+        verify(h)
+        compare(h.first.opacity, 1, "enabled segments are full")
+        h.row.enabled = false
+        compare(h.first.opacity, 0.45, "a disabled picked segment dims")
+        compare(h.second.opacity, 0.45, "and so does the other")
+        h.row.enabled = true
+        compare(h.second.opacity, 1, "enabled again")
     }
 
     function test_equalSharesFillTheRow() {
