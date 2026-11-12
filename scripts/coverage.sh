@@ -3,7 +3,7 @@
 # surrogate/, app/) over the whole ctest suite, Windows only. One summary
 # line per step, as in verify.sh; logs and reports go to Testing/coverage/.
 #
-# Usage: scripts/coverage.sh [--tests-only] [--no-devices] [-R <ctest regex>]
+# Usage: scripts/coverage.sh [--tests-only] [--no-devices] [--part <gtest|k/n>] [-R <ctest regex>]
 #
 #   configure   build-coverage, once, if it doesn't exist: the app and the
 #               tests, RelWithDebInfo with /Od /Ob0, so there are PDBs and
@@ -34,11 +34,13 @@ mkdir -p "$LOGDIR"
 tests_only=0
 devices=1
 regex=""
+part=all
 while [ $# -gt 0 ]; do
     case "$1" in
         --tests-only) tests_only=1 ;;
         --no-devices) devices=0 ;;
         -R) regex="${2:-}"; shift ;;
+        --part) part="${2:-}"; shift ;;
         -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
@@ -143,6 +145,7 @@ for t in json.load(sys.stdin)["tests"]:
             | sed -nE 's/^([A-Za-z_][A-Za-z0-9_/]*)\.( .*)?$/\1/p')
         [ -n "$suites" ] || continue
         owned="$owned|$(tr '\n' '|' <<<"$suites" | sed 's/|$//')"
+        case "$part" in all|gtest) ;; *) continue ;; esac
         if grep -qx "$name.exe" <<<"$serial"; then later="$later $exe"; continue; fi
         # Side by side, as ctest -j runs cases: a process under the tool uses one core
         (cover_one "$exe") &
@@ -156,7 +159,15 @@ for t in json.load(sys.stdin)["tests"]:
     done
     [ -z "$owned" ] || ctest_args+=(-E "^(${owned#|})\.")
 fi
-cover ctest 0 "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
+# --part: the gtest binaries alone, or the k-th of n interleaved slices of ctest's
+# other cases (ctest -I k,,n), so a runner each can share the work
+case "$part" in
+    all) ;;
+    gtest) ctest_skip=1 ;;
+    [1-9]*/[1-9]*) ctest_args+=(-I "${part%/*},,${part#*/}") ;;
+    *) echo "--part takes gtest or <k>/<n> (k from 1)" >&2; exit 2 ;;
+esac
+[ -n "${ctest_skip:-}" ] || cover ctest 0 "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
 cat "$LOGDIR"/cover-test_*.log "$LOGDIR/cover-ctest.log" > "$LOGDIR/coverage.log" 2>/dev/null
 dur=$((SECONDS - start))
 
