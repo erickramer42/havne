@@ -304,6 +304,7 @@ Rectangle {
 
             ConnectList {
                 objectName: "homeConnectList"
+                replayHint: false
                 visible: !Bridge.connected
                 Layout.fillWidth: true
                 recents: home.recents
@@ -397,7 +398,8 @@ Rectangle {
                 wrapMode: Text.WordWrap
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textDim
-                text: qsTr("Connect from here, or from Settings > Connection to choose a profile")
+                text: qsTr("Connect from here, or from Settings > Connection to choose a profile. "
+                           + "To play a recording back, open Recordings.")
             }
         }
     }

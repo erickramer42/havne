@@ -307,17 +307,25 @@ Page {
         // Refusals past an ECU's report list leave their rows blank: say
         // how many, since the rows can't
         const unnamed = Bridge.refusedUnnamed !== "" ? " · " + Bridge.refusedUnnamed : ""
+        // The plotted signals are what a log records: said while it runs,
+        // and where Start log is offered
+        if (Bridge.logActive)
+            return qsTr("Logging the %1 plotted signals").arg(Bridge.signalModel.subscribedCount) + unnamed
+        const logNote = Bridge.recordingActive || Bridge.currentUri.toLowerCase().startsWith("replay://")
+            ? "" : (Theme.compact ? qsTr(" · Start log records them")
+                                  : qsTr(" · Start log records the plotted ones"))
         if (Bridge.liveSignalModel.filter.active)
             return (Theme.compact ? qsTr("%1 of %2 shown · %3 plotted")
                                   : qsTr("Showing %1 of %2 signals · plotting %3"))
                        .arg(signalList.count).arg(Bridge.liveSignalModel.shownCount)
                        .arg(Bridge.signalModel.subscribedCount) + unnamed
+                       + (Theme.compact ? "" : logNote)   // the phone's line is one line: the count first
         // The 10 Hz clause is a desktop fact; a phone's line keeps the count
         if (Theme.compact)
             return qsTr("%1 of %2 plotted")
-                       .arg(Bridge.signalModel.subscribedCount).arg(Bridge.liveSignalModel.shownCount) + unnamed
+                       .arg(Bridge.signalModel.subscribedCount).arg(Bridge.liveSignalModel.shownCount) + unnamed + logNote
         return qsTr("Plotting %1 of %2 signals · values update at 10 Hz")
-                   .arg(Bridge.signalModel.subscribedCount).arg(Bridge.liveSignalModel.shownCount) + unnamed
+                   .arg(Bridge.signalModel.subscribedCount).arg(Bridge.liveSignalModel.shownCount) + unnamed + logNote
     }
 
     // The link-health banner's message. Unknown states read as degraded,

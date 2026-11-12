@@ -175,6 +175,41 @@ TestCase {
         Bridge.signalModel.toggleSubscribed(0)
     }
 
+    // The plotted rows are what Start log records: the line says so where
+    // the button is offered, and "Logging" while a log runs
+    function test_theStatusLineSaysWhatALogRecords() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const list = connectMock(page)
+        const all = list.count
+        verify(page.statusText().endsWith(" · Start log records the plotted ones"), page.statusText())
+        Bridge.startLog()
+        verify(Bridge.logActive, "a log runs")
+        compare(page.statusText(), "Logging the " + Bridge.signalModel.subscribedCount + " plotted signals")
+        Bridge.stopLog()
+        verify(!Bridge.logActive)
+        verify(page.statusText().endsWith("records the plotted ones"), page.statusText())
+
+        // Where Start log isn't offered the note isn't made: a recorded
+        // session (Record sessions on) and a replay
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        Bridge.recording = true
+        try {
+            compare(Bridge.connectSession("mock://demo"), "")
+            tryVerify(() => Bridge.recordingActive, 5000, "the session is recorded")
+            verify(page.statusText().indexOf("Start log") < 0, page.statusText())
+        } finally {
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+            Bridge.recording = false
+        }
+        const replay = Bridge.recordingRow(Harness.recordingFixtures + "/findings")
+        compare(Bridge.connectSession(replay.uri), "", "a replay connects")
+        tryVerify(() => page.statusText().indexOf("Plotting") === 0
+                        || page.statusText().indexOf(" of ") > 0, 5000, "its line")
+        verify(page.statusText().indexOf("Start log") < 0, page.statusText())
+    }
+
     // On a phone the field says "Find" and the status line drops the 10 Hz
     // clause, since the long forms are cut at 384 dp; the field's
     // accessible name keeps the whole phrase
@@ -191,7 +226,7 @@ TestCase {
         try {
             compare(field.placeholderText, "Find")
             compare(field.Accessible.name, "Find a signal by its name or unit")
-            compare(page.statusText(), all + " of " + all + " plotted")
+            compare(page.statusText(), all + " of " + all + " plotted · Start log records them")
             field.insert(0, "temp")
             field.textEdited()
             tryCompare(list, "count", 3)
