@@ -5404,17 +5404,16 @@ TEST(CoreTest, TheVinIsService09sThenF190s)
               ECUIO_ERR_NULL_ARGUMENT);
 }
 
-/* ecuio_session_get_unsupported_signals' contract: the mock's channel
- * has learned nothing (generation 0), so none, before start and after
- * close; NULLs refused as the absent signals' are. The judgment itself
- * is PidSupportTest's (test_obd2), and a session's through a fake ECU
+/* ecuio_session_get_unsupported_signals' contract on a channel that has
+ * learned nothing (the mock under its own profile, generation 0): none,
+ * before start and after close; NULLs refused as the absent signals'
+ * are. The judgment itself is PidSupportTest's (test_obd2), and a
+ * session's through a fake ECU
  * Elm327SessionTest.TheSignalsOfAWithheldPidAreUnsupported */
-TEST(CoreTest, TheMockHasNoUnsupportedSignals)
+TEST(CoreTest, AChannelThatLearnedNothingHasNoUnsupportedSignals)
 {
     ecuio_session_t* session = nullptr;
-    ASSERT_EQ(
-        ecuio_session_create("mock://a?profile=obd2&diagnose=0", &session),
-        ECUIO_OK);
+    ASSERT_EQ(ecuio_session_create("mock://a?diagnose=0", &session), ECUIO_OK);
     uint16_t ids[4] = {};
     uint32_t count = 99;
     ASSERT_EQ(ecuio_session_get_unsupported_signals(session, ids, 4, &count),
@@ -5436,6 +5435,148 @@ TEST(CoreTest, TheMockHasNoUnsupportedSignals)
     EXPECT_EQ(ecuio_session_get_unsupported_signals(session, ids, 4, &count),
               ECUIO_OK);
     EXPECT_EQ(count, 0u) << "readable after close";
+    ecuio_session_destroy(session);
+}
+
+namespace {
+
+/* The session's unsupported ids, all of them */
+std::vector<uint16_t> unsupported_ids(const ecuio_session_t* session)
+{
+    uint32_t count = 0;
+    EXPECT_EQ(
+        ecuio_session_get_unsupported_signals(session, nullptr, 0, &count),
+        ECUIO_OK);
+    std::vector<uint16_t> ids(count);
+    if (count > 0) {
+        EXPECT_EQ(ecuio_session_get_unsupported_signals(session, ids.data(),
+                                                        count, &count),
+                  ECUIO_OK);
+    }
+    return ids;
+}
+
+} // namespace
+
+/* The mock sends no Service 01 value, so under a profile that reads
+ * PIDs its ECU answers the supported-PID walk listing none, before the
+ * session is handed out: core then lists every Service 01 signal of the
+ * set, and obd2's computed Boost with them, as its ECU not sending them
+ * (ADR-0039 section 6). With diagnostics on or off, before start and
+ * after close. */
+TEST(CoreTest, TheMockDisclaimsTheService01SignalsItNeverSends)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    std::vector<uint16_t> every;
+    uint32_t requests = 0;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        const bool computed = (d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0;
+        if (computed || (d.mux_length == 2 && (d.mux_key >> 8) == 0x41u)) {
+            every.push_back(d.id);
+        }
+        /* a request per PID: its first field's def */
+        bool first = !computed;
+        for (uint32_t k = 0; k < i && first; ++k) {
+            first = set->defs[k].mux_key != d.mux_key ||
+                    (set->defs[k].flags & ECUIO_DEF_FLAG_COMPUTED) != 0;
+        }
+        requests += first ? 1u : 0u;
+    }
+    ASSERT_EQ(every.size(), set->count) << "obd2 holds nothing else";
+    ASSERT_EQ(every.back(), ECUIO_OBD2_SIG_BOOST_ID);
+
+    for (const char* uri :
+         {"mock://a?profile=obd2&diagnose=0", "mock://a?profile=obd2"}) {
+        SCOPED_TRACE(uri);
+        ecuio_session_t* session = nullptr;
+        ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+        ecuio_channel_support_t s{};
+        ASSERT_EQ(ecuio_session_get_channel_support(session, 0, &s), ECUIO_OK);
+        EXPECT_EQ(s.rx_id, 0x7E8u);
+        EXPECT_NE(s.generation, 0u) << "learned before start";
+        EXPECT_EQ(s.flags, ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE);
+        EXPECT_EQ(s.ranges, 0xFFu) << "every bitmap answered";
+        EXPECT_EQ(s.pids_supported, 0u);
+        EXPECT_EQ(s.pids_through, 0x100u);
+        EXPECT_EQ(s.requests, requests);
+        EXPECT_EQ(s.dropped, requests) << "each one, by the bitmaps";
+        EXPECT_EQ(s.dropped_list[0].reason, ECUIO_DROP_BITMAP);
+        EXPECT_EQ(s.scan_total, 0u);
+        EXPECT_EQ(unsupported_ids(session), every);
+
+        ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+        ecuio_channel_support_t later{};
+        ASSERT_EQ(ecuio_session_get_channel_support(session, 0, &later),
+                  ECUIO_OK);
+        EXPECT_EQ(later.generation, s.generation) << "nothing asked again";
+        ecuio_session_close(session);
+        EXPECT_EQ(unsupported_ids(session), every) << "readable after close";
+        ecuio_session_destroy(session);
+    }
+}
+
+/* A profile with no Service 01 signal learns nothing and lists none:
+ * the mock's own, raw, and uds-generic, whose DIDs the mock answers */
+TEST(CoreTest, TheMockDisclaimsNothingUnderAProfileWithNoPids)
+{
+    for (const char* uri :
+         {"mock://demo", "mock://demo?profile=raw",
+          "mock://demo?profile=uds-generic&did=1E1C,F190:text"}) {
+        SCOPED_TRACE(uri);
+        ecuio_session_t* session = nullptr;
+        ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_channel_support_t s{};
+        ASSERT_EQ(ecuio_session_get_channel_support(session, 0, &s), ECUIO_OK);
+        EXPECT_EQ(s.generation, 0u);
+        EXPECT_EQ(s.flags, 0u);
+        EXPECT_EQ(s.requests, 0u);
+        EXPECT_TRUE(unsupported_ids(session).empty());
+        ecuio_session_destroy(session);
+    }
+}
+
+/* A computed signal with an absent input is absent with it, and leaves
+ * the list when the input arrives: three replies to 01 0B with no data
+ * byte make obd2's MAP absent, and Boost, which reads it */
+TEST(CoreTest, AComputedSignalWithAnAbsentInputIsAbsentToo)
+{
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    uint16_t map = 0;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if ((set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) == 0 &&
+            set->defs[i].mux_key == 0x410Bu) {
+            map = set->defs[i].id;
+        }
+    }
+    ASSERT_NE(map, 0u);
+    const ecuio_frame_t none = value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0B});
+    const ecuio_frame_t one =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0B, 0x64});
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://a?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    uint16_t ids[4] = {};
+    uint32_t count = 99;
+    for (uint32_t k = 1; k <= ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(session, &none);
+        ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+                  ECUIO_OK);
+        EXPECT_EQ(count, k < ECUIO_ABSENT_AFTER_FRAMES ? 0u : 2u)
+            << "after " << k << " short replies";
+    }
+    EXPECT_EQ(ids[0], map);
+    EXPECT_EQ(ids[1], ECUIO_OBD2_SIG_BOOST_ID) << "in the set's order";
+    ecuio_session_dispatch_callbacks(session, &one);
+    ASSERT_EQ(ecuio_session_get_absent_signals(session, ids, 4, &count),
+              ECUIO_OK);
+    EXPECT_EQ(count, 0u) << "a reply that carries MAP clears both";
     ecuio_session_destroy(session);
 }
 

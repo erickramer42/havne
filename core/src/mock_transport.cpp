@@ -53,6 +53,37 @@ namespace {
 
 void answer_dids(ecuio_mock_transport* t, uint64_t timestamp_us);
 
+/* Whether the set reads a Service 01 PID: a value the mock never sends */
+bool reads_pids(const ecuio_signal_set_t* set)
+{
+    for (uint32_t i = 0;
+         set != nullptr && set->defs != nullptr && i < set->count; ++i) {
+        if (ecuio_service01_keyed(set->defs[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Walks the simulated ECU's supported-PID bitmaps, which list no PID,
+ * and hands the session channel 0's support report: core then lists the
+ * set's Service 01 signals as unsupported (ADR-0039 section 6), so a
+ * front end says they aren't sent rather than waiting for them. The
+ * engine is the caller's to drop after: nothing is asked again. */
+void disclaim_pids(ecuio_session_t* session, ecuio_request_engine* probe,
+                   ecuio_mock_ecu* ecu)
+{
+    const uint32_t rx_ids[1] = {ECUIO_MOCK_ECU_RX_ID};
+    ecuio_engine_init(probe, 1);
+    (void)ecuio_engine_derive(probe, session->active_signal_set, rx_ids, 1,
+                              nullptr);
+    int64_t now_us = 0;
+    ecuio_engine_probe(probe, now_us);
+    ecuio_mock_ecu_walk(probe, ecu, &now_us);
+    uint32_t published = 0;
+    ecuio_publish_support(session, *probe, 0, ECUIO_MOCK_ECU_RX_ID, published);
+}
+
 /* Reads the simulated ECU's diagnostics to their end and hands the
  * report to the session */
 void read_diagnostics(ecuio_mock_transport* t)
@@ -238,10 +269,14 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
         }
     }
     ecuio_mock_transport* impl = nullptr;
+    std::unique_ptr<ecuio_request_engine> probe; /* attach's alone */
     try {
         impl = new ecuio_mock_transport();
         if (params.diagnose) {
             impl->diag.reset(new ecuio_request_engine());
+        }
+        if (reads_pids(session->active_signal_set)) {
+            probe.reset(new ecuio_request_engine());
         }
         try {
             session->transport = new ecuio_transport_t{&kMockTransportOps, impl};
@@ -257,10 +292,11 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
     }
     session->info.backend = ECUIO_BACKEND_MOCK;
 
-    /* One channel, the simulated engine ECU: its support and identity
-     * reports stay empty (the mock answers no Service 01 bitmap or 09
-     * here), its diagnostics read now, before start, so the report is
-     * there as the session is (ADR-0037). */
+    /* One channel, the simulated engine ECU: its identity report stays
+     * empty (the mock answers no 09 here), and its support report too
+     * unless the profile reads Service 01 PIDs; its diagnostics are read
+     * now, before start, so the report is there as the session is
+     * (ADR-0037). */
     session->info.channel_count = 1;
     session->info.rx_ids[0] = ECUIO_MOCK_ECU_RX_ID;
     session->info.tx_ids[0] = ECUIO_MOCK_ECU_TX_ID;
@@ -270,6 +306,9 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
         session->support[0].rx_id = ECUIO_MOCK_ECU_RX_ID;
         session->identity[0].rx_id = ECUIO_MOCK_ECU_RX_ID;
         session->diagnostics[0].rx_id = ECUIO_MOCK_ECU_RX_ID;
+    }
+    if (probe) {
+        disclaim_pids(session, probe.get(), &impl->ecu);
     }
     if (impl->diag) {
         impl->ecu.engine = &impl->sim;

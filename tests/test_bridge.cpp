@@ -5004,12 +5004,15 @@ TEST(BridgeTest, LiveHidesTheFieldsCoreReportsAbsent)
     int unsupported = 0;
     for (int r = 0; r < rows; ++r) {
         const ecuio_signal_def_t& d = ecuio_obd2_signal_set()->defs[r];
+        /* Boost, the set's computed def, reads MAP (0B), which this car
+         * lacks: it is unsupported with it */
         const unsigned pid = (d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0
-                                 ? 0x100u
+                                 ? 0x0Bu
                                  : d.mux_key & 0xFFu;
         unsupported += (pid <= 0x20 && pid != 0x0C) ? 1 : 0;
     }
     ASSERT_GT(unsupported, 0);
+    EXPECT_TRUE(hidden(obd2RowOf(ECUIO_OBD2_SIG_BOOST_ID)));
     EXPECT_TRUE(hidden(b3)) << "still absent after the support's judgment";
     EXPECT_EQ(model.hiddenCount(), unsupported + 1);
 
@@ -9231,6 +9234,97 @@ TEST(BridgeTest, ASignalFilesRowsAreReferencedByTheirKeys)
     EXPECT_EQ(refsOf(bridge.profileSignals(
                   QStringLiteral("mock://demo?profile=") + alone)),
               QStringList{QStringLiteral("key:a")});
+    bridge.useSignalFiles({});
+}
+
+/* The mock sends no Service 01 value, and says so: under a signal file
+ * that extends obd2, obd2's rows, the file's own PID and what is computed
+ * from a PID are hidden as not sent by the ECU (ADR-0039 section 6), so a
+ * Dashboard cell reads "not sent by this ECU", never "waiting for data"
+ * for good; the file's DID, which the mock answers, and what is computed
+ * from it have values. The ECU's line is logged once. */
+TEST(BridgeTest, TheMockDisclaimsThePidsItNeverSends)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QByteArray file(
+        R"({"havne_signals":1,"name":"Disclaimed","source":{"name":"t"},)"
+        R"("extends":"obd2","ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+        R"({"key":"did","name":"Own DID","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0,"bits":8}},)"
+        R"({"key":"pid","name":"Own PID","read":{"service":"01","number":"06"},)"
+        R"("field":{"byte":0,"bits":8}},)"
+        R"({"key":"of_did","name":"Of DID","kind":"computed","expr":"did * 2"},)"
+        R"({"key":"of_pid","name":"Of PID","kind":"computed","expr":"pid * 2"}]})");
+    const QString profile = useFile(bridge, from.path(), file);
+    ASSERT_FALSE(profile.isEmpty());
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://demo?profile=") + profile)
+            .isEmpty());
+    SignalListModel* model = bridge.signalModel();
+    ASSERT_TRUE(spinUntil([&] { return model->hiddenCount() > 0; }, 3000));
+    ASSERT_TRUE(spinUntil(
+        [&] {
+            return rowNamed(modelRows(bridge), QStringLiteral("Of DID"))
+                .value(QStringLiteral("hasValue"))
+                .toBool();
+        },
+        3000));
+
+    const QVariantList rows = modelRows(bridge);
+    const auto hidden = [&rows](const char* name) {
+        const QVariantMap row = rowNamed(rows, QString::fromLatin1(name));
+        EXPECT_FALSE(row.isEmpty()) << name;
+        return row.value(QStringLiteral("hidden")).toBool();
+    };
+    const auto hasValue = [&rows](const char* name) {
+        return rowNamed(rows, QString::fromLatin1(name))
+            .value(QStringLiteral("hasValue"))
+            .toBool();
+    };
+    EXPECT_FALSE(hidden("Own DID"));
+    EXPECT_TRUE(hasValue("Own DID"));
+    EXPECT_FALSE(hidden("Of DID"));
+    EXPECT_TRUE(hidden("Own PID"));
+    EXPECT_FALSE(hasValue("Own PID"));
+    EXPECT_TRUE(hidden("Of PID")) << "computed from a PID the ECU lacks";
+    EXPECT_FALSE(hasValue("Of PID"));
+    EXPECT_TRUE(hidden("RPM")) << "obd2's";
+    EXPECT_TRUE(hidden("Boost")) << "obd2's computed signal";
+
+    // Every row but the file's DID and what it feeds: obd2's are refs by
+    // ID, the file's own by key
+    int byId = 0;
+    for (const QString& ref : refsOf(rows)) {
+        byId += ref.startsWith(QStringLiteral("id:")) ? 1 : 0;
+    }
+    ASSERT_GT(byId, 100);
+    EXPECT_EQ(model->hiddenCount(), byId + 2);
+    EXPECT_EQ(bridge.liveSignalModel()->rowCount(), 2) << "Live lists the rest";
+
+    spinLoop(300);
+    const QStringList ecu = log.filter(QStringLiteral("ECU 0x7E8: supports "));
+    ASSERT_EQ(ecu.size(), 1) << log.join(QLatin1Char('\n')).toStdString();
+    EXPECT_TRUE(
+        ecu.first().startsWith(QStringLiteral("ECU 0x7E8: supports 0 PIDs; ")))
+        << ecu.first().toStdString();
+    EXPECT_TRUE(
+        ecu.first().contains(QStringLiteral("(not in its supported PIDs)")))
+        << ecu.first().toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    // The mock's own profile: nothing hidden, no ECU line
+    log.clear();
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    spinLoop(400);
+    EXPECT_EQ(model->hiddenCount(), 0);
+    EXPECT_TRUE(log.filter(QStringLiteral("ECU 0x7E8: supports ")).isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
     bridge.useSignalFiles({});
 }
 

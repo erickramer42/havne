@@ -190,7 +190,8 @@ ecuio_status_t ecuio_unregister_values_callback(
  * carried it, as an ECU that answers PID 55 with bank 1's byte alone.
  * A signal that arrives later leaves the list. Judged from the frames
  * decoded for a values callback, so while none is registered nothing
- * is judged.
+ * is judged. A computed signal (ECUIO_DEF_FLAG_COMPUTED) with such an
+ * input is listed with it: it can't be computed.
  *
  * Fills ids with up to capacity signal ids, in the set's order, and
  * *count with how many there are; capacity 0 (ids may be NULL) asks
@@ -213,7 +214,10 @@ ecuio_status_t ecuio_session_get_absent_signals(
  * (ecuio_session_get_channel_support). A range whose bitmap was never
  * answered, a channel that has learned nothing yet, and every other def
  * judge nothing. A rescan that finds a PID takes its signals off the
- * list.
+ * list. A computed signal (ECUIO_DEF_FLAG_COMPUTED) with such an input
+ * is listed with it: it can't be computed. mock:// answers the bitmaps
+ * too, listing no PID, so under a profile with Service 01 signals it
+ * lists them all: it sends none of their values.
  *
  * Fills ids with up to capacity signal ids, in the set's order, and
  * *count with how many there are; capacity 0 (ids may be NULL) asks
