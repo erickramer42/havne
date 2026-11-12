@@ -1,8 +1,9 @@
 # ADR-0063: Conditions: one model in core, stored as data and judged on the worker, for triggered logging, alerts and markers
 
-- **Status:** Accepted. Built: section 12's step 2, the condition
-  loader (the appendix of 2026-11-12). The evaluator and every step
-  after it are not built. "Decided" at the end records each choice.
+- **Status:** Accepted. Built: section 12's steps 2 and 3, the
+  condition loader and the evaluator (the two appendices of
+  2026-11-12). The steps after them are not built. "Decided" at the end
+  records each choice.
 - **Date:** 2026-11-10.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (requests as data,
   read-only by construction); [ADR-0024](0024-decode-on-the-worker.md)
@@ -416,7 +417,9 @@ typedef struct ecuio_condition_event {
     uint32_t arbitration_id;  /* a check term: the finding's ID */
     int32_t  code;            /* a link term: the link's state; a check
                                  term: the finding's kind */
-    uint64_t reserved[2];     /* zero */
+    uint32_t generation;      /* the attach it belongs to */
+    uint32_t reserved0;       /* zero */
+    uint64_t reserved;        /* zero */
 } ecuio_condition_event_t;    /* 56 bytes, no pointer */
 
 typedef void (*ecuio_conditions_callback_t)(
@@ -433,9 +436,10 @@ typedef struct ecuio_condition_state {
     uint32_t flags;           /* _STALE; ECUIO_CONDITION_UNAVAILABLE 0x4 */
     uint64_t since_us;        /* session time of the last change */
     uint64_t fired;           /* firings so far */
-    double   value;           /* the deciding term's newest sample */
+    double   value;           /* the deciding term's sample at the
+                                 last change */
     uint32_t why;             /* UNAVAILABLE: ECUIO_CONDITION_WHY_* */
-    uint32_t reserved0;
+    uint32_t generation;      /* the attach these states belong to */
     uint64_t reserved[2];     /* zero */
 } ecuio_condition_state_t;    /* 56 bytes */
 
@@ -648,8 +652,9 @@ be muted.
   changed):**
   - `stream <uri> --conditions <file>`: a `conditions` line at the
     start (each key, its uses, available or why not) and a `condition`
-    line per event, `{"type":"condition","t":12.431,"key":"coolant_high",
-    "state":"on","fired":true,"stale":false,"value":112.0}`;
+    line per event, `{"type":"condition","t_us":12431000,
+    "key":"coolant_high","state":"on","fired":true,"stale":false,
+    "value":112.0,"term":0}`;
   - `log <uri> ... --conditions <file> [--armed]`: an armed log, with a
     `recording` line as each window opens and closes;
   - `conditions check <file> [--signals <file> | --profile <name>]`:
@@ -1021,3 +1026,185 @@ fixtures are the fuzz target's seeds), `CliConditionTest`, goldens and
 usage cases for `conditions check`, `SchemaKeysTest`,
 `SchemaFixturesTest`, `PythonTest.test_conditions`, `c_abi`, and
 `fuzz_condition_file`.
+
+## Appendix: the evaluator as built (2026-11-12)
+
+Section 12's step 3: signal terms judged in a session with section 2's
+timing, the callback, the states, the pull queue's third kind,
+`havne-cli stream --conditions`, the Python package's side, and the
+desk check against a plugin's variant. Link and check terms (step 6)
+aren't judged, and nothing is recorded yet (step 4).
+
+**Where it runs.** `core/src/condition_eval.{h,cpp}` holds a set bound
+to a signal set and its state, with one entry, `judge(time, values)`.
+The session's dispatch calls it right after the frame's decode, so it
+sees the values the callbacks get, computed ones included, and step 8's
+reader calls the same pair. On the worker, one frame goes: frame
+callbacks, frame queues, the decode, the judgment, the recorder, values
+callbacks, values queues, conditions callbacks, conditions queues. A
+frame's events arrive in one call after its values, ordered by time and
+then by the set's order; an event stamped with a deadline's time,
+earlier than the frame's, still comes after that frame's values, since
+the frame is what settled it. A session decodes every frame while a set
+is attached, a values consumer or not, and a frame that decodes nothing
+still settles what is due.
+
+**The swap.** The session keeps three slots under the mutex its
+dispatch already takes for each frame: the worker's set, a pending one
+and a retired one. `ecuio_session_set_conditions` builds the next set
+on the caller's thread and puts it in the pending slot; the next
+dispatch, inside that lock, moves its own into the retired slot and
+takes the pending one. The caller frees a retired set, and a pending
+one the worker never took, at its next call. So a frame gains no
+synchronization, the worker frees nothing, the caller never frees a set
+the worker holds, and any number of calls between two frames leave only
+the last to be judged. Inside that same lock the call takes its
+generation and writes the new set's states before it fills the pending
+slot: the worker can take the set and judge a frame the moment the lock
+goes, and it writes only states of its own generation, so states
+written after the handover would overwrite what that frame changed. Two
+callers at once each get a generation of their own.
+
+**What an event is.** A change of a condition's state or of its STALE
+flag; the changes one frame settles at one time are one event. The
+first judgment after an attach is an event, the attach is none. One
+frame gives one condition three events at most: a hold's end, an age
+bound, and the frame's own judgment. The buffer holds three for each
+condition that binds; the evaluator checks the bound where it writes
+(an assert, and a counted drop in a release build), and the fuzz target
+holds the count to zero. That count is the evaluator's own and no call
+reads it: the ABI gains nothing for a number that is zero unless the
+evaluator is wrong, and a field for it can take reserved room when
+something needs to read it.
+
+**Changed from section 6,** each for a reason found while building:
+
+- **A generation** in the event and in the state, in their reserved
+  room. A set can be replaced mid-session, and an event of the set
+  before can still sit in a queue, in a front end's staging, or in a
+  callback under way when the call returns, where its index would be
+  read against the new set. The generation is 1 for a session's first
+  attach and moves by one with each, a removal too.
+- **A state's value** is the settling term's sample at its last event,
+  not its newest: the states are published only when one changes, so
+  the getter never waits on a frame and a frame never takes the lock
+  for a sample alone. A live value is the values path's.
+- **Two reasons** join the list for the terms this step doesn't judge:
+  `NO_LINK` and `NO_CHECK`. Both stay true after step 6: a `replay://`
+  session has no link health, and a transport that reassembles runs no
+  `isotp` check.
+- **No event at the close.** A closed session delivers nothing, so a
+  consumer reads the close as the end of every condition; the states
+  keep what they last held.
+
+**Settled while building:**
+
+- **A value that is no number is no sample.** A FLOAT field can carry a
+  NaN off the wire. It compares with no level, so the evaluator passes
+  it by: the term keeps its truth and its sample's age runs on, as a
+  computed signal treats a NaN input as no value. An infinity is a
+  number, on one side of every level.
+- **Time never goes back.** A session's frame times rise on each
+  channel, not across channels, so a frame can be stamped a little
+  earlier than the one dispatched before it. The evaluator judges such a
+  frame at the time it had already reached. The alternative, taking the
+  earlier stamp, would let a sample move a deadline earlier (which the
+  deadline index rules out) and an event carry a time before one
+  already delivered.
+- **A hold that ends exactly at a frame's time** is settled after that
+  frame's values, if they didn't break it. A sample exactly at its age
+  bound is still fresh, as a computed signal's input is.
+- **A term keeps its truth across a stale stretch,** so a sample inside
+  its hysteresis band afterward reads as before, and a condition that
+  comes back to the state it had fires nothing.
+- **A quiet link.** Deadlines are settled by frames (section 2), so a
+  STALE that is due shows with the next frame and not before. The
+  workers have no wake in common that carries a session time: each
+  waits in its transport's own way, and a tick on the host's clock is
+  the alternative this record sets aside, since a replay could not
+  repeat it. Until a frame comes, a front end has the values' own ages
+  (a gauge dims at `ECUIO_VALUE_STALE_US` on the host's clock), and
+  step 6's link term reads link health, which reports a silent bus
+  within about a second on its own path.
+- **A recorder attached refuses a new set** (`ECUIO_ERR_IN_USE`): step
+  4 copies the set into the recording and writes its events against it,
+  so a recording holds one set for its whole length. Changing alerts
+  during a log would need the recording to hold a second set from some
+  point on; that is step 7's to decide with its editor, and allowing
+  later what is refused here breaks no caller.
+- **The time on `stream`'s line** is `t_us`, integer microseconds, as
+  every other line's, where section 10's example had seconds.
+
+**The cost.** Each watched signal keeps the levels and clears of its
+terms sorted. A term's truth changes only when a sample lands on or
+crosses one of them, so a sample visits the points between the sample
+before it and itself and no other term; a term not yet judged, or back
+from stale, has its signal's terms visited whole once. A sample moves a
+deadline later, never earlier, so each condition keeps a time no later
+than its earliest deadline and is examined only when a frame passes it,
+about once per age bound. Measured on the replay fixture's frames
+through the session's dispatch (`bench_bridge --decode`, Windows,
+Release; each figure a run's median of nine rounds, the lowest of seven
+runs, on a machine other builds were loading, so an upper bound):
+
+| | ns a frame |
+|---|---|
+| obd2, no set | 53 |
+| obd2, a typical set (8 conditions, 12 terms) | 61 |
+| obd2, the largest set (64 conditions of 4 terms, 18 terms a value) | 70 |
+| obd2, no values consumer, no set (nothing is decoded) | 16 |
+| obd2, no values consumer, a typical set (decoded for the conditions) | 59 |
+
+The largest set cost 155 ns before the points were sorted. A session
+with no set attached pays one test of a pointer: the conditions'
+callbacks are listed only by a frame that changed something. A/B against
+the commit before (`scripts/bench_ab.py decode`, seven runs of each,
+alternated), with no set attached, the lowest run of each: obd2 alone
+51.7 ns before and 53.0 after, eight computed signals 90.8 and 90.5, a
+chain of eight 195.3 and 192.9. Under that load one build's runs spread
+further apart than any of the three differences.
+
+The saturated run section 3 names goes through the bridge, which can't
+attach a set before step 7. Core's own replay worker looping at full
+speed, with a values consumer, is the stricter stand-in, since a frame
+costs it about 260 ns in all: 3.80 million frames a second with no set,
+3.61 million with the typical set (0.95) and 3.32 million with the
+largest (0.87), medians of five 1.5 s runs that spread by 15 % or more
+on the loaded machine. So section 3's 5 % is met for the typical set
+and not shown for the largest on that worker. The bridge's own load run
+with no set attached (`scripts/bench_ab.py load`, five runs of each)
+gave 0.36 million worker frames a second before and 0.40 million after,
+inside the runs' spread (0.27 to 0.44 million): about 2.5 us a frame,
+of which the largest set's 17 ns would be under 1 % by arithmetic. The
+bridge's run with the largest set attached is step 7's to make, and
+both tables are measured again on a quiet machine before the release.
+The largest set holds 44,480 bytes of state for a session.
+
+**The front ends.** `havne-cli stream <uri> --conditions <file>` reads
+the file before the connect, attaches it before a recording begins,
+writes a `conditions` line (the name, the generation, each key with its
+uses, `available` and `why`, the session's own reasons among them) and
+a `condition` line for each event (`t_us`, `key`, `state`, `fired`,
+`stale`, `value`, `term`), from the worker as a values line is, after
+the frame that settled it. A live session's stream drops lines when its
+reader falls behind; a lost event is a change of state the reader never
+sees, so the `end` line counts, in `conditions_dropped` (written only
+with `--conditions`), the changes whose line was dropped, with its
+frame or alone. `conditions check` takes `--plugin <pkg>
+[--variant <id>]`, resolving against a plugin variant's set and keys:
+its only variant, else the one named. In Python, `Session` gains
+`set_conditions`, `conditions()` (a stream of `ConditionEvent`) and
+`condition_states()`, and `ConditionSet.resolve` takes a `Plugin`. The
+package names an event by its attach's keys, stored before the call
+that attaches them, and keeps the newest 64 attaches' keys.
+
+**Tests:** `ConditionEvalTest` (the rules, fed by hand: hysteresis,
+holds, the join, stale, deadlines at their own time, three events in
+one frame, the same events however the frames are split),
+`ConditionSessionTest` (the attach and its states, the order after the
+values callback, attaches back to back, a swap under a running worker,
+the recorder's refusal, the queue, no allocation, a computed signal's
+term, a replay of a recording giving the live session's events),
+`CliConditionTest`, goldens and usage cases, `PythonTest.test_conditions`
+(the replay's events equal to `havne-cli`'s lines), `c_abi`, and
+`fuzz_condition_file`, which judges each loaded set.

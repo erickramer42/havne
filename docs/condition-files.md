@@ -7,11 +7,13 @@ alike, on every platform, with no code in it. The design and the reasons
 behind each rule are [ADR-0063](adr/0063-conditions.md); this page is
 the reference for writing a file by hand.
 
-> **Status:** core's loader (`ecuio_condition_set_load`,
-> `conditions.h`), `havne-cli conditions check`, the JSON Schema and the
-> Python package's `ConditionSet` read and check a file. Nothing judges
-> a condition during a session yet: the alert, the recording and the
-> marker a file asks for are read and reported, not acted on.
+> **Status:** core reads and checks a file (`ecuio_condition_set_load`,
+> `havne-cli conditions check`, the JSON Schema, the Python package's
+> `ConditionSet`), and a session judges its signal terms
+> (`ecuio_session_set_conditions`, `havne-cli stream --conditions`,
+> `Session.set_conditions`). Link and check terms load and aren't judged
+> yet, and the alert, the recording and the marker a file asks for are
+> reported, not acted on.
 
 ## A first file
 
@@ -222,10 +224,63 @@ further, so a list is an order of preference, not a search for one that
 fits. A condition with one unavailable term is unavailable as a whole,
 under `any` too.
 
+## In a session
+
+```
+havne-cli stream <uri> --conditions <file>
+```
+
+A session judges the file's conditions on the frames it reads. After
+its `session` line, `stream` writes a `conditions` line: each condition
+with whether this session can judge it and why not (a link or a check
+term is `no_link` or `no_check`). Then a `condition` line follows each
+change:
+
+```json
+{"type":"condition","t_us":3806218,"key":"running","state":"on","fired":true,"stale":false,"value":943.25,"term":0}
+```
+
+- **`state`** is `on` or `off`, and **`fired`** marks a change from off
+  to on.
+- **`stale`** means an input is too old to judge (older than its
+  `max_age`): the state is the one the condition had, kept. The next
+  judgment clears it, with `fired` false when the state is unchanged.
+- **`t_us`** is the session time of the change. A hold's end (`for`,
+  `clear_for`) and an age bound are stamped with their own time, which
+  is earlier than the frame that settled them, so the same frames give
+  the same lines however fast a recording is replayed. A bus that goes
+  wholly quiet settles nothing until its next frame.
+- **`value`** and **`term`** are the sample and the index of the term
+  that settled the change.
+
+A value that is no number (a float field's NaN) is no sample: the term
+keeps what it last judged, and goes stale at its age bound like any
+input that stops arriving.
+
+A live session's stream drops lines when its reader can't keep up
+(`dropped_frames` on the `end` line). A `condition` line can be dropped
+with its frame or alone, and the `end` line's `conditions_dropped`
+counts the changes whose line was dropped either way: above 0, the last
+`state` read for a condition may no longer be its state. A replay waits
+for its reader and drops nothing.
+
+Every condition starts off and stale; its first line is its first
+judgment. From Python:
+
+```python
+with havne.Session("replay://...?profile=obd2&speed=max") as session:
+    events = session.conditions()
+    session.set_conditions(havne.ConditionSet(path="daily.json"))
+    session.start()
+    for event in events:
+        print(event.timestamp_us, event.key, event.state, event.fired)
+```
+
 ## Checking one with no car
 
 ```
-havne-cli conditions check <file> [--signals <file> | --profile <name>]
+havne-cli conditions check <file> [--signals <file> | --profile <name> |
+                                   --plugin <pkg> [--variant <id>]]
 ```
 
 It writes JSON lines: `start`, a `condition_set` line (the file's name,
@@ -233,8 +288,10 @@ its count, and the check thresholds in force), then a `condition_def`
 line for each condition as read. A refused file is an `error` line with
 the loader's words and exit code 3.
 
-With `--profile` (a registered profile: `obd2`, `mock`) or `--signals`
-(a signal file), each condition is also resolved against that set: a
+With `--profile` (a registered profile: `obd2`, `mock`), `--signals`
+(a signal file) or `--plugin` (a plugin's variant: its only one, or the
+one `--variant` names), each condition is also resolved against that
+set: a
 signal term gains `resolved`, the reference it took and the signal's ID,
 name and unit there, and the line gains `available`, `why` and
 `why_term`.
@@ -253,7 +310,8 @@ for condition, binding in zip(conditions.conditions, conditions.resolve("obd2"))
     print(condition.key, binding.available, binding.why)
 ```
 
-`resolve` takes a profile's name, a `havne.SignalFile`, or nothing.
+`resolve` takes a profile's name, a `havne.SignalFile`, a `havne.Plugin`
+(with its variant's id), or nothing.
 
 ## The schema
 
