@@ -476,6 +476,17 @@ jobs:
         shell: bash
         run: bash scripts/coverage.sh
 
+      # A case that fails only under the tool is named in the step's log and
+      # explained in its own: the step doesn't fail, so this runs always.
+      - name: Upload coverage logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-logs
+          path: Testing/coverage/cover-*.log
+          retention-days: 14
+          if-no-files-found: ignore
+
       - name: Upload to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
