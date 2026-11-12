@@ -13,6 +13,7 @@
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QThreadPool>
 #include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
@@ -1642,12 +1643,17 @@ TEST(RecordingViewTest, DestroyedWithAnAskUnderWayIsSafe)
 {
     QElapsedTimer timer;
     const int hold = 1500;
+    int answers = 0;
     {
         RecordingView v;
         v.open(fixture("pull-early"));
         ASSERT_TRUE(waitFor([&] { return settled(v); }));
         const int rpm =
             signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+        QObject::connect(&v, &RecordingView::statsReady,
+                         [&](int, const QVariantList&) { ++answers; });
+        QObject::connect(&v, &RecordingView::stepReady,
+                         [&](int, double) { ++answers; });
         v.setAsksHoldForTesting(hold);
         timer.start();
         ASSERT_GT(v.stats({rpm}, 0, 30000), 0);
@@ -1655,8 +1661,15 @@ TEST(RecordingViewTest, DestroyedWithAnAskUnderWayIsSafe)
         ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
     }
     EXPECT_LT(timer.elapsed(), hold / 2) << "an ask or the destructor waited";
-    // Its answer arrives for a view that is gone, and is dropped
-    EXPECT_FALSE(waitFor([] { return false; }, hold + 500));
+    // The task reads on by itself, its hold and the read, and ends
+    EXPECT_TRUE(QThreadPool::globalInstance()->waitForDone(hold + 10000))
+        << "the abandoned task never ended";
+    EXPECT_GE(timer.elapsed(), hold - 50)
+        << "no read was under way when the view went";
+    // Its answers, posted for a view that is gone, run here and reach no one
+    QCoreApplication::processEvents();
+    QCoreApplication::sendPostedEvents();
+    EXPECT_EQ(answers, 0);
 }
 
 // The file gone under an open recording: a partial second's raw rows
