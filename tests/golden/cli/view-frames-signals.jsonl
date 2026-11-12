@@ -7,8 +7,8 @@
 {"decimals": 2, "first_us": 3000, "group": "Air", "highest": 5, "index": 4, "last_us": 3000, "lowest": 5, "name": "MAF", "rank": 4, "rate_hz": null, "recording": 0, "samples": 1, "text": false, "type": "signal", "unit": "g/s"}
 {"decimals": 1, "first_us": 1000, "group": "Oxygen sensors", "highest": 0, "index": 5, "last_us": 3000, "lowest": 0, "name": "Rear O2 Short Trim B1", "rank": 0, "rate_hz": 500, "recording": 0, "samples": 2, "text": false, "type": "signal", "unit": "%"}
 {"column_us": 2000, "columns": 2, "from_us": 0, "to_us": 4000, "type": "axis"}
-{"highest": [null, 1726], "lowest": [null, 1726], "recording": 0, "samples": [0, 2], "signal": "RPM", "type": "columns"}
-{"highest": [null, 50], "lowest": [null, 50], "recording": 0, "samples": [0, 1], "signal": "Coolant Temp", "type": "columns"}
-{"highest": [null, 25], "lowest": [null, 25], "recording": 0, "samples": [0, 1], "signal": "Intake Air Temp", "type": "columns"}
-{"highest": [null, 5], "lowest": [null, 5], "recording": 0, "samples": [0, 1], "signal": "MAF", "type": "columns"}
-{"highest": [null, 50], "lowest": [null, 50], "recording": 0, "samples": [0, 2], "signal": "Vehicle Speed", "type": "columns"}
+{"highest": [null, 1750], "lowest": [null, 1726], "mean": [null, 1734], "recording": 0, "samples": [0, 3], "signal": "RPM", "type": "columns"}
+{"highest": [null, 50], "lowest": [null, 50], "mean": [null, 50], "recording": 0, "samples": [0, 1], "signal": "Coolant Temp", "type": "columns"}
+{"highest": [null, 25], "lowest": [null, 25], "mean": [null, 25], "recording": 0, "samples": [0, 1], "signal": "Intake Air Temp", "type": "columns"}
+{"highest": [null, 5], "lowest": [null, 5], "mean": [null, 5], "recording": 0, "samples": [0, 1], "signal": "MAF", "type": "columns"}
+{"highest": [null, 50], "lowest": [null, 50], "mean": [null, 50], "recording": 0, "samples": [0, 2], "signal": "Vehicle Speed", "type": "columns"}

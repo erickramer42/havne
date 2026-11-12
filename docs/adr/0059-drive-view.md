@@ -391,3 +391,10 @@ form's alone" no longer holds.
   off softly, and idle hunts a few r/min. It runs only while Home shows
   and the app is active (`Qt.application.state`); `HomePage.animated`
   holds it still for tests.
+
+## Note: the Demo data row is everyone's (2026-11-12)
+
+The Demo data row (`mock://demo`) ends the connect list's group whatever
+developer mode says, and is never the chosen row by default; Settings' mock
+preset is shown to everyone likewise. Developer mode gates the frame-rate
+readout, the viewer's frame test, Export's raw frames and the adapter relay.

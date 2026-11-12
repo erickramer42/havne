@@ -40,6 +40,12 @@ std::string refusal(const std::string& json)
     return ecuio_last_error_detail();
 }
 
+/* Whether text holds words */
+bool has(const std::string& text, const char* words)
+{
+    return text.find(words) != std::string::npos;
+}
+
 /* ADR-0051 section 2's example */
 const char* const kExample = R"json({
   "havne_signals": 1,
@@ -128,7 +134,8 @@ TEST(SignalFileTest, TheAdrsExampleLoadsIntoItsSet)
     EXPECT_STREQ(ecuio_signal_file_extends(f.get()), "obd2");
     const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
     const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
-    ASSERT_EQ(set->count, obd2->count + 4) << "the base's, then the file's";
+    ASSERT_EQ(set->count, obd2->count + 3)
+        << "the base's, then the file's, its Boost standing for obd2's";
     EXPECT_EQ(ecuio_validate_signal_set(set, nullptr), ECUIO_VALIDATE_OK);
     EXPECT_EQ(set->defs[0].id, obd2->defs[0].id);
 
@@ -177,7 +184,14 @@ TEST(SignalFileTest, TheAdrsExampleLoadsIntoItsSet)
     ASSERT_NE(boost, nullptr);
     EXPECT_EQ(boost->flags, ECUIO_DEF_FLAG_COMPUTED);
     EXPECT_EQ(boost->plot_rank, 1);
-    ASSERT_EQ(set->computed_count, 1u);
+    ASSERT_EQ(set->computed_count, 1u) << "the file's boost replaced obd2's";
+    int boosts = 0;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        boosts += std::strcmp(set->defs[i].name, "Boost") == 0 ? 1 : 0;
+    }
+    EXPECT_EQ(boosts, 1) << "one Boost, the file's";
+    EXPECT_EQ(boost->id, ECUIO_OBD2_SIG_BOOST_ID)
+        << "the file's Boost has the base's ID: what names 7011 reads it";
     const ecuio_computed_t& p = set->computed[boost->table_first];
     ASSERT_EQ(p.input_count, 2);
     EXPECT_EQ(p.input_ids[0], ECUIO_OBD2_PID_SIG_ID(0x0B, 0)) << "obd2.map";
@@ -337,7 +351,9 @@ TEST(SignalFileTest, Obd2PublishesItsKeys)
         if (!f) {
             return -1;
         }
-        return ecuio_signal_file_set(f.get())->computed[0].input_ids[0];
+        /* the base's boost comes first, the file's program after it */
+        const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+        return set->computed[set->computed_count - 1].input_ids[0];
     };
     EXPECT_EQ(input("map"), long{ECUIO_OBD2_PID_SIG_ID(0x0B, 0)});
     EXPECT_EQ(input("baro"), long{ECUIO_OBD2_PID_SIG_ID(0x33, 0)});
@@ -355,6 +371,137 @@ TEST(SignalFileTest, Obd2PublishesItsKeys)
                   std::string(kNumber) + "]}");
     ASSERT_NE(f, nullptr) << ecuio_last_error_detail();
     EXPECT_EQ(ecuio_signal_file_find(f.get(), "a")->message_id, 0x7E8u);
+}
+
+/* A signal named as a base def replaces it, whatever it is; the rest of the
+ * base stays and the set's names are one each */
+TEST(SignalFileTest, ASignalNamedAsABaseDefReplacesIt)
+{
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    File f = load(
+        R"({"havne_signals":1,"name":"T","source":{"name":"t"},"extends":"obd2","signals":[)"
+        R"({"key":"temp","name":"Coolant Temp","unit":"kPa",)"
+        R"("read":{"service":"22","number":"D100"},"field":{"byte":0}},)"
+        R"({"key":"rpm","name":"RPM","read":{"service":"22","number":"D101"},"field":{"byte":0}}]})");
+    ASSERT_NE(f, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+    EXPECT_EQ(set->count, obd2->count) << "two out, two in";
+    for (uint32_t i = 0; i < set->count; ++i) {
+        for (uint32_t j = i + 1; j < set->count; ++j) {
+            EXPECT_STRNE(set->defs[i].name, set->defs[j].name);
+        }
+    }
+    const ecuio_signal_def_t* temp = ecuio_signal_file_find(f.get(), "temp");
+    ASSERT_NE(temp, nullptr);
+    EXPECT_EQ(temp->id, ECUIO_OBD2_SIG_COOLANT_TEMP_ID)
+        << "it takes the base def's ID";
+    EXPECT_EQ(temp->mux_key, 0x62D100u) << "the file's def, not PID 05's";
+    /* Each replaced ID is in the set once, on the file's def */
+    for (const auto& [id, key] :
+         {std::pair<uint16_t, const char*>{ECUIO_OBD2_SIG_COOLANT_TEMP_ID, "temp"},
+          std::pair<uint16_t, const char*>{ECUIO_OBD2_SIG_RPM_ID, "rpm"}}) {
+        int with = 0;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            if (set->defs[i].id == id) {
+                ++with;
+                EXPECT_STREQ(ecuio_signal_file_key(f.get(), &set->defs[i]), key)
+                    << "the def with ID " << id << " is the file's";
+            }
+        }
+        EXPECT_EQ(with, 1) << id;
+    }
+    /* A def the file left alone has no key: it is the base's */
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (set->defs[i].id == ECUIO_OBD2_SIG_SPEED_ID) {
+            EXPECT_STREQ(ecuio_signal_file_key(f.get(), &set->defs[i]), "");
+        }
+    }
+}
+
+TEST(SignalFileTest, TheBaseKeepsItsBoostWhenTheFileLeavesItAlone)
+{
+    File f = load(
+        R"({"havne_signals":1,"name":"T","source":{"name":"t"},"extends":"obd2","signals":[)" +
+        std::string(kNumber) + "]}");
+    ASSERT_NE(f, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+    EXPECT_EQ(set->count, ecuio_obd2_signal_set()->count + 1);
+    EXPECT_EQ(set->computed_count, 1u);
+    EXPECT_NE(set->defs[ecuio_obd2_signal_set()->count - 1].flags &
+                  ECUIO_DEF_FLAG_COMPUTED,
+              0u);
+}
+
+/* The file's def has the base's ID, so what reads that ID reads the file's:
+ * obd2's own Boost reads a replaced MAP or baro, and a computed signal's
+ * obd2.<key> reads a replaced def */
+TEST(SignalFileTest, WhatReadsAReplacedIdReadsTheFilesDef)
+{
+    const std::string head =
+        R"({"havne_signals":1,"name":"T","source":{"name":"t"},"extends":"obd2","signals":[)";
+    File f = load(head +
+        R"({"key":"baro","name":"Barometric Pressure","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0}}]})");
+    ASSERT_NE(f, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+    EXPECT_EQ(set->computed_count, 1u) << "obd2's Boost stays";
+    const ecuio_signal_def_t* boost = nullptr;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (set->defs[i].id == ECUIO_OBD2_SIG_BOOST_ID) {
+            boost = &set->defs[i];
+        }
+    }
+    ASSERT_NE(boost, nullptr);
+    EXPECT_EQ(set->computed[boost->table_first].input_ids[1],
+              ECUIO_OBD2_PID_SIG_ID(0x33, 0));
+    EXPECT_EQ(ecuio_signal_file_find(f.get(), "baro")->id,
+              ECUIO_OBD2_PID_SIG_ID(0x33, 0))
+        << "that input is now the file's baro";
+
+    File g = load(head +
+        R"({"key":"s","name":"Vehicle Speed","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0}},)"
+        R"({"key":"c","name":"C","kind":"computed","expr":"obd2.speed"}]})");
+    ASSERT_NE(g, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* gs = ecuio_signal_file_set(g.get());
+    const ecuio_signal_def_t* c = ecuio_signal_file_find(g.get(), "c");
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(gs->computed[c->table_first].input_ids[0], ECUIO_OBD2_SIG_SPEED_ID)
+        << "obd2.speed is the file's Vehicle Speed";
+    EXPECT_STREQ(ecuio_signal_file_key(g.get(), ecuio_signal_file_find(g.get(), "s")), "s");
+    /* A replacement that can't be an input (a text) is refused at its
+     * signal, naming the computed signal that reads it */
+    const std::string text_baro = refusal(
+        head +
+        R"({"key":"b","name":"Barometric Pressure","kind":"text","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0}}]})");
+    EXPECT_TRUE(has(text_baro, "line 1, column 81")) << text_baro;
+    EXPECT_TRUE(
+        has(text_baro,
+            "signal 'b' replaces 'Barometric Pressure', which 'Boost' "
+            "reads: a signal a computed one reads is a number or an enum"))
+        << text_baro;
+    const std::string text_speed = refusal(
+        head +
+        R"({"key":"s","name":"Vehicle Speed","kind":"hex","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0}},)"
+        R"({"key":"c","name":"C","kind":"computed","expr":"obd2.speed"}]})");
+    EXPECT_TRUE(
+        has(text_speed, "signal 's' replaces 'Vehicle Speed', which 'C' reads"))
+        << text_speed;
+}
+
+/* Two signals of a file with one name are refused, naming both: a recording
+ * keys its values by name */
+TEST(SignalFileTest, ANameTwiceInOneFileIsRefusedNamingBoth)
+{
+    const std::string two =
+        R"({"havne_signals":1,"name":"T","source":{"name":"t"},"extends":"obd2","signals":[)"
+        R"({"key":"a","name":"Same","read":{"service":"22","number":"D100"},"field":{"byte":0}},)"
+        R"({"key":"b","name":"Same","read":{"service":"22","number":"D101"},"field":{"byte":0}}]})";
+    const std::string why = refusal(two);
+    EXPECT_TRUE(has(why, "signal 'b' has the name 'Same'"));
+    EXPECT_TRUE(has(why, "signal 'a' has too"));
 }
 
 TEST(SignalFileTest, EveryRefusalSaysWhereAndWhy)
@@ -559,12 +706,12 @@ TEST(SignalFileTest, EachOwnDefNamesItsKeyAndNoOtherDefDoes)
     ASSERT_NE(f, nullptr) << ecuio_last_error_detail();
     const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
     const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
-    ASSERT_EQ(set->count, obd2->count + 4);
+    ASSERT_EQ(set->count, obd2->count + 3) << "the file's Boost stands for obd2's";
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t* def = &set->defs[i];
         const char* key = ecuio_signal_file_key(f.get(), def);
         ASSERT_NE(key, nullptr) << def->name;
-        if (i < obd2->count) {
+        if (i < obd2->count - 1) {
             EXPECT_STREQ(key, "") << "the base's " << def->name;
             EXPECT_STREQ(ecuio_signal_file_key(f.get(), &obd2->defs[i]), "")
                 << "obd2's own " << def->name;

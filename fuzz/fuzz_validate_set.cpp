@@ -18,21 +18,38 @@ constexpr uint32_t kMaxDefs = 8;
 constexpr uint32_t kMaxChannels = 8;
 constexpr uint32_t kDefBytes = 6;
 constexpr uint32_t kChannelBytes = 4;
+constexpr size_t kHeadBytes = 5;
 
-} // namespace
+/* No code: the input is shorter than the set it asks for */
+constexpr int kTooShort = 1000;
 
-extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
+/* Two valid defs with ids of their own, no channel: a set the validator
+ * takes. Names are one each in a set, so a harness that names no def
+ * never passes two; this input keeps that from coming back unseen. */
+// clang-format off
+constexpr uint8_t kTwoDefs[] = {
+    2, ECUIO_SIGNAL_SET_LAYOUT, 0, 0, 0, /* count, layout, reserved, channels */
+    1, ECUIO_VALUE_UINT, 8, 0, ECUIO_BYTE_ORDER_LE, 0,
+    2, ECUIO_VALUE_UINT, 8, 0, ECUIO_BYTE_ORDER_LE, 0,
+};
+// clang-format on
+
+/* The set data describes, validated twice and checked; its code, or
+ * kTooShort */
+int validated(const uint8_t* data, size_t size)
 {
-    if (size < 5) return 0;
+    if (size < kHeadBytes)
+        return kTooShort;
 
     const uint32_t count = data[0] % 9;                 /* 0..8 */
     const uint32_t channel_count = data[3] % 6;         /* 0..5, incl. >4 */
     const bool channels_null = (data[4] & 1u) != 0;
     const bool defs_null = (data[4] & 2u) != 0;
 
-    const size_t needed = 5 +
-        (size_t)count * kDefBytes + (size_t)channel_count * kChannelBytes;
-    if (size < needed) return 0;
+    const size_t needed = kHeadBytes + (size_t)count * kDefBytes +
+                          (size_t)channel_count * kChannelBytes;
+    if (size < needed)
+        return kTooShort;
 
     /* Every def starts from the valid baseline and bends from there.
      * p advances only for the defs the input carries: consuming
@@ -40,7 +57,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
      * end of the fuzz input, which is the harness's bug, not core's. */
     static ecuio_signal_def_t defs[kMaxDefs];
     memset(defs, 0, sizeof defs);
-    const uint8_t* p = data + 5;
+    const uint8_t* p = data + kHeadBytes;
     for (uint32_t i = 0; i < kMaxDefs; ++i) {
         defs[i].scale = 1.0;
         if (i >= count) continue;
@@ -50,6 +67,12 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         defs[i].bit_offset = p[3] & 0x0Fu;
         defs[i].byte_order = p[4] & 3u;
         defs[i].mux_length = (p[4] >> 2) & 3u;
+        /* A name of its own from the def's place ("s0" to "s7"), so
+         * several defs can pass; one bit takes the def before's (a
+         * duplicate name), another starts it as a formula does */
+        const bool repeats = (p[4] & 0x80u) != 0 && i > 0;
+        defs[i].name[0] = (p[4] & 0x40u) != 0 ? '=' : 's';
+        defs[i].name[1] = (char)('0' + (repeats ? i - 1 : i));
         if (p[5] != 0) defs[i].reserved[0] = p[5];      /* reserved injection */
         p += kDefBytes;
     }
@@ -109,8 +132,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         if (v1.index >= channel_count) abort();
         break;
 
-    /* Names a def: every per-def code, plus DUPLICATE_ID's second of
-     * the pair */
+    /* Names a def: every per-def code, plus DUPLICATE_ID's and
+     * DUPLICATE_NAME's second of the pair */
     case ECUIO_VALIDATE_ERR_BIT_LENGTH:
     case ECUIO_VALIDATE_ERR_BIT_OFFSET:
     case ECUIO_VALIDATE_ERR_NAME:
@@ -123,7 +146,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     case ECUIO_VALIDATE_ERR_FLOAT32:
     case ECUIO_VALIDATE_ERR_RESERVED:
     case ECUIO_VALIDATE_ERR_BYTE_ORDER:
+    case ECUIO_VALIDATE_ERR_FORMULA:
     case ECUIO_VALIDATE_ERR_DUPLICATE_ID:
+    case ECUIO_VALIDATE_ERR_DUPLICATE_NAME:
         if (v1.index >= count) abort();
         break;
 
@@ -131,5 +156,31 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         abort();   /* not a code this core defines */
     }
 
+    return rc1;
+}
+
+/* The harness still reaches a set of several defs that passes, and the
+ * duplicate name's refusal through its repeat bit */
+bool reaches_several_defs()
+{
+    if (validated(kTwoDefs, sizeof kTwoDefs) != ECUIO_VALIDATE_OK)
+        abort();
+    uint8_t repeated[sizeof kTwoDefs];
+    memcpy(repeated, kTwoDefs, sizeof kTwoDefs);
+    repeated[kHeadBytes + kDefBytes + 4] |= 0x80u;
+    if (validated(repeated, sizeof repeated) !=
+        ECUIO_VALIDATE_ERR_DUPLICATE_NAME) {
+        abort();
+    }
+    return true;
+}
+
+} // namespace
+
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
+{
+    static const bool checked = reaches_several_defs();
+    (void)checked;
+    (void)validated(data, size);
     return 0;
 }

@@ -7,6 +7,7 @@
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QKeyEvent>
+#include <QLocale>
 #include <QObject>
 #include <QQmlEngine>
 #include <QQmlExtensionPlugin>
@@ -23,6 +24,7 @@
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "recordingexport.h"
+#include "recordingimport.h"
 #include "signalstore.h"
 #include "windowtheme.h"
 
@@ -194,6 +196,24 @@ public:
     {
         const auto* e = qobject_cast<RecordingExport*>(exporter);
         return e != nullptr ? e->heldForTesting() : -1;
+    }
+
+    // The importer (Bridge.recordingImport) can't start its worker thread
+    // while on, as a system out of threads
+    Q_INVOKABLE void failImportThreads(QObject* importer, bool on)
+    {
+        if (auto* i = qobject_cast<RecordingImport*>(importer)) {
+            i->setFailThreadForTesting(on);
+        }
+    }
+
+    // The importer's next imports wait this long, or until a cancel,
+    // before core's call (0: no wait)
+    Q_INVOKABLE void holdImports(QObject* importer, int ms)
+    {
+        if (auto* i = qobject_cast<RecordingImport*>(importer)) {
+            i->setHoldForTesting(ms);
+        }
     }
 
     // The color scheme (Qt::ColorScheme as an int: 1 Light, 2 Dark) a
@@ -376,6 +396,11 @@ public:
 public slots:
     void applicationAvailable()
     {
+        // HAVNE_TEST_LOCALE (for example "C") runs a file under that locale, as CI
+        // does; the readouts group digits with the default locale
+        if (qEnvironmentVariableIsSet("HAVNE_TEST_LOCALE")) {
+            QLocale::setDefault(QLocale(qEnvironmentVariable("HAVNE_TEST_LOCALE")));
+        }
         // Main.qml stores its zoom with Settings; here that goes to a
         // scratch ini file, never the user's Havne settings
         QCoreApplication::setOrganizationName(QStringLiteral("Havne"));

@@ -1192,11 +1192,13 @@ long __stdcall PassThruStopMsgFilter(unsigned long ChannelID,
     if (FilterID == 0) {
         return STATUS_FAILED;
     }
-    /* Published for the detach-ordering tests */
-    if (fake_control::Page* page = fake_control::attach()) {
-        fake_control::record_filter_stop(page, FilterID);
-    }
     std::lock_guard<std::mutex> lk(fake_j2534::g_lock);
+    /* Published for the detach-ordering tests; the page's lock is taken
+     * under the fake's, as the writes' record takes it */
+    if (fake_control::Page* page = fake_control::attach()) {
+        fake_control::record_filter_stop(
+            page, FilterID, static_cast<uint32_t>(fake_j2534::g_queue_len));
+    }
     for (unsigned long i = 0; i < fake_j2534::g_filter_seq &&
                               i < FAKE_FILTER_DEPTH; ++i) {
         if (fake_j2534::g_filters[i].filter_id == FilterID) {

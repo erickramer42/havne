@@ -466,6 +466,20 @@ Pane {
         chooseProfile(profile)
     }
 
+    // The picked vehicle's files that no longer load
+    function unloadedCount() {
+        return pickedVehicle === null ? 0
+             : pickedVehicle.signals.filter(f => !signalOk(f.sha256)).length
+    }
+    // Of `total` files: ", doesn't load" says it of the only one; with more,
+    // the count of those that don't
+    function unloadedSummary(total) {
+        const n = unloadedCount()
+        return n === 0 ? ""
+             : n === 1 ? (total === 1 ? qsTr(", doesn't load") : qsTr(", 1 doesn't load"))
+             : qsTr(", %1 don't load").arg(n)
+    }
+
     // The Signals row's summary: a count of files, one or many (no
     // translation is loaded to pick a plural form)
     function filesSummary(n) {
@@ -835,9 +849,12 @@ Pane {
                    + (vehicles.list.length > 0 ? qsTr(" · %1 saved").arg(vehicles.list.length) : "") },
         { key: "signals", title: qsTr("Signals"),
           summary: pickedVehicle === null ? qsTr("pick a vehicle")
-                   : filesSummary(pickedVehicle.signals.length + (pickedVehicle.own !== "" ? 1 : 0)) },
+                   : filesSummary(pickedVehicle.signals.length + (pickedVehicle.own !== "" ? 1 : 0))
+                     + unloadedSummary(pickedVehicle.signals.length + (pickedVehicle.own !== "" ? 1 : 0)),
+          warn: pickedVehicle !== null && unloadedCount() > 0 },
         { key: "recording", title: qsTr("Recording"),
-          summary: Bridge.recordingActive ? qsTr("recording") : Bridge.recording ? qsTr("on") : qsTr("off") },
+          summary: !Bridge.recording ? qsTr("off")
+                   : Bridge.recordingActive && !Bridge.logActive ? qsTr("on · recording") : qsTr("on") },
         { key: "display", title: qsTr("Display"),
           summary: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
                    + (Bridge.unitSystem === 1 ? qsTr(" · imperial") : qsTr(" · metric"))
@@ -850,12 +867,19 @@ Pane {
     // The tab-bar form has no sidebar to list the Log: its row, last, opens
     // the Log page itself, as does Show log beside a failed connect
     signal logRequested()
-    // The newest activity line, the Log row's summary: the Log's first line
-    // until another comes
+    // Back from Connection while Other address... sent the user here: the
+    // page that sent them, as Android's Back goes
+    signal leaveRequested()
+    // The newest session event, the Log row's summary: the Log's first line
+    // until one comes. The display's inset lines are about the screen, not
+    // the session, so they don't take it
     property string lastActivity: qsTr("Ready.")
     Connections {
         target: Bridge
-        function onLogMessage(message) { page.lastActivity = message }
+        function onLogMessage(message) {
+            if (!message.startsWith("Display:"))
+                page.lastActivity = message
+        }
     }
 
     function open(key) {
@@ -867,6 +891,10 @@ Pane {
     }
     // Back from a page: the form returns to Signals, the rest to the list
     function back() {
+        if (backLeaves && pageKey === "connection") {
+            leaveRequested()
+            return
+        }
         pageKey = pageKey === "ownform" ? "signals" : ""
     }
     // The form for a new signal (Add a signal), as a page of its own
@@ -985,6 +1013,8 @@ Pane {
     // click recomposes it, keeping every other query key where it was.
     // The choices live only while the app runs.
     property string profileChoice: "default"
+    // uds-generic's extended session (session=03), composed as did= is
+    property bool extSession: false
 
     // The profiles the row offers (ADR-0013, ADR-0020), then the picked
     // vehicle's signal files that loaded (ADR-0051). "default" is the
@@ -1020,8 +1050,8 @@ Pane {
                                           && signalInfo[f.sha256].extends === "obd2") || null
     readonly property var defaultProfile: ({
         name: "default", label: qsTr("Default"),
-        hint: qsTr("The scheme's own profile: obd2 on an adapter, raw on a replay or a "
-                   + "CAN interface, the demo set on mock://") })
+        hint: qsTr("Default reads OBD-II values on an adapter; a recording or a "
+                   + "CAN interface shows its frames") })
     // The stand-in's entry, built in the same binding as the list, so the
     // two never disagree mid-update
     function standInProfile(f) {
@@ -1033,11 +1063,11 @@ Pane {
         : profileChoice === "default" ? [defaultProfile, standInProfile(standIn)]
         : [standInProfile(standIn)]).concat([
         { name: "raw", label: qsTr("raw (log only)"),
-          hint: qsTr("No decode: frames reach the Log page only. On an adapter it listens "
+          hint: qsTr("Raw (log only): no decode, frames reach the Log page only. On an adapter it listens "
                      + "to the engine ECU (0x7E8); add ?filter= for another ID. An ELM327 "
                      + "hears only replies to its requests, so add ?poll= there") },
         { name: "uds-generic", label: qsTr("uds-generic (DIDs)"),
-          hint: qsTr("Service 0x22 reads of the DIDs below, polled; a range is scanned "
+          hint: qsTr("UDS DIDs (uds-generic): Service 0x22 reads of the DIDs below, polled; a range is scanned "
                      + "once and the DIDs the ECU answers join the polling") }
     ])
 
@@ -1134,7 +1164,20 @@ Pane {
         setQuery(out, "profile", profileChoice === "default" ? null : profileChoice)
         const dids = profileChoice === "uds-generic" ? didField.text.replace(/\s+/g, "") : ""
         setQuery(out, "did", dids === "" ? null : dids)
+        // Core refuses session= under any other profile; extSession keeps the
+        // choice for the way back to uds-generic
+        if (profileChoice !== "uds-generic")
+            setQuery(out, "session", null)
+        else if (sessionOffered(base))
+            setQuery(out, "session", extSession ? "03" : null)
         return joinUri(base, out)
+    }
+
+    // The extended session is requested over an adapter or a CAN interface;
+    // core refuses session= on mock:// and replay://
+    function sessionOffered(base) {
+        const scheme = schemeOf(base)
+        return scheme !== "mock" && scheme !== "replay"
     }
 
     // The query keys each scheme takes, as core lists them
@@ -1144,11 +1187,11 @@ Pane {
         "mock": ["profile", "did", "diagnose"],
         "replay": ["profile", "did", "speed", "loop"],
         "j2534": ["baud", "flags", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                  "pack", "scan", "profile", "did"],
+                  "pack", "scan", "session", "profile", "did"],
         "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                   "pack", "scan", "profile", "did"],
+                   "pack", "scan", "session", "profile", "did"],
         "socketcan": ["profile", "did", "baud", "filter", "txid", "poll", "probe", "identify",
-                      "diagnose", "pack", "scan"]
+                      "diagnose", "pack", "scan", "session"]
     })
     // What a SocketCAN session that only listens takes: Default is raw
     // there, and core refuses it the keys that ask an ECU
@@ -1207,8 +1250,11 @@ Pane {
         syncing = true
         profileChoice = (profile === undefined || profile === null || profile === "")
                         ? "default" : profile
-        if (profileChoice === "uds-generic")
+        if (profileChoice === "uds-generic") {
             didField.text = did === undefined || did === null ? "" : did
+            const session = queryValue(pairs, "session")
+            extSession = session !== undefined && session !== null && Number(session) === 3
+        }
         else if (did !== undefined && did !== null)
             didField.text = did
         syncing = false
@@ -1379,6 +1425,7 @@ Pane {
 
         SettingsList {
             objectName: "settingsSideList"
+            stacked: true
             visible: page.twoPane
             Layout.preferredWidth: 200
             // A nested layout fills its row by default, which would leave

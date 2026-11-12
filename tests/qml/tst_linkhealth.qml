@@ -85,7 +85,7 @@ TestCase {
         // up) or on a phone's form, then the address while connected
         const roomy = find(main.contentItem, "headerTitle").visible
         compare(find(main.contentItem, "linkPillText").text,
-                !roomy || main.isCompact ? Theme.linkShortLabel(Bridge.linkState) : label,
+                !roomy || main.isCompact ? main.shortStatusWord(Bridge.linkState) : label,
                 "header pill")
         const address = find(main.contentItem, "linkPillAddress")
         compare(address.visible, Bridge.connected, "header pill's address")

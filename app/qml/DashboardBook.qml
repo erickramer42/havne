@@ -46,6 +46,9 @@ QtObject {
     // A format 1 phone span times this is the same shape on the 6 and 12
     // column grid; the phone's size control steps by it
     readonly property int phoneSpanScale: 3
+    // The kinds that draw a square face: the built-in layout's drawing
+    // never stretches them (stretched's `keepSquare`)
+    readonly property var squareKinds: ["analog", "ring"]
 
     // Append-only: a name is never reused for another drawing (section 1)
     readonly property var kinds: ["analog", "ring", "bar", "segments", "digital",
@@ -60,6 +63,7 @@ QtObject {
         from: { type: "number" }, to: { type: "number" },
         coldBelow: { type: "number" }, warnFrom: { type: "number" },
         dangerFrom: { type: "number" }, rise: { type: "number" },
+        warnBelow: { type: "number" }, dangerBelow: { type: "number" },
         majorStep: { type: "positive" }, minorStep: { type: "positive" },
         labelDivisor: { type: "positive" },
         decimals: { type: "whole", min: 0, max: 6 },
@@ -72,7 +76,8 @@ QtObject {
         caption: { type: "text", max: 40 },
         description: { type: "text", max: 80 },
         peakLabel: { type: "text", max: 8 },
-        accent: { type: "string" }
+        accent: { type: "string" },
+        color: { type: "string" }
     })
 
     // A new gauge's range by the unit it decodes to (section 6)
@@ -270,6 +275,27 @@ QtObject {
         return { kind: kind, w: w, h: h, label: label, refs: refs, unit: unit, options: options }
     }
 
+    // The zones a new gauge on a common signal starts with, and the built-in
+    // layouts use: the keys are Bridge.gaugeSignals', the values are in the
+    // unit a cell stores. Generic starting points for a petrol engine, not a
+    // diagnosis; a cell's own values are the user's from then on. Lambda,
+    // boost, speed, MAF, throttle and load are car-specific: none
+    readonly property var zoneTable: ({
+        coolant: { coldBelow: 60, warnFrom: 105, dangerFrom: 115 },
+        oil: { coldBelow: 70, warnFrom: 125, dangerFrom: 140 },
+        iat: { warnFrom: 55, dangerFrom: 70 },
+        battery: { dangerBelow: 11.8, warnBelow: 12.4, warnFrom: 14.8, dangerFrom: 15.2 },
+        rpm: { dangerFrom: 6800 }
+    })
+    // The zone options of a gaugeSignals key: a copy, {} for none
+    function zonesFor(key) {
+        return Object.assign({}, zoneTable[key] ?? {})
+    }
+    // The shift lights' band on engine speed: the first light and the shift
+    readonly property var shiftBand: ({ from: 4500, to: 6500 })
+    // Every zone option, for clearing a cell's when its signal changes
+    readonly property var zoneOptions: ["coldBelow", "warnFrom", "dangerFrom", "warnBelow", "dangerBelow"]
+
     // On 6 columns: the dial 4 wide with three readouts stacked beside it,
     // two traces across, then three readouts across. Every height is a
     // multiple of phoneSpanScale, the step the Height control takes
@@ -279,41 +305,43 @@ QtObject {
         const { boost, battery, lambda, boostOptions, lambdaOptions } = watched()
         return [
             gaugeCell("shift-light", 12, 3, qsTr("Shift lights"), rpm.slice(), "RPM",
-                      { from: 4500, to: 6500, count: 11 }),
+                      Object.assign({ count: 11 }, shiftBand)),
             gaugeCell("analog", 4, 18, qsTr("Engine speed"), rpm.slice(), "RPM",
-                      { from: 0, to: 8000, majorStep: 1000, minorStep: 250,
-                        labelDivisor: 1000, dangerFrom: 6800,
-                        caption: qsTr("\u00D71000 r/min"), peak: true, progress: true }),
+                      Object.assign({ from: 0, to: 8000, majorStep: 1000, minorStep: 250,
+                                     labelDivisor: 1000,
+                                     caption: qsTr("\u00D71000 r/min"), peak: true,
+                                     progress: true }, zonesFor("rpm"))),
             gaugeCell("digital", 2, 6, qsTr("Speed"), ["id:3001", "id:7004"], "km/h",
                       { from: 0, to: 260 }),
             gaugeCell("digital", 2, 6, qsTr("Coolant"), ["id:2001", "id:7002"], degC,
-                      { from: 0, to: 130, coldBelow: 60, warnFrom: 105, dangerFrom: 115 }),
+                      Object.assign({ from: 0, to: 130 }, zonesFor("coolant"))),
             gaugeCell("digital", 2, 6, qsTr("Oil temp"), ["id:9001", "id:7010"], degC,
-                      { from: 0, to: 160, coldBelow: 70, warnFrom: 125, dangerFrom: 140 }),
+                      Object.assign({ from: 0, to: 160 }, zonesFor("oil"))),
             gaugeCell("digital", 3, 9, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
-                      { from: 0, to: 300, description: qsTr("Mass air flow") }),
+                      { from: 0, to: 500, description: qsTr("Mass air flow") }),
             gaugeCell("digital", 3, 9, qsTr("Boost"), boost.slice(), "kPa", boostOptions),
             gaugeCell("digital", 2, 6, qsTr("IAT"), ["id:5001", "id:7005"], degC,
-                      { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
-                        description: qsTr("Intake air temperature") }),
+                      Object.assign({ from: 0, to: 120,
+                                     description: qsTr("Intake air temperature") }, zonesFor("iat"))),
             gaugeCell("digital", 2, 6, qsTr("Battery"), battery.slice(), "V",
-                      { from: 10, to: 16 }),
+                      Object.assign({ from: 10, to: 16 }, zonesFor("battery"))),
             gaugeCell("digital", 2, 6, qsTr("Lambda"), lambda.slice(), "\u03BB",
                       lambdaOptions)
         ]
     }
 
-    // What a driver watches beyond the dials, shared by both forms. Boost has
-    // no obd2 signal, so its ref is the mock's alone. Its range runs from the
+    // What a driver watches beyond the dials, shared by both forms. Boost's refs
+    // are the mock's and obd2's computed one (MAP minus baro). Its range runs from the
     // vacuum an idle pulls to what a turbo makes (about -15 to 25 psi), and
-    // lambda's from rich to the lean a fuel cut reads
+    // lambda's from rich to the lean a fuel cut reads. obd2's lambda is the
+    // commanded one (PID 44), so the cell says so
     function watched() {
         return {
-            boost: ["id:13001"],
+            boost: ["id:13001", "id:7011"],
             battery: ["id:14001", "id:7008"],
             lambda: ["id:10001", "id:11544"],
             boostOptions: { from: -100, to: 200 },
-            lambdaOptions: { from: 0.5, to: 2, description: qsTr("Equivalence ratio") }
+            lambdaOptions: { from: 0.5, to: 2, description: qsTr("Commanded equivalence ratio") }
         }
     }
 
@@ -325,29 +353,30 @@ QtObject {
         const { boost, battery, lambda, boostOptions, lambdaOptions } = watched()
         return [
             gaugeCell("shift-light", 12, 1, qsTr("Shift lights"), rpm.slice(), "RPM",
-                      { from: 4500, to: 6500, count: 15 }),
+                      Object.assign({ count: 15 }, shiftBand)),
             gaugeCell("analog", 2, 8, qsTr("Engine speed"), rpm.slice(), "RPM",
-                      { from: 0, to: 8000, majorStep: 1000, minorStep: 250,
-                        labelDivisor: 1000, dangerFrom: 6800,
-                        caption: qsTr("\u00D71000 r/min"), peak: true, progress: true }),
+                      Object.assign({ from: 0, to: 8000, majorStep: 1000, minorStep: 250,
+                                     labelDivisor: 1000,
+                                     caption: qsTr("\u00D71000 r/min"), peak: true,
+                                     progress: true }, zonesFor("rpm"))),
             // No caption: the dial shows its unit
             gaugeCell("analog", 2, 8, qsTr("Vehicle speed"), ["id:3001", "id:7004"], "km/h",
                       { from: 0, to: 260, majorStep: 20, minorStep: 10, peak: true }),
             gaugeCell("ring", 1, 4, qsTr("Coolant"), ["id:2001", "id:7002"], degC,
-                      { from: 0, to: 130, coldBelow: 60, warnFrom: 105, dangerFrom: 115 }),
+                      Object.assign({ from: 0, to: 130 }, zonesFor("coolant"))),
             gaugeCell("ring", 1, 4, qsTr("Oil temp"), ["id:9001", "id:7010"], degC,
-                      { from: 0, to: 160, coldBelow: 70, warnFrom: 125, dangerFrom: 140 }),
+                      Object.assign({ from: 0, to: 160 }, zonesFor("oil"))),
             // A dial this small has no room for a label: its caption names it
             gaugeCell("analog", 1, 4, qsTr("Boost"), boost.slice(), "kPa",
                       Object.assign({ caption: qsTr("Boost") }, boostOptions)),
             gaugeCell("digital", 1, 4, qsTr("IAT"), ["id:5001", "id:7005"], degC,
-                      { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
-                        description: qsTr("Intake air temperature") }),
+                      Object.assign({ from: 0, to: 120,
+                                     description: qsTr("Intake air temperature") }, zonesFor("iat"))),
             gaugeCell("digital", 1, 4, qsTr("MAF"), ["id:8001", "id:7009"], "g/s",
-                      { from: 0, to: 300, description: qsTr("Mass air flow") }),
+                      { from: 0, to: 500, description: qsTr("Mass air flow") }),
             gaugeCell("digital", 1, 4, qsTr("Lambda"), lambda.slice(), "\u03BB", lambdaOptions),
             gaugeCell("digital", 1, 4, qsTr("Battery"), battery.slice(), "V",
-                      { from: 10, to: 16 })
+                      Object.assign({ from: 10, to: 16 }, zonesFor("battery")))
         ]
     }
 
@@ -447,8 +476,13 @@ QtObject {
     // and a lift that moved it sideways would land elsewhere. A blank cell
     // doesn't stretch and nothing stretches over one. For display only:
     // the layout is untouched. `columns` is the grid's; left out, the
-    // boxes' right edge stands in
-    function stretched(placed, boxes, columns) {
+    // boxes' right edge stands in. With `keepSquare` (the built-in layout's
+    // drawing) a dial or ring keeps its own box, and the other gauges fill
+    // what it leaves: down over the empty squares under them, then right
+    // over the empty squares beside them, so no square is empty at any
+    // column count
+    function stretched(placed, boxes, columns, keepSquare) {
+        const square = i => keepSquare === true && squareKinds.indexOf(placed[i].kind) >= 0
         const taken = []   // taken[y][x]
         let rows = 0
         let cols = isFinite(columns) ? Math.max(1, Math.floor(columns)) : 0
@@ -471,7 +505,7 @@ QtObject {
         }
         const down = boxes.map((b, i) => {
             let h = b.h
-            if (placed[i].kind !== "blank") {
+            if (placed[i].kind !== "blank" && !square(i)) {
                 while (b.y + h < rows && emptyRow(b, b.y + h))
                     ++h
             }
@@ -487,6 +521,22 @@ QtObject {
                     drawn[y][x] = true
             }
         }
+        if (keepSquare === true) {
+            // `drawn` grows with each widening, so a later cell sees it
+            down.forEach((b, i) => {
+                if (placed[i].kind === "blank" || square(i))
+                    return
+                for (let free = true; free && b.x + b.w < cols;) {
+                    for (let y = b.y; y < b.y + b.h && free; ++y)
+                        free = !(drawn[y] && drawn[y][b.x + b.w])
+                    if (free) {
+                        for (let y = b.y; y < b.y + b.h; ++y)
+                            drawn[y][b.x + b.w] = true
+                        ++b.w
+                    }
+                }
+            })
+        }
         const aloneInRows = (b) => {
             for (let y = b.y; y < b.y + b.h; ++y) {
                 for (let x = 0; x < cols; ++x) {
@@ -497,7 +547,8 @@ QtObject {
             return true
         }
         return down.map((b, i) => {
-            const w = placed[i].kind !== "blank" && aloneInRows(b) ? cols - b.x : b.w
+            const w = placed[i].kind !== "blank" && !square(i) && aloneInRows(b)
+                      ? cols - b.x : b.w
             return { x: b.x, y: b.y, w: w, h: b.h }
         })
     }
@@ -667,6 +718,21 @@ QtObject {
                 else
                     c[k] = fields[k]
             }
+            return true
+        })
+    }
+
+    // The cell drawn as another kind, everything else kept: refs, unit,
+    // label, span and every option (a kind's own options stay stored for
+    // the way back). A blank has no signal, so neither side is blank
+    function setKind(doc, page, index, kind) {
+        return write(doc, d => {
+            if (!hasCell(d, page, index) || !knownKind(kind) || kind === "blank")
+                return false
+            const c = d.pages[page].cells[index]
+            if (c.kind === "blank" || c.kind === kind)
+                return false
+            c.kind = kind
             return true
         })
     }

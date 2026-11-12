@@ -975,7 +975,7 @@ TEST(CliSimTest, TheLinesCarryTheUriAndTheCounts)
                   counts + "\"failed\":false,\"yielded\":true}");
 }
 
-TEST(CliViewTest, AlignOnTakesItsFiveFormsAndNothingElse)
+TEST(CliViewTest, AlignOnTakesItsFormsAndNothingElse)
 {
     cli::AlignOn a;
     ASSERT_TRUE(cli::parse_align_on("rise:RPM:4000", a));
@@ -992,16 +992,354 @@ TEST(CliViewTest, AlignOnTakesItsFiveFormsAndNothingElse)
     EXPECT_EQ(a.label, "lap: 2");
     ASSERT_TRUE(cli::parse_align_on("engine-start", a));
     EXPECT_EQ(a.kind, cli::AlignOn::engine_start);
+    /* A pull by its number, 1 the first: one for all, or one for each */
+    ASSERT_TRUE(cli::parse_align_on("pull:2", a));
+    EXPECT_EQ(a.kind, cli::AlignOn::pull);
+    EXPECT_EQ(a.pulls, (std::vector<uint32_t>{2}));
+    ASSERT_TRUE(cli::parse_align_on("pull:3,1,100000", a));
+    EXPECT_EQ(a.pulls, (std::vector<uint32_t>{3, 1, 100000}));
     ASSERT_TRUE(cli::parse_align_on("utc", a));
     EXPECT_EQ(a.kind, cli::AlignOn::utc);
-    for (const char* bad :
-         {"", "UTC", "rise", "rise:RPM", "rise::4000",
-          "rise:RPM:", "rise:RPM:fast", "rise:RPM:inf", "rise:RPM:4000x",
-          "marker:", "sideways:RPM:1", "Engine-Start", "engine-start:RPM",
-          "engine", "engine-start "}) {
+    for (const char* bad : {"",
+                            "UTC",
+                            "rise",
+                            "rise:RPM",
+                            "rise::4000",
+                            "rise:RPM:",
+                            "rise:RPM:fast",
+                            "rise:RPM:inf",
+                            "rise:RPM:4000x",
+                            "marker:",
+                            "sideways:RPM:1",
+                            "Engine-Start",
+                            "engine-start:RPM",
+                            "engine",
+                            "engine-start ",
+                            "pull",
+                            "pull:",
+                            "pull:0",
+                            "pull:x",
+                            "pull:1,",
+                            "pull:,1",
+                            "pull:1,,2",
+                            "pull:-1",
+                            "pull:1.5",
+                            "pull:100001",
+                            "pull:1 ",
+                            "pull: 1",
+                            "pull:1,0",
+                            "Pull:1",
+                            "pull:0000001"}) {
         EXPECT_FALSE(cli::parse_align_on(bad, a)) << bad;
     }
     EXPECT_EQ(a.kind, cli::AlignOn::utc) << "a refusal leaves it as it was";
+    EXPECT_TRUE(a.pulls.empty());
+}
+
+TEST(CliViewTest, AColumnsSpanIsTheSamplesTheReaderCountsInIt)
+{
+    uint64_t from = 0;
+    uint64_t to = 0;
+    /* Columns under a second: their own microseconds, the end left out */
+    ASSERT_TRUE(cli::column_span(250000, 1250000, 4, 0, from, to));
+    EXPECT_EQ(from, 250000u);
+    EXPECT_EQ(to, 499999u);
+    ASSERT_TRUE(cli::column_span(250000, 1250000, 4, 3, from, to));
+    EXPECT_EQ(from, 1000000u);
+    EXPECT_EQ(to, 1249999u);
+
+    /* Columns of 2.5 s from 0.4 s: whole seconds, each in the column it
+     * starts in, the first taking the second across the start */
+    ASSERT_TRUE(cli::column_span(400000, 10400000, 4, 0, from, to));
+    EXPECT_EQ(from, 0u);
+    EXPECT_EQ(to, 2999999u) << "seconds 0, 1 and 2";
+    ASSERT_TRUE(cli::column_span(400000, 10400000, 4, 1, from, to));
+    EXPECT_EQ(from, 3000000u);
+    EXPECT_EQ(to, 5999999u) << "second 5 starts at 5.0, under 5.4";
+    ASSERT_TRUE(cli::column_span(400000, 10400000, 4, 2, from, to));
+    EXPECT_EQ(from, 6000000u);
+    EXPECT_EQ(to, 7999999u);
+    /* The last second whole, though it runs past the end */
+    ASSERT_TRUE(cli::column_span(400000, 10400000, 4, 3, from, to));
+    EXPECT_EQ(from, 8000000u);
+    EXPECT_EQ(to, 10999999u);
+
+    /* Columns of exactly a second on the second: one each */
+    ASSERT_TRUE(cli::column_span(3000000, 6000000, 3, 1, from, to));
+    EXPECT_EQ(from, 4000000u);
+    EXPECT_EQ(to, 4999999u);
+    /* Off it by half: the first takes two seconds, the last none */
+    ASSERT_TRUE(cli::column_span(3500000, 6500000, 3, 0, from, to));
+    EXPECT_EQ(from, 3000000u);
+    EXPECT_EQ(to, 4999999u);
+    ASSERT_TRUE(cli::column_span(3500000, 6500000, 3, 2, from, to));
+    EXPECT_EQ(from, 6000000u);
+    EXPECT_EQ(to, 6999999u);
+    /* The column before a recording's start, whole seconds from 0 */
+    ASSERT_TRUE(cli::column_span(0, 14000000, 1, 0, from, to));
+    EXPECT_EQ(from, 0u);
+    EXPECT_EQ(to, 13999999u);
+}
+
+TEST(CliViewTest, AnAlignedViewsWideColumnsHoldTheirOwnWindow)
+{
+    cli::Axis a;
+    ASSERT_TRUE(cli::make_axis(-31000000, 9000000, 8, a));
+    ASSERT_EQ(a.column_us, 5000000);
+    EXPECT_TRUE(cli::columns_own_window(true, a));
+    EXPECT_FALSE(cli::columns_own_window(false, a))
+        << "an unaligned view's recordings share their seconds";
+    cli::Axis second;
+    ASSERT_TRUE(cli::make_axis(0, 8000000, 8, second));
+    EXPECT_TRUE(cli::columns_own_window(true, second)) << "a second counts";
+    cli::Axis under;
+    ASSERT_TRUE(cli::make_axis(0, 7999999, 8, under));
+    ASSERT_EQ(under.column_us, 1000000) << "rounded out to the second";
+    EXPECT_TRUE(cli::columns_own_window(true, under));
+    ASSERT_TRUE(cli::make_axis(0, 7999992, 8, under));
+    ASSERT_EQ(under.column_us, 999999);
+    EXPECT_FALSE(cli::columns_own_window(true, under))
+        << "under a second a query counts the column's own samples";
+
+    /* A recording whose zero sits 31.5 s into it: each axis column is
+     * the same 5 s of the axis, here in the recording's own time */
+    uint64_t from = 0;
+    uint64_t to = 0;
+    ASSERT_TRUE(cli::own_span(a, -31500000, 0, from, to));
+    EXPECT_EQ(from, 500000u);
+    EXPECT_EQ(to, 5499999u) << "both ends counted, the next column's left";
+    ASSERT_TRUE(cli::own_span(a, -31500000, 6, from, to));
+    EXPECT_EQ(from, 30500000u);
+    EXPECT_EQ(to, 35499999u);
+    ASSERT_TRUE(cli::own_span(a, -31500000, 7, from, to));
+    EXPECT_EQ(from, 35500000u);
+    EXPECT_EQ(to, 40500000u) << "the last column holds the axis's end too";
+    /* One 12.5 s in: the first two columns end before its start, the
+     * third is cut at it */
+    EXPECT_FALSE(cli::own_span(a, -12500000, 0, from, to));
+    EXPECT_FALSE(cli::own_span(a, -12500000, 1, from, to));
+    EXPECT_FALSE(cli::own_span(a, -21000000, 1, from, to))
+        << "a column ending on the microsecond before the start";
+    ASSERT_TRUE(cli::own_span(a, -21000001, 1, from, to));
+    EXPECT_EQ(from, 0u);
+    EXPECT_EQ(to, 0u) << "a column ending on the first microsecond";
+    ASSERT_TRUE(cli::own_span(a, -12500000, 3, from, to));
+    EXPECT_EQ(from, 0u);
+    EXPECT_EQ(to, 1499999u);
+    ASSERT_TRUE(cli::own_span(a, -12500000, 4, from, to));
+    EXPECT_EQ(from, 1500000u);
+    EXPECT_EQ(to, 6499999u);
+    /* A recording put later on the axis (utc): its time runs behind */
+    ASSERT_TRUE(cli::own_span(a, 4000000, 7, from, to));
+    EXPECT_EQ(from, 0u);
+    EXPECT_EQ(to, 5000000u);
+    /* One that starts on the axis's last microsecond: that alone */
+    ASSERT_TRUE(cli::own_span(a, 9000000, 7, from, to));
+    EXPECT_EQ(from, 0u);
+    EXPECT_EQ(to, 0u);
+    EXPECT_FALSE(cli::own_span(a, 9000001, 7, from, to));
+
+    /* The statistics over such a span, as the column a query would give */
+    ecuio_recording_stats_t st = cli::no_stats();
+    ecuio_recording_column_t col = cli::column_of_stats(st);
+    EXPECT_EQ(col.samples, 0u);
+    st.samples = 12;
+    st.lowest = -3.5;
+    st.highest = 41;
+    st.mean = 7;
+    col = cli::column_of_stats(st);
+    EXPECT_EQ(col.samples, 12u);
+    EXPECT_EQ(col.lowest, -3.5);
+    EXPECT_EQ(col.highest, 41);
+    EXPECT_EQ(col.flags, 0u);
+    st.samples = uint64_t{UINT32_MAX} + 5;
+    EXPECT_EQ(cli::column_of_stats(st).samples, UINT32_MAX)
+        << "a count past the column's room is its most, never wrapped";
+}
+
+TEST(CliViewTest, TheLastColumnHoldsTheAxisEnd)
+{
+    /* Columns under a second: every query stops short of the end */
+    cli::Axis narrow;
+    ASSERT_TRUE(cli::make_axis(0, 4000000, 8, narrow));
+    cli::Window w;
+    ASSERT_TRUE(cli::window_of(narrow, 0, w));
+    EXPECT_TRUE(cli::query_leaves_end(w, narrow));
+    ASSERT_TRUE(cli::window_of(narrow, -250000, w));
+    EXPECT_TRUE(cli::query_leaves_end(w, narrow)) << "ending inside a second";
+
+    /* Columns of a second or more: a query ending inside a second takes
+     * that second whole, one ending on a second leaves the end out */
+    cli::Axis wide;
+    ASSERT_TRUE(cli::make_axis(0, 40000000, 8, wide));
+    ASSERT_TRUE(cli::window_of(wide, 0, w));
+    ASSERT_EQ(w.t1_us, 40000000u);
+    EXPECT_TRUE(cli::query_leaves_end(w, wide));
+    ASSERT_TRUE(cli::window_of(wide, -250000, w));
+    ASSERT_EQ(w.t1_us, 40250000u);
+    EXPECT_FALSE(cli::query_leaves_end(w, wide));
+
+    /* The axis ending inside the column across a recording's start: that
+     * one query's own width decides */
+    ASSERT_TRUE(cli::window_of(wide, 39500000, w));
+    ASSERT_TRUE(w.partial);
+    ASSERT_EQ(w.count, 1u);
+    ASSERT_EQ(w.t1_us, 500000u);
+    EXPECT_TRUE(cli::query_leaves_end(w, wide)) << "half a second, read raw";
+    ASSERT_TRUE(cli::window_of(wide, 37500000, w));
+    ASSERT_EQ(w.count, 1u);
+    ASSERT_EQ(w.t1_us, 2500000u);
+    EXPECT_FALSE(cli::query_leaves_end(w, wide));
+    ASSERT_TRUE(cli::window_of(wide, 38000000, w));
+    ASSERT_EQ(w.t1_us, 2000000u);
+    EXPECT_TRUE(cli::query_leaves_end(w, wide));
+
+    /* The end's samples into the last column */
+    ecuio_recording_column_t into{};
+    ecuio_recording_column_t more{};
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, 0u);
+    more.samples = 2;
+    more.lowest = 10;
+    more.highest = 30;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, 2u);
+    EXPECT_EQ(into.lowest, 10);
+    EXPECT_EQ(into.highest, 30);
+    more.samples = 1;
+    more.lowest = more.highest = 20;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, 3u);
+    EXPECT_EQ(into.lowest, 10) << "inside the range: it stays";
+    EXPECT_EQ(into.highest, 30);
+    more.lowest = more.highest = 45;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, 4u);
+    EXPECT_EQ(into.highest, 45);
+    more.lowest = more.highest = -5;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.lowest, -5);
+    EXPECT_EQ(into.highest, 45);
+    more.samples = 0;
+    more.lowest = more.highest = 99;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, 5u) << "an empty column adds nothing";
+    EXPECT_EQ(into.highest, 45);
+    into.samples = UINT32_MAX - 1;
+    more.samples = 7;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, UINT32_MAX);
+}
+
+TEST(CliViewTest, OneMicrosecondsStatisticsComeFromItsColumn)
+{
+    ecuio_recording_column_t col{};
+    ecuio_recording_stats_t st = cli::stats_of_instant(col, false, 0);
+    EXPECT_EQ(st.samples, 0u);
+    EXPECT_TRUE(std::isnan(st.last));
+    EXPECT_TRUE(std::isnan(st.lowest));
+    EXPECT_TRUE(std::isnan(st.mean));
+    EXPECT_EQ(st.lowest_us, ECUIO_RECORDING_NONE);
+    EXPECT_EQ(st.highest_us, ECUIO_RECORDING_NONE);
+
+    col.samples = 1;
+    col.lowest = col.highest = 50;
+    st = cli::stats_of_instant(col, false, 7);
+    EXPECT_EQ(st.samples, 1u);
+    EXPECT_EQ(st.first, 50);
+    EXPECT_EQ(st.last, 50);
+    EXPECT_EQ(st.lowest, 50);
+    EXPECT_EQ(st.highest, 50);
+    EXPECT_EQ(st.mean, 50);
+    EXPECT_EQ(st.lowest_us, 7u);
+    EXPECT_EQ(st.highest_us, 7u);
+
+    /* Two unlike samples in one microsecond: which came last isn't told */
+    col.samples = 2;
+    col.highest = 54;
+    st = cli::stats_of_instant(col, false, 0);
+    EXPECT_EQ(st.samples, 2u);
+    EXPECT_EQ(st.lowest, 50);
+    EXPECT_EQ(st.highest, 54);
+    EXPECT_EQ(st.mean, 52);
+    EXPECT_TRUE(std::isnan(st.first));
+    EXPECT_TRUE(std::isnan(st.last));
+    col.samples = 3;
+    st = cli::stats_of_instant(col, false, 0);
+    EXPECT_TRUE(std::isnan(st.mean)) << "three unlike samples have no mean";
+    EXPECT_EQ(st.highest, 54);
+
+    /* A text signal's samples alone */
+    col.samples = 1;
+    col.lowest = col.highest = 50;
+    st = cli::stats_of_instant(col, true, 0);
+    EXPECT_EQ(st.samples, 1u);
+    EXPECT_TRUE(std::isnan(st.last));
+    EXPECT_TRUE(std::isnan(st.lowest));
+    EXPECT_TRUE(std::isnan(st.mean));
+    EXPECT_EQ(st.lowest_us, ECUIO_RECORDING_NONE);
+}
+
+TEST(CliViewTest, AFailedReadsErrorLineSaysItsOwnCause)
+{
+    EXPECT_STREQ(cli::read_error_detail(ECUIO_ERR_RECORDING_CHANGED),
+                 "the recording changed while it was read");
+    EXPECT_EQ(cli::read_error_detail(ECUIO_ERR_OUT_OF_MEMORY), nullptr)
+        << "core's own detail, never the changed file's words";
+    EXPECT_EQ(cli::read_error_detail(ECUIO_ERR_INVALID_ARGUMENT), nullptr);
+}
+
+TEST(CliViewTest, ADeltaIsBetweenOneNameInOneUnit)
+{
+    ecuio_recording_signal_t speed{};
+    std::strcpy(speed.name, "Vehicle Speed");
+    std::strcpy(speed.unit, "km/h");
+    ecuio_recording_signal_t other = speed;
+    EXPECT_EQ(cli::delta_key(speed), cli::delta_key(other));
+    std::strcpy(other.unit, "mph");
+    EXPECT_NE(cli::delta_key(speed), cli::delta_key(other))
+        << "km/h less mph is no difference";
+    std::strcpy(other.unit, "KM/H");
+    EXPECT_EQ(cli::delta_key(speed), cli::delta_key(other))
+        << "a unit's case is no other unit: RPM and rpm";
+    std::strcpy(other.unit, "km/h");
+    std::strcpy(other.name, "vehicle speed");
+    EXPECT_NE(cli::delta_key(speed), cli::delta_key(other))
+        << "a name's case is another signal";
+    /* The name and the unit apart: "A" in "bc" isn't "Ab" in "c" */
+    ecuio_recording_signal_t a{};
+    ecuio_recording_signal_t b{};
+    std::strcpy(a.name, "A");
+    std::strcpy(a.unit, "bc");
+    std::strcpy(b.name, "Ab");
+    std::strcpy(b.unit, "c");
+    EXPECT_NE(cli::delta_key(a), cli::delta_key(b));
+    /* A name that fills its field has no NUL: read to the field's end */
+    ecuio_recording_signal_t full{};
+    std::memset(full.name, 'n', sizeof full.name);
+    EXPECT_EQ(cli::delta_key(full).size(), sizeof full.name + 1);
+}
+
+TEST(CliViewTest, AColumnsMeanComesFromItsRangeWhereThatGivesIt)
+{
+    ecuio_recording_column_t col{};
+    double mean = 7;
+    ASSERT_TRUE(cli::mean_of_column(col, mean));
+    EXPECT_TRUE(std::isnan(mean)) << "an empty column has none";
+    col.samples = 1;
+    col.lowest = col.highest = 12.5;
+    ASSERT_TRUE(cli::mean_of_column(col, mean));
+    EXPECT_EQ(mean, 12.5);
+    col.samples = 40;
+    ASSERT_TRUE(cli::mean_of_column(col, mean));
+    EXPECT_EQ(mean, 12.5) << "samples all alike";
+    col.samples = 2;
+    col.highest = 14.5;
+    ASSERT_TRUE(cli::mean_of_column(col, mean));
+    EXPECT_EQ(mean, 13.5);
+    col.samples = 3;
+    EXPECT_FALSE(cli::mean_of_column(col, mean))
+        << "three unlike samples must be read";
 }
 
 TEST(CliViewTest, SecondsAreSignedAndToTheMicrosecond)
@@ -1016,6 +1354,176 @@ TEST(CliViewTest, SecondsAreSignedAndToTheMicrosecond)
     for (const char* bad : {"", "soon", "5s", "nan", "1e10", "-1e10"}) {
         EXPECT_FALSE(cli::parse_seconds(bad, us)) << bad;
     }
+}
+
+TEST(CliViewTest, ASpanIsTwoSecondsInOrder)
+{
+    cli::Span s;
+    ASSERT_TRUE(cli::parse_span("-1.5:2", s));
+    EXPECT_EQ(s.from_us, -1500000);
+    EXPECT_EQ(s.to_us, 2000000);
+    ASSERT_TRUE(cli::parse_span("0:0.000001", s));
+    EXPECT_EQ(s.to_us, 1);
+    for (const char* bad :
+         {"", "5", "5:", ":5", "5:3", "5:5", "a:b", "1:2:3", "1;2"}) {
+        EXPECT_FALSE(cli::parse_span(bad, s)) << bad;
+    }
+}
+
+TEST(CliViewTest, AStatsLineHoldsTheSpanAndNullsWhatIsntThere)
+{
+    char buf[1024];
+    ecuio_recording_signal_t rpm{};
+    std::strcpy(rpm.name, "RPM");
+    cli::Span span;
+    span.from_us = -1000000;
+    span.to_us = 2500000;
+    ecuio_recording_stats_t st = cli::no_stats();
+    st.samples = 3;
+    st.first = 812.5;
+    st.last = 900;
+    st.lowest = 800;
+    st.lowest_us = 400000;
+    st.highest = HUGE_VAL;
+    st.highest_us = 2000000;
+    st.mean = HUGE_VAL;
+    cli::Line l(buf, sizeof buf);
+    cli::stats_line(l, 1, rpm, span, st);
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"stats\",\"recording\":1,\"signal\":\"RPM\","
+              "\"from_us\":-1000000,\"to_us\":2500000,\"samples\":3,"
+              "\"first\":812.5,\"last\":900,\"lowest\":800,"
+              "\"lowest_us\":400000,\"highest\":null,\"highest_us\":2000000,"
+              "\"mean\":null}");
+    cli::Line e(buf, sizeof buf);
+    cli::stats_line(e, 0, rpm, span, cli::no_stats());
+    EXPECT_EQ(std::string(e.data(), e.size()),
+              "{\"type\":\"stats\",\"recording\":0,\"signal\":\"RPM\","
+              "\"from_us\":-1000000,\"to_us\":2500000,\"samples\":0,"
+              "\"first\":null,\"last\":null,\"lowest\":null,"
+              "\"lowest_us\":null,\"highest\":null,\"highest_us\":null,"
+              "\"mean\":null}");
+}
+
+TEST(CliViewTest, AStretchLevelIsAKeyAndAValueInItsUnits)
+{
+    ecuio_stretch_rules_t r = cli::stretch_rules(ECUIO_STRETCH_PULLS);
+    EXPECT_EQ(r.kinds, ECUIO_STRETCH_PULLS);
+    EXPECT_EQ(r.throttle, UINT32_MAX);
+    EXPECT_EQ(r.engine_speed, UINT32_MAX);
+    ASSERT_TRUE(cli::parse_stretch_level("pull-throttle=85", false, r));
+    ASSERT_TRUE(cli::parse_stretch_level("pull-load=70.5", false, r));
+    ASSERT_TRUE(cli::parse_stretch_level("pull-hold=1.5", false, r));
+    ASSERT_TRUE(cli::parse_stretch_level("pull-gap=0.75", false, r));
+    ASSERT_TRUE(cli::parse_stretch_level("cruise-hold=20", false, r));
+    ASSERT_TRUE(cli::parse_stretch_level("cruise-throttle-band=5", true, r));
+    ASSERT_TRUE(cli::parse_stretch_level("pull-rise=600", true, r));
+    EXPECT_EQ(r.pull_min_rise, 600.0) << "rpm has no unit system";
+    ASSERT_TRUE(cli::parse_stretch_level("pull-gain=12", false, r));
+    EXPECT_EQ(r.pull_min_gain, 12.0);
+    ASSERT_TRUE(cli::parse_stretch_level("pull-gain=5", true, r));
+    EXPECT_DOUBLE_EQ(r.pull_min_gain, 8.04672) << "5 mph in km/h";
+    EXPECT_EQ(r.pull_level, 85.0);
+    EXPECT_EQ(r.pull_load_level, 70.5);
+    EXPECT_EQ(r.pull_hold_us, 1500000u);
+    EXPECT_EQ(r.pull_gap_us, 750000u);
+    EXPECT_EQ(r.cruise_hold_us, 20000000u);
+    EXPECT_EQ(r.cruise_throttle_band, 5.0) << "a percentage has no unit system";
+
+    /* Speeds in km/h, or mph under imperial: 40 mph reaches core as km/h */
+    ASSERT_TRUE(cli::parse_stretch_level("cruise-floor=40", true, r));
+    EXPECT_DOUBLE_EQ(r.cruise_floor, 64.37376);
+    ASSERT_TRUE(cli::parse_stretch_level("cruise-speed-band=2", true, r));
+    EXPECT_DOUBLE_EQ(r.cruise_speed_band, 3.218688);
+    ASSERT_TRUE(cli::parse_stretch_level("cruise-floor=60", false, r));
+    EXPECT_EQ(r.cruise_floor, 60.0);
+    ASSERT_TRUE(cli::parse_stretch_level("pull-gap=0", false, r));
+    EXPECT_EQ(r.pull_gap_us, 0u) << "0 takes core's default";
+
+    for (const char* bad :
+         {"pull-gap", "pull-gap=", "pull-gap=-1", "pull-gap=soon", "=1",
+          "pull-speed=1", "cruise-floor=1e10"}) {
+        EXPECT_FALSE(cli::parse_stretch_level(bad, false, r)) << bad;
+    }
+}
+
+TEST(CliViewTest, ARoleAndAKindAreOneOfTheirWords)
+{
+    uint32_t role = 0;
+    std::string name;
+    ASSERT_TRUE(cli::parse_role("speed=Vehicle Speed", role, name));
+    EXPECT_EQ(role, ECUIO_RECORDING_ROLE_VEHICLE_SPEED);
+    EXPECT_EQ(name, "Vehicle Speed");
+    ASSERT_TRUE(cli::parse_role("throttle=Pedal=D", role, name));
+    EXPECT_EQ(role, ECUIO_RECORDING_ROLE_THROTTLE);
+    EXPECT_EQ(name, "Pedal=D") << "the name is all after the first =";
+    ASSERT_TRUE(cli::parse_role("load=Load", role, name));
+    EXPECT_EQ(role, ECUIO_RECORDING_ROLE_ENGINE_LOAD);
+    ASSERT_TRUE(cli::parse_role("rpm=RPM", role, name));
+    EXPECT_EQ(role, ECUIO_RECORDING_ROLE_ENGINE_SPEED);
+    for (const char* bad : {"speed", "speed=", "brake=Pedal", "=RPM"}) {
+        EXPECT_FALSE(cli::parse_role(bad, role, name)) << bad;
+    }
+    ecuio_stretch_rules_t r = cli::stretch_rules(0);
+    cli::role_field(r, ECUIO_RECORDING_ROLE_ENGINE_LOAD) = 7;
+    EXPECT_EQ(r.engine_load, 7u);
+    EXPECT_EQ(r.throttle, UINT32_MAX);
+
+    uint32_t kinds = 0;
+    ASSERT_TRUE(cli::parse_stretch_kinds("pulls", kinds));
+    EXPECT_EQ(kinds, ECUIO_STRETCH_PULLS);
+    ASSERT_TRUE(cli::parse_stretch_kinds("cruises", kinds));
+    EXPECT_EQ(kinds, ECUIO_STRETCH_CRUISES);
+    ASSERT_TRUE(cli::parse_stretch_kinds("all", kinds));
+    EXPECT_EQ(kinds, ECUIO_STRETCH_PULLS | ECUIO_STRETCH_CRUISES);
+    EXPECT_FALSE(cli::parse_stretch_kinds("pull", kinds));
+}
+
+TEST(CliViewTest, TheRolesAndStretchLinesSayWhatWasFoundAndWith)
+{
+    char buf[1024];
+    ecuio_recording_signal_t speed{};
+    std::strcpy(speed.name, "Vehicle Speed");
+    ecuio_recording_signal_t rpm{};
+    std::strcpy(rpm.name, "RPM");
+    const ecuio_recording_signal_t* by_role[4] = {nullptr, nullptr, &speed,
+                                                  &rpm};
+    cli::Line l(buf, sizeof buf);
+    cli::roles_line(l, 1, by_role, cli::stretch_rules(ECUIO_STRETCH_PULLS));
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              "{\"type\":\"roles\",\"recording\":1,\"throttle\":null,"
+              "\"engine_load\":null,\"vehicle_speed\":\"Vehicle Speed\","
+              "\"engine_speed\":\"RPM\",\"cruise_floor\":56.32704,"
+              "\"cruise_speed_band\":2,\"pull_gain\":10}")
+        << "the defaults core takes, in km/h";
+    ecuio_stretch_rules_t set = cli::stretch_rules(ECUIO_STRETCH_PULLS);
+    set.pull_min_gain = 8.04672;
+    cli::Line gl(buf, sizeof buf);
+    cli::roles_line(gl, 0, by_role, set);
+    EXPECT_NE(std::string(gl.data(), gl.size()).find("\"pull_gain\":8.04672}"),
+              std::string::npos);
+
+    ecuio_recording_stretch_t s{};
+    s.kind = ECUIO_RECORDING_STRETCH_PULL;
+    s.from_us = 14000000;
+    s.to_us = 19500000;
+    s.start = 40;
+    s.end = 113.5;
+    s.flags = ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED |
+              ECUIO_RECORDING_STRETCH_CUT_END;
+    cli::Line sl(buf, sizeof buf);
+    cli::stretch_line(sl, 0, s, rpm, -14600000);
+    EXPECT_EQ(std::string(sl.data(), sl.size()),
+              "{\"type\":\"stretch\",\"recording\":0,\"kind\":\"pull\","
+              "\"from_us\":-600000,\"to_us\":4900000,\"length_us\":5500000,"
+              "\"signal\":\"RPM\",\"start\":40,\"end\":113.5,"
+              "\"by_load\":false,\"by_engine_speed\":true,"
+              "\"no_throttle\":false,\"cut_start\":false,\"cut_end\":true}");
+    s.kind = ECUIO_RECORDING_STRETCH_CRUISE;
+    cli::Line cl(buf, sizeof buf);
+    cli::stretch_line(cl, 0, s, speed, 0);
+    EXPECT_NE(std::string(cl.data(), cl.size()).find("\"kind\":\"cruise\""),
+              std::string::npos);
 }
 
 TEST(CliViewTest, TheAxisRoundsOutToWholeColumns)
@@ -1244,12 +1752,26 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     cols[0].samples = 3;
     cols[0].lowest = 1;
     cols[0].highest = 2.5;
+    const double means[4] = {NAN, NAN, 1.75, NAN};
     cli::Line c(buf, sizeof buf);
-    cli::columns_line(c, 0, s, w, 4, cols);
+    cli::columns_line(c, 0, s, w, 4, cols, means);
     EXPECT_EQ(std::string(c.data(), c.size()),
               "{\"type\":\"columns\",\"recording\":0,\"signal\":\"RPM\","
               "\"samples\":[0,0,3,0],\"lowest\":[null,null,1,null],"
-              "\"highest\":[null,null,2.5,null]}");
+              "\"highest\":[null,null,2.5,null],"
+              "\"mean\":[null,null,1.75,null]}");
+    /* A later recording's line: its mean less the first's, by column */
+    const double delta[4] = {NAN, NAN, -0.25, NAN};
+    cli::Line cd(buf, sizeof buf);
+    cli::columns_line(cd, 2, s, w, 4, cols, means, delta, 1);
+    EXPECT_EQ(std::string(cd.data(), cd.size()),
+              "{\"type\":\"columns\",\"recording\":2,\"signal\":\"RPM\","
+              "\"samples\":[0,0,3,0],\"lowest\":[null,null,1,null],"
+              "\"highest\":[null,null,2.5,null],"
+              "\"mean\":[null,null,1.75,null],\"delta_from\":1,"
+              "\"delta\":[null,null,-0.25,null]}");
+    EXPECT_GE(cli::columns_line_bytes(10000), 10000u * 5 * 26)
+        << "room for five entries a column";
     cli::Line ct(buf, sizeof buf);
     cli::columns_line(ct, 0, vin, w, 2, nullptr);
     EXPECT_EQ(std::string(ct.data(), ct.size()),
@@ -1438,20 +1960,18 @@ TEST(CliSignalFileTest, KindsAndUnitsAreTheFilesWords)
     EXPECT_STREQ(cli::kind_word(d), "computed");
 
     ecuio_signal_def_t u{};
-    u.id = ECUIO_USER_SIG_ID_BASE;
     std::strcpy(u.unit, "km/h");
     EXPECT_TRUE(cli::unit_converts(u));
-    EXPECT_FALSE(cli::unit_kept(u));
+    EXPECT_FALSE(cli::unit_kept(u, true));
     std::strcpy(u.unit, "kph");
     EXPECT_FALSE(cli::unit_converts(u));
-    EXPECT_TRUE(cli::unit_kept(u));
+    EXPECT_TRUE(cli::unit_kept(u, true));
     std::strcpy(u.unit, "%");
-    EXPECT_TRUE(cli::unit_kept(u));
+    EXPECT_TRUE(cli::unit_kept(u, true));
     u.unit[0] = '\0';
-    EXPECT_FALSE(cli::unit_kept(u)) << "no unit, nothing to convert";
+    EXPECT_FALSE(cli::unit_kept(u, true)) << "no unit, nothing to convert";
     std::strcpy(u.unit, "%");
-    u.id = ECUIO_USER_SIG_ID_BASE - 1;
-    EXPECT_FALSE(cli::unit_kept(u)) << "the base set's, not the file's";
+    EXPECT_FALSE(cli::unit_kept(u, false)) << "the base set's, not the file's";
 }
 
 // Each line says what the loader read, in the file's own terms: a reply's
@@ -1491,8 +2011,7 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
         return std::string(l.data(), l.size());
     };
     EXPECT_EQ(text([&](cli::Line& l) {
-                  cli::signal_file_line(l, ecuio_signal_file_name(file),
-                                        ecuio_signal_file_profile(file), set);
+                  cli::signal_file_line(l, file, set);
               }),
               "{\"type\":\"signal_file\",\"name\":\"Unit test\","
               "\"profile\":\"user.unit-test\",\"signals\":4,\"base\":0,"
@@ -1524,7 +2043,7 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
     };
     for (uint32_t i = 0; i < 4; ++i) {
         SCOPED_TRACE(i);
-        EXPECT_TRUE(cli::own_signal(set.defs[i]));
+        EXPECT_TRUE(cli::own_signal(file, set.defs[i]));
         EXPECT_LE(expected[i].size(), cli::def_line_bytes(set, set.defs[i]));
         EXPECT_EQ(text([&](cli::Line& l) {
                       cli::def_line(l, set, set.defs[i], nullptr);
@@ -1546,6 +2065,38 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
 
 // A def's gauge field: nothing for a def with none, else min and max and
 // only the levels given (cli::gauge_field)
+// A def that replaced a base one by name has the base's ID (7002 here), so
+// the ID range no longer says whose it is: the file's key does, and the
+// line and the count follow it
+TEST(CliSignalFileTest, AReplacingDefIsTheFilesOwnWhateverItsId)
+{
+    const std::string json =
+        "{\"havne_signals\":1,\"name\":\"Replaces\","
+        "\"source\":{\"name\":\"test\"},\"extends\":\"obd2\",\"signals\":["
+        "{\"key\":\"temp\",\"name\":\"Coolant Temp\","
+        "\"read\":{\"service\":\"22\",\"number\":\"1E1C\"},"
+        "\"field\":{\"byte\":1},\"unit\":\"kph\"}]}";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
+    const ecuio_signal_def_t* temp = ecuio_signal_file_find(file, "temp");
+    ASSERT_NE(temp, nullptr);
+    ASSERT_LT(temp->id, ECUIO_USER_SIG_ID_BASE) << "the base def's ID";
+    EXPECT_TRUE(cli::own_signal(file, *temp));
+    for (uint32_t i = 0; i < set.count; ++i) {
+        if (&set.defs[i] != temp) {
+            EXPECT_FALSE(cli::own_signal(file, set.defs[i])) << set.defs[i].name;
+        }
+    }
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    cli::signal_file_line(l, file, set);
+    const std::string line(l.data(), l.size());
+    EXPECT_NE(line.find("\"signals\":1,"), std::string::npos) << line;
+    ecuio_signal_file_free(file);
+}
+
 TEST(CliSignalFileTest, AGaugeFieldHoldsOnlyTheLevelsGiven)
 {
     const auto field = [](const ecuio_signal_gauge_t* g) {
@@ -1712,7 +2263,8 @@ TEST(CliPluginTest, AVariantLineCountsItsOwnSignals)
     const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(pk.p, 0);
     char buf[1024];
     cli::Line l(buf, sizeof buf);
-    cli::variant_line(l, "base", "plugin.p.base", set);
+    cli::variant_line(l, "base", "plugin.p.base",
+                      ecuio_plugin_variant_file(pk.p, 0), set);
     EXPECT_EQ(text_of(l),
               "{\"type\":\"variant\",\"id\":\"base\",\"profile\":"
               "\"plugin.p.base\",\"signals\":1,\"base\":0,\"ecus\":[{\"rx\":"
@@ -2141,6 +2693,7 @@ TEST(CliRefusedTest, ANegativeCodeHasItsStandardName)
     EXPECT_STREQ(cli::nrc_name(0x22), "conditionsNotCorrect");
     EXPECT_STREQ(cli::nrc_name(0x31), "requestOutOfRange");
     EXPECT_STREQ(cli::nrc_name(0x33), "securityAccessDenied");
+    EXPECT_STREQ(cli::nrc_name(0x36), "exceedNumberOfAttempts");
     EXPECT_STREQ(cli::nrc_name(0x7F), "serviceNotSupportedInActiveSession");
     EXPECT_STREQ(cli::nrc_name(0x00), "");
     EXPECT_STREQ(cli::nrc_name(0x99), "");

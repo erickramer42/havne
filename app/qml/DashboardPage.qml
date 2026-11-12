@@ -77,6 +77,10 @@ Page {
     readonly property var parsed: DashboardBook.parse(storedText, form)
     property var doc: parsed.doc
     readonly property string problem: parsed.problem
+    // The built-in layout is what's shown: nothing stored, or what is stored
+    // can't be read. A saved layout is drawn as it was saved
+    readonly property bool builtInShown: doc === parsed.doc && problem !== ""
+                                         && problem !== "dropped"
     // What a "dropped" read left out, in words
     readonly property string droppedWords: {
         const d = parsed.dropped
@@ -105,6 +109,7 @@ Page {
     property int selectedCount: 15   // the selected Shift lights card's lights
     property string panel: ""        // "", "cell", "add", "signal"
     property string addKind: ""      // Add's kind; "" when changing a cell's signal
+    property bool changingKind: false  // the kind list picks the selected cell's kind
     property bool moreShown: false
     property bool confirmReset: false
     property bool confirmRemovePage: false
@@ -140,8 +145,9 @@ Page {
     // An option's word in a step's words, as its caption on the panel says it
     readonly property var optionWords: ({
         "from": qsTr("range"), "to": qsTr("range"), "coldBelow": qsTr("zones"),
-        "warnFrom": qsTr("zones"), "dangerFrom": qsTr("zones"), "decimals": qsTr("decimals"),
-        "peak": qsTr("peak hold"), "majorStep": qsTr("major step"),
+        "warnFrom": qsTr("zones"), "dangerFrom": qsTr("zones"), "warnBelow": qsTr("zones"),
+        "dangerBelow": qsTr("zones"), "decimals": qsTr("decimals"),
+        "peak": qsTr("peak hold"), "color": qsTr("color"), "majorStep": qsTr("major step"),
         "minorStep": qsTr("major step"), "labelDivisor": qsTr("major step"),
         "caption": qsTr("caption"), "description": qsTr("description"), "cells": qsTr("cells"),
         "rise": qsTr("curve"), "digits": qsTr("digits"), "window": qsTr("window"),
@@ -193,7 +199,15 @@ Page {
     }
     function restore(text) {
         store[formKey] = text
-        doc = text === "" ? DashboardBook.reset(form) : DashboardBook.parse(text, form).doc
+        if (text === "")
+            showStoredLayout()
+        else
+            doc = DashboardBook.parse(text, form).doc
+    }
+    // With nothing stored the document is the stored read itself, so the
+    // built-in layout is drawn as at first run (builtInShown)
+    function showStoredLayout() {
+        doc = Qt.binding(() => root.parsed.doc)
     }
     // An undo or a redo goes from (page, cell) to (toPage, toCell). The
     // cell panel follows only when it was on the step's cell, so it never
@@ -362,7 +376,7 @@ Page {
         if (texts.unread !== "")
             store[formKey + "Unread"] = texts.unread
         store[formKey] = ""
-        doc = DashboardBook.reset(form)
+        showStoredLayout()
         confirmReset = false
         moreShown = false
         selected = -1
@@ -387,10 +401,15 @@ Page {
     // Outside edit mode nothing stays selected once the menu is gone
     function closePanel() {
         commitTyping()
+        const shown = selected
         panel = ""
         if (!editing)
             selected = -1
+        else if (shown >= 0)
+            revealRequested(shown)
     }
+    // The shown page scrolls to a cell, so what a panel edited is seen again
+    signal revealRequested(int cell)
 
     // ---- The drive view (ADR-0059): this page with every bar hidden
 
@@ -567,9 +586,35 @@ Page {
         commitTyping()
         selected = -1
         addKind = ""
+        changingKind = false
+        panel = "add"
+    }
+    // The cell's own kind list, Add's with the cell's kind marked
+    function changeKind() {
+        commitTyping()
+        addKind = ""
+        changingKind = true
         panel = "add"
     }
     function pickKind(kind) {
+        if (changingKind) {
+            if (selected < 0)
+                return
+            let next = DashboardBook.setKind(doc, pageIndex, selected, kind)
+            // A shift band isn't a dial's range: on an rpm signal, going to
+            // Shift lights takes the band and leaving takes the default range
+            // (another signal keeps its range both ways)
+            if ((kind === "shift-light") !== (selectedCell.kind === "shift-light")
+                    && (selectedCell.unit ?? "").toLowerCase() === "rpm") {
+                const range = kind === "shift-light" ? Object.assign({}, DashboardBook.shiftBand)
+                                                     : DashboardBook.defaultRange(selectedCell.unit)
+                next = DashboardBook.setOptions(next, pageIndex, selected, range)
+            }
+            if (edit(next, stepOf("", qsTr("changed %1's kind").arg(cellName(selectedCell)),
+                                  selected, selected)))
+                leaveKindList()
+            return
+        }
         if (kind === "blank") {
             const span = newSpans[kind]
             if (edit(DashboardBook.addCell(doc, pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] }),
@@ -580,6 +625,10 @@ Page {
         addKind = kind
         refreshRows()
         panel = "signal"
+    }
+    function leaveKindList() {
+        changingKind = false
+        panel = "cell"
     }
     function changeSignal() {
         addKind = ""
@@ -596,17 +645,59 @@ Page {
         }
         return [ref]
     }
+    // A cell's refs with the counterparts of each in the built-in sets, its
+    // own first: a cell made under one profile reads under another
+    function lookupRefs(refs) {
+        let all = refs ?? []
+        for (const ref of refs ?? [])
+            all = all.concat(counterparts(ref).filter(r => all.indexOf(r) < 0))
+        return all
+    }
     function labelFor(row) {
         return Array.from(String(row.name)).slice(0, DashboardBook.maxLabel).join("")
     }
-    // A new gauge's cell (section 5): the row's name, its unit and range
-    // as core decodes them (section 6), no zones; decimals follow the row
+    // The Bridge.gaugeSignals key whose refs hold this ref ("" for none)
+    function keyOfRef(ref) {
+        const sets = Bridge.gaugeSignals
+        for (const key in sets) {
+            if (sets[key].indexOf(ref) >= 0)
+                return key
+        }
+        return ""
+    }
+    // What a gauge on this row starts with, in the unit the cell stores: the
+    // signal file's own gauge (its range and levels), else the row's range
+    // and, for a common signal, the zones of DashboardBook's table; a shift
+    // light on engine speed starts from the shift band. All of it is written
+    // into the cell, so the panel shows ordinary values to type over or clear
+    function startOptions(kind, row) {
+        const g = row.gauge ?? ({})
+        const hasGauge = g.min !== undefined && g.max !== undefined
+        const r = DashboardBook.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
+        const options = hasGauge ? { from: g.min, to: g.max } : { from: r.from, to: r.to }
+        const key = keyOfRef(row.ref)
+        if (kind === "shift-light") {
+            if (key === "rpm")
+                Object.assign(options, DashboardBook.shiftBand)
+            return options
+        }
+        if (g.warnLow !== undefined || g.warnHigh !== undefined) {
+            if (g.warnLow !== undefined)
+                options.warnBelow = g.warnLow
+            if (g.warnHigh !== undefined)
+                options.warnFrom = g.warnHigh
+        } else {
+            Object.assign(options, DashboardBook.zonesFor(key))
+        }
+        return options
+    }
+    // A new gauge's cell (section 5): the row's name, its unit and what a
+    // gauge on it starts with (startOptions); decimals follow the row
     function newCell(kind, row) {
         const span = newSpans[kind] ?? [1, 4]
-        const r = DashboardBook.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
         return { kind: kind, w: span[0], h: span[1], label: labelFor(row),
                  refs: counterparts(row.ref), unit: row.decodedUnit,
-                 options: { from: r.from, to: r.to } }
+                 options: startOptions(kind, row) }
     }
     function pickSignal(row) {
         if (addKind !== "") {
@@ -620,15 +711,18 @@ Page {
         }
         if (selected < 0)
             return
-        // Another signal: its name, unit and range, and none of the old
-        // signal's zones, steps, words or decimals, which were its own
-        const r = DashboardBook.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
+        // Another signal: its name, unit, range and zones as a new gauge on
+        // it would start, and none of the old signal's steps, words or
+        // decimals, which were its own
         let next = DashboardBook.setCell(doc, pageIndex, selected, {
             refs: counterparts(row.ref), unit: row.decodedUnit, label: labelFor(row) })
-        next = DashboardBook.setOptions(next, pageIndex, selected, {
-            from: r.from, to: r.to, coldBelow: null, warnFrom: null, dangerFrom: null,
+        const cleared = {
             majorStep: null, minorStep: null, labelDivisor: null, caption: null,
-            description: null, peakLabel: null, decimals: null })
+            description: null, peakLabel: null, decimals: null }
+        for (const zone of DashboardBook.zoneOptions)
+            cleared[zone] = null
+        next = DashboardBook.setOptions(next, pageIndex, selected,
+                                        Object.assign(cleared, startOptions(selectedCell.kind, row)))
         edit(next, stepOf("", qsTr("changed %1's signal").arg(cellName(selectedCell)), selected, selected))
         panel = "cell"
     }
@@ -809,11 +903,13 @@ Page {
     onVisibleChanged: {
         maybeSweep()
         // Any page but Dash ends the view for good: a tab, the status's Log,
-        // and the history, as Done does: a step from outside edit mode
-        // isn't undone by a Ctrl+Z days later
+        // and the history outside edit mode, as Done does: a step from
+        // outside edit mode isn't undone by a Ctrl+Z days later. Edit mode
+        // stays open while hidden, so its history stays with it
         if (!visible) {
             leaveDrive(true)
-            clearHistory()
+            if (!editing)
+                clearHistory()
         }
     }
     Component.onCompleted: {
@@ -858,8 +954,8 @@ Page {
         return Math.round(x * 1e6) / 1e6
     }
     // A number for a field: at most four decimals, none trailing
-    function fieldText(v) {
-        return typeof v === "number" && isFinite(v) ? String(Number(v.toFixed(4))) : ""
+    function fieldText(v, places) {
+        return typeof v === "number" && isFinite(v) ? String(Number(v.toFixed(places ?? 4))) : ""
     }
     // A round tick spacing near `step`: 1, 2 or 5 times a power of ten
     function niceStep(step) {
@@ -929,7 +1025,7 @@ Page {
         readonly property var options: cell && cell.options ? cell.options : ({})
         readonly property string cellUnit: cell && typeof cell.unit === "string" ? cell.unit : ""
         readonly property string label: cell && typeof cell.label === "string" ? cell.label : ""
-        readonly property SignalHub.Entry entry: hub.lookup(cell && cell.refs ? cell.refs : [])
+        readonly property SignalHub.Entry entry: hub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
 
         readonly property bool hasValue: Bridge.connected && entry !== null && entry.hasValue
         readonly property real value: entry ? entry.value : 0
@@ -1014,11 +1110,20 @@ Page {
         readonly property real coldBelow: zone("coldBelow")
         readonly property real warnFrom: zone("warnFrom")
         readonly property real dangerFrom: zone("dangerFrom")
+        readonly property real warnBelow: zone("warnBelow")
+        readonly property real dangerBelow: zone("dangerBelow")
+        // A picked color (options.color) takes the normal zone's place; the
+        // zones, and Night, still win
+        readonly property string picked: Theme.gaugeColor(opt("color", ""))
         // A stored "info" draws as the value's own color: blue means cold alone
         readonly property color accent: {
+            if (picked !== "")
+                return picked
             const a = opt("accent", "accent")
             return a === "success" ? Theme.success : Theme.gaugeValue
         }
+        readonly property color readoutColor: picked !== "" ? picked : Theme.gaugeReadout
+        readonly property color needleColor: picked !== "" ? picked : Theme.gaugeNeedle
 
         // Each kind's own
         readonly property real labelDivisor: opt("labelDivisor", 1)
@@ -1050,10 +1155,11 @@ Page {
 
         readonly property var shared: ["value", "windowHigh", "windowLow", "hasValue", "stale",
                                        "from", "to", "label", "unit", "note", "decimals",
-                                       "coldBelow", "warnFrom", "dangerFrom", "accent", "showPeak"]
+                                       "coldBelow", "warnFrom", "dangerFrom", "warnBelow", "dangerBelow", "accent", "readoutColor",
+                                       "showPeak"]
         readonly property var own: ({
             "analog": ["majorStep", "minorStep", "labelDivisor", "caption", "peakLabel",
-                       "showProgress"],
+                       "showProgress", "needleColor"],
             "bar": ["scaleMarks", "vertical", "marks"],
             "segments": ["cells", "rise"],
             "seven-segment": ["digits"],
@@ -1211,7 +1317,7 @@ Page {
 
     // A number option, typed in the unit shown when `converted`; empty
     // removes it when `clearable`, else puts the shown value back
-    component OptionField: TextField {
+    component OptionField: ThemedTextField {
         id: field
         required property string option
         property bool converted: true
@@ -1222,8 +1328,14 @@ Page {
             const o = cell && cell.options ? cell.options[field.option] : undefined
             return o !== undefined ? o : field.fallback
         }
+        // A converted end shows to the signal's decimals plus one (161.5565
+        // mph at 1 decimal reads 161.56), 1 place with no row to take them from
+        readonly property var entry: cell ? hub.lookup(root.lookupRefs(cell.refs ?? [])) : null
+        readonly property int places: (cell && cell.options && cell.options.decimals !== undefined
+                                       ? cell.options.decimals : entry ? entry.decimals : 0) + 1
         readonly property string shownText: cell === null ? ""
-            : root.fieldText(converted ? root.shown(cell.unit ?? "", value) : value)
+            : converted ? root.fieldText(root.shown(cell.unit ?? "", value), places)
+                        : root.fieldText(value)
         Layout.fillWidth: true
         Layout.preferredHeight: Theme.touchTarget
         text: shownText
@@ -1257,9 +1369,12 @@ Page {
             readonly property string unitShown: cell ? root.shownUnit(cell.unit ?? "") : ""
             readonly property var range: DashboardBook.defaultRange(cell ? cell.unit ?? "" : "")
             // The row the cell shows, whose decimals it uses until it has its own
-            readonly property SignalHub.Entry entry: hub.lookup(cell && cell.refs ? cell.refs : [])
+            readonly property SignalHub.Entry entry: hub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
             readonly property bool phone: root.form === "phone"
             readonly property bool hasSignal: kind !== "blank"
+            // Every kind but the shift lights draws the value's text and tone, which
+            // the zones, the decimals and the color shape; the lights read only the range
+            readonly property bool drawsValue: hasSignal && kind !== "shift-light"
             // The cell's label, or its kind's name when it has none
             readonly property string name: cell && cell.label ? cell.label
                                            : (root.kindNames[kind] ?? kind)
@@ -1289,6 +1404,21 @@ Page {
                     }
                 }
 
+                // The cell itself, live, at a fixed size, so range, zones,
+                // color and size are seen as they change
+                Cell {
+                    objectName: "panelPreview"
+                    visible: panelCard.hasSignal
+                    cell: panelCard.cell
+                    shown: false
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: panelCard.kind === "bar" || panelCard.kind === "shift-light"
+                                           || panelCard.kind === "segments" || panelCard.kind === "sparkline" ? 200 : 120
+                    Layout.preferredHeight: panelCard.kind === "shift-light" ? 40
+                                          : panelCard.kind === "segments" || panelCard.kind === "sparkline" ? 100
+                                          : panelCard.kind === "bar" || panelCard.kind === "seven-segment" ? 70 : 120
+                }
+
                 // A copy of the whole cell, for this run (section 5)
                 RowLayout {
                     Layout.fillWidth: true
@@ -1315,7 +1445,7 @@ Page {
                     rowSpacing: 8
 
                     Caption { visible: panelCard.hasSignal; text: qsTr("Label") }
-                    TextField {
+                    ThemedTextField {
                         id: labelField
                         objectName: "panelLabel"
                         visible: panelCard.hasSignal
@@ -1330,15 +1460,40 @@ Page {
                         }
                     }
                     Caption { visible: panelCard.hasSignal; text: qsTr("Signal") }
-                    ThemedButton {
-                        objectName: "panelSignal"
+                    RowLayout {
                         visible: panelCard.hasSignal
                         Layout.fillWidth: true
-                        text: qsTr("Change signal")
-                        onClicked: root.changeSignal()
+                        spacing: 8
+                        ThemedButton {
+                            objectName: "panelSignal"
+                            Layout.fillWidth: true
+                            text: qsTr("Change signal")
+                            onClicked: root.changeSignal()
+                        }
+                        ThemedButton {
+                            objectName: "panelKind"
+                            Layout.fillWidth: true
+                            text: qsTr("Change kind")
+                            onClicked: root.changeKind()
+                        }
                     }
 
-                    Caption { visible: panelCard.hasSignal; text: qsTr("From (%1)").arg(panelCard.unitShown) }
+                    Caption {
+                        objectName: "panelSignalName"
+                        visible: panelCard.hasSignal && panelCard.entry !== null
+                        Layout.fillWidth: true
+                        Layout.columnSpan: panelCard.phone ? 2 : 4
+                        Layout.preferredWidth: 0
+                        elide: Text.ElideRight
+                        text: panelCard.entry ? qsTr("Signal: %1").arg(panelCard.entry.name) : ""
+                    }
+                    Caption {
+                        objectName: "panelFromCaption"
+                        visible: panelCard.hasSignal
+                        text: panelCard.kind === "shift-light"
+                              ? qsTr("First light at (%1)").arg(panelCard.unitShown)
+                              : qsTr("From (%1)").arg(panelCard.unitShown)
+                    }
                     OptionField {
                         objectName: "panelFrom"
                         visible: panelCard.hasSignal
@@ -1346,7 +1501,13 @@ Page {
                         clearable: false
                         fallback: panelCard.range.from
                     }
-                    Caption { visible: panelCard.hasSignal; text: qsTr("To (%1)").arg(panelCard.unitShown) }
+                    Caption {
+                        objectName: "panelToCaption"
+                        visible: panelCard.hasSignal
+                        text: panelCard.kind === "shift-light"
+                              ? qsTr("Shift at (%1)").arg(panelCard.unitShown)
+                              : qsTr("To (%1)").arg(panelCard.unitShown)
+                    }
                     OptionField {
                         objectName: "panelTo"
                         visible: panelCard.hasSignal
@@ -1354,18 +1515,31 @@ Page {
                         clearable: false
                         fallback: panelCard.range.to
                     }
+                    Caption {
+                        objectName: "panelShiftHint"
+                        visible: panelCard.kind === "shift-light"
+                        Layout.fillWidth: true
+                        Layout.columnSpan: panelCard.phone ? 2 : 4
+                        Layout.preferredWidth: 0
+                        wrapMode: Text.WordWrap
+                        text: qsTr("The lights fill green, amber, red between the two and flash at the shift point.")
+                    }
 
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Cold below") }
-                    OptionField { objectName: "panelColdBelow"; visible: panelCard.hasSignal; option: "coldBelow" }
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Warning from") }
-                    OptionField { objectName: "panelWarnFrom"; visible: panelCard.hasSignal; option: "warnFrom" }
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Danger from") }
-                    OptionField { objectName: "panelDangerFrom"; visible: panelCard.hasSignal; option: "dangerFrom" }
+                    Caption { objectName: "panelColdBelowCaption"; visible: panelCard.drawsValue; text: qsTr("Cold below") }
+                    OptionField { objectName: "panelColdBelow"; visible: panelCard.drawsValue; option: "coldBelow" }
+                    Caption { objectName: "panelWarnBelowCaption"; visible: panelCard.drawsValue; text: qsTr("Warning below") }
+                    OptionField { objectName: "panelWarnBelow"; visible: panelCard.drawsValue; option: "warnBelow" }
+                    Caption { objectName: "panelDangerBelowCaption"; visible: panelCard.drawsValue; text: qsTr("Danger below") }
+                    OptionField { objectName: "panelDangerBelow"; visible: panelCard.drawsValue; option: "dangerBelow" }
+                    Caption { objectName: "panelWarnFromCaption"; visible: panelCard.drawsValue; text: qsTr("Warning from") }
+                    OptionField { objectName: "panelWarnFrom"; visible: panelCard.drawsValue; option: "warnFrom" }
+                    Caption { objectName: "panelDangerFromCaption"; visible: panelCard.drawsValue; text: qsTr("Danger from") }
+                    OptionField { objectName: "panelDangerFrom"; visible: panelCard.drawsValue; option: "dangerFrom" }
 
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Decimals") }
+                    Caption { objectName: "panelDecimalsCaption"; visible: panelCard.drawsValue; text: qsTr("Decimals") }
                     SpinBox {
                         objectName: "panelDecimals"
-                        visible: panelCard.hasSignal
+                        visible: panelCard.drawsValue
                         Accessible.name: qsTr("Decimals")
                         Layout.preferredHeight: Theme.touchTarget
                         from: 0
@@ -1409,6 +1583,7 @@ Page {
                     // A checkbox, as every other yes-or-no in the app
                     ThemedCheckBox {
                         objectName: "panelPeak"
+                        Layout.columnSpan: panelCard.phone ? 2 : 4
                         text: qsTr("Peak hold")
                         Accessible.name: qsTr("Peak hold")
                         visible: root.peakKinds.indexOf(panelCard.kind) >= 0
@@ -1428,7 +1603,7 @@ Page {
                         converted: false
                     }
                     Caption { visible: panelCard.kind === "analog"; text: qsTr("Caption") }
-                    TextField {
+                    ThemedTextField {
                         objectName: "panelCaption"
                         visible: panelCard.kind === "analog"
                         Layout.fillWidth: true
@@ -1444,7 +1619,7 @@ Page {
                         }
                     }
                     Caption { visible: panelCard.kind === "digital"; text: qsTr("Description") }
-                    TextField {
+                    ThemedTextField {
                         objectName: "panelDescription"
                         visible: panelCard.kind === "digital"
                         Layout.fillWidth: true
@@ -1559,6 +1734,70 @@ Page {
                     }
                 }
 
+                // The value's color from a fixed set; zones and Night still win.
+                // Shift lights keep their own green, amber and red
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: panelCard.drawsValue
+                    spacing: 8
+
+                    Caption { Layout.alignment: Qt.AlignTop; Layout.topMargin: 10; text: qsTr("Color") }
+                    Flow {
+                        id: colorRow
+                        objectName: "panelColors"
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 0
+                        Layout.minimumWidth: 0
+                        spacing: 8
+                        // Night draws no pick: the row dims, and stays choosable
+                        opacity: Theme.nightActive ? 0.45 : 1
+                        // A name this version doesn't know reads as Default, as it draws
+                        readonly property string current: panelCard.cell && panelCard.cell.options
+                                                          && Theme.gaugeColorNames.indexOf(panelCard.cell.options.color) >= 0
+                                                          ? panelCard.cell.options.color : ""
+                        ThemedButton {
+                            objectName: "panelColor_default"
+                            text: qsTr("Default")
+                            Accessible.name: qsTr("Default color")
+                            checkable: true
+                            checked: colorRow.current === ""
+                            onClicked: root.setOptions({ color: null })
+                        }
+                        Repeater {
+                            model: Theme.gaugeColorNames
+                            AbstractButton {
+                                id: swatch
+                                required property string modelData
+                                objectName: "panelColor_" + modelData
+                                width: Theme.touchTarget
+                                height: Theme.touchTarget
+                                checkable: true
+                                checked: colorRow.current === modelData
+                                Accessible.name: qsTr("Color %1").arg(Theme.gaugeColorLabel(modelData))
+                                onToggled: { toggle(); root.setOptions({ color: modelData }) }
+                                contentItem: Item {}
+                                background: Rectangle {
+                                    anchors.centerIn: parent
+                                    width: Math.min(parent.width, 32)
+                                    height: width
+                                    radius: 6
+                                    color: Theme.gaugeSwatch(swatch.modelData)
+                                    border.width: swatch.checked ? 3 : 1
+                                    border.color: swatch.checked ? Theme.text : Theme.outline
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Caption {
+                    objectName: "panelColorNight"
+                    Layout.fillWidth: true
+                    visible: panelCard.drawsValue && Theme.nightActive
+                    wrapMode: Text.Wrap
+                    text: qsTr("Night draws every gauge in its own tint")
+                }
+
                 // The order: both forms' grids follow it
                 GridLayout {
                     Layout.fillWidth: true
@@ -1627,12 +1866,17 @@ Page {
                         font.pixelSize: Theme.fontBody
                         font.bold: true
                         color: Theme.text
-                        text: qsTr("Add a gauge: its kind")
+                        text: root.changingKind ? qsTr("Change this gauge's kind")
+                                                : qsTr("Add a gauge: its kind")
                     }
                     ThemedButton {
                         objectName: "addClose"
-                        text: qsTr("Close")
+                        text: root.changingKind ? qsTr("Back") : qsTr("Close")
                         onClicked: {
+                            if (root.changingKind) {
+                                root.leaveKindList()
+                                return
+                            }
                             root.commitTyping()
                             root.panel = ""
                         }
@@ -1642,7 +1886,9 @@ Page {
                     Layout.fillWidth: true
                     spacing: 8
                     Repeater {
-                        model: root.drawnKinds
+                        // A blank has no signal to keep, so a change never offers it
+                        model: root.changingKind ? root.drawnKinds.filter(k => k !== "blank")
+                                                 : root.drawnKinds
                         ColumnLayout {
                             id: kindTile
                             required property string modelData
@@ -1686,6 +1932,11 @@ Page {
                                 objectName: "addKind_" + kindTile.modelData
                                 Layout.fillWidth: true
                                 text: root.kindNames[kindTile.modelData]
+                                // The cell's own kind is marked, and no change to it
+                                readonly property bool current: root.changingKind && root.selectedCell
+                                                                && root.selectedCell.kind === kindTile.modelData
+                                checkable: current
+                                checked: current
                                 onClicked: root.pickKind(kindTile.modelData)
                             }
                         }
@@ -1765,7 +2016,7 @@ Page {
                         ThemedButton {
                             required property var modelData
                             objectName: "pickSignal_" + modelData.ref
-                            text: modelData.unit !== "" ? qsTr("%1 (%2)").arg(modelData.name).arg(modelData.unit)
+                            text: modelData.unit !== "" && modelData.unit !== modelData.name ? qsTr("%1 (%2)").arg(modelData.name).arg(modelData.unit)
                                                         : modelData.name
                             onClicked: root.pickSignal(modelData)
                         }
@@ -2039,6 +2290,11 @@ Page {
                 Label {
                     objectName: "driveLogReadout"
                     visible: Bridge.logActive
+                    // Gives way first, so Stop log and Mark keep their size
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0
+                    Layout.minimumWidth: 0
+                    elide: Text.ElideRight
                     font.family: Theme.valueFamily
                     font.features: { "tnum": 1 }
                     font.pixelSize: Theme.fontBody
@@ -2056,7 +2312,7 @@ Page {
                 }
                 SheetButton {
                     objectName: "driveMark"
-                    visible: Bridge.recordingActive && !Bridge.logActive
+                    visible: Bridge.recordingActive
                     text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount) : qsTr("Mark")
                     Accessible.name: qsTr("Mark the recording")
                     onClicked: Bridge.mark()
@@ -2285,38 +2541,16 @@ Page {
             }
         }
 
-        // After an undo or a redo, the step's words; outside edit mode,
-        // after each step too, with an Undo, since there is no bar there
-        RowLayout {
-            objectName: "dashUndoLine"
-            readonly property real touchMin: Theme.touchTarget
+        // How a gauge is reached, while no panel is open
+        Label {
+            objectName: "dashEditHint"
+            visible: root.editing && root.panel === ""
             Layout.fillWidth: true
-            visible: root.undoLine !== "" && !root.driving
-            spacing: 10
-            Label {
-                objectName: "dashUndoLineText"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: Theme.text
-                font.pixelSize: Theme.fontCaption
-                text: root.undoLine
-            }
-            Label {
-                objectName: "dashUndoLineKeys"
-                visible: root.editing && root.form === "desktop"
-                color: Theme.textDim
-                font.pixelSize: Theme.fontCaption
-                text: undoKey.nativeText + "  " + redoKey.nativeText
-            }
-            ThemedButton {
-                objectName: "dashUndoLineUndo"
-                compact: true
-                visible: !root.editing
-                enabled: root.canUndo
-                text: qsTr("Undo")
-                Accessible.name: root.canUndo ? qsTr("Undo: %1").arg(root.undoWords) : qsTr("Undo")
-                onClicked: root.undo()
-            }
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            font.pixelSize: Theme.fontCaption
+            text: root.form === "phone" ? qsTr("Tap a gauge to change it; hold it to move it")
+                                        : qsTr("Click a gauge to change it; hold it to move it")
         }
 
         // The pages' controls, then a gap, then Reset (it replaces every page,
@@ -2330,7 +2564,7 @@ Page {
             Layout.preferredWidth: 1
             visible: root.editing && root.moreShown && !root.confirmReset && !root.confirmRemovePage
             spacing: 8
-            TextField {
+            ThemedTextField {
                 id: pageName
                 objectName: "moreRename"
                 width: Math.min(220, topBar.width)
@@ -2516,6 +2750,54 @@ Page {
         }
     }
 
+    // After an undo or a redo, the step's words; outside edit mode, after each
+    // step too, with an Undo, since there is no bar there. It floats over the
+    // pages' foot, so its coming and going moves nothing
+    Rectangle {
+        id: undoOverlay
+        z: 2
+        x: (root.width - width) / 2
+        anchors.bottom: swipe.bottom
+        width: Math.max(0, root.width - 2 * root.margin)
+        height: Theme.touchTarget + 8
+        visible: root.undoLine !== "" && !root.driving
+        color: Theme.surface
+        border.width: 1
+        border.color: Theme.hairline
+        radius: Theme.radiusCard
+        RowLayout {
+            objectName: "dashUndoLine"
+            readonly property real touchMin: Theme.touchTarget
+            anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
+                      leftMargin: 8; rightMargin: 8 }
+            spacing: 10
+            Label {
+                objectName: "dashUndoLineText"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Theme.text
+                font.pixelSize: Theme.fontCaption
+                text: root.undoLine
+            }
+            Label {
+                objectName: "dashUndoLineKeys"
+                visible: root.editing && root.form === "desktop"
+                color: Theme.textDim
+                font.pixelSize: Theme.fontCaption
+                text: undoKey.nativeText + "  " + redoKey.nativeText
+            }
+            ThemedButton {
+                objectName: "dashUndoLineUndo"
+                compact: true
+                visible: !root.editing
+                enabled: root.canUndo
+                text: qsTr("Undo")
+                Accessible.name: root.canUndo ? qsTr("Undo: %1").arg(root.undoWords) : qsTr("Undo")
+                onClicked: root.undo()
+            }
+        }
+    }
+
     // ---- The pages: one SwipeView, swiped on the phone form, moved by
     // the strip's tabs and the keys on the desktop form
 
@@ -2553,6 +2835,21 @@ Page {
                 readonly property var cells: page && Array.isArray(page.cells) ? page.cells : []
                 objectName: "dashPage_" + index
                 clip: true
+                Connections {
+                    target: root
+                    function onRevealRequested(cell) {
+                        if (!pageView.shown)
+                            return
+                        const item = cellRepeater.itemAt(cell)
+                        if (!item)
+                            return
+                        const top = grid.y + item.y
+                        const bottom = top + item.height
+                        const max = Math.max(0, pageView.contentHeight - pageView.height)
+                        if (top < pageView.contentY || bottom > pageView.contentY + pageView.height)
+                            pageView.contentY = Math.max(0, Math.min(max, top - root.panelMargin))
+                    }
+                }
                 contentWidth: width
                 contentHeight: grid.y + grid.height + root.panelMargin
                 interactive: root.held < 0
@@ -2585,7 +2882,7 @@ Page {
                 readonly property var boxes: {
                     const b = DashboardBook.place(placed, columns)
                     return root.joined && !root.editing && root.held < 0
-                        ? DashboardBook.stretched(placed, b, columns) : b
+                        ? DashboardBook.stretched(placed, b, columns, root.builtInShown) : b
                 }
                 readonly property var seams: root.joined
                     ? DashboardBook.seams(placed, boxes, columns) : []
@@ -2715,7 +3012,7 @@ Page {
 
                 Label {
                     objectName: "dashEmptyPage"
-                    visible: pageView.cells.length === 0 && !root.editing
+                    visible: pageView.cells.length === 0 && !root.editing && !root.connectShown
                     x: root.margin
                     y: root.topGap
                     width: pageView.gridWidth
@@ -2766,6 +3063,7 @@ Page {
                     }
 
                     Repeater {
+                        id: cellRepeater
                         model: pageView.cells.length
 
                         Cell {

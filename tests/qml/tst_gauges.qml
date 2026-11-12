@@ -89,6 +89,115 @@ TestCase {
         same(find(g, "readout").color, Theme.gaugeReadout, "the normal readout after the switch")
     }
 
+    // The low side: below warnBelow is the warning, below dangerBelow the
+    // danger, each strictly, and a picked color or the cold zone never hides
+    // them. Cold below sits under both low bands on one cell
+    function lowGaugeOf(kind, value, extra) {
+        const g = gaugeOf(kind, value)
+        for (const name in extra)
+            g[name] = extra[name]
+        return g
+    }
+    function test_everyKindColorsBelowItsLowLevels_data() {
+        return kinds.map(k => ({ tag: k.tag, kind: k }))
+    }
+    function test_everyKindColorsBelowItsLowLevels(data) {
+        const g = lowGaugeOf(data.kind, 50, { warnFrom: NaN, dangerFrom: NaN, warnBelow: 40, dangerBelow: 20 })
+        const readout = find(g, "readout")
+        same(readout.color, Theme.gaugeReadout, "between the levels")
+        g.value = 40
+        same(readout.color, Theme.gaugeReadout, "at warnBelow is not below it")
+        g.value = 39
+        same(readout.color, Theme.gaugeWarn, "below warnBelow")
+        g.value = 20
+        same(readout.color, Theme.gaugeWarn, "at dangerBelow is not below it")
+        g.value = 19
+        same(readout.color, Theme.gaugeDanger, "below dangerBelow")
+        verify(g.inDanger, "the danger state follows")
+        g.value = 50
+        verify(!g.inDanger, "and clears")
+    }
+    function test_theLowZonesOrderDangerWarningCold() {
+        const g = lowGaugeOf(kinds[0], 5, { warnFrom: NaN, dangerFrom: NaN, coldBelow: 30,
+                                            warnBelow: 25, dangerBelow: 10 })
+        const readout = find(g, "readout")
+        same(readout.color, Theme.gaugeDanger, "danger beats warning and cold")
+        g.value = 15
+        same(readout.color, Theme.gaugeWarn, "warning beats cold")
+        g.value = 28
+        same(readout.color, Theme.info, "cold where no level is crossed")
+        g.value = 60
+        same(readout.color, Theme.gaugeReadout, "normal above them")
+    }
+    // Where the low bands end on the scale, and the ring's cold band above
+    // them (the strip's order: low danger, low warning, cold, normal)
+    function test_theLowBandsEndWhereTheirLevelsAre() {
+        const g = lowGaugeOf(kinds[0], 50, { warnBelow: 40, dangerBelow: 20 })
+        compare(g.lowDangerEnd, 20)
+        compare(g.lowWarnEnd, 40)
+        g.dangerBelow = NaN
+        compare(g.lowDangerEnd, 0, "no danger level: the scale's start")
+        compare(g.lowWarnEnd, 40)
+        g.warnBelow = 500
+        compare(g.lowWarnEnd, 100, "a level past the scale ends at its end")
+        g.warnBelow = NaN
+        g.dangerBelow = 20
+        compare(g.lowWarnEnd, 20, "no warning level: the danger's end")
+    }
+    function test_theRingsColdBandStartsWhereTheLowBandsEnd() {
+        const g = lowGaugeOf(kinds[3], 50, { coldBelow: 30, warnBelow: 40, dangerBelow: 20 })
+        compare(g.coldEnd, 40, "cold below the warning level has no band of its own")
+        g.warnBelow = 25
+        compare(g.coldEnd, 30, "cold above it ends at its own level")
+        g.coldBelow = NaN
+        compare(g.coldEnd, 25, "no cold level: the low warning's end")
+        g.warnBelow = NaN
+        g.dangerBelow = NaN
+        compare(g.coldEnd, 0, "no low levels: the scale's start")
+    }
+
+    // The built-in Battery: danger below 11.8 V and from 15.2 V, warning
+    // below 12.4 V and from 14.8 V
+    function test_theBuiltInBatteryColorsByItsFourLevels() {
+        const cells = DashboardBook.builtIn("desktop").pages[0].cells
+        const battery = cells.find(c => c.unit === "V")
+        verify(battery, "the layout has a Battery")
+        const g = gaugeOf(kinds[2], 14)
+        Object.assign(g, battery.options)
+        const readout = find(g, "readout")
+        const at = (v, color, what) => { g.value = v; same(readout.color, color, what) }
+        at(11.5, Theme.gaugeDanger, "11.5 V")
+        at(12.0, Theme.gaugeWarn, "12.0 V")
+        at(14.0, Theme.gaugeReadout, "14.0 V")
+        at(15.5, Theme.gaugeDanger, "15.5 V")
+        at(15.0, Theme.gaugeWarn, "15.0 V")
+    }
+
+    // A saved cell carries none of the low keys: the low bands are empty and
+    // the colors are the high zones' alone
+    function test_aGaugeWithoutLowLevelsDrawsAsBefore() {
+        for (const kind of kinds) {
+            const g = gaugeOf(kind, 5)
+            verify(isNaN(g.warnBelow) && isNaN(g.dangerBelow), kind.tag + ": no low levels by default")
+            compare(g.lowDangerEnd, 0, kind.tag + ": no low danger band")
+            compare(g.lowWarnEnd, 0, kind.tag + ": no low warning band")
+            same(find(g, "readout").color, Theme.gaugeReadout, kind.tag + ": a low value is normal")
+            verify(!g.inDanger, kind.tag + ": and not in danger")
+        }
+    }
+
+    function test_aHighZoneStillWorksWithALowOne() {
+        const g = lowGaugeOf(kinds[2], 50, { warnBelow: 30, dangerBelow: 10 })
+        const readout = find(g, "readout")
+        same(readout.color, Theme.gaugeReadout, "the middle")
+        g.value = 70
+        same(readout.color, Theme.gaugeWarn, "the high warning")
+        g.value = 90
+        same(readout.color, Theme.gaugeDanger, "the high danger")
+        g.value = 5
+        same(readout.color, Theme.gaugeDanger, "the low danger")
+    }
+
     // The needle's literal is a role now
     function test_theNeedleIsARole() {
         for (const name of Theme.paletteNames) {

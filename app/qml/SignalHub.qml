@@ -10,7 +10,10 @@ import QtQuick
 // (Bridge.gaugeSignals). Each row is mirrored into an Entry whose
 // required properties re-bind on the model's dataChanged, the same path
 // LiveView's delegates use. A row whose ref is "" (uds-generic's, or any
-// other set's) has no entry in byRef. byRef is replaced, never mutated,
+// other set's) has no entry in byRef. A file's def that replaced a base
+// one by name has a key and the base's ID (below the file's band), and is
+// found by both: a cell that named the base def by ID still reads it.
+// byRef is replaced, never mutated,
 // so lookup() bindings re-run when rows come and go (a profile switch
 // resets the model).
 Instantiator {
@@ -39,6 +42,19 @@ Instantiator {
 
     property var byRef: ({})
 
+    // The ECU-set IDs below the file band (signal_sets.h's
+    // ECUIO_USER_SIG_ID_BASE): a keyed def with one took a base def's place
+    readonly property int fileIdBase: 30000
+
+    // The refs an entry is found by: its own and, for a keyed def standing
+    // in a base def's place, that def's "id:<n>"
+    function refsOf(entry) {
+        if (entry.ref === "") return []
+        if (entry.ref.startsWith("key:") && entry.id < fileIdBase)
+            return [entry.ref, "id:" + entry.id]
+        return [entry.ref]
+    }
+
     model: Bridge.signalModel
     delegate: Entry {}
 
@@ -46,17 +62,22 @@ Instantiator {
     // delegate's Entry, which says so to the type checker
     onObjectAdded: (index, object) => {
         const entry = object as Entry
-        if (entry.ref === "") return
+        const refs = hub.refsOf(entry)
+        if (refs.length === 0) return
         const m = Object.assign({}, hub.byRef)
-        m[entry.ref] = entry
+        for (const ref of refs) m[ref] = entry
         hub.byRef = m
     }
     onObjectRemoved: (index, object) => {
         const entry = object as Entry
-        if (entry.ref === "" || hub.byRef[entry.ref] !== entry) return
         const m = Object.assign({}, hub.byRef)
-        delete m[entry.ref]
-        hub.byRef = m
+        let changed = false
+        for (const ref of hub.refsOf(entry)) {
+            if (hub.byRef[ref] !== entry) continue
+            delete m[ref]
+            changed = true
+        }
+        if (changed) hub.byRef = m
     }
 
     // First of `refs` the active signal set provides, else null

@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -126,7 +127,7 @@ const QRegularExpression
 /* A worker that can't be started (the system out of threads) is a start
  * that says no, with nothing busy and nothing made, for an import and for a
  * guess alike */
-TEST(BridgeTest, AnImportWhoseThreadCantStartSaysSo)
+TEST(BridgeTest, ImportWhoseThreadCantStartSaysSo)
 {
     QTemporaryDir dir;
     RecordingImport im([&] { return dir.path(); });
@@ -190,6 +191,7 @@ TEST(BridgeTest, ImportMakesARecordingOfACsvThroughItsMap)
     EXPECT_EQ(i.result.value(QStringLiteral("columnsIgnored")).toDouble(), 1.0)
         << "Note";
     EXPECT_EQ(i.result.value(QStringLiteral("frames")).toDouble(), 0.0);
+    EXPECT_EQ(i.result.value(QStringLiteral("rowsNoTime")).toDouble(), 0.0);
     const QStringList made = entries(root);
     ASSERT_EQ(made.size(), 1);
     const QRegularExpressionMatch m = kStamped.match(made[0]);
@@ -200,6 +202,25 @@ TEST(BridgeTest, ImportMakesARecordingOfACsvThroughItsMap)
     EXPECT_EQ(entries(root + QLatin1Char('/') + made[0]),
               (QStringList{QStringLiteral("events.log"),
                            QStringLiteral("signals.csv")}));
+}
+
+/* A CSV's rows with no time are left out by core: the result says how many */
+TEST(BridgeTest, ImportCountsACsvsRowsWithNoTime)
+{
+    QTemporaryDir dir;
+    const QString root = dir.filePath(QStringLiteral("recordings"));
+    RecordingImport im([root] { return root; });
+    const QString map = write(
+        dir, "map.json",
+        R"({"havne_column_map": 1, "time": {"column": "time", "unit": "ms"},
+            "signals": [{"column": "rpm", "name": "RPM"}]})");
+    const Imported i = import(
+        im,
+        fileUrl(write(dir, "log.csv", "time,rpm\n0,800\n,850\n500,900\n , \n")),
+        RecordingImport::Csv, fileUrl(map));
+    ASSERT_TRUE(ok(i)) << words(i).toStdString();
+    EXPECT_EQ(i.result.value(QStringLiteral("rowsNoTime")).toDouble(), 2.0);
+    EXPECT_EQ(i.result.value(QStringLiteral("values")).toDouble(), 2.0);
 }
 
 /* A candump log of one bus takes it; one of several is refused in core's
@@ -273,6 +294,117 @@ TEST(BridgeTest, ImportStopsWhenTheImporterGoes)
     EXPECT_FALSE(finished) << "its end goes with it";
 }
 
+/* An import the user cancels ends canceled with nothing made: held before
+ * core's call, through the second pass with its partial folder there, and
+ * in a provider file's copy. A guess isn't stopped, and the importer
+ * imports again after each */
+TEST(BridgeTest, ImportCanceledEndsCanceledAndLeavesNoRecording)
+{
+    QTemporaryDir dir;
+    QByteArray log;
+    for (int i = 0; i < 300000; ++i) {
+        log += QStringLiteral("(1700000000.%1) can0 7E8#03410C1AF8AAAAAA\n")
+                   .arg(i * 3, 6, 10, QLatin1Char('0'))
+                   .toLatin1();
+    }
+    const QUrl file = fileUrl(write(dir, "long.log", log));
+    const QString root = dir.filePath(QStringLiteral("recordings"));
+    RecordingImport im([root] { return root; });
+    QVariantMap result;
+    int ends = 0;
+    QObject::connect(&im, &RecordingImport::finished,
+                     [&](const QVariantMap& r) {
+                         result = r;
+                         ++ends;
+                     });
+    const auto expectCanceled = [&](const char* when) {
+        EXPECT_FALSE(result.value(QStringLiteral("ok")).toBool()) << when;
+        EXPECT_TRUE(result.value(QStringLiteral("canceled")).toBool()) << when;
+        EXPECT_EQ(result.value(QStringLiteral("words")).toString(),
+                  QStringLiteral("the import was canceled"))
+            << when;
+        EXPECT_FALSE(im.busy()) << when;
+        EXPECT_TRUE(entries(root).isEmpty())
+            << when << ": no folder and no partial: "
+            << entries(root).join(QLatin1Char(' ')).toStdString();
+    };
+
+    im.cancel(); // with nothing under way: nothing
+
+    // Held before core's call: the cancel ends the hold and core's first
+    // ask stops it
+    im.setHoldForTesting(60000);
+    QElapsedTimer held;
+    held.start();
+    ASSERT_TRUE(im.start(file, RecordingImport::Candump, {}, {}));
+    EXPECT_TRUE(im.busy());
+    im.cancel();
+    ASSERT_TRUE(waitUntil([&] { return ends == 1; }, 60000));
+    EXPECT_LT(held.elapsed(), 30000) << "the cancel ends the hold";
+    expectCanceled("held before core's call");
+    im.setHoldForTesting(0);
+
+    // Mid-way: the second pass has made its partial folder. An import
+    // that outran the look (it ended, or its folder was already in place)
+    // is no judgment: its folder goes and the next is tried
+    bool caught = false;
+    for (int attempt = 0; attempt < 5 && !caught; ++attempt) {
+        const int was = ends;
+        ASSERT_TRUE(im.start(file, RecordingImport::Candump, {}, {}));
+        ASSERT_TRUE(waitUntil(
+            [&] { return !entries(root).isEmpty() || ends > was; }, 60000));
+        const QStringList seen = entries(root);
+        const bool partial = ends == was && seen.size() == 1 &&
+                             seen[0].contains(QStringLiteral(".partial-"));
+        im.cancel();
+        ASSERT_TRUE(waitUntil([&] { return ends > was; }, 60000));
+        caught = partial && result.value(QStringLiteral("canceled")).toBool();
+        if (caught) {
+            expectCanceled("in the second pass");
+        } else {
+            ASSERT_TRUE(QDir(root).removeRecursively());
+        }
+    }
+    EXPECT_TRUE(caught) << "no import was stopped with its partial folder "
+                           "there in five tries";
+
+    // In the copy of a file core can't read in place
+    im.setCopyLocalFilesForTesting(true);
+    int was = ends;
+    ASSERT_TRUE(im.start(file, RecordingImport::Candump, {}, {}));
+    im.cancel();
+    ASSERT_TRUE(waitUntil([&] { return ends == was + 1; }, 60000));
+    expectCanceled("in the copy");
+    im.setCopyLocalFilesForTesting(false);
+
+    // A guess runs to its end whatever is asked
+    bool guessed = false;
+    QVariantMap guess;
+    QObject::connect(&im, &RecordingImport::guessFinished,
+                     [&](const QVariantMap& g) {
+                         guess = g;
+                         guessed = true;
+                     });
+    const QUrl csv =
+        fileUrl(write(dir, "small.csv", "time (s),rpm\n0,800\n1,900\n"));
+    ASSERT_TRUE(im.guess(csv, QString()));
+    im.cancel();
+    ASSERT_TRUE(waitUntil([&] { return guessed; }));
+    EXPECT_TRUE(guess.value(QStringLiteral("ok")).toBool())
+        << guess.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_FALSE(guess.contains(QStringLiteral("canceled")));
+
+    // An earlier cancel is no cancel of the next import
+    was = ends;
+    const Imported whole = import(im, file, RecordingImport::Candump);
+    ASSERT_TRUE(ok(whole)) << words(whole).toStdString();
+    EXPECT_FALSE(whole.result.contains(QStringLiteral("canceled")));
+    EXPECT_EQ(whole.result.value(QStringLiteral("frames")).toDouble(),
+              300000.0);
+    EXPECT_EQ(entries(root).size(), 1);
+    EXPECT_EQ(ends, was + 1);
+}
+
 /* A name taken in this second: the next, "-2", as a recording's would */
 TEST(BridgeTest, ImportTakesTheNextNameWhenOneIsTaken)
 {
@@ -294,6 +426,55 @@ TEST(BridgeTest, ImportTakesTheNextNameWhenOneIsTaken)
         QDir(i.result.value(QStringLiteral("folder")).toString()).dirName();
     EXPECT_TRUE(name.endsWith(QStringLiteral("-2 candump import")))
         << name.toStdString();
+}
+
+/* A typed label is the folder's label, reduced as the recorder reduces one;
+ * a CSV that carries dates is stamped with its first row's time, not the
+ * import's */
+TEST(BridgeTest, ImportKeepsATypedLabelAndStampsADatedCsvWithItsOwnTime)
+{
+    QTemporaryDir dir;
+    const QString root = dir.filePath(QStringLiteral("recordings"));
+    RecordingImport im([root] { return root; });
+    im.setLabel(QStringLiteral("  My  drive:/ ."));
+    EXPECT_EQ(im.label(), QStringLiteral("My drive"));
+    // Forty characters as core's recorder counts them: a pair that
+    // straddles the end is whole or out, never cut, and characters past
+    // ASCII stay as core keeps them
+    const QString pair = QString::fromUcs4(U"\U0001F600");
+    im.setLabel(QString(39, QLatin1Char('a')) + pair + QStringLiteral("bcd"));
+    EXPECT_EQ(im.label(), QString(39, QLatin1Char('a')) + pair);
+    im.setLabel(QString(40, QLatin1Char('a')) + pair);
+    EXPECT_EQ(im.label(), QString(40, QLatin1Char('a')));
+    im.setLabel(QStringLiteral("a") + QChar(0x2028) + QStringLiteral("b"));
+    EXPECT_EQ(im.label(), QStringLiteral("a") + QChar(0x2028) + QStringLiteral("b"))
+        << "core's recorder keeps what is past ASCII";
+    im.setLabel(QStringLiteral("  My  drive:/ ."));
+    const Imported dated =
+        import(im, fileUrl(fixture("logger-b/log.csv")), RecordingImport::Csv,
+               fileUrl(fixture("logger-b/map.json")));
+    ASSERT_TRUE(ok(dated)) << words(dated).toStdString();
+    const QString name =
+        QDir(dated.result.value(QStringLiteral("folder")).toString())
+            .dirName();
+    const QString first =
+        QDateTime::fromString(QStringLiteral("2026-11-05T22:03:22+09:00"),
+                              Qt::ISODate)
+            .toLocalTime()
+            .toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    EXPECT_EQ(name, first + QStringLiteral(" My drive"));
+    EXPECT_TRUE(QFileInfo::exists(
+        dated.result.value(QStringLiteral("folder")).toString() +
+        QStringLiteral("/signals.csv")));
+
+    im.setLabel(QString());
+    const Imported undated = import(im, fileUrl(write(dir, "two.log", kOneBus)),
+                                    RecordingImport::Candump);
+    ASSERT_TRUE(ok(undated));
+    EXPECT_TRUE(QDir(undated.result.value(QStringLiteral("folder")).toString())
+                    .dirName()
+                    .endsWith(QStringLiteral(" candump import")))
+        << "an empty label keeps the format's own";
 }
 
 /* A file the app can't hand core by its path (Android's content://) is
@@ -537,6 +718,66 @@ TEST(BridgeTest, ImportShowsTheFirstRowsAsTheFileHasThem)
         EXPECT_FALSE(v.toString().contains(path));
 }
 
+/* A padded file's cells show as the import reads them: an unquoted cell
+ * trimmed (a blank one empty), a quoted one exact; a label is the header
+ * without its padding, and a header of spaces is an empty one */
+TEST(BridgeTest, ImportShowsPaddedCellsAsTheImportReadsThem)
+{
+    QTemporaryDir dir;
+    RecordingImport im([] { return QString(); });
+    const QVariantMap g =
+        guessed(im, fileUrl(write(dir, "padded.csv",
+                                  "Time, \"Engine speed (rpm)\" , Mode, \n"
+                                  "0,  900, \" OL \", \n"
+                                  "250, 910, , \n"
+                                  "500,\t950 , OL, \n")));
+    ASSERT_TRUE(ok({g}))
+        << g.value(QStringLiteral("words")).toString().toStdString();
+    ASSERT_EQ(g.value(QStringLiteral("columns")).toList().size(), 4);
+    EXPECT_EQ(column(g, 1).value(QStringLiteral("column")).toString(),
+              QStringLiteral("Engine speed (rpm)"));
+    EXPECT_EQ(column(g, 1).value(QStringLiteral("samples")).toStringList(),
+              (QStringList{QStringLiteral("900"), QStringLiteral("910"),
+                           QStringLiteral("950")}));
+    EXPECT_EQ(column(g, 2).value(QStringLiteral("column")).toString(),
+              QStringLiteral(" Mode"));
+    EXPECT_EQ(column(g, 2).value(QStringLiteral("label")).toString(),
+              QStringLiteral("Mode"));
+    EXPECT_EQ(column(g, 2).value(QStringLiteral("samples")).toStringList(),
+              (QStringList{QStringLiteral(" OL "), QString(),
+                           QStringLiteral("OL")}));
+    const QVariantMap blank = column(g, 3);
+    EXPECT_EQ(blank.value(QStringLiteral("label")).toString(), QString());
+    EXPECT_EQ(blank.value(QStringLiteral("why")).toString(),
+              QStringLiteral("its header cell is empty"));
+    EXPECT_FALSE(blank.value(QStringLiteral("canPutBack")).toBool());
+    EXPECT_EQ(blank.value(QStringLiteral("samples")).toStringList(),
+              (QStringList{QString(), QString(), QString()}));
+}
+
+/* A tab delimiter right after a closing quote ends the cell, as core's
+ * reader has it: the preview doesn't merge the cells around it */
+TEST(BridgeTest, ImportShowsATabAfterAQuotedCellAsTheEndOfIt)
+{
+    QTemporaryDir dir;
+    RecordingImport im([] { return QString(); });
+    const QVariantMap g = guessed(
+        im, fileUrl(write(dir, "tabbed.tsv",
+                          "Time\tMode\tLoad\n"
+                          "0\t\"OL\"\t30\n"
+                          "250\t\"CL\"\t40\n"
+                          "500\t\"OL\" \t50\n")));
+    ASSERT_TRUE(ok({g}))
+        << g.value(QStringLiteral("words")).toString().toStdString();
+    ASSERT_EQ(g.value(QStringLiteral("columns")).toList().size(), 3);
+    EXPECT_EQ(column(g, 1).value(QStringLiteral("samples")).toStringList(),
+              (QStringList{QStringLiteral("OL"), QStringLiteral("CL"),
+                           QStringLiteral("OL")}));
+    EXPECT_EQ(column(g, 2).value(QStringLiteral("samples")).toStringList(),
+              (QStringList{QStringLiteral("30"), QStringLiteral("40"),
+                           QStringLiteral("50")}));
+}
+
 /* A left-out column can be put back unless its header can't name it: an
  * empty header, or one the file has twice (core refuses a map naming it) */
 TEST(BridgeTest, ImportGuessPutsBackOnlyAColumnAMapCanName)
@@ -586,7 +827,7 @@ TEST(BridgeTest, ImportCutsNamesAndCellsOnWholeCharacters)
         QString(28, QLatin1Char('x')) + QStringLiteral("..."));
 }
 
-/* A time of plain numbers has no unit until one is given, and the one the
+/* A time named so, of whole numbers with no unit, reads as ms; the unit the
  * caller gives wins; a file with no header is refused in core's words */
 TEST(BridgeTest, ImportGuessTakesTheTimeUnitTheCallerGives)
 {
@@ -596,9 +837,15 @@ TEST(BridgeTest, ImportGuessTakesTheTimeUnitTheCallerGives)
         fileUrl(write(dir, "plain.csv", "time,rpm\n0,800\n1,900\n2,1000\n"));
     QVariantMap g = guessed(im, plain);
     ASSERT_TRUE(ok({g}));
-    EXPECT_FALSE(g.value(QStringLiteral("unitKnown")).toBool());
+    EXPECT_TRUE(g.value(QStringLiteral("unitKnown")).toBool());
     EXPECT_TRUE(g.value(QStringLiteral("timeNumbers")).toBool());
-    EXPECT_EQ(g.value(QStringLiteral("timeUnit")).toString(), QString());
+    EXPECT_EQ(g.value(QStringLiteral("timeUnit")).toString(),
+              QStringLiteral("ms"));
+
+    g = guessed(im, plain, QStringLiteral("s"));
+    ASSERT_TRUE(ok({g}));
+    EXPECT_EQ(g.value(QStringLiteral("timeUnit")).toString(),
+              QStringLiteral("s"));
 
     g = guessed(im, plain, QStringLiteral("ms"));
     ASSERT_TRUE(ok({g}));

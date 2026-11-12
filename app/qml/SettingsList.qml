@@ -17,6 +17,9 @@ ColumnLayout {
     // The Log row's summary: a line of its own, so a new one doesn't remake
     // the rows `pages` makes (a press in flight, the focus)
     property string logSummary: ""
+    // True beside the pages, where the list is narrow: the value goes under
+    // the title, on up to two lines, so it reads whole
+    property bool stacked: false
     signal chosen(string key)
     spacing: 0
 
@@ -27,13 +30,17 @@ ColumnLayout {
             required property var modelData
             objectName: "settingsRow_" + modelData.key
             Layout.fillWidth: true
-            Layout.preferredHeight: Theme.touchTarget
+            Layout.preferredHeight: Math.max(Theme.touchTarget,
+                                             list.stacked ? stackedContent.implicitHeight + 16 : 0)
             checkable: true
             checked: list.current === modelData.key
             Accessible.name: modelData.title
             onClicked: list.chosen(modelData.key)
-            contentItem: RowLayout {
-                spacing: 10
+            contentItem: GridLayout {
+                id: stackedContent
+                columns: list.stacked ? 1 : 2
+                columnSpacing: 10
+                rowSpacing: 2
                 Label {
                     text: row.modelData.title
                     color: Theme.text
@@ -46,10 +53,13 @@ ColumnLayout {
                     objectName: "settingsRowSummary"
                     visible: row.width >= 200
                     text: row.modelData.key === "log" ? list.logSummary : row.modelData.summary
-                    color: Theme.textDim
+                    color: row.modelData.warn === true ? Theme.danger : Theme.textDim
+                    wrapMode: list.stacked ? Text.WordWrap : Text.NoWrap
+                    maximumLineCount: list.stacked ? 2 : 1
                     elide: Text.ElideRight
-                    horizontalAlignment: Text.AlignRight
+                    horizontalAlignment: list.stacked ? Text.AlignLeft : Text.AlignRight
                     Layout.fillWidth: true
+                    Layout.preferredWidth: 0
                 }
             }
         }

@@ -339,6 +339,29 @@ std::string unique_key(const std::string& base, std::set<std::string>& taken)
     return k;
 }
 
+/* A name not yet taken: the name, else cut to fit " 2", " 3"... at a whole
+ * character, as clean() cuts. A set's names are one each (a recording keys
+ * values by name), and a file's signal named as a base def would replace
+ * it, which a converted set never means to. */
+std::string unique_name(const std::string& base, std::set<std::string>& taken,
+                        bool* repeated)
+{
+    std::string n = base;
+    *repeated = false;
+    for (unsigned k = 2; taken.count(n) != 0; ++k) {
+        const std::string tail = " " + std::to_string(k);
+        size_t cut = 31 - tail.size();
+        while (cut > 0 && cut < base.size() &&
+               (static_cast<unsigned char>(base[cut]) & 0xC0) == 0x80) {
+            --cut;
+        }
+        n = base.substr(0, cut) + tail;
+        *repeated = true;
+    }
+    taken.insert(n);
+    return n;
+}
+
 /* A module: its request and reply IDs and its id in the file */
 struct module {
     uint32_t tx = 0;
@@ -361,6 +384,7 @@ struct importer {
     std::vector<module> modules;
     std::set<uint64_t> asked; /* (rx, request) a session asks */
     std::set<std::string> keys;
+    std::set<std::string> names; /* the file's names and, extending, obd2's */
     std::set<std::string> ecu_ids;
     std::map<std::string, std::string> numbers; /* OBDb id -> key, numeric */
     std::string signals;                        /* the file's signal entries */
@@ -413,6 +437,9 @@ struct importer {
             return;
         }
         const ecuio_signal_set_t* base = ecuio_obd2_signal_set();
+        for (uint32_t i = 0; i < base->count; ++i) {
+            names.insert(base->defs[i].name);
+        }
         for (uint32_t i = 0; i < base->channel_count; ++i) {
             module m;
             m.tx = base->channels[i].tx_id;
@@ -763,6 +790,12 @@ struct importer {
             name = key;
             changes.push_back({"name", "none Havne can show: the key instead"});
         }
+        bool repeated = false;
+        name = unique_name(name, names, &repeated);
+        if (repeated) {
+            changes.push_back({"name",
+                               "the same as another signal's: a number added"});
+        }
 
         std::string e = "{\"key\":";
         add_string(e, key);
@@ -1053,6 +1086,12 @@ struct importer {
         if (name.empty()) {
             name = key;
             changes.push_back({"name", "none Havne can show: the key instead"});
+        }
+        bool repeated = false;
+        name = unique_name(name, names, &repeated);
+        if (repeated) {
+            changes.push_back({"name",
+                               "the same as another signal's: a number added"});
         }
         std::string e = "{\"key\":";
         add_string(e, key);

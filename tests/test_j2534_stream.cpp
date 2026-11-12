@@ -702,6 +702,8 @@ protected:
             defs[i].message_id = ECUIO_OBD2_ECU_ARB_ID;
             defs[i].mux_length = 2;
             defs[i].mux_key = 0x4100u | pids[i];
+            std::snprintf(defs[i].name, sizeof defs[i].name, "PID %02X",
+                          pids[i]);
         }
         *set = ecuio_signal_set_t{};
         set->layout_version = ECUIO_SIGNAL_SET_LAYOUT;
@@ -1352,6 +1354,7 @@ TEST_F(J2534AdoptionTest, RequestsGoToTheirDefsChannel)
     defs[1].message_id = 0x7E8u;
     defs[1].mux_length = 2;
     defs[1].mux_key = 0x410Cu;
+    std::snprintf(defs[1].name, sizeof defs[1].name, "%s", "Engine RPM");
     static ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 2;
@@ -1771,6 +1774,8 @@ TEST_F(J2534AdoptionTest, NegativeReplyDropsTheDidTheEcuRefuses)
     }
     defs[0].mux_key = 0x621E1Du;   /* the fake's ECU doesn't know it */
     defs[1].mux_key = 0x621E1Cu;
+    std::snprintf(defs[0].name, sizeof defs[0].name, "%s", "DID 1E1D");
+    std::snprintf(defs[1].name, sizeof defs[1].name, "%s", "DID 1E1C");
     static ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 2;
@@ -2759,6 +2764,62 @@ TEST_F(J2534AdoptionTest, AFocusAsksOnlyThePickedPids)
     EXPECT_GT(pids.size(), 2u) << "the whole set is asked again";
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
+}
+
+/* ADR-0051's appendix of 2026-11-10: a focus on obd2's computed Boost alone
+ * asks its inputs, MAP and baro, and nothing else, and Boost computes from
+ * the fake ECU's 35 kPa and 101 kPa */
+TEST_F(J2534AdoptionTest, AFocusOnBoostAsksItsInputsAndComputesIt)
+{
+    char uri[700];
+    snprintf(
+        uri, sizeof(uri),
+        "j2534://%s?profile=obd2&filter=0x7E8&probe=0&identify=0&diagnose=0",
+        FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+    const uint16_t boost = ECUIO_OBD2_SIG_BOOST_ID;
+    ASSERT_EQ(ecuio_session_set_focus(session, &boost, 1), ECUIO_OK)
+        << ecuio_last_error_detail();
+    struct Seen {
+        std::atomic<int> boosts{0};
+        std::atomic<double> last{0.0};
+    } seen;
+    ASSERT_EQ(ecuio_register_values_callback(
+                  session,
+                  [](const ecuio_value_batch_t* b, void* user_data) {
+                      auto* n = static_cast<Seen*>(user_data);
+                      for (uint32_t i = 0; i < b->count; ++i) {
+                          if (b->values[i].signal_id == ECUIO_OBD2_SIG_BOOST_ID) {
+                              n->last.store(b->values[i].value);
+                              ++n->boosts;
+                          }
+                      }
+                  },
+                  &seen),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    wait_for_writes(get_write_count, 16, 250);
+    for (unsigned long i = 1; i < 16; ++i) {
+        unsigned char wbuf[64] = {};
+        unsigned long wlen = 0, wflags = 0;
+        get_recorded_write(i, wbuf, &wlen, &wflags);
+        ASSERT_GE(wlen, 6u) << "write " << i;
+        EXPECT_EQ(wbuf[4], 0x01u) << "write " << i;
+        EXPECT_TRUE(wbuf[5] == 0x0B || wbuf[5] == 0x33)
+            << "write " << i << " asks PID " << int(wbuf[5]);
+    }
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (seen.boosts.load() == 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+    ASSERT_GT(seen.boosts.load(), 0) << "Boost computed";
+    EXPECT_EQ(seen.last.load(), 35.0 - 101.0);
 }
 
 /* ADR-0056 section 4 through the fake's write stamps: two picks with a

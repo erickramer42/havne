@@ -1,6 +1,7 @@
 // File/layer: core/src/recording_reader.cpp | C++17, Qt-free; the reader
 //             (ADR-0049 section 5)
-// Testing: UNIT: RecordingTest, RecordingFramesTest (test_core)
+// Testing: UNIT: RecordingTest, RecordingFramesTest, RecordingStatsTest,
+//          RecordingStretchesTest (test_core)
 //
 // One pass at open reads events.log's header (the format, the UTC start,
 // each signal's kind, decimal places and plot rank) and signals.csv, and
@@ -19,6 +20,7 @@
 #include "error_detail.h"
 #include "frame_decoder.h"
 #include "frames_csv.h" /* native_path, file_size, seek_to, parse_row */
+#include "recording_aids.h"
 #include "isotp.h"
 #include "recording_check.h" /* iso15765_id */
 #include "recording_rows.h"
@@ -51,15 +53,16 @@ constexpr uint64_t kProgressBytes = 4u << 20;
 constexpr size_t kCacheBytes = 8u << 20;
 constexpr size_t kChunk = 64u << 10;
 
-/* A number signal's second: 32 bytes, the bound's figure */
+/* A number signal's second: 40 bytes, the bound's figure */
 struct number_second {
     uint32_t second;
     uint32_t count;
     double lowest; /* NaN until a value that isn't NaN */
     double highest;
     double last;
+    double sum; /* every value's; NaN when one was NaN (or inf met -inf) */
 };
-static_assert(sizeof(number_second) == 32, "the memory bound's 32 bytes");
+static_assert(sizeof(number_second) == 40, "the memory bound's 40 bytes");
 
 /* A text signal's second: 16 bytes, its last row's offset for text_at */
 struct text_second {
@@ -764,11 +767,13 @@ bool ecuio_recording::read_signals(ecuio_open_progress_t progress, void* user,
         }
         if (track_number && number) {
             if (s->numbers.empty() || s->numbers.back().second != second) {
-                s->numbers.push_back(number_second{second, 0, NAN, NAN, v});
+                s->numbers.push_back(
+                    number_second{second, 0, NAN, NAN, v, 0.0});
             }
             number_second& ns = s->numbers.back();
             ++ns.count;
             ns.last = v;
+            ns.sum += v;
             merge(ns.lowest, ns.highest, v);
             merge(s->lowest, s->highest, v);
         }
@@ -975,11 +980,12 @@ bool ecuio_recording::read_frames(ecuio_open_progress_t progress, void* user,
                 continue;
             }
             if (s.numbers.empty() || s.numbers.back().second != second) {
-                s.numbers.push_back(number_second{second, 0, NAN, NAN, x});
+                s.numbers.push_back(number_second{second, 0, NAN, NAN, x, 0.0});
             }
             number_second& ns = s.numbers.back();
             ++ns.count;
             ns.last = x;
+            ns.sum += x;
             merge(ns.lowest, ns.highest, x);
             merge(s.lowest, s.highest, x);
         }
@@ -1143,16 +1149,26 @@ ecuio_status_t ecuio_recording::scan_frames(FILE* f, const index_entry& e,
         for (uint32_t k = 0; k < n; ++k) {
             const ecuio_value_t& v = scan.decoder.values[k];
             const auto it = def_of_id.find(v.signal_id);
-            const uint32_t signal =
-                it != def_of_id.end() ? def_signal[it->second] : UINT32_MAX;
-            if (signal == UINT32_MAX) {
-                return ECUIO_ERR_RECORDING_CHANGED; /* none at the open */
+            if (it == def_of_id.end()) {
+                return ECUIO_ERR_RECORDING_CHANGED;
             }
+            const ecuio_signal_def_t& d = frame_set->set.defs[it->second];
             value.clear();
-            if (signals[signal].text()) {
+            if (d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX) {
                 value.assign(v.text, v.text_len);
             } else {
+                /* As the open judged it: not finite is no sample, so a def
+                 * with no other value has no signal and isn't a change */
+                double x = 0.0;
                 rows::append_value(value, v.value);
+                if (!rows::parse_number(value.data(), value.size(), &x) ||
+                    !std::isfinite(x)) {
+                    continue;
+                }
+            }
+            const uint32_t signal = def_signal[it->second];
+            if (signal == UINT32_MAX) {
+                return ECUIO_ERR_RECORDING_CHANGED; /* none at the open */
             }
             fn(signal, r.host_us, value, lines.line_start());
         }
@@ -1257,7 +1273,7 @@ ecuio_recording::rows_of(FILE*& f, file_ptr& owner, const index_entry& e,
             double v = 0.0;
             if (!signals[signal].text() &&
                 !rows::parse_number(value.data(), value.size(), &v)) {
-                /* a frames open dropped a number that isn't finite too */
+                /* signals.csv's row lost its number: the file changed */
                 bad = !from_frames;
                 return;
             }
@@ -1287,6 +1303,263 @@ void ecuio_recording::evict() const
         lru.pop_back();
     }
 }
+
+namespace {
+
+/* A signal's first summary at or after second */
+template <typename Second>
+typename std::vector<Second>::const_iterator
+first_from(const std::vector<Second>& seconds, uint64_t second)
+{
+    return std::lower_bound(
+        seconds.begin(), seconds.end(), second,
+        [](const Second& e, uint64_t v) { return e.second < v; });
+}
+
+/* fn(row) for each of signal's raw rows in second, through the cache */
+template <typename Fn>
+ecuio_status_t each_row(const ecuio_recording_t* r, uint32_t second,
+                        uint32_t signal, FILE*& f, file_ptr& owner, Fn fn)
+{
+    const index_entry* e = r->index_of(second);
+    if (e == nullptr) {
+        return ECUIO_ERR_RECORDING_CHANGED;
+    }
+    std::shared_ptr<const std::vector<raw_row>> rows;
+    const ecuio_status_t rc = r->rows_of(f, owner, *e, &rows);
+    if (rc != ECUIO_OK) {
+        return rc;
+    }
+    for (const raw_row& row : *rows) {
+        if (row.signal == signal) {
+            fn(row);
+        }
+    }
+    return ECUIO_OK;
+}
+
+/* A number signal's value in force at t_us: its last sample at or before
+ * it, NaN with none */
+ecuio_status_t number_at(const ecuio_recording_t* r, uint32_t signal,
+                         uint64_t t_us, FILE*& f, file_ptr& owner, double* out)
+{
+    *out = NAN;
+    const std::vector<number_second>& seconds = r->signals[signal].numbers;
+    const uint64_t sec = t_us / kSecondUs;
+    auto it = std::upper_bound(
+        seconds.begin(), seconds.end(), sec,
+        [](uint64_t v, const number_second& e) { return v < e.second; });
+    if (it == seconds.begin()) {
+        return ECUIO_OK;
+    }
+    --it;
+    if (it->second < sec) {
+        *out = it->last;
+        return ECUIO_OK;
+    }
+    /* t's own second may hold the signal's samples only after t */
+    bool found = false;
+    const ecuio_status_t rc =
+        each_row(r, it->second, signal, f, owner, [&](const raw_row& row) {
+            if (row.host_us <= t_us) {
+                *out = row.value;
+                found = true;
+            }
+        });
+    if (rc == ECUIO_OK && !found && it != seconds.begin()) {
+        *out = (it - 1)->last;
+    }
+    return rc;
+}
+
+/* A span's statistics as they gather. An extreme a summary gave keeps
+ * its second, whose rows give its time once the pass is done. */
+struct span_stats {
+    uint64_t samples = 0;
+    uint64_t valued = 0; /* the samples that aren't NaN */
+    double sum = 0.0;
+    double lowest = NAN;
+    double highest = NAN;
+    uint64_t lowest_us = ECUIO_RECORDING_NONE;
+    uint64_t highest_us = ECUIO_RECORDING_NONE;
+    uint32_t lowest_second = UINT32_MAX;
+    uint32_t highest_second = UINT32_MAX;
+
+    void take(uint64_t host_us, double v)
+    {
+        ++samples;
+        if (std::isnan(v)) {
+            return;
+        }
+        ++valued;
+        sum += v;
+        if (std::isnan(lowest) || v < lowest) {
+            lowest = v;
+            lowest_us = host_us;
+            lowest_second = UINT32_MAX;
+        }
+        if (std::isnan(highest) || v > highest) {
+            highest = v;
+            highest_us = host_us;
+            highest_second = UINT32_MAX;
+        }
+    }
+
+    /* A whole second whose sum isn't NaN, so none of its values is */
+    void take(const number_second& ns)
+    {
+        samples += ns.count;
+        valued += ns.count;
+        sum += ns.sum;
+        if (std::isnan(lowest) || ns.lowest < lowest) {
+            lowest = ns.lowest;
+            lowest_us = ECUIO_RECORDING_NONE;
+            lowest_second = ns.second;
+        }
+        if (std::isnan(highest) || ns.highest > highest) {
+            highest = ns.highest;
+            highest_us = ECUIO_RECORDING_NONE;
+            highest_second = ns.second;
+        }
+    }
+};
+
+/* The time of the first of signal's samples in second equal to value */
+ecuio_status_t first_at(const ecuio_recording_t* r, uint32_t signal,
+                        uint32_t second, double value, FILE*& f,
+                        file_ptr& owner, uint64_t* at_us)
+{
+    return each_row(r, second, signal, f, owner, [&](const raw_row& row) {
+        if (*at_us == ECUIO_RECORDING_NONE && row.value == value) {
+            *at_us = row.host_us;
+        }
+    });
+}
+
+ecuio_status_t number_stats(const ecuio_recording_t* r, uint32_t signal,
+                            uint64_t t0_us, uint64_t t1_us, FILE*& f,
+                            file_ptr& owner, ecuio_recording_stats_t* out)
+{
+    const std::vector<number_second>& seconds = r->signals[signal].numbers;
+    span_stats acc;
+    const uint64_t last_second = t1_us / kSecondUs;
+    for (auto it = first_from(seconds, t0_us / kSecondUs);
+         it != seconds.end() && it->second <= last_second; ++it) {
+        const uint64_t start = uint64_t{it->second} * kSecondUs;
+        if (start >= t0_us && start + kSecondUs - 1 <= t1_us &&
+            !std::isnan(it->sum)) {
+            acc.take(*it);
+            continue;
+        }
+        const ecuio_status_t rc =
+            each_row(r, it->second, signal, f, owner, [&](const raw_row& row) {
+                if (row.host_us >= t0_us && row.host_us <= t1_us) {
+                    acc.take(row.host_us, row.value);
+                }
+            });
+        if (rc != ECUIO_OK) {
+            return rc;
+        }
+    }
+    if (acc.lowest_second != UINT32_MAX) {
+        const ecuio_status_t rc = first_at(
+            r, signal, acc.lowest_second, acc.lowest, f, owner, &acc.lowest_us);
+        if (rc != ECUIO_OK) {
+            return rc;
+        }
+    }
+    if (acc.highest_second != UINT32_MAX) {
+        const ecuio_status_t rc =
+            first_at(r, signal, acc.highest_second, acc.highest, f, owner,
+                     &acc.highest_us);
+        if (rc != ECUIO_OK) {
+            return rc;
+        }
+    }
+    out->samples = acc.samples;
+    out->lowest = acc.lowest;
+    out->highest = acc.highest;
+    out->lowest_us = acc.lowest_us;
+    out->highest_us = acc.highest_us;
+    out->mean =
+        acc.valued != 0 ? acc.sum / static_cast<double>(acc.valued) : NAN;
+    const ecuio_status_t rc =
+        number_at(r, signal, t0_us, f, owner, &out->first);
+    if (rc != ECUIO_OK) {
+        return rc;
+    }
+    return number_at(r, signal, t1_us, f, owner, &out->last);
+}
+
+ecuio_status_t text_stats(const ecuio_recording_t* r, uint32_t signal,
+                          uint64_t t0_us, uint64_t t1_us, FILE*& f,
+                          file_ptr& owner, ecuio_recording_stats_t* out)
+{
+    const std::vector<text_second>& seconds = r->signals[signal].texts;
+    const uint64_t last_second = t1_us / kSecondUs;
+    for (auto it = first_from(seconds, t0_us / kSecondUs);
+         it != seconds.end() && it->second <= last_second; ++it) {
+        const uint64_t start = uint64_t{it->second} * kSecondUs;
+        if (start >= t0_us && start + kSecondUs - 1 <= t1_us) {
+            out->samples += it->count;
+            continue;
+        }
+        const ecuio_status_t rc =
+            each_row(r, it->second, signal, f, owner, [&](const raw_row& row) {
+                if (row.host_us >= t0_us && row.host_us <= t1_us) {
+                    ++out->samples;
+                }
+            });
+        if (rc != ECUIO_OK) {
+            return rc;
+        }
+    }
+    return ECUIO_OK;
+}
+
+/* The first of signal's samples strictly after t_us, or strictly before
+ * it, through its seconds */
+template <typename Second>
+ecuio_status_t step_through(const ecuio_recording_t* r,
+                            const std::vector<Second>& seconds, uint32_t signal,
+                            uint64_t t_us, bool forward, uint64_t* at_us)
+{
+    FILE* f = nullptr;
+    file_ptr owner;
+    const uint64_t sec = t_us / kSecondUs;
+    if (forward) {
+        for (auto it = first_from(seconds, sec); it != seconds.end(); ++it) {
+            const ecuio_status_t rc = each_row(
+                r, it->second, signal, f, owner, [&](const raw_row& row) {
+                    if (*at_us == ECUIO_RECORDING_NONE && row.host_us > t_us) {
+                        *at_us = row.host_us;
+                    }
+                });
+            if (rc != ECUIO_OK || *at_us != ECUIO_RECORDING_NONE) {
+                return rc;
+            }
+        }
+        return ECUIO_OK;
+    }
+    auto it = std::upper_bound(
+        seconds.begin(), seconds.end(), sec,
+        [](uint64_t v, const Second& e) { return v < e.second; });
+    while (it != seconds.begin()) {
+        --it;
+        const ecuio_status_t rc =
+            each_row(r, it->second, signal, f, owner, [&](const raw_row& row) {
+                if (row.host_us < t_us) {
+                    *at_us = row.host_us;
+                }
+            });
+        if (rc != ECUIO_OK || *at_us != ECUIO_RECORDING_NONE) {
+            return rc;
+        }
+    }
+    return ECUIO_OK;
+}
+
+} // namespace
 
 extern "C" {
 
@@ -1753,14 +2026,71 @@ bool is_rpm(const char* unit)
     return true;
 }
 
-/* The engine-speed signal: a number signal in rpm, the lowest nonzero
- * rank among several, else the first; UINT32_MAX with none */
-uint32_t engine_speed_signal(const ecuio_recording_t* r)
+char ascii_lower(char c)
+{
+    return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+/* Whether text is word (lower case), ASCII case ignored */
+bool is_word(const char* text, const char* word)
+{
+    for (; *word != '\0'; ++text, ++word) {
+        if (ascii_lower(*text) != *word) {
+            return false;
+        }
+    }
+    return *text == '\0';
+}
+
+/* Whether text holds word (lower case), ASCII case ignored */
+bool holds(const char* text, const char* word)
+{
+    const size_t n = std::strlen(word);
+    for (const char* p = text; *p != '\0'; ++p) {
+        size_t k = 0;
+        while (k < n && p[k] != '\0' && ascii_lower(p[k]) == word[k]) {
+            ++k;
+        }
+        if (k == n) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Whether a signal can play role, by its unit and name */
+bool plays(const signal_entry& s, uint32_t role)
+{
+    if (s.text()) {
+        return false;
+    }
+    const char* unit = s.pub.unit;
+    const char* name = s.pub.name;
+    switch (role) {
+    case ECUIO_RECORDING_ROLE_ENGINE_SPEED:
+        return is_rpm(unit);
+    case ECUIO_RECORDING_ROLE_VEHICLE_SPEED:
+        return (is_word(unit, "km/h") || is_word(unit, "mph")) &&
+               holds(name, "speed");
+    case ECUIO_RECORDING_ROLE_THROTTLE:
+        return is_word(unit, "%") &&
+               (holds(name, "throttle") || holds(name, "pedal")) &&
+               !holds(name, "relative") && !holds(name, "commanded");
+    case ECUIO_RECORDING_ROLE_ENGINE_LOAD:
+        return is_word(unit, "%") && holds(name, "load");
+    default:
+        return false;
+    }
+}
+
+/* The signal playing role: the lowest nonzero rank among several, else
+ * the first; UINT32_MAX with none */
+uint32_t role_signal(const ecuio_recording_t* r, uint32_t role)
 {
     uint32_t best = UINT32_MAX;
     for (uint32_t k = 0; k < r->signals.size(); ++k) {
         const signal_entry& s = r->signals[k];
-        if (s.text() || !is_rpm(s.pub.unit)) {
+        if (!plays(s, role)) {
             continue;
         }
         const uint8_t rank = s.pub.plot_rank;
@@ -1771,6 +2101,12 @@ uint32_t engine_speed_signal(const ecuio_recording_t* r)
         }
     }
     return best;
+}
+
+/* The engine-speed signal: a number signal in rpm */
+uint32_t engine_speed_signal(const ecuio_recording_t* r)
+{
+    return role_signal(r, ECUIO_RECORDING_ROLE_ENGINE_SPEED);
 }
 
 } // namespace
@@ -1830,6 +2166,314 @@ ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
     return find_crossing(r, what->signal,
                          what->direction == ECUIO_RECORDING_FIND_RISING,
                          what->level, what->hysteresis, from_us, at_us);
+}
+
+ecuio_status_t ecuio_recording_stats(const ecuio_recording_t* r,
+                                     const uint32_t* signal_ids,
+                                     uint32_t signal_count, uint64_t t0_us,
+                                     uint64_t t1_us,
+                                     ecuio_recording_stats_t* out)
+{
+    if (r == nullptr || signal_ids == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (signal_count == 0 || t0_us >= t1_us) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    for (uint32_t i = 0; i < signal_count; ++i) {
+        if (signal_ids[i] >= r->signals.size()) {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
+    try {
+        FILE* f = nullptr;
+        file_ptr owner;
+        for (uint32_t i = 0; i < signal_count; ++i) {
+            ecuio_recording_stats_t& st = out[i];
+            st = ecuio_recording_stats_t{};
+            st.first = st.last = st.lowest = st.highest = st.mean = NAN;
+            st.lowest_us = st.highest_us = ECUIO_RECORDING_NONE;
+            const uint32_t signal = signal_ids[i];
+            const ecuio_status_t rc =
+                r->signals[signal].text()
+                    ? text_stats(r, signal, t0_us, t1_us, f, owner, &st)
+                    : number_stats(r, signal, t0_us, t1_us, f, owner, &st);
+            if (rc != ECUIO_OK) {
+                return rc;
+            }
+        }
+        return ECUIO_OK;
+    } catch (const std::bad_alloc&) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+}
+
+ecuio_status_t ecuio_recording_step(const ecuio_recording_t* r, uint32_t signal,
+                                    uint64_t t_us, uint32_t direction,
+                                    uint64_t* at_us)
+{
+    if (r == nullptr || at_us == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (signal >= r->signals.size() ||
+        (direction != ECUIO_RECORDING_STEP_FORWARD &&
+         direction != ECUIO_RECORDING_STEP_BACKWARD)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *at_us = ECUIO_RECORDING_NONE;
+    const bool forward = direction == ECUIO_RECORDING_STEP_FORWARD;
+    try {
+        const signal_entry& s = r->signals[signal];
+        return s.text()
+                   ? step_through(r, s.texts, signal, t_us, forward, at_us)
+                   : step_through(r, s.numbers, signal, t_us, forward, at_us);
+    } catch (const std::bad_alloc&) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+}
+
+ecuio_status_t ecuio_recording_role_signal(const ecuio_recording_t* r,
+                                           uint32_t role, uint32_t* index)
+{
+    if (r == nullptr || index == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (role < ECUIO_RECORDING_ROLE_ENGINE_SPEED ||
+        role > ECUIO_RECORDING_ROLE_ENGINE_LOAD) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *index = role_signal(r, role);
+    return ECUIO_OK;
+}
+
+namespace {
+
+/* How far under its highest a pull's speed may sit and be at it */
+constexpr double kPullTolerance = 0.0;
+
+enum : size_t { kThrottle, kLoad, kSpeed, kRpm, kRoles };
+
+/* A rule's level or band: its default for 0; false for a negative or NaN */
+bool level_of(double given, double fallback, double* out)
+{
+    if (std::isnan(given) || given < 0.0) {
+        return false;
+    }
+    *out = given == 0.0 ? fallback : given;
+    return true;
+}
+
+uint64_t time_of(uint64_t given, uint64_t fallback)
+{
+    return given == 0 ? fallback : given;
+}
+
+/* A role's signal: the rules' index, or core's pick for UINT32_MAX;
+ * false for an index past the signals or on a text signal */
+bool role_of(const ecuio_recording_t* r, uint32_t given, uint32_t role,
+             uint32_t* out)
+{
+    if (given == UINT32_MAX) {
+        *out = role_signal(r, role);
+        return true;
+    }
+    if (given >= r->signals.size() || r->signals[given].text()) {
+        return false;
+    }
+    *out = given;
+    return true;
+}
+
+/* Each role signal's samples in [from_us, to_us] and the one on each side
+ * of it, in one pass over the rows */
+ecuio_status_t gather(const ecuio_recording_t* r, const uint32_t* signal,
+                      uint64_t from_us, uint64_t to_us,
+                      ecuio_aids::samples* out)
+{
+    uint64_t lo[kRoles];
+    uint64_t hi[kRoles];
+    uint64_t first = UINT64_MAX;
+    uint64_t last = 0;
+    for (size_t k = 0; k < kRoles; ++k) {
+        lo[k] = from_us;
+        hi[k] = to_us;
+        if (signal[k] == UINT32_MAX) {
+            continue;
+        }
+        uint64_t at = ECUIO_RECORDING_NONE;
+        ecuio_status_t rc = ecuio_recording_step(
+            r, signal[k], from_us, ECUIO_RECORDING_STEP_BACKWARD, &at);
+        if (rc != ECUIO_OK) {
+            return rc;
+        }
+        if (at != ECUIO_RECORDING_NONE) {
+            lo[k] = at;
+        }
+        rc = ecuio_recording_step(r, signal[k], to_us,
+                                  ECUIO_RECORDING_STEP_FORWARD, &at);
+        if (rc != ECUIO_OK) {
+            return rc;
+        }
+        if (at != ECUIO_RECORDING_NONE) {
+            hi[k] = at;
+        }
+        first = (std::min)(first, lo[k]);
+        last = (std::max)(last, hi[k]);
+    }
+    if (first == UINT64_MAX) {
+        return ECUIO_OK;
+    }
+    auto it = std::lower_bound(
+        r->index.begin(), r->index.end(), first / kSecondUs,
+        [](const index_entry& e, uint64_t v) { return e.second < v; });
+    FILE* f = nullptr;
+    file_ptr owner;
+    for (; it != r->index.end() && it->second <= last / kSecondUs; ++it) {
+        std::shared_ptr<const std::vector<raw_row>> rows;
+        const ecuio_status_t rc = r->rows_of(f, owner, *it, &rows);
+        if (rc != ECUIO_OK) {
+            return rc;
+        }
+        for (const raw_row& row : *rows) {
+            for (size_t k = 0; k < kRoles; ++k) {
+                if (row.signal == signal[k] && row.host_us >= lo[k] &&
+                    row.host_us <= hi[k]) {
+                    out[k].push_back(
+                        ecuio_aids::sample{row.host_us, row.value});
+                }
+            }
+        }
+    }
+    return ECUIO_OK;
+}
+
+} // namespace
+
+ecuio_status_t ecuio_recording_stretches(const ecuio_recording_t* r,
+                                         const ecuio_stretch_rules_t* rules,
+                                         uint64_t from_us, uint64_t to_us,
+                                         ecuio_recording_stretch_t* out,
+                                         uint32_t capacity, uint32_t* count)
+{
+    if (r == nullptr || rules == nullptr || count == nullptr ||
+        (out == nullptr && capacity != 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    const uint32_t known = ECUIO_STRETCH_PULLS | ECUIO_STRETCH_CRUISES;
+    if (rules->kinds == 0 || (rules->kinds & ~known) != 0 ||
+        rules->flags != 0 || from_us >= to_us) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    for (uint64_t v : rules->reserved) {
+        if (v != 0) {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
+    double pull_level = 0;
+    double load_level = 0;
+    double speed_band = 0;
+    double throttle_band = 0;
+    double floor = 0;
+    double min_rise = 0;
+    double min_gain = 0;
+    uint32_t signal[kRoles] = {};
+    if (!level_of(rules->pull_level, ECUIO_STRETCH_DEFAULT_PULL_LEVEL,
+                  &pull_level) ||
+        !level_of(rules->pull_min_rise, ECUIO_STRETCH_DEFAULT_PULL_RISE,
+                  &min_rise) ||
+        !level_of(rules->pull_min_gain, ECUIO_STRETCH_DEFAULT_PULL_GAIN,
+                  &min_gain) ||
+        !level_of(rules->pull_load_level, ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL,
+                  &load_level) ||
+        !level_of(rules->cruise_speed_band,
+                  ECUIO_STRETCH_DEFAULT_CRUISE_SPEED_BAND, &speed_band) ||
+        !level_of(rules->cruise_throttle_band,
+                  ECUIO_STRETCH_DEFAULT_CRUISE_THROTTLE_BAND, &throttle_band) ||
+        !level_of(rules->cruise_floor, ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR,
+                  &floor) ||
+        !role_of(r, rules->throttle, ECUIO_RECORDING_ROLE_THROTTLE,
+                 &signal[kThrottle]) ||
+        !role_of(r, rules->engine_load, ECUIO_RECORDING_ROLE_ENGINE_LOAD,
+                 &signal[kLoad]) ||
+        !role_of(r, rules->vehicle_speed, ECUIO_RECORDING_ROLE_VEHICLE_SPEED,
+                 &signal[kSpeed]) ||
+        !role_of(r, rules->engine_speed, ECUIO_RECORDING_ROLE_ENGINE_SPEED,
+                 &signal[kRpm])) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *count = 0;
+    const uint64_t pull_hold =
+        time_of(rules->pull_hold_us, ECUIO_STRETCH_DEFAULT_PULL_HOLD_US);
+    const uint64_t cruise_hold =
+        time_of(rules->cruise_hold_us, ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US);
+    try {
+        ecuio_aids::samples s[kRoles];
+        const ecuio_status_t rc = gather(r, signal, from_us, to_us, s);
+        if (rc != ECUIO_OK) {
+            return rc;
+        }
+        const bool has_throttle = signal[kThrottle] != UINT32_MAX;
+        const bool has_speed = signal[kSpeed] != UINT32_MAX;
+        const size_t gate = has_throttle ? kThrottle : kLoad;
+        const size_t measure = has_speed ? kSpeed : kRpm;
+        const ecuio_aids::samples none;
+        const ecuio_aids::samples* engine_speed =
+            signal[kRpm] != UINT32_MAX ? &s[kRpm] : nullptr;
+        /* The rules' km/h in an mph signal's own unit, by the display's
+         * table */
+        double per_kmh = 1.0;
+        ecuio_display_value_t mph{};
+        if (has_speed && is_word(r->signals[signal[kSpeed]].pub.unit, "mph") &&
+            ecuio_display_convert("km/h", 0, 1.0, ECUIO_UNITS_IMPERIAL, &mph) ==
+                ECUIO_DISPLAY_OK) {
+            per_kmh = mph.value;
+        }
+        const ecuio_aids::pull_rules pull{
+            has_throttle ? pull_level : load_level,
+            pull_hold,
+            time_of(rules->pull_gap_us, ECUIO_STRETCH_DEFAULT_PULL_GAP_US),
+            kPullTolerance,
+            min_rise,
+            min_gain * per_kmh};
+        std::vector<ecuio_aids::stretch> found;
+        if ((rules->kinds & ECUIO_STRETCH_PULLS) != 0 &&
+            signal[gate] != UINT32_MAX && signal[measure] != UINT32_MAX) {
+            const uint32_t flags =
+                (has_throttle ? 0u : ECUIO_RECORDING_STRETCH_BY_LOAD) |
+                (has_speed ? 0u : ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED);
+            ecuio_aids::find_pulls(s[gate], s[measure], has_speed, engine_speed,
+                                   pull, flags, found);
+        }
+        if ((rules->kinds & ECUIO_STRETCH_CRUISES) != 0 && has_speed) {
+            const ecuio_aids::cruise_rules cruise{
+                cruise_hold, speed_band * per_kmh, throttle_band,
+                floor * per_kmh};
+            ecuio_aids::find_cruises(
+                s[kSpeed], has_throttle ? &s[kThrottle] : nullptr, cruise,
+                has_throttle ? 0u : ECUIO_RECORDING_STRETCH_NO_THROTTLE, found);
+        }
+        ecuio_aids::cut_to(
+            found, from_us, to_us, pull, has_speed, engine_speed, cruise_hold,
+            signal[measure] != UINT32_MAX ? s[measure] : none, s[kSpeed]);
+        *count =
+            static_cast<uint32_t>((std::min<size_t>)(found.size(), UINT32_MAX));
+        for (uint32_t i = 0; i < capacity && i < *count; ++i) {
+            const ecuio_aids::stretch& f = found[i];
+            ecuio_recording_stretch_t& o = out[i];
+            o = ecuio_recording_stretch_t{};
+            o.kind = f.kind;
+            o.signal = f.kind == ECUIO_RECORDING_STRETCH_PULL ? signal[measure]
+                                                              : signal[kSpeed];
+            o.from_us = f.from_us;
+            o.to_us = f.to_us;
+            o.start = f.start;
+            o.end = f.end;
+            o.flags = f.flags;
+        }
+        return ECUIO_OK;
+    } catch (const std::bad_alloc&) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
 }
 
 void ecuio_recording_close(ecuio_recording_t* r)

@@ -17,6 +17,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#include <chrono>
 #include <system_error>
 
 #include "ecuio/core.h"
@@ -34,6 +35,15 @@ QString openable(const QUrl& url)
 QVariantMap refused(const QString& words)
 {
     return {{QStringLiteral("ok"), false}, {QStringLiteral("words"), words}};
+}
+
+// An import the user stopped: nothing was made
+QVariantMap canceled()
+{
+    return {
+        {QStringLiteral("ok"), false},
+        {QStringLiteral("canceled"), true},
+        {QStringLiteral("words"), QStringLiteral("the import was canceled")}};
 }
 
 // The file's bytes into path, a chunk at a time: a log can be larger than
@@ -76,11 +86,13 @@ struct Job {
     QString interfaceName;
     QString root;
     QString stamp;
+    QString label;
     bool copyLocal = false;
+    int holdMsForTesting = 0;
     std::atomic<bool>* stop = nullptr;
 };
 
-// ecuio_import_with's cancel: the importer's destruction
+// ecuio_import_with's cancel: the importer's cancel() or its destruction
 int stopAsked(void* user)
 {
     return static_cast<const std::atomic<bool>*>(user)->load() ? 1 : 0;
@@ -121,7 +133,10 @@ QVariantMap run(const Job& job)
     // Named and sorted as a recording is ("<stamp>[-n] <label>"), never by
     // the file's own name, which can hold a VIN or a person's name
     const QString label =
-        csv ? QStringLiteral("CSV import") : QStringLiteral("candump import");
+        !job.label.isEmpty()
+            ? job.label
+            : csv ? QStringLiteral("CSV import")
+                  : QStringLiteral("candump import");
     QString folder;
     for (int n = 1; n <= 999 && folder.isEmpty(); ++n) {
         const QString name =
@@ -152,6 +167,9 @@ QVariantMap run(const Job& job)
         in = copy.filePath(QStringLiteral("input"));
         bool readable = false;
         if (!copyTo(job.file, in, &readable, job.stop)) {
+            if (job.stop->load()) {
+                return canceled(); // the copy stopped, not a failed read
+            }
             return refused(
                 readable
                     ? QStringLiteral(
@@ -170,14 +188,42 @@ QVariantMap run(const Job& job)
     o.interface_utf8 = !csv && !iface.isEmpty() ? iface.constData() : nullptr;
     o.column_map_utf8 = csv ? map.constData() : nullptr;
     ecuio_import_report_t r{};
+    for (int waited = 0; waited < job.holdMsForTesting && !job.stop->load();
+         waited += 10) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     const ecuio_status_t status =
         ecuio_import_with(&o, stopAsked, job.stop, &r);
+    if (status == ECUIO_ERR_CANCELED) {
+        return canceled();
+    }
     if (status != ECUIO_OK) {
         const QString detail = QString::fromUtf8(ecuio_last_error_detail());
         return refused(
             !detail.isEmpty()
                 ? detail
                 : QStringLiteral("the import failed (status %1)").arg(status));
+    }
+    // A CSV that carries dates is stamped with its first row's time, not the
+    // import's: the row then says when the drive was
+    if (csv && r.utc_start_us > 0) {
+        const QString stamp =
+            QDateTime::fromMSecsSinceEpoch(
+                static_cast<qint64>(r.utc_start_us / 1000))
+                .toString(QStringLiteral("yyyyMMdd-HHmmss"));
+        for (int n = 1; n <= 999; ++n) {
+            const QString name =
+                stamp + (n > 1 ? QStringLiteral("-%1").arg(n) : QString()) +
+                QLatin1Char(' ') + label;
+            const QString target = job.root + QLatin1Char('/') + name;
+            if (target == folder) {
+                break;
+            }
+            if (!QFileInfo::exists(target) && QDir().rename(folder, target)) {
+                folder = target;
+                break;
+            }
+        }
     }
     return {{QStringLiteral("ok"), true},
             {QStringLiteral("words"), QString()},
@@ -186,6 +232,7 @@ QVariantMap run(const Job& job)
             {QStringLiteral("values"), static_cast<double>(r.values)},
             {QStringLiteral("columnsIgnored"),
              static_cast<double>(r.columns_ignored)},
+            {QStringLiteral("rowsNoTime"), static_cast<double>(r.rows_no_time)},
             {QStringLiteral("durationUs"), static_cast<double>(r.duration_us)}};
 }
 
@@ -221,8 +268,28 @@ constexpr int kShownRows = 5;
 constexpr int kShownBytes = 64 * 1024;
 constexpr int kShownCellChars = 32;
 
+bool isPadding(char c)
+{
+    return c == ' ' || c == '\t';
+}
+
+// Spaces and tabs off both ends, as the import trims an unquoted cell
+QByteArray trimPadding(const QByteArray& text)
+{
+    qsizetype a = 0;
+    qsizetype b = text.size();
+    while (a < b && isPadding(text[a])) {
+        ++a;
+    }
+    while (b > a && isPadding(text[b - 1])) {
+        --b;
+    }
+    return text.mid(a, b - a);
+}
+
 // RFC 4180 records of the text's first bytes (quotes, doubled quotes, CRLF
-// or LF); a record the read cut short is left out
+// or LF), each cell as the import reads it: an unquoted one trimmed of
+// padding, a quoted one exact; a record the read cut short is left out
 QList<QStringList> splitRecords(const QByteArray& bytes, char delimiter,
                                 bool cut, int wanted)
 {
@@ -230,10 +297,12 @@ QList<QStringList> splitRecords(const QByteArray& bytes, char delimiter,
     QStringList row;
     QByteArray cell;
     bool quoted = false;
-    bool any = false; // the record under way has a byte
+    bool wasQuoted = false; // the cell under way opened with a quote
+    bool any = false;       // the record under way has a byte
     auto endCell = [&] {
-        row << QString::fromUtf8(cell);
+        row << QString::fromUtf8(wasQuoted ? cell : trimPadding(cell));
         cell.clear();
+        wasQuoted = false;
     };
     auto endRecord = [&] {
         if (any) {
@@ -254,12 +323,18 @@ QList<QStringList> splitRecords(const QByteArray& bytes, char delimiter,
             } else {
                 cell += c;
             }
-        } else if (c == '"') {
+        } else if (c == '"' && !wasQuoted && trimPadding(cell).isEmpty()) {
+            cell.clear();
             quoted = true;
+            wasQuoted = true;
             any = true;
         } else if (c == delimiter) {
+            // Before the padding test, as core's reader has it: a tab
+            // delimiter after a closing quote ends the cell
             endCell();
             any = true;
+        } else if (wasQuoted && isPadding(c)) {
+            any = true; // padding after the closing quote
         } else if (c == '\n') {
             endRecord();
         } else if (c != '\r') {
@@ -437,14 +512,16 @@ QVariantMap runGuess(const QUrl& file, const QString& timeUnit, bool copyLocal)
         QVariantMap col;
         col.insert(QStringLiteral("index"), static_cast<int>(i));
         col.insert(QStringLiteral("column"), header);
+        col.insert(QStringLiteral("label"),
+                   QString::fromUtf8(trimPadding(header.toUtf8())));
         col.insert(QStringLiteral("used"), used);
         col.insert(QStringLiteral("why"),
                    c.value(QStringLiteral("why")).toString());
         col.insert(QStringLiteral("isTime"), isTime);
-        // A column with an empty header, or a header the file has twice,
-        // can't be named in a map
+        // A column with an empty header (spaces alone too), or a header the
+        // file has twice, can't be named in a map
         col.insert(QStringLiteral("canPutBack"),
-                   !used && !header.isEmpty() &&
+                   !used && !trimPadding(header.toUtf8()).isEmpty() &&
                        headerCount.value(header) == 1);
         const bool signal = used && !isTime;
         col.insert(QStringLiteral("name"),
@@ -515,6 +592,36 @@ RecordingImport::~RecordingImport()
     }
 }
 
+void RecordingImport::setLabel(const QString& label)
+{
+    // Core's recorder rule (reduce_label): ASCII letters and digits, space,
+    // '-', '_', '.' and every character past ASCII; runs of spaces made
+    // one; at most 40 characters, counted whole (never half a surrogate
+    // pair); no dot or space at the end (Windows refuses them)
+    QList<char32_t> kept;
+    for (const char32_t c : label.toUcs4()) {
+        const bool ok = c > 127 || (c >= '0' && c <= '9') ||
+                        (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        c == '-' || c == '_' || c == '.' || c == ' ';
+        if (!ok || (c == ' ' && (kept.isEmpty() || kept.back() == ' '))) {
+            continue;
+        }
+        kept.append(c);
+        if (kept.size() == 40) {
+            break;
+        }
+    }
+    while (!kept.isEmpty() && (kept.back() == ' ' || kept.back() == '.')) {
+        kept.removeLast();
+    }
+    const QString out = QString::fromUcs4(kept.constData(), kept.size());
+    if (out == m_label) {
+        return;
+    }
+    m_label = out;
+    emit labelChanged();
+}
+
 int RecordingImport::guessKind(const QUrl& file) const
 {
     static const QRegularExpression candump(QStringLiteral(
@@ -562,11 +669,18 @@ bool RecordingImport::beginImport(const QUrl& file, int kind, const QUrl& map,
     job.hasMapText = hasMapText;
     job.interfaceName = interfaceName;
     job.root = m_root();
+    job.label = m_label;
     job.stamp = QDateTime::currentDateTime().toString(
         QStringLiteral("yyyyMMdd-HHmmss"));
     job.copyLocal = m_copyLocal;
+    job.holdMsForTesting = m_holdMsForTesting;
     job.stop = &m_stop;
     return launch(false, [job] { return run(job); });
+}
+
+void RecordingImport::cancel()
+{
+    m_stop = true; // an import's next look ends it; a guess never looks
 }
 
 bool RecordingImport::guess(const QUrl& file, const QString& timeUnit)
@@ -590,6 +704,7 @@ bool RecordingImport::launch(bool isGuess, std::function<QVariantMap()> work)
             throw std::system_error(std::make_error_code(
                 std::errc::resource_unavailable_try_again));
         }
+        m_stop = false; // an earlier cancel was the earlier worker's
         m_worker = std::thread([this, isGuess, work = std::move(work)] {
             const QVariantMap result = work();
             QMetaObject::invokeMethod(

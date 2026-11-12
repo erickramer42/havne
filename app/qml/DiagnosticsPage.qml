@@ -251,7 +251,8 @@ Page {
             columnSpacing: 10
             rowSpacing: Theme.spacing
             PageHeader {
-                title: qsTr("Diagnostics")
+                objectName: "diagnosticsHeader"
+                title: Theme.compact ? qsTr("Codes") : qsTr("Diagnostics")
             }
             // The row's width: a title row alone reports its own width as
             // its most, and the grid would stop there

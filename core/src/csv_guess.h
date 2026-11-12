@@ -9,8 +9,9 @@
 // text: the map (havne_column_map 1, which csv_import.h's parse_map takes
 // before it is handed out), every header column used or left out with
 // why, and the notes a front end shows. The same bytes always give the
-// same text. Every refusal and note names columns as the header has
-// them, through ecuio_json::quoted, and never a cell's value.
+// same text. Every refusal and note names columns by the header's text
+// without its padding, through ecuio_json::quoted (the map's column key
+// keeps the text exactly), and never a cell's value.
 
 #ifndef ECUIO_CSV_GUESS_H
 #define ECUIO_CSV_GUESS_H
@@ -130,6 +131,21 @@ inline char time_unit_of(const std::string& unit)
     return 0;
 }
 
+/* A cell of digits alone, a sign before them allowed */
+inline bool whole_number(const std::string& c)
+{
+    size_t at = !c.empty() && (c[0] == '-' || c[0] == '+') ? 1 : 0;
+    if (at == c.size()) {
+        return false;
+    }
+    for (; at < c.size(); ++at) {
+        if (c[at] < '0' || c[at] > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* A header named as a time column, before its unit */
 inline bool named_as_time(const std::string& name)
 {
@@ -244,7 +260,8 @@ struct bounded_source {
 /* Whether the record at off reads as a header split by delimiter: two or
  * more cells, more than half of its non-empty ones not numbers or times,
  * then up to kCheckRows rows of its cell count, each with more than half
- * of its non-empty cells numbers or times (a row of empty cells skipped;
+ * of its non-empty cells numbers or times, read as the import reads them,
+ * padding trimmed (a row of empty cells skipped;
  * a row the kCheckBytes window ends inside ends the rows, as the file's
  * end would) */
 inline bool header_at(const unsigned char* p, size_t n, size_t off,
@@ -263,6 +280,7 @@ inline bool header_at(const unsigned char* p, size_t n, size_t off,
     if (r.next(head, &line, &why) != 1 || line != 1 || head.size() < 2) {
         return false;
     }
+    r.trim_padding(true);
     size_t filled = 0;
     size_t numbers = 0;
     for (const std::string& c : head) {
@@ -373,7 +391,7 @@ private:
     void leave_out(size_t at, const std::string& words)
     {
         why_[at] = words;
-        note(ecuio_json::quoted(header_[at]) + " is left out: " + words);
+        note(ecuio_json::quoted(trim(header_[at])) + " is left out: " + words);
     }
 
     /* The first line, of the first 1000 within kSearchBytes, that reads
@@ -423,6 +441,7 @@ private:
         if (r.next(header_, &line, why) != 1) {
             return false;
         }
+        r.trim_padding(true);
         const size_t start = src.at;
         std::vector<std::string> row;
         uint64_t short_rows = 0;
@@ -439,6 +458,7 @@ private:
                 return false;
             }
             if (got == 0) {
+                whole_ = !cut_;
                 break;
             }
             ++rows_read_;
@@ -449,6 +469,7 @@ private:
                 continue;
             }
             rows_.push_back(row);
+            lines_.push_back(line);
         }
         why->clear();
         if (short_rows > 0) {
@@ -529,15 +550,22 @@ private:
     }
 
     /* The first column only rises: numbers or ISO times with an offset,
-     * never less than the one before, two or more distinct */
+     * never less than the one before, two or more distinct. An empty cell
+     * is passed by, as the import leaves its row out, while more than half
+     * of the rows hold one: a sparse counter is no time */
     bool rises(size_t at) const
     {
         bool any = false;
         bool apart = false;
         double prev = 0;
+        size_t filled = 0;
         for (const std::string& c : cells(at)) {
             double v = 0;
             int64_t us = 0;
+            if (c.empty()) {
+                continue;
+            }
+            ++filled;
             if (csv::parse_cell_number(c, decimal_, &v)) {
             } else if (iso_time(c, decimal_, &us)) {
                 v = static_cast<double>(us);
@@ -551,7 +579,7 @@ private:
             prev = v;
             any = true;
         }
-        return apart;
+        return apart && filled * 2 > rows_.size();
     }
 
     bool decide_time(std::string* why)
@@ -565,6 +593,7 @@ private:
                 time_ = i;
             }
         }
+        const bool named = time_ != npos;
         if (time_ == npos && !twice_[0] && rises(0)) {
             time_ = 0;
         }
@@ -574,7 +603,7 @@ private:
                    "column's cells don't rise";
             return false;
         }
-        const std::string col = ecuio_json::quoted(header_[time_]);
+        const std::string col = ecuio_json::quoted(trim(header_[time_]));
         std::string name;
         std::string unit;
         bool bracketed = false;
@@ -583,6 +612,7 @@ private:
         bool all_number = true;
         bool all_zoneless = true;
         bool all_clock = true;
+        bool all_whole = true;
         bool any = false;
         for (const std::string& c : cells(time_)) {
             if (c.empty()) {
@@ -592,10 +622,16 @@ private:
             int64_t us = 0;
             all_iso = all_iso && iso_time(c, decimal_, &us);
             all_number = all_number && is_number(c, decimal_);
+            all_whole = all_whole && whole_number(c);
             all_zoneless =
                 all_zoneless && (zoneless_iso(c) || iso_time(c, decimal_, &us));
             all_clock = all_clock &&
                         csv::parse_clock(c.data(), c.size(), decimal_, &us);
+        }
+        if (!any && whole_) {
+            /* The import's words for the same file */
+            *why = "no row below the header has a time";
+            return false;
         }
         if (!any) {
             note("the time column " + col + " is empty in the rows read");
@@ -616,6 +652,12 @@ private:
                       : u == 'm' ? std::string("milliseconds")
                                  : std::string("microseconds")) +
                      (given_ != nullptr ? " as given" : " by its header"));
+            } else if (named && all_whole) {
+                /* A bare whole-number Time is milliseconds far more often
+                 * than not; a fraction may be seconds, a counter rows */
+                unit_ = "ms";
+                note("the time column " + col +
+                     " has no unit: read as ms; change it if it isn't");
             } else {
                 note(col + " is the time, its unit not known: say s, ms or "
                            "us");
@@ -632,7 +674,44 @@ private:
         if (!unit_.empty()) {
             flags_ |= kTimeUnitKnown;
         }
+        if (any) {
+            drop_untimed();
+        }
         return true;
+    }
+
+    /* The import leaves a row with no time out whole, so the signals are
+     * decided without it */
+    void drop_untimed()
+    {
+        const size_t read = rows_.size();
+        size_t kept = 0;
+        uint64_t first = 0;
+        for (size_t i = 0; i < read; ++i) {
+            if (rows_[i][time_].empty()) {
+                first = first == 0 ? lines_[i] : first;
+                continue;
+            }
+            if (kept != i) {
+                rows_[kept].swap(rows_[i]);
+                lines_[kept] = lines_[i];
+            }
+            ++kept;
+        }
+        rows_.resize(kept);
+        lines_.resize(kept);
+        const size_t dropped = read - kept;
+        if (dropped == 0) {
+            return;
+        }
+        untimed_dropped_ = true;
+        note(std::to_string(dropped) + " of the " + std::to_string(rows_read_) +
+             " rows read " +
+             (dropped == 1
+                  ? "has no time (line " + std::to_string(first) +
+                        "): the import leaves it out"
+                  : "have no time (the first on line " + std::to_string(first) +
+                        "): the import leaves such a row out"));
     }
 
     void decide_signals()
@@ -649,11 +728,12 @@ private:
                 continue;
             }
             const std::string& head = header_[i];
+            const std::string shown = ecuio_json::quoted(trim(head));
             std::string base;
             std::string unit;
             bool bracketed = false;
             split_header(head, &base, &unit, &bracketed);
-            if (head.empty()) {
+            if (trim(head).empty()) {
                 leave_out(i, "its header cell is empty");
                 continue;
             }
@@ -676,6 +756,7 @@ private:
             /* Its cells: empty ones and placeholders hold no sample */
             bool number = true;
             bool any = false;
+            size_t values = 0;
             bool long_text = false;
             uint8_t decimals = 0;
             bool here[kPlaceholderCount] = {};
@@ -693,6 +774,7 @@ private:
                     continue;
                 }
                 any = true;
+                ++values;
                 long_text = long_text || c.size() > csv::kTextMax;
                 if (number && is_number(c, decimal_)) {
                     const uint8_t d = decimals_of(c, decimal_);
@@ -702,7 +784,22 @@ private:
                 }
             }
             if (!any) {
-                leave_out(i, "it is empty in every row read");
+                /* The rows the signals are decided on: "read", or "with a
+                 * time" once rows with none were taken out */
+                const std::string kind =
+                    untimed_dropped_ ? " with a time" : " read";
+                leave_out(
+                    i, whole_ ? "it is empty in every row" +
+                                    std::string(
+                                        untimed_dropped_ ? " with a time" : "")
+                       : rows_.size() == 1
+                           ? "it is empty in the one row" + kind +
+                                 ": a later value is imported only if it "
+                                 "is put back"
+                           : "it is empty in the first " +
+                                 std::to_string(rows_.size()) + " rows" + kind +
+                                 ": a later value is imported only if it "
+                                 "is put back");
                 continue;
             }
             if (!number && long_text) {
@@ -722,7 +819,7 @@ private:
             if (bracketed && !unit.empty() &&
                 (unit.size() > ecuio_recording_rows::kUnitMax ||
                  !csv::plain_text(unit) || formula_start(unit))) {
-                note(ecuio_json::quoted(head) + "'s unit is left out: " +
+                note(shown + "'s unit is left out: " +
                      (unit.size() > ecuio_recording_rows::kUnitMax
                           ? "it is longer than 15 bytes"
                           : "a map refuses it"));
@@ -740,13 +837,27 @@ private:
                 renamed = true;
             }
             if (cut || renamed) {
-                note(ecuio_json::quoted(head) + " is named " +
-                     ecuio_json::quoted(name) + ": " +
+                note(shown + " is named " + ecuio_json::quoted(name) + ": " +
                      (renamed ? "another column has its name"
                               : "a name is 31 bytes at most"));
             }
             names.push_back(name);
             signals_.push_back(signal{i, name, unit, !number, decimals});
+            /* A wide export's sweep row waits for every column but one
+             * far sparser than the rest, whose newest value it holds */
+            if (number && values * 2 < rows_.size()) {
+                const bool far =
+                    values * ecuio_recording_rows::kSparseTimes < rows_.size();
+                note(shown + " holds a value in " + std::to_string(values) +
+                     (untimed_dropped_ ? " of the " : " of ") +
+                     std::to_string(rows_.size()) +
+                     (untimed_dropped_ ? " rows with a time: "
+                                       : " rows read: ") +
+                     (far ? "a wide export by sweep holds its newest value "
+                            "in the rows the other columns set"
+                          : "a wide export by sweep follows its rate; pick a "
+                            "row interval"));
+            }
         }
         if (past > 0) {
             note(std::to_string(past) + " more columns are left out: a map "
@@ -899,7 +1010,10 @@ private:
     char decimal_ = '.';
     std::vector<std::string> header_;
     std::vector<std::vector<std::string>> rows_;
+    std::vector<uint64_t> lines_;  /* each of rows_' first line */
+    bool untimed_dropped_ = false; /* rows_ is the rows with a time alone */
     uint32_t rows_read_ = 0;
+    bool whole_ = false;           /* the sample read the whole file */
     std::vector<std::string> why_; /* each header column's, when left out */
     std::vector<bool> twice_;
     size_t time_ = npos;

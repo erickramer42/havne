@@ -636,3 +636,334 @@ time is v0.7.1's and is built (the appendix "the minimum time between
 sweeps as built"). The navigation aids moved to v0.7.3, with the
 analysis viewer, since they need logs from real drives to design
 against.
+
+## Note: a focus on a computed signal (2026-11-10)
+
+Section 2's focus names signals to ask, and a computed signal asks nothing
+itself. A picked computed def now keeps its inputs' requests in rotation:
+`ecuio_session_set_focus` adds each input's def to the session's picked
+defs (`focus_defs`), which `ecuio_take_focus` and the askable judgment
+read, and leaves the caller's ids (`focus_ids`) as given, so the recorder's
+`focus` line, the CLI's `focus` line and the app's picks name what was
+picked. A focus naming obd2's Boost alone is taken and keeps MAP (01 0B)
+and baro (01 33); a focus whose picks, inputs included, have no askable
+request is refused as before. `CoreTest.AComputedPickKeepsItsInputsRequested`
+and `J2534AdoptionTest.AFocusOnBoostAsksItsInputsAndComputesIt` pin it.
+
+## Appendix: a sparse column and the sweep (2026-11-11)
+
+Section 4's rule waits for every column in the rule. A column far
+sparser than the rest, such as a logger's event counter that holds a
+value in a small fraction of its rows, has a long usual interval and so
+a long silence: it stays in the rule and sets every row's pace. Fixture
+A (`tests/fixtures/import/csv/logger-c/`, made up in a tuner log's
+shape) shows it: its `Flux counter` has six values in 420 rows, and
+section 4's rule alone gives 6 rows by sweep against 401 at a 300 ms
+interval.
+
+- **The rule:** a column whose usual interval (the median of its gaps,
+  the one that sets its silence) is over 16 times the lower median of
+  the other columns' usual intervals is far sparser, and it sets no
+  sweep's pace. A row is written once every other column in the rule
+  has a sample newer than the previous row. The sparse column's cell
+  follows section 4: its newest value at the row's time, held, empty
+  before its first sample and once it is quiet past its silence (1 s,
+  or 3x its own usual interval if longer), never 0 and never
+  interpolated.
+- **When the rest stop:** once every other column has left the rule
+  through its silence, the sparse column is alone in it and each of its
+  samples is a row, as a lone column's are. A sample of it that a later
+  one replaces before any row is written is in no row, as section 4
+  allows ("as read or not at all").
+- **Judged once, in the survey** over the range exported, beside the
+  silence; the rule's other parts stand. A row interval (the grid) is
+  unchanged: it waits for no column.
+- **One sample in range:** a column with one sample has no interval of
+  its own, so the span of the values exported stands in for it (the
+  range held no other sample of it), and it is never among the others.
+  Beside a column with an interval it is sparse when that span is over
+  16 times the others' lower median: fixture A from 10 s to 20 s holds
+  one counter value and keeps a row for each of its 34 log rows. Over a
+  range a few sweeps long, one sample can't be told from a slow column,
+  and it keeps the rule.
+- **The edges:** every column as sparse as the rest keeps the rule (none
+  is over 16 times the others). With no other interval to compare, no
+  column is sparse: one column alone, or one beside named picks that
+  never answered, and each of its samples is a row either way. Each
+  column is judged against the lower median of the others, so a
+  near-even split goes against the slow class: with 3 fast columns and
+  4 slow ones at 20x, the 4 slow ones are sparse; with 3 fast and 5
+  slow, none is. Two slow columns beside one fast one both leave, the
+  lower median of one fast and one slow interval being the fast one.
+- **Why 16:** the request engine's two rate classes (ADR-0039 section
+  3, two fast requests to one slow) put a slow request's interval 2S/F
+  times a fast one's, F and S the classes' sizes; while the fast class
+  holds the median, F is at least S and the ratio is 2 at most. Over the
+  distinct recordings on hand (the test car's runs over J2534 and
+  ELM327, the test phone's and the bench's), the largest column over
+  the others' median was 6x, a DID that answered a few times in a
+  session scanning DIDs; every obd2 rotation was within 1.01x. The
+  committed recordings in `tests/fixtures/recording/` poll coolant once
+  a second beside 100 ms signals, 10x, a slow signal the sweep follows;
+  `CsvExportTest.WideASlowColumnsIntervalSetsItsSilence`'s slow column
+  is 5x. Fixture A's counter is 73x. 16 stays more than 2.5x above the
+  polled sets and 1.6x above the fixtures' 10x, wider than the
+  histogram's rounding of a median (12.5 % at most), and still takes a
+  column holding a value in under about one row in 16.
+- **The guess:** the CSV map guess's note on a number column with a
+  value in under half the rows read says "a wide export by sweep holds
+  its newest value in the rows the other columns set" when under one row
+  in 16 has one, else "a wide export by sweep follows its rate; pick a row
+  interval". The guess judges by the rows filled and the export by
+  intervals, so the note is a hint and the export's rule decides.
+- **Fixture A** by sweep gives 420 rows, one for each of the log's, the
+  counter held in 383 of them; at 300 ms, 401; from 10 s to 20 s, 34.
+- **Where:** `export.cpp`'s `mark_sparse` (one sort of the intervals:
+  a column above their lower median keeps it when it leaves the rest,
+  and one at or below it can't be over the rest's) and the sweep's check in `wide_rows::sample`; the bound,
+  `kSparseTimes`, in `recording_rows.h`, which the guess reads. The
+  app's Export, `havne-cli export`, Python's `export_csv` and
+  `ecuio_export_estimate` all go through it. No ABI change.
+- **Tests:** `CsvExportTest.WideAFarSparserColumnPacesNoSweep`,
+  `.WideTheSparseBoundIsSixteenTimesTheOthersInterval` (16x keeps the
+  rule, 17x leaves it), `.WideColumnsSparseAlikeAllKeepTheRule`,
+  `.WideTwoSparseColumnsBesideOneLeaveTheRuleBoth`,
+  `.WideAOneSampleColumnHoldsNoRowUp`,
+  `.WideAOneSampleColumnLeavesTheBoundAsItIs`,
+  `.WideASparseColumnMakesTheRowsOnceTheRestStop`,
+  `.WideWritesARowPerSweepOverEveryNumberSignal` (a range one sweep long
+  keeps its one-sample columns in the rule), `CsvGuessTest`'s two notes,
+  and `CliTransferRunTest.csv-guess` (fixture A by sweep, at 300 ms and
+  from 10 s to 20 s).
+
+## Appendix: the navigation aids as built (2026-11-09)
+
+Section 6's stretches of high load (a pull) and steady cruise are found
+from the signals in core, with levels the caller can change, and listed by
+`havne-cli view`. v0.7.3 adds them as a PATCH under ADR-0048: new reader
+calls and structs, a `view` line type and flags, nothing changed in shape.
+The viewer's Compare lines recordings up on a pull; its Jump row, the bands
+on the axis and a panel for the levels and roles are a later change, and
+the viewer reads pulls with core's default rules.
+
+**What a stretch is.**
+
+- *A pull:* a run of throttle samples at or above `pull_level` (80 %)
+  lasting `pull_hold_us` (1 s), over which the vehicle moved faster. A dip
+  under the level shorter than `pull_gap_us` is kept inside the pull,
+  measured from the dip's first sample under the level to the next sample at
+  or above it. Without a throttle signal, engine load at or above
+  `pull_load_level` (80 %) stands in (`ECUIO_RECORDING_STRETCH_BY_LOAD`).
+  The pull ends at vehicle speed's first sample at its highest in the run,
+  so the limiter's flat speed ends it. Without a speed signal the whole run
+  is the pull and only its ends are compared
+  (`ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED`), since an upshift's drop would
+  end it at the first shift. Section 6 wrote "while engine speed rises";
+  vehicle speed is the test because a pull through an upshift drops engine
+  speed by a third and rises again, while speed rises through the whole
+  pull. The rise and gain rules are in the appendix against road logs.
+- *A steady cruise:* a run of at least `cruise_hold_us` (10 s), starting at
+  a speed sample at or above `cruise_floor` (35 mph, 56.33 km/h: the
+  constant is 56.32704, exactly 35 mph), in which speed stays within
+  `cruise_speed_band` (2 km/h) and throttle within `cruise_throttle_band`
+  (3 %), the throttle band taken from the throttle in force at the run's
+  start. Without a throttle signal speed alone decides
+  (`ECUIO_RECORDING_STRETCH_NO_THROTTLE`). A sample that would put a band
+  past its width ends the run, and the next run starts at the next speed
+  sample.
+- A stretch reaching past the asked range is cut at its edge
+  (`ECUIO_RECORDING_STRETCH_CUT_START`, `_CUT_END`), measured again over
+  what is left, and left out when that is shorter than its hold or a pull no
+  longer rises as its rule asks.
+- A stretch is `[from_us, to_us]` with its kind. Stretches of one kind never
+  overlap, and the two kinds can't by their rules, so one time-ordered list
+  holds both.
+
+**The roles.** A recording holds names and units, not IDs, so core picks
+each role at open: by unit, then by the name (ASCII case ignored), the
+lowest nonzero plot rank winning, else the first in the recording's order.
+Engine speed: unit `rpm` (the pick `ECUIO_RECORDING_FIND_ENGINE_START` uses).
+Vehicle speed: unit `km/h` or `mph`, the name holding `speed`. Throttle:
+unit `%`, the name holding `throttle` or `pedal` and neither `relative` nor
+`commanded`. Engine load: unit `%`, the name holding `load`. A role not
+found is none, and a rule that needs it finds nothing of its kind. The
+speeds of the rules are in km/h; when a recording's speed signal is in mph,
+core converts them through the unit table `ecuio_display_convert` uses, so
+the default floor reads 35 mph.
+
+**The calls** (`ecuio/recording.h`). `ecuio_recording_role_signal(r, role,
+&index)` gives the signal core picked for `ECUIO_RECORDING_ROLE_ENGINE_SPEED`
+(1), `_VEHICLE_SPEED` (2), `_THROTTLE` (3) or `_ENGINE_LOAD` (4), or
+`UINT32_MAX` for none. `ecuio_recording_stretches(r, rules, from_us, to_us,
+out, capacity, &count)` finds the stretches of `rules->kinds`
+(`ECUIO_STRETCH_PULLS`, `ECUIO_STRETCH_CRUISES`; 0 is refused, so a zeroed
+struct finds nothing silently otherwise) in time order, in one pass over the
+role signals' raw rows. `ecuio_stretch_rules_t` (120 bytes) holds the
+levels, times and bands, the four role signal indexes (`UINT32_MAX` takes
+core's pick) and `pull_min_rise` and `pull_min_gain` at 88 and 96; a zero
+level takes its default, a negative or NaN one is refused, and the defaults
+are public (`ECUIO_STRETCH_DEFAULT_PULL_LEVEL` and the rest). An
+`ecuio_recording_stretch_t` (64 bytes) carries `kind`, `signal` (the index
+measured: a pull's vehicle speed, or engine speed with
+`BY_ENGINE_SPEED`; a cruise's vehicle speed), `from_us`, `to_us`, `start`
+and `end` (a pull's two ends; a cruise's mean in both) and the flags above.
+The rules are one struct with a flag per kind rather than a general
+condition because the condition model of a later release belongs to the
+session; these two rules are then two of its instances.
+
+**`havne-cli view <recording>... --stretches [pulls|cruises|all]`** adds a
+`roles` line per recording (`{type: "roles", recording, throttle,
+engine_load, vehicle_speed, engine_speed, cruise_floor, cruise_speed_band,
+pull_gain}`, each role a signal name or null, the speeds in km/h so a reader
+sees what was searched with) and one `stretch` line per stretch in time
+order (`{type: "stretch", recording, kind, from_us, to_us, length_us,
+signal (the name of the signal measured), start, end, by_load, by_engine_speed, no_throttle, cut_start, cut_end}`),
+after the `signal` lines and before `columns`. `--stretch-level <key>=<value>`
+sets `pull-throttle`, `pull-load`, `pull-hold`, `pull-gap`, `pull-rise`,
+`pull-gain`, `cruise-hold`, `cruise-speed-band`, `cruise-throttle-band` and
+`cruise-floor` (seconds, percent, rpm, and speeds in the units `--units`
+names); `--role <role>=<name>` names a role's signal (`throttle`, `load`,
+`speed`, `rpm`). A kind whose role is missing writes no `stretch` lines and
+exits 0, since a view is a list; a malformed level or an unknown name is
+usage (exit 2). Schema 1 grows by line types and keys, appended (ADR-0031).
+Python: `Recording.stretches(kinds, from_us, to_us, roles, **levels)`.
+
+**Tested against** two pull fixtures (throttle with the engine-speed
+fallback, the pulls aligning as `--align-on` aligns them), a recording of
+the demo's drive cycle (two gear pulls, the limiter's flat speed ending
+each, the 100 km/h cruise, the quarter mile's upshifts kept whole by the
+gap), a hand-written cruise fixture (two cruises ended by a 3 km/h step) and
+`fuzz_recording`, which runs the rules over its folders.
+
+## Appendix: the navigation aids against road logs (2026-11-12)
+
+The appendix "the navigation aids as built" left two things for a real log to
+settle: whether the pull's gap holds against a driver's shifts, and whether a
+pull needs a minimum gained. Five road logs of one car, read through a logger
+at 3 to 4 Hz (250 to 350 ms between samples, uneven), settled both, and
+showed a third: a comparison lined up on a level's first crossing compares
+unlike events. The rule was replayed over the logs' decoded speed, engine
+speed and throttle: 35 pulls, 5 to 10 a log.
+
+**The gap's default is 1.5 s.** The longest lift between two gears inside one
+pull measured 925 ms from the first sample under the level to the next at it;
+the closest two separate pulls stood 2.2 s apart. A gap of 1 s would hold
+every pull whole with 75 ms to spare: one slower shift or one dropped sample
+splits one. At 3 to 4 Hz a lift is measured between samples, so it reads up
+to a sample longer than it was. 1.5 s clears the lifts and stays well under
+the pulls' separation. `ECUIO_STRETCH_DEFAULT_PULL_GAP_US` is 1500000.
+
+**A pull must climb in engine speed, not gain speed.** A floor on the speed
+gained can't tell a pull in top gear from a stab at the throttle: pulls that
+began fast gained 14 to 18 km/h, and the one false pull in the logs, a brief
+stab, gained 8. Engine speed tells them apart: the real pulls rose 1000 to
+4000 rpm, the stab 180. The demo engine's launch, held on the two-step at a
+standstill, is the other false pull on hand: 1.25 s at full throttle, 2 km/h
+gained, engine speed climbing some 540 rpm onto the limiter. So:
+
+- `pull_min_rise` (rpm, default 750, `ECUIO_STRETCH_DEFAULT_PULL_RISE`): where
+  the recording has an engine-speed signal, engine speed must climb that much
+  inside the pull. The climb is the most a sample stands above an earlier
+  one, the value in force at the pull's start counted. It is not the end less
+  the start: a pull through an upshift can end under where it began, and it
+  is still a pull. 750 sits between the largest false climb (540) and the
+  smallest real rise (1000).
+- `pull_min_gain` (km/h, default 10, `ECUIO_STRETCH_DEFAULT_PULL_GAIN`,
+  converted for a speed signal in mph): only where the recording has no
+  engine-speed signal, vehicle speed must gain that much. It sits between the
+  stab's 8 and the top-gear pulls' 14. With engine speed in the recording the
+  gain is no floor at all.
+- With both signals, speed must still rise over the pull; that keeps a free
+  rev at a standstill out, whatever it climbs.
+- A pull cut by a range's edge is judged again by the same rule over what is
+  left.
+
+A zero field takes the default and a negative or NaN one is refused. A caller
+that wants no floor passes a small value, as for every level.
+
+**A comparison lines up on a chosen pull.** Lined up on the first time engine
+speed crossed 3000 rpm, a log from before a change and one from after
+overlaid a part-throttle rise on a pull. The pulls are the anchors:
+
+- `havne-cli view <a> <b> --align-on pull:<n>[,<n>...]` puts each recording's
+  nth pull's start at 0 (1 is the first): one number for every recording, or
+  one for each in order, so `pull:3,1` lays the first's third pull on the
+  second's first. The pulls are found over the whole recording with
+  `--stretch-level`'s and `--role`'s rules, which `--align-on pull:` takes as
+  `--stretches` does. A recording with fewer pulls isn't found and has no
+  columns, as with any alignment.
+- The viewer's Compare has "Align a pull" and a choice of pull for each
+  recording, the first of each to begin with. `RecordingView::stretches(pulls,
+  cruises)` reads them with core's default rules as a task of the global
+  thread pool per ask that shares the reader: a pass over a dense hour (1.8
+  million rows) takes 0.2 to 0.6 s on the desktop, and core has no way to
+  stop one, so a close never waits for it. The pass ends on its own and its
+  answer is dropped; only the application's end waits for one (Qt's
+  destructor waits for the global pool). A cancel for the reader's long calls
+  is a later ABI step.
+- The Nth crossing of a level isn't offered: the pulls cover the case that
+  was seen.
+
+**A column says its mean, and a later recording its difference.** `view`'s
+`columns` line has `mean` (each column's samples' mean, null where it is
+empty), and for a recording after the first aligned one that shows a number
+signal of the same name in the same unit (the unit's case aside), `delta` (its
+mean less the first's, null where either is empty) and `delta_from` (the
+first's place): a speed in km/h is never taken from one in mph. A column's
+`samples`, `lowest`, `highest` and `mean` are over one set of samples. In an
+unaligned view, or in columns under a second, they are the samples a query
+counts there: a column of a second or more holds the whole host seconds that
+start in it, in the recording's own time. In an aligned view (any
+`--align-on`) with columns of a second or more, that rule would fill one axis
+column from windows a part of a second apart in two recordings whose offsets
+differ by that much, and their `delta` would carry the shift (a recording
+against itself half a second later differed by up to 272 rpm at eight columns
+over 40 s). There every number of a column comes from the reader's statistics
+(`ecuio_recording_stats`, which reads the partial seconds from the rows) over
+the column's own microseconds of the recording's time, so one axis column is
+one stretch of the axis in every recording and `delta` compares like with
+like. An unaligned view keeps the query's seconds: every recording there sits
+at offset 0, so a column is the same window in each already. The axis's last
+column holds the axis's last microsecond too, in every view, so a sample
+exactly at the end is counted once. The `roles` line has `pull_gain` in km/h, and `--stretch-level` takes
+`pull-rise=` (rpm) and `pull-gain=` (speed in `--units`).
+
+**Tested against** recordings written to the logs' shape (uneven 3 to 4 Hz; a
+925 ms and a 1.4 s lift inside pulls, two pulls 2.2 s apart, a pull in top
+gear gaining 15 km/h, a stab gaining 8 km/h and 180 rpm, a pull through an
+upshift that ends under its start), with and without an engine-speed signal
+and with speed in mph; the demo engine's loop (its launch is no pull); and a
+committed fixture of the same shape, `tests/fixtures/recording/pull-twice`,
+which the CLI, the package and the viewer read to the same two pulls.
+
+**Left for its own change:** the viewer's Jump between stretches, the bands
+on the axis and a Stretches panel for the levels and roles. The viewer's
+comparison uses core's defaults, and it shows no column difference: the
+`delta` is `havne-cli view`'s alone.
+
+## Appendix: the Jump row as built (2026-11-12)
+
+Section 6's Jump row and bands. The viewer asks core for the recording's
+pulls and cruises once per open (`RecordingView::stretches(pulls, cruises,
+rules)`), and the Jump row, the bands on the axis and Compare's pull numbers
+share that answer; the other recording's ask is its own. The row (previous
+and next for each kind, and a line saying "Pull 2 of 5 · 12.9 s") sits under
+the title row on the desktop and under the chart on a phone. A jump puts the
+stretch in view with the cursor at its start. Each stretch is a band drawn
+under the traces (`StripChart.decorateBelow`), pulls and cruises in their own
+colors, hidden by the Bands switch (in the panel on a phone).
+
+Stretches... opens a panel with the finder's ten levels in the viewer's units
+(throttle, load, hold, gap, engine-speed rise, speed gain, and the cruise's
+bands and floor), the defaults shown in the fields. A field left empty, or 0,
+takes core's default. The values are checked before a pass starts: a
+percentage from 0 to 100, a time up to an hour, a speed up to 1000 km/h, any
+other value refused with words naming the rule and no ask taken. The levels
+are kept between runs, and a stored level core refuses reads as the defaults,
+with the words shown. A change of the unit system asks again in the new unit.
+The roles stay core's picks.
+
+The app's alignment follows the panel's levels: Compare's pull numbers use the
+levels in force for both recordings, where `havne-cli view --align-on pull:`
+uses core's defaults unless it is given levels (`--stretch-level`, `--role`),
+so the same numbers need the same levels on both sides.

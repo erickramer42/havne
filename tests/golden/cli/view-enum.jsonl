@@ -3,5 +3,5 @@
 {"decimals": 0, "enum": true, "first_us": 0, "group": "Fuel", "highest": 3, "index": 0, "labels": {"1": "Open loop, cold", "16": "Closed loop, fault", "2": "Closed loop", "4": "Open loop, load", "8": "Open loop, fault"}, "last_us": 9500000, "lowest": 1, "name": "Fuel System 1", "rank": 1, "rate_hz": 2, "recording": 0, "samples": 20, "text": false, "type": "signal", "unit": ""}
 {"decimals": 0, "first_us": 100000, "group": "Engine", "highest": 1400, "index": 1, "last_us": 9600000, "lowest": 800, "name": "RPM", "rank": 2, "rate_hz": 2, "recording": 0, "samples": 20, "text": false, "type": "signal", "unit": "rpm"}
 {"column_us": 2500000, "columns": 4, "from_us": 0, "to_us": 10000000, "type": "axis"}
-{"highest": [1, 2, 3, 2], "lowest": [1, 1, 2, 2], "recording": 0, "samples": [6, 4, 6, 4], "signal": "Fuel System 1", "type": "columns"}
-{"highest": [1400, 1220, 820, 820], "lowest": [1250, 800, 800, 800], "recording": 0, "samples": [6, 4, 6, 4], "signal": "RPM", "type": "columns"}
+{"highest": [1, 2, 3, 2], "lowest": [1, 1, 2, 2], "mean": [1, 1.5, 2.1666666666666665, 2], "recording": 0, "samples": [6, 4, 6, 4], "signal": "Fuel System 1", "type": "columns"}
+{"highest": [1400, 1220, 820, 820], "lowest": [1250, 800, 800, 800], "mean": [1325, 1007.5, 810, 810], "recording": 0, "samples": [6, 4, 6, 4], "signal": "RPM", "type": "columns"}

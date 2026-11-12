@@ -8,7 +8,8 @@ import App
 
 // A strip chart: what ChartLayout.layout returns for the series its
 // fetch() gives. Live and the Recordings page each make one. The Canvas
-// draws the background, the grid, the captions and the labels; the traces
+// draws the background, the grid, the captions, the panes' axes and seams
+// and the labels; the traces
 // are a Shape over it, which the scene graph draws on the GPU (rasterized
 // on the Canvas, a phone's full-resolution strokes and bands held the GUI
 // thread about 150 ms a paint), and a page's marks a Canvas over that.
@@ -34,6 +35,9 @@ Canvas {
     property var drawn: null
     // A page's marks, drawn over the traces: decorate(ctx, layout)
     property var decorate: null
+    // A page's marks drawn under the traces, after the grid: a band's fill
+    // (a translucent fill over a trace would shift its color)
+    property var decorateBelow: null
     // What drawing has cost since the page last zeroed them: paints, and
     // their total and longest time in ms (onPaint's own, to the ms)
     property int paints: 0
@@ -88,6 +92,7 @@ Canvas {
             ctx.reset()
             ctx.clearRect(0, 0, width, height)
             ctx.scale(chart.zoom, chart.zoom)
+            ctx.font = ChartLayout.labelPx + "px " + (Theme.fontFamily || "sans-serif")
             if (chart.drawn && chart.decorate)
                 chart.decorate(ctx, chart.drawn)
         }
@@ -102,6 +107,11 @@ Canvas {
             joinStyle: ShapePath.MiterJoin
             PathMultiline { paths: [] }
         }
+    }
+
+    // Only a page's marks again, for a mark that moves while the traces rest
+    function repaintMarks() {
+        marks.requestPaint()
     }
 
     function pathsFor(i) {
@@ -132,8 +142,8 @@ Canvas {
         for (let i = 0; i < traces.length; ++i) {
             const tr = traces[i]
             const set = pathsFor(i)
-            const color = Theme.seriesColor(tr.row)
-            const dash = tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.row)
+            const color = Theme.seriesColor(tr.slot)
+            const dash = tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.slot)
             const lines = [], fills = [], edges = []
             for (const piece of tr.pieces) {
                 if (!piece.band) {
@@ -171,6 +181,61 @@ Canvas {
         paintMaxMs = Math.max(paintMaxMs, took)
     }
 
+    // Canvas text takes no font features, so tabular figures are drawn by
+    // hand: each digit in a cell as wide as the face's widest digit, any
+    // other run of text whole (its kerning, shaping and combining marks
+    // intact). The layout measures the same way. digitW is set once per
+    // draw(), for the font that draw has set.
+    property real digitW: 0
+    property var digitWs: []
+    readonly property var runPattern: /[0-9]+|[^0-9]+/g
+
+    function setDigitW(ctx) {
+        const ws = []
+        for (let d = 0; d < 10; ++d)
+            ws.push(ctx.measureText(String(d)).width)
+        digitWs = ws
+        digitW = Math.max.apply(null, ws)
+    }
+
+    function runsOf(text) {
+        return text.match(runPattern) || []
+    }
+
+    function isDigits(run) {
+        return run.charCodeAt(0) >= 48 && run.charCodeAt(0) <= 57
+    }
+
+    function tabularWidth(ctx, text) {
+        let w = 0
+        for (const run of runsOf(text))
+            w += isDigits(run) ? run.length * digitW : ctx.measureText(run).width
+        return w
+    }
+
+    // fillText with tabular digits, at ctx.textAlign's anchor
+    function tabularText(ctx, text, x, y) {
+        const align = ctx.textAlign
+        let at = x
+        if (align === "right")
+            at -= tabularWidth(ctx, text)
+        else if (align === "center")
+            at -= tabularWidth(ctx, text) / 2
+        ctx.textAlign = "left"
+        for (const run of runsOf(text)) {
+            if (!isDigits(run)) {
+                ctx.fillText(run, at, y)
+                at += ctx.measureText(run).width
+                continue
+            }
+            for (const c of run) {
+                ctx.fillText(c, at + (digitW - digitWs[c.charCodeAt(0) - 48]) / 2, y)
+                at += digitW
+            }
+        }
+        ctx.textAlign = align
+    }
+
     function draw() {
         const ctx = getContext("2d")
         ctx.reset()
@@ -189,8 +254,9 @@ Canvas {
             return
         }
 
-        ctx.font = ChartLayout.labelPx + "px " + Theme.monoFamily   // measured and drawn in
-        const opts = { measure: text => ctx.measureText(text).width }
+        ctx.font = ChartLayout.labelPx + "px " + (Theme.fontFamily || "sans-serif")   // measured and drawn in
+        setDigitW(ctx)
+        const opts = { measure: text => tabularWidth(ctx, text) }
         for (const k in chart.layoutOpts)
             opts[k] = chart.layoutOpts[k]
         const l = ChartLayout.layout(series, shownW, shownH, opts)
@@ -200,13 +266,14 @@ Canvas {
             return
         }
 
-        // Grid: quarter lines, and one vertical per time tick
+        // Grid: a pane's value ticks (quarter lines without an axis), and
+        // one vertical per time tick through every pane
         ctx.strokeStyle = Theme.bg
         ctx.lineWidth = 1
         ctx.beginPath()
         for (const gy of l.hGrid) {
-            ctx.moveTo(0, gy)
-            ctx.lineTo(l.plotW, gy)
+            ctx.moveTo(l.left, gy)
+            ctx.lineTo(l.left + l.plotW, gy)
         }
         for (const tick of l.ticks) {
             ctx.moveTo(tick.x, l.top)
@@ -214,13 +281,41 @@ Canvas {
         }
         ctx.stroke()
 
-        // Captions under the ticks
+        // The seams between panes, a hairline across the plot
+        if (l.seams.length > 0) {
+            ctx.strokeStyle = Theme.outline
+            ctx.beginPath()
+            for (const sy of l.seams) {
+                ctx.moveTo(0, Math.round(sy) + 0.5)
+                ctx.lineTo(l.left + l.plotW, Math.round(sy) + 0.5)
+            }
+            ctx.stroke()
+        }
+
+        if (chart.decorateBelow)
+            chart.decorateBelow(ctx, l)
+
+        // Captions under the time ticks; each pane's name at its axis's
+        // top and its value captions right-aligned against the plot
         ctx.fillStyle = Theme.textDim
         ctx.textBaseline = "top"
         for (const tick of l.ticks) {
             if (!tick.captioned) continue
             ctx.textAlign = tick.align
-            ctx.fillText(tick.caption, tick.x, l.top + l.plotH + 3)
+            tabularText(ctx, tick.caption, tick.x, l.top + l.plotH + 3)
+        }
+        for (const pane of l.panes) {
+            if (pane.label !== "") {
+                ctx.textAlign = "left"
+                ctx.textBaseline = "top"
+                tabularText(ctx, pane.label, 0, pane.top)
+            }
+            ctx.textAlign = "right"
+            ctx.textBaseline = "middle"
+            for (const tick of pane.ticks) {
+                if (tick.captioned)
+                    tabularText(ctx, tick.caption, l.left - ChartLayout.axisGap, tick.y)
+            }
         }
 
         // Traces, each piece its own polyline (a gap is a break); a band
@@ -235,15 +330,15 @@ Canvas {
         ctx.textBaseline = "middle"
         for (const tr of l.traces) {
             if (!tr.labeled) continue   // no room: its row shows the value
-            const c = Theme.seriesColor(tr.row)
+            const c = Theme.seriesColor(tr.slot)
             ctx.strokeStyle = c
-            ctx.setLineDash(tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.row))
+            ctx.setLineDash(tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.slot))
             ctx.beginPath()
             ctx.moveTo(l.labelX, tr.labelY)
             ctx.lineTo(l.labelX + ChartLayout.swatchW, tr.labelY)
             ctx.stroke()
             ctx.fillStyle = c
-            ctx.fillText(tr.label, l.labelX + ChartLayout.swatchW + 4, tr.labelY)
+            tabularText(ctx, tr.label, l.labelX + ChartLayout.swatchW + 4, tr.labelY)
         }
         ctx.setLineDash([])
     }

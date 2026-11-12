@@ -6,14 +6,17 @@
 #include "healthreport.h"
 
 #include <QByteArray>
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QList>
 #include <QMetaObject>
+#include <QThreadPool>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <new>
@@ -410,7 +413,19 @@ void RecordingView::stop()
         m_worker.join();
         m_cancel = false;
     }
-    ecuio_recording_close(m_reader);
+    if (m_askWorker.joinable()) {
+        {
+            const std::lock_guard<std::mutex> lock(m_askMutex);
+            m_askStop = true;
+        }
+        m_askWake.notify_all();
+        m_askWorker.join(); // before the close: it may be reading
+        m_askStop = false;
+        m_statsAsk.reset();
+        m_stepAsk.reset();
+    }
+    // Closed here, or when a stretches pass still reading lets go of it
+    m_readerHold.reset();
     m_reader = nullptr;
     m_info = {};
     m_signals.clear();
@@ -512,7 +527,8 @@ void RecordingView::finish(const std::shared_ptr<Result>& res,
         emit stateChanged();
         return;
     }
-    m_reader = res->reader;
+    m_readerHold.reset(res->reader, ecuio_recording_close);
+    m_reader = m_readerHold.get();
     res->reader = nullptr;
     ecuio_recording_get_info(m_reader, &m_info);
 
@@ -522,29 +538,27 @@ void RecordingView::finish(const std::shared_ptr<Result>& res,
         ecuio_recording_get_signal(m_reader, i, &m_signals[i].pub);
         ranked = ranked || m_signals[i].pub.plot_rank != 0;
     }
-    // Live's default (SignalListModel::judgePlotted): every number, or in a
-    // ranked recording the DefaultPlotted of the lowest rank, a tie in the
-    // recording's order; a signal with no samples gives its place up
+    // At most ViewerPlotted numbers plot on open, so a phone's chart stays
+    // readable: a ranked recording's lowest ranks (the signals Live plotted),
+    // else the first in the recording's order. A signal with no samples gives
+    // its place up; an unranked one in a ranked recording never plots.
     std::vector<uint32_t> order;
     for (uint32_t i = 0; i < m_info.signal_count; ++i) {
         const ecuio_recording_signal_t& s = m_signals[i].pub;
         const bool number =
             (s.flags & ECUIO_RECORDING_SIGNAL_TEXT) == 0 && s.samples > 0;
-        if (!number) {
-            continue;
-        }
-        if (!ranked) {
-            m_signals[i].plotted = true;
-        } else if (s.plot_rank != 0) {
+        if (number && (!ranked || s.plot_rank != 0)) {
             order.push_back(i);
         }
     }
-    std::stable_sort(
-        order.begin(), order.end(), [this](uint32_t a, uint32_t b) {
-            return m_signals[a].pub.plot_rank < m_signals[b].pub.plot_rank;
-        });
-    if (order.size() > static_cast<size_t>(DefaultPlotted)) {
-        order.resize(DefaultPlotted);
+    if (ranked) {
+        std::stable_sort(
+            order.begin(), order.end(), [this](uint32_t a, uint32_t b) {
+                return m_signals[a].pub.plot_rank < m_signals[b].pub.plot_rank;
+            });
+    }
+    if (order.size() > static_cast<size_t>(ViewerPlotted)) {
+        order.resize(ViewerPlotted);
     }
     for (uint32_t i : order) {
         m_signals[i].plotted = true;
@@ -947,6 +961,460 @@ QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,
         });
     }
     return out;
+}
+
+bool RecordingView::startAsks()
+{
+    if (m_askWorker.joinable()) {
+        return true;
+    }
+    try {
+        if (m_failThreadForTesting) {
+            throw std::system_error(std::make_error_code(
+                std::errc::resource_unavailable_try_again));
+        }
+        m_askWorker = std::thread(&RecordingView::answerAsks, this, m_reader,
+                                  m_generation);
+    } catch (const std::system_error&) {
+        return false;
+    }
+    return true;
+}
+
+void RecordingView::answerAsks(ecuio_recording_t* reader, quint64 generation)
+{
+    for (;;) {
+        std::optional<StatsAsk> stats;
+        std::optional<StepAsk> step;
+        {
+            std::unique_lock<std::mutex> lock(m_askMutex);
+            m_askWake.wait(lock, [this] {
+                return m_askStop || m_statsAsk.has_value() ||
+                       m_stepAsk.has_value();
+            });
+            if (m_askStop) {
+                return;
+            }
+            stats.swap(m_statsAsk);
+            step.swap(m_stepAsk);
+        }
+        // A copy that can't be allocated leaves its ask unanswered: an
+        // exception out of this thread would end the process
+        try {
+            if (step) {
+                uint64_t at = ECUIO_RECORDING_NONE;
+                const ecuio_status_t rc = ecuio_recording_step(
+                    reader, step->signal, step->t, step->direction, &at);
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, request = step->request, rc, at, generation] {
+                        stepFinished(request, rc, at, generation);
+                    },
+                    Qt::QueuedConnection);
+            }
+        } catch (const std::bad_alloc&) {
+            ++m_asksLost;
+        }
+        try {
+            if (stats) {
+                std::vector<ecuio_recording_stats_t> got(stats->ids.size());
+                const ecuio_status_t rc = ecuio_recording_stats(
+                    reader, stats->ids.data(),
+                    static_cast<uint32_t>(stats->ids.size()), stats->t0,
+                    stats->t1, got.data());
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, ask = *stats, rc, got, generation] {
+                        statsFinished(ask, rc, got, generation);
+                    },
+                    Qt::QueuedConnection);
+            }
+        } catch (const std::bad_alloc&) {
+            ++m_asksLost;
+        }
+    }
+}
+
+namespace {
+
+enum class RuleUnit { Percent, Seconds, Rpm, Speed };
+
+// One level of ecuio_stretch_rules_t as a page sets it: its key in the
+// rules map, its name in a refusal's words, core's default (%, seconds,
+// rpm or km/h) and where a value in core's unit (%, us, rpm, km/h) goes
+struct StretchRule {
+    const char* key;
+    const char* name;
+    RuleUnit unit;
+    double fallback;
+    void (*set)(ecuio_stretch_rules_t&, double);
+};
+
+uint64_t wholeUs(double us)
+{
+    return static_cast<uint64_t>(std::llround(us));
+}
+
+const StretchRule kStretchRules[] = {
+    {"pullLevel", "Pull level", RuleUnit::Percent,
+     ECUIO_STRETCH_DEFAULT_PULL_LEVEL,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_level = v; }},
+    {"pullLoadLevel", "Pull load level", RuleUnit::Percent,
+     ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_load_level = v; }},
+    {"pullHoldS", "Pull hold", RuleUnit::Seconds,
+     ECUIO_STRETCH_DEFAULT_PULL_HOLD_US / 1e6,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_hold_us = wholeUs(v); }},
+    {"pullGapS", "Pull gap", RuleUnit::Seconds,
+     ECUIO_STRETCH_DEFAULT_PULL_GAP_US / 1e6,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_gap_us = wholeUs(v); }},
+    {"pullRise", "Pull rise", RuleUnit::Rpm, ECUIO_STRETCH_DEFAULT_PULL_RISE,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_min_rise = v; }},
+    {"pullGain", "Pull gain", RuleUnit::Speed, ECUIO_STRETCH_DEFAULT_PULL_GAIN,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_min_gain = v; }},
+    {"cruiseHoldS", "Cruise hold", RuleUnit::Seconds,
+     ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US / 1e6,
+     [](ecuio_stretch_rules_t& r, double v) { r.cruise_hold_us = wholeUs(v); }},
+    {"cruiseSpeedBand", "Cruise speed band", RuleUnit::Speed,
+     ECUIO_STRETCH_DEFAULT_CRUISE_SPEED_BAND,
+     [](ecuio_stretch_rules_t& r, double v) { r.cruise_speed_band = v; }},
+    {"cruiseThrottleBand", "Cruise throttle band", RuleUnit::Percent,
+     ECUIO_STRETCH_DEFAULT_CRUISE_THROTTLE_BAND,
+     [](ecuio_stretch_rules_t& r, double v) { r.cruise_throttle_band = v; }},
+    {"cruiseFloor", "Cruise floor", RuleUnit::Speed,
+     ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR,
+     [](ecuio_stretch_rules_t& r, double v) { r.cruise_floor = v; }},
+};
+
+// The most a rule takes: a percentage, an hour, and a speed in km/h
+constexpr double kPercentMost = 100.0;
+constexpr double kSecondsMost = 3600.0;
+constexpr double kSpeedMostKmh = 1000.0;
+
+// 1 km/h in the unit system's speed unit, by core's display table
+double speedPerKmh(uint32_t units)
+{
+    ecuio_display_value_t one{};
+    return ecuio_display_convert("km/h", 0, 1.0, units, &one) ==
+                   ECUIO_DISPLAY_OK
+               ? one.value
+               : 1.0;
+}
+
+bool isNumber(const QVariant& v)
+{
+    switch (v.typeId()) {
+    case QMetaType::Double:
+    case QMetaType::Float:
+    case QMetaType::Int:
+    case QMetaType::UInt:
+    case QMetaType::LongLong:
+    case QMetaType::ULongLong:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// A page's rules map as core's struct, its speeds from the unit system's
+// unit to km/h; false with the refusal's words, naming the rule
+bool stretchRulesOf(const QVariantMap& map, uint32_t units,
+                    ecuio_stretch_rules_t* out, QString* problem)
+{
+    const double perKmh = speedPerKmh(units);
+    const bool imperial = units == ECUIO_UNITS_IMPERIAL;
+    for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
+        const StretchRule* rule = nullptr;
+        for (const StretchRule& r : kStretchRules) {
+            if (it.key() == QLatin1String(r.key)) {
+                rule = &r;
+            }
+        }
+        if (rule == nullptr) {
+            *problem =
+                QStringLiteral("'%1' isn't a stretch rule").arg(it.key());
+            return false;
+        }
+        const double shown = isNumber(it.value()) ? it.value().toDouble() : NAN;
+        double value = shown; // in core's unit
+        double most = INFINITY;
+        QString range = QStringLiteral(", 0 or more");
+        switch (rule->unit) {
+        case RuleUnit::Percent:
+            most = kPercentMost;
+            range = QStringLiteral(" from 0 to 100");
+            break;
+        case RuleUnit::Seconds:
+            most = kSecondsMost;
+            range = QStringLiteral(" from 0 to 3600 s");
+            value = shown * 1e6;
+            break;
+        case RuleUnit::Speed:
+            most = kSpeedMostKmh * perKmh;
+            range = QStringLiteral(" from 0 to %1 %2")
+                        .arg(static_cast<int>(most))
+                        .arg(imperial ? QStringLiteral("mph")
+                                      : QStringLiteral("km/h"));
+            value = shown / perKmh;
+            break;
+        case RuleUnit::Rpm:
+            break;
+        }
+        if (!std::isfinite(shown) || shown < 0.0 || shown > most) {
+            *problem = QStringLiteral("%1 must be a number%2")
+                           .arg(QLatin1String(rule->name), range);
+            return false;
+        }
+        rule->set(*out, value);
+    }
+    return true;
+}
+
+} // namespace
+
+QVariantMap RecordingView::stretchDefaults() const
+{
+    const double perKmh = speedPerKmh(m_units);
+    QVariantMap out;
+    for (const StretchRule& r : kStretchRules) {
+        out.insert(QLatin1String(r.key), r.unit == RuleUnit::Speed
+                                             ? r.fallback * perKmh
+                                             : r.fallback);
+    }
+    return out;
+}
+
+void RecordingView::setStretchesProblem(const QString& words)
+{
+    if (words != m_stretchesProblem) {
+        m_stretchesProblem = words;
+        emit stretchesProblemChanged();
+    }
+}
+
+void RecordingView::findStretches(
+    const std::shared_ptr<ecuio_recording_t>& reader,
+    const QPointer<RecordingView>& view, int request,
+    ecuio_stretch_rules_t rules, quint64 generation, int holdMs)
+{
+    if (holdMs > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(holdMs));
+    }
+    ecuio_recording_info_t info{};
+    ecuio_recording_get_info(reader.get(), &info);
+    const uint64_t end = info.duration_us + 1;
+    // One pass for a recording with no more stretches than this; a second
+    // only for one with more
+    const uint32_t first = 64;
+    ecuio_status_t rc = ECUIO_ERR_OUT_OF_MEMORY;
+    std::vector<ecuio_recording_stretch_t> got;
+    try {
+        got.resize(first);
+        uint32_t count = 0;
+        rc = ecuio_recording_stretches(reader.get(), &rules, 0, end, got.data(),
+                                       first, &count);
+        if (rc == ECUIO_OK && count > first) {
+            got.resize(count);
+            rc = ecuio_recording_stretches(reader.get(), &rules, 0, end,
+                                           got.data(), count, &count);
+        }
+        got.resize(rc == ECUIO_OK ? (std::min<size_t>)(got.size(), count) : 0);
+    } catch (const std::bad_alloc&) {
+        got.clear();
+        rc = ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    // An application ending reads null here (Qt 6.12 clears instance(),
+    // then waits for the pool); one read non-null lives until this ends
+    QCoreApplication* app = QCoreApplication::instance();
+    if (app == nullptr) {
+        return;
+    }
+    QMetaObject::invokeMethod(
+        app,
+        [view, request, rc, got, generation] {
+            if (view) {
+                view->stretchesFinished(request, rc, got, generation);
+            }
+        },
+        Qt::QueuedConnection);
+}
+
+int RecordingView::stats(const QVariantList& signalIndexes, double t0Ms,
+                         double t1Ms)
+{
+    if (m_reader == nullptr || signalIndexes.isEmpty()) {
+        return 0;
+    }
+    StatsAsk ask;
+    for (const QVariant& v : signalIndexes) {
+        uint32_t i = 0;
+        if (!signalIndex(v, &i)) {
+            return 0;
+        }
+        ask.ids.push_back(i);
+    }
+    ask.t0 = fromMs(t0Ms);
+    ask.t1 = fromMs(t1Ms);
+    if (ask.t1 <= ask.t0) {
+        return 0;
+    }
+    ask.request = ++m_lastAsk;
+    m_lastStats = ask.request;
+    {
+        const std::lock_guard<std::mutex> lock(m_askMutex);
+        m_statsAsk = std::move(ask);
+    }
+    if (!startAsks()) {
+        const std::lock_guard<std::mutex> lock(m_askMutex);
+        m_statsAsk.reset();
+        m_lastStats = 0;
+        return 0;
+    }
+    m_askWake.notify_all();
+    return m_lastStats;
+}
+
+int RecordingView::step(int signal, double tMs, bool forward)
+{
+    uint32_t i = 0;
+    if (m_reader == nullptr || !signalIndex(QVariant(signal), &i)) {
+        return 0;
+    }
+    StepAsk ask;
+    ask.request = ++m_lastAsk;
+    ask.signal = i;
+    ask.t = fromMs(tMs);
+    ask.direction =
+        forward ? ECUIO_RECORDING_STEP_FORWARD : ECUIO_RECORDING_STEP_BACKWARD;
+    m_lastStep = ask.request;
+    {
+        const std::lock_guard<std::mutex> lock(m_askMutex);
+        m_stepAsk = ask;
+    }
+    if (!startAsks()) {
+        const std::lock_guard<std::mutex> lock(m_askMutex);
+        m_stepAsk.reset();
+        m_lastStep = 0;
+        return 0;
+    }
+    m_askWake.notify_all();
+    return m_lastStep;
+}
+
+int RecordingView::stretches(bool pulls, bool cruises, const QVariantMap& rules)
+{
+    // Judged here, before any task: a refusal is the caller's at once
+    ecuio_stretch_rules_t asked{};
+    QString problem;
+    const bool taken = stretchRulesOf(rules, m_units, &asked, &problem);
+    setStretchesProblem(problem);
+    if (!taken || m_reader == nullptr || (!pulls && !cruises)) {
+        return 0;
+    }
+    asked.kinds = (pulls ? ECUIO_STRETCH_PULLS : 0u) |
+                  (cruises ? ECUIO_STRETCH_CRUISES : 0u);
+    asked.throttle = asked.engine_load = UINT32_MAX;
+    asked.vehicle_speed = asked.engine_speed = UINT32_MAX;
+    const int request = ++m_lastAsk;
+    try {
+        // A task of the global pool with its share of the reader: a close
+        // leaves it to finish, and QCoreApplication's end waits for it
+        QThreadPool::globalInstance()->start(
+            [reader = m_readerHold, view = QPointer<RecordingView>(this),
+             request, asked, generation = m_generation,
+             holdMs = m_stretchesHoldMs] {
+                findStretches(reader, view, request, asked, generation, holdMs);
+            });
+    } catch (const std::bad_alloc&) {
+        return 0;
+    }
+    m_lastStretches = request;
+    return request;
+}
+
+void RecordingView::stretchesFinished(
+    int request, ecuio_status_t rc,
+    const std::vector<ecuio_recording_stretch_t>& got, quint64 generation)
+{
+    if (generation != m_generation || request != m_lastStretches) {
+        return;
+    }
+    if (rc == ECUIO_ERR_RECORDING_CHANGED) {
+        markStale();
+    }
+    QVariantList out;
+    for (size_t k = 0; rc == ECUIO_OK && k < got.size(); ++k) {
+        const ecuio_recording_stretch_t& g = got[k];
+        if (g.signal >= m_signals.size()) {
+            continue;
+        }
+        const ecuio_display_value_t start = shown(m_signals[g.signal], g.start);
+        out.append(QVariantMap{
+            {QStringLiteral("kind"), g.kind == ECUIO_RECORDING_STRETCH_PULL
+                                         ? QStringLiteral("pull")
+                                         : QStringLiteral("cruise")},
+            {QStringLiteral("fromMs"), toMs(g.from_us)},
+            {QStringLiteral("toMs"), toMs(g.to_us)},
+            {QStringLiteral("start"), start.value},
+            {QStringLiteral("end"), shown(m_signals[g.signal], g.end).value},
+            {QStringLiteral("unit"), QString::fromUtf8(start.unit)},
+            {QStringLiteral("decimals"), start.decimal_places},
+            {QStringLiteral("signal"), static_cast<int>(g.signal)},
+        });
+    }
+    emit stretchesReady(request, out, rc == ECUIO_OK);
+}
+
+void RecordingView::statsFinished(
+    const StatsAsk& ask, ecuio_status_t rc,
+    const std::vector<ecuio_recording_stats_t>& got, quint64 generation)
+{
+    if (generation != m_generation || ask.request != m_lastStats) {
+        return;
+    }
+    if (rc == ECUIO_ERR_RECORDING_CHANGED) {
+        markStale();
+    }
+    QVariantList out;
+    if (rc == ECUIO_OK) {
+        const double seconds = static_cast<double>(ask.t1 - ask.t0) / 1e6;
+        for (size_t k = 0; k < ask.ids.size(); ++k) {
+            const Signal& s = m_signals[ask.ids[k]];
+            const ecuio_recording_stats_t& g = got[k];
+            // Every conversion is a rising line, so a mean converts as a value
+            const ecuio_display_value_t first = shown(s, g.first);
+            const double last = shown(s, g.last).value;
+            const double change = last - first.value;
+            out.append(QVariantMap{
+                {QStringLiteral("index"), static_cast<int>(ask.ids[k])},
+                {QStringLiteral("samples"), static_cast<double>(g.samples)},
+                {QStringLiteral("first"), first.value},
+                {QStringLiteral("last"), last},
+                {QStringLiteral("lowest"), shown(s, g.lowest).value},
+                {QStringLiteral("highest"), shown(s, g.highest).value},
+                {QStringLiteral("mean"), shown(s, g.mean).value},
+                {QStringLiteral("change"), change},
+                {QStringLiteral("rate"), change / seconds},
+                {QStringLiteral("lowestMs"), toMsOrNone(g.lowest_us)},
+                {QStringLiteral("highestMs"), toMsOrNone(g.highest_us)},
+                {QStringLiteral("unit"), QString::fromUtf8(first.unit)},
+                {QStringLiteral("decimals"), first.decimal_places},
+            });
+        }
+    }
+    emit statsReady(ask.request, out);
+}
+
+void RecordingView::stepFinished(int request, ecuio_status_t rc, uint64_t at,
+                                 quint64 generation)
+{
+    if (generation != m_generation || request != m_lastStep) {
+        return;
+    }
+    if (rc == ECUIO_ERR_RECORDING_CHANGED) {
+        markStale();
+    }
+    emit stepReady(request, rc == ECUIO_OK ? toMsOrNone(at) : -1.0);
 }
 
 double RecordingView::nearestSampleMs(int signal, double tMs)

@@ -14,9 +14,9 @@
 {"found": true, "host_us": 14600000, "offset_us": -14600000, "on": "rise:RPM:4000", "recording": 0, "type": "align"}
 {"found": true, "host_us": 24600000, "offset_us": -24600000, "on": "rise:RPM:4000", "recording": 1, "type": "align"}
 {"column_us": 1000000, "columns": 10, "from_us": -2000000, "to_us": 8000000, "type": "axis"}
-{"highest": [3513, 4325, 5125, 5913, 6721, 6806, 5189, 3595, 2018, 1995], "lowest": [2000, 3591, 4405, 5205, 5996, 5354, 3756, 2179, 1991, 1988], "recording": 0, "samples": [20, 10, 10, 10, 10, 10, 10, 10, 10, 10], "signal": "RPM", "type": "columns"}
+{"highest": [3201, 3997, 4803, 5592, 6401, 6806, 5852, 4234, 2649, 1995], "lowest": [2486, 3280, 4080, 4884, 5671, 6015, 4392, 2804, 1995, 1988], "mean": [2842.3, 3634.2, 4443.1, 5241, 6036.4, 6488, 5113.9, 3516.5, 2170.1, 1992.1818181818182], "recording": 0, "samples": [10, 10, 10, 10, 10, 10, 10, 10, 10, 11], "signal": "RPM", "type": "columns"}
 {"recording": 0, "samples": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "signal": "VIN", "type": "columns"}
-{"highest": [3513, 4325, 5125, 5913, 6721, 6806, 5189, 3595, 2018, 1995], "lowest": [2000, 3591, 4405, 5205, 5996, 5354, 3756, 2179, 1991, 1988], "recording": 1, "samples": [20, 10, 10, 10, 10, 10, 10, 10, 10, 10], "signal": "RPM", "type": "columns"}
+{"delta": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "delta_from": 0, "highest": [3201, 3997, 4803, 5592, 6401, 6806, 5852, 4234, 2649, 1995], "lowest": [2486, 3280, 4080, 4884, 5671, 6015, 4392, 2804, 1995, 1988], "mean": [2842.3, 3634.2, 4443.1, 5241, 6036.4, 6488, 5113.9, 3516.5, 2170.1, 1992.1818181818182], "recording": 1, "samples": [10, 10, 10, 10, 10, 10, 10, 10, 10, 11], "signal": "RPM", "type": "columns"}
 {"recording": 1, "samples": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "signal": "VIN", "type": "columns"}
 {"recording": 0, "t_us": 2000000, "type": "at", "values": [{"host_us": 16600000, "signal": "RPM", "text": "5671"}, {"host_us": 500000, "signal": "VIN", "text": "ZZZFAKE11M0000001"}]}
 {"recording": 1, "t_us": 2000000, "type": "at", "values": [{"host_us": 26600000, "signal": "RPM", "text": "5671"}, {"host_us": 500000, "signal": "VIN", "text": "ZZZFAKE11M0000001"}]}

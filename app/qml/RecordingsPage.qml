@@ -16,7 +16,8 @@ pragma ComponentBehavior: Bound
 // viewer's Replay the part in view (?from=&to=). The
 // viewer: the recording's signals (ticked ones plotted, the cursor's
 // values beside each), the chart over the part in view (drag to pan, the
-// wheel or a pinch to zoom, a tap to place the cursor), markers and the
+// wheel or a pinch to zoom, a tap to place the cursor, a long press or
+// Shift+click the second, whose span gets its statistics), markers and the
 // frames check's findings on it, and the findings listed. A second
 // recording can be overlaid, its traces dashed in the first's colors,
 // lined up as havne-cli view --align-on lines two up. The vehicle picked
@@ -67,6 +68,10 @@ Page {
     // names a log's interfaces when it has several
     property bool importAsksInterface: false
     property string importNote: ""
+    // Cancel pressed on an import under way, until it ends
+    property bool importStopping: false
+    // The last import was canceled: neither made nor failed
+    property bool importCanceled: false
     property bool importFailed: false
     // [{ title, uri, folder, source, profile }] (Bridge.recentRecordings)
     property var recordings: []
@@ -104,11 +109,48 @@ Page {
         else
             maximizedTall = !maximizedTall
     }
+    // A focused box (a ComboBox, which keeps Home, End and its letters for its
+    // own choice) keeps those keys: told by its `popup`, since a style's box
+    // isn't a ComboBox to `instanceof`. Left and Right it doesn't use, and a
+    // press in the plot takes the focus back from it (chartTap)
+    readonly property bool boxFocused: root.Window.activeFocusItem !== null
+                                       && root.Window.activeFocusItem.popup !== undefined
     // F on a keyboard; a text field takes its own letters first
     Shortcut {
         sequence: "F"
         enabled: root.visible && recording.state === RecordingView.Open && !Theme.mobile
+                 && !root.boxFocused
         onActivated: root.toggleMaximized()
+    }
+    // The arrows step a cursor a sample of the snap's signal, B says which
+    // cursor they move, Home and End go to the recording's ends
+    readonly property bool cursorKeys: root.visible && recording.state === RecordingView.Open
+                                       && !Theme.mobile
+    readonly property bool editKeys: cursorKeys && !root.boxFocused
+    Shortcut {
+        sequence: "Left"
+        enabled: root.cursorKeys
+        onActivated: root.stepCursor(false)
+    }
+    Shortcut {
+        sequence: "Right"
+        enabled: root.cursorKeys
+        onActivated: root.stepCursor(true)
+    }
+    Shortcut {
+        sequence: "Home"
+        enabled: root.editKeys
+        onActivated: root.cursorToEnd(false)
+    }
+    Shortcut {
+        sequence: "End"
+        enabled: root.editKeys
+        onActivated: root.cursorToEnd(true)
+    }
+    Shortcut {
+        sequence: "B"
+        enabled: root.editKeys
+        onActivated: root.arrowsMoveB = root.hasCursorB && !root.arrowsMoveB
     }
     // The splitter below the chart: its height once dragged, -1 for the
     // page's own (the default), kept between runs
@@ -119,13 +161,97 @@ Page {
         // The maximized chart's strip of the cursor's values folded to a
         // tab, so the plot has the width
         property bool stripFolded: false
+        // The panes' heights once a seam is dragged, as JSON: a share per
+        // pane, kept by the count of panes ({ "3": [0.5, 0.25, 0.25] })
+        property string paneShares: "{}"
+        // The second cursor's hint has been shown
+        property bool spanHintSeen: false
+        // The stretches' levels the user set, as JSON by key, in display
+        // units: {} for core's defaults
+        property string stretchRules: "{}"
     }
     property alias chartHeight: viewerSettings.chartHeight
     property alias stripFolded: viewerSettings.stripFolded
+    property alias spanHintSeen: viewerSettings.spanHintSeen
     // The chart's height until the splitter sets one: on a phone 40 % of
-    // the page, no less than three panes of 72 and the time axis
-    readonly property real defaultChartHeight: phoneShape ? Math.max(248, scroller.height * 0.4)
+    // the page, no less than three panes and the time axis, its handles' height
+    readonly property real phoneChartFloor: 3 * ChartLayout.paneMinH + 2 * ChartLayout.paneGap
+                                            + ChartLayout.top + ChartLayout.axisHCursor
+                                            + ChartLayout.bottomPad + 8
+    readonly property real defaultChartHeight: phoneShape ? Math.max(phoneChartFloor, scroller.height * 0.4)
                                                           : Math.max(200, scroller.height * 0.45)
+    // Pinned, the page never scrolls: the chart gives way down to 200 so
+    // the view's list keeps this much under the splitter
+    readonly property real pinnedListMin: 2 * rowHeight
+
+    // The chart's panes (ADR-0049's viewer, panes by unit): at most 3 on a
+    // phone's page, 4 maximized or on the desktop. A pane's range is the
+    // user's once zoomed or panned (paneRanges, by pane key, dropped at an
+    // open, a close and a change of units); the heights' shares are kept
+    readonly property int paneLimit: phoneShape && !chartMaximized ? 3 : ChartLayout.paneMax
+    property var paneRanges: ({})
+    readonly property var paneShares: {
+        try {
+            const v = JSON.parse(viewerSettings.paneShares)
+            return v !== null && typeof v === "object" && !Array.isArray(v) ? v : {}
+        } catch (e) {
+            return {}
+        }
+    }
+    function setPaneRange(key, range) {
+        const next = Object.assign({}, paneRanges)
+        if (range)
+            next[key] = { vMin: range.vMin, vMax: range.vMax }
+        else
+            delete next[key]
+        paneRanges = next
+        chart.requestPaint()
+    }
+    function setPaneShares(count, shares) {
+        const next = Object.assign({}, paneShares)
+        if (shares)
+            next[count] = shares
+        else
+            delete next[count]
+        viewerSettings.paneShares = JSON.stringify(next)
+        chart.requestPaint()
+    }
+    // The drawn panes' places, assigned only when they change, so the
+    // seams' and axes' handlers aren't made again at every paint
+    property var paneBoxes: []
+    function notePanes(l) {
+        const boxes = !l ? [] : l.panes.map((p, i) => ({ index: i, key: p.key, axis: p.axis,
+                                                          top: p.top, h: p.h, left: l.left,
+                                                          plotW: l.plotW }))
+        if (JSON.stringify(boxes) !== JSON.stringify(paneBoxes))
+            paneBoxes = boxes
+    }
+    // What a double tap at x, y on the chart means: a pane's axis (a touch
+    // wide on a phone) returns its range to automatic, a seam's band evens
+    // the heights, anywhere else maximizes
+    function axisStripWidth(l) {
+        return phoneShape ? Math.max(l.left, Theme.touchTarget) : l.left
+    }
+    function doubleTapAt(x, y) {
+        const l = chart.drawn
+        if (l && l.panes.length > 1) {
+            for (const sy of l.seams) {
+                if (Math.abs(y - sy) <= ChartLayout.paneGap / 2 + 8 && x >= l.left) {
+                    setPaneShares(l.panes.length, null)
+                    return "seam"
+                }
+            }
+        }
+        if (l && l.left > 0 && x < axisStripWidth(l)) {
+            const i = ChartLayout.paneAt(l, y)
+            if (i >= 0 && l.panes[i].axis) {
+                setPaneRange(l.panes[i].key, null)
+                return "axis"
+            }
+        }
+        toggleMaximized()
+        return "maximize"
+    }
 
     // The part of the axis in view, in ms since the recording started
     // (before it too, with a compared recording that starts earlier), and
@@ -136,6 +262,8 @@ Page {
     // of the part in view (a recording with a frames.csv). The values each
     // time a recording opens
     property string detailView: "values"
+    // True from a decode choice until the recording opens again
+    property bool decodeReopen: false
     readonly property bool framesShown: detailView === "frames"
                                         && recording.state === RecordingView.Open
                                         && recording.hasFrames
@@ -152,8 +280,77 @@ Page {
     }
     property real cursorMs: NaN
     readonly property bool hasCursor: !isNaN(cursorMs)
+    // The second cursor (NaN for none). Each keeps its own place, so one can
+    // be anchored while the other walks past it; what reads out of the two
+    // goes by time, the earlier as A
+    property real cursorBMs: NaN
+    readonly property bool hasCursorB: !isNaN(cursorBMs)
+    readonly property bool hasSpan: hasCursor && hasCursorB && cursorMs !== cursorBMs
+    readonly property real spanFromMs: Math.min(cursorMs, cursorBMs)
+    readonly property real spanToMs: Math.max(cursorMs, cursorBMs)
+    // Which cursor the keys move
+    property bool arrowsMoveB: false
+    // Signal index -> { text, unit } at the second cursor
+    property var readoutB: ({})
+    // The span's ends' values, by time
+    readonly property var readoutFrom: hasSpan && cursorBMs < cursorMs ? readoutB : readout
+    readonly property var readoutTo: hasSpan && cursorBMs < cursorMs ? readout : readoutB
+    // Signal index -> RecordingView.stats' map over the span
+    property var spanStats: ({})
+    property int statsAsk: 0
+    // Which cursor the step under way moves
+    property bool stepsB: false
+    // The extremes' dots as last drawn
+    property var spanDots: []
+    // The box a Shift+drag or a long-press drag draws, NaN between drags
+    property real boxFromMs: NaN
+    property real boxToMs: NaN
+    // The plotted numbers: the statistics' rows and the extremes' dots
+    readonly property var spanRows: hasSpan
+        ? recording.signalList.filter(s => !s.isText && root.plotted[s.index] === true) : []
+    // The first cursor's hint for the second, shown once
+    property bool spanHintUp: false
+    readonly property bool spanLineUp: recording.state === RecordingView.Open && !exportShown
+                                       && (hasSpan || (spanHintUp && hasCursor))
+    Timer {
+        objectName: "spanHintTimer"
+        interval: 6000
+        running: root.spanHintUp
+        onTriggered: root.spanHintUp = false
+    }
     // Signal index -> plotted, from the recording's default at the open
     property var plotted: ({})
+    // Signal index -> its trace's color slot, by plotted order: a signal
+    // takes the lowest free slot when plotted and keeps it while it stays
+    // plotted, so unplotting another recolors nothing
+    property var slots: ({})
+    onPlottedChanged: reconcileSlots()
+    function reconcileSlots() {
+        const next = {}
+        const taken = {}
+        for (const k of Object.keys(slots)) {
+            if (plotted[k] === true) {
+                next[k] = slots[k]
+                taken[slots[k]] = true
+            }
+        }
+        for (const k of Object.keys(plotted).map(Number).sort((a, b) => a - b)) {
+            if (plotted[k] !== true || next[k] !== undefined)
+                continue
+            let slot = 0
+            while (taken[slot])
+                ++slot
+            next[k] = slot
+            taken[slot] = true
+        }
+        slots = next
+    }
+    // Only a plotted signal is drawn, and each plotted one has a slot, so a
+    // trace never falls back to its row; the fallback is for any other caller
+    function slotOf(index) {
+        const slot = slots[index]
+        return slot === undefined ? index : slot
+    }
     // The signal rows the filter leaves (ADR-0050): the recording's own
     // list while it's off. Every filter property shares one change
     // signal, so reading active re-filters on any change; the ticks are
@@ -177,6 +374,96 @@ Page {
     readonly property real touchMin: phoneShape ? Theme.touchTarget : 0
     readonly property real rowHeight: phoneShape ? Theme.touchTarget : Theme.dense ? 36 : 40
     readonly property real segmentHeight: phoneShape ? Theme.touchTarget : 30
+
+    // A phone held upright (the phone viewer's structure): the title row, the
+    // chart and its splitter stay put, and under them one list scrolls, the
+    // shown view's controls in its head. Not maximized, on its side, on the
+    // desktop or while a panel (Export) has the page
+    readonly property bool pinnedViewer: phoneShape && !Theme.shortLayout && !chartMaximized
+                                         && recording.state === RecordingView.Open && !exportShown
+    // On that form About is a view of the switch
+    readonly property bool aboutShown: pinnedViewer && detailView === "about"
+    // Each view's list head, noted as its list makes it
+    property Item valuesHead: null
+    property Item valuesFoot: null
+    property Item framesHead: null
+    property Item idsHead: null
+    property Item aboutHead: null
+    readonly property Item currentHead: !pinnedViewer ? null
+                                      : aboutShown ? aboutHead
+                                      : framesShown ? (framesById ? idsHead : framesHead)
+                                      : valuesHead
+    function noteHead(role, head) {
+        if (role === "values") valuesHead = head
+        else if (role === "frames") framesHead = head
+        else if (role === "ids") idsHead = head
+        else aboutHead = head
+    }
+    // A view's list head on the pinned form: the zoom row, the switch and
+    // the view's own controls move into its slots, so they scroll away
+    // with the list; elsewhere it is empty and takes no height
+    component ViewHead: ColumnLayout {
+        id: head
+        // values, frames, ids or about
+        required property string role
+        readonly property alias zoomSlot: zoomSlotItem
+        readonly property alias switchSlot: switchSlotItem
+        readonly property alias toolsSlot: toolsSlotItem
+        // The list it heads. A ListView keeps its contentY when its header's
+        // height changes, so a head that grows at the list's start would
+        // slide under the list's top: the list goes back to its start then,
+        // unless it was scrolled on. While a change waits for that, a contentY
+        // within the head's height of the origin is the change's, not a scroll
+        property ListView list: null
+        property bool listAtStart: true
+        property bool settling: false
+        visible: root.pinnedViewer
+        height: visible ? implicitHeight + 10 : 0
+        spacing: 10
+        function settle() {
+            head.settling = true
+            Qt.callLater(head.toStart)
+        }
+        function toStart() {
+            head.settling = false
+            if (head.visible && head.list !== null && head.list.visible && head.listAtStart)
+                head.list.positionViewAtBeginning()
+        }
+        onHeightChanged: head.settle()
+        Connections {
+            target: head.list
+            function onContentYChanged() {
+                head.listAtStart = head.list.contentY
+                                   <= head.list.originY + 1 + (head.settling ? head.height : 0)
+            }
+            function onHeightChanged() { head.settle() }
+            function onOriginYChanged() { head.settle() }
+            function onVisibleChanged() { head.settle() }
+        }
+        ColumnLayout {
+            id: zoomSlotItem
+            Layout.fillWidth: true
+            spacing: 0
+        }
+        RowLayout {
+            id: switchSlotItem
+            Layout.fillWidth: true
+        }
+        ColumnLayout {
+            id: toolsSlotItem
+            Layout.fillWidth: true
+            spacing: 0
+        }
+        Component.onCompleted: root.noteHead(role, head)
+    }
+    Component {
+        id: framesHeadComponent
+        ViewHead { role: "frames"; list: viewerFrameTable.list }
+    }
+    Component {
+        id: idsHeadComponent
+        ViewHead { role: "ids"; list: viewerFrameIds.list }
+    }
     // A column narrower than a second reads the recording's raw rows of
     // every signal in it (ADR-0049 section 5); a second or wider, the
     // reader's per-second summaries. Past this many rows in view, columns
@@ -192,10 +479,15 @@ Page {
     // on the first's axis at compareOffsetMs (its own time plus the
     // offset). alignOn says how the two line up: "start", "utc", "marker"
     // (alignLabel), "rise" or "fall" (alignSignal reaching alignLevel, in
-    // display units, after being alignHysteresis beyond it), or "engine"
+    // display units, after being alignHysteresis beyond it), "engine"
     // (each engine's first start: RPM reaching 500 after being below 100)
+    // or "pull" (the start of a pull chosen in each: alignPullHere of
+    // pullsHere on alignPullThere of pullsThere)
     readonly property bool comparing: compare.state !== RecordingView.Closed
     property string compareTitle: ""
+    // The Compare controls shown above the chart (the title row's Compare...
+    // opens them; a compare started from anywhere does too)
+    property bool compareOpen: false
     property bool compareAligned: false
     property real compareOffsetMs: 0
     property string compareStatus: ""
@@ -208,6 +500,52 @@ Page {
     property string alignSignal: ""
     property real alignLevel: NaN
     property real alignHysteresis: 0
+    // Each recording's pulls in time order (RecordingView.stretches; null
+    // until its answer), and the place of the one chosen in each
+    property var pullsHere: null
+    property var pullsThere: null
+    // This recording's stretches, pulls and cruises in time order, from one
+    // ask per open (RecordingView.stretches; null until answered): the Jump
+    // row's list, the bands' and the alignment's pulls here. A failed ask is
+    // stretchFailed, never an empty list
+    property var stretchList: null
+    property bool stretchFailed: false
+    property int stretchAsk: 0
+    property bool bandsShown: true
+    // The Stretches panel's levels: what is in force, the panel above the
+    // chart (in its place on a phone), and the words of the last refusal
+    readonly property var stretchRules: readRules(viewerSettings.stretchRules)
+    property bool stretchesOpen: false
+    property string rulesProblem: ""
+    // The levels the last accepted ask went out with (the stored ones, or
+    // the defaults when those were refused) and the unit system they were
+    // read in: Compare's ask takes the same, and a change of units asks again
+    property var askedRules: ({})
+    property int stretchUnits: 0
+    function readRules(text) {
+        try {
+            const v = JSON.parse(text)
+            return v !== null && typeof v === "object" && !Array.isArray(v) ? v : ({})
+        } catch (e) {
+            return ({})
+        }
+    }
+    // The stretch last jumped to: its kind and its place in that kind's
+    // list, -1 for none
+    property string jumpKind: ""
+    property int jumpIndex: -1
+    onStretchListChanged: chart.requestPaint()
+    onBandsShownChanged: chart.requestPaint()
+    onJumpIndexChanged: chart.requestPaint()
+    // An ask that failed (the file changed since the open): not a
+    // recording with no pull
+    property bool pullsHereFailed: false
+    property bool pullsThereFailed: false
+    property int pullsThereAsk: 0
+    property int alignPullHere: 0
+    property int alignPullThere: 0
+    onAlignPullHereChanged: align()
+    onAlignPullThereChanged: align()
     onAlignOnChanged: align()
     onAlignLabelChanged: align()
     onAlignSignalChanged: align()
@@ -225,11 +563,32 @@ Page {
     property var frameTest: null
     readonly property bool frameTesting: frameTest !== null
 
+    // Four signals of four panes where the recording has them, so the test
+    // draws the most panes the chart shows, then the first others
+    function frameTestSignals(list) {
+        const numbers = list.filter(s => !s.isText && s.samples > 0)
+        const keys = []
+        const picked = []
+        for (const s of numbers) {
+            const key = ChartLayout.paneKey(s.unit)
+            if (keys.indexOf(key) < 0 && picked.length < 4) {
+                keys.push(key)
+                picked.push(s)
+            }
+        }
+        for (const s of numbers) {
+            if (picked.length < 4 && picked.indexOf(s) < 0)
+                picked.push(s)
+        }
+        return picked
+    }
+
     function startFrameTest() {
         const four = {}
-        for (const s of recording.signalList.filter(s => !s.isText && s.samples > 0).slice(0, 4))
+        for (const s of frameTestSignals(recording.signalList))
             four[s.index] = true
-        frameTest = { begun: Date.now(), frames: [0, 0], plotted: plotted, signals: Object.keys(four).length }
+        frameTest = { begun: Date.now(), frames: [0, 0], plotted: plotted, signals: Object.keys(four).length,
+                      panes: 0 }
         plotted = four
         chart.paints = 0
         chart.paintMs = 0
@@ -256,17 +615,18 @@ Page {
     function finishFrameTest() {
         const t = frameTest
         const seconds = (Date.now() - t.begun) / 1000
+        const panes = chart.drawn ? chart.drawn.panes.length : 0
         frameTest = null
         plotted = t.plotted
         showAll()
         // Frames shown in each half, panning then zooming
         const half = seconds / 2
-        frameTestResult = qsTr("Frame test, %1 plotted at %2 px: %3 frames/s shown panning, %4 zooming; "
-                               + "%5 charts drawn/s, %6 ms a chart on average, %7 ms at most")
+        frameTestResult = qsTr("Frame test, %1 plotted in %8 at %2 px: %3 frames/s shown panning, "
+                               + "%4 zooming; %5 charts drawn/s, %6 ms a chart on average, %7 ms at most")
             .arg(t.signals).arg(Math.round(chart.shownW))
             .arg((t.frames[0] / half).toFixed(1)).arg((t.frames[1] / half).toFixed(1))
             .arg((chart.paints / seconds).toFixed(1))
-            .arg((chart.paintMs / Math.max(1, chart.paints)).toFixed(1)).arg(chart.paintMaxMs)
+            .arg((chart.paintMs / Math.max(1, chart.paints)).toFixed(1)).arg(chart.paintMaxMs).arg(panes === 1 ? qsTr("1 pane") : qsTr("%1 panes").arg(panes))
         Bridge.logEvent(frameTestResult)
     }
 
@@ -288,6 +648,7 @@ Page {
         importMap = ""
         importAsksInterface = false
         importInterface.text = ""
+        importLabel.text = ""
         importNote = ""
         importFailed = false
         importOpen = true
@@ -301,6 +662,10 @@ Page {
         if (importKind !== RecordingImport.Csv || importMap.toString() !== "")
             return
         importGuessing = Bridge.recordingImport.guess(importFile, "")
+        if (!importGuessing) {
+            importFailed = true
+            importNote = qsTr("The file couldn't be read. Column map... picks a map instead.")
+        }
     }
 
     // A map file chosen (the dialog, or one saved earlier) instead of the
@@ -327,13 +692,15 @@ Page {
     function startImport() {
         importNote = ""
         importFailed = false
-        if (importUsesGuess) {
-            Bridge.recordingImport.startWithMap(importFile, guessPreview.mapText())
-            return
+        const started = importUsesGuess
+            ? Bridge.recordingImport.startWithMap(importFile, guessPreview.mapText())
+            : Bridge.recordingImport.start(importFile, importKind, importMap,
+                                           importKind === RecordingImport.Candump
+                                           ? importInterface.text : "")
+        if (!started) {
+            importFailed = true
+            importNote = qsTr("Not imported: the import couldn't start")
         }
-        Bridge.recordingImport.start(importFile, importKind, importMap,
-                                     importKind === RecordingImport.Candump
-                                     ? importInterface.text : "")
     }
 
     // What an import made, in words
@@ -341,10 +708,18 @@ Page {
         if (importKind === RecordingImport.Candump)
             return qsTr("Imported %1 frames over %2 s")
                        .arg(result.frames).arg((result.durationUs / 1e6).toFixed(1))
-        return result.columnsIgnored > 0
-               ? qsTr("Imported %1 values; columns ignored: %2")
-                     .arg(result.values).arg(result.columnsIgnored)
-               : qsTr("Imported %1 values").arg(result.values)
+        const words = result.columnsIgnored > 0
+                      ? qsTr("Imported %1 values; columns ignored: %2")
+                            .arg(result.values).arg(result.columnsIgnored)
+                      : qsTr("Imported %1 values").arg(result.values)
+        if (!(result.rowsNoTime > 0))
+            return words
+        // A row with no time has nowhere to go: core leaves it out, counted.
+        // havne-cli's words; after a count of columns a comma would read as its
+        const left = result.rowsNoTime === 1
+                     ? qsTr("1 row with no time left out")
+                     : qsTr("%1 rows with no time left out").arg(result.rowsNoTime)
+        return words + (result.columnsIgnored > 0 ? "; " : ", ") + left
     }
 
     function checkBaseline() {
@@ -410,10 +785,13 @@ Page {
     }
 
     function backToList() {
+        importNote = ""
         closeExport()
+        stretchesOpen = false
         recording.close()
         viewFrames.clear()
         detailView = "values"
+        decodeReopen = false
         stopComparing()
         alignChoice.currentIndex = 0
         alignOn = "start"
@@ -481,27 +859,187 @@ Page {
         setView(t - half, t + half)
     }
 
+    // The cursors' time tags on the axis row, for the layout to keep its
+    // captions out from under them: the time and the tag's width
+    function cursorTags() {
+        const out = []
+        for (const ms of [cursorMs, cursorBMs]) {
+            if (isFinite(ms) && ms >= viewT0 && ms <= viewT1)
+                out.push({ ms: ms, width: Math.max(phoneShape ? Theme.touchTarget : 24,
+                                                   timeTextWidth(ms) + 8) })
+        }
+        return out
+    }
+    FontMetrics { id: tagMetrics; font.pixelSize: ChartLayout.labelPx; font.family: Theme.valueFamily }
+    function timeTextWidth(ms) {
+        return tagMetrics.advanceWidth(timeText(ms, true))
+    }
+
     // A tapped time moved to the nearest sample of the first signal
     // plotted, so the cursor stands where the line has a sample and reads
     // the value drawn there; as it is with nothing plotted
+    function snapSignal() {
+        return recording.signalList.find(s => !s.isText && root.plotted[s.index] === true)
+    }
     function snapped(t) {
-        const first = recording.signalList.find(s => !s.isText && root.plotted[s.index] === true)
+        const first = snapSignal()
         if (!first)
             return t
         const at = recording.nearestSampleMs(first.index, t)
         return at >= 0 ? at : t
     }
-    function setCursor(t) {
-        cursorMs = Math.min(Math.max(axisStart(), t), axisEnd())
+    function valuesAtTime(t) {
         const values = {}
-        const indexes = recording.signalList.map(s => s.index)
-        if (cursorMs >= 0) {
-            for (const v of recording.valuesAt(indexes, cursorMs))
+        if (t >= 0) {
+            for (const v of recording.valuesAt(recording.signalList.map(s => s.index), t))
                 values[v.index] = v
         }
-        readout = values
-        compareReadout = compareValuesAt(cursorMs)
+        return values
+    }
+    function setCursor(t) {
+        cursorMs = Math.min(Math.max(axisStart(), t), axisEnd())
+        readout = valuesAtTime(cursorMs)
+        refreshCompareReadout()
+        if (!hasCursorB && !spanHintSeen) {
+            spanHintSeen = true
+            spanHintUp = true
+        }
+        askSpanStats()
         chart.requestPaint()
+    }
+    function setCursorB(t) {
+        cursorBMs = Math.min(Math.max(axisStart(), t), axisEnd())
+        readoutB = valuesAtTime(cursorBMs)
+        refreshCompareReadout()
+        spanHintUp = false
+        askSpanStats()
+        chart.requestPaint()
+    }
+    // The compared recording's values at the cursor the rows read: the first,
+    // or the earlier of two
+    function refreshCompareReadout() {
+        compareReadout = compareValuesAt(hasSpan ? spanFromMs : cursorMs)
+    }
+    function clearCursorB() {
+        cursorBMs = NaN
+        readoutB = ({})
+        refreshCompareReadout()
+        spanStats = ({})
+        statsAsk = 0
+        arrowsMoveB = false
+        chart.requestPaint()
+    }
+    // The second gesture at time t: with no first cursor yet it places that
+    function placeSecond(t) {
+        if (hasCursor)
+            setCursorB(t)
+        else
+            setCursor(t)
+    }
+    function askSpanStats() {
+        if (!hasSpan) {
+            statsAsk = 0
+            spanStats = ({})
+            return
+        }
+        statsAsk = recording.stats(recording.signalList.map(s => s.index), spanFromMs, spanToMs)
+        if (statsAsk === 0)
+            spanStats = ({})
+    }
+    function zoomToSpan() {
+        const pad = (spanToMs - spanFromMs) * 0.05
+        setView(spanFromMs - pad, spanToMs + pad)
+    }
+    // Keeps a cursor a key moved in the view
+    function bringIntoView(t) {
+        if (t < viewT0 || t > viewT1)
+            centerOn(t)
+    }
+    function moveKeyed(t, isB) {
+        if (isB)
+            setCursorB(t)
+        else
+            setCursor(t)
+        bringIntoView(t)
+    }
+    function stepCursor(forward) {
+        const s = snapSignal()
+        const from = arrowsMoveB ? cursorBMs : cursorMs
+        if (!s || isNaN(from))
+            return
+        stepsB = arrowsMoveB
+        recording.step(s.index, from, forward)
+    }
+    function cursorToEnd(last) {
+        moveKeyed(snapped(last ? durationMs() : 0), arrowsMoveB)
+    }
+    // A cursor's handle let go: on a sample, and one dropped on the other
+    // leaves a single cursor
+    // The nearest sample can lie past the view's end by half a sample when the
+    // end is off the grid (a wheel zoom): then the one in force at the end,
+    // so the handle never drops out of view
+    function snappedInView(t) {
+        const s = snapped(t)
+        if (s < viewT0)
+            return viewT0
+        const first = snapSignal()
+        if (s <= viewT1 || !first)
+            return Math.min(s, viewT1)
+        const at = recording.valuesAt([first.index], viewT1)
+        return at.length > 0 && at[0].atMs >= 0 ? at[0].atMs : viewT1
+    }
+    function dropHandle(isB) {
+        const t = snappedInView(isB ? cursorBMs : cursorMs)
+        if (isB)
+            setCursorB(t)
+        else
+            setCursor(t)
+        if (hasCursorB && Math.abs(xOfTime(cursorMs) - xOfTime(cursorBMs)) <= handleDropPx)
+            clearCursorB()
+    }
+    readonly property real handleDropPx: 4
+    // A time's x in the chart's frame
+    function xOfTime(t) {
+        return chart.x + plotLeft() + (t - viewT0) / (viewT1 - viewT0) * Math.max(1, plotWidth() - 1)
+    }
+    function finishBox() {
+        const a = snapped(Math.min(boxFromMs, boxToMs))
+        const b = snapped(Math.max(boxFromMs, boxToMs))
+        boxFromMs = NaN
+        boxToMs = NaN
+        setCursor(a)
+        if (b !== a)
+            setCursorB(b)
+        else if (hasCursorB)
+            clearCursorB()
+    }
+    // A change, signed, in a signal's decimals
+    function changeText(v, decimals, unit) {
+        return v > 0 ? "+" + valueText(v, decimals, unit) : valueText(v, decimals, unit)
+    }
+    // A statistic of a row, or a dash with none
+    function statText(v, s) {
+        return isFinite(v) ? valueText(v, s.decimals, s.unit) : qsTr("—")
+    }
+    function statChange(s) {
+        return s && isFinite(s.change) ? changeText(s.change, s.decimals, s.unit) : qsTr("—")
+    }
+    function statRate(s) {
+        return s && isFinite(s.rate)
+               ? changeText(s.rate, s.decimals + 1, s.unit !== "" ? s.unit + "/s" : "/s") : qsTr("—")
+    }
+    // A value at one of the span's ends, as the rows show it
+    function atText(at, s) {
+        return !at || at.atMs < 0 ? qsTr("—")
+               : s.isText ? at.text
+               : at.label ? at.label
+               : valueText(Number(at.text), s.decimals, at.unit)
+    }
+    // The second line a row and a strip's cell show with a span
+    function spanCaption(s) {
+        const stat = spanStats[s.index]
+        return s.isText ? qsTr("B %1").arg(atText(readoutTo[s.index], s))
+                        : qsTr("B %1 · Δ %2").arg(atText(readoutTo[s.index], s)).arg(statChange(stat))
     }
 
     function togglePlotted(index) {
@@ -515,8 +1053,12 @@ Page {
     function plotWidth() {
         return chart.drawn ? chart.drawn.plotW : chart.shownW
     }
+    // The plot's left edge in the chart: the panes' axes are left of it
+    function plotLeft() {
+        return chart.drawn ? chart.drawn.left : 0
+    }
     function timeAt(x) {
-        return viewT0 + (x - chart.x) / Math.max(1, plotWidth() - 1) * (viewT1 - viewT0)
+        return viewT0 + (x - chart.x - plotLeft()) / Math.max(1, plotWidth() - 1) * (viewT1 - viewT0)
     }
 
     // The chart's series: each plotted number's columns over the view, its
@@ -538,11 +1080,14 @@ Page {
         let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
         if (spanS * (rowsPerSecond + (compareAligned ? compareRowsPerSecond : 0)) > rawRowsPerFrame)
             n = Math.max(1, Math.min(n, Math.floor(spanS)))
-        const inView = cursorMs >= viewT0 && cursorMs <= viewT1
-        const labelOf = at => inView && at && at.text !== "" ? Number(at.text) : NaN
+        // The labels follow the readout's A, the earlier of the two cursors,
+        // the compared recording's too
+        const fromMs = hasSpan ? spanFromMs : cursorMs
+        const fromInView = fromMs >= viewT0 && fromMs <= viewT1
+        const labelOf = (at, shown) => shown && at && at.text !== "" ? Number(at.text) : NaN
         // Where that value's sample lies on the axis: a dot marks it
-        const labelMsOf = (at, offset) => inView && at && at.text !== "" && at.atMs >= 0
-                                          ? at.atMs + offset : NaN
+        const labelMsOf = (at, offset, shown) => shown && at && at.text !== "" && at.atMs >= 0
+                                                 ? at.atMs + offset : NaN
         // The columns lie on a grid from time 0, not from the view's
         // start, so a pan carries each column's samples along with it
         // rather than regrouping them, and a noisy trace's peaks hold
@@ -555,9 +1100,10 @@ Page {
         const out = indexes.length === 0 ? [] : recording.columns(indexes, g0, g1, gn).map(c => {
             const s = sigs[c.index]
             return { columns: { lows: c.lows, highs: c.highs, t0: g0, t1: g1 }, row: c.index,
+                     slot: root.slotOf(c.index),
                      scaleKey: c.index, decimals: s.decimals, unit: s.unit,
-                     labelValue: labelOf(root.readout[c.index]),
-                     labelMs: labelMsOf(root.readout[c.index], 0) }
+                     labelValue: labelOf(root.readoutFrom[c.index], fromInView),
+                     labelMs: labelMsOf(root.readoutFrom[c.index], 0, fromInView) }
         })
         if (!compareAligned)
             return out
@@ -573,10 +1119,10 @@ Page {
             const mine = pairs[k].mine
             const s = theirs[pairs[k].theirs]
             out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs, t0: g0, t1: g1 },
-                       row: mine,
-                       scaleKey: mine, dash: Theme.seriesCompareDash(mine), decimals: s.decimals,
-                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine]),
-                       labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs) })
+                       row: mine, slot: root.slotOf(mine),
+                       scaleKey: mine, dash: Theme.seriesCompareDash(root.slotOf(mine)), decimals: s.decimals,
+                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine], fromInView),
+                       labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs, fromInView) })
         }
         return out
     }
@@ -595,12 +1141,14 @@ Page {
     }
 
     function compareWith(row) {
+        compareOpen = true
         compareTitle = row.title
         compareAligned = false
         compareStatus = qsTr("Opening %1…").arg(row.title)
         compare.open(row.folder)
     }
     function stopComparing() {
+        compareOpen = false
         compare.close()
         compareTitle = ""
         compareStatus = ""
@@ -622,6 +1170,145 @@ Page {
     }
     function numberNames() {
         return recording.signalList.filter(s => !s.isText).map(s => s.name)
+    }
+    // Asks each recording for its pulls, once: the answers align again
+    function askPulls() {
+        if (pullsHere === null && stretchAsk === 0)
+            askStretches()
+        if (pullsThere === null && pullsThereAsk === 0)
+            pullsThereAsk = compare.stretches(true, false, forcedRules())
+    }
+    // One ask for both kinds: only the newest ask per view is answered, so
+    // the Jump row, the bands and the alignment share it
+    function askStretches() {
+        if (recording.state !== RecordingView.Open)
+            return
+        rulesProblem = ""
+        stretchUnits = Bridge.unitSystem
+        let used = stretchRules
+        let request = recording.stretches(true, true, used)
+        if (request === 0 && recording.stretchesProblem !== "") {
+            // A stored level that is none today: the defaults, with the
+            // words under the panel's fields, never a refused ask
+            rulesProblem = recording.stretchesProblem
+            used = ({})
+            request = recording.stretches(true, true, used)
+        }
+        stretchAsk = request
+        if (request === 0) {
+            stretchFailed = true
+            pullsHereFailed = true
+            pullsHere = []
+        } else {
+            askedRules = used
+        }
+    }
+    // The levels in force for the compared recording's ask too, so a pull is
+    // counted by one rule in both
+    function forcedRules() {
+        return askedRules
+    }
+    // Asks again with the levels in force, here and there: a change of unit
+    // system reads the same typed numbers in the other unit
+    function reaskStretches() {
+        stretchList = null
+        stretchFailed = false
+        pullsHere = null
+        pullsHereFailed = false
+        jumpIndex = -1
+        askStretches()
+        if (compare.state === RecordingView.Open) {
+            pullsThere = null
+            alignPullThere = 0
+            pullsThereAsk = compare.stretches(true, false, askedRules)
+        }
+    }
+    // Asks again with the panel's levels. A refusal leaves the earlier answer
+    // standing and its words under the fields
+    function applyStretchRules(rules) {
+        const request = recording.stretches(true, true, rules)
+        if (request === 0) {
+            rulesProblem = recording.stretchesProblem
+            if (rulesProblem === "")
+                stretchFailed = true
+            return
+        }
+        rulesProblem = ""
+        askedRules = rules
+        stretchUnits = Bridge.unitSystem
+        viewerSettings.stretchRules = JSON.stringify(rules)
+        stretchAsk = request
+        stretchList = null
+        stretchFailed = false
+        pullsHere = null
+        jumpIndex = -1
+        if (compare.state === RecordingView.Open) {
+            pullsThere = null
+            alignPullThere = 0
+            pullsThereAsk = compare.stretches(true, false, rules)
+        }
+        // On a phone the panel stood where the chart is: back to it
+        if (Theme.compact)
+            stretchesOpen = false
+    }
+    function stretchesOf(kind) {
+        return stretchList === null ? [] : stretchList.filter(s => s.kind === kind)
+    }
+    // Where a jump goes on from: the cursor, else the view's start
+    function jumpBase() {
+        return hasCursor ? cursorMs : viewT0
+    }
+    // The place in a kind's list of the first stretch after the base, or
+    // of the last before it; -1 for none
+    function nextStretch(kind) {
+        const at = jumpBase()
+        return stretchesOf(kind).findIndex(s => s.fromMs > at + 0.5)
+    }
+    function previousStretch(kind) {
+        const at = jumpBase()
+        const list = stretchesOf(kind)
+        for (let i = list.length - 1; i >= 0; --i) {
+            if (list[i].fromMs < at - 0.5)
+                return i
+        }
+        return -1
+    }
+    // The stretch in view with a margin, the cursor at its start
+    function jump(kind, direction) {
+        const i = direction > 0 ? nextStretch(kind) : previousStretch(kind)
+        if (i < 0)
+            return
+        const s = stretchesOf(kind)[i]
+        const margin = Math.max(minSpanMs, (s.toMs - s.fromMs) / 4)
+        setView(s.fromMs - margin, s.toMs + margin)
+        setCursor(s.fromMs)
+        jumpKind = kind
+        jumpIndex = i
+    }
+    // The Jump row's line: where the last jump went while the cursor is
+    // still at its start, else how many of each were found
+    readonly property string jumpStatus: {
+        if (stretchFailed)
+            return qsTr("Its stretches couldn't be read")
+        if (stretchList === null)
+            return qsTr("Looking for stretches…")
+        const list = jumpIndex >= 0 ? stretchesOf(jumpKind) : []
+        const at = jumpIndex >= 0 ? list[jumpIndex] : undefined
+        if (at !== undefined && hasCursor && Math.abs(cursorMs - at.fromMs) < 0.5)
+            return qsTr("%1 %2 of %3 · %4").arg(jumpKind === "pull" ? qsTr("Pull") : qsTr("Cruise"))
+                       .arg(jumpIndex + 1).arg(list.length).arg(timeText(at.fromMs, true))
+        const pulls = stretchesOf("pull").length
+        const cruises = stretchesOf("cruise").length
+        return (pulls === 0 ? qsTr("No pull found")
+                            : pulls === 1 ? qsTr("1 pull") : qsTr("%1 pulls").arg(pulls)) + " · "
+               + (cruises === 0 ? qsTr("No cruise found")
+                                : cruises === 1 ? qsTr("1 cruise") : qsTr("%1 cruises").arg(cruises))
+    }
+    // A recording's pulls as the choices' rows: its number, start and length
+    function pullRows(pulls, here) {
+        return (pulls || []).map((p, i) =>
+            (here ? qsTr("Pull %1 here · %2 · %3") : qsTr("Pull %1 there · %2 · %3"))
+                .arg(i + 1).arg(timeText(p.fromMs, true)).arg(lengthText(p.toMs - p.fromMs)))
     }
     function setAlignOn(on) {
         if (on === "marker" && alignLabel === "")
@@ -683,6 +1370,22 @@ Page {
             what = qsTr("their engine starts")
             here = recording.findEngineStart()
             there = compare.findEngineStart()
+        } else if (alignOn === "pull") {
+            if (pullsHere === null || pullsThere === null) {
+                askPulls()
+                compareStatus = qsTr("Dashed: %1. Finding each recording's pulls…").arg(compareTitle)
+                return
+            }
+            if (pullsHereFailed || pullsThereFailed) {
+                compareStatus = (pullsHereFailed && pullsThereFailed
+                                 ? qsTr("%1 isn't drawn: neither recording's pulls could be read")
+                                 : pullsHereFailed ? qsTr("%1 isn't drawn: this recording's pulls couldn't be read")
+                                 : qsTr("%1 isn't drawn: its pulls couldn't be read")).arg(compareTitle)
+                return
+            }
+            what = qsTr("pull %1 here and pull %2 there").arg(alignPullHere + 1).arg(alignPullThere + 1)
+            here = alignPullHere < pullsHere.length ? pullsHere[alignPullHere].fromMs : -1
+            there = alignPullThere < pullsThere.length ? pullsThere[alignPullThere].fromMs : -1
         }
         if (here < 0 || there < 0) {
             compareStatus = alignOn === "utc"
@@ -694,6 +1397,12 @@ Page {
                    ? qsTr("%1 isn't drawn: neither has an engine start (RPM reaching 500 after being below 100)")
                    : here < 0 ? qsTr("%1 isn't drawn: this recording has no engine start (RPM reaching 500 after being below 100)")
                    : qsTr("%1 isn't drawn: it has no engine start (RPM reaching 500 after being below 100)"))
+                  .arg(compareTitle)
+                : alignOn === "pull"
+                ? (here < 0 && there < 0
+                   ? qsTr("%1 isn't drawn: neither recording has a pull (full throttle for a second while it accelerates)")
+                   : here < 0 ? qsTr("%1 isn't drawn: this recording has no pull (full throttle for a second while it accelerates)")
+                   : qsTr("%1 isn't drawn: it has no pull (full throttle for a second while it accelerates)"))
                   .arg(compareTitle)
                 : here < 0 && there < 0 ? qsTr("%1 isn't drawn: neither has %2").arg(compareTitle).arg(what)
                 : here < 0 ? qsTr("%1 isn't drawn: this recording has no %2").arg(compareTitle).arg(what)
@@ -718,7 +1427,8 @@ Page {
     function timeText(ms, tenths) {
         if (ms < 0)
             return "-" + timeText(-ms, tenths)
-        const s = ms / 1000
+        // Tenths are rounded as a whole first: 119.96 s is 2:00.0, never 1:60.0
+        const s = tenths ? Math.round(ms / 100) / 10 : ms / 1000
         if (s < 60)
             return tenths ? qsTr("%1 s").arg(s.toFixed(1)) : qsTr("%1 s").arg(Math.round(s))
         const whole = Math.floor(s)
@@ -772,10 +1482,28 @@ Page {
     function decodeWith(value) {
         if (value === recording.decodedWith && recording.state === RecordingView.Open)
             return
+        decodeReopen = true
         if (value === "")
             recording.open(recording.folder)
         else
             recording.openFrames(recording.folder, value)
+    }
+
+    // A row's length, whether it is a log of chosen signals or a whole
+    // session, its signal count and its marks
+    function rowFacts(row) {
+        const parts = []
+        if (row.durationMs >= 0)
+            parts.push(lengthText(row.durationMs))
+        if (row.log)
+            parts.push(row.signals === 1 ? qsTr("log, 1 signal") : qsTr("log, %1 signals").arg(row.signals))
+        else if (row.frames !== false)
+            parts.push(qsTr("session"))
+        else if (row.signals > 0)
+            parts.push(row.signals === 1 ? qsTr("1 signal") : qsTr("%1 signals").arg(row.signals))
+        if (row.marks > 0)
+            parts.push(row.marks === 1 ? qsTr("1 mark") : qsTr("%1 marks").arg(row.marks))
+        return parts.join(" · ")
     }
 
     // A row's second line: the address it was recorded from and the
@@ -831,7 +1559,10 @@ Page {
         id: importDialog
         title: qsTr("Import a log")
         fileMode: FileDialog.OpenFile
-        nameFilters: [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
+        // Android's picker filters by MIME type and grays out a .csv it indexes
+        // as another type: every file is offered there
+        nameFilters: Qt.platform.os === "android" ? [qsTr("All files (*)")]
+                                                  : [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         onAccepted: root.chooseImportFile(importDialog.selectedFile)
     }
@@ -914,6 +1645,10 @@ Page {
         if (started) {
             reportFailed = false
             reportNote = qsTr("Saving the report…")
+        } else if (!recording.reporting) {
+            // Not a report already under way: the note says this one didn't start
+            reportFailed = true
+            reportNote = qsTr("Report not saved: the report couldn't start")
         }
         return started
     }
@@ -929,14 +1664,49 @@ Page {
         id: recording
         unitSystem: Bridge.unitSystem
         onReportSaved: result => root.reportSaved(result)
+        onStatsReady: (request, stats) => {
+            if (request !== root.statsAsk)
+                return
+            const byIndex = {}
+            for (const s of stats)
+                byIndex[s.index] = s
+            root.spanStats = byIndex
+            chart.repaintMarks()
+        }
+        onStepReady: (request, atMs) => {
+            if (atMs >= 0)
+                root.moveKeyed(atMs, root.stepsB)
+        }
+        onStretchesReady: (request, found, ok) => {
+            if (request !== root.stretchAsk)
+                return
+            root.stretchAsk = 0
+            root.stretchFailed = !ok
+            root.stretchList = found
+            root.jumpIndex = -1
+            root.alignPullHere = 0
+            root.pullsHereFailed = !ok
+            root.pullsHere = found.filter(s => s.kind === "pull")
+            if (root.comparing)
+                root.align()
+        }
         onStateChanged: {
             root.reportNote = ""
             root.reportFailed = false
+            root.pullsHere = null
+            root.pullsHereFailed = false
+            root.stretchAsk = 0
+            root.stretchList = null
+            root.stretchFailed = false
+            root.jumpIndex = -1
+            root.stretchesOpen = false
+            root.alignPullHere = 0
             if (recording.state !== RecordingView.Open)
                 return
             const defaults = {}
             for (const s of recording.signalList)
                 defaults[s.index] = s.plotted
+            root.slots = ({})
             root.plotted = defaults
             root.readout = ({})
             let rows = 0
@@ -944,15 +1714,26 @@ Page {
                 rows += s.samples
             root.rowsPerSecond = rows / (root.durationMs() / 1000)
             root.cursorMs = NaN
-            root.detailView = "values"
+            root.spanHintUp = false
+            root.clearCursorB()
+            // A decode chosen in the pinned form's About reopens into About
+            root.detailView = root.decodeReopen && root.detailView === "about" ? "about" : "values"
+            root.decodeReopen = false
             root.framesById = false
             root.framesFilterOpen = false
             framesFilterPanel.clear()
             root.showAll()
+            root.askStretches()
         }
         onSignalListChanged: {
+            // An open, a close or new units: a range set before means nothing
+            root.paneRanges = ({})
             if (root.hasCursor)
                 root.setCursor(root.cursorMs)
+            if (root.hasCursorB)
+                root.setCursorB(root.cursorBMs)
+            if (recording.state === RecordingView.Open && root.stretchUnits !== Bridge.unitSystem)
+                root.reaskStretches()
             chart.requestPaint()
         }
     }
@@ -960,7 +1741,20 @@ Page {
     RecordingView {
         id: compare
         unitSystem: Bridge.unitSystem
+        onStretchesReady: (request, found, ok) => {
+            if (request !== root.pullsThereAsk)
+                return
+            root.pullsThereAsk = 0
+            root.alignPullThere = 0
+            root.pullsThereFailed = !ok
+            root.pullsThere = found
+            root.align()
+        }
         onStateChanged: {
+            root.pullsThere = null
+            root.pullsThereFailed = false
+            root.pullsThereAsk = 0
+            root.alignPullThere = 0
             if (compare.state === RecordingView.Open) {
                 const names = {}
                 let rows = 0
@@ -996,11 +1790,16 @@ Page {
             }
         }
         function onFinished(result) {
-            root.importFailed = !result.ok
+            root.importStopping = false
+            root.importCanceled = result.canceled === true
+            root.importFailed = !result.ok && !root.importCanceled
             if (result.ok) {
-                root.importNote = root.importedWords(result)
                 root.importOpen = false
-                root.refresh()
+                root.openFolder(result.folder)
+                root.importNote = root.importedWords(result)
+            } else if (root.importCanceled) {
+                // The panel stays, its choices kept, for another try
+                root.importNote = qsTr("Import canceled: nothing was imported")
             } else {
                 root.importNote = result.words
                 if (root.importKind === RecordingImport.Candump)
@@ -1062,10 +1861,11 @@ Page {
         anchors.fill: parent
         clip: true
         contentWidth: width
-        contentHeight: Math.max(height, column.implicitHeight + 2 * Theme.pageMargin)
+        contentHeight: root.pinnedViewer ? height
+                                         : Math.max(height, column.implicitHeight + 2 * Theme.pageMargin)
         flickableDirection: Flickable.VerticalFlick
         boundsBehavior: Flickable.StopAtBounds
-        interactive: contentHeight > height && !pan.active && !pinch.active
+        interactive: !root.pinnedViewer && contentHeight > height && !pan.active && !pinch.active
         ScrollBar.vertical: ScrollBar {
             policy: scroller.contentHeight > scroller.height ? ScrollBar.AlwaysOn
                                                              : ScrollBar.AsNeeded
@@ -1109,6 +1909,58 @@ Page {
                 wrapMode: Text.WrapAnywhere
                 color: Theme.text
                 text: qsTr("Import %1").arg(root.fileNameOf(root.importFile))
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                ThemedButton {
+                    objectName: "importStart"
+                    text: qsTr("Import")
+                    highlighted: true
+                    enabled: !Bridge.recordingImport.busy && root.importReady
+                    onClicked: root.startImport()
+                }
+                ThemedButton {
+                    objectName: "importCancel"
+                    text: qsTr("Cancel")
+                    // An import under way is stopped; a guess is short and
+                    // runs to its end
+                    enabled: !root.importGuessing && !root.importStopping
+                    onClicked: {
+                        if (Bridge.recordingImport.busy) {
+                            root.importStopping = true
+                            Bridge.recordingImport.cancel()
+                            return
+                        }
+                        root.importOpen = false
+                        root.importNote = ""
+                    }
+                }
+                Label {
+                    objectName: "importBusy"
+                    visible: Bridge.recordingImport.busy
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.textDim
+                    text: root.importGuessing ? qsTr("Reading...")
+                          : root.importStopping ? qsTr("Stopping...") : qsTr("Importing...")
+                }
+            }
+            // An optional name for the recording, kept as its folder's label
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                Label { text: qsTr("Label"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+                ThemedTextField {
+                    id: importLabel
+                    objectName: "importLabel"
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the row's width, not its text's
+                    placeholderText: qsTr("Optional, shown on the recording's row")
+                    inputMethodHints: Qt.ImhNoPredictiveText
+                    enabled: !Bridge.recordingImport.busy
+                    onTextChanged: Bridge.recordingImport.label = text
+                }
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -1244,44 +2096,16 @@ Page {
                     enabled: !Bridge.recordingImport.busy
                 }
             }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Theme.spacing
-                ThemedButton {
-                    objectName: "importStart"
-                    text: qsTr("Import")
-                    highlighted: true
-                    enabled: !Bridge.recordingImport.busy && root.importReady
-                    onClicked: root.startImport()
-                }
-                ThemedButton {
-                    objectName: "importCancel"
-                    text: qsTr("Cancel")
-                    enabled: !Bridge.recordingImport.busy
-                    onClicked: {
-                        root.importOpen = false
-                        root.importNote = ""
-                    }
-                }
-                Label {
-                    objectName: "importBusy"
-                    visible: Bridge.recordingImport.busy
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    color: Theme.textDim
-                    text: root.importGuessing ? qsTr("Reading...") : qsTr("Importing...")
-                }
-            }
         }
 
         // The last import's words: what it made, or why not
         Label {
             objectName: "importNote"
-            visible: root.importNote !== "" && !root.viewing
+            visible: root.importNote !== ""
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            color: root.importFailed ? Theme.danger : Theme.success
+            color: root.importFailed ? Theme.danger
+                   : root.importCanceled ? Theme.textDim : Theme.success
             text: root.importNote
         }
 
@@ -1294,7 +2118,7 @@ Page {
             color: Theme.textDim
             text: root.recordings.length > 0
                   ? qsTr("Newest first. Open one to look through it, or replay it as a session.")
-                  : qsTr("No recordings yet: turn Record on in Settings, then connect.")
+                  : qsTr("No recordings yet. Start log, in the top bar while connected, makes one; Settings, Recording keeps every session; Import brings in another logger's file.")
         }
 
         // A baseline whose folder was moved or deleted says so, on the list
@@ -1369,6 +2193,15 @@ Page {
                             objectName: "recordingTitle"
                             text: recordingRow.modelData.title
                             color: Theme.text
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Label {
+                            objectName: "recordingFacts"
+                            visible: text !== ""
+                            text: root.rowFacts(recordingRow.modelData)
+                            color: Theme.textDim
+                            font.pixelSize: Theme.fontCaption
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
@@ -1478,6 +2311,17 @@ Page {
                         text: qsTr("Save report…")
                         onClicked: reportDialog.open()
                     }
+                    // Selected while its controls are open above the chart
+                    ThemedButton {
+                        objectName: "compareButton"
+                        compact: Theme.compact
+                        Layout.fillWidth: Theme.compact
+                        Layout.preferredWidth: Theme.compact ? 1 : -1
+                        checkable: true
+                        checked: root.compareOpen
+                        text: qsTr("Compare…")
+                        onClicked: root.compareOpen = !root.compareOpen
+                    }
                 }
             }
             ThemedButton {
@@ -1537,11 +2381,66 @@ Page {
             onCloseRequested: root.closeExport()
         }
 
+        // Compare's controls, over the chart: the recording to overlay, how
+        // the two line up, and what came of it
+        ColumnLayout {
+            id: compareSlot
+            objectName: "compareSlot"
+            visible: root.compareOpen && recording.state === RecordingView.Open && !root.exportShown
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+        }
+
+        // The levels that make a stretch: over the chart, so the bands stay
+        // in sight while they are tuned; on a phone in the chart's place
+        StretchesPanel {
+            id: stretchesPanel
+            objectName: "stretchesPanel"
+            visible: root.stretchesOpen && recording.state === RecordingView.Open && !root.exportShown
+            Layout.fillWidth: true
+            Layout.fillHeight: Theme.compact
+            view: recording
+            rules: root.stretchRules
+            problem: root.rulesProblem
+            bandsShown: root.bandsShown
+            onBandsToggled: root.bandsShown = !root.bandsShown
+            onApplyRequested: rules => root.applyStretchRules(rules)
+            onCloseRequested: root.stretchesOpen = false
+        }
+
+        // The Jump row over the chart on the desktop; on a phone under it,
+        // so a recording still opens onto its chart
+        ColumnLayout {
+            id: jumpAbove
+            visible: chartFrame.visible && !Theme.compact
+            Layout.fillWidth: true
+            spacing: 0
+        }
+        RecordingJumpRow {
+            id: jumpRow
+            objectName: "jumpRow"
+            parent: Theme.compact ? jumpBelow : jumpAbove
+            visible: chartFrame.visible
+            Layout.fillWidth: true
+            status: root.jumpStatus
+            canPreviousPull: root.previousStretch("pull") >= 0
+            canNextPull: root.nextStretch("pull") >= 0
+            canPreviousCruise: root.previousStretch("cruise") >= 0
+            canNextCruise: root.nextStretch("cruise") >= 0
+            bandsShown: root.bandsShown
+            stretchesOpen: root.stretchesOpen
+            onJumpRequested: (kind, direction) => root.jump(kind, direction)
+            onBandsToggled: root.bandsShown = !root.bandsShown
+            onStretchesToggled: root.stretchesOpen = !root.stretchesOpen
+        }
+
         Rectangle {
             id: chartFrame
             objectName: "chartFrame"
-            // Maximized with Frames chosen, the table has the page instead
+            // Maximized with Frames chosen, the table has the page instead;
+            // a phone's Stretches panel stands in the chart's place
             visible: recording.state === RecordingView.Open && !root.exportShown
+                     && !(Theme.compact && root.stretchesOpen)
                      && !(root.chartMaximized && root.framesShown)
             Layout.fillWidth: true
             // A share of the page, so the rows show under it; the splitter
@@ -1549,9 +2448,11 @@ Page {
             readonly property real restingHeight: viewerSettings.chartHeight > 0
                                                   ? Math.max(200, viewerSettings.chartHeight)
                                                   : root.defaultChartHeight
-            Layout.minimumHeight: root.chartMaximized ? 200 : restingHeight
+            Layout.minimumHeight: root.chartMaximized || root.pinnedViewer ? 200 : restingHeight
             Layout.preferredHeight: root.chartMaximized ? -1 : restingHeight
-            Layout.fillHeight: root.chartMaximized
+            // Pinned, it fills up to its height, so a short page shrinks it
+            Layout.maximumHeight: root.pinnedViewer ? restingHeight : Number.POSITIVE_INFINITY
+            Layout.fillHeight: root.chartMaximized || root.pinnedViewer
             color: Theme.surface
             radius: 4
             border.color: Theme.hairline
@@ -1578,8 +2479,10 @@ Page {
             readonly property real stripHeight: !stripShown || !stripBelow ? 0
                 : viewerSettings.stripFolded ? stripFold.height + 8
                 : Math.max(stripFold.height + 8,
-                           Math.min(Math.ceil(stripModel.length / stripColumns) * 40 + 8,
+                           Math.min(Math.ceil(stripModel.length / stripColumns) * stripCellH + 8,
                                     Math.round(height * 0.4)))
+            // A cell's height: a third line with a span
+            readonly property real stripCellH: root.hasSpan ? 56 : 40
 
             StripChart {
                 id: chart
@@ -1594,18 +2497,49 @@ Page {
                 layoutOpts: ({
                     gapMs: Theme.staleMs, minSpanUnits: 20, format: root.valueText,
                     span: { t0: root.viewT0, t1: root.viewT1 }, absolute: true,
-                    caption: root.captionOf })
+                    caption: root.captionOf,
+                    tags: root.cursorTags(),
+                    axisH: root.phoneShape && root.hasCursor ? ChartLayout.axisHCursor : ChartLayout.axisH,
+                    panes: { max: root.paneLimit, minH: ChartLayout.paneMinH,
+                             shares: root.paneShares, ranges: root.paneRanges,
+                             mixedLabel: qsTr("mixed") } })
+                onDrawnChanged: root.notePanes(drawn)
                 // Findings as bars along the plot's foot, markers as dashed
-                // lines with their labels, the cursor as a solid line
+                // lines with their labels, the cursors as solid lines over
+                // their span's tint, the extremes' dots on the traces
+                decorateBelow: function(ctx, l) {
+                    if (!root.bandsShown || root.stretchList === null)
+                        return
+                    const span = root.viewT1 - root.viewT0
+                    const xOf = t => l.left + (t - root.viewT0) / span * (l.plotW - 1)
+                    const plotEnd = l.left + l.plotW
+                    const chosen = root.jumpIndex >= 0 ? root.stretchesOf(root.jumpKind)[root.jumpIndex]
+                                                       : undefined
+                    for (const s of root.stretchList) {
+                        const x0 = Math.max(l.left, xOf(s.fromMs))
+                        const x1 = Math.min(plotEnd, xOf(s.toMs))
+                        if (x1 <= x0)
+                            continue
+                        const role = s.kind === "pull" ? Theme.stretchPull : Theme.stretchCruise
+                        const here = chosen !== undefined && s.kind === root.jumpKind
+                                     && s.fromMs === chosen.fromMs
+                        ctx.fillStyle = Qt.alpha(role, here ? 0.22 : 0.15)
+                        ctx.fillRect(x0, l.top, x1 - x0, l.plotH)
+                        // The edge along the plot's top, solid
+                        ctx.fillStyle = role
+                        ctx.fillRect(x0, l.top, x1 - x0, 2)
+                    }
+                }
                 decorate: function(ctx, l) {
                     const span = root.viewT1 - root.viewT0
-                    const xOf = t => (t - root.viewT0) / span * (l.plotW - 1)
+                    const xOf = t => l.left + (t - root.viewT0) / span * (l.plotW - 1)
+                    const plotEnd = l.left + l.plotW
                     for (const f of recording.findings) {
                         const x0 = xOf(f.atMs), x1 = xOf(f.atMs + f.lengthMs)
-                        if (x1 < 0 || x0 > l.plotW) continue
+                        if (x1 < l.left || x0 > plotEnd) continue
                         ctx.fillStyle = root.findingColor(f.kind)
-                        const left = Math.max(0, x0)
-                        ctx.fillRect(left, l.top + l.plotH - 4, Math.max(2, Math.min(l.plotW, x1) - left), 4)
+                        const left = Math.max(l.left, x0)
+                        ctx.fillRect(left, l.top + l.plotH - 4, Math.max(2, Math.min(plotEnd, x1) - left), 4)
                     }
                     ctx.strokeStyle = Theme.textDim
                     ctx.fillStyle = Theme.textDim
@@ -1615,7 +2549,7 @@ Page {
                     ctx.textBaseline = "top"
                     for (const m of recording.markers) {
                         const x = xOf(m.timeMs)
-                        if (x < 0 || x > l.plotW) continue
+                        if (x < l.left || x > plotEnd) continue
                         ctx.beginPath()
                         ctx.moveTo(x, l.top)
                         ctx.lineTo(x, l.top + l.plotH)
@@ -1623,21 +2557,51 @@ Page {
                         ctx.fillText(m.label, x + 3, l.top + 1)
                     }
                     ctx.setLineDash([])
-                    if (root.cursorMs >= root.viewT0 && root.cursorMs <= root.viewT1) {
-                        ctx.strokeStyle = Theme.text
+                    const tint = (from, to, alpha) => {
+                        const x0 = Math.max(l.left, xOf(from))
+                        const x1 = Math.min(plotEnd, xOf(to))
+                        if (x1 <= x0)
+                            return
+                        const c = Qt.color(Theme.text)
+                        ctx.fillStyle = Qt.rgba(c.r, c.g, c.b, alpha)
+                        ctx.fillRect(x0, l.top, x1 - x0, l.plotH)
+                    }
+                    if (root.hasSpan)
+                        tint(root.spanFromMs, root.spanToMs, 0.06)
+                    if (!isNaN(root.boxFromMs))
+                        tint(Math.min(root.boxFromMs, root.boxToMs),
+                             Math.max(root.boxFromMs, root.boxToMs), 0.14)
+                    ctx.strokeStyle = Theme.text
+                    for (const t of [root.cursorMs, root.cursorBMs]) {
+                        if (!(t >= root.viewT0 && t <= root.viewT1))
+                            continue
                         ctx.beginPath()
-                        ctx.moveTo(xOf(root.cursorMs), l.top)
-                        ctx.lineTo(xOf(root.cursorMs), l.top + l.plotH)
+                        ctx.moveTo(xOf(t), l.top)
+                        ctx.lineTo(xOf(t), l.top + l.plotH)
                         ctx.stroke()
+                    }
+                    // The span's lowest hollow, its highest filled
+                    root.spanDots = root.hasSpan
+                        ? ChartLayout.extremeDots(l, root.spanStats, root.viewT0, root.viewT1) : []
+                    for (const d of root.spanDots) {
+                        ctx.beginPath()
+                        ctx.arc(d.x, d.y, root.cursorDotR, 0, 2 * Math.PI)
+                        if (d.filled) {
+                            ctx.fillStyle = Theme.seriesColor(d.slot)
+                            ctx.fill()
+                        } else {
+                            ctx.strokeStyle = Theme.seriesColor(d.slot)
+                            ctx.stroke()
+                        }
                     }
                     // A dot on each trace at the sample its value comes from
                     for (const tr of l.traces) {
                         if (!isFinite(tr.labelMs))
                             continue
                         const x = xOf(tr.labelMs)
-                        if (x < 0 || x > l.plotW)
+                        if (x < l.left || x > plotEnd)
                             continue
-                        ctx.fillStyle = Theme.seriesColor(tr.row)
+                        ctx.fillStyle = Theme.seriesColor(tr.slot)
                         ctx.beginPath()
                         ctx.arc(x, tr.endY, root.cursorDotR, 0, 2 * Math.PI)
                         ctx.fill()
@@ -1648,7 +2612,8 @@ Page {
             // Drag pans, the wheel and a pinch zoom about the pointer, a
             // tap places the cursor. A drag is sideways only, so the page
             // scrolls up and down; one that starts while a pinch is on or
-            // just after is the pinch's last finger, and moves nothing
+            // just after is the pinch's last finger, and moves nothing.
+            // Under Shift or after a long press it draws the span's box
             DragHandler {
                 id: pan
                 objectName: "chartPan"
@@ -1656,53 +2621,284 @@ Page {
                 yAxis.enabled: false
                 property real startT0: 0
                 property bool fromPinch: false
+                property bool boxing: false
                 onActiveChanged: {
-                    if (!active)
+                    if (!active) {
+                        if (boxing)
+                            root.finishBox()
+                        boxing = false
                         return
+                    }
                     startT0 = root.viewT0
                     fromPinch = pinch.active || Date.now() - pinch.endedAt < 300
+                    boxing = !fromPinch && (chartTap.held || (centroid.modifiers & Qt.ShiftModifier) !== 0)
+                    if (boxing) {
+                        root.boxFromMs = root.timeAt(centroid.pressPosition.x)
+                        root.boxToMs = root.boxFromMs
+                    }
                 }
                 onActiveTranslationChanged: {
                     if (!active || fromPinch) return
+                    if (boxing) {
+                        root.boxToMs = Math.min(root.viewT1, Math.max(root.viewT0, root.timeAt(centroid.position.x)))
+                        chart.repaintMarks()
+                        return
+                    }
                     const span = root.viewT1 - root.viewT0
                     const t0 = startT0 - activeTranslation.x / Math.max(1, root.plotWidth() - 1) * span
                     root.setView(t0, t0 + span)
                 }
             }
+            // A pinch zooms the time about its middle; one whose fingers
+            // lie more up and down than across as it starts, over a pane
+            // with an axis, zooms that pane's range about its middle instead
             PinchHandler {
                 id: pinch
                 objectName: "chartPinch"
                 target: null
                 property real lastScale: 1
                 property double endedAt: 0
+                // The pane a vertical pinch zooms, -1 for a time zoom
+                property int pane: -1
+                property var startPane: null
+                property real startY: 0
                 onActiveChanged: {
                     lastScale = 1
-                    if (!active)
+                    pane = -1
+                    if (!active) {
                         endedAt = Date.now()
+                        return
+                    }
+                    const l = chart.drawn
+                    const a = fingerA.point.position, b = fingerB.point.position
+                    if (!l || !fingerA.active || !fingerB.active
+                            || Math.abs(b.y - a.y) <= Math.abs(b.x - a.x))
+                        return
+                    startY = centroid.position.y - chart.y
+                    const i = ChartLayout.paneAt(l, startY)
+                    if (i < 0 || !l.panes[i].axis)
+                        return
+                    pane = i
+                    startPane = Object.assign({}, l.panes[i])
                 }
                 onActiveScaleChanged: {
                     if (!active || activeScale <= 0) return
+                    if (pane >= 0) {
+                        root.setPaneRange(startPane.key,
+                                          ChartLayout.scaledRange(startPane, startY, 1 / activeScale))
+                        return
+                    }
                     root.zoomAt(root.timeAt(centroid.position.x), lastScale / activeScale)
                     lastScale = activeScale
                 }
             }
+            // The pinch's two fingers, for which way it runs as it starts
+            PointHandler {
+                id: fingerA
+                acceptedDevices: PointerDevice.TouchScreen
+            }
+            PointHandler {
+                id: fingerB
+                acceptedDevices: PointerDevice.TouchScreen
+            }
             // A notch (120) in shows 0.8 of the span, out 1.25; a
             // high-resolution wheel's or a touchpad's parts of a notch zoom
-            // by their share of it, and a sideways scroll doesn't zoom
+            // by their share of it, and a sideways scroll doesn't zoom.
+            // With Ctrl, over a pane with an axis, it zooms the pane's range
+            // about the pointer instead
             WheelHandler {
                 target: null
                 onWheel: event => {
                     const dy = event.angleDelta.y
-                    if (dy !== 0)
-                        root.zoomAt(root.timeAt(event.x), Math.pow(0.8, dy / 120))
+                    if (dy === 0)
+                        return
+                    const factor = Math.pow(0.8, dy / 120)
+                    if (event.modifiers & Qt.ControlModifier) {
+                        const l = chart.drawn
+                        const i = l ? ChartLayout.paneAt(l, event.y - chart.y) : -1
+                        if (i >= 0 && l.panes[i].axis)
+                            root.setPaneRange(l.panes[i].key,
+                                              ChartLayout.scaledRange(l.panes[i], event.y - chart.y, factor))
+                        return
+                    }
+                    root.zoomAt(root.timeAt(event.x), factor)
                 }
             }
             DoubleTapHandler {
-                onTapped: (eventPoint, button) => root.setCursor(root.snapped(root.timeAt(eventPoint.position.x)))
+                id: chartTap
+                objectName: "chartTap"
+                property point lastAt: Qt.point(0, 0)
+                // A long press fired in this press, so its drag draws a box
+                property bool held: false
+                onPressedChanged: if (pressed) {
+                    held = false
+                    // A box a mouse pick focused gives the page's keys back (the
+                    // chart's own item: the page's focus would leave the box's)
+                    chartFrame.forceActiveFocus()
+                }
+                onLongPressed: {
+                    const at = chartTap.point.position
+                    if (!root.phoneShape || at.x - chart.x < root.plotLeft())
+                        return
+                    held = true
+                    root.placeSecond(root.snapped(root.timeAt(at.x)))
+                }
+                onTapped: (eventPoint, button) => {
+                    lastAt = eventPoint.position
+                    // A tap on the axes' column places no cursor
+                    if (eventPoint.position.x - chart.x < root.plotLeft())
+                        return
+                    const t = root.snapped(root.timeAt(eventPoint.position.x))
+                    if ((chartTap.point.modifiers & Qt.ShiftModifier) !== 0)
+                        root.placeSecond(t)
+                    else
+                        root.setCursor(t)
+                }
                 // A double-click or double-tap maximizes it, or gives the
-                // signals back; the two taps of a thumb may land a little apart
-                onDoubleTap: root.toggleMaximized()
+                // signals back (on an axis or a seam, root.doubleTapAt);
+                // the two taps of a thumb may land a little apart
+                onDoubleTap: root.doubleTapAt(lastAt.x - chart.x, lastAt.y - chart.y)
             }
+
+            // On the desktop a drag on a pane's axis pans its range (a
+            // double click there, the handler above, makes it automatic again)
+            Repeater {
+                model: Theme.mobile ? 0 : root.paneBoxes.length
+                delegate: Item {
+                    id: paneAxis
+                    required property int index
+                    readonly property var box: root.paneBoxes[index]
+                    objectName: "paneAxis_" + index
+                    visible: box !== undefined && box.axis
+                    x: chart.x
+                    y: chart.y + (box ? box.top : 0)
+                    width: box ? box.left : 0
+                    height: box ? box.h : 0
+                    HoverHandler { cursorShape: Qt.SizeVerCursor }
+                    DragHandler {
+                        target: null
+                        xAxis.enabled: false
+                        property var startRange: null
+                        onActiveChanged: {
+                            const p = active && chart.drawn ? chart.drawn.panes[paneAxis.index] : null
+                            startRange = p ? { vMin: p.vMin, vMax: p.vMax, key: p.key, h: p.h } : null
+                        }
+                        onActiveTranslationChanged: {
+                            if (active && startRange)
+                                root.setPaneRange(startRange.key, ChartLayout.pannedRange(
+                                    startRange, startRange.h, activeTranslation.y))
+                        }
+                    }
+                }
+            }
+            // The seams between panes: a drag trades two neighbors' heights,
+            // kept by the count of panes; a double tap evens them (above).
+            // A count for a model, so a drag's own resize keeps its handler
+            Repeater {
+                model: Math.max(0, root.paneBoxes.length - 1)
+                delegate: Item {
+                    id: seam
+                    required property int index
+                    readonly property var box: root.paneBoxes[index]
+                    objectName: "paneSeam_" + index
+                    x: chart.x + (box ? box.left : 0)
+                    y: chart.y + (box ? box.top + box.h + ChartLayout.paneGap / 2 : 0) - height / 2
+                    width: box ? box.plotW : 0
+                    height: 24
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 40
+                        height: 4
+                        radius: 2
+                        color: seamDrag.active || seamHover.hovered ? Theme.textDim : Theme.outline
+                    }
+                    HoverHandler { id: seamHover; cursorShape: Qt.SizeVerCursor }
+                    DragHandler {
+                        id: seamDrag
+                        objectName: "seamDrag"
+                        target: null
+                        xAxis.enabled: false
+                        property var startHeights: []
+                        onActiveChanged: if (active) startHeights = root.paneBoxes.map(b => b.h)
+                        onActiveTranslationChanged: {
+                            if (active && startHeights.length > seam.index + 1)
+                                root.setPaneShares(startHeights.length, ChartLayout.seamShares(
+                                    startHeights, seam.index, activeTranslation.y, ChartLayout.paneMinH))
+                        }
+                    }
+                }
+            }
+
+            // A cursor's handle at the axis's foot, its time on it; a drag
+            // moves its cursor. It reaches up over the plot to a touch's
+            // height, and takes the press from the chart's own gestures
+            component CursorHandle: Item {
+                id: handle
+                required property bool isB
+                readonly property real at: isB ? root.cursorBMs : root.cursorMs
+                readonly property real minWidth: root.phoneShape ? Theme.touchTarget : 24
+                readonly property real tabH: chart.drawn ? chart.drawn.axisH : ChartLayout.axisH
+                visible: chart.drawn !== null && at >= root.viewT0 && at <= root.viewT1
+                width: Math.max(minWidth, handleText.implicitWidth + 8)
+                height: root.phoneShape ? Theme.touchTarget : 24
+                x: Math.min(Math.max(0, root.xOfTime(at) - width / 2), chartFrame.width - width)
+                y: chart.y + (chart.drawn ? chart.drawn.top + chart.drawn.plotH + tabH : 0) - height
+                Accessible.role: Accessible.Slider
+                Accessible.name: qsTr("Cursor at %1").arg(handleText.text)
+                Rectangle {
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    height: handle.tabH
+                    radius: 2
+                    readonly property bool moved: handle.isB === root.arrowsMoveB
+                    color: moved ? Theme.text : Theme.elevated
+                    border.width: 1
+                    border.color: Theme.text
+                    Label {
+                        id: handleText
+                        objectName: "handleTime"
+                        anchors.centerIn: parent
+                        text: root.timeText(handle.at, true)
+                        color: parent.moved ? Theme.bg : Theme.text
+                        font.pixelSize: ChartLayout.labelPx
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
+                    }
+                }
+                MouseArea {
+                    objectName: "handleDrag"
+                    anchors.fill: parent
+                    cursorShape: Qt.SizeHorCursor
+                    preventStealing: true
+                    property real pressX: 0
+                    property bool dragging: false
+                    function frameX(x) {
+                        return mapToItem(chartFrame, x, 0).x
+                    }
+                    onPressed: mouse => {
+                        pressX = frameX(mouse.x)
+                        dragging = false
+                    }
+                    onPositionChanged: mouse => {
+                        const x = frameX(mouse.x)
+                        if (!dragging && Math.abs(x - pressX) < Application.styleHints.startDragDistance)
+                            return
+                        dragging = true
+                        // Past the plot's edge the handle would leave the view,
+                        // hide, and lose the grab before the drop
+                        const t = Math.min(Math.max(root.timeAt(x), root.viewT0), root.viewT1)
+                        if (handle.isB)
+                            root.setCursorB(t)
+                        else
+                            root.setCursor(t)
+                    }
+                    onReleased: if (dragging) root.dropHandle(handle.isB)
+                    onCanceled: if (dragging) root.dropHandle(handle.isB)
+                }
+            }
+            CursorHandle { id: handleA; objectName: "cursorHandleA"; isB: false }
+            CursorHandle { id: handleB; objectName: "cursorHandleB"; isB: true }
 
             ThemedButton {
                 id: stripFold
@@ -1729,23 +2925,23 @@ Page {
                 width: chartFrame.stripBelow ? stripFold.x - 8 : chartFrame.stripWidth - 4
                 height: chartFrame.stripBelow ? chartFrame.stripHeight - 8 : parent.height - 4 - y
                 cellWidth: chartFrame.stripBelow ? Math.floor(width / chartFrame.stripColumns) : width
-                cellHeight: 40
+                cellHeight: chartFrame.stripCellH
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
                 model: visible ? chartFrame.stripModel : []
                 delegate: Item {
                     id: stripRow
                     required property var modelData
-                    readonly property var at: root.readout[modelData.index]
+                    readonly property var at: root.readoutFrom[modelData.index]
                     width: GridView.view.cellWidth
-                    height: 40
+                    height: chartFrame.stripCellH
                     Rectangle {
                         x: 0
                         y: 6
                         width: 8
                         height: 8
                         radius: 2
-                        color: Theme.seriesColor(stripRow.modelData.index)
+                        color: Theme.seriesColor(root.slotOf(stripRow.modelData.index))
                     }
                     Label {
                         objectName: "stripName"
@@ -1767,7 +2963,21 @@ Page {
                               : root.valueText(Number(stripRow.at.text), stripRow.modelData.decimals,
                                                stripRow.at.unit)
                         color: Theme.text
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
+                        elide: Text.ElideRight
+                    }
+                    Label {
+                        objectName: "stripSpan"
+                        visible: root.hasSpan
+                        x: 12
+                        y: 34
+                        width: parent.width - 12
+                        text: visible ? root.spanCaption(stripRow.modelData) : ""
+                        color: Theme.textDim
+                        font.pixelSize: Theme.fontCaption
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                         elide: Text.ElideRight
                     }
                 }
@@ -1804,101 +3014,189 @@ Page {
             DoubleTapHandler { onDoubleTap: viewerSettings.chartHeight = -1 }
         }
 
+        ColumnLayout {
+            id: jumpBelow
+            visible: chartFrame.visible && Theme.compact
+            Layout.fillWidth: true
+            spacing: 0
+        }
+
         // Maximized on a narrow page, the views' switch has a row of its own
         RowLayout {
             id: switchRowSlot
             visible: root.chartMaximized && recording.hasFrames && !root.switchInZoomRow
         }
 
-        // Zoom, and where the cursor is
-        // Compact on a phone: at their desktop widths the buttons, Frame
-        // test among them, outgrow its width
+        // The span line: where the two cursors are and how far apart, or
+        // once, the first cursor's hint for the second. Under the zoom row
+        // on a phone, at its right on the desktop
         RowLayout {
-            visible: recording.state === RecordingView.Open
+            id: spanLine
+            objectName: "spanLine"
+            parent: root.phoneShape ? spanRowPhone : spanRowDesktop
+            visible: root.spanLineUp
             Layout.fillWidth: true
             spacing: 6
-            // Maximized, the views' switch leads the row, so either view
-            // leads back to the other
-            RowLayout {
-                id: zoomSwitchSlot
-                visible: root.chartMaximized && recording.hasFrames && root.switchInZoomRow
-            }
-            ThemedButton {
-                objectName: "zoomAll"
-                compact: Theme.dense
-                text: qsTr("All")
-                Layout.maximumWidth: 72
-                onClicked: root.showAll()
-            }
-            ThemedButton {
-                objectName: "zoomOut"
-                compact: Theme.dense
-                text: "−"
-                Layout.maximumWidth: 48
-                Accessible.name: qsTr("Zoom out")
-                onClicked: root.zoomAt((root.viewT0 + root.viewT1) / 2, 2)
-            }
-            ThemedButton {
-                objectName: "zoomIn"
-                compact: Theme.dense
-                text: "+"
-                Layout.maximumWidth: 48
-                Accessible.name: qsTr("Zoom in")
-                onClicked: root.zoomAt((root.viewT0 + root.viewT1) / 2, 0.5)
-            }
-            ThemedButton {
-                objectName: "frameTest"
-                compact: Theme.dense
-                visible: Theme.developerMode
-                enabled: !root.frameTesting
-                text: qsTr("Frame test")
-                Layout.maximumWidth: 120
-                onClicked: root.startFrameTest()
-            }
-            // On a phone the hint wraps onto two caption lines where the
-            // row leaves it little width, instead of eliding to "Tap for …"
             Label {
-                objectName: "cursorTime"
+                objectName: "spanText"
                 Layout.fillWidth: true
-                horizontalAlignment: Text.AlignRight
+                horizontalAlignment: root.phoneShape ? Text.AlignLeft : Text.AlignRight
                 verticalAlignment: Text.AlignVCenter
-                wrapMode: Theme.compact ? Text.WordWrap : Text.NoWrap
-                maximumLineCount: Theme.compact ? 2 : 1
+                wrapMode: root.phoneShape ? Text.WordWrap : Text.NoWrap
+                maximumLineCount: root.phoneShape ? 2 : 1
                 elide: Text.ElideRight
-                font.pixelSize: Theme.compact ? Theme.fontCaption : Theme.fontBody
+                font.pixelSize: root.phoneShape ? Theme.fontCaption : Theme.fontBody
                 color: Theme.textDim
-                text: !root.hasCursor ? (Theme.compact ? qsTr("Tap for values")
-                                                       : qsTr("Click the chart for values"))
-                                      : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
+                text: root.hasSpan ? qsTr("A %1 to B %2 · %3").arg(root.timeText(root.spanFromMs, true))
+                                       .arg(root.timeText(root.spanToMs, true))
+                                       .arg(root.timeText(root.spanToMs - root.spanFromMs, true))
+                      : root.phoneShape ? qsTr("Hold to place the second cursor")
+                      : qsTr("At %1. Shift+click to place the second cursor")
+                            .arg(root.timeText(root.cursorMs, true))
             }
             ThemedButton {
-                objectName: "maximizeChart"
-                text: root.chartMaximized ? qsTr("Signals") : qsTr("Chart")
-                compact: Theme.dense
-                Layout.minimumWidth: 52
-                Layout.maximumWidth: 84
-                Accessible.name: root.chartMaximized ? qsTr("Show the signals again")
-                                                     : qsTr("Give the chart the page")
-                onClicked: root.toggleMaximized()
+                objectName: "zoomToSpan"
+                visible: root.hasSpan
+                compact: true
+                text: root.phoneShape ? qsTr("Zoom") : qsTr("Zoom to span")
+                Accessible.name: qsTr("Zoom to the span")
+                onClicked: root.zoomToSpan()
+            }
+            ThemedButton {
+                objectName: "clearSpan"
+                visible: root.hasSpan
+                flat: true
+                text: qsTr("Clear")
+                Accessible.name: qsTr("Remove the second cursor")
+                onClicked: root.clearCursorB()
             }
         }
 
-        Label {
-            objectName: "frameTestResult"
-            visible: Theme.developerMode && root.frameTestResult !== "" && !root.chartMaximized
-                     && recording.state === RecordingView.Open
+        // The zoom row's place on the page; on the pinned form it leads the
+        // shown view's list
+        ColumnLayout {
+            id: zoomHome
+            // A visible layout counts in its column's spacing even when empty
+            visible: zoomBlock.parent === zoomHome && recording.state === RecordingView.Open
             Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.textDim
-            text: root.frameTestResult
+            // A layout fills by default: this one keeps its content's height
+            Layout.fillHeight: false
+            ColumnLayout {
+                id: zoomBlock
+                parent: root.currentHead ? root.currentHead.zoomSlot : zoomHome
+                Layout.fillWidth: true
+                spacing: 10
+                // Zoom, and where the cursor is
+                // Compact on a phone: at their desktop widths the buttons, Frame
+                // test among them, outgrow its width
+                RowLayout {
+                    visible: recording.state === RecordingView.Open
+                    Layout.fillWidth: true
+                    spacing: 6
+                    // Maximized, the views' switch leads the row, so either view
+                    // leads back to the other
+                    RowLayout {
+                        id: zoomSwitchSlot
+                        visible: root.chartMaximized && recording.hasFrames && root.switchInZoomRow
+                    }
+                    ThemedButton {
+                        objectName: "zoomAll"
+                        compact: Theme.dense
+                        text: qsTr("All")
+                        Layout.maximumWidth: 72
+                        onClicked: root.showAll()
+                    }
+                    ThemedButton {
+                        objectName: "zoomOut"
+                        compact: Theme.dense
+                        text: "−"
+                        Layout.maximumWidth: 48
+                        Accessible.name: qsTr("Zoom out")
+                        onClicked: root.zoomAt((root.viewT0 + root.viewT1) / 2, 2)
+                    }
+                    ThemedButton {
+                        objectName: "zoomIn"
+                        compact: Theme.dense
+                        text: "+"
+                        Layout.maximumWidth: 48
+                        Accessible.name: qsTr("Zoom in")
+                        onClicked: root.zoomAt((root.viewT0 + root.viewT1) / 2, 0.5)
+                    }
+                    ThemedButton {
+                        objectName: "frameTest"
+                        compact: Theme.dense
+                        visible: Theme.developerMode
+                        enabled: !root.frameTesting
+                        text: qsTr("Frame test")
+                        Layout.maximumWidth: 120
+                        onClicked: root.startFrameTest()
+                    }
+                    // On a phone the hint wraps onto two caption lines where the
+                    // row leaves it little width, instead of eliding to "Tap for …"
+                    Label {
+                        objectName: "cursorTime"
+                        visible: root.phoneShape || !root.spanLineUp
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignRight
+                        verticalAlignment: Text.AlignVCenter
+                        wrapMode: Theme.compact ? Text.WordWrap : Text.NoWrap
+                        maximumLineCount: Theme.compact ? 2 : 1
+                        elide: Text.ElideRight
+                        font.pixelSize: Theme.compact ? Theme.fontCaption : Theme.fontBody
+                        color: Theme.textDim
+                        text: !root.hasCursor ? (Theme.compact ? qsTr("Tap for values")
+                                                               : qsTr("Click for values · drag to pan · wheel to zoom · double-click a pane to enlarge it"))
+                                              : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
+                    }
+                    RowLayout {
+                        id: spanRowDesktop
+                        visible: !root.phoneShape && root.spanLineUp
+                        Layout.fillWidth: true
+                    }
+                    ThemedButton {
+                        objectName: "maximizeChart"
+                        text: root.chartMaximized ? qsTr("Signals") : qsTr("Chart")
+                        compact: Theme.dense
+                        Layout.minimumWidth: 52
+                        Layout.maximumWidth: 84
+                        Accessible.name: root.chartMaximized ? qsTr("Show the signals again")
+                                                             : qsTr("Give the chart the page")
+                        onClicked: root.toggleMaximized()
+                    }
+                }
+
+                // The span line, under the zoom row on a phone
+                RowLayout {
+                    id: spanRowPhone
+                    visible: root.phoneShape && root.spanLineUp
+                    Layout.fillWidth: true
+                }
+                ColumnLayout {
+                    id: spanStatsPinned
+                    visible: spanStatsBlock.parent === spanStatsPinned && spanStatsBlock.shown
+                    Layout.fillWidth: true
+                    Layout.fillHeight: false
+                }
+
+                Label {
+                    objectName: "frameTestResult"
+                    visible: Theme.developerMode && root.frameTestResult !== "" && !root.chartMaximized
+                             && recording.state === RecordingView.Open
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.textDim
+                    text: root.frameTestResult
+                }
+            }
         }
 
         // The signal area's two views, the values at the cursor or the frames
         // in view (hidden for a recording with no frames.csv), then the
         // filter: one row on the desktop, a row each on a phone
         GridLayout {
+            id: detailGrid
             objectName: "detailRow"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
+            visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.pinnedViewer
             Layout.fillWidth: true
             columns: root.phoneShape ? 1 : 2
             columnSpacing: Theme.spacing
@@ -1908,7 +3206,8 @@ Page {
                 visible: recording.hasFrames
                 // Maximized, it leads the zoom row where the row has room
                 Rectangle {
-                    parent: !root.chartMaximized ? detailSwitchSlot
+                    parent: root.currentHead ? root.currentHead.switchSlot
+                          : !root.chartMaximized ? detailSwitchSlot
                           : root.switchInZoomRow ? zoomSwitchSlot : switchRowSlot
                     implicitWidth: detailSwitch.implicitWidth + 4
                     implicitHeight: detailSwitch.implicitHeight + 4
@@ -1923,21 +3222,33 @@ Page {
                             tapHeight: root.segmentHeight
                             objectName: "detailView_values"
                             text: qsTr("Values")
-                            selected: !root.framesShown
+                            selected: !root.framesShown && !root.aboutShown
                             onClicked: root.detailView = "values"
                         }
                         SegmentButton {
                             tapHeight: root.segmentHeight
                             objectName: "detailView_frames"
+                            visible: recording.hasFrames
                             text: qsTr("Frames")
                             selected: root.framesShown
                             onClicked: root.detailView = "frames"
+                        }
+                        // On the pinned form About is a view of its own
+                        SegmentButton {
+                            tapHeight: root.segmentHeight
+                            objectName: "detailView_about"
+                            visible: root.pinnedViewer
+                            text: qsTr("About")
+                            selected: root.aboutShown
+                            onClicked: root.detailView = "about"
                         }
                     }
                 }
             }
             SignalFilterBar {
                 objectName: "recordingFilter"
+                parent: root.currentHead && root.currentHead === root.valuesHead
+                        ? root.valuesHead.toolsSlot : detailGrid
                 visible: !root.framesShown
                 Layout.fillWidth: true
                 filter: signalFilter
@@ -1950,85 +3261,104 @@ Page {
             objectName: "viewerFrames"
             visible: root.framesShown
             Layout.fillWidth: true
-            Layout.fillHeight: root.chartMaximized
+            Layout.fillHeight: root.chartMaximized || root.pinnedViewer
             spacing: Theme.spacing
 
-            Flow {
+            // The table's tools: here, or in the table's head on the pinned form
+            ColumnLayout {
+                id: framesToolsHome
+                visible: framesTools.parent === framesToolsHome
                 Layout.fillWidth: true
-                spacing: Theme.spacing
+                // A layout fills by default: this one keeps its content's height
+                Layout.fillHeight: false
+                ColumnLayout {
+                    id: framesTools
+                    parent: root.currentHead && root.framesShown ? root.currentHead.toolsSlot
+                                                                 : framesToolsHome
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing
 
-                Rectangle {
-                    implicitWidth: framesTableSwitch.implicitWidth + 4
-                    implicitHeight: framesTableSwitch.implicitHeight + 4
-                    radius: Theme.radius
-                    color: Theme.surface
+                        Rectangle {
+                            implicitWidth: framesTableSwitch.implicitWidth + 4
+                            implicitHeight: framesTableSwitch.implicitHeight + 4
+                            radius: Theme.radius
+                            color: Theme.surface
 
-                    Row {
-                        id: framesTableSwitch
-                        anchors.centerIn: parent
-                        spacing: 2
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "framesTable_frames"
-                            text: qsTr("List")
-                            selected: !root.framesById
-                            onClicked: root.framesById = false
-                        }
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "framesTable_byId"
-                            text: qsTr("By ID")
-                            selected: root.framesById
-                            onClicked: {
-                                root.framesById = true
-                                viewFrames.ids.refresh()
+                            Row {
+                                id: framesTableSwitch
+                                anchors.centerIn: parent
+                                spacing: 2
+                                SegmentButton {
+                                    tapHeight: root.segmentHeight
+                                    objectName: "framesTable_frames"
+                                    text: qsTr("List")
+                                    selected: !root.framesById
+                                    onClicked: root.framesById = false
+                                }
+                                SegmentButton {
+                                    tapHeight: root.segmentHeight
+                                    objectName: "framesTable_byId"
+                                    text: qsTr("By ID")
+                                    selected: root.framesById
+                                    onClicked: {
+                                        root.framesById = true
+                                        viewFrames.ids.refresh()
+                                    }
+                                }
                             }
                         }
+                        ThemedButton {
+                            objectName: "framesFilterToggle"
+                            text: viewFrames.frames.filterTerms > 0
+                                  ? qsTr("Filter (%1)").arg(viewFrames.frames.filterTerms)
+                                  : qsTr("Filter")
+                            checkable: true
+                            checked: root.framesFilterOpen
+                            onClicked: root.framesFilterOpen = !root.framesFilterOpen
+                        }
+                    }
+
+                    FrameFilterPanel {
+                        id: framesFilterPanel
+                        visible: root.framesFilterOpen
+                        frames: viewFrames.frames
+                    }
+
+                    // How many rows the part in view has, and when it has more than
+                    // the table holds, where the table begins
+                    Label {
+                        objectName: "framesWords"
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 0
+                        wrapMode: Text.WordWrap
+                        color: viewFrames.error !== "" ? Theme.danger : Theme.textDim
+                        font.pixelSize: Theme.fontCaption
+                        text: viewFrames.error !== "" ? viewFrames.error
+                              : viewFrames.loading ? qsTr("Reading the frames…")
+                              : viewFrames.note !== "" ? viewFrames.note
+                              : viewFrames.frames.filterTerms > 0
+                                ? qsTr("Showing %1 of %2 frames").arg(viewFrames.frames.count)
+                                                                 .arg(viewFrames.frames.heldCount)
+                                : viewFrames.rows === 1 ? qsTr("1 frame in view")
+                                                       : qsTr("%1 frames in view").arg(viewFrames.rows)
                     }
                 }
-                ThemedButton {
-                    objectName: "framesFilterToggle"
-                    text: viewFrames.frames.filterTerms > 0
-                          ? qsTr("Filter (%1)").arg(viewFrames.frames.filterTerms)
-                          : qsTr("Filter")
-                    checkable: true
-                    checked: root.framesFilterOpen
-                    onClicked: root.framesFilterOpen = !root.framesFilterOpen
-                }
-            }
-
-            FrameFilterPanel {
-                id: framesFilterPanel
-                visible: root.framesFilterOpen
-                frames: viewFrames.frames
-            }
-
-            // How many rows the part in view has, and when it has more than
-            // the table holds, where the table begins
-            Label {
-                objectName: "framesWords"
-                Layout.fillWidth: true
-                Layout.preferredWidth: 0
-                wrapMode: Text.WordWrap
-                color: viewFrames.error !== "" ? Theme.danger : Theme.textDim
-                font.pixelSize: Theme.fontCaption
-                text: viewFrames.error !== "" ? viewFrames.error
-                      : viewFrames.loading ? qsTr("Reading the frames…")
-                      : viewFrames.note !== "" ? viewFrames.note
-                      : viewFrames.frames.filterTerms > 0
-                        ? qsTr("Showing %1 of %2 frames").arg(viewFrames.frames.count)
-                                                         .arg(viewFrames.frames.heldCount)
-                        : viewFrames.rows === 1 ? qsTr("1 frame in view")
-                                               : qsTr("%1 frames in view").arg(viewFrames.rows)
             }
 
             // A fixed height, the page scrolling and the table inside it;
             // maximized, what the page has left
             FrameTable {
+                id: viewerFrameTable
                 objectName: "viewerFrameTable"
                 visible: !root.framesById
-                Layout.preferredHeight: root.chartMaximized ? 0 : 280
-                Layout.fillHeight: root.chartMaximized
+                Layout.preferredHeight: root.chartMaximized || root.pinnedViewer ? 0 : 280
+                Layout.minimumHeight: root.pinnedViewer ? root.pinnedListMin : 0
+                Layout.fillHeight: root.chartMaximized || root.pinnedViewer
+                head: framesHeadComponent
+                headScrolls: root.pinnedViewer
                 live: false
                 frames: viewFrames.frames
                 emptyText: viewFrames.loading ? qsTr("Reading the frames…")
@@ -2039,10 +3369,14 @@ Page {
                 onRowClicked: (index, modifiers, timestampUs) => root.setCursor(timestampUs / 1000)
             }
             FrameIdList {
+                id: viewerFrameIds
                 objectName: "viewerFrameIds"
                 visible: root.framesById
-                Layout.preferredHeight: root.chartMaximized ? 0 : 280
-                Layout.fillHeight: root.chartMaximized
+                Layout.preferredHeight: root.chartMaximized || root.pinnedViewer ? 0 : 280
+                Layout.minimumHeight: root.pinnedViewer ? root.pinnedListMin : 0
+                Layout.fillHeight: root.chartMaximized || root.pinnedViewer
+                head: idsHeadComponent
+                headScrolls: root.pinnedViewer
                 ids: viewFrames.ids
                 refreshing: root.framesById && root.framesShown
                 emptyText: viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")
@@ -2061,26 +3395,46 @@ Page {
             id: signalRows
             objectName: "signalRows"
             visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.framesShown
+                     && !root.aboutShown
             Layout.fillWidth: true
-            Layout.preferredHeight: count * root.rowHeight
-            // On the tab-bar form five rows at most and under 40 % of the
-            // screen, so a swipe always finds more page than list
-            Layout.maximumHeight: Theme.compact
-                                  ? Math.max(root.rowHeight, Math.min(5 * root.rowHeight, scroller.height * 0.4))
-                                  : Math.max(root.rowHeight, column.height * 0.3)
+            // On the pinned form the rest of the page, its head included
+            Layout.preferredHeight: root.pinnedViewer ? 0 : count * root.rowHeight
+            Layout.minimumHeight: root.pinnedViewer ? root.pinnedListMin : 0
+            Layout.maximumHeight: root.pinnedViewer ? Number.POSITIVE_INFINITY
+                                                    : Math.max(root.rowHeight, column.height * 0.3)
+            Layout.fillHeight: root.pinnedViewer
             clip: true
             currentIndex: -1
             highlightFollowsCurrentItem: false
             boundsBehavior: Flickable.StopAtBounds
             model: root.shownSignals
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            header: Component {
+                ViewHead {
+                    role: "values"
+                    // The pinned list's scrollbar lies over its right edge: the head keeps clear
+                    width: signalRows.width - (root.pinnedViewer ? 12 : 0)
+                    list: signalRows
+                }
+            }
+            footer: Component {
+                ColumnLayout {
+                    id: valuesFootItem
+                    width: signalRows.width
+                    Item { implicitHeight: 6; visible: filterCount.parent === valuesFootItem && filterCount.shown }
+                    Component.onCompleted: root.valuesFoot = valuesFootItem
+                }
+            }
+            ScrollBar.vertical: ScrollBar {
+                policy: root.pinnedViewer && signalRows.contentHeight > signalRows.height
+                        ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+            }
 
             delegate: Rectangle {
                 id: signalRow
                 required property var modelData
                 required property int index
                 readonly property int signalIndex: modelData.index
-                readonly property var at: root.readout[signalIndex]
+                readonly property var at: root.readoutFrom[signalIndex]
                 width: signalRows.width
                 height: root.rowHeight
                 color: index % 2 === 0 ? Theme.surface : Theme.bg
@@ -2101,28 +3455,70 @@ Page {
                         readonly property bool shown: root.plotted[signalRow.signalIndex] === true
                         implicitWidth: 10; implicitHeight: 10
                         radius: 2
-                        color: shown ? Theme.seriesColor(signalRow.signalIndex) : "transparent"
+                        color: shown ? Theme.seriesColor(root.slotOf(signalRow.signalIndex)) : "transparent"
                         border.width: 1
-                        border.color: Theme.seriesColor(signalRow.signalIndex)
+                        border.color: shown ? Theme.seriesColor(root.slotOf(signalRow.signalIndex))
+                                            : Theme.textDim
                         opacity: shown ? 1.0 : 0.5
                     }
-                    Label {
-                        text: signalRow.modelData.name
-                        color: Theme.text
-                        elide: Text.ElideRight
+                    ColumnLayout {
                         Layout.fillWidth: true
+                        spacing: 0
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Label {
+                                text: signalRow.modelData.name
+                                color: Theme.text
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                            Label {
+                                objectName: "cursorValue"
+                                text: root.atText(signalRow.at, signalRow.modelData)
+                                Layout.maximumWidth: Math.round(signalRow.width * (root.compareAligned ? 0.3 : 0.5))
+                                elide: Text.ElideRight
+                                color: Theme.text
+                                font.family: Theme.valueFamily
+                                font.features: Theme.valueFeatures
+                            }
+                        }
+                        // On a phone B and the change have a line of their own
+                        Label {
+                            objectName: "cursorSpanLine"
+                            visible: root.phoneShape && root.hasSpan
+                            text: visible ? root.spanCaption(signalRow.modelData) : ""
+                            Layout.fillWidth: true
+                            horizontalAlignment: Text.AlignRight
+                            elide: Text.ElideLeft
+                            color: Theme.textDim
+                            font.pixelSize: Theme.fontCaption
+                            font.family: Theme.valueFamily
+                            font.features: Theme.valueFeatures
+                        }
+                    }
+                    // On the desktop, two more columns
+                    Label {
+                        objectName: "cursorBValue"
+                        visible: !root.phoneShape && root.hasSpan
+                        text: visible ? root.atText(root.readoutTo[signalRow.signalIndex], signalRow.modelData) : ""
+                        Layout.preferredWidth: Math.round(signalRow.width * 0.18)
+                        horizontalAlignment: Text.AlignRight
+                        elide: Text.ElideRight
+                        color: Theme.text
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                     }
                     Label {
-                        objectName: "cursorValue"
-                        text: !signalRow.at || signalRow.at.atMs < 0 ? qsTr("—")
-                              : signalRow.modelData.isText ? signalRow.at.text
-                              : signalRow.at.label ? signalRow.at.label
-                              : root.valueText(Number(signalRow.at.text), signalRow.modelData.decimals,
-                                               signalRow.at.unit)
-                        Layout.maximumWidth: Math.round(signalRow.width * (root.compareAligned ? 0.3 : 0.5))
+                        objectName: "cursorDelta"
+                        visible: !root.phoneShape && root.hasSpan
+                        text: visible && !signalRow.modelData.isText
+                              ? root.statChange(root.spanStats[signalRow.signalIndex]) : ""
+                        Layout.preferredWidth: Math.round(signalRow.width * 0.18)
+                        horizontalAlignment: Text.AlignRight
                         elide: Text.ElideRight
-                        color: Theme.text
-                        font.family: Theme.monoFamily
+                        color: Theme.textDim
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                     }
                     // The compared recording's, at the cursor
                     Label {
@@ -2136,244 +3532,465 @@ Page {
                         Layout.maximumWidth: Math.round(signalRow.width * 0.3)
                         elide: Text.ElideRight
                         color: Theme.textDim
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                     }
                 }
             }
         }
 
         // While the filter narrows the rows, how many it shows and how many
-        // the chart draws: the chart keeps every ticked signal (ADR-0050)
-        Label {
-            objectName: "filterCount"
-            visible: recording.state === RecordingView.Open && signalFilter.active && !root.chartMaximized && !root.framesShown
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.textDim
-            text: (Theme.compact ? qsTr("%1 of %2 shown · %3 plotted")
-                                 : qsTr("Showing %1 of %2 signals · plotting %3"))
-                  .arg(root.shownSignals.length).arg(recording.signalList.length)
-                  .arg(recording.signalList.filter(s => root.plotted[s.index] === true).length)
-        }
-
-        // ---- About this recording: what applies to it as a whole ----
-        Heading {
-            objectName: "aboutHeading"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
-            text: qsTr("About this recording")
-        }
-        Label {
-            objectName: "recordingInfo"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.textDim
-            text: recording.state === RecordingView.Open ? root.infoText() : ""
-        }
-        RowLayout {
-            id: aboutActions
-            visible: Theme.compact && recording.state === RecordingView.Open && !root.chartMaximized
-            Layout.fillWidth: true
-        }
+        // the chart draws: the chart keeps every ticked signal (ADR-0050).
+        // Under the rows, or their list's footer on the pinned form
         ColumnLayout {
-            id: aboutNote
-            visible: Theme.compact && root.reportNote !== "" && !root.chartMaximized
+            id: filterCountHome
+            visible: filterCount.parent === filterCountHome && filterCount.shown
             Layout.fillWidth: true
-        }
-        Label {
-            objectName: "reportNote"
-            // Under Save report...: the title row's on the desktop, About's on a phone
-            parent: Theme.compact ? aboutNote : topNote
-            visible: root.reportNote !== ""
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            text: root.reportNote
-            color: root.reportFailed ? Theme.danger : Theme.textDim
-        }
-
-        // Where the values come from: offered once it opened, or failed
-        // (a profile that can't decode it, a folder with frames alone)
-        ComboBox {
-            implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
-                                     implicitContentHeight + topPadding + bottomPadding,
-                                     implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
-            id: decodeChoice
-            objectName: "decodeChoice"
-            // Values alone have no frames to decode through a profile
-            visible: (recording.state === RecordingView.Open
-                      || recording.state === RecordingView.Failed) && !root.chartMaximized
-                     && recording.hasFrames
-            Layout.fillWidth: true
-            textRole: "text"
-            valueRole: "value"
-            model: visible ? root.decodeChoices() : []
-            currentIndex: Math.max(0, indexOfValue(recording.decodedWith))
-            Accessible.name: qsTr("Where the values come from")
-            onActivated: index => root.decodeWith(valueAt(index))
-        }
-
-        // The picked vehicle's baseline: this recording made it, or the
-        // baseline overlaid on it, lined up on their engine starts
-        Flow {
-            id: baselineFlow
-            objectName: "baselineRow"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
-                     && root.pickedVehicle !== null
-            Layout.fillWidth: true
-            spacing: Theme.spacing
-            ThemedButton {
-                objectName: "useAsBaseline"
-                visible: !root.isBaseline
-                width: Math.min(implicitWidth, baselineFlow.width)
-                text: qsTr("Use as %1's baseline").arg(root.pickedVehicle !== null
-                                                        ? root.pickedVehicle.label : "")
-                onClicked: root.useAsBaseline()
-            }
+            Layout.fillHeight: false
             Label {
-                objectName: "isBaseline"
-                visible: root.isBaseline
-                width: Math.min(implicitWidth, baselineFlow.width)
-                height: root.phoneShape ? Theme.touchTarget : Theme.controlHeight
-                verticalAlignment: Text.AlignVCenter
+                id: filterCount
+                objectName: "filterCount"
+                readonly property bool shown: recording.state === RecordingView.Open && signalFilter.active
+                                              && !root.chartMaximized && !root.framesShown && !root.aboutShown
+                parent: root.pinnedViewer && root.valuesFoot !== null ? root.valuesFoot : filterCountHome
+                visible: shown
+                Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: Theme.textDim
-                text: qsTr("%1's baseline").arg(root.pickedVehicle !== null
-                                                 ? root.pickedVehicle.label : "")
-            }
-            ThemedButton {
-                objectName: "compareBaseline"
-                visible: root.baselineRow !== null && !root.isBaseline
-                width: Math.min(implicitWidth, baselineFlow.width)
-                text: qsTr("Compare with the baseline")
-                Accessible.name: qsTr("Compare with %1's baseline, aligned on the engine starts")
-                                     .arg(root.pickedVehicle !== null ? root.pickedVehicle.label : "")
-                onClicked: root.compareWithBaseline()
+                text: (Theme.compact ? qsTr("%1 of %2 shown · %3 plotted")
+                                     : qsTr("Showing %1 of %2 signals · plotting %3"))
+                      .arg(root.shownSignals.length).arg(recording.signalList.length)
+                      .arg(recording.signalList.filter(s => root.plotted[s.index] === true).length)
             }
         }
 
-        // Another recording to overlay, and how the two line up
-        RowLayout {
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
+        // The statistics' place on the page; on the pinned form they follow
+        // the span line in the list's head
+        ColumnLayout {
+            id: spanStatsHome
+            visible: spanStatsBlock.parent === spanStatsHome && spanStatsBlock.shown
             Layout.fillWidth: true
-            spacing: Theme.spacing
-            ComboBox {
-                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
-                                         implicitContentHeight + topPadding + bottomPadding,
-                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
-                id: compareChoice
-                objectName: "compareChoice"
-                readonly property var others: root.recordings.filter(r => r.folder !== recording.folder)
+            Layout.fillHeight: false
+            // Each plotted signal over the span: a table on the desktop, a
+            // grid of cards on a phone, whose rate the span line's length gives
+            ColumnLayout {
+                id: spanStatsBlock
+                objectName: "spanStats"
+                readonly property bool shown: root.spanRows.length > 0 && !root.chartMaximized
+                                              && !root.framesShown && !root.aboutShown
+                parent: root.pinnedViewer ? spanStatsPinned : spanStatsHome
+                visible: shown
                 Layout.fillWidth: true
-                model: [root.comparing ? root.compareTitle : qsTr("Compare with…")]
-                       .concat(others.map(r => r.title))
-                enabled: others.length > 0
-                Accessible.name: qsTr("Compare with another recording")
-                onActivated: index => {
-                    if (index > 0)
-                        root.compareWith(others[index - 1])
-                    currentIndex = 0
+                spacing: 0
+                component StatCell: Label {
+                    // Shares, not widths: a width read from the page would
+                    // make the column lay itself out again as it sizes
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 10
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideRight
+                    color: Theme.text
+                    font.family: Theme.valueFamily
+                    font.features: Theme.valueFeatures
+                }
+                RowLayout {
+                    visible: !root.phoneShape
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 8
+                    Layout.rightMargin: 12
+                    Label { text: qsTr("Signal"); color: Theme.textDim; Layout.fillWidth: true; Layout.preferredWidth: 30 }
+                    StatCell { text: qsTr("Change"); color: Theme.textDim }
+                    StatCell { text: qsTr("Low"); color: Theme.textDim }
+                    StatCell { text: qsTr("High"); color: Theme.textDim }
+                    StatCell { text: qsTr("Mean"); color: Theme.textDim }
+                    StatCell { text: qsTr("Rate"); color: Theme.textDim }
+                }
+                Repeater {
+                    model: root.phoneShape ? [] : root.spanRows
+                    delegate: RowLayout {
+                        id: statRow
+                        required property var modelData
+                        readonly property var stat: root.spanStats[modelData.index]
+                        objectName: "statRow_" + modelData.index
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 8
+                        Layout.rightMargin: 12
+                        Label {
+                            text: statRow.modelData.name
+                            color: Theme.text
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 30
+                        }
+                        StatCell { objectName: "statChange"; text: root.statChange(statRow.stat) }
+                        StatCell {
+                            objectName: "statLow"
+                            text: statRow.stat ? root.statText(statRow.stat.lowest, statRow.stat) : qsTr("—")
+                        }
+                        StatCell {
+                            objectName: "statHigh"
+                            text: statRow.stat ? root.statText(statRow.stat.highest, statRow.stat) : qsTr("—")
+                        }
+                        StatCell {
+                            objectName: "statMean"
+                            text: statRow.stat ? root.statText(statRow.stat.mean, statRow.stat) : qsTr("—")
+                        }
+                        StatCell { objectName: "statRate"; text: root.statRate(statRow.stat) }
+                    }
+                }
+                GridLayout {
+                    visible: root.phoneShape
+                    Layout.fillWidth: true
+                    columns: 2
+                    columnSpacing: 4
+                    rowSpacing: 4
+                    Repeater {
+                        model: root.phoneShape ? root.spanRows : []
+                        delegate: Rectangle {
+                            id: statCard
+                            required property var modelData
+                            readonly property var stat: root.spanStats[modelData.index]
+                            objectName: "statCard_" + modelData.index
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 1
+                            Layout.preferredHeight: Theme.touchTarget
+                            color: Theme.surface
+                            radius: 4
+                            border.color: Theme.hairline
+                            border.width: 1
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 6
+                                anchors.rightMargin: 6
+                                spacing: 0
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label {
+                                        text: statCard.modelData.name
+                                        color: Theme.textDim
+                                        elide: Text.ElideRight
+                                        font.pixelSize: Theme.fontCaption
+                                        Layout.fillWidth: true
+                                    }
+                                    Label {
+                                        objectName: "statChange"
+                                        text: root.statChange(statCard.stat)
+                                        color: Theme.text
+                                        font.pixelSize: Theme.fontCaption
+                                        font.family: Theme.valueFamily
+                                        font.features: Theme.valueFeatures
+                                    }
+                                }
+                                Label {
+                                    objectName: "statLine"
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    color: Theme.textDim
+                                    font.pixelSize: Theme.fontCaption
+                                    font.family: Theme.valueFamily
+                                    font.features: Theme.valueFeatures
+                                    text: !statCard.stat ? qsTr("—")
+                                          : [statCard.stat.lowest, statCard.stat.highest, statCard.stat.mean]
+                                            .map(v => isFinite(v) ? Number(v).toLocaleString(Qt.locale(), 'f', statCard.stat.decimals)
+                                                                  : qsTr("—")).join(" · ")
+                                }
+                            }
+                        }
+                    }
                 }
             }
-            ThemedButton {
-                objectName: "stopCompare"
-                visible: root.comparing
-                text: qsTr("Stop")
-                Accessible.name: qsTr("Stop comparing")
-                onClicked: root.stopComparing()
-            }
-        }
-        Flow {
-            visible: root.comparing && recording.state === RecordingView.Open && !root.chartMaximized
-            Layout.fillWidth: true
-            spacing: 6
-            ComboBox {
-                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
-                                         implicitContentHeight + topPadding + bottomPadding,
-                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
-                id: alignChoice
-                objectName: "alignChoice"
-                width: 170
-                textRole: "text"
-                valueRole: "value"
-                model: [{ text: qsTr("Align the starts"), value: "start" },
-                        { text: qsTr("Align UTC starts"), value: "utc" },
-                        { text: qsTr("Align a marker"), value: "marker" },
-                        { text: qsTr("Align a rise"), value: "rise" },
-                        { text: qsTr("Align a fall"), value: "fall" },
-                        { text: qsTr("Align engine starts"), value: "engine" }]
-                onActivated: root.setAlignOn(currentValue)
-            }
-            ComboBox {
-                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
-                                         implicitContentHeight + topPadding + bottomPadding,
-                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
-                objectName: "alignMarker"
-                visible: root.alignOn === "marker"
-                width: 150
-                model: recording.state === RecordingView.Open ? root.markerLabels() : []
-                onActivated: root.alignLabel = currentText
-            }
-            ComboBox {
-                implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
-                                         implicitContentHeight + topPadding + bottomPadding,
-                                         implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
-                objectName: "alignSignal"
-                visible: root.alignOn === "rise" || root.alignOn === "fall"
-                width: 150
-                model: recording.state === RecordingView.Open ? root.numberNames() : []
-                onActivated: root.alignSignal = currentText
-            }
-            ThemedTextField {
-                objectName: "alignLevel"
-                visible: root.alignOn === "rise" || root.alignOn === "fall"
-                width: 100
-                placeholderText: qsTr("Level")
-                inputMethodHints: Qt.ImhFormattedNumbersOnly
-                onEditingFinished: root.alignLevel = root.numberOf(text)
-            }
-            ThemedTextField {
-                objectName: "alignHysteresis"
-                visible: root.alignOn === "rise" || root.alignOn === "fall"
-                width: 100
-                placeholderText: qsTr("Hysteresis")
-                inputMethodHints: Qt.ImhFormattedNumbersOnly
-                onEditingFinished: {
-                    const v = root.numberOf(text)
-                    root.alignHysteresis = v >= 0 ? v : 0
-                }
-            }
-        }
-        Label {
-            objectName: "compareStatus"
-            visible: root.comparing && recording.state === RecordingView.Open && !root.chartMaximized
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.textDim
-            text: root.compareStatus
         }
 
-        // The frames check: what it found, each row centering the view on
-        // its finding
-        Label {
-            objectName: "checkSummary"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
+        // What applies to the recording as a whole: under the rows, or the
+        // About view's head on the pinned form
+        ColumnLayout {
+            id: aboutHome
+            // Shown through a reopen, so the decode choice keeps its model
+            visible: aboutBlock.parent === aboutHome && !root.pinnedViewer && !root.chartMaximized
+                     && root.viewing
             Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.textDim
-            text: recording.state === RecordingView.Open ? root.checkText() : ""
+            // A layout fills by default: this one keeps its content's height
+            Layout.fillHeight: false
+            ColumnLayout {
+                id: aboutBlock
+                parent: root.currentHead && root.aboutShown ? root.currentHead.toolsSlot : aboutHome
+                Layout.fillWidth: true
+                spacing: 10
+                // ---- About this recording: what applies to it as a whole ----
+                Heading {
+                    objectName: "aboutHeading"
+                    visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.pinnedViewer
+                    text: qsTr("About this recording")
+                }
+                Label {
+                    objectName: "recordingInfo"
+                    visible: recording.state === RecordingView.Open && !root.chartMaximized
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.textDim
+                    text: recording.state === RecordingView.Open ? root.infoText() : ""
+                }
+                RowLayout {
+                    id: aboutActions
+                    visible: Theme.compact && recording.state === RecordingView.Open && !root.chartMaximized
+                    Layout.fillWidth: true
+                }
+                ColumnLayout {
+                    id: aboutNote
+                    visible: Theme.compact && root.reportNote !== "" && !root.chartMaximized
+                    Layout.fillWidth: true
+                }
+                Label {
+                    objectName: "reportNote"
+                    // Under Save report...: the title row's on the desktop, About's on a phone
+                    parent: Theme.compact ? aboutNote : topNote
+                    visible: root.reportNote !== ""
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    text: root.reportNote
+                    color: root.reportFailed ? Theme.danger : Theme.textDim
+                }
+
+                // Where the values come from: offered once it opened, or failed
+                // (a profile that can't decode it, a folder with frames alone)
+                ComboBox {
+                    implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                             implicitContentHeight + topPadding + bottomPadding,
+                                             implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                    id: decodeChoice
+                    objectName: "decodeChoice"
+                    // Values alone have no frames to decode through a profile
+                    readonly property bool shown: (recording.state === RecordingView.Open
+                                                   || recording.state === RecordingView.Failed)
+                                                  && !root.chartMaximized && recording.hasFrames
+                    // Its own rule, not its place's: About's head hides and moves it
+                    visible: shown
+                    Layout.fillWidth: true
+                    textRole: "text"
+                    valueRole: "value"
+                    // The model stays while the box is hidden: a model made again
+                    // resets the index, which the binding below wouldn't set back
+                    model: root.decodeChoices()
+                    currentIndex: Math.max(0, indexOfValue(recording.decodedWith))
+                    Accessible.name: qsTr("Where the values come from")
+                    onActivated: index => root.decodeWith(valueAt(index))
+                }
+
+                // The picked vehicle's baseline: this recording made it, or the
+                // baseline overlaid on it, lined up on their engine starts
+                Flow {
+                    id: baselineFlow
+                    objectName: "baselineRow"
+                    visible: recording.state === RecordingView.Open && !root.chartMaximized
+                             && root.pickedVehicle !== null
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    ThemedButton {
+                        objectName: "useAsBaseline"
+                        visible: !root.isBaseline
+                        width: Math.min(implicitWidth, baselineFlow.width)
+                        text: qsTr("Use as %1's baseline").arg(root.pickedVehicle !== null
+                                                                ? root.pickedVehicle.label : "")
+                        onClicked: root.useAsBaseline()
+                    }
+                    Label {
+                        objectName: "isBaseline"
+                        visible: root.isBaseline
+                        width: Math.min(implicitWidth, baselineFlow.width)
+                        height: root.phoneShape ? Theme.touchTarget : Theme.controlHeight
+                        verticalAlignment: Text.AlignVCenter
+                        wrapMode: Text.WordWrap
+                        color: Theme.textDim
+                        text: qsTr("%1's baseline").arg(root.pickedVehicle !== null
+                                                         ? root.pickedVehicle.label : "")
+                    }
+                    ThemedButton {
+                        objectName: "compareBaseline"
+                        visible: root.baselineRow !== null && !root.isBaseline
+                        width: Math.min(implicitWidth, baselineFlow.width)
+                        text: qsTr("Compare with the baseline")
+                        Accessible.name: qsTr("Compare with %1's baseline, aligned on the engine starts")
+                                             .arg(root.pickedVehicle !== null ? root.pickedVehicle.label : "")
+                        onClicked: root.compareWithBaseline()
+                    }
+                }
+
+                // Another recording to overlay, and how the two line up
+                RowLayout {
+                    parent: compareSlot
+                    visible: recording.state === RecordingView.Open
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing
+                    ComboBox {
+                        implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                                 implicitContentHeight + topPadding + bottomPadding,
+                                                 implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                        id: compareChoice
+                        objectName: "compareChoice"
+                        readonly property var others: root.recordings.filter(r => r.folder !== recording.folder)
+                        Layout.fillWidth: true
+                        model: [root.comparing ? root.compareTitle : qsTr("Compare with…")]
+                               .concat(others.map(r => r.title))
+                        enabled: others.length > 0
+                        Accessible.name: qsTr("Compare with another recording")
+                        onActivated: index => {
+                            if (index > 0)
+                                root.compareWith(others[index - 1])
+                            currentIndex = 0
+                        }
+                    }
+                    ThemedButton {
+                        objectName: "stopCompare"
+                        visible: root.comparing
+                        text: qsTr("Stop")
+                        Accessible.name: qsTr("Stop comparing")
+                        onClicked: root.stopComparing()
+                    }
+                }
+                Flow {
+                    parent: compareSlot
+                    visible: root.comparing && recording.state === RecordingView.Open
+                    Layout.fillWidth: true
+                    spacing: 6
+                    ComboBox {
+                        implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                                 implicitContentHeight + topPadding + bottomPadding,
+                                                 implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                        id: alignChoice
+                        objectName: "alignChoice"
+                        width: 170
+                        textRole: "text"
+                        valueRole: "value"
+                        model: [{ text: qsTr("Align the starts"), value: "start" },
+                                { text: qsTr("Align UTC starts"), value: "utc" },
+                                { text: qsTr("Align a marker"), value: "marker" },
+                                { text: qsTr("Align a rise"), value: "rise" },
+                                { text: qsTr("Align a fall"), value: "fall" },
+                                { text: qsTr("Align engine starts"), value: "engine" },
+                                { text: qsTr("Align a pull"), value: "pull" }]
+                        onActivated: root.setAlignOn(currentValue)
+                    }
+                    ComboBox {
+                        implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                                 implicitContentHeight + topPadding + bottomPadding,
+                                                 implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                        objectName: "alignPullHere"
+                        visible: root.alignOn === "pull"
+                        width: 220
+                        enabled: count > 0
+                        model: root.pullRows(root.pullsHere, true)
+                        currentIndex: root.alignPullHere
+                        Accessible.name: qsTr("This recording's pull to align on")
+                        // A pick ends the binding: put it back, so the box
+                        // follows the page's choice
+                        onActivated: index => {
+                            root.alignPullHere = index
+                            currentIndex = Qt.binding(() => root.alignPullHere)
+                        }
+                    }
+                    ComboBox {
+                        implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                                 implicitContentHeight + topPadding + bottomPadding,
+                                                 implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                        objectName: "alignPullThere"
+                        visible: root.alignOn === "pull"
+                        width: 220
+                        enabled: count > 0
+                        model: root.pullRows(root.pullsThere, false)
+                        currentIndex: root.alignPullThere
+                        Accessible.name: qsTr("The compared recording's pull to align on")
+                        onActivated: index => {
+                            root.alignPullThere = index
+                            currentIndex = Qt.binding(() => root.alignPullThere)
+                        }
+                    }
+                    ComboBox {
+                        implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                                 implicitContentHeight + topPadding + bottomPadding,
+                                                 implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                        objectName: "alignMarker"
+                        visible: root.alignOn === "marker"
+                        width: 150
+                        model: recording.state === RecordingView.Open ? root.markerLabels() : []
+                        onActivated: root.alignLabel = currentText
+                    }
+                    ComboBox {
+                        implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                                 implicitContentHeight + topPadding + bottomPadding,
+                                                 implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                        objectName: "alignSignal"
+                        visible: root.alignOn === "rise" || root.alignOn === "fall"
+                        width: 150
+                        model: recording.state === RecordingView.Open ? root.numberNames() : []
+                        onActivated: root.alignSignal = currentText
+                    }
+                    ThemedTextField {
+                        objectName: "alignLevel"
+                        visible: root.alignOn === "rise" || root.alignOn === "fall"
+                        width: 100
+                        placeholderText: qsTr("Level")
+                        inputMethodHints: Qt.ImhFormattedNumbersOnly
+                        onEditingFinished: root.alignLevel = root.numberOf(text)
+                    }
+                    ThemedTextField {
+                        objectName: "alignHysteresis"
+                        visible: root.alignOn === "rise" || root.alignOn === "fall"
+                        width: 100
+                        placeholderText: qsTr("Hysteresis")
+                        inputMethodHints: Qt.ImhFormattedNumbersOnly
+                        onEditingFinished: {
+                            const v = root.numberOf(text)
+                            root.alignHysteresis = v >= 0 ? v : 0
+                        }
+                    }
+                }
+                Label {
+                    objectName: "compareStatus"
+                    parent: compareSlot
+                    visible: root.comparing && recording.state === RecordingView.Open
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.textDim
+                    text: root.compareStatus
+                }
+
+                // The frames check: what it found, each row centering the view on
+                // its finding
+                Label {
+                    objectName: "checkSummary"
+                    visible: recording.state === RecordingView.Open && !root.chartMaximized
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.textDim
+                    text: recording.state === RecordingView.Open ? root.checkText() : ""
+                }
+            }
         }
         ListView {
             id: findingList
             objectName: "findingList"
-            visible: recording.state === RecordingView.Open && count > 0 && !root.chartMaximized
+            visible: recording.state === RecordingView.Open && !root.chartMaximized
+                     && (root.pinnedViewer ? root.aboutShown : count > 0)
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(count, 3) * Math.max(32, root.touchMin)
+            Layout.preferredHeight: root.pinnedViewer ? 0 : Math.min(count, 3) * Math.max(32, root.touchMin)
+            Layout.minimumHeight: root.pinnedViewer ? root.pinnedListMin : 0
+            Layout.fillHeight: root.pinnedViewer
             clip: true
             currentIndex: -1
             highlightFollowsCurrentItem: false
             boundsBehavior: Flickable.StopAtBounds
             model: recording.findings
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+            header: Component {
+                ViewHead {
+                    role: "about"
+                    width: findingList.width
+                    list: findingList
+                }
+            }
+            ScrollBar.vertical: ScrollBar {
+                policy: root.pinnedViewer && findingList.contentHeight > findingList.height
+                        ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
+            }
 
             delegate: Rectangle {
                 id: findingRow
@@ -2420,7 +4037,7 @@ Page {
 
         // The rest stays at the top
         Item {
-            visible: root.viewing && !root.chartMaximized
+            visible: root.viewing && !root.chartMaximized && !root.pinnedViewer
             Layout.fillHeight: true
         }
     }

@@ -222,6 +222,10 @@ int main(void)
     ecuio_recording_marker_t reading_marker;
     ecuio_recording_column_t reading_column;
     ecuio_recording_find_t reading_find;
+    ecuio_recording_stats_t reading_stats;
+    ecuio_stretch_rules_t reading_rules;
+    ecuio_recording_stretch_t reading_stretch;
+    uint32_t reading_count = 0;
     uint64_t reading_at = 0;
     uint32_t reading_pick = 0;
     char reading_text[8];
@@ -504,6 +508,7 @@ int main(void)
     }
     /* The reader (ADR-0049 section 5): its layout and its NULL refusals */
     memset(&reading_find, 0, sizeof reading_find);
+    memset(&reading_rules, 0, sizeof reading_rules);
     if (sizeof(ecuio_recording_info_t) != 96 ||
         sizeof(ecuio_recording_signal_t) != 128 ||
         offsetof(ecuio_recording_signal_t, samples) != 56 ||
@@ -511,6 +516,38 @@ int main(void)
         offsetof(ecuio_recording_marker_t, label_utf8) != 32 ||
         sizeof(ecuio_recording_column_t) != 24 ||
         offsetof(ecuio_recording_find_t, label_utf8) != 64 ||
+        sizeof(ecuio_recording_stats_t) != 96 ||
+        offsetof(ecuio_recording_stats_t, lowest_us) != 40 ||
+        offsetof(ecuio_recording_stats_t, mean) != 56 ||
+        offsetof(ecuio_recording_stats_t, flags) != 64 ||
+        ECUIO_RECORDING_STEP_FORWARD != 1u ||
+        ECUIO_RECORDING_STEP_BACKWARD != 2u ||
+        sizeof(ecuio_stretch_rules_t) != 120 ||
+        offsetof(ecuio_stretch_rules_t, cruise_floor) != 64 ||
+        offsetof(ecuio_stretch_rules_t, throttle) != 72 ||
+        offsetof(ecuio_stretch_rules_t, pull_min_rise) != 88 ||
+        offsetof(ecuio_stretch_rules_t, pull_min_gain) != 96 ||
+        offsetof(ecuio_stretch_rules_t, reserved) != 104 ||
+        sizeof(ecuio_recording_stretch_t) != 64 ||
+        offsetof(ecuio_recording_stretch_t, start) != 24 ||
+        offsetof(ecuio_recording_stretch_t, flags) != 40 ||
+        offsetof(ecuio_recording_stretch_t, reserved) != 48 ||
+        ECUIO_STRETCH_PULLS != 0x1u || ECUIO_STRETCH_CRUISES != 0x2u ||
+        ECUIO_RECORDING_STRETCH_PULL != 1u ||
+        ECUIO_RECORDING_STRETCH_CRUISE != 2u ||
+        ECUIO_RECORDING_ROLE_ENGINE_SPEED != 1u ||
+        ECUIO_RECORDING_ROLE_VEHICLE_SPEED != 2u ||
+        ECUIO_RECORDING_ROLE_THROTTLE != 3u ||
+        ECUIO_RECORDING_ROLE_ENGINE_LOAD != 4u ||
+        ECUIO_RECORDING_STRETCH_BY_LOAD != 0x1u ||
+        ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED != 0x2u ||
+        ECUIO_RECORDING_STRETCH_NO_THROTTLE != 0x4u ||
+        ECUIO_RECORDING_STRETCH_CUT_START != 0x8u ||
+        ECUIO_RECORDING_STRETCH_CUT_END != 0x10u ||
+        ECUIO_VALIDATE_ERR_COMPUTED_INPUT != -22 ||
+        ECUIO_VALIDATE_ERR_DUPLICATE_NAME != -25 ||
+        ECUIO_OBD2_SIG_BOOST_ID != 7011 ||
+        ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR != 56.32704 ||
         sizeof(ecuio_recording_signals_t) != 128 ||
         offsetof(ecuio_recording_signals_t, length) != 8 ||
         offsetof(ecuio_recording_signals_t, sha256) != 16 ||
@@ -542,6 +579,15 @@ int main(void)
                                 &reading_at) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_find(NULL, &reading_find, 0, &reading_at) !=
             ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_stats(NULL, &reading_pick, 1, 0, 1, &reading_stats) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_step(NULL, 0, 0, ECUIO_RECORDING_STEP_FORWARD,
+                             &reading_at) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_role_signal(NULL, ECUIO_RECORDING_ROLE_THROTTLE,
+                                    &reading_pick) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_stretches(NULL, &reading_rules, 0, 1, &reading_stretch,
+                                  1,
+                                  &reading_count) != ECUIO_ERR_NULL_ARGUMENT ||
         INTERNAL(ecuio_recording_test_table_bytes(NULL), 0) != 0) {
         return 1;
     }
@@ -586,7 +632,8 @@ int main(void)
         offsetof(ecuio_import_report_t, duration_us) != 40 ||
         offsetof(ecuio_import_report_t, values) != 48 ||
         offsetof(ecuio_import_report_t, columns_ignored) != 56 ||
-        offsetof(ecuio_import_report_t, reserved) != 64 ||
+        offsetof(ecuio_import_report_t, rows_no_time) != 64 ||
+        offsetof(ecuio_import_report_t, reserved) != 72 ||
         offsetof(ecuio_import_options_t, in_path_utf8) != 8 ||
         ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED != 4u ||
         ECUIO_EXPORT_LEFT_OUT_COUNT != 5u ||

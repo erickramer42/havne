@@ -19,7 +19,8 @@ ColumnLayout {
     ThemedCheckBox {
         id: developerBox
         objectName: "developerBox"
-        text: qsTr("Developer mode: the mock:// preset, and the raw frames on the Log page")
+        text: qsTr("Developer mode: tools for developers, such as the frame rate, "
+                   + "the frame test, Export's raw frames and the adapter relay")
         checked: Theme.developerMode
         Layout.fillWidth: true
         onToggled: {

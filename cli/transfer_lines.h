@@ -491,8 +491,9 @@ inline void export_failed_line(Line& l, const ecuio_export_report_t& r)
 // {"type":"imported","format":"candump","folder":...,"interface":...|null,
 //  "lines":N,"frames":N,"error_frames":N,"interfaces":N,
 //  "utc_start_us":N,"duration_us":N}; csv's: "format":"csv","folder":...,
-//  "lines":N,"values":N,"columns_ignored":N,"utc_start_us":N|null,
-//  "duration_us":N
+//  "lines":N,"values":N,"columns_ignored":N,"rows_no_time":N (the rows
+//  left out for an empty time cell; schema 1 growth),
+//  "utc_start_us":N|null,"duration_us":N
 inline void imported_line(Line& l, const ImportArgs& a,
                           const ecuio_import_report_t& r)
 {
@@ -506,6 +507,8 @@ inline void imported_line(Line& l, const ImportArgs& a,
         l.u64(r.values);
         l.key("columns_ignored");
         l.u64(r.columns_ignored);
+        l.key("rows_no_time");
+        l.u64(r.rows_no_time);
         l.key("utc_start_us");
         if (r.utc_start_us == 0) {
             l.raw("null");

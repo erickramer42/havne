@@ -296,10 +296,17 @@ ecuio_status_t ecuio_session_get_absent_signals(
         return ECUIO_OK;
     }
     const uint32_t defs = static_cast<uint32_t>(session->decoder.values.size());
+    const auto absent = [&](uint32_t i) {
+        return i < defs &&
+               session->decoder.carried[i].load(std::memory_order_relaxed) ==
+                   0 &&
+               session->decoder.short_frames[i].load(
+                   std::memory_order_relaxed) >= ECUIO_ABSENT_AFTER_FRAMES;
+    };
     for (uint32_t i = 0; i < defs; ++i) {
-        if (session->decoder.carried[i].load(std::memory_order_relaxed) == 0 &&
-            session->decoder.short_frames[i].load(std::memory_order_relaxed) >=
-                ECUIO_ABSENT_AFTER_FRAMES) {
+        /* A computed def with an absent input never has a value either */
+        if (absent(i) ||
+            ecuio_computed_input_gone(*set, set->defs[i], absent)) {
             if (*count < capacity) {
                 ids[*count] = set->defs[i].id;
             }
@@ -504,6 +511,27 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
                              static_cast<unsigned>(signal_ids[k]),
                              session->info.profile);
             return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
+    /* A computed pick keeps its inputs asked (ADR-0051's appendix of
+     * 2026-11-10): they join the picked defs, never the caller's ids, so the
+     * recorder's focus line names what the caller picked. Inputs are never
+     * computed themselves, so one pass is all there is. */
+    if (set != nullptr && set->computed != nullptr) {
+        for (uint32_t i = 0; i < defs; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if (picked[i] == 0 || (d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0 ||
+                d.table_first >= set->computed_count) {
+                continue;
+            }
+            const ecuio_computed_t& c = set->computed[d.table_first];
+            for (uint8_t k = 0; k < c.input_count && k < 4; ++k) {
+                for (uint32_t j = 0; j < defs; ++j) {
+                    if (set->defs[j].id == c.input_ids[k]) {
+                        picked[j] = 1;
+                    }
+                }
+            }
         }
     }
     {

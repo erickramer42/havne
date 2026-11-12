@@ -9,6 +9,7 @@
 #   python tests/cli_log.py closed-pipe <havne-cli>
 #   python tests/cli_log.py focus-refused <havne-cli> <fake_j2534.dll>   (Windows)
 #   python tests/cli_log.py pace <havne-cli>
+#   python tests/cli_log.py session <havne-cli> <fake_j2534.dll> <golden> [--update]   (Windows)
 #
 # demo: mock://demo logged for 2 s with two signals picked, the log line's
 # period shortened through HAVNE_CLI_LOG_EVERY_MS (set here): the lines
@@ -430,6 +431,48 @@ def focus_refused(cli, dll):
     return 0
 
 
+def session_line(cli, dll, golden_file, update):
+    """A uds-generic log with ?session=03 writes stream's session line: the
+    last one is the engine ECU's entered session, as the golden holds it"""
+    with tempfile.TemporaryDirectory(prefix="havne-cli-log-session-") as root:
+        uri = (f"j2534://{dll}?profile=uds-generic&did=1E1C,D200&session=03"
+               "&identify=0&diagnose=0")
+        code, rows, err = run(cli, ["log", uri, root, "--signal", "DID 1E1C",
+                                    "--seconds", "3"])
+    if code != 0:
+        print(f"FAIL  exit {code}: {err}")
+        return 1
+    # A module's session line is the one carrying ecu: the opening session
+    # line (backend, profile, channels) shares its type
+    types = [r.get("type") for r in rows]
+    opening = [r for r in rows if r.get("type") == "session" and "ecu" not in r]
+    if len(opening) != 1 or "backend" not in opening[0] or \
+            types.index("session") != rows.index(opening[0]):
+        print(f"FAIL  the opening session line: {opening!r}")
+        return 1
+    sessions = [i for i, r in enumerate(rows)
+                if r.get("type") == "session" and "ecu" in r]
+    if not sessions:
+        print("FAIL  no module's session line")
+        return 1
+    last = rows[sessions[-1]]
+    if sessions[0] < rows.index(opening[0]) or rows[-1].get("type") != "end":
+        print(f"FAIL  the order of the lines {types!r}")
+        return 1
+    # The session line is the log's own: written before the end line, never
+    # after it
+    if types.index("end") < sessions[-1]:
+        print("FAIL  a session line after the end")
+        return 1
+    if update:
+        Path(golden_file).write_text(golden.golden_text([last], set()),
+                                     encoding="utf-8", newline="\n")
+        print(f"ok    wrote {golden_file}")
+        return 0
+    expected = golden.parse(Path(golden_file).read_text("utf-8"), golden_file)
+    return golden.report(golden.compare([last], expected, set()), golden_file)
+
+
 def main(argv):
     if len(argv) >= 3 and argv[1] == "demo":
         return demo(argv[2])
@@ -443,6 +486,8 @@ def main(argv):
         return closed_pipe(argv[2])
     if len(argv) >= 4 and argv[1] == "focus-refused":
         return focus_refused(argv[2], argv[3])
+    if len(argv) >= 5 and argv[1] == "session":
+        return session_line(argv[2], argv[3], argv[4], "--update" in argv[5:])
     if len(argv) >= 3 and argv[1] == "pace":
         return pace(argv[2])
     print(__doc__ or "usage: cli_log.py <mode> <havne-cli> ...")

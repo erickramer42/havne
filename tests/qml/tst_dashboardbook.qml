@@ -62,10 +62,9 @@ TestCase {
         return d
     }
 
-    // Boost has no key in Bridge.gaugeSignals: the demo's signal alone
     function refsOf(key) {
         const out = []
-        for (const r of key === "boost" ? ["id:13001"] : Bridge.gaugeSignals[key])
+        for (const r of Bridge.gaugeSignals[key])
             out.push(String(r))
         return out
     }
@@ -151,19 +150,42 @@ TestCase {
         compare(c[6].options, { from: 0, to: 120, warnFrom: 55, dangerFrom: 70,
                                 description: "Intake air temperature" })
         // No accent: blue means cold, nothing else
-        compare(c[7].options, { from: 0, to: 300, description: "Mass air flow" })
-        compare(c[8].options, { from: 0.5, to: 2, description: "Equivalence ratio" })
-        compare(c[9].options, { from: 10, to: 16 })
+        compare(c[7].options, { from: 0, to: 500, description: "Mass air flow" })
+        compare(c[8].options, { from: 0.5, to: 2, description: "Commanded equivalence ratio" })
+        compare(c[9].options, { from: 10, to: 16, dangerBelow: 11.8, warnBelow: 12.4, warnFrom: 14.8, dangerFrom: 15.2 })
     }
 
-    // No empty square on a grid of 5 columns (the desktop at 1280 x 800)
-    // or 8 (1920 x 1080), or the phone's 6 or 12: every square is covered
-    // by a cell as a joined panel draws it, and no dial or ring is stretched
-    // past its square, since it would draw the gauge with blank space around
+    // The built-in layouts read the zone table: a cell on a table signal has
+    // exactly the table's zones, and the shift lights the band
+    function test_theBuiltInLayoutsTakeTheirZonesFromTheTable() {
+        for (const form of ["desktop", "phone"]) {
+            for (const c of DashboardBook.builtIn(form).pages[0].cells) {
+                const key = c.refs && c.refs.length ? Object.keys(Bridge.gaugeSignals).find(
+                    k => Bridge.gaugeSignals[k][0] === c.refs[0]) : undefined
+                if (key === undefined || c.kind === "shift-light")
+                    continue
+                const zones = DashboardBook.zonesFor(key)
+                for (const name of DashboardBook.zoneOptions)
+                    compare(c.options[name], zones[name], form + " " + c.label + " " + name)
+            }
+            const shift = DashboardBook.builtIn(form).pages[0].cells[0]
+            compare([shift.kind, shift.options.from, shift.options.to],
+                    ["shift-light", DashboardBook.shiftBand.from, DashboardBook.shiftBand.to])
+        }
+        const battery = DashboardBook.zonesFor("battery")
+        verify(battery.dangerBelow < battery.warnBelow && battery.warnBelow < battery.warnFrom
+               && battery.warnFrom < battery.dangerFrom, "the battery's four levels are ordered")
+    }
+
+    // No empty square on a desktop grid of 5 to 8 columns (1280 x 800 is 5,
+    // 1920 x 1080 is 8), or the phone's 6 or 12: every square is covered by
+    // a cell as the built-in layout is drawn (`keepSquare`), and no dial or
+    // ring is stretched past its square, since it would draw the gauge with
+    // blank space around it
     function emptySquares(form, columns) {
         const cells = DashboardBook.builtIn(form).pages[0].cells
         const boxes = DashboardBook.place(cells, columns)
-        const drawn = DashboardBook.stretched(cells, boxes, columns)
+        const drawn = DashboardBook.stretched(cells, boxes, columns, true)
         const covered = {}
         let stretchedRound = 0
         cells.forEach((c, i) => {
@@ -187,6 +209,8 @@ TestCase {
     function test_theBuiltInLayoutLeavesNoEmptySquare_data() {
         return [
             { tag: "desktop at 1280 x 800", form: "desktop", columns: 5 },
+            { tag: "desktop at 6 columns", form: "desktop", columns: 6 },
+            { tag: "desktop at 7 columns", form: "desktop", columns: 7 },
             { tag: "desktop at 1920 x 1080", form: "desktop", columns: 8 },
             { tag: "phone", form: "phone", columns: 6 },
             { tag: "phone on its side", form: "phone", columns: 12 }
@@ -806,6 +830,35 @@ TestCase {
         compare(DashboardBook.labelOf(e.pages[0].cells[0]), "")
     }
 
+    // A new kind keeps the signal, the label, the span and every option,
+    // the old kind's own included, so the way back finds them
+    function test_setKindKeepsEverythingElse() {
+        const own = cell("IAT", "analog")
+        own.options = { from: 0, to: 8000, warnFrom: 6000, majorStep: 1000, caption: "x" }
+        const d = DashboardBook.addCell(book(), 0, own)
+        const at = d.pages[0].cells.length - 1
+        const ring = DashboardBook.setKind(d, 0, at, "ring")
+        const c = ring.pages[0].cells[at]
+        compare(c.kind, "ring")
+        compare([c.label, c.refs, c.unit, c.w, c.h], [own.label, own.refs, own.unit, own.w, own.h])
+        compare(c.options, own.options, "every option, the dial's own included")
+        compare(JSON.stringify(DashboardBook.setKind(ring, 0, at, d.pages[0].cells[at].kind).pages[0].cells[at]),
+                JSON.stringify(d.pages[0].cells[at]), "and back is the cell it was")
+    }
+
+    function test_setKindRefusesWhatItCannotDraw() {
+        const d = DashboardBook.addCell(book(), 0, { kind: "blank", w: 1, h: 4, refs: [] })
+        const s = JSON.stringify
+        for (const [what, doc, i, kind] of [
+                ["a blank target", book(), 0, "blank"],
+                ["an unknown kind", book(), 0, "gauge9"],
+                ["the same kind", book(), 0, "digital"],
+                ["a blank cell", d, 2, "ring"],
+                ["no cell", book(), 5, "ring"],
+                ["no page", book(), -1, "ring"]])
+            compare(s(DashboardBook.setKind(doc, what === "no page" ? 9 : 0, i, kind)), s(doc), what)
+    }
+
     function test_thePageFunctions() {
         const added = DashboardBook.addPage(book(), "  Laps  ")
         compare(added.pages.map(p => p.name), ["Engine", "Track", "Laps"])
@@ -1197,6 +1250,32 @@ TestCase {
         const boxes = DashboardBook.place(cells, 6)
         compare(DashboardBook.stretched(cells, boxes, 6)[0].w, 6)
         compare(DashboardBook.stretched(cells, boxes)[0].w, 2)
+    }
+
+    // The built-in layout's drawing (`keepSquare`): a dial or ring keeps its
+    // box, and a gauge fills down and then right over what it leaves. Without
+    // it every cell stretches down, and only one alone in its rows runs right
+    function test_stretchedKeepingTheSquares() {
+        const cell = (kind, w, h) => ({ kind: kind, w: w, h: h })
+        const cells = [cell("ring", 1, 4), cell("digital", 1, 4), cell("digital", 1, 4)]
+        const boxes = [{ x: 0, y: 0, w: 1, h: 4 }, { x: 1, y: 0, w: 1, h: 4 },
+                       { x: 0, y: 4, w: 1, h: 4 }]
+        compare(DashboardBook.stretched(cells, boxes, 4).map(b => [b.w, b.h]),
+                [[1, 4], [1, 8], [1, 4]], "as before")
+        compare(DashboardBook.stretched(cells, boxes, 4, true).map(b => [b.w, b.h]),
+                [[1, 4], [3, 8], [1, 4]], "the second runs down, then right to the edge")
+        compare(DashboardBook.stretched(cells, boxes, 4, false).map(b => [b.w, b.h]),
+                [[1, 4], [1, 8], [1, 4]], "false is the same as left out")
+        // The dial keeps its box even with empty squares under it
+        const dial = [cell("analog", 1, 4)]
+        const room = [{ x: 0, y: 0, w: 1, h: 4 }, { x: 1, y: 0, w: 1, h: 8 }]
+        compare(DashboardBook.stretched(dial.concat([cell("digital", 1, 8)]), room, 4, true)
+                    .map(b => [b.w, b.h]), [[1, 4], [3, 8]], "a dial is never stretched")
+        // A blank beside it stops the fill, as one under it does
+        const withBlank = [cell("digital", 1, 4), cell("blank", 1, 4)]
+        compare(DashboardBook.stretched(withBlank, [{ x: 0, y: 0, w: 1, h: 4 },
+                                                     { x: 1, y: 0, w: 1, h: 4 }], 4, true)
+                    .map(b => [b.w, b.h]), [[1, 4], [1, 4]], "never over a blank")
     }
 
     function test_digitsFor_data() {

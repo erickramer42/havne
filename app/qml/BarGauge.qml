@@ -1,5 +1,6 @@
 // File/layer: app/qml/BarGauge.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard,
+//          QmlTest.dashedit
 
 import QtQuick
 
@@ -30,21 +31,30 @@ GaugeBase {
 
     Text {
         id: title
+        objectName: "gaugeTitle"
         Accessible.ignored: true
         anchors { left: parent.left; verticalCenter: readout.verticalCenter }
         text: gauge.label
         font.pixelSize: 12
         font.weight: Font.DemiBold
         color: Theme.textDim
+        elide: Text.ElideRight
+        width: Math.max(0, Math.min(implicitWidth, gauge.width - readout.width - 8))
+        visible: !gauge.noteAlone
     }
+    readonly property bool noteAlone: noteTakesLine(title.implicitWidth, width - readout.width - 8)
     Text {
         objectName: "gaugeNote"
         Accessible.ignored: true
-        anchors { left: title.right; leftMargin: 10; right: readout.left; rightMargin: 8
-                  baseline: title.baseline }
-        visible: (!gauge.hasValue || gauge.stale) && width > 0
+        anchors { left: gauge.noteAlone ? parent.left : title.right
+                  leftMargin: gauge.noteAlone ? 0 : 10
+                  right: readout.left; rightMargin: 8 }
+        y: gauge.noteAlone ? 0 : title.y + title.baselineOffset - baselineOffset
+        visible: (!gauge.hasValue || gauge.stale) && (gauge.noteAlone || width > 0)
         elide: Text.ElideRight
-        text: gauge.shownNote
+        wrapMode: gauge.noteAlone ? Text.WordWrap : Text.NoWrap
+        maximumLineCount: gauge.noteAlone ? 2 : 1
+        text: gauge.noteAlone ? gauge.titledNote : gauge.shownNote
         font.pixelSize: 11
         color: Qt.alpha(Theme.textDim, 0.7)
     }
@@ -62,13 +72,13 @@ GaugeBase {
             font.weight: Font.Bold
             font.family: Theme.valueFamily
             font.features: Theme.valueFeatures
-            color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
+            color: gauge.hasValue ? gauge.zoneColor(gauge.value, gauge.readoutColor) : Theme.textDim
         }
         // Past dangerFrom, beside the value
         DangerMark {
             // The slot stays once a gauge has a danger zone, so the readout
             // never moves as the mark appears
-            visible: !isNaN(gauge.dangerFrom)
+            visible: gauge.hasDangerZone
             opacity: gauge.inDanger ? 1 : 0
             size: 18
             anchors.verticalCenter: valueLabel.verticalCenter
@@ -108,9 +118,8 @@ GaugeBase {
 
                 // The danger zone's segments carry an outline: heavier than
                 // the others, so the zone reads apart by more than its hue
-                readonly property bool inDangerZone: !isNaN(gauge.dangerFrom)
-                    && gauge.from + (index + 0.5) / gauge.segments * (gauge.to - gauge.from)
-                       >= gauge.dangerFrom
+                readonly property bool inDangerZone: gauge.inDangerAt(
+                    gauge.from + (index + 0.5) / gauge.segments * (gauge.to - gauge.from))
 
                 readonly property real along: (gauge.barLength
                     - (gauge.segments - 1) * gauge.segmentGap) / gauge.segments

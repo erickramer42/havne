@@ -143,6 +143,14 @@ ApplicationWindow {
         if (Theme.mobile || testMobile)
             zoomRoot.forceActiveFocus()
     }
+    // Back out of Settings to the page that sent the user (Other address...)
+    function leaveSettings() {
+        const to = cameFrom
+        settingsView.backLeaves = false
+        settingsView.closeShown()
+        if (to >= 0)
+            gotoPage(to)
+    }
     // Android's Back: true when it did something here. False leaves it to the
     // system, which goes to the launcher and keeps the session
     function goBack() {
@@ -151,8 +159,7 @@ ApplicationWindow {
         if (currentPage === settingsPage) {
             if (!settingsView.backLeaves)
                 return settingsView.closeShown()
-            settingsView.closeShown()
-            gotoPage(cameFrom)
+            leaveSettings()
             return true
         }
         if (currentPage === logPage && cameFrom >= 0) {
@@ -216,6 +223,13 @@ ApplicationWindow {
     Connections {
         target: Bridge
         function onConnectResult(uri, error) {
+            // A connect that worked on Connection, reached by Other address...,
+            // returns to the page that sent it, where the gauges are
+            if (error === "" && root.currentPage === root.settingsPage && settingsView.backLeaves
+                    && uri !== root.replayPending) {
+                root.leaveSettings()
+                return
+            }
             if (root.replayPending === "" || uri !== root.replayPending)
                 return
             root.replayPending = ""
@@ -241,6 +255,17 @@ ApplicationWindow {
     // the time on one line or under it
     readonly property int logSizeShownBytes: 104858
     readonly property bool logReadoutOneLine: headerRow.width >= 560
+    // The header's short state word: "Connected" ("Replaying" for a
+    // replay) where the other pages' short label says "Live", which is a tab's name
+    function shortStatusWord(state) {
+        if (state !== "ok")
+            return Theme.linkShortLabel(state)
+        return Bridge.currentUri.toLowerCase().startsWith("replay://") ? qsTr("Replaying")
+                                                                       : qsTr("Connected")
+    }
+    // From 720 px of header the readout says what the time is, and Mark
+    // stands beside Stop log
+    readonly property bool headerHasRoom: headerRow.width >= 720
     function logReadoutText(ms, bytes, oneLine) {
         const time = logTimeText(ms)
         const size = logSizeText(bytes)
@@ -457,7 +482,7 @@ ApplicationWindow {
                                 Bridge.connecting ? qsTr("Connecting…")
                               : Bridge.disconnecting ? qsTr("Disconnecting…")
                               : root.isCompact || !headerTitle.visible
-                                ? Theme.linkShortLabel(Bridge.linkState)
+                                ? root.shortStatusWord(Bridge.linkState)
                                 : Theme.linkLabel(Bridge.linkState)
                             readonly property string address: Bridge.connected ? Bridge.uriLabel : ""
                             Layout.fillWidth: true
@@ -527,6 +552,16 @@ ApplicationWindow {
                                     color: Theme.textDim
                                     text: qsTr("· recording")
                                 }
+                                // Marks the status as a button where it opens the Log
+                                Label {
+                                    objectName: "linkPillChevron"
+                                    // Not where it would squeeze a connected phone's address
+                                    visible: pill.enabled && (pill.address === "" || headerRow.width >= 420)
+                                    Accessible.ignored: true
+                                    font.pixelSize: Theme.fontCaption
+                                    color: Theme.textDim
+                                    text: "›"   // a right angle quotation mark
+                                }
                             }
                         }
 
@@ -545,13 +580,14 @@ ApplicationWindow {
 
                         Item { Layout.fillWidth: true }  // Spacer
 
-                        // A marker in the recording under way, from any page
+                        // A marker in the recording under way (a log is one: beside
+                        // Stop log from 720 px of header), from any page
                         // (ADR-0049 section 4): "Mark N" at the tap, which the
                         // Recordings page aligns two runs on
                         HeaderButton {
                             id: markButton
                             objectName: "markButton"
-                            visible: Bridge.recordingActive && !Bridge.logActive
+                            visible: Bridge.recordingActive && (!Bridge.logActive || root.headerHasRoom)
                             text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount)
                                                        : qsTr("Mark")
                             Accessible.name: qsTr("Mark the recording")
@@ -580,8 +616,11 @@ ApplicationWindow {
                         Label {
                             objectName: "logReadout"
                             visible: Bridge.logActive
-                            text: root.logReadoutText(Bridge.logElapsedMs, Bridge.logBytes,
-                                                      root.logReadoutOneLine)
+                            text: root.headerHasRoom
+                                  ? qsTr("Logging %1").arg(root.logReadoutText(
+                                        Bridge.logElapsedMs, Bridge.logBytes, true))
+                                  : root.logReadoutText(Bridge.logElapsedMs, Bridge.logBytes,
+                                                        root.logReadoutOneLine)
                             horizontalAlignment: Text.AlignRight
                             font.pixelSize: Theme.fontBody
                             color: Theme.text
@@ -734,6 +773,7 @@ ApplicationWindow {
                         id: settingsView
                         objectName: "settingsPage"
                         onLogRequested: root.openLog()
+                        onLeaveRequested: root.leaveSettings()
                     }
                 }
             }

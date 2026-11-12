@@ -223,11 +223,24 @@ ECUIO_RECORDING_INFO_FRAMES = 2
 ECUIO_RECORDING_INFO_NO_SUMMARY = 1
 ECUIO_RECORDING_NONE = 0xffffffffffffffff
 ECUIO_RECORDING_REASON_LEN = 128
+ECUIO_RECORDING_ROLE_ENGINE_LOAD = 4
+ECUIO_RECORDING_ROLE_ENGINE_SPEED = 1
+ECUIO_RECORDING_ROLE_THROTTLE = 3
+ECUIO_RECORDING_ROLE_VEHICLE_SPEED = 2
 ECUIO_RECORDING_SIGNALS_MATCH = 4
 ECUIO_RECORDING_SIGNALS_NAMED = 1
 ECUIO_RECORDING_SIGNALS_PRESENT = 2
 ECUIO_RECORDING_SIGNAL_ENUM = 2
 ECUIO_RECORDING_SIGNAL_TEXT = 1
+ECUIO_RECORDING_STEP_BACKWARD = 2
+ECUIO_RECORDING_STEP_FORWARD = 1
+ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED = 2
+ECUIO_RECORDING_STRETCH_BY_LOAD = 1
+ECUIO_RECORDING_STRETCH_CRUISE = 2
+ECUIO_RECORDING_STRETCH_CUT_END = 16
+ECUIO_RECORDING_STRETCH_CUT_START = 8
+ECUIO_RECORDING_STRETCH_NO_THROTTLE = 4
+ECUIO_RECORDING_STRETCH_PULL = 1
 ECUIO_SERIAL_DEVICE_LEN = 128
 ECUIO_SERIAL_NAME_LEN = 128
 ECUIO_SESSION_INFO_LISTEN_ONLY = 16
@@ -271,6 +284,18 @@ ECUIO_SIM_REPLY_LATE = 2
 ECUIO_SIM_REPLY_PENDING = 1
 ECUIO_SIM_REPLY_STALLED = 8
 ECUIO_SIM_YIELDED = 2
+ECUIO_STRETCH_CRUISES = 2
+ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR = 56.32704
+ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US = 0x989680
+ECUIO_STRETCH_DEFAULT_CRUISE_SPEED_BAND = 2.0
+ECUIO_STRETCH_DEFAULT_CRUISE_THROTTLE_BAND = 3.0
+ECUIO_STRETCH_DEFAULT_PULL_GAIN = 10.0
+ECUIO_STRETCH_DEFAULT_PULL_GAP_US = 0x16e360
+ECUIO_STRETCH_DEFAULT_PULL_HOLD_US = 0xf4240
+ECUIO_STRETCH_DEFAULT_PULL_LEVEL = 80.0
+ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL = 80.0
+ECUIO_STRETCH_DEFAULT_PULL_RISE = 750.0
+ECUIO_STRETCH_PULLS = 1
 ECUIO_SUPPORT_COMPLETE = 2
 ECUIO_SUPPORT_EXTENDED = 32
 ECUIO_SUPPORT_MAX_DROPPED = 8
@@ -304,6 +329,7 @@ ECUIO_VALIDATE_ERR_COMPUTED = 20
 ECUIO_VALIDATE_ERR_COMPUTED_INPUT = -22
 ECUIO_VALIDATE_ERR_DECIMALS = 8
 ECUIO_VALIDATE_ERR_DUPLICATE_ID = -14
+ECUIO_VALIDATE_ERR_DUPLICATE_NAME = -25
 ECUIO_VALIDATE_ERR_DUPLICATE_RX = -13
 ECUIO_VALIDATE_ERR_ENUM = 19
 ECUIO_VALIDATE_ERR_ENUM_ENTRY = -20
@@ -501,6 +527,12 @@ class ecuio_recording_signal_t(Structure):
 class ecuio_recording_signals_t(Structure):
     pass
 
+class ecuio_recording_stats_t(Structure):
+    pass
+
+class ecuio_recording_stretch_t(Structure):
+    pass
+
 class ecuio_recording_t(Structure):
     pass
 
@@ -547,6 +579,9 @@ class ecuio_stream_callbacks_t(Structure):
     pass
 
 class ecuio_stream_t(Structure):
+    pass
+
+class ecuio_stretch_rules_t(Structure):
     pass
 
 class ecuio_validation_t(Structure):
@@ -840,7 +875,8 @@ ecuio_import_report_t._fields_ = [
     ('duration_us', c_uint64),
     ('values', c_uint64),
     ('columns_ignored', c_uint64),
-    ('reserved', (c_uint64 * 2)),
+    ('rows_no_time', c_uint64),
+    ('reserved', (c_uint64 * 1)),
 ]
 ecuio_inspection_t._fields_ = [
     ('verdict', c_uint8),
@@ -980,6 +1016,30 @@ ecuio_recording_signals_t._fields_ = [
     ('length', c_uint64),
     ('sha256', (c_char * 72)),
     ('reserved', (c_uint64 * 5)),
+]
+ecuio_recording_stats_t._fields_ = [
+    ('samples', c_uint64),
+    ('first', c_double),
+    ('last', c_double),
+    ('lowest', c_double),
+    ('highest', c_double),
+    ('lowest_us', c_uint64),
+    ('highest_us', c_uint64),
+    ('mean', c_double),
+    ('flags', c_uint32),
+    ('reserved0', c_uint32),
+    ('reserved', (c_uint64 * 3)),
+]
+ecuio_recording_stretch_t._fields_ = [
+    ('kind', c_uint32),
+    ('signal', c_uint32),
+    ('from_us', c_uint64),
+    ('to_us', c_uint64),
+    ('start', c_double),
+    ('end', c_double),
+    ('flags', c_uint32),
+    ('reserved0', c_uint32),
+    ('reserved', (c_uint64 * 2)),
 ]
 ecuio_replay_faults_t._fields_ = [
     ('frames', c_uint64),
@@ -1130,6 +1190,25 @@ ecuio_stream_callbacks_t._fields_ = [
     ('flags', c_uint32),
     ('reserved', (c_uint32 * 5)),
 ]
+ecuio_stretch_rules_t._fields_ = [
+    ('kinds', c_uint32),
+    ('flags', c_uint32),
+    ('pull_level', c_double),
+    ('pull_load_level', c_double),
+    ('pull_hold_us', c_uint64),
+    ('pull_gap_us', c_uint64),
+    ('cruise_hold_us', c_uint64),
+    ('cruise_speed_band', c_double),
+    ('cruise_throttle_band', c_double),
+    ('cruise_floor', c_double),
+    ('throttle', c_uint32),
+    ('engine_load', c_uint32),
+    ('vehicle_speed', c_uint32),
+    ('engine_speed', c_uint32),
+    ('pull_min_rise', c_double),
+    ('pull_min_gain', c_double),
+    ('reserved', (c_uint64 * 2)),
+]
 ecuio_validation_t._fields_ = [
     ('code', c_int32),
     ('index', c_uint32),
@@ -1241,6 +1320,10 @@ FUNCTIONS = {
     'ecuio_recording_open_frames': (c_int, [c_char_p, POINTER(ecuio_signal_set_t), ecuio_open_progress_t, c_void_p, POINTER(POINTER(ecuio_recording_t))]),  # recording.h
     'ecuio_recording_query': (c_int, [POINTER(ecuio_recording_t), POINTER(c_uint32), c_uint32, c_uint64, c_uint64, POINTER(ecuio_recording_column_t), c_uint32]),  # recording.h
     'ecuio_recording_read_frames': (c_int, [c_char_p, c_uint64, c_uint64, ecuio_frame_row_callback_t, c_void_p, POINTER(ecuio_frames_read_t)]),  # recording.h
+    'ecuio_recording_role_signal': (c_int, [POINTER(ecuio_recording_t), c_uint32, POINTER(c_uint32)]),  # recording.h
+    'ecuio_recording_stats': (c_int, [POINTER(ecuio_recording_t), POINTER(c_uint32), c_uint32, c_uint64, c_uint64, POINTER(ecuio_recording_stats_t)]),  # recording.h
+    'ecuio_recording_step': (c_int, [POINTER(ecuio_recording_t), c_uint32, c_uint64, c_uint32, POINTER(c_uint64)]),  # recording.h
+    'ecuio_recording_stretches': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_stretch_rules_t), c_uint64, c_uint64, POINTER(ecuio_recording_stretch_t), c_uint32, POINTER(c_uint32)]),  # recording.h
     'ecuio_recording_text_at': (c_int, [POINTER(ecuio_recording_t), c_uint32, c_uint64, c_char_p, c_uint32, POINTER(c_uint64)]),  # recording.h
     'ecuio_register_frame_callback': (c_int, [POINTER(ecuio_session_t), ecuio_frame_callback_t, c_void_p]),  # core.h
     'ecuio_register_values_callback': (c_int, [POINTER(ecuio_session_t), ecuio_values_callback_t, c_void_p]),  # profile.h

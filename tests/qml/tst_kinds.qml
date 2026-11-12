@@ -63,8 +63,10 @@ TestCase {
 
     // ---- A status note
 
-    // Whole on a wide card, cut inside a narrow one, gone when the title
-    // leaves it no room, and clear of the value on a tile too short for a trace
+    // Whole on a wide card; inside a narrow one, cut (a number's) or taking
+    // the title's line, led by the title, when it doesn't fit beside it (a
+    // title that leaves it no room too); clear of the value on a tile too
+    // short for a trace
     function test_aNoteStaysInItsCard_data() {
         return [{ tag: "digits", c: readoutC, narrow: 125, titled: true },
                 { tag: "bar", c: barC, narrow: 190, titled: true },
@@ -85,12 +87,17 @@ TestCase {
         const n = find(g, "gaugeNote")
         const left = n.mapToItem(g, 0, 0).x
         verify(n.visible, "there's room for part of it: " + n.width)
-        verify(n.truncated, "cut to fit")
+        if (data.titled) {
+            verify(g.noteAlone, "it doesn't fit beside the title")
+            verify(n.text.indexOf(words.label) === 0, "led by the title: " + n.text)
+        } else {
+            verify(n.truncated, "cut to fit")
+        }
         verify(left + n.width <= g.width + 0.5, "ends at " + (left + n.width) + " in " + g.width)
         verify(n.contentWidth <= n.width + 0.5, n.contentWidth + " drawn in " + n.width)
         if (data.titled)
-            verify(!find(make(data.c, Object.assign({ width: 60 }, words)), "gaugeNote").visible,
-                   "no room past the title")
+            verify(find(make(data.c, Object.assign({ width: 60 }, words)), "gaugeNote").visible,
+                   "the note takes the title's line")
         if (data.height !== undefined) {
             const value = find(g, "readout")
             verify(g.brief, "a short tile")

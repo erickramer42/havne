@@ -72,6 +72,27 @@ ecuio_signal_def_t pid_def(uint32_t pid, uint32_t field, uint8_t start,
     return d;
 }
 
+/* A computed def (ADR-0051 section 5): no frame of its own, its value
+ * worked out by the program kObd2Computed[program] from other defs'. The
+ * validator wants the decode block plain: message 0, UINT, LE, every bit
+ * field 0, scale 1. The group is set with every def's, below. */
+ecuio_signal_def_t computed_def(uint16_t id, const char* name,
+                                const char* unit, uint8_t decimals,
+                                uint16_t program)
+{
+    ecuio_signal_def_t d = {};
+    d.id = id;
+    d.flags = ECUIO_DEF_FLAG_COMPUTED;
+    d.kind = static_cast<uint8_t>(ECUIO_VALUE_UINT);
+    d.byte_order = ECUIO_BYTE_ORDER_LE;
+    d.scale = 1.0;
+    d.decimal_places = decimals;
+    d.table_first = program;
+    (void)std::snprintf(d.name, sizeof d.name, "%s", name);
+    (void)std::snprintf(d.unit, sizeof d.unit, "%s", unit);
+    return d;
+}
+
 /* J1979's repeated scalings: a trim (0 % at 128), a percentage of 255,
  * a 16-bit equivalence ratio and a wide-range sensor's voltage */
 constexpr double kTrim = 100.0 / 128.0;
@@ -244,6 +265,8 @@ ecuio_signal_def_t kObd2Defs[] = {
     pid_def(0xA2, 0, 0, "Cylinder Fuel Rate", U, 16, 0.03125, 0.0, "mg/stroke",
             2),
     pid_def(0xA6, 0, 0, "Odometer", U, 32, 0.1, 0.0, "km", 1),
+    /* Last, so every def before it keeps its place. Its program is kObd2Computed[0]. */
+    computed_def(ECUIO_OBD2_SIG_BOOST_ID, "Boost", "kPa", 0, 0),
 };
 
 /* The signals a UI plots at session start, best first (ADR-0039 section
@@ -315,6 +338,7 @@ const struct {
     uint8_t group;
 } kGroupExceptions[] = {
     {ECUIO_OBD2_PID_SIG_ID(0x4F, 3), G_AIR},
+    {ECUIO_OBD2_SIG_BOOST_ID, G_AIR},
 };
 #undef G_DIAG
 #undef G_ELEC
@@ -354,6 +378,23 @@ const ecuio_channel_decl_t kObd2Channels[] = {
     { ECUIO_OBD2_ECU_ARB_ID, ECUIO_OBD2_TESTER_ARB_ID },
 };
 
+/* Boost is MAP (PID 0B) minus baro (PID 33): below zero a vacuum. Baro
+ * moves with the weather, so it keeps 30 s; MAP keeps the default bound. */
+const ecuio_computed_t kObd2Computed[] = {
+    [] {
+        ecuio_computed_t c = {};
+        c.input_ids[0] = static_cast<uint16_t>(ECUIO_OBD2_PID_SIG_ID(0x0B, 0));
+        c.input_ids[1] = static_cast<uint16_t>(ECUIO_OBD2_PID_SIG_ID(0x33, 0));
+        c.max_age_us[1] = 30000000u;
+        c.input_count = 2;
+        c.step_count = 3;
+        c.steps[0] = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+        c.steps[1] = ECUIO_COMPUTED_PUSH_INPUT | 1u;
+        c.steps[2] = ECUIO_COMPUTED_SUBTRACT;
+        return c;
+    }(),
+};
+
 const ecuio_signal_set_t kObd2Set = [] {
     for (size_t r = 0; r < sizeof kPlotOrder / sizeof kPlotOrder[0]; ++r) {
         for (ecuio_signal_def_t& d : kObd2Defs) {
@@ -371,6 +412,8 @@ const ecuio_signal_set_t kObd2Set = [] {
     s.defs = kObd2Defs;
     s.channel_count = static_cast<uint32_t>(sizeof(kObd2Channels) / sizeof(kObd2Channels[0]));
     s.channels = kObd2Channels;
+    s.computed_count = static_cast<uint32_t>(sizeof(kObd2Computed) / sizeof(kObd2Computed[0]));
+    s.computed = kObd2Computed;
     return s;
 }();
 

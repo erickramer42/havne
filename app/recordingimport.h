@@ -25,6 +25,9 @@ class RecordingImport : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+    // The next import's folder label, as typed: reduced to a safe name the
+    // way the recorder reduces one; "" keeps the format's own ("CSV import")
+    Q_PROPERTY(QString label READ label WRITE setLabel NOTIFY labelChanged)
 
 public:
     // ecuio_import's formats
@@ -41,6 +44,8 @@ public:
     RecordingImport& operator=(const RecordingImport&) = delete;
 
     bool busy() const { return m_busy; }
+    QString label() const { return m_label; }
+    void setLabel(const QString& label);
 
     // The file's kind from its first line that isn't blank: candump's
     // "(seconds) interface ID#data" is Candump, anything else Csv
@@ -50,10 +55,16 @@ public:
     // map, a candump log's interface named (empty: the log's only one).
     // False while one is under way. finished() follows, on this thread,
     // with { ok, words, folder, frames, values, columnsIgnored,
-    // durationUs }: words core's refusal (a line and why, never a path) or
-    // the app's, "" with ok
+    // rowsNoTime, durationUs }: words core's refusal (a line and why, never
+    // a path) or the app's, "" with ok
     Q_INVOKABLE bool start(const QUrl& file, int kind, const QUrl& map,
                            const QString& interfaceName);
+
+    // Stops an import under way at its copy's next chunk or core's next
+    // ask, leaving nothing made: finished() follows with { ok: false,
+    // canceled: true, words }. An import that ended first keeps its
+    // result. Nothing while none runs; a guess is short and runs to its end
+    Q_INVOKABLE void cancel();
 
     // Starts a CSV import through a column map given as text (the Import
     // panel's edited guess): the same worker, finished() and result as
@@ -66,8 +77,9 @@ public:
     // guessFinished() follows, on this thread, with { ok, words, mapText
     // (the map core wrote), unitKnown, timeNumbers, decimalComma,
     // preamble, delimiter, headerRow, timeColumn, timeUnit ("" for
-    // none), columns: [{ index, column, used, why, isTime, name, unit,
-    // kind, canPutBack, samples }], notes }. samples are the file's first
+    // none), columns: [{ index, column, label (the header's text without
+    // its padding), used, why, isTime, name, unit, kind, canPutBack,
+    // samples }], notes }. samples are the file's first
     // rows below the header for display, read here and never judged:
     // core's reader is the import's, this one only shows rows.
     Q_INVOKABLE bool guess(const QUrl& file, const QString& timeUnit);
@@ -98,12 +110,16 @@ public:
     void setCopyLocalFilesForTesting(bool copy) { m_copyLocal = copy; }
     // The next worker can't be started, as when the system is out of threads
     void setFailThreadForTesting(bool on) { m_failThreadForTesting = on; }
+    // An import's worker waits this long, or until a stop, before core's
+    // call, so a test's cancel finds one under way
+    void setHoldForTesting(int ms) { m_holdMsForTesting = ms; }
 
     // The largest column map read, as havne-cli reads one
     static constexpr qint64 MapMaxBytes = 1024 * 1024;
 
 signals:
     void busyChanged();
+    void labelChanged();
     void finished(const QVariantMap& result);
     void guessFinished(const QVariantMap& result);
 
@@ -119,10 +135,13 @@ private:
 
     std::function<QString()> m_root;
     std::thread m_worker;
-    // Set at destruction: the worker's copy and core's import stop
+    // Set by cancel() and at destruction: the worker's copy and core's
+    // import stop. Cleared as each worker starts
     std::atomic<bool> m_stop{false};
     bool m_busy = false;
+    int m_holdMsForTesting = 0;
     bool m_copyLocal = false;
+    QString m_label;
     bool m_failThreadForTesting = false;
     QString m_mapsRoot;
 };

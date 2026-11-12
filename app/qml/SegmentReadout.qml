@@ -81,6 +81,8 @@ GaugeBase {
 
     implicitHeight: 64
 
+    readonly property bool noteAlone: noteTakesLine(title.implicitWidth, width)
+
     Text {
         id: title
         objectName: "readoutTitle"
@@ -90,14 +92,22 @@ GaugeBase {
         font.pixelSize: 12
         font.weight: Font.DemiBold
         color: Theme.textDim
+        elide: Text.ElideRight
+        width: Math.min(implicitWidth, gauge.width)
+        visible: !gauge.noteAlone
     }
     Text {
         objectName: "gaugeNote"
         Accessible.ignored: true
-        anchors { left: title.right; leftMargin: 10; right: parent.right; baseline: title.baseline }
-        visible: (!gauge.hasValue || gauge.stale) && width > 0
+        anchors { left: gauge.noteAlone ? parent.left : title.right
+                  leftMargin: gauge.noteAlone ? 0 : 10
+                  right: parent.right }
+        y: gauge.noteAlone ? 0 : title.y + title.baselineOffset - baselineOffset
+        visible: (!gauge.hasValue || gauge.stale) && (gauge.noteAlone || width > 0)
         elide: Text.ElideRight
-        text: gauge.shownNote
+        wrapMode: gauge.noteAlone ? Text.WordWrap : Text.NoWrap
+        maximumLineCount: gauge.noteAlone ? 2 : 1
+        text: gauge.noteAlone ? gauge.titledNote : gauge.shownNote
         font.pixelSize: 11
         color: Qt.alpha(Theme.textDim, 0.7)
     }
@@ -176,7 +186,7 @@ GaugeBase {
         }
         // Past dangerFrom, beside the unit; its slot stays
         DangerMark {
-            visible: !isNaN(gauge.dangerFrom)
+            visible: gauge.hasDangerZone
             opacity: gauge.inDanger ? 1 : 0
             size: gauge.markPx
         }

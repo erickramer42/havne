@@ -22,7 +22,8 @@ ColumnLayout {
     // s, ms or us for a time of plain numbers; "" until one is chosen
     property string timeUnit: ""
     // One entry a header column but the time's, in the header's order:
-    // { column, include, used, why, canPutBack, name, unit, kind, samples }.
+    // { column, label, include, used, why, canPutBack, name, unit, kind,
+    // samples }; label is the header's text without its padding.
     // Edited in place by the rows below; replaced by load()
     property var columns: []
     property int included: 0
@@ -61,7 +62,7 @@ ColumnLayout {
                 time = c
                 continue
             }
-            list.push({ column: c.column, include: c.used, used: c.used, why: c.why,
+            list.push({ column: c.column, label: c.label, include: c.used, used: c.used, why: c.why,
                         canPutBack: c.canPutBack, name: c.name, unit: c.unit,
                         kind: c.kind, samples: c.samples })
         }
@@ -120,7 +121,7 @@ ColumnLayout {
         wrapMode: Text.WrapAnywhere
         color: Theme.text
         text: preview.timeColumn === null ? ""
-              : qsTr("Time: %1").arg(preview.timeColumn.column)
+              : qsTr("Time: %1").arg(preview.timeColumn.label)
     }
     Label {
         objectName: "guessTimeSamples"
@@ -142,26 +143,17 @@ ColumnLayout {
             color: Theme.textDim
             font.pixelSize: Theme.fontCaption
         }
-        Rectangle {
-            implicitWidth: unitSwitch.implicitWidth + 4
-            implicitHeight: unitSwitch.implicitHeight + 4
-            radius: Theme.radius
-            color: Theme.surface
-            Row {
-                id: unitSwitch
-                anchors.centerIn: parent
-                spacing: 2
-                Repeater {
-                    model: ["s", "ms", "us"]
-                    SegmentButton {
-                        required property string modelData
-                        objectName: "guessTimeUnit_" + modelData
-                        text: modelData
-                        implicitWidth: Math.max(Theme.touchTarget, implicitContentWidth + 24)
-                        implicitHeight: Theme.touchTarget
-                        selected: preview.timeUnit === modelData
-                        onClicked: preview.timeUnit = modelData
-                    }
+        SegmentRow {
+            Repeater {
+                model: ["s", "ms", "us"]
+                SegmentButton {
+                    required property string modelData
+                    objectName: "guessTimeUnit_" + modelData
+                    text: modelData
+                    implicitWidth: Math.max(Theme.touchTarget, implicitContentWidth + 24)
+                    implicitHeight: Theme.touchTarget
+                    selected: preview.timeUnit === modelData
+                    onClicked: preview.timeUnit = modelData
                 }
             }
         }
@@ -220,6 +212,8 @@ ColumnLayout {
                     objectName: "include"
                     Layout.fillWidth: true
                     Layout.minimumHeight: Theme.touchTarget
+                    // A box with text sits at the row's start, beside it
+                    text: row.col.label === "" ? qsTr("(no header)") : row.col.label
                     checked: row.on
                     enabled: row.col.used || row.col.canPutBack
                     onToggled: {
@@ -228,7 +222,7 @@ ColumnLayout {
                         preview.recount()
                     }
                     contentItem: Label {
-                        text: row.col.column === "" ? qsTr("(no header)") : row.col.column
+                        text: includeBox.text
                         color: Theme.text
                         wrapMode: Text.WrapAnywhere
                         verticalAlignment: Text.AlignVCenter
@@ -277,7 +271,7 @@ ColumnLayout {
                         Layout.minimumWidth: Theme.touchTarget
                         property string kind: row.col.kind
                         text: kind
-                        Accessible.name: qsTr("Kind of %1: %2, press to change").arg(row.col.column).arg(kind)
+                        Accessible.name: qsTr("Kind of %1: %2, press to change").arg(row.col.label === "" ? qsTr("(no header)") : row.col.label).arg(kind)
                         onClicked: {
                             kind = kind === "number" ? "text" : "number"
                             row.col.kind = kind

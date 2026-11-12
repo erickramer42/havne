@@ -387,7 +387,10 @@ each one covers are listed in [testing.md](testing.md).
 **QML tests** (`test_qml`, Qt Quick Test) load the app's QML module,
 the `app_ui` library, against a real bridge. Each
 `tests/qml/tst_*.qml` file is one ctest case, `QmlTest.<name>`, in a
-process of its own; a new file is picked up at the next configure.
+process of its own, except the three slowest (`tst_dashboard.qml`,
+`tst_dashedit.qml`, `tst_phone.qml`), which run as three cases each,
+`QmlTest.<name>-1of3` to `-3of3`, every third case; a new file is picked
+up at the next configure.
 
 ```sh
 ctest --test-dir build -C Release -R '^QmlTest\.' --output-on-failure

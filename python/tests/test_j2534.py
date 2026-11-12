@@ -64,3 +64,32 @@ def test_a_scan_in_the_extended_session_reports_its_session():
         assert report.flags & havne.c.ECUIO_SUPPORT_EXTENDED
         assert report.session_entries == 1
         assert report.scan_found == 1, "D200, answered in the session alone"
+
+
+
+def test_session_state_says_the_session_in_havne_clis_words():
+    """ADR-0060: the module's session as words, the fields of the session
+    line havne-cli stream writes for the same URI; none without ?session=03"""
+    from conftest import cli
+    uri = ("j2534://" + FAKE.replace("\\", "/") +
+           "?profile=uds-generic&did=1E1C&did=D200-D203&session=03"
+           "&identify=0&diagnose=0")
+    with havne.Session(uri) as s:
+        s.start()
+        until = time.monotonic() + 15
+        while (not s.support(0).flags & havne.c.ECUIO_SUPPORT_SCAN_COMPLETE and
+               time.monotonic() < until):
+            time.sleep(0.05)
+        state = s.session_state(0)
+    assert state is not None
+    assert state.state == "entered" and state.session == "03" and state.nrc is None
+    assert state.entries == 1 and state.lost == 0
+    lines = cli("stream", uri, "--until-scanned")
+    ours = {k: v for k, v in state._asdict().items()}
+    theirs = [x for x in lines if x.get("type") == "session"][-1]
+    assert {k: theirs[k] for k in ours if k != "ecu"} ==         {k: v for k, v in ours.items() if k != "ecu"}
+    assert theirs["ecu"] == state.ecu
+    plain = uri.replace("&session=03", "")
+    with havne.Session(plain) as s:
+        s.start()
+        assert s.session_state(0) is None

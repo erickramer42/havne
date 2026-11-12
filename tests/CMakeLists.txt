@@ -26,7 +26,7 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_recorder.cpp test_recording.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
-    test_frames_read.cpp test_csv_guess.cpp)
+    test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -404,6 +404,14 @@ if(TARGET havne-cli)
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt-twice PROPERTIES
             TIMEOUT 120 SKIP_RETURN_CODE 77)
+        # Interrupts once core's call has returned change nothing: the
+        # result line whole, exit 0, the file in place
+        add_test(NAME CliTransferRunTest.interrupt-late
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    interrupt-late $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliTransferRunTest.interrupt-late PROPERTIES
+            TIMEOUT 120 SKIP_RETURN_CODE 77)
         # The made-up loggers' CSVs imported by their column maps and
         # viewed; a missing map, a refused one, a folder already there
         add_test(NAME CliTransferRunTest.csv-import
@@ -609,6 +617,13 @@ if(TARGET havne-cli)
                         $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
             set_tests_properties(CliLogRunTest.AFocusTheSessionCantAskIsAnError
                 PROPERTIES TIMEOUT 60)
+            # An extended session's state: the session line stream writes
+            add_test(NAME CliLogRunTest.ALogWritesTheSessionLineStreamDoes
+                COMMAND ${Python3_EXECUTABLE} ${_cli_log} session
+                        $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>
+                        ${CMAKE_CURRENT_SOURCE_DIR}/golden/cli/log-session.jsonl)
+            set_tests_properties(CliLogRunTest.ALogWritesTheSessionLineStreamDoes
+                PROPERTIES TIMEOUT 60)
         endif()
         # view (ADR-0049 section 5) on two recordings of one pull, written
         # by hand (tests/fixtures/recording/: pull-late's starts 10 s later
@@ -640,6 +655,14 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/refused.json)
         app_cli_golden(SignalsCheckNamesAMissingFile signals-missing.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/none.json)
+        # A file standing in for obd2's MAP: the base counts what is left of
+        # obd2's, and Boost reads the file's def; one standing a text in for
+        # baro is refused, naming Boost
+        app_cli_golden(SignalsCheckCountsWhatIsLeftOfTheBase signals-check-replaces.jsonl
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/replaces.json)
+        app_cli_golden(SignalsCheckNamesTheComputedSignalAReplacementFeeds
+            signals-replaces-refused.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/replaces-text.json)
         app_cli_golden(StreamDecodesThroughASignalFile stream-signals.jsonl
             -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max&from=100&to=102"
                --signals ${_cli_signals}/extras.json --values --count 40)
@@ -767,6 +790,37 @@ if(TARGET havne-cli)
                ${_cli_pulls}/start-late ${_cli_pulls}/pull-early
                --align-on engine-start --from -6 --to 4 --columns 10
                --at 0.5 --signal RPM)
+        # A span's statistics (the chart's ADR, section 5): two pulls
+        # aligned on their rise, two spans, a text signal's samples alone
+        app_cli_golden(ViewSpanGivesEachSignalsStatistics view-span.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               ${_cli_pulls}/pull-late --align-on rise:RPM:4000 --hysteresis 500
+               --from -2 --to 8 --columns 2 --signal RPM --signal VIN
+               --span -1:1 --span 0:5)
+        # The navigation aids (ADR-0056's appendix): the two pulls aligned on
+        # their rise, found by throttle with engine speed's rise (the
+        # fixtures have no speed); a hand-written cruise, a 3 km/h step
+        # between two; and its floor in mph, which only the second clears
+        app_cli_golden(ViewStretchesFindsThePulls view-stretches-pulls.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
+               ${_cli_pulls}/pull-late --align-on rise:RPM:4000 --hysteresis 500
+               --columns 2 --signal RPM --stretches)
+        # A road log's two pulls (pull-twice: a stab at the throttle and a
+        # part-throttle rise that are none), its second laid on
+        # pull-early's first: the pulls' starts at 0, each column's mean,
+        # and the second recording's delta from the first
+        app_cli_golden(ViewAlignsOnEachRecordingsChosenPull view-align-pull.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-twice
+               ${_cli_pulls}/pull-early --align-on pull:2,1 --from -1 --to 3
+               --columns 8 --signal RPM --stretches pulls)
+        app_cli_golden(ViewStretchesFindsTwoCruises view-stretches-cruise.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/cruise --columns 1
+               --stretches cruises)
+        app_cli_golden(ViewStretchesTakeTheirLevelsInImperial
+            view-stretches-imperial.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/cruise --columns 1
+               --stretches --units imperial --stretch-level cruise-floor=51
+               --role "speed=Vehicle Speed")
         app_cli_golden(ViewRefusesAFolderWithNoRecording view-no-recording.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> view ${_cli_pulls})
         # view --frames (ADR-0049's appendix of 2026-11-06): a SocketCAN
@@ -807,8 +861,49 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py agree
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
                     ${_cli_pulls}/pull-late)
+        add_test(NAME CliViewRunTest.SpanStatisticsAreTheSamples
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py stats
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
+                    ${_cli_pulls}/pull-late)
+        add_test(NAME CliViewRunTest.ColumnMeansAndDeltasAreTheSamples
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py means
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.ADeltaIsBetweenOneNameInOneUnit
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py deltas
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.ARecordingShiftedHalfASecondDiffersInNoColumn
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py shifted
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.ASpanEndingAtZeroHoldsTheSampleThere
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py instant
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.APullPastARecordingsPullsLeavesItOffTheAxis
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py past
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.StretchesTakesItsWordBeforeAFolderOfThatName
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py named
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.ASampleAtTheAxisEndIsInTheLastColumn
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py end
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
         set_tests_properties(CliViewRunTest.ColumnsCountEverySampleOnce
-            CliViewRunTest.AlignedPullsAgree PROPERTIES TIMEOUT 60)
+            CliViewRunTest.ASampleAtTheAxisEndIsInTheLastColumn
+            CliViewRunTest.AlignedPullsAgree
+            CliViewRunTest.SpanStatisticsAreTheSamples
+            CliViewRunTest.ColumnMeansAndDeltasAreTheSamples
+            CliViewRunTest.ADeltaIsBetweenOneNameInOneUnit
+            CliViewRunTest.ARecordingShiftedHalfASecondDiffersInNoColumn
+            CliViewRunTest.ASpanEndingAtZeroHoldsTheSampleThere
+            CliViewRunTest.APullPastARecordingsPullsLeavesItOffTheAxis
+            CliViewRunTest.StretchesTakesItsWordBeforeAFolderOfThatName
+            PROPERTIES TIMEOUT 60)
         # info (ADR-0049 section 6) on a recording with one of each finding
         # (tests/fixtures/recording/findings, wire frames written by hand: a
         # gap, a rate drop, a sleep, a late ID, an overflow, a cut First
@@ -978,8 +1073,39 @@ if(TARGET havne-cli)
     app_cli_usage(ViewHysteresisWithAnEngineStartIsUsage
         "view|x|--align-on|engine-start|--hysteresis|400")
     app_cli_usage(ViewAnEngineStartOnASignalIsUsage "view|x|--align-on|engine-start:RPM")
+    app_cli_usage(ViewAPullListThatIsEmptyIsUsage "view|x|--align-on|pull:")
+    app_cli_usage(ViewPullZeroIsUsage "view|x|--align-on|pull:0")
+    app_cli_usage(ViewAPullThatIsntANumberIsUsage "view|x|--align-on|pull:first")
+    app_cli_usage_says(ViewAPullForEachOfAnotherCountIsUsage
+        "view|x|y|--align-on|pull:1,2,3" "one for each of the 2")
+    app_cli_usage(ViewHysteresisWithAPullIsUsage
+        "view|x|--align-on|pull:1|--hysteresis|5")
     app_cli_usage(ViewFromNotBeforeToIsUsage "view|x|--from|5|--to|5")
     app_cli_usage(ViewSecondsThatArentAreUsage "view|x|--at|soon")
+    app_cli_usage(ViewASpanWithoutItsEndIsUsage "view|x|--span|5")
+    app_cli_usage(ViewASpanBackwardsIsUsage "view|x|--span|5:3")
+    app_cli_usage(ViewASpanOfNoLengthIsUsage "view|x|--span|5:5")
+    app_cli_usage(ViewASpanOfWordsIsUsage "view|x|--span|soon:later")
+    app_cli_usage(ViewASpanWithThreePartsIsUsage "view|x|--span|1:2:3")
+    app_cli_usage(ViewAStretchLevelWithoutStretchesIsUsage
+        "view|x|--stretch-level|pull-gap=1")
+    app_cli_usage(ViewARoleWithoutStretchesIsUsage "view|x|--role|rpm=RPM")
+    app_cli_usage(ViewUnitsWithoutStretchesIsUsage "view|x|--units|imperial")
+    app_cli_usage(ViewAnUnknownStretchLevelIsUsage
+        "view|x|--stretches|--stretch-level|pull-speed=1")
+    app_cli_usage(ViewANegativeStretchLevelIsUsage
+        "view|x|--stretches|--stretch-level|pull-gap=-1")
+    app_cli_usage(ViewANegativePullRiseIsUsage
+        "view|x|--stretches|--stretch-level|pull-rise=-1")
+    app_cli_usage(ViewAPullGainOfWordsIsUsage
+        "view|x|--align-on|pull:1|--stretch-level|pull-gain=some")
+    app_cli_usage(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal")
+    # pulls, cruises or all after --stretches is its word, never a folder
+    app_cli_usage_says(ViewStretchesAndItsWordNameNoFolder "view|--stretches|all"
+        "view needs a recording's folder")
+    app_cli_usage_says(ViewStretchesPullsNamesNoFolder "view|--stretches|pulls"
+        "view needs a recording's folder")
+    app_cli_usage(ViewUnitsThatArentAreUsage "view|x|--stretches|--units|furlongs")
     app_cli_usage(ViewAnUnknownOptionIsUsage "view|x|--fast")
     set(_cli_pull_early ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/pull-early)
     app_cli_usage(ViewASignalNoRecordingHasIsUsage
@@ -989,6 +1115,12 @@ if(TARGET havne-cli)
     app_cli_usage(ViewARiseOnTextIsUsage "view|${_cli_pull_early}|--align-on|rise:VIN:1")
     app_cli_usage(ViewFromAfterTheDefaultEndIsUsage
         "view|${_cli_pull_early}|--from|100")
+    app_cli_usage(ViewASpanOutsideTheAxisIsUsage
+        "view|${_cli_pull_early}|--span|1:1000")
+    app_cli_usage(ViewARoleNoRecordingHasIsUsage
+        "view|${_cli_pull_early}|--stretches|--role|speed=Speed")
+    app_cli_usage(ViewARoleOnTextIsUsage
+        "view|${_cli_pull_early}|--stretches|--role|throttle=VIN")
     app_cli_usage(ViewAProfileWithoutFramesIsUsage "view|x|--profile|obd2")
     app_cli_usage(ViewSignalsWithoutFramesIsUsage "view|x|--signals|a.json")
     app_cli_usage(ViewAPluginWithoutFramesIsUsage "view|x|--plugin|a")
@@ -1474,6 +1606,8 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         file(TO_CMAKE_PATH "$ENV{SystemRoot}/Fonts" _qml_fonts)
         list(APPEND _qml_test_env "QT_QPA_FONTDIR=${_qml_fonts}")
     endif()
+    # Files whose cases together run near ctest's bound on a slow runner
+    set(_qml_split_files dashboard dashedit driveview phone)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
@@ -1482,11 +1616,63 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         # waits for what it checks with tryVerify, and tst_recordings
         # alone opens a 10,200-frame recording, which a machine building
         # beside the suite took past 60 s in all
-        add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
-        set_tests_properties(QmlTest.${_qml_name} PROPERTIES
-            ENVIRONMENT "${_qml_test_env}"
-            TIMEOUT 180
-        )
+        # A file near the bound runs as _qml_parts ctest entries, each
+        # a disjoint share of its cases (every third one, so the slow
+        # ones spread), named as the TestCase names them; QmlTest.<name>
+        # then reads QmlTest.<name>-<k>of<n>
+        set(_qml_parts 1)
+        if(_qml_name IN_LIST _qml_split_files)
+            set(_qml_parts 3)
+        endif()
+        if(_qml_parts EQUAL 1)
+            add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
+            set_tests_properties(QmlTest.${_qml_name} PROPERTIES
+                ENVIRONMENT "${_qml_test_env}"
+                TIMEOUT 180
+            )
+        else()
+            # The shares are read from the file: an edit configures again,
+            # or a case added to it would be in no share and never run
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                         ${_qml_test})
+            file(STRINGS ${_qml_test} _qml_title REGEX "^    name: \"")
+            string(REGEX REPLACE "^.*\"(.*)\".*$" "\\1" _qml_title "${_qml_title}")
+            file(STRINGS ${_qml_test} _qml_cases
+                 REGEX "^    function test_[A-Za-z0-9_]+\\(")
+            # A case written another way, or a second TestCase, would drop
+            # out of every share unseen
+            file(STRINGS ${_qml_test} _qml_any REGEX "function test_")
+            list(LENGTH _qml_title _qml_titles)
+            list(LENGTH _qml_cases _qml_found)
+            list(LENGTH _qml_any _qml_all)
+            if(NOT _qml_titles EQUAL 1 OR NOT _qml_found EQUAL _qml_all)
+                message(FATAL_ERROR "${_qml_test}: the split needs one TestCase name "
+                        "and every case as '    function test_x(' "
+                        "(${_qml_titles} names, ${_qml_found} of ${_qml_all} cases read)")
+            endif()
+            set(_qml_index 0)
+            foreach(_qml_case IN LISTS _qml_cases)
+                string(REGEX REPLACE "^    function (test_[A-Za-z0-9_]+)\\(.*$" "\\1"
+                       _qml_case "${_qml_case}")
+                if(NOT _qml_case MATCHES "_data$")
+                    math(EXPR _qml_share "${_qml_index} % ${_qml_parts}")
+                    list(APPEND _qml_share_${_qml_share} "${_qml_title}::${_qml_case}")
+                    math(EXPR _qml_index "${_qml_index} + 1")
+                endif()
+            endforeach()
+            math(EXPR _qml_last "${_qml_parts} - 1")
+            foreach(_qml_share RANGE 0 ${_qml_last})
+                math(EXPR _qml_k "${_qml_share} + 1")
+                set(_qml_part QmlTest.${_qml_name}-${_qml_k}of${_qml_parts})
+                add_test(NAME ${_qml_part}
+                         COMMAND test_qml -input ${_qml_test} ${_qml_share_${_qml_share}})
+                set_tests_properties(${_qml_part} PROPERTIES
+                    ENVIRONMENT "${_qml_test_env}"
+                    TIMEOUT 180
+                )
+                unset(_qml_share_${_qml_share})
+            endforeach()
+        endif()
     endforeach()
 endif()
 

@@ -20,12 +20,12 @@ show. The README shows a few of these.
 
 ![The Dashboard through a quarter mile: a launch from the two-step near 3,900 rpm, upshifts that refill the shift lights, and past 100 mph at the line](images/dashboard.gif)
 
-*A quarter mile on the warmed-up vehicle: the launch, each upshift, and
-coolant and oil climbing toward the fan's cut-in.*
+*A quarter mile on the warmed-up vehicle: the launch, each upshift, boost
+building to about 16 psi, and coolant and oil climbing toward the fan's cut-in.*
 
 | Light | Night, amber | Night, red |
 |---|---|---|
-| [![The Dashboard in the Light look in a 2nd-gear pull at 5,849 rpm](images/desktop-dashboard-light.png)](images/desktop-dashboard-light.png) | [![The Dashboard in Night's amber style in a 2nd-gear pull at 6,051 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 6,336 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
+| [![The Dashboard in the Light look in a 2nd-gear pull at 5,992 rpm](images/desktop-dashboard-light.png)](images/desktop-dashboard-light.png) | [![The Dashboard in Night's amber style in a 2nd-gear pull at 6,867 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 7,004 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
 
 ### Live
 
@@ -50,8 +50,8 @@ readiness monitors, each done this drive and complete since the clear.*
 
 | Activity | Frames |
 |---|---|
-| [![The Log's activity view: two connects and, between them, the disconnect's Delivery line](images/desktop-log-activity.png)](images/desktop-log-activity.png) | [![The Log's frame table in developer mode, newest first](images/desktop-log-frames.png)](images/desktop-log-frames.png) |
-| Each session's lines; a disconnect adds its Delivery line (none dropped, and the GUI thread's wait) | In developer mode, the raw frames: time, length, standard or extended ID, payload |
+| [![The Log's activity view: two connects and, between them, the disconnect's Delivery line](images/desktop-log-activity.png)](images/desktop-log-activity.png) | [![The Log's frame table, newest first](images/desktop-log-frames.png)](images/desktop-log-frames.png) |
+| Each session's lines; a disconnect adds its Delivery line (none dropped, and the GUI thread's wait) | The raw frames: time, length, standard or extended ID, payload |
 
 ### Recordings
 
@@ -59,6 +59,12 @@ readiness monitors, each done this drive and complete since the clear.*
 
 *A recording in the viewer: rpm and speed through the first loop's
 pulls, coolant and oil warming from the cold start.*
+
+![The viewer on a pull, maximized: rpm, throttle, lambda and boost in a pane each, the cursor at peak boost at 18.4 s](images/viewer.png)
+
+*One pull, the chart maximized: from before the throttle opens through
+the limiter, with the cursor at peak boost (16.7 psi, lambda 0.82, rpm
+climbing).*
 
 ### Link health
 
@@ -80,20 +86,20 @@ pulls, coolant and oil warming from the cold start.*
 
 | Dark | Night, amber | Night, red |
 |---|---|---|
-| [![The phone layout's Dashboard in a pull at 6,762 rpm](images/phone-dashboard-dark.png)](images/phone-dashboard-dark.png) | [![The phone layout's Dashboard in Night's amber style at 6,609 rpm](images/phone-dashboard-amber.png)](images/phone-dashboard-amber.png) | [![The phone layout's Dashboard in Night's red style at 6,568 rpm](images/phone-dashboard-night.png)](images/phone-dashboard-night.png) |
+| [![The phone layout's Dashboard in a pull at 6,335 rpm, boost 15.7 psi](images/phone-dashboard-dark.png)](images/phone-dashboard-dark.png) | [![The phone layout's Dashboard in Night's amber style at 6,863 rpm, boost 9.0 psi](images/phone-dashboard-amber.png)](images/phone-dashboard-amber.png) | [![The phone layout's Dashboard in Night's red style at 6,252 rpm, boost 15.8 psi](images/phone-dashboard-night.png)](images/phone-dashboard-night.png) |
 
 *The phone's joined panel: the tach beside speed, coolant and oil, MAF
 and boost with their traces, then intake air, battery and lambda.*
 
 ### Dashboard in Light
 
-<a href="images/phone-dashboard-light.png"><img src="images/phone-dashboard-light.png" alt="The phone layout's Dashboard in the Light look at 6,517 rpm" width="240"></a>
+<a href="images/phone-dashboard-light.png"><img src="images/phone-dashboard-light.png" alt="The phone layout's Dashboard in the Light look at 6,278 rpm, boost 15.7 psi" width="240"></a>
 
 *Light: dark text on white, for the sun (Settings, Display, Look).*
 
 ### Drive view
 
-<a href="images/phone-drive-view.png"><img src="images/phone-drive-view.png" alt="The phone layout's drive view: every bar hidden, the gauges filling the screen in a pull at 6,510 rpm" width="240"></a>
+<a href="images/phone-drive-view.png"><img src="images/phone-drive-view.png" alt="The phone layout's drive view: every bar hidden, the gauges filling the screen in a pull at 6,044 rpm, boost 16.0 psi" width="240"></a>
 
 *The drive view: the status line alone at the top and the panel filling
 the screen; a tap raises the controls from the bottom with the tab bar.*

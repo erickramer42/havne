@@ -167,29 +167,19 @@ GridLayout {
         Layout.preferredWidth: 0   // the panel's width, not its text's
         spacing: Theme.spacing
 
-        Rectangle {
-            implicitWidth: directionSwitch.implicitWidth + 4
-            implicitHeight: directionSwitch.implicitHeight + 4
-            radius: Theme.radius
-            color: Theme.surface
-
-            Row {
-                id: directionSwitch
-                anchors.centerIn: parent
-                spacing: 2
-                Repeater {
-                    model: [qsTr("All"), qsTr("Received"), qsTr("Sent")]
-                    SegmentButton {
-                        required property string modelData
-                        required property int index
-                        objectName: "direction_" + index
-                        tapHeight: Math.max(30, panel.touchMin)
-                        text: modelData
-                        selected: panel.direction === index
-                        onClicked: {
-                            panel.direction = index
-                            panel.apply()
-                        }
+        SegmentRow {
+            Repeater {
+                model: [qsTr("All"), qsTr("Received"), qsTr("Sent")]
+                SegmentButton {
+                    required property string modelData
+                    required property int index
+                    objectName: "direction_" + index
+                    tapHeight: Math.max(30, panel.touchMin)
+                    text: modelData
+                    selected: panel.direction === index
+                    onClicked: {
+                        panel.direction = index
+                        panel.apply()
                     }
                 }
             }

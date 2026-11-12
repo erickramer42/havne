@@ -1,5 +1,5 @@
 // File/layer: app/qml/Theme.qml | Qt6 Quick singleton, UI layer
-// Testing: QML: QmlTest.theme, QmlTest.settings, QmlTest.dashboard,
+// Testing: QML: QmlTest.theme, QmlTest.dashedit, QmlTest.settings, QmlTest.dashboard,
 //          QmlTest.liveview, QmlTest.log, QmlTest.phone (test_qml); Manual smoke
 pragma Singleton
 import QtCore
@@ -262,6 +262,7 @@ QtObject {
             gaugeValue: "#ebebee",
             gaugeReadout: "#ebebee", gaugeNeedle: "#ff5a5f", gaugeTick: "#ebebee",
             gaugeWarn: "#ffd166", gaugeDanger: "#f87171",
+            stretchPull: "#e0b050", stretchCruise: "#7aa2d6",
             // One per hue family, so traces stay distinct on the dark surface
             series: ["#4aa3ff",   // blue
                      "#31d08c",   // green
@@ -281,6 +282,7 @@ QtObject {
             gaugeValue: "#f0a53a",
             gaugeReadout: "#f3c895", gaugeNeedle: "#ff7a2e", gaugeTick: "#e9bf8a",
             gaugeWarn: "#ff8a3a", gaugeDanger: "#ff4a38",
+            stretchPull: "#e09a3a", stretchCruise: "#a8825a",
             // Warm, told apart by lightness and saturation as much as hue
             series: ["#f0b45a", "#ff4000", "#e6c200", "#9e5d47", "#d17d00",
                      "#9e9147", "#ffb299", "#d9c27a", "#ff794d", "#b89c00"]
@@ -294,6 +296,7 @@ QtObject {
             gaugeValue: "#ff5a4a",
             gaugeReadout: "#ff9484", gaugeNeedle: "#ff4a3a", gaugeTick: "#f08a7a",
             gaugeWarn: "#ff8a4a", gaugeDanger: "#ff3030",
+            stretchPull: "#ff8a6a", stretchCruise: "#b8695a",
             series: ["#ee9a7c", "#ff0000", "#9e5b18", "#ff7373", "#9e7777",
                      "#ff8000", "#e08a4a", "#d1431f", "#b86253", "#d9a3a3"]
         },
@@ -308,6 +311,7 @@ QtObject {
             gaugeValue: "#141416",
             gaugeReadout: "#141416", gaugeNeedle: "#d2232a", gaugeTick: "#141416",
             gaugeWarn: "#8c5a00", gaugeDanger: "#b9262b",
+            stretchPull: "#8a5a00", stretchCruise: "#2458b8",
             // Dark's hue families, row for row, deepened to read on white
             series: ["#1f5fc8",   // blue
                      "#1e7d3f",   // green
@@ -322,6 +326,42 @@ QtObject {
         }
     })
     readonly property var colors: palettes[active]
+
+    // A gauge's picked colors (a stored name, never a hex): each at least
+    // 3:1 on its look's surface. Night has none, so a pick draws in its tint
+    // None is near the zones' colors (warning, danger, cold), which keep their meaning
+    readonly property var gaugeColorNames: ["teal", "green", "lime", "cyan", "pink", "magenta", "stone"]
+    readonly property var gaugePalettes: ({
+        dark: { teal: "#3fd1c0", green: "#4ade80", lime: "#b5e04a", cyan: "#5ad8e8",
+                pink: "#f48fb1", magenta: "#e879c8", stone: "#a8a8b3" },
+        daylight: { teal: "#0f7f84", green: "#1e7d3f", lime: "#4f7a0a", cyan: "#0a7d95",
+                    pink: "#b83a73", magenta: "#a81f8c", stone: "#5b5b66" }
+    })
+    // A name as the picker says it
+    function gaugeColorLabel(name) {
+        switch (name) {
+        case "teal": return qsTr("Teal")
+        case "green": return qsTr("Green")
+        case "lime": return qsTr("Lime")
+        case "cyan": return qsTr("Cyan")
+        case "pink": return qsTr("Pink")
+        case "magenta": return qsTr("Magenta")
+        case "stone": return qsTr("Stone")
+        default: return name
+        }
+    }
+    // The picked color for a stored name in the look shown, "" for none: the
+    // default, a name this version doesn't know, or Night
+    function gaugeColor(name) {
+        const set = gaugePalettes[active]
+        return set !== undefined && typeof name === "string"
+               && Object.prototype.hasOwnProperty.call(set, name) ? set[name] : ""
+    }
+    // A name as the picker shows it, in the palette's look (Dark's when Night is on)
+    function gaugeSwatch(name) {
+        const set = gaugePalettes[active] ?? gaugePalettes[nightActive ? "dark" : active]
+        return set !== undefined && Object.prototype.hasOwnProperty.call(set, name) ? set[name] : "transparent"
+    }
 
     readonly property color bg:             colors.bg
     readonly property color surface:        colors.surface
@@ -358,6 +398,10 @@ QtObject {
     readonly property color gaugeTick:      colors.gaugeTick
     readonly property color gaugeWarn:      colors.gaugeWarn
     readonly property color gaugeDanger:    colors.gaugeDanger
+    // The recording viewer's stretch bands (pulls and cruises): a faint
+    // fill over the plot and a solid edge along its top
+    readonly property color stretchPull:    colors.stretchPull
+    readonly property color stretchCruise:  colors.stretchCruise
 
     // A phone's density: Main.qml sets dense when the layout (after the
     // zoom) is narrower than 720 px or shorter than 480 px, a phone

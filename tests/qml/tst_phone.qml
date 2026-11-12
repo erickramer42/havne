@@ -37,12 +37,17 @@ TestCase {
         Relay.stop()
         Theme.developerMode = false
         Theme.night = "off"
+        Theme.nightStyle = "amber"
+        Theme.look = "dark"
         Theme.zoom = 1.0
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.recording = false
         Bridge.minSweepMs = 0
     }
+
+    // The readouts group digits with the system locale, as Live and the gauges do.
+    function grouped(n) { return Number(n).toLocaleString(Qt.locale(), 'f', 0) }
 
     function find(within, name) {
         const item = findChild(within, name)
@@ -103,6 +108,36 @@ TestCase {
         + "Intake air temperature after the intercooler (deg C),Always empty\n"
         + "0,800.5,31.5,\n1,900.25,31.75,\n2,950,32,\n"
 
+    // The Log's buttons and segments reach a phone's touch size, in both
+    // views, so a thumb never meets a 30 px switch
+    function test_theLogsControlsReachATouchTarget() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        Theme.developerMode = true
+        main.width = 384
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const page = find(main.contentItem, "logPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        verify(waitForPolish(main), "laid out")
+        verify(Theme.touchTarget >= 48, "the phone's target")
+        page.view = "activity"
+        for (const n of ["copyLog", "view_activity", "view_frames"]) {
+            const b = find(page, n)
+            verify(b.visible, n + " shows")
+            verify(b.height >= Theme.touchTarget - 0.5, n + " is " + b.height + " high")
+        }
+        page.view = "frames"
+        verify(waitForPolish(main), "laid out")
+        for (const n of ["pauseFrames", "clearFrames", "exportFrames", "table_frames", "table_byId",
+                         "filterToggle"]) {
+            const b = find(page, n)
+            verify(b.visible, n + " shows")
+            verify(b.height >= Theme.touchTarget - 0.5, n + " is " + b.height + " high")
+        }
+    }
+
     // The test phone upright, in device-independent pixels (1440 px
     // at 600 dpi)
     function test_everyPageFitsAPhonesWidth_data() {
@@ -113,7 +148,8 @@ TestCase {
                 { tag: "livePage" },
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
                 { tag: "recordingsPage" }, { tag: "recordingsOpened" }, { tag: "recordingsViewer" },
-                { tag: "recordingsCompare" }, { tag: "recordingsImportCsv" },
+                { tag: "recordingsCompare" }, { tag: "recordingsComparePull" },
+                { tag: "recordingsImportCsv" },
                 { tag: "recordingsImportCandump" }, { tag: "recordingsImportGuess" },
                 { tag: "settingsPage" }]
     }
@@ -131,7 +167,8 @@ TestCase {
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         // recordingsOpened: the viewer as it opens, its toolbar's hint
         // still showing; recordingsViewer: a cursor placed
-        const viewer = ["recordingsOpened", "recordingsViewer", "recordingsCompare"].includes(data.tag)
+        const viewer = ["recordingsOpened", "recordingsViewer", "recordingsCompare",
+                        "recordingsComparePull"].includes(data.tag)
         const importing = data.tag.startsWith("recordingsImport")
         // dashboardPage is the desktop form at a phone's width;
         // dashboardPhone* the phone's, in edit mode with each of its
@@ -212,12 +249,27 @@ TestCase {
             page.setAlignOn("rise")
             page.setCursor(5000)
         }
+        // Compared with itself, aligned on a pull: both pull choices
+        // shown, in the phone viewer's About, where Compare lives
+        if (data.tag === "recordingsComparePull") {
+            page.compareWith(row)
+            tryVerify(() => page.compareAligned, 10000, "the compared one opens")
+            page.setAlignOn("pull")
+            tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
+            if (page.pinnedViewer)
+                page.detailView = "about"
+            tryVerify(() => find(page, "alignPullHere").visible && find(page, "alignPullThere").visible,
+                      2000, "both pull choices show")
+        }
         if (data.tag === "diagnosticsPage") {
             tryVerify(() => find(page, "clearCodes").enabled, 2000, "the report is read")
             find(page, "clearCodes").clicked()
         }
         wait(300)
         waitForRendering(main.contentItem)
+        // A value that changed since the last frame lays out on the next polish:
+        // read the geometry after it, not between a text and its layout
+        verify(waitForPolish(main), "laid out")
         const out = pastTheEdge(page, main.contentItem, [])
         compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
         // Live's window buttons keep their text on one line: a wrapped
@@ -230,6 +282,90 @@ TestCase {
         }
         if (data.tag === "diagnosticsPage")
             find(page, "clearCancel").clicked()
+    }
+
+    // Every page, and each of Settings' pages, in each look at the two
+    // narrowest phone widths: nothing paints past the right edge, whatever
+    // the palette (a look changes the text and the summaries it shows)
+    function test_everyPageFitsAPhonesWidthInEachLook_data() {
+        const looks = [{ name: "dark", look: "dark", night: "off", style: "amber" },
+                       { name: "daylight", look: "daylight", night: "off", style: "amber" },
+                       { name: "nightAmber", look: "dark", night: "on", style: "amber" },
+                       { name: "nightRed", look: "dark", night: "on", style: "red" }]
+        const rows = []
+        for (const l of looks) {
+            for (const w of [384, 320])
+                rows.push({ tag: l.name + " " + w, look: l.look, night: l.night, style: l.style, w: w })
+        }
+        return rows
+    }
+
+    function test_everyPageFitsAPhonesWidthInEachLook(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        Theme.look = data.look
+        Theme.nightStyle = data.style
+        Theme.night = data.night
+        compare(Theme.active, data.night === "on" ? (data.style === "red" ? "nightRed" : "nightAmber")
+                                                  : data.look, "the look in force")
+        main.width = data.w
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const walked = []
+        const over = []
+        const walk = (page, what) => {
+            main.gotoPage(Array.from(page.parent.children).indexOf(page))
+            verify(page.visible, what + " is on screen")
+            verify(waitForPolish(main), what + " laid out")
+            const out = pastTheEdge(page, main.contentItem, [])
+            if (out.length > 0)
+                over.push(what + " past " + main.contentItem.width + " px: " + out.slice(0, 4).join(", "))
+            walked.push(what)
+        }
+        for (const name of ["homePage", "dashboardPage", "livePage", "diagnosticsPage", "logPage",
+                            "recordingsPage"])
+            walk(find(main.contentItem, name), name)
+        const settings = find(main.contentItem, "settingsPage")
+        for (const key of ["", "connection", "vehicle", "signals", "recording", "display", "advanced"]) {
+            settings.pageKey = key
+            walk(settings, "settings " + (key || "list"))
+        }
+        settings.pageKey = ""
+        compare(walked.length, 13, "every page was walked")
+        compare(over, [], "nothing past the edge")
+    }
+
+    // A value too long for its row (a refusal's words, a text) is bounded by
+    // its column, whatever its text: the name keeps its third and the value
+    // ends at the row's margin, at 384 px and the narrowest phone's 320
+    function test_aLongValueStaysInItsRowOnAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_aLongValueStaysInItsRowOnAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const page = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        const list = find(page, "signalList")
+        tryVerify(() => list.itemAtIndex(0) !== null && list.itemAtIndex(0).hasValue, 5000,
+                  "a row has a value")
+        const row = list.itemAtIndex(0)
+        const value = find(row, "valueLabel")
+        // The text assigned here ends the binding, so no later value
+        // brings the short text back
+        value.text = "W".repeat(300)
+        verify(waitForPolish(main), "laid out")
+        const name = find(row, "nameLabel")
+        const right = value.mapToItem(row, value.width, 0).x
+        verify(right <= row.width - 12 + 0.5, "the value ends at " + right + " of " + row.width)
+        verify(value.x >= name.x + Math.min(name.implicitWidth, Math.round(row.width / 3)) - 0.5,
+               "the value starts at " + value.x + ", the name at " + name.x)
+        verify(value.width <= Math.round(row.width * 0.6) + 0.5, "the value is " + value.width)
     }
 
     // The drive view's settings on the narrowest phone, also at the top
@@ -256,6 +392,8 @@ TestCase {
         display.orientationShown = true
         find(page, "driveHide_0").text = "W".repeat(60)
         find(page, "driveOrientation_follow").text = "W".repeat(60)
+        for (const name of ["look_dark", "night_off", "nightStyle_amber", "units_metric"])
+            find(page, name).text = "W".repeat(60)
         wait(300)
         // Geometry alone is read below; a render waits out 5 s at 100 % when no frame is due
         verify(waitForPolish(main), "laid out")
@@ -270,7 +408,8 @@ TestCase {
         }
         for (const name of ["driveHide_2000", "driveHide_4000", "driveHide_8000", "driveHide_0",
                             "driveOrientation_follow", "driveOrientation_upright",
-                            "driveOrientation_side"]) {
+                            "driveOrientation_side", "look_dark", "night_off", "nightStyle_amber",
+                            "units_metric"]) {
             const seg = find(page, name)
             const label = seg.contentItem
             verify(label.contentWidth <= label.width + 0.5,
@@ -278,6 +417,85 @@ TestCase {
             verify(label.contentHeight <= seg.height + 0.5,
                    name + " is " + label.contentHeight + " high in " + seg.height)
         }
+    }
+
+    // The two cursors on a phone's width: each handle a touch wide and
+    // tall, the span line inside the window with its targets a touch's
+    // size, the rows still a touch tall with B and the change on their
+    // second line, and the statistics' grid under the span line
+    function test_theTwoCursorsFitAPhone_data() {
+        return [{ tag: "320", w: 320 }, { tag: "384", w: 384 }]
+    }
+    function test_theTwoCursorsFitAPhone(data) {
+        const v = uprightViewer({ title: "Early", uri: "replay://x?profile=obd2", source: "",
+                                  folder: Harness.recordingFixtures + "/pull-early", profile: "obd2" })
+        const main = v.main
+        const page = v.page
+        main.width = data.w
+        verify(waitForPolish(main), "laid out")
+        page.setCursor(1000)
+        page.setCursorB(3000)
+        tryVerify(() => Object.keys(page.spanStats).length > 0, 5000, "the statistics arrive")
+        verify(waitForPolish(main), "laid out with the span")
+        verify(page.pinnedViewer, "pinned")
+
+        for (const name of ["cursorHandleA", "cursorHandleB"]) {
+            const h = find(page, name)
+            tryVerify(() => h.visible, 2000, name + " shows")
+            verify(h.width >= Theme.touchTarget - 0.5, name + " is " + h.width + " wide")
+            verify(h.height >= Theme.touchTarget - 0.5, name + " is " + h.height + " tall")
+            verify(h.mapToItem(main.contentItem, h.width, 0).x <= data.w + 0.5, name + " inside the window")
+        }
+        const chart = find(page, "chart")
+        compare(chart.drawn.axisH, ChartLayout.axisHCursor)
+
+        const line = find(page, "spanLine")
+        tryVerify(() => line.visible, 2000, "the span line shows")
+        compare(find(page, "spanText").text, "A 1.0 s to B 3.0 s · 2.0 s")
+        for (const name of ["zoomToSpan", "clearSpan"]) {
+            const b = find(page, name)
+            verify(b.height >= Theme.touchTarget - 0.5, name + " is " + b.height + " tall")
+            verify(b.mapToItem(main.contentItem, b.width, 0).x <= data.w + 0.5, name + " inside the window")
+        }
+        const text = find(page, "spanText")
+        verify(text.contentWidth <= text.width + 0.5, "the span's words fit their box")
+
+        const grid = find(page, "spanStats")
+        tryVerify(() => grid.visible, 2000, "the grid shows")
+        const zoomRow = find(page, "zoomAll")
+        const lineY = line.mapToItem(main.contentItem, 0, 0).y
+        verify(lineY > zoomRow.mapToItem(main.contentItem, 0, 0).y, "the span line under the zoom row")
+        verify(grid.mapToItem(main.contentItem, 0, 0).y >= lineY + line.height - 0.5, "the grid under the line")
+        const rows = find(page, "signalRows")
+        const first = rows.itemAtIndex(0)
+        verify(first !== null, "a row")
+        verify(grid.mapToItem(main.contentItem, 0, grid.height).y
+               <= first.mapToItem(main.contentItem, 0, 0).y + 0.5, "the grid above the rows")
+
+        const plotted = page.spanRows
+        verify(plotted.length >= 2, "plotted: " + plotted.length)
+        const cards = plotted.map(s => find(grid, "statCard_" + s.index))
+        for (const c of cards) {
+            verify(c.height >= Theme.touchTarget - 0.5, "a card is " + c.height + " tall")
+            verify(c.mapToItem(main.contentItem, c.width, 0).x <= data.w + 0.5, "a card inside the window")
+        }
+        fuzzyCompare(cards[0].width, cards[1].width, 1, "two even columns")
+        verify(cards[1].x > cards[0].x, "side by side")
+        compare(cards[0].y, cards[1].y)
+        const rpm = plotted.find(s => s.name === "RPM")
+        const card = find(grid, "statCard_" + rpm.index)
+        compare(find(card, "statChange").text, "-19 rpm")
+        compare(find(card, "statLine").text, grouped(1982) + " · " + grouped(2012) + " · " + grouped(2003))
+
+        const at = rows.model.findIndex(s => s.name === "RPM")
+        tryVerify(() => rows.itemAtIndex(at) !== null, 2000, "the RPM row")
+        const row = rows.itemAtIndex(at)
+        verify(row.height >= Theme.touchTarget - 0.5 && row.height <= Theme.touchTarget + 0.5,
+               "a row stays a touch tall: " + row.height)
+        const second = find(row, "cursorSpanLine")
+        verify(second.visible, "the row's second line")
+        compare(second.text, "B " + grouped(1982) + " rpm · Δ -19 rpm")
+        verify(second.mapToItem(row, 0, second.height).y <= row.height + 0.5, "inside the row")
     }
 
     // On a phone upright and on its side, the viewer's page scrolls to all
@@ -326,6 +544,20 @@ TestCase {
         Theme.developerMode = false
     }
 
+    // True once the item's place on the glass has held for `polls` checks
+    // in a row (use with tryVerify): the page's chart takes its height from
+    // the window and the fonts, so the layout can move after the rows show
+    function holdsStill(item, root, polls) {
+        let last = null
+        let still = 0
+        return () => {
+            const y = item.mapToItem(root, 0, 0).y
+            still = last !== null && y === last ? still + 1 : 0
+            last = y
+            return still >= polls
+        }
+    }
+
     function test_theViewersFramesViewFitsAPhone() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
@@ -352,6 +584,7 @@ TestCase {
         const edge = table.mapToItem(scroll, table.width, 0).x
         verify(edge <= scroll.width + 0.5, "the table ends at " + edge + " of " + scroll.width)
         const toggle = find(page, "framesFilterToggle")
+        tryVerify(holdsStill(toggle, main.contentItem, 5), 10000, "the layout holds still")
         tap(toggle, toggle.width / 2, toggle.height / 2)
         tryVerify(() => find(page, "filterPanel").visible, 2000, "the filter opens")
         verify(waitForPolish(main), "laid out")
@@ -395,12 +628,41 @@ TestCase {
         verify(chart.height >= 200, "the chart is " + chart.height + " px")
 
         const scroll = find(page, "recordingsScroll")
-        scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
-        verify(waitForPolish(main), "scrolled")
         const check = find(page, "checkSummary")
-        const bottom = check.mapToItem(scroll, 0, check.height).y
-        verify(check.visible && bottom <= scroll.height + 0.5,
-               "the frames check's line ends at " + bottom + " of " + scroll.height)
+        compare(page.pinnedViewer, !page.chartMaximized && data.h >= 480, "pinned upright")
+        if (page.pinnedViewer) {
+            // Upright the page stays put and About's list scrolls to its last finding
+            find(page, "detailView_about").clicked()
+            verify(waitForPolish(main), "About laid out")
+            const findings = find(page, "findingList")
+            verify(findings.visible && findings.count > 0, "About's list holds the findings")
+            verify(findings.interactive, "About's list scrolls")
+            const listBottom = findings.mapToItem(scroll, 0, findings.height).y
+            verify(listBottom <= scroll.height + 0.5, "the list ends at " + listBottom + " of " + scroll.height)
+            // Scrolled until the check's line is in the list's last row of view
+            findings.contentY = Math.max(findings.originY, check.mapToItem(findings.contentItem, 0, check.height).y
+                                                           - findings.height)
+            verify(waitForPolish(main), "scrolled to the check")
+            const checkBottom = check.mapToItem(scroll, 0, check.height).y
+            verify(check.visible && checkBottom <= listBottom + 0.5,
+                   "the frames check's line ends at " + checkBottom + " of " + listBottom)
+            findings.positionViewAtEnd()
+            verify(waitForPolish(main), "scrolled")
+            const last = findings.itemAtIndex(findings.count - 1)
+            verify(last !== null, "the last finding has a row")
+            const lastBottom = last.mapToItem(scroll, 0, last.height).y
+            verify(lastBottom <= listBottom + 0.5 && listBottom <= scroll.height + 0.5,
+                   "the last finding ends at " + lastBottom + " of " + listBottom)
+            findings.positionViewAtBeginning()
+            find(page, "detailView_values").clicked()
+            verify(waitForPolish(main), "Values laid out")
+        } else {
+            scroll.contentY = Math.max(0, scroll.contentHeight - scroll.height)
+            verify(waitForPolish(main), "scrolled")
+            const bottom = check.mapToItem(scroll, 0, check.height).y
+            verify(check.visible && bottom <= scroll.height + 0.5,
+                   "the frames check's line ends at " + bottom + " of " + scroll.height)
+        }
 
         const bar = find(page, "recordingFilter")
         find(bar, "filterButton").clicked()
@@ -462,8 +724,81 @@ TestCase {
         }
     }
 
-    // A recording folder of twelve number signals, three samples each
-    function wideRecording(name) {
+    // The Jump row stands under the chart on a phone, its buttons a touch's
+    // size and inside the width at 384 and 320 px
+    function test_theJumpRowFitsAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theJumpRowFitsAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "obd2" })
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const row = find(page, "jumpRow")
+        verify(row.visible, "the Jump row is shown")
+        const chartBottom = find(page, "chartFrame").mapToItem(main.contentItem, 0, find(page, "chartFrame").height).y
+        const rowTop = row.mapToItem(main.contentItem, 0, 0).y
+        verify(rowTop >= chartBottom - 0.5, "under the chart: " + rowTop + " from " + chartBottom)
+        for (const name of ["jumpPrevious_pull", "jumpNext_pull", "jumpPrevious_cruise", "jumpStretches",
+                            "jumpNext_cruise"]) {
+            const item = find(page, name)
+            const top = item.mapToItem(main.contentItem, 0, 0).y
+            const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+            verify(bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+            const right = item.mapToItem(main.contentItem, item.width, 0).x
+            verify(right <= main.contentItem.width + 0.5, name + " ends at " + right)
+        }
+        const status = find(page, "jumpStatus")
+        const edge = status.mapToItem(main.contentItem, status.width, 0).x
+        verify(edge <= main.contentItem.width + 0.5, "the status ends at " + edge)
+    }
+
+    // The Stretches panel in the chart's place on a phone: its buttons a
+    // touch's size, every field inside the width at 384 and 320 px
+    function test_theStretchesPanelFitsAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theStretchesPanelFitsAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "obd2" })
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(main), "laid out")
+        verify(find(page, "stretchesPanel").visible, "the panel is up")
+        verify(!find(page, "chartFrame").visible, "in the chart's place")
+        for (const name of ["stretchesApply", "stretchesReset", "stretchesClose", "rule_pullLevel",
+                            "rule_pullRise"]) {
+            const item = find(page, name)
+            const top = item.mapToItem(main.contentItem, 0, 0).y
+            const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+            verify(bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+            const right = item.mapToItem(main.contentItem, item.width, 0).x
+            verify(right <= main.contentItem.width + 0.5, name + " ends at " + right)
+        }
+        const panel = find(page, "stretchesPanel")
+        const bottom = panel.mapToItem(main.contentItem, 0, panel.height).y
+        verify(bottom <= main.contentItem.height + 0.5, "the panel ends at " + bottom)
+    }
+
+    // A recording folder of number signals (twelve unless given), three
+    // samples each
+    function wideRecording(name, count) {
+        const n = count || 12
         const folder = Harness.writeFramesRecording(name, 1, 100000)
         verify(folder !== "", "the folder is made")
         let header = "ecuio session recording, format 2 (ADR-0049)\n"
@@ -471,22 +806,22 @@ TestCase {
                      + "utc  2026-11-03T16:00:00.000Z\ncore  0.3.6\n"
                      + "uri  socketcan://vcan0?profile=raw\nprofile  raw\n"
         let rows = "host_us,signal,value,unit\n"
-        for (let s = 1; s <= 12; ++s)
+        for (let s = 1; s <= n; ++s)
             header += "signal  Signal " + s + ",number,V,0,0\n"
         for (let t = 1; t <= 3; ++t) {
-            for (let s = 1; s <= 12; ++s)
+            for (let s = 1; s <= n; ++s)
                 rows += (t * 100000) + ",Signal " + s + "," + s + ",V\n"
         }
-        header += "\n10:00:01.000  +1.000  end  havne-cli: seconds: 1 frames, 36 values, "
+        header += "\n10:00:01.000  +1.000  end  havne-cli: seconds: 1 frames, " + (3 * n) + " values, "
                   + "0 records dropped, 0 notes dropped\n"
         Harness.writeScratchFile(name + "/events.log", header)
         Harness.writeScratchFile(name + "/signals.csv", rows)
         return folder
     }
 
-    // The test phone upright: twelve signals' rows stop at five, under
-    // 40 % of the screen, so there is always more page than list to swipe
-    function test_theViewersRowsStopAtFiveOnAPhone() {
+    // Main on the test phone upright, the Recordings page shown with a
+    // recording open at the chart's default height
+    function uprightViewer(row) {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
         main.width = 384
@@ -494,16 +829,215 @@ TestCase {
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
         main.gotoPage(Array.from(page.parent.children).indexOf(page))
-        page.open({ title: "Twelve", uri: "replay://x?profile=raw", source: "",
-                    folder: wideRecording("twelve-signals"), profile: "raw" })
-        const rows = find(page, "signalRows")
-        tryVerify(() => rows.visible && rows.count === 12, 10000, "the recording opens")
+        page.chartHeight = -1
+        page.open(row)
+        tryVerify(() => find(page, "signalRows").visible && find(page, "signalRows").itemAtIndex(0) !== null,
+                  10000, "the recording opens")
         verify(waitForPolish(main), "laid out")
+        return { main: main, page: page }
+    }
+
+    // The scrollers the page shows that a swipe moves: visible, interactive
+    // and holding more than their height
+    function scrollersOf(page) {
+        const found = []
+        const walk = item => {
+            for (const child of item.children) {
+                if (!child.visible)
+                    continue
+                if (child.flickableDirection !== undefined && child.interactive
+                        && child.contentHeight > child.height + 0.5)
+                    found.push(child.objectName || String(child))
+                walk(child)
+            }
+        }
+        walk(page)
+        return found
+    }
+
+    // A phone upright pins the title row, the chart and its splitter, and
+    // under them one list scrolls in each view: Values' rows, the Frames
+    // table and About's findings, each with its view's controls at its head
+    function test_aPhoneUprightPinsTheChartAndScrollsOneList() {
+        const v = uprightViewer({ title: "Wide", uri: "socketcan://vcan0?profile=raw", source: "",
+                                  folder: wideRecording("pv-a-wide", 100), profile: "raw" })
+        const main = v.main
+        const page = v.page
         const scroll = find(page, "recordingsScroll")
-        verify(rows.height <= 5 * page.rowHeight + 0.5,
-               "the rows are " + rows.height + " for rows of " + page.rowHeight)
-        verify(rows.height <= 0.4 * scroll.height + 0.5, "the rows are " + rows.height + " of " + scroll.height)
-        verify(rows.height >= 4 * page.rowHeight, "four rows show at least: " + rows.height)
+        const rows = find(page, "signalRows")
+        verify(page.pinnedViewer, "the viewer is pinned")
+        verify(!scroll.interactive, "the page itself never scrolls")
+        const glass = name => find(page, name).mapToItem(main.contentItem, 0, 0).y
+        const pinned = ["openedTitle", "chartFrame", "chartSplitter"]
+        const before = pinned.map(glass)
+        const splitter = find(page, "chartSplitter")
+        const pinnedFoot = splitter.mapToItem(main.contentItem, 0, splitter.height).y
+        const listTop = rows.mapToItem(main.contentItem, 0, 0).y
+        const listFoot = rows.mapToItem(main.contentItem, 0, rows.height).y
+        const pageFoot = scroll.mapToItem(main.contentItem, 0, scroll.height).y
+        const firstTop = rows.itemAtIndex(0).mapToItem(main.contentItem, 0, 0).y
+        console.log("pinned view at 384 x 832: the pinned part ends at " + pinnedFoot
+                    + ", the list runs " + listTop + " to " + listFoot + " of " + pageFoot
+                    + ", rows at first sight " + ((listFoot - firstTop) / page.rowHeight).toFixed(1)
+                    + ", with the head scrolled off " + ((listFoot - listTop) / page.rowHeight).toFixed(1))
+        verify(listTop >= pinnedFoot, "the list under the splitter")
+        verify(listFoot >= pageFoot - Theme.pageMargin - 1 && listFoot <= pageFoot + 0.5,
+               "the list's foot is the page's: " + listFoot + " of " + pageFoot)
+        verify(firstTop > glass("recordingFilter"), "the head over the rows")
+        verify(!find(page, "recordingInfo").visible, "About waits for its view")
+        compare(scrollersOf(page).join(", "), "signalRows", "Values: the rows alone scroll")
+
+        // The splitter dragged past the page stops with two rows under it
+        const kept = page.chartHeight
+        page.chartHeight = 2000
+        verify(waitForPolish(main), "a tall chart")
+        const tallFoot = splitter.mapToItem(main.contentItem, 0, splitter.height).y
+        verify(tallFoot <= pageFoot - 2 * page.rowHeight + 0.5, "the splitter ends at " + tallFoot)
+        verify(rows.height >= 2 * page.rowHeight - 1, "two rows still show: " + rows.height)
+        compare(scroll.contentY, 0, "the page stays")
+        page.chartHeight = kept
+        verify(waitForPolish(main), "the chart's height again")
+        compare(splitter.mapToItem(main.contentItem, 0, splitter.height).y, pinnedFoot, "as it was")
+
+        // A swipe on the rows moves the rows alone
+        mouseDrag(rows, rows.width / 2, rows.height - 30, 0, -250)
+        tryVerify(() => rows.contentY > rows.originY + 40, 3000, "the swipe scrolls the rows")
+        tryVerify(() => !rows.moving, 5000, "the rows settle")
+        compare(pinned.map(glass).join(", "), before.join(", "), "the title row and the chart stay")
+        compare(scroll.contentY, 0, "the page stays")
+        rows.positionViewAtEnd()
+        verify(waitForPolish(main), "at the end")
+        const last = rows.itemAtIndex(rows.count - 1)
+        verify(last !== null && last.mapToItem(main.contentItem, 0, last.height).y <= listFoot + 0.5,
+               "the last row is reached")
+        compare(pinned.map(glass).join(", "), before.join(", "), "the title row and the chart stay at the end")
+        rows.positionViewAtBeginning()
+        verify(waitForPolish(main), "back at the start")
+
+        // Filtered, the count closes the rows' list and the list keeps the page's foot
+        const signalFilter = find(page, "recordingFilter").filter
+        signalFilter.text = "Signal 1"
+        const count = find(page, "filterCount")
+        tryVerify(() => count.visible && rows.count > 0 && rows.count < 100, 2000, "the filter narrows the rows")
+        verify(waitForPolish(main), "filtered")
+        rows.positionViewAtEnd()
+        verify(waitForPolish(main), "at the filtered end")
+        const countTop = count.mapToItem(main.contentItem, 0, 0).y
+        const lastShown = rows.itemAtIndex(rows.count - 1)
+        verify(countTop >= lastShown.mapToItem(main.contentItem, 0, lastShown.height).y - 0.5
+               && count.mapToItem(main.contentItem, 0, count.height).y <= listFoot + 0.5,
+               "the count under the last row, inside the list: " + countTop)
+        compare(rows.mapToItem(main.contentItem, 0, rows.height).y, listFoot, "the list keeps its foot")
+        signalFilter.text = ""
+        tryVerify(() => !count.visible && rows.count === 100, 2000, "the filter cleared")
+        rows.positionViewAtBeginning()
+        verify(waitForPolish(main), "back at the start again")
+
+        find(page, "detailView_frames").clicked()
+        const table = find(page, "viewerFrameTable")
+        tryVerify(() => table.visible && find(table, "frameList").count > 0, 10000, "Frames: the table")
+        verify(waitForPolish(main), "Frames laid out")
+        verify(!rows.visible, "the rows give way to the table")
+        verify(scrollersOf(page).length <= 1, "Frames: one list at most: " + scrollersOf(page).join(", "))
+        const tableFoot = table.mapToItem(main.contentItem, 0, table.height).y
+        verify(tableFoot >= pageFoot - Theme.pageMargin - 1 && tableFoot <= pageFoot + 0.5,
+               "the table's foot is the page's: " + tableFoot + " of " + pageFoot)
+        const names = find(table, "frameColumnNames")
+        const firstFrame = find(table, "frameList").itemAtIndex(0)
+        verify(names.mapToItem(main.contentItem, 0, 0).y > glass("framesFilterToggle"),
+               "the column names under the head's tools")
+        const namesGap = firstFrame.mapToItem(main.contentItem, 0, 0).y
+                         - names.mapToItem(main.contentItem, 0, names.height).y
+        verify(namesGap >= -0.5 && namesGap <= 4.5, "and right over the first frame: " + namesGap)
+        const listInTable = find(table, "frameList").mapToItem(table, 0, 0).y
+        verify(listInTable <= 4.5, "the names left no gap at the table's top: " + listInTable)
+
+        find(page, "detailView_about").clicked()
+        const findings = find(page, "findingList")
+        tryVerify(() => findings.visible && findings.contentY <= findings.originY + 0.5, 2000, "About")
+        verify(waitForPolish(main), "About laid out")
+        verify(!rows.visible && !table.visible, "the rows and the table give way to About")
+        const info = find(page, "recordingInfo")
+        const infoTop = info.mapToItem(main.contentItem, 0, 0).y
+        const infoFoot = info.mapToItem(main.contentItem, 0, info.height).y
+        verify(info.visible && infoTop >= pinnedFoot && infoFoot <= pageFoot + 0.5,
+               "the recording's line on screen with no scroll: " + infoTop + " to " + infoFoot)
+        verify(!find(page, "aboutHeading").visible, "the switch names About, no heading does")
+        verify(scrollersOf(page).length <= 1, "About: one list at most: " + scrollersOf(page).join(", "))
+        compare(pinned.map(glass).join(", "), before.join(", "), "the chart stays in every view")
+        find(page, "detailView_values").clicked()
+        verify(waitForPolish(main), "Values again")
+        verify(rows.visible && !info.visible, "Values: the rows, About gone")
+    }
+
+    // A head that grows keeps its list at the start when it was there, and
+    // leaves a list scrolled on where it was
+    function test_aGrowingHeadKeepsItsListsPlace() {
+        const v = uprightViewer({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                                  folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        const page = v.page
+        find(page, "detailView_frames").clicked()
+        const table = find(page, "viewerFrameTable")
+        const list = find(table, "frameList")
+        tryVerify(() => table.visible && list.count > 20, 10000, "the frames")
+        verify(waitForPolish(v.main), "laid out")
+        tryVerify(() => list.contentY <= list.originY + 0.5, 2000, "the table at its start")
+        page.framesFilterOpen = true
+        tryVerify(() => find(page, "filterPanel").visible && list.contentY <= list.originY + 0.5,
+                  2000, "the grown head shows from its top")
+        page.framesFilterOpen = false
+        tryVerify(() => list.contentY <= list.originY + 0.5, 2000, "and when it shrinks")
+        list.positionViewAtEnd()
+        verify(waitForPolish(v.main), "scrolled to the end")
+        const scrolled = list.contentY
+        page.framesFilterOpen = true
+        verify(waitForPolish(v.main), "grown")
+        verify(waitForPolish(v.main), "and settled")
+        verify(list.contentY > list.originY + 100, "a list scrolled on stays scrolled: " + list.contentY)
+        compare(list.contentY, scrolled, "where it was")
+        page.framesFilterOpen = false
+    }
+
+    // A recording of values alone has no Frames view: Values | About
+    function test_aRecordingWithoutFramesShowsTwoViews() {
+        const folder = Harness.importCsvFixture("logger-a", "20261105-220324 Logger A")
+        verify(folder !== "", "the fixture imports")
+        const v = uprightViewer({ title: "Logger A", uri: "", source: "", folder: folder, profile: "" })
+        verify(v.page.pinnedViewer, "pinned")
+        verify(!find(v.page, "detailView_frames").visible, "no Frames")
+        verify(find(v.page, "detailView_values").visible && find(v.page, "detailView_about").visible,
+               "Values and About")
+        find(v.page, "detailView_about").clicked()
+        verify(waitForPolish(v.main), "About laid out")
+        verify(find(v.page, "recordingInfo").visible, "About shows the recording's line")
+    }
+
+    // Upright, a decode chosen in About reopens the recording and leaves the
+    // viewer in About with the choice kept
+    function test_aDecodeChosenInAboutStaysInAbout() {
+        const v = uprightViewer({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                                  folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        const page = v.page
+        find(page, "detailView_about").clicked()
+        verify(waitForPolish(v.main), "About laid out")
+        const choice = find(page, "decodeChoice")
+        verify(choice.visible, "the decode choice in About")
+        const obd2 = choice.indexOfValue("obd2")
+        verify(obd2 > 0, "obd2 is offered")
+        choice.activated(obd2)
+        const info = find(page, "recordingInfo")
+        tryVerify(() => info.visible && info.text.indexOf("through obd2") > 0, 10000, "decoded through obd2")
+        verify(page.aboutShown, "still About")
+        compare(choice.currentIndex, obd2, "the choice kept")
+        find(page, "detailView_values").clicked()
+        verify(!choice.visible, "Values: no choice")
+        find(page, "detailView_about").clicked()
+        tryCompare(choice, "currentIndex", obd2, 2000, "the choice as decoded when About shows again")
+        page.backToList()
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        tryVerify(() => find(page, "signalRows").visible, 10000, "a recording opened from the list")
+        compare(page.detailView, "values", "opens at Values")
     }
 
     // On its side the viewer gives the page to the view the switch names:
@@ -1384,6 +1918,60 @@ TestCase {
             live.stepWindow(1)
     }
 
+    // Live's window row on a phone, following and paused: Live takes the
+    // row's end while paused, the window buttons compact to make room,
+    // nothing passes the edge or overlaps, each label keeps one line, and
+    // every button is a touch's height (Live a touch's width too)
+    function test_livesWindowRowFitsWhilePaused_data() {
+        return [{ tag: "384 following", w: 384, paused: false },
+                { tag: "384 paused", w: 384, paused: true },
+                { tag: "320 paused", w: 320, paused: true }]
+    }
+    function test_livesWindowRowFitsWhilePaused(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const live = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(live.parent.children).indexOf(live))
+        tryCompare(Theme, "compact", true)
+        if (data.paused) {
+            tryVerify(() => {
+                const s = Bridge.signalModel.chartData(0, 0)
+                return s.length > 0 && s[0].samples.length >= 2
+            }, 5000, "a history to pause on")
+            live.pause()
+            verify(live.paused, "paused")
+        }
+        verify(waitForPolish(main), "laid out")
+        waitForRendering(main.contentItem)
+        const row = find(live, "chartWindowRow")
+        const button = find(live, "liveButton")
+        compare(button.visible, data.paused, "Live shows while paused only")
+        const out = pastTheEdge(row, main.contentItem, [])
+        compare(out.length, 0, "past " + main.contentItem.width + " px: " + out.join(", "))
+
+        const buttons = live.chartWindows.map(s => find(live, "chartWindow_" + s))
+            .concat([find(live, "maximizeChart")]).concat(data.paused ? [button] : [])
+        const glass = item => {
+            const a = item.mapToItem(main.contentItem, 0, 0)
+            const b = item.mapToItem(main.contentItem, item.width, item.height)
+            return { x0: a.x, x1: b.x, h: b.y - a.y, w: b.x - a.x }
+        }
+        let right = -Infinity
+        for (const b of buttons) {
+            const g = glass(b)
+            verify(g.h >= Theme.touchTarget - 0.5, b.objectName + " is " + g.h + " tall")
+            verify(g.x0 >= right - 0.5, b.objectName + " overlaps the one before")
+            right = g.x1
+            compare(b.contentItem.lineCount, 1, b.objectName + " on " + b.contentItem.lineCount + " lines")
+        }
+        if (data.paused)
+            verify(glass(button).w >= Theme.touchTarget - 0.5, "Live is " + glass(button).w + " wide")
+    }
+
     // Developer mode's frame-rate readout: in the header, so it covers no
     // page; hidden otherwise, and counting the frames the window draws
     // while a session moves the page
@@ -1466,7 +2054,7 @@ TestCase {
         waitForRendering(main.contentItem)
         verify(!title.visible, "the name gives way to Start log on a phone")
         const pillText = find(main.contentItem, "linkPillText")
-        tryCompare(pillText, "text", "Live", 5000, "the state is a word, not 'Ses...'")
+        tryCompare(pillText, "text", "Connected", 5000, "the state is a word, not 'Ses...'")
         verify(!pillText.truncated, "and it fits")
         compare(find(main.contentItem, "linkPillAddress").text, "· mock://logged")
         let out = pastTheEdge(row, main.contentItem, [])
@@ -1556,18 +2144,16 @@ TestCase {
         verify(Bridge.logActive, "the log runs")
         // The log's own size is a second's worth: what the row would show
         // of a 0.1 MB one is read from the function with the row's choice
-        verify(row.width < 560, "a phone's row is under 560 px: " + row.width)
+        tryVerify(() => row.width < 560, 5000, "a phone's row is under 560 px")
         verify(!main.logReadoutOneLine, "two lines on a phone")
         compare(main.logReadoutText(1000, 104858, main.logReadoutOneLine), "0:01\n0.1 MB")
         main.width = 700
-        waitForRendering(main.contentItem)
-        verify(row.width >= 560, "a wide row: " + row.width)
+        tryVerify(() => row.width >= 560, 5000, "a wide row")
         verify(main.logReadoutOneLine, "one line where the row has room")
         compare(main.logReadoutText(1000, 104858, main.logReadoutOneLine), "0:01 · 0.1 MB")
         compare(readout.font.pixelSize, Theme.fontBody, "the readout is body text")
         main.width = 559 + (main.width - row.width)
-        waitForRendering(main.contentItem)
-        verify(!main.logReadoutOneLine, "two lines again at " + row.width)
+        tryVerify(() => !main.logReadoutOneLine, 5000, "two lines again")
     }
 
     // The header ends in the one divider the look has, a hairline
@@ -1607,6 +2193,79 @@ TestCase {
         }
         const settings = find(main.contentItem, "tabLabel_" + main.settingsPage)
         verify(settings.truncated, "Settings elides in a tab of " + settings.width)
+    }
+
+    // Other address... then a connect that works returns to the page that
+    // sent the user, and the page's arrow goes where Back goes
+    function test_aConnectFromOtherAddressReturnsToDash() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        main.gotoPage(main.dashboardPage)
+        main.openConnectFromDash()
+        compare(main.currentPage, main.settingsPage)
+        settings.uriField.text = "mock://demo"
+        settings.requestConnect("mock://demo")
+        tryCompare(main, "currentPage", main.dashboardPage, 10000, "back on Dash with the gauges")
+        verify(!settings.backLeaves)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        // The arrow, with nothing connected
+        main.gotoPage(main.dashboardPage)
+        main.openConnectFromDash()
+        find(find(settings, "settingsConnectionPage"), "settingsBack").clicked()
+        compare(main.currentPage, main.dashboardPage, "the arrow does what Back does")
+    }
+
+    // The status says Connected (Replaying for a replay) and ends in a
+    // chevron where it opens the Log; the Profile row is three segments
+    function test_thePhonesStatusAndProfileRow() {
+        const main = phoneMain()
+        const word = find(main.contentItem, "linkPillText")
+        const chevron = find(main.contentItem, "linkPillChevron")
+        verify(chevron.visible, "a button, marked")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryCompare(word, "text", "Connected", 5000)
+        verify(!chevron.visible, "not where it would squeeze a connected phone's address")
+        main.width = 600
+        waitForRendering(main.contentItem)
+        verify(chevron.visible, "with 420 px of header it shows beside the address")
+        main.width = 384
+        waitForRendering(main.contentItem)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        const row = Bridge.recordingRow(Harness.recordingFixtures + "/findings")
+        compare(Bridge.connectSession(row.uri), "")
+        tryCompare(word, "text", "Replaying", 5000)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+
+        main.openConnect()
+        const settings = find(main.contentItem, "settingsPage")
+        const segments = find(settings, "profileSegments")
+        verify(segments.visible, "the three profiles are one segmented row")
+        compare(find(settings, "profile_default").text, "Default")
+        compare(find(settings, "profile_raw").text, "Raw")
+        compare(find(settings, "profile_uds-generic").text, "UDS DIDs")
+        verify(find(settings, "profile_default").selected)
+        find(settings, "profile_raw").clicked()
+        verify(find(settings, "profile_raw").selected && !find(settings, "profile_default").selected)
+        compare(settings.profileChoice, "raw")
+    }
+
+    // On the tab-bar form the Diagnostics page's title is its tab's word,
+    // and Settings' Recording row reads the switch (off, on)
+    function test_theCodesPageAndRecordingRowUseTheirShortWords() {
+        const main = phoneMain()
+        compare(find(main.contentItem, "diagnosticsHeader").title, "Codes", "the tab's word")
+        const settings = find(main.contentItem, "settingsPage")
+        const row = () => settings.pageList.find(r => r.key === "recording")
+        try {
+            compare(row().summary, "off")
+            Bridge.recording = true
+            compare(row().summary, "on")
+        } finally {
+            Bridge.recording = false
+        }
     }
 
     // A recording's Replay connects it in one tap and lands on Live, the
@@ -1849,7 +2508,7 @@ TestCase {
         waitForRendering(main.contentItem)
         checkHeaderButtons(main, ["startLogButton", "disconnectButton"])
         if (data.zoom === 1.0)
-            verify(!find(main.contentItem, "linkPillAddress").truncated, "the address keeps its width")
+            verify(!find(main.contentItem, "linkPillText").truncated, "the word keeps its width; the address gives way first")
 
         start.clicked()
         verify(Bridge.logActive, "the log runs")
@@ -1912,16 +2571,17 @@ TestCase {
                "a touch's size: " + onGlass(pill, main).height)
 
         compare(Bridge.connectSession("mock://demo"), "", "connects")
-        tryCompare(state, "text", "Live", 5000)
+        tryCompare(state, "text", "Connected", 5000)
         compare(address.text, "· mock://demo")
         waitForRendering(main.contentItem)
-        verify(address.visible && !address.truncated, "a short address fits")
+        verify(address.visible && !find(main.contentItem, "linkPillText").truncated,
+               "the address shows and the word keeps its width")
 
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         const long = "mock://a-long-name-for-an-adapter-that-cannot-fit-beside-the-buttons"
         compare(Bridge.connectSession(long), "", "the long one connects")
-        tryCompare(state, "text", "Live", 5000)
+        tryCompare(state, "text", "Connected", 5000)
         waitForRendering(main.contentItem)
         verify(address.truncated, "the address elides")
         verify(!state.truncated && state.width >= state.implicitWidth - 0.5, "the word doesn't")
@@ -2053,12 +2713,69 @@ TestCase {
         verify(words.lineCount <= 2, "the words take " + words.lineCount + " lines at 320")
     }
 
+    // The demo row is every user's, last under Adapters, never chosen
+    // by default; a recent address of a listed device shows its name
+    function test_theDemoRowIsAlwaysThereAndNeverTheDefault() {
+        const main = phoneMain()
+        Theme.developerMode = false
+        const list = connectListOn(main, [])
+        tryVerify(() => findChild(list, "connectRow_0") !== null, 2000, "the demo row")
+        compare(find(find(list, "connectRow_0"), "connectRowKind").text, "Demo data")
+        compare(list.chosen, "", "nothing chosen with only the demo")
+        verify(!find(list, "connectRow_0").checked)
+        const hint = find(list, "connectPickHint")
+        verify(hint.visible, "the hint shows with nothing chosen")
+        compare(hint.text, "Pick a row, then connect", "it asks for a row, not an adapter")
+    }
+
+    function test_aRecentAddressOfAListedDeviceTakesItsName() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["elm327://COM9?profile=raw"])
+        list.adapters = [{ uri: "elm327://COM9", title: "Bench adapter", kind: "ELM327 adapter" }]
+        verify(waitForPolish(main), "laid out")
+        const row = find(list, "connectRow_0")
+        compare(find(row, "connectRowAddress").text, "Bench adapter")
+        compare(find(row, "connectRowKind").text, "ELM327 adapter")
+        compare(list.recentRows[0].detail.indexOf("elm327://COM9") >= 0, true, "the address is its detail")
+        compare(find(list, "connectAdapters").visible, true)
+    }
+
+    // A log is a recording: Mark stands beside Stop log from 720 px of
+    // header, and the readout says it is the log's time
+    function test_markStandsBesideStopLogOnAWideHeader() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1280
+        main.height = 800
+        const start = find(main.contentItem, "startLogButton")
+        const mark = find(main.contentItem, "markButton")
+        const readout = find(main.contentItem, "logReadout")
+        compare(Bridge.connectSession("mock://logged"), "")
+        try {
+            tryVerify(() => start.visible && start.enabled, 5000, "Start log")
+            verify(!mark.visible, "no Mark before the log")
+            start.clicked()
+            verify(Bridge.logActive)
+            tryVerify(() => mark.visible, 2000, "Mark beside Stop log")
+            verify(/^Logging \d+:\d\d$/.test(readout.text), readout.text)
+            const before = Bridge.markCount
+            mark.clicked()
+            tryVerify(() => Bridge.markCount === before + 1, 2000, "a marker in the log")
+            main.width = 600
+            waitForRendering(main.contentItem)
+            verify(!mark.visible, "under 720 px of header the phone's rule holds")
+            verify(!/^Logging/.test(readout.text), readout.text)
+        } finally {
+            if (Bridge.logActive)
+                Bridge.stopLog()
+        }
+    }
+
     // With no recent address and exactly one adapter, it is chosen; the
-    // developer's demo row doesn't count
+    // demo row doesn't count
     function test_aSoleAdapterIsChosen() {
         const main = phoneMain()
         const list = connectListOn(main, [])
-        Theme.developerMode = true
         try {
             find(main.contentItem, "settingsPage").serialPorts = [{ name: "COM9", device: "" }]
             tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "the port and the demo")
@@ -2067,8 +2784,6 @@ TestCase {
             verify(find(list, "connectRow_0").checked, "its row marked")
             const go = find(list, "connectGo")
             verify(go.enabled && go.highlighted && go.text === "Connect", "one tap connects")
-            Theme.developerMode = false
-            tryVerify(() => findChild(list, "connectRow_1") === null, 2000, "no demo row off developer mode")
             find(main.contentItem, "settingsPage").serialPorts =
                 [{ name: "COM9", device: "" }, { name: "COM8", device: "" }]
             tryCompare(list, "chosen", "", 2000, "two: none chosen")
@@ -2085,8 +2800,31 @@ TestCase {
             [{ name: "COM9", device: "" }, { name: "COM8", device: "" }]
         tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "the recent and COM8")
         compare(find(find(list, "connectRow_1"), "connectRowAddress").text, "COM8")
-        compare(findChild(list, "connectRow_2"), null, "COM9 once")
+        compare(find(find(list, "connectRow_2"), "connectRowKind").text, "Demo data", "COM9 once, then the demo")
+        compare(findChild(list, "connectRow_3"), null, "COM9 once")
         compare(list.chosen, "elm327://COM9?profile=obd2", "the recent one")
+    }
+
+    // One adapter connected under two profiles is two recents: on a phone
+    // the profile's word stands where the kind goes, so the rows differ
+    function test_twoRecentsOnOneAdapterReadDifferentOnAPhone() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["elm327://COM9", "elm327://COM9?profile=raw",
+                                          "elm327://COM9?profile=uds-generic&did=F190:text"])
+        find(main.contentItem, "settingsPage").serialPorts = [{ name: "COM9", device: "" }]
+        tryVerify(() => findChild(list, "connectRow_2") !== null
+                        && find(findChild(list, "connectRow_0"), "connectRowKind").text === "Default",
+                  2000, "the profile's word where the kind goes")
+        verify(Theme.compact, "a phone's form")
+        const words = [0, 1, 2].map(i => find(findChild(list, "connectRow_" + i), "connectRowKind").text)
+        compare(words, ["Default", "Raw", "UDS DIDs"])
+        const names = [0, 1, 2].map(i => findChild(list, "connectRow_" + i).Accessible.name)
+        verify(names[0] !== names[1] && names[1] !== names[2] && names[0] !== names[2],
+               "each row has a name of its own: " + names.join(" | "))
+        // an adapter with one recent keeps its kind
+        list.recents = ["elm327://COM9"]
+        tryVerify(() => find(findChild(list, "connectRow_0"), "connectRowKind").text !== "Default",
+                  2000, "a lone recent keeps its kind")
     }
 
     // At most six adapter rows; the rest are Other address...'s
@@ -2098,7 +2836,8 @@ TestCase {
             ports.push({ name: "COM" + i, device: "" })
         find(main.contentItem, "settingsPage").serialPorts = ports
         tryVerify(() => findChild(list, "connectRow_5") !== null, 2000, "six rows")
-        compare(findChild(list, "connectRow_6"), null, "no seventh")
+        compare(find(find(list, "connectRow_6"), "connectRowKind").text, "Demo data", "the demo after six")
+        compare(findChild(list, "connectRow_7"), null, "no seventh adapter")
         verify(find(list, "connectOther").visible, "the rest through Other address")
     }
 
@@ -2216,9 +2955,8 @@ TestCase {
         const main = phoneMain()
         const list = connectListOn(main, [])
         compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
-        const go = find(list, "connectGo")
         wait(0)
-        verify(go.enabled, "it only opens Settings")
+        verify(find(list, "connectOther").enabled, "Other address... still opens Settings")
     }
 
     function vehicleWith(label, uri) {
@@ -2440,12 +3178,11 @@ TestCase {
         const main = phoneMain()
         const settings = find(main.contentItem, "settingsPage")
         const list = connectListOn(main, [])
-        verify(!find(list, "connectOther").visible, "one way to Settings")
-        verify(findChild(list, "connectRow_0") === null, "no rows")
+        compare(find(find(list, "connectRow_0"), "connectRowKind").text, "Demo data", "the demo row alone")
         const go = find(list, "connectGo")
-        compare(go.text, "Connect…")
-        verify(!go.highlighted, "nothing to connect to: it opens Settings, so it isn't primary")
-        mouseClick(go)
+        compare(go.text, "Connect")
+        verify(!go.enabled && !go.highlighted, "the demo is never chosen by default")
+        mouseClick(find(list, "connectOther"))
         tryCompare(main, "currentPage", main.settingsPage, 2000)
         tryCompare(settings, "shownKey", "connection", 2000)
         verify(!Bridge.connecting && !Bridge.connected, "nothing to connect to")
@@ -2462,6 +3199,45 @@ TestCase {
         tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "back after Done")
         dash.form = "desktop"
         tryVerify(() => findChild(dash, "dashConnectList") === null, 2000, "the desktop keeps Home")
+    }
+
+    // Edit mode's panel and the More row use the themed field: a touch's
+    // height on the glass, and inside the phone's width
+    function test_theDashboardsFieldsAreThemedAndATouchsSize_data() {
+        return [{ tag: "384 upright", w: 384, h: 832 }, { tag: "320 upright", w: 320, h: 640 }]
+    }
+
+    function test_theDashboardsFieldsAreThemedAndATouchsSize(data) {
+        const main = phoneMain()
+        main.width = data.w
+        main.height = data.h
+        verify(waitForPolish(main), "laid out")
+        const dash = find(main.contentItem, "dashboardPage")
+        dash.form = "phone"
+        dash.startEditing()
+        dash.select(1)
+        verify(waitForPolish(main), "panel laid out")
+        waitForRendering(main.contentItem)
+        const names = ["panelLabel", "panelCaption", "panelWarnFrom", "panelDangerFrom"]
+        let shown = 0
+        for (const n of names) {
+            const f = find(dash, n)
+            verify(f, n + " exists")
+            verify(f.touchMin !== undefined, n + " is the themed field")
+            if (!f.visible)
+                continue
+            ++shown
+            verify(f.height >= Theme.touchTarget - 0.5, n + " is " + f.height + " tall")
+            tryVerify(() => f.mapToItem(main.contentItem, f.width, 0).x
+                            <= main.contentItem.width + 0.5, 2000,
+                      n + " is past the right edge: " + f.mapToItem(main.contentItem, f.width, 0).x + " of " + main.contentItem.width)
+        }
+        verify(shown >= 2, "fields shown: " + shown)
+        dash.moreShown = true
+        waitForRendering(main.contentItem)
+        const rename = find(dash, "moreRename")
+        verify(rename.touchMin !== undefined, "moreRename is the themed field")
+        verify(rename.height >= Theme.touchTarget - 0.5, "moreRename is " + rename.height + " tall")
     }
 
     // Five rows of long addresses fit a phone's width, every target a

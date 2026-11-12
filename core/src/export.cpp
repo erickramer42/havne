@@ -1077,7 +1077,9 @@ private:
         uint64_t samples = 0;
         uint64_t last_us = 0;
         timing_hist deltas; /* between its samples */
+        uint64_t usual_us = 0; /* the median of deltas; 0 with none */
         uint64_t silence_us = kSilenceUs;
+        bool sparse = false; /* far sparser than the rest: paces no sweep */
     };
 
     /* One row interval's rows over the columns, fed the samples in time
@@ -1188,9 +1190,10 @@ private:
                 return;
             }
             /* A row once every column in the rule has a sample newer
-             * than the last row, at the completing sample's time */
+             * than the last row, at the completing sample's time; a
+             * sparse column's cell rides along */
             for (size_t j = 0; j < cols.size(); ++j) {
-                if (in_rule[j] != 0 && fresh[j] == 0) {
+                if (in_rule[j] != 0 && !cols[j].sparse && fresh[j] == 0) {
                     return;
                 }
             }
@@ -1335,9 +1338,8 @@ private:
             if (!check_column(c)) {
                 return false;
             }
-            const uint64_t usual =
-                c.deltas.count > 0 ? c.deltas.quantile(0.5) : 0;
-            c.silence_us = (std::max)(kSilenceUs, kSilenceTimes * usual);
+            c.usual_us = c.deltas.count > 0 ? c.deltas.quantile(0.5) : 0;
+            c.silence_us = (std::max)(kSilenceUs, kSilenceTimes * c.usual_us);
             std::string unit = c.unit;
             ecuio_display_value_t dv{};
             if (ecuio_display_convert(c.unit.c_str(), c.decimals, 0.0, o_.units,
@@ -1347,8 +1349,42 @@ private:
             c.head =
                 csv_field(unit.empty() ? c.name : c.name + " (" + unit + ")");
         }
+        mark_sparse();
         r_.signal_count = columns_.size();
         return true;
+    }
+
+    /* A column is sparse, pacing no sweep, when its interval is over
+     * rows::kSparseTimes the lower median of the others' intervals. One
+     * sample in range gives no interval: its stand-in is the span of the
+     * values exported, which held no other, and it isn't among the others.
+     * With no other interval to compare, none is sparse */
+    void mark_sparse()
+    {
+        std::vector<uint64_t> all;
+        for (const wide_column& c : columns_) {
+            if (c.usual_us > 0) {
+                all.push_back(c.usual_us);
+            }
+        }
+        if (all.empty()) {
+            return;
+        }
+        std::sort(all.begin(), all.end());
+        /* For a column in all, the rest's lower median is the entry at
+         * (n - 2) / 2 when the column is above it (its removal leaves it in
+         * place); one at or below it is never over the rest's, which is at
+         * least as large. A one-sample column's rest is all */
+        const uint64_t in_all = all.size() >= 2 ? all[(all.size() - 2) / 2] : 0;
+        const uint64_t beside = all[(all.size() - 1) / 2];
+        const uint64_t span = last_us_ - first_us_;
+        for (wide_column& c : columns_) {
+            if (c.samples == 1) {
+                c.sparse = span > rows::kSparseTimes * beside;
+            } else if (c.usual_us > 0 && all.size() >= 2) {
+                c.sparse = c.usual_us > rows::kSparseTimes * in_all;
+            }
+        }
     }
 
     std::string wide_head() const

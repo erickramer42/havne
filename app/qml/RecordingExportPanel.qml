@@ -129,13 +129,18 @@ ColumnLayout {
             return qsTr("%1 MB").arg(one(n / 1000000))
         return qsTr("%1 GB").arg(one(n / 1000000000))
     }
-    // "18,402 rows, 1.2 MB" for an interval; "" for none known
+    // "18,402 rows, 1.2 MB" for an interval; "" for none known; an
+    // interval that gives no fewer rows than every sweep (the recording is
+    // slower than it) says so, not a size that looks like a saving
     function sizeOf(ms) {
         if (ms < 0)
             return ""
         const s = sizes.find(x => x.rowMs === ms)
         if (s === undefined)
             return exporter.sizing ? qsTr("Sizing...") : ""
+        const sweep = sizes.find(x => x.rowMs === 0)
+        if (ms > 0 && sweep !== undefined && s.rows >= sweep.rows)
+            return qsTr("no fewer rows than every sweep")
         const rows = Number(s.rows).toLocaleString(numberLocale, 'f', 0)
         return s.rows === 1 ? qsTr("1 row, %1").arg(bytesText(s.bytes))
                             : qsTr("%1 rows, %2").arg(rows).arg(bytesText(s.bytes))
@@ -300,38 +305,29 @@ ColumnLayout {
         text: panel.note
     }
 
-    Rectangle {
-        implicitWidth: formatSwitch.implicitWidth + 4
-        implicitHeight: formatSwitch.implicitHeight + 4
-        radius: Theme.radius
-        color: Theme.surface
-        Row {
-            id: formatSwitch
-            anchors.centerIn: parent
-            spacing: 2
-            SegmentButton {
-                objectName: "exportFormat_csv"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("CSV")
-                selected: panel.format === "csv"
-                enabled: panel.hasValues
-                onClicked: panel.format = "csv"
-            }
-            SegmentButton {
-                objectName: "exportFormat_pcapng"
-                implicitHeight: Theme.touchTarget
-                visible: panel.view.hasFrames
-                text: qsTr("pcapng")
-                selected: panel.format === "pcapng"
-                onClicked: panel.format = "pcapng"
-            }
-            SegmentButton {
-                objectName: "exportFormat_folder"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("Folder")
-                selected: panel.format === "folder"
-                onClicked: panel.format = "folder"
-            }
+    SegmentRow {
+        SegmentButton {
+            objectName: "exportFormat_csv"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("CSV")
+            selected: panel.format === "csv"
+            enabled: panel.hasValues
+            onClicked: panel.format = "csv"
+        }
+        SegmentButton {
+            objectName: "exportFormat_pcapng"
+            implicitHeight: Theme.touchTarget
+            visible: panel.view.hasFrames
+            text: qsTr("pcapng")
+            selected: panel.format === "pcapng"
+            onClicked: panel.format = "pcapng"
+        }
+        SegmentButton {
+            objectName: "exportFormat_folder"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("Folder")
+            selected: panel.format === "folder"
+            onClicked: panel.format = "folder"
         }
     }
 
@@ -344,30 +340,21 @@ ColumnLayout {
         text: qsTr("No CSV: this recording has frames alone, no values were recorded.")
     }
 
-    Rectangle {
+    SegmentRow {
         visible: panel.format === "csv"
-        implicitWidth: layoutSwitch.implicitWidth + 4
-        implicitHeight: layoutSwitch.implicitHeight + 4
-        radius: Theme.radius
-        color: Theme.surface
-        Row {
-            id: layoutSwitch
-            anchors.centerIn: parent
-            spacing: 2
-            SegmentButton {
-                objectName: "exportLayout_wide"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("Wide")
-                selected: !panel.longLayout
-                onClicked: panel.longLayout = false
-            }
-            SegmentButton {
-                objectName: "exportLayout_long"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("Long")
-                selected: panel.longLayout
-                onClicked: panel.longLayout = true
-            }
+        SegmentButton {
+            objectName: "exportLayout_wide"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("Wide")
+            selected: !panel.longLayout
+            onClicked: panel.longLayout = false
+        }
+        SegmentButton {
+            objectName: "exportLayout_long"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("Long")
+            selected: panel.longLayout
+            onClicked: panel.longLayout = true
         }
     }
 
@@ -456,30 +443,21 @@ ColumnLayout {
         text: qsTr("Signals:")
         color: Theme.textDim
     }
-    Rectangle {
+    SegmentRow {
         visible: panel.wideCsv && panel.hasValues && panel.plottedOffered
-        implicitWidth: columnSwitch.implicitWidth + 4
-        implicitHeight: columnSwitch.implicitHeight + 4
-        radius: Theme.radius
-        color: Theme.surface
-        Row {
-            id: columnSwitch
-            anchors.centerIn: parent
-            spacing: 2
-            SegmentButton {
-                objectName: "exportColumns_own"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("The log's own")
-                selected: !panel.usePlotted
-                onClicked: panel.columnChoice = "own"
-            }
-            SegmentButton {
-                objectName: "exportColumns_plotted"
-                implicitHeight: Theme.touchTarget
-                text: qsTr("The %1 plotted").arg(panel.plottedNames.length)
-                selected: panel.usePlotted
-                onClicked: panel.columnChoice = "plotted"
-            }
+        SegmentButton {
+            objectName: "exportColumns_own"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("The log's own")
+            selected: !panel.usePlotted
+            onClicked: panel.columnChoice = "own"
+        }
+        SegmentButton {
+            objectName: "exportColumns_plotted"
+            implicitHeight: Theme.touchTarget
+            text: qsTr("The %1 plotted").arg(panel.plottedNames.length)
+            selected: panel.usePlotted
+            onClicked: panel.columnChoice = "plotted"
         }
     }
 

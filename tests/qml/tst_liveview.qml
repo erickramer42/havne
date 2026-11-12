@@ -1,6 +1,7 @@
 // File/layer: tests/qml/tst_liveview.qml | Qt Quick Test, QML tier
 // Testing: QML: QmlTest.liveview (test_qml)
 
+import QtCore
 import QtQuick
 import QtTest
 import App
@@ -31,7 +32,21 @@ TestCase {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
     }
 
+    // Live's store, for the first pause's hint
+    Settings {
+        id: liveStore
+        category: "live"
+    }
+    // The test window's size before a case grew it, or null
+    property var grownFrom: null
+
     function cleanup() {
+        if (grownFrom) {
+            testCase.parent.Window.window.width = grownFrom[0]
+            testCase.parent.Window.window.height = grownFrom[1]
+            grownFrom = null
+        }
+        Bridge.unitSystem = 0
         Bridge.liveSignalModel.filter.clear()
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
@@ -160,6 +175,53 @@ TestCase {
         Bridge.signalModel.toggleSubscribed(0)
     }
 
+    // The plotted rows are what Start log records: the line says so where
+    // the button is offered, and "Logging" while a log runs
+    function test_theStatusLineSaysWhatALogRecords() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const list = connectMock(page)
+        const all = list.count
+        verify(page.statusText().endsWith(" · Start log records the plotted ones"), page.statusText())
+        Bridge.startLog()
+        verify(Bridge.logActive, "a log runs")
+        compare(page.statusText(), "Logging the " + Bridge.signalModel.subscribedCount + " plotted signals")
+        Bridge.stopLog()
+        verify(!Bridge.logActive)
+        verify(page.statusText().endsWith("records the plotted ones"), page.statusText())
+
+        // one plotted signal reads in the singular
+        for (let i = list.count - 1; i >= 1; --i) {
+            if (list.itemAtIndex(i).subscribed)
+                Bridge.signalModel.toggleSubscribed(i)
+        }
+        tryCompare(Bridge.signalModel, "subscribedCount", 1, 2000, "one signal left plotted")
+        Bridge.startLog()
+        verify(Bridge.logActive, "a log runs")
+        compare(page.statusText(), "Logging the 1 plotted signal")
+        Bridge.stopLog()
+        verify(!Bridge.logActive)
+
+        // Where Start log isn't offered the note isn't made: a recorded
+        // session (Record sessions on) and a replay
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        Bridge.recording = true
+        try {
+            compare(Bridge.connectSession("mock://demo"), "")
+            tryVerify(() => Bridge.recordingActive, 5000, "the session is recorded")
+            verify(page.statusText().indexOf("Start log") < 0, page.statusText())
+        } finally {
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+            Bridge.recording = false
+        }
+        const replay = Bridge.recordingRow(Harness.recordingFixtures + "/findings")
+        compare(Bridge.connectSession(replay.uri), "", "a replay connects")
+        tryVerify(() => page.statusText().indexOf("Plotting") === 0
+                        || page.statusText().indexOf(" of ") > 0, 5000, "its line")
+        verify(page.statusText().indexOf("Start log") < 0, page.statusText())
+    }
+
     // On a phone the field says "Find" and the status line drops the 10 Hz
     // clause, since the long forms are cut at 384 dp; the field's
     // accessible name keeps the whole phrase
@@ -176,7 +238,7 @@ TestCase {
         try {
             compare(field.placeholderText, "Find")
             compare(field.Accessible.name, "Find a signal by its name or unit")
-            compare(page.statusText(), all + " of " + all + " plotted")
+            compare(page.statusText(), all + " of " + all + " plotted · Start log records them")
             field.insert(0, "temp")
             field.textEdited()
             tryCompare(list, "count", 3)
@@ -468,6 +530,272 @@ TestCase {
     function test_bannerText(data) {
         const page = createTemporaryObject(pageComponent, testCase)
         compare(page.bannerText(data.state, data.episodes, data.code), data.text)
+    }
+
+    // A page in the test window, grown to the page's size so a pointer
+    // lands on the chart; cleanup() puts the size back
+    function pageInGrownWindow() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const win = page.Window.window
+        grownFrom = [win.width, win.height]
+        win.width = page.width
+        win.height = page.height
+        tryVerify(() => win.width >= page.width && win.height >= page.height, 5000, "the window grown")
+        verify(waitForPolish(win), "the grown window laid out")
+        return page
+    }
+
+    // The plotted history spans at least ms
+    function waitForHistory(ms) {
+        tryVerify(() => {
+            const s = Bridge.signalModel.chartData(0, 0)
+            return s.length > 0 && s[0].samples.length >= 6
+                   && s[0].samples[s[0].samples.length - 2] - s[0].samples[0] >= ms
+        }, 20000, "a history of " + ms + " ms to pause on")
+    }
+
+    // A drag in steps, as a pointer moves (mouseDrag's two moves don't carry
+    // a DragHandler past its threshold)
+    function dragAcross(frame, dx) {
+        const x = frame.width / 2, y = frame.height / 2
+        mousePress(frame, x, y)
+        const step = dx > 0 ? 10 : -10
+        for (let d = step; Math.abs(d) <= Math.abs(dx); d += step)
+            mouseMove(frame, x + d, y, 10)
+        mouseRelease(frame, x + dx, y)
+    }
+
+    // The pause keeps each plotted signal's history as it stood, times
+    // counted back from its newest sample; the session goes on and the
+    // chart holds still, until Live follows now again
+    function test_thePauseKeepsTheHistoryAsItStood() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        connectMock(page)
+        const chart = findChild(page, "chart")
+        const live = findChild(page, "liveButton")
+        verify(!live.visible, "no Live button while the chart follows")
+        waitForHistory(500)
+        const before = Bridge.signalModel.chartData(0, 0)
+        page.pause()
+        verify(page.paused, "paused")
+        compare(page.snapshot.length, before.length, "a series for each plotted signal")
+        let newest = -Infinity
+        for (let i = 0; i < before.length; ++i) {
+            const sp = before[i].samples, kept = page.snapshot[i].samples
+            compare(kept.length, sp.length, "every sample of row " + before[i].row)
+            if (sp.length < 2)
+                continue
+            compare(kept[0] + page.snapshotEndMs, sp[0], "the first sample's time")
+            compare(kept[kept.length - 2] + page.snapshotEndMs, sp[sp.length - 2], "the last's")
+            newest = Math.max(newest, sp[sp.length - 2])
+        }
+        compare(page.snapshotEndMs, newest, "the pause is at the newest sample")
+        verify(live.visible && live.highlighted, "Live shows, primary")
+        verify(page.statusText().indexOf("Paused · ") === 0, page.statusText())
+
+        tryVerify(() => {
+            const s = Bridge.signalModel.chartData(0, 0)
+            return s[0].samples[s[0].samples.length - 2] > page.snapshotEndMs + 300
+        }, 5000, "the session goes on")
+        for (const s of chart.fetch(400)) {
+            verify(s.samples.length === 0 || s.samples[s.samples.length - 2] <= 0,
+                   "the chart holds at the pause: row " + s.row)
+        }
+        live.clicked()
+        verify(!page.paused, "Live follows now again")
+        compare(page.snapshot, null, "the snapshot dropped")
+        verify(!live.visible, "and goes")
+        verify(page.statusText().indexOf("Paused") < 0, page.statusText())
+    }
+
+    // A leftward drag on a following chart pauses nothing and doesn't spend
+    // the first pause's hint, which the next pause shows
+    function test_aLeftwardDragSpendsNoHint() {
+        liveStore.setValue("pauseHintSeen", false)
+        liveStore.sync()
+        const page = pageInGrownWindow()
+        connectMock(page)
+        waitForHistory(500)
+        dragAcross(findChild(page, "chartFrame"), -200)
+        verify(!page.paused, "a leftward drag on a following chart pauses nothing")
+        liveStore.sync()
+        compare(liveStore.value("pauseHintSeen", false), false, "and spends no hint")
+        page.pause()
+        verify(findChild(page, "pauseHint").visible, "the first pause shows it")
+    }
+
+    // Under a replay Start log isn't offered, so neither the hint nor its flag
+    function test_aReplaysPauseHasNoHint() {
+        liveStore.setValue("pauseHintSeen", false)
+        liveStore.sync()
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        compare(Bridge.connectSession("replay://" + Harness.replayFixtures
+                                      + "/2026-10-25-engine-start?profile=obd2&speed=max"), "",
+                "the replay connects")
+        waitForHistory(500)
+        page.pause()
+        verify(page.paused)
+        verify(!findChild(page, "pauseHint").visible, "no hint where Start log isn't offered")
+        page.resume()
+        liveStore.sync()
+        compare(liveStore.value("pauseHintSeen", false), false, "the flag is kept for a session that records")
+    }
+
+    // A drag pauses and pans back through the snapshot; a drag pushed past
+    // its right edge follows now again
+    function test_aDragPausesPansAndResumesAtTheEdge() {
+        const page = pageInGrownWindow()
+        compare(Bridge.connectSession("replay://" + Harness.replayFixtures
+                                      + "/2026-10-25-engine-start?profile=obd2&speed=max"), "",
+                "the replay connects")
+        const kept = page.chartWindowS
+        // Live's stored window is put back whatever the checks find
+        try {
+            findChild(page, "chartWindow_10").clicked()
+            waitForHistory(25000)
+            const frame = findChild(page, "chartFrame")
+            dragAcross(frame, 200)
+            verify(page.paused, "a drag pauses")
+            verify(page.viewEndMs < -1000, "and pans back: " + page.viewEndMs)
+            const panned = page.viewEndMs
+            dragAcross(frame, 80)
+            verify(page.paused && page.viewEndMs < panned, "a second drag pans on: " + page.viewEndMs)
+            dragAcross(frame, -600)
+            verify(!page.paused, "a drag past the right edge follows now again")
+        } finally {
+            findChild(page, "chartWindow_" + kept).clicked()
+        }
+    }
+
+    // Space on a focused check box toggles it and leaves the chart following
+    function test_spaceOnAFocusedCheckBoxIsTheBoxsNotThePauses() {
+        if (Theme.mobile)
+            skip("Space is a desktop's key")
+        const page = pageInGrownWindow()
+        const list = connectMock(page)
+        waitForHistory(1500)
+        const box = findChild(list.itemAtIndex(0), "plotCheck")
+        verify(box.enabled, "the first mock row can be plotted")
+        const before = box.checked
+        findChild(page, "filterText").focus = false
+        box.forceActiveFocus()
+        verify(box.activeFocus, "the box has the focus")
+        keyClick(Qt.Key_Space)
+        tryCompare(box, "checked", !before, 2000, "Space toggles the box")
+        verify(!page.paused, "and the chart is not paused")
+        // the page's own focus still pauses
+        box.focus = false
+        page.forceActiveFocus()
+        keyClick(Qt.Key_Space)
+        verify(page.paused, "Space off a button pauses as before")
+    }
+
+    // Space pauses and resumes on a desktop, but types a space into Find a
+    // signal; a tap on the paused chart reads each trace's value at the
+    // cursor into its label
+    function test_spaceAndTheCursor() {
+        if (Theme.mobile)
+            skip("Space is a desktop's key")
+        const page = pageInGrownWindow()
+        connectMock(page)
+        waitForHistory(1500)
+        const field = findChild(page, "filterText")
+        field.focus = false
+        page.forceActiveFocus()
+        keyClick(Qt.Key_Space)
+        verify(page.paused, "Space pauses")
+        keyClick(Qt.Key_Space)
+        verify(!page.paused, "and resumes")
+        field.forceActiveFocus()
+        keyClick(" ")
+        compare(field.text, " ", "a space goes into the filter")
+        verify(!page.paused, "and leaves the chart following")
+        Bridge.liveSignalModel.filter.clear()
+        field.focus = false
+        page.forceActiveFocus()
+        keyClick(Qt.Key_Space)
+        verify(page.paused, "paused again")
+
+        const frame = findChild(page, "chartFrame")
+        const chart = findChild(page, "chart")
+        tryVerify(() => chart.drawn !== null, 2000, "the paused chart drawn")
+        // Halfway into the snapshot, where every trace has samples
+        const w = page.chartWindowS * 1000
+        const x = Math.round(chart.x + (page.snapshotStartMs / 2 + w) / w * (chart.drawn.plotW - 1))
+        // Taken before the tap: the labels it fills change the plot's width
+        const tapped = page.timeAt(x)
+        mouseClick(frame, x, frame.height / 2)
+        verify(!isNaN(page.cursorMs), "a tap places the cursor")
+        compare(page.cursorMs, tapped, "where the tap was")
+        verify(page.statusText().indexOf("cursor at −") > 0, page.statusText())
+        let read = 0
+        for (const s of page.snapshot) {
+            const sp = s.samples
+            let best = 0
+            for (let i = 0; i + 1 < sp.length; i += 2) {
+                if (Math.abs(sp[i] - page.cursorMs) < Math.abs(sp[best] - page.cursorMs))
+                    best = i
+            }
+            if (sp.length < 2 || Math.abs(sp[best] - page.cursorMs) > page.staleMs)
+                continue
+            tryVerify(() => chart.drawn && chart.drawn.traces.some(tr => tr.row === s.row
+                                                                    && tr.labelMs !== undefined),
+                      2000, "row " + s.row + " read at the cursor")
+            const tr = chart.drawn.traces.find(t => t.row === s.row)
+            compare(tr.labelMs, sp[best], "row " + s.row + "'s label reads the nearest sample")
+            compare(tr.label, page.valueText(sp[best + 1], s.decimals, s.unit),
+                    "row " + s.row + "'s value")
+            ++read
+        }
+        verify(read > 0, "some trace has a sample at the cursor")
+    }
+
+    // The snapshot goes with what it was taken of: a unit change, leaving
+    // the page, a disconnect
+    function test_thePauseDropsWithItsSession() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        connectMock(page)
+        waitForHistory(300)
+        page.pause()
+        verify(page.paused)
+        Bridge.unitSystem = 1
+        verify(!page.paused, "a unit change drops it")
+        Bridge.unitSystem = 0
+        page.pause()
+        verify(page.paused)
+        page.visible = false
+        verify(!page.paused, "leaving the page drops it")
+        page.visible = true
+        page.pause()
+        verify(page.paused)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected, 5000, "disconnected")
+        verify(!page.paused, "a disconnect drops it")
+        compare(page.snapshot, null)
+    }
+
+    // The first pause of all names Start log, once: not at the next pause,
+    // nor on a page made later
+    function test_theFirstPauseHintShowsOnce() {
+        liveStore.setValue("pauseHintSeen", false)
+        liveStore.sync()
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        connectMock(page)
+        waitForHistory(300)
+        const hint = findChild(page, "pauseHint")
+        verify(!hint.visible, "no hint while live")
+        page.pause()
+        verify(hint.visible, "the first pause shows it")
+        compare(hint.text, "Start log records the session for the viewer")
+        page.resume()
+        verify(!hint.visible, "gone at resume")
+        page.pause()
+        verify(!hint.visible, "not at the second pause")
+        page.resume()
+        const later = createTemporaryObject(pageComponent, testCase.parent)
+        later.pause()
+        verify(later.paused)
+        verify(!findChild(later, "pauseHint").visible, "nor on a page made later")
     }
 
     // The empty state: plain words, and a Connect that isn't a second

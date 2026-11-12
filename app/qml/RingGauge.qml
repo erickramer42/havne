@@ -1,5 +1,6 @@
 // File/layer: app/qml/RingGauge.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard
+// Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility, QmlTest.dashboard,
+//          QmlTest.dashedit
 
 import QtQuick
 import QtQuick.Shapes
@@ -31,7 +32,8 @@ GaugeBase {
     function py(deg, radius) { return cy + radius * Math.sin(deg * Math.PI / 180) }
 
     // Zone boundaries, each collapsing to its neighbor when unset
-    readonly property real coldEnd: isNaN(coldBelow) ? from : coldBelow
+    // Cold starts where the low warning ends: the low bands win where they overlap
+    readonly property real coldEnd: isNaN(coldBelow) ? lowWarnEnd : Math.max(coldBelow, lowWarnEnd)
     readonly property real dangerStart: isNaN(dangerFrom) ? to : dangerFrom
     readonly property real warnStart: isNaN(warnFrom) ? dangerStart : warnFrom
     readonly property real gapDeg: 1.5   // hairline gap between zone segments
@@ -40,10 +42,24 @@ GaugeBase {
         anchors.fill: parent
         preferredRendererType: Shape.CurveRenderer
 
-        // Zone strip: cold, normal, warn, danger
+        // Zone strip: low danger, low warning, cold, normal, warn, danger
         GaugeArc {
             centerX: gauge.cx; centerY: gauge.cy; radius: gauge.zoneRadius
             startAngle: gauge.startAngle
+            sweepAngle: Math.max(0, gauge.angleOf(gauge.lowDangerEnd) - startAngle - gauge.gapDeg)
+            strokeColor: Theme.gaugeDanger
+            strokeWidth: gauge.zoneWidth * 2
+        }
+        GaugeArc {
+            centerX: gauge.cx; centerY: gauge.cy; radius: gauge.zoneRadius
+            startAngle: gauge.angleOf(gauge.lowDangerEnd)
+            sweepAngle: Math.max(0, gauge.angleOf(gauge.lowWarnEnd) - startAngle - gauge.gapDeg)
+            strokeColor: Theme.gaugeWarn
+            strokeWidth: gauge.zoneWidth
+        }
+        GaugeArc {
+            centerX: gauge.cx; centerY: gauge.cy; radius: gauge.zoneRadius
+            startAngle: gauge.angleOf(gauge.lowWarnEnd)
             sweepAngle: Math.max(0, gauge.angleOf(gauge.coldEnd) - startAngle - gauge.gapDeg)
             strokeColor: Theme.info
             strokeWidth: gauge.zoneWidth
@@ -161,13 +177,13 @@ GaugeBase {
                 font.weight: Font.Bold
                 font.family: Theme.valueFamily
                 font.features: Theme.valueFeatures
-                color: gauge.hasValue ? gauge.zoneColor(gauge.value, Theme.gaugeReadout) : Theme.textDim
+                color: gauge.hasValue ? gauge.zoneColor(gauge.value, gauge.readoutColor) : Theme.textDim
             }
             // Past dangerFrom, beside the value
             DangerMark {
                 // The slot stays once a gauge has a danger zone, so the readout
                 // never moves as the mark appears
-                visible: !isNaN(gauge.dangerFrom)
+                visible: gauge.hasDangerZone
                 opacity: gauge.inDanger ? 1 : 0
                 size: Math.max(12, gauge.rr * 0.3)
                 anchors.verticalCenter: readout.verticalCenter

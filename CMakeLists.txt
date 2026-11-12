@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Havne
-    VERSION 0.7.2
+    VERSION 0.7.3
     DESCRIPTION "Cross-platform ECU reading, logging, and tuning"
     LANGUAGES C CXX
 )
@@ -83,8 +83,16 @@ endif()
 # is a plain Release build's. The binary records only the PDB's file
 # name, not the build's path, which names the account on a dev machine.
 # The release ships the PDBs in a zip of their own (stage.ps1).
+# /Z7 puts the debug info in each object, which a compiler cache can
+# store; /Zi writes a shared PDB it cannot. CI turns this on for its
+# cached Windows build; the release keeps /Zi.
+option(HAVNE_EMBEDDED_DEBUG_INFO "MSVC Release: /Z7 in place of /Zi" OFF)
 if(MSVC)
-    add_compile_options("$<$<CONFIG:Release>:/Zi>")
+    if(HAVNE_EMBEDDED_DEBUG_INFO)
+        add_compile_options("$<$<CONFIG:Release>:/Z7>")
+    else()
+        add_compile_options("$<$<CONFIG:Release>:/Zi>")
+    endif()
     add_link_options("$<$<CONFIG:Release>:/DEBUG>"
                      "$<$<CONFIG:Release>:/OPT:REF>"
                      "$<$<CONFIG:Release>:/OPT:ICF>")

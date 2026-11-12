@@ -1,0 +1,421 @@
+﻿host_us,signal,value,unit
+0,Vehicle Speed,50,km/h
+1000,RPM,2400,rpm
+2000,Throttle,12.0,%
+250000,Vehicle Speed,50,km/h
+251000,RPM,2400,rpm
+252000,Throttle,12.0,%
+580000,Vehicle Speed,50,km/h
+581000,RPM,2400,rpm
+582000,Throttle,12.0,%
+870000,Vehicle Speed,50,km/h
+871000,RPM,2400,rpm
+872000,Throttle,12.0,%
+1180000,Vehicle Speed,50,km/h
+1181000,RPM,2400,rpm
+1182000,Throttle,12.4,%
+1450000,Vehicle Speed,50,km/h
+1451000,RPM,2400,rpm
+1452000,Throttle,12.4,%
+1700000,Vehicle Speed,50,km/h
+1701000,RPM,2400,rpm
+1702000,Throttle,12.4,%
+2030000,Vehicle Speed,50,km/h
+2031000,RPM,2400,rpm
+2032000,Throttle,12.8,%
+2320000,Vehicle Speed,50,km/h
+2321000,RPM,2400,rpm
+2322000,Throttle,12.8,%
+2630000,Vehicle Speed,50,km/h
+2631000,RPM,2400,rpm
+2632000,Throttle,12.8,%
+2900000,Vehicle Speed,50,km/h
+2901000,RPM,2400,rpm
+2902000,Throttle,12.8,%
+3150000,Vehicle Speed,50,km/h
+3151000,RPM,2400,rpm
+3152000,Throttle,12.0,%
+3480000,Vehicle Speed,50,km/h
+3481000,RPM,2400,rpm
+3482000,Throttle,12.0,%
+3770000,Vehicle Speed,50,km/h
+3771000,RPM,2400,rpm
+3772000,Throttle,12.0,%
+4080000,Vehicle Speed,50,km/h
+4081000,RPM,2414,rpm
+4082000,Throttle,45.0,%
+4350000,Vehicle Speed,51,km/h
+4351000,RPM,2463,rpm
+4352000,Throttle,45.0,%
+4600000,Vehicle Speed,52,km/h
+4601000,RPM,2508,rpm
+4602000,Throttle,45.0,%
+4930000,Vehicle Speed,53,km/h
+4931000,RPM,2567,rpm
+4932000,Throttle,45.0,%
+5220000,Vehicle Speed,54,km/h
+5221000,RPM,2620,rpm
+5222000,Throttle,45.0,%
+5530000,Vehicle Speed,55,km/h
+5531000,RPM,2675,rpm
+5532000,Throttle,45.0,%
+5800000,Vehicle Speed,55,km/h
+5801000,RPM,2724,rpm
+5802000,Throttle,45.0,%
+6050000,Vehicle Speed,56,km/h
+6051000,RPM,2769,rpm
+6052000,Throttle,45.0,%
+6380000,Vehicle Speed,57,km/h
+6381000,RPM,2828,rpm
+6382000,Throttle,45.0,%
+6670000,Vehicle Speed,58,km/h
+6671000,RPM,2881,rpm
+6672000,Throttle,45.0,%
+6980000,Vehicle Speed,59,km/h
+6981000,RPM,2936,rpm
+6982000,Throttle,45.0,%
+7250000,Vehicle Speed,60,km/h
+7251000,RPM,2985,rpm
+7252000,Throttle,45.0,%
+7500000,Vehicle Speed,60,km/h
+7501000,RPM,3030,rpm
+7502000,Throttle,45.0,%
+7830000,Vehicle Speed,61,km/h
+7831000,RPM,3089,rpm
+7832000,Throttle,45.0,%
+8120000,Vehicle Speed,62,km/h
+8121000,RPM,3142,rpm
+8122000,Throttle,45.0,%
+8430000,Vehicle Speed,63,km/h
+8431000,RPM,3197,rpm
+8432000,Throttle,45.0,%
+8700000,Vehicle Speed,64,km/h
+8701000,RPM,3246,rpm
+8702000,Throttle,45.0,%
+8950000,Vehicle Speed,65,km/h
+8951000,RPM,3291,rpm
+8952000,Throttle,45.0,%
+9280000,Vehicle Speed,65,km/h
+9281000,RPM,3225,rpm
+9282000,Throttle,12.0,%
+9570000,Vehicle Speed,65,km/h
+9571000,RPM,3148,rpm
+9572000,Throttle,12.0,%
+9880000,Vehicle Speed,65,km/h
+9881000,RPM,3065,rpm
+9882000,Throttle,12.0,%
+10150000,Vehicle Speed,65,km/h
+10151000,RPM,2993,rpm
+10152000,Throttle,12.4,%
+10400000,Vehicle Speed,65,km/h
+10401000,RPM,2927,rpm
+10402000,Throttle,12.4,%
+10730000,Vehicle Speed,65,km/h
+10731000,RPM,2839,rpm
+10732000,Throttle,12.4,%
+11020000,Vehicle Speed,65,km/h
+11021000,RPM,2761,rpm
+11022000,Throttle,12.8,%
+11330000,Vehicle Speed,65,km/h
+11331000,RPM,2679,rpm
+11332000,Throttle,12.8,%
+11600000,Vehicle Speed,65,km/h
+11601000,RPM,2607,rpm
+11602000,Throttle,12.8,%
+11850000,Vehicle Speed,65,km/h
+11851000,RPM,2540,rpm
+11852000,Throttle,12.8,%
+12000000,Vehicle Speed,65,km/h
+12001000,RPM,2500,rpm
+12002000,Throttle,90.0,%
+12180000,Vehicle Speed,66,km/h
+12181000,RPM,2525,rpm
+12182000,Throttle,90.0,%
+12470000,Vehicle Speed,68,km/h
+12471000,RPM,2565,rpm
+12472000,Throttle,90.0,%
+12780000,Vehicle Speed,70,km/h
+12781000,RPM,2608,rpm
+12782000,Throttle,90.0,%
+13050000,Vehicle Speed,71,km/h
+13051000,RPM,2645,rpm
+13052000,Throttle,90.0,%
+13300000,Vehicle Speed,73,km/h
+13301000,RPM,2680,rpm
+13302000,Throttle,90.0,%
+13630000,Vehicle Speed,73,km/h
+13631000,RPM,2673,rpm
+13632000,Throttle,12.4,%
+13920000,Vehicle Speed,73,km/h
+13921000,RPM,2667,rpm
+13922000,Throttle,12.4,%
+14230000,Vehicle Speed,72,km/h
+14231000,RPM,2660,rpm
+14232000,Throttle,12.8,%
+14500000,Vehicle Speed,72,km/h
+14501000,RPM,2654,rpm
+14502000,Throttle,12.8,%
+14750000,Vehicle Speed,72,km/h
+14751000,RPM,2649,rpm
+14752000,Throttle,12.8,%
+15080000,Vehicle Speed,72,km/h
+15081000,RPM,2642,rpm
+15082000,Throttle,12.0,%
+15370000,Vehicle Speed,72,km/h
+15371000,RPM,2635,rpm
+15372000,Throttle,12.0,%
+15680000,Vehicle Speed,71,km/h
+15681000,RPM,2629,rpm
+15682000,Throttle,12.0,%
+15950000,Vehicle Speed,71,km/h
+15951000,RPM,2623,rpm
+15952000,Throttle,12.0,%
+16200000,Vehicle Speed,71,km/h
+16201000,RPM,2617,rpm
+16202000,Throttle,12.4,%
+16530000,Vehicle Speed,71,km/h
+16531000,RPM,2610,rpm
+16532000,Throttle,12.4,%
+16820000,Vehicle Speed,71,km/h
+16821000,RPM,2604,rpm
+16822000,Throttle,12.4,%
+17130000,Vehicle Speed,71,km/h
+17131000,RPM,2600,rpm
+17132000,Throttle,12.8,%
+17400000,Vehicle Speed,70,km/h
+17401000,RPM,2600,rpm
+17402000,Throttle,12.8,%
+17650000,Vehicle Speed,70,km/h
+17651000,RPM,2600,rpm
+17652000,Throttle,12.8,%
+18000000,Vehicle Speed,70,km/h
+18001000,RPM,2600,rpm
+18002000,Throttle,96.0,%
+18270000,Vehicle Speed,73,km/h
+18271000,RPM,2893,rpm
+18272000,Throttle,96.0,%
+18580000,Vehicle Speed,76,km/h
+18581000,RPM,3230,rpm
+18582000,Throttle,96.0,%
+18850000,Vehicle Speed,78,km/h
+18851000,RPM,3523,rpm
+18852000,Throttle,96.0,%
+19100000,Vehicle Speed,81,km/h
+19101000,RPM,3794,rpm
+19102000,Throttle,96.0,%
+19430000,Vehicle Speed,84,km/h
+19431000,RPM,4153,rpm
+19432000,Throttle,96.0,%
+19720000,Vehicle Speed,87,km/h
+19721000,RPM,4467,rpm
+19722000,Throttle,96.0,%
+20030000,Vehicle Speed,90,km/h
+20031000,RPM,4804,rpm
+20032000,Throttle,96.0,%
+20300000,Vehicle Speed,93,km/h
+20301000,RPM,5097,rpm
+20302000,Throttle,96.0,%
+20550000,Vehicle Speed,96,km/h
+20551000,RPM,5369,rpm
+20552000,Throttle,96.0,%
+20880000,Vehicle Speed,99,km/h
+20881000,RPM,5727,rpm
+20882000,Throttle,96.0,%
+21170000,Vehicle Speed,102,km/h
+21171000,RPM,6042,rpm
+21172000,Throttle,96.0,%
+21500000,Vehicle Speed,105,km/h
+21501000,RPM,6400,rpm
+21502000,Throttle,20.0,%
+21750000,Vehicle Speed,105,km/h
+21751000,RPM,5886,rpm
+21752000,Throttle,20.0,%
+22000000,Vehicle Speed,106,km/h
+22001000,RPM,5373,rpm
+22002000,Throttle,20.0,%
+22425000,Vehicle Speed,106,km/h
+22426000,RPM,4500,rpm
+22427000,Throttle,96.0,%
+22620000,Vehicle Speed,108,km/h
+22621000,RPM,4629,rpm
+22622000,Throttle,96.0,%
+22930000,Vehicle Speed,110,km/h
+22931000,RPM,4833,rpm
+22932000,Throttle,96.0,%
+23200000,Vehicle Speed,113,km/h
+23201000,RPM,5012,rpm
+23202000,Throttle,96.0,%
+23450000,Vehicle Speed,115,km/h
+23451000,RPM,5177,rpm
+23452000,Throttle,96.0,%
+23780000,Vehicle Speed,118,km/h
+23781000,RPM,5395,rpm
+23782000,Throttle,96.0,%
+24070000,Vehicle Speed,120,km/h
+24071000,RPM,5586,rpm
+24072000,Throttle,96.0,%
+24380000,Vehicle Speed,123,km/h
+24381000,RPM,5791,rpm
+24382000,Throttle,96.0,%
+24650000,Vehicle Speed,125,km/h
+24651000,RPM,5969,rpm
+24652000,Throttle,96.0,%
+24900000,Vehicle Speed,127,km/h
+24901000,RPM,6134,rpm
+24902000,Throttle,96.0,%
+25000000,Vehicle Speed,128,km/h
+25001000,RPM,6200,rpm
+25002000,Throttle,96.0,%
+25230000,Vehicle Speed,128,km/h
+25231000,RPM,6113,rpm
+25232000,Throttle,12.4,%
+25520000,Vehicle Speed,129,km/h
+25521000,RPM,6002,rpm
+25522000,Throttle,12.4,%
+25830000,Vehicle Speed,130,km/h
+25831000,RPM,5885,rpm
+25832000,Throttle,12.4,%
+26100000,Vehicle Speed,130,km/h
+26101000,RPM,5782,rpm
+26102000,Throttle,12.8,%
+26350000,Vehicle Speed,131,km/h
+26351000,RPM,5687,rpm
+26352000,Throttle,12.8,%
+26680000,Vehicle Speed,131,km/h
+26681000,RPM,5562,rpm
+26682000,Throttle,12.8,%
+26970000,Vehicle Speed,132,km/h
+26971000,RPM,5451,rpm
+26972000,Throttle,12.8,%
+27280000,Vehicle Speed,133,km/h
+27281000,RPM,5334,rpm
+27282000,Throttle,12.0,%
+27550000,Vehicle Speed,133,km/h
+27551000,RPM,5231,rpm
+27552000,Throttle,12.0,%
+27800000,Vehicle Speed,134,km/h
+27801000,RPM,5136,rpm
+27802000,Throttle,12.0,%
+28130000,Vehicle Speed,134,km/h
+28131000,RPM,5011,rpm
+28132000,Throttle,12.4,%
+28420000,Vehicle Speed,135,km/h
+28421000,RPM,4900,rpm
+28422000,Throttle,12.4,%
+28730000,Vehicle Speed,135,km/h
+28731000,RPM,4783,rpm
+28732000,Throttle,12.4,%
+29000000,Vehicle Speed,136,km/h
+29001000,RPM,4680,rpm
+29002000,Throttle,12.8,%
+29250000,Vehicle Speed,136,km/h
+29251000,RPM,4585,rpm
+29252000,Throttle,12.8,%
+29580000,Vehicle Speed,137,km/h
+29581000,RPM,4460,rpm
+29582000,Throttle,12.8,%
+29870000,Vehicle Speed,138,km/h
+29871000,RPM,4349,rpm
+29872000,Throttle,12.8,%
+30180000,Vehicle Speed,138,km/h
+30181000,RPM,4300,rpm
+30182000,Throttle,12.0,%
+30450000,Vehicle Speed,139,km/h
+30451000,RPM,4300,rpm
+30452000,Throttle,12.0,%
+30700000,Vehicle Speed,139,km/h
+30701000,RPM,4300,rpm
+30702000,Throttle,12.0,%
+31000000,Vehicle Speed,140,km/h
+31001000,RPM,4300,rpm
+31002000,Throttle,97.0,%
+31320000,Vehicle Speed,141,km/h
+31321000,RPM,4460,rpm
+31322000,Throttle,97.0,%
+31630000,Vehicle Speed,142,km/h
+31631000,RPM,4615,rpm
+31632000,Throttle,97.0,%
+31900000,Vehicle Speed,143,km/h
+31901000,RPM,4750,rpm
+31902000,Throttle,97.0,%
+32150000,Vehicle Speed,144,km/h
+32151000,RPM,4875,rpm
+32152000,Throttle,97.0,%
+32480000,Vehicle Speed,146,km/h
+32481000,RPM,5040,rpm
+32482000,Throttle,97.0,%
+32770000,Vehicle Speed,147,km/h
+32771000,RPM,5185,rpm
+32772000,Throttle,97.0,%
+33080000,Vehicle Speed,148,km/h
+33081000,RPM,5340,rpm
+33082000,Throttle,97.0,%
+33350000,Vehicle Speed,149,km/h
+33351000,RPM,5475,rpm
+33352000,Throttle,97.0,%
+33600000,Vehicle Speed,150,km/h
+33601000,RPM,5600,rpm
+33602000,Throttle,97.0,%
+33930000,Vehicle Speed,151,km/h
+33931000,RPM,5765,rpm
+33932000,Throttle,97.0,%
+34220000,Vehicle Speed,152,km/h
+34221000,RPM,5910,rpm
+34222000,Throttle,97.0,%
+34530000,Vehicle Speed,153,km/h
+34531000,RPM,6065,rpm
+34532000,Throttle,97.0,%
+34800000,Vehicle Speed,154,km/h
+34801000,RPM,6200,rpm
+34802000,Throttle,97.0,%
+35000000,Vehicle Speed,155,km/h
+35001000,RPM,6300,rpm
+35002000,Throttle,97.0,%
+35380000,Vehicle Speed,155,km/h
+35381000,RPM,6140,rpm
+35382000,Throttle,12.8,%
+35670000,Vehicle Speed,154,km/h
+35671000,RPM,6019,rpm
+35672000,Throttle,12.8,%
+35980000,Vehicle Speed,154,km/h
+35981000,RPM,5888,rpm
+35982000,Throttle,12.8,%
+36250000,Vehicle Speed,154,km/h
+36251000,RPM,5775,rpm
+36252000,Throttle,12.0,%
+36500000,Vehicle Speed,154,km/h
+36501000,RPM,5670,rpm
+36502000,Throttle,12.0,%
+36830000,Vehicle Speed,153,km/h
+36831000,RPM,5531,rpm
+36832000,Throttle,12.0,%
+37120000,Vehicle Speed,153,km/h
+37121000,RPM,5410,rpm
+37122000,Throttle,12.4,%
+37430000,Vehicle Speed,153,km/h
+37431000,RPM,5279,rpm
+37432000,Throttle,12.4,%
+37700000,Vehicle Speed,152,km/h
+37701000,RPM,5166,rpm
+37702000,Throttle,12.4,%
+37950000,Vehicle Speed,152,km/h
+37951000,RPM,5061,rpm
+37952000,Throttle,12.4,%
+38280000,Vehicle Speed,152,km/h
+38281000,RPM,4922,rpm
+38282000,Throttle,12.8,%
+38570000,Vehicle Speed,151,km/h
+38571000,RPM,4801,rpm
+38572000,Throttle,12.8,%
+38880000,Vehicle Speed,151,km/h
+38881000,RPM,4670,rpm
+38882000,Throttle,12.8,%
+39150000,Vehicle Speed,151,km/h
+39151000,RPM,4557,rpm
+39152000,Throttle,12.0,%
+39400000,Vehicle Speed,151,km/h
+39401000,RPM,4452,rpm
+39402000,Throttle,12.0,%
+39730000,Vehicle Speed,150,km/h
+39731000,RPM,4313,rpm
+39732000,Throttle,12.0,%

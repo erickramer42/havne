@@ -23,6 +23,7 @@
 
 #include "csv_import.h"
 #include "ecuio/core.h"
+#include "ecuio/internal.h" /* ecuio_import_test_between_passes */
 #include "ecuio/recording.h"
 #include "partial_left.h"
 #include "temp_name.h"
@@ -339,7 +340,9 @@ TEST(CsvImportTest, EveryReaderRefusalNamesItsLine)
          "line 1: the header names a column twice: 'Engine Speed'"},
         {"Time,Engine Speed\n", "the file holds no rows after its header"},
         {"", "the file ends before its header row"},
-        {"Time,Engine Speed\n,800\n", "line 2: the row has no time"},
+        {"Time,Engine Speed\n,800\n", "no row below the header has a time"},
+        {"Time,Engine Speed\n,800\n , \n",
+         "no row below the header has a time"},
         {"Time,Engine Speed\nzero,800\n",
          "line 2: its time isn't a number of seconds"},
         {"Time,Engine Speed\n0,eight\n",
@@ -435,6 +438,120 @@ TEST(CsvImportTest, EmptyCellsAndTheMapsMissingTextsAreNoSample)
     EXPECT_NE(refused(map_of("t", "s", kRpm), "t,Engine Speed\n0,n/a\n")
                   .find("isn't a number"),
               std::string::npos);
+}
+
+/* A logger that pads each field with a space writes an empty one as " ":
+ * below the header an unquoted cell's spaces and tabs around it are
+ * padding, so " " is no sample (never a refusal or a zero), " N" is "N"
+ * and " ---" a placeholder; a quoted cell keeps its text exactly, and
+ * padding may stand around its quotes; a time of spaces alone is none */
+TEST(CsvImportTest, PaddingAroundACellIsDropped)
+{
+    Pass p(map_of("t", "ms", kRpm + "," + kGear, "\"missing\": [\"---\"]"),
+           "t,Engine Speed,Gear\n0, 800, N\n250, , 1\n500,  \t, \t\n"
+           "750, ---, 2 \n1000, 900, \" CL \" \n1250, 950,\"\"\n");
+    ASSERT_TRUE(p.ok) << p.why;
+    ASSERT_EQ(p.got.size(), 7u);
+    EXPECT_EQ(p.got[0].number, 800.0);
+    EXPECT_EQ(p.got[1].value, "N");
+    EXPECT_EQ(p.got[2].value, "1");
+    EXPECT_EQ(p.got[3].value, "2");
+    EXPECT_EQ(p.got[4].number, 900.0);
+    EXPECT_EQ(p.got[4].us, 1000000u);
+    EXPECT_EQ(p.got[5].value, " CL ") << "a quoted cell is kept exactly";
+    EXPECT_EQ(p.got[6].number, 950.0);
+    EXPECT_EQ(p.out.values, 7u);
+    Pass untimed(map_of("t", "ms", kRpm), "t,Engine Speed\n0,800\n  ,900\n");
+    ASSERT_TRUE(untimed.ok) << untimed.why;
+    EXPECT_EQ(untimed.out.rows_no_time, 1u);
+    EXPECT_EQ(untimed.got.size(), 1u);
+    /* Padding is spaces and tabs alone */
+    EXPECT_EQ(refused(map_of("t", "ms", kGear), "t,Gear\n0, \"N\" x\n"),
+              "line 2: text after a quoted field's closing quote");
+    EXPECT_EQ(refused(map_of("t", "ms", kGear), "t,Gear\n0, a\"N\"\n"),
+              "line 2: a quote inside a field that isn't quoted");
+    /* A quoted space is text, so a number column refuses it */
+    EXPECT_NE(refused(map_of("t", "ms", kRpm), "t,Engine Speed\n0,\" \"\n")
+                  .find("isn't a number"),
+              std::string::npos);
+    /* The header keeps its text: a map names a padded column as it is */
+    Pass header(
+        map_of("t", "ms", R"({"column": " Engine Speed", "name": "RPM"})"),
+        "t, Engine Speed\n0, 800\n");
+    ASSERT_TRUE(header.ok) << header.why;
+    ASSERT_EQ(header.got.size(), 1u);
+    EXPECT_EQ(header.got[0].number, 800.0);
+    /* Padding around a header's quotes is taken; the quoted text names it */
+    Pass quoted(
+        map_of("t", "ms",
+               R"json({"column": "Engine speed (rpm)", "name": "RPM"})json"),
+        "t, \"Engine speed (rpm)\" \n0, 800\n");
+    ASSERT_TRUE(quoted.ok) << quoted.why;
+    ASSERT_EQ(quoted.got.size(), 1u);
+    EXPECT_EQ(quoted.got[0].number, 800.0);
+}
+
+/* A row whose time cell is empty has no time to put its values at: it is
+ * left out whole (a cell a number column would refuse too), counted with
+ * the first one's line, and the rows around it keep their times; a row of
+ * padding alone, as a logger ends a file, is one; a cell that isn't a time
+ * is still refused */
+TEST(CsvImportTest, ARowWithNoTimeIsLeftOutAndCounted)
+{
+    const std::string m = map_of("t", "ms", kRpm + "," + kGear);
+    Pass p(m, "t,Engine Speed,Gear\n0,800,N\n,850,1\n250,900,1\n"
+              ",eight,2\n500,950,2\n , , \n");
+    ASSERT_TRUE(p.ok) << p.why;
+    EXPECT_EQ(p.out.rows_no_time, 3u);
+    EXPECT_EQ(p.out.first_no_time, 3u);
+    EXPECT_EQ(p.out.rows, 6u);
+    EXPECT_EQ(p.out.values, 6u);
+    EXPECT_EQ(p.out.lines, 7u);
+    EXPECT_EQ(p.out.duration_us, 500000u);
+    ASSERT_EQ(p.got.size(), 6u);
+    EXPECT_EQ(p.got[0].number, 800.0);
+    EXPECT_EQ(p.got[2].number, 900.0);
+    EXPECT_EQ(p.got[2].us, 250000u);
+    EXPECT_EQ(p.got[4].number, 950.0);
+    EXPECT_EQ(p.got[4].us, 500000u);
+
+    /* None left out: no count and no line */
+    Pass full(m, "t,Engine Speed,Gear\n0,800,N\n250,900,1\n");
+    ASSERT_TRUE(full.ok) << full.why;
+    EXPECT_EQ(full.out.rows_no_time, 0u);
+    EXPECT_EQ(full.out.first_no_time, 0u);
+
+    /* The first row untimed: the next row's time is the start */
+    Pass first(m, "t,Engine Speed,Gear\n,800,N\n250,900,1\n750,950,2\n");
+    ASSERT_TRUE(first.ok) << first.why;
+    EXPECT_EQ(first.out.first_no_time, 2u);
+    ASSERT_EQ(first.got.size(), 4u);
+    EXPECT_EQ(first.got[0].us, 0u);
+    EXPECT_EQ(first.got[2].us, 500000u);
+
+    /* An untimed row moves no clock: a time of day's day roll and the
+     * 100 ms step back are judged against the timed row before */
+    const std::string tod =
+        R"({"havne_column_map": 1,
+        "time": {"column": "t", "unit": "time-of-day", "date": "2026-11-05", "utc_offset": "+00:00"},
+        "signals": [{"column": "Engine Speed", "name": "RPM"}]})";
+    Pass roll(tod, "t,Engine Speed\n23:59:59,1\n,2\n00:00:01,3\n");
+    ASSERT_TRUE(roll.ok) << roll.why;
+    ASSERT_EQ(roll.got.size(), 2u);
+    EXPECT_EQ(roll.got[1].us, 2000000u);
+    EXPECT_EQ(
+        refused(map_of("t", "ms", kRpm), "t,Engine Speed\n1000,1\n,2\n800,3\n"),
+        "line 4: its time is more than 0.1 s before the row before it");
+
+    /* A row of another field count is refused before its time is read */
+    EXPECT_EQ(refused(m, "t,Engine Speed,Gear\n0,800,N\n,850\n"),
+              "line 3: the row has 2 fields where the header has 3");
+    EXPECT_EQ(refused(m, "t,Engine Speed,Gear\n0,800,N\n-,850,1\n"),
+              "line 3: its time isn't a number of milliseconds");
+    /* A quoted empty time is empty too */
+    Pass quoted(m, "t,Engine Speed,Gear\n0,800,N\n\"\",850,1\n");
+    ASSERT_TRUE(quoted.ok) << quoted.why;
+    EXPECT_EQ(quoted.out.rows_no_time, 1u);
 }
 
 TEST(CsvImportTest, ADecimalCommaReadsAndAPointIsRefused)
@@ -723,6 +840,118 @@ TEST(CsvImportTest, ManyIgnoredColumnsAreCountedAndTheFirstListed)
     EXPECT_NE(events.find("import  columns ignored: 40 ('x0', 'x1', "),
               std::string::npos);
     EXPECT_NE(events.find("'x31' and 8 more)\n"), std::string::npos) << events;
+}
+
+/* The import's result and its events.log say how many rows had no time
+ * and where the first is; a file with none says nothing, and one where no
+ * row has a time is refused with nothing written */
+TEST(CsvImportTest, RowsWithNoTimeAreCountedAndNamedInTheLog)
+{
+    Folder f;
+    const std::string map = map_of("Time (s)", "s", kRpm + "," + kGear);
+    const std::string in = f.write(
+        "log.csv", kTwoSignals + ",1600,3,23\n1.5,1700,3,24\n , , , \n");
+    Imported imp(in, f.utf8("rec"), map);
+    ASSERT_EQ(imp.rc, ECUIO_OK) << imp.detail;
+    EXPECT_EQ(imp.report.rows_no_time, 2u);
+    EXPECT_EQ(imp.report.reserved[0], 0u);
+    EXPECT_EQ(imp.report.lines, 7u);
+    EXPECT_EQ(imp.report.values, 8u);
+    EXPECT_EQ(imp.report.duration_us, 1500000u);
+    const std::string events = read_file(f.path / "rec" / "events.log");
+    EXPECT_NE(events.find("import  columns ignored: 1 ('Coolant')\n"
+                          "import  rows left out: 2 with no time (the first "
+                          "on line 5)\nprofile  raw\n"),
+              std::string::npos)
+        << events;
+    Opened rec(f.utf8("rec"));
+    ASSERT_NE(rec.r, nullptr);
+    EXPECT_EQ(rec.info.duration_us, 1500000u);
+    const ecuio_recording_signal_t rpm = rec.signal(0);
+    EXPECT_EQ(rpm.samples, 4u);
+    EXPECT_EQ(rpm.highest, 1700.0); /* the untimed row's 1600 is nowhere */
+
+    Imported full(f.write("full.csv", kTwoSignals), f.utf8("full"), map);
+    ASSERT_EQ(full.rc, ECUIO_OK) << full.detail;
+    EXPECT_EQ(full.report.rows_no_time, 0u);
+    EXPECT_EQ(read_file(f.path / "full" / "events.log").find("rows left out"),
+              std::string::npos);
+
+    Imported none(
+        f.write("none.csv", "Time (s),Engine Speed,Gear,Coolant\n,800,N,20\n"),
+        f.utf8("none"), map);
+    EXPECT_EQ(none.rc, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(none.detail, "no row below the header has a time");
+    EXPECT_EQ(none.report.rows_no_time, 0u);
+    EXPECT_FALSE(fs::exists(f.path / "none"));
+    EXPECT_FALSE(partial_left(f.path, "none"));
+}
+
+/* Writes its text over the file between the import's passes */
+struct Rewritten {
+    fs::path file;
+    std::string text;
+    static void hook(void* user)
+    {
+        const Rewritten* r = static_cast<const Rewritten*>(user);
+        std::ofstream(r->file, std::ios::binary | std::ios::trunc) << r->text;
+    }
+};
+
+/* The seam set for a scope */
+struct BetweenPasses {
+    explicit BetweenPasses(Rewritten* r)
+    {
+        ecuio_import_test_between_passes(&Rewritten::hook, r);
+    }
+    ~BetweenPasses() { ecuio_import_test_between_passes(nullptr, nullptr); }
+    BetweenPasses(const BetweenPasses&) = delete;
+    BetweenPasses& operator=(const BetweenPasses&) = delete;
+};
+
+/* The second pass must find what the first checked: a row that lost its
+ * time (the rows and values the same, one more left out), a cell that
+ * gained a value and a row that went are each a file that changed, with
+ * nothing left; the same bytes written again import */
+TEST(CsvImportTest, AFileThatChangesBetweenItsPassesIsRefused)
+{
+    Folder f;
+    const std::string map = map_of("t", "ms", kRpm);
+    /* Longer than a stream's buffer, so the second pass reads the file */
+    std::string rest;
+    for (int i = 2; i < 2000; ++i) {
+        rest += std::to_string(i * 10) + "," + std::to_string(800 + i) + "\n";
+    }
+    const std::string head = "t,Engine Speed\n0,800\n";
+    const std::string start = head + "10,\n" + rest;
+    const struct {
+        const char* what;
+        const char* row;
+        bool changed;
+    } cases[] = {
+        {"the same bytes", "10,\n", false},
+        {"a row lost its time", " ,\n", true},
+        {"a cell gained a value", "10,801\n", true},
+        {"a row went", "", true},
+    };
+    int n = 0;
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.what);
+        const std::string name = "rec" + std::to_string(++n);
+        const std::string in = f.write("log.csv", start);
+        Rewritten r{f.path / "log.csv", head + c.row + rest};
+        BetweenPasses seam(&r);
+        Imported imp(in, f.utf8(name), map);
+        if (!c.changed) {
+            EXPECT_EQ(imp.rc, ECUIO_OK) << imp.detail;
+            EXPECT_EQ(imp.report.rows_no_time, 0u);
+            continue;
+        }
+        EXPECT_EQ(imp.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(imp.detail, "the file changed while it was read");
+        EXPECT_FALSE(fs::exists(f.path / name));
+        EXPECT_FALSE(partial_left(f.path, name));
+    }
 }
 
 /* ---- the made-up loggers ---- */

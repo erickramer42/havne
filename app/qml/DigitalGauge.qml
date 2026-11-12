@@ -1,6 +1,6 @@
 // File/layer: app/qml/DigitalGauge.qml | Qt6 Quick + Shapes, UI layer
 // Testing: QML: QmlTest.kinds, QmlTest.gauges, QmlTest.accessibility,
-//          QmlTest.dashboard;
+//          QmlTest.dashboard, QmlTest.dashedit;
 //          manual smoke: DashboardPage under mock://demo
 
 import QtQuick
@@ -45,7 +45,7 @@ GaugeBase {
     // Too short for the trace and the footer: the label and the value alone
     readonly property bool brief: height < 84
     readonly property color levelColor: gauge.hasValue
-                                        ? gauge.zoneColor(gauge.value, Theme.gaugeReadout)
+                                        ? gauge.zoneColor(gauge.value, gauge.readoutColor)
                                         : Theme.textDim
 
     // Polyline for the sparkline, newest sample on the right edge.
@@ -119,7 +119,7 @@ GaugeBase {
         DangerMark {
             // The slot stays once a gauge has a danger zone, so the readout
             // never moves as the mark appears
-            visible: !isNaN(gauge.dangerFrom)
+            visible: gauge.hasDangerZone
             opacity: gauge.inDanger ? 1 : 0
             size: Math.max(14, readout.font.pixelSize * 0.55)
             anchors.verticalCenter: readout.verticalCenter

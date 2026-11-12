@@ -391,14 +391,17 @@ TEST(CliTransferTest, TheLinesSayWhatCoreReports)
     EXPECT_EQ(text(c0),
               "{\"type\":\"imported\",\"format\":\"csv\",\"folder\":\"rec\","
               "\"lines\":11,\"values\":22,\"columns_ignored\":1,"
-              "\"utc_start_us\":null,\"duration_us\":3500000}");
+              "\"rows_no_time\":0,\"utc_start_us\":null,"
+              "\"duration_us\":3500000}");
     cr.utc_start_us = 1793883802250000u;
+    cr.rows_no_time = 2;
     cli::Line c1(buf, sizeof buf);
     cli::imported_line(c1, csv_im, cr);
     EXPECT_EQ(text(c1),
               "{\"type\":\"imported\",\"format\":\"csv\",\"folder\":\"rec\","
               "\"lines\":11,\"values\":22,\"columns_ignored\":1,"
-              "\"utc_start_us\":1793883802250000,\"duration_us\":3500000}");
+              "\"rows_no_time\":2,\"utc_start_us\":1793883802250000,"
+              "\"duration_us\":3500000}");
 }
 
 // With no --map the map is guessed: --time-unit gives a plain time its

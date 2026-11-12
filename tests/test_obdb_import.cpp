@@ -521,6 +521,69 @@ TEST(ObdbImportTest, WhatIsntASetIsRefusedAndACallbackCancels)
     ecuio_obdb_free(nullptr);
 }
 
+// A signal named as one of obd2's would replace it in the file's set, which a
+// converted set never means to: its name takes a number, and the change is said
+TEST(ObdbImportTest, ANameLikeObd2sTakesANumber)
+{
+    const std::string set =
+        "{\"commands\":[" + one("", "0101", sig("RPM", kByte)) + "]}";
+    Imported im;
+    import(im, set);
+    ASSERT_EQ(im.status, ECUIO_OK) << im.detail;
+    const ecuio_signal_def_t* d = im.def("rpm");
+    ASSERT_NE(d, nullptr);
+    EXPECT_STREQ(d->name, "RPM 2");
+    EXPECT_GE(d->id, ECUIO_USER_SIG_ID_BASE) << "obd2's RPM is still obd2's";
+    const ecuio_signal_set_t* s = ecuio_signal_file_set(im.file);
+    int rpms = 0;
+    for (uint32_t i = 0; i < s->count; ++i) {
+        rpms += std::strcmp(s->defs[i].name, "RPM") == 0 ? 1 : 0;
+    }
+    EXPECT_EQ(rpms, 1);
+}
+
+// A repeated name is cut for its number at a whole character, never inside
+// one: a name of 31 bytes whose character across the cut takes two or
+// three bytes loses that character whole, so the file is still UTF-8 and
+// loads; a cut that falls between characters takes nothing more
+TEST(ObdbImportTest, ARepeatedNameIsCutAtAWholeCharacter)
+{
+    const struct {
+        std::string name;
+        std::string second;
+    } cases[] = {
+        /* 28 letters, a two-byte character at bytes 28-29, a letter */
+        {std::string(28, 'n') + "\xC3\xA9" + "x", std::string(28, 'n') + " 2"},
+        /* 27 letters, a three-byte character at bytes 27-29, a letter */
+        {std::string(27, 'n') + "\xE2\x82\xAC" + "x",
+         std::string(27, 'n') + " 2"},
+        /* 27 letters, a two-byte character at bytes 27-28, two letters:
+         * the cut at byte 29 is between characters */
+        {std::string(27, 'n') + "\xC3\xA9" + "xy",
+         std::string(27, 'n') + "\xC3\xA9" + " 2"},
+    };
+    for (const auto& c : cases) {
+        SCOPED_TRACE(c.name);
+        ASSERT_EQ(c.name.size(), 31u);
+        const auto named = [&c](const char* id) {
+            return std::string("{\"id\":\"") + id + "\",\"name\":\"" + c.name +
+                   "\",\"fmt\":" + kByte + "}";
+        };
+        const std::string set = "{\"commands\":[" +
+                                one("", "0101", named("first")) + "," +
+                                one("", "0102", named("second")) + "]}";
+        Imported im;
+        import(im, set);
+        ASSERT_EQ(im.status, ECUIO_OK) << im.detail;
+        const ecuio_signal_def_t* first = im.def("first");
+        const ecuio_signal_def_t* second = im.def("second");
+        ASSERT_NE(first, nullptr);
+        ASSERT_NE(second, nullptr);
+        EXPECT_EQ(std::string(first->name), c.name);
+        EXPECT_EQ(std::string(second->name), c.second);
+    }
+}
+
 // The caller's name, URL and commit go in the file; keys come from OBDb's
 // ids, camel case split, a letter first, each once
 TEST(ObdbImportTest, TheCallersSourceAndKeysFromTheIds)

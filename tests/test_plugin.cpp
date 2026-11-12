@@ -204,8 +204,9 @@ TEST(PluginTest, TheExamplePluginLoadsWithItsVariants)
     const ecuio_signal_set_t* late = ecuio_plugin_variant_set(p.get(), 1);
     ASSERT_NE(base, nullptr);
     ASSERT_NE(late, nullptr);
-    EXPECT_EQ(base->count, obd2->count + 5);
-    EXPECT_EQ(late->count, obd2->count + 6);
+    /* the plugin's Boost stands for obd2's: one fewer than added */
+    EXPECT_EQ(base->count, obd2->count + 4);
+    EXPECT_EQ(late->count, obd2->count + 5);
     EXPECT_EQ(base->channel_count, 2u);
     const ecuio_signal_def_t* t0 =
         ecuio_plugin_variant_find(p.get(), 0, "trans_temp");
@@ -839,7 +840,7 @@ TEST(PluginTest, AVariantThatMakesNoOneSignalFileIsRefused)
     const std::string pad(600 * 1024, 'x');
     const auto file = [&pad](const char* key, const char* did) {
         return std::string(R"({"havne_signals": 1, "signals": [{"key": ")") +
-               key + R"(", "name": "N", "ecu": "pcm", "x-pad": ")" + pad +
+               key + R"(", "name": ")" + key + R"(", "ecu": "pcm", "x-pad": ")" + pad +
                R"(", "read": {"service": "22", "number": ")" + did +
                R"("}, "field": {"byte": 0}}]})";
     };
@@ -910,7 +911,7 @@ TEST(PluginTest, AVariantsFileNamesEachOfItsOwnDefsKeys)
         uint32_t keyed = 0;
         for (uint32_t i = 0; i < set->count; ++i) {
             const char* key = ecuio_signal_file_key(file, &set->defs[i]);
-            if (i < obd2->count) {
+            if (i < obd2->count - 1) { /* the base but its Boost */
                 EXPECT_STREQ(key, "") << set->defs[i].name;
                 continue;
             }
@@ -919,7 +920,7 @@ TEST(PluginTest, AVariantsFileNamesEachOfItsOwnDefsKeys)
                 << key;
             ++keyed;
         }
-        EXPECT_EQ(keyed, set->count - obd2->count);
+        EXPECT_EQ(keyed, set->count - (obd2->count - 1));
     }
     const ecuio_signal_file_t* late = ecuio_plugin_variant_file(p.get(), 1);
     EXPECT_STREQ(ecuio_signal_file_key(

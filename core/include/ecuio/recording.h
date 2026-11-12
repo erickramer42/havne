@@ -339,6 +339,41 @@ _Static_assert(offsetof(ecuio_recording_find_t, label_utf8) == 64,
                "recording find label offset is ABI");
 #endif
 
+/* One signal's statistics over a span (ecuio_recording_stats), as
+ * signals.csv holds the values. first and last are the values in force
+ * at t0_us and t1_us (the last sample at or before each); lowest, highest
+ * and mean leave a NaN sample out. Each is NaN with none, and lowest_us
+ * and highest_us (the first sample at each extreme) ECUIO_RECORDING_NONE. */
+typedef struct ecuio_recording_stats {
+    uint64_t samples; /* in the span, a NaN's included */
+    double first;
+    double last;
+    double lowest;
+    double highest;
+    uint64_t lowest_us;
+    uint64_t highest_us;
+    double mean;          /* the samples' arithmetic mean */
+    uint32_t flags;       /* zero */
+    uint32_t reserved0;   /* zero */
+    uint64_t reserved[3]; /* zero; ABI growth space */
+} ecuio_recording_stats_t;
+
+#if defined(__cplusplus)
+static_assert(offsetof(ecuio_recording_stats_t, mean) == 56,
+              "recording stats mean offset is ABI");
+static_assert(sizeof(ecuio_recording_stats_t) == 96,
+              "ecuio_recording_stats_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_recording_stats_t, mean) == 56,
+               "recording stats mean offset is ABI");
+_Static_assert(sizeof(ecuio_recording_stats_t) == 96,
+               "ecuio_recording_stats_t size is ABI");
+#endif
+
+/* ecuio_recording_step's direction; append-only */
+#define ECUIO_RECORDING_STEP_FORWARD  1u
+#define ECUIO_RECORDING_STEP_BACKWARD 2u
+
 /* Called on the opening thread every few megabytes; a nonzero return
  * cancels the open */
 typedef int (*ecuio_open_progress_t)(uint64_t bytes_read,
@@ -526,6 +561,209 @@ ecuio_status_t ecuio_recording_text_at(const ecuio_recording_t* r,
 ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
                                     const ecuio_recording_find_t* what,
                                     uint64_t from_us, uint64_t* at_us);
+
+/*
+ * Fills out[i] with the statistics of signal_ids[i] over the closed span
+ * [t0_us, t1_us]: a sample exactly at t1_us counts, where
+ * ecuio_recording_query's half-open [t0_us, t1_us) leaves it out. The
+ * span's whole seconds come from the per-second summaries, its partial
+ * seconds and any second holding a NaN from their raw rows. The mean
+ * takes the samples that aren't NaN: an inf makes it inf, and an inf and
+ * a -inf in one span make it NaN. A text signal's entry has samples
+ * alone, its numbers NaN and its times ECUIO_RECORDING_NONE.
+ * ECUIO_ERR_INVALID_ARGUMENT for t0_us >= t1_us, a count of 0 or an index
+ * past the signals; ECUIO_ERR_RECORDING_CHANGED as for a query.
+ */
+ecuio_status_t ecuio_recording_stats(const ecuio_recording_t* r,
+                                     const uint32_t* signal_ids,
+                                     uint32_t signal_count, uint64_t t0_us,
+                                     uint64_t t1_us,
+                                     ecuio_recording_stats_t* out);
+
+/*
+ * The signal's first sample strictly after t_us
+ * (ECUIO_RECORDING_STEP_FORWARD) or strictly before it (_BACKWARD), for a
+ * cursor stepping a sample at a time: *at_us, or ECUIO_RECORDING_NONE
+ * past the last sample or before the first, with ECUIO_OK.
+ * ECUIO_ERR_INVALID_ARGUMENT for an unknown direction or an index past
+ * the signals; ECUIO_ERR_RECORDING_CHANGED as for a query.
+ */
+ecuio_status_t ecuio_recording_step(const ecuio_recording_t* r, uint32_t signal,
+                                    uint64_t t_us, uint32_t direction,
+                                    uint64_t* at_us);
+
+/* --- The navigation aids (ADR-0056's appendix "the navigation aids") --- */
+
+/* ecuio_recording_role_signal's role; append-only */
+#define ECUIO_RECORDING_ROLE_ENGINE_SPEED  1u
+#define ECUIO_RECORDING_ROLE_VEHICLE_SPEED 2u
+#define ECUIO_RECORDING_ROLE_THROTTLE      3u
+#define ECUIO_RECORDING_ROLE_ENGINE_LOAD   4u
+
+/*
+ * The number signal core picks for role, by its unit and name (ASCII case
+ * ignored): engine speed, the unit "rpm" (ecuio_recording_find's engine
+ * speed); vehicle speed, "km/h" or "mph" with "speed" in the name;
+ * throttle, "%" with "throttle" or "pedal" in the name and neither
+ * "relative" nor "commanded"; engine load, "%" with "load". Of several,
+ * the one of the lowest nonzero plot_rank, else the first in the
+ * recording's order. *index, or UINT32_MAX with none, with ECUIO_OK.
+ * ECUIO_ERR_INVALID_ARGUMENT for an unknown role.
+ */
+ecuio_status_t ecuio_recording_role_signal(const ecuio_recording_t* r,
+                                           uint32_t role, uint32_t* index);
+
+/* ecuio_stretch_rules_t.kinds */
+#define ECUIO_STRETCH_PULLS   0x1u
+#define ECUIO_STRETCH_CRUISES 0x2u
+
+/* The defaults a zero field of ecuio_stretch_rules_t takes, from road
+ * logs sampled at 3 to 4 Hz (ADR-0056's appendix of 2026-11-12). The gap
+ * outlasts the lift between two gears, 925 ms at the longest, and stays
+ * under the 2.2 s the closest two pulls there stood apart. The rise sits
+ * between the largest climb a false pull made (540 rpm, a launch held on
+ * the two-step; 180 rpm, a stab at the throttle) and the smallest a real
+ * pull made (1000 rpm); the gain between the stab's 8 km/h and the
+ * 14 km/h a pull in top gear gained. The cruise's floor is 35 mph
+ * exactly (1 mph = 1.609344 km/h). */
+#define ECUIO_STRETCH_DEFAULT_PULL_LEVEL           80.0
+#define ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL      80.0
+#define ECUIO_STRETCH_DEFAULT_PULL_HOLD_US         1000000u
+#define ECUIO_STRETCH_DEFAULT_PULL_GAP_US          1500000u
+#define ECUIO_STRETCH_DEFAULT_PULL_RISE            750.0
+#define ECUIO_STRETCH_DEFAULT_PULL_GAIN            10.0
+#define ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US       10000000u
+#define ECUIO_STRETCH_DEFAULT_CRUISE_SPEED_BAND    2.0
+#define ECUIO_STRETCH_DEFAULT_CRUISE_THROTTLE_BAND 3.0
+#define ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR         56.32704
+
+/* What ecuio_recording_stretches looks for. A zero level, time, band,
+ * rise or gain takes its default; a role index of UINT32_MAX takes core's
+ * pick (ecuio_recording_role_signal). Speeds are in km/h; a speed signal
+ * in mph has them converted. */
+typedef struct ecuio_stretch_rules {
+    uint32_t kinds;              /* ECUIO_STRETCH_*: which to find, one or
+                                    both */
+    uint32_t flags;              /* zero */
+    double pull_level;           /* throttle, % */
+    double pull_load_level;      /* engine load, %, with no throttle */
+    uint64_t pull_hold_us;       /* the shortest pull */
+    uint64_t pull_gap_us;        /* a dip under the level shorter than
+                                    this stays inside the pull */
+    uint64_t cruise_hold_us;     /* the shortest cruise */
+    double cruise_speed_band;    /* km/h */
+    double cruise_throttle_band; /* % */
+    double cruise_floor;         /* km/h */
+    uint32_t throttle;           /* signal indexes, or UINT32_MAX */
+    uint32_t engine_load;
+    uint32_t vehicle_speed;
+    uint32_t engine_speed;
+    double pull_min_rise; /* engine speed's least climb in a pull, rpm */
+    double pull_min_gain; /* km/h a pull gains at least, with no engine
+                             speed */
+    uint64_t reserved[2]; /* zero; ABI growth space */
+} ecuio_stretch_rules_t;
+
+#if defined(__cplusplus)
+static_assert(offsetof(ecuio_stretch_rules_t, throttle) == 72,
+              "stretch rules throttle offset is ABI");
+static_assert(offsetof(ecuio_stretch_rules_t, pull_min_rise) == 88,
+              "stretch rules pull_min_rise offset is ABI");
+static_assert(sizeof(ecuio_stretch_rules_t) == 120,
+              "ecuio_stretch_rules_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_stretch_rules_t, throttle) == 72,
+               "stretch rules throttle offset is ABI");
+_Static_assert(offsetof(ecuio_stretch_rules_t, pull_min_rise) == 88,
+               "stretch rules pull_min_rise offset is ABI");
+_Static_assert(sizeof(ecuio_stretch_rules_t) == 120,
+               "ecuio_stretch_rules_t size is ABI");
+#endif
+
+/* ecuio_recording_stretch_t.kind; append-only */
+#define ECUIO_RECORDING_STRETCH_PULL   1u
+#define ECUIO_RECORDING_STRETCH_CRUISE 2u
+
+/* ecuio_recording_stretch_t.flags: BY_LOAD, a pull found by engine load;
+ * BY_ENGINE_SPEED, a pull measured by engine speed, with no vehicle
+ * speed; NO_THROTTLE, a cruise found by speed alone; CUT_START and
+ * CUT_END, a stretch that reached past the range's start or its end */
+#define ECUIO_RECORDING_STRETCH_BY_LOAD         0x1u
+#define ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED 0x2u
+#define ECUIO_RECORDING_STRETCH_NO_THROTTLE     0x4u
+#define ECUIO_RECORDING_STRETCH_CUT_START       0x8u
+#define ECUIO_RECORDING_STRETCH_CUT_END         0x10u
+
+/* A stretch found. signal is the one measured: a pull's vehicle speed
+ * (or engine speed), a cruise's vehicle speed, in that signal's unit. */
+typedef struct ecuio_recording_stretch {
+    uint32_t kind;   /* ECUIO_RECORDING_STRETCH_* */
+    uint32_t signal; /* its index */
+    uint64_t from_us;
+    uint64_t to_us;
+    double start;         /* a pull: the value in force at from_us; a
+                             cruise: its speed samples' mean */
+    double end;           /* a pull: at to_us; a cruise: the mean again */
+    uint32_t flags;       /* ECUIO_RECORDING_STRETCH_BY_LOAD and the rest */
+    uint32_t reserved0;   /* zero */
+    uint64_t reserved[2]; /* zero; ABI growth space */
+} ecuio_recording_stretch_t;
+
+#if defined(__cplusplus)
+static_assert(offsetof(ecuio_recording_stretch_t, flags) == 40,
+              "recording stretch flags offset is ABI");
+static_assert(sizeof(ecuio_recording_stretch_t) == 64,
+              "ecuio_recording_stretch_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_recording_stretch_t, flags) == 40,
+               "recording stretch flags offset is ABI");
+_Static_assert(sizeof(ecuio_recording_stretch_t) == 64,
+               "ecuio_recording_stretch_t size is ABI");
+#endif
+
+/*
+ * The stretches of rules->kinds within [from_us, to_us], in time order:
+ * *count gets them all and the first capacity are copied to out
+ * (capacity 0 with out NULL for the count). One pass over the role
+ * signals' raw rows in the range and a sample on each side of it.
+ *
+ * A pull: a run of throttle samples at or above pull_level (engine load
+ * at pull_load_level with no throttle signal, BY_LOAD) lasting
+ * pull_hold_us, a dip under the level shorter than pull_gap_us, from the
+ * dip's first sample to the next at the level, kept inside it; it ends
+ * at vehicle speed's first sample at its highest in the run, so the
+ * limiter's flat speed ends it, and speed must have risen over it. With
+ * no speed signal the whole run is the pull (BY_ENGINE_SPEED), since an
+ * upshift drops engine speed. Engine speed must climb pull_min_rise
+ * inside the pull: the most a sample stands above an earlier one, the
+ * value in force at the pull's start counted, so a pull through an
+ * upshift that ends under where it began still counts, and a stab at
+ * the throttle or a launch held at a standstill doesn't. With no
+ * engine-speed signal vehicle speed must gain pull_min_gain instead. No
+ * throttle or load signal, or neither speed, finds no pull.
+ *
+ * A cruise: a run from a vehicle-speed sample at or above cruise_floor,
+ * lasting cruise_hold_us, in which speed stays within cruise_speed_band
+ * and throttle (when there is one; else NO_THROTTLE) within
+ * cruise_throttle_band. It ends at the first sample that would put a
+ * band past its width or speed under the floor, and the next may start
+ * at that speed sample. No speed signal finds no cruise.
+ *
+ * A stretch reaching past the range is cut at its edge (CUT_START,
+ * CUT_END), measured again over what is left, and left out when that is
+ * shorter than its hold or a pull no longer rises as its rule asks.
+ *
+ * ECUIO_ERR_NULL_ARGUMENT for NULL rules or count, or NULL out with a
+ * capacity; ECUIO_ERR_INVALID_ARGUMENT for kinds of 0 or one this core
+ * doesn't know, nonzero flags or reserved, a negative or NaN level,
+ * band, rise or gain, a role index past the signals or on a text signal, or
+ * from_us >= to_us; ECUIO_ERR_RECORDING_CHANGED as for a query.
+ */
+ecuio_status_t ecuio_recording_stretches(const ecuio_recording_t* r,
+                                         const ecuio_stretch_rules_t* rules,
+                                         uint64_t from_us, uint64_t to_us,
+                                         ecuio_recording_stretch_t* out,
+                                         uint32_t capacity, uint32_t* count);
 
 /* Frees the reader. NULL is a safe no-op. No other call on the handle
  * may overlap it. */
@@ -1032,7 +1270,9 @@ typedef struct ecuio_import_report {
     uint64_t values;          /* CSV: the samples written */
     uint64_t columns_ignored; /* CSV: the header's columns the map
                                  doesn't name */
-    uint64_t reserved[2];     /* zero; ABI growth space */
+    uint64_t rows_no_time;    /* CSV: the rows left out for an empty time
+                                 cell */
+    uint64_t reserved[1];     /* zero; ABI growth space */
 } ecuio_import_report_t;
 
 #if defined(__cplusplus)
@@ -1040,10 +1280,14 @@ static_assert(sizeof(ecuio_import_report_t) == 80,
               "ecuio_import_report_t size is ABI");
 static_assert(offsetof(ecuio_import_report_t, values) == 48,
               "ecuio_import_report_t layout is ABI");
+static_assert(offsetof(ecuio_import_report_t, rows_no_time) == 64,
+              "ecuio_import_report_t layout is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_import_report_t) == 80,
                "ecuio_import_report_t size is ABI");
 _Static_assert(offsetof(ecuio_import_report_t, values) == 48,
+               "ecuio_import_report_t layout is ABI");
+_Static_assert(offsetof(ecuio_import_report_t, rows_no_time) == 64,
                "ecuio_import_report_t layout is ABI");
 #endif
 
@@ -1064,11 +1308,15 @@ _Static_assert(offsetof(ecuio_import_report_t, values) == 48,
  * A CSV (section 5) through options->column_map_utf8: RFC 4180, strict
  * and bounded, checked whole before anything is written; signals.csv
  * with the mapped columns' samples (an empty cell, or one of the map's
- * "missing" texts, no sample) and a format 3 events.log whose signal
+ * "missing" texts, no sample; below the header an unquoted cell's spaces
+ * and tabs around it are padding, dropped, so " " is empty, and a quoted
+ * one's text is kept exactly) and a format 3 events.log whose signal
  * lines are the map's, its utc line the map's start or the file's first
  * time (none for a relative time with no start); no frames.csv. A row up
  * to 100 ms before the one before it takes that one's time; further back
- * is refused. report may be NULL.
+ * is refused. A row whose time cell is empty is left out whole, counted in
+ * report->rows_no_time and named in an events.log import line; a file
+ * where no row has a time is refused. report may be NULL.
  *
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL options or path;
  * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, a flag or reserved
@@ -1097,7 +1345,8 @@ ecuio_status_t ecuio_import_with(const ecuio_import_options_t* options,
 /* ecuio_csv_guess_t.flags: TIME_UNIT_KNOWN the map's time has a unit;
  * DECIMAL_COMMA its decimal mark is a comma; PREAMBLE lines above the
  * header are left out (the map's header_row is above 1); TIME_NUMBERS
- * the time column holds plain numbers, which time_unit can give a unit */
+ * the time column holds plain numbers, which time_unit can give another
+ * unit than the guess's */
 #define ECUIO_CSV_GUESS_TIME_UNIT_KNOWN 0x00000001u
 #define ECUIO_CSV_GUESS_DECIMAL_COMMA   0x00000002u
 #define ECUIO_CSV_GUESS_PREAMBLE        0x00000004u
@@ -1142,14 +1391,18 @@ _Static_assert(offsetof(ecuio_csv_guess_t, reserved) == 24,
  * is complete JSON, to print, save or pass as column_map_utf8. Imports
  * nothing and writes no file; the same file always gives the same text.
  * It reads the first 1000 rows within 1 MiB for the header, then up to
- * 200 rows or 64 KiB below it. Notes and words name columns as the header
- * has them, never a cell's value or the file's path.
+ * 200 rows or 64 KiB below it. Notes and words name columns by the
+ * header's text without its padding (the map's column keeps it exactly),
+ * never a cell's value or the file's path.
  *
  * A time column of numbers takes time_unit ("s", "ms" or "us") when it
  * is given, else the unit its header names ("Time (s)", "[ms]"); with
- * neither the map's time has no unit and the flag is clear, and the
- * import refuses the map until one is given. ISO 8601 times with their
- * offset are "iso8601" whatever time_unit says. Any other time
+ * neither, a column named as a time whose cells are all whole numbers is
+ * read as "ms", the convention of loggers that name no unit, and a note
+ * says so (TIME_UNIT_KNOWN set: a front end shows the unit, changeable,
+ * by TIME_NUMBERS); a first column that only rises, or a time with
+ * fractions, has no unit until time_unit gives one. ISO 8601 times with
+ * their offset are "iso8601" whatever time_unit says. Any other time
  * (ISO 8601 with no offset, times of day, cells not all times) needs a
  * column map with the zone (or the date and offset): no time_unit gives
  * it a unit, and TIME_NUMBERS is clear. The start is never guessed.

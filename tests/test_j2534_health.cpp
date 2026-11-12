@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -1178,6 +1179,148 @@ TEST_F(J2534HealthTest, PendingReplyHoldsTheRequestForItsAnswer)
     EXPECT_GE(replies, 2u);
 }
 
+constexpr char kExtendedSession[] =
+    "?profile=uds-generic&did=1E1C&session=03&identify=0&diagnose=0";
+
+/* ADR-0060's close: 10 01's answer, 14 ms after it, is read before the
+ * filter stops (the session dispatches nothing once its close begins, so
+ * the fake counts what it still held then), so the module's reply finds
+ * the channel there and is sent once
+ * (docs/bench-sessions/2026-11-11-ext-session-car.md: after the
+ * disconnect it came again for 13.5 s) */
+TEST_F(J2534HealthTest, TheClosesAnswerIsReadBeforeTheFilterStops)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "14"));
+    ASSERT_NO_FATAL_FAILURE(start_session(kExtendedSession));
+    ASSERT_TRUE(wait_for_frames(3, 3000)) << "nothing arrived";
+    ASSERT_NO_FATAL_FAILURE(close_session());
+    EXPECT_NE(fake_control::last_stopped(page), 0u) << "no filter stopped";
+    EXPECT_EQ(fake_control::unread_at_stop(page), 0u)
+        << "a reply was left unread when the filter stopped";
+}
+
+/* The fake's steady clock (its write stamps' microseconds, low 32 bits),
+ * which this process shares */
+uint32_t fake_now_us()
+{
+    return static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count());
+}
+
+/* Waits for the fake's next write after `after` writes, up to 3 s */
+bool wait_for_write(fake_control::Page* page, uint32_t after)
+{
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (fake_control::writes(page) <= after) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+}
+
+/* A request out when the close comes is answered before 10 01 goes: the
+ * close follows a write at once, its reply comes 80 ms after it, so 10 01
+ * follows that write by 80 ms at least */
+TEST_F(J2534HealthTest, TheCloseWaitsForTheRequestInFlight)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "80"));
+    ASSERT_NO_FATAL_FAILURE(start_session(kExtendedSession));
+    ASSERT_TRUE(wait_for_frames(2, 3000)) << "nothing arrived";
+    ASSERT_TRUE(wait_for_write(page, fake_control::writes(page)));
+    const uint32_t closed_at = fake_now_us();
+    ASSERT_NO_FATAL_FAILURE(close_session());
+
+    const uint32_t n = fake_control::writes(page);
+    ASSERT_GE(n, 3u);
+    ASSERT_LE(n, fake_control::kWriteDepth) << "the page keeps the first 16";
+    fake_control::Write last{}, before{};
+    ASSERT_TRUE(fake_control::recorded_write(page, n - 1, &last));
+    ASSERT_TRUE(fake_control::recorded_write(page, n - 2, &before));
+    const uint8_t leave[6] = {0x00, 0x00, 0x07, 0xE0, 0x10, 0x01};
+    ASSERT_EQ(last.size, sizeof(leave));
+    EXPECT_EQ(memcmp(last.data, leave, sizeof(leave)), 0) << "the last write";
+    ASSERT_LT(closed_at - before.us, 80000u)
+        << "the close came after the request's reply: nothing was in flight";
+    EXPECT_GE(last.us - before.us, 80000u)
+        << "10 01 went out before the reply to the request in flight";
+}
+
+/* A module that answers 7F 22 78 and then nothing for 3 s holds the close
+ * no longer than its one bound (J2534_CLOSE_US, 200 ms), however the 78
+ * extends the request's own wait, and 10 01 still goes out */
+TEST_F(J2534HealthTest, APendingAnswerHoldsTheCloseNoLongerThanItsBound)
+{
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_PENDING", "1"));
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "3000"));
+    ASSERT_NO_FATAL_FAILURE(start_session(kExtendedSession));
+    /* 10 03, its 50 03 after 3 s, then the read whose 78 comes at once */
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (fake_control::writes(page) < 2 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_EQ(fake_control::writes(page), 2u) << "the read never went out";
+    const auto t0 = std::chrono::steady_clock::now();
+    ASSERT_NO_FATAL_FAILURE(close_session());
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - t0)
+                        .count();
+    EXPECT_LT(ms, 1500) << "a 78 held the close past its bound";
+    ASSERT_EQ(fake_control::writes(page), 3u);
+    fake_control::Write last{};
+    ASSERT_TRUE(fake_control::recorded_write(page, 2, &last));
+    const uint8_t leave[6] = {0x00, 0x00, 0x07, 0xE0, 0x10, 0x01};
+    ASSERT_EQ(last.size, sizeof(leave));
+    EXPECT_EQ(memcmp(last.data, leave, sizeof(leave)), 0) << "10 01";
+}
+
+/* An ECU that stops answering (each reply 2 s late) holds the close no
+ * longer than the request in flight's wait and 10 01's, 100 ms each */
+TEST_F(J2534HealthTest, ACloseWithNoAnswerEndsWithinItsWaits)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session(kExtendedSession));
+    ASSERT_TRUE(wait_for_frames(3, 3000)) << "nothing arrived";
+    const uint32_t before = fake_control::writes(page);
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_REPLY_DELAY_MS", "2000"));
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (fake_control::writes(page) < before + 2 &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_GE(fake_control::writes(page), before + 2) << "no write went out";
+    const auto t0 = std::chrono::steady_clock::now();
+    ASSERT_NO_FATAL_FAILURE(close_session());
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - t0)
+                        .count();
+    EXPECT_LT(ms, 1000) << "the close waited for a reply past its waits";
+}
+
+/* A dead adapter (every read STATUS_FAILED) still closes at once */
+TEST_F(J2534HealthTest, ACloseOnADeadLinkEndsPromptly)
+{
+    ASSERT_NO_FATAL_FAILURE(start_session(kExtendedSession));
+    ASSERT_TRUE(wait_for_frames(3, 3000)) << "nothing arrived";
+    ASSERT_NO_FATAL_FAILURE(knob("ECUIO_FAKE_READ_STATUS", "7"));
+    int32_t le = 0;
+    uint32_t ec = 0;
+    ASSERT_TRUE(wait_for_state(session, ECUIO_ERR_TRANSPORT_HARD_FAILURE, 5000,
+                               le, ec));
+    const auto t0 = std::chrono::steady_clock::now();
+    ASSERT_NO_FATAL_FAILURE(close_session());
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - t0)
+                        .count();
+    EXPECT_LT(ms, 1500) << "a dead link held the close";
+}
+
 /* Two ECUs, each on its channel, answer 60 ms after a request. Each
  * channel waits only for its own reply, so both requests are out before
  * either reply arrives, and both ECUs' replies come back. Test-only
@@ -1195,6 +1338,7 @@ TEST_F(J2534HealthTest, ChannelsWaitOnlyForTheirOwnReplies)
         defs[i].scale = 1.0;
         defs[i].message_id = kChannels[i].rx_id;
         defs[i].mux_length = 2;
+        std::snprintf(defs[i].name, sizeof defs[i].name, "Signal %d", i);
     }
     defs[0].mux_key = 0x410Cu;
     defs[1].mux_key = 0x410Du;
@@ -1259,6 +1403,7 @@ TEST_F(J2534HealthTest, LongRepliesArriveWhole)
         defs[i].message_id = 0x7E8u;
         defs[i].mux_length = 3;
         defs[i].mux_key = 0x62F1A0u + static_cast<uint32_t>(i);
+        std::snprintf(defs[i].name, sizeof defs[i].name, "DID F1A%d", i);
     }
     static ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;

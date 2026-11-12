@@ -10,7 +10,8 @@
 # made-up logger's map on one line before its file. Each seed is in the harness's own form (fuzz/README.md): the
 # JSON harness's first byte picks its bounds, the OBDb harness's its
 # options, the plugin harness's its form, the recording and export
-# harnesses' a folder ('F'), with the pieces cut at 0x1E bytes. Started from
+# harnesses' a folder ('F'), with the pieces cut at 0x1E bytes, or the
+# stretches' rules ('S') over two fixtures' samples. Started from
 # these, a 60 s run reaches the loaders behind the JSON reader; from
 # nothing, it barely leaves the reader. Built from the fixtures, never
 # copies of them, so the seeds follow the formats as the fixtures do.
@@ -21,6 +22,7 @@
 import glob
 import json
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -37,6 +39,37 @@ def write(out, harness, name, data):
     os.makedirs(folder, exist_ok=True)
     with open(os.path.join(folder, name), "wb") as f:
         f.write(data)
+
+
+def signal_rows(path):
+    """{signal: [(host_us, value)]} of a signals.csv's number rows"""
+    rows = {}
+    for line in read(path).decode("utf-8-sig").splitlines()[1:]:
+        cells = line.split(",")
+        try:
+            rows.setdefault(cells[1], []).append((int(cells[0]), float(cells[2])))
+        except (IndexError, ValueError):
+            pass
+    return rows
+
+
+def stretch_seed(switches, gate, speed, measure):
+    """fuzz_recording's stretches input: the switches, the default rules
+    but the rise, 10 on the seeds' scale of rpm / 60 (indexes into the
+    harness's tables), the whole range, then each
+    signal's samples, at most 255, a time step in 10 ms and a value in
+    halves under 120"""
+    rules = bytes([7, 5, 8, 0, 6, 3, 4, 6, 14, 14])
+    signals = [gate[:255], speed[:255], measure[:255]]
+    out = b"S" + bytes([switches]) + rules + bytes([0, 255])
+    out += bytes(len(s) for s in signals)
+    for s in signals:
+        last = 0
+        for t, v in s:
+            step = min((t - last) // 10000, 199)
+            last += step * 10000
+            out += bytes([step, max(0, min(239, round(v * 2)))])
+    return out
 
 
 def main(argv):
@@ -85,6 +118,26 @@ def main(argv):
         name = os.path.basename(path)
         write(out, "fuzz_obdb_import", "default_" + name, b"\x00" + data)
         write(out, "fuzz_obdb_import", "alone_2019_" + name, bytes([0x80 | 29]) + data)
+    # Two signals of one 31-byte name whose two-byte character sits across
+    # the place a repeat's number is cut in: the cut must leave it whole
+    name = "n" * 28 + "\u00e9x"
+    repeated = {"commands": [
+        {"hdr": "7E1", "rax": "7E9", "cmd": {"22": did}, "freq": 1,
+         "signals": [{"id": key, "name": name,
+                      "fmt": {"len": 8, "max": 255, "unit": "volts"}}]}
+        for did, key in (("0101", "first"), ("0102", "second"))]}
+    write(out, "fuzz_obdb_import", "repeated_name_across_a_character",
+          b"\x00" + json.dumps(repeated, ensure_ascii=False).encode("utf-8"))
+
+    # The set validator: a head (count, layout, reserved, channels, NULLs),
+    # then six bytes for each def. Two defs with ids of their own make a
+    # set it takes; with the second's repeat bit, one name twice
+    layout = int(re.search(rb"#define ECUIO_SIGNAL_SET_LAYOUT (\d+)u",
+                           read("core/include/ecuio/signals.h")).group(1))
+    two = bytes([2, layout, 0, 0, 0, 1, 0, 8, 0, 0, 0, 2, 0, 8, 0, 0, 0])
+    write(out, "fuzz_validate_set", "two_defs", two)
+    write(out, "fuzz_validate_set", "two_defs_one_name",
+          two[:15] + b"\x80" + two[16:])
 
     # The plugin loader: the folder (an odd first byte; the manifest, its
     # files in turn, then a value fixture) and the packed form (an even
@@ -132,9 +185,40 @@ def main(argv):
     events = (b"ecuio session recording, format 2 (ADR-0049)\n"
               b"profile  obd2\n\n")
     folder_seeds["wire-frames"] = b"F" + events + SEP + SEP + SEP + wire
+    # The harness's first float on 0x123: 1.0, +inf, -inf, a NaN, 2.0. The
+    # three between are no samples, at the open or read again
+    folder_seeds["float-not-finite"] = b"F" + SEP + SEP + SEP + header + (
+        b"100000,100000,0x123,0x0,3F 80 00 00\n"
+        b"200000,200000,0x123,0x0,7F 80 00 00\n"
+        b"300000,300000,0x123,0x0,FF 80 00 00\n"
+        b"400000,400000,0x123,0x0,7F C0 00 00\n"
+        b"500000,500000,0x123,0x0,40 00 00 00\n")
+    # Both floats: the first 1.0, 2.0, 3.0, the second never finite, so it
+    # has no signal and a second read again passes its values by
+    folder_seeds["float-never-finite"] = b"F" + SEP + SEP + SEP + header + (
+        b"100000,100000,0x123,0x0,3F 80 00 00 7F C0 00 00\n"
+        b"300000,300000,0x123,0x0,40 00 00 00 7F 80 00 00\n"
+        b"500000,500000,0x123,0x0,40 40 00 00 FF C0 00 00\n")
+    # signals.csv alone, a number signal whose one value is a NaN: its
+    # range reads 0 at the open and NaN in its statistics
+    folder_seeds["values-all-nan"] = (
+        b"F" + SEP + b"host_us,signal,value,unit\n0,a,nan,\n")
     for name, seed in folder_seeds.items():
         write(out, "fuzz_recording", name, seed)
         write(out, "fuzz_export", name, seed)
+    # The stretches' rules ('S'): the pull fixture's throttle and engine
+    # speed (no speed signal, so engine speed measures; switch 16, the
+    # recording has an engine speed), and the cruise fixture's speed and
+    # throttle, under the default rules but the rise, 10 on the seed's
+    # scale of rpm / 60
+    pulls = signal_rows("tests/fixtures/recording/pull-early/signals.csv")
+    write(out, "fuzz_recording", "stretches-pull",
+          stretch_seed(16, pulls.get("Throttle", []), [],
+                       [(t, v / 60) for t, v in pulls.get("RPM", [])]))
+    cruise = signal_rows("tests/fixtures/recording/cruise/signals.csv")
+    write(out, "fuzz_recording", "stretches-cruise",
+          stretch_seed(3, cruise.get("Throttle", []),
+                       cruise.get("Vehicle Speed", []), []))
     vin = b"ZZZFAKE11M0000001"
     ecu = header + (
         b"100000,100000,0x7E8,0x100,49 02 01 " + b" ".join(b"%02X" % c for c in vin) + b"\n"
@@ -194,10 +278,14 @@ def main(argv):
           b"(1.005000) can0 7E8#2144454647484950\n"
           b"(1.005500) can0 7E8#2251525354555657\n")
 
-    # The CSV import: the first line a column map's JSON, the rest the file
-    for cmap_path in sorted(glob.glob(os.path.join(ROOT, "tests", "fixtures", "import",
-                                                   "csv", "*", "map.json"))):
-        folder = os.path.dirname(cmap_path)
+    # The CSV import: the first line a column map's JSON (the logger's own,
+    # else its guessed one), the rest the file
+    for log_path in sorted(glob.glob(os.path.join(ROOT, "tests", "fixtures", "import",
+                                                  "csv", "*", "log.csv"))):
+        folder = os.path.dirname(log_path)
+        cmap_path = os.path.join(folder, "map.json")
+        if not os.path.exists(cmap_path):
+            cmap_path = os.path.join(folder, "guessed-map.json")
         with open(cmap_path, encoding="utf-8") as f:
             cmap = json.dumps(json.load(f), separators=(",", ":")).encode("utf-8")
         with open(os.path.join(folder, "log.csv"), "rb") as f:

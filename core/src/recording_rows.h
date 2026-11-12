@@ -1,7 +1,8 @@
 // File/layer: core/src/recording_rows.h | internal, C++17, Qt-free,
 //             header-only; ALL platforms
 // Testing: UNIT: RecordingRowsTest, RecordingTest (test_core); JsonTest
-//          (test_core); FUZZ: fuzz_recording, fuzz_json
+//          (test_core); CsvExportTest and CsvGuessTest (kSparseTimes);
+//          FUZZ: fuzz_recording, fuzz_json
 //
 // The rows of a recording as the reader parses them (ADR-0049 section 5):
 // signals.csv's and markers.csv's CSV rows, events.log's header lines and
@@ -35,6 +36,10 @@ namespace ecuio_recording_rows {
 constexpr size_t kRowMax = 32768;
 constexpr size_t kNameMax = 31; /* ecuio_signal_def_t's name, terminated */
 constexpr size_t kUnitMax = 15;
+/* The wide CSV's sweep (ADR-0056's appendix "a sparse column and the
+ * sweep"): a column whose usual interval is over this many times the other
+ * columns' paces no row; the CSV guess's note says so by its fill */
+constexpr uint64_t kSparseTimes = 16;
 
 constexpr const char* kSignalsHeader = "host_us,signal,value,unit";
 constexpr const char* kMarkersHeader = "host_us,label";

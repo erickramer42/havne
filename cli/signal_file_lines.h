@@ -5,8 +5,9 @@
 // and `sim --signals`
 // need besides core's loader (signals.h): the profile a URI selects, and
 // the lines that say what the loader read. A file's own signals are its
-// defs from ECUIO_USER_SIG_ID_BASE up (signal_sets.h); the defs below
-// that are its base set's (extends).
+// defs that have a key (ecuio_signal_file_key); the rest are its base
+// set's (extends). The ID doesn't say: a signal that replaced a base def
+// by name keeps that def's ID (ADR-0051's appendix of 2026-11-10).
 
 #ifndef HAVNE_CLI_SIGNAL_FILE_LINES_H
 #define HAVNE_CLI_SIGNAL_FILE_LINES_H
@@ -101,17 +102,20 @@ inline bool unit_converts(const ecuio_signal_def_t& d)
            v.converted != 0;
 }
 
-// A file's own signal, not its base set's
-inline bool own_signal(const ecuio_signal_def_t& d)
+// A file's own signal, not its base set's: the def has a key in the file
+// (ecuio_signal_file_key). A def that replaced a base one by name has the
+// base's ID, so the ID says nothing about whose it is.
+inline bool own_signal(const ecuio_signal_file_t* file,
+                       const ecuio_signal_def_t& d)
 {
-    return d.id >= ECUIO_USER_SIG_ID_BASE;
+    return ecuio_signal_file_key(file, &d)[0] != '\0';
 }
 
-// Whether a file's own def gets a unit line: a unit, and one that
-// doesn't convert
-inline bool unit_kept(const ecuio_signal_def_t& d)
+// Whether a file's own def (own: own_signal's answer) gets a unit line: a
+// unit, and one that doesn't convert
+inline bool unit_kept(const ecuio_signal_def_t& d, bool own)
 {
-    return own_signal(d) && d.unit[0] != '\0' && !unit_converts(d);
+    return own && d.unit[0] != '\0' && !unit_converts(d);
 }
 
 // An enum def's labels in its set's table: count entries, or none
@@ -182,12 +186,14 @@ inline size_t def_line_bytes(const ecuio_signal_set_t& set,
 // {"type":"signal_file", name, profile, signals (the file's own), base
 // (its base set's; 0 without extends), ecus [{rx, tx}] (the base's
 // first)}
-inline void signal_file_line(Line& l, const char* name, const char* profile,
+inline void signal_file_line(Line& l, const ecuio_signal_file_t* file,
                              const ecuio_signal_set_t& set)
 {
+    const char* name = ecuio_signal_file_name(file);
+    const char* profile = ecuio_signal_file_profile(file);
     uint32_t own = 0;
     for (uint32_t i = 0; i < set.count; ++i) {
-        own += own_signal(set.defs[i]) ? 1u : 0u;
+        own += own_signal(file, set.defs[i]) ? 1u : 0u;
     }
     l.raw("{\"type\":\"signal_file\"");
     l.key("name");

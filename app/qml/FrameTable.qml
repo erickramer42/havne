@@ -11,6 +11,7 @@ import QtQuick.Layouts
 // recording viewer's frames share it; what a tap does is the user's.
 Rectangle {
     id: table
+    objectName: "frameTable"
     // The FrameListModel the rows come from
     required property var frames
     // True for the live session: new rows land at one end and the view
@@ -37,6 +38,34 @@ Rectangle {
     // A row tapped: its index, the keyboard modifiers held and its time in
     // microseconds, as the table shows it
     signal rowClicked(int index, int modifiers, real timestampUs)
+    // A head over the rows (the viewer's controls on a phone), and whether
+    // it shows: then it and the column names scroll with the rows, so the
+    // table is the one thing that scrolls
+    property Component head: null
+    property bool headScrolls: false
+    // Where the column names go while the head scrolls: made with the head
+    property Item namesSlot: null
+    readonly property ListView list: frameList
+
+    // The time in microseconds of a view row, -1 for no such row
+    function timeAt(row) { return table.frames.timestampAt(row) }
+    // The first view row at or after a time in the view's order (later in
+    // time oldest-first, earlier newest-first), the last row when the time
+    // lies past them all: the row the table shows that time at
+    function rowAtTime(timeUs) {
+        const newest = table.frames.newestFirst
+        let lo = 0
+        let hi = table.frames.count
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1
+            const t = table.timeAt(mid)
+            if (newest ? t > timeUs : t < timeUs)
+                lo = mid + 1
+            else
+                hi = mid
+        }
+        return Math.min(lo, table.frames.count - 1)
+    }
 
     Layout.fillWidth: true
     Layout.fillHeight: true
@@ -44,10 +73,12 @@ Rectangle {
     color: Theme.surface
     clip: true
 
-    // Column header
+    // Column header: at the top, or under the head while it scrolls
     Rectangle {
         id: columnHeader
-        anchors { top: parent.top; left: parent.left; right: parent.right }
+        objectName: "frameColumnNames"
+        parent: table.headScrolls && table.namesSlot ? table.namesSlot : table
+        width: parent ? parent.width : 0
         height: Math.max(32, table.touchMin)
         z: 2
         color: Theme.elevated
@@ -106,10 +137,28 @@ Rectangle {
     ListView {
         id: frameList
         objectName: "frameList"
-        anchors { top: columnHeader.bottom; left: parent.left
+        anchors { top: parent.top; left: parent.left
                   right: parent.right; bottom: parent.bottom }
         anchors.margins: 4
+        anchors.topMargin: table.headScrolls ? 4 : columnHeader.height + 4
         clip: true
+        header: table.head !== null ? headHolder : null
+        Component {
+            id: headHolder
+            Column {
+                width: frameList.width
+                Loader {
+                    width: parent.width
+                    sourceComponent: table.head
+                }
+                Item {
+                    id: names
+                    width: parent.width
+                    height: table.headScrolls ? columnHeader.height : 0
+                    Component.onCompleted: table.namesSlot = names
+                }
+            }
+        }
         // Bound only while shown: each live frame inserts a row, and a hidden
         // table would make and destroy a delegate for it on every page
         model: table.visible ? table.frames : null
@@ -140,16 +189,18 @@ Rectangle {
         // scroll may have started since the call was queued.
         function followTail() { if (follow) jumpToLatest() }
 
-        // A hidden table keeps its place: the first row shown and whether it
-        // followed, noted while shown and put back once it's bound again
-        property int keptTop: 0
+        // A hidden table keeps its place: the time of the first row shown
+        // (rows arrive and leave while it's hidden, so an index would land
+        // on another frame) and whether it followed, noted while shown and
+        // put back once it's bound again
+        property real keptTimeUs: -1
         property bool keptFollow: true
         property bool rebinding: false
-        onContentYChanged: if (table.visible && count > 0) keptTop = indexAt(1, contentY + 1)
+        onContentYChanged: if (table.visible && count > 0) keptTimeUs = table.timeAt(indexAt(1, contentY + 1))
         onFollowChanged: if (table.visible && count > 0) keptFollow = follow
         function restoreTop() {
-            if (!follow && count > 0)
-                positionViewAtIndex(Math.min(Math.max(keptTop, 0), count - 1), ListView.Beginning)
+            if (!follow && count > 0 && keptTimeUs >= 0)
+                positionViewAtIndex(table.rowAtTime(keptTimeUs), ListView.Beginning)
         }
 
         onCountChanged: {
@@ -159,7 +210,7 @@ Rectangle {
                 // Cleared or a new session: the place noted before is gone too
                 follow = true
                 keptFollow = true
-                keptTop = 0
+                keptTimeUs = -1
             } else if (rebinding) {
                 rebinding = false
                 follow = keptFollow

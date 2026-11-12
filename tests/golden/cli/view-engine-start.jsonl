@@ -15,7 +15,7 @@
 {"found": true, "host_us": 12600000, "offset_us": -12600000, "on": "engine-start", "recording": 1, "type": "align"}
 {"found": false, "host_us": null, "offset_us": null, "on": "engine-start", "recording": 2, "type": "align"}
 {"column_us": 1000000, "columns": 10, "from_us": -6000000, "to_us": 4000000, "type": "axis"}
-{"highest": [null, 0, 0, 0, 0, 1180, 940, 940, 940, 940], "lowest": [null, 0, 0, 0, 0, 220, 900, 900, 900, 900], "recording": 0, "samples": [0, 19, 10, 10, 10, 10, 10, 10, 10, 10], "signal": "RPM", "type": "columns"}
-{"highest": [0, 0, 0, 0, 0, 1180, 940, 940, 940, 940], "lowest": [0, 0, 0, 0, 0, 220, 900, 900, 900, 900], "recording": 1, "samples": [20, 10, 10, 10, 10, 10, 10, 10, 10, 10], "signal": "RPM", "type": "columns"}
+{"highest": [0, 0, 0, 0, 0, 240, 1180, 940, 940, 940], "lowest": [0, 0, 0, 0, 0, 0, 640, 900, 900, 900], "mean": [0, 0, 0, 0, 0, 138, 919, 920, 920, 919.0909090909091], "recording": 0, "samples": [5, 10, 10, 10, 10, 10, 10, 10, 10, 11], "signal": "RPM", "type": "columns"}
+{"delta": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "delta_from": 0, "highest": [0, 0, 0, 0, 0, 240, 1180, 940, 940, 940], "lowest": [0, 0, 0, 0, 0, 0, 640, 900, 900, 900], "mean": [0, 0, 0, 0, 0, 138, 919, 920, 920, 919.0909090909091], "recording": 1, "samples": [10, 10, 10, 10, 10, 10, 10, 10, 10, 11], "signal": "RPM", "type": "columns"}
 {"recording": 0, "t_us": 500000, "type": "at", "values": [{"host_us": 6100000, "signal": "RPM", "text": "910"}]}
 {"recording": 1, "t_us": 500000, "type": "at", "values": [{"host_us": 13100000, "signal": "RPM", "text": "910"}]}
