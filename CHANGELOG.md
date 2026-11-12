@@ -130,6 +130,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
   a folded pane names its units; a long pane name or trace label is cut with
   an ellipsis.
 - Android: the import picker offers every file.
+- The Recordings page's Import can be canceled while it runs: Cancel stops it
+  and nothing is imported.
 - The Light look sets the Light color scheme on Linux too, where the platform
   theme takes the request; the window's frame keeps the desktop's colors.
 - A recording opens in the viewer with at most four signals plotted: the

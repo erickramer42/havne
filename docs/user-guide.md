@@ -216,8 +216,9 @@ by core's defaults unless it is given levels.
 readiness and key values. **Import** on the list brings in a candump log
 or another logger's CSV as a recording, with an optional **Label**; the
 recording opens when the import ends, and a CSV whose times carry dates is
-listed at the drive's time. A CSV row with no time is left out, and the
-import says how many it left out.
+listed at the drive's time. **Cancel** stops an import that is running:
+nothing is imported and the panel keeps your choices. A CSV row with no time
+is left out, and the import says how many it left out.
 
 **Compare...**, beside **Export**, lines two recordings up. **Align a pull** lines them up on a
 pull you choose in each: a pull is full throttle for a second or more
