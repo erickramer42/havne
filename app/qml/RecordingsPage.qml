@@ -2456,7 +2456,8 @@ Page {
                               : root.valueText(Number(stripRow.at.text), stripRow.modelData.decimals,
                                                stripRow.at.unit)
                         color: Theme.text
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                         elide: Text.ElideRight
                     }
                     Label {
@@ -2468,7 +2469,8 @@ Page {
                         text: visible ? root.spanCaption(stripRow.modelData) : ""
                         color: Theme.textDim
                         font.pixelSize: Theme.fontCaption
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                         elide: Text.ElideRight
                     }
                 }
@@ -2960,7 +2962,8 @@ Page {
                                 Layout.maximumWidth: Math.round(signalRow.width * (root.compareAligned ? 0.3 : 0.5))
                                 elide: Text.ElideRight
                                 color: Theme.text
-                                font.family: Theme.monoFamily
+                                font.family: Theme.valueFamily
+                                font.features: Theme.valueFeatures
                             }
                         }
                         // On a phone B and the change have a line of their own
@@ -2973,7 +2976,7 @@ Page {
                             elide: Text.ElideLeft
                             color: Theme.textDim
                             font.pixelSize: Theme.fontCaption
-                            font.family: Theme.monoFamily
+                            font.family: Theme.valueFamily
                             font.features: Theme.valueFeatures
                         }
                     }
@@ -2986,7 +2989,8 @@ Page {
                         horizontalAlignment: Text.AlignRight
                         elide: Text.ElideRight
                         color: Theme.text
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                     }
                     Label {
                         objectName: "cursorDelta"
@@ -2997,7 +3001,8 @@ Page {
                         horizontalAlignment: Text.AlignRight
                         elide: Text.ElideRight
                         color: Theme.textDim
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                     }
                     // The compared recording's, at the cursor
                     Label {
@@ -3011,7 +3016,8 @@ Page {
                         Layout.maximumWidth: Math.round(signalRow.width * 0.3)
                         elide: Text.ElideRight
                         color: Theme.textDim
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                     }
                 }
             }
@@ -3068,7 +3074,7 @@ Page {
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideRight
                     color: Theme.text
-                    font.family: Theme.monoFamily
+                    font.family: Theme.valueFamily
                     font.features: Theme.valueFeatures
                 }
                 RowLayout {
@@ -3155,7 +3161,7 @@ Page {
                                         text: root.statChange(statCard.stat)
                                         color: Theme.text
                                         font.pixelSize: Theme.fontCaption
-                                        font.family: Theme.monoFamily
+                                        font.family: Theme.valueFamily
                                         font.features: Theme.valueFeatures
                                     }
                                 }
@@ -3165,7 +3171,7 @@ Page {
                                     elide: Text.ElideRight
                                     color: Theme.textDim
                                     font.pixelSize: Theme.fontCaption
-                                    font.family: Theme.monoFamily
+                                    font.family: Theme.valueFamily
                                     font.features: Theme.valueFeatures
                                     text: !statCard.stat ? qsTr("—")
                                           : [statCard.stat.lowest, statCard.stat.highest, statCard.stat.mean]
