@@ -855,6 +855,54 @@ TestCase {
         return found
     }
 
+    // A recording of three signals in three units, so the chart has panes
+    // and seams between them
+    function panedRecording(name) {
+        const folder = Harness.writeFramesRecording(name, 1, 100000)
+        verify(folder !== "", "the folder is made")
+        const units = ["rpm", "%", "km/h"]
+        let header = "ecuio session recording, format 2 (ADR-0049)\n"
+                     + "started  2026-11-03 10:00:00.000 (local time)\n"
+                     + "utc  2026-11-03T16:00:00.000Z\ncore  0.3.6\n"
+                     + "uri  socketcan://vcan0?profile=raw\nprofile  raw\n"
+        let rows = "host_us,signal,value,unit\n"
+        for (let s = 0; s < 3; ++s)
+            header += "signal  Signal " + s + ",number," + units[s] + ",0,0\n"
+        for (let t = 1; t <= 3; ++t) {
+            for (let s = 0; s < 3; ++s)
+                rows += (t * 100000) + ",Signal " + s + "," + (t * (s + 1)) + "," + units[s] + "\n"
+        }
+        header += "\n10:00:01.000  +1.000  end  havne-cli: seconds: 1 frames, 9 values, "
+                  + "0 records dropped, 0 notes dropped\n"
+        Harness.writeScratchFile(name + "/events.log", header)
+        Harness.writeScratchFile(name + "/signals.csv", rows)
+        return folder
+    }
+
+    // The viewer's resize grips reach a touch's size on the glass: the
+    // pane seam and the chart splitter draw small and take the press
+    // from a margin around them
+    function test_theViewersGripsReachATouchsSize() {
+        const v = uprightViewer({ title: "Paned", uri: "socketcan://vcan0?profile=raw", source: "",
+                                  folder: panedRecording("pv-grips"), profile: "raw" })
+        const main = v.main
+        const page = v.page
+        verify(page.phoneShape, "the phone's form")
+        const grips = [find(page, "chartSplitter"), find(page, "paneSeam_0")]
+        for (const grip of grips) {
+            tryVerify(() => grip && grip.visible, 5000, "a grip shows")
+        }
+        for (const grip of grips) {
+            const handler = grip.data.filter(c => c.yAxis !== undefined && c.margin !== undefined)[0]
+            verify(handler, grip.objectName + " has its drag handler")
+            const top = grip.mapToItem(main.contentItem, 0, 0).y
+            const foot = grip.mapToItem(main.contentItem, 0, grip.height).y
+            const scale = (foot - top) / grip.height
+            const reach = foot - top + 2 * handler.margin * scale
+            verify(reach >= 48 - 0.5, grip.objectName + " reaches " + reach + " on the glass")
+        }
+    }
+
     // A phone upright pins the title row, the chart and its splitter, and
     // under them one list scrolls in each view: Values' rows, the Frames
     // table and About's findings, each with its view's controls at its head
@@ -2415,6 +2463,18 @@ TestCase {
         verify(pill.mapToItem(main.contentItem, pill.width, 0).x <= main.contentItem.width + 0.5,
                "the pill inside the page")
         compare(find(main.contentItem, "disconnectButton").visible, true, "Connect... still on the row")
+    }
+
+    // The display line says the form and the orientation and no size, scale
+    // or inset: Copy and a saved report would carry it to others
+    function test_theDisplayLineHoldsNoPixelSize() {
+        const main = phoneMain()
+        const line = main.displayLine
+        verify(line.startsWith("Display: phone form, "), line)
+        verify(!/[0-9]/.test(line), "no digit in: " + line)
+        compare(line.indexOf("screen"), -1)
+        compare(line.indexOf("window"), -1)
+        compare(line.indexOf("safe area"), -1)
     }
 
     // A Main on a phone's form at 384 x 832, laid out, with Android's text
