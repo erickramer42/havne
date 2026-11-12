@@ -1276,14 +1276,53 @@ int run_signals_check(const char* path)
     return ended(out, kExitOk);
 }
 
-// conditions check <file> [--signals <file> | --profile <name>] (ADR-0063
-// section 10): what the loader read, or why it refused the file, and with
-// a set of signals how each condition's references meet it. start,
+ecuio_status_t load_package(const char* path, ecuio_plugin_t** out,
+                            std::string* why);
+ecuio_plugin_info_t plugin_info(const ecuio_plugin_t* p);
+std::string variant_of(const ecuio_plugin_t* p, uint32_t index);
+
+// conditions check <file> [--signals <file> | --profile <name> |
+// --plugin <pkg> [--variant <id>]] (ADR-0063 section 10): what the loader
+// read, or why it refused the file, and with a set of signals how each
+// condition's references meet it: a signal file's, a registered
+// profile's, or a plugin variant's (its only one, else --variant's;
+// naming none of several is usage, nothing written). start,
 // condition_set, a condition_def line each; a file refused or unread, a
-// signal file likewise or a profile not registered: start and an error
-// line, exit 3. No end line (a list, as signals check's)
+// signal file or a package likewise, or a profile not registered: start
+// and an error line, exit 3. No end line (a list, as signals check's)
 int run_conditions_check(const cli::ConditionsCheckArgs& args)
 {
+    ecuio_plugin_t* plugin = nullptr;
+    uint32_t variant = 0;
+    std::string plugin_why;
+    std::string plugin_profile;
+    ecuio_status_t plugin_st = ECUIO_OK;
+    if (args.plugin != nullptr) {
+        plugin_st = load_package(args.plugin, &plugin, &plugin_why);
+    }
+    if (plugin != nullptr) {
+        const ecuio_plugin_info_t info = plugin_info(plugin);
+        std::string names;
+        bool chosen = false;
+        for (uint32_t v = 0; v < info.variant_count; ++v) {
+            const std::string id = variant_of(plugin, v);
+            names += (v > 0 ? ", " : "") + id;
+            if (args.variant != nullptr ? id == args.variant
+                                        : info.variant_count == 1) {
+                chosen = true;
+                variant = v;
+                plugin_profile = cli::plugin_profile(info.id, id.c_str());
+            }
+        }
+        if (!chosen) {
+            std::fprintf(stderr,
+                         "havne-cli: --plugin needs --variant to name one of "
+                         "its variants: %s\n",
+                         names.c_str());
+            ecuio_plugin_free(plugin);
+            return kExitUsage;
+        }
+    }
     Output out;
     write_start(out);
     std::string why;
@@ -1292,6 +1331,7 @@ int run_conditions_check(const cli::ConditionsCheckArgs& args)
                     &bytes, &why)) {
         write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
         out.flush();
+        ecuio_plugin_free(plugin);
         return kExitConnect;
     }
     ecuio_condition_set_t* set = nullptr;
@@ -1300,14 +1340,17 @@ int run_conditions_check(const cli::ConditionsCheckArgs& args)
     if (st != ECUIO_OK) {
         write_error(out, st);
         out.flush();
+        ecuio_plugin_free(plugin);
         return kExitConnect;
     }
-    ecuio_signal_file_t* file = nullptr;
+    ecuio_signal_file_t* own_file = nullptr;
+    const ecuio_signal_file_t* file = nullptr;
     const ecuio_signal_set_t* signals = nullptr;
     const char* against = nullptr;
     if (args.signals != nullptr) {
-        st = load_signal_file(args.signals, &file, &why);
+        st = load_signal_file(args.signals, &own_file, &why);
         if (st == ECUIO_OK) {
+            file = own_file;
             signals = ecuio_signal_file_set(file);
             against = ecuio_signal_file_profile(file);
         }
@@ -1315,11 +1358,20 @@ int run_conditions_check(const cli::ConditionsCheckArgs& args)
         st = ecuio_profile_lookup(args.profile, &signals);
         why = std::string("no profile is named '") + args.profile + "'";
         against = args.profile;
+    } else if (args.plugin != nullptr) {
+        st = plugin_st;
+        why = plugin_why;
+        if (plugin != nullptr) {
+            file = ecuio_plugin_variant_file(plugin, variant);
+            signals = ecuio_plugin_variant_set(plugin, variant);
+            against = plugin_profile.c_str();
+        }
     }
     if (st != ECUIO_OK) {
         write_error(out, st, why.c_str());
         ecuio_condition_set_free(set);
         out.flush();
+        ecuio_plugin_free(plugin);
         return kExitConnect;
     }
     ecuio_check_options_t checks;
@@ -1352,7 +1404,8 @@ int run_conditions_check(const cli::ConditionsCheckArgs& args)
                                 signals);
         write_line(out, b.line);
     }
-    ecuio_signal_file_free(file);
+    ecuio_signal_file_free(own_file);
+    ecuio_plugin_free(plugin);
     ecuio_condition_set_free(set);
     return ended(out, kExitOk);
 }
@@ -2017,6 +2070,10 @@ struct Stream {
     // written (its values follow it, or not)
     uint64_t seen = 0;
     bool last_written = false;
+    // --conditions: each condition's key by its index, set before start
+    // and never changed after; the events no line was written for
+    std::vector<std::string> condition_keys;
+    std::atomic<uint64_t> conditions_dropped{0};
 };
 
 void on_frame(const ecuio_frame_t* f, void* user)
@@ -2046,6 +2103,23 @@ void on_frame(const ecuio_frame_t* f, void* user)
     s->last_written = l.finish() && s->ring.push(cli::LineKind::Frame, l.data(),
                                                  l.size(), s->wait);
     s->covered.store(n, std::memory_order_release);
+}
+
+// A frame's condition events (ADR-0063), after its values line: a line
+// each, only for a frame that was written. An event with no line is a
+// change the reader never sees, so each is counted for the end line.
+void on_conditions(const ecuio_condition_event_t* events, uint32_t count,
+                   void* user)
+{
+    auto* s = static_cast<Stream*>(user);
+    const uint64_t lost = cli::write_condition_events(
+        events, count, s->condition_keys, s->last_written,
+        s->limit != 0 && s->seen > s->limit, [s](const char* line, size_t n) {
+            return s->ring.push(cli::LineKind::Condition, line, n, s->wait);
+        });
+    if (lost != 0) {
+        s->conditions_dropped.fetch_add(lost, std::memory_order_relaxed);
+    }
 }
 
 void on_values(const ecuio_value_batch_t* batch, void* user)
@@ -2108,6 +2182,7 @@ void usage(FILE* to)
         "                         [--until-scanned] [--record <folder> "
         "[--label <name>]]\n"
         "                         [--signals <file> | --plugin <pkg>]\n"
+        "                         [--conditions <file>]\n"
         "       havne-cli log <uri> <folder> [--signal <name>]... "
         "[--min-sweep <ms>]\n"
         "                      [--label <name>] [--seconds S]\n"
@@ -2151,7 +2226,8 @@ void usage(FILE* to)
         "       havne-cli signals import obdb <file> --out <file> [--year Y]\n"
         "                      [--name N] [--url U] [--commit C] [--alone]\n"
         "       havne-cli conditions check <file> [--signals <file> |\n"
-        "                      --profile <name>]\n"
+        "                      --profile <name> | --plugin <pkg> "
+        "[--variant <id>]]\n"
         "       havne-cli plugins list <pkg>...\n"
         "       havne-cli plugins check <pkg> [--on <vcan>]\n"
         "       havne-cli plugins match <pkg> --vin <VIN>\n"
@@ -2180,6 +2256,11 @@ void usage(FILE* to)
         "         A replay:// with neither reads with its recording's own\n"
         "         signals.json when its hash still matches and the URI\n"
         "         selects the recorded profile or none.\n"
+        "         --conditions attaches a condition file: a conditions\n"
+        "         line says which of its conditions the session can judge,\n"
+        "         and a condition line follows each change, at its own time;\n"
+        "         the end line's conditions_dropped counts the changes whose\n"
+        "         line was dropped, with its frame or alone.\n"
         "         --plugin loads a plugin (a folder or a packed file) and\n"
         "         registers its variants as plugin.<id>.<variant>; the URI's\n"
         "         profile= names the one to read.\n"
@@ -2297,9 +2378,11 @@ void usage(FILE* to)
         "         obd2 out of it.\n"
         "conditions  check reads a condition file as a session would:\n"
         "         each condition it holds, or why it's refused. With\n"
-        "         --signals or --profile it also says which signal each\n"
-        "         term reads in that signal file's or that profile's set,\n"
-        "         and which conditions can't be judged there and why.\n"
+        "         --signals, --profile or --plugin it also says which\n"
+        "         signal each term reads in that signal file's, profile's\n"
+        "         or plugin variant's set (--variant names one of\n"
+        "         several), and which conditions can't be judged there and\n"
+        "         why.\n"
         "plugins  list says what each package holds, or why it's refused.\n"
         "         check reads one as a session would, then its value\n"
         "         fixtures: with --on (Linux), each answered by the\n"
@@ -2383,6 +2466,7 @@ struct StreamArgs {
     const char* label = nullptr;
     const char* signals = nullptr; // --signals' file
     const char* plugin = nullptr;  // --plugin's package
+    const char* conditions = nullptr; // --conditions' file
 };
 
 // The markers typed into stream --record (ADR-0049 section 4): a thread
@@ -2648,12 +2732,32 @@ int run_stream(const StreamArgs& args)
     stream->limit = args.count;
 
     write_start(out);
+    // --conditions: the file is read before the connect, so one the
+    // loader refuses never opens the adapter
+    ecuio_condition_set_t* conditions = nullptr;
+    if (args.conditions != nullptr) {
+        std::string why;
+        std::string bytes;
+        ecuio_status_t loaded = ECUIO_ERR_LOAD_FAILED;
+        if (read_whole(args.conditions, ECUIO_CONDITION_FILE_MAX_BYTES,
+                       "condition file", &bytes, &why)) {
+            loaded = ecuio_condition_set_load(bytes.data(), bytes.size(),
+                                              &conditions);
+            why = ecuio_last_error_detail();
+        }
+        if (loaded != ECUIO_OK) {
+            write_error(out, loaded, why.c_str());
+            out.flush();
+            return kExitConnect;
+        }
+    }
     ecuio_session_t* session = nullptr;
     std::string detail;
     ecuio_status_t st = create_within(out, args.uri, &session, &detail);
     if (st != ECUIO_OK) {
         write_error(out, st, detail.c_str());
         out.flush();
+        ecuio_condition_set_free(conditions);
         return kExitConnect;
     }
     ecuio_session_info_t info;
@@ -2664,6 +2768,41 @@ int run_stream(const StreamArgs& args)
     const bool replay_ends =
         replay && !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
     write_session(out, info);
+    // The conditions go on before a recording begins (a recording holds
+    // one set for its whole length): the conditions line says what the
+    // session made of each
+    if (conditions != nullptr) {
+        st = ecuio_session_set_conditions(session, conditions,
+                                          session_signal_file());
+        const uint32_t count = ecuio_condition_set_count(conditions);
+        std::vector<ecuio_condition_info_t> infos(count);
+        std::vector<ecuio_condition_state_t> states(count);
+        uint32_t held = 0;
+        if (st == ECUIO_OK) {
+            st = ecuio_session_get_condition_states(session, states.data(),
+                                                    count, &held);
+        }
+        if (st != ECUIO_OK || held != count) {
+            write_error(out, st != ECUIO_OK ? st : ECUIO_ERR_INVALID_ARGUMENT);
+            out.flush();
+            ecuio_condition_set_free(conditions);
+            ecuio_session_destroy(session);
+            return kExitConnect;
+        }
+        for (uint32_t i = 0; i < count; ++i) {
+            ecuio_condition_set_get(conditions, i, &infos[i]);
+            stream->condition_keys.emplace_back(infos[i].key);
+        }
+        const char* name = ecuio_condition_set_name(conditions);
+        BigLine b(cli::conditions_line_bytes(name, count));
+        cli::conditions_line(b.line, name, count > 0 ? states[0].generation : 1,
+                             infos.data(), states.data(), count);
+        write_line(out, b.line);
+        ecuio_condition_set_free(conditions);
+        conditions = nullptr;
+        ecuio_register_conditions_callback(session, on_conditions,
+                                           stream.get());
+    }
     ecuio_recorder_t* recorder = nullptr;
     bool recording_failed = false;
     if (args.record != nullptr &&
@@ -2848,6 +2987,10 @@ int run_stream(const StreamArgs& args)
         l.u64(stream->ring.dropped_frames());
         l.key("dropped_values");
         l.u64(stream->ring.dropped_values());
+        if (args.conditions != nullptr) {
+            l.key("conditions_dropped");
+            l.u64(stream->conditions_dropped.load());
+        }
         if (info.flags & ECUIO_SESSION_INFO_REPLAY_FAULTS) {
             write_faults(l, session);
         }
@@ -5167,7 +5310,7 @@ int run(int argc, char** argv)
     if (command == "conditions") {
         cli::ConditionsCheckArgs check;
         std::string why = "conditions takes check <file> [--signals <file> | "
-                          "--profile <name>]";
+                          "--profile <name> | --plugin <pkg> [--variant <id>]]";
         if (argc > 2 && std::string(argv[2]) == "check" &&
             cli::parse_conditions_check(argc - 3, argv + 3, &check, &why)) {
             return run_conditions_check(check);
@@ -5278,6 +5421,13 @@ int run(int argc, char** argv)
             args.signals = argv[++i];
         } else if (a == "--plugin" && i + 1 < argc) {
             args.plugin = argv[++i];
+        } else if (a == "--conditions" && i + 1 < argc &&
+                   args.conditions == nullptr && *argv[i + 1] != '\0') {
+            args.conditions = argv[++i];
+        } else if (a == "--conditions") {
+            std::fprintf(stderr,
+                         "havne-cli: --conditions takes one condition file\n");
+            return kExitUsage;
         } else if (a.rfind("--", 0) == 0 || args.uri) {
             std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
             usage(stderr);

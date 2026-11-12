@@ -4,6 +4,8 @@
 // What `havne-cli conditions check` writes besides core's loader
 // (conditions.h): the arguments it takes, and the lines that say what the
 // loader read and how each condition's references meet a set of signals.
+// And `stream --conditions`' two lines: the set as the session took it,
+// and each event of it.
 
 #ifndef HAVNE_CLI_CONDITION_LINES_H
 #define HAVNE_CLI_CONDITION_LINES_H
@@ -17,33 +19,54 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace cli {
 
-// conditions check <file> [--signals <file> | --profile <name>]
+// conditions check <file> [--signals <file> | --profile <name> |
+//                          --plugin <pkg> [--variant <id>]]
 struct ConditionsCheckArgs {
     const char* file = nullptr;
     const char* signals = nullptr;
     const char* profile = nullptr;
+    const char* plugin = nullptr;
+    const char* variant = nullptr;
 };
 
 // The arguments after "conditions check". False with why set for a usage
-// error: no file or two, an option without its value, both sets named,
-// anything else starting "--"
+// error: no file or two, an option without its value or given twice, two
+// sets named, --variant with no --plugin, anything else starting "--"
 inline bool parse_conditions_check(int argc, const char* const* argv,
                                    ConditionsCheckArgs* out, std::string* why)
 {
+    static const struct {
+        const char* option;
+        const char* ConditionsCheckArgs::* slot;
+        const char* takes;
+    } kOptions[] = {
+        {"--signals", &ConditionsCheckArgs::signals, "signal file"},
+        {"--profile", &ConditionsCheckArgs::profile, "profile name"},
+        {"--plugin", &ConditionsCheckArgs::plugin, "package"},
+        {"--variant", &ConditionsCheckArgs::variant, "variant's id"},
+    };
     for (int i = 0; i < argc; ++i) {
         const std::string a = argv[i];
         const bool option = a.compare(0, 2, "--") == 0;
-        if (a == "--signals" || a == "--profile") {
-            const char*& slot = a == "--signals" ? out->signals : out->profile;
-            if (i + 1 >= argc || argv[i + 1][0] == '\0' || slot != nullptr) {
-                *why = a + " takes one " +
-                       (a == "--signals" ? "signal file" : "profile name");
+        const char* ConditionsCheckArgs::* slot = nullptr;
+        const char* takes = "";
+        for (const auto& o : kOptions) {
+            if (a == o.option) {
+                slot = o.slot;
+                takes = o.takes;
+            }
+        }
+        if (slot != nullptr) {
+            if (i + 1 >= argc || argv[i + 1][0] == '\0' ||
+                out->*slot != nullptr) {
+                *why = a + " takes one " + takes;
                 return false;
             }
-            slot = argv[++i];
+            out->*slot = argv[++i];
         } else if (option) {
             *why = "unexpected '" + a + "'";
             return false;
@@ -58,8 +81,16 @@ inline bool parse_conditions_check(int argc, const char* const* argv,
         *why = "conditions check takes a condition file";
         return false;
     }
-    if (out->signals != nullptr && out->profile != nullptr) {
-        *why = "conditions check takes --signals or --profile, not both";
+    const int sets = (out->signals != nullptr ? 1 : 0) +
+                     (out->profile != nullptr ? 1 : 0) +
+                     (out->plugin != nullptr ? 1 : 0);
+    if (sets > 1) {
+        *why = "conditions check takes one of --signals, --profile and "
+               "--plugin";
+        return false;
+    }
+    if (out->variant != nullptr && out->plugin == nullptr) {
+        *why = "--variant names a --plugin's variant";
         return false;
     }
     return true;
@@ -133,6 +164,10 @@ inline const char* condition_why_word(uint32_t why)
         return "not_a_number";
     case ECUIO_CONDITION_WHY_ENUM_ORDER:
         return "enum_order";
+    case ECUIO_CONDITION_WHY_NO_LINK:
+        return "no_link";
+    case ECUIO_CONDITION_WHY_NO_CHECK:
+        return "no_check";
     default:
         return "unknown";
     }
@@ -371,6 +406,125 @@ inline void condition_def_line(Line& l, const ecuio_condition_info_t& info,
         }
     }
     l.ch('}');
+}
+
+// The bytes stream's conditions line takes at most
+inline size_t conditions_line_bytes(const char* name, uint32_t count)
+{
+    return 256 + Line::string_bytes(name) +
+           size_t{count} * (160 + 6 * ECUIO_CONDITION_KEY_MAX);
+}
+
+// {"type":"conditions", name (null with none), generation, conditions
+// [{key, alert (null, warning or danger), record, mark, available, why
+// (null, or condition_why_word's)}]}: the set as the session took it, the
+// session's own reasons among them
+inline void conditions_line(Line& l, const char* name, uint32_t generation,
+                            const ecuio_condition_info_t* infos,
+                            const ecuio_condition_state_t* states,
+                            uint32_t count)
+{
+    l.raw("{\"type\":\"conditions\"");
+    l.key("name");
+    if (name[0] != '\0') {
+        word(l, name);
+    } else {
+        l.raw("null");
+    }
+    l.key("generation");
+    l.u64(generation);
+    l.key("conditions");
+    l.ch('[');
+    for (uint32_t i = 0; i < count; ++i) {
+        if (i != 0) {
+            l.ch(',');
+        }
+        const ecuio_condition_info_t& c = infos[i];
+        const bool unavailable =
+            (states[i].flags & ECUIO_CONDITION_UNAVAILABLE) != 0;
+        l.ch('{');
+        l.key("key");
+        word(l, c.key);
+        l.key("alert");
+        l.raw((c.uses & ECUIO_CONDITION_USE_ALERT) == 0 ? "null"
+              : c.alert_level == ECUIO_ALERT_DANGER     ? "\"danger\""
+                                                        : "\"warning\"");
+        l.key("record");
+        l.raw((c.uses & ECUIO_CONDITION_USE_RECORD) != 0 ? "true" : "false");
+        l.key("mark");
+        l.raw((c.uses & ECUIO_CONDITION_USE_MARK) != 0 ? "true" : "false");
+        l.key("available");
+        l.raw(unavailable ? "false" : "true");
+        l.key("why");
+        if (unavailable) {
+            word(l, condition_why_word(states[i].why));
+        } else {
+            l.raw("null");
+        }
+        l.ch('}');
+    }
+    l.ch(']');
+    l.ch('}');
+}
+
+// {"type":"condition", t_us, key, state (on|off), fired, stale, value,
+// term}: one event, at its own time (a deadline's is earlier than the
+// frame line before it). Fits a buffer of kConditionLineBytes.
+constexpr size_t kConditionLineBytes = 256 + 6 * ECUIO_CONDITION_KEY_MAX;
+
+inline void condition_event_line(Line& l, const ecuio_condition_event_t& e,
+                                 const char* key)
+{
+    l.raw("{\"type\":\"condition\"");
+    l.key("t_us");
+    l.u64(e.timestamp_us);
+    l.key("key");
+    word(l, key);
+    l.key("state");
+    l.raw(e.state == ECUIO_CONDITION_ON ? "\"on\"" : "\"off\"");
+    l.key("fired");
+    l.raw((e.flags & ECUIO_CONDITION_FIRED) != 0 ? "true" : "false");
+    l.key("stale");
+    l.raw((e.flags & ECUIO_CONDITION_STALE) != 0 ? "true" : "false");
+    l.key("value");
+    l.number(e.value);
+    l.key("term");
+    l.u64(e.term);
+    l.ch('}');
+}
+
+// A frame's condition events into a stream: a line each through
+// push(line, size), which says whether it took the line. Returns the
+// events lost: every one of a frame whose own line was dropped, each
+// line push refused, and an event of a condition keys has no entry for.
+// The events of a frame past --count are none: the stream ended before
+// it.
+template <typename Push>
+uint64_t write_condition_events(const ecuio_condition_event_t* events,
+                                uint32_t count,
+                                const std::vector<std::string>& keys,
+                                bool frame_written, bool past_count, Push push)
+{
+    if (past_count) {
+        return 0;
+    }
+    if (!frame_written) {
+        return count;
+    }
+    uint64_t lost = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        if (events[i].condition >= keys.size()) {
+            ++lost;
+            continue;
+        }
+        char buf[kConditionLineBytes];
+        Line l(buf, sizeof buf);
+        condition_event_line(l, events[i], keys[events[i].condition].c_str());
+        if (!l.finish() || !push(l.data(), l.size())) {
+            ++lost;
+        }
+    }
+    return lost;
 }
 
 } // namespace cli

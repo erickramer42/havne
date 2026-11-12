@@ -1,0 +1,30 @@
+{
+  "havne_conditions": 1,
+  "name": "Example plugin",
+  "notes": "Synthetic: written for Havne's tests, resolved against plugins/example-sim's variants",
+  "conditions": [
+    {
+      "key": "oil_hot",
+      "name": "Oil hot",
+      "when": { "signal": ["key:oil_temp", "obd2.oil_temp"], "unit": "°C", "above": 130, "clear": 125 },
+      "for": 5,
+      "alert": { "level": "danger", "sound": true, "banner": true }
+    },
+    {
+      "key": "slipping",
+      "name": "Clutch slipping in gear",
+      "when": { "all": [
+        { "signal": ["key:clutch_slip"], "unit": "r/min", "above": 150 },
+        { "signal": ["key:gear"], "differs": 0 }
+      ] },
+      "for": 0.5,
+      "mark": true
+    },
+    {
+      "key": "boosted",
+      "name": "Boost",
+      "when": { "signal": ["key:boost"], "unit": "kPa", "above": 50 },
+      "record": { "before": 5, "after": 5 }
+    }
+  ]
+}

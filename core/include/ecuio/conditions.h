@@ -1,5 +1,7 @@
 // File/layer: core/include/ecuio/conditions.h | C ABI, public
-// Testing: UNIT: ConditionFileTest (test_signals); c_abi; FUZZ: fuzz_condition_file
+// Testing: UNIT: ConditionFileTest, ConditionEvalTest (test_signals),
+//          ConditionSessionTest, QueueTest (test_core); c_abi; FUZZ:
+//          fuzz_condition_file
 
 #ifndef ECUIO_CONDITIONS_H
 #define ECUIO_CONDITIONS_H
@@ -189,6 +191,12 @@ ecuio_status_t ecuio_condition_set_get_term(const ecuio_condition_set_t* set,
 #define ECUIO_CONDITION_WHY_NOT_A_NUMBER 4u /* a text or hex signal */
 #define ECUIO_CONDITION_WHY_ENUM_ORDER   5u /* above or below on an
                                                enumeration */
+#define ECUIO_CONDITION_WHY_NO_LINK      6u /* a link term, and the session
+                                               gives it no link state to
+                                               read */
+#define ECUIO_CONDITION_WHY_NO_CHECK     7u /* a check term, and the session
+                                               doesn't run that check on its
+                                               frames */
 
 /* How one condition's terms meet a set of signals */
 typedef struct ecuio_condition_binding {
@@ -221,15 +229,16 @@ typedef struct ecuio_condition_binding {
  * only) or a computed signal, in the term's unit. A link or a check
  * term binds to any set.
  *
- * signals is the set (ecuio_profile_lookup's, ecuio_signal_file_set's,
+ * signal_set is the set (ecuio_profile_lookup's, ecuio_signal_file_set's,
  * ecuio_session_signal_set's), or NULL for none, which provides no
- * signal. file is the signal file whose set signals is, or NULL.
+ * signal. file is the signal file whose set signal_set is, or NULL.
  * ECUIO_OK with *out filled; ECUIO_ERR_NULL_ARGUMENT for a NULL set or
  * out; ECUIO_ERR_INVALID_ARGUMENT for an index past the count or a file
- * whose set isn't signals (out untouched). */
+ * whose set isn't signal_set (out untouched). The parameter isn't named
+ * signals, which a Qt source defines as a macro. */
 ecuio_status_t ecuio_condition_set_resolve(const ecuio_condition_set_t* set,
                                            uint32_t index,
-                                           const ecuio_signal_set_t* signals,
+                                           const ecuio_signal_set_t* signal_set,
                                            const ecuio_signal_file_t* file,
                                            ecuio_condition_binding_t* out);
 
@@ -285,6 +294,146 @@ _Static_assert(offsetof(ecuio_condition_binding_t, why_term) == 4, "binding why_
 _Static_assert(offsetof(ecuio_condition_binding_t, reference) == 16, "binding reference offset is ABI");
 _Static_assert(offsetof(ecuio_condition_binding_t, signal_id) == 32, "binding signal_id offset is ABI");
 _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding reserved offset is ABI");
+#endif
+
+/* ---- Conditions in a session (ADR-0063 sections 2, 3 and 6) ----
+ * A set attached to a session is judged on its worker, frame by frame,
+ * on the frames' own time: a term keeps the truth of its newest sample,
+ * a sample older than the term's age bound can't be judged, and a
+ * condition whose terms can't be judged keeps its state and is STALE.
+ * A value that is no number (a NaN) is no sample; an infinity is one.
+ * Time never goes back: a frame stamped earlier than the one before it
+ * (two channels' frames can arrive a little out of order) is judged at
+ * that one's time.
+ * A hold's end and an age bound are settled by the next frame, at their
+ * own time, so the same frames give the same events however fast they
+ * are played. A bus that goes wholly quiet settles nothing until its
+ * next frame. */
+
+/* A condition's state (an event's and a state's). Values are
+ * append-only. */
+#define ECUIO_CONDITION_OFF 0u
+#define ECUIO_CONDITION_ON  1u
+
+/* An event's and a state's flags. Values are append-only. */
+#define ECUIO_CONDITION_STALE       0x1u /* an input is too old to judge:
+                                            the state is the one kept */
+#define ECUIO_CONDITION_FIRED       0x2u /* an event's alone: this change
+                                            is OFF to ON */
+#define ECUIO_CONDITION_UNAVAILABLE 0x4u /* a state's alone: never judged
+                                            on this session; why says why */
+
+/* Binds the set to the session's signals, as ecuio_condition_set_resolve
+ * does, and judges it from the next frame; a NULL set takes the
+ * conditions away. file is the signal file whose set the session
+ * decodes with, for key: references, or NULL. The session copies what it
+ * needs: the set may be freed once this returns. Before or after
+ * ecuio_session_start. Every state starts OFF and STALE, and each call
+ * that succeeds begins a new generation: 1 for a session's first, one
+ * more for each after it, a removal included.
+ *
+ * A link or a check term is not judged: its condition is unavailable
+ * (ECUIO_CONDITION_WHY_NO_LINK, _NO_CHECK).
+ *
+ * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session;
+ * ECUIO_ERR_SESSION_CLOSED after close; ECUIO_ERR_INVALID_ARGUMENT for a
+ * file whose set isn't the session's; ECUIO_ERR_IN_USE while a recorder
+ * is attached, since a recording holds one set for its whole length
+ * (ADR-0063 section 12's step 7 decides a change of set within one);
+ * ECUIO_ERR_OUT_OF_MEMORY. Nothing changes on a failure, and
+ * ecuio_last_error_detail() says why. */
+ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
+                                            const ecuio_condition_set_t* set,
+                                            const ecuio_signal_file_t* file);
+
+/* One change of a condition's state or of its STALE flag; changes at one
+ * time that one frame settles are one event. The first judgment after
+ * an attach is an event (OFF with STALE clear, or ON with FIRED), an
+ * attach itself is none. */
+typedef struct ecuio_condition_event {
+    uint64_t timestamp_us;   /* session time of the change: for a hold's
+                                end or an age bound, the deadline's own
+                                time, earlier than the frame that settled
+                                it */
+    uint32_t condition;      /* its index in the set attached */
+    uint32_t state;          /* ECUIO_CONDITION_OFF, _ON */
+    uint32_t flags;          /* ECUIO_CONDITION_STALE, _FIRED */
+    uint32_t term;           /* the term that settled it: the one whose
+                                sample changed the join, started the hold
+                                that ended, or passed its age bound */
+    double   value;          /* that term's newest sample */
+    uint32_t arbitration_id; /* 0 */
+    int32_t  code;           /* 0 */
+    uint32_t generation;     /* the attach it belongs to: an event of a
+                                set since replaced carries the old one */
+    uint32_t reserved0;      /* zero */
+    uint64_t reserved;       /* zero */
+} ecuio_condition_event_t;
+
+/* A frame's events, on the session's worker, under the frame callback's
+ * whole contract (core.h): after that frame's values callbacks, in one
+ * call, ordered by time and then by index. events is valid during the
+ * call. */
+typedef void (*ecuio_conditions_callback_t)(
+    const ecuio_condition_event_t* events, uint32_t count, void* user_data);
+
+ecuio_status_t ecuio_register_conditions_callback(
+    ecuio_session_t* session, ecuio_conditions_callback_t callback,
+    void* user_data);
+ecuio_status_t ecuio_unregister_conditions_callback(
+    ecuio_session_t* session, ecuio_conditions_callback_t callback,
+    void* user_data);
+
+typedef struct ecuio_condition_state {
+    uint32_t state;        /* ECUIO_CONDITION_OFF, _ON */
+    uint32_t flags;        /* ECUIO_CONDITION_STALE, _UNAVAILABLE */
+    uint64_t since_us;     /* session time of its last event; 0 before one */
+    uint64_t fired;        /* firings since the attach */
+    double   value;        /* the settling term's sample at its last event */
+    uint32_t why;          /* with _UNAVAILABLE: ECUIO_CONDITION_WHY_* */
+    uint32_t generation;   /* the attach these states belong to */
+    uint64_t reserved[2];  /* zero */
+} ecuio_condition_state_t;
+
+/* Every condition's state, in the set's order: *out_count is how many
+ * the set attached holds (0 with none), and the first capacity are
+ * copied. Any thread; readable after close, when the states are the
+ * last the session held. ECUIO_ERR_NULL_ARGUMENT for a NULL session or
+ * out_count, or a NULL out with a capacity. */
+ecuio_status_t ecuio_session_get_condition_states(
+    ecuio_session_t* session, ecuio_condition_state_t* out, uint32_t capacity,
+    uint32_t* out_count);
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_condition_event_t) == 56, "ecuio_condition_event_t size is ABI");
+static_assert(offsetof(ecuio_condition_event_t, condition) == 8, "event condition offset is ABI");
+static_assert(offsetof(ecuio_condition_event_t, flags) == 16, "event flags offset is ABI");
+static_assert(offsetof(ecuio_condition_event_t, value) == 24, "event value offset is ABI");
+static_assert(offsetof(ecuio_condition_event_t, arbitration_id) == 32, "event arbitration_id offset is ABI");
+static_assert(offsetof(ecuio_condition_event_t, generation) == 40, "event generation offset is ABI");
+static_assert(offsetof(ecuio_condition_event_t, reserved) == 48, "event reserved offset is ABI");
+static_assert(sizeof(ecuio_condition_state_t) == 56, "ecuio_condition_state_t size is ABI");
+static_assert(offsetof(ecuio_condition_state_t, since_us) == 8, "state since_us offset is ABI");
+static_assert(offsetof(ecuio_condition_state_t, fired) == 16, "state fired offset is ABI");
+static_assert(offsetof(ecuio_condition_state_t, value) == 24, "state value offset is ABI");
+static_assert(offsetof(ecuio_condition_state_t, why) == 32, "state why offset is ABI");
+static_assert(offsetof(ecuio_condition_state_t, generation) == 36, "state generation offset is ABI");
+static_assert(offsetof(ecuio_condition_state_t, reserved) == 40, "state reserved offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_condition_event_t) == 56, "ecuio_condition_event_t size is ABI");
+_Static_assert(offsetof(ecuio_condition_event_t, condition) == 8, "event condition offset is ABI");
+_Static_assert(offsetof(ecuio_condition_event_t, flags) == 16, "event flags offset is ABI");
+_Static_assert(offsetof(ecuio_condition_event_t, value) == 24, "event value offset is ABI");
+_Static_assert(offsetof(ecuio_condition_event_t, arbitration_id) == 32, "event arbitration_id offset is ABI");
+_Static_assert(offsetof(ecuio_condition_event_t, generation) == 40, "event generation offset is ABI");
+_Static_assert(offsetof(ecuio_condition_event_t, reserved) == 48, "event reserved offset is ABI");
+_Static_assert(sizeof(ecuio_condition_state_t) == 56, "ecuio_condition_state_t size is ABI");
+_Static_assert(offsetof(ecuio_condition_state_t, since_us) == 8, "state since_us offset is ABI");
+_Static_assert(offsetof(ecuio_condition_state_t, fired) == 16, "state fired offset is ABI");
+_Static_assert(offsetof(ecuio_condition_state_t, value) == 24, "state value offset is ABI");
+_Static_assert(offsetof(ecuio_condition_state_t, why) == 32, "state why offset is ABI");
+_Static_assert(offsetof(ecuio_condition_state_t, generation) == 36, "state generation offset is ABI");
+_Static_assert(offsetof(ecuio_condition_state_t, reserved) == 40, "state reserved offset is ABI");
 #endif
 
 #ifdef __cplusplus

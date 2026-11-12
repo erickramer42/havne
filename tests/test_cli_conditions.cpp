@@ -5,11 +5,13 @@
 // sets core's loader read.
 
 #include "condition_lines.h"
+#include "line_ring.h"
 
 #include <gtest/gtest.h>
 
 #include <ecuio/profile.h>
 
+#include <chrono>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -144,9 +146,25 @@ TEST(CliConditionTest, ChecksBadFormsAreUsage)
               "--profile takes one profile name");
     EXPECT_EQ(why_of({"a.json", "--profile", "obd2", "--profile", "mock"}),
               "--profile takes one profile name");
-    EXPECT_EQ(why_of({"a.json", "--signals", "s.json", "--profile", "obd2"}),
-              "conditions check takes --signals or --profile, not both");
-    EXPECT_EQ(why_of({"a.json", "--plugin", "p"}), "unexpected '--plugin'");
+    EXPECT_EQ(
+        why_of({"a.json", "--signals", "s.json", "--profile", "obd2"}),
+        "conditions check takes one of --signals, --profile and --plugin");
+    EXPECT_EQ(
+        why_of({"a.json", "--plugin", "p", "--profile", "obd2"}),
+        "conditions check takes one of --signals, --profile and --plugin");
+    EXPECT_EQ(
+        why_of({"a.json", "--plugin", "p", "--signals", "s.json"}),
+        "conditions check takes one of --signals, --profile and --plugin");
+    EXPECT_EQ(why_of({"a.json", "--plugin"}), "--plugin takes one package");
+    EXPECT_EQ(why_of({"a.json", "--plugin", "p", "--plugin", "q"}),
+              "--plugin takes one package");
+    EXPECT_EQ(why_of({"a.json", "--plugin", "p", "--variant"}),
+              "--variant takes one variant's id");
+    EXPECT_EQ(why_of({"a.json", "--variant", "base"}),
+              "--variant names a --plugin's variant");
+    EXPECT_EQ(why_of({"a.json", "--profile", "obd2", "--variant", "base"}),
+              "--variant names a --plugin's variant");
+    EXPECT_EQ(why_of({"a.json", "--package", "p"}), "unexpected '--package'");
     EXPECT_EQ(why_of({"--", "a.json"}), "unexpected '--'");
 }
 
@@ -287,7 +305,84 @@ TEST(CliConditionTest, EachWordIsTheFilesOwn)
                  "not_a_number");
     EXPECT_STREQ(cli::condition_why_word(ECUIO_CONDITION_WHY_ENUM_ORDER),
                  "enum_order");
+    EXPECT_STREQ(cli::condition_why_word(ECUIO_CONDITION_WHY_NO_LINK),
+                 "no_link");
+    EXPECT_STREQ(cli::condition_why_word(ECUIO_CONDITION_WHY_NO_CHECK),
+                 "no_check");
     EXPECT_STREQ(cli::condition_why_word(99), "unknown");
+}
+
+TEST(CliConditionTest, CheckTakesAPluginAndItsVariant)
+{
+    Args a({"c.json", "--plugin", "pkg", "--variant", "my2019"});
+    cli::ConditionsCheckArgs args;
+    std::string why;
+    ASSERT_TRUE(
+        cli::parse_conditions_check(a.argc(), a.argv.data(), &args, &why))
+        << why;
+    EXPECT_STREQ(args.plugin, "pkg");
+    EXPECT_STREQ(args.variant, "my2019");
+    EXPECT_EQ(args.signals, nullptr);
+    EXPECT_EQ(args.profile, nullptr);
+}
+
+TEST(CliConditionTest, TheStreamsLinesSayTheSetAndEachEvent)
+{
+    Loaded l(R"({"havne_conditions":1,"name":"Desk","conditions":[)"
+             R"({"key":"hot","name":"Hot","when":{"link":"timeout"},)"
+             R"("alert":{"level":"danger"},"mark":true},)"
+             R"({"key":"revs","name":"Revs","when":{"signal":["obd2.rpm"],)"
+             R"("unit":"RPM","above":1},"record":{}}]})");
+    ASSERT_NE(l.set, nullptr);
+    ecuio_condition_info_t infos[2] = {};
+    ASSERT_EQ(ecuio_condition_set_get(l.set, 0, &infos[0]), ECUIO_OK);
+    ASSERT_EQ(ecuio_condition_set_get(l.set, 1, &infos[1]), ECUIO_OK);
+    ecuio_condition_state_t states[2] = {};
+    states[0].flags = ECUIO_CONDITION_UNAVAILABLE;
+    states[0].why = ECUIO_CONDITION_WHY_NO_LINK;
+    states[1].flags = ECUIO_CONDITION_STALE;
+    std::vector<char> buf(cli::conditions_line_bytes("Desk", 2));
+    cli::Line line(buf.data(), buf.size());
+    cli::conditions_line(line, "Desk", 3, infos, states, 2);
+    EXPECT_FALSE(line.full());
+    EXPECT_EQ(std::string(line.data(), line.size()),
+              "{\"type\":\"conditions\",\"name\":\"Desk\",\"generation\":3,"
+              "\"conditions\":[{\"key\":\"hot\",\"alert\":\"danger\","
+              "\"record\":false,\"mark\":true,\"available\":false,"
+              "\"why\":\"no_link\"},{\"key\":\"revs\",\"alert\":null,"
+              "\"record\":true,\"mark\":false,\"available\":true,"
+              "\"why\":null}]}");
+    char small[512];
+    cli::Line none(small, sizeof small);
+    cli::conditions_line(none, "", 1, infos, states, 0);
+    EXPECT_EQ(std::string(none.data(), none.size()),
+              "{\"type\":\"conditions\",\"name\":null,\"generation\":1,"
+              "\"conditions\":[]}");
+
+    ecuio_condition_event_t e{};
+    e.timestamp_us = 12431000;
+    e.condition = 1;
+    e.state = ECUIO_CONDITION_ON;
+    e.flags = ECUIO_CONDITION_FIRED;
+    e.term = 2;
+    e.value = 112.5;
+    char one[cli::kConditionLineBytes];
+    cli::Line event(one, sizeof one);
+    cli::condition_event_line(event, e, "revs");
+    EXPECT_EQ(std::string(event.data(), event.size()),
+              "{\"type\":\"condition\",\"t_us\":12431000,\"key\":\"revs\","
+              "\"state\":\"on\",\"fired\":true,\"stale\":false,\"value\":112.5,"
+              "\"term\":2}");
+    e.state = ECUIO_CONDITION_OFF;
+    e.flags = ECUIO_CONDITION_STALE;
+    /* The longest key, every byte a character to escape, still fits */
+    const std::string key(ECUIO_CONDITION_KEY_MAX, '\x01');
+    cli::Line longest(one, sizeof one);
+    cli::condition_event_line(longest, e, key.c_str());
+    EXPECT_FALSE(longest.full());
+    EXPECT_NE(std::string(longest.data(), longest.size())
+                  .find("\"state\":\"off\",\"fired\":false,\"stale\":true"),
+              std::string::npos);
 }
 
 /* The longest line a file can ask for: four terms of eight references,
@@ -351,4 +446,78 @@ TEST(CliConditionTest, TheFullestConditionFitsItsLine)
         << line;
     EXPECT_NE(line.find("\"available\":true"), std::string::npos) << line;
     EXPECT_EQ(line.back(), '}');
+}
+
+/* A frame's events are each a line, or each counted: never neither */
+TEST(CliConditionTest, AFramesEventsAreWrittenOrCounted)
+{
+    ecuio_condition_event_t events[3] = {};
+    events[0].condition = 1;
+    events[0].state = ECUIO_CONDITION_ON;
+    events[0].flags = ECUIO_CONDITION_FIRED;
+    events[1].condition = 0;
+    events[2].condition = 1;
+    const std::vector<std::string> keys = {"hot", "revs"};
+    std::vector<std::string> lines;
+    int refuse = -1; /* the push to refuse, counted from 0 */
+    const auto push = [&lines, &refuse](const char* line, size_t n) {
+        if (static_cast<int>(lines.size()) == refuse) {
+            refuse = -2;
+            return false;
+        }
+        lines.emplace_back(line, n);
+        return true;
+    };
+    const auto keys_written = [&lines] {
+        std::string out;
+        for (const std::string& l : lines) {
+            const size_t at = l.find("\"key\":\"") + 7;
+            out += l.substr(at, l.find('"', at) - at) + " ";
+        }
+        lines.clear();
+        return out;
+    };
+
+    EXPECT_EQ(cli::write_condition_events(events, 3, keys, true, false, push),
+              0u);
+    EXPECT_EQ(keys_written(), "revs hot revs ");
+    /* The frame's own line was dropped: its events go with it, counted */
+    EXPECT_EQ(cli::write_condition_events(events, 3, keys, false, false, push),
+              3u);
+    EXPECT_EQ(keys_written(), "");
+    /* Past --count the stream has ended: nothing written, nothing lost */
+    EXPECT_EQ(cli::write_condition_events(events, 3, keys, false, true, push),
+              0u);
+    EXPECT_EQ(cli::write_condition_events(events, 3, keys, true, true, push),
+              0u);
+    EXPECT_EQ(keys_written(), "");
+    /* A line the ring has no room for */
+    refuse = 1;
+    EXPECT_EQ(cli::write_condition_events(events, 3, keys, true, false, push),
+              1u);
+    EXPECT_EQ(keys_written(), "revs revs ");
+    /* An event of a condition the stream has no key for */
+    events[1].condition = 2;
+    EXPECT_EQ(cli::write_condition_events(events, 3, keys, true, false, push),
+              1u);
+    EXPECT_EQ(keys_written(), "revs revs ");
+    EXPECT_EQ(cli::write_condition_events(events, 0, keys, false, false, push),
+              0u);
+}
+
+/* The ring counts a dropped frame and a dropped values line, and leaves
+ * a condition line's drop to its caller */
+TEST(CliConditionTest, TheRingLeavesAConditionLinesDropToItsCaller)
+{
+    cli::LineRing ring;
+    ASSERT_TRUE(ring.init(8));
+    const char line[] = "0123456789\n";
+    EXPECT_FALSE(ring.push(cli::LineKind::Condition, line, 11, false));
+    EXPECT_EQ(ring.dropped_frames(), 0u);
+    EXPECT_EQ(ring.dropped_values(), 0u);
+    EXPECT_FALSE(ring.push(cli::LineKind::Values, line, 11, false));
+    EXPECT_EQ(ring.dropped_values(), 1u);
+    char out[8];
+    EXPECT_EQ(ring.drain(out, std::chrono::milliseconds(0)), 0u)
+        << "no dropped line is owed for the condition line";
 }

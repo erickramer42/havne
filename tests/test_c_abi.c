@@ -205,6 +205,29 @@ typedef char abi_condition_binding_term_check[(offsetof(ecuio_condition_binding_
 typedef char abi_condition_binding_reference_check[(offsetof(ecuio_condition_binding_t, reference) == 16) ? 1 : -1];
 typedef char abi_condition_binding_signal_check[(offsetof(ecuio_condition_binding_t, signal_id) == 32) ? 1 : -1];
 typedef char abi_condition_binding_reserved_check[(offsetof(ecuio_condition_binding_t, reserved) == 48) ? 1 : -1];
+typedef char abi_condition_event_size_check[(sizeof(ecuio_condition_event_t) == 56) ? 1 : -1];
+typedef char abi_condition_event_condition_check[(offsetof(ecuio_condition_event_t, condition) == 8) ? 1 : -1];
+typedef char abi_condition_event_flags_check[(offsetof(ecuio_condition_event_t, flags) == 16) ? 1 : -1];
+typedef char abi_condition_event_value_check[(offsetof(ecuio_condition_event_t, value) == 24) ? 1 : -1];
+typedef char abi_condition_event_id_check[(offsetof(ecuio_condition_event_t, arbitration_id) == 32) ? 1 : -1];
+typedef char abi_condition_event_generation_check[(offsetof(ecuio_condition_event_t, generation) == 40) ? 1 : -1];
+typedef char abi_condition_event_reserved_check[(offsetof(ecuio_condition_event_t, reserved) == 48) ? 1 : -1];
+typedef char abi_condition_state_size_check[(sizeof(ecuio_condition_state_t) == 56) ? 1 : -1];
+typedef char abi_condition_state_since_check[(offsetof(ecuio_condition_state_t, since_us) == 8) ? 1 : -1];
+typedef char abi_condition_state_fired_check[(offsetof(ecuio_condition_state_t, fired) == 16) ? 1 : -1];
+typedef char abi_condition_state_value_check[(offsetof(ecuio_condition_state_t, value) == 24) ? 1 : -1];
+typedef char abi_condition_state_why_check[(offsetof(ecuio_condition_state_t, why) == 32) ? 1 : -1];
+typedef char abi_condition_state_generation_check[(offsetof(ecuio_condition_state_t, generation) == 36) ? 1 : -1];
+typedef char abi_condition_state_reserved_check[(offsetof(ecuio_condition_state_t, reserved) == 40) ? 1 : -1];
+
+/* A conditions callback as C writes one */
+static void no_conditions(const ecuio_condition_event_t* events, uint32_t count,
+                          void* user_data)
+{
+    (void)events;
+    (void)count;
+    (void)user_data;
+}
 
 /* A condition file read from C: a condition, its term and how it binds
  * to obd2, and each call's answer to a NULL */
@@ -266,6 +289,44 @@ static int conditions_from_c(void)
          binding.reference[0] == 1u &&
          binding.signal_id[0] == ECUIO_OBD2_SIG_RPM_ID &&
          ecuio_condition_set_get(set, 1, &info) == ECUIO_ERR_INVALID_ARGUMENT;
+    /* Attached to a session from C: its states before a frame, a queue of
+     * its events, and each call's answer to a NULL */
+    if (ok) {
+        ecuio_session_t* session = NULL;
+        ecuio_queue_t* queue = NULL;
+        ecuio_condition_state_t state;
+        ecuio_condition_event_t event;
+        uint32_t count = 99u;
+        uint64_t dropped = 99u;
+        ok = ecuio_session_create("mock://c?profile=obd2", &session) == ECUIO_OK &&
+             ecuio_queue_open(session, ECUIO_QUEUE_CONDITIONS, 4u, &queue) ==
+                 ECUIO_OK &&
+             ecuio_register_conditions_callback(session, no_conditions, NULL) ==
+                 ECUIO_OK &&
+             ecuio_session_set_conditions(session, set, NULL) == ECUIO_OK &&
+             ecuio_session_get_condition_states(session, &state, 1u, &count) ==
+                 ECUIO_OK &&
+             count == 1u && state.state == ECUIO_CONDITION_OFF &&
+             state.flags == ECUIO_CONDITION_STALE && state.generation == 1u &&
+             state.why == ECUIO_CONDITION_WHY_NONE &&
+             ecuio_queue_read_conditions(queue, &event, 1u, &count, &dropped,
+                                         0u) == ECUIO_OK &&
+             count == 0u && dropped == 0u &&
+             ecuio_unregister_conditions_callback(session, no_conditions,
+                                                  NULL) == ECUIO_OK &&
+             ecuio_session_set_conditions(NULL, set, NULL) ==
+                 ECUIO_ERR_NULL_ARGUMENT &&
+             ecuio_register_conditions_callback(NULL, no_conditions, NULL) ==
+                 ECUIO_ERR_NULL_ARGUMENT &&
+             ecuio_unregister_conditions_callback(NULL, no_conditions, NULL) ==
+                 ECUIO_ERR_NULL_ARGUMENT &&
+             ecuio_session_get_condition_states(NULL, &state, 1u, &count) ==
+                 ECUIO_ERR_NULL_ARGUMENT &&
+             ecuio_queue_read_conditions(NULL, &event, 1u, &count, &dropped,
+                                         0u) == ECUIO_ERR_NULL_ARGUMENT;
+        ecuio_queue_close(queue);
+        ecuio_session_destroy(session);
+    }
     ecuio_condition_set_free(set);
     return ok ? 0 : 1;
 }
