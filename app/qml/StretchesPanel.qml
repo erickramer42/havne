@@ -56,13 +56,9 @@ ColumnLayout {
             return Number(t)
         }
     }
-    function fieldOf(key) {
-        for (let i = 0; i < fieldRepeater.count; ++i) {
-            const item = fieldRepeater.itemAt(i)
-            if (item && item.key === key)
-                return item.field
-        }
-        return null
+    // The cell of the nth field, typed for what the Repeater hands back
+    function cellAt(i) {
+        return fieldRepeater.itemAt(i) as RuleCell
     }
     // The levels typed: a key each for the fields that hold a number; null
     // with the words set when one holds something else
@@ -70,7 +66,7 @@ ColumnLayout {
         const out = {}
         typedProblem = ""
         for (let i = 0; i < fieldRepeater.count; ++i) {
-            const item = fieldRepeater.itemAt(i)
+            const item = cellAt(i)
             const text = item.field.text.trim()
             if (text === "")
                 continue
@@ -91,20 +87,48 @@ ColumnLayout {
     // Every field back to its default, asked for at once
     function reset() {
         for (let i = 0; i < fieldRepeater.count; ++i)
-            fieldRepeater.itemAt(i).field.text = ""
+            cellAt(i).field.text = ""
         typedProblem = ""
         applyRequested({})
     }
     // The fields hold what is in force, each as it was typed
     function fill() {
         for (let i = 0; i < fieldRepeater.count; ++i) {
-            const item = fieldRepeater.itemAt(i)
+            const item = cellAt(i)
             const v = rules[item.key]
             item.field.text = v === undefined ? "" : String(v)
         }
         typedProblem = ""
     }
     onRulesChanged: fill()
+
+    // One level's caption and field
+    component RuleCell: ColumnLayout {
+        id: cell
+        required property var modelData
+        readonly property string key: modelData.key
+        readonly property string name: modelData.name
+        property alias field: input
+        implicitWidth: Theme.compact ? Math.floor((grid.width - Theme.spacing) / 2)
+                                     : Math.min(grid.width, 200)
+        spacing: 2
+        Label {
+            Layout.fillWidth: true
+            text: cell.modelData.name + " (" + cell.modelData.unit + ")"
+            color: Theme.textDim
+            font.pixelSize: Theme.fontCaption
+            elide: Text.ElideRight
+        }
+        ThemedTextField {
+            id: input
+            objectName: "rule_" + cell.key
+            Layout.fillWidth: true
+            placeholderText: panel.shown(panel.view.stretchDefaults[cell.key])
+            inputMethodHints: Qt.ImhFormattedNumbersOnly
+            Accessible.name: cell.modelData.name
+            onAccepted: panel.apply()
+        }
+    }
 
     RowLayout {
         spacing: Theme.spacing
@@ -181,32 +205,7 @@ ColumnLayout {
             Repeater {
                 id: fieldRepeater
                 model: panel.fields
-                delegate: ColumnLayout {
-                    id: cell
-                    required property var modelData
-                    readonly property string key: modelData.key
-                    readonly property string name: modelData.name
-                    property alias field: input
-                    width: Theme.compact ? Math.floor((grid.width - Theme.spacing) / 2)
-                                         : Math.min(grid.width, 200)
-                    spacing: 2
-                    Label {
-                        Layout.fillWidth: true
-                        text: cell.modelData.name + " (" + cell.modelData.unit + ")"
-                        color: Theme.textDim
-                        font.pixelSize: Theme.fontCaption
-                        elide: Text.ElideRight
-                    }
-                    ThemedTextField {
-                        id: input
-                        objectName: "rule_" + cell.key
-                        Layout.fillWidth: true
-                        placeholderText: panel.shown(panel.view.stretchDefaults[cell.key])
-                        inputMethodHints: Qt.ImhFormattedNumbersOnly
-                        Accessible.name: cell.modelData.name
-                        onAccepted: panel.apply()
-                    }
-                }
+                delegate: RuleCell {}
             }
         }
     }
