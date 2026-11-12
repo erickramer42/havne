@@ -13,6 +13,31 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- An OBD-II connection reads Boost, the intake manifold pressure minus the
+  barometric pressure, as the demo connection does, so a gauge for Boost
+  reads on either.
+- A signal file that extends OBD-II and gives a signal the name of one of
+  OBD-II's replaces it: the session shows the file's, with the same ID, so a
+  gauge or layout that named OBD-II's signal reads it. Two signals in one
+  file with the same name are refused, since a recording keeps its values by
+  name; a file with a repeated name needs one renamed. The OBDb import
+  numbers a repeated name (`Name 2`) and never takes an OBD-II signal's.
+- A log that picks a computed signal, such as Boost, asks the signals it is
+  computed from, and records only the pick.
+- `havne-cli log` writes the `session` line `stream` writes when a connection
+  asks for the extended session, so a log's output says which session each
+  module was read in.
+- Python reads each module's extended session as words
+  (`Session.session_state()`), and looks up a VIN's decode and a trouble
+  code's title offline (`havne.decode_vin`, `havne.dtc_title`), as
+  `havne-cli vin` and `dtc` do.
+- `havne-cli view --span A:B` writes each shown signal's statistics over a
+  span (`stats` lines: samples, first, last, lowest, highest, mean), and
+  `--stretches` lists a recording's pulls and cruises with the signals each
+  was found from (`--role` and `--stretch-level` set them). Python's
+  `Recording` has `stats`, `step`, `role_signal` and `stretches`, and the C
+  API adds `ecuio_recording_stats`, `ecuio_recording_step`,
+  `ecuio_recording_stretches` and `ecuio_recording_role_signal`.
 - Dashboard: change a gauge's kind in its panel (**Change kind**, beside
   Change signal); its signal, range and zones stay, and changing back
   restores the old kind's own settings.
@@ -82,6 +107,10 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Changed
 
+- The Light look sets the Light color scheme on Linux too, where the platform
+  theme takes the request; the window's frame keeps the desktop's colors.
+- A recording opens in the viewer with at most four signals plotted: the
+  lowest ranks, else the first in the recording's order.
 - The Demo data row on Home's and Dash's lists and the `mock://demo` button
   are there for everyone, not only in Developer mode, which now gates the
   frame rate, the viewer's frame test, Export's raw frames and the adapter
@@ -128,6 +157,17 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Fixed
 
+- A Dashboard cell with no value says why, and its title and the undo line
+  keep their place; a cell made under OBD-II reads under the demo connection
+  too.
+- On a phone with no session, the empty-page note no longer draws over the
+  connect list.
+- Settings' Log summary no longer shows the screen's display lines.
+- An import that couldn't start says so.
+- With two cursors, the chart's value labels follow the readout's earlier
+  cursor.
+- An export interval that gives no fewer rows than every sweep says so in
+  place of a size.
 - Importing a CSV whose fields are padded with a space after each comma, as
   many tuner logs are, keeps a mostly empty number column (an event counter)
   as numbers instead of losing it from the wide export; the spaces around an
@@ -165,24 +205,6 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
-- An OBD-II connection reads Boost, the intake manifold pressure minus the
-  barometric pressure, as the demo connection does, so a gauge for Boost
-  reads on either.
-- A signal file that extends OBD-II and gives a signal the name of one of
-  OBD-II's replaces it: the session shows the file's, with the same ID, so a
-  gauge or layout that named OBD-II's signal reads it. Two signals in one
-  file with the same name are refused, since a recording keeps its values by
-  name; a file with a repeated name needs one renamed. The OBDb import
-  numbers a repeated name (`Name 2`) and never takes an OBD-II signal's.
-- A log that picks a computed signal, such as Boost, asks the signals it is
-  computed from, and records only the pick.
-- `havne-cli log` writes the `session` line `stream` writes when a connection
-  asks for the extended session, so a log's output says which session each
-  module was read in.
-- Python reads each module's extended session as words
-  (`Session.session_state()`), and looks up a VIN's decode and a trouble
-  code's title offline (`havne.decode_vin`, `havne.dtc_title`), as
-  `havne-cli vin` and `dtc` do.
 - The Recordings viewer's Export panel has a Cancel button while an export runs:
   it stops at once and leaves nothing half written.
 - A Light look, dark text on white for reading the screen in sun, chosen
