@@ -44,7 +44,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 </thead>
 <tbody>
 <tr>
-<td><a href="docs/images/phone-drive-view.png"><img src="docs/images/phone-drive-view.png" alt="The phone layout's drive view: every bar hidden, the gauges filling the screen in a pull at 6,510 rpm" width="240"></a></td>
+<td><a href="docs/images/phone-drive-view.png"><img src="docs/images/phone-drive-view.png" alt="The phone layout's drive view: every bar hidden, the gauges filling the screen in a pull at 6,044 rpm, boost 16.0 psi" width="240"></a></td>
 <td><a href="docs/images/phone-codes.png"><img src="docs/images/phone-codes.png" alt="Codes on the test phone: the inspection verdict, the check-engine light, and stored, pending and permanent codes with their titles" width="240"></a></td>
 <td><a href="docs/images/phone-dashboard-night.png"><img src="docs/images/phone-dashboard-night.png" alt="The phone layout's Dashboard with Night on in red" width="240"></a></td>
 </tr>
@@ -56,9 +56,9 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 </tbody>
 </table>
 
-![Live on the desktop: rpm, speed, MAF and lambda through a 3rd-gear pull onto the limiter](docs/images/live.png)
+![The Recordings viewer on a log of a pull: rpm, throttle, lambda and boost in a pane each, the cursor at peak boost reading 4,992 rpm, lambda 0.82 and 16.7 psi](docs/images/viewer.png)
 
-*Live on the desktop: a 3rd-gear pull onto the limiter, lambda swinging lean on each fuel cut.*
+*A pull in the Recordings viewer: each unit in its own pane on one time axis, the cursor's values beside them, lambda going lean on the limiter's fuel cut.*
 
 Every page on the desktop and the phone, in Dark and in Night's amber and red: [docs/screenshots.md](docs/screenshots.md).
 

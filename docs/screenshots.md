@@ -60,6 +60,12 @@ readiness monitors, each done this drive and complete since the clear.*
 *A recording in the viewer: rpm and speed through the first loop's
 pulls, coolant and oil warming from the cold start.*
 
+![The viewer on a pull, maximized: rpm, throttle, lambda and boost in a pane each, the cursor at peak boost at 18.4 s](images/viewer.png)
+
+*One pull, the chart maximized: from before the throttle opens through
+the limiter, with the cursor at peak boost (16.7 psi, lambda 0.82, rpm
+climbing).*
+
 ### Link health
 
 ![Live over the fake J2534 driver with every request refused: the "Requests failing" status and banner, and the chart waiting for data](images/desktop-link-health.png)
@@ -80,20 +86,20 @@ pulls, coolant and oil warming from the cold start.*
 
 | Dark | Night, amber | Night, red |
 |---|---|---|
-| [![The phone layout's Dashboard in a pull at 6,762 rpm](images/phone-dashboard-dark.png)](images/phone-dashboard-dark.png) | [![The phone layout's Dashboard in Night's amber style at 6,609 rpm](images/phone-dashboard-amber.png)](images/phone-dashboard-amber.png) | [![The phone layout's Dashboard in Night's red style at 6,568 rpm](images/phone-dashboard-night.png)](images/phone-dashboard-night.png) |
+| [![The phone layout's Dashboard in a pull at 6,335 rpm, boost 15.7 psi](images/phone-dashboard-dark.png)](images/phone-dashboard-dark.png) | [![The phone layout's Dashboard in Night's amber style at 6,863 rpm, boost 9.0 psi](images/phone-dashboard-amber.png)](images/phone-dashboard-amber.png) | [![The phone layout's Dashboard in Night's red style at 6,252 rpm, boost 15.8 psi](images/phone-dashboard-night.png)](images/phone-dashboard-night.png) |
 
 *The phone's joined panel: the tach beside speed, coolant and oil, MAF
 and boost with their traces, then intake air, battery and lambda.*
 
 ### Dashboard in Light
 
-<a href="images/phone-dashboard-light.png"><img src="images/phone-dashboard-light.png" alt="The phone layout's Dashboard in the Light look at 6,517 rpm" width="240"></a>
+<a href="images/phone-dashboard-light.png"><img src="images/phone-dashboard-light.png" alt="The phone layout's Dashboard in the Light look at 6,278 rpm, boost 15.7 psi" width="240"></a>
 
 *Light: dark text on white, for the sun (Settings, Display, Look).*
 
 ### Drive view
 
-<a href="images/phone-drive-view.png"><img src="images/phone-drive-view.png" alt="The phone layout's drive view: every bar hidden, the gauges filling the screen in a pull at 6,510 rpm" width="240"></a>
+<a href="images/phone-drive-view.png"><img src="images/phone-drive-view.png" alt="The phone layout's drive view: every bar hidden, the gauges filling the screen in a pull at 6,044 rpm, boost 16.0 psi" width="240"></a>
 
 *The drive view: the status line alone at the top and the panel filling
 the screen; a tap raises the controls from the bottom with the tab bar.*
