@@ -282,11 +282,13 @@ QList<QStringList> splitRecords(const QByteArray& bytes, char delimiter,
             quoted = true;
             wasQuoted = true;
             any = true;
-        } else if (wasQuoted && isPadding(c)) {
-            any = true; // padding after the closing quote
         } else if (c == delimiter) {
+            // Before the padding test, as core's reader has it: a tab
+            // delimiter after a closing quote ends the cell
             endCell();
             any = true;
+        } else if (wasQuoted && isPadding(c)) {
+            any = true; // padding after the closing quote
         } else if (c == '\n') {
             endRecord();
         } else if (c != '\r') {

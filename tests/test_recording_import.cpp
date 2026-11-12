@@ -594,6 +594,29 @@ TEST(BridgeTest, ImportShowsPaddedCellsAsTheImportReadsThem)
               (QStringList{QString(), QString(), QString()}));
 }
 
+/* A tab delimiter right after a closing quote ends the cell, as core's
+ * reader has it: the preview doesn't merge the cells around it */
+TEST(BridgeTest, ImportShowsATabAfterAQuotedCellAsTheEndOfIt)
+{
+    QTemporaryDir dir;
+    RecordingImport im([] { return QString(); });
+    const QVariantMap g = guessed(
+        im, fileUrl(write(dir, "tabbed.tsv",
+                          "Time\tMode\tLoad\n"
+                          "0\t\"OL\"\t30\n"
+                          "250\t\"CL\"\t40\n"
+                          "500\t\"OL\" \t50\n")));
+    ASSERT_TRUE(ok({g}))
+        << g.value(QStringLiteral("words")).toString().toStdString();
+    ASSERT_EQ(g.value(QStringLiteral("columns")).toList().size(), 3);
+    EXPECT_EQ(column(g, 1).value(QStringLiteral("samples")).toStringList(),
+              (QStringList{QStringLiteral("OL"), QStringLiteral("CL"),
+                           QStringLiteral("OL")}));
+    EXPECT_EQ(column(g, 2).value(QStringLiteral("samples")).toStringList(),
+              (QStringList{QStringLiteral("30"), QStringLiteral("40"),
+                           QStringLiteral("50")}));
+}
+
 /* A left-out column can be put back unless its header can't name it: an
  * empty header, or one the file has twice (core refuses a map naming it) */
 TEST(BridgeTest, ImportGuessPutsBackOnlyAColumnAMapCanName)
