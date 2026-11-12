@@ -1750,24 +1750,76 @@ TEST(BridgeTest, FrameLogOrdersByArrivalNotTimestamp)
     bridge.disconnectSession();
 }
 
-TEST(BridgeTest, AFrameRowsTimeIsReadByItsViewRow)
+/* A table keeps its place by a row's arrival number, which a stamp that
+ * steps back (a vendor's 32-bit stamp wrapping) leaves in order: each row is
+ * found again by its own, in either order and under a filter, and one that
+ * has gone or is filtered out gives the next row in the view's order. */
+TEST(BridgeTest, AFrameRowIsFoundAgainByItsArrivalAcrossAStampThatStepsBack)
 {
     SessionBridge bridge;
     FrameListModel* proxy = bridge.model();
-    EXPECT_EQ(proxy->timestampAt(0), -1) << "no rows";
-    for (quint64 t : {100u, 200u, 300u}) {
+    EXPECT_EQ(proxy->seqAt(0), -1) << "no rows";
+    EXPECT_EQ(proxy->rowAtSeq(0), -1) << "no rows";
+    // The stamp wraps after the fourth frame; the IDs alternate
+    const quint64 stamps[] = {4000, 5000, 6000, 7000, 100, 200, 300, 400};
+    const int n = static_cast<int>(std::size(stamps));
+    for (int k = 0; k < n; ++k) {
         ecuio_frame_t f{};
-        f.timestamp_us = t;
+        f.timestamp_us = stamps[k];
+        f.arbitration_id = k % 2 == 0 ? 0x123 : 0x124;
+        f.data_length = 1;
+        proxy->appendFrame(f, 1);
+    }
+    ASSERT_EQ(proxy->count(), n);
+    for (const bool newestFirst : {true, false}) {
+        proxy->setNewestFirst(newestFirst);
+        for (int row = 0; row < n; ++row) {
+            // Rows are in arrival order: the kth frame's number is k
+            const int k = newestFirst ? n - 1 - row : row;
+            EXPECT_EQ(proxy->seqAt(row), k) << "row " << row;
+            EXPECT_EQ(proxy->rowAtSeq(k), row) << "row " << row;
+        }
+        EXPECT_EQ(proxy->seqAt(-1), -1);
+        EXPECT_EQ(proxy->seqAt(n), -1);
+        EXPECT_EQ(proxy->rowAtSeq(n + 5), newestFirst ? 0 : n - 1)
+            << "past them all: the newest row";
+    }
+
+    // Only 0x124's frames (arrivals 1, 3, 5, 7): one the filter leaves out
+    // gives the next shown row in the view's order
+    ASSERT_TRUE(proxy->setFilter(QStringLiteral("124"), QString(), 0, 0)
+                    .value(QStringLiteral("ids"))
+                    .toString()
+                    .isEmpty());
+    ASSERT_EQ(proxy->count(), 4);
+    proxy->setNewestFirst(false);
+    EXPECT_EQ(proxy->rowAtSeq(5), 2) << "a shown arrival is its own row";
+    EXPECT_EQ(proxy->rowAtSeq(4), 2)
+        << "oldest first: the first to arrive after";
+    EXPECT_EQ(proxy->rowAtSeq(0), 0);
+    EXPECT_EQ(proxy->rowAtSeq(8), 3) << "past them all: the last row";
+    proxy->setNewestFirst(true);
+    EXPECT_EQ(proxy->rowAtSeq(5), 1) << "a shown arrival is its own row";
+    EXPECT_EQ(proxy->rowAtSeq(4), 2)
+        << "newest first: the last to arrive before";
+    EXPECT_EQ(proxy->rowAtSeq(0), 3) << "none arrived before: the last row";
+    EXPECT_EQ(proxy->rowAtSeq(8), 0);
+    proxy->setFilter(QString(), QString(), 0, 0);
+
+    // The arrival numbers run on across a clear, so a place noted before it
+    // is before every row: the oldest one
+    proxy->clear();
+    for (int k = 0; k < 3; ++k) {
+        ecuio_frame_t f{};
+        f.timestamp_us = 50;
         f.arbitration_id = 0x123;
         f.data_length = 1;
         proxy->appendFrame(f, 1);
     }
-    EXPECT_EQ(proxy->timestampAt(0), 300) << "newest first";
-    EXPECT_EQ(proxy->timestampAt(2), 100);
+    EXPECT_EQ(proxy->seqAt(2), n) << "newest first: the oldest row is last";
+    EXPECT_EQ(proxy->rowAtSeq(3), 2);
     proxy->setNewestFirst(false);
-    EXPECT_EQ(proxy->timestampAt(0), 100) << "oldest first";
-    EXPECT_EQ(proxy->timestampAt(-1), -1);
-    EXPECT_EQ(proxy->timestampAt(3), -1);
+    EXPECT_EQ(proxy->rowAtSeq(3), 0);
 }
 
 TEST(BridgeTest, FrameLogOrdersNewestFirstByDefault)
