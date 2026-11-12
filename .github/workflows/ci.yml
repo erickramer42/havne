@@ -335,18 +335,14 @@ jobs:
           clang-tidy --version
           & "$env:ProgramFiles\Git\bin\bash.exe" scripts/tidy.sh --qt ($env:QT_PREFIX -replace '\\', '/') build-tidy
 
-  # The Visual Studio generator is what release.yml builds with, but win-build
-  # and win-coverage use Ninja (a compiler cache needs it). This keeps the
-  # generator, the multi-config layout and /Zi in CI at a minute or two:
-  # core, the shared library, the surrogate and test_core, no Qt.
-  win-vs-generator:
-    if: ${{ !inputs.smoke_only }}
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+      # The Visual Studio generator is what release.yml builds with, but
+      # win-build and win-coverage use Ninja (a compiler cache needs it).
+      # This keeps the generator, the multi-config layout and /Zi in CI at
+      # a minute or two: core, the shared library, the surrogate and
+      # test_core, no Qt. One shard runs it, after its tidy step whatever
+      # that did, so one red doesn't hide the other.
       - name: Configure and build with the Visual Studio generator
+        if: ${{ (success() || failure()) && matrix.shard == '2/3' }}
         run: |
           cmake -B build-vs -DHAVNE_BUILD_CORE_ONLY=ON
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -354,6 +350,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Run CoreTest (test_core)
+        if: ${{ (success() || failure()) && matrix.shard == '2/3' }}
         run: ctest --test-dir build-vs -C Release --output-on-failure --no-tests=error -R "^CoreTest\."
 
   win-build:
@@ -597,7 +594,7 @@ jobs:
           New-ItemProperty -Path "$root\Havne relative" -Name FUNCTIONLIBRARY -Value 'fake_j2534.dll' -PropertyType String -Force | Out-Null
 
       # The coverage tree is a Ninja tree under sccache (the Visual Studio
-      # generator ignores a launcher; win-vs-generator keeps that one built),
+      # generator ignores a launcher; clang-tidy (2/3) keeps that one built),
       # so it runs from a Developer shell. The objects are /Od and /Z7, a key
       # of their own; the gtest runner saves them on dev and main.
       - name: Install sccache
