@@ -1,0 +1,12 @@
+{
+  "havne_column_map": 1,
+  "header_row": 1,
+  "delimiter": ",",
+  "decimal": ".",
+  "time": {"column": "Time (ms)", "unit": "ms"},
+  "signals": [
+    {"column": " Engine speed (rpm)", "name": "Engine speed", "unit": "rpm", "kind": "number", "decimals": 0},
+    {"column": " Widget pressure (kPa)", "name": "Widget pressure", "unit": "kPa", "kind": "number", "decimals": 1},
+    {"column": " Gizmo state", "name": "Gizmo state", "kind": "text"}
+  ]
+}

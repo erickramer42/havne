@@ -873,7 +873,8 @@ ecuio_import_report_t._fields_ = [
     ('duration_us', c_uint64),
     ('values', c_uint64),
     ('columns_ignored', c_uint64),
-    ('reserved', (c_uint64 * 2)),
+    ('rows_no_time', c_uint64),
+    ('reserved', (c_uint64 * 1)),
 ]
 ecuio_inspection_t._fields_ = [
     ('verdict', c_uint8),

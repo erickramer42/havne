@@ -389,10 +389,10 @@ uint64_t ecuio_recording_test_table_bytes(const ecuio_recording_t* r);
 uint64_t ecuio_recording_test_cache_bytes(const ecuio_recording_t* r);
 void ecuio_recording_test_set_cache_limit(ecuio_recording_t* r, uint64_t bytes);
 
-/* Test-only (ADR-0054 section 4), never in recording.h: the candump
- * import calls hook(user) after its first pass and before its second, so
- * a test changes the log between them; NULL takes it away. One for the
- * process. */
+/* Test-only (ADR-0054 sections 4 and 5), never in recording.h: an import,
+ * a candump log's or a CSV's, calls hook(user) after its first pass and
+ * before its second, so a test changes the file between them; NULL takes
+ * it away. One for the process. */
 void ecuio_import_test_between_passes(void (*hook)(void* user), void* user);
 
 #ifdef __cplusplus

@@ -61,8 +61,10 @@ struct keeping_sink {
 bool same(const csv::outcome& a, const csv::outcome& b)
 {
     return a.lines == b.lines && a.rows == b.rows && a.values == b.values &&
-           a.ignored == b.ignored && a.has_utc == b.has_utc &&
-           a.utc_start_us == b.utc_start_us && a.duration_us == b.duration_us;
+           a.rows_no_time == b.rows_no_time &&
+           a.first_no_time == b.first_no_time && a.ignored == b.ignored &&
+           a.has_utc == b.has_utc && a.utc_start_us == b.utc_start_us &&
+           a.duration_us == b.duration_us;
 }
 
 /* A map's text read, aborting on a map read that breaks its bounds */
@@ -111,6 +113,14 @@ void import(const csv::column_map& m, const unsigned char* body, size_t body_n)
     }
     if (o1.values != k1.samples.size() ||
         (!o1.has_utc && o1.utc_start_us != 0)) {
+        abort();
+    }
+    /* A row left out for no time is a row read, named by a line below the
+     * header's, and an import that passes kept one row or more */
+    if (o1.rows_no_time >= o1.rows ||
+        (o1.rows_no_time == 0) != (o1.first_no_time == 0) ||
+        (o1.first_no_time != 0 &&
+         (o1.first_no_time <= m.header_row || o1.first_no_time > o1.lines))) {
         abort();
     }
     uint64_t prev = 0;

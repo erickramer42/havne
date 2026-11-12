@@ -1250,7 +1250,9 @@ typedef struct ecuio_import_report {
     uint64_t values;          /* CSV: the samples written */
     uint64_t columns_ignored; /* CSV: the header's columns the map
                                  doesn't name */
-    uint64_t reserved[2];     /* zero; ABI growth space */
+    uint64_t rows_no_time;    /* CSV: the rows left out for an empty time
+                                 cell */
+    uint64_t reserved[1];     /* zero; ABI growth space */
 } ecuio_import_report_t;
 
 #if defined(__cplusplus)
@@ -1258,10 +1260,14 @@ static_assert(sizeof(ecuio_import_report_t) == 80,
               "ecuio_import_report_t size is ABI");
 static_assert(offsetof(ecuio_import_report_t, values) == 48,
               "ecuio_import_report_t layout is ABI");
+static_assert(offsetof(ecuio_import_report_t, rows_no_time) == 64,
+              "ecuio_import_report_t layout is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_import_report_t) == 80,
                "ecuio_import_report_t size is ABI");
 _Static_assert(offsetof(ecuio_import_report_t, values) == 48,
+               "ecuio_import_report_t layout is ABI");
+_Static_assert(offsetof(ecuio_import_report_t, rows_no_time) == 64,
                "ecuio_import_report_t layout is ABI");
 #endif
 
@@ -1288,7 +1294,9 @@ _Static_assert(offsetof(ecuio_import_report_t, values) == 48,
  * lines are the map's, its utc line the map's start or the file's first
  * time (none for a relative time with no start); no frames.csv. A row up
  * to 100 ms before the one before it takes that one's time; further back
- * is refused. report may be NULL.
+ * is refused. A row whose time cell is empty is left out whole, counted in
+ * report->rows_no_time and named in an events.log import line; a file
+ * where no row has a time is refused. report may be NULL.
  *
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL options or path;
  * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, a flag or reserved

@@ -610,10 +610,18 @@ Page {
         if (importKind === RecordingImport.Candump)
             return qsTr("Imported %1 frames over %2 s")
                        .arg(result.frames).arg((result.durationUs / 1e6).toFixed(1))
-        return result.columnsIgnored > 0
-               ? qsTr("Imported %1 values; columns ignored: %2")
-                     .arg(result.values).arg(result.columnsIgnored)
-               : qsTr("Imported %1 values").arg(result.values)
+        const words = result.columnsIgnored > 0
+                      ? qsTr("Imported %1 values; columns ignored: %2")
+                            .arg(result.values).arg(result.columnsIgnored)
+                      : qsTr("Imported %1 values").arg(result.values)
+        if (!(result.rowsNoTime > 0))
+            return words
+        // A row with no time has nowhere to go: core leaves it out, counted.
+        // havne-cli's words; after a count of columns a comma would read as its
+        const left = result.rowsNoTime === 1
+                     ? qsTr("1 row with no time left out")
+                     : qsTr("%1 rows with no time left out").arg(result.rowsNoTime)
+        return words + (result.columnsIgnored > 0 ? "; " : ", ") + left
     }
 
     function checkBaseline() {
