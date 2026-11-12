@@ -1149,16 +1149,26 @@ ecuio_status_t ecuio_recording::scan_frames(FILE* f, const index_entry& e,
         for (uint32_t k = 0; k < n; ++k) {
             const ecuio_value_t& v = scan.decoder.values[k];
             const auto it = def_of_id.find(v.signal_id);
-            const uint32_t signal =
-                it != def_of_id.end() ? def_signal[it->second] : UINT32_MAX;
-            if (signal == UINT32_MAX) {
-                return ECUIO_ERR_RECORDING_CHANGED; /* none at the open */
+            if (it == def_of_id.end()) {
+                return ECUIO_ERR_RECORDING_CHANGED;
             }
+            const ecuio_signal_def_t& d = frame_set->set.defs[it->second];
             value.clear();
-            if (signals[signal].text()) {
+            if (d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX) {
                 value.assign(v.text, v.text_len);
             } else {
+                /* As the open judged it: not finite is no sample, so a def
+                 * with no other value has no signal and isn't a change */
+                double x = 0.0;
                 rows::append_value(value, v.value);
+                if (!rows::parse_number(value.data(), value.size(), &x) ||
+                    !std::isfinite(x)) {
+                    continue;
+                }
+            }
+            const uint32_t signal = def_signal[it->second];
+            if (signal == UINT32_MAX) {
+                return ECUIO_ERR_RECORDING_CHANGED; /* none at the open */
             }
             fn(signal, r.host_us, value, lines.line_start());
         }
@@ -1263,7 +1273,7 @@ ecuio_recording::rows_of(FILE*& f, file_ptr& owner, const index_entry& e,
             double v = 0.0;
             if (!signals[signal].text() &&
                 !rows::parse_number(value.data(), value.size(), &v)) {
-                /* a frames open dropped a number that isn't finite too */
+                /* signals.csv's row lost its number: the file changed */
                 bad = !from_frames;
                 return;
             }
