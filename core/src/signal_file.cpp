@@ -366,6 +366,7 @@ struct entry {
     uint16_t id = 0;    /* its def's id: the base def's it replaces, else
                            ECUIO_USER_SIG_ID_BASE + its place in the list */
     std::string name;   /* its "name" when that is text, else "" */
+    bool replaces = false; /* it stands in a base def's place */
 };
 
 /* The expression compiler (ADR-0051 section 2): + - * /, parentheses,
@@ -1063,6 +1064,7 @@ void build(const parts& in, ecuio_signal_file& f)
                 kept.push_back(d);
             } else {
                 entries[by - entries.data()].id = d.id;
+                entries[by - entries.data()].replaces = true;
             }
         }
         f.computed.clear();
@@ -1203,6 +1205,27 @@ void build(const parts& in, ecuio_signal_file& f)
         f.keys.emplace_back(e.key, e.def);
     }
 
+    /* A replacement keeps the base def's ID, so a computed signal reading
+     * that ID (obd2's Boost reads MAP and baro) reads the file's def */
+    for (const ecuio_signal_def_t& d : f.defs) {
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
+            continue;
+        }
+        const ecuio_computed_t& p = f.computed[d.table_first];
+        for (uint32_t k = 0; k < p.input_count && k < ECUIO_COMPUTED_MAX_INPUTS;
+             ++k) {
+            for (const entry& e : entries) {
+                if (e.replaces && e.id == p.input_ids[k] &&
+                    e.kind != "number" && e.kind != "enum") {
+                    refuse(*e.v, "signal " + q(e.key) + " replaces " +
+                                     q(e.name) + ", which " + q(d.name) +
+                                     " reads: a signal a computed one reads is "
+                                     "a number or an enum");
+                }
+            }
+        }
+    }
+
     f.set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     f.set.count = static_cast<uint32_t>(f.defs.size());
     f.set.defs = f.defs.data();
@@ -1219,9 +1242,10 @@ void build(const parts& in, ecuio_signal_file& f)
     if (ecuio_validate_signal_set(&f.set, &why) != ECUIO_VALIDATE_OK) {
         const size_t first = first_own;
         /* Only these codes' index is a def's */
-        const bool names_a_def = why.code > 0 ||
-                                 why.code == ECUIO_VALIDATE_ERR_DUPLICATE_ID ||
-                                 why.code == ECUIO_VALIDATE_ERR_TABLE_RANGE;
+        const bool names_a_def =
+            why.code > 0 || why.code == ECUIO_VALIDATE_ERR_DUPLICATE_ID ||
+            why.code == ECUIO_VALIDATE_ERR_DUPLICATE_NAME ||
+            why.code == ECUIO_VALIDATE_ERR_TABLE_RANGE;
         if (names_a_def && why.index != UINT32_MAX && why.index >= first &&
             why.index - first < entries.size()) {
             refuse(*entries[why.index - first].v,

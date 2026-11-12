@@ -190,6 +190,7 @@ TEST(BridgeTest, ImportMakesARecordingOfACsvThroughItsMap)
     EXPECT_EQ(i.result.value(QStringLiteral("columnsIgnored")).toDouble(), 1.0)
         << "Note";
     EXPECT_EQ(i.result.value(QStringLiteral("frames")).toDouble(), 0.0);
+    EXPECT_EQ(i.result.value(QStringLiteral("rowsNoTime")).toDouble(), 0.0);
     const QStringList made = entries(root);
     ASSERT_EQ(made.size(), 1);
     const QRegularExpressionMatch m = kStamped.match(made[0]);
@@ -200,6 +201,25 @@ TEST(BridgeTest, ImportMakesARecordingOfACsvThroughItsMap)
     EXPECT_EQ(entries(root + QLatin1Char('/') + made[0]),
               (QStringList{QStringLiteral("events.log"),
                            QStringLiteral("signals.csv")}));
+}
+
+/* A CSV's rows with no time are left out by core: the result says how many */
+TEST(BridgeTest, ImportCountsACsvsRowsWithNoTime)
+{
+    QTemporaryDir dir;
+    const QString root = dir.filePath(QStringLiteral("recordings"));
+    RecordingImport im([root] { return root; });
+    const QString map = write(
+        dir, "map.json",
+        R"({"havne_column_map": 1, "time": {"column": "time", "unit": "ms"},
+            "signals": [{"column": "rpm", "name": "RPM"}]})");
+    const Imported i = import(
+        im,
+        fileUrl(write(dir, "log.csv", "time,rpm\n0,800\n,850\n500,900\n , \n")),
+        RecordingImport::Csv, fileUrl(map));
+    ASSERT_TRUE(ok(i)) << words(i).toStdString();
+    EXPECT_EQ(i.result.value(QStringLiteral("rowsNoTime")).toDouble(), 2.0);
+    EXPECT_EQ(i.result.value(QStringLiteral("values")).toDouble(), 2.0);
 }
 
 /* A candump log of one bus takes it; one of several is refused in core's

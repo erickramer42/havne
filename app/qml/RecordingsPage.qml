@@ -366,25 +366,33 @@ Page {
         // The list it heads. A ListView keeps its contentY when its header's
         // height changes, so a head that grows at the list's start would
         // slide under the list's top: the list goes back to its start then,
-        // unless it was scrolled on
+        // unless it was scrolled on. While a change waits for that, a contentY
+        // within the head's height of the origin is the change's, not a scroll
         property ListView list: null
         property bool listAtStart: true
+        property bool settling: false
         visible: root.pinnedViewer
         height: visible ? implicitHeight + 10 : 0
         spacing: 10
+        function settle() {
+            head.settling = true
+            Qt.callLater(head.toStart)
+        }
         function toStart() {
+            head.settling = false
             if (head.visible && head.list !== null && head.list.visible && head.listAtStart)
                 head.list.positionViewAtBeginning()
         }
-        onHeightChanged: Qt.callLater(head.toStart)
+        onHeightChanged: head.settle()
         Connections {
             target: head.list
             function onContentYChanged() {
-                head.listAtStart = head.list.contentY <= head.list.originY + 1
+                head.listAtStart = head.list.contentY
+                                   <= head.list.originY + 1 + (head.settling ? head.height : 0)
             }
-            function onHeightChanged() { Qt.callLater(head.toStart) }
-            function onOriginYChanged() { Qt.callLater(head.toStart) }
-            function onVisibleChanged() { Qt.callLater(head.toStart) }
+            function onHeightChanged() { head.settle() }
+            function onOriginYChanged() { head.settle() }
+            function onVisibleChanged() { head.settle() }
         }
         ColumnLayout {
             id: zoomSlotItem
@@ -618,10 +626,18 @@ Page {
         if (importKind === RecordingImport.Candump)
             return qsTr("Imported %1 frames over %2 s")
                        .arg(result.frames).arg((result.durationUs / 1e6).toFixed(1))
-        return result.columnsIgnored > 0
-               ? qsTr("Imported %1 values; columns ignored: %2")
-                     .arg(result.values).arg(result.columnsIgnored)
-               : qsTr("Imported %1 values").arg(result.values)
+        const words = result.columnsIgnored > 0
+                      ? qsTr("Imported %1 values; columns ignored: %2")
+                            .arg(result.values).arg(result.columnsIgnored)
+                      : qsTr("Imported %1 values").arg(result.values)
+        if (!(result.rowsNoTime > 0))
+            return words
+        // A row with no time has nowhere to go: core leaves it out, counted.
+        // havne-cli's words; after a count of columns a comma would read as its
+        const left = result.rowsNoTime === 1
+                     ? qsTr("1 row with no time left out")
+                     : qsTr("%1 rows with no time left out").arg(result.rowsNoTime)
+        return words + (result.columnsIgnored > 0 ? "; " : ", ") + left
     }
 
     function checkBaseline() {
@@ -2525,7 +2541,8 @@ Page {
                               : root.valueText(Number(stripRow.at.text), stripRow.modelData.decimals,
                                                stripRow.at.unit)
                         color: Theme.text
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                         elide: Text.ElideRight
                     }
                     Label {
@@ -2537,7 +2554,8 @@ Page {
                         text: visible ? root.spanCaption(stripRow.modelData) : ""
                         color: Theme.textDim
                         font.pixelSize: Theme.fontCaption
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                         elide: Text.ElideRight
                     }
                 }
@@ -3029,7 +3047,8 @@ Page {
                                 Layout.maximumWidth: Math.round(signalRow.width * (root.compareAligned ? 0.3 : 0.5))
                                 elide: Text.ElideRight
                                 color: Theme.text
-                                font.family: Theme.monoFamily
+                                font.family: Theme.valueFamily
+                                font.features: Theme.valueFeatures
                             }
                         }
                         // On a phone B and the change have a line of their own
@@ -3042,7 +3061,7 @@ Page {
                             elide: Text.ElideLeft
                             color: Theme.textDim
                             font.pixelSize: Theme.fontCaption
-                            font.family: Theme.monoFamily
+                            font.family: Theme.valueFamily
                             font.features: Theme.valueFeatures
                         }
                     }
@@ -3055,7 +3074,8 @@ Page {
                         horizontalAlignment: Text.AlignRight
                         elide: Text.ElideRight
                         color: Theme.text
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                     }
                     Label {
                         objectName: "cursorDelta"
@@ -3066,7 +3086,8 @@ Page {
                         horizontalAlignment: Text.AlignRight
                         elide: Text.ElideRight
                         color: Theme.textDim
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                     }
                     // The compared recording's, at the cursor
                     Label {
@@ -3080,7 +3101,8 @@ Page {
                         Layout.maximumWidth: Math.round(signalRow.width * 0.3)
                         elide: Text.ElideRight
                         color: Theme.textDim
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                     }
                 }
             }
@@ -3137,7 +3159,7 @@ Page {
                     horizontalAlignment: Text.AlignRight
                     elide: Text.ElideRight
                     color: Theme.text
-                    font.family: Theme.monoFamily
+                    font.family: Theme.valueFamily
                     font.features: Theme.valueFeatures
                 }
                 RowLayout {
@@ -3224,7 +3246,7 @@ Page {
                                         text: root.statChange(statCard.stat)
                                         color: Theme.text
                                         font.pixelSize: Theme.fontCaption
-                                        font.family: Theme.monoFamily
+                                        font.family: Theme.valueFamily
                                         font.features: Theme.valueFeatures
                                     }
                                 }
@@ -3234,7 +3256,7 @@ Page {
                                     elide: Text.ElideRight
                                     color: Theme.textDim
                                     font.pixelSize: Theme.fontCaption
-                                    font.family: Theme.monoFamily
+                                    font.family: Theme.valueFamily
                                     font.features: Theme.valueFeatures
                                     text: !statCard.stat ? qsTr("—")
                                           : [statCard.stat.lowest, statCard.stat.highest, statCard.stat.mean]

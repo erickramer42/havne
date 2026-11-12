@@ -647,6 +647,14 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/refused.json)
         app_cli_golden(SignalsCheckNamesAMissingFile signals-missing.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/none.json)
+        # A file standing in for obd2's MAP: the base counts what is left of
+        # obd2's, and Boost reads the file's def; one standing a text in for
+        # baro is refused, naming Boost
+        app_cli_golden(SignalsCheckCountsWhatIsLeftOfTheBase signals-check-replaces.jsonl
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/replaces.json)
+        app_cli_golden(SignalsCheckNamesTheComputedSignalAReplacementFeeds
+            signals-replaces-refused.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/replaces-text.json)
         app_cli_golden(StreamDecodesThroughASignalFile stream-signals.jsonl
             -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max&from=100&to=102"
                --signals ${_cli_signals}/extras.json --values --count 40)

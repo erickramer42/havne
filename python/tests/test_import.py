@@ -58,7 +58,7 @@ def test_a_loggers_csv_imports_by_its_map_and_reads_back(tmp_path):
     folder = tmp_path / "logger-a"
     got = havne.import_csv(os.path.join(CSV, "logger-a", "log.csv"), folder,
                            column_map("logger-a"))
-    assert got == havne.Imported(str(folder), 11, 0, 0, 0, 22, 1, None, 1_750_000)
+    assert got == havne.Imported(str(folder), 11, 0, 0, 0, 22, 1, None, 1_750_000, 0)
     assert sorted(os.listdir(folder)) == ["events.log", "signals.csv"]
     with havne.Recording(folder) as r:
         assert r.info.utc_start_us == 0
@@ -239,6 +239,33 @@ def test_a_time_of_plain_numbers_with_no_unit_reads_as_ms(tmp_path):
     assert havne.guess_csv_map(plain, time_unit="us").map["time"]["unit"] == "us"
     got = havne.import_csv(plain, tmp_path / "rec-s", time_unit="s")
     assert (got.values, got.duration_us) == (2, 1_000_000)
+
+
+def test_rows_with_no_time_are_left_out_and_counted(tmp_path):
+    # logger-d: one mid-file holding values, a last one of padding alone
+    log = os.path.join(CSV, "logger-d", "log.csv")
+    g = havne.guess_csv_map(log)
+    assert g.map == guessed_map("logger-d")
+    assert ("2 of the 10 rows read have no time (the first on line 5): the import leaves "
+            "such a row out") in g.notes
+    folder = tmp_path / "logger-d"
+    got = havne.import_csv(log, folder)
+    assert (got.rows_no_time, got.values, got.lines, got.duration_us) == (2, 24, 11, 1_740_000)
+    assert got[-1] == 2  # the last field: the earlier ones keep their places
+    with havne.Recording(folder) as r:
+        assert [s.samples for s in r.signals] == [8, 8, 8]
+    # No row with a time: refused by the guess and by the import alike
+    untimed = tmp_path / "untimed.csv"
+    untimed.write_text("time (s),A\n,1\n,2\n", encoding="utf-8", newline="\n")
+    own_map = {"havne_column_map": 1, "time": {"column": "time (s)", "unit": "s"},
+               "signals": [{"column": "A", "name": "A"}]}
+    for call in (lambda: havne.guess_csv_map(untimed),
+                 lambda: havne.import_csv(untimed, tmp_path / "rec"),
+                 lambda: havne.import_csv(untimed, tmp_path / "rec", own_map)):
+        with pytest.raises(havne.Error) as e:
+            call()
+        assert e.value.detail == "no row below the header has a time"
+    assert not os.path.exists(tmp_path / "rec")
 
 
 def test_a_time_no_unit_can_read_names_a_map(tmp_path):

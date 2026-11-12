@@ -329,6 +329,7 @@ ECUIO_VALIDATE_ERR_COMPUTED = 20
 ECUIO_VALIDATE_ERR_COMPUTED_INPUT = -22
 ECUIO_VALIDATE_ERR_DECIMALS = 8
 ECUIO_VALIDATE_ERR_DUPLICATE_ID = -14
+ECUIO_VALIDATE_ERR_DUPLICATE_NAME = -25
 ECUIO_VALIDATE_ERR_DUPLICATE_RX = -13
 ECUIO_VALIDATE_ERR_ENUM = 19
 ECUIO_VALIDATE_ERR_ENUM_ENTRY = -20
@@ -874,7 +875,8 @@ ecuio_import_report_t._fields_ = [
     ('duration_us', c_uint64),
     ('values', c_uint64),
     ('columns_ignored', c_uint64),
-    ('reserved', (c_uint64 * 2)),
+    ('rows_no_time', c_uint64),
+    ('reserved', (c_uint64 * 1)),
 ]
 ecuio_inspection_t._fields_ = [
     ('verdict', c_uint8),

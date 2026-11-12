@@ -5246,6 +5246,12 @@ int run(int argc, char** argv)
         cli::Line& l = b.line;
         cli::imported_line(l, im, report);
         write_line(out, l);
+        if (report.rows_no_time > 0) {
+            // Left out and counted, never silent
+            std::fprintf(stderr, "havne-cli: %llu %s with no time left out\n",
+                         static_cast<unsigned long long>(report.rows_no_time),
+                         report.rows_no_time == 1 ? "row" : "rows");
+        }
         return ended(out, kExitOk);
     }
     if (command == "play") {

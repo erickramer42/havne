@@ -469,10 +469,26 @@ TEST(SignalFileTest, WhatReadsAReplacedIdReadsTheFilesDef)
     EXPECT_EQ(gs->computed[c->table_first].input_ids[0], ECUIO_OBD2_SIG_SPEED_ID)
         << "obd2.speed is the file's Vehicle Speed";
     EXPECT_STREQ(ecuio_signal_file_key(g.get(), ecuio_signal_file_find(g.get(), "s")), "s");
-    /* a replacement that can't be an input (a text) makes the set refused */
-    EXPECT_TRUE(has(refusal(head +
+    /* A replacement that can't be an input (a text) is refused at its
+     * signal, naming the computed signal that reads it */
+    const std::string text_baro = refusal(
+        head +
         R"({"key":"b","name":"Barometric Pressure","kind":"text","read":{"service":"22","number":"D100"},)"
-        R"("field":{"byte":0}}]})"), "validator"));
+        R"("field":{"byte":0}}]})");
+    EXPECT_TRUE(has(text_baro, "line 1, column 81")) << text_baro;
+    EXPECT_TRUE(
+        has(text_baro,
+            "signal 'b' replaces 'Barometric Pressure', which 'Boost' "
+            "reads: a signal a computed one reads is a number or an enum"))
+        << text_baro;
+    const std::string text_speed = refusal(
+        head +
+        R"({"key":"s","name":"Vehicle Speed","kind":"hex","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0}},)"
+        R"({"key":"c","name":"C","kind":"computed","expr":"obd2.speed"}]})");
+    EXPECT_TRUE(
+        has(text_speed, "signal 's' replaces 'Vehicle Speed', which 'C' reads"))
+        << text_speed;
 }
 
 /* Two signals of a file with one name are refused, naming both: a recording

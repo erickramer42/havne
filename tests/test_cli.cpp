@@ -2485,6 +2485,7 @@ TEST(CliRefusedTest, ANegativeCodeHasItsStandardName)
     EXPECT_STREQ(cli::nrc_name(0x22), "conditionsNotCorrect");
     EXPECT_STREQ(cli::nrc_name(0x31), "requestOutOfRange");
     EXPECT_STREQ(cli::nrc_name(0x33), "securityAccessDenied");
+    EXPECT_STREQ(cli::nrc_name(0x36), "exceedNumberOfAttempts");
     EXPECT_STREQ(cli::nrc_name(0x7F), "serviceNotSupportedInActiveSession");
     EXPECT_STREQ(cli::nrc_name(0x00), "");
     EXPECT_STREQ(cli::nrc_name(0x99), "");
