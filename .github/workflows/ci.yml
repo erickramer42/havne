@@ -70,8 +70,9 @@ env:
 
 # Every job sets timeout-minutes at roughly 3-5x its usual duration, so a
 # hung download, build or simulator fails within minutes instead of
-# holding a runner for GitHub's 6 h default. No job waits for another:
-# each one starts at once, so a run takes as long as its longest job.
+# holding a runner for GitHub's 6 h default. No job waits for another but
+# android-build (for a runner slot): each starts at once, so a run takes as
+# long as its longest job.
 jobs:
   core-and-tests:
     runs-on: ubuntu-latest
@@ -1029,8 +1030,12 @@ jobs:
   # Cross builds (Android, iOS) are build-only: BUILD_TESTING=OFF, because
   # gtest_discover_tests runs each test binary at build time, which can't
   # work for a target the runner can't execute.
+  # Waits for core-and-tests, the short job that frees its runner first: a
+  # manual run has more jobs than the account's 20 concurrent runners, and this
+  # one starts in that slot, whatever core-and-tests did
   android-build:
-    if: ${{ !inputs.smoke_only }}
+    needs: core-and-tests
+    if: ${{ (success() || failure()) && !inputs.smoke_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
