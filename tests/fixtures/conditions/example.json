@@ -1,0 +1,41 @@
+{
+  "havne_conditions": 1,
+  "name": "Daily driver",
+  "notes": "Synthetic: ADR-0063 section 5's example, written for Havne's tests",
+  "checks": { "gap": 1, "rate_drop": 10, "settle": 2 },
+  "conditions": [
+    {
+      "key": "coolant_high",
+      "name": "Coolant high",
+      "when": { "signal": ["obd2.coolant"], "unit": "°C",
+                "above": 110, "clear": 105, "max_age": 10 },
+      "for": 2,
+      "alert": { "level": "danger", "sound": true, "banner": true },
+      "mark": true
+    },
+    {
+      "key": "pull",
+      "name": "Full throttle",
+      "when": { "all": [
+        { "signal": ["obd2.throttle"], "unit": "%", "above": 80, "clear": 70 },
+        { "signal": ["id:1001", "id:7003"], "unit": "RPM", "above": 2500 }
+      ] },
+      "for": 0.5,
+      "record": { "before": 5, "after": 5 },
+      "mark": true
+    },
+    {
+      "key": "link_fault",
+      "name": "Link fault",
+      "when": { "link": "not_ok" },
+      "record": { "before": 10, "after": 10 }
+    },
+    {
+      "key": "module_slow",
+      "name": "A module slowed down",
+      "when": { "check": "rate_drop" },
+      "alert": { "level": "warning", "banner": true },
+      "mark": true
+    }
+  ]
+}

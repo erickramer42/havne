@@ -73,6 +73,7 @@
 #include <vector>
 
 #include "sessionbridge.h"
+#include "ecuio/conditions.h"
 #include "ecuio/internal.h"   /* ecuio_session_dispatch_callbacks */
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
@@ -973,6 +974,14 @@ bool loadTest(bool withSlowRun)
 // deep). Each round times every set once, in turn; the table gives each
 // set's median, fastest and slowest. A core that refuses a set's file
 // says so in its row.
+//
+// Then conditions (ADR-0063 section 3): obd2 with a typical set attached
+// (8 conditions, 12 terms) and the largest (64 conditions of 4 terms,
+// every term on a signal the fixture carries), each judged after the
+// decode; and the two rows with no values consumer, where a frame is
+// decoded only because a set is attached. Last, core's own replay worker
+// looping at full speed with a values consumer: its frames a second with
+// no set, the typical one and the largest, alternated.
 
 const char* const kFlatFile = R"({"havne_signals": 1, "name": "Bench flat",
  "source": {"name": "bench_bridge"}, "extends": "obd2", "signals": [
@@ -1032,20 +1041,85 @@ void countValues(const ecuio_value_batch_t* b, void* user)
 }
 
 struct DecodeSet {
-    const char* label;
-    const char* profile;
-    const char* file; /* nullptr: the built-in profile alone */
+    const char* label = "";
+    const char* profile = nullptr;
+    const char* file = nullptr; /* nullptr: the built-in profile alone */
     std::string refused;
     ecuio_signal_file_t* loaded = nullptr;
     std::vector<double> ns;
     double values = 0.0;
+    std::string conditions; /* a condition file's JSON; "" for none */
+    bool consumer = true;   /* a values callback is registered */
 };
 
+// A typical set: 8 conditions, 12 terms on obd2's signals, with clears
+// and holds
+std::string typicalConditions()
+{
+    return R"({"havne_conditions":1,"conditions":[
+ {"key":"c1","name":"C1","when":{"signal":["obd2.rpm"],"unit":"RPM","above":3000,"clear":2800}},
+ {"key":"c2","name":"C2","when":{"signal":["obd2.coolant"],"unit":"°C","above":105,"clear":100},"for":2},
+ {"key":"c3","name":"C3","when":{"all":[
+   {"signal":["obd2.throttle"],"unit":"%","above":80,"clear":70},
+   {"signal":["obd2.rpm"],"unit":"RPM","above":2500}]},"for":0.5},
+ {"key":"c4","name":"C4","when":{"any":[
+   {"signal":["obd2.load"],"unit":"%","above":90},
+   {"signal":["obd2.maf"],"unit":"g/s","above":100}]}},
+ {"key":"c5","name":"C5","when":{"signal":["obd2.speed"],"unit":"km/h","above":130}},
+ {"key":"c6","name":"C6","when":{"all":[
+   {"signal":["obd2.iat"],"unit":"°C","above":60},
+   {"signal":["obd2.coolant"],"unit":"°C","above":100}]}},
+ {"key":"c7","name":"C7","when":{"signal":["obd2.module_voltage"],"unit":"V","below":12},"for":1},
+ {"key":"c8","name":"C8","when":{"all":[
+   {"signal":["obd2.speed"],"unit":"km/h","above":100},
+   {"signal":["obd2.throttle"],"unit":"%","above":50}]},"clear_for":1}]})";
+}
+
+// The largest set: 64 conditions of 4 terms, on engine speed, throttle and
+// load, which the fixture carries, with levels the run crosses
+std::string largestConditions()
+{
+    std::string all = R"({"havne_conditions":1,"conditions":[)";
+    for (int i = 0; i < 64; ++i) {
+        const std::string n = std::to_string(i);
+        all +=
+            std::string(i == 0 ? "" : ",") + R"({"key":"c)" + n +
+            R"(","name":"C)" + n + R"(","when":{"all":[)" +
+            R"({"signal":["obd2.rpm"],"unit":"RPM","above":)" +
+            std::to_string(600 + 10 * i) + "}," +
+            R"({"signal":["obd2.throttle"],"unit":"%","above":)" +
+            std::to_string(i) + "}," +
+            R"({"signal":["obd2.rpm"],"unit":"RPM","below":9000,"clear":9100},)" +
+            R"({"signal":["obd2.load"],"unit":"%","differs":255}]},"for":0.5})";
+    }
+    return all + "]}";
+}
+
+// Attaches a condition file's JSON to the session
+void attachConditions(ecuio_session_t* session, const std::string& json)
+{
+    ecuio_condition_set_t* set = nullptr;
+    if (ecuio_condition_set_load(json.data(), json.size(), &set) != ECUIO_OK ||
+        ecuio_session_set_conditions(session, set, nullptr) != ECUIO_OK) {
+        std::fprintf(stderr, "the bench's conditions didn't attach: %s\n",
+                     ecuio_last_error_detail());
+        std::exit(1);
+    }
+    ecuio_condition_set_free(set);
+}
+
+void countEvents(const ecuio_condition_event_t*, uint32_t count, void* user)
+{
+    *static_cast<uint64_t*>(user) += count;
+}
+
 // ns a frame for one pass of frames through a session under profile, and
-// the values a frame
-double decodeNs(const char* profile, std::vector<ecuio_frame_t>& frames,
+// the values a frame (the condition events a frame for a set with no
+// values consumer)
+double decodeNs(const DecodeSet& set, std::vector<ecuio_frame_t>& frames,
                 double* values)
 {
+    const char* profile = set.profile;
     const std::string uri = std::string("mock://bench?profile=") + profile;
     ecuio_session_t* session = nullptr;
     if (ecuio_session_create(uri.c_str(), &session) != ECUIO_OK) {
@@ -1054,7 +1128,14 @@ double decodeNs(const char* profile, std::vector<ecuio_frame_t>& frames,
         std::exit(1);
     }
     uint64_t count = 0;
-    ecuio_register_values_callback(session, countValues, &count);
+    if (set.consumer) {
+        ecuio_register_values_callback(session, countValues, &count);
+    } else {
+        ecuio_register_conditions_callback(session, countEvents, &count);
+    }
+    if (!set.conditions.empty()) {
+        attachConditions(session, set.conditions);
+    }
     const uint64_t span = frames.back().timestamp_us + 1000000;
     const auto t0 = std::chrono::steady_clock::now();
     for (int pass = 0; pass < kDecodePasses; ++pass) {
@@ -1082,23 +1163,29 @@ bool decodeTest()
         std::fprintf(stderr, "the fixture's frames.csv didn't read\n");
         return false;
     }
-    DecodeSet sets[] = {
-        {"obd2 alone", "obd2", nullptr, {}, nullptr, {}, 0.0},
-        {"8 computed, format 1",
-         "user.bench-flat",
-         kFlatFile,
-         {},
-         nullptr,
-         {},
-         0.0},
-        {"a chain 8 deep",
-         "user.bench-chain",
-         kChainFile,
-         {},
-         nullptr,
-         {},
-         0.0},
-    };
+    DecodeSet sets[7];
+    sets[0].label = "obd2 alone";
+    sets[1].label = "8 computed, format 1";
+    sets[1].profile = "user.bench-flat";
+    sets[1].file = kFlatFile;
+    sets[2].label = "a chain 8 deep";
+    sets[2].profile = "user.bench-chain";
+    sets[2].file = kChainFile;
+    sets[3].label = "obd2, a typical condition set";
+    sets[3].conditions = typicalConditions();
+    sets[4].label = "obd2, the largest condition set";
+    sets[4].conditions = largestConditions();
+    sets[5].label = "obd2, no values consumer, no set";
+    sets[5].consumer = false;
+    sets[6].label = "obd2, no values consumer, a typical set";
+    sets[6].conditions = typicalConditions();
+    sets[6].consumer = false;
+    const int kSets = 7;
+    for (DecodeSet& s : sets) {
+        if (s.profile == nullptr) {
+            s.profile = "obd2";
+        }
+    }
     for (DecodeSet& s : sets) {
         if (s.file == nullptr)
             continue;
@@ -1113,10 +1200,10 @@ bool decodeTest()
         }
     }
     for (int r = 0; r < kDecodeRounds; ++r) {
-        for (int k = 0; k < 3; ++k) {
-            DecodeSet& s = sets[(r + k) % 3];
+        for (int k = 0; k < kSets; ++k) {
+            DecodeSet& s = sets[(r + k) % kSets];
             if (s.refused.empty())
-                s.ns.push_back(decodeNs(s.profile, frames, &s.values));
+                s.ns.push_back(decodeNs(s, frames, &s.values));
         }
     }
     std::printf("Core's decode a frame: the fixture's %zu frames x %d passes, "
@@ -1139,6 +1226,72 @@ bool decodeTest()
             ecuio_profile_unregister(s.profile);
             ecuio_signal_file_free(s.loaded);
         }
+    }
+
+    /* Core's own worker, saturated: the fixture replayed in a loop at
+     * full speed under obd2 with a values consumer, frames a second with
+     * no set, the typical one and the largest, alternated */
+    const std::string none;
+    const std::string typical = typicalConditions();
+    const std::string largest = largestConditions();
+    const std::string* which[] = {&none, &typical, &largest};
+    const char* const names[] = {"no set", "a typical set", "the largest set"};
+    std::vector<double> rates[3];
+    const QByteArray replay =
+        (QStringLiteral("replay://") + QStringLiteral(ECUIO_REPLAY_FIXTURES) +
+         QStringLiteral(
+             "/2026-10-25-engine-start?profile=obd2&speed=max&loop=1"))
+            .toUtf8();
+    for (int r = 0; r < 5; ++r) {
+        for (int k = 0; k < 3; ++k) {
+            const int at = (r + k) % 3;
+            ecuio_session_t* session = nullptr;
+            if (ecuio_session_create(replay.constData(), &session) !=
+                ECUIO_OK) {
+                std::fprintf(stderr, "the replay didn't open: %s\n",
+                             ecuio_last_error_detail());
+                return false;
+            }
+            std::atomic<uint64_t> seen{0};
+            uint64_t values = 0;
+            ecuio_register_frame_callback(
+                session,
+                [](const ecuio_frame_t*, void* user) {
+                    static_cast<std::atomic<uint64_t>*>(user)->fetch_add(
+                        1, std::memory_order_relaxed);
+                },
+                &seen);
+            ecuio_register_values_callback(session, countValues, &values);
+            if (!which[at]->empty()) {
+                attachConditions(session, *which[at]);
+            }
+            ecuio_session_start(session);
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            const uint64_t from = seen.load();
+            const auto t0 = std::chrono::steady_clock::now();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            const uint64_t to = seen.load();
+            const double s = std::chrono::duration<double>(
+                                 std::chrono::steady_clock::now() - t0)
+                                 .count();
+            ecuio_session_close(session);
+            ecuio_session_destroy(session);
+            rates[at].push_back(static_cast<double>(to - from) / s);
+        }
+    }
+    std::printf("\nCore's replay worker looping at full speed under obd2, "
+                "with a values consumer: median of 5 runs of 1.5 s\n\n");
+    std::printf("| Conditions | frames a second | lowest to highest | of no "
+                "set |\n|---|---|---|---|\n");
+    double base = 0.0;
+    for (int k = 0; k < 3; ++k) {
+        std::sort(rates[k].begin(), rates[k].end());
+        const double median = rates[k][rates[k].size() / 2];
+        if (k == 0) {
+            base = median;
+        }
+        std::printf("| %s | %.0f | %.0f to %.0f | %.3f |\n", names[k], median,
+                    rates[k].front(), rates[k].back(), median / base);
     }
     return true;
 }

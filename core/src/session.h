@@ -1,6 +1,6 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
-// Testing: UNIT: CoreTest, RecorderTest (test_core)
+// Testing: UNIT: CoreTest, RecorderTest, ConditionSessionTest (test_core)
 
 #ifndef ECUIO_SESSION_H
 #define ECUIO_SESSION_H
@@ -23,6 +23,8 @@
 #include <utility>
 #include <vector>
 
+#include "condition_eval.h"
+
 struct ecuio_session {
     /* The registry's set, held from create (profile_hold.h); first, so
      * it's released after every member that reads the set */
@@ -36,6 +38,32 @@ struct ecuio_session {
     std::vector<std::pair<ecuio_frame_callback_t, void*>> callbacks;
     /* Under the same mutex: the values callbacks (ADR-0024) */
     std::vector<std::pair<ecuio_values_callback_t, void*>> values_callbacks;
+    /* Under the same mutex: the conditions callbacks, and the conditions
+     * attached (ADR-0063 section 3, condition_eval.h) in three slots.
+     * `conditions` is the worker's: only dispatch replaces it, inside the
+     * lock it takes for each frame, and reads it outside. The caller
+     * (ecuio_session_set_conditions) puts the next set in
+     * conditions_pending and sets conditions_swap; dispatch then moves
+     * its own into conditions_retired and takes the pending one. The
+     * caller frees a retired set and a pending one the worker never took
+     * at its next call, so the worker frees nothing and the caller never
+     * frees one the worker holds. */
+    std::vector<std::pair<ecuio_conditions_callback_t, void*>>
+        conditions_callbacks;
+    std::unique_ptr<ecuio_condition_eval> conditions;
+    std::unique_ptr<ecuio_condition_eval> conditions_pending;
+    std::unique_ptr<ecuio_condition_eval> conditions_retired;
+    bool conditions_swap = false;
+    /* Under the same mutex: the attaches so far */
+    uint32_t conditions_generation = 0;
+    /* The states of the newest attach (ecuio_session_get_condition_states),
+     * under their mutex: set whole by the attach before the worker can
+     * take its set (their mutex inside callback_mutex, never the other
+     * way), then each one by the worker when it changes, which a set
+     * since replaced no longer does */
+    mutable std::mutex condition_states_mutex;
+    std::vector<ecuio_condition_state_t> condition_states;
+    uint32_t condition_states_generation = 0;
     ecuio_transport_t* transport = nullptr;
     /* The profile's set: the registry's static one, or, under
      * uds-generic, the session's own below (ADR-0020). */

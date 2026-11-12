@@ -4,8 +4,9 @@
 #
 # Writes the seed inputs of the harnesses that read a structured format
 # into <out>/<harness>/, one file each, from the files the tree commits:
-# the signal-file and OBDb fixtures, the example plugin and the recording
-# fixtures; the ELM327 emulator's, the conversations its hosts open with;
+# the signal-file, condition-file and OBDb fixtures, the example plugin
+# and the recording fixtures; the ELM327 emulator's, the conversations its
+# hosts open with;
 # candump's, a log's lines in each form; and the CSV import's, each
 # made-up logger's map on one line before its file. Each seed is in the harness's own form (fuzz/README.md): the
 # JSON harness's first byte picks its bounds, the OBDb harness's its
@@ -135,6 +136,22 @@ def main(argv):
              "signals": leaves + [{"key": k, "name": k.upper(), "kind": "computed", "expr": e}
                                   for k, e in chain_exprs]}
     write(out, "fuzz_signal_file", "chain_format2.json", json.dumps(chain).encode())
+
+    # The condition-file loader (ADR-0063): each fixture alone, and again
+    # before a signal file to resolve it against (cut at 0x1E). One of
+    # them, every-key.json, holds every key the loader takes, each term
+    # kind, and a reference of each form to each kind of signal in that
+    # signal file; another, holds.json, joins two terms under a hold, so
+    # the judged run meets a term changing while a hold runs.
+    # ConditionFileTest loads each fixture, so a seed the loader refuses
+    # by mistake fails there.
+    condition_files = sorted(glob.glob(os.path.join(ROOT, "tests/fixtures/conditions/*.json")))
+    extras = read("tests/fixtures/signals/extras.json")
+    for path in condition_files:
+        name = os.path.basename(path)
+        data = read(os.path.relpath(path, ROOT))
+        write(out, "fuzz_condition_file", name, data)
+        write(out, "fuzz_condition_file", "extras_" + name, data + SEP + extras)
 
     # The OBDb import: no year extending obd2 (0x00), and alone in 2019
     # (0x80 | (2019 - 1990))

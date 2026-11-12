@@ -26,7 +26,8 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_recorder.cpp test_recording.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
-    test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp)
+    test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
+    test_condition_session.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -91,7 +92,8 @@ app_enable_warnings(bench_recording)
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp
     test_computed_grammar.cpp
-    test_plugin.cpp)
+    test_plugin.cpp
+    test_condition_file.cpp test_condition_eval.cpp)
 
 # test_signal_tables.cpp and test_computed.cpp check computed.h, the
 # programs' checker and stack machine, which are internal
@@ -105,7 +107,8 @@ target_link_libraries(test_signals PRIVATE
 )
 # test_plugin.cpp loads the repository's example plugin
 target_compile_definitions(test_signals PRIVATE
-    ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins")
+    ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+    ECUIO_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
 app_enable_warnings(test_signals)
 gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
@@ -257,7 +260,7 @@ endif()
 if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
-        test_cli_log.cpp)
+        test_cli_log.cpp test_cli_conditions.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
@@ -664,6 +667,84 @@ if(TARGET havne-cli)
         app_cli_golden(SignalsCheckNamesTheComputedSignalAReplacementFeeds
             signals-replaces-refused.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/replaces-text.json)
+        # A condition file through the loader (ADR-0063): what it holds;
+        # how its references meet obd2's set, the mock's and a signal
+        # file's (a level in another unit, a text signal, an enumeration
+        # above a level, a signal of another file and a condition
+        # switched off among them); one the loader refuses, one that
+        # isn't there, a profile nothing registered and a signal file
+        # refused, each in words and never the path
+        set(_cli_conditions ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/conditions)
+        app_cli_golden(ConditionsCheckReadsAFile conditions-check.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/example.json)
+        app_cli_golden(ConditionsCheckResolvesAgainstObd2 conditions-check-obd2.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/example.json
+               --profile obd2)
+        app_cli_golden(ConditionsCheckResolvesAgainstTheMock conditions-check-mock.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check --profile mock
+               ${_cli_conditions}/example.json)
+        app_cli_golden(ConditionsCheckResolvesAgainstASignalFile
+            conditions-check-signals.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/desk.json
+               --signals ${_cli_signals}/extras.json)
+        app_cli_golden(ConditionsCheckResolvesAgainstNoSignals conditions-check-raw.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/desk.json
+               --profile raw)
+        app_cli_golden(ConditionsCheckRefusesAFile conditions-refused.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/refused.json)
+        app_cli_golden(ConditionsCheckNamesAMissingFile conditions-missing.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/none.json)
+        app_cli_golden(ConditionsCheckNamesAnUnknownProfile
+            conditions-unknown-profile.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/example.json
+               --profile obd3)
+        app_cli_golden(ConditionsCheckRefusesASignalFile conditions-refused-signals.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/example.json
+               --signals ${_cli_signals}/refused.json)
+        # A plugin variant's own signals: its only variant or the one
+        # named, a key only the later variant has, a package that isn't
+        # there
+        set(_cli_conditions_plugin ${CMAKE_SOURCE_DIR}/plugins/example-sim)
+        app_cli_golden(ConditionsCheckResolvesAgainstAPluginsVariant
+            conditions-check-plugin.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/plugin.json
+               --plugin ${_cli_conditions_plugin} --variant my2019)
+        app_cli_golden(ConditionsCheckResolvesAgainstAnotherVariant
+            conditions-check-plugin-base.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/plugin.json
+               --variant base --plugin ${_cli_conditions_plugin})
+        app_cli_golden(ConditionsCheckNamesAMissingPackage
+            conditions-missing-plugin.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/plugin.json
+               --plugin ${_cli_conditions}/none.json)
+        # Conditions judged in a session (ADR-0063 step 3): the replay
+        # fixture's engine start under obd2 (a level crossed, a hold ended
+        # at its own time, an input read too seldom going stale and back,
+        # a link term the session can't judge); the mock, where only the
+        # reference it provides binds; keys bound through the session's
+        # signal file; a file the loader refuses and one that isn't there,
+        # each before the connect
+        app_cli_golden(StreamJudgesConditionsOnAReplay stream-conditions.jsonl
+            -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?profile=obd2&speed=max"
+               --conditions ${_cli_conditions}/replay.json --count 300)
+        app_cli_golden(StreamJudgesConditionsOnTheMock stream-conditions-mock.jsonl
+            --ignore t_us
+            -- $<TARGET_FILE:havne-cli> stream mock://x
+               --conditions ${_cli_conditions}/replay.json --count 3)
+        app_cli_golden(StreamBindsConditionsThroughItsSignalFile
+            stream-conditions-signals.jsonl
+            -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max"
+               --signals ${_cli_signals}/extras.json
+               --conditions ${_cli_conditions}/desk.json --count 1)
+        app_cli_golden(StreamRefusesAConditionFile stream-conditions-refused.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> stream mock://x
+               --conditions ${_cli_conditions}/refused.json)
+        app_cli_golden(StreamNamesAMissingConditionFile stream-conditions-missing.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> stream mock://x
+               --conditions ${_cli_conditions}/none.json)
         app_cli_golden(StreamDecodesThroughASignalFile stream-signals.jsonl
             -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max&from=100&to=102"
                --signals ${_cli_signals}/extras.json --values --count 40)
@@ -1020,6 +1101,34 @@ if(TARGET havne-cli)
     app_cli_usage(SignalsWithoutAFileIsUsage "stream|mock://x|--signals")
     app_cli_usage(SignalsForAnotherProfileIsUsage
         "stream|mock://x?profile=obd2|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json")
+    app_cli_usage(ConditionsWithoutCheckIsUsage "conditions")
+    app_cli_usage(ConditionsAnUnknownWordIsUsage "conditions|lint|c.json")
+    app_cli_usage_says(ConditionsCheckWithoutAFileIsUsage "conditions|check"
+        "conditions check takes a condition file")
+    app_cli_usage_says(ConditionsCheckTwoFilesIsUsage "conditions|check|a.json|b.json"
+        "conditions check takes one file")
+    app_cli_usage_says(ConditionsCheckSignalsWithoutAFileIsUsage
+        "conditions|check|a.json|--signals" "--signals takes one signal file")
+    app_cli_usage_says(ConditionsCheckProfileWithoutANameIsUsage
+        "conditions|check|a.json|--profile" "--profile takes one profile name")
+    app_cli_usage_says(ConditionsCheckSignalsAndAProfileIsUsage
+        "conditions|check|a.json|--signals|s.json|--profile|obd2"
+        "one of --signals, --profile and --plugin")
+    app_cli_usage_says(ConditionsCheckAnUnknownOptionIsUsage
+        "conditions|check|a.json|--package|p" "unexpected '--package'")
+    app_cli_usage_says(ConditionsCheckAVariantWithoutAPluginIsUsage
+        "conditions|check|a.json|--variant|base" "--variant names a --plugin's variant")
+    app_cli_usage_says(ConditionsCheckAPluginOfSeveralVariantsNeedsOne
+        "conditions|check|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/conditions/example.json|--plugin|${CMAKE_SOURCE_DIR}/plugins/example-sim"
+        "--plugin needs --variant to name one of its variants: base, my2019")
+    app_cli_usage_says(ConditionsCheckAVariantThePluginLacksIsUsage
+        "conditions|check|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/conditions/example.json|--plugin|${CMAKE_SOURCE_DIR}/plugins/example-sim|--variant|my2020"
+        "--plugin needs --variant to name one of its variants: base, my2019")
+    app_cli_usage_says(StreamConditionsWithoutAFileIsUsage
+        "stream|mock://x|--conditions" "--conditions takes one condition file")
+    app_cli_usage_says(StreamTwoConditionFilesIsUsage
+        "stream|mock://x|--conditions|a.json|--conditions|b.json"
+        "--conditions takes one condition file")
     app_cli_usage(SignalsCheckWithoutAFileIsUsage "signals|check")
     app_cli_usage(SignalsWithoutCheckIsUsage "signals")
     app_cli_usage(SignalsAnUnknownWordIsUsage "signals|lint|x.json")

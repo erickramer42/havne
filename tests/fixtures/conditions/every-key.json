@@ -1,0 +1,30 @@
+{
+  "havne_conditions": 1,
+  "name": "Every key",
+  "notes": "Synthetic: every key the loader takes, each term kind and a reference of each form, resolved against tests/fixtures/signals/extras.json",
+  "x-tool": 1,
+  "checks": { "gap": 0.5, "rate_drop": 2.5, "settle": 3 },
+  "conditions": [
+    {
+      "key": "a",
+      "name": "A",
+      "enabled": false,
+      "when": { "any": [
+        { "signal": ["key:road_speed", "id:3001", "obd2.speed"], "unit": "km/h",
+          "below": 5, "clear": 8, "max_age": 0.1 },
+        { "signal": ["key:standstill"], "equals": 0 },
+        { "signal": ["key:tcm_part", "obd2.pid_0b"], "differs": 1, "unit": "" },
+        { "signal": ["key:krpm"], "unit": "krpm", "above": 6.5, "clear": 6 }
+      ] },
+      "for": 600, "clear_for": 0.000001,
+      "alert": { "level": "warning", "sound": true, "banner": false },
+      "record": { "before": 60, "after": 600 },
+      "mark": true
+    },
+    {
+      "key": "b",
+      "name": "B",
+      "when": { "all": [ { "link": "hard_failure" }, { "check": "isotp" } ] }
+    }
+  ]
+}

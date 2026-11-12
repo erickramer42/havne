@@ -449,7 +449,7 @@ TEST(QueueTest, RefusalsSayWhichArgument)
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_queue_open(fed.session, 0, 8, &q),
               ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_EQ(ecuio_queue_open(fed.session, 3, 8, &q),
+    EXPECT_EQ(ecuio_queue_open(fed.session, 4, 8, &q),
               ECUIO_ERR_INVALID_ARGUMENT);
     EXPECT_EQ(ecuio_queue_open(fed.session, ECUIO_QUEUE_FRAMES, 0, &q),
               ECUIO_ERR_INVALID_ARGUMENT);

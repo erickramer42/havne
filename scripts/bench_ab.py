@@ -18,8 +18,10 @@
 #   100x. timing: bench_timing (each transport against the fakes, the
 #   fake's 4 ms reply): each transport's lowest P50 latency and its
 #   requests a second. decode: bench_bridge --decode, core's decode a
-#   frame under obd2, eight computed signals and a chain of eight; a
-#   figure only B has (a set A's core refuses) is listed with B's alone.
+#   frame under obd2, eight computed signals and a chain of eight, with
+#   and without a condition set, then its replay worker's frames a
+#   second; a figure only B has (a set A's core refuses, a row A's
+#   bench lacks) is listed with B's alone.
 #   N is 5 by default. The trees are build trees with the bench targets
 #   built (Release); each run's raw output and a CSV
 #   of every figure go to Testing/bench-ab/<stamp>/.
@@ -61,14 +63,18 @@ def parse_load(text):
 
 
 def parse_decode(text):
-    """bench_bridge --decode's table: each set's median ns a frame"""
+    """bench_bridge --decode's tables: each row's median, named with its
+    table's own column (ns a frame, frames a second)"""
     out = {}
+    unit = "ns a frame"
     for line in text.splitlines():
-        if not line.startswith("| ") or line.startswith("| Set"):
+        if not line.startswith("| "):
             continue
         c = cells(line)
         if len(c) >= 2 and re.match(r"^[0-9.]+$", c[1]):
-            out[f"{c[0]}, ns a frame"] = float(c[1])
+            out[f"{c[0]}, {unit}"] = float(c[1])
+        elif len(c) >= 2:
+            unit = c[1]
     return out
 
 

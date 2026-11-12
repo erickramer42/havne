@@ -1,5 +1,5 @@
 // File/layer: cli/line_ring.h | havne-cli, the worker-to-output ring (ADR-0031 section 4)
-// Testing: UNIT (tests/test_cli.cpp, CliRingTest)
+// Testing: UNIT: CliRingTest, CliConditionTest (test_cli)
 //
 // One ring of text between core's worker, which pushes finished lines,
 // and the main thread, which drains them to standard output. Allocated
@@ -23,7 +23,9 @@
 
 namespace cli {
 
-enum class LineKind { Frame, Values };
+// A Condition line's drop is its caller's to count: the ring counts
+// and reports frames and values alone
+enum class LineKind { Frame, Values, Condition };
 
 class LineRing
 {
@@ -60,7 +62,7 @@ public:
         if (kind == LineKind::Frame) {
             ++m_unreported_frames;
             ++m_dropped_frames;
-        } else {
+        } else if (kind == LineKind::Values) {
             ++m_unreported_values;
             ++m_dropped_values;
         }

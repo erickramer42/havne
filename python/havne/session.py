@@ -1,9 +1,10 @@
 # File/layer: python/havne/session.py | Python 3.11+, the havne package
 # Testing: PythonTest.test_session, test_replay, test_recording,
-#          test_signal_file, test_vcan, test_j2534
+#          test_signal_file, test_conditions, test_vcan, test_j2534
 #
-# A session (core.h) and what a script reads from it: frames and values
-# through pull queues (queue.h, ADR-0053 section 4), never a callback, so
+# A session (core.h) and what a script reads from it: frames, values and
+# condition events through pull queues (queue.h, ADR-0053 section 4),
+# never a callback, so
 # no Python runs on core's worker; its report, identity and support; a
 # recording of it (recording.h); its health report as it stands
 # (health.py), from the newest value of each signal a values stream has
@@ -26,6 +27,7 @@ from collections import namedtuple
 
 from . import _ecuio as e
 from ._core import check, lib, text, utf8, with_profile
+from .conditions import _WHYS, ConditionEvent, ConditionState
 from .export import _whole, checked
 from .health import _report, options_for
 
@@ -59,6 +61,14 @@ _SESSION_STATES = {
 }
 _EXTENDED = 0x03
 
+# A queue kind's entry, its read and what a dropped entry is called
+_KINDS = {
+    e.ECUIO_QUEUE_FRAMES: (e.ecuio_frame_t, "ecuio_queue_read_frames", "frames"),
+    e.ECUIO_QUEUE_VALUES: (e.ecuio_queue_value_t, "ecuio_queue_read_values", "values"),
+    e.ECUIO_QUEUE_CONDITIONS: (e.ecuio_condition_event_t, "ecuio_queue_read_conditions",
+                               "condition events"),
+}
+
 
 class _Queue:
     """A pull queue's handle and the lock its reads hold"""
@@ -75,7 +85,8 @@ class _Queue:
 
 
 class Stream:
-    """A pull queue of a session's frames or values. Iterating reads in
+    """A pull queue of a session's frames, values or condition events
+    (ConditionEvent, each with its condition's key). Iterating reads in
     batches, 100 ms at a time, so Ctrl+C lands within that, and ends when
     the stream does: a replay's last frame (ECUIO_ERR_STREAM_ENDED) or the
     session's close. `dropped` is the running total of entries a full queue
@@ -101,11 +112,10 @@ class Stream:
         check(lib.ecuio_queue_open(session._handle(), kind, capacity,
                                    ctypes.byref(self._queue.q)),
               "ecuio_queue_open")
-        entry = e.ecuio_frame_t if kind == e.ECUIO_QUEUE_FRAMES else e.ecuio_queue_value_t
+        entry, read, self._what = _KINDS[kind]
         self._buf = (entry * batch)()
         self._batch = batch
-        self._read = (lib.ecuio_queue_read_frames if kind == e.ECUIO_QUEUE_FRAMES
-                      else lib.ecuio_queue_read_values)
+        self._read = getattr(lib, read)
 
     def read(self, timeout=0.1):
         """What's waiting, as a list, waiting up to timeout seconds for the
@@ -131,9 +141,9 @@ class Stream:
                     if v.kind not in TEXT_KINDS:
                         self._held[v.signal_id] = (v.value, now)
         if dropped.value > self.dropped:
-            what = "frames" if self.kind == e.ECUIO_QUEUE_FRAMES else "values"
             log.warning("havne: %d %s dropped so far: the script reads slower than "
-                        "they arrive (a recording keeps every frame)", dropped.value, what)
+                        "they arrive (a recording keeps every frame)", dropped.value,
+                        self._what)
             self.dropped = dropped.value
         return entries
 
@@ -156,6 +166,13 @@ class Stream:
         if self.kind == e.ECUIO_QUEUE_FRAMES:
             return Frame(c.timestamp_us, c.arbitration_id, c.channel_id, c.flags,
                          ctypes.string_at(c.data, c.data_length))
+        if self.kind == e.ECUIO_QUEUE_CONDITIONS:
+            keys = self._session._condition_keys.get(c.generation, ())
+            return ConditionEvent(
+                c.timestamp_us, keys[c.condition] if c.condition < len(keys) else "",
+                "on" if c.state == e.ECUIO_CONDITION_ON else "off",
+                bool(c.flags & e.ECUIO_CONDITION_FIRED),
+                bool(c.flags & e.ECUIO_CONDITION_STALE), c.value, c.term, c.generation)
         name, unit = self._session._names.get(c.signal_id, ("", ""))
         has_text = c.kind in TEXT_KINDS or (c.kind == e.ECUIO_VALUE_ENUM and c.text_len > 0)
         return Value(c.timestamp_us, c.arbitration_id, c.signal_id, name, unit, c.kind,
@@ -228,6 +245,12 @@ class Session:
             self._variant = plugin.variant_index(variant)
         self.uri = uri
         self._streams, self._queues, self._recorders = [], [], []
+        # Each attach's keys by its generation, so an event names its own:
+        # the newest KEPT_GENERATIONS attaches', under the lock that
+        # orders the attaches
+        self._condition_keys = {}
+        self._conditions_generation = 0
+        self._conditions_lock = threading.Lock()
         self._s = ctypes.POINTER(e.ecuio_session_t)()
         check(lib.ecuio_session_create(utf8(uri), ctypes.byref(self._s)), "ecuio_session_create")
         self._finalizer = weakref.finalize(self, _close_session, self._s, self._queues,
@@ -276,6 +299,82 @@ class Session:
         self._streams.append(s)
         self._queues.append(s._queue)
         return s
+
+    #: How many attaches' keys a session keeps for the events still unread
+    KEPT_GENERATIONS = 64
+
+    def conditions(self, capacity=1024, batch=Stream.BATCH):
+        """A stream of the events of the conditions attached
+        (set_conditions), each a ConditionEvent; before start()"""
+        s = Stream(self, e.ECUIO_QUEUE_CONDITIONS, capacity, batch)
+        self._streams.append(s)
+        self._queues.append(s._queue)
+        return s
+
+    def set_conditions(self, conditions):
+        """Attaches a ConditionSet (ADR-0063), judged from the next frame
+        against the session's signals; None takes the conditions away.
+        Before or after start(). Every state starts off and stale. key:
+        references bind through the session's own signal file or plugin
+        variant. While a recording is open it is core's IN_USE: a
+        recording holds one set for its whole length (ADR-0063 section
+        12's step 7 decides a change of set within one). An event read
+        more than KEPT_GENERATIONS attaches after its own has "" for a
+        key."""
+        handle = None
+        keys = ()
+        if conditions is not None:
+            if not conditions._finalizer.alive:
+                raise ValueError("the condition set is closed")
+            handle = conditions._handle
+            keys = tuple(c.key for c in conditions.conditions)
+        session, file = self._handle(), self._decoding_file()
+        with self._conditions_lock:
+            # Core counts each attach that succeeds. The keys go in
+            # before the call: a reader on another thread may meet the
+            # attach's first event before the call returns
+            generation = self._conditions_generation + 1
+            self._condition_keys[generation] = keys
+            rc = None
+            try:
+                rc = lib.ecuio_session_set_conditions(session, handle, file)
+            finally:
+                # Core's answer alone says whether the set is attached,
+                # whatever interrupts this thread before check() raises
+                if rc == e.ECUIO_OK:
+                    self._conditions_generation = generation
+                    self._condition_keys.pop(generation - self.KEPT_GENERATIONS, None)
+                else:
+                    del self._condition_keys[generation]
+            check(rc, "ecuio_session_set_conditions")
+
+    def condition_states(self):
+        """A ConditionState for each condition attached, in the set's
+        order; [] with none"""
+        count = ctypes.c_uint32()
+        states, room = None, 0
+        while True:
+            check(lib.ecuio_session_get_condition_states(self._handle(), states, room,
+                                                         ctypes.byref(count)),
+                  "ecuio_session_get_condition_states")
+            if count.value <= room:
+                break
+            # More than there was room for: an attach on another thread
+            # may have grown the set since the last look
+            room = count.value
+            states = (e.ecuio_condition_state_t * room)()
+        out = []
+        for i in range(count.value):
+            s = states[i]
+            keys = self._condition_keys.get(s.generation, ())
+            unavailable = bool(s.flags & e.ECUIO_CONDITION_UNAVAILABLE)
+            out.append(ConditionState(
+                keys[i] if i < len(keys) else "",
+                "on" if s.state == e.ECUIO_CONDITION_ON else "off",
+                bool(s.flags & e.ECUIO_CONDITION_STALE), not unavailable,
+                _WHYS.get(s.why, "unknown") if unavailable else None,
+                s.since_us, s.fired, s.value, s.generation))
+        return out
 
     def record(self, root, label=None):
         """A recording of the session into a new folder under root, from

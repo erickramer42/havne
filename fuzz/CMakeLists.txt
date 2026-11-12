@@ -27,7 +27,7 @@ set(_ecuio_fuzzers fuzz_decode_signal fuzz_validate_set fuzz_uds_query
     fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_elm327_emulator
     fuzz_recording fuzz_candump fuzz_request_bus fuzz_json fuzz_signal_file
     fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import fuzz_export
-    fuzz_computed)
+    fuzz_computed fuzz_condition_file)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
    NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")

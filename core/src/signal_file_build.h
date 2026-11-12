@@ -1,6 +1,6 @@
 // File/layer: core/src/signal_file_build.h | C++17, Qt-free, every platform
-// Testing: UNIT: SignalFileTest, PluginTest (test_signals); RecorderTest
-//          (test_core)
+// Testing: UNIT: SignalFileTest, PluginTest, ConditionFileTest (test_signals);
+//          RecorderTest (test_core)
 //
 // The signal-file loader's inside (ADR-0051), shared with the plugin
 // loader (ADR-0052): a set built from parts, so a signal file and a
@@ -102,6 +102,16 @@ const std::string& text_of(const ecuio_json::Value& v, size_t lo, size_t hi,
                            const std::string& what);
 int64_t whole_of(const ecuio_json::Value& v, int64_t lo, int64_t hi,
                  const std::string& what);
+double finite_of(const ecuio_json::Value& v, const std::string& what);
+/* s into a zeroed buffer of cap bytes, cut to cap - 1 */
+void copy_text(char* dst, size_t cap, const std::string& s);
+/* A key: 1 to 31 of [a-z0-9_] */
+bool key_ok(const std::string& k);
+/* Refuses text a spreadsheet would run as a formula (ADR-0049 section 8) */
+void no_formula(const ecuio_json::Value& v, const std::string& what);
+/* The index in base (the obd2 set) of the def an obd2 key names
+ * ("coolant", "pid_0b", "pid_14_1"), or -1 */
+long obd2_def(const ecuio_signal_set_t* base, const std::string& key);
 
 /* The bytes a recording copies, "" for none */
 inline const std::string& bytes_of(const ecuio_signal_file& f)

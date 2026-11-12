@@ -2,7 +2,8 @@
 //             C declarations, Qt-free; included by core sources,
 //             test_core, test_elm327, test_j2534_load and
 //             test_j2534_routing
-// Testing: UNIT: CoreTest, RecorderTest, ImportTest (test_core);
+// Testing: UNIT: CoreTest, RecorderTest, ImportTest,
+//          ConditionSessionTest (test_core);
 //          test_elm327; HARNESS: test_j2534_load; test_j2534_routing
 
 #ifndef ECUIO_INTERNAL_H
@@ -394,6 +395,13 @@ void ecuio_recording_test_set_cache_limit(ecuio_recording_t* r, uint64_t bytes);
  * before its second, so a test changes the file between them; NULL takes
  * it away. One for the process. */
 void ecuio_import_test_between_passes(void (*hook)(void* user), void* user);
+
+/* Test-only (ADR-0063 section 3), never in conditions.h:
+ * ecuio_session_set_conditions calls hook(user) on its caller's thread
+ * once the worker can take the new set, before it returns, so a test
+ * dispatches a frame there; NULL takes it away. One for the process. */
+void ecuio_session_test_after_conditions_handover(void (*hook)(void* user),
+                                                  void* user);
 
 #ifdef __cplusplus
 }

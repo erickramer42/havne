@@ -1,0 +1,6 @@
+{
+  "havne_conditions": 1,
+  "conditions": [
+    { "key": "revs", "name": "Revs", "when": { "link": "down" } }
+  ]
+}
