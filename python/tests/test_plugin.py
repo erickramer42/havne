@@ -194,3 +194,26 @@ def test_a_plugin_says_a_variant_s_gauge(tmp_path):
     assert plugin.gauge("oil") is None, "the first variant's, when none is named"
     assert plugin.gauge("oil", "gauged") == havne.Gauge(40.0, 150.0, None, 130.0)
     assert plugin.gauge("no_such_signal", "gauged") is None
+
+
+def test_a_plugin_says_a_variant_s_expression(tmp_path):
+    (tmp_path / "manifest.json").write_text(
+        '{"havne_plugin": 1, "id": "chained", "name": "Chained", "version": "1.0.0", '
+        '"requires": {"core": "0.1.0"}, "source": {"name": "Havne\'s tests"}, '
+        '"tiers": ["data"], "ecus": [{"id": "pcm", "rx": "7E8"}], '
+        '"variants": [{"id": "plain", "files": ["a.json"]}, '
+        '{"id": "chain", "files": ["a.json", "b.json"]}]}')
+    (tmp_path / "a.json").write_text(
+        '{"havne_signals": 1, "signals": [{"key": "oil", "name": "Oil", '
+        '"read": {"service": "22", "number": "F40D"}, "field": {"byte": 0}, '
+        '"offset": -40, "unit": "degC"}]}')
+    (tmp_path / "b.json").write_text(
+        '{"havne_signals": 2, "signals": ['
+        '{"key": "hot", "name": "Hot", "kind": "computed", "expr": "if(oil > 100, 1, 0)"}, '
+        '{"key": "hot_twice", "name": "Hot Twice", "kind": "computed", "expr": "hot * 2"}]}')
+    plugin = havne.Plugin(str(tmp_path))
+    assert plugin.expr("hot") is None, "the first variant has no such signal"
+    assert plugin.expr("oil", "chain") is None, "a number signal has none"
+    assert plugin.expr("hot", "chain") == "if(oil > 100, 1, 0)"
+    assert plugin.expr("hot_twice", "chain") == "hot * 2"
+    assert plugin.expr("no_such_signal", "chain") is None

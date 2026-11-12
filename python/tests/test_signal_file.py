@@ -7,7 +7,9 @@
 # a refused file's line and column; a recording opened through the file
 # it's given; the file recorded with its session; each signal's gauge as
 # havne.Gauge, a level not given None, and None for a signal with no
-# gauge or no such signal.
+# gauge or no such signal; the file's format and each computed signal's
+# expression as written (a chain in a format 2 file, None for a number
+# signal or no such signal).
 
 import os
 
@@ -90,6 +92,28 @@ def test_a_signal_file_says_each_signal_s_gauge():
     assert gauges.gauge("half_volts") == havne.Gauge(5.0, 8.0, None, None)
     assert gauges.gauge("load") is None
     assert gauges.gauge("no_such_signal") is None
+
+
+def test_a_signal_file_says_its_format_and_each_expression():
+    extras = havne.SignalFile(path=os.path.join(SIGNALS, "extras.json"))
+    assert extras.format == 1
+    assert extras.expr("krpm") == "obd2.rpm / 1000"
+    assert extras.expr("road_speed") is None, "a number signal has none"
+    assert extras.expr("no_such_signal") is None
+    chain = havne.SignalFile(path=os.path.join(SIGNALS, "chain.json"))
+    assert chain.format == 2
+    assert chain.expr("hottest") == "max(coolant, oil)"
+    assert chain.expr("margin") == "clamp(130 - hottest, 0, 130)", "reads a computed signal"
+    assert chain.expr("hot") == "if(margin < 20, 1, 0)"
+    assert chain.expr("coolant") is None
+
+
+def test_a_call_in_a_format_1_file_is_refused_naming_the_fix():
+    with open(os.path.join(SIGNALS, "call-in-format-1.json"), encoding="utf-8") as f:
+        text = f.read()
+    with pytest.raises(havne.Error, match='needs "havne_signals": 2'):
+        havne.SignalFile(text)
+    havne.SignalFile(text.replace('"havne_signals": 1', '"havne_signals": 2'))
 
 
 def test_a_gauge_the_field_cannot_reach_is_refused_naming_the_unit():
