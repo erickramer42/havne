@@ -1117,6 +1117,37 @@ TestCase {
         compare(uri.text, "j2534://Fake?profile=raw")
     }
 
+    // The phone's words and list (Theme.mobile is the platform's, so the
+    // section's own `mobile` stands in): the count names Bluetooth alone,
+    // and the list takes all its rows where the desktop's stops at its cap
+    function test_theMobileFormsConnectionWords_data() {
+        return [{ tag: "phone", mobile: true }, { tag: "desktop", mobile: false }]
+    }
+    function test_theMobileFormsConnectionWords(data) {
+        const page = createPage()
+        const section = find(page, "adapterSection")
+        const list = find(page, "deviceList")
+        const count = find(page, "deviceCount")
+        section.mobile = data.mobile
+        page.j2534Devices = []
+        page.canInterfaces = []
+        page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" }]
+        const ports = []
+        for (let i = 0; i < 12; ++i)
+            ports.push({ name: "COM" + (10 + i), device: "" })
+        page.serialPorts = ports
+        compare(list.count, 13)
+        if (data.mobile) {
+            compare(count.text, "Bluetooth: 1 found; tap one, then Connect")
+            tryVerify(() => list.contentHeight > 0 && Math.abs(list.height - list.contentHeight) < 1,
+                      3000, "the page alone scrolls")
+        } else {
+            verify(count.text.indexOf("J2534 interfaces: 0, serial ports: 12") >= 0, count.text)
+            tryVerify(() => list.contentHeight > 0 && list.height < list.contentHeight,
+                      3000, "the desktop's list stops at its cap")
+        }
+    }
+
     // The phone's Bluetooth adapters join the list after the ports
     // (ADR-0028 section 2): a paired classic one fills elm327://bt:<address>, a
     // BLE one elm327://ble:<address>, the query kept; the count names
