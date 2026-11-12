@@ -2,10 +2,10 @@
 # win-coverage job (scripts/coverage.sh): line coverage of core/,
 # surrogate/ and app/ over the whole suite. The checks are informational:
 # the number is reported on each commit, and no threshold fails one.
-# Four uploads per commit (CI's win-coverage matrix): report after all of them
+# Three uploads per commit (CI's win-coverage matrix): report after all of them
 codecov:
   notify:
-    after_n_builds: 4
+    after_n_builds: 3
 
 coverage:
   status:

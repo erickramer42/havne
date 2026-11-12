@@ -509,17 +509,16 @@ jobs:
     if: ${{ !inputs.smoke_only && github.event_name != 'pull_request' }}
     runs-on: windows-latest
     timeout-minutes: 30
-    # Four runners share the run, each with its own build: the gtest
-    # binaries, and three interleaved slices of ctest's other cases
-    # (scripts/coverage.sh --part). Codecov merges the four uploads of a commit.
+    # Three runners share the run, each with its own build: the gtest
+    # binaries, and two interleaved slices of ctest's other cases
+    # (scripts/coverage.sh --part). Codecov merges the three uploads of a commit.
     strategy:
       fail-fast: false
       matrix:
         include:
           - { name: gtest, part: gtest }
-          - { name: ctest-1, part: 1/3 }
-          - { name: ctest-2, part: 2/3 }
-          - { name: ctest-3, part: 3/3 }
+          - { name: ctest-1, part: 1/2 }
+          - { name: ctest-2, part: 2/2 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
