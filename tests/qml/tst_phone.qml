@@ -317,7 +317,6 @@ TestCase {
         const walk = (page, what) => {
             main.gotoPage(Array.from(page.parent.children).indexOf(page))
             verify(page.visible, what + " is on screen")
-            wait(100)
             verify(waitForPolish(main), what + " laid out")
             const out = pastTheEdge(page, main.contentItem, [])
             if (out.length > 0)
@@ -922,7 +921,7 @@ TestCase {
         const scrolled = list.contentY
         page.framesFilterOpen = true
         verify(waitForPolish(v.main), "grown")
-        wait(50)
+        verify(waitForPolish(v.main), "and settled")
         verify(list.contentY > list.originY + 100, "a list scrolled on stays scrolled: " + list.contentY)
         compare(list.contentY, scrolled, "where it was")
         page.framesFilterOpen = false
@@ -2653,6 +2652,9 @@ TestCase {
         compare(find(find(list, "connectRow_0"), "connectRowKind").text, "Demo data")
         compare(list.chosen, "", "nothing chosen with only the demo")
         verify(!find(list, "connectRow_0").checked)
+        const hint = find(list, "connectPickHint")
+        verify(hint.visible, "the hint shows with nothing chosen")
+        compare(hint.text, "Pick a row, then connect", "it asks for a row, not an adapter")
     }
 
     function test_aRecentAddressOfAListedDeviceTakesItsName() {
@@ -2730,6 +2732,28 @@ TestCase {
         compare(find(find(list, "connectRow_2"), "connectRowKind").text, "Demo data", "COM9 once, then the demo")
         compare(findChild(list, "connectRow_3"), null, "COM9 once")
         compare(list.chosen, "elm327://COM9?profile=obd2", "the recent one")
+    }
+
+    // One adapter connected under two profiles is two recents: on a phone
+    // the profile's word stands where the kind goes, so the rows differ
+    function test_twoRecentsOnOneAdapterReadDifferentOnAPhone() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["elm327://COM9", "elm327://COM9?profile=raw",
+                                          "elm327://COM9?profile=uds-generic&did=F190:text"])
+        find(main.contentItem, "settingsPage").serialPorts = [{ name: "COM9", device: "" }]
+        tryVerify(() => findChild(list, "connectRow_2") !== null
+                        && find(findChild(list, "connectRow_0"), "connectRowKind").text === "Default",
+                  2000, "the profile's word where the kind goes")
+        verify(Theme.compact, "a phone's form")
+        const words = [0, 1, 2].map(i => find(findChild(list, "connectRow_" + i), "connectRowKind").text)
+        compare(words, ["Default", "Raw", "UDS DIDs"])
+        const names = [0, 1, 2].map(i => findChild(list, "connectRow_" + i).Accessible.name)
+        verify(names[0] !== names[1] && names[1] !== names[2] && names[0] !== names[2],
+               "each row has a name of its own: " + names.join(" | "))
+        // an adapter with one recent keeps its kind
+        list.recents = ["elm327://COM9"]
+        tryVerify(() => find(findChild(list, "connectRow_0"), "connectRowKind").text !== "Default",
+                  2000, "a lone recent keeps its kind")
     }
 
     // At most six adapter rows; the rest are Other address...'s
