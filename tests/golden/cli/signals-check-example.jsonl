@@ -1,0 +1,4 @@
+{"schema": 1, "type": "start"}
+{"base": 130, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}], "format": 2, "name": "Boost ratio", "profile": "user.boost-ratio", "signals": 2, "type": "signal_file"}
+{"decimals": 0, "expr": "obd2.map - obd2.baro", "group": "Air", "id": 30000, "inputs": [{"id": 11088, "max_age_us": 3000000}, {"id": 11408, "max_age_us": 30000000}], "kind": "computed", "name": "Boost", "rank": 1, "type": "signal_def", "unit": "kPa"}
+{"decimals": 2, "expr": "(boost + obd2.baro) / obd2.baro", "group": "Air", "id": 30001, "inputs": [{"computed": true, "id": 30000, "max_age_us": null}, {"id": 11408, "max_age_us": 30000000}], "kind": "computed", "name": "Pressure Ratio", "rank": 0, "type": "signal_def", "unit": ""}

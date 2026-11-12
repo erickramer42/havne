@@ -180,21 +180,26 @@ inline void gauge_field(Line& l, const ecuio_signal_gauge_t* g)
     l.ch('}');
 }
 
-// The bytes a def's line takes at most: its fields, its gauge and its
-// labels
+// A computed signal's expression: 256 characters, each at most six bytes
+// escaped
+inline constexpr size_t kExprBytes = 256 * 6 + 16;
+
+// The bytes a def's line takes at most: its fields, its gauge, its
+// expression and its labels
 inline size_t def_line_bytes(const ecuio_signal_set_t& set,
                              const ecuio_signal_def_t& d)
 {
     uint32_t count = 0;
     def_labels(set, d, &count);
-    return 1024 + kGaugeBytes + labels_bytes(count);
+    return 1024 + kGaugeBytes + kExprBytes + labels_bytes(count);
 }
 
-// {"type":"signal_file", name, profile, signals (the file's own), base
+// {"type":"signal_file", name, profile, format (the file's, or its
+// newest file's for a plugin's variant), signals (the file's own), base
 // (its base set's; 0 without extends), ecus [{rx, tx}] (the base's
 // first)}
 inline void signal_file_line(Line& l, const char* name, const char* profile,
-                             const ecuio_signal_set_t& set)
+                             uint32_t format, const ecuio_signal_set_t& set)
 {
     uint32_t own = 0;
     for (uint32_t i = 0; i < set.count; ++i) {
@@ -205,6 +210,8 @@ inline void signal_file_line(Line& l, const char* name, const char* profile,
     l.string(name, std::strlen(name));
     l.key("profile");
     l.string(profile, std::strlen(profile));
+    l.key("format");
+    l.u64(format);
     l.key("signals");
     l.u64(own);
     l.key("base");
@@ -229,11 +236,13 @@ inline void signal_file_line(Line& l, const char* name, const char* profile,
 // {service, number} as the file writes them and byte (after the echo, as
 // the file's field); a number's and an enum's bits, bit (little-endian
 // only), order and signed, a number's scale and offset, an enum's labels;
-// a text's bytes (0: to the end); a computed signal's inputs [{id,
-// max_age_us}] (the stale age where the file gives none)}
+// a text's bytes (0: to the end); a computed signal's expr as the file
+// writes it (expr, from ecuio_signal_file_expr; NULL or "" writes none)
+// and inputs [{id, max_age_us}] (the stale age where the file gives
+// none; an input that is itself computed gives null and "computed": true)}
 inline void def_line(Line& l, const ecuio_signal_set_t& set,
                      const ecuio_signal_def_t& d,
-                     const ecuio_signal_gauge_t* gauge)
+                     const ecuio_signal_gauge_t* gauge, const char* expr)
 {
     const char* kind = kind_word(d);
     l.raw("{\"type\":\"signal_def\"");
@@ -254,6 +263,10 @@ inline void def_line(Line& l, const ecuio_signal_set_t& set,
     l.u64(d.plot_rank);
     gauge_field(l, gauge);
     if (const ecuio_computed_t* p = def_program(set, d)) {
+        if (expr != nullptr && expr[0] != '\0') {
+            l.key("expr");
+            l.string(expr, std::strlen(expr));
+        }
         l.key("inputs");
         l.ch('[');
         for (uint32_t i = 0; i < p->input_count && i < 4; ++i) {

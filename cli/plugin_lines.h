@@ -198,26 +198,42 @@ inline void fixture_line(Line& l, const char* file, const char* variant,
 // The oldest core that reads a signal file's "gauge" (ADR-0051)
 constexpr uint16_t kGaugeCore[3] = {0, 7, 2};
 
-// Whether a plugin whose data files use "gauge" (uses_gauge) declares
-// a requires.core (ecuio_plugin_requires_core's X, Y, Z) older than
-// kGaugeCore: an older core passes the manifest's check, then refuses
-// those files
-inline bool gauge_needs_newer_core(const uint16_t declared[3], bool uses_gauge)
+// The oldest core that reads a format 2 signal file (ADR-0062)
+constexpr uint16_t kFormat2Core[3] = {0, 8, 0};
+
+// Whether a declared requires.core (ecuio_plugin_requires_core's X, Y, Z)
+// is older than need: an older core passes the manifest's check, then
+// refuses the data files that use what need introduced
+inline bool core_older_than(const uint16_t declared[3], const uint16_t need[3])
 {
-    if (!uses_gauge) {
-        return false;
-    }
     for (int i = 0; i < 3; ++i) {
-        if (declared[i] != kGaugeCore[i]) {
-            return declared[i] < kGaugeCore[i];
+        if (declared[i] != need[i]) {
+            return declared[i] < need[i];
         }
     }
     return false;
 }
 
+// Whether a plugin whose data files use "gauge" (uses_gauge) declares
+// a requires.core older than kGaugeCore
+inline bool gauge_needs_newer_core(const uint16_t declared[3], bool uses_gauge)
+{
+    return uses_gauge && core_older_than(declared, kGaugeCore);
+}
+
+// Whether a plugin with a data file of format 2 (uses_format2) declares a
+// requires.core older than kFormat2Core
+inline bool format2_needs_newer_core(const uint16_t declared[3],
+                                     bool uses_format2)
+{
+    return uses_format2 && core_older_than(declared, kFormat2Core);
+}
+
 // {"type":"requires_core", declared, needs, warning}, written before
-// checked when gauge_needs_newer_core
-inline void requires_core_line(Line& l, const uint16_t declared[3])
+// checked when a feature the data files use (what, as the warning says it:
+// "gauge" in quotes, say) needs a core newer than declared's: need
+inline void requires_core_line(Line& l, const uint16_t declared[3],
+                               const uint16_t need[3], const char* what)
 {
     char version[24];
     std::snprintf(version, sizeof version, "%u.%u.%u", unsigned{declared[0]},
@@ -225,18 +241,25 @@ inline void requires_core_line(Line& l, const uint16_t declared[3])
     l.raw("{\"type\":\"requires_core\"");
     l.key("declared");
     l.string(version, std::strlen(version));
-    std::snprintf(version, sizeof version, "%u.%u.%u", unsigned{kGaugeCore[0]},
-                  unsigned{kGaugeCore[1]}, unsigned{kGaugeCore[2]});
+    std::snprintf(version, sizeof version, "%u.%u.%u", unsigned{need[0]},
+                  unsigned{need[1]}, unsigned{need[2]});
     l.key("needs");
     l.string(version, std::strlen(version));
     l.key("warning");
     const std::string why =
-        std::string("the data files use \"gauge\", which core reads from ") +
-        version + " on: raise the manifest's \"requires\" core to " + version +
+        std::string("the data files use ") + what +
+        ", which core reads from " + version +
+        " on: raise the manifest's \"requires\" core to " + version +
         ", so an older Havne names that version instead of refusing a "
         "signal file";
     l.string(why.c_str(), why.size());
     l.ch('}');
+}
+
+// The gauge's warning
+inline void requires_core_line(Line& l, const uint16_t declared[3])
+{
+    requires_core_line(l, declared, kGaugeCore, "\"gauge\"");
 }
 
 // The check's counts
