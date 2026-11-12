@@ -327,8 +327,8 @@ jobs:
           cmake --build build-vs --config Release --target ecuio ecuio-j2534-surrogate test_core
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
-      - name: Run test_core
-        run: build-vs/tests/Release/test_core.exe
+      - name: Run CoreTest (test_core)
+        run: ctest --test-dir build-vs -C Release --output-on-failure --no-tests=error -R "^CoreTest\."
 
   win-build:
     name: win-build (${{ matrix.shard }}/2)
