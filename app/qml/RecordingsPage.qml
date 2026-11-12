@@ -1981,37 +1981,28 @@ Page {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
-                Rectangle {
-                    implicitWidth: kindSwitch.implicitWidth + 4
-                    implicitHeight: kindSwitch.implicitHeight + 4
-                    radius: Theme.radius
-                    color: Theme.surface
-                    Row {
-                        id: kindSwitch
-                        anchors.centerIn: parent
-                        spacing: 2
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "importKind_csv"
-                            text: qsTr("CSV")
-                            selected: root.importKind === RecordingImport.Csv
-                            enabled: !Bridge.recordingImport.busy
-                            onClicked: {
-                                root.importKind = RecordingImport.Csv
-                                if (guessPreview.guess === null && !root.importGuessing)
-                                    root.guessImportFile()
-                            }
+                SegmentRow {
+                    SegmentButton {
+                        tapHeight: root.segmentHeight
+                        objectName: "importKind_csv"
+                        text: qsTr("CSV")
+                        selected: root.importKind === RecordingImport.Csv
+                        enabled: !Bridge.recordingImport.busy
+                        onClicked: {
+                            root.importKind = RecordingImport.Csv
+                            if (guessPreview.guess === null && !root.importGuessing)
+                                root.guessImportFile()
                         }
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "importKind_candump"
-                            text: qsTr("candump")
-                            selected: root.importKind === RecordingImport.Candump
-                            enabled: !Bridge.recordingImport.busy
-                            onClicked: {
-                                root.importKind = RecordingImport.Candump
-                                root.importNote = ""
-                            }
+                    }
+                    SegmentButton {
+                        tapHeight: root.segmentHeight
+                        objectName: "importKind_candump"
+                        text: qsTr("candump")
+                        selected: root.importKind === RecordingImport.Candump
+                        enabled: !Bridge.recordingImport.busy
+                        onClicked: {
+                            root.importKind = RecordingImport.Candump
+                            root.importNote = ""
                         }
                     }
                 }
@@ -3221,43 +3212,34 @@ Page {
                 id: detailSwitchSlot
                 visible: recording.hasFrames
                 // Maximized, it leads the zoom row where the row has room
-                Rectangle {
+                SegmentRow {
                     parent: root.currentHead ? root.currentHead.switchSlot
                           : !root.chartMaximized ? detailSwitchSlot
                           : root.switchInZoomRow ? zoomSwitchSlot : switchRowSlot
-                    implicitWidth: detailSwitch.implicitWidth + 4
-                    implicitHeight: detailSwitch.implicitHeight + 4
-                    radius: Theme.radius
-                    color: Theme.surface
 
-                    Row {
-                        id: detailSwitch
-                        anchors.centerIn: parent
-                        spacing: 2
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "detailView_values"
-                            text: qsTr("Values")
-                            selected: !root.framesShown && !root.aboutShown
-                            onClicked: root.detailView = "values"
-                        }
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "detailView_frames"
-                            visible: recording.hasFrames
-                            text: qsTr("Frames")
-                            selected: root.framesShown
-                            onClicked: root.detailView = "frames"
-                        }
-                        // On the pinned form About is a view of its own
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "detailView_about"
-                            visible: root.pinnedViewer
-                            text: qsTr("About")
-                            selected: root.aboutShown
-                            onClicked: root.detailView = "about"
-                        }
+                    SegmentButton {
+                        tapHeight: root.segmentHeight
+                        objectName: "detailView_values"
+                        text: qsTr("Values")
+                        selected: !root.framesShown && !root.aboutShown
+                        onClicked: root.detailView = "values"
+                    }
+                    SegmentButton {
+                        tapHeight: root.segmentHeight
+                        objectName: "detailView_frames"
+                        visible: recording.hasFrames
+                        text: qsTr("Frames")
+                        selected: root.framesShown
+                        onClicked: root.detailView = "frames"
+                    }
+                    // On the pinned form About is a view of its own
+                    SegmentButton {
+                        tapHeight: root.segmentHeight
+                        objectName: "detailView_about"
+                        visible: root.pinnedViewer
+                        text: qsTr("About")
+                        selected: root.aboutShown
+                        onClicked: root.detailView = "about"
                     }
                 }
             }
@@ -3297,32 +3279,22 @@ Page {
                         Layout.fillWidth: true
                         spacing: Theme.spacing
 
-                        Rectangle {
-                            implicitWidth: framesTableSwitch.implicitWidth + 4
-                            implicitHeight: framesTableSwitch.implicitHeight + 4
-                            radius: Theme.radius
-                            color: Theme.surface
-
-                            Row {
-                                id: framesTableSwitch
-                                anchors.centerIn: parent
-                                spacing: 2
-                                SegmentButton {
-                                    tapHeight: root.segmentHeight
-                                    objectName: "framesTable_frames"
-                                    text: qsTr("List")
-                                    selected: !root.framesById
-                                    onClicked: root.framesById = false
-                                }
-                                SegmentButton {
-                                    tapHeight: root.segmentHeight
-                                    objectName: "framesTable_byId"
-                                    text: qsTr("By ID")
-                                    selected: root.framesById
-                                    onClicked: {
-                                        root.framesById = true
-                                        viewFrames.ids.refresh()
-                                    }
+                        SegmentRow {
+                            SegmentButton {
+                                tapHeight: root.segmentHeight
+                                objectName: "framesTable_frames"
+                                text: qsTr("List")
+                                selected: !root.framesById
+                                onClicked: root.framesById = false
+                            }
+                            SegmentButton {
+                                tapHeight: root.segmentHeight
+                                objectName: "framesTable_byId"
+                                text: qsTr("By ID")
+                                selected: root.framesById
+                                onClicked: {
+                                    root.framesById = true
+                                    viewFrames.ids.refresh()
                                 }
                             }
                         }
