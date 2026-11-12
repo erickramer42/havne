@@ -68,6 +68,10 @@ Page {
     // names a log's interfaces when it has several
     property bool importAsksInterface: false
     property string importNote: ""
+    // Cancel was pressed on an import under way, until it ends; and the
+    // last import ended so, which is neither made nor failed
+    property bool importStopping: false
+    property bool importCanceled: false
     property bool importFailed: false
     // [{ title, uri, folder, source, profile }] (Bridge.recentRecordings)
     property var recordings: []
@@ -1505,11 +1509,16 @@ Page {
             }
         }
         function onFinished(result) {
-            root.importFailed = !result.ok
+            root.importStopping = false
+            root.importCanceled = result.canceled === true
+            root.importFailed = !result.ok && !root.importCanceled
             if (result.ok) {
                 root.importNote = root.importedWords(result)
                 root.importOpen = false
                 root.refresh()
+            } else if (root.importCanceled) {
+                // The panel stays, its choices kept, for another try
+                root.importNote = qsTr("Import canceled: nothing was imported")
             } else {
                 root.importNote = result.words
                 if (root.importKind === RecordingImport.Candump)
@@ -1768,8 +1777,15 @@ Page {
                 ThemedButton {
                     objectName: "importCancel"
                     text: qsTr("Cancel")
-                    enabled: !Bridge.recordingImport.busy
+                    // An import under way is stopped; a guess is short and
+                    // runs to its end
+                    enabled: !root.importGuessing && !root.importStopping
                     onClicked: {
+                        if (Bridge.recordingImport.busy) {
+                            root.importStopping = true
+                            Bridge.recordingImport.cancel()
+                            return
+                        }
                         root.importOpen = false
                         root.importNote = ""
                     }
@@ -1780,7 +1796,8 @@ Page {
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
                     color: Theme.textDim
-                    text: root.importGuessing ? qsTr("Reading...") : qsTr("Importing...")
+                    text: root.importGuessing ? qsTr("Reading...")
+                          : root.importStopping ? qsTr("Stopping...") : qsTr("Importing...")
                 }
             }
         }
@@ -1791,7 +1808,8 @@ Page {
             visible: root.importNote !== "" && !root.viewing
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            color: root.importFailed ? Theme.danger : Theme.success
+            color: root.importFailed ? Theme.danger
+                   : root.importCanceled ? Theme.textDim : Theme.success
             text: root.importNote
         }
 

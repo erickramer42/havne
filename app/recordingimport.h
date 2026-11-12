@@ -55,6 +55,12 @@ public:
     Q_INVOKABLE bool start(const QUrl& file, int kind, const QUrl& map,
                            const QString& interfaceName);
 
+    // Stops an import under way at its copy's next chunk or core's next
+    // ask, leaving nothing made: finished() follows with { ok: false,
+    // canceled: true, words }. An import that ended first keeps its
+    // result. Nothing while none runs; a guess is short and runs to its end
+    Q_INVOKABLE void cancel();
+
     // Starts a CSV import through a column map given as text (the Import
     // panel's edited guess): the same worker, finished() and result as
     // start(), with no map file read
@@ -99,6 +105,9 @@ public:
     void setCopyLocalFilesForTesting(bool copy) { m_copyLocal = copy; }
     // The next worker can't be started, as when the system is out of threads
     void setFailThreadForTesting(bool on) { m_failThreadForTesting = on; }
+    // An import's worker waits this long, or until a stop, before core's
+    // call, so a test's cancel finds one under way
+    void setHoldForTesting(int ms) { m_holdMs = ms; }
 
     // The largest column map read, as havne-cli reads one
     static constexpr qint64 MapMaxBytes = 1024 * 1024;
@@ -120,9 +129,11 @@ private:
 
     std::function<QString()> m_root;
     std::thread m_worker;
-    // Set at destruction: the worker's copy and core's import stop
+    // Set by cancel() and at destruction: the worker's copy and core's
+    // import stop. Cleared as each worker starts
     std::atomic<bool> m_stop{false};
     bool m_busy = false;
+    int m_holdMs = 0;
     bool m_copyLocal = false;
     bool m_failThreadForTesting = false;
     QString m_mapsRoot;

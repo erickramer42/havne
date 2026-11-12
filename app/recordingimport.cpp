@@ -17,6 +17,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#include <chrono>
 #include <system_error>
 
 #include "ecuio/core.h"
@@ -34,6 +35,15 @@ QString openable(const QUrl& url)
 QVariantMap refused(const QString& words)
 {
     return {{QStringLiteral("ok"), false}, {QStringLiteral("words"), words}};
+}
+
+// An import the user stopped: nothing was made
+QVariantMap canceled()
+{
+    return {
+        {QStringLiteral("ok"), false},
+        {QStringLiteral("canceled"), true},
+        {QStringLiteral("words"), QStringLiteral("the import was canceled")}};
 }
 
 // The file's bytes into path, a chunk at a time: a log can be larger than
@@ -77,10 +87,11 @@ struct Job {
     QString root;
     QString stamp;
     bool copyLocal = false;
+    int holdMs = 0;
     std::atomic<bool>* stop = nullptr;
 };
 
-// ecuio_import_with's cancel: the importer's destruction
+// ecuio_import_with's cancel: the importer's cancel() or its destruction
 int stopAsked(void* user)
 {
     return static_cast<const std::atomic<bool>*>(user)->load() ? 1 : 0;
@@ -152,6 +163,9 @@ QVariantMap run(const Job& job)
         in = copy.filePath(QStringLiteral("input"));
         bool readable = false;
         if (!copyTo(job.file, in, &readable, job.stop)) {
+            if (job.stop->load()) {
+                return canceled(); // the copy stopped, not a failed read
+            }
             return refused(
                 readable
                     ? QStringLiteral(
@@ -170,8 +184,15 @@ QVariantMap run(const Job& job)
     o.interface_utf8 = !csv && !iface.isEmpty() ? iface.constData() : nullptr;
     o.column_map_utf8 = csv ? map.constData() : nullptr;
     ecuio_import_report_t r{};
+    for (int waited = 0; waited < job.holdMs && !job.stop->load();
+         waited += 10) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     const ecuio_status_t status =
         ecuio_import_with(&o, stopAsked, job.stop, &r);
+    if (status == ECUIO_ERR_CANCELED) {
+        return canceled();
+    }
     if (status != ECUIO_OK) {
         const QString detail = QString::fromUtf8(ecuio_last_error_detail());
         return refused(
@@ -594,8 +615,14 @@ bool RecordingImport::beginImport(const QUrl& file, int kind, const QUrl& map,
     job.stamp = QDateTime::currentDateTime().toString(
         QStringLiteral("yyyyMMdd-HHmmss"));
     job.copyLocal = m_copyLocal;
+    job.holdMs = m_holdMs;
     job.stop = &m_stop;
     return launch(false, [job] { return run(job); });
+}
+
+void RecordingImport::cancel()
+{
+    m_stop = true; // an import's next look ends it; a guess never looks
 }
 
 bool RecordingImport::guess(const QUrl& file, const QString& timeUnit)
@@ -619,6 +646,7 @@ bool RecordingImport::launch(bool isGuess, std::function<QVariantMap()> work)
             throw std::system_error(std::make_error_code(
                 std::errc::resource_unavailable_try_again));
         }
+        m_stop = false; // an earlier cancel was the earlier worker's
         m_worker = std::thread([this, isGuess, work = std::move(work)] {
             const QVariantMap result = work();
             QMetaObject::invokeMethod(

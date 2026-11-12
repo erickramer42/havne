@@ -293,6 +293,117 @@ TEST(BridgeTest, ImportStopsWhenTheImporterGoes)
     EXPECT_FALSE(finished) << "its end goes with it";
 }
 
+/* An import the user cancels ends canceled with nothing made: held before
+ * core's call, through the second pass with its partial folder there, and
+ * in a provider file's copy. A guess isn't stopped, and the importer
+ * imports again after each */
+TEST(BridgeTest, ACanceledImportEndsCanceledAndLeavesNoRecording)
+{
+    QTemporaryDir dir;
+    QByteArray log;
+    for (int i = 0; i < 300000; ++i) {
+        log += QStringLiteral("(1700000000.%1) can0 7E8#03410C1AF8AAAAAA\n")
+                   .arg(i * 3, 6, 10, QLatin1Char('0'))
+                   .toLatin1();
+    }
+    const QUrl file = fileUrl(write(dir, "long.log", log));
+    const QString root = dir.filePath(QStringLiteral("recordings"));
+    RecordingImport im([root] { return root; });
+    QVariantMap result;
+    int ends = 0;
+    QObject::connect(&im, &RecordingImport::finished,
+                     [&](const QVariantMap& r) {
+                         result = r;
+                         ++ends;
+                     });
+    const auto expectCanceled = [&](const char* when) {
+        EXPECT_FALSE(result.value(QStringLiteral("ok")).toBool()) << when;
+        EXPECT_TRUE(result.value(QStringLiteral("canceled")).toBool()) << when;
+        EXPECT_EQ(result.value(QStringLiteral("words")).toString(),
+                  QStringLiteral("the import was canceled"))
+            << when;
+        EXPECT_FALSE(im.busy()) << when;
+        EXPECT_TRUE(entries(root).isEmpty())
+            << when << ": no folder and no partial: "
+            << entries(root).join(QLatin1Char(' ')).toStdString();
+    };
+
+    im.cancel(); // with nothing under way: nothing
+
+    // Held before core's call: the cancel ends the hold and core's first
+    // ask stops it
+    im.setHoldForTesting(60000);
+    QElapsedTimer held;
+    held.start();
+    ASSERT_TRUE(im.start(file, RecordingImport::Candump, {}, {}));
+    EXPECT_TRUE(im.busy());
+    im.cancel();
+    ASSERT_TRUE(waitUntil([&] { return ends == 1; }, 60000));
+    EXPECT_LT(held.elapsed(), 30000) << "the cancel ends the hold";
+    expectCanceled("held before core's call");
+    im.setHoldForTesting(0);
+
+    // Mid-way: the second pass has made its partial folder. An import
+    // that outran the look (it ended, or its folder was already in place)
+    // is no judgment: its folder goes and the next is tried
+    bool caught = false;
+    for (int attempt = 0; attempt < 5 && !caught; ++attempt) {
+        const int was = ends;
+        ASSERT_TRUE(im.start(file, RecordingImport::Candump, {}, {}));
+        ASSERT_TRUE(waitUntil(
+            [&] { return !entries(root).isEmpty() || ends > was; }, 60000));
+        const QStringList seen = entries(root);
+        const bool partial = ends == was && seen.size() == 1 &&
+                             seen[0].contains(QStringLiteral(".partial-"));
+        im.cancel();
+        ASSERT_TRUE(waitUntil([&] { return ends > was; }, 60000));
+        caught = partial && result.value(QStringLiteral("canceled")).toBool();
+        if (caught) {
+            expectCanceled("in the second pass");
+        } else {
+            ASSERT_TRUE(QDir(root).removeRecursively());
+        }
+    }
+    EXPECT_TRUE(caught) << "no import was stopped with its partial folder "
+                           "there in five tries";
+
+    // In the copy of a file core can't read in place
+    im.setCopyLocalFilesForTesting(true);
+    int was = ends;
+    ASSERT_TRUE(im.start(file, RecordingImport::Candump, {}, {}));
+    im.cancel();
+    ASSERT_TRUE(waitUntil([&] { return ends == was + 1; }, 60000));
+    expectCanceled("in the copy");
+    im.setCopyLocalFilesForTesting(false);
+
+    // A guess runs to its end whatever is asked
+    bool guessed = false;
+    QVariantMap guess;
+    QObject::connect(&im, &RecordingImport::guessFinished,
+                     [&](const QVariantMap& g) {
+                         guess = g;
+                         guessed = true;
+                     });
+    const QUrl csv =
+        fileUrl(write(dir, "small.csv", "time (s),rpm\n0,800\n1,900\n"));
+    ASSERT_TRUE(im.guess(csv, QString()));
+    im.cancel();
+    ASSERT_TRUE(waitUntil([&] { return guessed; }));
+    EXPECT_TRUE(guess.value(QStringLiteral("ok")).toBool())
+        << guess.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_FALSE(guess.contains(QStringLiteral("canceled")));
+
+    // An earlier cancel is no cancel of the next import
+    was = ends;
+    const Imported whole = import(im, file, RecordingImport::Candump);
+    ASSERT_TRUE(ok(whole)) << words(whole).toStdString();
+    EXPECT_FALSE(whole.result.contains(QStringLiteral("canceled")));
+    EXPECT_EQ(whole.result.value(QStringLiteral("frames")).toDouble(),
+              300000.0);
+    EXPECT_EQ(entries(root).size(), 1);
+    EXPECT_EQ(ends, was + 1);
+}
+
 /* A name taken in this second: the next, "-2", as a recording's would */
 TEST(BridgeTest, ImportTakesTheNextNameWhenOneIsTaken)
 {
