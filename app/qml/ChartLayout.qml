@@ -269,7 +269,7 @@ QtObject {
                              { at: s.highestMs, v: s.highest, filled: true }]) {
                 const y = traceYAt(l, tr, e.v)
                 if (e.at >= 0 && e.at >= t0 && e.at <= t1 && y !== null)
-                    dots.push({ row: tr.row, x: xOf(e.at), y: y, filled: e.filled })
+                    dots.push({ row: tr.row, slot: tr.slot, x: xOf(e.at), y: y, filled: e.filled })
             }
         }
         return dots
@@ -615,7 +615,7 @@ QtObject {
             const value = isFinite(s.labelValue) ? s.labelValue : last
             const label = opts.format(value, s.decimals, s.unit)
             labelW = Math.max(labelW, opts.measure(label))
-            traces.push({ sp: sp, cols: cols, row: s.row, vMin: range.vMin, vMax: range.vMax,
+            traces.push({ sp: sp, cols: cols, row: s.row, slot: s.slot !== undefined ? s.slot : s.row, vMin: range.vMin, vMax: range.vMax,
                           flat: range.flat, label: label, value: value, decimals: s.decimals,
                           unit: s.unit, scaleKey: s.scaleKey, dash: s.dash, labelMs: s.labelMs })
         }
@@ -789,7 +789,7 @@ QtObject {
                                    top: traceY(tr.cols.highs[c]),
                                    bottom: traceY(tr.cols.lows[c]) })
                 }
-                out.push({ row: tr.row,
+                out.push({ row: tr.row, slot: tr.slot,
                            dash: tr.dash,
                            pane: tr.pane,
                            segments: [],
@@ -811,7 +811,7 @@ QtObject {
                                        ? bandPieces(seg, bandColumnW, swing)
                                        : [{ band: false, points: seg }])
             }
-            out.push({ row: tr.row,
+            out.push({ row: tr.row, slot: tr.slot,
                        dash: tr.dash,
                        pane: tr.pane,
                        segments: segs,
