@@ -1210,8 +1210,15 @@ profile  raw
                 verify(!rows.visible, "the rows give way to About")
                 const findings = find(page, "findingList")
                 // the head is the list's first item, whatever height the font gives it
-                tryVerify(() => findings.headerItem.mapToItem(findings, 0, 0).y >= -0.5, 2000,
-                          "About's list at its start")
+                const headAt = () => findings.headerItem.mapToItem(findings, 0, 0).y
+                // a condition wait without tryVerify, which would end the case
+                // before the numbers below are read
+                const until = Date.now() + 2000
+                while (headAt() < -0.5 && Date.now() < until)
+                    wait(20)
+                verify(headAt() >= -0.5, "About's list at its start: head at " + headAt()
+                       + ", contentY " + findings.contentY + ", originY " + findings.originY
+                       + ", head height " + findings.headerItem.height)
                 inOrder(["chartSplitter", "zoomAll", "detailView_about", "recordingInfo", "decodeChoice",
                          "compareChoice", "checkSummary"])
                 const save = yOf("saveReport")
