@@ -37,6 +37,9 @@ TestCase {
     // Settings stores a write when the page goes, so the store is put
     // back once the last case's pages are gone, through setValue
     function init() {
+        // Each case starts from no session, whatever an earlier one left
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting && !Bridge.connected, 5000, "no session at the start")
         wait(0)
         const store = createTemporaryObject(storeComponent, testCase)
         for (const key of ["phone", "desktop", "phoneUnread", "desktopUnread"])
@@ -2058,10 +2061,10 @@ TestCase {
     }
     readonly property var anyCell: ["panelClose", "panelCopy", "panelPaste", "panelW", "panelH",
                                     "panelEarlier", "panelLater", "panelStart", "panelEnd", "panelRemove"]
+    // panelSignalName shows while the cell's ref has a row: the demo's RPM
+    // (id:1001) has one with no session, which init() guarantees
     readonly property var withSignal: ["panelPreview", "panelLabel", "panelSignal", "panelKind", "panelFrom",
-                                       "panelFromCaption", "panelTo", "panelToCaption"]
-    // Shown only while the row has a session's entry, which these cases have none of
-    readonly property var withEntry: ["panelSignalName"]
+                                       "panelFromCaption", "panelTo", "panelToCaption", "panelSignalName"]
     // What the value's text and tone read: every kind that draws a value
     readonly property var valueDrawn: ["panelColdBelow", "panelWarnBelow", "panelDangerBelow",
                                        "panelWarnFrom", "panelDangerFrom", "panelDecimals", "panelColors",
@@ -2150,13 +2153,21 @@ TestCase {
         press(find(page, "dashCell_0_0"))
         compare(page.panel, "cell")
         const found = panelFields(page)
-        // The signal's name shows only while the cell's row exists, which a
-        // session left by an earlier case decides
-        const shown = found.filter(f => f.shown && f.name !== "panelSignalName").map(f => f.name).sort()
+        const shown = found.filter(f => f.shown).map(f => f.name).sort()
         compare(shown, fieldsOfKind[data.kind].slice().sort())
-        const listed = Object.values(fieldsOfKind).reduce((all, l) => all.concat(l), withEntry)
+        const listed = Object.values(fieldsOfKind).reduce((all, l) => all.concat(l), [])
         for (const f of found)
             verify(listed.indexOf(f.name) >= 0, f.name + " is in the table for some kind")
+    }
+
+    function test_theSignalNameIsHiddenWhenTheCellsRowDoesNotExist() {
+        const cell = cellOf("A", "analog")
+        cell.refs = ["id:987654"]
+        const page = pageOf({}, docOf([cell, cellOf("B")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        verify(!find(page, "panelSignalName").visible, "no row, no name")
+        verify(find(page, "panelSignal").visible, "the signal's own row still shows")
     }
 
     function test_aHiddenFieldKeepsItsStoredValueThroughAKindChange() {
