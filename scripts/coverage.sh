@@ -101,7 +101,7 @@ fi
 root=$(cygpath -w "$PWD")
 ctest_args=(--test-dir "$TREE" -C RelWithDebInfo --output-on-failure --no-tests=error)
 [ -n "$regex" ] && ctest_args+=(-R "$regex")
-rm -rf "$LOGDIR/html" "$LOGDIR"/raw*.xml "$LOGDIR"/cover-*.log "$LOGDIR/cobertura.xml"
+rm -rf "$LOGDIR/html" "$LOGDIR"/rc-* "$LOGDIR"/raw*.xml "$LOGDIR"/cover-*.log "$LOGDIR/cobertura.xml"
 # A program the tool starts runs under a debugger, which gives it Windows'
 # debug heap: an allocation-heavy case runs many times slower there.
 export _NO_DEBUG_HEAP=1
@@ -118,6 +118,7 @@ cover() { # cover <name> <seconds, 0 for none> <program> [args...]: into raw-<na
 start=$SECONDS
 owned=""
 failed=""
+gtest_jobs=${COVERAGE_JOBS:-3}
 if [ -z "$regex" ]; then
     for exe in "$TREE"/tests/RelWithDebInfo/test_*.exe; do
         name=$(basename "$exe" .exe)
@@ -125,8 +126,19 @@ if [ -z "$regex" ]; then
             | sed -nE 's/^([A-Za-z_][A-Za-z0-9_/]*)\.( .*)?$/\1/p')
         [ -n "$suites" ] || continue
         owned="$owned|$(tr '\n' '|' <<<"$suites" | sed 's/|$//')"
-        cover "$name" 600 "$(cygpath -w "$PWD/$exe")"
-        [ "$rc" = 0 ] || failed="$failed $name"
+        # Binaries run side by side, as ctest -j runs their cases: a
+        # process is single-threaded under the tool, so the cores idle
+        # otherwise. Each writes its own log and raw report.
+        (
+            cover "$name" 600 "$(cygpath -w "$PWD/$exe")"
+            echo "$rc" > "$LOGDIR/rc-$name"
+        ) &
+        while [ "$(jobs -rp | wc -l)" -ge "$gtest_jobs" ]; do wait -n; done
+    done
+    wait
+    for rcfile in "$LOGDIR"/rc-*; do
+        [ -e "$rcfile" ] || continue
+        [ "$(cat "$rcfile")" = 0 ] || failed="$failed $(basename "$rcfile" | sed 's/^rc-//')"
     done
     [ -z "$owned" ] || ctest_args+=(-E "^(${owned#|})\.")
 fi
