@@ -405,6 +405,62 @@ TEST(RecordingExportTest, ARefusedExportLeavesAPickedDocumentGone)
     EXPECT_FALSE(QFileInfo::exists(picked)) << "the empty document goes";
 }
 
+/* A document the user chose to replace holds their bytes: a refused export,
+ * a refused start and a thread that can't start leave it as it was */
+TEST(RecordingExportTest, ARefusedExportLeavesAReplacedDocumentAlone)
+{
+    QTemporaryDir dir;
+    RecordingExport e;
+    e.setThroughProviderForTesting(true);
+    const QString picked = dir.filePath(QStringLiteral("picked.csv"));
+    const QByteArray theirs("the user's earlier export\n");
+    writeFile(picked, theirs);
+
+    const QVariantMap r = exported(e, formulaRecording(dir), Options{},
+                                   QUrl::fromLocalFile(picked));
+    EXPECT_FALSE(ok(r));
+    EXPECT_EQ(bytesOf(picked), theirs) << "a refused export";
+
+    EXPECT_FALSE(
+        e.start(asMap(QString(), Options{}), QUrl::fromLocalFile(picked)));
+    EXPECT_EQ(bytesOf(picked), theirs) << "an empty folder";
+
+    Options odd;
+    odd.format = 99;
+    EXPECT_FALSE(e.start(asMap(fixture("pull-early"), odd),
+                         QUrl::fromLocalFile(picked)));
+    EXPECT_EQ(bytesOf(picked), theirs) << "a bad format";
+
+    e.setFailThreadForTesting(true);
+    EXPECT_FALSE(e.start(asMap(fixture("pull-early"), Options{}),
+                         QUrl::fromLocalFile(picked)));
+    EXPECT_EQ(bytesOf(picked), theirs) << "a thread that can't start";
+    e.setFailThreadForTesting(false);
+}
+
+/* A copy that fails after it wrote some bytes: a document empty when the
+ * export began goes, one that held bytes survives (cut by the copy's own
+ * truncation, which a temporary file first would avoid) */
+TEST(RecordingExportTest, AFailureAfterBytesWereWrittenJudgesTheDocumentAtEntry)
+{
+    QTemporaryDir dir;
+    RecordingExport e;
+    e.setThroughProviderForTesting(true);
+    e.setFailCopyAfterBytesForTesting(true);
+
+    const QString fresh = dir.filePath(QStringLiteral("fresh.csv"));
+    writeFile(fresh, QByteArray());
+    EXPECT_FALSE(ok(exported(e, fixture("pull-early"), Options{},
+                             QUrl::fromLocalFile(fresh))));
+    EXPECT_FALSE(QFileInfo::exists(fresh)) << "an empty one goes, part written";
+
+    const QString theirs = dir.filePath(QStringLiteral("theirs.csv"));
+    writeFile(theirs, QByteArray("the user's earlier export\n"));
+    EXPECT_FALSE(ok(exported(e, fixture("pull-early"), Options{},
+                             QUrl::fromLocalFile(theirs))));
+    EXPECT_TRUE(QFileInfo::exists(theirs)) << "one that held bytes stays";
+}
+
 /* A start that refuses (a start under way, no folder, a format it doesn't
  * know) or whose thread can't start leaves no picked document, as a failed
  * export does; a folder target is never removed */
@@ -786,12 +842,12 @@ TEST(RecordingExportTest, DestroyedAsALocalFolderCopyBeginsLeavesNoCopy)
 }
 
 /* Destroyed after core's export, before a provider's copy: the copy
- * stops at its first chunk and the picked document goes */
+ * stops at its first chunk and the document the picker made (empty) goes */
 TEST(RecordingExportTest, DestroyedBeforeAProvidersCopyItCopiesNothing)
 {
     QTemporaryDir dir;
     const QString out = dir.filePath(QStringLiteral("a.csv"));
-    writeFile(out, "the picker's document");
+    writeFile(out, QByteArray());
     QElapsedTimer t;
     {
         RecordingExport e;
@@ -880,12 +936,12 @@ TEST(RecordingExportTest, ACanceledExportSaysSoAndWritesNothing)
 }
 
 /* Canceled after core's export, before a provider's copy: the copy stops
- * at its first chunk and the picked document goes */
+ * at its first chunk and the document the picker made (empty) goes */
 TEST(RecordingExportTest, ACancelBeforeAProvidersCopyCopiesNothing)
 {
     QTemporaryDir dir;
     const QString out = dir.filePath(QStringLiteral("a.csv"));
-    writeFile(out, "the picker's document");
+    writeFile(out, QByteArray());
     RecordingExport e;
     Finished done(e);
     e.setThroughProviderForTesting(true);

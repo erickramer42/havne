@@ -35,6 +35,18 @@ uint32_t healthLatestModelYear();
 // empty for none: baseline_folder_utf8 is then NULL
 QByteArray healthBaselineArgument(const QString& folder);
 
+// Whether the document at where (a path or a provider's URI) exists and
+// holds no byte, read rather than sized: a provider that gives no size
+// reads 0 for a document with bytes, so an unreadable one counts as not
+// empty. A save asks this before it writes anything and removes the
+// document on failure only if it was empty then: the picker's own, even part
+// written, never one the user chose to replace
+bool isEmptyDocument(const QString& where);
+
+// Removes the document at where when isEmptyDocument says it is empty:
+// for a refusal before anything is written
+void removeIfEmpty(const QString& where);
+
 // A written report's counts in words, each noun as its count wants it:
 // "1 ECU, 3 trouble codes, 0 key values"; and the log's line, "Health
 // report saved: <summary> (2 identification items left out)"
@@ -51,7 +63,7 @@ QString healthSavedLine(const ecuio_health_report_t& report);
 // from a recording's folder at core's next ask (ecuio_health_export_with),
 // with nothing written. A report that isn't written removes the document a
 // picker made at url when it is a provider's (not a local file, or
-// throughProvider, which a test sets)
+// throughProvider, which a test sets) and was empty when the call began
 QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url,
                               std::atomic<bool>* stop = nullptr,
                               bool throughProvider = false);

@@ -108,6 +108,11 @@ public:
     int heldForTesting() const { return m_heldForTesting.load(); }
     // Every copy to the target fails, as a provider refusing the bytes
     void setFailCopyForTesting(bool on) { m_failCopyForTesting = on; }
+    // A provider's copy fails after writing some bytes into the document
+    void setFailCopyAfterBytesForTesting(bool on)
+    {
+        m_failCopyAfterBytesForTesting = on;
+    }
 
 signals:
     void busyChanged();
@@ -147,4 +152,5 @@ private:
     int m_holdMsForTesting = 0;
     std::atomic<int> m_heldForTesting{0};
     bool m_failCopyForTesting = false;
+    bool m_failCopyAfterBytesForTesting = false;
 };

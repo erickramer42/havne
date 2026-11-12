@@ -481,7 +481,7 @@ bool RecordingView::saveHealthReport(const QUrl& url, int filterIndex,
     } catch (const std::system_error&) {
         // The picker made the document the report would have filled
         if (provider || !url.isLocalFile()) {
-            QFile::remove(url.isLocalFile() ? url.toLocalFile()
+            removeIfEmpty(url.isLocalFile() ? url.toLocalFile()
                                             : url.toString());
         }
         return false;
