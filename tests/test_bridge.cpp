@@ -242,6 +242,19 @@ TEST(BridgeTest, GaugeSignalsNameBoostOnTheMockAndObd2)
               QString("id:%1").arg(ECUIO_OBD2_SIG_BOOST_ID));
 }
 
+/* The built-in Lambda cell reads the demo's lambda or obd2's commanded one
+ * (PID 44 field 0): the cell's description says "commanded" */
+TEST(BridgeTest, GaugeSignalsNameLambdaOnTheMockAndObd2sCommandedOne)
+{
+    SessionBridge bridge;
+    const QVariantList lambda = bridge.gaugeSignals().value("lambda").toList();
+    ASSERT_EQ(lambda.size(), 2);
+    EXPECT_EQ(lambda[0].toString(),
+              QString("id:%1").arg(ECUIO_MOCK_SIG_LAMBDA_ID));
+    EXPECT_EQ(lambda[1].toString(),
+              QString("id:%1").arg(ECUIO_OBD2_PID_SIG_ID(0x44, 0)));
+}
+
 TEST(BridgeTest, InvalidUriReturnsError)
 {
     SessionBridge bridge;
@@ -11634,6 +11647,23 @@ TEST(BridgeTest, WindowThemeAppliesOncePerChangeOfEachColor)
     EXPECT_EQ(applied, 2);
     theme.setText(Qt::blue);
     EXPECT_EQ(applied, 3);
+}
+
+// The scheme apply() asks for follows the look's lightness each way, and
+// the first apply (at construction) asks too. The offscreen platform
+// reports Unknown whatever is asked, so the QML case that reads the
+// platform's scheme skips there: this is what pins the choice
+TEST(BridgeTest, WindowThemeAsksTheSchemeOfTheLookEachWay)
+{
+    FakeTheme theme; // black: a dark look
+    WindowTheme follower(&theme, nullptr);
+    EXPECT_EQ(follower.askedScheme(), Qt::ColorScheme::Dark);
+    theme.setBg(QColor(QLatin1String("#f3f3f1")));
+    EXPECT_EQ(follower.askedScheme(), Qt::ColorScheme::Light);
+    theme.setBg(QColor(QLatin1String("#0d0a07"))); // Night amber
+    EXPECT_EQ(follower.askedScheme(), Qt::ColorScheme::Dark);
+    theme.setBg(QColor(QLatin1String("#ffffff")));
+    EXPECT_EQ(follower.askedScheme(), Qt::ColorScheme::Light);
 }
 
 // A light look's page gets dark bar icons and the Light scheme; Dark and

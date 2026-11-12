@@ -151,7 +151,7 @@ TestCase {
                                 description: "Intake air temperature" })
         // No accent: blue means cold, nothing else
         compare(c[7].options, { from: 0, to: 500, description: "Mass air flow" })
-        compare(c[8].options, { from: 0.5, to: 2, description: "Equivalence ratio" })
+        compare(c[8].options, { from: 0.5, to: 2, description: "Commanded equivalence ratio" })
         compare(c[9].options, { from: 10, to: 16, dangerBelow: 11.8, warnBelow: 12.4, warnFrom: 14.8, dangerFrom: 15.2 })
     }
 

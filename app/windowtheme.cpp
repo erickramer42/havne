@@ -120,9 +120,9 @@ bool WindowTheme::lightBars(const QColor& bg)
 void WindowTheme::apply()
 {
     const bool light = lightBars(m_theme->property("bg").value<QColor>());
+    m_asked = light ? Qt::ColorScheme::Light : Qt::ColorScheme::Dark;
     if (m_window != nullptr) {
-        QGuiApplication::styleHints()->setColorScheme(
-            light ? Qt::ColorScheme::Light : Qt::ColorScheme::Dark);
+        QGuiApplication::styleHints()->setColorScheme(m_asked);
     }
 #ifdef Q_OS_ANDROID
     colorAndroidWindow(m_theme->property("bg").value<QColor>(), light);

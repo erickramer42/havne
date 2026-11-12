@@ -42,6 +42,11 @@ public:
 public slots:
     void apply();
 
+    // The color scheme the last apply() asked for, Light or Dark, whether
+    // or not there is a window to ask it of or a platform that reports it
+    // back: the offscreen platform reports Unknown, so a test reads this
+    Qt::ColorScheme askedScheme() const { return m_asked; }
+
 signals:
     // Emitted at the end of every apply(), whether or not the platform has
     // a step for it
@@ -50,4 +55,5 @@ signals:
 private:
     QObject* m_theme;
     QWindow* m_window;
+    Qt::ColorScheme m_asked = Qt::ColorScheme::Unknown;
 };
