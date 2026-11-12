@@ -816,8 +816,8 @@ session; these two rules are then two of its instances.
 engine_load, vehicle_speed, engine_speed, cruise_floor, cruise_speed_band,
 pull_gain}`, each role a signal name or null, the speeds in km/h so a reader
 sees what was searched with) and one `stretch` line per stretch in time
-order (`{type: "stretch", recording, kind, from_us, to_us, length_us, role,
-start, end, by_load, by_engine_speed, no_throttle, cut_start, cut_end}`),
+order (`{type: "stretch", recording, kind, from_us, to_us, length_us,
+signal (the name of the signal measured), start, end, by_load, by_engine_speed, no_throttle, cut_start, cut_end}`),
 after the `signal` lines and before `columns`. `--stretch-level <key>=<value>`
 sets `pull-throttle`, `pull-load`, `pull-hold`, `pull-gap`, `pull-rise`,
 `pull-gain`, `cruise-hold`, `cruise-speed-band`, `cruise-throttle-band` and
@@ -925,4 +925,5 @@ which the CLI, the package and the viewer read to the same two pulls.
 
 **Left for its own change:** the viewer's Jump between stretches, the bands
 on the axis and a Stretches panel for the levels and roles. The viewer's
-comparison uses core's defaults.
+comparison uses core's defaults, and it shows no column difference: the
+`delta` is `havne-cli view`'s alone.
