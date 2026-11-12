@@ -563,6 +563,22 @@ ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
                                     uint64_t from_us, uint64_t* at_us);
 
 /*
+ * ecuio_recording_find with a way to stop it (ecuio_cancel_t): cancel,
+ * when not NULL, is asked once the arguments pass and before each
+ * second's rows are read. A nonzero answer ends the call with
+ * ECUIO_ERR_CANCELED ("the search was canceled" in the detail) and
+ * *at_us ECUIO_RECORDING_NONE. A NULL cancel is ecuio_recording_find.
+ * cancel runs on the calling thread, so what it reads to decide (a flag
+ * another thread sets) is the caller's to make safe across threads; it
+ * may call the reader's queries, never close.
+ */
+ecuio_status_t ecuio_recording_find_with(const ecuio_recording_t* r,
+                                         const ecuio_recording_find_t* what,
+                                         uint64_t from_us,
+                                         ecuio_cancel_t cancel, void* user_data,
+                                         uint64_t* at_us);
+
+/*
  * Fills out[i] with the statistics of signal_ids[i] over the closed span
  * [t0_us, t1_us]: a sample exactly at t1_us counts, where
  * ecuio_recording_query's half-open [t0_us, t1_us) leaves it out. The
@@ -764,6 +780,19 @@ ecuio_status_t ecuio_recording_stretches(const ecuio_recording_t* r,
                                          uint64_t from_us, uint64_t to_us,
                                          ecuio_recording_stretch_t* out,
                                          uint32_t capacity, uint32_t* count);
+
+/*
+ * ecuio_recording_stretches with a way to stop it (ecuio_cancel_t):
+ * cancel, when not NULL, is asked once the arguments pass and before
+ * each second's rows are read. A nonzero answer ends the call with
+ * ECUIO_ERR_CANCELED ("the search was canceled" in the detail) and
+ * *count 0, out unwritten. A NULL cancel is ecuio_recording_stretches.
+ * cancel's rules are ecuio_recording_find_with's.
+ */
+ecuio_status_t ecuio_recording_stretches_with(
+    const ecuio_recording_t* r, const ecuio_stretch_rules_t* rules,
+    uint64_t from_us, uint64_t to_us, ecuio_cancel_t cancel, void* user_data,
+    ecuio_recording_stretch_t* out, uint32_t capacity, uint32_t* count);
 
 /* Frees the reader. NULL is a safe no-op. No other call on the handle
  * may overlap it. */
