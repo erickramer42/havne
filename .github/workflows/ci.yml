@@ -368,10 +368,60 @@ jobs:
           python -m venv --system-site-packages "$env:RUNNER_TEMP\py"
           & "$env:RUNNER_TEMP\py\Scripts\python.exe" -m pip install --require-hashes -r .github/pytest-requirements.txt
 
+      # sccache from its GitHub release, checked against the SHA-256 that
+      # the release publishes. Windows' Visual Studio generator ignores a
+      # compiler launcher, so this job builds with Ninja in a Developer
+      # shell, as clang-tidy does. The cache holds compiled objects (links
+      # aren't cached), capped by SCCACHE_CACHE_SIZE; it is read on every
+      # ref and saved only on dev and main, the Qt kit's rule.
+      - name: Install sccache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = "$env:RUNNER_TEMP\sccache.zip"
+          gh release download v0.19.0 -R mozilla/sccache -p sccache-v0.19.0-x86_64-pc-windows-msvc.zip -O $zip --clobber
+          if ($LASTEXITCODE -ne 0) { Write-Error 'could not download sccache'; exit 1 }
+          $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash
+          if ($sha -ne '28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1') {
+            Write-Error "unexpected SHA-256 $sha"; exit 1
+          }
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\sccache-bin"
+          $bin = (Get-ChildItem "$env:RUNNER_TEMP\sccache-bin" -Recurse -Filter sccache.exe | Select-Object -First 1).DirectoryName
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "SCCACHE_DIR=$env:RUNNER_TEMP\sccache-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SCCACHE_CACHE_SIZE=1G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Restore the compiler cache
+        id: cc-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\sccache-cache
+          key: sccache-win-build-1-${{ github.sha }}
+          restore-keys: sccache-win-build-1-
+
       - name: Build full app
         run: |
-          cmake -B build -DCMAKE_PREFIX_PATH="$env:QT_PREFIX" -DPython3_EXECUTABLE="$env:RUNNER_TEMP\py\Scripts\python.exe"
-          cmake --build build --config Release
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * -property installationPath `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation `
+            -DevCmdArguments '-arch=x64 -host_arch=x64'
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DHAVNE_EMBEDDED_DEBUG_INFO=ON `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_PREFIX_PATH="$env:QT_PREFIX" -DPython3_EXECUTABLE="$env:RUNNER_TEMP\py\Scripts\python.exe"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          sccache --show-stats | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Save the compiler cache (dev and main)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/ci/v073-coverage-time-3'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\sccache-cache
+          key: sccache-win-build-1-${{ github.sha }}
+
       # ECUIO_PYTEST_REQUIRED: PythonTest.* fail rather than skip without
       # pytest
       - name: Run tests
@@ -383,7 +433,7 @@ jobs:
       # broken invariant or a bound far below the dev machine's figures
       - name: Load test
         shell: bash
-        run: build/tests/Release/bench_bridge.exe --load | tee -a "$GITHUB_STEP_SUMMARY"
+        run: build/tests/bench_bridge.exe --load | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Line coverage for the README badge: the whole suite under
   # OpenCppCoverage (scripts/coverage.sh), uploaded to Codecov. Windows,
