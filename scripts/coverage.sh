@@ -9,14 +9,16 @@
 #               tests, RelWithDebInfo with /Od /Ob0, so there are PDBs and
 #               no inlining to hide lines. Release Qt, so no debug kit
 #   build       build-coverage, RelWithDebInfo
-#   coverage    ctest under OpenCppCoverage with --cover_children, so every
-#               test process and the x64 surrogate child it spawns count.
-#               Reports: Testing/coverage/html/index.html and
-#               Testing/coverage/cobertura.xml (repo-relative paths, one
-#               entry per file; CI uploads it to Codecov). Failing tests
-#               are listed but don't stop
-#               the report: the build is unoptimized and the tool attaches
-#               to every process, so a timing case can miss its bounds
+#   coverage    each gtest binary run whole, then ctest for the other cases
+#               (scripts, QML), under OpenCppCoverage with --cover_children,
+#               so every test process and the x64 surrogate child it spawns
+#               count. Report: Testing/coverage/cobertura.xml (repo-relative
+#               paths, one entry per file; CI uploads it to Codecov); logs
+#               cover-<binary>.log and cover-ctest.log. Failing tests are
+#               listed but don't stop the report: the build is unoptimized
+#               and the tool attaches to every process, so a timing case can
+#               miss its bounds. A whole binary shares one process across its
+#               cases, so a knob a case leaks reaches the next
 #
 # Not counted: QML/JS (OpenCppCoverage sees only native code), the x86
 # surrogate (the cross-arch run isn't covered), the tests and the fake
@@ -37,7 +39,7 @@ while [ $# -gt 0 ]; do
         --tests-only) tests_only=1 ;;
         --no-devices) devices=0 ;;
         -R) regex="${2:-}"; shift ;;
-        -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
     shift
@@ -99,17 +101,38 @@ fi
 root=$(cygpath -w "$PWD")
 ctest_args=(--test-dir "$TREE" -C RelWithDebInfo --output-on-failure --no-tests=error)
 [ -n "$regex" ] && ctest_args+=(-R "$regex")
-rm -rf "$LOGDIR/html" "$LOGDIR/raw.xml" "$LOGDIR/cobertura.xml"
-run coverage "$tool" --quiet --cover_children \
-    --modules "$root\\$TREE" \
-    --sources "$root\\core" --sources "$root\\surrogate" --sources "$root\\app" \
-    --export_type "html:$root\\Testing\\coverage\\html" \
-    --export_type "cobertura:$root\\Testing\\coverage\\raw.xml" \
-    -- "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
+rm -rf "$LOGDIR/html" "$LOGDIR"/raw*.xml "$LOGDIR"/cover-*.log "$LOGDIR/cobertura.xml"
+cover() { # cover <name> <seconds, 0 for none> <program> [args...]: into raw-<name>.xml
+    local name=$1 limit=$2; shift 2
+    run "cover-$name" timeout --kill-after=10 "$limit" "$tool" --quiet --cover_children \
+        --modules "$root\\$TREE" \
+        --sources "$root\\core" --sources "$root\\surrogate" --sources "$root\\app" \
+        --export_type "cobertura:$root\\Testing\\coverage\\raw-$name.xml" \
+        -- "$@"
+}
+# A gtest binary runs whole: a ctest case is a process, which costs seconds
+# under the tool. The bound stands in for ctest's per-case TIMEOUT.
+start=$SECONDS
+owned=""
+failed=""
+if [ -z "$regex" ]; then
+    for exe in "$TREE"/tests/RelWithDebInfo/test_*.exe; do
+        name=$(basename "$exe" .exe)
+        suites=$("$exe" --gtest_list_tests 2>/dev/null | tr -d '\r' \
+            | sed -nE 's/^([A-Za-z_][A-Za-z0-9_/]*)\.( .*)?$/\1/p')
+        [ -n "$suites" ] || continue
+        owned="$owned|$(tr '\n' '|' <<<"$suites" | sed 's/|$//')"
+        cover "$name" 600 "$(cygpath -w "$PWD/$exe")"
+        [ "$rc" = 0 ] || failed="$failed $name"
+    done
+    [ -z "$owned" ] || ctest_args+=(-E "^(${owned#|})\.")
+fi
+cover ctest 0 "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
+cat "$LOGDIR"/cover-test_*.log "$LOGDIR/cover-ctest.log" > "$LOGDIR/coverage.log" 2>/dev/null
+dur=$((SECONDS - start))
 
-raw=$LOGDIR/raw.xml
 xml=$LOGDIR/cobertura.xml
-if [ ! -f "$raw" ]; then
+if ! ls "$LOGDIR"/raw-*.xml >/dev/null 2>&1; then
     line coverage FAIL "$dur" "no report; see $LOGDIR/coverage.log"
     exit 1
 fi
@@ -158,9 +181,17 @@ summary=$(awk -v prefix="$prefix" -v out="$xml" '
         printf "%.1f%% of lines (%d/%d)\n", 100 * rate, tc, tv
         for (a in avalid)
             printf "  %-16s %5.1f%%  %5d/%-5d\n", a, 100 * acov[a] / avalid[a], acov[a], avalid[a]
-    }' "$raw")
-tests=$(grep -oE '[0-9]+% tests passed.* out of [0-9]+' "$LOGDIR/coverage.log" | tail -n 1)
-line coverage ok "$dur" "$(head -n 1 <<<"$summary"); ${tests:-no ctest summary}"
+    }' "$LOGDIR"/raw-*.xml)
+tests=$(grep -oE '[0-9]+% tests passed.* out of [0-9]+' "$LOGDIR/cover-ctest.log" | tail -n 1)
+gtests=$(cat "$LOGDIR"/cover-test_*.log 2>/dev/null | tr -d '\r' | awk '
+    /^\[  PASSED  \] [0-9]+ test/ { p += $4 }
+    /^\[  FAILED  \] [0-9]+ test/ { f += $4 }
+    END { if (p + f) printf "gtest %d passed, %d failed", p, f }')
+line coverage ok "$dur" "$(head -n 1 <<<"$summary"); ${gtests:-no gtest summary}; ctest ${tests:-no summary}"
 tail -n +2 <<<"$summary"
-sed -n '/The following tests FAILED:/,$p' "$LOGDIR/coverage.log" | sed -n '2,25p'
-echo "report: $LOGDIR/html/index.html"
+for name in $failed; do
+    echo "FAILED: $name (see $LOGDIR/cover-$name.log)"
+    tr -d '\r' <"$LOGDIR/cover-$name.log" | sed -nE 's/^\[  FAILED  \] ([A-Za-z][^ ]*).*/  \1/p' | sort -u | sed -n '1,25p'
+done
+sed -n '/The following tests FAILED:/,$p' "$LOGDIR/cover-ctest.log" | sed -n '2,25p'
+echo "report: $LOGDIR/cobertura.xml"
