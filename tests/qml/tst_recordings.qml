@@ -24,6 +24,16 @@ TestCase {
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
         setStoredRules("{}")
+        setHintSeen(false)
+    }
+
+    // The second cursor's hint flag (its Settings), so which case measures
+    // the hint line never depends on the order the cases ran in
+    function setHintSeen(seen) {
+        const store = Qt.createQmlObject("import QtCore; Settings { category: \"recordings\" }", testCase)
+        store.setValue("spanHintSeen", seen)
+        store.sync()
+        store.destroy()
     }
 
     // The viewer's kept stretch levels (its Settings, in the test's scratch
@@ -2182,8 +2192,7 @@ profile  raw
             const px = atTime(page, chart, 15000)
             const py = inPlot(chart, 0).y
             mousePress(frame, px, py)
-            wait(200)
-            verify(page.hasCursorB, "the hold places it")
+            tryVerify(() => page.hasCursorB, 2000, "the hold places it")
             verify(Math.abs(page.cursorBMs - 15000) < 300, "where it was held: " + page.cursorBMs)
             compare(page.cursorMs, 5000, "the first stays")
             mouseRelease(frame, px, py)
@@ -2192,7 +2201,7 @@ profile  raw
             const view = [page.viewT0, page.viewT1]
             const to = atTime(page, chart, 25000)
             mousePress(frame, px, py)
-            wait(200)
+            tryVerify(() => tap.held, 2000, "the hold is on")
             for (let k = 1; k <= 8; ++k)
                 mouseMove(frame, px + (to - px) * k / 8, py, 10)
             verify(!isNaN(page.boxFromMs), "the drag draws the box")
@@ -2283,11 +2292,145 @@ profile  raw
 
         page.setView(10000, 12000)
         page.setCursor(11900)
+        // A step reads the cursor's time when the key is pressed and lands
+        // later: the second key waits for the first's step, or both read
+        // 11900 and neither goes off the view
         keyClick(Qt.Key_Right)
+        tryCompare(page, "cursorMs", 12000, 2000, "the last sample in view")
         keyClick(Qt.Key_Right)
-        tryVerify(() => page.cursorMs >= 12000 && page.cursorMs <= page.viewT1 && page.viewT0 > 10000,
+        tryVerify(() => page.cursorMs > 12000 && page.cursorMs <= page.viewT1 && page.viewT0 > 10000,
                   2000, "a step off the view brings it back")
         page.clearCursorB()
+    }
+
+    // The compared recording's value is read where the rows read this
+    // one's: at the earlier of two cursors
+    function test_theComparedValueFollowsTheEarlierCursor() {
+        const page = openEarly()
+        page.compareWith(lateRow)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        page.setAlignOn("rise")
+        page.alignHysteresis = 500
+        page.alignLevel = 4000
+        verify(page.compareAligned)
+        const rpm = find(page, "signalRows").model.find(s => s.name === "RPM").index
+        const atTen = page.compareValuesAt(10000)[rpm].atMs
+        const atTwenty = page.compareValuesAt(20000)[rpm].atMs
+        verify(atTen !== atTwenty, "the two times read different samples there")
+        spanned(page, 20000, 10000)
+        compare(page.compareReadout[rpm].atMs, atTen, "the earlier cursor's sample, not the first's")
+        // The dashed label's dot is at the earlier cursor too, shown while
+        // that one is in view, whatever the first cursor does
+        page.setView(5000, 15000)
+        const dashed = page.series(400).filter(s => s.dash !== undefined && s.row === rpm)
+        compare(dashed.length, 1, "the compared RPM is drawn")
+        compare(dashed[0].labelMs, atTen + page.compareOffsetMs, "its label is at the earlier cursor")
+        page.showAll()
+        page.setCursorB(30000)
+        compare(page.compareReadout[rpm].atMs, atTwenty, "the first is the earlier again")
+        page.setCursorB(10000)
+        page.clearCursorB()
+        compare(page.compareReadout[rpm].atMs, atTwenty, "one cursor: the first's")
+    }
+
+    // A handle dragged past the plot's edge stays in the view and ends on
+    // a sample
+    function test_aHandleDraggedPastTheEdgeStaysInView() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const chart = panedChart(page)
+            page.setView(10000, 20000)
+            verify(waitForPolish(page.Window.window), "laid out")
+            page.setCursor(12000)
+            page.setCursorB(15000)
+            const frame = find(page, "chartFrame")
+            const handle = find(page, "cursorHandleB")
+            const grab = find(handle, "handleDrag")
+            const from = grab.mapToItem(frame, grab.width / 2, grab.height / 2)
+            mousePress(frame, from.x, from.y)
+            const edge = frame.width - 2
+            for (let k = 1; k <= 8; ++k)
+                mouseMove(frame, from.x + (edge - from.x) * k / 8, from.y, 10)
+            verify(page.cursorBMs <= page.viewT1 + 1e-6, "inside the view: " + page.cursorBMs)
+            verify(handle.visible, "the handle is still shown")
+            mouseRelease(frame, edge, from.y)
+            verify(page.cursorBMs <= page.viewT1 + 1e-6, "ends inside the view: " + page.cursorBMs)
+            compare(page.cursorBMs, page.snapped(page.cursorBMs), "on a sample")
+        } finally {
+            restore()
+        }
+    }
+
+    // A time is rounded to tenths as a whole: never 1:60.0
+    function test_aTimeNeverReadsSixtySeconds() {
+        const page = openEarly()
+        compare(page.timeText(119960, true), "2:00.0")
+        compare(page.timeText(59960, true), "1:00.0")
+        compare(page.timeText(59940, true), "59.9 s")
+        compare(page.timeText(3599960, true), "1:00:00.0")
+        compare(page.timeText(-59960, true), "-1:00.0")
+        compare(page.timeText(12300, true), "12.3 s")
+        compare(page.timeText(62300, true), "1:02.3")
+    }
+
+    // A decode chosen while comparing on pulls asks again for the pulls
+    // and aligns on them
+    function test_aDecodeWhileComparingOnPullsAsksAgain() {
+        const page = openFindings()
+        page.recordings = [findingsRow, earlyRow]
+        page.compareWith(earlyRow)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        const choice = find(page, "alignChoice")
+        choice.currentIndex = choice.indexOfValue("pull")
+        choice.activated(choice.currentIndex)
+        tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
+        page.compareStatus = "stale"   // what the alignment says, until it is made again
+        const decode = find(page, "decodeChoice")
+        const obd2 = decode.indexOfValue("obd2")
+        decode.activated(obd2)
+        tryVerify(() => page.pullsHere === null, 10000, "the reopen clears the pulls")
+        tryVerify(() => page.pullsHere !== null, 10000, "and they are asked for again")
+        tryVerify(() => page.compareStatus !== "stale", 10000, "and the alignment is made again")
+        verify(page.comparing, "still comparing")
+    }
+
+    // The page's keys are a focused box's own: Home and End move a
+    // ComboBox's choice, never the chart's cursor
+    function test_aFocusedBoxKeepsItsKeys() {
+        const page = openEarly()
+        page.forceActiveFocus()
+        page.setCursor(1000)
+        const choice = find(page, "compareChoice")
+        choice.forceActiveFocus()
+        verify(choice.activeFocus, "the box has the focus")
+        keyClick(Qt.Key_End)
+        keyClick(Qt.Key_Home)
+        keyClick("b")
+        wait(50)
+        compare(page.cursorMs, 1000, "the cursor stayed")
+        verify(!page.arrowsMoveB, "B did nothing to the cursors")
+        const before = page.maximizedTall
+        keyClick("f")
+        compare(page.maximizedTall, before, "F didn't maximize the chart")
+    }
+
+    // The decoded profile stays in the box after the chart is maximized
+    // and back
+    function test_theDecodeChoiceSurvivesAMaximize() {
+        const page = openFindings()
+        const choice = find(page, "decodeChoice")
+        const obd2 = choice.indexOfValue("obd2")
+        choice.activated(obd2)
+        const info = find(page, "recordingInfo")
+        tryVerify(() => info.visible && info.text.indexOf("values decoded from its frames through obd2") > 0,
+                  10000, "decoded through obd2")
+        compare(choice.currentIndex, obd2)
+        page.toggleMaximized()
+        verify(waitForPolish(page.Window.window), "maximized")
+        page.toggleMaximized()
+        verify(waitForPolish(page.Window.window), "and back")
+        compare(choice.currentIndex, obd2, "the box still reads obd2")
     }
 
     // The first cursor's hint comes once, and the second cursor ends it
@@ -2420,19 +2563,27 @@ profile  raw
     function test_aPhonesAxisStripIsATouchWide() {
         const page = openEarly()
         const chart = panedChart(page)
-        page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
-        const p = chart.drawn.panes[1]
-        const left = chart.drawn.left
-        const wider = Theme.touchTarget > left
-        const x = wider ? (left + Theme.touchTarget) / 2 : left / 2
-        const y = p.top + p.h / 2
+        // The phone's target (48) is what the strip is measured against,
+        // so the form is set before the sums
         Theme.compact = true
         try {
+            verify(waitForPolish(page.Window.window), "laid out as a phone")
+            compare(Theme.touchTarget, 48)
+            page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
+            const p = chart.drawn.panes[1]
+            const left = chart.drawn.left
+            const wider = Theme.touchTarget > left
+            const x = wider ? (left + Theme.touchTarget) / 2 : left / 2
+            const y = p.top + p.h / 2
             compare(page.doubleTapAt(x, y), "axis")
             compare(page.paneRanges["unit %"], undefined)
         } finally {
             Theme.compact = false
         }
+        verify(waitForPolish(page.Window.window), "laid out as a desktop")
+        const left = chart.drawn.left
+        const p = chart.drawn.panes[1]
+        const y = p.top + p.h / 2
         page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
         // On the desktop the strip is the captions alone, so a point past
         // them, and past a touch where that is wider, is the plot

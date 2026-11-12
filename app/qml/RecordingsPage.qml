@@ -105,16 +105,22 @@ Page {
         else
             maximizedTall = !maximizedTall
     }
+    // A focused box (a ComboBox, which keeps Home, End and its letters for its
+    // own choice) takes the page's keys: told by its `popup`, since a style's
+    // box isn't a ComboBox to `instanceof`
+    readonly property bool boxFocused: root.Window.activeFocusItem !== null
+                                       && root.Window.activeFocusItem.popup !== undefined
     // F on a keyboard; a text field takes its own letters first
     Shortcut {
         sequence: "F"
         enabled: root.visible && recording.state === RecordingView.Open && !Theme.mobile
+                 && !root.boxFocused
         onActivated: root.toggleMaximized()
     }
     // The arrows step a cursor a sample of the snap's signal, B says which
     // cursor they move, Home and End go to the recording's ends
     readonly property bool cursorKeys: root.visible && recording.state === RecordingView.Open
-                                       && !Theme.mobile
+                                       && !Theme.mobile && !root.boxFocused
     Shortcut {
         sequence: "Left"
         enabled: root.cursorKeys
@@ -869,7 +875,7 @@ Page {
     function setCursor(t) {
         cursorMs = Math.min(Math.max(axisStart(), t), axisEnd())
         readout = valuesAtTime(cursorMs)
-        compareReadout = compareValuesAt(cursorMs)
+        refreshCompareReadout()
         if (!hasCursorB && !spanHintSeen) {
             spanHintSeen = true
             spanHintUp = true
@@ -880,13 +886,20 @@ Page {
     function setCursorB(t) {
         cursorBMs = Math.min(Math.max(axisStart(), t), axisEnd())
         readoutB = valuesAtTime(cursorBMs)
+        refreshCompareReadout()
         spanHintUp = false
         askSpanStats()
         chart.requestPaint()
     }
+    // The compared recording's values at the cursor the rows read: the first,
+    // or the earlier of two
+    function refreshCompareReadout() {
+        compareReadout = compareValuesAt(hasSpan ? spanFromMs : cursorMs)
+    }
     function clearCursorB() {
         cursorBMs = NaN
         readoutB = ({})
+        refreshCompareReadout()
         spanStats = ({})
         statsAsk = 0
         arrowsMoveB = false
@@ -1030,9 +1043,8 @@ Page {
         let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
         if (spanS * (rowsPerSecond + (compareAligned ? compareRowsPerSecond : 0)) > rawRowsPerFrame)
             n = Math.max(1, Math.min(n, Math.floor(spanS)))
-        // The labels follow the readout's A, the earlier of the two cursors
-        // (the compared recording's readout is the first cursor's alone)
-        const inView = cursorMs >= viewT0 && cursorMs <= viewT1
+        // The labels follow the readout's A, the earlier of the two cursors,
+        // the compared recording's too
         const fromMs = hasSpan ? spanFromMs : cursorMs
         const fromInView = fromMs >= viewT0 && fromMs <= viewT1
         const labelOf = (at, shown) => shown && at && at.text !== "" ? Number(at.text) : NaN
@@ -1072,8 +1084,8 @@ Page {
             out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs, t0: g0, t1: g1 },
                        row: mine, slot: root.slotOf(mine),
                        scaleKey: mine, dash: Theme.seriesCompareDash(root.slotOf(mine)), decimals: s.decimals,
-                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine], inView),
-                       labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs, inView) })
+                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine], fromInView),
+                       labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs, fromInView) })
         }
         return out
     }
@@ -1378,7 +1390,8 @@ Page {
     function timeText(ms, tenths) {
         if (ms < 0)
             return "-" + timeText(-ms, tenths)
-        const s = ms / 1000
+        // Tenths are rounded as a whole first: 119.96 s is 2:00.0, never 1:60.0
+        const s = tenths ? Math.round(ms / 100) / 10 : ms / 1000
         if (s < 60)
             return tenths ? qsTr("%1 s").arg(s.toFixed(1)) : qsTr("%1 s").arg(Math.round(s))
         const whole = Math.floor(s)
@@ -2767,12 +2780,16 @@ Page {
                         if (!dragging && Math.abs(x - pressX) < Application.styleHints.startDragDistance)
                             return
                         dragging = true
+                        // Past the plot's edge the handle would leave the view,
+                        // hide, and lose the grab before the drop
+                        const t = Math.min(Math.max(root.timeAt(x), root.viewT0), root.viewT1)
                         if (handle.isB)
-                            root.setCursorB(root.timeAt(x))
+                            root.setCursorB(t)
                         else
-                            root.setCursor(root.timeAt(x))
+                            root.setCursor(t)
                     }
                     onReleased: if (dragging) root.dropHandle(handle.isB)
+                    onCanceled: if (dragging) root.dropHandle(handle.isB)
                 }
             }
             CursorHandle { id: handleA; objectName: "cursorHandleA"; isB: false }
@@ -3645,7 +3662,9 @@ Page {
                     textRole: "text"
                     valueRole: "value"
                     // Its own rule, not its place's: About's head hides and moves it
-                    model: shown ? root.decodeChoices() : []
+                    // The model stays while the box is hidden: a model made again
+                    // resets the index, which the binding below wouldn't set back
+                    model: root.decodeChoices()
                     currentIndex: Math.max(0, indexOfValue(recording.decodedWith))
                     Accessible.name: qsTr("Where the values come from")
                     onActivated: index => root.decodeWith(valueAt(index))
