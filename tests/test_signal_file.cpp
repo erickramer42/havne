@@ -479,7 +479,8 @@ TEST(SignalFileTest, WhatReadsAReplacedIdReadsTheFilesDef)
     EXPECT_TRUE(
         has(text_baro,
             "signal 'b' replaces 'Barometric Pressure', which 'Boost' "
-            "reads: a signal a computed one reads is a number or an enum"))
+            "reads: a computed signal reads a number, an enum or another "
+            "computed signal"))
         << text_baro;
     const std::string text_speed = refusal(
         head +
@@ -489,6 +490,135 @@ TEST(SignalFileTest, WhatReadsAReplacedIdReadsTheFilesDef)
     EXPECT_TRUE(
         has(text_speed, "signal 's' replaces 'Vehicle Speed', which 'C' reads"))
         << text_speed;
+}
+
+/* ADR-0062: in format 2 a computed replacement is read as any computed
+ * signal is, by the file's own (the boost-ratio example's shape) and by
+ * obd2's Boost; format 1 refuses it, naming the reader */
+TEST(SignalFileTest, AComputedReplacementIsReadInFormat2)
+{
+    const auto head = [](int format) {
+        return R"({"havne_signals":)" + std::to_string(format) +
+               R"(,"name":"T","source":{"name":"t"},"extends":"obd2","signals":[)";
+    };
+    File f = load(
+        head(2) +
+        R"({"key":"boost","name":"Boost","kind":"computed","expr":"obd2.map - obd2.baro"},)"
+        R"({"key":"pr","name":"Pressure Ratio","kind":"computed",)"
+        R"("expr":"(boost + obd2.baro) / obd2.baro"}]})");
+    ASSERT_NE(f, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+    EXPECT_EQ(set->computed_count, 2u)
+        << "obd2's Boost left out, two of the file's";
+    EXPECT_EQ(ecuio_signal_file_find(f.get(), "boost")->id,
+              ECUIO_OBD2_SIG_BOOST_ID);
+    const ecuio_signal_def_t* pr = ecuio_signal_file_find(f.get(), "pr");
+    EXPECT_EQ(set->computed[pr->table_first].input_ids[0],
+              ECUIO_OBD2_SIG_BOOST_ID)
+        << "Pressure Ratio reads the file's Boost";
+
+    const std::string map =
+        R"({"key":"map","name":"Intake Manifold Pressure","kind":"computed",)"
+        R"("expr":"obd2.baro * 1","unit":"kPa"}]})";
+    File g = load(head(2) + map);
+    ASSERT_NE(g, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* gs = ecuio_signal_file_set(g.get());
+    const ecuio_signal_def_t* boost = nullptr;
+    for (uint32_t i = 0; i < gs->count; ++i) {
+        if (gs->defs[i].id == ECUIO_OBD2_SIG_BOOST_ID) {
+            boost = &gs->defs[i];
+        }
+    }
+    ASSERT_NE(boost, nullptr);
+    const ecuio_signal_def_t* own = ecuio_signal_file_find(g.get(), "map");
+    EXPECT_EQ(gs->computed[boost->table_first].input_ids[0], own->id)
+        << "obd2's Boost reads the computed MAP";
+    EXPECT_NE(own->flags & ECUIO_DEF_FLAG_COMPUTED, 0u);
+
+    const std::string one = refusal(head(1) + map);
+    EXPECT_TRUE(has(one, "signal 'map' replaces 'Intake Manifold Pressure', "
+                         "which 'Boost' reads: a computed signal read by "
+                         "another needs \"havne_signals\": 2"))
+        << one;
+    /* obd2's Boost keeps an age bound on baro, which a computed input can't
+     * carry */
+    const std::string aged = refusal(
+        head(2) +
+        R"({"key":"baro","name":"Barometric Pressure","kind":"computed",)"
+        R"("expr":"obd2.load * 0 + 101","unit":"kPa"}]})");
+    EXPECT_TRUE(has(aged, "signal 'baro' replaces 'Barometric Pressure', which "
+                          "'Boost' reads with an age bound: a computed input's "
+                          "ages are its own inputs'"))
+        << aged;
+    const std::string aged_by_key = refusal(
+        head(2) +
+        R"({"key":"s","name":"Vehicle Speed","kind":"computed","expr":"obd2.rpm * 0"},)"
+        R"({"key":"c","name":"C","kind":"computed","expr":"obd2.speed + 1",)"
+        R"("max_age":{"obd2.speed":5}}]})");
+    EXPECT_TRUE(has(aged_by_key, "signal 's' replaces 'Vehicle Speed', which "
+                                 "'C' reads with an age bound"))
+        << aged_by_key;
+    /* A file's obd2.<key> reads a replacement by its ID: the reader's
+     * format decides */
+    const std::string speed =
+        R"({"key":"s","name":"Vehicle Speed","kind":"computed","expr":"obd2.rpm * 0"},)"
+        R"({"key":"c","name":"C","kind":"computed","expr":"obd2.speed + 1"}]})";
+    EXPECT_TRUE(load(head(2) + speed)) << ecuio_last_error_detail();
+    const std::string by_key = refusal(head(1) + speed);
+    EXPECT_TRUE(has(by_key, "signal 's' replaces 'Vehicle Speed', which 'C' "
+                            "reads: a computed signal read by another needs "
+                            "\"havne_signals\": 2"))
+        << by_key;
+}
+
+/* A chain through a replacement is the file's chain: a circle and a depth
+ * past 8 are refused in the file's words, and a replacement that puts
+ * obd2's Boost past 8 deep is refused at it; exactly 8 deep loads */
+TEST(SignalFileTest, AChainThroughAReplacementIsChecked)
+{
+    const std::string head =
+        R"({"havne_signals":2,"name":"T","source":{"name":"t"},"extends":"obd2","signals":[)";
+    const std::string circle = refusal(
+        head +
+        R"({"key":"boost","name":"Boost","kind":"computed","expr":"pr - 1"},)"
+        R"({"key":"pr","name":"Pressure Ratio","kind":"computed","expr":"boost + 1"}]})");
+    EXPECT_TRUE(has(circle, "signal 'boost' reads 'pr', which reads 'boost': "
+                            "computed signals can't read in a circle"))
+        << circle;
+
+    /* e1 up a chain from engine speed, then a last level named as a base
+     * def, levels deep in all */
+    const auto chain = [&](const std::string& last, const std::string& more,
+                           int levels = 8) {
+        std::string text =
+            head +
+            R"({"key":"e1","name":"E1","kind":"computed","expr":"obd2.rpm + 1"},)";
+        for (int k = 2; k < levels; ++k) {
+            text += R"({"key":"e)" + std::to_string(k) + R"(","name":"E)" +
+                    std::to_string(k) + R"(","kind":"computed","expr":"e)" +
+                    std::to_string(k - 1) + R"( + 1"},)";
+        }
+        return text + R"({"key":"top","name":")" + last +
+               R"(","kind":"computed","expr":"e)" + std::to_string(levels - 1) +
+               R"( + 1","unit":"kPa"})" + more + "]}";
+    };
+    EXPECT_TRUE(load(chain("Boost", ""))) << ecuio_last_error_detail();
+    const std::string nine = refusal(
+        chain("Boost",
+              R"(,{"key":"n","name":"N","kind":"computed","expr":"top + 1"})"));
+    EXPECT_TRUE(has(nine, "signal 'n' sits 9 computed signals deep: a chain "
+                          "goes 8 deep at most"))
+        << nine;
+    EXPECT_TRUE(load(chain("Intake Manifold Pressure", "", 7)))
+        << "obd2's Boost 8 deep: " << ecuio_last_error_detail();
+    const std::string under_boost =
+        refusal(chain("Intake Manifold Pressure", ""));
+    EXPECT_TRUE(
+        has(under_boost,
+            "signal 'top' replaces 'Intake Manifold Pressure', which 'Boost' "
+            "reads: that puts 'Boost' 9 computed signals deep: a chain "
+            "goes 8 deep at most"))
+        << under_boost;
 }
 
 /* Two signals of a file with one name are refused, naming both: a recording

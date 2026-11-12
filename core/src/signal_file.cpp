@@ -1259,12 +1259,22 @@ void read_file(const Value& root, ecuio_signal_file& f)
 /* Computed signals reading each other (ADR-0062): no circle and no
  * chain past ECUIO_COMPUTED_MAX_DEPTH, refused at the first signal of
  * either in the file's order, at its expr. Depths settle pass by pass;
- * one left unsettled is on a circle or reads one. */
-void check_chains(const std::vector<entry>& entries, const ecuio_signal_file& f)
+ * one left unsettled is on a circle or reads one. An input is found by
+ * its ID, a replacement's (the base def's) too. Returns each signal's
+ * depth, 0 for one that isn't computed. */
+std::vector<uint32_t> check_chains(const std::vector<entry>& entries,
+                                   const ecuio_signal_file& f)
 {
     const size_t n = entries.size();
+    /* The entries by ID, to find an input's */
+    std::vector<std::pair<uint16_t, size_t>> by_id(n);
+    for (size_t i = 0; i < n; ++i) {
+        by_id[i] = {entries[i].id, i};
+    }
+    std::sort(by_id.begin(), by_id.end());
     /* Each signal's computed inputs, as entry indexes */
     std::vector<std::vector<size_t>> reads(n);
+    std::vector<uint32_t> depth(n, 0);
     bool chained = false;
     for (size_t i = 0; i < n; ++i) {
         if (entries[i].kind != "computed") {
@@ -1273,19 +1283,23 @@ void check_chains(const std::vector<entry>& entries, const ecuio_signal_file& f)
         const ecuio_computed_t& c =
             f.computed[f.defs[entries[i].def].table_first];
         for (uint32_t k = 0; k < c.input_count; ++k) {
-            const uint32_t id = c.input_ids[k];
-            if (id >= ECUIO_USER_SIG_ID_BASE &&
-                id - ECUIO_USER_SIG_ID_BASE < n &&
-                entries[id - ECUIO_USER_SIG_ID_BASE].kind == "computed") {
-                reads[i].push_back(id - ECUIO_USER_SIG_ID_BASE);
+            const auto it =
+                std::lower_bound(by_id.begin(), by_id.end(),
+                                 std::pair<uint16_t, size_t>{
+                                     static_cast<uint16_t>(c.input_ids[k]), 0});
+            if (it != by_id.end() && it->first == c.input_ids[k] &&
+                entries[it->second].kind == "computed") {
+                reads[i].push_back(it->second);
                 chained = true;
             }
         }
     }
     if (!chained) {
-        return;
+        for (size_t i = 0; i < n; ++i) {
+            depth[i] = entries[i].kind == "computed" ? 1 : 0;
+        }
+        return depth;
     }
-    std::vector<uint32_t> depth(n, 0);
     for (bool more = true; more;) {
         more = false;
         for (size_t i = 0; i < n; ++i) {
@@ -1351,6 +1365,7 @@ void check_chains(const std::vector<entry>& entries, const ecuio_signal_file& f)
                  ": computed signals can't read in a circle";
         refuse(expr, words);
     }
+    return depth;
 }
 
 void build(const parts& in, ecuio_signal_file& f)
@@ -1598,27 +1613,54 @@ void build(const parts& in, ecuio_signal_file& f)
             read_gauge(s, d, e.def, f, what);
         }
     }
-    check_chains(entries, f);
+    const std::vector<uint32_t> depth = check_chains(entries, f);
     for (const entry& e : entries) {
         f.keys.emplace_back(e.key, e.def);
     }
 
     /* A replacement keeps the base def's ID, so a computed signal reading
-     * that ID (obd2's Boost reads MAP and baro) reads the file's def */
-    for (const ecuio_signal_def_t& d : f.defs) {
+     * that ID (obd2's Boost reads MAP and baro) reads the file's def. A
+     * computed one is read in format 2: the reader's, or for a base
+     * program the replacement's. */
+    const auto format_of = [&](size_t i) {
+        return i < in.formats.size() ? in.formats[i] : in.format;
+    };
+    for (size_t r = 0; r < f.defs.size(); ++r) {
+        const ecuio_signal_def_t& d = f.defs[r];
         if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
             continue;
         }
+        const bool base_program = r < first_own;
         const ecuio_computed_t& p = f.computed[d.table_first];
         for (uint32_t k = 0; k < p.input_count && k < ECUIO_COMPUTED_MAX_INPUTS;
              ++k) {
-            for (const entry& e : entries) {
-                if (e.replaces && e.id == p.input_ids[k] &&
-                    e.kind != "number" && e.kind != "enum") {
-                    refuse(*e.v, "signal " + q(e.key) + " replaces " +
-                                     q(e.name) + ", which " + q(d.name) +
-                                     " reads: a signal a computed one reads is "
-                                     "a number or an enum");
+            for (size_t i = 0; i < entries.size(); ++i) {
+                const entry& e = entries[i];
+                if (!e.replaces || e.id != p.input_ids[k] ||
+                    e.kind == "number" || e.kind == "enum") {
+                    continue;
+                }
+                const std::string reads = "signal " + q(e.key) + " replaces " +
+                                          q(e.name) + ", which " + q(d.name) +
+                                          " reads";
+                if (e.kind != "computed") {
+                    refuse(*e.v, reads + ": a computed signal reads a number, "
+                                         "an enum or another computed signal");
+                }
+                if (format_of(base_program ? i : r - first_own) < 2) {
+                    refuse(*e.v, reads + ": a computed signal read by another "
+                                         "needs \"havne_signals\": 2");
+                }
+                if (p.max_age_us[k] != 0) {
+                    refuse(*e.v, reads + " with an age bound: a computed "
+                                         "input's ages are its own inputs'");
+                }
+                if (base_program && depth[i] + 1 > ECUIO_COMPUTED_MAX_DEPTH) {
+                    refuse(*e.v, reads + ": that puts " + q(d.name) + " " +
+                                     std::to_string(depth[i] + 1) +
+                                     " computed signals deep: a chain goes " +
+                                     std::to_string(ECUIO_COMPUTED_MAX_DEPTH) +
+                                     " deep at most");
                 }
             }
         }
