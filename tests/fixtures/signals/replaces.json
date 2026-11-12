@@ -1,0 +1,28 @@
+{
+  "havne_signals": 1,
+  "name": "Desk boost",
+  "notes": "Synthetic: its manifold pressure, read by a DID, stands in for obd2's, which obd2's Boost then reads",
+  "source": { "name": "Written by hand for Havne's tests" },
+  "extends": "obd2",
+  "ecus": [
+    { "id": "pcm", "rx": "7E8" }
+  ],
+  "signals": [
+    {
+      "key": "map",
+      "name": "Intake Manifold Pressure",
+      "ecu": "pcm",
+      "read": { "service": "22", "number": "D100" },
+      "field": { "byte": 0, "bits": 16 },
+      "scale": 0.1, "unit": "kPa", "decimals": 1, "group": "air"
+    },
+    {
+      "key": "wastegate",
+      "name": "Wastegate Duty",
+      "ecu": "pcm",
+      "read": { "service": "22", "number": "D101" },
+      "field": { "byte": 0 },
+      "scale": 0.392157, "unit": "%", "decimals": 1, "group": "air"
+    }
+  ]
+}
