@@ -13,6 +13,16 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Added
 
+- The recordings viewer has a Jump row: previous and next for a recording's
+  pulls and for its cruises, which puts the stretch in view with the cursor
+  at its start and says where you are ("Pull 2 of 5 · 12.9 s"). Each pull
+  and cruise is drawn as a band on the chart; the Bands switch hides them.
+  Stretches... sets the levels that make a pull or a cruise (throttle, hold,
+  gap, engine-speed rise, speed gain, and the cruise's bands and floor), with
+  the defaults shown in the fields; they are kept between runs and used for
+  the pull numbers when two recordings are compared by a pull.
+- Compare... is a button beside Export in the viewer (in About on a phone),
+  and opens its controls above the chart.
 - An OBD-II connection reads Boost, the intake manifold pressure minus the
   barometric pressure, as the demo connection does, so a gauge for Boost
   reads on either.
@@ -107,6 +117,19 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Changed
 
+- Recordings: a row says how long it is, whether it is a log of chosen
+  signals or a whole session, its signal count and its marks; an import opens
+  its recording; Import takes an optional label and, for a CSV with dates, is
+  listed at the drive's time; the import panel's Import and Cancel are at its
+  head.
+- Dashboard: editing says a gauge is clicked and held; a gauge's panel shows
+  the gauge it edits; Peak hold and the signal's name have their own rows; a
+  range end is shown to the signal's decimals plus one.
+- The viewer: the chart's help line names pan, zoom and the pane
+  double-click; a cursor's time tag no longer hides the time label beside it;
+  a folded pane names its units; a long pane name or trace label is cut with
+  an ellipsis.
+- Android: the import picker offers every file.
 - The Light look sets the Light color scheme on Linux too, where the platform
   theme takes the request; the window's frame keeps the desktop's colors.
 - A recording opens in the viewer with at most four signals plotted: the
@@ -157,6 +180,46 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Fixed
 
+- In the recordings viewer a trace's color follows the order the signals are
+  plotted in, so two plotted signals no longer share a color.
+- A computed signal whose input the ECU doesn't send is hidden as not sent,
+  not left waiting: on a car without the barometric pressure PID, Boost no
+  longer sits in Live and on the Dashboard with no value.
+- The demo connection says which signals it never sends. Under OBD-II, or a
+  signal file or plugin that extends it, the demo sends no Service 01 value;
+  those rows are left out of Live and a Dashboard gauge reads "not sent by
+  this ECU", where it read "waiting for data" for good. A signal file's DIDs
+  are answered as before.
+- After Reset, or an undo back to nothing stored, the Dashboard draws the
+  built-in layout as the built-in one (no empty square, Boost and Lambda
+  where they belong), and leaving the page in edit mode keeps its undo
+  history.
+- Connect lists tell two recent addresses on one adapter apart on a phone by
+  their profile (Default, Raw, UDS DIDs), and Connect stays off until a row
+  is chosen.
+- Live: Space presses a focused button instead of resuming the chart, and the
+  first-pause hint shows only for a drag back in time that pauses it.
+- Settings drops `session=` from the address under every profile but UDS
+  DIDs.
+- A segment row that can't be changed while a session runs is dimmed.
+- Recordings viewer: its keys (arrows, Home, End, B, F) are off while a
+  drop-down has the focus, a cursor handle can't be dragged out of the view,
+  and Compare's readout follows the earlier of the two cursors.
+- The CSV import's preview ends a cell at a tab after a quoted cell in a
+  tab-delimited file, as the import does.
+- The viewer says "Report not saved: the report couldn't start" when a health
+  report can't start, instead of keeping an earlier note.
+- The built-in Lambda cell says its value is the commanded equivalence ratio,
+  as OBD-II's PID 44 gives it.
+- `havne-cli view` in an aligned view: columns of a second or more hold
+  exactly their own time in each recording, so a delta compares the same
+  stretch of the axis in both (a recording against itself half a second later
+  differed by up to 272 rpm at eight columns), and a sample exactly at the
+  axis's end is counted in the last column.
+- `havne-cli export`, `import` and a recording's `health`: a second Ctrl+C
+  that arrived after the work was done no longer replaces the result with an
+  interrupted end line and exit 1; the result line is written and the exit
+  code is the run's own.
 - A Dashboard cell with no value says why, and its title and the undo line
   keep their place; a cell made under OBD-II reads under the demo connection
   too.

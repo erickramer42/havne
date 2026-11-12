@@ -103,7 +103,8 @@ Units follow **Settings, Display, Units** (metric or imperial).
 2. **Add a gauge:** press **Add gauge** (or the **+** cell at the end),
    pick its kind (Dial, Ring, Bar, Cells, Number, Digits, Sparkline,
    Shift lights or Blank), then its signal. Its panel opens.
-3. **Change a gauge:** click it (tap it on a phone). Out of edit mode,
+3. **Change a gauge:** click it (tap it on a phone; edit mode says so,
+   and the panel shows the gauge it edits). Out of edit mode,
    a long press on a gauge opens the same panel. It holds the label,
    the signal (**Change signal**), its kind (**Change kind**: the signal,
    range, zones and size stay, and settings only the old kind used come
@@ -164,7 +165,9 @@ where recordings are kept.
 ## View and export a recording
 
 1. Open **Recordings** (Recs). **All recordings** lists them, newest
-   first; press one to open it.
+   first, each row saying how long the recording is, whether it is a log
+   of chosen signals or a whole session, its signal count and its marks;
+   press one to open it.
 2. Tick signals to plot them. Click the chart for the values at that
    time. **+** and the button beside it zoom in and out, **All** shows
    the whole recording, and **Values** and **Frames** switch between the
@@ -200,12 +203,23 @@ highest, mean and rate. Handles at the chart's foot move the cursors. On the
 desktop the arrow keys step the cursor a sample, **B** picks the other
 cursor, and Home and End go to the ends of the recording.
 
+Under the title row (under the chart on a phone) the Jump row steps
+between pulls and cruises: the arrows move the view to the previous or
+next one, with the cursor at its start, and the line beside them says
+which one you are at. Each is a band on the chart; **Bands** turns them
+off. **Stretches...** opens the levels the finder uses; an empty field, or
+0, takes the default shown in it, and **Apply** finds them again. The pull
+numbers in Compare follow these levels; `havne-cli`'s `--align-on` counts
+by core's defaults unless it is given levels.
+
 **Save report...** writes a health report of the recording: its codes,
 readiness and key values. **Import** on the list brings in a candump log
-or another logger's CSV as a recording. A CSV row with no time is left
-out, and the import says how many it left out.
+or another logger's CSV as a recording, with an optional **Label**; the
+recording opens when the import ends, and a CSV whose times carry dates is
+listed at the drive's time. A CSV row with no time is left out, and the
+import says how many it left out.
 
-**Compare** lines two recordings up. **Align a pull** lines them up on a
+**Compare...**, beside **Export**, lines two recordings up. **Align a pull** lines them up on a
 pull you choose in each: a pull is full throttle for a second or more
 while the car accelerates. Each recording's pulls are listed with their
 start and length; the first of each is chosen to begin with. Use it to
