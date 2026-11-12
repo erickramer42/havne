@@ -1,0 +1,361 @@
+{
+ "format": 2,
+ "form": "desktop",
+ "pages": [
+  {
+   "name": "Engine",
+   "cells": [
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C0",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C1",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C2",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C3",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C4",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C5",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C6",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C7",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C8",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C9",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C10",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C11",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C12",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C13",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C14",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C15",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C16",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C17",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C18",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C19",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C20",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C21",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C22",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C23",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "C24",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    }
+   ]
+  }
+ ]
+}

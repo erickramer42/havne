@@ -1,0 +1,38 @@
+{
+ "format": 2,
+ "form": "desktop",
+ "pages": [
+  {
+   "name": "Engine",
+   "cells": [
+    {
+     "kind": "analog",
+     "w": 12,
+     "h": 48,
+     "label": "llllllllllllllllllllllllllllllllllllllll",
+     "refs": [
+      "id:0",
+      "id:1",
+      "id:2",
+      "id:3",
+      "id:4",
+      "id:5",
+      "id:6",
+      "id:7"
+     ],
+     "unit": "RPM",
+     "options": {
+      "decimals": 6,
+      "count": 32,
+      "cells": 64,
+      "digits": 8,
+      "window": 120,
+      "caption": "cccccccccccccccccccccccccccccccccccccccc",
+      "description": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "peakLabel": "pppppppp"
+     }
+    }
+   ]
+  }
+ ]
+}

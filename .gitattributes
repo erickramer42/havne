@@ -7,3 +7,6 @@
 # Libs with a stray byte
 *.desktop text eol=lf
 *.pc.in text eol=lf
+
+# Layout files are read byte for byte, so a checkout never rewrites their line endings
+tests/data/layouts/* -text
