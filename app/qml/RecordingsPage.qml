@@ -464,13 +464,18 @@ Page {
         id: idsHeadComponent
         ViewHead { role: "ids"; list: viewerFrameIds.list }
     }
-    // A column narrower than a second reads the recording's raw rows of
-    // every signal in it (ADR-0049 section 5); a second or wider, the
-    // reader's per-second summaries. Past this many rows in view, columns
-    // stay a second wide: a 50-signal 10 Hz hour panned at two pixels a
-    // column read about 180,000 rows a frame and drew at 30 frames/s on the
-    // laptop (ADR-0049's appendix "the viewer")
+    // A column narrower than a second reads the recording's raw rows
+    // (ADR-0049 section 5); a second or wider, the reader's per-second
+    // summaries. A frame's work is the rows of the signals it draws (the
+    // reader passes by another signal's row at a twentieth of the cost):
+    // past this many of those in view, both recordings' together, columns
+    // stay a second wide (ADR-0049's appendix "the viewer")
     readonly property int rawRowsPerFrame: 20000
+    // The reader keeps 8 MiB of parsed rows, every signal's. A view that
+    // holds more reads its seconds from the file again each frame, so past
+    // this many rows of either recording in view columns stay a second
+    // wide too. A test lowers it
+    property int rawRowsCached: 150000
     // The recording's rows a second, every signal's together
     property real rowsPerSecond: 0
 
@@ -1061,10 +1066,19 @@ Page {
         return viewT0 + (x - chart.x - plotLeft()) / Math.max(1, plotWidth() - 1) * (viewT1 - viewT0)
     }
 
+    // The rows a second of a recording's signals at those indexes
+    function rowsEachSecond(list, indexes, lengthMs) {
+        let rows = 0
+        for (const i of indexes)
+            rows += list[i].samples
+        return rows / Math.max(1, lengthMs / 1000)
+    }
+
     // The chart's series: each plotted number's columns over the view, its
     // label the cursor's value while that's in view, then the compared
     // recording's of the same names, dashed. Two pixels a column, or a
-    // second when that would read more than rawRowsPerFrame rows
+    // second when that would draw more than rawRowsPerFrame rows or hold
+    // more than rawRowsCached
     function series(widthPx) {
         if (recording.state !== RecordingView.Open)
             return []
@@ -1076,9 +1090,17 @@ Page {
         if (plotted.length === 0)
             return []
         const indexes = plotted.filter(i => sigs[i].samples > 0)
+        const theirs = compareAligned ? compare.signalList : []
+        const pairs = !compareAligned ? []
+            : plotted.map(i => ({ mine: i, theirs: root.compareByName[sigs[i].name] }))
+                     .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
+                                  && theirs[p.theirs].samples > 0)
         const spanS = (viewT1 - viewT0) / 1000
         let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
-        if (spanS * (rowsPerSecond + (compareAligned ? compareRowsPerSecond : 0)) > rawRowsPerFrame)
+        const drawn = rowsEachSecond(sigs, indexes, durationMs())
+                      + rowsEachSecond(theirs, pairs.map(p => p.theirs), compare.durationMs)
+        const held = Math.max(rowsPerSecond, compareAligned ? compareRowsPerSecond : 0)
+        if (spanS * drawn > rawRowsPerFrame || spanS * held > rawRowsCached)
             n = Math.max(1, Math.min(n, Math.floor(spanS)))
         // The labels follow the readout's A, the earlier of the two cursors,
         // the compared recording's too
@@ -1105,12 +1127,6 @@ Page {
                      labelValue: labelOf(root.readoutFrom[c.index], fromInView),
                      labelMs: labelMsOf(root.readoutFrom[c.index], 0, fromInView) }
         })
-        if (!compareAligned)
-            return out
-        const theirs = compare.signalList
-        const pairs = plotted.map(i => ({ mine: i, theirs: root.compareByName[sigs[i].name] }))
-                             .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
-                                          && theirs[p.theirs].samples > 0)
         if (pairs.length === 0)
             return out
         const cols = compare.columns(pairs.map(p => p.theirs), g0 - compareOffsetMs,

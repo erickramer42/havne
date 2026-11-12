@@ -3385,6 +3385,76 @@ profile  raw
         compare(page.stretchesOf("pull").length, 1)
     }
 
+    // A values recording of `count` number signals, each sampled ten times
+    // a second for a minute (600 rows a signal), and its row
+    function denseRecording(name, count) {
+        const folder = Harness.writeFramesRecording(name, 1, 10000)
+        verify(folder !== "", "the folder is made")
+        let header = "ecuio session recording, format 2 (ADR-0049)\n"
+                     + "started  2026-11-03 09:00:00.000 (local time)\n"
+                     + "profile  test\n"
+        for (let s = 1; s <= count; ++s)
+            header += "signal  Signal " + s + ",number,V,0,0\n"
+        header += "\n00:01:00.000  +60.000  end  test: 0 frames, " + (600 * count)
+                  + " values, 0 records dropped, 0 notes dropped\n"
+        const rows = ["host_us,signal,value,unit"]
+        for (let t = 1; t <= 600; ++t) {
+            for (let s = 1; s <= count; ++s)
+                rows.push((t * 100000) + ",Signal " + s + "," + ((t + s) % 50) + ",V")
+        }
+        verify(Harness.writeScratchFile(name + "/events.log", header).toString() !== "")
+        verify(Harness.writeScratchFile(name + "/signals.csv", rows.join("\n") + "\n").toString() !== "")
+        return { title: name, uri: "replay://x?profile=test", source: "", folder: folder,
+                 profile: "test" }
+    }
+
+    // Columns stay narrower than a second while the rows a frame draws (the
+    // plotted signals', both recordings' together) fit rawRowsPerFrame,
+    // whatever the signals not plotted add, and go a second wide past it or
+    // once either recording's rows in view outgrow the reader's cache
+    function test_columnsGoASecondWideByTheRowsAFrameDraws() {
+        const one = denseRecording("dense-one", 40)
+        const two = denseRecording("dense-two", 40)
+        const page = createPage()
+        page.recordings = [two, one]
+        openRow(page, one)
+        const first = n => {
+            const picks = {}
+            for (let i = 0; i < n; ++i)
+                picks[i] = true
+            return picks
+        }
+        const columnMs = () => {
+            const c = page.series(400)[0].columns
+            return (c.t1 - c.t0) / c.lows.length
+        }
+        const spanS = (page.viewT1 - page.viewT0) / 1000
+        verify(spanS * page.rowsPerSecond > page.rawRowsPerFrame,
+               "every signal's rows in view pass the bound: " + spanS * page.rowsPerSecond)
+        page.plotted = first(2)
+        verify(columnMs() < 1000, "two of forty plotted, 1,200 rows: " + columnMs() + " ms a column")
+        page.plotted = first(40)
+        verify(columnMs() >= 1000, "all forty, 24,000 rows: " + columnMs() + " ms a column")
+
+        // The cache's bound counts every signal's rows, plotted or not
+        page.plotted = first(2)
+        page.rawRowsCached = 20000
+        verify(columnMs() >= 1000, "24,000 rows held against 20,000: " + columnMs() + " ms a column")
+        page.rawRowsCached = 30000
+        verify(columnMs() < 1000, "and against 30,000: " + columnMs() + " ms a column")
+
+        // Compared, the rows drawn are both recordings'; the rows held are
+        // each reader's own
+        page.compareWith(two)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        compare(page.series(400).filter(s => s.dash !== undefined).length, 2, "both are drawn dashed")
+        verify(columnMs() < 1000, "24,000 rows in each reader, 2,400 drawn: " + columnMs() + " ms a column")
+        page.plotted = first(20)
+        verify(columnMs() >= 1000, "twenty of each, 24,000 rows drawn: " + columnMs() + " ms a column")
+        page.stopComparing()
+        verify(columnMs() < 1000, "twenty alone, 12,000: " + columnMs() + " ms a column")
+    }
+
     function test_aComparedRecordingIsDrawnDashed() {
         const page = openEarly()
         const choice = find(page, "compareChoice")
