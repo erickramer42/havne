@@ -166,6 +166,9 @@ struct Axis {
     uint32_t columns = 0;
 };
 
+// The axis: columns of column_us from from_us, each holding its own
+// microseconds and the last the axis's last one, to_us, too, so a sample
+// exactly at the end is counted once
 inline bool make_axis(int64_t from_us, int64_t to_us, uint32_t columns,
                       Axis& out)
 {
@@ -502,6 +505,73 @@ inline bool column_span(uint64_t t0_us, uint64_t t1_us, uint32_t n, uint32_t c,
     return true;
 }
 
+// Whether a view's columns each hold the column's own microseconds, not
+// the whole seconds a query places there: an aligned view (any
+// --align-on) in columns of a second or more, where two recordings'
+// offsets a part of a second apart would put one axis column on two
+// windows
+inline bool columns_own_window(bool aligned_view, const Axis& a)
+{
+    return aligned_view && a.column_us >= 1000000;
+}
+
+// A span's statistics as the column a query over it would give
+inline ecuio_recording_column_t
+column_of_stats(const ecuio_recording_stats_t& st)
+{
+    ecuio_recording_column_t col{};
+    col.samples =
+        static_cast<uint32_t>((std::min<uint64_t>)(st.samples, UINT32_MAX));
+    col.lowest = st.lowest;
+    col.highest = st.highest;
+    return col;
+}
+
+// Whether the window's queries leave the axis's last microsecond out of
+// the last column: a half-open query does, except one in columns of a
+// second or more that ends inside a second, which takes that second whole
+inline bool query_leaves_end(const Window& w, const Axis& a)
+{
+    const bool rest = w.count > (w.partial ? 1u : 0u);
+    const uint64_t width =
+        rest ? static_cast<uint64_t>(a.column_us) : w.partial_t1_us;
+    return width < 1000000 || w.t1_us % 1000000 == 0;
+}
+
+// One more column's samples counted into a column
+inline void add_column(ecuio_recording_column_t& into,
+                       const ecuio_recording_column_t& more)
+{
+    if (more.samples == 0) {
+        return;
+    }
+    if (into.samples == 0) {
+        into = more;
+        return;
+    }
+    into.samples = static_cast<uint32_t>((
+        std::min<uint64_t>)(uint64_t{into.samples} + more.samples, UINT32_MAX));
+    into.lowest = std::fmin(into.lowest, more.lowest);
+    into.highest = std::fmax(into.highest, more.highest);
+}
+
+// Axis column c in a recording's own time, cut at its start: the closed
+// span [from_us, to_us], the last column's taking the axis's last
+// microsecond. False for a column that ends before the start.
+inline bool own_span(const Axis& a, int64_t offset_us, uint32_t c,
+                     uint64_t& from_us, uint64_t& to_us)
+{
+    const int64_t lo =
+        a.from_us + static_cast<int64_t>(c) * a.column_us - offset_us;
+    const int64_t hi = lo + a.column_us - (c + 1 == a.columns ? 0 : 1);
+    if (hi < 0) {
+        return false;
+    }
+    from_us = static_cast<uint64_t>((std::max<int64_t>)(lo, 0));
+    to_us = static_cast<uint64_t>(hi);
+    return true;
+}
+
 // A column's mean where its count and range alone give it: none for an
 // empty column (NaN), the value of one sample or of samples all alike,
 // the middle of two. False where the samples themselves must be read.
@@ -563,9 +633,13 @@ inline size_t columns_line_bytes(uint32_t columns)
 // where a column is empty; then, for a recording after the first aligned
 // one that shows the signal as a number in the same unit (delta_key),
 // delta_from (that first's place) and delta [], its mean less the
-// first's, null where either column is empty}. A column one microsecond
-// wide holding three or more unlike samples has no mean (the reader's
-// statistics take no span of one instant). cols holds w.count columns, the axis's from w.first on; the
+// first's, null where either has no mean}. A column's numbers are all
+// over one set of samples: the ones a query counts there, or under
+// columns_own_window the ones in the column's own microseconds; the last
+// column's include a sample exactly at the axis's end. A
+// column one microsecond wide holding three or more unlike samples has no
+// mean (the reader's statistics take no span of one instant).
+// cols holds w.count columns, the axis's from w.first on; the
 // others are empty. NULL cols: every column empty. means and delta hold
 // the axis's columns each, NaN for none; NULL delta: no delta keys.
 inline void columns_line(Line& l, uint32_t recording,
@@ -715,6 +789,40 @@ inline ecuio_recording_stats_t no_stats()
     st.first = st.last = st.lowest = st.highest = st.mean = NAN;
     st.lowest_us = st.highest_us = ECUIO_RECORDING_NONE;
     return st;
+}
+
+// The statistics of one microsecond, a span ecuio_recording_stats
+// refuses, from that microsecond's column: the count and the extremes
+// (their time at_us), a mean where mean_of_column gives one, and first
+// and last only where the samples are alike, their order being untold
+inline ecuio_recording_stats_t
+stats_of_instant(const ecuio_recording_column_t& col, bool text, uint64_t at_us)
+{
+    ecuio_recording_stats_t st = no_stats();
+    st.samples = col.samples;
+    if (text || col.samples == 0) {
+        return st;
+    }
+    st.lowest = col.lowest;
+    st.highest = col.highest;
+    st.lowest_us = st.highest_us = at_us;
+    double mean = NAN;
+    if (mean_of_column(col, mean)) {
+        st.mean = mean;
+    }
+    if (col.lowest == col.highest) {
+        st.first = st.last = col.lowest;
+    }
+    return st;
+}
+
+// A failed read of an open recording, as its error line's detail: the
+// changed file's words for that code, NULL (core's own detail) otherwise
+inline const char* read_error_detail(ecuio_status_t rc)
+{
+    return rc == ECUIO_ERR_RECORDING_CHANGED
+               ? "the recording changed while it was read"
+               : nullptr;
 }
 
 // --- --stretches (ADR-0056's appendix "the navigation aids") -----------

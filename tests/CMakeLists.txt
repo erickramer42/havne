@@ -404,6 +404,14 @@ if(TARGET havne-cli)
                     ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
         set_tests_properties(CliTransferRunTest.interrupt-twice PROPERTIES
             TIMEOUT 120 SKIP_RETURN_CODE 77)
+        # Interrupts once core's call has returned change nothing: the
+        # result line whole, exit 0, the file in place
+        add_test(NAME CliTransferRunTest.interrupt-late
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_transfer.py
+                    interrupt-late $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/golden/recording/replay-obd2)
+        set_tests_properties(CliTransferRunTest.interrupt-late PROPERTIES
+            TIMEOUT 120 SKIP_RETURN_CODE 77)
         # The made-up loggers' CSVs imported by their column maps and
         # viewed; a missing map, a refused one, a folder already there
         add_test(NAME CliTransferRunTest.csv-import
@@ -865,11 +873,36 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py deltas
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
                     ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.ARecordingShiftedHalfASecondDiffersInNoColumn
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py shifted
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.ASpanEndingAtZeroHoldsTheSampleThere
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py instant
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.APullPastARecordingsPullsLeavesItOffTheAxis
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py past
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.StretchesTakesItsWordBeforeAFolderOfThatName
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py named
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.ASampleAtTheAxisEndIsInTheLastColumn
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py end
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
         set_tests_properties(CliViewRunTest.ColumnsCountEverySampleOnce
+            CliViewRunTest.ASampleAtTheAxisEndIsInTheLastColumn
             CliViewRunTest.AlignedPullsAgree
             CliViewRunTest.SpanStatisticsAreTheSamples
             CliViewRunTest.ColumnMeansAndDeltasAreTheSamples
             CliViewRunTest.ADeltaIsBetweenOneNameInOneUnit
+            CliViewRunTest.ARecordingShiftedHalfASecondDiffersInNoColumn
+            CliViewRunTest.ASpanEndingAtZeroHoldsTheSampleThere
+            CliViewRunTest.APullPastARecordingsPullsLeavesItOffTheAxis
+            CliViewRunTest.StretchesTakesItsWordBeforeAFolderOfThatName
             PROPERTIES TIMEOUT 60)
         # info (ADR-0049 section 6) on a recording with one of each finding
         # (tests/fixtures/recording/findings, wire frames written by hand: a
@@ -1067,6 +1100,11 @@ if(TARGET havne-cli)
     app_cli_usage(ViewAPullGainOfWordsIsUsage
         "view|x|--align-on|pull:1|--stretch-level|pull-gain=some")
     app_cli_usage(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal")
+    # pulls, cruises or all after --stretches is its word, never a folder
+    app_cli_usage_says(ViewStretchesAndItsWordNameNoFolder "view|--stretches|all"
+        "view needs a recording's folder")
+    app_cli_usage_says(ViewStretchesPullsNamesNoFolder "view|--stretches|pulls"
+        "view needs a recording's folder")
     app_cli_usage(ViewUnitsThatArentAreUsage "view|x|--stretches|--units|furlongs")
     app_cli_usage(ViewAnUnknownOptionIsUsage "view|x|--fast")
     set(_cli_pull_early ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/pull-early)

@@ -15,4 +15,4 @@
 {"found": true, "host_us": null, "offset_us": 90000000, "on": "utc", "recording": 1, "type": "align"}
 {"column_us": 32500000, "columns": 4, "from_us": 0, "to_us": 130000000, "type": "axis"}
 {"highest": [90, null, null, null], "lowest": [88, null, null, null], "mean": [88.62068965517241, null, null, null], "recording": 0, "samples": [29, 0, 0, 0], "signal": "Coolant", "type": "columns"}
-{"delta": [null, null, null, null], "delta_from": 0, "highest": [null, null, 88, 90], "lowest": [null, null, 88, 88], "mean": [null, null, 88, 88.54545454545455], "recording": 1, "samples": [0, 0, 6, 33], "signal": "Coolant", "type": "columns"}
+{"delta": [null, null, null, null], "delta_from": 0, "highest": [null, null, 88, 90], "lowest": [null, null, 88, 88], "mean": [null, null, 88, 88.5625], "recording": 1, "samples": [0, 0, 7, 32], "signal": "Coolant", "type": "columns"}
