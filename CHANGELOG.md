@@ -11,6 +11,156 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+
+- Dashboard: change a gauge's kind in its panel (**Change kind**, beside
+  Change signal); its signal, range and zones stay, and changing back
+  restores the old kind's own settings.
+- Dashboard: pick a color for a gauge from a set; warning zones and Night
+  still win, and at Night the Color row is dimmed, with a note, since Night
+  draws every gauge in its own tint.
+- Dashboard gauges can warn below a level as well as above one: "Warning
+  below" and "Danger below" sit beside the existing zones, on the dial, bar,
+  ring, number and segment kinds. The built-in Battery gauge has all four
+  levels and warns when charging stops.
+- A new gauge on a common signal (coolant, oil, intake air, battery, engine
+  speed) starts with generic zones for a gasoline engine, and a signal file's
+  own gauge (range and levels) wins over them. Shift lights ask for "First
+  light at" and "Shift at" and start from the shift band on engine speed.
+- Recordings: the chart is in panes, one for each unit, stacked on one time
+  axis, each with its own axis. A pane's range zooms with Ctrl and the wheel
+  or a vertical pinch and pans with a drag on its axis, and a double click
+  or tap there puts it back; dragging the line between two panes sets their
+  heights, which are kept.
+- Recordings: a second cursor, placed with a long press or Shift+click, or
+  both at once by dragging a box. The span between them shows its length,
+  and each signal's change, lowest, highest, mean and rate. Handles at the
+  chart's foot move the cursors; on the desktop the arrow keys step a
+  sample, B picks the cursor, and Home and End go to the ends.
+- Live: drag the chart to pause it and look back through the last two
+  minutes while the values keep updating. A tap reads each trace's value at
+  that moment, and Live (or Space on a desktop) follows now again.
+- The demo vehicle (`mock://demo`) is turbocharged: boost builds with lag
+  to about 17 psi in each pull and vents on a lift, MAP, MAF, load, lambda
+  and the intake temperature follow it, and the quarter mile runs about
+  13 s. The built-in MAF gauge reads to 500 g/s.
+- Compare lines two recordings up on a pull you choose in each: **Align a
+  pull** in the Recordings viewer, and
+  `havne-cli view <a> <b> --align-on pull:<n>[,<n>...]` (`pull:3,1` lays
+  the first recording's third pull on the second's first).
+- `havne-cli view`'s `columns` lines carry each column's `mean`, and a
+  recording compared with an earlier one its `delta` from it, column by
+  column.
+- `havne-cli view --stretch-level` takes `pull-rise=` (rpm) and
+  `pull-gain=` (speed), and the Python package's `Recording.stretches()`
+  takes `pull_min_rise` and `pull_min_gain`.
+- Pulls are found as road logs drive them: a lift between gears of up to
+  1.5 s stays inside its pull, and a pull must climb 750 rpm in engine
+  speed, so a stab at the throttle and a launch held at a standstill aren't
+  listed, and a pull in top gear that gains little speed is. Where a
+  recording has no engine speed, a pull must gain 10 km/h.
+  `ecuio_stretch_rules_t` carries both as `pull_min_rise` and
+  `pull_min_gain`.
+- Connection: an **Extended session (10 03)** box under uds-generic's DIDs
+  (over an adapter or a CAN interface), and a line saying where the other
+  address options are listed.
+- Mark stands beside Stop log from 720 px of header, and the running log's
+  time reads "Logging 0:02" there. Live's line says Start log records the
+  plotted signals, and "Logging the N plotted signals" while a log runs.
+- Settings says what Record sessions keeps and that it replaces Start log,
+  what a vehicle is for, and what an OBDb set and a signal file are, and
+  says "Disconnect to ..." on Vehicle, Signals and Recording while a
+  session runs. The Settings list's Signals row says when a file doesn't
+  load.
+- A signal set registered by a program, a plugin's, or the one a recording's
+  frames are opened with is refused when two of its signals share a name,
+  as a signal file's always was: a recording keys its values by name.
+- A signal file that stands a text in for a signal one of `obd2`'s computed
+  signals reads (Boost reads the manifold and barometric pressures) is
+  refused, naming that signal, where it said only "refused by its validator
+  (code -22)".
+
+### Changed
+
+- The Demo data row on Home's and Dash's lists and the `mock://demo` button
+  are there for everyone, not only in Developer mode, which now gates the
+  frame rate, the viewer's frame test, Export's raw frames and the adapter
+  relay. The Log page's Activity | Frames switch is for everyone.
+- On a phone the status reads "Connected" ("Replaying" for a replay) and
+  ends in a chevron where there is room; a connect from **Other
+  address...** returns to the page that sent it; Profile is a segmented row
+  (Default, Raw, UDS DIDs); the Connection count and device list drop what a
+  phone never has; the Diagnostics page is titled "Codes"; and Settings'
+  Recording row reads off, on, or on while a session is being recorded.
+- The WiFi presets are under **WiFi and other addresses**, and a recent
+  address of a listed adapter shows the adapter's name. Home's and Dash's
+  lists say a recording is played back from Recordings.
+- The drive view offers Mark during a log too.
+- Recordings on a phone, upright: the title row and the chart stay at the
+  top while one list scrolls under them, and About this recording is a view
+  of its own beside Values and Frames.
+- Dashboard on the desktop: the built-in layout leaves no empty square at
+  any window width from 5 to 8 columns; a gauge after the dials fills the
+  space beside it. A layout you've saved is drawn as before.
+- Every choice among a few values (Display's look, Night, units and the
+  drive view's settings, the Log's and the viewer's switches) is drawn the
+  same way: a bordered track with the picked value outlined. The Log page's
+  buttons are phone-sized.
+- The recording viewer's values are drawn in the value face, like the
+  gauges.
+- A wide CSV export by sweep no longer lets a column far sparser than the
+  rest (its usual interval over 16 times theirs, such as an event counter in
+  another logger's CSV) set every row's pace: the rows follow the other
+  columns and that column's newest value is written in them. A tuner log's
+  shape that gave 6 rows by sweep gives one for each of its 420
+  ([ADR-0056](docs/adr/0056-analysis-log.md)).
+- A CSV whose time column is named as one (Time, Timestamp, Elapsed...) and
+  holds whole numbers with no unit in its header imports as milliseconds,
+  with a note saying so; the unit stays changeable in Import and with
+  `havne-cli import csv --time-unit`. A time with fractions, or a first
+  column that only counts up, still asks for its unit.
+- Import's preview shows a padded file's cells as they will be imported, and
+  its column names without the padding; a header cell of spaces alone shows
+  as "(no header)".
+- The import's guess says when a number column holds a value in under half
+  its rows: a wide export by sweep then follows that column's rate, so a row
+  interval gives every row.
+
+### Fixed
+
+- Importing a CSV whose fields are padded with a space after each comma, as
+  many tuner logs are, keeps a mostly empty number column (an event counter)
+  as numbers instead of losing it from the wide export; the spaces around an
+  unquoted value are dropped for text too, while a quoted value keeps its
+  spaces.
+- A CSV with a row whose time cell is empty (a logger's last line of
+  padding, or a blank part way down) imports: the row is left out and
+  counted. The app's finished line says how many, `havne-cli import csv`
+  adds `rows_no_time` to its `imported` line and says so on standard error,
+  Python's `Imported` ends with `rows_no_time`, and the recording's
+  `events.log` names the first such row's line. The guessed map's notes say
+  how many of the rows it read have no time. A file in which no row has a
+  time is refused, by the guess too.
+- A session in the extended session (`?session=03`) returns each module to
+  the default session at the close even when a read is under way: through an
+  ELM327 adapter the close waits for the reply's end before `10 01` (and
+  sends it again if the adapter answers `STOPPED`), and through J2534 it
+  reads the module's answer before disconnecting, so the module isn't left
+  repeating it.
+- A shift light's cell panel no longer shows the zone and Decimals fields it
+  doesn't use; they keep their values if you change the gauge's kind back.
+- Settings' side list on the desktop shows the Display value whole (under
+  its title, on two lines at most) instead of cutting it off.
+- Live fits a 320 px phone: the "Window" caption gives way and a long value
+  stays inside its row.
+- The Log's frame table, switched away from and back to, returns to the same
+  frame rather than the same row number while frames arrive.
+- On a phone the recording viewer's About view opens at its start on every
+  platform.
+- The name of negative response 0x36 is `exceedNumberOfAttempts`, ISO
+  14229-1's, in `havne-cli`'s refused, session and clear lines and in the
+  app's refused signals.
+
 ## [0.7.2] - 2026-11-11
 
 ### Added

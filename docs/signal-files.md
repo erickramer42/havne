@@ -148,7 +148,7 @@ fills the block as above, and a file you share keeps it
 it, so one session shows both. Without it the file is a set of its own,
 and a session on it reads only your signals. A signal of yours named as one
 of `obd2`'s (`Boost`, say) replaces it: the session shows yours, in its
-place, and a gauge or layout that named `obd2`'s signal reads yours.
+place, and a gauge or layout that named `obd2`'s signal reads yours. So does a computed signal of `obd2`'s: name yours `Intake Manifold Pressure` or `Barometric Pressure` and Boost is worked out from it, in its unit, so keep it kPa. A signal a computed one reads is a number or an enum; the loader refuses a text in its place, naming the computed signal.
 
 ### `ecus`
 

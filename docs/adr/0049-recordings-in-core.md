@@ -518,6 +518,15 @@ How it works:
   whatever the file's size. As an example, 50 number signals each with
   a sample every second of an hour come to about 5.8 MB beside the
   cache.
+
+  > **2026-11-09: the per-second sum.** Each number signal's second gains
+  > the sum of its values (`number_second`, 40 bytes), so a span's mean is
+  > read from the summaries for its whole seconds (`ecuio_recording_stats`).
+  > The bound is 40 bytes per number signal and 16 per text signal for each
+  > second it has samples, plus 16 per second for the index and the 8 MiB
+  > cache: 50 number signals with a sample every second of an hour come to
+  > about 7.2 MB. A second whose sum is NaN (a NaN sample, or an inf and a
+  > -inf) has its mean read from its raw rows.
 - **Alignment:** `ecuio_recording_find` returns the first time after
   `from_us` a signal crosses a level in a direction, with hysteresis
   (rpm above 3000 after being below 2900), or a marker's time; the

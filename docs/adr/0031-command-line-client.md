@@ -501,6 +501,11 @@ aligned pulls' columns equal (`CliViewRunTest`, `tests/cli_view.py`);
 the grammar, the axis and each line (`CliViewTest`); the usage errors
 (`CliUsageTest.View*`).
 
+> 2026-11-11: `--align-on` also takes `pull:<n>[,<n>...]` (pulls,
+> ADR-0056); the `columns` line gains `mean`, and `delta` with
+> `delta_from` on a recording after the first aligned one; the `roles` line
+> gains `pull_gain`.
+
 ## Appendix: 2026-11-03, info
 
 `havne-cli info <recording> [--gap S] [--rate-drop X] [--settle S]`

@@ -754,3 +754,14 @@ round to it more slowly than the default 3 s); MAP keeps the default.
   base def.
 - **The built-in layouts** name the signal by its ID beside the mock's
   (`Bridge.gaugeSignals`' `boost`), as for the others.
+
+## Appendix: a gauge starts from its signal (2026-11-11)
+
+The app starts a dial from a signal's gauge: `profileSignals` rows carry
+`gauge` (`{min, max, warnLow?, warnHigh?}` in the decoded unit, `{}` for
+none). The file's `warn_low` is "at or below" in core's header, while the
+cell's `warnBelow` colors strictly below; the cell is the user's to edit, so
+the mapping copies the number and the two comparisons differ only at the
+exact level. A file gauge with a range and no levels takes the table's zones
+for a common signal (its range still wins); a shift light on engine speed
+always starts from the shift band, whatever the file's gauge.
