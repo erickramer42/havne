@@ -2062,7 +2062,8 @@ TestCase {
     readonly property var anyCell: ["panelClose", "panelCopy", "panelPaste", "panelW", "panelH",
                                     "panelEarlier", "panelLater", "panelStart", "panelEnd", "panelRemove"]
     // panelSignalName shows while the cell's ref has a row: the demo's RPM
-    // (id:1001) has one with no session, which init() guarantees
+    // (id:1001) has one with no session once a session has run, which the field
+    // table's case sets up itself
     readonly property var withSignal: ["panelPreview", "panelLabel", "panelSignal", "panelKind", "panelFrom",
                                        "panelFromCaption", "panelTo", "panelToCaption", "panelSignalName"]
     // What the value's text and tone read: every kind that draws a value
@@ -2146,6 +2147,11 @@ TestCase {
         return Object.keys(fieldsOfKind).map(k => ({ tag: k, kind: k }))
     }
     function test_eachKindsPanelShowsOnlyItsFields(data) {
+        // The demo's rows stay in the model after a session ends: put them there
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting && !Bridge.connected, 5000, "no session again")
+        wait(0)
         const cell = data.kind === "blank" ? { kind: "blank", w: 2, h: 4, refs: [] }
                                            : cellOf("A", data.kind)
         const page = pageOf({}, docOf([cell, cellOf("B")]))

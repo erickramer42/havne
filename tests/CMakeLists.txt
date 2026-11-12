@@ -1638,6 +1638,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     # The shares a file runs as, where not three: tst_phone's longest share
     # otherwise outlasts the rest of the suite
     set(_qml_shares_phone 5)
+    set(_qml_shares_dashedit 4)
     # Seconds a file's entry (or one share of it) took in a full run's
     # CTestCostData.txt, so a tree with no history starts the long ones first
     set(_qml_cost_dashboard 40)
