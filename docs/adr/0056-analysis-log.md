@@ -967,3 +967,37 @@ The app's alignment follows the panel's levels: Compare's pull numbers use the
 levels in force for both recordings, where `havne-cli view --align-on pull:`
 uses core's defaults unless it is given levels (`--stretch-level`, `--role`),
 so the same numbers need the same levels on both sides.
+
+## Appendix: a cancel for the reader's searches (2026-11-12)
+
+`ecuio_recording_stretches_with` and `ecuio_recording_find_with`
+(`recording.h`) are the two searches with an `ecuio_cancel_t`. The cancel is
+asked once the arguments pass and before each second whose rows the search
+reads; a find passes by a second its summary rules out without asking. A
+nonzero answer ends the call with `ECUIO_ERR_CANCELED`, "the search was
+canceled" in the detail, a count of 0 or `ECUIO_RECORDING_NONE`. The plain
+calls are these with a NULL cancel. `RecordingStretchesTest.ACancelStops*`
+pin each ask.
+
+The statistics, the step and the queries take no cancel. One call over the
+dense hour (1.8 million rows) is at most about 270 ms, and only the
+application's end waits for one, so the viewer checks its own stop between
+calls instead.
+
+The viewer's stop. Each open has a stop flag, which its close, the next open
+and the view's destructor set. A stretches pass hands it to core and ends at
+its next second. The asks' task makes no statistics or step call, and starts
+no column of a means pass, once it is set. A call under way runs to its end
+and its answer is dropped, as before. `RecordingViewTest.ACloseStopsAStretchesPassUnderWay`
+times a close in the middle of a pass over a dense recording against a whole
+pass, and `.AClosedOpensStatsAndStepAreNotRead` closes during the asks' hold.
+
+`havne-cli view` hands its interrupt to the opens (their progress) and to
+both searches, and checks it between recordings while it writes the columns
+and the spans. An interrupt ends the view with the interrupted end line and
+exit 1 (`CliViewRunTest.AnInterruptEndsEachSearch`, which holds the first
+search's ask through `HAVNE_CLI_EXPORT_HOLD_MS`).
+
+Python's `Recording.stretches`, `find_threshold` and `find_marker` take no
+cancel yet, so a script's interrupt during one waits for the call to end. That is the gap
+this step leaves.
