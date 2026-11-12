@@ -181,6 +181,10 @@ TestCase {
         verify(note.visible)
         verify(Qt.colorEqual(note.color, Theme.success))
         verify(!panel.visible, "done with the file")
+        verify(page.viewing, "the import opens its recording")
+        verify(note.visible, "its words stay above the viewer")
+        page.backToList()
+        verify(!note.visible)
         verify(page.recordings.some(r => r.title.endsWith(" · CSV import")),
                "it joins the list")
 
@@ -205,6 +209,7 @@ TestCase {
                   "the import ends")
         compare(note.text, "Imported 2 frames over 0.5 s")
         verify(!panel.visible)
+        page.backToList()
         verify(page.recordings.some(r => r.title.endsWith(" · candump import")))
 
         // The next log needs no interface: the one typed for the last is gone
@@ -215,6 +220,7 @@ TestCase {
         tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
                   "the import ends")
         compare(note.text, "Imported 1 frames over 0.0 s")
+        page.backToList()
 
         page.chooseImportFile(log)
         find(page, "importKind_csv").clicked()
@@ -224,6 +230,46 @@ TestCase {
         find(page, "importCancel").clicked()
         verify(!panel.visible)
         verify(!note.visible)
+    }
+
+    // The panel's Import and Cancel stand at its head, above the columns,
+    // and a typed label names the folder
+    function test_theImportPanelPutsItsActionsFirstAndTakesALabel() {
+        const page = createPage()
+        const csv = Harness.writeScratchFile("head-log.csv",
+            "Time (ms),RPM [rpm],Load [%]
+0,800,12
+500,900,30
+")
+        page.chooseImportFile(csv)
+        const preview = guessed(page)
+        const start = find(page, "importStart")
+        const label = find(page, "importLabel")
+        verify(label.visible)
+        const head = start.mapToItem(page, 0, 0).y
+        verify(head < find(preview, "guessRow_0").mapToItem(page, 0, 0).y,
+               "Import is above the first column")
+        verify(find(page, "importCancel").mapToItem(page, 0, 0).y
+               < find(preview, "guessRow_0").mapToItem(page, 0, 0).y,
+               "Cancel is above the first column too")
+        const box = find(preview, "include")
+        verify(box.indicator.x < 40, "the include box starts its row")
+        label.text = "Cold start"
+        start.clicked()
+        tryVerify(() => page.viewing, 10000, "the import opens its recording")
+        verify(page.openedTitle.endsWith(" · Cold start"), page.openedTitle)
+        page.backToList()
+    }
+
+    // A row says its length, its kind and signals, and its marks
+    function test_aRowSaysItsLengthKindAndMarks() {
+        const page = createPage()
+        compare(page.rowFacts({ durationMs: 60000, log: true, signals: 13, marks: 0, frames: true }),
+                "1 min 0 s · log, 13 signals")
+        compare(page.rowFacts({ durationMs: 12000, log: false, signals: 5, marks: 2, frames: true }),
+                "12 s · session · 2 marks")
+        compare(page.rowFacts({ durationMs: -1, log: false, signals: 3, marks: 1, frames: false }),
+                "3 signals · 1 mark")
     }
 
     // Waits for a picked CSV's guess to show
@@ -1659,7 +1705,7 @@ profile  raw
     // The cursor reads each signal's value in force at its time
     function test_theCursorReadsTheValuesAtItsTime() {
         const page = openFindings()
-        compare(find(page, "cursorTime").text, "Click the chart for values")
+        compare(find(page, "cursorTime").text, "Click for values · drag to pan · wheel to zoom · double-click a pane to enlarge it")
         const row = find(page, "signalRows").itemAtIndex(0)
         compare(find(row, "cursorValue").text, "—")
         page.setCursor(5000)
