@@ -14,9 +14,9 @@
 {"found": true, "host_us": 14600000, "offset_us": -14600000, "on": "rise:RPM:4000", "recording": 0, "type": "align"}
 {"found": true, "host_us": 24600000, "offset_us": -24600000, "on": "rise:RPM:4000", "recording": 1, "type": "align"}
 {"column_us": 5000000, "columns": 2, "from_us": -2000000, "to_us": 8000000, "type": "axis"}
-{"highest": [6721, 6806], "lowest": [2000, 1988], "mean": [4360.05, 3487.36], "recording": 0, "samples": [60, 50], "signal": "RPM", "type": "columns"}
+{"highest": [6401, 6806], "lowest": [2486, 1988], "mean": [4439.4, 3819.5882352941176], "recording": 0, "samples": [50, 51], "signal": "RPM", "type": "columns"}
 {"recording": 0, "samples": [0, 0], "signal": "VIN", "type": "columns"}
-{"delta": [0, 0], "delta_from": 0, "highest": [6721, 6806], "lowest": [2000, 1988], "mean": [4360.05, 3487.36], "recording": 1, "samples": [60, 50], "signal": "RPM", "type": "columns"}
+{"delta": [0, 0], "delta_from": 0, "highest": [6401, 6806], "lowest": [2486, 1988], "mean": [4439.4, 3819.5882352941176], "recording": 1, "samples": [50, 51], "signal": "RPM", "type": "columns"}
 {"recording": 1, "samples": [0, 0], "signal": "VIN", "type": "columns"}
 {"first": 3280, "from_us": -1000000, "highest": 4884, "highest_us": 15600000, "last": 4884, "lowest": 3280, "lowest_us": 13600000, "mean": 4078.904761904762, "recording": 0, "samples": 21, "signal": "RPM", "to_us": 1000000, "type": "stats"}
 {"first": null, "from_us": -1000000, "highest": null, "highest_us": null, "last": null, "lowest": null, "lowest_us": null, "mean": null, "recording": 0, "samples": 0, "signal": "VIN", "to_us": 1000000, "type": "stats"}

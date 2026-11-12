@@ -1081,6 +1081,214 @@ TEST(CliViewTest, AColumnsSpanIsTheSamplesTheReaderCountsInIt)
     EXPECT_EQ(to, 13999999u);
 }
 
+TEST(CliViewTest, AnAlignedViewsWideColumnsHoldTheirOwnWindow)
+{
+    cli::Axis a;
+    ASSERT_TRUE(cli::make_axis(-31000000, 9000000, 8, a));
+    ASSERT_EQ(a.column_us, 5000000);
+    EXPECT_TRUE(cli::columns_own_window(true, a));
+    EXPECT_FALSE(cli::columns_own_window(false, a))
+        << "an unaligned view's recordings share their seconds";
+    cli::Axis second;
+    ASSERT_TRUE(cli::make_axis(0, 8000000, 8, second));
+    EXPECT_TRUE(cli::columns_own_window(true, second)) << "a second counts";
+    cli::Axis under;
+    ASSERT_TRUE(cli::make_axis(0, 7999999, 8, under));
+    ASSERT_EQ(under.column_us, 1000000) << "rounded out to the second";
+    EXPECT_TRUE(cli::columns_own_window(true, under));
+    ASSERT_TRUE(cli::make_axis(0, 7999992, 8, under));
+    ASSERT_EQ(under.column_us, 999999);
+    EXPECT_FALSE(cli::columns_own_window(true, under))
+        << "under a second a query counts the column's own samples";
+
+    /* A recording whose zero sits 31.5 s into it: each axis column is
+     * the same 5 s of the axis, here in the recording's own time */
+    uint64_t from = 0;
+    uint64_t to = 0;
+    ASSERT_TRUE(cli::own_span(a, -31500000, 0, from, to));
+    EXPECT_EQ(from, 500000u);
+    EXPECT_EQ(to, 5499999u) << "both ends counted, the next column's left";
+    ASSERT_TRUE(cli::own_span(a, -31500000, 6, from, to));
+    EXPECT_EQ(from, 30500000u);
+    EXPECT_EQ(to, 35499999u);
+    ASSERT_TRUE(cli::own_span(a, -31500000, 7, from, to));
+    EXPECT_EQ(from, 35500000u);
+    EXPECT_EQ(to, 40500000u) << "the last column holds the axis's end too";
+    /* One 12.5 s in: the first two columns end before its start, the
+     * third is cut at it */
+    EXPECT_FALSE(cli::own_span(a, -12500000, 0, from, to));
+    EXPECT_FALSE(cli::own_span(a, -12500000, 1, from, to));
+    EXPECT_FALSE(cli::own_span(a, -21000000, 1, from, to))
+        << "a column ending on the microsecond before the start";
+    ASSERT_TRUE(cli::own_span(a, -21000001, 1, from, to));
+    EXPECT_EQ(from, 0u);
+    EXPECT_EQ(to, 0u) << "a column ending on the first microsecond";
+    ASSERT_TRUE(cli::own_span(a, -12500000, 3, from, to));
+    EXPECT_EQ(from, 0u);
+    EXPECT_EQ(to, 1499999u);
+    ASSERT_TRUE(cli::own_span(a, -12500000, 4, from, to));
+    EXPECT_EQ(from, 1500000u);
+    EXPECT_EQ(to, 6499999u);
+    /* A recording put later on the axis (utc): its time runs behind */
+    ASSERT_TRUE(cli::own_span(a, 4000000, 7, from, to));
+    EXPECT_EQ(from, 0u);
+    EXPECT_EQ(to, 5000000u);
+    /* One that starts on the axis's last microsecond: that alone */
+    ASSERT_TRUE(cli::own_span(a, 9000000, 7, from, to));
+    EXPECT_EQ(from, 0u);
+    EXPECT_EQ(to, 0u);
+    EXPECT_FALSE(cli::own_span(a, 9000001, 7, from, to));
+
+    /* The statistics over such a span, as the column a query would give */
+    ecuio_recording_stats_t st = cli::no_stats();
+    ecuio_recording_column_t col = cli::column_of_stats(st);
+    EXPECT_EQ(col.samples, 0u);
+    st.samples = 12;
+    st.lowest = -3.5;
+    st.highest = 41;
+    st.mean = 7;
+    col = cli::column_of_stats(st);
+    EXPECT_EQ(col.samples, 12u);
+    EXPECT_EQ(col.lowest, -3.5);
+    EXPECT_EQ(col.highest, 41);
+    EXPECT_EQ(col.flags, 0u);
+    st.samples = uint64_t{UINT32_MAX} + 5;
+    EXPECT_EQ(cli::column_of_stats(st).samples, UINT32_MAX)
+        << "a count past the column's room is its most, never wrapped";
+}
+
+TEST(CliViewTest, TheLastColumnHoldsTheAxisEnd)
+{
+    /* Columns under a second: every query stops short of the end */
+    cli::Axis narrow;
+    ASSERT_TRUE(cli::make_axis(0, 4000000, 8, narrow));
+    cli::Window w;
+    ASSERT_TRUE(cli::window_of(narrow, 0, w));
+    EXPECT_TRUE(cli::query_leaves_end(w, narrow));
+    ASSERT_TRUE(cli::window_of(narrow, -250000, w));
+    EXPECT_TRUE(cli::query_leaves_end(w, narrow)) << "ending inside a second";
+
+    /* Columns of a second or more: a query ending inside a second takes
+     * that second whole, one ending on a second leaves the end out */
+    cli::Axis wide;
+    ASSERT_TRUE(cli::make_axis(0, 40000000, 8, wide));
+    ASSERT_TRUE(cli::window_of(wide, 0, w));
+    ASSERT_EQ(w.t1_us, 40000000u);
+    EXPECT_TRUE(cli::query_leaves_end(w, wide));
+    ASSERT_TRUE(cli::window_of(wide, -250000, w));
+    ASSERT_EQ(w.t1_us, 40250000u);
+    EXPECT_FALSE(cli::query_leaves_end(w, wide));
+
+    /* The axis ending inside the column across a recording's start: that
+     * one query's own width decides */
+    ASSERT_TRUE(cli::window_of(wide, 39500000, w));
+    ASSERT_TRUE(w.partial);
+    ASSERT_EQ(w.count, 1u);
+    ASSERT_EQ(w.t1_us, 500000u);
+    EXPECT_TRUE(cli::query_leaves_end(w, wide)) << "half a second, read raw";
+    ASSERT_TRUE(cli::window_of(wide, 37500000, w));
+    ASSERT_EQ(w.count, 1u);
+    ASSERT_EQ(w.t1_us, 2500000u);
+    EXPECT_FALSE(cli::query_leaves_end(w, wide));
+    ASSERT_TRUE(cli::window_of(wide, 38000000, w));
+    ASSERT_EQ(w.t1_us, 2000000u);
+    EXPECT_TRUE(cli::query_leaves_end(w, wide));
+
+    /* The end's samples into the last column */
+    ecuio_recording_column_t into{};
+    ecuio_recording_column_t more{};
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, 0u);
+    more.samples = 2;
+    more.lowest = 10;
+    more.highest = 30;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, 2u);
+    EXPECT_EQ(into.lowest, 10);
+    EXPECT_EQ(into.highest, 30);
+    more.samples = 1;
+    more.lowest = more.highest = 20;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, 3u);
+    EXPECT_EQ(into.lowest, 10) << "inside the range: it stays";
+    EXPECT_EQ(into.highest, 30);
+    more.lowest = more.highest = 45;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, 4u);
+    EXPECT_EQ(into.highest, 45);
+    more.lowest = more.highest = -5;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.lowest, -5);
+    EXPECT_EQ(into.highest, 45);
+    more.samples = 0;
+    more.lowest = more.highest = 99;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, 5u) << "an empty column adds nothing";
+    EXPECT_EQ(into.highest, 45);
+    into.samples = UINT32_MAX - 1;
+    more.samples = 7;
+    cli::add_column(into, more);
+    EXPECT_EQ(into.samples, UINT32_MAX);
+}
+
+TEST(CliViewTest, OneMicrosecondsStatisticsComeFromItsColumn)
+{
+    ecuio_recording_column_t col{};
+    ecuio_recording_stats_t st = cli::stats_of_instant(col, false, 0);
+    EXPECT_EQ(st.samples, 0u);
+    EXPECT_TRUE(std::isnan(st.last));
+    EXPECT_TRUE(std::isnan(st.lowest));
+    EXPECT_TRUE(std::isnan(st.mean));
+    EXPECT_EQ(st.lowest_us, ECUIO_RECORDING_NONE);
+    EXPECT_EQ(st.highest_us, ECUIO_RECORDING_NONE);
+
+    col.samples = 1;
+    col.lowest = col.highest = 50;
+    st = cli::stats_of_instant(col, false, 7);
+    EXPECT_EQ(st.samples, 1u);
+    EXPECT_EQ(st.first, 50);
+    EXPECT_EQ(st.last, 50);
+    EXPECT_EQ(st.lowest, 50);
+    EXPECT_EQ(st.highest, 50);
+    EXPECT_EQ(st.mean, 50);
+    EXPECT_EQ(st.lowest_us, 7u);
+    EXPECT_EQ(st.highest_us, 7u);
+
+    /* Two unlike samples in one microsecond: which came last isn't told */
+    col.samples = 2;
+    col.highest = 54;
+    st = cli::stats_of_instant(col, false, 0);
+    EXPECT_EQ(st.samples, 2u);
+    EXPECT_EQ(st.lowest, 50);
+    EXPECT_EQ(st.highest, 54);
+    EXPECT_EQ(st.mean, 52);
+    EXPECT_TRUE(std::isnan(st.first));
+    EXPECT_TRUE(std::isnan(st.last));
+    col.samples = 3;
+    st = cli::stats_of_instant(col, false, 0);
+    EXPECT_TRUE(std::isnan(st.mean)) << "three unlike samples have no mean";
+    EXPECT_EQ(st.highest, 54);
+
+    /* A text signal's samples alone */
+    col.samples = 1;
+    col.lowest = col.highest = 50;
+    st = cli::stats_of_instant(col, true, 0);
+    EXPECT_EQ(st.samples, 1u);
+    EXPECT_TRUE(std::isnan(st.last));
+    EXPECT_TRUE(std::isnan(st.lowest));
+    EXPECT_TRUE(std::isnan(st.mean));
+    EXPECT_EQ(st.lowest_us, ECUIO_RECORDING_NONE);
+}
+
+TEST(CliViewTest, AFailedReadsErrorLineSaysItsOwnCause)
+{
+    EXPECT_STREQ(cli::read_error_detail(ECUIO_ERR_RECORDING_CHANGED),
+                 "the recording changed while it was read");
+    EXPECT_EQ(cli::read_error_detail(ECUIO_ERR_OUT_OF_MEMORY), nullptr)
+        << "core's own detail, never the changed file's words";
+    EXPECT_EQ(cli::read_error_detail(ECUIO_ERR_INVALID_ARGUMENT), nullptr);
+}
+
 TEST(CliViewTest, ADeltaIsBetweenOneNameInOneUnit)
 {
     ecuio_recording_signal_t speed{};
