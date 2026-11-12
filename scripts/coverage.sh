@@ -85,10 +85,18 @@ if [ "$tests_only" = 0 ]; then
             echo "no Qt kit: set QT_PREFIX, or configure build first (docs/development.md, Build configurations)" >&2
             exit 2
         fi
-        run configure cmake -B "$TREE" \
+        # HAVNE_COVERAGE_NINJA=1 (CI, from a Developer shell): a Ninja tree with
+        # sccache and /Z7, since the Visual Studio generator ignores a launcher
+        gen=(); dbg=/Zi
+        if [ "${HAVNE_COVERAGE_NINJA:-0}" = 1 ]; then
+            gen=(-G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                 -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache)
+            dbg=/Z7
+        fi
+        run configure cmake -B "$TREE" "${gen[@]}" \
             -DCMAKE_PREFIX_PATH="$qt" \
-            "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=/Zi /Od /Ob0 /DNDEBUG" \
-            "-DCMAKE_C_FLAGS_RELWITHDEBINFO=/Zi /Od /Ob0 /DNDEBUG"
+            "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=$dbg /Od /Ob0 /DNDEBUG" \
+            "-DCMAKE_C_FLAGS_RELWITHDEBINFO=$dbg /Od /Ob0 /DNDEBUG"
         [ "$rc" = 0 ] || build_failed configure
         line configure ok "$dur" "$TREE"
     fi
@@ -97,6 +105,9 @@ if [ "$tests_only" = 0 ]; then
     line build ok "$dur" ""
 fi
 
+# A multi-config tree puts binaries in a folder per configuration, a Ninja tree's are one level up
+bindir=$TREE/tests/RelWithDebInfo
+grep -q '^CMAKE_GENERATOR:INTERNAL=Ninja' "$TREE/CMakeCache.txt" 2>/dev/null && bindir=$TREE/tests
 if [ "$devices" = 1 ]; then
     export ECUIO_EXPECT_J2534_DEVICES=1
 fi
@@ -139,7 +150,7 @@ for t in json.load(sys.stdin)["tests"]:
         echo "$rc" > "$LOGDIR/rc-$name"
     }
     later=""
-    for exe in "$TREE"/tests/RelWithDebInfo/test_*.exe; do
+    for exe in "$bindir"/test_*.exe; do
         name=$(basename "$exe" .exe)
         suites=$("$exe" --gtest_list_tests 2>/dev/null | tr -d '\r' \
             | sed -nE 's/^([A-Za-z_][A-Za-z0-9_/]*)\.( .*)?$/\1/p')

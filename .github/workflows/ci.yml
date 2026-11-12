@@ -560,7 +560,7 @@ jobs:
       # discovery must skip.
       - name: Register the fake DLL as a Pass-Thru device
         run: |
-          $dll = '%GITHUB_WORKSPACE%\build-coverage\tests\RelWithDebInfo\fake_j2534.dll'
+          $dll = '%GITHUB_WORKSPACE%\build-coverage\tests\fake_j2534.dll'
           foreach ($view in '64', '32') {
             reg add "HKLM\SOFTWARE\PassThruSupport.04.04\Havne fake" /v FUNCTIONLIBRARY /t REG_EXPAND_SZ /d $dll /reg:$view /f
             if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -571,9 +571,55 @@ jobs:
           New-ItemProperty -Path "$root\Havne number" -Name FUNCTIONLIBRARY -Value 1 -PropertyType DWord -Force | Out-Null
           New-ItemProperty -Path "$root\Havne relative" -Name FUNCTIONLIBRARY -Value 'fake_j2534.dll' -PropertyType String -Force | Out-Null
 
+      # The coverage tree is a Ninja tree under sccache (the Visual Studio
+      # generator ignores a launcher; win-vs-generator keeps that one built),
+      # so it runs from a Developer shell. The objects are /Od and /Z7, a key
+      # of their own; the gtest runner saves them on dev and main.
+      - name: Install sccache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = "$env:RUNNER_TEMP\sccache.zip"
+          gh release download v0.19.0 -R mozilla/sccache -p sccache-v0.19.0-x86_64-pc-windows-msvc.zip -O $zip --clobber
+          if ($LASTEXITCODE -ne 0) { Write-Error 'could not download sccache'; exit 1 }
+          $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash
+          if ($sha -ne '28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1') {
+            Write-Error "unexpected SHA-256 $sha"; exit 1
+          }
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\sccache-bin"
+          $bin = (Get-ChildItem "$env:RUNNER_TEMP\sccache-bin" -Recurse -Filter sccache.exe | Select-Object -First 1).DirectoryName
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "SCCACHE_DIR=$env:RUNNER_TEMP\sccache-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SCCACHE_CACHE_SIZE=1G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Restore the compiler cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\sccache-cache
+          key: sccache-win-coverage-1-${{ github.sha }}
+          restore-keys: sccache-win-coverage-1-
+
       - name: Measure coverage
-        shell: bash
-        run: bash scripts/coverage.sh --part ${{ matrix.part }}
+        shell: pwsh
+        env:
+          HAVNE_COVERAGE_NINJA: '1'
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * -property installationPath `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation `
+            -DevCmdArguments '-arch=x64 -host_arch=x64'
+          & "$env:ProgramFiles\Git\bin\bash.exe" scripts/coverage.sh --part ${{ matrix.part }}
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          sccache --show-stats
+
+      - name: Save the compiler cache (dev and main)
+        if: matrix.name == 'gtest' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/ci/v073-coverage-time-3')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\sccache-cache
+          key: sccache-win-coverage-1-${{ github.sha }}
 
       # A case that fails only under the tool is named in the step's log and
       # explained in its own: the step doesn't fail, so this runs always.
