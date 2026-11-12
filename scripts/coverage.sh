@@ -102,6 +102,9 @@ root=$(cygpath -w "$PWD")
 ctest_args=(--test-dir "$TREE" -C RelWithDebInfo --output-on-failure --no-tests=error)
 [ -n "$regex" ] && ctest_args+=(-R "$regex")
 rm -rf "$LOGDIR/html" "$LOGDIR"/raw*.xml "$LOGDIR"/cover-*.log "$LOGDIR/cobertura.xml"
+# A program the tool starts runs under a debugger, which gives it Windows'
+# debug heap: an allocation-heavy case runs many times slower there.
+export _NO_DEBUG_HEAP=1
 cover() { # cover <name> <seconds, 0 for none> <program> [args...]: into raw-<name>.xml
     local name=$1 limit=$2; shift 2
     run "cover-$name" timeout --kill-after=10 "$limit" "$tool" --quiet --cover_children \
