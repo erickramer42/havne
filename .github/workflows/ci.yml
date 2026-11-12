@@ -335,24 +335,6 @@ jobs:
           clang-tidy --version
           & "$env:ProgramFiles\Git\bin\bash.exe" scripts/tidy.sh --qt ($env:QT_PREFIX -replace '\\', '/') build-tidy
 
-      # The Visual Studio generator is what release.yml builds with, but
-      # win-build and win-coverage use Ninja (a compiler cache needs it).
-      # This keeps the generator, the multi-config layout and /Zi in CI at
-      # a minute or two: core, the shared library, the surrogate and
-      # test_core, no Qt. One shard runs it, after its tidy step whatever
-      # that did, so one red doesn't hide the other.
-      - name: Configure and build with the Visual Studio generator
-        if: ${{ (success() || failure()) && matrix.shard == '2/3' }}
-        run: |
-          cmake -B build-vs -DHAVNE_BUILD_CORE_ONLY=ON
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build build-vs --config Release --target ecuio ecuio-j2534-surrogate test_core
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-
-      - name: Run CoreTest (test_core)
-        if: ${{ (success() || failure()) && matrix.shard == '2/3' }}
-        run: ctest --test-dir build-vs -C Release --output-on-failure --no-tests=error -R "^CoreTest\."
-
   win-build:
     name: win-build (${{ matrix.shard }}/2)
     if: ${{ !inputs.smoke_only }}
@@ -496,6 +478,19 @@ jobs:
         shell: bash
         run: build/tests/bench_bridge.exe --load | tee -a "$GITHUB_STEP_SUMMARY"
 
+      # The Visual Studio generator is what release.yml builds with, but this
+      # job and win-coverage use Ninja (a compiler cache needs it). One shard
+      # keeps the generator, the multi-config layout and /Zi in CI: core, the
+      # shared library and the surrogate, no Qt, after the tests whatever
+      # they did, so one red doesn't hide the other.
+      - name: Configure and build with the Visual Studio generator
+        if: ${{ (success() || failure()) && matrix.shard == 2 }}
+        run: |
+          cmake -B build-vs -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build-vs --config Release --target ecuio ecuio-j2534-surrogate
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
   # Line coverage for the README badge: the whole suite under
   # OpenCppCoverage (scripts/coverage.sh), uploaded to Codecov. Windows,
   # because only here do the J2534 stack and the surrogate run. On pushes
@@ -594,7 +589,7 @@ jobs:
           New-ItemProperty -Path "$root\Havne relative" -Name FUNCTIONLIBRARY -Value 'fake_j2534.dll' -PropertyType String -Force | Out-Null
 
       # The coverage tree is a Ninja tree under sccache (the Visual Studio
-      # generator ignores a launcher; clang-tidy (2/3) keeps that one built),
+      # generator ignores a launcher; win-build (2/2) keeps that one built),
       # so it runs from a Developer shell. The objects are /Od and /Z7, a key
       # of their own; the gtest runner saves them on dev and main.
       - name: Install sccache
