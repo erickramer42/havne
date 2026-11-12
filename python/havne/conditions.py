@@ -4,7 +4,8 @@
 # A condition file (ADR-0063), loaded by core from bytes: what each
 # condition holds, and how its references meet a set of signals. The
 # package never reads the JSON itself: what core's loader refuses is
-# refused here in its words, and what it reads is what a session judges.
+# refused here in its words, and what it reads is what a session judges
+# (Session.set_conditions, whose events and states are named here).
 
 import collections
 import ctypes
@@ -51,6 +52,24 @@ be judged there, else why not ("disabled", "no_signal", "unit",
 (None when no one term is the reason); terms holds a Resolved for each
 signal term that named a signal, None for any other"""
 
+ConditionEvent = collections.namedtuple(
+    "ConditionEvent", "timestamp_us key state fired stale value term generation")
+ConditionEvent.__doc__ = """One change of a condition in a session: its
+session time (a hold's end or an age bound is stamped with its own time,
+earlier than the frame that settled it), the condition's key, state ("on"
+or "off"), whether this change fired it (OFF to ON) and whether an input is
+too old to judge (the state is then the one kept), the sample of the term
+that settled it, that term's index, and the attach the event belongs to
+(Session.set_conditions counts them from 1)"""
+
+ConditionState = collections.namedtuple(
+    "ConditionState", "key state stale available why since_us fired value generation")
+ConditionState.__doc__ = """A condition's state in a session: "on" or
+"off", stale, whether the session can judge it and else why not (a
+Binding's words, and "no_link" and "no_check" for a term the session
+doesn't judge), the time of its last event, its firings since the attach
+and the sample that settled its last event"""
+
 _TESTS = {e.ECUIO_TERM_ABOVE: "above", e.ECUIO_TERM_BELOW: "below",
           e.ECUIO_TERM_EQUALS: "equals", e.ECUIO_TERM_DIFFERS: "differs"}
 _LINKS = {e.ECUIO_TERM_LINK_NOT_OK: "not_ok", e.ECUIO_TERM_LINK_TIMEOUT: "timeout",
@@ -63,7 +82,9 @@ _WHYS = {e.ECUIO_CONDITION_WHY_DISABLED: "disabled",
          e.ECUIO_CONDITION_WHY_NO_SIGNAL: "no_signal",
          e.ECUIO_CONDITION_WHY_UNIT: "unit",
          e.ECUIO_CONDITION_WHY_NOT_A_NUMBER: "not_a_number",
-         e.ECUIO_CONDITION_WHY_ENUM_ORDER: "enum_order"}
+         e.ECUIO_CONDITION_WHY_ENUM_ORDER: "enum_order",
+         e.ECUIO_CONDITION_WHY_NO_LINK: "no_link",
+         e.ECUIO_CONDITION_WHY_NO_CHECK: "no_check"}
 _NONE = 0xFFFFFFFF
 
 
@@ -141,11 +162,12 @@ class ConditionSet:
                          tuple(terms), info.for_us, info.clear_for_us, alert, record,
                          bool(info.uses & e.ECUIO_CONDITION_USE_MARK))
 
-    def resolve(self, signals=None):
+    def resolve(self, signals=None, variant=None):
         """A Binding for each condition, in the file's order, against a
         set of signals: a SignalFile (its set, and its keys for key:
-        references), a registered profile's name ("obd2", "mock"), or
-        None for no signals at all"""
+        references), a Plugin (its variant's set and keys: the one named,
+        the first when None), a registered profile's name ("obd2",
+        "mock"), or None for no signals at all"""
         if not self._finalizer.alive:
             raise ValueError("the condition set is closed")
         file = None
@@ -154,6 +176,10 @@ class ConditionSet:
             chosen = ctypes.POINTER(e.ecuio_signal_set_t)()
             check(lib.ecuio_profile_lookup(utf8(signals), ctypes.byref(chosen)),
                   "ecuio_profile_lookup")
+        elif hasattr(signals, "variant_index"):
+            index = signals.variant_index(variant)
+            file = lib.ecuio_plugin_variant_file(signals._handle, index)
+            chosen = lib.ecuio_plugin_variant_set(signals._handle, index)
         elif signals is not None:
             file = signals._handle
             chosen = lib.ecuio_signal_file_set(file)

@@ -26,8 +26,8 @@ from .export import (Estimate, EstimatedSize, Exported, LeftOut, estimate_csv, e
 from .health import HealthReport, health_report
 from .sim import Reply, Sim
 from .signals import Gauge, Plugin, SignalFile
-from .conditions import (Alert, Binding, Checks, Condition, ConditionSet, Record, Resolved,
-                         Term)
+from .conditions import (Alert, Binding, Checks, Condition, ConditionEvent, ConditionSet,
+                         ConditionState, Record, Resolved, Term)
 from . import _ecuio as c
 
 __all__ = [
@@ -41,4 +41,5 @@ __all__ = [
     "estimate_csv", "Estimate", "EstimatedSize", "health_report", "HealthReport",
     "Sim", "Reply", "SignalFile", "Plugin", "Gauge",
     "ConditionSet", "Condition", "Term", "Alert", "Record", "Checks", "Binding", "Resolved",
+    "ConditionEvent", "ConditionState",
 ]
