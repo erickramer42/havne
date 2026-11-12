@@ -787,13 +787,17 @@ private:
             }
             names.push_back(name);
             signals_.push_back(signal{i, name, unit, !number, decimals});
-            /* A wide export's sweep row waits for every column: a sparse
-             * one sets its pace */
+            /* A wide export's sweep row waits for every column but one
+             * far sparser than the rest, whose newest value it holds */
             if (number && values * 2 < rows_.size()) {
+                const bool far =
+                    values * ecuio_recording_rows::kSparseTimes < rows_.size();
                 note(shown + " holds a value in " + std::to_string(values) +
-                     " of " + std::to_string(rows_.size()) +
-                     " rows read: a wide export by sweep follows its rate; "
-                     "pick a row interval");
+                     " of " + std::to_string(rows_.size()) + " rows read: " +
+                     (far ? "a wide export by sweep holds its newest value "
+                            "in the rows the other columns set"
+                          : "a wide export by sweep follows its rate; pick a "
+                            "row interval"));
             }
         }
         if (past > 0) {

@@ -649,3 +649,89 @@ picked. A focus naming obd2's Boost alone is taken and keeps MAP (01 0B)
 and baro (01 33); a focus whose picks, inputs included, have no askable
 request is refused as before. `CoreTest.AComputedPickKeepsItsInputsRequested`
 and `J2534AdoptionTest.AFocusOnBoostAsksItsInputsAndComputesIt` pin it.
+
+## Appendix: a sparse column and the sweep (2026-11-11)
+
+Section 4's rule waits for every column in the rule. A column far
+sparser than the rest, such as a logger's event counter that holds a
+value in a small fraction of its rows, has a long usual interval and so
+a long silence: it stays in the rule and sets every row's pace. Fixture
+A (`tests/fixtures/import/csv/logger-c/`, made up in a tuner log's
+shape) shows it: its `Flux counter` has six values in 420 rows, and
+section 4's rule alone gives 6 rows by sweep against 401 at a 300 ms
+interval.
+
+- **The rule:** a column whose usual interval (the median of its gaps,
+  the one that sets its silence) is over 16 times the lower median of
+  the other columns' usual intervals is far sparser, and it sets no
+  sweep's pace. A row is written once every other column in the rule
+  has a sample newer than the previous row. The sparse column's cell
+  follows section 4: its newest value at the row's time, held, empty
+  before its first sample and once it is quiet past its silence (1 s,
+  or 3x its own usual interval if longer), never 0 and never
+  interpolated.
+- **When the rest stop:** once every other column has left the rule
+  through its silence, the sparse column is alone in it and each of its
+  samples is a row, as a lone column's are. A sample of it that a later
+  one replaces before any row is written is in no row, as section 4
+  allows ("as read or not at all").
+- **Judged once, in the survey** over the range exported, beside the
+  silence; the rule's other parts stand. A row interval (the grid) is
+  unchanged: it waits for no column.
+- **One sample in range:** a column with one sample has no interval of
+  its own, so the span of the values exported stands in for it (the
+  range held no other sample of it), and it is never among the others.
+  Beside a column with an interval it is sparse when that span is over
+  16 times the others' lower median: fixture A from 10 s to 20 s holds
+  one counter value and keeps a row for each of its 34 log rows. Over a
+  range a few sweeps long, one sample can't be told from a slow column,
+  and it keeps the rule.
+- **The edges:** every column as sparse as the rest keeps the rule (none
+  is over 16 times the others). With no other interval to compare, no
+  column is sparse: one column alone, or one beside named picks that
+  never answered, and each of its samples is a row either way. Each
+  column is judged against the lower median of the others, so a
+  near-even split goes against the slow class: with 3 fast columns and
+  4 slow ones at 20x, the 4 slow ones are sparse; with 3 fast and 5
+  slow, none is. Two slow columns beside one fast one both leave, the
+  lower median of one fast and one slow interval being the fast one.
+- **Why 16:** the request engine's two rate classes (ADR-0039 section
+  3, two fast requests to one slow) put a slow request's interval 2S/F
+  times a fast one's, F and S the classes' sizes; while the fast class
+  holds the median, F is at least S and the ratio is 2 at most. Over the
+  distinct recordings on hand (the test car's runs over J2534 and
+  ELM327, the test phone's and the bench's), the largest column over
+  the others' median was 6x, a DID that answered a few times in a
+  session scanning DIDs; every obd2 rotation was within 1.01x. The
+  committed recordings in `tests/fixtures/recording/` poll coolant once
+  a second beside 100 ms signals, 10x, a slow signal the sweep follows;
+  `CsvExportTest.WideASlowColumnsIntervalSetsItsSilence`'s slow column
+  is 5x. Fixture A's counter is 73x. 16 stays more than 2.5x above the
+  polled sets and 1.6x above the fixtures' 10x, wider than the
+  histogram's rounding of a median (12.5 % at most), and still takes a
+  column holding a value in under about one row in 16.
+- **The guess:** the CSV map guess's note on a number column with a
+  value in under half the rows read says "a wide export by sweep holds
+  its newest value in the rows the other columns set" when under one row
+  in 16 has one, else "a wide export by sweep follows its rate; pick a row
+  interval". The guess judges by the rows filled and the export by
+  intervals, so the note is a hint and the export's rule decides.
+- **Fixture A** by sweep gives 420 rows, one for each of the log's, the
+  counter held in 383 of them; at 300 ms, 401; from 10 s to 20 s, 34.
+- **Where:** `export.cpp`'s `mark_sparse` (one sort of the intervals:
+  a column above their lower median keeps it when it leaves the rest,
+  and one at or below it can't be over the rest's) and the sweep's check in `wide_rows::sample`; the bound,
+  `kSparseTimes`, in `recording_rows.h`, which the guess reads. The
+  app's Export, `havne-cli export`, Python's `export_csv` and
+  `ecuio_export_estimate` all go through it. No ABI change.
+- **Tests:** `CsvExportTest.WideAFarSparserColumnPacesNoSweep`,
+  `.WideTheSparseBoundIsSixteenTimesTheOthersInterval` (16x keeps the
+  rule, 17x leaves it), `.WideColumnsSparseAlikeAllKeepTheRule`,
+  `.WideTwoSparseColumnsBesideOneLeaveTheRuleBoth`,
+  `.WideAOneSampleColumnHoldsNoRowUp`,
+  `.WideAOneSampleColumnLeavesTheBoundAsItIs`,
+  `.WideASparseColumnMakesTheRowsOnceTheRestStop`,
+  `.WideWritesARowPerSweepOverEveryNumberSignal` (a range one sweep long
+  keeps its one-sample columns in the rule), `CsvGuessTest`'s two notes,
+  and `CliTransferRunTest.csv-guess` (fixture A by sweep, at 300 ms and
+  from 10 s to 20 s).

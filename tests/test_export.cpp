@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -1345,6 +1346,252 @@ TEST(CsvExportTest, WideASlowColumnsIntervalSetsItsSilence)
     EXPECT_EQ(got[4], "3100,3100,")
         << "quiet 1.6 s at 3100 ms, past 3x its 500 ms; not at 2600";
     EXPECT_EQ(got.size(), 4u + 10u) << "then a row an RPM to 4000 ms";
+}
+
+/* Each signal's samples as signals.csv rows in time order: {ms, name,
+ * value, unit} */
+struct Sample {
+    int ms;
+    const char* name;
+    int value;
+    const char* unit;
+};
+std::string sample_rows(std::vector<Sample> samples)
+{
+    std::stable_sort(
+        samples.begin(), samples.end(),
+        [](const Sample& a, const Sample& b) { return a.ms < b.ms; });
+    std::string s;
+    for (const Sample& x : samples) {
+        s += std::to_string(x.ms) + "000," + x.name + "," +
+             std::to_string(x.value) + "," + x.unit + "\n";
+    }
+    return s;
+}
+
+/* A column far sparser than the rest (its usual interval over 16x the
+ * median of the others') paces no sweep: a row for each sweep of the
+ * others, its newest value held in each, empty before its first sample
+ * and once quiet past its silence (3x its own 2 s) */
+TEST(CsvExportTest, WideAFarSparserColumnPacesNoSweep)
+{
+    /* polled_rows' rows with the counter's sorted in by host_us */
+    const std::string polled = polled_rows(120);
+    std::vector<std::string> lines = {
+        "1050000,Counter,1,\n", "3050000,Counter,2,\n", "5050000,Counter,3,\n"};
+    for (size_t at = 0; at < polled.size();) {
+        const size_t nl = polled.find('\n', at);
+        lines.push_back(polled.substr(at, nl + 1 - at));
+        at = nl + 1;
+    }
+    std::stable_sort(lines.begin(), lines.end(),
+                     [](const std::string& a, const std::string& b) {
+                         return std::stoull(a) < std::stoull(b);
+                     });
+    std::string rows;
+    for (const std::string& l : lines) {
+        rows += l;
+    }
+    Folder f;
+    recording(f, "", rows);
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::vector<std::string> got = wide_lines(e.bytes);
+    ASSERT_EQ(got.size(), 1u + 120u) << e.bytes.substr(0, 400);
+    EXPECT_EQ(got[0], "Time (ms),RPM (rpm),Speed (km/h),Throttle (%),Counter");
+    EXPECT_EQ(got[1], "160,800,0,10.5,") << "before its first sample";
+    EXPECT_EQ(got[9], "960,808,4,18.5,");
+    EXPECT_EQ(got[10], "1060,809,4,19.5,1") << "its sample rides the next row";
+    EXPECT_EQ(got[30], "3060,829,14,39.5,2");
+    EXPECT_EQ(got[109], "10960,908,54,118.5,3") << "held within its silence";
+    EXPECT_EQ(got[110], "11060,909,54,119.5,") << "6 s quiet: past it";
+    EXPECT_EQ(got[120], "12060,919,59,129.5,");
+    EXPECT_EQ(e.report.rows, 120u);
+    EXPECT_EQ(e.report.values, 3u * 120u + 100u);
+
+    /* The estimate runs the same rule: its rows and bytes are the file's */
+    const uint32_t sweep = 0;
+    ecuio_export_estimate_t size{};
+    ecuio_export_options_t o{};
+    const std::string folder = f.utf8("rec");
+    o.format = ECUIO_EXPORT_CSV;
+    o.folder_utf8 = folder.c_str();
+    ASSERT_EQ(ecuio_export_estimate(&o, &sweep, 1, &size), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(size.rows, 120u);
+    EXPECT_EQ(size.bytes, e.bytes.size());
+}
+
+/* The bound: a column at 16x the others' interval still sets the pace; at
+ * 17x it leaves the rule */
+TEST(CsvExportTest, WideTheSparseBoundIsSixteenTimesTheOthersInterval)
+{
+    const auto rows_with = [](int gap_ms) {
+        std::vector<Sample> s;
+        for (int t = 100; t <= 12000; t += 100) {
+            s.push_back({t, "RPM", t, "rpm"});
+        }
+        for (int i = 0; i < 4; ++i) {
+            s.push_back({50 + gap_ms * i, "Slow", i, ""});
+        }
+        return sample_rows(s);
+    };
+    {
+        SCOPED_TRACE("16x");
+        Folder f;
+        recording(f, "", rows_with(1600));
+        WideExported e(f);
+        ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+        const std::vector<std::string> got = wide_lines(e.bytes);
+        ASSERT_GE(got.size(), 5u) << e.bytes;
+        EXPECT_EQ(got[0], "Time (ms),Slow,RPM (rpm)");
+        EXPECT_EQ(got[1], "100,0,100") << "RPM's first completes the row";
+        EXPECT_EQ(got[2], "1650,1,1600") << "then the rows wait for Slow";
+        EXPECT_EQ(got[3], "3250,2,3200");
+        EXPECT_EQ(got[4], "4850,3,4800");
+        /* Slow quiet past 3x 1.6 s at 9700 ms: the rows go on without it */
+        ASSERT_EQ(got.size(), 5u + 24u) << e.bytes;
+        EXPECT_EQ(got[5], "9700,,9700");
+        EXPECT_EQ(got[28], "12000,,12000");
+    }
+    {
+        SCOPED_TRACE("17x");
+        Folder f;
+        recording(f, "", rows_with(1700));
+        WideExported e(f);
+        ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+        const std::vector<std::string> got = wide_lines(e.bytes);
+        ASSERT_EQ(got.size(), 1u + 120u) << e.bytes.substr(0, 400);
+        EXPECT_EQ(got[1], "100,0,100");
+        EXPECT_EQ(got[17], "1700,0,1700") << "held, not waited for";
+        EXPECT_EQ(got[18], "1800,1,1800");
+        EXPECT_EQ(got[102], "10200,3,10200");
+        EXPECT_EQ(got[103], "10300,,10300") << "quiet past 3x 1.7 s";
+        EXPECT_EQ(e.report.rows, 120u);
+    }
+}
+
+/* Every column as sparse as the rest: none leaves the rule, so the rows
+ * follow them all */
+TEST(CsvExportTest, WideColumnsSparseAlikeAllKeepTheRule)
+{
+    std::vector<Sample> s;
+    for (int i = 0; i < 4; ++i) {
+        s.push_back({2000 * i, "A", i, ""});
+        s.push_back({2000 * i + 500, "B", i, ""});
+        s.push_back({2000 * i + 900, "C", i, ""});
+    }
+    Folder f;
+    recording(f, "", sample_rows(s));
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(e.bytes, "Time (ms),A,B,C\r\n"
+                       "900,0,0,0\r\n"
+                       "2900,1,1,1\r\n"
+                       "4900,2,2,2\r\n"
+                       "6900,3,3,3\r\n");
+}
+
+/* Two columns far sparser than one: each is judged against the lower
+ * median of the others' intervals (the fast one's), so both leave the
+ * rule and the fast one's samples make the rows */
+TEST(CsvExportTest, WideTwoSparseColumnsBesideOneLeaveTheRuleBoth)
+{
+    std::vector<Sample> s;
+    for (int t = 100; t <= 6000; t += 100) {
+        s.push_back({t, "RPM", t, "rpm"});
+    }
+    for (int i = 0; i < 3; ++i) {
+        s.push_back({1050 + 2000 * i, "A", i, ""});
+        s.push_back({1070 + 2000 * i, "B", i, ""});
+    }
+    Folder f;
+    recording(f, "", sample_rows(s));
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::vector<std::string> got = wide_lines(e.bytes);
+    ASSERT_EQ(got.size(), 1u + 60u) << e.bytes;
+    EXPECT_EQ(got[0], "Time (ms),RPM (rpm),A,B");
+    EXPECT_EQ(got[10], "1000,1000,,");
+    EXPECT_EQ(got[11], "1100,1100,0,0");
+    EXPECT_EQ(got[60], "6000,6000,2,2");
+}
+
+/* A column with one sample in range has no interval of its own: beside a
+ * column with one it is sparse, holding no row up, its value held for its
+ * 1 s silence */
+TEST(CsvExportTest, WideAOneSampleColumnHoldsNoRowUp)
+{
+    std::vector<Sample> s;
+    for (int t = 100; t <= 3000; t += 100) {
+        s.push_back({t, "RPM", t, "rpm"});
+    }
+    s.push_back({1050, "One", 7, ""});
+    Folder f;
+    recording(f, "", sample_rows(s));
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::vector<std::string> got = wide_lines(e.bytes);
+    ASSERT_EQ(got.size(), 1u + 30u) << e.bytes;
+    EXPECT_EQ(got[0], "Time (ms),RPM (rpm),One");
+    EXPECT_EQ(got[1], "100,100,") << "no wait for its sample";
+    EXPECT_EQ(got[10], "1000,1000,");
+    EXPECT_EQ(got[11], "1100,1100,7");
+    EXPECT_EQ(got[20], "2000,2000,7") << "held within its silence";
+    EXPECT_EQ(got[21], "2100,2100,") << "1 s quiet: past it";
+    EXPECT_EQ(e.report.rows, 30u);
+}
+
+/* A one-sample column has no interval to count among the others: beside
+ * it, a column at 16x the rest's still paces the rows */
+TEST(CsvExportTest, WideAOneSampleColumnLeavesTheBoundAsItIs)
+{
+    std::vector<Sample> s;
+    for (int t = 100; t <= 12000; t += 100) {
+        s.push_back({t, "RPM", t, "rpm"});
+    }
+    for (int i = 0; i < 4; ++i) {
+        s.push_back({50 + 1600 * i, "Slow", i, ""});
+    }
+    s.push_back({3000, "One", 7, ""});
+    Folder f;
+    recording(f, "", sample_rows(s));
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::vector<std::string> got = wide_lines(e.bytes);
+    ASSERT_EQ(got.size(), 5u + 24u) << e.bytes;
+    EXPECT_EQ(got[0], "Time (ms),Slow,RPM (rpm),One");
+    EXPECT_EQ(got[1], "100,0,100,");
+    EXPECT_EQ(got[2], "1650,1,1600,") << "the rows wait for Slow";
+    EXPECT_EQ(got[3], "3250,2,3200,7");
+    EXPECT_EQ(got[4], "4850,3,4800,");
+    EXPECT_EQ(got[5], "9700,,9700,");
+}
+
+/* The others gone quiet past their silence leave the sparse column alone
+ * in the rule: each of its samples is then a row of its own */
+TEST(CsvExportTest, WideASparseColumnMakesTheRowsOnceTheRestStop)
+{
+    std::vector<Sample> s;
+    for (int t = 100; t <= 2000; t += 100) {
+        s.push_back({t, "RPM", t, "rpm"});
+    }
+    for (int i = 0; i < 4; ++i) {
+        s.push_back({1050 + 2000 * i, "Counter", i + 1, ""});
+    }
+    Folder f;
+    recording(f, "", sample_rows(s));
+    WideExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::vector<std::string> got = wide_lines(e.bytes);
+    ASSERT_EQ(got.size(), 1u + 20u + 3u) << e.bytes;
+    EXPECT_EQ(got[10], "1000,1000,");
+    EXPECT_EQ(got[11], "1100,1100,1");
+    EXPECT_EQ(got[20], "2000,2000,1");
+    /* RPM quiet past 1 s at 3050 ms: the counter's samples are the rows */
+    EXPECT_EQ(got[21], "3050,,2");
+    EXPECT_EQ(got[22], "5050,,3");
+    EXPECT_EQ(got[23], "7050,,4");
 }
 
 /* A grid: a row at each interval from the recording's zero with the

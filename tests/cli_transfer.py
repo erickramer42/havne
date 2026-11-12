@@ -43,8 +43,8 @@
 # with fractions is refused until --time-unit gives one; logger-c, a tuner
 # log's shape (padded cells, a trailing comma, a sparse counter), imports
 # with its notes, its text trimmed but a quoted cell kept, and its wide
-# export keeps the counter; a file with no header is refused, exit 3
-# with words and nothing made. interrupt: an
+# export keeps the counter, which paces no sweep; a file with no header
+# is refused, exit 3 with words and nothing made. interrupt: an
 # export to pcapng, a folder copy, a CSV's sizing, a wide CSV and its
 # sizing during their named columns' check, an import of a candump log
 # and of a CSV, and a recording's health report, each held at its first
@@ -658,8 +658,8 @@ def logger_c(cli, fixtures, d):
     for note in ["the time column 'Time' has no unit: read as ms; change it "
                  "if it isn't",
                  "'Flux counter' holds a value in 3 of 200 rows read: a "
-                 "wide export by sweep follows its rate; pick a row "
-                 "interval"]:
+                 "wide export by sweep holds its newest value in the rows "
+                 "the other columns set"]:
         if note not in guessed["notes"]:
             raise SystemExit(f"FAIL  logger-c's notes lack {note!r}: "
                              f"{guessed['notes']}")
@@ -674,9 +674,9 @@ def logger_c(cli, fixtures, d):
     if (len(modes) != 420 or modes.count("OL ") != 1 or
             set(modes) != {"OL", "CL", "OL "}):
         raise SystemExit(f"FAIL  logger-c's modes {sorted(set(modes))}")
-    # Its wide export keeps the sparse counter; by sweep it follows the
-    # counter's rate, a row interval gives every row
-    for rows, at_least in [(None, 6), ("300", 400)]:
+    # Its wide export keeps the sparse counter; far sparser than the rest,
+    # it paces no sweep, so by sweep there is a row for each of the log's
+    for rows, count in [(None, 420), ("300", 401)]:
         out_csv = os.path.join(d, f"logger-c-{rows or 'sweep'}.csv")
         args = ["export", rec, out_csv, "--format", "csv"]
         if rows:
@@ -688,9 +688,18 @@ def logger_c(cli, fixtures, d):
         runs = [v for k, v in enumerate(flux) if k == 0 or flux[k - 1] != v]
         if (exported["signals"] != 14 or "Flux counter" not in head or
                 runs != ["1", "2", "3", "4", "5", "6"] or
-                exported["rows"] < at_least):
+                exported["rows"] != count):
             raise SystemExit(f"FAIL  logger-c exported {exported} {head} "
                              f"{flux}")
+    # 10 s to 20 s holds one counter value: with no interval of its own it
+    # is still sparse, so the range keeps a row for each of its 34 log rows
+    out_csv = os.path.join(d, "logger-c-range.csv")
+    exported = one(run(cli, ["export", rec, out_csv, "--format", "csv",
+                             "--from", "10", "--to", "20"]), "exported")
+    head, cells = wide_columns(out_csv)
+    flux = [c for c in cells.get("Flux counter", []) if c != ""]
+    if exported["rows"] != 34 or not flux or set(flux) != {"1"}:
+        raise SystemExit(f"FAIL  logger-c's range exported {exported} {flux}")
 
 
 def csv_guess(cli, fixtures):
