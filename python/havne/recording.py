@@ -62,8 +62,9 @@ _ROLE_FIELDS = {"rpm": "engine_speed", "speed": "vehicle_speed", "throttle": "th
                 "load": "engine_load"}
 _KINDS = {"pulls": e.ECUIO_STRETCH_PULLS, "cruises": e.ECUIO_STRETCH_CRUISES,
           "all": e.ECUIO_STRETCH_PULLS | e.ECUIO_STRETCH_CRUISES}
-_LEVELS = ("pull_level", "pull_load_level", "pull_hold_us", "pull_gap_us", "cruise_hold_us",
-           "cruise_speed_band", "cruise_throttle_band", "cruise_floor")
+_LEVELS = ("pull_level", "pull_load_level", "pull_hold_us", "pull_gap_us", "pull_min_rise",
+           "pull_min_gain", "cruise_hold_us", "cruise_speed_band", "cruise_throttle_band",
+           "cruise_floor")
 
 
 def _role(word):
@@ -229,8 +230,9 @@ class Recording:
         default), in time order, as Stretch. roles maps a role ('throttle',
         'load', 'speed', 'rpm') to the signal that plays it, in place of
         core's pick; levels are ecuio_stretch_rules_t's own fields in its
-        units (pull_level=85, pull_gap_us=750_000, cruise_floor in km/h),
-        each left out taking core's default"""
+        units (pull_level=85, pull_gap_us=750_000, pull_min_rise in rpm,
+        pull_min_gain and cruise_floor in km/h), each left out taking
+        core's default"""
         rules = e.ecuio_stretch_rules_t()
         if kinds not in _KINDS:
             raise ValueError(f"kinds is 'pulls', 'cruises' or 'all', not {kinds!r}")
