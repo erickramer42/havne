@@ -3455,6 +3455,163 @@ profile  raw
         verify(columnMs() < 1000, "twenty alone, 12,000: " + columnMs() + " ms a column")
     }
 
+    // A values recording of one RPM signal sampled three to four times a
+    // second for ten minutes, swinging through a few thousand rpm: every
+    // sample shiftMs later and plus higher, in the unit given; and its row
+    function swingRecording(name, shiftMs, plus, unit) {
+        const folder = Harness.writeFramesRecording(name, 1, 10000)
+        verify(folder !== "", "the folder is made")
+        const header = "ecuio session recording, format 2 (ADR-0049)\n"
+                       + "started  2026-11-03 09:00:00.000 (local time)\n"
+                       + "profile  test\n"
+                       + "signal  RPM,number," + unit + ",0,1\n"
+                       + "\n00:10:01.000  +601.000  end  test: 0 frames, 0 values, 0 records "
+                       + "dropped, 0 notes dropped\n"
+        const rows = ["host_us,signal,value,unit"]
+        let t = 1000
+        for (let k = 0; t < 600000; ++k) {
+            const v = Math.round(2500 + 1500 * Math.sin(t / 7000) + 300 * Math.sin(t / 900)) + plus
+            rows.push(((t + shiftMs) * 1000) + ",RPM," + v + "," + unit)
+            t += k % 3 === 0 ? 333 : 250
+        }
+        verify(Harness.writeScratchFile(name + "/events.log", header).toString() !== "")
+        verify(Harness.writeScratchFile(name + "/signals.csv", rows.join("\n") + "\n").toString() !== "")
+        return { title: name, uri: "replay://x?profile=test", source: "", folder: folder,
+                 profile: "test" }
+    }
+
+    // A comparison's difference is the compared recording's mean less this
+    // one's over one stretch of the axis in both. A recording against
+    // itself half a second later, aligned, shows none, in columns of a
+    // second or more (where the traces drawn hold each recording's own
+    // whole seconds, half a second apart) and in narrower ones
+    function test_aRecordingAgainstItselfHalfASecondLaterShowsNoDifference() {
+        const here = swingRecording("swing", 0, 0, "rpm")
+        const later = swingRecording("swing-later", 500, 0, "rpm")
+        const higher = swingRecording("swing-higher", 0, 100, "rpm")
+        const other = swingRecording("swing-other-unit", 500, 0, "1/min")
+        const page = createPage()
+        page.recordings = [other, higher, later, here]
+        openRow(page, here)
+        const rpm = page.shownSignals.find(s => s.name === "RPM").index
+        const picks = {}
+        picks[rpm] = true
+        page.plotted = picks
+        const box = find(page, "compareDifference")
+        // The difference of the grid the chart draws, once it is read
+        const differenceTrace = () => {
+            let trace
+            tryVerify(() => {
+                trace = page.series(400).find(s => s.pane !== undefined)
+                return trace !== undefined && page.difference !== null
+                       && page.difference.key === page.differenceWanted.key
+            }, 10000, "the view's difference is read")
+            return trace
+        }
+        const columnMs = trace => (trace.columns.t1 - trace.columns.t0) / trace.columns.lows.length
+        // The columns holding a difference, and how far the farthest is from `from`
+        const judged = (trace, from) => {
+            let count = 0, most = 0
+            for (let c = 0; c < trace.columns.lows.length; ++c) {
+                const d = trace.columns.lows[c]
+                if (!isFinite(d))
+                    continue
+                ++count
+                most = Math.max(most, Math.abs(d - from))
+            }
+            return { count: count, most: most }
+        }
+
+        page.compareWith(later)
+        verify(!box.enabled, "nothing to subtract until the two are lined up")
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        page.setAlignOn("rise")
+        page.alignHysteresis = 200
+        page.alignLevel = 3500
+        verify(page.compareAligned, page.compareStatus)
+        compare(page.compareOffsetMs, -500, "the copy lies over the recording")
+        verify(box.enabled && !box.checked && !page.differenceShown, "off until asked for")
+        compare(page.series(400).filter(s => s.pane !== undefined).length, 0)
+        box.toggled()
+        verify(page.differenceShown && box.checked)
+
+        // The whole ten minutes: columns of more than a second
+        page.showAll()
+        let trace = differenceTrace()
+        verify(columnMs(trace) >= 1000, columnMs(trace) + " ms a column")
+        compare(trace.paneLabel, "\u0394 rpm")
+        compare(trace.row, rpm)
+        let found = judged(trace, 0)
+        verify(found.count > 100, "columns holding both: " + found.count)
+        verify(found.most < 1e-6, "a difference of " + found.most + " between the same samples")
+        // What the chart draws there can't give it: the dashed trace holds
+        // the copy's own whole seconds, half a second from this one's
+        const all = page.series(400)
+        const mine = all.find(s => s.dash === undefined && s.pane === undefined).columns
+        const dashed = all.find(s => s.dash !== undefined).columns
+        let apart = 0
+        for (let c = 0; c < mine.lows.length; ++c) {
+            const d = (dashed.lows[c] + dashed.highs[c]) / 2 - (mine.lows[c] + mine.highs[c]) / 2
+            if (isFinite(d))
+                apart = Math.max(apart, Math.abs(d))
+        }
+        verify(apart > 1, "the drawn columns differ by " + apart)
+
+        // Zoomed in: columns under a second
+        page.setView(100000, 120000)
+        trace = differenceTrace()
+        verify(columnMs(trace) < 1000, columnMs(trace) + " ms a column")
+        found = judged(trace, 0)
+        verify(found.count > 20, "columns holding both: " + found.count)
+        verify(found.most < 1e-6, "a difference of " + found.most + " between the same samples")
+
+        // Switched off, the answer isn't drawn; on again, the one it held is
+        const panes = () => page.series(400).filter(s => s.pane !== undefined).length
+        box.toggled()
+        verify(!page.differenceShown && !box.checked)
+        compare(panes(), 0, "switched off")
+        box.toggled()
+        verify(page.differenceShown && box.checked)
+        compare(panes(), 1, "switched on again")
+        // Lined up another way, the answer for the offset before isn't drawn
+        page.setAlignOn("start")
+        compare(page.compareOffsetMs, 0)
+        compare(panes(), 0, "an answer for another offset")
+
+        // A recording 100 rpm higher is 100 higher in every column: the
+        // compared one less this one
+        page.compareWith(higher)
+        compare(page.difference, null, "the recording before's difference goes with it")
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        page.setAlignOn("start")
+        compare(page.compareOffsetMs, 0)
+        verify(page.differenceShown, "another recording keeps the choice")
+        page.showAll()
+        trace = differenceTrace()
+        found = judged(trace, 100)
+        verify(found.count > 100, "columns holding both: " + found.count)
+        verify(found.most < 1e-6, found.most + " from 100")
+
+        // This recording opened again drops the answer too: its values can
+        // be another decode's
+        verify(page.difference !== null)
+        page.open(here)
+        compare(page.difference, null, "this recording's answer goes with it")
+        tryVerify(() => find(page, "recordingInfo").visible, 10000, "it opens again")
+        page.plotted = picks
+
+        // The same name in another unit is nothing to subtract
+        page.compareWith(other)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        compare(page.differencePairs().length, 0)
+        compare(page.series(400).filter(s => s.pane !== undefined).length, 0)
+        compare(page.series(400).filter(s => s.dash !== undefined).length, 1, "still drawn dashed")
+
+        find(page, "stopCompare").clicked()
+        verify(!page.differenceShown && !box.checked, "Stop ends it")
+        compare(page.difference, null)
+    }
+
     function test_aComparedRecordingIsDrawnDashed() {
         const page = openEarly()
         const choice = find(page, "compareChoice")

@@ -205,6 +205,20 @@ public:
     // before the start reads from the start. Empty on a failure.
     Q_INVOKABLE int stats(const QVariantList& signalIndexes, double t0Ms,
                           double t1Ms);
+    // Each signal's mean in each of `columns` columns over [t0Ms, t1Ms),
+    // every column over its own span of the recording's time
+    // (ecuio_recording_stats, which reads a part of a second from the
+    // rows), where columns() puts a whole second in the column it starts
+    // in: what the difference of two recordings a part of a second apart
+    // is taken from (ADR-0056's appendix of 2026-11-12). Read off the GUI
+    // thread: the ask's number, or 0 with nothing asked (not open, a bad
+    // index, no signals, no span, a column count columns() refuses).
+    // columnMeansReady answers with that number unless a later ask
+    // replaced it: one map per signal in signalIndexes' order, { index,
+    // means (`columns` numbers in display units; NaN for an empty column,
+    // one before the start and a text signal) }. Empty on a failure.
+    Q_INVOKABLE int columnMeans(const QVariantList& signalIndexes, double t0Ms,
+                                double t1Ms, int columns);
     // The signal's next sample after tMs, or its previous before it
     // (ecuio_recording_step), off the GUI thread: the ask's number, 0 with
     // nothing asked. stepReady answers with that number unless a later ask
@@ -235,6 +249,11 @@ public:
     // The holds this recording's asks' task has come to with an ask taken:
     // a close before the first finds no read under way
     int asksHeldForTesting() const { return m_asks ? m_asks->held.load() : 0; }
+    // The means passes a newer ask or a close ended early
+    int meansStoppedForTesting() const
+    {
+        return m_asks ? m_asks->stopped.load() : 0;
+    }
 
 signals:
     void stateChanged();
@@ -246,6 +265,7 @@ signals:
     void reportSaved(const QVariantMap& result);
     void statsReady(int request, const QVariantList& stats);
     void stepReady(int request, double atMs);
+    void columnMeansReady(int request, const QVariantList& means);
     void stretchesReady(int request, const QVariantList& stretches, bool ok);
     void stretchesProblemChanged();
 
@@ -263,19 +283,31 @@ private:
         uint64_t t = 0;
         uint32_t direction = 0;
     };
-    // What a view shares with the task answering its statistics and step
-    // asks: one of each kind waits, a newer ask replacing it, so a dragged
-    // cursor never builds a queue. A close empties it and lets go of it,
-    // and the task ends after the read it is in
+    struct MeansAsk {
+        int request = 0;
+        std::vector<uint32_t> ids;
+        int64_t t0 = 0; // signed: a window can start before the recording
+        int64_t t1 = 0;
+        uint32_t columns = 0;
+    };
+    // What a view shares with the task answering its statistics, step and
+    // column means asks: one of each kind waits, a newer ask replacing it,
+    // so a dragged cursor never builds a queue. A close empties it and
+    // lets go of it, and the task ends after the read it is in
     struct Asks {
         std::mutex m;
         std::optional<StatsAsk> stats;
         std::optional<StepAsk> step;
+        std::optional<MeansAsk> means;
         bool answering = false; // a task is at work
+        // Set by a close and by a newer means ask: a means pass under way
+        // stops at its next column
+        std::atomic<bool> meansStale{false};
         // Asks left unanswered because a copy could not be allocated
         std::atomic<int> lost{0};
-        int holdMs = 0;           // a test's wait before each read
-        std::atomic<int> held{0}; // a test's holds begun
+        int holdMs = 0;              // a test's wait before each read
+        std::atomic<int> held{0};    // a test's holds begun
+        std::atomic<int> stopped{0}; // means passes ended before their end
     };
     struct Signal {
         ecuio_recording_signal_t pub;
@@ -318,6 +350,8 @@ private:
                        quint64 generation);
     void stepFinished(int request, ecuio_status_t rc, uint64_t at,
                       quint64 generation);
+    void meansFinished(const MeansAsk& ask, ecuio_status_t rc,
+                       const std::vector<double>& got, quint64 generation);
     // One pass, a task of the global thread pool that holds the reader
     // open; its answer is posted to the application and reaches view only
     // if it still lives
@@ -369,6 +403,7 @@ private:
     int m_lastAsk = 0;
     int m_lastStats = 0;
     int m_lastStep = 0;
+    int m_lastMeans = 0;
     int m_lastStretches = 0;
     int m_stretchesHoldMs = 0;
     QString m_stretchesProblem;

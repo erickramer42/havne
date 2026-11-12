@@ -498,6 +498,20 @@ Page {
     property string compareStatus: ""
     property var compareByName: ({})
     property real compareRowsPerSecond: 0
+    // The comparison's difference traces (ADR-0056's appendix "a difference
+    // in the viewer"): for each plotted number the compared recording holds
+    // under the same name in the same unit, the compared one's mean less
+    // this one's in each column, a column the same stretch of the axis in
+    // both (RecordingView.columnMeans)
+    property bool differenceShown: false
+    // The last answer, drawn while its pairs and offset still hold: { key,
+    // pairsKey, t0, t1, rows: { <this recording's index>: [a number a
+    // column, NaN where either is empty] } }; null with none
+    property var difference: null
+    // The grid the chart last drew, and the ask under way for it: each
+    // view's request number, then its answer
+    property var differenceWanted: null
+    property var differenceAsk: null
     // The first's signal index -> the compared one's value at the cursor
     property var compareReadout: ({})
     property string alignOn: "start"
@@ -1066,6 +1080,85 @@ Page {
         return viewT0 + (x - chart.x - plotLeft()) / Math.max(1, plotWidth() - 1) * (viewT1 - viewT0)
     }
 
+    // What a difference is taken between: a plotted number here and the
+    // compared recording's signal of the same name in the same unit (the
+    // unit's case aside), each with samples
+    function differencePairs() {
+        if (!compareAligned || recording.state !== RecordingView.Open)
+            return []
+        const sigs = recording.signalList
+        const theirs = compare.signalList
+        return sigs.filter(s => !s.isText && root.plotted[s.index] && s.samples > 0)
+                   .map(s => ({ mine: s.index, theirs: root.compareByName[s.name] }))
+                   .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
+                                && theirs[p.theirs].samples > 0
+                                && theirs[p.theirs].unit.toLowerCase() === sigs[p.mine].unit.toLowerCase())
+    }
+    // What an answer holds for: the pairs, the offset and the units
+    function differencePairsKey(pairs) {
+        return pairs.map(p => p.mine + ":" + p.theirs).join(",") + "|" + compareOffsetMs
+               + "|" + Bridge.unitSystem
+    }
+    // Asks both recordings for the wanted grid's means, unless it is
+    // answered or asked already
+    function askDifference() {
+        const w = differenceWanted
+        if (!differenceShown || !compareAligned || w === null || w.pairs.length === 0)
+            return
+        if ((difference !== null && difference.key === w.key)
+                || (differenceAsk !== null && differenceAsk.key === w.key))
+            return
+        // The grid's ends at whole microseconds, so each column's two spans
+        // lie exactly the offset apart and hold the same samples
+        const t0 = Math.round(w.g0 * 1000) / 1000
+        const t1 = Math.round(w.g1 * 1000) / 1000
+        const mine = recording.columnMeans(w.pairs.map(p => p.mine), t0, t1, w.gn)
+        const theirs = compare.columnMeans(w.pairs.map(p => p.theirs), t0 - compareOffsetMs,
+                                           t1 - compareOffsetMs, w.gn)
+        differenceAsk = mine > 0 && theirs > 0
+                        ? { key: w.key, pairsKey: w.pairsKey, pairs: w.pairs, t0: t0, t1: t1,
+                            mine: mine, theirs: theirs, mineMeans: null, theirMeans: null }
+                        : null
+    }
+    // One recording's means for the ask under way; with both, the difference
+    function differenceAnswered(here, request, means) {
+        const a = differenceAsk
+        if (a === null || request !== (here ? a.mine : a.theirs))
+            return
+        if (here)
+            a.mineMeans = means
+        else
+            a.theirMeans = means
+        if (a.mineMeans === null || a.theirMeans === null)
+            return
+        differenceAsk = null
+        // A read that failed answers with no rows: no difference to draw
+        const rows = {}
+        if (a.mineMeans.length === a.pairs.length && a.theirMeans.length === a.pairs.length) {
+            for (let k = 0; k < a.pairs.length; ++k) {
+                const m = a.mineMeans[k].means
+                const t = a.theirMeans[k].means
+                const d = []
+                for (let c = 0; c < m.length; ++c)
+                    d.push(t[c] - m[c])
+                rows[a.pairs[k].mine] = d
+            }
+        }
+        difference = { key: a.key, pairsKey: a.pairsKey, t0: a.t0, t1: a.t1, rows: rows }
+        chart.requestPaint()
+    }
+    function setDifferenceShown(on) {
+        differenceShown = on
+        chart.requestPaint()
+    }
+    // Another recording on either side: an answer for the one before
+    // holds for nothing
+    function forgetDifference() {
+        difference = null
+        differenceWanted = null
+        differenceAsk = null
+    }
+
     // The rows a second of a recording's signals at those indexes
     function rowsEachSecond(list, indexes, lengthMs) {
         let rows = 0
@@ -1140,6 +1233,32 @@ Page {
                        unit: s.unit, labelValue: labelOf(root.compareReadout[mine], fromInView),
                        labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs, fromInView) })
         }
+        if (!differenceShown)
+            return out
+        // Each difference in a pane of its own quantity, under the signals'.
+        // The last answer draws where its own columns lie while a newer
+        // grid's is read, which waits for the view to rest
+        const apart = differencePairs()
+        const pairsKey = differencePairsKey(apart)
+        const key = [g0, g1, gn, pairsKey].join("|")
+        if (difference !== null && difference.pairsKey === pairsKey) {
+            for (const p of apart) {
+                const d = difference.rows[p.mine]
+                if (d === undefined)
+                    continue
+                const s = sigs[p.mine]
+                const here = labelOf(root.readoutFrom[p.mine], fromInView)
+                const there = labelOf(root.compareReadout[p.mine], fromInView)
+                out.push({ columns: { lows: d, highs: d, t0: difference.t0, t1: difference.t1 },
+                           row: p.mine, slot: root.slotOf(p.mine), decimals: s.decimals, unit: s.unit,
+                           pane: "difference " + ChartLayout.paneKey(s.unit),
+                           paneLabel: qsTr("Δ %1").arg(s.unit), labelValue: there - here })
+            }
+        }
+        if (differenceWanted === null || differenceWanted.key !== key)
+            differenceWanted = { key: key, pairsKey: pairsKey, pairs: apart, g0: g0, g1: g1, gn: gn }
+        if (!chart.moving)
+            Qt.callLater(root.askDifference)
         return out
     }
 
@@ -1170,6 +1289,8 @@ Page {
         compareStatus = ""
         compareAligned = false
         compareReadout = ({})
+        differenceShown = false
+        forgetDifference()
         if (recording.state === RecordingView.Open)
             showAll()
     }
@@ -1680,6 +1801,7 @@ Page {
         id: recording
         unitSystem: Bridge.unitSystem
         onReportSaved: result => root.reportSaved(result)
+        onColumnMeansReady: (request, means) => root.differenceAnswered(true, request, means)
         onStatsReady: (request, stats) => {
             if (request !== root.statsAsk)
                 return
@@ -1707,6 +1829,7 @@ Page {
                 root.align()
         }
         onStateChanged: {
+            root.forgetDifference()
             root.reportNote = ""
             root.reportFailed = false
             root.pullsHere = null
@@ -1757,6 +1880,7 @@ Page {
     RecordingView {
         id: compare
         unitSystem: Bridge.unitSystem
+        onColumnMeansReady: (request, means) => root.differenceAnswered(false, request, means)
         onStretchesReady: (request, found, ok) => {
             if (request !== root.pullsThereAsk)
                 return
@@ -1767,6 +1891,7 @@ Page {
             root.align()
         }
         onStateChanged: {
+            root.forgetDifference()
             root.pullsThere = null
             root.pullsThereFailed = false
             root.pullsThereAsk = 0
@@ -3929,6 +4054,17 @@ Page {
                         onEditingFinished: {
                             const v = root.numberOf(text)
                             root.alignHysteresis = v >= 0 ? v : 0
+                        }
+                    }
+                    ThemedCheckBox {
+                        objectName: "compareDifference"
+                        text: qsTr("Difference")
+                        enabled: root.compareAligned
+                        checked: root.differenceShown
+                        Accessible.name: qsTr("Plot the compared recording's difference from this one")
+                        onToggled: {
+                            root.setDifferenceShown(!root.differenceShown)
+                            checked = Qt.binding(() => root.differenceShown)
                         }
                     }
                 }

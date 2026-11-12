@@ -682,6 +682,27 @@ TestCase {
         compare(inPane(l, 1), 0)
     }
 
+    // A series that names a pane of its own gets it, whatever its unit's
+    // pane, with its own word in the pane's label (a comparison's
+    // differences beside the signals they are of)
+    function test_aSeriesOwnPaneWinsAndNamesItsLabel() {
+        const own = (row, lo, hi) => Object.assign(ramp(row, "rpm", lo, hi),
+                                                   { pane: "difference rpm", paneLabel: "D rpm" })
+        const l = paned([ramp(0, "rpm", 800, 6000), own(1, -40, 25), ramp(2, "%", 0, 100), own(3, -5, 60)],
+                        600, { assign: { 1: "drive" } })
+        compare(l.panes.map(p => p.key).join("|"), "unit rpm|difference rpm|unit %")
+        compare(l.panes.map(p => p.label).join("|"), "rpm|D rpm|%")
+        compare([0, 1, 2, 3].map(r => inPane(l, r)).join(","), "0,1,2,1")
+        // The pane's range is its own traces', not the signal's
+        verify(l.panes[1].vMin <= -40 && l.panes[1].vMax >= 60 && l.panes[1].vMax < 800,
+               "the difference's own range: " + l.panes[1].vMin + " to " + l.panes[1].vMax)
+        // Folded past the limit, the mixed pane lists the word too
+        const folded = paned([ramp(0, "rpm", 800, 6000), ramp(2, "%", 0, 100), own(1, -40, 25)],
+                             600, { max: 2 })
+        compare(folded.panes.length, 2)
+        compare(folded.panes[1].label, "% \u00b7 D rpm")
+    }
+
     // Past the limit, the last units fold into one mixed pane: no axis, its
     // traces each on its own scale as without panes, named at its axis
     function test_pastTheLimitTheLastUnitsFoldIntoAMixedPane_data() {
