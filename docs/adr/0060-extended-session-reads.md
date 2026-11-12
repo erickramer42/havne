@@ -274,8 +274,8 @@ the close is about to do and not that it did.
 
 ## Appendix: the session line in the log, and Python (2026-11-10)
 
-`havne-cli log` writes `stream`'s `session` line, on each change of a
-module's session, from the same rule (`cli/scan_line.h`'s `session_due`),
+`havne-cli log` writes `stream`'s `session` line (told from the opening
+`session` line by its `ecu` key), on each change of a module's session, from the same rule (`cli/scan_line.h`'s `session_due`),
 and once more after the session closes, before the end line, so a log that
 ended between polls still says where each module stood. Without `?session=03`
 neither writes one. Python reads the same fields through
@@ -287,3 +287,47 @@ digits for a refused or abandoned session, and the entry and loss counts;
 `golden/cli/log-session.jsonl` (the fake DLL's engine ECU, Windows), and
 `PythonTest.test_j2534` pins Python against `havne-cli stream` for the same
 URI.
+
+## Appendix: the close waits for the module (2026-11-11)
+
+The car runs of 2026-11-11 found both closes short
+([2026-11-11-ext-session-car](../bench-sessions/2026-11-11-ext-session-car.md)).
+Through an ELM327, a close during a read typed `1001` into the adapter's
+reply, which the adapter answered `STOPPED`, and `10 01` never went out.
+Through J2534 the `50 01` came after the disconnect and the module sent it
+again for about 13.5 s. So the close waits for the module, within one bound.
+
+ELM327: a reply the stop cut off is read to its prompt first, then `10 01`,
+sent once more if the adapter answers `STOPPED`. Each read at the close ends
+1 s after its own send (`ELM327_LEAVE_MS`), whatever lines come, so an
+adapter printing `7F xx 78` can't hold it, and the whole close ends within
+2 s (`ELM327_CLOSE_MS`). A reply still running at its wait is stopped with
+one space, which both chips ignore at the prompt and a running reply answers
+`STOPPED`; typing `1001` into it instead is what lost the `10 01`. The wire
+log names how each module answered.
+
+J2534: the close takes at most 200 ms (`J2534_CLOSE_US`). A request still
+out on a leaving channel is read for until it is answered or 100 ms pass,
+whichever is first, however a `78` extends its own wait; then `10 01` is
+written and read for until `50 01` or `7F 10` (not `78`), another 100 ms at
+most, before the filters stop. Each wait is the engine's wait for any reply
+(100 ms: P2's 50 ms plus 50 ms for the adapter). P2 alone would be too
+short: it is the module's own response time, and the answer reaches the
+transport only after the adapter and its link to the computer have passed it
+on. An answer that missed the wait would meet a disconnected adapter, and
+the module would resend it as it did on the car. A hard read failure ends
+either wait at once.
+
+SocketCAN still only writes `10 01`: the interface stays up after the
+session's socket closes, so its controller acknowledges a late answer. The
+section 2 sentence on the ELM327's wait (500 ms at most) is amended by this
+appendix. `Elm327SessionTest.TheCloseWaitsForTheReplyUnderWayBefore1001`,
+`.AReplyStillRunningAtTheCloseIsStoppedBefore1001`,
+`.AChattyReplyCantStretchTheClose`, `.A1001AnsweredStoppedIsSentOnceMore`,
+`.ACloseOnASilentOrDeadAdapterEndsWithinItsWaits`,
+`J2534HealthTest.TheClosesAnswerIsReadBeforeTheFilterStops`,
+`.TheCloseWaitsForTheRequestInFlight`,
+`.APendingAnswerHoldsTheCloseNoLongerThanItsBound`,
+`.ACloseWithNoAnswerEndsWithinItsWaits`, `.ACloseOnADeadLinkEndsPromptly`.
+A parked car run with a listener on the bus, expecting one `50 01`, is still
+to come.

@@ -50,8 +50,8 @@ readiness monitors, each done this drive and complete since the clear.*
 
 | Activity | Frames |
 |---|---|
-| [![The Log's activity view: two connects and, between them, the disconnect's Delivery line](images/desktop-log-activity.png)](images/desktop-log-activity.png) | [![The Log's frame table in developer mode, newest first](images/desktop-log-frames.png)](images/desktop-log-frames.png) |
-| Each session's lines; a disconnect adds its Delivery line (none dropped, and the GUI thread's wait) | In developer mode, the raw frames: time, length, standard or extended ID, payload |
+| [![The Log's activity view: two connects and, between them, the disconnect's Delivery line](images/desktop-log-activity.png)](images/desktop-log-activity.png) | [![The Log's frame table, newest first](images/desktop-log-frames.png)](images/desktop-log-frames.png) |
+| Each session's lines; a disconnect adds its Delivery line (none dropped, and the GUI thread's wait) | The raw frames: time, length, standard or extended ID, payload |
 
 ### Recordings
 

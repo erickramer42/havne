@@ -200,8 +200,8 @@ background too ([roadmap](#roadmap)).
     ([ADR-0060](docs/adr/0060-extended-session-reads.md)). Run parked on
     the test car through the VX and the MX+: the engine ECU entered it
     (P2 50 ms, P2* 5000 ms), read in it and took tester present in quiet
-    gaps with no loss; the closes don't yet return it surely (Known
-    Issue #44;
+    gaps with no loss; the closes wait for the module's answer, tested
+    against the fakes, with a car re-run owed (Known Issue #44;
     [2026-11-11-ext-session-car](docs/bench-sessions/2026-11-11-ext-session-car.md),
     [2026-11-11-quiet-session-car](docs/bench-sessions/2026-11-11-quiet-session-car.md)).
   - **Your own signals** ([ADR-0051](docs/adr/0051-signal-files.md)):
@@ -261,9 +261,10 @@ background too ([roadmap](#roadmap)).
     and the viewer's chart can take the whole page (a button, a
     double-click or `F`; on a phone on its side by default), a splitter
     sets the list's share, and a pinch or the wheel steps Live's
-    window; pages are denser on a phone's width or height. Developer
-    mode (off until switched on): the `mock://` preset, a frame-rate
-    badge, and the Log page's raw frame table with its bridge counters:
+    window; pages are denser on a phone's width or height. The Log page's
+    raw frame table with its bridge counters (developer mode, off until
+    switched on, adds a frame-rate badge, the viewer's frame test,
+    Export's raw frames and the adapter relay):
     a filter (ID, data, direction, flag), a By ID view (count, rate,
     newest payload), selected rows copied to the clipboard as they are,
     and Export CSV, scrubbed by core (ADR-0054's appendix "frames in
@@ -429,7 +430,7 @@ background too ([roadmap](#roadmap)).
     VX on USB 47.38 and 6.63, every reply after the connect carrying
     only the picked PIDs
     ([2026-11-08-linux-car](docs/bench-sessions/2026-11-08-linux-car.md)).
-    Left: a log through J2534 and SocketCAN, the viewer's Export.
+    Left: a log through J2534 and SocketCAN.
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), written by core's
@@ -446,8 +447,9 @@ background too ([roadmap](#roadmap)).
     a scrubbed health report by `havne-cli health`, and a
     `candump -L` log or another logger's CSV imported as a recording
     (`havne-cli import`, and the Recordings page's Import, which guesses
-    a CSV's map from its header); the app exports the Log page's frames
-    and a report, and a surrogate
+    a CSV's map from its header); the Recordings viewer exports a
+    recording as a CSV, pcapng or a folder copy, the Log page exports its
+    frames, the app saves a report, and a surrogate
     session log of every vendor call, with every request and reply
     while recording. Session time counts the machine's sleep on every
     platform, so a sleep is a gap on Live and in a recording, and the
@@ -467,13 +469,13 @@ background too ([roadmap](#roadmap)).
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 1982 ctest cases on Windows (both trees rebuilt,
-  2026-11-11), all passing but six skips (the cross-arch case and
+- **Tests:** 2147 ctest cases on Windows (both trees rebuilt,
+  2026-11-12), all passing but six skips (the cross-arch case and
   the real-car recordings' diff, run locally; three cases that run on
   Linux only, Read once over SocketCAN and the Python package's vcan
   and ISO-TP fuzzing cases; and the Wireshark export's `tshark` run,
   without tshark installed), plus the
-  cross-arch subset (103/103); 0 MSVC warnings, and a GCC or Clang
+  cross-arch subset (108/108); 0 MSVC warnings, and a GCC or Clang
   warning fails CI. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
@@ -614,18 +616,18 @@ an issue is resolved it is removed, and its number is not reused.
     With three-button navigation it takes two presses. A tap on the
     gauges, then **Exit drive**, leaves at once in either mode. Checked
     on the test phone (Android 16) with the mock.
-- **#44. The extended session's close doesn't surely return a module
-    to the default session.** Through an ELM327 adapter, a close that
-    lands while a read is in flight types `1001` into the adapter's
-    reply and gets `STOPPED`, so `10 01` never goes out (3 of 3 on the
-    MX+; with nothing in flight it got `50 01`). Through J2534 the close
-    writes `10 01` and disconnects about 10 ms later; a `50 01` that
-    comes after that, with no other node on the bus to acknowledge it,
-    is sent again by the module until one does (about 13.5 s on the test
-    car, until the next session opened), though the module did return.
-    Through the ELM327 the module drops back by itself once S3 lapses
+- **#44. The extended session's close is fixed against the fakes; the
+    car re-run is owed (BENCH prep #36).** Through an ELM327 adapter the
+    close finishes a reply the stop cut off, then sends `10 01`, again
+    if the adapter answers `STOPPED`; through J2534 it reads the
+    module's answer before the filters stop, so the module isn't left
+    repeating it ([ADR-0060](docs/adr/0060-extended-session-reads.md)'s
+    appendix "the close waits for the module"). The car runs of
+    2026-11-11 found the earlier closes short
     ([2026-11-11-ext-session-car](docs/bench-sessions/2026-11-11-ext-session-car.md),
     [2026-11-11-quiet-session-car](docs/bench-sessions/2026-11-11-quiet-session-car.md)).
+    The number closes with a parked car run, a listener on the bus,
+    that reads one `50 01`.
 
 ## Roadmap
 
@@ -680,11 +682,43 @@ PATCH may carry"): the C ABI grows, append-only
     reference of every address ([docs/addresses.md](docs/addresses.md)).
 
   Run on the test phone with the mock, not on a car.
-- **Left:** README's desktop Dashboard and Home shots in the new design
-  and the drive view's phone shot, then the release.
 
-**Done when:** the README and the gallery show the desktop's panel and
-the drive view.
+### v0.7.3: the analysis viewer
+
+For people who read their recordings. A patch on v0.7.1's theme
+([ADR-0048](docs/adr/0048-semantic-versioning.md)'s appendix "what a
+PATCH may carry"): the C ABI grows, append-only
+(`ecuio_recording_stats`, `ecuio_recording_step`,
+`ecuio_recording_stretches`, `ecuio_recording_role_signal`).
+- **Built:**
+  - the viewer's chart in panes by unit, a second cursor with the span's
+    statistics, and one list under a pinned chart on a phone;
+  - Live's pause: a drag looks back through two minutes of history;
+  - pulls and cruises found in core, from `havne-cli view`, Python and
+    Compare's "Align a pull", tuned against road logs, and the viewer's
+    Jump row, bands and Stretches panel
+    ([ADR-0056](docs/adr/0056-analysis-log.md)'s appendices on the
+    navigation aids and the Jump row);
+  - the CSV import's padded cells, bare time and rows with no time, and
+    the wide export's sparse column
+    ([ADR-0054](docs/adr/0054-exports-and-imports.md));
+  - a Dashboard gauge's kind and color changed in its panel, warnings
+    below a level, zones from the signal, and a turbocharged demo;
+  - the close of an extended session waiting for the module, against
+    the fakes ([ADR-0060](docs/adr/0060-extended-session-reads.md)'s
+    appendix "the close waits for the module");
+  - a signal set refused for a repeated name, and a computed signal's
+    replacement checked ([ADR-0051](docs/adr/0051-signal-files.md));
+  - the first-run words: the Demo data row and the Log's frames for
+    everyone, Mark in a log, a phone status that reads Connected, and
+    Settings pages that say why they are dim; and the Recordings page's
+    rows, Import's label and the gauge a panel edits;
+  - the demo saying which signals it never sends, and a computed signal
+    hidden with its input
+    ([ADR-0039](docs/adr/0039-full-service01-coverage.md)'s appendix C).
+- **Left:** the phone check of the viewer's values list, the CI
+  speed-up, the review's fixes still in flight (core, the import's
+  cancel, the viewer, the Stretches panel), then the release.
 
 ### Waiting on a tester: an iPhone download
 

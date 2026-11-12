@@ -33,15 +33,19 @@ To choose what's read (a profile), or for an adapter the list doesn't
 show, connect from **Settings, Connection** instead: pick the adapter
 from its list (or type an address in the field), pick a **Profile**
 (Default reads OBD-II on an adapter; **raw (log only)** reads frames and
-decodes nothing; **uds-generic (DIDs)** reads the DIDs you list), then
-**Connect**. A WiFi adapter isn't listed: **Not listed: show** offers
-the two common WiFi addresses, and the computer or phone must be on the
-adapter's WiFi network first.
+decodes nothing, and they are on the Log page's **Frames** view;
+**uds-generic (DIDs)** reads the DIDs you list), then **Connect**. Under
+uds-generic, **Extended session (10 03)** enters the extended diagnostic
+session before the reads, over an adapter or a CAN interface; the other
+options go after `?` in the address ([addresses.md](addresses.md)). A WiFi
+adapter isn't listed: **WiFi and other addresses: show** offers the two
+common WiFi addresses, and the computer or phone must be on the adapter's
+WiFi network first.
 
-**Without a car:** in **Settings, Advanced**, tick **Developer mode**.
-Home's list then has a **Demo data** row, and **Not listed: show** on
-Connection has a `mock://demo` button: a simulated car that runs every
-page.
+**Without a car:** Home's and Dash's lists end with a **Demo data** row,
+and **WiFi and other addresses: show** on Connection has a `mock://demo`
+button: a simulated car that runs every page. Replaying a recording is
+done from Recordings.
 
 ### Bluetooth adapters
 
@@ -85,6 +89,9 @@ open, and SocketCAN interfaces.
    (**Plotted only**).
 4. **Window** sets how many seconds the chart shows. **Chart** gives the
    chart the whole page, and **List** brings the list back.
+5. Drag the chart to pause it and look back through the last two minutes
+   while the values keep updating; a tap reads each trace's value at that
+   moment. **Live** (or Space on a desktop) follows now again.
 
 Units follow **Settings, Display, Units** (metric or imperial).
 
@@ -96,12 +103,25 @@ Units follow **Settings, Display, Units** (metric or imperial).
 2. **Add a gauge:** press **Add gauge** (or the **+** cell at the end),
    pick its kind (Dial, Ring, Bar, Cells, Number, Digits, Sparkline,
    Shift lights or Blank), then its signal. Its panel opens.
-3. **Change a gauge:** click it (tap it on a phone). Out of edit mode,
+3. **Change a gauge:** click it (tap it on a phone; edit mode says so,
+   and the panel shows the gauge it edits). Out of edit mode,
    a long press on a gauge opens the same panel. It holds the label,
-   the signal, the range (**From** and **To**), the color bands (**Cold below**,
-   **Warning from**, **Danger from**), decimals, its size in columns and
-   rows, **Peak hold**, its place (**Move earlier**, **Move later**),
-   **Copy** and **Paste after**. **Close** shuts the panel.
+   the signal (**Change signal**), its kind (**Change kind**: the signal,
+   range, zones and size stay, and settings only the old kind used come
+   back if you change back), the range (**From** and **To**), the zones
+   (**Cold below**, **Warning below**, **Danger below**, **Warning from**,
+   **Danger from**), decimals, **Color**, its size in columns and rows,
+   **Peak hold**, its place (**Move earlier**, **Move later**), **Copy**
+   and **Paste after**. **Close** shuts the panel.
+
+   A gauge colors normal, cold, warning and danger by level; each of warning
+   and danger can be set above or below a value. A new gauge on a common
+   signal starts with generic zones for a gasoline engine, not a diagnosis;
+   they are ordinary values to type over or clear. Zones, Decimals and Color
+   apply to every kind but Shift lights. Color is a set of seven, or
+   Default (the look's own); a warning zone and Night still draw in their
+   colors, and at Night the row is dimmed, with a note: Night draws every
+   gauge in its own tint, and your pick comes back by day.
 4. **Move a gauge:** hold it and drag it to its new place.
 5. **Remove a gauge:** press the **x** in its corner, or **Remove** in
    its panel.
@@ -128,7 +148,8 @@ There are two ways to keep a drive.
 1. On **Live**, tick the signals to log (the plotted ones are logged).
 2. Press **Start log** in the top bar. Only the ticked signals are asked
    for while it runs, so each comes as often as the car answers. The
-   top bar shows the log's time and size.
+   top bar shows the log's time and size, and from a window 720 px wide
+   **Mark** beside it adds a marker to the log.
 3. Press **Stop log**. The log opens on the Recordings page.
 
 For a slow adapter or a busy ECU, **Settings, Advanced, Minimum time
@@ -138,13 +159,15 @@ between sweeps** spaces the requests out.
 sessions**. From the next connect, each session's frames, values and
 events are kept, and **Mark** in the top bar adds a marker to the
 recording. While it records, Start log isn't offered: the recording
-already holds every signal. **Open folder** on the same page shows
+already holds every signal, and **Settings, Recording** says so. **Open folder** on the same page shows
 where recordings are kept.
 
 ## View and export a recording
 
 1. Open **Recordings** (Recs). **All recordings** lists them, newest
-   first; press one to open it.
+   first, each row saying how long the recording is, whether it is a log
+   of chosen signals or a whole session, its signal count and its marks;
+   press one to open it.
 2. Tick signals to plot them. Click the chart for the values at that
    time. **+** and the button beside it zoom in and out, **All** shows
    the whole recording, and **Values** and **Frames** switch between the
@@ -153,7 +176,10 @@ where recordings are kept.
    - the format: **CSV**, **pcapng** (for Wireshark) or **Folder** (a
      copy of the recording);
    - for CSV, **Wide** (a column for each signal) or **Long** (a row for
-     each value), and how often a row is written;
+     each value), and how often a row is written: **Every sweep** writes a
+     row once each signal has a new value, except a signal far sparser
+     than the rest (an event counter, say), whose newest value goes in
+     the others' rows;
    - which signals: the log's own or the ones plotted;
    - **Raw, not scrubbed**: left off, the file leaves out the vehicle's
      identification (its VIN and calibration IDs).
@@ -162,9 +188,47 @@ where recordings are kept.
 4. **Replay** plays a recording back as a session, as if the car were
    connected. Disconnect first.
 
+The chart is in panes, one for each unit, stacked on one time axis, each
+with its own value axis. On the desktop, Ctrl and the wheel over a pane
+zoom its range, and a drag on its axis pans it; on a phone, pinch up and
+down. A double click or tap on an axis puts the range back, and dragging the
+line between two panes sets their heights, which are kept.
+
+A click or tap places the cursor, and each row shows the value there. A
+second cursor goes in with Shift+click, or a long press on a phone; dragging
+a box with Shift pressed places both at once. The span between them shows
+its length, **Zoom to span** fits the chart to it, and **Clear** removes the
+second cursor. Each signal's row then shows the span's change, lowest,
+highest, mean and rate. Handles at the chart's foot move the cursors. On the
+desktop the arrow keys step the cursor a sample, **B** picks the other
+cursor, and Home and End go to the ends of the recording.
+
+Under the title row (under the chart on a phone) the Jump row steps
+between pulls and cruises: the arrows move the view to the previous or
+next one, with the cursor at its start, and the line beside them says
+which one you are at. Each is a band on the chart; **Bands** turns them
+off. **Stretches...** opens the levels the finder uses; an empty field, or
+0, takes the default shown in it, and **Apply** finds them again. The pull
+numbers in Compare follow these levels; `havne-cli`'s `--align-on` counts
+by core's defaults unless it is given levels.
+
 **Save report...** writes a health report of the recording: its codes,
 readiness and key values. **Import** on the list brings in a candump log
-or another logger's CSV as a recording.
+or another logger's CSV as a recording, with an optional **Label**; the
+recording opens when the import ends, and a CSV whose times carry dates is
+listed at the drive's time. **Cancel** stops an import that is running:
+nothing is imported and the panel keeps your choices. A CSV row with no time
+is left out, and the import says how many it left out.
+
+**Compare...**, beside **Export**, lines two recordings up. **Align a pull** lines them up on a
+pull you choose in each: a pull is full throttle for a second or more
+while the car accelerates. Each recording's pulls are listed with their
+start and length; the first of each is chosen to begin with. Use it to
+lay a pull from before a change over the same pull after it. With
+`havne-cli view`, `--align-on pull:2` puts every recording's second pull
+at 0, and `pull:3,1` the first recording's third and the second's first;
+each `columns` line then carries the column's `mean`, and the later
+recording's line its `delta` from the first.
 
 ![A recording in the viewer: rpm and speed through the first loop's pulls, coolant and oil warming](images/desktop-recordings.png)
 
@@ -195,8 +259,9 @@ fail an emissions inspection until some driving completes them.
 
 ## Add a vehicle and import signals
 
-A vehicle keeps its own signal files and its last address. Vehicles
-change only with no session connected: disconnect first.
+A vehicle keeps its own signal files, its last address and its plotted
+signals. Vehicles change only with no session connected: disconnect
+first (the page says so while a session runs).
 
 1. Open **Settings, Vehicle**. Type a label ("Daily driver"; left empty,
    it's "Vehicle 1") and press **New**. The new vehicle is picked.
@@ -206,7 +271,8 @@ change only with no session connected: disconnect first.
    - **Import a signal file** adds a file of your own signals
      ([signal-files.md](signal-files.md) says how to write one);
    - **Import an OBDb set** converts a set from
-     [OBDb](https://github.com/OBDb), saved on the device, for the
+     [OBDb](https://github.com/OBDb), a community list of a model's
+     signals, downloaded first and saved on the device, for the
      vehicle. **OBDb model year** beside it is the year to convert for;
      a VIN looked up on the Vehicle page fills it in. The report shows
      what converted and what was left out; **Keep** adds it,
@@ -226,7 +292,7 @@ hidden, and keeps the screen on.
 
 1. Connect, open Dash and press **Drive**.
 2. Tap the gauges to bring the controls up from the bottom: Start log or
-   Stop log, Mark while Record sessions records (not during a log),
+   Stop log, Mark while Record sessions records or a log runs,
    Disconnect, Reset peaks,
    Night and **Exit drive**. They slide away again by themselves.
 3. Press **Exit drive** to leave the view.

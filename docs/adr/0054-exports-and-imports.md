@@ -1817,3 +1817,15 @@ hold ignore the first interrupt, so a test can send two.
 *Note of 2026-11-10:* a failed or stopped `ecuio_export_with` leaves
 `report` zeroed but for `failed_class`, as `ecuio_health_export_with`
 does, so a caller never reads the counts of a file that isn't there.
+
+## Note of 2026-11-11: a named time of whole numbers
+
+A column named as the time (Time, Timestamp, Elapsed...) that holds whole
+numbers, with no unit in its header, is read as milliseconds, with a note
+saying so; the unit stays changeable in the app's Import and with
+`havne-cli import csv --time-unit`. A time with fractions, or a first column
+that only counts up, still asks for its unit. A file padded with a space
+after each comma has the spaces around an unquoted value dropped, a quoted
+value keeping its own, and the preview shows the cells as they will be
+imported. This amends the appendix "a column map guessed from the header",
+whose plain numbers asked for a unit.

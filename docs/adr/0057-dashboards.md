@@ -1396,3 +1396,46 @@ MAF and Boost at 3 x 9, then IAT, Battery and Lambda at 2 x 6.
 Boost has no obd2 ref until the profile computes it, so it reads "no signal"
 on a real car. A stored layout never changes; only `builtIn` and `reset` do.
 `gaugeSignals` gains `lambda`.
+
+## Appendix: the built-in layout fills its row (2026-11-11)
+
+`DashboardBook.stretched(placed, boxes, columns, keepSquare)` takes a fourth
+argument. The page passes it while the built-in layout is what it shows
+(nothing stored, or a stored text that can't be read: its `builtInShown`),
+and never for a saved layout. With it an analog or ring cell keeps its own
+box, and each other gauge runs down over the empty squares under it and then
+right over the empty squares beside it, up to the next drawn square, so the
+desktop's built-in layout has no empty square at 5 to 8 columns. A blank
+cell still stops the fill. The stored cells and the saved layouts' drawing
+are unchanged; once a first edit stores the cells, the layout is drawn as
+saved.
+
+## Note: the built-in MAF cell (2026-11-11)
+
+The built-in layout's MAF cell runs 0 to 500 g/s in both forms, so the
+turbocharged demo's pulls (about 446 g/s) stay on the scale; the default
+range for a new g/s gauge (`unitRanges`, section 6) stays 0 to 300.
+
+## Note: the color rule (2026-11-11)
+
+A gauge's picked colors must be readable (3:1 on the look's surface) and
+visibly apart from the zone colors that keep their meaning (warning, danger,
+cold, and the default needle): at least 25 apart in CIE L*a*b* (the 1976
+distance), in Dark and in Light. A luminance ratio can't state "apart": the
+zones sit at mid luminance on both looks, so a color readable against the
+surface is within about 1.1 to 1.6 of them whatever its hue, and only
+near-black or near-white colors, unreadable or not distinct from the text,
+clear 1.5. Hue-aware distance is the measure that matches what a driver
+sees. The set (teal, green, lime, cyan, pink, magenta, stone) leaves out
+red, amber, orange (zone look-alikes) and blue (the cold color); the least
+distance in the set is 29 (pink from danger in Dark).
+`QmlTest.dashedit`'s `test_everyNamedColorIsReadableAndApartFromTheZones`
+holds it.
+
+## Note: Boost's refs (2026-11-12)
+
+The built-in Boost cell's refs are `id:13001` (the demo's) and `id:7011`
+(`obd2`'s computed Boost, the manifold pressure less the barometric
+pressure), so a gauge for Boost reads on a car as on the demo; the table in
+"the built-in layout by what people watch" listing `id:13001` alone is the
+demo's half.

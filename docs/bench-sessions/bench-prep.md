@@ -139,8 +139,9 @@ which has no bench session):
 - **#36, the extended session on a car:** the module's session read
   back after quiet gaps (a session DID it answers, or a DID that reads
   only in the extended session: none in seven blocks on the test car's
-  two modules, so likely another car), and both closes once fixed
-  (Known Issue #44).
+  two modules, so likely another car), and both closes once the car
+  re-run reads one `50 01` with a listener on the bus (Known Issue
+  #44).
 - **#34, a busy bus through the surrogate:** a listening session on a
   bus with heavy broadcast traffic (a car's powertrain bus, or a desk
   bus fed by `cangen` through the USB2CAN), its frame count against
