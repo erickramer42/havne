@@ -207,6 +207,15 @@ public:
         }
     }
 
+    // The importer's next imports wait this long, or until a cancel,
+    // before core's call (0: no wait)
+    Q_INVOKABLE void holdImports(QObject* importer, int ms)
+    {
+        if (auto* i = qobject_cast<RecordingImport*>(importer)) {
+            i->setHoldForTesting(ms);
+        }
+    }
+
     // The color scheme (Qt::ColorScheme as an int: 1 Light, 2 Dark) a
     // WindowTheme sets on a real window that follows theme, as main() makes
     // one; the platform's own scheme is put back after
