@@ -617,6 +617,7 @@ jobs:
             -R "$REPEAT_REGEX" --repeat "until-fail:$REPEAT_COUNT"
 
   linux-build:
+    name: linux-build (${{ matrix.shard }}/2)
     if: ${{ !inputs.smoke_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
