@@ -228,7 +228,8 @@ class Recording:
     def stretches(self, kinds="all", from_us=0, to_us=None, roles=None, **levels):
         """The pulls and cruises (kinds 'pulls', 'cruises' or 'all') within
         the closed range [from_us, to_us] (to_us the recording's end by
-        default), in time order, as Stretch. roles maps a role ('throttle',
+        default; an empty default range answers []), in time order, as
+        Stretch. roles maps a role ('throttle',
         'load', 'speed', 'rpm') to the signal that plays it, in place of
         core's pick; levels are ecuio_stretch_rules_t's own fields in its
         units (pull_level=85, pull_gap_us=750_000, pull_min_rise in rpm,
@@ -247,9 +248,17 @@ class Recording:
             if name not in _LEVELS:
                 raise TypeError(f"stretches() has no level {name!r}")
             setattr(rules, name, value)
+        count = ctypes.c_uint32()
+        if to_us is None and self.info.duration_us <= from_us:
+            # Nothing past from_us (a recording whose samples sit at one
+            # time): core refuses an empty range, so it judges the rules
+            # over a microsecond and the answer is no stretch
+            check(lib.ecuio_recording_stretches(self._r, ctypes.byref(rules), from_us,
+                                                from_us + 1, None, 0, ctypes.byref(count)),
+                  "ecuio_recording_stretches")
+            return []
         if to_us is None:
             to_us = self.info.duration_us
-        count = ctypes.c_uint32()
         check(lib.ecuio_recording_stretches(self._r, ctypes.byref(rules), from_us, to_us,
                                             None, 0, ctypes.byref(count)),
               "ecuio_recording_stretches")

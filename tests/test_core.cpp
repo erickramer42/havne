@@ -1,4 +1,5 @@
 // File/layer: tests/test_core.cpp | GTest, UNIT tier, headless CI job
+// Testing: UNIT: CoreTest (test_core)
 
 #include <gtest/gtest.h>
 #include <algorithm>
@@ -5678,7 +5679,7 @@ TEST(CoreTest, APackedReplySplitsByTheLengthTheEcuSends)
     EXPECT_EQ(id_values(cap.batches.back()),
               (std::vector<std::pair<uint16_t, double>>{
                   {ECUIO_OBD2_SIG_RPM_ID, 1726.0},
-                  {ECUIO_OBD2_PID_SIG_ID(0x55, 0), 0.0},
+                  {static_cast<uint16_t>(ECUIO_OBD2_PID_SIG_ID(0x55, 0)), 0.0},
                   {ECUIO_OBD2_SIG_SPEED_ID, 50.0}}));
     EXPECT_EQ(unsplit(session), 0u);
     uint16_t ids[4] = {};
@@ -5712,7 +5713,7 @@ TEST(CoreTest, APackedReplyReplaysToItsRecords)
     EXPECT_EQ(id_values(cap.batches[1]),
               (std::vector<std::pair<uint16_t, double>>{
                   {ECUIO_OBD2_SIG_RPM_ID, 1726.0},
-                  {ECUIO_OBD2_PID_SIG_ID(0x55, 0), 0.0},
+                  {static_cast<uint16_t>(ECUIO_OBD2_PID_SIG_ID(0x55, 0)), 0.0},
                   {ECUIO_OBD2_SIG_SPEED_ID, 50.0}}));
     EXPECT_EQ(unsplit(session), 0u);
     ecuio_session_destroy(session);

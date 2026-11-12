@@ -190,11 +190,192 @@ void write_file(const char* name, const uint8_t* p, size_t n, bool present)
     fclose(f);
 }
 
+/* Two FLOAT defs on 0x123, bytes 0-3 and 4-7: the kind whose decoded value
+ * can be inf or a NaN, no sample at the open and none read again. Two, so
+ * one can have no sample at all in a second the other is read from */
+const ecuio_signal_set_t* float_set()
+{
+    static ecuio_signal_def_t defs[2];
+    static ecuio_signal_set_t set;
+    if (set.count == 0) {
+        for (uint16_t i = 0; i < 2; ++i) {
+            defs[i].id = static_cast<uint16_t>(i + 1);
+            defs[i].message_id = 0x123;
+            defs[i].kind = ECUIO_VALUE_FLOAT;
+            defs[i].byte_order = ECUIO_BYTE_ORDER_BE;
+            defs[i].start_byte = static_cast<uint16_t>(i * 4);
+            defs[i].bit_length = 32;
+            defs[i].scale = 1.0;
+            snprintf(defs[i].name, sizeof defs[i].name, "Float %u", i + 1u);
+        }
+        set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        set.defs = defs;
+        set.count = 2;
+        if (ecuio_validate_signal_set(&set, nullptr) != ECUIO_VALIDATE_OK) {
+            abort();
+        }
+    }
+    return &set;
+}
+
 struct opened {
     ecuio_status_t rc = ECUIO_OK;
     std::string detail;
     ecuio_recording_info_t info{};
 };
+
+/* The closed span over a signal's every sample (ecuio_recording_stats):
+ * the open's count, and for a number its range, with the extremes' times
+ * among its samples'; a text signal has its count alone */
+void whole_stats(const ecuio_recording_t* r, uint32_t k,
+                 const ecuio_recording_signal_t& s)
+{
+    ecuio_recording_stats_t st;
+    memset(&st, 0xA5, sizeof st);
+    if (ecuio_recording_stats(r, &k, 1, 0, s.last_us + 1, &st) != ECUIO_OK ||
+        st.samples != s.samples || st.flags != 0 || st.reserved0 != 0 ||
+        st.reserved[0] != 0 || st.reserved[1] != 0 || st.reserved[2] != 0) {
+        abort();
+    }
+    if ((s.flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0) {
+        if (!std::isnan(st.lowest) || !std::isnan(st.highest) ||
+            !std::isnan(st.mean) || st.lowest_us != ECUIO_RECORDING_NONE ||
+            st.highest_us != ECUIO_RECORDING_NONE) {
+            abort();
+        }
+        return;
+    }
+    /* With no value but NaNs the open's range reads 0 and the stats' NaN */
+    const double lowest = std::isnan(st.lowest) ? 0.0 : st.lowest;
+    const double highest = std::isnan(st.highest) ? 0.0 : st.highest;
+    if (lowest != s.lowest || highest != s.highest) {
+        abort();
+    }
+    for (uint64_t at : {st.lowest_us, st.highest_us}) {
+        if (at != ECUIO_RECORDING_NONE && (at < s.first_us || at > s.last_us)) {
+            abort();
+        }
+    }
+}
+
+/* A step at a time (ecuio_recording_step): forward from the start each
+ * step lands later, among the signal's times, the first on its first
+ * sample and the last on its last, a time per sample at most; backward
+ * from past the end is its last sample, and before its first is none */
+void steps_through(const ecuio_recording_t* r, uint32_t k,
+                   const ecuio_recording_signal_t& s)
+{
+    constexpr uint32_t kMostSteps = 512;
+    uint64_t t = 0;
+    uint64_t at = 0;
+    uint32_t steps = 0;
+    bool ended = false;
+    while (steps < kMostSteps) {
+        if (ecuio_recording_step(r, k, t, ECUIO_RECORDING_STEP_FORWARD, &at) !=
+            ECUIO_OK) {
+            abort();
+        }
+        if (at == ECUIO_RECORDING_NONE) {
+            ended = true;
+            break;
+        }
+        /* A sample at 0 is the start itself, which no step lands on */
+        if (at <= t || at < s.first_us || at > s.last_us ||
+            (steps == 0 && s.first_us > 0 && at != s.first_us)) {
+            abort();
+        }
+        t = at;
+        ++steps;
+    }
+    if (ended && (steps > s.samples || t != s.last_us)) {
+        abort();
+    }
+    if (ecuio_recording_step(r, k, s.last_us + 1, ECUIO_RECORDING_STEP_BACKWARD,
+                             &at) != ECUIO_OK ||
+        at != s.last_us ||
+        ecuio_recording_step(r, k, s.first_us, ECUIO_RECORDING_STEP_BACKWARD,
+                             &at) != ECUIO_OK ||
+        at != ECUIO_RECORDING_NONE) {
+        abort();
+    }
+}
+
+/* The navigation aids over the whole recording: a role's signal is a
+ * number of the recording's or none; the stretches by core's rules lie
+ * in the recording, in time order, of a known kind and flags, on a
+ * signal of its own, their reserved words zero; the count is the same
+ * asked for alone and with room, and nothing past it is written */
+void aids(const ecuio_recording_t* r, const ecuio_recording_info_t& info)
+{
+    for (uint32_t role = ECUIO_RECORDING_ROLE_ENGINE_SPEED - 1;
+         role <= ECUIO_RECORDING_ROLE_ENGINE_LOAD + 1; ++role) {
+        uint32_t index = 0;
+        const ecuio_status_t rc = ecuio_recording_role_signal(r, role, &index);
+        if (role < ECUIO_RECORDING_ROLE_ENGINE_SPEED ||
+            role > ECUIO_RECORDING_ROLE_ENGINE_LOAD) {
+            if (rc != ECUIO_ERR_INVALID_ARGUMENT) {
+                abort();
+            }
+            continue;
+        }
+        if (rc != ECUIO_OK) {
+            abort();
+        }
+        if (index != UINT32_MAX) {
+            ecuio_recording_signal_t s{};
+            if (index >= info.signal_count ||
+                ecuio_recording_get_signal(r, index, &s) != ECUIO_OK ||
+                (s.flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0) {
+                abort();
+            }
+        }
+    }
+    ecuio_stretch_rules_t rules{};
+    rules.kinds = ECUIO_STRETCH_PULLS | ECUIO_STRETCH_CRUISES;
+    rules.throttle = rules.engine_load = UINT32_MAX;
+    rules.vehicle_speed = rules.engine_speed = UINT32_MAX;
+    uint32_t count = UINT32_MAX;
+    if (info.duration_us == 0) {
+        /* No span: the range is refused, whatever the folder holds */
+        if (ecuio_recording_stretches(r, &rules, 0, 0, nullptr, 0, &count) !=
+            ECUIO_ERR_INVALID_ARGUMENT) {
+            abort();
+        }
+        return;
+    }
+    if (ecuio_recording_stretches(r, &rules, 0, info.duration_us, nullptr, 0,
+                                  &count) != ECUIO_OK ||
+        count > 1000000) {
+        abort();
+    }
+    constexpr uint32_t kUntouched = 0xA5A5A5A5u;
+    std::vector<ecuio_recording_stretch_t> out(count + 1);
+    out[count].kind = kUntouched;
+    uint32_t again = UINT32_MAX;
+    if (ecuio_recording_stretches(r, &rules, 0, info.duration_us, out.data(),
+                                  count + 1, &again) != ECUIO_OK ||
+        again != count || out[count].kind != kUntouched) {
+        abort();
+    }
+    constexpr uint32_t kFlags = ECUIO_RECORDING_STRETCH_BY_LOAD |
+                                ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED |
+                                ECUIO_RECORDING_STRETCH_NO_THROTTLE |
+                                ECUIO_RECORDING_STRETCH_CUT_START |
+                                ECUIO_RECORDING_STRETCH_CUT_END;
+    uint64_t before = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const ecuio_recording_stretch_t& x = out[i];
+        if ((x.kind != ECUIO_RECORDING_STRETCH_PULL &&
+             x.kind != ECUIO_RECORDING_STRETCH_CRUISE) ||
+            x.signal >= info.signal_count || x.from_us > x.to_us ||
+            x.to_us > info.duration_us || x.from_us < before ||
+            (x.flags & ~kFlags) != 0 || x.reserved0 != 0 ||
+            x.reserved[0] != 0 || x.reserved[1] != 0) {
+            abort();
+        }
+        before = x.from_us;
+    }
+}
 
 /* The folder through signals.csv (set NULL), or through its frames.csv
  * decoded with set (ecuio_recording_open_frames: ISO-TP on the wire
@@ -334,7 +515,10 @@ opened open_and_query(const ecuio_signal_set_t* set)
                 abort();
             }
         }
+        whole_stats(r, k, s);
+        steps_through(r, k, s);
     }
+    aids(r, o.info);
     for (uint32_t m = 0; m < o.info.marker_count; ++m) {
         ecuio_recording_marker_t mk{};
         if (ecuio_recording_get_marker(r, m, &mk) != ECUIO_OK ||
@@ -838,10 +1022,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     write_file("signals.csv", parts[1], lens[1], count > 1);
     write_file("markers.csv", parts[2], lens[2], count > 2);
     write_file("frames.csv", parts[3], lens[3], count > 3);
-    /* signals.csv, then the frames through obd2 (packed replies split)
-     * and the mock's set (a computed signal), each twice alike */
+    /* signals.csv, then the frames through obd2 (packed replies split),
+     * the mock's set (a computed signal) and a float, each twice alike */
     const ecuio_signal_set_t* sets[] = {nullptr, ecuio_obd2_signal_set(),
-                                        ecuio_mock_signal_set()};
+                                        ecuio_mock_signal_set(), float_set()};
     for (const ecuio_signal_set_t* set : sets) {
         const opened a = open_and_query(set);
         const opened b = open_and_query(set);
