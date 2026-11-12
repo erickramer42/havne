@@ -63,7 +63,7 @@ inline const char* nrc_name(uint8_t nrc)
     case 0x35:
         return "invalidKey";
     case 0x36:
-        return "exceededNumberOfAttempts";
+        return "exceedNumberOfAttempts";
     case 0x37:
         return "requiredTimeDelayNotExpired";
     case 0x78:
