@@ -476,7 +476,7 @@ jobs:
           sccache --show-stats | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
       - name: Save the compiler cache (dev and main)
-        if: matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/ci/v073-coverage-time-3')
+        if: matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\sccache-cache
@@ -639,7 +639,7 @@ jobs:
           sccache --show-stats
 
       - name: Save the compiler cache (dev and main)
-        if: matrix.name == 'gtest' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/ci/v073-coverage-time-3')
+        if: matrix.name == 'gtest' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\sccache-cache
@@ -732,7 +732,7 @@ jobs:
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Save the compiler cache (dev and main)
-        if: matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/ci/v073-coverage-time-3')
+        if: matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
@@ -829,7 +829,7 @@ jobs:
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Save the compiler cache (dev and main)
-        if: matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/ci/v073-coverage-time-3')
+        if: matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
@@ -1236,7 +1236,7 @@ jobs:
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Save the compiler cache (dev and main)
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/ci/v073-coverage-time-3'
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
