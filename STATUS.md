@@ -695,9 +695,10 @@ PATCH may carry"): the C ABI grows, append-only
     statistics, and one list under a pinned chart on a phone;
   - Live's pause: a drag looks back through two minutes of history;
   - pulls and cruises found in core, from `havne-cli view`, Python and
-    Compare's "Align a pull", tuned against road logs
+    Compare's "Align a pull", tuned against road logs, and the viewer's
+    Jump row, bands and Stretches panel
     ([ADR-0056](docs/adr/0056-analysis-log.md)'s appendices on the
-    navigation aids);
+    navigation aids and the Jump row);
   - the CSV import's padded cells, bare time and rows with no time, and
     the wide export's sparse column
     ([ADR-0054](docs/adr/0054-exports-and-imports.md));
@@ -710,11 +711,14 @@ PATCH may carry"): the C ABI grows, append-only
     replacement checked ([ADR-0051](docs/adr/0051-signal-files.md));
   - the first-run words: the Demo data row and the Log's frames for
     everyone, Mark in a log, a phone status that reads Connected, and
-    Settings pages that say why they are dim.
-- **Left:** the first-run wayfinding's second lane (Recordings, Import
-  and the Dashboard's panel), the demo's disclaimer, the viewer's Jump
-  row with the Stretches panel, the CI speed-up, the review's fixes,
-  then the release.
+    Settings pages that say why they are dim; and the Recordings page's
+    rows, Import's label and the gauge a panel edits;
+  - the demo saying which signals it never sends, and a computed signal
+    hidden with its input
+    ([ADR-0039](docs/adr/0039-full-service01-coverage.md)'s appendix C).
+- **Left:** the phone check of the viewer's values list, the CI
+  speed-up, the review's fixes still in flight (core, the import's
+  cancel, the viewer, the Stretches panel), then the release.
 
 ### Waiting on a tester: an iPhone download
 
