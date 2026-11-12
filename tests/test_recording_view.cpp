@@ -1364,20 +1364,54 @@ TEST(RecordingViewTest, ACloseDropsAnAskAndANewOpenAnswers)
     const int rpm =
         signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
     int answers = 0;
+    int stepAnswers = 0;
     const auto c =
         QObject::connect(&v, &RecordingView::statsReady,
                          [&](int, const QVariantList&) { ++answers; });
+    const auto cs = QObject::connect(&v, &RecordingView::stepReady,
+                                     [&](int, double) { ++stepAnswers; });
     ASSERT_GT(v.stats({rpm}, 0, 30000), 0);
+    ASSERT_GT(v.step(rpm, 100, true), 0);
     QThread::msleep(300); // answered and posted: no events run in the wait
     v.close();
     EXPECT_EQ(v.stats({rpm}, 0, 30000), 0) << "closed";
+    EXPECT_EQ(v.step(rpm, 100, true), 0) << "closed";
     QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
     EXPECT_EQ(answers, 0) << "the close's own generation has gone";
+    EXPECT_EQ(stepAnswers, 0) << "and the step's";
     QObject::disconnect(c);
+    QObject::disconnect(cs);
 
     v.open(fixture("pull-early"));
     ASSERT_TRUE(waitFor([&] { return settled(v); }));
     EXPECT_EQ(askedStats(v, {rpm}, 1000, 3000).size(), 1);
+}
+
+// An asks' thread the system can't start: a statistics or step ask says 0,
+// leaves nothing queued, and the next ask answers once threads are there
+TEST(RecordingViewTest, AnAsksThreadThatCantStartSaysSoAndTheNextAskAnswers)
+{
+    RecordingView v;
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    int answers = 0;
+    const auto c = QObject::connect(&v, &RecordingView::statsReady,
+                                    [&](int, const QVariantList&) { ++answers; });
+    const auto cs = QObject::connect(&v, &RecordingView::stepReady,
+                                     [&](int, double) { ++answers; });
+    v.setFailThreadForTesting(true);
+    EXPECT_EQ(v.stats({rpm}, 0, 30000), 0);
+    EXPECT_EQ(v.step(rpm, 100, true), 0);
+    QThread::msleep(100);
+    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    EXPECT_EQ(answers, 0) << "nothing was left queued";
+    v.setFailThreadForTesting(false);
+    EXPECT_EQ(askedStats(v, {rpm}, 1000, 3000).size(), 1);
+    EXPECT_GE(askedStep(v, rpm, 100, true), 0.0);
+    QObject::disconnect(c);
+    QObject::disconnect(cs);
 }
 
 TEST(RecordingViewTest, DestroyedWithAnAskUnderWayIsSafe)

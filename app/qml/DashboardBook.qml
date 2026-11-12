@@ -333,14 +333,15 @@ QtObject {
     // What a driver watches beyond the dials, shared by both forms. Boost's refs
     // are the mock's and obd2's computed one (MAP minus baro). Its range runs from the
     // vacuum an idle pulls to what a turbo makes (about -15 to 25 psi), and
-    // lambda's from rich to the lean a fuel cut reads
+    // lambda's from rich to the lean a fuel cut reads. obd2's lambda is the
+    // commanded one (PID 44), so the cell says so
     function watched() {
         return {
             boost: ["id:13001", "id:7011"],
             battery: ["id:14001", "id:7008"],
             lambda: ["id:10001", "id:11544"],
             boostOptions: { from: -100, to: 200 },
-            lambdaOptions: { from: 0.5, to: 2, description: qsTr("Equivalence ratio") }
+            lambdaOptions: { from: 0.5, to: 2, description: qsTr("Commanded equivalence ratio") }
         }
     }
 

@@ -1090,6 +1090,17 @@ profile  raw
         compare(note.text, "Saved: 1 row", "this one's")
     }
 
+    // A report that can't start (here no recording is open) says so, in
+    // place of an earlier note
+    function test_aReportThatCantStartSaysSo() {
+        const page = createPage()
+        page.reportNote = "Report saved: 1 ECU, 0 trouble codes, 0 key values"
+        const url = Harness.writeScratchFile("never.json", "")
+        verify(!page.saveReportTo(url, 1), "nothing to report on")
+        compare(page.reportNote, "Report not saved: the report couldn't start")
+        verify(page.reportFailed, "in the failure's color")
+    }
+
     // Save report: the whole recording's (the zoom never narrows it), on
     // the view's thread, the picked vehicle's baseline named, the note and
     // one log line when it ends

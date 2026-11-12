@@ -1613,6 +1613,10 @@ Page {
         if (started) {
             reportFailed = false
             reportNote = qsTr("Saving the report…")
+        } else if (!recording.reporting) {
+            // Not a report already under way: the note says this one didn't start
+            reportFailed = true
+            reportNote = qsTr("Report not saved: the report couldn't start")
         }
         return started
     }
