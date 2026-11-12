@@ -114,10 +114,12 @@ TestCase {
                 if (!tr.labeled) continue
                 const right = l.labelX + ChartLayout.swatchW + 4 + widthOf(c, tr.label)
                 verify(right <= w + 0.5, "label '" + tr.label + "' ends at " + right + " of " + w)
+                // the number is whole, whatever happens to the unit
+                verify(/^-?\d+\.\d( |$)/.test(tr.label), "label '" + tr.label + "' keeps its number whole")
             }
             for (const pane of l.panes) {
                 if (pane.label !== "")
-                    verify(widthOf(c, pane.label) <= l.left + 0.5,
+                    verify(widthOf(c, pane.label) <= l.left - ChartLayout.axisGap + 0.5,
                            "pane label '" + pane.label + "' is " + widthOf(c, pane.label) + " of " + l.left + " at " + w)
             }
         }

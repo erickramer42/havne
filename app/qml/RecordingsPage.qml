@@ -106,8 +106,9 @@ Page {
             maximizedTall = !maximizedTall
     }
     // A focused box (a ComboBox, which keeps Home, End and its letters for its
-    // own choice) takes the page's keys: told by its `popup`, since a style's
-    // box isn't a ComboBox to `instanceof`
+    // own choice) keeps those keys: told by its `popup`, since a style's box
+    // isn't a ComboBox to `instanceof`. Left and Right it doesn't use, and a
+    // press in the plot takes the focus back from it (chartTap)
     readonly property bool boxFocused: root.Window.activeFocusItem !== null
                                        && root.Window.activeFocusItem.popup !== undefined
     // F on a keyboard; a text field takes its own letters first
@@ -120,7 +121,8 @@ Page {
     // The arrows step a cursor a sample of the snap's signal, B says which
     // cursor they move, Home and End go to the recording's ends
     readonly property bool cursorKeys: root.visible && recording.state === RecordingView.Open
-                                       && !Theme.mobile && !root.boxFocused
+                                       && !Theme.mobile
+    readonly property bool editKeys: cursorKeys && !root.boxFocused
     Shortcut {
         sequence: "Left"
         enabled: root.cursorKeys
@@ -133,17 +135,17 @@ Page {
     }
     Shortcut {
         sequence: "Home"
-        enabled: root.cursorKeys
+        enabled: root.editKeys
         onActivated: root.cursorToEnd(false)
     }
     Shortcut {
         sequence: "End"
-        enabled: root.cursorKeys
+        enabled: root.editKeys
         onActivated: root.cursorToEnd(true)
     }
     Shortcut {
         sequence: "B"
-        enabled: root.cursorKeys
+        enabled: root.editKeys
         onActivated: root.arrowsMoveB = root.hasCursorB && !root.arrowsMoveB
     }
     // The splitter below the chart: its height once dragged, -1 for the
@@ -951,8 +953,21 @@ Page {
     }
     // A cursor's handle let go: on a sample, and one dropped on the other
     // leaves a single cursor
+    // The nearest sample can lie past the view's end by half a sample when the
+    // end is off the grid (a wheel zoom): then the one in force at the end,
+    // so the handle never drops out of view
+    function snappedInView(t) {
+        const s = snapped(t)
+        if (s < viewT0)
+            return viewT0
+        const first = snapSignal()
+        if (s <= viewT1 || !first)
+            return Math.min(s, viewT1)
+        const at = recording.valuesAt([first.index], viewT1)
+        return at.length > 0 && at[0].atMs >= 0 ? at[0].atMs : viewT1
+    }
     function dropHandle(isB) {
-        const t = snapped(isB ? cursorBMs : cursorMs)
+        const t = snappedInView(isB ? cursorBMs : cursorMs)
         if (isB)
             setCursorB(t)
         else
@@ -2630,7 +2645,12 @@ Page {
                 property point lastAt: Qt.point(0, 0)
                 // A long press fired in this press, so its drag draws a box
                 property bool held: false
-                onPressedChanged: if (pressed) held = false
+                onPressedChanged: if (pressed) {
+                    held = false
+                    // A box a mouse pick focused gives the page's keys back (the
+                    // chart's own item: the page's focus would leave the box's)
+                    chartFrame.forceActiveFocus()
+                }
                 onLongPressed: {
                     const at = chartTap.point.position
                     if (!root.phoneShape || at.x - chart.x < root.plotLeft())
@@ -3657,11 +3677,11 @@ Page {
                     readonly property bool shown: (recording.state === RecordingView.Open
                                                    || recording.state === RecordingView.Failed)
                                                   && !root.chartMaximized && recording.hasFrames
+                    // Its own rule, not its place's: About's head hides and moves it
                     visible: shown
                     Layout.fillWidth: true
                     textRole: "text"
                     valueRole: "value"
-                    // Its own rule, not its place's: About's head hides and moves it
                     // The model stays while the box is hidden: a model made again
                     // resets the index, which the binding below wouldn't set back
                     model: root.decodeChoices()

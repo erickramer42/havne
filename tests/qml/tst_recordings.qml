@@ -2338,9 +2338,11 @@ profile  raw
     function test_aHandleDraggedPastTheEdgeStaysInView() {
         const page = openEarly()
         const restore = growWindow(page)
+        let pressed = false
         try {
             const chart = panedChart(page)
-            page.setView(10000, 20000)
+            // an end off the sample grid: the nearest sample to it lies past it
+            page.setView(10000, 19960)
             verify(waitForPolish(page.Window.window), "laid out")
             page.setCursor(12000)
             page.setCursorB(15000)
@@ -2349,15 +2351,20 @@ profile  raw
             const grab = find(handle, "handleDrag")
             const from = grab.mapToItem(frame, grab.width / 2, grab.height / 2)
             mousePress(frame, from.x, from.y)
+            pressed = true
             const edge = frame.width - 2
             for (let k = 1; k <= 8; ++k)
                 mouseMove(frame, from.x + (edge - from.x) * k / 8, from.y, 10)
             verify(page.cursorBMs <= page.viewT1 + 1e-6, "inside the view: " + page.cursorBMs)
             verify(handle.visible, "the handle is still shown")
             mouseRelease(frame, edge, from.y)
+            pressed = false
             verify(page.cursorBMs <= page.viewT1 + 1e-6, "ends inside the view: " + page.cursorBMs)
+            verify(handle.visible, "and the drop leaves it shown")
             compare(page.cursorBMs, page.snapped(page.cursorBMs), "on a sample")
         } finally {
+            if (pressed)
+                mouseRelease(find(page, "chartFrame"), 0, 0)   // a failed check leaves no button held
             restore()
         }
     }
@@ -2404,15 +2411,53 @@ profile  raw
         const choice = find(page, "compareChoice")
         choice.forceActiveFocus()
         verify(choice.activeFocus, "the box has the focus")
+        // Left and Right it doesn't use: the cursor still steps
+        keyClick(Qt.Key_Right)
+        tryVerify(() => page.cursorMs > 1000, 2000, "Right steps the cursor beside a focused box")
+        page.setCursor(1000)
         keyClick(Qt.Key_End)
+        verify(page.compareOpen, "End went to the box: it picked the last recording")
         keyClick(Qt.Key_Home)
         keyClick("b")
-        wait(50)
         compare(page.cursorMs, 1000, "the cursor stayed")
         verify(!page.arrowsMoveB, "B did nothing to the cursors")
         const before = page.maximizedTall
         keyClick("f")
         compare(page.maximizedTall, before, "F didn't maximize the chart")
+        // no open of the compared recording is left running
+        page.stopComparing()
+        compare(page.comparing, false, "the comparison is stopped")
+    }
+
+    // A mouse pick gives a box the focus; a press in the plot takes it back,
+    // so the chart's keys work again without a Tab
+    function test_aPressInThePlotTakesTheKeysBackFromABox() {
+        const page = openFindings()
+        const restore = growWindow(page)
+        try {
+            const chart = find(page, "chart")
+            tryVerify(() => chart.drawn !== null, 5000, "the chart is drawn")
+            const choice = find(page, "decodeChoice")
+            tryVerify(() => choice.visible && choice.width > 0, 2000, "the box shows")
+            mouseClick(choice)
+            tryVerify(() => choice.popup.opened, 2000, "the box opens")
+            verify(choice.activeFocus, "a mouse press gives the box the focus")
+            choice.popup.close()
+            tryVerify(() => !choice.popup.opened, 2000, "and closes")
+            const frame = find(page, "chartFrame")
+            const at = inPlot(chart, 0)
+            mouseClick(frame, at.x, at.y)
+            verify(!choice.activeFocus, "the press took the focus back")
+            const placed = page.cursorMs
+            verify(!isNaN(placed), "the press placed the cursor")
+            keyClick(Qt.Key_Right)
+            tryVerify(() => page.cursorMs > placed, 2000, "Right steps the cursor")
+            const stepped = page.cursorMs
+            keyClick(Qt.Key_Home)
+            tryVerify(() => page.cursorMs < stepped, 2000, "so does Home")
+        } finally {
+            restore()
+        }
     }
 
     // The decoded profile stays in the box after the chart is maximized
@@ -2572,8 +2617,8 @@ profile  raw
             page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
             const p = chart.drawn.panes[1]
             const left = chart.drawn.left
-            const wider = Theme.touchTarget > left
-            const x = wider ? (left + Theme.touchTarget) / 2 : left / 2
+            verify(left < Theme.touchTarget, "the captions end before a touch's width: " + left)
+            const x = (left + Theme.touchTarget) / 2
             const y = p.top + p.h / 2
             compare(page.doubleTapAt(x, y), "axis")
             compare(page.paneRanges["unit %"], undefined)

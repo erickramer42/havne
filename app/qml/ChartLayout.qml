@@ -731,11 +731,17 @@ QtObject {
         // Free text (an imported column's unit) can outrun its column: a pane's
         // name is cut to the axes' column, a value's label to its own
         const labelRoom = Math.max(0, width - (left + plotW + 6) - swatchW - 4)
-        for (const tr of traces)
-            tr.label = fitText(tr.label, labelRoom, opts.measure)
+        for (const tr of traces) {
+            // The number stays whole; the unit goes first
+            let k = tr.unit !== undefined ? String(tr.unit).length : 0
+            while (opts.measure(tr.label) > labelRoom && k > 0) {
+                --k
+                tr.label = opts.format(tr.value, tr.decimals, tr.unit.slice(0, k) + (k > 0 ? "…" : ""))
+            }
+        }
         for (const pane of panes) {
             if (pane.label !== "")
-                pane.label = fitText(pane.label, left, opts.measure)
+                pane.label = fitText(pane.label, left - axisGap, opts.measure)
         }
 
         const hGrid = []
