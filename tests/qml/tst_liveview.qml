@@ -382,6 +382,22 @@ TestCase {
     // A text row (a uds-generic TEXT def, which the mock answers each
     // tick) shows its text where a number would go and can't be plotted;
     // the number row beside it formats as usual
+    // A row is one accessible node named by its value; its Texts are
+    // ignored, so a value changing at the model's rate renames the node and
+    // makes, hides or destroys none (355)
+    function test_aRowIsOneNamedNode() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        compare(Bridge.connectSession("mock://demo"), "", "the mock connects")
+        const list = findChild(page, "signalList")
+        tryVerify(() => list.count > 0 && list.itemAtIndex(0) !== null, 3000, "a row")
+        const row = list.itemAtIndex(0)
+        tryVerify(() => row.hasValue, 3000, "a value")
+        const value = findChild(row, "valueLabel")
+        verify(findChild(row, "nameLabel").Accessible.ignored, "the name's Text is ignored")
+        verify(value.Accessible.ignored, "the value's Text is ignored")
+        compare(row.Accessible.name, row.name + ": " + value.text)
+    }
+
     function test_textRowShowsTextAndCannotPlot() {
         const page = createTemporaryObject(pageComponent, testCase)
         compare(Bridge.connectSession("mock://demo?profile=uds-generic&did=F190:text,1E1C:u16"),

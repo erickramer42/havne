@@ -577,6 +577,30 @@ TestCase {
         compare(page.rateText(20.4), "20/s")
     }
 
+    // By ID is one named list; its rows' Texts are ignored, since the rows
+    // refresh twice a second and a new ID adds one (355)
+    function test_byIdsRowsAreNotAccessibleNodes() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        heldFrames(page)
+        find(page, "table_byId").clicked()
+        const ids = find(page, "idList")
+        tryVerify(() => ids.count >= 2 && ids.itemAtIndex(0) !== null, 3000, "the IDs show")
+        compare(ids.Accessible.name, "Frames by ID")
+        let texts = 0
+        const walk = item => {
+            for (const child of item.children) {
+                if (child.textFormat !== undefined) {
+                    ++texts
+                    verify(child.Accessible.ignored, "a Text is ignored: '" + child.text + "'")
+                }
+                walk(child)
+            }
+        }
+        walk(ids.itemAtIndex(0))
+        compare(texts, 4, "the four columns were walked")
+    }
+
     // One number as a standard and as an extended ID: each By ID row's
     // tap shows that row's own frames alone, whatever its width
     function test_aTapShowsItsOwnWidthsFramesAlone() {

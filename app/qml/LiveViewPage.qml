@@ -512,6 +512,11 @@ Page {
                 width: signalList.width - (signalList.overflows ? listBar.width : 0)
                 height: root.rowHeight
                 color: signalDelegate.index % 2 === 0 ? Theme.surface : Theme.bg
+                // One node a row, named by its value: the Texts below are
+                // ignored, so a value changing at the model's rate is a name
+                // change and never a node made, hidden or destroyed
+                Accessible.role: Accessible.ListItem
+                Accessible.name: signalDelegate.name + ": " + valueLabel.text
 
                 RowLayout {
                     id: rowLayout
@@ -549,6 +554,7 @@ Page {
                     Label {
                         id: nameLabel
                         objectName: "nameLabel"
+                        Accessible.ignored: true
                         text: signalDelegate.name
                         color: Theme.text
                         Layout.fillWidth: true
@@ -569,6 +575,7 @@ Page {
                     Label {
                         id: valueLabel
                         objectName: "valueLabel"
+                        Accessible.ignored: true
                         // Room past the whole name (its x is the checkbox's and
                         // the swatch's), within the value's cap below
                         readonly property bool refusedFits:
