@@ -531,8 +531,22 @@ int main(void)
         sizeof(ecuio_recording_stretch_t) != 64 ||
         offsetof(ecuio_recording_stretch_t, start) != 24 ||
         offsetof(ecuio_recording_stretch_t, flags) != 40 ||
+        offsetof(ecuio_recording_stretch_t, reserved) != 48 ||
+        ECUIO_STRETCH_PULLS != 0x1u || ECUIO_STRETCH_CRUISES != 0x2u ||
+        ECUIO_RECORDING_STRETCH_PULL != 1u ||
+        ECUIO_RECORDING_STRETCH_CRUISE != 2u ||
+        ECUIO_RECORDING_ROLE_ENGINE_SPEED != 1u ||
+        ECUIO_RECORDING_ROLE_VEHICLE_SPEED != 2u ||
+        ECUIO_RECORDING_ROLE_THROTTLE != 3u ||
         ECUIO_RECORDING_ROLE_ENGINE_LOAD != 4u ||
+        ECUIO_RECORDING_STRETCH_BY_LOAD != 0x1u ||
+        ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED != 0x2u ||
+        ECUIO_RECORDING_STRETCH_NO_THROTTLE != 0x4u ||
+        ECUIO_RECORDING_STRETCH_CUT_START != 0x8u ||
         ECUIO_RECORDING_STRETCH_CUT_END != 0x10u ||
+        ECUIO_VALIDATE_ERR_COMPUTED_INPUT != -22 ||
+        ECUIO_VALIDATE_ERR_DUPLICATE_NAME != -25 ||
+        ECUIO_OBD2_SIG_BOOST_ID != 7011 ||
         ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR != 56.32704 ||
         sizeof(ecuio_recording_signals_t) != 128 ||
         offsetof(ecuio_recording_signals_t, length) != 8 ||

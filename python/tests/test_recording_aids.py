@@ -155,6 +155,34 @@ def test_the_pulls_are_the_ones_havne_cli_lists():
     assert (align["found"], align["host_us"]) == (True, 18_002_000)
 
 
+def test_a_recording_with_no_duration_has_no_stretches(tmp_path):
+    # One row: its samples sit at one time, so the default range is empty
+    log = tmp_path / "one.csv"
+    log.write_text("time (s),Engine speed (rpm)\n0,800\n", encoding="utf-8", newline="\n")
+    folder = tmp_path / "one"
+    assert havne.import_csv(log, folder).duration_us == 0
+    with havne.Recording(folder) as r:
+        assert r.info.duration_us == 0
+        assert r.stretches() == []
+        assert r.stretches("pulls", pull_level=50.0) == []
+        # A range the caller gives is still core's to judge
+        with pytest.raises(havne.Error) as e:
+            r.stretches(from_us=0, to_us=0)
+        assert e.value.name == "INVALID_ARGUMENT"
+        with pytest.raises(ValueError):
+            r.stretches("pull")
+        # And so are the rules, though the range holds nothing
+        with pytest.raises(havne.Error) as e:
+            r.stretches(pull_level=-1.0)
+        assert e.value.name == "INVALID_ARGUMENT"
+        with pytest.raises(havne.Error) as e:
+            r.stretches(cruise_floor=math.nan)
+        assert e.value.name == "INVALID_ARGUMENT"
+    # A start at or past the end of a recording that has a duration
+    with havne.Recording(PULL) as r:
+        assert r.stretches(from_us=r.info.duration_us) == []
+
+
 def test_what_core_cant_answer_is_refused():
     with havne.Recording(PULL) as r:
         with pytest.raises(havne.Error) as e:

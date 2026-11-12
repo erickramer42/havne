@@ -265,6 +265,65 @@ void expect_same(const std::string& folder, const ecuio_signal_set_t* set)
             ASSERT_EQ(vb, va) << name << " at " << t;
             ASSERT_EQ(at_b, at_a) << name << " at " << t;
         }
+        /* The readers over a span say the same: statistics over the whole
+         * and over its first half, and a step from the start */
+        const bool text =
+            (rows.signal(p.first).flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0;
+        for (const uint64_t to : {end, end / 2 + 1}) {
+            ecuio_recording_stats_t a{};
+            ecuio_recording_stats_t b{};
+            ASSERT_EQ(ecuio_recording_stats(rows.r, &p.first, 1, 0, to, &a),
+                      ECUIO_OK)
+                << name;
+            ASSERT_EQ(ecuio_recording_stats(frames.r, &p.second, 1, 0, to, &b),
+                      ECUIO_OK)
+                << name;
+            EXPECT_EQ(b.samples, a.samples) << name << " to " << to;
+            if (!text && a.samples > 0) {
+                EXPECT_EQ(b.lowest, a.lowest) << name << " to " << to;
+                EXPECT_EQ(b.highest, a.highest) << name << " to " << to;
+                EXPECT_DOUBLE_EQ(b.mean, a.mean) << name << " to " << to;
+                EXPECT_EQ(b.lowest_us, a.lowest_us) << name << " to " << to;
+                EXPECT_EQ(b.highest_us, a.highest_us) << name << " to " << to;
+            }
+        }
+        uint64_t step_a = 0;
+        uint64_t step_b = 0;
+        ASSERT_EQ(ecuio_recording_step(rows.r, p.first, 0,
+                                       ECUIO_RECORDING_STEP_FORWARD, &step_a),
+                  ECUIO_OK)
+            << name;
+        ASSERT_EQ(ecuio_recording_step(frames.r, p.second, 0,
+                                       ECUIO_RECORDING_STEP_FORWARD, &step_b),
+                  ECUIO_OK)
+            << name;
+        EXPECT_EQ(step_b, step_a) << name;
+    }
+    /* The stretches by core's rules: the same answer, and the same
+     * stretches on the same signals */
+    ecuio_stretch_rules_t rules{};
+    rules.kinds = ECUIO_STRETCH_PULLS | ECUIO_STRETCH_CRUISES;
+    rules.throttle = rules.engine_load = UINT32_MAX;
+    rules.vehicle_speed = rules.engine_speed = UINT32_MAX;
+    ecuio_recording_stretch_t found_a[32] = {};
+    ecuio_recording_stretch_t found_b[32] = {};
+    uint32_t count_a = 0;
+    uint32_t count_b = 0;
+    const ecuio_status_t sa = ecuio_recording_stretches(
+        rows.r, &rules, 0, ri.duration_us, found_a, 32, &count_a);
+    const ecuio_status_t sb = ecuio_recording_stretches(
+        frames.r, &rules, 0, ri.duration_us, found_b, 32, &count_b);
+    EXPECT_EQ(sa, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(sb, sa);
+    ASSERT_EQ(count_b, count_a);
+    for (uint32_t i = 0; i < count_a && i < 32; ++i) {
+        EXPECT_EQ(found_b[i].kind, found_a[i].kind) << i;
+        EXPECT_EQ(found_b[i].from_us, found_a[i].from_us) << i;
+        EXPECT_EQ(found_b[i].to_us, found_a[i].to_us) << i;
+        EXPECT_EQ(found_b[i].flags, found_a[i].flags) << i;
+        EXPECT_STREQ(frames.signal(found_b[i].signal).name,
+                     rows.signal(found_a[i].signal).name)
+            << i;
     }
 }
 
@@ -365,6 +424,117 @@ TEST(RecordingFramesTest, AValueThatIsntFiniteIsNoSample)
     EXPECT_EQ(s.lowest, 1.0);
     EXPECT_EQ(s.highest, 1.0);
     EXPECT_EQ(s.first_us, 500000u);
+
+    /* Read again, the second's rows are that one sample too: a span cut
+     * inside the second (its raw rows) says what the whole second's
+     * summary says, a step from the start lands on the sample, and a
+     * column narrower than a second counts it once */
+    ecuio_recording_stats_t part{};
+    ecuio_recording_stats_t whole{};
+    ASSERT_EQ(ecuio_recording_stats(r.r, &k, 1, 0, 600000, &part), ECUIO_OK);
+    ASSERT_EQ(ecuio_recording_stats(r.r, &k, 1, 0, 999999, &whole), ECUIO_OK);
+    for (const ecuio_recording_stats_t* st : {&part, &whole}) {
+        SCOPED_TRACE(st == &part ? "a part of the second" : "the second");
+        EXPECT_EQ(st->samples, 1u);
+        EXPECT_EQ(st->lowest, 1.0);
+        EXPECT_EQ(st->highest, 1.0);
+        EXPECT_EQ(st->mean, 1.0);
+        EXPECT_EQ(st->lowest_us, 500000u);
+        EXPECT_EQ(st->highest_us, 500000u);
+    }
+    uint64_t at = 0;
+    ASSERT_EQ(
+        ecuio_recording_step(r.r, k, 0, ECUIO_RECORDING_STEP_FORWARD, &at),
+        ECUIO_OK);
+    EXPECT_EQ(at, 500000u);
+    ASSERT_EQ(ecuio_recording_step(r.r, k, 500000,
+                                   ECUIO_RECORDING_STEP_BACKWARD, &at),
+              ECUIO_OK);
+    EXPECT_EQ(at, ECUIO_RECORDING_NONE) << "nothing before it";
+    EXPECT_EQ(r.samples(k, 0, 1000000, 2), 1u);
+}
+
+/* A def none of whose values is finite has no signal. A second read again
+ * passes its values by, so the other defs' rows are still read */
+TEST(RecordingFramesTest, ADefWithNoFiniteValueLeavesTheOthersReadable)
+{
+    ecuio_signal_def_t defs[2] = {};
+    for (uint16_t i = 0; i < 2; ++i) {
+        defs[i].id = static_cast<uint16_t>(i + 1);
+        defs[i].message_id = 0x123;
+        defs[i].kind = ECUIO_VALUE_FLOAT;
+        defs[i].byte_order = ECUIO_BYTE_ORDER_BE;
+        defs[i].start_byte = static_cast<uint16_t>(i * 4);
+        defs[i].bit_length = 32;
+        defs[i].scale = 1.0;
+        std::snprintf(defs[i].name, sizeof defs[i].name, "%s",
+                      i == 0 ? "Finite" : "Never");
+    }
+    ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 2;
+    set.defs = defs;
+    ASSERT_EQ(ecuio_validate_signal_set(&set, nullptr), 0);
+    Folder f;
+    std::string csv = kFramesHeader;
+    /* 1.0 with a NaN, 2.0 with +inf, 3.0 with a negative NaN */
+    csv += row(100000, 0x123, {0x3F, 0x80, 0x00, 0x00, 0x7F, 0xC0, 0x00, 0x00});
+    csv += row(300000, 0x123, {0x40, 0x00, 0x00, 0x00, 0x7F, 0x80, 0x00, 0x00});
+    csv += row(500000, 0x123, {0x40, 0x40, 0x00, 0x00, 0xFF, 0xC0, 0x00, 0x00});
+    f.write("frames.csv", csv);
+    Opened r(f.utf8(), &set);
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(r.find("Never"), UINT32_MAX);
+    const uint32_t k = r.find("Finite");
+    ASSERT_NE(k, UINT32_MAX);
+    EXPECT_EQ(r.signal(k).samples, 3u);
+
+    /* Each of these reads the second's rows again */
+    ecuio_recording_stats_t part{};
+    ASSERT_EQ(ecuio_recording_stats(r.r, &k, 1, 0, 400000, &part), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(part.samples, 2u);
+    EXPECT_EQ(part.lowest, 1.0);
+    EXPECT_EQ(part.highest, 2.0);
+    EXPECT_EQ(part.mean, 1.5);
+    uint64_t at = 0;
+    ASSERT_EQ(
+        ecuio_recording_step(r.r, k, 100000, ECUIO_RECORDING_STEP_FORWARD, &at),
+        ECUIO_OK);
+    EXPECT_EQ(at, 300000u);
+    EXPECT_EQ(r.samples(k, 0, 1000000, 2), 3u);
+}
+
+/* A text def's value read again is its text, never judged as a number */
+TEST(RecordingFramesTest, ATextDefsValueReadAgainIsItsText)
+{
+    ecuio_signal_def_t d{};
+    d.id = 1;
+    d.message_id = 0x123;
+    d.kind = ECUIO_VALUE_TEXT;
+    d.byte_length = 4;
+    d.scale = 1.0;
+    std::snprintf(d.name, sizeof d.name, "Label");
+    ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 1;
+    set.defs = &d;
+    ASSERT_EQ(ecuio_validate_signal_set(&set, nullptr), 0);
+    Folder f;
+    std::string csv = kFramesHeader;
+    csv += row(100000, 0x123, {'A', 'B', '1', '2'});
+    csv += row(300000, 0x123, {'C', 'D', '3', '4'});
+    f.write("frames.csv", csv);
+    Opened r(f.utf8(), &set);
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    const uint32_t k = r.find("Label");
+    ASSERT_NE(k, UINT32_MAX);
+    EXPECT_EQ(r.signal(k).samples, 2u);
+    uint64_t at = 0;
+    EXPECT_EQ(r.text_at(k, 200000, &at), "AB12");
+    EXPECT_EQ(at, 100000u);
+    EXPECT_EQ(r.text_at(k, 900000, &at), "CD34");
+    EXPECT_EQ(at, 300000u);
 }
 
 TEST(RecordingFramesTest, TwoSendersOnOneIdTearTheirMessagesNotSpliceThem)

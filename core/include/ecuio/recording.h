@@ -685,9 +685,9 @@ _Static_assert(sizeof(ecuio_stretch_rules_t) == 120,
 #define ECUIO_RECORDING_STRETCH_CRUISE 2u
 
 /* ecuio_recording_stretch_t.flags: BY_LOAD, a pull found by engine load;
- * BY_ENGINE_SPEED, a pull whose rise is engine speed's; NO_THROTTLE, a
- * cruise found by speed alone; CUT_START and CUT_END, a stretch that
- * reached past the range's start or its end */
+ * BY_ENGINE_SPEED, a pull measured by engine speed, with no vehicle
+ * speed; NO_THROTTLE, a cruise found by speed alone; CUT_START and
+ * CUT_END, a stretch that reached past the range's start or its end */
 #define ECUIO_RECORDING_STRETCH_BY_LOAD         0x1u
 #define ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED 0x2u
 #define ECUIO_RECORDING_STRETCH_NO_THROTTLE     0x4u

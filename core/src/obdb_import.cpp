@@ -339,9 +339,10 @@ std::string unique_key(const std::string& base, std::set<std::string>& taken)
     return k;
 }
 
-/* A name not yet taken: the name, else cut to fit " 2", " 3"... A set's names
- * are one each (a recording keys values by name), and a file's signal named
- * as a base def would replace it, which a converted set never means to. */
+/* A name not yet taken: the name, else cut to fit " 2", " 3"... at a whole
+ * character, as clean() cuts. A set's names are one each (a recording keys
+ * values by name), and a file's signal named as a base def would replace
+ * it, which a converted set never means to. */
 std::string unique_name(const std::string& base, std::set<std::string>& taken,
                         bool* repeated)
 {
@@ -349,7 +350,12 @@ std::string unique_name(const std::string& base, std::set<std::string>& taken,
     *repeated = false;
     for (unsigned k = 2; taken.count(n) != 0; ++k) {
         const std::string tail = " " + std::to_string(k);
-        n = base.substr(0, 31 - tail.size()) + tail;
+        size_t cut = 31 - tail.size();
+        while (cut > 0 && cut < base.size() &&
+               (static_cast<unsigned char>(base[cut]) & 0xC0) == 0x80) {
+            --cut;
+        }
+        n = base.substr(0, cut) + tail;
         *repeated = true;
     }
     taken.insert(n);
