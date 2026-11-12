@@ -469,7 +469,7 @@ background too ([roadmap](#roadmap)).
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 2114 ctest cases on Windows (both trees rebuilt,
+- **Tests:** 2147 ctest cases on Windows (both trees rebuilt,
   2026-11-12), all passing but six skips (the cross-arch case and
   the real-car recordings' diff, run locally; three cases that run on
   Linux only, Read once over SocketCAN and the Python package's vcan
