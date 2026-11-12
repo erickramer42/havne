@@ -1,0 +1,20 @@
+{
+  "havne_signals": 1,
+  "name": "Desk baro text",
+  "notes": "Synthetic: its barometric pressure is a text, which obd2's Boost can't read, so the loader refuses it",
+  "source": { "name": "Written by hand for Havne's tests" },
+  "extends": "obd2",
+  "ecus": [
+    { "id": "pcm", "rx": "7E8" }
+  ],
+  "signals": [
+    {
+      "key": "baro",
+      "name": "Barometric Pressure",
+      "kind": "text",
+      "ecu": "pcm",
+      "read": { "service": "22", "number": "D102" },
+      "field": { "byte": 0 }
+    }
+  ]
+}

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -1337,6 +1338,7 @@ TEST_F(J2534HealthTest, ChannelsWaitOnlyForTheirOwnReplies)
         defs[i].scale = 1.0;
         defs[i].message_id = kChannels[i].rx_id;
         defs[i].mux_length = 2;
+        std::snprintf(defs[i].name, sizeof defs[i].name, "Signal %d", i);
     }
     defs[0].mux_key = 0x410Cu;
     defs[1].mux_key = 0x410Du;
@@ -1401,6 +1403,7 @@ TEST_F(J2534HealthTest, LongRepliesArriveWhole)
         defs[i].message_id = 0x7E8u;
         defs[i].mux_length = 3;
         defs[i].mux_key = 0x62F1A0u + static_cast<uint32_t>(i);
+        std::snprintf(defs[i].name, sizeof defs[i].name, "DID F1A%d", i);
     }
     static ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;

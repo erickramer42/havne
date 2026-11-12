@@ -207,9 +207,7 @@ std::string one_line(const char* text)
  * either reads back, and a line break is a space, keeping the label
  * within its 27 bytes. A label can't start a formula: the set's
  * validator refuses one that would (ADR-0049 section 8), so none reaches
- * a file. The caller writes them only for the first def of a name, since
- * the reader keeps the first signal line of a name; name is the
- * CSV-quoted name.
+ * a file. name is the CSV-quoted name.
  */
 std::string label_lines(const ecuio_signal_set_t* set,
                         const ecuio_signal_def_t& d, const std::string& name)
@@ -1603,7 +1601,6 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                           : link_text(state, episodes);
             header += "\n";
         }
-        std::vector<std::string> named; /* the names signal lines wrote */
         for (uint32_t i = 0;
              set != nullptr && set->defs != nullptr && i < set->count; ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
@@ -1617,10 +1614,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                                      : "number",
                 csv_quoted(d.unit, strnlen(d.unit, sizeof d.unit)),
                 d.decimal_places, d.plot_rank, d.group);
-            if (std::find(named.begin(), named.end(), name) == named.end()) {
-                header += label_lines(set, d, name);
-                named.push_back(name);
-            }
+            header += label_lines(set, d, name);
         }
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
