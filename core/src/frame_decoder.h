@@ -5,7 +5,8 @@
 // What one frame decodes to against a set, as a session delivers it: every
 // def the frame matches and decodes, in the set's order, a packed Service
 // 01 reply record by record (ADR-0039 Appendix A), then each computed def
-// one of them feeds (ADR-0051 section 5). The session decodes through one
+// one of them feeds (ADR-0051 section 5), through any chain of computed
+// defs (ADR-0062). The session decodes through one
 // on its worker; the reader (ADR-0049 section 5) decodes a recording's
 // frames through one of its own, so both give the same values. prepare
 // sizes every buffer once, so a decode allocates nothing.
@@ -32,11 +33,18 @@ struct ecuio_frame_decoder {
         uint64_t decode = 0;
     };
     struct computed_plan {
+        static constexpr uint32_t kLeaf = UINT32_MAX; /* a number input */
         uint32_t def = 0; /* the computed def's index */
         const ecuio_computed_t* program = nullptr;
         uint32_t inputs[ECUIO_COMPUTED_MAX_INPUTS] =
             {}; /* the inputs' def indexes */
         uint64_t max_age_us[ECUIO_COMPUTED_MAX_INPUTS] = {};
+        /* A computed input's plan, else kLeaf */
+        uint32_t plan_of[ECUIO_COMPUTED_MAX_INPUTS] = {kLeaf, kLeaf, kLeaf,
+                                                       kLeaf};
+        /* 1 reads only number defs; 0 none worked out (a circle in a set
+         * the validator never saw), so never worked out */
+        uint8_t depth = 0;
     };
 
     /* The set prepare took; NULL decodes nothing */
@@ -66,11 +74,19 @@ struct ecuio_frame_decoder {
     uint8_t learned_lengths[256] = {};
     std::atomic<uint64_t> unsplit_replies{0};
     /* Computed signals (ADR-0051 section 5), sized only when the set has a
-     * computed def: each def's newest value, and one plan per computed
-     * def; decodes counts the decodes, the first 1 */
+     * computed def: each number def's newest value, and one plan per
+     * computed def in the set's order; decodes counts the decodes, the
+     * first 1 */
     std::vector<latest_value> latest;
     std::vector<computed_plan> computed;
     uint64_t decodes = 0;
+    /* A set with a chain (a computed def reading another, ADR-0062): the
+     * plans by depth, then a decode's state per plan (fed, needed, has a
+     * value) and each value; sized here, so a decode allocates nothing */
+    bool chained = false;
+    std::vector<uint32_t> by_depth;
+    std::vector<uint8_t> chain_state;
+    std::vector<double> chain_value;
 
     /* Sizes the buffers for set, which must stay valid and unchanged
      * while this decodes; absent keeps the absent signals' counts. A NULL

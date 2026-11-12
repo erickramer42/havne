@@ -156,7 +156,7 @@ CASES = [
     ("notes that aren't text", SIGNAL_FILE, ["notes"], 1, False),
     ("a tool's own key", SIGNAL_FILE, S0 + ["x-tool"], {"any": [1]}, True),
     ("extends something other than obd2", SIGNAL_FILE, ["extends"], "uds", False),
-    ("format 2", SIGNAL_FILE, ["havne_signals"], 2, False),
+    ("format 3", SIGNAL_FILE, ["havne_signals"], 3, False),
     ("a $schema key", SIGNAL_FILE, ["$schema"], "signal-file.schema.json", False),
     ("the base packed plugin", PACKED, [], None, True),
     ("an id with a dash first", PACKED, ["id"], "-edge", False),
@@ -222,6 +222,31 @@ def keywords(errors):
         found |= keywords(e.context)
     return found
 
+
+# Format 2 files (ADR-0062), each one change or two to the base: a call, a
+# comparison and a chain take the schema's widened characters. The loader
+# alone checks which format a form needs, so no case here is a format 1 file
+# using one
+F2 = changed(SIGNAL_FILE, ["havne_signals"], 2)
+F2_CHAIN = copy.deepcopy(F2)
+F2_CHAIN["signals"].append({"key": "quarter_rpm", "name": "Quarter RPM", "kind": "computed",
+                            "expr": "half_rpm / 2"})
+FORMAT2 = [
+    ("format 2", SIGNAL_FILE, None, F2, True),
+    ("a call in format 2", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "max(rpm_raw, 100)"), True),
+    ("a comparison in format 2", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "if(rpm_raw >= 1000, rpm_raw, 0)"), True),
+    ("a truth joined in format 2", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "if(all(rpm_raw > 1, rpm_raw != 5), 1, 0)"), True),
+    ("a computed signal reading another in format 2", SIGNAL_FILE, None, F2_CHAIN, True),
+    ("a character no format has", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "if(rpm_raw > 1, 1; 0)"), False),
+    ("a question mark in an expression", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "rpm_raw ? 1 : 0"), False),
+    ("a format 2 expression of 257 characters", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "max(rpm_raw, 1)" + " " * 250), False),
+]
 
 class Cli:
     def __init__(self, exe, scratch):
@@ -301,7 +326,7 @@ def main():
 
     # Signal files
     for pattern in ("tests/fixtures/signal-files/*.json", "tests/fixtures/signals/*.json",
-                    "tests/golden/obdb/*.json"):
+                    "tests/golden/obdb/*.json", "examples/*.json"):
         for path in sorted(glob.glob(os.path.join(root, pattern))):
             if os.path.normpath(path) not in refused:
                 validate("signal-file", path)
@@ -344,7 +369,7 @@ def main():
                                     f"{'it reads' if ok else repr(detail)}, not {words!r}")
 
         # Edge cases: one verdict from both
-        cases = list(CASES)
+        cases = list(CASES) + FORMAT2
         for p, accepted in PATHS:
             doc = changed(PACKED, ["variants", 0, "files"], [p])
             doc["files"] = {p: PACKED["files"]["a.json"]}

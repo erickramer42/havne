@@ -1,0 +1,46 @@
+{
+  "havne_signals": 2,
+  "name": "Chained extras",
+  "notes": "Synthetic: written for Havne's tests. margin reads hottest, which reads two numbers: a chain two deep, with a call and a comparison",
+  "source": { "name": "Written by hand for Havne's tests" },
+  "ecus": [ { "id": "pcm", "rx": "7E8" } ],
+  "signals": [
+    {
+      "key": "coolant",
+      "name": "Coolant",
+      "read": { "service": "01", "number": "05" },
+      "field": { "byte": 0, "bits": 8 },
+      "offset": -40,
+      "unit": "°C", "decimals": 0, "group": "engine"
+    },
+    {
+      "key": "oil",
+      "name": "Oil",
+      "read": { "service": "22", "number": "F40D" },
+      "field": { "byte": 0, "bits": 8 },
+      "offset": -40,
+      "unit": "°C", "decimals": 0, "group": "engine"
+    },
+    {
+      "key": "hottest",
+      "name": "Hottest",
+      "kind": "computed",
+      "expr": "max(coolant, oil)",
+      "unit": "°C", "decimals": 0, "group": "engine"
+    },
+    {
+      "key": "margin",
+      "name": "Margin to 130",
+      "kind": "computed",
+      "expr": "clamp(130 - hottest, 0, 130)",
+      "unit": "°C", "decimals": 0, "group": "engine"
+    },
+    {
+      "key": "hot",
+      "name": "Running Hot",
+      "kind": "computed",
+      "expr": "if(margin < 20, 1, 0)",
+      "decimals": 0, "group": "engine"
+    }
+  ]
+}

@@ -175,22 +175,63 @@ typedef struct ecuio_enum_entry {
 } ecuio_enum_entry_t;
 
 /* A computed def's program (ADR-0051 section 5): a stack machine over
- * up to four inputs, each another def's newest value no older than its
- * age bound, and up to 16 constants. Each step pushes an input or a
- * constant, or pops two values and pushes one; a program runs to one
- * value. The low four bits of a push step are the input's or the
- * constant's index. */
+ * up to four inputs and up to 16 constants. An input is a number def's
+ * newest value no older than its age bound, or a computed def's value
+ * worked out at the same frame from the number defs under it (a chain,
+ * ADR-0062), which takes no age bound of its own. Each step pushes an
+ * input or a constant, or pops one, two or three values and pushes one;
+ * a program runs to one number. The low four bits of a push step are
+ * the input's or the constant's index.
+ *
+ * A value is a number or a truth, and the validator checks each step's
+ * types: a step given the wrong type, a truth left at the end or a step
+ * value not listed here is refused. Any value may instead be no value:
+ * an input with none within its age bound, or a step whose number isn't
+ * finite. A step with no value in gives no value out, but for
+ * ECUIO_COMPUTED_IF, ALL and ANY, as their comments say. "a" is the
+ * second from the top and "b" the top; a run of steps over more parts
+ * (min of three, clamp) is a run of these. */
 #define ECUIO_COMPUTED_MAX_INPUTS    4u
 #define ECUIO_COMPUTED_MAX_CONSTANTS 16u
 #define ECUIO_COMPUTED_MAX_STEPS     33u   /* 16 operations and their 17 operands */
+/* A chain's most levels: a computed def reading only number defs is 1
+ * deep, one reading it 2 */
+#define ECUIO_COMPUTED_MAX_DEPTH     8u
 
+/* Numbers to a number */
 #define ECUIO_COMPUTED_PUSH_INPUT    0x00u  /* | the input's index */
 #define ECUIO_COMPUTED_PUSH_CONSTANT 0x10u  /* | the constant's index */
 #define ECUIO_COMPUTED_ADD           0x20u
-#define ECUIO_COMPUTED_SUBTRACT      0x21u  /* the second from the top minus the top */
+#define ECUIO_COMPUTED_SUBTRACT      0x21u  /* a - b */
 #define ECUIO_COMPUTED_MULTIPLY      0x22u
-#define ECUIO_COMPUTED_DIVIDE        0x23u  /* the second from the top over the top;
-                                               a zero top gives no value */
+#define ECUIO_COMPUTED_DIVIDE        0x23u  /* a / b; a zero b gives no value */
+#define ECUIO_COMPUTED_MIN           0x24u  /* b when b < a, else a */
+#define ECUIO_COMPUTED_MAX           0x25u  /* b when b > a, else a */
+#define ECUIO_COMPUTED_ABS           0x26u  /* one number: its distance from zero */
+#define ECUIO_COMPUTED_SQRT          0x27u  /* one number; below zero gives no value */
+#define ECUIO_COMPUTED_ROUND         0x28u  /* one number; a half goes away from zero */
+#define ECUIO_COMPUTED_FLOOR         0x29u  /* one number */
+#define ECUIO_COMPUTED_CEIL          0x2Au  /* one number */
+
+/* Two numbers to a truth */
+#define ECUIO_COMPUTED_LESS          0x30u  /* a < b */
+#define ECUIO_COMPUTED_LESS_EQUAL    0x31u  /* a <= b */
+#define ECUIO_COMPUTED_GREATER       0x32u  /* a > b */
+#define ECUIO_COMPUTED_GREATER_EQUAL 0x33u  /* a >= b */
+#define ECUIO_COMPUTED_EQUAL         0x34u  /* a == b, exactly */
+#define ECUIO_COMPUTED_NOT_EQUAL     0x35u  /* a != b, exactly */
+
+/* Truths to a truth, and the one conditional */
+#define ECUIO_COMPUTED_ALL           0x38u  /* false when either is false, else
+                                               no value when either has none */
+#define ECUIO_COMPUTED_ANY           0x39u  /* true when either is true, else
+                                               no value when either has none */
+#define ECUIO_COMPUTED_NOT           0x3Au  /* one truth */
+#define ECUIO_COMPUTED_IF            0x3Bu  /* a truth p (third from the top),
+                                               then numbers a and b: a when p
+                                               holds, else b; no value when p
+                                               has none or the one picked
+                                               has none */
 
 /* The age past which a value is stale: the app dims it and a computed
  * input older than this, with no max_age of its own, gives no value
@@ -207,7 +248,8 @@ typedef struct ecuio_computed {
     uint32_t max_age_us[4];       /* each input's age bound: 0 for
                                      ECUIO_VALUE_STALE_US, else
                                      ECUIO_COMPUTED_MIN_AGE_US to _MAX_;
-                                     zero after input_count */
+                                     0 for a computed input; zero after
+                                     input_count */
     uint8_t  input_count;         /* 1 to ECUIO_COMPUTED_MAX_INPUTS */
     uint8_t  step_count;          /* 1 to ECUIO_COMPUTED_MAX_STEPS */
     uint8_t  constant_count;      /* 0 to ECUIO_COMPUTED_MAX_CONSTANTS */
@@ -424,12 +466,16 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
                                                       not strictly
                                                       ascending */
 #define ECUIO_VALIDATE_ERR_PROGRAM          (-21)  /* a program that doesn't
-                                                      run to one value: a
+                                                      run to one number: a
                                                       count out of range,
                                                       an unknown step, an
                                                       index past its count,
-                                                      too few values for an
-                                                      operation, a constant
+                                                      too few values for a
+                                                      step, a step given a
+                                                      truth for a number or
+                                                      a number for a truth,
+                                                      a truth at the end,
+                                                      a constant
                                                       not finite, an age
                                                       bound out of range,
                                                       or a nonzero byte
@@ -438,9 +484,19 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
 #define ECUIO_VALIDATE_ERR_COMPUTED_INPUT   (-22)  /* an input id that isn't
                                                       a numeric def of the
                                                       set (UINT, INT, FLOAT
-                                                      or ENUM, not
-                                                      COMPUTED) */
-/* -23 and -24 are reserved. */
+                                                      or ENUM) or a COMPUTED
+                                                      def, or a COMPUTED
+                                                      input with an age
+                                                      bound */
+#define ECUIO_VALIDATE_ERR_COMPUTED_CHAIN   (-23)  /* computed defs reading
+                                                      each other in a
+                                                      circle, or a chain
+                                                      past
+                                                      ECUIO_COMPUTED_MAX_DEPTH
+                                                      */
+#define ECUIO_VALIDATE_ERR_OUT_OF_MEMORY    (-24)  /* no room to check the
+                                                      chains: the set may
+                                                      be valid */
 #define ECUIO_VALIDATE_ERR_DUPLICATE_NAME   (-25)  /* two defs share a name,
                                                       byte for byte, an
                                                       empty one too: a
@@ -453,10 +509,11 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
  * duplicate rx, the second channel of the pair; for too many requests,
  * the first def whose request didn't fit; for a table range, the def;
  * for an enum entry, the entry; for a program or its input, the
- * program. It is
+ * program; for a chain, the first program in the table it couldn't
+ * settle (on a circle, reading one, or past the depth). It is
  * UINT32_MAX for ECUIO_VALIDATE_OK and for a code that names no single
  * element: a NULL, the layout version, the set's reserved fields, the
- * channel count, a NULL table. */
+ * channel count, a NULL table, no memory. */
 typedef struct ecuio_validation {
     int32_t  code;                /* ECUIO_VALIDATE_*; 0 = OK */
     uint32_t index;               /* the def or channel, or UINT32_MAX */
@@ -500,8 +557,11 @@ const ecuio_signal_set_t* ecuio_obd2_signal_set(void); /* ADR-0013 obd2 profile 
  * reserved fields; every def (ecuio_validate_signal; the first failing
  * def's code); unique def ids; unique def names; the channel
  * declarations; then the tables: each NULL only when empty, each def's
- * range in them, each enum entry, each program and its inputs. A set
- * with count 0 may leave defs NULL. Returns ECUIO_VALIDATE_OK or a
+ * range in them, each enum entry, each program and its inputs, then the
+ * chains (no circle, none past ECUIO_COMPUTED_MAX_DEPTH; checked with a
+ * byte per program from the heap, only when one computed def reads
+ * another, so a set with no chain allocates nothing). A set with count
+ * 0 may leave defs NULL. Returns ECUIO_VALIDATE_OK or a
  * ECUIO_VALIDATE_ERR_* code. When out isn't NULL, it receives the same
  * code and the index of the element at fault; a caller that only needs
  * pass or fail passes NULL. */
@@ -566,8 +626,11 @@ int ecuio_display_convert(const char* unit, uint8_t decimal_places,
 /* A file's bounds */
 #define ECUIO_SIGNAL_FILE_MAX_BYTES   1048576u   /* 1 MiB */
 #define ECUIO_SIGNAL_FILE_MAX_SIGNALS 1024u
-/* The format this core reads: a file's "havne_signals" */
-#define ECUIO_SIGNAL_FILE_FORMAT      1u
+/* The formats this core reads, a file's "havne_signals": the newest and
+ * the oldest. Format 2 adds the computed grammar's functions,
+ * comparisons and conditional; a format 1 file is held to format 1. */
+#define ECUIO_SIGNAL_FILE_FORMAT        2u
+#define ECUIO_SIGNAL_FILE_FORMAT_OLDEST 1u
 
 typedef struct ecuio_signal_file ecuio_signal_file_t;
 
@@ -612,6 +675,18 @@ const ecuio_signal_def_t* ecuio_signal_file_find(const ecuio_signal_file_t* file
  * ecuio_signal_file_free. */
 const char* ecuio_signal_file_key(const ecuio_signal_file_t* file,
                                   const ecuio_signal_def_t* def);
+
+/* The file's format, its "havne_signals" (ECUIO_SIGNAL_FILE_FORMAT_OLDEST
+ * to ECUIO_SIGNAL_FILE_FORMAT); a plugin variant's, the newest among its
+ * files. 0 for NULL. */
+uint32_t ecuio_signal_file_format(const ecuio_signal_file_t* file);
+
+/* A computed def's "expr" as the file wrote it, found by the def's
+ * address as ecuio_signal_file_key finds its key. "" for any other def,
+ * a base set's def, a def that isn't the file's, or a NULL argument.
+ * Valid until ecuio_signal_file_free. */
+const char* ecuio_signal_file_expr(const ecuio_signal_file_t* file,
+                                   const ecuio_signal_def_t* def);
 
 /* A gauge's warning levels (ecuio_signal_gauge_t's flags). Values are
  * append-only. */

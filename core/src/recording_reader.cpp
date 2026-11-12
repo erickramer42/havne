@@ -379,8 +379,8 @@ struct ecuio_recording {
     /* Opened through its frames: the set they decode with, each def's
      * signal (UINT32_MAX for one that never decoded), each def by its id,
      * a mark per index entry, the packed replies' lengths at the marks
-     * where they changed, the defs the computed signals read and their
-     * newest values at each mark */
+     * where they changed, the number defs the computed signals read and
+     * their newest values at each mark */
     bool from_frames = false;
     std::unique_ptr<set_copy> frame_set;
     std::vector<uint32_t> def_signal;
@@ -905,10 +905,13 @@ bool ecuio_recording::read_frames(ecuio_open_progress_t progress, void* user,
     }
     end_offset = lines.offset();
     frame_scan scan(&frame_set->set);
+    /* The number defs the computed signals read: a chain's computed
+     * inputs keep no state, so a mark saves its leaves alone (ADR-0062) */
     for (const ecuio_frame_decoder::computed_plan& c : scan.decoder.computed) {
         for (uint32_t k = 0; k < c.program->input_count; ++k) {
-            if (std::find(inputs.begin(), inputs.end(), c.inputs[k]) ==
-                inputs.end()) {
+            if (c.plan_of[k] == ecuio_frame_decoder::computed_plan::kLeaf &&
+                std::find(inputs.begin(), inputs.end(), c.inputs[k]) ==
+                    inputs.end()) {
                 inputs.push_back(c.inputs[k]);
             }
         }
@@ -1610,7 +1613,11 @@ ecuio_status_t ecuio_recording_open_frames(const char* folder_utf8,
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     ecuio_detail_clear();
-    if (ecuio_validate_signal_set(signal_set, nullptr) != ECUIO_VALIDATE_OK) {
+    const int valid = ecuio_validate_signal_set(signal_set, nullptr);
+    if (valid == ECUIO_VALIDATE_ERR_OUT_OF_MEMORY) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    if (valid != ECUIO_VALIDATE_OK) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     try {

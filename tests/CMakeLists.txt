@@ -89,11 +89,12 @@ target_compile_definitions(bench_recording PRIVATE
 app_enable_warnings(bench_recording)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_signal_file.cpp
+add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp
+    test_computed_grammar.cpp
     test_plugin.cpp)
 
-# test_signal_tables.cpp checks computed.h, the programs' checker and
-# stack machine, which are internal
+# test_signal_tables.cpp and test_computed.cpp check computed.h, the
+# programs' checker and stack machine, which are internal
 target_include_directories(test_signals PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -670,6 +671,21 @@ if(TARGET havne-cli)
             --exit 3
             -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max"
                --signals ${_cli_signals}/refused.json --values)
+        # Format 2 (ADR-0062): a chain two computed signals deep read back,
+        # a call refused in a format 1 file, and the example in examples/
+        # read and run through a hand-written replay of MAP and baro
+        # replies (a boost of 0, 50 and 100 kPa, a ratio of 1, 1.5 and 2)
+        app_cli_golden(SignalsCheckReadsAChain signals-check-chain.jsonl
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/chain.json)
+        app_cli_golden(SignalsCheckRefusesACallInFormat1 signals-refused-format.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/call-in-format-1.json)
+        app_cli_golden(SignalsCheckReadsTheExample signals-check-example.jsonl
+            -- $<TARGET_FILE:havne-cli> signals check ${CMAKE_SOURCE_DIR}/examples/boost-ratio.json)
+        app_cli_golden(StreamComputesTheExamplesChain stream-example.jsonl
+            -- $<TARGET_FILE:havne-cli> stream
+               "replay://${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/boost-ratio?speed=max"
+               --signals ${CMAKE_SOURCE_DIR}/examples/boost-ratio.json --values)
         # Plugins (ADR-0052): the example and the test packages listed,
         # checked with their fixtures unrun (the vcan run is
         # CliPluginRunTest's), the variants a made-up VIN proposes, and the
@@ -686,6 +702,9 @@ if(TARGET havne-cli)
         app_cli_golden(PluginsCheckSaysALongInterfacesName plugins-check-long-on.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/packed.json
                --on vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv)
+        app_cli_golden(PluginsCheckWarnsOfAFormat2FileOnAnOlderCore
+            plugins-check-format2.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/format2)
         app_cli_golden(PluginsCheckNamesARefusedFixtureFile
             plugins-check-bad-fixture.jsonl --exit 1
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/bad-fixture)

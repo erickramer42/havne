@@ -11,13 +11,17 @@
 #
 #   python3 scripts/bench_ab.py [-n N] <tree A> <tree B> load
 #   python3 scripts/bench_ab.py [-n N] <tree A> <tree B> timing [seconds]
+#   python3 scripts/bench_ab.py [-n N] <tree A> <tree B> decode
 #
 # load: bench_bridge --load (the replay fixture through the bridge):
 #   the worker's frames a second looping, and frame to GUI thread p99 at
 #   100x. timing: bench_timing (each transport against the fakes, the
 #   fake's 4 ms reply): each transport's lowest P50 latency and its
-#   requests a second. N is 5 by default. The trees are build trees with
-#   the bench targets built (Release); each run's raw output and a CSV
+#   requests a second. decode: bench_bridge --decode, core's decode a
+#   frame under obd2, eight computed signals and a chain of eight; a
+#   figure only B has (a set A's core refuses) is listed with B's alone.
+#   N is 5 by default. The trees are build trees with the bench targets
+#   built (Release); each run's raw output and a CSV
 #   of every figure go to Testing/bench-ab/<stamp>/.
 
 import os
@@ -56,6 +60,18 @@ def parse_load(text):
     return out
 
 
+def parse_decode(text):
+    """bench_bridge --decode's table: each set's median ns a frame"""
+    out = {}
+    for line in text.splitlines():
+        if not line.startswith("| ") or line.startswith("| Set"):
+            continue
+        c = cells(line)
+        if len(c) >= 2 and re.match(r"^[0-9.]+$", c[1]):
+            out[f"{c[0]}, ns a frame"] = float(c[1])
+    return out
+
+
 def parse_timing(text, seconds):
     """bench_timing's table: per transport, the lowest P50 latency and the
     requests a second"""
@@ -79,7 +95,7 @@ def main():
     n = 5
     if len(args) >= 2 and args[0] == "-n":
         n, args = int(args[1]), args[2:]
-    if len(args) < 3 or args[2] not in ("load", "timing"):
+    if len(args) < 3 or args[2] not in ("load", "timing", "decode"):
         for line in open(__file__, encoding="utf-8"):
             if not line.startswith("#"):
                 break
@@ -87,8 +103,8 @@ def main():
         sys.exit(2)
     trees, kind = args[:2], args[2]
     seconds = int(args[3]) if kind == "timing" and len(args) > 3 else 10
-    if kind == "load":
-        cmds = [[exe(t, "bench_bridge"), "--load"] for t in trees]
+    if kind in ("load", "decode"):
+        cmds = [[exe(t, "bench_bridge"), "--" + kind] for t in trees]
     else:
         cmds = [[exe(t, "bench_timing"), str(seconds)] for t in trees]
     out_dir = os.path.join("Testing", "bench-ab", time.strftime("%Y%m%d-%H%M%S"))
@@ -101,7 +117,9 @@ def main():
             label = "AB"[side]
             with open(os.path.join(out_dir, f"{label}{i + 1}.txt"), "w", encoding="utf-8") as fh:
                 fh.write(text)
-            got = parse_load(text) if kind == "load" else parse_timing(text, seconds)
+            got = (parse_load(text) if kind == "load" else
+                   parse_decode(text) if kind == "decode" else
+                   parse_timing(text, seconds))
             if run.returncode != 0 or not got:
                 sys.exit(f"bench_ab: run {label}{i + 1} failed (exit {run.returncode}); see {out_dir}")
             for k, v in got.items():
@@ -123,6 +141,10 @@ def main():
         ma, mb = statistics.median(a), statistics.median(b)
         ratio = f"{mb / ma:.2f}" if ma else "-"
         print(f"| {k} | {ma:g} ({min(a):g} to {max(a):g}) | {mb:g} ({min(b):g} to {max(b):g}) | {ratio} |")
+    for k, b in figures[1].items():
+        if k not in figures[0]:
+            mb = statistics.median(b)
+            print(f"| {k} | - | {mb:g} ({min(b):g} to {max(b):g}) | - |")
 
 
 if __name__ == "__main__":

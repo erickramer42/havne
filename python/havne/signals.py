@@ -42,6 +42,13 @@ def _gauge(file, key):
                  g.warn_high if g.flags & e.ECUIO_GAUGE_WARN_HIGH else None)
 
 
+def _expr(file, key):
+    """The expression of file's computed signal named key, as written;
+    None for no such signal, or one that isn't computed"""
+    found = text(lib.ecuio_signal_file_expr(file, lib.ecuio_signal_file_find(file, utf8(key))))
+    return found or None
+
+
 class SignalFile:
     """A signal file (ADR-0051), from its text or a path; registered as
     its profile ("user.<slug>") on load"""
@@ -60,6 +67,7 @@ class SignalFile:
         self.name = text(lib.ecuio_signal_file_name(self._handle))
         self.profile = text(lib.ecuio_signal_file_profile(self._handle))
         self.extends = text(lib.ecuio_signal_file_extends(self._handle))
+        self.format = lib.ecuio_signal_file_format(self._handle)
         check(lib.ecuio_profile_register(utf8(self.profile),
                                          lib.ecuio_signal_file_set(self._handle), None),
               "ecuio_profile_register")
@@ -68,6 +76,11 @@ class SignalFile:
         """The Gauge of the signal named key; None for no such signal, or
         one that gives no gauge"""
         return _gauge(self._handle, key)
+
+    def expr(self, key):
+        """The expression of the computed signal named key, as the file
+        writes it; None for no such signal, or one that isn't computed"""
+        return _expr(self._handle, key)
 
     def __repr__(self):
         return f"SignalFile({self.name!r}, profile {self.profile!r})"
@@ -161,6 +174,13 @@ class Plugin:
         when None); None for no such signal, or one that gives no gauge"""
         return _gauge(lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)),
                       key)
+
+    def expr(self, key, variant=None):
+        """The expression of a variant's computed signal named key (the
+        first variant when None), as written; None for no such signal, or
+        one that isn't computed"""
+        return _expr(lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)),
+                     key)
 
     @property
     def requires_core(self):

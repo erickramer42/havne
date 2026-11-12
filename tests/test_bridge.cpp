@@ -8553,6 +8553,55 @@ TEST(BridgeTest, SignalFileImportKeepsACopyByItsHash)
     EXPECT_EQ(storeFiles(dir.store()).size(), 1);
 }
 
+/* A format 2 file (ADR-0062) imports and is used as any: its chain counts
+ * among its signals, its profile registers, and a format 1 file using a
+ * call or a format 3 file is refused in the loader's words */
+TEST(BridgeTest, AFormat2SignalFileImportsAndIsUsedAsAny)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    const auto chain = [](const char* format, const char* expr) {
+        return QStringLiteral(
+                   R"({"havne_signals":%1,"name":"Chained","source":{"name":"t"},)"
+                   R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+                   R"({"key":"a","name":"A","read":{"service":"22","number":"D100"},)"
+                   R"("field":{"byte":0,"bits":8}},)"
+                   R"({"key":"b","name":"B","kind":"computed","expr":"%2"},)"
+                   R"({"key":"c","name":"C","kind":"computed","expr":"b * 2"}]})")
+            .arg(QLatin1String(format), QLatin1String(expr))
+            .toUtf8();
+    };
+    const QByteArray good = chain("2", "max(a, 1)");
+    QVariantMap r =
+        bridge.importSignalFile(writeScratch(from.path(), "chain.json", good));
+    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(r.value(QStringLiteral("count")).toInt(), 3);
+    EXPECT_EQ(r.value(QStringLiteral("profile")).toString().toStdString(),
+              "user.chained");
+    EXPECT_EQ(bridge.useSignalFiles({sha256Of(good)}).size(), 1);
+    EXPECT_TRUE(registered("user.chained"));
+
+    r = bridge.importSignalFile(
+        writeScratch(from.path(), "one.json", chain("1", "max(a, 1)")));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(r.value(QStringLiteral("words"))
+                    .toString()
+                    .contains(QStringLiteral("\"havne_signals\": 2")))
+        << r.value(QStringLiteral("words")).toString().toStdString();
+
+    r = bridge.importSignalFile(
+        writeScratch(from.path(), "three.json", chain("3", "a")));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(r.value(QStringLiteral("words"))
+                    .toString()
+                    .contains(QStringLiteral("format 3")))
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(storeFiles(dir.store()).size(), 1);
+}
+
 /* A file says the built-in set it extends and how many of its signals
  * are its own, at import and in use: the page offers one extending obd2
  * in obd2's place (ADR-0052) */

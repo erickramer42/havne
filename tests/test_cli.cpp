@@ -2014,7 +2014,8 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
                   cli::signal_file_line(l, file, set);
               }),
               "{\"type\":\"signal_file\",\"name\":\"Unit test\","
-              "\"profile\":\"user.unit-test\",\"signals\":4,\"base\":0,"
+              "\"profile\":\"user.unit-test\",\"format\":1,"
+              "\"signals\":4,\"base\":0,"
               "\"ecus\":[{\"rx\":\"0x7E9\",\"tx\":\"0x7E1\"}]}");
     const std::string other = ecuio_signal_group_name(ECUIO_SIGNAL_GROUP_OTHER);
     const std::string expected[] = {
@@ -2039,14 +2040,16 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
         "{\"type\":\"signal_def\",\"id\":30003,\"name\":\"Half\","
         "\"kind\":\"computed\",\"unit\":\"kph\",\"decimals\":0,\"group\":\"" +
             other +
-            "\",\"rank\":0,\"inputs\":[{\"id\":30000,\"max_age_us\":3000000}]}",
+            "\",\"rank\":0,\"expr\":\"temp / 2\","
+            "\"inputs\":[{\"id\":30000,\"max_age_us\":3000000}]}",
     };
     for (uint32_t i = 0; i < 4; ++i) {
         SCOPED_TRACE(i);
         EXPECT_TRUE(cli::own_signal(file, set.defs[i]));
         EXPECT_LE(expected[i].size(), cli::def_line_bytes(set, set.defs[i]));
         EXPECT_EQ(text([&](cli::Line& l) {
-                      cli::def_line(l, set, set.defs[i], nullptr);
+                      cli::def_line(l, set, set.defs[i], nullptr,
+                                    ecuio_signal_file_expr(file, &set.defs[i]));
                   }),
                   expected[i]);
     }
@@ -2364,6 +2367,37 @@ TEST(CliPluginTest, AGaugeWantsTheCoreThatReadsIt)
               "core reads from 0.7.2 on: raise the manifest's \\\"requires\\\" "
               "core to 0.7.2, so an older Havne names that version instead of "
               "refusing a signal file\"}\n");
+}
+
+// A plugin whose data files include one of format 2 is warned of a
+// requires.core below 0.8.0 and of no other; the gauge's warning is its own
+TEST(CliPluginTest, AFormat2FileWantsTheCoreThatReadsIt)
+{
+    struct Version {
+        uint16_t part[3];
+    };
+    const auto older = [](Version v, bool uses_format2) {
+        return cli::format2_needs_newer_core(v.part, uses_format2);
+    };
+    EXPECT_FALSE(older({{0, 8, 0}}, true));
+    EXPECT_FALSE(older({{0, 8, 1}}, true));
+    EXPECT_FALSE(older({{1, 0, 0}}, true));
+    EXPECT_TRUE(older({{0, 7, 9}}, true));
+    EXPECT_TRUE(older({{0, 1, 0}}, true));
+    EXPECT_FALSE(older({{0, 1, 0}}, false));
+
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    const uint16_t declared[3] = {0, 7, 3};
+    cli::requires_core_line(l, declared, cli::kFormat2Core,
+                            "\"havne_signals\": 2");
+    EXPECT_EQ(text_of(l),
+              "{\"type\":\"requires_core\",\"declared\":\"0.7.3\",\"needs\":"
+              "\"0.8.0\",\"warning\":\"the data files use "
+              "\\\"havne_signals\\\": 2, which core reads from 0.8.0 on: "
+              "raise the manifest's \\\"requires\\\" core to 0.8.0, so an "
+              "older Havne names that version instead of refusing a signal "
+              "file\"}\n");
 }
 
 // ---- A replay's own signal file (cli/recording_signals.h, ADR-0051
@@ -3259,4 +3293,49 @@ TEST(CliElm327Test, AddressesAndLines)
     EXPECT_EQ(std::string(c.data(), c.size()),
               "{\"type\":\"client\",\"event\":\"refused\","
               "\"peer\":\"127.0.0.1:50123\"}");
+}
+
+// A computed input has no age bound of its own (ADR-0062): its ages are the
+// number signals' under it, so its line says so instead of the stale age
+TEST(CliSignalFileTest, AComputedInputIsNamedComputedWithNoAge)
+{
+    const std::string json =
+        "{\"havne_signals\":2,\"name\":\"Chain\","
+        "\"source\":{\"name\":\"test\"},"
+        "\"ecus\":[{\"id\":\"tcm\",\"rx\":\"7E9\"}],\"signals\":["
+        "{\"key\":\"temp\",\"name\":\"Temp\",\"ecu\":\"tcm\","
+        "\"read\":{\"service\":\"22\",\"number\":\"1E1C\"},"
+        "\"field\":{\"byte\":0}},"
+        "{\"key\":\"half\",\"name\":\"Half\",\"kind\":\"computed\","
+        "\"expr\":\"temp / 2\",\"max_age\":{\"temp\":1.5}},"
+        "{\"key\":\"sum\",\"name\":\"Sum\",\"kind\":\"computed\","
+        "\"expr\":\"half + temp\"}]}";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
+    ASSERT_EQ(set.count, 3u);
+    char buf[4096];
+    const auto line = [&](uint32_t i) {
+        cli::Line l(buf, sizeof buf);
+        cli::def_line(l, set, set.defs[i], nullptr,
+                      ecuio_signal_file_expr(file, &set.defs[i]));
+        return std::string(l.data(), l.size());
+    };
+    EXPECT_EQ(ecuio_signal_file_format(file), 2u);
+    const std::string half = line(1);
+    EXPECT_NE(half.find("\"expr\":\"temp / 2\",\"inputs\""),
+              std::string::npos)
+        << half;
+    EXPECT_NE(half.find("\"inputs\":[{\"id\":30000,\"max_age_us\":1500000}]"),
+              std::string::npos)
+        << half;
+    const std::string sum = line(2);
+    EXPECT_NE(sum.find("\"expr\":\"half + temp\",\"inputs\":[{\"id\":30001,\"max_age_us\":null,"
+                       "\"computed\":true},{\"id\":30000,"
+                       "\"max_age_us\":3000000}]"),
+              std::string::npos)
+        << sum;
+    EXPECT_LE(sum.size(), cli::def_line_bytes(set, set.defs[2]));
+    ecuio_signal_file_free(file);
 }

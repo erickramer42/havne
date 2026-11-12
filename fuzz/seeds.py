@@ -15,6 +15,9 @@
 # these, a 60 s run reaches the loaders behind the JSON reader; from
 # nothing, it barely leaves the reader. Built from the fixtures, never
 # copies of them, so the seeds follow the formats as the fixtures do.
+# fuzz_computed's are programs in the harness's built form (computed()),
+# where the format 1 machine and this one would part if they ever
+# differed: no coverage tells the fuzzer that a value went wrong.
 #
 #   python3 fuzz/seeds.py corpus
 #   ./build-fuzz/fuzz/fuzz_signal_file corpus/fuzz_signal_file -max_total_time=60
@@ -23,6 +26,7 @@ import glob
 import json
 import os
 import re
+import struct
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -110,6 +114,27 @@ def main(argv):
               read(os.path.relpath(path, ROOT)))
     for path in data_files:
         write(out, "fuzz_signal_file", "plugin_" + os.path.basename(path), read(plugin + "/" + path))
+    # Format 2's grammar (ADR-0062), which no fixture holds yet: each
+    # function and comparison once, over four DIDs
+    leaves = [{"key": k, "name": k.upper(), "read": {"service": "22", "number": "D10%d" % n},
+               "field": {"byte": 0}} for n, k in enumerate("abcd")]
+    exprs = ["min(a, b, c)", "max(a, b) - abs(c)", "clamp(a, 0, 100)",
+             "sqrt(round(a) + floor(b) * ceil(c))",
+             "if(all(a > b, b >= c, c < d), a, if(any(a <= 1, not(b == 2), c != 3), b, -c))"]
+    grammar = {"havne_signals": 2, "name": "Grammar", "source": {"name": "Havne's seeds"},
+               "ecus": [{"id": "pcm", "rx": "7E8"}],
+               "signals": leaves + [{"key": "e%d" % n, "name": "E%d" % n, "kind": "computed",
+                                     "expr": e} for n, e in enumerate(exprs)]}
+    write(out, "fuzz_signal_file", "grammar_format2.json", json.dumps(grammar).encode())
+    # A chain (ADR-0062) listed top first, so its depth order isn't the
+    # set's: the harness's decode checks the batch keeps the set's
+    chain_exprs = [("top", "mid * 2 + side"), ("side", "low - d"), ("mid", "low + b"),
+                   ("low", "a + c")]
+    chain = {"havne_signals": 2, "name": "Chain", "source": {"name": "Havne's seeds"},
+             "ecus": [{"id": "pcm", "rx": "7E8"}],
+             "signals": leaves + [{"key": k, "name": k.upper(), "kind": "computed", "expr": e}
+                                  for k, e in chain_exprs]}
+    write(out, "fuzz_signal_file", "chain_format2.json", json.dumps(chain).encode())
 
     # The OBDb import: no year extending obd2 (0x00), and alone in 2019
     # (0x80 | (2019 - 1990))
@@ -299,7 +324,75 @@ def main(argv):
         # The start of a longer file, cut at a line feed
         write(out, "fuzz_csv_import", os.path.basename(folder) + "-guess-cut",
               b"guess cut\n" + log[:len(log) * 2 // 3])
+
+    # The computed machine: its operations by kOperations' index
+    add, sub, mul, div, mn, mx, sqrt, rnd = 0, 1, 2, 3, 4, 5, 7, 8
+    gt, eq, all_, any_, if_ = 13, 15, 17, 18, 20
+    inf, nzero, tiny = float("inf"), -0.0, 5e-324
+    seeds = {
+        "one-over-x": (True, [("k", 0), ("i", 0), div], [1.0], [inf, 0, 0, 0]),
+        "boost": (True, [("i", 0), ("i", 1), sub], [], [28.5, 25.0, 0, 0]),
+        "ratio": (True, [("i", 0), ("i", 1), add, ("i", 1), div], [], [tiny, 2.5, 0, 0]),
+        "air-per-rev": (False, [("i", 0), ("k", 0), gt, ("i", 1), ("k", 1), mul,
+                                ("i", 0), div, ("k", 0), if_],
+                        [0.0, 60.0], [0.0, 12.3, 0, 0]),
+        "gear": (False, [("i", 0), ("k", 0), eq, ("k", 0), ("i", 1), ("i", 2), div, if_],
+                 [0.0], [0.0, 20.0, None, 0]),
+        "all-any": (False, [("i", 0), ("k", 0), gt, ("i", 1), ("k", 0), gt, all_,
+                            ("i", 2), ("k", 0), gt, any_, ("k", 1), ("k", 0), if_],
+                    [0.0, 1.0], [1.0, None, -1.0, 0]),
+        "clamp": (False, [("i", 0), ("k", 0), mx, ("k", 1), mn], [0.0, 100.0],
+                  [104.7, 0, 0, 0]),
+        "edges": (False, [("i", 0), sqrt, ("i", 1), rnd, mn, ("i", 2), mx],
+                  [], [nzero, -0.5, inf, 0]),
+        "deepest": (True, [("i", k % 4) for k in range(17)] + [add, sub, mul, div] * 4,
+                    [], [1.0, 2.0, 3.0, 4.0]),
+    }
+    for name, (format1, steps, constants, inputs) in seeds.items():
+        write(out, "fuzz_computed", name, computed(format1, steps, constants, inputs))
+    # The program as the struct's own bytes (an odd first byte): boost
+    program = struct.pack("<4H4I4B36s16d4I", 1, 2, 0, 0, 0, 0, 0, 0, 2, 3, 0, 0,
+                          bytes([0x00, 0x01, 0x21]), *([0.0] * 16), 0, 0, 0, 0)
+    write(out, "fuzz_computed", "struct-boost",
+          b"\x01" + program + b"\x00" + b"".join(number_bytes(v) for v in (28.5, 25.0, 0, 0)))
     return 0
+
+
+# fuzz_computed's edges, in its kEdges' order (the last, NaN, left out)
+EDGES = [float("inf"), float("-inf"), 0.0, -0.0, 5e-324, -5e-324, 1.7976931348623157e308,
+         -1.7976931348623157e308, 1e-300, 1e300, 0.5, -0.5, 2.5]
+
+
+def number_bytes(v):
+    """A value in fuzz_computed's form: an edge's byte, a small number's
+    (a whole number of halves from -32 to 31.5), or 0x80 and 8 bytes"""
+    for i, e in enumerate(EDGES):
+        if struct.pack("<d", e) == struct.pack("<d", v):
+            return bytes([0xC0 | i])
+    x = v * 4
+    if x == int(x) and int(x) % 2 == 0 and -128 <= int(x) < 128:
+        return bytes([(int(x) & 0xFF) >> 1])
+    return b"\x80" + struct.pack("<d", v)
+
+
+def computed(format1, steps, constants, inputs):
+    """An input to fuzz_computed's built form: each step ("i", k) pushes
+    input k, ("k", c) constant c, and a number is an operation's index in
+    kOperations; an input of None has no value"""
+    pushed = [s[1] for s in steps if isinstance(s, tuple) and s[0] == "i"]
+    data = bytes([0x02 if format1 else 0x00, max(pushed + [0]), len(steps) - 1,
+                  len(constants)])
+    for s in steps:
+        if isinstance(s, tuple):
+            data += bytes([(s[1] << 2) | (0 if s[0] == "i" else 1)])
+        else:
+            data += bytes([(s << 2) | 2])
+    for c in constants:
+        data += number_bytes(c)
+    data += bytes([sum(1 << i for i, v in enumerate(inputs) if v is None)])
+    for v in inputs:
+        data += number_bytes(0.0 if v is None else v)
+    return data
 
 
 if __name__ == "__main__":

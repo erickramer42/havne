@@ -183,8 +183,8 @@
       "properties": {
         "havne_signals": {
           "title": "Format",
-          "description": "The signal-file format's version, and the file's first key. This Havne reads format 1.",
-          "const": 1
+          "description": "The signal-file format's version, and the file's first key. This Havne reads formats 1 and 2: a variant takes the newest of its files, and a plugin with a format 2 file names a core that reads it in requires.core.",
+          "enum": [1, 2]
         },
         "name": {
           "title": "Name",

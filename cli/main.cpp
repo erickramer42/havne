@@ -1272,7 +1272,8 @@ void write_check_lines(Output& out, const ecuio_signal_file_t* file)
         if (cli::own_signal(file, set.defs[i])) {
             BigLine b(cli::def_line_bytes(set, set.defs[i]));
             cli::def_line(b.line, set, set.defs[i],
-                          ecuio_signal_file_gauge(file, &set.defs[i]));
+                          ecuio_signal_file_gauge(file, &set.defs[i]),
+                          ecuio_signal_file_expr(file, &set.defs[i]));
             write_line(out, b.line);
         }
     }
@@ -1765,9 +1766,13 @@ int run_plugins_check(const char* path, const char* on)
         write_line(out, b.line);
     }
     bool uses_gauge = false;
+    bool uses_format2 = false;
     for (uint32_t v = 0; v < info.variant_count; ++v) {
         const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, v);
         const std::string id = variant_of(p, v);
+        uses_format2 = uses_format2 ||
+                       ecuio_signal_file_format(
+                           ecuio_plugin_variant_file(p, v)) >= 2;
         {
             BigLine b(1024 + size_t{set.channel_count} * 64);
             cli::variant_line(b.line, id.c_str(),
@@ -1781,7 +1786,9 @@ int run_plugins_check(const char* path, const char* on)
                     ecuio_plugin_variant_file(p, v), &set.defs[i]);
                 uses_gauge = uses_gauge || gauge != nullptr;
                 BigLine b(cli::def_line_bytes(set, set.defs[i]));
-                cli::def_line(b.line, set, set.defs[i], gauge);
+                cli::def_line(b.line, set, set.defs[i], gauge,
+                              ecuio_signal_file_expr(
+                                  ecuio_plugin_variant_file(p, v), &set.defs[i]));
                 write_line(out, b.line);
             }
         }
@@ -1862,11 +1869,18 @@ int run_plugins_check(const char* path, const char* on)
     }
     uint16_t declared[3] = {};
     if (ecuio_plugin_requires_core(p, &declared[0], &declared[1],
-                                   &declared[2]) == ECUIO_OK &&
-        cli::gauge_needs_newer_core(declared, uses_gauge)) {
-        BigLine b(512);
-        cli::requires_core_line(b.line, declared);
-        write_line(out, b.line);
+                                   &declared[2]) == ECUIO_OK) {
+        if (cli::gauge_needs_newer_core(declared, uses_gauge)) {
+            BigLine b(512);
+            cli::requires_core_line(b.line, declared);
+            write_line(out, b.line);
+        }
+        if (cli::format2_needs_newer_core(declared, uses_format2)) {
+            BigLine b(512);
+            cli::requires_core_line(b.line, declared, cli::kFormat2Core,
+                                    "\"havne_signals\": 2");
+            write_line(out, b.line);
+        }
     }
     {
         BigLine b(512 + (on != nullptr ? std::strlen(on) * 6 : 0));
