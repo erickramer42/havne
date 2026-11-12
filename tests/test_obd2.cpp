@@ -4779,6 +4779,66 @@ TEST(PidSupportTest, TheBitmapsMarkTheirClearPidsUnsupported)
     }
 }
 
+/* A complete walk whose chain ended early (0x40's link to 0x60 clear)
+ * says every later PID unsupported, as J1979 reads the clear link: the
+ * set's PIDs past 0x60 are listed with the clear ones before it */
+TEST(PidSupportTest, AChainEndedEarlyMarksEveryLaterPidUnsupported)
+{
+    ecuio_channel_support_t car = first_vehicle();
+    car.flags = ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE;
+    car.pid_bitmap[(0x60 - 1) / 8] &= ~(0x80u >> ((0x60 - 1) % 8));
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    std::vector<uint16_t> expected;
+    int pastTheChain = 0;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if ((set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+            continue; /* none of obd2's computed inputs is past 0x60 */
+        }
+        const unsigned pid = set->defs[i].mux_key & 0xFFu;
+        if (pid > 0x60 ||
+            (car.pid_bitmap[(pid - 1) / 8] & (0x80u >> ((pid - 1) % 8))) == 0) {
+            expected.push_back(set->defs[i].id);
+        }
+        pastTheChain += pid > 0x60 ? 1 : 0;
+    }
+    ASSERT_GT(pastTheChain, 5);
+    EXPECT_EQ(unsupported(&car, 1), expected);
+    EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0x61));
+    EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0xA6));
+    EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0xFF));
+    EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0x5C)) << "as before";
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x0C)) << "as before";
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x00));
+
+    /* A chain whose last answered link is set judges nothing past it: the
+     * walk ended for another reason than the ECU's word */
+    ecuio_channel_support_t linked = car;
+    linked.pid_bitmap[(0x60 - 1) / 8] |= 0x80u >> ((0x60 - 1) % 8);
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(linked, 0x61));
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(linked, 0xA6));
+    /* A range below an answered one stays as its own bitmap says */
+    ecuio_channel_support_t gap = car;
+    gap.ranges = 0x5; /* 00 and 40 answered, 20 not */
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(gap, 0x21))
+        << "00's link to 20 is set";
+}
+
+/* A walk that never finished (PROBED alone) judges no range it didn't
+ * answer, however its last answered link reads */
+TEST(PidSupportTest, AnUnfinishedWalkJudgesNoRangeItDidntAnswer)
+{
+    ecuio_channel_support_t car = first_vehicle();
+    ASSERT_EQ(car.flags & ECUIO_SUPPORT_COMPLETE, 0u);
+    car.pid_bitmap[(0x60 - 1) / 8] &= ~(0x80u >> ((0x60 - 1) % 8));
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x61));
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0xA6));
+    for (uint16_t id : unsupported(&car, 1)) {
+        const ecuio_signal_def_t* d = find_def(ecuio_obd2_signal_set(), id);
+        ASSERT_NE(d, nullptr);
+        EXPECT_LE(d->mux_key & 0xFFu, 0x60u) << id;
+    }
+}
+
 /* The first vehicle's sheet counts 44 data PIDs to 0x60 (0x20 and 0x40,
  * the chain's links, and 0x60 left out); the bitmaps cover what their
  * ranges answered */
