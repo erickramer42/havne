@@ -75,9 +75,11 @@ env:
 jobs:
   core-and-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # the tags, for the ABI check below
 
       # jsonschema for SchemaFixturesTest (schema/ against the committed
       # fixtures) and pytest for PythonTest.* (the havne package against
@@ -109,6 +111,29 @@ jobs:
           ECUIO_PYTEST_REQUIRED: '1'
         run: |
           ctest --test-dir build -C Release --output-on-failure --no-tests=error
+
+      # The C ABI against the newest release's (scripts/abi-check.sh,
+      # libabigail): an incompatible change fails, an addition is reported.
+      # Its own steps, run whatever the tests did, so one red doesn't hide
+      # the other; the checkout above has the tags and the base release's tree
+      - name: Install libabigail and Ninja
+        if: ${{ (success() || failure()) && !inputs.smoke_only }}
+        run: sudo apt-get update && sudo apt-get install -y abigail-tools ninja-build
+      - name: Compare the C ABI with the newest release
+        if: ${{ (success() || failure()) && !inputs.smoke_only }}
+        shell: bash
+        run: |
+          # The summary is written whatever the verdict, and the check's
+          # own status then ends the step: a failure is when it's read
+          set +e
+          bash scripts/abi-check.sh 2>&1 | tee abi.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          # The headers' verdict first: abidiff's report can run past 40
+          # lines. An error before the headers' check leaves no verdict line
+          { echo '### C ABI'; echo; echo '```'; grep -m 1 'public declaration' abi.txt || true
+            tail -n 40 abi.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
   # Core and its Qt-free tests under AddressSanitizer and
   # UndefinedBehaviorSanitizer; LeakSanitizer runs with ASan on Linux, so
@@ -852,33 +877,6 @@ jobs:
         if: matrix.shard == 1
         shell: bash   # -o pipefail: tee must not hide the bench's exit status
         run: build/tests/bench_bridge --load | tee -a "$GITHUB_STEP_SUMMARY"
-
-  # The C ABI against the newest release's (scripts/abi-check.sh,
-  # libabigail): an incompatible change fails, an addition is reported
-  abi:
-    if: ${{ !inputs.smoke_only }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0   # the tags, and the base release's tree
-      - name: Install libabigail and Ninja
-        run: sudo apt-get update && sudo apt-get install -y abigail-tools ninja-build
-      - name: Compare the C ABI with the newest release
-        shell: bash
-        run: |
-          # The summary is written whatever the verdict, and the check's
-          # own status then ends the step: a failure is when it's read
-          set +e
-          bash scripts/abi-check.sh 2>&1 | tee abi.txt
-          status=${PIPESTATUS[0]}
-          set -e
-          # The headers' verdict first: abidiff's report can run past 40
-          # lines. An error before the headers' check leaves no verdict line
-          { echo '### C ABI'; echo; echo '```'; grep -m 1 'public declaration' abi.txt || true
-            tail -n 40 abi.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          exit "$status"
 
   # The Linux AppImage (packaging/linux/make-appimage.sh), on the oldest
   # Ubuntu it supports: an AppImage runs where glibc is at least its
