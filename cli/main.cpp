@@ -443,10 +443,11 @@ int open_interrupted(uint64_t, uint64_t, void* user)
 
 // An export, its sizing, an import or a recording's health report stopped
 // by an interrupt: the end line the other commands write on one, and
-// exit 1, as clear's, since nothing was written
-int ended_interrupted(Output& out)
+// exit 1, as clear's, since nothing was written. `where` names the caller
+// for HAVNE_CLI_EXPORT_TAIL_HOLD_MS's hold (the column check)
+int ended_interrupted(Output& out, const char* where = nullptr)
 {
-    second_interrupt_over(); // one end line, whatever interrupt follows
+    second_interrupt_over(where); // one end line, whatever interrupt follows
     char buf[64];
     cli::Line l(buf, sizeof buf);
     l.raw("{\"type\":\"end\"");
@@ -5272,7 +5273,7 @@ int run(int argc, char** argv)
         if (ex.options.format == ECUIO_EXPORT_CSV &&
             ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty() &&
             !missing_columns(ex, &asked, &missing)) {
-            return ended_interrupted(out);
+            return ended_interrupted(out, "column check");
         }
         if (ex.estimate) {
             const std::vector<uint32_t> rows = cli::estimate_intervals(ex);
