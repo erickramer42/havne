@@ -1018,6 +1018,21 @@ TestCase {
                 "the same scheme keeps the query whole")
     }
 
+    // keepalive_ms is a key all three adapter schemes take, so a switch
+    // between them keeps it
+    function test_anotherSchemeKeepsKeepaliveMs() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+
+        type(uri, "elm327://COM5?profile=uds-generic&keepalive_ms=2000")
+        press(page, "preset_j2534")
+        compare(uri.text, "j2534://?profile=uds-generic&keepalive_ms=2000",
+                "J2534 takes keepalive_ms")
+        press(page, "preset_wifi_obdx")
+        compare(uri.text, "elm327://192.168.4.1:23?profile=uds-generic&keepalive_ms=2000",
+                "ELM327 takes keepalive_ms")
+    }
+
     // The Units row sets the bridge's unit system, connected or not, and
     // shows the one in force
     function test_unitsRowSetsTheBridge() {
@@ -1245,10 +1260,10 @@ TestCase {
         // SocketCAN asks an ECU through core's ISO-TP under a profile that
         // requests (ADR-0040): uds-generic stays with its request keys; under
         // Default, raw there, which only listens, the request keys go
-        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0"
+        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0&keepalive_ms=2000"
         compare(page.profileChoice, "uds-generic")
         tap(find(list.itemAtIndex(0), "deviceRowArea"))
-        compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0")
+        compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0&keepalive_ms=2000")
         compare(page.profileChoice, "uds-generic")
         uri.text = "j2534://?identify=0&poll=0C&baud=500000"
         compare(page.profileChoice, "default")
