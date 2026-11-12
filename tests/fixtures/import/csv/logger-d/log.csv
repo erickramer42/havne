@@ -1,0 +1,11 @@
+Time (ms), Engine speed (rpm), Widget pressure (kPa), Gizmo state
+0, 900, 101.0, idle
+250, 950, 101.5, idle
+510, 1010, 102.0, idle
+, 1020, 102.1, idle
+760, 1100, 103.5, run
+1010, 1200, 104.0, run
+1270, 1350, 105.5, run
+1500, 1500, 106.0, run
+1740, 1480, 105.8, run
+ , , , 

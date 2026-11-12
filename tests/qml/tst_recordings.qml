@@ -282,6 +282,48 @@ TestCase {
         verify(!find(page, "importPanel").visible, "done with the file")
     }
 
+    // A CSV's rows with no time (one mid-file, a last one of padding) are
+    // left out: the guess's notes say so before the import, and the
+    // finished line counts them, after the ignored columns when both
+    function test_anImportSaysTheRowsWithNoTimeItLeftOut() {
+        const page = createPage()
+        const text = "Time (ms),RPM [rpm],Load [%],Note\n0,800,12,a\n,850,20,b\n"
+                     + "500,900,30,c\n , , , \n"
+        page.chooseImportFile(Harness.writeScratchFile("untimed-log.csv", text))
+        const preview = guessed(page)
+        verify(find(page, "importStart").enabled)
+        verify(preview.guess.notes.some(
+                   n => n.startsWith("2 of the 4 rows read have no time")),
+               "the guess says so: " + preview.guess.notes.join("; "))
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(find(page, "importNote").text,
+                "Imported 6 values, 2 rows with no time left out")
+        verify(Qt.colorEqual(find(page, "importNote").color, Theme.success))
+
+        // One such row is said as one
+        page.chooseImportFile(Harness.writeScratchFile("untimed-log-1.csv",
+            "Time (ms),RPM [rpm],Load [%],Note\n0,800,12,a\n,850,20,b\n500,900,30,c\n"))
+        guessed(page)
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(find(page, "importNote").text,
+                "Imported 6 values, 1 row with no time left out")
+
+        page.chooseImportFile(Harness.writeScratchFile("untimed-log-2.csv", text))
+        guessed(page)
+        page.chooseImportMap(Harness.writeScratchFile("untimed-map.json",
+            '{"havne_column_map": 1, "time": {"column": "Time (ms)", "unit": "ms"}, '
+            + '"signals": [{"column": "RPM [rpm]", "name": "RPM", "unit": "rpm"}]}'))
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        compare(find(page, "importNote").text,
+                "Imported 2 values; columns ignored: 2; 2 rows with no time left out")
+    }
+
     // A time named so, of whole numbers with no unit, reads as ms: Import is ready,
     // the unit shows chosen and changes with a tap
     function test_aTimeWithoutAUnitReadsAsMilliseconds() {

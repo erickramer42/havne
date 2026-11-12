@@ -721,6 +721,131 @@ TEST(CsvGuessTest, ARowOfAnotherShapeIsNoted)
         refused("time (s),A\n0,1\n1,2,3\n2,3\n").rfind("no row within", 0), 0u);
 }
 
+/* The guess's map over the same bytes, as the import runs it */
+struct Ran {
+    bool ok = false;
+    std::string why;
+    csv::outcome out;
+    Ran(const Guessed& g, const std::string& text)
+    {
+        csv::column_map m;
+        const std::string mt = g.map_text();
+        if (!csv::parse_map(mt.data(), mt.size(), m, &why)) {
+            return;
+        }
+        csv::memory_source src{
+            reinterpret_cast<const unsigned char*>(text.data()), text.size()};
+        csv::counting_sink count;
+        ok = csv::run(src, m, count, out, &why);
+    }
+};
+
+/* A row with no time: the import leaves it out, so the guess says how
+ * many of the rows it read are such, decides every signal without them,
+ * and its map imports the file with the same rows left out */
+TEST(CsvGuessTest, ARowWithNoTimeIsNotedAndDecidesNoSignal)
+{
+    /* A's text, S's two values and all of E's are in rows with no time */
+    const std::string six = "time (s),A,B,S,E\n0,1,a,,\n1,2,b,7,\n2,3,c,,\n"
+                            "3,4,d,,\n4,5,e,8,\n";
+    const std::string text = six + ",x,f,9,1\n5,6,g,,\n , , ,9 , 2\n";
+    Guessed g(text);
+    ASSERT_TRUE(g.ok) << g.why;
+    EXPECT_EQ(g.r.rows_read, 8u);
+    EXPECT_TRUE(g.noted("2 of the 8 rows read have no time (the first on line "
+                        "7): the import leaves such a row out"))
+        << notes_of(g);
+    EXPECT_EQ(g.sig("A", "kind"), "number");
+    EXPECT_EQ(g.sig("B", "kind"), "text");
+    /* Past the drop a count is of the rows with a time, and says so */
+    EXPECT_TRUE(g.noted("'S' holds a value in 2 of the 6 rows with a time: a "
+                        "wide export by sweep follows its rate; pick a row "
+                        "interval"))
+        << notes_of(g);
+    EXPECT_EQ(g.column("E"), "it is empty in every row with a time");
+    Guessed longer(text, nullptr, true);
+    ASSERT_TRUE(longer.ok) << longer.why;
+    EXPECT_EQ(longer.column("E"),
+              "it is empty in the first 6 rows with a time: a later value is "
+              "imported only if it is put back");
+    Guessed lone("time (s),A,E\n0,1,\n,2,\n", nullptr, true);
+    ASSERT_TRUE(lone.ok) << lone.why;
+    EXPECT_EQ(lone.column("E"),
+              "it is empty in the one row with a time: a later value is "
+              "imported only if it is put back");
+    const Ran ran(g, text);
+    ASSERT_TRUE(ran.ok) << ran.why;
+    EXPECT_EQ(ran.out.rows_no_time, 2u);
+    EXPECT_EQ(ran.out.first_no_time, 7u);
+    EXPECT_EQ(ran.out.values, 6u * 2u + 2u);
+
+    /* One row: its line */
+    Guessed one(six + ",9,z,,\n");
+    ASSERT_TRUE(one.ok) << one.why;
+    EXPECT_TRUE(one.noted("1 of the 6 rows read has no time (line 7): the "
+                          "import leaves it out"))
+        << notes_of(one);
+    /* None: no note, and the counts are of the rows read */
+    Guessed none(six);
+    ASSERT_TRUE(none.ok) << none.why;
+    EXPECT_FALSE(none.noted("no time")) << notes_of(none);
+    EXPECT_TRUE(none.noted("'S' holds a value in 2 of 5 rows read: "))
+        << notes_of(none);
+    EXPECT_EQ(none.column("E"), "it is empty in every row");
+    /* "Rows read" is every row read, one of another field count too */
+    Guessed mixed(six + "9,9,9,9,9,9\n,9,z,,\n");
+    ASSERT_TRUE(mixed.ok) << mixed.why;
+    EXPECT_EQ(mixed.r.rows_read, 7u);
+    EXPECT_TRUE(mixed.noted("1 of the 7 rows read has no time (line 8): the "
+                            "import leaves it out"))
+        << notes_of(mixed);
+    EXPECT_TRUE(mixed.noted("'S' holds a value in 2 of the 5 rows with a time"))
+        << notes_of(mixed);
+
+    /* A first column that rises around an empty cell is the time; one
+     * that falls across it is none */
+    const std::string clock = "Clock,RPM\n0,800\n,850\n1,900\n";
+    Guessed first(clock, "s");
+    ASSERT_TRUE(first.ok) << first.why;
+    EXPECT_EQ(first.time("column"), "Clock");
+    EXPECT_TRUE(first.noted("1 of the 3 rows read has no time (line 3)"))
+        << notes_of(first);
+    const Ran first_ran(first, clock);
+    ASSERT_TRUE(first_ran.ok) << first_ran.why;
+    EXPECT_EQ(first_ran.out.rows_no_time, 1u);
+    EXPECT_NE(refused("Clock,RPM\n1,800\n,850\n0,900\n")
+                  .find("no column reads as the time"),
+              std::string::npos);
+    /* A first column filled in half the rows or fewer is a sparse counter,
+     * not the time: taking it would leave half the file out */
+    EXPECT_NE(refused("Counter,RPM\n1,800\n,810\n,820\n2,830\n")
+                  .find("no column reads as the time"),
+              std::string::npos);
+    Guessed most("Counter,RPM\n1,800\n,810\n2,820\n,830\n3,840\n", "s");
+    ASSERT_TRUE(most.ok) << most.why;
+    EXPECT_EQ(most.time("column"), "Counter");
+    /* A column named as the time is the time however sparse, and noted */
+    Guessed named("time,RPM\n1,800\n,810\n,820\n2,830\n");
+    ASSERT_TRUE(named.ok) << named.why;
+    EXPECT_TRUE(named.noted("2 of the 4 rows read have no time"))
+        << notes_of(named);
+
+    /* No row with a time: the import's refusal when the sample is the
+     * whole file, a note when the file goes on past it */
+    const std::string empty = "time,rpm\n,800\n,900\n";
+    EXPECT_EQ(refused(empty), "no row below the header has a time");
+    Guessed more(empty, nullptr, true);
+    ASSERT_TRUE(more.ok) << more.why;
+    EXPECT_TRUE(more.noted("the time column 'time' is empty in the rows read"))
+        << notes_of(more);
+    EXPECT_FALSE(more.noted("the import leaves")) << notes_of(more);
+    EXPECT_EQ(more.sig("rpm", "kind"), "number");
+    /* None named and the first column empty throughout: no time to name */
+    EXPECT_NE(
+        refused("Clock,rpm\n,800\n,900\n").find("no column reads as the time"),
+        std::string::npos);
+}
+
 /* Each row below a header holds mostly numbers, so a preamble line of the
  * data's field count is never taken for it */
 TEST(CsvGuessTest, APreambleLineOfTheDatasShapeIsNoHeader)
@@ -1225,6 +1350,40 @@ TEST(CsvGuessTest, TheMadeUpLoggersAreGuessedAndImported)
         EXPECT_EQ(imp.report.values, 420u * 14u + 6u);
         EXPECT_EQ(imp.report.columns_ignored, 1u);
         EXPECT_EQ(imp.report.duration_us, 121521000u);
+    }
+    {
+        /* A row with no time in the middle, holding values, and a last
+         * row of padding alone: left out by the import, said by the guess */
+        SCOPED_TRACE("logger-d");
+        const std::string in =
+            (dir / "logger-d" / "log.csv").generic_u8string();
+        Guessed g(read_file(dir / "logger-d" / "log.csv"));
+        ASSERT_TRUE(g.ok) << g.why;
+        EXPECT_EQ(g.time("column"), "Time (ms)");
+        EXPECT_EQ(g.time("unit"), "ms");
+        EXPECT_TRUE(g.noted("2 of the 10 rows read have no time (the first on "
+                            "line 5): the import leaves such a row out"))
+            << notes_of(g);
+        EXPECT_EQ(g.sig(" Engine speed (rpm)", "kind"), "number");
+        EXPECT_EQ(g.sig(" Gizmo state", "kind"), "text");
+        EXPECT_EQ(g.r.columns, 3u);
+        Folder f;
+        const Called c(in);
+        ASSERT_EQ(c.rc, ECUIO_OK) << c.detail;
+        EXPECT_EQ(c.map() + "\n",
+                  read_text(dir / "logger-d" / "guessed-map.json"));
+        Imported imp(in, f.utf8("rec"), c.map());
+        ASSERT_EQ(imp.rc, ECUIO_OK) << imp.detail;
+        EXPECT_EQ(imp.report.rows_no_time, 2u);
+        EXPECT_EQ(imp.report.lines, 11u);
+        /* 8 rows with a time, 3 columns each */
+        EXPECT_EQ(imp.report.values, 8u * 3u);
+        EXPECT_EQ(imp.report.duration_us, 1740000u);
+        const std::string events = read_file(f.path / "rec" / "events.log");
+        EXPECT_NE(events.find("import  rows left out: 2 with no time (the "
+                              "first on line 5)\n"),
+                  std::string::npos)
+            << events;
     }
 }
 
