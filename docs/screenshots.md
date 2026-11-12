@@ -20,12 +20,12 @@ show. The README shows a few of these.
 
 ![The Dashboard through a quarter mile: a launch from the two-step near 3,900 rpm, upshifts that refill the shift lights, and past 100 mph at the line](images/dashboard.gif)
 
-*A quarter mile on the warmed-up vehicle: the launch, each upshift, and
-coolant and oil climbing toward the fan's cut-in.*
+*A quarter mile on the warmed-up vehicle: the launch, each upshift, boost
+building to about 16 psi, and coolant and oil climbing toward the fan's cut-in.*
 
 | Light | Night, amber | Night, red |
 |---|---|---|
-| [![The Dashboard in the Light look in a 2nd-gear pull at 5,849 rpm](images/desktop-dashboard-light.png)](images/desktop-dashboard-light.png) | [![The Dashboard in Night's amber style in a 2nd-gear pull at 6,051 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 6,336 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
+| [![The Dashboard in the Light look in a 2nd-gear pull at 5,992 rpm](images/desktop-dashboard-light.png)](images/desktop-dashboard-light.png) | [![The Dashboard in Night's amber style in a 2nd-gear pull at 6,867 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 7,004 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
 
 ### Live
 
