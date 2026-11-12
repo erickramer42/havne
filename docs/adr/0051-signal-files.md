@@ -755,6 +755,17 @@ round to it more slowly than the default 3 s); MAP keeps the default.
 - **The built-in layouts** name the signal by its ID beside the mock's
   (`Bridge.gaugeSignals`' `boost`), as for the others.
 
+Note of 2026-11-12: with chains (ADR-0062) a computed signal is an input
+too, so a replacement a computed signal reads is a number, an enum or,
+in a format 2 file, a computed signal (the reader's format decides; for
+a base program, the replacement's file's). The loader's chain check finds
+an input by its ID, a replacement's included, so a circle through one or a
+chain past 8 deep is refused in the file's words, and a replacement that
+puts a base program past 8 deep is refused at it. A base program's input
+with an age bound (obd2's Boost keeps 30 s on baro) stays a number: a
+computed input's ages are its own inputs'. Section 5's example loads so,
+its Boost the file's at 7011 and its Pressure Ratio reading it.
+
 ## Appendix: a gauge starts from its signal (2026-11-11)
 
 The app starts a dial from a signal's gauge: `profileSignals` rows carry
