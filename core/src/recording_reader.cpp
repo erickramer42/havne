@@ -2364,9 +2364,15 @@ ecuio_status_t ecuio_recording_stretches(const ecuio_recording_t* r,
     double speed_band = 0;
     double throttle_band = 0;
     double floor = 0;
+    double min_rise = 0;
+    double min_gain = 0;
     uint32_t signal[kRoles] = {};
     if (!level_of(rules->pull_level, ECUIO_STRETCH_DEFAULT_PULL_LEVEL,
                   &pull_level) ||
+        !level_of(rules->pull_min_rise, ECUIO_STRETCH_DEFAULT_PULL_RISE,
+                  &min_rise) ||
+        !level_of(rules->pull_min_gain, ECUIO_STRETCH_DEFAULT_PULL_GAIN,
+                  &min_gain) ||
         !level_of(rules->pull_load_level, ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL,
                   &load_level) ||
         !level_of(rules->cruise_speed_band,
@@ -2401,29 +2407,34 @@ ecuio_status_t ecuio_recording_stretches(const ecuio_recording_t* r,
         const size_t gate = has_throttle ? kThrottle : kLoad;
         const size_t measure = has_speed ? kSpeed : kRpm;
         const ecuio_aids::samples none;
+        const ecuio_aids::samples* engine_speed =
+            signal[kRpm] != UINT32_MAX ? &s[kRpm] : nullptr;
+        /* The rules' km/h in an mph signal's own unit, by the display's
+         * table */
+        double per_kmh = 1.0;
+        ecuio_display_value_t mph{};
+        if (has_speed && is_word(r->signals[signal[kSpeed]].pub.unit, "mph") &&
+            ecuio_display_convert("km/h", 0, 1.0, ECUIO_UNITS_IMPERIAL, &mph) ==
+                ECUIO_DISPLAY_OK) {
+            per_kmh = mph.value;
+        }
+        const ecuio_aids::pull_rules pull{
+            has_throttle ? pull_level : load_level,
+            pull_hold,
+            time_of(rules->pull_gap_us, ECUIO_STRETCH_DEFAULT_PULL_GAP_US),
+            kPullTolerance,
+            min_rise,
+            min_gain * per_kmh};
         std::vector<ecuio_aids::stretch> found;
         if ((rules->kinds & ECUIO_STRETCH_PULLS) != 0 &&
             signal[gate] != UINT32_MAX && signal[measure] != UINT32_MAX) {
-            const ecuio_aids::pull_rules pull{
-                has_throttle ? pull_level : load_level, pull_hold,
-                time_of(rules->pull_gap_us, ECUIO_STRETCH_DEFAULT_PULL_GAP_US),
-                kPullTolerance};
             const uint32_t flags =
                 (has_throttle ? 0u : ECUIO_RECORDING_STRETCH_BY_LOAD) |
                 (has_speed ? 0u : ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED);
-            ecuio_aids::find_pulls(s[gate], s[measure], has_speed, pull, flags,
-                                   found);
+            ecuio_aids::find_pulls(s[gate], s[measure], has_speed, engine_speed,
+                                   pull, flags, found);
         }
         if ((rules->kinds & ECUIO_STRETCH_CRUISES) != 0 && has_speed) {
-            /* The rules' km/h in an mph signal's own unit, by the
-             * display's table */
-            double per_kmh = 1.0;
-            ecuio_display_value_t mph{};
-            if (is_word(r->signals[signal[kSpeed]].pub.unit, "mph") &&
-                ecuio_display_convert("km/h", 0, 1.0, ECUIO_UNITS_IMPERIAL,
-                                      &mph) == ECUIO_DISPLAY_OK) {
-                per_kmh = mph.value;
-            }
             const ecuio_aids::cruise_rules cruise{
                 cruise_hold, speed_band * per_kmh, throttle_band,
                 floor * per_kmh};
@@ -2431,9 +2442,9 @@ ecuio_status_t ecuio_recording_stretches(const ecuio_recording_t* r,
                 s[kSpeed], has_throttle ? &s[kThrottle] : nullptr, cruise,
                 has_throttle ? 0u : ECUIO_RECORDING_STRETCH_NO_THROTTLE, found);
         }
-        ecuio_aids::cut_to(found, from_us, to_us, pull_hold, cruise_hold,
-                           signal[measure] != UINT32_MAX ? s[measure] : none,
-                           s[kSpeed]);
+        ecuio_aids::cut_to(
+            found, from_us, to_us, pull, has_speed, engine_speed, cruise_hold,
+            signal[measure] != UINT32_MAX ? s[measure] : none, s[kSpeed]);
         *count =
             static_cast<uint32_t>((std::min<size_t>)(found.size(), UINT32_MAX));
         for (uint32_t i = 0; i < capacity && i < *count; ++i) {

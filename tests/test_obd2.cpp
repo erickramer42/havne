@@ -1688,6 +1688,26 @@ TEST(RequestEngineTest, ScanFoundWithAFullTableIsCountedButNotPolled) {
     EXPECT_EQ(s.flags, ECUIO_SUPPORT_SCAN_COMPLETE);
 }
 
+/* A found DID the table already polls adds no second request: one DID,
+ * one row, as uds-generic's set has one def for it */
+TEST(RequestEngineTest, ScanFindingAPolledDidAddsNoSecondRequest)
+{
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 1);
+    const uint8_t req[3] = {0x22, 0x1E, 0x1C};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, req, 3), ecuio_engine_add_result::added);
+    ASSERT_TRUE(ecuio_engine_scan_add(&e, 0, 0x1E1C));
+    int64_t now = 0;
+    ASSERT_NO_FATAL_FAILURE(send_rotation(&e, 0, 0, now));
+    EXPECT_EQ(answer_did(&e, 0, 0x1E1C, now + kMs), ecuio_reply::positive);
+    now += ECUIO_ENGINE_GAP_US;
+    ASSERT_NO_FATAL_FAILURE(send_scan_request(&e, 0, 0x1E1C, now));
+    EXPECT_EQ(answer_did(&e, 0, 0x1E1C, now + kMs), ecuio_reply::positive);
+    EXPECT_EQ(e.scan[0].outcome, ECUIO_SCAN_FOUND);
+    EXPECT_EQ(e.scan[0].polled, 1u) << "its request is the one polled";
+    EXPECT_EQ(e.count, 1u);
+}
+
 /* A scan request the driver couldn't send stays due, as a bitmap does. */
 TEST(RequestEngineTest, UnsentScanRequestStaysDue) {
     ecuio_request_engine e;

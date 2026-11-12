@@ -3,9 +3,10 @@
 //
 // `havne-cli view`'s lines, read through the reader (recording.h): what
 // each recording holds, where an --align-on puts it, then each signal's
-// lowest, highest and count per column on one axis, the min/max shape a
-// chart draws, a --span's statistics and --stretches' pulls and
-// cruises. Times named host_us (and a signal's first_us and last_us, a
+// lowest, highest, mean and count per column on one axis (the min/max
+// shape a chart draws), a later recording's difference from the first's,
+// a --span's statistics, and --stretches' pulls and cruises. Times named
+// host_us (and a signal's first_us and last_us, a
 // stats line's lowest_us and highest_us) are the recording's own; the
 // axis's (from_us and to_us, on the axis, stats and stretch lines; an at
 // line's t_us) are host_us plus the recording's offset_us, so aligned
@@ -19,6 +20,7 @@
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -26,20 +28,53 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace cli {
 
 // --align-on: rise:<signal>:<level>, fall:<signal>:<level>,
-// marker:<label>, utc or engine-start (the rpm signal reaching 500
-// after being below 100, core's ECUIO_RECORDING_FIND_ENGINE_START). The
+// marker:<label>, utc, engine-start (the rpm signal reaching 500
+// after being below 100, core's ECUIO_RECORDING_FIND_ENGINE_START) or
+// pull:<n>[,<n>...] (the start of each recording's nth pull, 1 the
+// first: one number for every recording, or one for each in order). The
 // level is the last colon's: a signal's name may hold one.
 struct AlignOn {
-    enum Kind { none, rise, fall, marker, utc, engine_start };
+    enum Kind { none, rise, fall, marker, utc, engine_start, pull };
     Kind kind = none;
     std::string signal;
     std::string label;
     double level = 0;
+    std::vector<uint32_t> pulls; // pull: one, or one per recording
 };
+
+// The most pulls --align-on pull: counts to
+constexpr uint32_t kAlignPullMax = 100000;
+
+// pull:'s list: whole numbers from 1 to kAlignPullMax between commas,
+// one or more, nothing else
+inline bool parse_pull_list(const std::string& text, std::vector<uint32_t>& out)
+{
+    std::vector<uint32_t> list;
+    uint32_t n = 0;
+    size_t digits = 0;
+    for (size_t i = 0; i <= text.size(); ++i) {
+        const char c = i < text.size() ? text[i] : ',';
+        if (c >= '0' && c <= '9') {
+            n = n * 10 + static_cast<uint32_t>(c - '0');
+            if (++digits > 6) {
+                return false;
+            }
+        } else if (c == ',' && digits != 0 && n >= 1 && n <= kAlignPullMax) {
+            list.push_back(n);
+            n = 0;
+            digits = 0;
+        } else {
+            return false;
+        }
+    }
+    out = list;
+    return true;
+}
 
 // A finite decimal, the whole text
 inline bool parse_decimal(const char* text, double& out)
@@ -71,6 +106,11 @@ inline bool parse_align_on(const char* text, AlignOn& out)
     } else if (s.rfind("marker:", 0) == 0 && s.size() > 7) {
         a.kind = AlignOn::marker;
         a.label = s.substr(7);
+    } else if (s.rfind("pull:", 0) == 0) {
+        a.kind = AlignOn::pull;
+        if (!parse_pull_list(s.substr(5), a.pulls)) {
+            return false;
+        }
     } else if (s.rfind("rise:", 0) == 0 || s.rfind("fall:", 0) == 0) {
         a.kind = s[0] == 'r' ? AlignOn::rise : AlignOn::fall;
         const std::string rest = s.substr(5);
@@ -432,6 +472,70 @@ inline void align_line(Line& l, uint32_t recording, const char* on, bool found,
     l.ch('}');
 }
 
+// The closed span of a recording's time whose samples the reader counts
+// in column c of a query of n columns over [t0_us, t1_us), the span a
+// whole number of columns as view's queries are: the column's own
+// microseconds, or with columns of a second or more the whole seconds
+// the reader places there (each in the column it starts in, the first
+// taking the second across t0_us, the last second whole though it runs
+// past t1_us). False for a column no second starts in.
+inline bool column_span(uint64_t t0_us, uint64_t t1_us, uint32_t n, uint32_t c,
+                        uint64_t& from_us, uint64_t& to_us)
+{
+    const uint64_t second = 1000000;
+    const uint64_t width = (t1_us - t0_us) / n;
+    const uint64_t start = t0_us + c * width;
+    if (width < second) {
+        from_us = start;
+        to_us = start + width - 1;
+        return true;
+    }
+    const uint64_t first =
+        c == 0 ? t0_us / second : (start + second - 1) / second;
+    const uint64_t past = (std::min)((start + width + second - 1) / second,
+                                     (t1_us + second - 1) / second);
+    if (first >= past) {
+        return false;
+    }
+    from_us = first * second;
+    to_us = past * second - 1;
+    return true;
+}
+
+// A column's mean where its count and range alone give it: none for an
+// empty column (NaN), the value of one sample or of samples all alike,
+// the middle of two. False where the samples themselves must be read.
+inline bool mean_of_column(const ecuio_recording_column_t& col, double& mean)
+{
+    if (col.samples == 0) {
+        mean = NAN;
+    } else if (col.samples == 1 || col.lowest == col.highest) {
+        mean = col.lowest;
+    } else if (col.samples == 2) {
+        mean = (col.lowest + col.highest) / 2;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+// What a delta compares: a signal's name and its unit, the unit's ASCII
+// case ignored ("RPM" is "rpm"), so a speed in km/h is never taken from
+// one in mph
+inline std::string delta_key(const ecuio_recording_signal_t& s)
+{
+    std::string key;
+    for (size_t i = 0; i < sizeof s.name && s.name[i] != '\0'; ++i) {
+        key += s.name[i];
+    }
+    key += '\n';
+    for (size_t i = 0; i < sizeof s.unit && s.unit[i] != '\0'; ++i) {
+        const char c = s.unit[i];
+        key += c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+    }
+    return key;
+}
+
 // {"type":"axis", from_us, to_us, columns, column_us}
 inline void axis_line(Line& l, const Axis& a)
 {
@@ -447,20 +551,28 @@ inline void axis_line(Line& l, const Axis& a)
     l.ch('}');
 }
 
-// The bytes a columns line can take: a column's three entries at most
+// The bytes a columns line can take: a column's five entries at most
 // 26 bytes each, and a name escaped
 inline size_t columns_line_bytes(uint32_t columns)
 {
-    return 512 + static_cast<size_t>(columns) * 3 * 27;
+    return 512 + static_cast<size_t>(columns) * 5 * 27;
 }
 
 // One signal's columns on the axis: {"type":"columns", recording, signal,
-// samples [], and a number's lowest [] and highest [], null where a column
-// is empty}. cols holds w.count columns, the axis's from w.first on; the
-// others are empty. NULL cols: every column empty.
+// samples [], and a number's lowest [], highest [] and mean [], null
+// where a column is empty; then, for a recording after the first aligned
+// one that shows the signal as a number in the same unit (delta_key),
+// delta_from (that first's place) and delta [], its mean less the
+// first's, null where either column is empty}. A column one microsecond
+// wide holding three or more unlike samples has no mean (the reader's
+// statistics take no span of one instant). cols holds w.count columns, the axis's from w.first on; the
+// others are empty. NULL cols: every column empty. means and delta hold
+// the axis's columns each, NaN for none; NULL delta: no delta keys.
 inline void columns_line(Line& l, uint32_t recording,
                          const ecuio_recording_signal_t& s, const Window& w,
-                         uint32_t columns, const ecuio_recording_column_t* cols)
+                         uint32_t columns, const ecuio_recording_column_t* cols,
+                         const double* means = nullptr,
+                         const double* delta = nullptr, uint32_t delta_from = 0)
 {
     const bool text = (s.flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0;
     auto at = [&](uint32_t c) -> const ecuio_recording_column_t* {
@@ -500,6 +612,25 @@ inline void columns_line(Line& l, uint32_t recording,
             }
         }
         l.ch(']');
+    }
+    const auto numbers = [&](const char* key, const double* values) {
+        l.key(key);
+        l.ch('[');
+        for (uint32_t c = 0; c < columns; ++c) {
+            if (c != 0) {
+                l.ch(',');
+            }
+            l.number(values != nullptr ? values[c] : NAN);
+        }
+        l.ch(']');
+    };
+    if (!text) {
+        numbers("mean", means);
+        if (delta != nullptr) {
+            l.key("delta_from");
+            l.u64(delta_from);
+            numbers("delta", delta);
+        }
     }
     l.ch('}');
 }
@@ -616,9 +747,10 @@ inline ecuio_stretch_rules_t stretch_rules(uint32_t kinds)
 }
 
 // --stretch-level <key>=<value>: pull-throttle and pull-load in %,
-// pull-hold, pull-gap and cruise-hold in seconds, cruise-speed-band and
-// cruise-floor in km/h (mph with imperial, converted), and
-// cruise-throttle-band in %; 0 or more, 0 the default
+// pull-hold, pull-gap and cruise-hold in seconds, pull-rise in rpm,
+// pull-gain, cruise-speed-band and cruise-floor in km/h (mph with
+// imperial, converted), and cruise-throttle-band in %; 0 or more, 0 the
+// default
 inline bool parse_stretch_level(const char* text, bool imperial,
                                 ecuio_stretch_rules_t& r)
 {
@@ -638,6 +770,10 @@ inline bool parse_stretch_level(const char* text, bool imperial,
         r.pull_hold_us = us;
     } else if (key == "pull-gap") {
         r.pull_gap_us = us;
+    } else if (key == "pull-rise") {
+        r.pull_min_rise = v;
+    } else if (key == "pull-gain") {
+        r.pull_min_gain = speed;
     } else if (key == "cruise-hold") {
         r.cruise_hold_us = us;
     } else if (key == "cruise-speed-band") {
@@ -699,10 +835,10 @@ inline void name_or_null(Line& l, const ecuio_recording_signal_t* s)
     }
 }
 
-// Each role's signal for a recording, and what the cruise was sought
-// with, in km/h: {"type":"roles", recording, throttle, engine_load,
+// Each role's signal for a recording, and the speeds the stretches were
+// sought with, in km/h: {"type":"roles", recording, throttle, engine_load,
 // vehicle_speed, engine_speed (names, or null for none), cruise_floor,
-// cruise_speed_band}. by_role holds the four in that order.
+// cruise_speed_band, pull_gain}. by_role holds the four in that order.
 inline void roles_line(Line& l, uint32_t recording,
                        const ecuio_recording_signal_t* const by_role[4],
                        const ecuio_stretch_rules_t& r)
@@ -725,6 +861,9 @@ inline void roles_line(Line& l, uint32_t recording,
     l.number(r.cruise_speed_band != 0
                  ? r.cruise_speed_band
                  : ECUIO_STRETCH_DEFAULT_CRUISE_SPEED_BAND);
+    l.key("pull_gain");
+    l.number(r.pull_min_gain != 0 ? r.pull_min_gain
+                                  : ECUIO_STRETCH_DEFAULT_PULL_GAIN);
     l.ch('}');
 }
 

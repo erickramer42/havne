@@ -148,7 +148,8 @@ TestCase {
                 { tag: "livePage" },
                 { tag: "diagnosticsPage" }, { tag: "logPage" }, { tag: "logFrames" },
                 { tag: "recordingsPage" }, { tag: "recordingsOpened" }, { tag: "recordingsViewer" },
-                { tag: "recordingsCompare" }, { tag: "recordingsImportCsv" },
+                { tag: "recordingsCompare" }, { tag: "recordingsComparePull" },
+                { tag: "recordingsImportCsv" },
                 { tag: "recordingsImportCandump" }, { tag: "recordingsImportGuess" },
                 { tag: "settingsPage" }]
     }
@@ -166,7 +167,8 @@ TestCase {
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         // recordingsOpened: the viewer as it opens, its toolbar's hint
         // still showing; recordingsViewer: a cursor placed
-        const viewer = ["recordingsOpened", "recordingsViewer", "recordingsCompare"].includes(data.tag)
+        const viewer = ["recordingsOpened", "recordingsViewer", "recordingsCompare",
+                        "recordingsComparePull"].includes(data.tag)
         const importing = data.tag.startsWith("recordingsImport")
         // dashboardPage is the desktop form at a phone's width;
         // dashboardPhone* the phone's, in edit mode with each of its
@@ -246,6 +248,18 @@ TestCase {
             tryVerify(() => page.compareAligned, 10000, "the compared one opens")
             page.setAlignOn("rise")
             page.setCursor(5000)
+        }
+        // Compared with itself, aligned on a pull: both pull choices
+        // shown, in the phone viewer's About, where Compare lives
+        if (data.tag === "recordingsComparePull") {
+            page.compareWith(row)
+            tryVerify(() => page.compareAligned, 10000, "the compared one opens")
+            page.setAlignOn("pull")
+            tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
+            if (page.pinnedViewer)
+                page.detailView = "about"
+            tryVerify(() => find(page, "alignPullHere").visible && find(page, "alignPullThere").visible,
+                      2000, "both pull choices show")
         }
         if (data.tag === "diagnosticsPage") {
             tryVerify(() => find(page, "clearCodes").enabled, 2000, "the report is read")

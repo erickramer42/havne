@@ -31,9 +31,10 @@ Signal.__doc__ = ("A recording's signal: kind 'number', 'text' or 'enum'; a numb
 Marker = namedtuple("Marker", "host_us label")
 Column = namedtuple("Column", "lowest highest samples")
 Imported = namedtuple("Imported", "folder lines frames error_frames interfaces values "
-                                  "columns_ignored utc_start_us duration_us")
+                                  "columns_ignored utc_start_us duration_us rows_no_time")
 Imported.__doc__ = ("What an import made: its folder and core's counts; utc_start_us None "
-                    "when the file gave no UTC time")
+                    "when the file gave no UTC time; rows_no_time a CSV's rows left out "
+                    "for an empty time cell")
 RecordedFrame = namedtuple("RecordedFrame", "host_us timestamp_us id flags data")
 RecordedFrame.__doc__ = ("A frames.csv row as recorded: its host_us (the time Recording's "
                          "queries take), its session time in us, its CAN ID, "
@@ -62,8 +63,9 @@ _ROLE_FIELDS = {"rpm": "engine_speed", "speed": "vehicle_speed", "throttle": "th
                 "load": "engine_load"}
 _KINDS = {"pulls": e.ECUIO_STRETCH_PULLS, "cruises": e.ECUIO_STRETCH_CRUISES,
           "all": e.ECUIO_STRETCH_PULLS | e.ECUIO_STRETCH_CRUISES}
-_LEVELS = ("pull_level", "pull_load_level", "pull_hold_us", "pull_gap_us", "cruise_hold_us",
-           "cruise_speed_band", "cruise_throttle_band", "cruise_floor")
+_LEVELS = ("pull_level", "pull_load_level", "pull_hold_us", "pull_gap_us", "pull_min_rise",
+           "pull_min_gain", "cruise_hold_us", "cruise_speed_band", "cruise_throttle_band",
+           "cruise_floor")
 
 
 def _role(word):
@@ -229,8 +231,9 @@ class Recording:
         default), in time order, as Stretch. roles maps a role ('throttle',
         'load', 'speed', 'rpm') to the signal that plays it, in place of
         core's pick; levels are ecuio_stretch_rules_t's own fields in its
-        units (pull_level=85, pull_gap_us=750_000, cruise_floor in km/h),
-        each left out taking core's default"""
+        units (pull_level=85, pull_gap_us=750_000, pull_min_rise in rpm,
+        pull_min_gain and cruise_floor in km/h), each left out taking
+        core's default"""
         rules = e.ecuio_stretch_rules_t()
         if kinds not in _KINDS:
             raise ValueError(f"kinds is 'pulls', 'cruises' or 'all', not {kinds!r}")
@@ -270,7 +273,7 @@ def _import(options, folder, cancel):
         ctypes.byref(options), callback, None, ctypes.byref(report))), "ecuio_import_with")
     return Imported(folder, report.lines, report.frames, report.error_frames,
                     report.interfaces, report.values, report.columns_ignored,
-                    report.utc_start_us or None, report.duration_us)
+                    report.utc_start_us or None, report.duration_us, report.rows_no_time)
 
 
 def _guessed(path, time_unit):

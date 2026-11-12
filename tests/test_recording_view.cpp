@@ -701,6 +701,192 @@ double askedStep(RecordingView& v, int signal, double t, bool forward)
     return got;
 }
 
+// The answer to one stretches ask, waited for on the GUI thread
+QVariantList askedStretches(RecordingView& v, bool pulls, bool cruises)
+{
+    QVariantList got;
+    bool answered = false;
+    const auto c = QObject::connect(&v, &RecordingView::stretchesReady,
+                                    [&](int, const QVariantList& s, bool ok) {
+                                        got = s;
+                                        answered = true;
+                                        EXPECT_TRUE(ok);
+                                    });
+    EXPECT_GT(v.stretches(pulls, cruises), 0);
+    EXPECT_TRUE(waitFor([&] { return answered; }));
+    QObject::disconnect(c);
+    return got;
+}
+
+// The pulls and cruises are core's, as havne-cli view --stretches lists
+// them (tests/golden/cli/view-align-pull.jsonl and view-stretches-cruise),
+// in display units
+TEST(RecordingViewTest, AStretchesAskFindsThePullsAndCruises)
+{
+    RecordingView v;
+    EXPECT_EQ(v.stretches(true, true), 0) << "not open";
+    v.open(fixture("pull-twice"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_EQ(v.stretches(false, false), 0) << "neither kind";
+    const int speed =
+        signalNamed(v, "Vehicle Speed").value(QStringLiteral("index")).toInt();
+
+    const QVariantList pulls = askedStretches(v, true, false);
+    ASSERT_EQ(pulls.size(), 2) << "neither the stab nor the part throttle";
+    const QVariantMap first = pulls[0].toMap();
+    EXPECT_EQ(first.value(QStringLiteral("kind")).toString(),
+              QStringLiteral("pull"));
+    EXPECT_EQ(first.value(QStringLiteral("fromMs")).toDouble(), 18002.0);
+    EXPECT_EQ(first.value(QStringLiteral("toMs")).toDouble(), 25000.0);
+    EXPECT_EQ(first.value(QStringLiteral("start")).toDouble(), 70.0);
+    EXPECT_EQ(first.value(QStringLiteral("end")).toDouble(), 128.0);
+    EXPECT_EQ(first.value(QStringLiteral("unit")).toString(),
+              QStringLiteral("km/h"));
+    EXPECT_EQ(first.value(QStringLiteral("decimals")).toInt(), 0);
+    EXPECT_EQ(first.value(QStringLiteral("signal")).toInt(), speed);
+    const QVariantMap second = pulls[1].toMap();
+    EXPECT_EQ(second.value(QStringLiteral("fromMs")).toDouble(), 31002.0);
+    EXPECT_EQ(second.value(QStringLiteral("toMs")).toDouble(), 35000.0);
+    EXPECT_TRUE(askedStretches(v, false, true).isEmpty())
+        << "cruises alone: the log has none";
+
+    // Its ends in mph under imperial
+    v.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    const QVariantMap mph = askedStretches(v, true, false)[1].toMap();
+    EXPECT_EQ(mph.value(QStringLiteral("unit")).toString(),
+              QStringLiteral("mph"));
+    EXPECT_NEAR(mph.value(QStringLiteral("start")).toDouble(), 140 / 1.609344,
+                1e-9);
+    v.setUnitSystem(ECUIO_UNITS_METRIC);
+
+    // Cruises alone, and both kinds in time order
+    v.open(fixture("cruise"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_TRUE(askedStretches(v, true, false).isEmpty());
+    const QVariantList cruises = askedStretches(v, false, true);
+    ASSERT_EQ(cruises.size(), 2);
+    EXPECT_EQ(cruises[0].toMap().value(QStringLiteral("kind")).toString(),
+              QStringLiteral("cruise"));
+    EXPECT_EQ(cruises[0].toMap().value(QStringLiteral("fromMs")).toDouble(),
+              0.0);
+    EXPECT_EQ(cruises[1].toMap().value(QStringLiteral("fromMs")).toDouble(),
+              12000.0);
+    EXPECT_EQ(askedStretches(v, true, true).size(), 2);
+}
+
+// A later ask replaces one waiting, and a close drops one
+TEST(RecordingViewTest, OnlyTheNewestStretchesAskIsAnswered)
+{
+    RecordingView v;
+    v.open(fixture("pull-twice"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    std::vector<int> answered;
+    std::vector<qsizetype> sizes;
+    QObject::connect(&v, &RecordingView::stretchesReady,
+                     [&](int request, const QVariantList& s, bool) {
+                         answered.push_back(request);
+                         sizes.push_back(s.size());
+                     });
+    // No events run meanwhile, so an earlier answer is posted and waiting
+    ASSERT_GT(v.stretches(true, true), 0);
+    QThread::msleep(300);
+    const int last = v.stretches(true, false);
+    ASSERT_TRUE(
+        waitFor([&] { return !answered.empty() && answered.back() == last; }));
+    EXPECT_EQ(answered.size(), 1u);
+    EXPECT_EQ(sizes.back(), 2);
+
+    ASSERT_GT(v.stretches(true, false), 0);
+    v.close();
+    EXPECT_FALSE(waitFor([&] { return answered.size() > 1; }, 300))
+        << "a closed recording's answer is dropped";
+}
+
+// A pass over a long recording takes a while and core can't be told to
+// stop it: a close leaves it to end on its own, the reader open under it
+// until then, and never waits
+TEST(RecordingViewTest, ACloseNeverWaitsForAStretchesPass)
+{
+    RecordingView v;
+    v.open(fixture("pull-twice"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    int answers = 0;
+    QObject::connect(&v, &RecordingView::stretchesReady,
+                     [&](int, const QVariantList&, bool) { ++answers; });
+    const int hold = 2000;
+    v.setStretchesHoldForTesting(hold);
+    QElapsedTimer timer;
+    timer.start();
+    ASSERT_GT(v.stretches(true, true), 0);
+    v.close();
+    EXPECT_LT(timer.elapsed(), hold / 2)
+        << "the ask or the close waited for the pass";
+    EXPECT_EQ(v.state(), RecordingView::Closed);
+
+    // Another recording opens and answers while the first pass still holds
+    v.setStretchesHoldForTesting(0);
+    v.open(fixture("cruise"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_EQ(askedStretches(v, false, true).size(), 2);
+    answers = 0;
+    // The abandoned pass reads the closed recording to its end, and its
+    // answer goes nowhere
+    EXPECT_FALSE(waitFor([&] { return answers > 0; }, hold + 500));
+}
+
+// The view gone mid-pass: the pass ends on its own and posts to no one
+TEST(RecordingViewTest, DestroyedWithAStretchesPassUnderWayIsSafe)
+{
+    QElapsedTimer timer;
+    const int hold = 1500;
+    {
+        RecordingView v;
+        v.open(fixture("pull-twice"));
+        ASSERT_TRUE(waitFor([&] { return settled(v); }));
+        v.setStretchesHoldForTesting(hold);
+        timer.start();
+        ASSERT_GT(v.stretches(true, false), 0);
+    }
+    EXPECT_LT(timer.elapsed(), hold / 2) << "the ask or the destructor waited";
+    // Its answer arrives for a view that is gone, and is dropped
+    EXPECT_FALSE(waitFor([] { return false; }, hold + 500));
+}
+
+// A file changed since the open: the ask says it failed, with no stretch,
+// so a page never reads it as a recording with no pull
+TEST(RecordingViewTest, AStretchesAskOnAChangedFileSaysItFailed)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    QDir().mkpath(dir.filePath(QStringLiteral("copy")));
+    for (const char* name : {"events.log", "signals.csv"}) {
+        ASSERT_TRUE(QFile::copy(
+            fixture("pull-twice") + QLatin1Char('/') + QLatin1String(name),
+            dir.filePath(QStringLiteral("copy/") + QLatin1String(name))));
+    }
+    RecordingView v;
+    v.open(dir.filePath(QStringLiteral("copy")));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open);
+    QFile rows(dir.filePath(QStringLiteral("copy/signals.csv")));
+    ASSERT_TRUE(rows.setPermissions(QFile::ReadOwner | QFile::WriteOwner));
+    ASSERT_TRUE(rows.remove());
+    bool answered = false;
+    bool ok = true;
+    qsizetype count = -1;
+    QObject::connect(&v, &RecordingView::stretchesReady,
+                     [&](int, const QVariantList& s, bool good) {
+                         answered = true;
+                         ok = good;
+                         count = s.size();
+                     });
+    ASSERT_GT(v.stretches(true, false), 0);
+    ASSERT_TRUE(waitFor([&] { return answered; }));
+    EXPECT_FALSE(ok);
+    EXPECT_EQ(count, 0);
+    EXPECT_TRUE(v.stale());
+}
+
 // RPM over 1 s to 3 s of pull-early, worked out from signals.csv by hand;
 // a sample at the span's end counts
 TEST(RecordingViewTest, AStatsAskReadsTheSpan)

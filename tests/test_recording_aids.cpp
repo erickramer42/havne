@@ -2,11 +2,13 @@
 // Testing: UNIT: RecordingAidsTest (test_core)
 //
 // The navigation aids' rules (core/src/recording_aids.h) over plain sample
-// vectors: the pull's gate, gap, rising test and trim, the cruise's bands
-// and floor, and the cut at a range's edge.
+// vectors: the pull's gate, gap, trim and rise (engine speed's climb, or
+// the speed gained with no engine speed), the cruise's bands and floor,
+// and the cut at a range's edge.
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -31,7 +33,7 @@ aids::samples every(uint64_t from_ms, uint64_t to_ms, uint64_t step_ms, F f)
     return out;
 }
 
-const aids::pull_rules kPull{80.0, 1 * kS, 500 * kMs, 0.0};
+const aids::pull_rules kPull{80.0, 1 * kS, 500 * kMs, 0.0, 750.0, 10.0};
 const aids::cruise_rules kCruise{10 * kS, 2.0, 3.0, 56.32704};
 
 } // namespace
@@ -80,7 +82,7 @@ TEST(RecordingAidsTest, APullMustRiseAndLastItsHold)
                            : 40.0 + (ms - 2000) * 0.015;
     });
     std::vector<aids::stretch> out;
-    aids::find_pulls(throttle, rising, true, kPull, 0, out);
+    aids::find_pulls(throttle, rising, true, nullptr, kPull, 0, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].kind, ECUIO_RECORDING_STRETCH_PULL);
     EXPECT_EQ(out[0].from_us, 2000 * kMs);
@@ -92,7 +94,7 @@ TEST(RecordingAidsTest, APullMustRiseAndLastItsHold)
     out.clear();
     const aids::samples flat =
         every(0, 10000, 100, [](uint64_t) { return 60.0; });
-    aids::find_pulls(throttle, flat, true, kPull, 0, out);
+    aids::find_pulls(throttle, flat, true, nullptr, kPull, 0, out);
     EXPECT_TRUE(out.empty());
 
     /* Shorter than the hold: no pull */
@@ -100,16 +102,133 @@ TEST(RecordingAidsTest, APullMustRiseAndLastItsHold)
     const aids::samples stab = every(0, 10000, 100, [](uint64_t ms) {
         return ms >= 2000 && ms < 2900 ? 95.0 : 5.0;
     });
-    aids::find_pulls(stab, rising, true, kPull, 0, out);
+    aids::find_pulls(stab, rising, true, nullptr, kPull, 0, out);
     EXPECT_TRUE(out.empty());
 
     /* Exactly the hold: a pull */
     const aids::samples held = every(0, 10000, 100, [](uint64_t ms) {
         return ms >= 2000 && ms <= 3000 ? 95.0 : 5.0;
     });
-    aids::find_pulls(held, rising, true, kPull, 0, out);
+    aids::find_pulls(held, rising, true, nullptr, kPull, 0, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].to_us - out[0].from_us, kPull.hold_us);
+}
+
+TEST(RecordingAidsTest,
+     TheLargestClimbIsTheMostALaterSampleStandsAboveAnEarlier)
+{
+    /* A pull through an upshift: up 1000, down 1900, up 600 */
+    const aids::samples shift = {{0, 5500.0},
+                                 {1 * kS, 6000.0},
+                                 {2 * kS, 6500.0},
+                                 {3 * kS, 4600.0},
+                                 {4 * kS, 5200.0}};
+    EXPECT_DOUBLE_EQ(aids::largest_climb(shift, 0, 4 * kS), 1000.0);
+    EXPECT_DOUBLE_EQ(aids::largest_climb(shift, 3 * kS, 4 * kS), 600.0);
+    EXPECT_DOUBLE_EQ(aids::largest_climb(shift, 2 * kS, 3 * kS), 0.0)
+        << "falling alone is no climb";
+    EXPECT_DOUBLE_EQ(aids::largest_climb(shift, 0, 0), 0.0);
+    /* A dip and then a climb: from the dip's foot, not from the start */
+    const aids::samples dip = {{0, 5000.0}, {1 * kS, 3000.0}, {2 * kS, 4500.0}};
+    EXPECT_DOUBLE_EQ(aids::largest_climb(dip, 0, 2 * kS), 1500.0);
+
+    /* The value in force at the start counts, and nothing before it or
+     * after the end does */
+    const aids::samples around = {{0, 1000.0},
+                                  {1 * kS, 3000.0},
+                                  {2 * kS + 500 * kMs, 3400.0},
+                                  {4 * kS, 9000.0}};
+    EXPECT_DOUBLE_EQ(aids::largest_climb(around, 2 * kS, 3 * kS), 400.0);
+    EXPECT_DOUBLE_EQ(aids::largest_climb(around, 2 * kS, 4 * kS), 6000.0);
+
+    /* A NaN is passed by, in force at the start too; no sample, no climb */
+    const aids::samples holed = {
+        {0, NAN}, {1 * kS, 2000.0}, {2 * kS, NAN}, {3 * kS, 2900.0}};
+    EXPECT_DOUBLE_EQ(aids::largest_climb(holed, 0, 3 * kS), 900.0);
+    EXPECT_DOUBLE_EQ(aids::largest_climb(aids::samples{}, 0, 3 * kS), 0.0);
+}
+
+TEST(RecordingAidsTest, APullClimbsItsRiseOrWithNoEngineSpeedGainsItsSpeed)
+{
+    const aids::samples throttle = every(0, 10000, 100, [](uint64_t ms) {
+        return ms >= 2000 && ms <= 6000 ? 95.0 : 5.0;
+    });
+    /* Speed gaining gain km/h and engine speed rise rpm over the pull */
+    const auto ramp = [](double from, double gain) {
+        return every(0, 10000, 100, [=](uint64_t ms) {
+            return ms < 2000   ? from
+                   : ms > 6000 ? from + gain
+                               : from + gain * (ms - 2000) / 4000.0;
+        });
+    };
+    const auto pulls = [&](const aids::samples& speed,
+                           const aids::samples* rpm) {
+        std::vector<aids::stretch> out;
+        aids::find_pulls(throttle, speed, true, rpm, kPull, 0, out);
+        return out.size();
+    };
+
+    /* A pull in top gear gains little speed and climbs a long way; a stab
+     * at the throttle gains nearly as much and climbs next to nothing */
+    const aids::samples top_gear_rpm = ramp(4300.0, 2000.0);
+    const aids::samples stab_rpm = ramp(2500.0, 180.0);
+    EXPECT_EQ(pulls(ramp(150.0, 15.0), &top_gear_rpm), 1u);
+    EXPECT_EQ(pulls(ramp(60.0, 8.0), &stab_rpm), 0u);
+
+    /* The rise at the floor counts; a hair under doesn't */
+    const aids::samples at_floor = ramp(3000.0, 750.0);
+    const aids::samples under = ramp(3000.0, 749.0);
+    EXPECT_EQ(pulls(ramp(60.0, 30.0), &at_floor), 1u);
+    EXPECT_EQ(pulls(ramp(60.0, 30.0), &under), 0u);
+
+    /* With engine speed the gain is no floor: 2 km/h with a real climb is
+     * a pull, 30 km/h with none isn't (speed must still rise at all) */
+    EXPECT_EQ(pulls(ramp(200.0, 2.0), &top_gear_rpm), 1u);
+    EXPECT_EQ(pulls(ramp(60.0, 30.0), &stab_rpm), 0u);
+    EXPECT_EQ(pulls(ramp(60.0, 0.0), &top_gear_rpm), 0u);
+    /* Speed read 50 ms before the throttle, as a poll loop reads them
+     * one after the other: still falling as the throttle opens, then
+     * rising under where it was. No rise over the pull, whatever engine
+     * speed climbs. */
+    const aids::samples dipped = every(50, 10000, 100, [](uint64_t ms) {
+        return ms < 2000 ? 100.0
+                         : 95.0 + (std::min<uint64_t>)(ms - 2000, 4000) * 0.001;
+    });
+    EXPECT_EQ(pulls(dipped, &top_gear_rpm), 0u);
+
+    /* With none, the gain is: at the floor counts, under it doesn't */
+    EXPECT_EQ(pulls(ramp(150.0, 15.0), nullptr), 1u);
+    EXPECT_EQ(pulls(ramp(60.0, 10.0), nullptr), 1u);
+    EXPECT_EQ(pulls(ramp(60.0, 8.0), nullptr), 0u);
+
+    /* An engine-speed measure: the climb alone, so a pull through an
+     * upshift that ends under where it began is one */
+    const aids::samples shifted = every(0, 10000, 100, [](uint64_t ms) {
+        if (ms < 2000) {
+            return 5500.0;
+        }
+        if (ms < 4000) {
+            return 5500.0 + (ms - 2000) * 0.5; /* to 6500 */
+        }
+        return ms < 6000 ? 4600.0 + (ms - 4000) * 0.3 : 5200.0;
+    });
+    std::vector<aids::stretch> out;
+    aids::find_pulls(throttle, shifted, false, &shifted, kPull,
+                     ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED, out);
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_DOUBLE_EQ(out[0].start, 5500.0);
+    EXPECT_LT(out[0].end, out[0].start);
+    out.clear();
+    aids::find_pulls(throttle, stab_rpm, false, &stab_rpm, kPull,
+                     ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED, out);
+    EXPECT_TRUE(out.empty());
+
+    /* A measure with no value at an end is no pull */
+    const aids::samples late =
+        every(3000, 10000, 100, [](uint64_t ms) { return 3000.0 + ms; });
+    out.clear();
+    aids::find_pulls(throttle, late, false, &late, kPull, 0, out);
+    EXPECT_TRUE(out.empty());
 }
 
 TEST(RecordingAidsTest, ASpeedMeasureEndsAPullAtItsHighestAndEngineSpeedDoesnt)
@@ -123,7 +242,7 @@ TEST(RecordingAidsTest, ASpeedMeasureEndsAPullAtItsHighestAndEngineSpeedDoesnt)
         return ms < 1000 ? 30.0 : ms < 5000 ? 30.0 + (ms - 1000) * 0.02 : 110.0;
     });
     std::vector<aids::stretch> out;
-    aids::find_pulls(throttle, speed, true, kPull, 0, out);
+    aids::find_pulls(throttle, speed, true, nullptr, kPull, 0, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].to_us, 5000 * kMs) << "the flat speed ends it";
     EXPECT_DOUBLE_EQ(out[0].end, 110.0);
@@ -135,7 +254,7 @@ TEST(RecordingAidsTest, ASpeedMeasureEndsAPullAtItsHighestAndEngineSpeedDoesnt)
         return ms < 4000 ? 2000.0 + (ms - 1000) : 4000.0 + (ms - 4000) * 0.5;
     });
     out.clear();
-    aids::find_pulls(throttle, rpm, false, kPull,
+    aids::find_pulls(throttle, rpm, false, &rpm, kPull,
                      ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].to_us, 9000 * kMs) << "the shift's drop keeps it whole";
@@ -151,13 +270,13 @@ TEST(RecordingAidsTest, ASpeedMeasureEndsAPullAtItsHighestAndEngineSpeedDoesnt)
                          : 110.0 + (ms - 5000) * 0.0001;
     });
     out.clear();
-    aids::find_pulls(throttle, creep, true, kPull, 0, out);
+    aids::find_pulls(throttle, creep, true, nullptr, kPull, 0, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].to_us, 9000 * kMs) << "no tolerance: the creep's top";
     aids::pull_rules tolerant = kPull;
     tolerant.tolerance = 0.5;
     out.clear();
-    aids::find_pulls(throttle, creep, true, tolerant, 0, out);
+    aids::find_pulls(throttle, creep, true, nullptr, tolerant, 0, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].to_us, 5000 * kMs);
 }
@@ -222,7 +341,8 @@ TEST(RecordingAidsTest, AStretchPastAnEdgeIsCutThereAndSaysSo)
     std::vector<aids::stretch> found = {
         {ECUIO_RECORDING_STRETCH_CRUISE, 0, 30000 * kMs, 100.0, 100.0, 0},
     };
-    aids::cut_to(found, 5000 * kMs, 25000 * kMs, kS, 10 * kS, speed, speed);
+    aids::cut_to(found, 5000 * kMs, 25000 * kMs, kPull, true, nullptr, 10 * kS,
+                 speed, speed);
     ASSERT_EQ(found.size(), 1u);
     EXPECT_EQ(found[0].from_us, 5000 * kMs);
     EXPECT_EQ(found[0].to_us, 25000 * kMs);
@@ -231,16 +351,42 @@ TEST(RecordingAidsTest, AStretchPastAnEdgeIsCutThereAndSaysSo)
 
     /* What is left shorter than the hold goes */
     found = {{ECUIO_RECORDING_STRETCH_CRUISE, 0, 30000 * kMs, 100.0, 100.0, 0}};
-    aids::cut_to(found, 25000 * kMs, 40000 * kMs, kS, 10 * kS, speed, speed);
+    aids::cut_to(found, 25000 * kMs, 40000 * kMs, kPull, true, nullptr, 10 * kS,
+                 speed, speed);
     EXPECT_TRUE(found.empty());
 
     /* A pull cut is measured again at its new ends */
     const aids::samples rising =
         every(0, 10000, 100, [](uint64_t ms) { return 40.0 + ms * 0.01; });
     found = {{ECUIO_RECORDING_STRETCH_PULL, 0, 10000 * kMs, 40.0, 140.0, 0}};
-    aids::cut_to(found, 2000 * kMs, 20000 * kMs, kS, 10 * kS, rising, speed);
+    aids::cut_to(found, 2000 * kMs, 20000 * kMs, kPull, true, nullptr, 10 * kS,
+                 rising, speed);
     ASSERT_EQ(found.size(), 1u);
     EXPECT_DOUBLE_EQ(found[0].start, 60.0);
     EXPECT_DOUBLE_EQ(found[0].end, 140.0);
     EXPECT_EQ(found[0].flags, ECUIO_RECORDING_STRETCH_CUT_START);
+
+    /* What is left must still rise as a pull must: 8 km/h gained over
+     * four seconds goes, 12 over six stays, and with engine speed its
+     * climb over what is left decides */
+    const aids::samples slow =
+        every(0, 10000, 100, [](uint64_t ms) { return 40.0 + ms * 0.002; });
+    found = {{ECUIO_RECORDING_STRETCH_PULL, 0, 10000 * kMs, 40.0, 60.0, 0}};
+    aids::cut_to(found, 6000 * kMs, 20000 * kMs, kPull, true, nullptr, 10 * kS,
+                 slow, speed);
+    EXPECT_TRUE(found.empty());
+    found = {{ECUIO_RECORDING_STRETCH_PULL, 0, 10000 * kMs, 40.0, 60.0, 0}};
+    aids::cut_to(found, 4000 * kMs, 20000 * kMs, kPull, true, nullptr, 10 * kS,
+                 slow, speed);
+    EXPECT_EQ(found.size(), 1u);
+    const aids::samples rpm =
+        every(0, 10000, 100, [](uint64_t ms) { return 2000.0 + ms * 0.4; });
+    found = {{ECUIO_RECORDING_STRETCH_PULL, 0, 10000 * kMs, 40.0, 140.0, 0}};
+    aids::cut_to(found, 8000 * kMs, 20000 * kMs, kPull, true, &rpm, 10 * kS,
+                 rising, speed);
+    ASSERT_EQ(found.size(), 1u) << "800 rpm left to climb";
+    found = {{ECUIO_RECORDING_STRETCH_PULL, 0, 10000 * kMs, 40.0, 140.0, 0}};
+    aids::cut_to(found, 8200 * kMs, 20000 * kMs, kPull, true, &rpm, 10 * kS,
+                 rising, speed);
+    EXPECT_TRUE(found.empty()) << "720 rpm left";
 }

@@ -2795,6 +2795,15 @@ TEST(CoreTest, ProfileRegisterReportsTheValidatorResult) {
         EXPECT_EQ(v.reserved[1], 0u) << label;
     }
 
+    /* The signal file's one-name rule holds for a registered set too */
+    defs[1].bit_length = mock->defs[1].bit_length;
+    std::memcpy(defs[1].name, defs[0].name, sizeof defs[1].name);
+    std::memset(&v, 0xAB, sizeof v);
+    EXPECT_EQ(ecuio_profile_register("test-why", &bad, &v),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_DUPLICATE_NAME);
+    EXPECT_EQ(v.index, 1u);
+
     std::memset(&v, 0xAB, sizeof v);
     EXPECT_EQ(ecuio_profile_register("test-why", mock, &v), ECUIO_OK);
     EXPECT_EQ(v.code, ECUIO_VALIDATE_OK);
@@ -2819,6 +2828,7 @@ TEST(CoreTest, ProfileRegisterRefusesMoreRequestsThanTheEngineHolds) {
         defs[i].bit_length = 8;
         defs[i].mux_length = 3;
         defs[i].mux_key = 0x620000u | (0x1000u + ((i == 1) ? 0u : i));
+        std::snprintf(defs[i].name, sizeof defs[i].name, "Signal %u", i);
     }
     static ecuio_signal_set_t fits = {};
     fits.layout_version = ECUIO_SIGNAL_SET_LAYOUT;

@@ -433,8 +433,10 @@ Page {
     // on the first's axis at compareOffsetMs (its own time plus the
     // offset). alignOn says how the two line up: "start", "utc", "marker"
     // (alignLabel), "rise" or "fall" (alignSignal reaching alignLevel, in
-    // display units, after being alignHysteresis beyond it), or "engine"
+    // display units, after being alignHysteresis beyond it), "engine"
     // (each engine's first start: RPM reaching 500 after being below 100)
+    // or "pull" (the start of a pull chosen in each: alignPullHere of
+    // pullsHere on alignPullThere of pullsThere)
     readonly property bool comparing: compare.state !== RecordingView.Closed
     property string compareTitle: ""
     property bool compareAligned: false
@@ -449,6 +451,20 @@ Page {
     property string alignSignal: ""
     property real alignLevel: NaN
     property real alignHysteresis: 0
+    // Each recording's pulls in time order (RecordingView.stretches; null
+    // until its answer), and the place of the one chosen in each
+    property var pullsHere: null
+    property var pullsThere: null
+    // An ask that failed (the file changed since the open): not a
+    // recording with no pull
+    property bool pullsHereFailed: false
+    property bool pullsThereFailed: false
+    property int pullsHereAsk: 0
+    property int pullsThereAsk: 0
+    property int alignPullHere: 0
+    property int alignPullThere: 0
+    onAlignPullHereChanged: align()
+    onAlignPullThereChanged: align()
     onAlignOnChanged: align()
     onAlignLabelChanged: align()
     onAlignSignalChanged: align()
@@ -610,10 +626,18 @@ Page {
         if (importKind === RecordingImport.Candump)
             return qsTr("Imported %1 frames over %2 s")
                        .arg(result.frames).arg((result.durationUs / 1e6).toFixed(1))
-        return result.columnsIgnored > 0
-               ? qsTr("Imported %1 values; columns ignored: %2")
-                     .arg(result.values).arg(result.columnsIgnored)
-               : qsTr("Imported %1 values").arg(result.values)
+        const words = result.columnsIgnored > 0
+                      ? qsTr("Imported %1 values; columns ignored: %2")
+                            .arg(result.values).arg(result.columnsIgnored)
+                      : qsTr("Imported %1 values").arg(result.values)
+        if (!(result.rowsNoTime > 0))
+            return words
+        // A row with no time has nowhere to go: core leaves it out, counted.
+        // havne-cli's words; after a count of columns a comma would read as its
+        const left = result.rowsNoTime === 1
+                     ? qsTr("1 row with no time left out")
+                     : qsTr("%1 rows with no time left out").arg(result.rowsNoTime)
+        return words + (result.columnsIgnored > 0 ? "; " : ", ") + left
     }
 
     function checkBaseline() {
@@ -1025,6 +1049,19 @@ Page {
     function numberNames() {
         return recording.signalList.filter(s => !s.isText).map(s => s.name)
     }
+    // Asks each recording for its pulls, once: the answers align again
+    function askPulls() {
+        if (pullsHere === null && pullsHereAsk === 0)
+            pullsHereAsk = recording.stretches(true, false)
+        if (pullsThere === null && pullsThereAsk === 0)
+            pullsThereAsk = compare.stretches(true, false)
+    }
+    // A recording's pulls as the choices' rows: its number, start and length
+    function pullRows(pulls, here) {
+        return (pulls || []).map((p, i) =>
+            (here ? qsTr("Pull %1 here · %2 · %3") : qsTr("Pull %1 there · %2 · %3"))
+                .arg(i + 1).arg(timeText(p.fromMs, true)).arg(lengthText(p.toMs - p.fromMs)))
+    }
     function setAlignOn(on) {
         if (on === "marker" && alignLabel === "")
             alignLabel = markerLabels()[0] || ""
@@ -1085,6 +1122,22 @@ Page {
             what = qsTr("their engine starts")
             here = recording.findEngineStart()
             there = compare.findEngineStart()
+        } else if (alignOn === "pull") {
+            if (pullsHere === null || pullsThere === null) {
+                askPulls()
+                compareStatus = qsTr("Dashed: %1. Finding each recording's pulls…").arg(compareTitle)
+                return
+            }
+            if (pullsHereFailed || pullsThereFailed) {
+                compareStatus = (pullsHereFailed && pullsThereFailed
+                                 ? qsTr("%1 isn't drawn: neither recording's pulls could be read")
+                                 : pullsHereFailed ? qsTr("%1 isn't drawn: this recording's pulls couldn't be read")
+                                 : qsTr("%1 isn't drawn: its pulls couldn't be read")).arg(compareTitle)
+                return
+            }
+            what = qsTr("pull %1 here and pull %2 there").arg(alignPullHere + 1).arg(alignPullThere + 1)
+            here = alignPullHere < pullsHere.length ? pullsHere[alignPullHere].fromMs : -1
+            there = alignPullThere < pullsThere.length ? pullsThere[alignPullThere].fromMs : -1
         }
         if (here < 0 || there < 0) {
             compareStatus = alignOn === "utc"
@@ -1096,6 +1149,12 @@ Page {
                    ? qsTr("%1 isn't drawn: neither has an engine start (RPM reaching 500 after being below 100)")
                    : here < 0 ? qsTr("%1 isn't drawn: this recording has no engine start (RPM reaching 500 after being below 100)")
                    : qsTr("%1 isn't drawn: it has no engine start (RPM reaching 500 after being below 100)"))
+                  .arg(compareTitle)
+                : alignOn === "pull"
+                ? (here < 0 && there < 0
+                   ? qsTr("%1 isn't drawn: neither recording has a pull (full throttle for a second while it accelerates)")
+                   : here < 0 ? qsTr("%1 isn't drawn: this recording has no pull (full throttle for a second while it accelerates)")
+                   : qsTr("%1 isn't drawn: it has no pull (full throttle for a second while it accelerates)"))
                   .arg(compareTitle)
                 : here < 0 && there < 0 ? qsTr("%1 isn't drawn: neither has %2").arg(compareTitle).arg(what)
                 : here < 0 ? qsTr("%1 isn't drawn: this recording has no %2").arg(compareTitle).arg(what)
@@ -1345,9 +1404,22 @@ Page {
             if (atMs >= 0)
                 root.moveKeyed(atMs, root.stepsB)
         }
+        onStretchesReady: (request, found, ok) => {
+            if (request !== root.pullsHereAsk)
+                return
+            root.pullsHereAsk = 0
+            root.alignPullHere = 0
+            root.pullsHereFailed = !ok
+            root.pullsHere = found
+            root.align()
+        }
         onStateChanged: {
             root.reportNote = ""
             root.reportFailed = false
+            root.pullsHere = null
+            root.pullsHereFailed = false
+            root.pullsHereAsk = 0
+            root.alignPullHere = 0
             if (recording.state !== RecordingView.Open)
                 return
             const defaults = {}
@@ -1384,7 +1456,20 @@ Page {
     RecordingView {
         id: compare
         unitSystem: Bridge.unitSystem
+        onStretchesReady: (request, found, ok) => {
+            if (request !== root.pullsThereAsk)
+                return
+            root.pullsThereAsk = 0
+            root.alignPullThere = 0
+            root.pullsThereFailed = !ok
+            root.pullsThere = found
+            root.align()
+        }
         onStateChanged: {
+            root.pullsThere = null
+            root.pullsThereFailed = false
+            root.pullsThereAsk = 0
+            root.alignPullThere = 0
             if (compare.state === RecordingView.Open) {
                 const names = {}
                 let rows = 0
@@ -3346,8 +3431,43 @@ Page {
                                 { text: qsTr("Align a marker"), value: "marker" },
                                 { text: qsTr("Align a rise"), value: "rise" },
                                 { text: qsTr("Align a fall"), value: "fall" },
-                                { text: qsTr("Align engine starts"), value: "engine" }]
+                                { text: qsTr("Align engine starts"), value: "engine" },
+                                { text: qsTr("Align a pull"), value: "pull" }]
                         onActivated: root.setAlignOn(currentValue)
+                    }
+                    ComboBox {
+                        implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                                 implicitContentHeight + topPadding + bottomPadding,
+                                                 implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                        objectName: "alignPullHere"
+                        visible: root.alignOn === "pull"
+                        width: 220
+                        enabled: count > 0
+                        model: root.pullRows(root.pullsHere, true)
+                        currentIndex: root.alignPullHere
+                        Accessible.name: qsTr("This recording's pull to align on")
+                        // A pick ends the binding: put it back, so the box
+                        // follows the page's choice
+                        onActivated: index => {
+                            root.alignPullHere = index
+                            currentIndex = Qt.binding(() => root.alignPullHere)
+                        }
+                    }
+                    ComboBox {
+                        implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
+                                                 implicitContentHeight + topPadding + bottomPadding,
+                                                 implicitIndicatorHeight + topPadding + bottomPadding, root.touchMin)
+                        objectName: "alignPullThere"
+                        visible: root.alignOn === "pull"
+                        width: 220
+                        enabled: count > 0
+                        model: root.pullRows(root.pullsThere, false)
+                        currentIndex: root.alignPullThere
+                        Accessible.name: qsTr("The compared recording's pull to align on")
+                        onActivated: index => {
+                            root.alignPullThere = index
+                            currentIndex = Qt.binding(() => root.alignPullThere)
+                        }
                     }
                     ComboBox {
                         implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,

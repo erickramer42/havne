@@ -469,6 +469,7 @@ private:
                 continue;
             }
             rows_.push_back(row);
+            lines_.push_back(line);
         }
         why->clear();
         if (short_rows > 0) {
@@ -549,15 +550,22 @@ private:
     }
 
     /* The first column only rises: numbers or ISO times with an offset,
-     * never less than the one before, two or more distinct */
+     * never less than the one before, two or more distinct. An empty cell
+     * is passed by, as the import leaves its row out, while more than half
+     * of the rows hold one: a sparse counter is no time */
     bool rises(size_t at) const
     {
         bool any = false;
         bool apart = false;
         double prev = 0;
+        size_t filled = 0;
         for (const std::string& c : cells(at)) {
             double v = 0;
             int64_t us = 0;
+            if (c.empty()) {
+                continue;
+            }
+            ++filled;
             if (csv::parse_cell_number(c, decimal_, &v)) {
             } else if (iso_time(c, decimal_, &us)) {
                 v = static_cast<double>(us);
@@ -571,7 +579,7 @@ private:
             prev = v;
             any = true;
         }
-        return apart;
+        return apart && filled * 2 > rows_.size();
     }
 
     bool decide_time(std::string* why)
@@ -620,6 +628,11 @@ private:
             all_clock = all_clock &&
                         csv::parse_clock(c.data(), c.size(), decimal_, &us);
         }
+        if (!any && whole_) {
+            /* The import's words for the same file */
+            *why = "no row below the header has a time";
+            return false;
+        }
         if (!any) {
             note("the time column " + col + " is empty in the rows read");
         } else if (all_iso) {
@@ -661,7 +674,44 @@ private:
         if (!unit_.empty()) {
             flags_ |= kTimeUnitKnown;
         }
+        if (any) {
+            drop_untimed();
+        }
         return true;
+    }
+
+    /* The import leaves a row with no time out whole, so the signals are
+     * decided without it */
+    void drop_untimed()
+    {
+        const size_t read = rows_.size();
+        size_t kept = 0;
+        uint64_t first = 0;
+        for (size_t i = 0; i < read; ++i) {
+            if (rows_[i][time_].empty()) {
+                first = first == 0 ? lines_[i] : first;
+                continue;
+            }
+            if (kept != i) {
+                rows_[kept].swap(rows_[i]);
+                lines_[kept] = lines_[i];
+            }
+            ++kept;
+        }
+        rows_.resize(kept);
+        lines_.resize(kept);
+        const size_t dropped = read - kept;
+        if (dropped == 0) {
+            return;
+        }
+        untimed_dropped_ = true;
+        note(std::to_string(dropped) + " of the " + std::to_string(rows_read_) +
+             " rows read " +
+             (dropped == 1
+                  ? "has no time (line " + std::to_string(first) +
+                        "): the import leaves it out"
+                  : "have no time (the first on line " + std::to_string(first) +
+                        "): the import leaves such a row out"));
     }
 
     void decide_signals()
@@ -734,16 +784,22 @@ private:
                 }
             }
             if (!any) {
-                leave_out(i, whole_ ? std::string("it is empty in every row")
-                             : rows_.size() == 1
-                                 ? std::string("it is empty in the one row "
-                                               "read: a later value is "
-                                               "imported only if it is put "
-                                               "back")
-                                 : "it is empty in the first " +
-                                       std::to_string(rows_.size()) +
-                                       " rows read: a later value is "
-                                       "imported only if it is put back");
+                /* The rows the signals are decided on: "read", or "with a
+                 * time" once rows with none were taken out */
+                const std::string kind =
+                    untimed_dropped_ ? " with a time" : " read";
+                leave_out(
+                    i, whole_ ? "it is empty in every row" +
+                                    std::string(
+                                        untimed_dropped_ ? " with a time" : "")
+                       : rows_.size() == 1
+                           ? "it is empty in the one row" + kind +
+                                 ": a later value is imported only if it "
+                                 "is put back"
+                           : "it is empty in the first " +
+                                 std::to_string(rows_.size()) + " rows" + kind +
+                                 ": a later value is imported only if it "
+                                 "is put back");
                 continue;
             }
             if (!number && long_text) {
@@ -793,7 +849,10 @@ private:
                 const bool far =
                     values * ecuio_recording_rows::kSparseTimes < rows_.size();
                 note(shown + " holds a value in " + std::to_string(values) +
-                     " of " + std::to_string(rows_.size()) + " rows read: " +
+                     (untimed_dropped_ ? " of the " : " of ") +
+                     std::to_string(rows_.size()) +
+                     (untimed_dropped_ ? " rows with a time: "
+                                       : " rows read: ") +
                      (far ? "a wide export by sweep holds its newest value "
                             "in the rows the other columns set"
                           : "a wide export by sweep follows its rate; pick a "
@@ -951,6 +1010,8 @@ private:
     char decimal_ = '.';
     std::vector<std::string> header_;
     std::vector<std::vector<std::string>> rows_;
+    std::vector<uint64_t> lines_;  /* each of rows_' first line */
+    bool untimed_dropped_ = false; /* rows_ is the rows with a time alone */
     uint32_t rows_read_ = 0;
     bool whole_ = false;           /* the sample read the whole file */
     std::vector<std::string> why_; /* each header column's, when left out */

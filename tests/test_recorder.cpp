@@ -493,7 +493,7 @@ void register_enum_profile()
     kEnumDefs[0].table_count = 3;
     kEnumDefs[0].plot_rank = 1;
     kEnumDefs[0].group = ECUIO_SIGNAL_GROUP_FUEL;
-    std::strcpy(kEnumDefs[1].name, "Fuel, System"); /* its labels unwritten */
+    std::strcpy(kEnumDefs[1].name, "Fuel, Spare");
     kEnumDefs[1].table_first = 3;
     kEnumDefs[1].table_count = 1;
     std::strcpy(kEnumDefs[2].name, "Mode"); /* no entries */
@@ -542,12 +542,12 @@ TEST(RecorderTest, AnEnumsNumberIsInTheRowsAndItsLabelsInTheHeader)
                           "label  \"Fuel, System\",1,\"Open loop, cold\"\n"
                           "label  \"Fuel, System\",2,\"Closed \"\"loop\"\"\"\n"
                           "label  \"Fuel, System\",4294967295,Two lines\n"
-                          "signal  \"Fuel, System\",enum,,0,0,0\n"
+                          "signal  \"Fuel, Spare\",enum,,0,0,0\n"
+                          "label  \"Fuel, Spare\",9,Other\n"
                           "signal  Mode,enum,,0,0,0\n"
                           "signal  Count,number,,0,0,0\n"),
               std::string::npos)
         << events;
-    EXPECT_EQ(events.find(",9,Other"), std::string::npos) << events;
 
     /* Read back: the number as a number, the word beside it */
     ecuio_recording_t* r = nullptr;
@@ -557,7 +557,7 @@ TEST(RecorderTest, AnEnumsNumberIsInTheRowsAndItsLabelsInTheHeader)
     ecuio_recording_info_t info{};
     ASSERT_EQ(ecuio_recording_get_info(r, &info), ECUIO_OK);
     EXPECT_EQ(info.format, ECUIO_RECORDING_FORMAT_ENUMS);
-    ASSERT_EQ(info.signal_count, 3u) << "one signal a name";
+    ASSERT_EQ(info.signal_count, 4u);
     ecuio_recording_signal_t fuel{};
     ASSERT_EQ(ecuio_recording_get_signal(r, 0, &fuel), ECUIO_OK);
     EXPECT_STREQ(fuel.name, "Fuel, System");
@@ -575,13 +575,14 @@ TEST(RecorderTest, AnEnumsNumberIsInTheRowsAndItsLabelsInTheHeader)
     EXPECT_EQ(got[2].raw, 4294967295u);
     EXPECT_STREQ(got[2].label, "Two lines");
     EXPECT_STREQ(ecuio_recording_enum_label(r, 0, 2), "Closed \"loop\"");
+    EXPECT_STREQ(ecuio_recording_enum_label(r, 1, 9), "Other");
     ecuio_recording_signal_t mode{};
-    ASSERT_EQ(ecuio_recording_get_signal(r, 1, &mode), ECUIO_OK);
+    ASSERT_EQ(ecuio_recording_get_signal(r, 2, &mode), ECUIO_OK);
     EXPECT_EQ(mode.flags, ECUIO_RECORDING_SIGNAL_ENUM);
-    EXPECT_EQ(ecuio_recording_get_labels(r, 1, nullptr, 0, &count), ECUIO_OK);
+    EXPECT_EQ(ecuio_recording_get_labels(r, 2, nullptr, 0, &count), ECUIO_OK);
     EXPECT_EQ(count, 0u);
     ecuio_recording_signal_t plain{};
-    ASSERT_EQ(ecuio_recording_get_signal(r, 2, &plain), ECUIO_OK);
+    ASSERT_EQ(ecuio_recording_get_signal(r, 3, &plain), ECUIO_OK);
     EXPECT_EQ(plain.flags, 0u);
     ecuio_recording_close(r);
 }
