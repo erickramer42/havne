@@ -13,6 +13,7 @@
 #   python tests/cli_view.py past <havne-cli> <pull-twice> <pull-early>
 #   python tests/cli_view.py named <havne-cli> <pull-twice> <pull-early>
 #   python tests/cli_view.py end <havne-cli> <pull-twice> <pull-early>
+#   python tests/cli_view.py interrupt <havne-cli> <pull-twice> <pull-early>
 #
 # once: over many zooms and alignments, a signal's columns count each of
 # its samples once when the axis covers the recording (the default axis
@@ -44,15 +45,21 @@
 # name is given as ./all. end: a recording whose last sample sits
 # exactly at its length, viewed in column counts its length divides by,
 # has that sample in the last column: counted once, at every zoom,
-# started or aligned.
+# started or aligned. interrupt: a view held at its first search's ask
+# (the stretches, a pull to align on, a level's rise) and interrupted ends
+# with the interrupted end line and exit 1, and writes nothing the search
+# would have given.
 
 import csv
 import json
 import math
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 
 SIGNALS = ["--signal", "RPM", "--signal", "Throttle", "--signal", "Coolant",
            "--signal", "VIN"]
@@ -640,10 +647,84 @@ def named(cli, folders):
     return 1 if bad else 0
 
 
+# The first ask's hold (HAVNE_CLI_EXPORT_HOLD_MS, tests only): long enough
+# that an end within half of it is the interrupt's
+HOLD_MS = 20000
+HELD_WAIT_S = 30
+
+
+def interrupted_view(cli, args):
+    """view args held at its first search's ask, then interrupted: None, a
+    failure's words, or "skip" with no console"""
+    env = dict(os.environ)
+    env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
+    kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
+          "stdin": subprocess.DEVNULL, "env": env}
+    if os.name == "nt":
+        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    p = subprocess.Popen([cli, "view"] + args, **kw)
+    held = []
+    reader = threading.Thread(target=lambda: held.append(p.stderr.readline()))
+    reader.start()
+    reader.join(HELD_WAIT_S)
+    if reader.is_alive() or not held or \
+            not held[0].startswith(b"havne-cli: holding the view's"):
+        p.kill()
+        _, err = p.communicate()
+        reader.join()
+        return (f"didn't hold at the view's first ask within {HELD_WAIT_S} "
+                f"s: exit {p.returncode}, "
+                f"{(held[0] if held else b'') + err!r}")
+    try:
+        p.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt"
+                      else signal.SIGINT)
+    except OSError as e:
+        p.kill()
+        p.communicate()
+        print(f"skip  no console to send the interrupt through: {e}")
+        return "skip"
+    sent = time.monotonic()
+    try:
+        out, err = p.communicate(timeout=HOLD_MS / 2000)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        return f"still running {HOLD_MS / 2000:.0f} s after the interrupt"
+    took = time.monotonic() - sent
+    lines = [json.loads(l) for l in out.decode("utf-8").splitlines()]
+    if p.returncode != 1 or not lines or \
+            lines[-1] != {"type": "end", "reason": "interrupted"}:
+        return (f"exit {p.returncode}, lines {lines}, "
+                f"{err.decode('utf-8', 'replace')}")
+    found = [l["type"] for l in lines
+             if l["type"] in ("align", "stretch", "axis", "columns", "error")]
+    if found:
+        return f"an interrupted view wrote {found}"
+    print(f"ok    view {' '.join(args[1:])}: interrupted, ended {took:.2f} s "
+          f"after it")
+    return None
+
+
+def interrupt(cli, folders):
+    """Each of view's searches interrupted at its first ask"""
+    bad = 0
+    for args in ([folders[0], "--stretches", "pulls"],
+                 [folders[0], "--align-on", "pull:1"],
+                 [folders[0], "--align-on", "rise:RPM:3000"]):
+        why = interrupted_view(cli, args)
+        if why == "skip":
+            return 77
+        if why is not None:
+            print(f"FAIL  view {' '.join(args[1:])}: {why}")
+            bad += 1
+    return 1 if bad else 0
+
+
 def main(argv):
     modes = {"once": once, "agree": agree, "stats": stats, "means": means,
              "deltas": deltas, "shifted": shifted, "instant": instant,
-             "past": past, "named": named, "end": end}
+             "past": past, "named": named, "end": end,
+             "interrupt": interrupt}
     if len(argv) != 5 or argv[1] not in modes:
         print(__doc__ or "see the header", file=sys.stderr)
         return 2

@@ -913,6 +913,12 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py end
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
                     ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.AnInterruptEndsEachSearch
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py interrupt
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        set_tests_properties(CliViewRunTest.AnInterruptEndsEachSearch
+            PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
         set_tests_properties(CliViewRunTest.ColumnsCountEverySampleOnce
             CliViewRunTest.ASampleAtTheAxisEndIsInTheLastColumn
             CliViewRunTest.AlignedPullsAgree
