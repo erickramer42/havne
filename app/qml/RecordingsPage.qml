@@ -636,6 +636,7 @@ Page {
         importMap = ""
         importAsksInterface = false
         importInterface.text = ""
+        importLabel.text = ""
         importNote = ""
         importFailed = false
         importOpen = true
@@ -772,6 +773,7 @@ Page {
     }
 
     function backToList() {
+        importNote = ""
         closeExport()
         stretchesOpen = false
         recording.close()
@@ -843,6 +845,22 @@ Page {
     function centerOn(t) {
         const half = (viewT1 - viewT0) / 2
         setView(t - half, t + half)
+    }
+
+    // The cursors' time tags on the axis row, for the layout to keep its
+    // captions out from under them: the time and the tag's width
+    function cursorTags() {
+        const out = []
+        for (const ms of [cursorMs, cursorBMs]) {
+            if (isFinite(ms) && ms >= viewT0 && ms <= viewT1)
+                out.push({ ms: ms, width: Math.max(phoneShape ? Theme.touchTarget : 24,
+                                                   timeTextWidth(ms) + 8) })
+        }
+        return out
+    }
+    FontMetrics { id: tagMetrics; font.pixelSize: ChartLayout.labelPx; font.family: Theme.valueFamily }
+    function timeTextWidth(ms) {
+        return tagMetrics.advanceWidth(timeText(ms, true))
     }
 
     // A tapped time moved to the nearest sample of the first signal
@@ -1439,6 +1457,23 @@ Page {
             recording.openFrames(recording.folder, value)
     }
 
+    // A row's length, whether it is a log of chosen signals or a whole
+    // session, its signal count and its marks
+    function rowFacts(row) {
+        const parts = []
+        if (row.durationMs >= 0)
+            parts.push(lengthText(row.durationMs))
+        if (row.log)
+            parts.push(row.signals === 1 ? qsTr("log, 1 signal") : qsTr("log, %1 signals").arg(row.signals))
+        else if (row.frames !== false)
+            parts.push(qsTr("session"))
+        else if (row.signals > 0)
+            parts.push(row.signals === 1 ? qsTr("1 signal") : qsTr("%1 signals").arg(row.signals))
+        if (row.marks > 0)
+            parts.push(row.marks === 1 ? qsTr("1 mark") : qsTr("%1 marks").arg(row.marks))
+        return parts.join(" · ")
+    }
+
     // A row's second line: the address it was recorded from and the
     // profile it replays under, the profile only where the address
     // doesn't name it already. A row without frames (a CSV import's
@@ -1492,7 +1527,10 @@ Page {
         id: importDialog
         title: qsTr("Import a log")
         fileMode: FileDialog.OpenFile
-        nameFilters: [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
+        // Android's picker filters by MIME type and grays out a .csv it indexes
+        // as another type: every file is offered there
+        nameFilters: Qt.platform.os === "android" ? [qsTr("All files (*)")]
+                                                  : [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         onAccepted: root.chooseImportFile(importDialog.selectedFile)
     }
@@ -1718,9 +1756,9 @@ Page {
         function onFinished(result) {
             root.importFailed = !result.ok
             if (result.ok) {
-                root.importNote = root.importedWords(result)
                 root.importOpen = false
-                root.refresh()
+                root.openFolder(result.folder)
+                root.importNote = root.importedWords(result)
             } else {
                 root.importNote = result.words
                 if (root.importKind === RecordingImport.Candump)
@@ -1830,6 +1868,50 @@ Page {
                 wrapMode: Text.WrapAnywhere
                 color: Theme.text
                 text: qsTr("Import %1").arg(root.fileNameOf(root.importFile))
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                ThemedButton {
+                    objectName: "importStart"
+                    text: qsTr("Import")
+                    highlighted: true
+                    enabled: !Bridge.recordingImport.busy && root.importReady
+                    onClicked: root.startImport()
+                }
+                ThemedButton {
+                    objectName: "importCancel"
+                    text: qsTr("Cancel")
+                    enabled: !Bridge.recordingImport.busy
+                    onClicked: {
+                        root.importOpen = false
+                        root.importNote = ""
+                    }
+                }
+                Label {
+                    objectName: "importBusy"
+                    visible: Bridge.recordingImport.busy
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.textDim
+                    text: root.importGuessing ? qsTr("Reading...") : qsTr("Importing...")
+                }
+            }
+            // An optional name for the recording, kept as its folder's label
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                Label { text: qsTr("Label"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+                ThemedTextField {
+                    id: importLabel
+                    objectName: "importLabel"
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the row's width, not its text's
+                    placeholderText: qsTr("Optional, shown on the recording's row")
+                    inputMethodHints: Qt.ImhNoPredictiveText
+                    enabled: !Bridge.recordingImport.busy
+                    onTextChanged: Bridge.recordingImport.label = text
+                }
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -1965,41 +2047,12 @@ Page {
                     enabled: !Bridge.recordingImport.busy
                 }
             }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Theme.spacing
-                ThemedButton {
-                    objectName: "importStart"
-                    text: qsTr("Import")
-                    highlighted: true
-                    enabled: !Bridge.recordingImport.busy && root.importReady
-                    onClicked: root.startImport()
-                }
-                ThemedButton {
-                    objectName: "importCancel"
-                    text: qsTr("Cancel")
-                    enabled: !Bridge.recordingImport.busy
-                    onClicked: {
-                        root.importOpen = false
-                        root.importNote = ""
-                    }
-                }
-                Label {
-                    objectName: "importBusy"
-                    visible: Bridge.recordingImport.busy
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    color: Theme.textDim
-                    text: root.importGuessing ? qsTr("Reading...") : qsTr("Importing...")
-                }
-            }
         }
 
         // The last import's words: what it made, or why not
         Label {
             objectName: "importNote"
-            visible: root.importNote !== "" && !root.viewing
+            visible: root.importNote !== ""
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: root.importFailed ? Theme.danger : Theme.success
@@ -2015,7 +2068,7 @@ Page {
             color: Theme.textDim
             text: root.recordings.length > 0
                   ? qsTr("Newest first. Open one to look through it, or replay it as a session.")
-                  : qsTr("No recordings yet: turn Record on in Settings, then connect.")
+                  : qsTr("No recordings yet. Start log, in the top bar while connected, makes one; Settings, Recording keeps every session; Import brings in another logger's file.")
         }
 
         // A baseline whose folder was moved or deleted says so, on the list
@@ -2090,6 +2143,15 @@ Page {
                             objectName: "recordingTitle"
                             text: recordingRow.modelData.title
                             color: Theme.text
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Label {
+                            objectName: "recordingFacts"
+                            visible: text !== ""
+                            text: root.rowFacts(recordingRow.modelData)
+                            color: Theme.textDim
+                            font.pixelSize: Theme.fontCaption
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
@@ -2386,6 +2448,7 @@ Page {
                     gapMs: Theme.staleMs, minSpanUnits: 20, format: root.valueText,
                     span: { t0: root.viewT0, t1: root.viewT1 }, absolute: true,
                     caption: root.captionOf,
+                    tags: root.cursorTags(),
                     axisH: root.phoneShape && root.hasCursor ? ChartLayout.axisHCursor : ChartLayout.axisH,
                     panes: { max: root.paneLimit, minH: ChartLayout.paneMinH,
                              shares: root.paneShares, ranges: root.paneRanges,
@@ -3023,7 +3086,7 @@ Page {
                         font.pixelSize: Theme.compact ? Theme.fontCaption : Theme.fontBody
                         color: Theme.textDim
                         text: !root.hasCursor ? (Theme.compact ? qsTr("Tap for values")
-                                                               : qsTr("Click the chart for values"))
+                                                               : qsTr("Click for values · drag to pan · wheel to zoom · double-click a pane to enlarge it"))
                                               : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
                     }
                     RowLayout {
@@ -3289,7 +3352,8 @@ Page {
             header: Component {
                 ViewHead {
                     role: "values"
-                    width: signalRows.width
+                    // The pinned list's scrollbar lies over its right edge: the head keeps clear
+                    width: signalRows.width - (root.pinnedViewer ? 12 : 0)
                     list: signalRows
                 }
             }

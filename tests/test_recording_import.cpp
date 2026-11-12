@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -314,6 +315,55 @@ TEST(BridgeTest, ImportTakesTheNextNameWhenOneIsTaken)
         QDir(i.result.value(QStringLiteral("folder")).toString()).dirName();
     EXPECT_TRUE(name.endsWith(QStringLiteral("-2 candump import")))
         << name.toStdString();
+}
+
+/* A typed label is the folder's label, reduced as the recorder reduces one;
+ * a CSV that carries dates is stamped with its first row's time, not the
+ * import's */
+TEST(BridgeTest, ImportKeepsATypedLabelAndStampsADatedCsvWithItsOwnTime)
+{
+    QTemporaryDir dir;
+    const QString root = dir.filePath(QStringLiteral("recordings"));
+    RecordingImport im([root] { return root; });
+    im.setLabel(QStringLiteral("  My  drive:/ ."));
+    EXPECT_EQ(im.label(), QStringLiteral("My drive"));
+    // Forty characters as core's recorder counts them: a pair that
+    // straddles the end is whole or out, never cut, and characters past
+    // ASCII stay as core keeps them
+    const QString pair = QString::fromUcs4(U"\U0001F600");
+    im.setLabel(QString(39, QLatin1Char('a')) + pair + QStringLiteral("bcd"));
+    EXPECT_EQ(im.label(), QString(39, QLatin1Char('a')) + pair);
+    im.setLabel(QString(40, QLatin1Char('a')) + pair);
+    EXPECT_EQ(im.label(), QString(40, QLatin1Char('a')));
+    im.setLabel(QStringLiteral("a") + QChar(0x2028) + QStringLiteral("b"));
+    EXPECT_EQ(im.label(), QStringLiteral("a") + QChar(0x2028) + QStringLiteral("b"))
+        << "core's recorder keeps what is past ASCII";
+    im.setLabel(QStringLiteral("  My  drive:/ ."));
+    const Imported dated =
+        import(im, fileUrl(fixture("logger-b/log.csv")), RecordingImport::Csv,
+               fileUrl(fixture("logger-b/map.json")));
+    ASSERT_TRUE(ok(dated)) << words(dated).toStdString();
+    const QString name =
+        QDir(dated.result.value(QStringLiteral("folder")).toString())
+            .dirName();
+    const QString first =
+        QDateTime::fromString(QStringLiteral("2026-11-05T22:03:22+09:00"),
+                              Qt::ISODate)
+            .toLocalTime()
+            .toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    EXPECT_EQ(name, first + QStringLiteral(" My drive"));
+    EXPECT_TRUE(QFileInfo::exists(
+        dated.result.value(QStringLiteral("folder")).toString() +
+        QStringLiteral("/signals.csv")));
+
+    im.setLabel(QString());
+    const Imported undated = import(im, fileUrl(write(dir, "two.log", kOneBus)),
+                                    RecordingImport::Candump);
+    ASSERT_TRUE(ok(undated));
+    EXPECT_TRUE(QDir(undated.result.value(QStringLiteral("folder")).toString())
+                    .dirName()
+                    .endsWith(QStringLiteral(" candump import")))
+        << "an empty label keeps the format's own";
 }
 
 /* A file the app can't hand core by its path (Android's content://) is

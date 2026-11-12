@@ -212,6 +212,8 @@ ColumnLayout {
                     objectName: "include"
                     Layout.fillWidth: true
                     Layout.minimumHeight: Theme.touchTarget
+                    // A box with text sits at the row's start, beside it
+                    text: row.col.label === "" ? qsTr("(no header)") : row.col.label
                     checked: row.on
                     enabled: row.col.used || row.col.canPutBack
                     onToggled: {
@@ -220,7 +222,7 @@ ColumnLayout {
                         preview.recount()
                     }
                     contentItem: Label {
-                        text: row.col.label === "" ? qsTr("(no header)") : row.col.label
+                        text: includeBox.text
                         color: Theme.text
                         wrapMode: Text.WrapAnywhere
                         verticalAlignment: Text.AlignVCenter

@@ -6577,6 +6577,54 @@ TEST(BridgeTest, ReplayUriForTakesTheRecordedProfile)
         << "the last profile= wins, as in core";
 }
 
+/* A row says how long it is, whether it is a log of chosen signals or a
+ * whole session, its signal count and its marks */
+TEST(BridgeTest, ARecordingsRowSaysItsLengthKindSignalsAndMarks)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const auto make = [&root](const char* name, bool log, int marks) {
+        const QString dir =
+            root.path() + QLatin1Char('/') + QString::fromUtf8(name);
+        ASSERT_TRUE(QDir().mkpath(dir));
+        QFile frames(dir + QStringLiteral("/frames.csv"));
+        ASSERT_TRUE(frames.open(QIODevice::WriteOnly));
+        QFile events(dir + QStringLiteral("/events.log"));
+        ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+        events.write("ecuio session recording, format 2\n"
+                     "uri  mock://demo\n"
+                     "signal  A,number,km/h,1,1,1\n"
+                     "signal  B,number,%,1,2,2\n");
+        if (log) {
+            events.write("focus  A,B\n");
+        }
+        events.write("columns  local time, seconds\n\n"
+                     "09:00:25.000  +25.500  end  x\n");
+        if (marks > 0) {
+            QFile m(dir + QStringLiteral("/markers.csv"));
+            ASSERT_TRUE(m.open(QIODevice::WriteOnly));
+            m.write("host_us,label\n");
+            for (int i = 0; i < marks; ++i) {
+                m.write("1000,m\n");
+            }
+        }
+    };
+    make("20261110-090000", true, 0);
+    make("20261111-090000", false, 2);
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    const QVariantList rows = bridge.recentRecordings(10);
+    ASSERT_EQ(rows.size(), 2);
+    const QVariantMap session = rows.at(0).toMap();
+    const QVariantMap log = rows.at(1).toMap();
+    EXPECT_EQ(session.value(QStringLiteral("durationMs")).toLongLong(), 25500);
+    EXPECT_EQ(session.value(QStringLiteral("signals")).toInt(), 2);
+    EXPECT_FALSE(session.value(QStringLiteral("log")).toBool());
+    EXPECT_EQ(session.value(QStringLiteral("marks")).toInt(), 2);
+    EXPECT_TRUE(log.value(QStringLiteral("log")).toBool());
+    EXPECT_EQ(log.value(QStringLiteral("marks")).toInt(), 0);
+}
+
 TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
 {
     QTemporaryDir root;

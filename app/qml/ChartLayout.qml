@@ -108,8 +108,13 @@ QtObject {
             return groups
         const kept = groups.slice(0, limit - 1)
         const keys = kept.map(g => g.key)
-        kept.push({ key: "mixed", units: [], axis: false,
-                    traces: traces.filter(tr => keys.indexOf(tr.paneKey) < 0) })
+        const folded = traces.filter(tr => keys.indexOf(tr.paneKey) < 0)
+        const units = []
+        for (const tr of folded) {
+            if (tr.unit !== "" && units.indexOf(tr.unit) < 0)
+                units.push(tr.unit)
+        }
+        kept.push({ key: "mixed", units: units, axis: false, traces: folded })
         return kept
     }
 
@@ -639,7 +644,8 @@ QtObject {
             const pane = { key: g.key, axis: g.axis, manual: false, top: paneTop, h: heights[i],
                            vMin: NaN, vMax: NaN, ticks: [],
                            label: !po ? "" : g.axis ? g.units.filter(u => u !== "").join(", ")
-                                                    : (po.mixedLabel || "mixed") }
+                                                    : g.units.length > 0 ? g.units.join(" · ")
+                                                                         : (po.mixedLabel || "mixed") }
             paneTop += heights[i] + paneGap
             for (const tr of g.traces)
                 tr.pane = i
@@ -748,8 +754,16 @@ QtObject {
             const stepS = tickStep(spanS, (plotW - 1) / spanS, widest + captionGap)
             for (let k = Math.ceil(tMin / 1000 / stepS); k * stepS * 1000 <= tMax; ++k) {
                 const x = xOf(k * stepS * 1000)
-                ticks.push({ x: x, seconds: k * stepS, caption: caption(k * stepS), align: "center",
-                             captioned: x - left >= widest / 2 && x - left <= plotW - widest / 2 })
+                const text = caption(k * stepS)
+                // A cursor's time tag sits on this row: a caption it would cover is left out
+                let covered = false
+                for (const tag of opts.tags || []) {
+                    const room = (tag.width + opts.measure(text)) / 2 + 2
+                    if (Math.abs(xOf(tag.ms) - x) < room)
+                        covered = true
+                }
+                ticks.push({ x: x, seconds: k * stepS, caption: text, align: "center",
+                             captioned: !covered && x - left >= widest / 2 && x - left <= plotW - widest / 2 })
             }
         } else {
             const widest = opts.measure(caption(Math.ceil(spanS)))
