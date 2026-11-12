@@ -3713,6 +3713,9 @@ TEST(BridgeTest, ConnectLogsWhatTheEcuSupports)
 TEST(BridgeTest, AnExtendedSessionNamesEachModulesSessionOnce)
 {
     FakeEnvArm module("ECUIO_FAKE_MODULE_DIDS", "7E9:D801=00 12");
+    /* Paced by its replies, the range's scan spans two ticks or more
+     * only when each reply takes a while (well under the 100 ms wait) */
+    FakeEnvArm slow("ECUIO_FAKE_REPLY_DELAY_MS", "40");
     QTemporaryDir root;
     ASSERT_TRUE(root.isValid());
     SessionBridge bridge;
