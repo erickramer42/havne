@@ -105,16 +105,24 @@ Page {
         else
             maximizedTall = !maximizedTall
     }
+    // A focused box (a ComboBox, which keeps Home, End and its letters for its
+    // own choice) keeps those keys: told by its `popup`, since a style's box
+    // isn't a ComboBox to `instanceof`. Left and Right it doesn't use, and a
+    // press in the plot takes the focus back from it (chartTap)
+    readonly property bool boxFocused: root.Window.activeFocusItem !== null
+                                       && root.Window.activeFocusItem.popup !== undefined
     // F on a keyboard; a text field takes its own letters first
     Shortcut {
         sequence: "F"
         enabled: root.visible && recording.state === RecordingView.Open && !Theme.mobile
+                 && !root.boxFocused
         onActivated: root.toggleMaximized()
     }
     // The arrows step a cursor a sample of the snap's signal, B says which
     // cursor they move, Home and End go to the recording's ends
     readonly property bool cursorKeys: root.visible && recording.state === RecordingView.Open
                                        && !Theme.mobile
+    readonly property bool editKeys: cursorKeys && !root.boxFocused
     Shortcut {
         sequence: "Left"
         enabled: root.cursorKeys
@@ -127,17 +135,17 @@ Page {
     }
     Shortcut {
         sequence: "Home"
-        enabled: root.cursorKeys
+        enabled: root.editKeys
         onActivated: root.cursorToEnd(false)
     }
     Shortcut {
         sequence: "End"
-        enabled: root.cursorKeys
+        enabled: root.editKeys
         onActivated: root.cursorToEnd(true)
     }
     Shortcut {
         sequence: "B"
-        enabled: root.cursorKeys
+        enabled: root.editKeys
         onActivated: root.arrowsMoveB = root.hasCursorB && !root.arrowsMoveB
     }
     // The splitter below the chart: its height once dragged, -1 for the
@@ -887,7 +895,7 @@ Page {
     function setCursor(t) {
         cursorMs = Math.min(Math.max(axisStart(), t), axisEnd())
         readout = valuesAtTime(cursorMs)
-        compareReadout = compareValuesAt(cursorMs)
+        refreshCompareReadout()
         if (!hasCursorB && !spanHintSeen) {
             spanHintSeen = true
             spanHintUp = true
@@ -898,13 +906,20 @@ Page {
     function setCursorB(t) {
         cursorBMs = Math.min(Math.max(axisStart(), t), axisEnd())
         readoutB = valuesAtTime(cursorBMs)
+        refreshCompareReadout()
         spanHintUp = false
         askSpanStats()
         chart.requestPaint()
     }
+    // The compared recording's values at the cursor the rows read: the first,
+    // or the earlier of two
+    function refreshCompareReadout() {
+        compareReadout = compareValuesAt(hasSpan ? spanFromMs : cursorMs)
+    }
     function clearCursorB() {
         cursorBMs = NaN
         readoutB = ({})
+        refreshCompareReadout()
         spanStats = ({})
         statsAsk = 0
         arrowsMoveB = false
@@ -956,8 +971,21 @@ Page {
     }
     // A cursor's handle let go: on a sample, and one dropped on the other
     // leaves a single cursor
+    // The nearest sample can lie past the view's end by half a sample when the
+    // end is off the grid (a wheel zoom): then the one in force at the end,
+    // so the handle never drops out of view
+    function snappedInView(t) {
+        const s = snapped(t)
+        if (s < viewT0)
+            return viewT0
+        const first = snapSignal()
+        if (s <= viewT1 || !first)
+            return Math.min(s, viewT1)
+        const at = recording.valuesAt([first.index], viewT1)
+        return at.length > 0 && at[0].atMs >= 0 ? at[0].atMs : viewT1
+    }
     function dropHandle(isB) {
-        const t = snapped(isB ? cursorBMs : cursorMs)
+        const t = snappedInView(isB ? cursorBMs : cursorMs)
         if (isB)
             setCursorB(t)
         else
@@ -1048,9 +1076,8 @@ Page {
         let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
         if (spanS * (rowsPerSecond + (compareAligned ? compareRowsPerSecond : 0)) > rawRowsPerFrame)
             n = Math.max(1, Math.min(n, Math.floor(spanS)))
-        // The labels follow the readout's A, the earlier of the two cursors
-        // (the compared recording's readout is the first cursor's alone)
-        const inView = cursorMs >= viewT0 && cursorMs <= viewT1
+        // The labels follow the readout's A, the earlier of the two cursors,
+        // the compared recording's too
         const fromMs = hasSpan ? spanFromMs : cursorMs
         const fromInView = fromMs >= viewT0 && fromMs <= viewT1
         const labelOf = (at, shown) => shown && at && at.text !== "" ? Number(at.text) : NaN
@@ -1090,8 +1117,8 @@ Page {
             out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs, t0: g0, t1: g1 },
                        row: mine, slot: root.slotOf(mine),
                        scaleKey: mine, dash: Theme.seriesCompareDash(root.slotOf(mine)), decimals: s.decimals,
-                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine], inView),
-                       labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs, inView) })
+                       unit: s.unit, labelValue: labelOf(root.compareReadout[mine], fromInView),
+                       labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs, fromInView) })
         }
         return out
     }
@@ -1396,7 +1423,8 @@ Page {
     function timeText(ms, tenths) {
         if (ms < 0)
             return "-" + timeText(-ms, tenths)
-        const s = ms / 1000
+        // Tenths are rounded as a whole first: 119.96 s is 2:00.0, never 1:60.0
+        const s = tenths ? Math.round(ms / 100) / 10 : ms / 1000
         if (s < 60)
             return tenths ? qsTr("%1 s").arg(s.toFixed(1)) : qsTr("%1 s").arg(Math.round(s))
         const whole = Math.floor(s)
@@ -2684,7 +2712,12 @@ Page {
                 property point lastAt: Qt.point(0, 0)
                 // A long press fired in this press, so its drag draws a box
                 property bool held: false
-                onPressedChanged: if (pressed) held = false
+                onPressedChanged: if (pressed) {
+                    held = false
+                    // A box a mouse pick focused gives the page's keys back (the
+                    // chart's own item: the page's focus would leave the box's)
+                    chartFrame.forceActiveFocus()
+                }
                 onLongPressed: {
                     const at = chartTap.point.position
                     if (!root.phoneShape || at.x - chart.x < root.plotLeft())
@@ -2834,12 +2867,16 @@ Page {
                         if (!dragging && Math.abs(x - pressX) < Application.styleHints.startDragDistance)
                             return
                         dragging = true
+                        // Past the plot's edge the handle would leave the view,
+                        // hide, and lose the grab before the drop
+                        const t = Math.min(Math.max(root.timeAt(x), root.viewT0), root.viewT1)
                         if (handle.isB)
-                            root.setCursorB(root.timeAt(x))
+                            root.setCursorB(t)
                         else
-                            root.setCursor(root.timeAt(x))
+                            root.setCursor(t)
                     }
                     onReleased: if (dragging) root.dropHandle(handle.isB)
+                    onCanceled: if (dragging) root.dropHandle(handle.isB)
                 }
             }
             CursorHandle { id: handleA; objectName: "cursorHandleA"; isB: false }
@@ -3708,12 +3745,14 @@ Page {
                     readonly property bool shown: (recording.state === RecordingView.Open
                                                    || recording.state === RecordingView.Failed)
                                                   && !root.chartMaximized && recording.hasFrames
+                    // Its own rule, not its place's: About's head hides and moves it
                     visible: shown
                     Layout.fillWidth: true
                     textRole: "text"
                     valueRole: "value"
-                    // Its own rule, not its place's: About's head hides and moves it
-                    model: shown ? root.decodeChoices() : []
+                    // The model stays while the box is hidden: a model made again
+                    // resets the index, which the binding below wouldn't set back
+                    model: root.decodeChoices()
                     currentIndex: Math.max(0, indexOfValue(recording.decodedWith))
                     Accessible.name: qsTr("Where the values come from")
                     onActivated: index => root.decodeWith(valueAt(index))
