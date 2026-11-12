@@ -1438,6 +1438,24 @@ TestCase {
                                                     data.columns), "a saved layout is drawn as before")
     }
 
+    // After Reset the built-in layout is drawn as at first run: no empty
+    // squares, no stretched dial
+    function test_theBuiltInLayoutAfterResetIsDrawnAsAtFirstRun() {
+        const page = createTemporaryObject(pageComponent, testCase,
+                                           { form: "desktop", width: 1100, height: 1400 })
+        const view = findChild(page, "dashPage_0")
+        tryVerify(() => view.width > 0, 3000, "laid out")
+        const changed = DashboardBook.builtIn("desktop")
+        changed.pages[0].cells[0].label = "Changed"
+        findChild(page, "dashStore").desktop = DashboardBook.serialize(changed)
+        tryVerify(() => !page.builtInShown && page.pages[0].cells[0].label === "Changed", 1000, "a saved layout")
+        page.resetForm()
+        tryVerify(() => page.builtInShown, 1000, "the built-in layout after Reset")
+        compare(findChild(page, "dashStore").desktop, "", "nothing stored")
+        compare(emptySquaresOf(view), 0, "no empty square after Reset")
+        compare(stretchedRound(view), 0, "no dial or ring stretched after Reset")
+    }
+
     // The desktop's short cell fills the empty squares under it too, and
     // the stored layout stays
     function test_theDesktopStretchesAShortCellToo() {

@@ -82,6 +82,10 @@ Page {
     property double clockNow: 0
     // This pause shows the hint: the first pause of all, once
     property bool hintShown: false
+    // Start log is offered while a session runs that no recorder holds: not
+    // under Record sessions, not for a replay
+    readonly property bool startLogOffered: !(Bridge.recordingActive
+        || Bridge.currentUri.toLowerCase().startsWith("replay://"))
 
     function pause() {
         if (paused || !Bridge.connected)
@@ -109,7 +113,7 @@ Page {
         cursorMs = NaN
         pausedAt = Date.now()
         clockNow = pausedAt
-        hintShown = !liveSettings.pauseHintSeen
+        hintShown = startLogOffered && !liveSettings.pauseHintSeen
         if (hintShown) {
             // Stored at once, not on the store's timer: a page made next reads it
             liveSettings.pauseHintSeen = true
@@ -251,10 +255,15 @@ Page {
         running: root.paused && root.visible
         onTriggered: root.clockNow = Date.now()
     }
-    // Space on a keyboard pauses and resumes; a text field takes it first
+    // Space on a keyboard pauses and resumes; a text field takes it first,
+    // and a focused button or check box keeps it for itself (a button is
+    // told by its `checkable`: neither `instanceof` nor `as` match the
+    // style's own button types)
     Shortcut {
         sequence: "Space"
         enabled: root.visible && !Theme.mobile
+                 && !(root.Window.activeFocusItem !== null
+                      && typeof root.Window.activeFocusItem.checkable === "boolean")
         onActivated: root.paused ? root.resume() : root.pause()
     }
     // The snapshot goes with what it was taken of: the session, its signal
@@ -310,8 +319,9 @@ Page {
         // The plotted signals are what a log records: said while it runs,
         // and where Start log is offered
         if (Bridge.logActive)
-            return qsTr("Logging the %1 plotted signals").arg(Bridge.signalModel.subscribedCount) + unnamed
-        const logNote = Bridge.recordingActive || Bridge.currentUri.toLowerCase().startsWith("replay://")
+            return (Bridge.signalModel.subscribedCount === 1 ? qsTr("Logging the 1 plotted signal")
+                    : qsTr("Logging the %1 plotted signals").arg(Bridge.signalModel.subscribedCount)) + unnamed
+        const logNote = !startLogOffered
             ? "" : (Theme.compact ? qsTr(" · Start log records them")
                                   : qsTr(" · Start log records the plotted ones"))
         if (Bridge.liveSignalModel.filter.active)
@@ -761,14 +771,20 @@ Page {
                     fromPinch = windowPinch.active || Date.now() - windowPinch.endedAt < 300
                     if (fromPinch)
                         return
-                    root.pause()
                     startEnd = root.viewEndMs
                 }
+                // A following chart pauses once the drag goes back in time: a
+                // leftward drag pauses nothing and spends no hint
                 onActiveTranslationChanged: {
-                    if (!active || fromPinch || !root.paused)
+                    if (!active || fromPinch)
                         return
                     const end = startEnd - activeTranslation.x / Math.max(1, root.plotWidth() - 1)
                                 * root.chartWindowS * 1000
+                    if (!root.paused) {
+                        if (end >= 0)
+                            return
+                        root.pause()
+                    }
                     if (end > 0)
                         root.resume()
                     else

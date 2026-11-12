@@ -258,10 +258,10 @@ TestCase {
         const show = find(page, "errorShowLog")
         page.requestConnect("mock://demo?profile=no-such-profile")
         tryVerify(() => show.visible, 5000, "a connect's refusal offers the Log")
-        page.errorLabel.text = "Stop first"   // as SettingsAdapter's Relay writes its own
-        page.logExplains = false
+        // the relay button, with the relay refusing what the field holds
+        find(page, "relayButton").clicked()
+        verify(page.errorLabel.text !== "", "the relay's own words: " + page.errorLabel.text)
         verify(!show.visible, "no Show log beside the relay's words")
-        verify(page.errorLabel.text !== "")
     }
 
     // A URI isn't prose: no capital first letter, no predicted words
@@ -1340,7 +1340,12 @@ TestCase {
         verify(box.checked, "a typed session=0x03 ticks the box")
         press(page, "profile_default")
         verify(!box.visible)
-        compare(uri.text, "j2534://Vendor?session=0x03", "left alone under another profile")
+        compare(uri.text, "j2534://Vendor", "core refuses session= under another profile: dropped")
+        press(page, "profile_uds-generic")
+        verify(box.checked, "the choice is kept for the way back")
+        compare(uri.text, "j2534://Vendor?profile=uds-generic&session=03")
+        press(page, "profile_raw")
+        compare(uri.text, "j2534://Vendor?profile=raw", "and dropped again under Raw")
 
         // core refuses session= on mock:// and replay://: no box, no key
         press(page, "profile_uds-generic")
@@ -2622,6 +2627,26 @@ TestCase {
         page.signalInfo = info
         compare(row().summary, "1 file, doesn't load")
         verify(row().warn, "flagged for the list's danger color")
+    }
+
+    // Of several files the row counts the ones that don't load
+    function test_theSignalsRowCountsTheFilesThatDontLoad() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "first.json", "First", "D100"))
+        verify(importFile(page, "second.json", "Second", "D101"))
+        verify(importFile(page, "third.json", "Third", "D102"))
+        const row = () => page.pageList.find(r => r.key === "signals")
+        compare(row().summary, "3 files")
+        const info = Object.assign({}, page.signalInfo)
+        const files = page.pickedVehicle.signals
+        info[files[0].sha256] = Object.assign({}, info[files[0].sha256], { ok: false })
+        page.signalInfo = info
+        compare(row().summary, "3 files, 1 doesn't load", "one of three, said as a count")
+        const two = Object.assign({}, info)
+        two[files[1].sha256] = Object.assign({}, info[files[1].sha256], { ok: false })
+        page.signalInfo = two
+        compare(row().summary, "3 files, 2 don't load")
     }
 
     // A file is saved out as the vehicle has it, byte for byte (a Save
