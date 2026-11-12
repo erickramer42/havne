@@ -354,6 +354,7 @@ if(TARGET havne-cli)
         app_cli_elm327(ASecondModulesDidAnswers modules)
         app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
         app_cli_elm327(PythonObdReadsIt python-obd)
+        set_tests_properties(CliElm327RunTest.PythonObdReadsIt PROPERTIES COST 13)
         # A clear (ADR-0038's appendix of 2026-11-06): the mock's report
         # first, its clear at the key-on's 0 rpm, the report read again;
         # and with the word on the engine, its 0 km/h read too
@@ -436,7 +437,7 @@ if(TARGET havne-cli)
         add_test(NAME CliHealthRunTest.session
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
                     session $<TARGET_FILE:havne-cli>)
-        set_tests_properties(CliHealthRunTest.session PROPERTIES TIMEOUT 180)
+        set_tests_properties(CliHealthRunTest.session PROPERTIES TIMEOUT 180 COST 39)
         add_test(NAME CliHealthRunTest.recording
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
                     recording $<TARGET_FILE:havne-cli>
@@ -1380,7 +1381,7 @@ if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/example_notebook.py)
     set_tests_properties(ExampleTest.notebook PROPERTIES
         ENVIRONMENT "HAVNE_LIBRARY=$<TARGET_FILE:ecuio>;PYTHONDONTWRITEBYTECODE=1"
-        SKIP_RETURN_CODE 77 TIMEOUT 300 LABELS "python")
+        SKIP_RETURN_CODE 77 TIMEOUT 300 COST 38 LABELS "python")
 
     # The wheel itself (tests/wheel_installed.py): made from this tree's
     # shared core, installed in a fresh venv and used from outside the
@@ -1634,6 +1635,14 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     endif()
     # Files whose cases together run near ctest's bound on a slow runner
     set(_qml_split_files dashboard dashedit driveview phone)
+    # Seconds a file's entry (or one share of it) took in a full run's
+    # CTestCostData.txt, so a tree with no history starts the long ones first
+    set(_qml_cost_dashboard 40)
+    set(_qml_cost_dashedit 52)
+    set(_qml_cost_driveview 37)
+    set(_qml_cost_phone 55)
+    set(_qml_cost_recordings 25)
+    set(_qml_cost_diagnostics 7)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
@@ -1656,6 +1665,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
                 ENVIRONMENT "${_qml_test_env}"
                 TIMEOUT 180
             )
+            if(DEFINED _qml_cost_${_qml_name})
+                set_tests_properties(QmlTest.${_qml_name} PROPERTIES
+                    COST ${_qml_cost_${_qml_name}})
+            endif()
         else()
             # The shares are read from the file: an edit configures again,
             # or a case added to it would be in no share and never run
@@ -1695,6 +1708,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
                 set_tests_properties(${_qml_part} PROPERTIES
                     ENVIRONMENT "${_qml_test_env}"
                     TIMEOUT 180
+                    COST ${_qml_cost_${_qml_name}}
                 )
                 unset(_qml_share_${_qml_share})
             endforeach()
