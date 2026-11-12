@@ -3167,4 +3167,210 @@ TestCase {
         compare(labels(page), ["A", "B", "C", "T", "A"], "appended")
         compare(page.undoWords, "pasted A")
     }
+
+    // ---- The layout file (ADR-0057's appendix on the layout file)
+
+    // A scratch file a layout is written to and read back from
+    function layoutUrl(name) {
+        return Harness.writeScratchFile(name, "")
+    }
+
+    function test_aLayoutRoundTripsAndLoadsAsOneUndoStep() {
+        const first = docOf([cellOf("A", "analog"), cellOf("B")])
+        const url = layoutUrl("layout-roundtrip.json")
+        let page = storedPageOf({}, first)
+        verify(page.exportLayoutTo(url), page.layoutNote)
+        const raw = JSON.parse(Bridge.layoutFileText(url).text)
+        compare(raw.form, "desktop")
+        compare(raw.files, [])
+        compare(page.layoutNote, "Saved this layout to a file")
+        page.destroy()
+
+        const second = docOf([cellOf("X")])
+        page = storedPageOf({}, second)
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        compare(page.doc, first, "the file's layout, with no form or files key")
+        compare(storedText(page), DashboardBook.serialize(first), "stored as an edit would store it")
+        compare(page.undoWords, "load a layout")
+        page.undo()
+        compare(page.doc, second, "one Undo takes the whole load back")
+        verify(!page.canUndo, "and it was one step")
+    }
+
+    function test_twoQuickLoadsAreTwoUndoSteps() {
+        const a = docOf([cellOf("A")])
+        const b = docOf([cellOf("B")])
+        const urlA = layoutUrl("layout-quick-a.json")
+        const urlB = layoutUrl("layout-quick-b.json")
+        let src = storedPageOf({}, a)
+        verify(src.exportLayoutTo(urlA), src.layoutNote)
+        src.destroy()
+        src = storedPageOf({}, b)
+        verify(src.exportLayoutTo(urlB), src.layoutNote)
+        src.destroy()
+        const start = docOf([cellOf("S")])
+        const page = storedPageOf({}, start)
+        page.startEditing()
+        verify(page.loadLayoutFrom(urlA), page.layoutNote)
+        verify(page.loadLayoutFrom(urlB), page.layoutNote)
+        page.undo()
+        compare(page.doc, a, "the first Undo takes back the second load only")
+        page.undo()
+        compare(page.doc, start, "the second takes back the first")
+        verify(!page.canUndo)
+    }
+
+    function test_aPhoneLayoutIsNotLoadedOnTheDesktopForm() {
+        const url = layoutUrl("layout-phone.json")
+        const phone = storedPageOf({ form: "phone" }, docOf([cellOf("P")]))
+        verify(phone.exportLayoutTo(url), phone.layoutNote)
+        compare(JSON.parse(Bridge.layoutFileText(url).text).form, "phone")
+        phone.destroy()
+        const desktop = docOf([cellOf("D")])
+        const page = storedPageOf({}, desktop)
+        page.startEditing()
+        verify(!page.loadLayoutFrom(url))
+        verify(page.layoutNoteBad)
+        verify(page.layoutNote.indexOf("phone layout") >= 0 && page.layoutNote.indexOf("desktop form") >= 0,
+               page.layoutNote)
+        compare(page.doc, desktop, "nothing changed")
+        verify(!page.canUndo)
+        compare(find(page, "dashStore").desktopUnread, "", "the unread text is never touched")
+    }
+
+    function test_aDamagedOrNewerOrEmptyFileIsRefusedInWords_data() {
+        return [
+            { tag: "damaged", text: "{ nope", words: "isn't a dashboard layout" },
+            { tag: "newer", text: JSON.stringify({ format: 9, pages: [] }), words: "newer version" },
+            { tag: "empty", text: "", words: "the file is empty" },
+            { tag: "no pages", text: JSON.stringify({ format: 2, form: "desktop", pages: [] }),
+              words: "isn't a dashboard layout" }
+        ]
+    }
+    function test_aDamagedOrNewerOrEmptyFileIsRefusedInWords(data) {
+        const url = Harness.writeScratchFile("layout-bad-" + data.tag.replace(" ", "-") + ".json", data.text)
+        const own = docOf([cellOf("A")])
+        const page = storedPageOf({}, own)
+        page.startEditing()
+        verify(!page.loadLayoutFrom(url))
+        verify(page.layoutNoteBad)
+        verify(page.layoutNote.indexOf(data.words) >= 0, page.layoutNote)
+        compare(page.doc, own)
+        compare(storedText(page), DashboardBook.serialize(own))
+        verify(!page.canUndo)
+    }
+
+    function test_aMissingFileIsRefusedInWords() {
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        verify(!page.loadLayoutFrom(Qt.resolvedUrl("no-such-layout.json")))
+        verify(page.layoutNote.indexOf("Couldn't read the file") >= 0, page.layoutNote)
+    }
+
+    function test_aFileWithDroppedGaugesSaysSoAndLoadsTheRest() {
+        const text = JSON.stringify({ format: 2, form: "desktop", pages: [
+            { name: "T", cells: [cellOf("Good"), { kind: "digital", w: 0, h: 4, refs: [] }] }] })
+        const url = Harness.writeScratchFile("layout-dropped.json", text)
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        compare(labels(page), ["Good"])
+        verify(page.layoutNote.indexOf("1 gauge left out") >= 0, page.layoutNote)
+        verify(!page.layoutNoteBad)
+    }
+
+    function test_aFileWithNoFormIsReadAsThisFormAndSaysSo() {
+        const url = Harness.writeScratchFile("layout-noform.json",
+                                             JSON.stringify({ format: 2, pages: [{ name: "T", cells: [cellOf("Good")] }] }))
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        verify(page.layoutNote.indexOf("named no form") >= 0 && page.layoutNote.indexOf("desktop form") >= 0,
+               page.layoutNote)
+    }
+
+    function test_theSameLayoutLoadedAgainChangesNothing() {
+        const own = docOf([cellOf("A")])
+        const url = layoutUrl("layout-same.json")
+        const page = storedPageOf({}, own)
+        page.startEditing()
+        verify(page.exportLayoutTo(url))
+        verify(!page.loadLayoutFrom(url))
+        verify(page.layoutNote.indexOf("already shown") >= 0, page.layoutNote)
+        verify(!page.canUndo)
+    }
+
+    function test_noLoadPastAnOpenQuestion() {
+        const url = layoutUrl("layout-question.json")
+        const own = docOf([cellOf("A")])
+        const page = storedPageOf({}, own)
+        page.startEditing()
+        verify(page.exportLayoutTo(url))
+        page.doc = docOf([cellOf("Other")])
+        page.confirmReset = true
+        verify(!page.loadLayoutFrom(url))
+        verify(page.layoutNoteBad)
+        compare(labels(page), ["Other"], "the question stands and nothing loaded")
+        page.confirmReset = false
+        page.confirmRemovePage = true
+        verify(!page.loadLayoutFrom(url))
+        compare(labels(page), ["Other"])
+    }
+
+    function test_theSignalFilesALayoutNeedsAreNamedAndTheLoadSaysWhichAreMissing() {
+        const file = { havne_signals: 1, name: "Boosty", source: { name: "t" },
+                       ecus: [{ id: "pcm", rx: "7E8" }],
+                       signals: [{ key: "boosty", name: "Boosty", read: { service: "22", number: "D100" },
+                                   field: { byte: 0, bits: 8 }, unit: "kPa" }] }
+        const r = Bridge.importSignalFile(Harness.writeScratchFile("boosty.json", JSON.stringify(file)))
+        verify(r.ok, "the file imports")
+        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
+        let vehicles = VehicleBook.add(VehicleBook.empty(), "Test car")
+        vehicles = VehicleBook.addSignals(vehicles, { sha256: r.sha256, name: r.name, profile: r.profile })
+        compare(VehicleBook.picked(vehicles).signals.length, 1, "the vehicle has the file")
+
+        const own = docOf([cellOf("A"), Object.assign(cellOf("Boosty"), { refs: ["key:boosty"] })])
+        const url = layoutUrl("layout-needs.json")
+        let page = storedPageOf({ vehicles: vehicles }, own)
+        verify(page.exportLayoutTo(url), page.layoutNote)
+        const raw = JSON.parse(Bridge.layoutFileText(url).text)
+        compare(raw.files, [{ name: r.name, sha256: r.sha256 }], "the file the layout needs, by name and hash")
+        verify(page.layoutNote.indexOf(r.name) >= 0, page.layoutNote)
+        compare(page.layoutFileName(), "dashboard-test-car-desktop.json")
+        page.destroy()
+
+        // A layout of cells that read no file names none
+        page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("A")]))
+        const noneUrl = layoutUrl("layout-needs-none.json")
+        verify(page.exportLayoutTo(noneUrl))
+        compare(JSON.parse(Bridge.layoutFileText(noneUrl).text).files, [])
+        page.destroy()
+
+        // Loaded where the vehicle lacks the file: the load names it
+        page = storedPageOf({}, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        verify(page.layoutNote.indexOf("signal files this vehicle lacks: " + r.name) >= 0, page.layoutNote)
+        compare(page.doc.pages[0].cells.length, 2, "the layout loads whole")
+        page.destroy()
+
+        // And where it has it, nothing is said
+        page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        verify(page.layoutNote.indexOf("lacks") < 0, page.layoutNote)
+        Bridge.useSignalFiles([])
+    }
+
+    function test_theLayoutButtonsAreInTheMoreRow() {
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        click(page, "dashMore")
+        verify(find(page, "moreExport").visible && find(page, "moreLoad").visible)
+        page.noteLayout("Saved", false)
+        verify(find(page, "dashLayoutNote").visible)
+        page.stopEditing()
+        compare(page.layoutNote, "", "the note goes with edit mode")
+    }
 }

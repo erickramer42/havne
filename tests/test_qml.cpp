@@ -89,6 +89,26 @@ public:
         return QStringLiteral(ECUIO_RECORDING_FIXTURES);
     }
 
+    // The shared layout corpus (tests/data/layouts, which havne-cli's
+    // test_cli runs too): each case's name, and a case's file as a URL
+    // (ext "json" for the layout, "expect.json" for its verdicts)
+    Q_INVOKABLE QStringList layoutCases() const
+    {
+        QStringList names;
+        const QStringList files = QDir(QStringLiteral(ECUIO_LAYOUT_CORPUS))
+                                      .entryList({QStringLiteral("*.expect.json")},
+                                                 QDir::Files, QDir::Name);
+        for (const QString& f : files) {
+            names << f.chopped(QStringLiteral(".expect.json").size());
+        }
+        return names;
+    }
+    Q_INVOKABLE QUrl layoutUrl(const QString& name, const QString& ext) const
+    {
+        return QUrl::fromLocalFile(QStringLiteral(ECUIO_LAYOUT_CORPUS "/") + name +
+                                   QLatin1Char('.') + ext);
+    }
+
     QUrl obdbFixture() const
     {
         return QUrl::fromLocalFile(QStringLiteral(ECUIO_OBDB_FIXTURE));

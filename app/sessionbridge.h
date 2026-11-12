@@ -794,6 +794,18 @@ public:
     // words }, words never naming either path; a copy changed since it
     // was kept is refused, not saved. Logs one line
     Q_INVOKABLE QVariantMap saveSignalFile(const QString& sha, const QUrl& url);
+    // A dashboard layout file (ADR-0057's appendix on the layout file): the
+    // text DashboardBook.exportText made, written where the user chose (as
+    // saveSignalFile writes), and a picked file's text back. { ok, words }
+    // and { ok, words, text }, words never naming a path. The size is
+    // bounded at layoutFileMaxBytes either way, a text that isn't UTF-8 is
+    // refused unread, and a leading UTF-8 BOM is skipped. A local file is
+    // written whole or not at all and nothing is ever removed; a provider's
+    // document is written through its provider, which can't be atomic.
+    // Each logs one line
+    Q_INVOKABLE QVariantMap saveLayoutFile(const QString& text, const QUrl& url);
+    Q_INVOKABLE QVariantMap layoutFileText(const QUrl& url);
+    static constexpr qint64 layoutFileMaxBytes = 66016 + 16384;
     // The Log page's Export CSV (FrameListModel::scrubbedCsv) to the file
     // at url (a local file, or Android's content:// through QFile): { ok,
     // words, written, leftOut, unattributed }, leftOut the identification

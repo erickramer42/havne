@@ -34,6 +34,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QStringConverter>
 #include <QStringList>
 #include <QtGlobal>
 
@@ -1628,6 +1629,64 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
         return {{QStringLiteral("ok"), false}, {QStringLiteral("words"), words}};
     }
     return {{QStringLiteral("ok"), true}, {QStringLiteral("words"), QString()}};
+}
+
+QVariantMap SessionBridge::saveLayoutFile(const QString& text, const QUrl& url)
+{
+    const QByteArray bytes = text.toUtf8();
+    QString words;
+    bool written = false;
+    if (bytes.isEmpty()) {
+        words = QStringLiteral("There is no layout to save");
+    } else if (bytes.size() > layoutFileMaxBytes) {
+        words = QStringLiteral("The layout is over %1 bytes, a layout file's most")
+                    .arg(layoutFileMaxBytes);
+    } else {
+        written = writeToUrl(url, bytes);
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    emit logMessage(written ? QStringLiteral("Layout saved to a file (%1 bytes)")
+                                  .arg(bytes.size())
+                            : QStringLiteral("Layout not saved: %1").arg(words));
+    return {{QStringLiteral("ok"), written}, {QStringLiteral("words"), words}};
+}
+
+QVariantMap SessionBridge::layoutFileText(const QUrl& url)
+{
+    // Android's content:// URIs open through QFile as they are
+    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    QString words;
+    QString text;
+    if (!file.open(QIODevice::ReadOnly)) {
+        words = QStringLiteral("Couldn't read the file");
+    } else {
+        QByteArray bytes = file.read(layoutFileMaxBytes + 1);
+        if (bytes.size() > layoutFileMaxBytes) {
+            words = QStringLiteral("The file is over %1 bytes, a layout file's most")
+                        .arg(layoutFileMaxBytes);
+        } else {
+            if (bytes.startsWith("\xEF\xBB\xBF")) {
+                bytes.remove(0, 3);
+            }
+            QStringDecoder utf8(QStringDecoder::Utf8,
+                                QStringConverter::Flag::Stateless |
+                                    QStringConverter::Flag::ConvertInitialBom);
+            text = utf8(bytes);
+            if (utf8.hasError()) {
+                text.clear();
+                words = QStringLiteral("The file isn't UTF-8 text");
+            }
+        }
+    }
+    emit logMessage(words.isEmpty()
+                        ? QStringLiteral("Layout file read (%1 characters)")
+                              .arg(text.size())
+                        : QStringLiteral("Layout file not read: %1").arg(words));
+    return {{QStringLiteral("ok"), words.isEmpty()},
+            {QStringLiteral("words"), words},
+            {QStringLiteral("text"), text}};
 }
 
 QVariantMap SessionBridge::exportFrames(const QUrl& url)

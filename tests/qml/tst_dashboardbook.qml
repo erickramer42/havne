@@ -4,6 +4,7 @@
 import QtQuick
 import QtTest
 import App
+import AppTest
 TestCase {
     name: "DashboardBook"
 
@@ -1297,5 +1298,147 @@ TestCase {
     }
     function test_digitsFor(data) {
         compare(DashboardBook.digitsFor(data.from, data.to, data.d), data.want)
+    }
+
+    // ---- The layout file (ADR-0057's appendix on the layout file)
+
+    readonly property string sha: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+    function pagesAndCells(doc) {
+        return [doc.pages.length, doc.pages.reduce((n, p) => n + p.cells.length, 0)]
+    }
+
+    function test_exportThenImportReturnsTheDocument_data() {
+        return [{ tag: "phone", form: "phone" }, { tag: "desktop", form: "desktop" }]
+    }
+    function test_exportThenImportReturnsTheDocument(data) {
+        const doc = book()
+        doc.unknownKey = { kept: true }
+        const files = [{ name: "Boost.json", sha256: sha }]
+        const text = DashboardBook.exportText(doc, data.form, files)
+        verify(text !== "", "the document exports")
+        const raw = JSON.parse(text)
+        compare(raw.form, data.form)
+        compare(raw.files, files)
+        compare(Object.keys(raw).slice(0, 3), ["format", "form", "files"])
+        compare(Object.keys(raw)[Object.keys(raw).length - 1], "pages", "the pages come last")
+        const r = DashboardBook.importProblem(text, data.form, [sha])
+        compare(r.problem, "")
+        compare(r.doc, doc, "the form and files keys never reach the document")
+        compare(r.form, data.form)
+        compare(r.files, files)
+        compare(r.missing, [])
+        compare(r.notes, [])
+        compare(DashboardBook.importProblem(text, data.form, []).missing, files, "a file the vehicle lacks")
+        compare(DashboardBook.importProblem(text, data.form, undefined).missing, files, "no vehicle: every file")
+    }
+
+    function test_theOtherFormIsRefusedInTheWordsOfItsProblem() {
+        const text = DashboardBook.exportText(book(), "phone", [])
+        const r = DashboardBook.importProblem(text, "desktop", [])
+        compare(r.problem, "otherform")
+        compare(r.form, "phone")
+        compare(r.doc, DashboardBook.builtIn("desktop"), "the built-in layout stands in")
+    }
+
+    function test_anExportOfADocumentThatDoesNotReadBackIsRefused() {
+        const doc = book()
+        doc.pages[0].cells[0].w = 0
+        compare(DashboardBook.exportText(doc, "desktop", []), "")
+        compare(DashboardBook.exportText(book(), "tablet", []), "")
+        compare(DashboardBook.exportText(book(), "desktop", "x"), "")
+        compare(DashboardBook.exportText(book(), "desktop", [{ name: "a", sha256: "short" }]), "")
+        const many = []
+        for (let i = 0; i < DashboardBook.maxFiles + 1; ++i)
+            many.push({ name: "f" + i, sha256: sha })
+        compare(DashboardBook.exportText(book(), "desktop", many), "")
+    }
+
+    function test_aFullDocumentWithItsFilesStillLoads() {
+        const doc = { format: DashboardBook.format, pages: [] }
+        for (let p = 0; p < DashboardBook.maxPages; ++p) {
+            const cells = []
+            for (let c = 0; c < DashboardBook.maxCells; ++c)
+                cells.push(cell("C" + c, { label: "x".repeat(DashboardBook.maxLabel),
+                                           refs: ["id:1", "id:2", "id:3", "id:4", "id:5", "id:6", "id:7", "id:8"] }))
+            doc.pages.push({ name: "P" + p, cells: cells })
+        }
+        verify(DashboardBook.documentProblem(doc) === "", "the fullest document is within its bound")
+        const files = []
+        for (let i = 0; i < DashboardBook.maxFiles; ++i)
+            files.push({ name: "n".repeat(DashboardBook.maxFileName), sha256: sha })
+        const text = DashboardBook.exportText(doc, "desktop", files)
+        verify(text !== "")
+        const r = DashboardBook.importProblem(text, "desktop", [sha])
+        compare(r.problem, "", "the keys' own bytes are allowed for")
+        compare(r.files.length, DashboardBook.maxFiles)
+    }
+
+    function test_theFilesALayoutNeeds() {
+        const doc = { format: DashboardBook.format, pages: [
+            { name: "A", cells: [cell("a", { refs: ["id:1005", "key:boost"] })] },
+            { name: "B", cells: [cell("b", { refs: ["key:oil"] })] }] }
+        const vehicle = [
+            { name: "Boost.json", sha256: sha, refs: ["id:30000", "key:boost"] },
+            { name: "Other.json", sha256: "b".repeat(64), refs: ["key:other", "id:1005"] },
+            { name: "Oil.json", sha256: "c".repeat(64), refs: ["key:oil"] }]
+        compare(DashboardBook.neededFiles(doc, vehicle).map(f => f.name), ["Boost.json", "Oil.json"],
+                "a file is needed by a key: reference in any cell of any page")
+        compare(DashboardBook.neededFiles(doc, vehicle)[0], { name: "Boost.json", sha256: sha },
+                "its name and sha256 only")
+        compare(DashboardBook.neededFiles(doc, []), [])
+    }
+
+    function test_anExportPastTheFilesBoundIsRefused() {
+        // A control character escapes to 6 bytes: each name fits fileFits
+        const files = []
+        for (let i = 0; i < DashboardBook.maxFiles; ++i)
+            files.push({ name: String.fromCharCode(1).repeat(DashboardBook.maxFileName - 2) + (i % 10) + (i % 7), sha256: sha })
+        verify(files.every(DashboardBook.fileFits))
+        compare(DashboardBook.exportText(book(), "desktop", files), "")
+        verify(DashboardBook.exportText(book(), "desktop", files.slice(0, 4)) !== "", "a few of them fit")
+    }
+
+    function test_aTextPastTheFilesBoundIsDamaged() {
+        const text = DashboardBook.exportText(book(), "desktop", [])
+        const padded = text.slice(0, -1) + ',"pad":"' + "x".repeat(DashboardBook.maxBytes
+                                                                 + DashboardBook.fileKeysBytes) + '"}'
+        compare(DashboardBook.importProblem(padded, "desktop", []).problem, "damaged")
+        compare(DashboardBook.importProblem(text, "desktop", []).problem, "")
+        compare(DashboardBook.importProblem("", "desktop", []).problem, "none")
+    }
+
+    // havne-cli's `layout check` is a C++ port of importProblem: both read
+    // every case of tests/data/layouts to the verdicts beside it
+    function test_theLayoutCorpus_data() {
+        return Harness.layoutCases().map(n => ({ tag: n, name: n }))
+    }
+    function test_theLayoutCorpus(data) {
+        const file = Bridge.layoutFileText(Harness.layoutUrl(data.name, "json"))
+        verify(file.ok, "the case reads: " + file.words)
+        const expected = Bridge.layoutFileText(Harness.layoutUrl(data.name, "expect.json"))
+        verify(expected.ok, "its verdicts read: " + expected.words)
+        const runs = JSON.parse(expected.text)
+        verify(runs.length > 0)
+        for (const run of runs) {
+            const where = data.name + " as " + run.as
+            const r = DashboardBook.importProblem(file.text, run.as, run.vehicle ?? [])
+            compare(r.problem, run.problem, where + ": problem")
+            compare(r.form, run.form, where + ": form")
+            if (run.problem !== "" && run.problem !== "dropped")
+                continue
+            const counts = pagesAndCells(r.doc)
+            compare(counts[0], run.pages, where + ": pages")
+            compare(counts[1], run.cells, where + ": cells")
+            compare(r.dropped, run.dropped, where + ": dropped")
+            compare(r.files, run.files, where + ": files")
+            compare(r.notes, run.notes, where + ": notes")
+            if (run.first_cell !== undefined) {
+                compare(r.doc.pages[0].cells[0].w, run.first_cell.w, where + ": first cell's width")
+                compare(r.doc.pages[0].cells[0].h, run.first_cell.h, where + ": first cell's height")
+            }
+            if (run.missing !== undefined)
+                compare(r.missing.map(f => f.name), run.missing, where + ": missing")
+        }
     }
 }
