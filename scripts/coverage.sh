@@ -130,6 +130,7 @@ cover() { # cover <name> <seconds, 0 for none> <program> [args...]: into raw-<na
 # under the tool. The bound stands in for ctest's per-case TIMEOUT.
 start=$SECONDS
 owned=""
+skip=""
 failed=""
 gtest_jobs=${COVERAGE_JOBS:-3}
 if [ -z "$regex" ]; then
@@ -169,8 +170,12 @@ for t in json.load(sys.stdin)["tests"]:
         [ -e "$rcfile" ] || continue
         [ "$(cat "$rcfile")" = 0 ] || failed="$failed $(basename "$rcfile" | sed 's/^rc-//')"
     done
-    [ -z "$owned" ] || ctest_args+=(-E "^(${owned#|})\.")
+    [ -z "$owned" ] || skip="$skip|^(${owned#|})\."
 fi
+# Left out: under the tool on CI's runners core's module wait runs out and the
+# Ctrl+Break child is killed (0xC000013A); both run in the plain suite
+skip="^(CliSessionRunTest\.TheStreamNamesEachModulesSession|CliSignalTest\.CtrlBreakEndsTheStreamCleanly)\$$skip"
+ctest_args+=(-E "$skip")
 # --part: the gtest binaries alone, or the k-th of n interleaved slices of ctest's
 # other cases (ctest -I k,,n), so a runner each can share the work
 case "$part" in
