@@ -570,6 +570,71 @@ TestCase {
         verify(!page.importFailed)
     }
 
+    // Cancel on an import under way stops it: nothing is imported, the
+    // words say so in neither the made nor the failed color, and the panel
+    // stays with its choices; the next Import runs, and an idle Cancel
+    // closes the panel
+    function test_cancelStopsAnImportUnderWay() {
+        const page = createPage()
+        const panel = find(page, "importPanel")
+        const note = find(page, "importNote")
+        const cancel = find(page, "importCancel")
+        const busy = find(page, "importBusy")
+        page.refresh()
+        const before = page.recordings.length
+        Harness.holdImports(Bridge.recordingImport, 15000)
+        try {
+            page.chooseImportFile(Harness.writeScratchFile("cancel-one.log",
+                "(1.000000) can0 7E8#01\n"))
+            verify(cancel.enabled)
+            find(page, "importStart").clicked()
+            verify(Bridge.recordingImport.busy)
+            verify(cancel.enabled, "an import under way can be stopped")
+            compare(busy.text, "Importing...")
+            cancel.clicked()
+            verify(page.importStopping)
+            verify(!cancel.enabled, "asked once")
+            compare(busy.text, "Stopping...")
+            verify(panel.visible, "the panel stays while it stops")
+            tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                      "the canceled import ends")
+            compare(note.text, "Import canceled: nothing was imported")
+            verify(note.visible)
+            verify(Qt.colorEqual(note.color, Theme.textDim), "neither made nor failed")
+            verify(!page.importFailed)
+            verify(!page.importStopping)
+            verify(panel.visible, "its choices are kept for another try")
+            verify(!page.importAsksInterface, "a canceled log isn't asked for its interface")
+            verify(cancel.enabled)
+            verify(find(page, "importStart").enabled)
+        } finally {
+            // A worker took its hold when it started: after a failed check
+            // it is freed here, or the shared importer stays busy for the
+            // cases after this one
+            Harness.holdImports(Bridge.recordingImport, 0)
+            Bridge.recordingImport.cancel()
+            tryVerify(() => !Bridge.recordingImport.busy, 20000, "the held import ends")
+        }
+        page.refresh()
+        compare(page.recordings.length, before, "nothing was imported")
+
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the next import ends")
+        compare(note.text, "Imported 1 frames over 0.0 s")
+        verify(Qt.colorEqual(note.color, Theme.success))
+        verify(!panel.visible)
+        page.backToList()   // the import opened its recording
+        compare(page.recordings.length, before + 1)
+
+        page.chooseImportFile(Harness.writeScratchFile("cancel-two.log",
+            "(1.000000) can0 7E8#01\n"))
+        verify(panel.visible)
+        cancel.clicked()
+        verify(!panel.visible, "with nothing under way Cancel closes the panel")
+        verify(!Bridge.recordingImport.busy)
+    }
+
     function test_aRefusedGuessImportKeepsItsEdits() {
         const page = createPage()
         page.chooseImportFile(Harness.writeScratchFile("guess-refused.csv",

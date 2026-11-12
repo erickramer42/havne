@@ -68,6 +68,10 @@ Page {
     // names a log's interfaces when it has several
     property bool importAsksInterface: false
     property string importNote: ""
+    // Cancel pressed on an import under way, until it ends
+    property bool importStopping: false
+    // The last import was canceled: neither made nor failed
+    property bool importCanceled: false
     property bool importFailed: false
     // [{ title, uri, folder, source, profile }] (Bridge.recentRecordings)
     property var recordings: []
@@ -1786,11 +1790,16 @@ Page {
             }
         }
         function onFinished(result) {
-            root.importFailed = !result.ok
+            root.importStopping = false
+            root.importCanceled = result.canceled === true
+            root.importFailed = !result.ok && !root.importCanceled
             if (result.ok) {
                 root.importOpen = false
                 root.openFolder(result.folder)
                 root.importNote = root.importedWords(result)
+            } else if (root.importCanceled) {
+                // The panel stays, its choices kept, for another try
+                root.importNote = qsTr("Import canceled: nothing was imported")
             } else {
                 root.importNote = result.words
                 if (root.importKind === RecordingImport.Candump)
@@ -1914,8 +1923,15 @@ Page {
                 ThemedButton {
                     objectName: "importCancel"
                     text: qsTr("Cancel")
-                    enabled: !Bridge.recordingImport.busy
+                    // An import under way is stopped; a guess is short and
+                    // runs to its end
+                    enabled: !root.importGuessing && !root.importStopping
                     onClicked: {
+                        if (Bridge.recordingImport.busy) {
+                            root.importStopping = true
+                            Bridge.recordingImport.cancel()
+                            return
+                        }
                         root.importOpen = false
                         root.importNote = ""
                     }
@@ -1926,7 +1942,8 @@ Page {
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
                     color: Theme.textDim
-                    text: root.importGuessing ? qsTr("Reading...") : qsTr("Importing...")
+                    text: root.importGuessing ? qsTr("Reading...")
+                          : root.importStopping ? qsTr("Stopping...") : qsTr("Importing...")
                 }
             }
             // An optional name for the recording, kept as its folder's label
@@ -2087,7 +2104,8 @@ Page {
             visible: root.importNote !== ""
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            color: root.importFailed ? Theme.danger : Theme.success
+            color: root.importFailed ? Theme.danger
+                   : root.importCanceled ? Theme.textDim : Theme.success
             text: root.importNote
         }
 
