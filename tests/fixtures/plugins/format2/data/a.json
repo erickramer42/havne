@@ -1,0 +1,26 @@
+{
+  "havne_signals": 2,
+  "signals": [
+    {
+      "key": "oil",
+      "name": "Oil Temp",
+      "ecu": "pcm",
+      "read": { "service": "22", "number": "F40D" },
+      "field": { "byte": 0, "bits": 8 },
+      "offset": -40,
+      "unit": "°C", "decimals": 0
+    },
+    {
+      "key": "hot",
+      "name": "Running Hot",
+      "kind": "computed",
+      "expr": "if(oil > 110, 1, 0)"
+    },
+    {
+      "key": "alarm",
+      "name": "Alarm",
+      "kind": "computed",
+      "expr": "hot * 2"
+    }
+  ]
+}
