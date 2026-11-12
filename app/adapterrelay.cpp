@@ -56,7 +56,7 @@ QString AdapterRelay::start(const QString& uri, int port)
     }
     std::unique_ptr<RelayAdapter> adapter = m_factory(rest.mid(3));
     if (adapter == nullptr) {
-        return tr("The adapter %1 can't be relayed").arg(rest);
+        return tr("This adapter can't be relayed");
     }
     auto* server = new QTcpServer(this);
     // The phone's own loopback address alone: adb's forward reaches it,

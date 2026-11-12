@@ -252,16 +252,24 @@ TestCase {
                 ["J2534 adapter", "Serial port", "CAN interface", "Bluetooth", "Bluetooth LE"])
     }
 
-    // A relay's refusal is not a connect's: the Log has nothing for it
-    function test_aRelayRefusalLeavesTheLogOut() {
+    // A relay's refusal is in the Log, and its Show log finds it
+    function test_aRelayRefusalIsInTheLog() {
         const page = createPage()
         const show = find(page, "errorShowLog")
-        page.requestConnect("mock://demo?profile=no-such-profile")
-        tryVerify(() => show.visible, 5000, "a connect's refusal offers the Log")
+        verify(!show.visible, "nothing refused yet")
+        const spy = createTemporaryObject(logSpyComponent, testCase,
+                                          { target: Bridge, signalName: "logMessage" })
         // the relay button, with the relay refusing what the field holds
         find(page, "relayButton").clicked()
-        verify(page.errorLabel.text !== "", "the relay's own words: " + page.errorLabel.text)
-        verify(!show.visible, "no Show log beside the relay's words")
+        const words = page.errorLabel.text
+        verify(words !== "", "the relay's own words")
+        compare(spy.count, 1, "one line logged")
+        compare(spy.signalArguments[0][0], "Relay: " + words)
+        verify(show.visible, "Show log beside the relay's words")
+        logSpy.target = page
+        logSpy.clear()
+        tap(show)
+        compare(logSpy.count, 1, "the Log asked for")
     }
 
     // A URI isn't prose: no capital first letter, no predicted words
