@@ -81,6 +81,17 @@ class RecordingView : public QObject
     // A health report being written (saveHealthReport), until its thread
     // ends, whether or not the viewer closed meanwhile
     Q_PROPERTY(bool reporting READ reporting NOTIFY reportingChanged)
+    // The levels stretches() takes as its rules, each core's default
+    // (ECUIO_STRETCH_DEFAULT_*) in display units: { pullLevel,
+    // pullLoadLevel, cruiseThrottleBand (%), pullHoldS, pullGapS,
+    // cruiseHoldS (seconds), pullRise (rpm), pullGain, cruiseSpeedBand,
+    // cruiseFloor (km/h, or mph under imperial units) }
+    Q_PROPERTY(QVariantMap stretchDefaults READ stretchDefaults NOTIFY
+                   unitSystemChanged)
+    // Why the last stretches() was refused, naming the rule ("Pull level
+    // must be a number from 0 to 100"); empty once an ask is taken
+    Q_PROPERTY(QString stretchesProblem READ stretchesProblem NOTIFY
+                   stretchesProblemChanged)
 
 public:
     enum State { Closed, Opening, Open, Failed };
@@ -110,6 +121,8 @@ public:
     bool ownSignalFile() const { return m_ownSignalFile; }
     bool hasFrames() const { return m_hasFrames; }
     bool reporting() const { return m_reporting; }
+    QVariantMap stretchDefaults() const;
+    QString stretchesProblem() const { return m_stretchesProblem; }
 
     // The log viewer's Save report (ADR-0054's appendix "the health report
     // as built"): the whole recording's health from its folder (core's
@@ -199,16 +212,22 @@ public:
     // replaced it: the sample's time, -1 at the ends or on a failure.
     Q_INVOKABLE int step(int signal, double tMs, bool forward);
     // The recording's pulls, its cruises or both (ecuio_recording_stretches
-    // over the whole recording, core's default rules and its own pick of
-    // each role's signal), off the GUI thread: the ask's number, or 0 with
-    // nothing asked (not open, neither kind). stretchesReady answers with
+    // over the whole recording, core's own pick of each role's signal),
+    // off the GUI thread: the ask's number, or 0 with nothing asked (not
+    // open, neither kind, rules refused). rules holds stretchDefaults'
+    // keys in display units, a key left out or 0 taking core's default. A
+    // key that isn't one, a value that isn't a finite number of 0 or
+    // more, a percentage past 100, a time past an hour or a speed past
+    // 1000 km/h refuses the ask here, on the caller's thread, with
+    // stretchesProblem saying which. stretchesReady answers with
     // that number unless a later ask replaced it or the recording closed:
     // one map per stretch in time order, { kind ("pull" or "cruise"),
     // fromMs, toMs, start, end (a pull's measured signal at its two ends,
     // a cruise's mean speed in both, in display units), unit, decimals,
     // signal (the measured one's index) }, and ok: false, the list empty,
     // when the pass failed (the file changed since the open, no memory).
-    Q_INVOKABLE int stretches(bool pulls, bool cruises);
+    Q_INVOKABLE int stretches(bool pulls, bool cruises,
+                              const QVariantMap& rules = {});
     // Each stretches pass waits this long before it reads, so a test can
     // close or destroy the view while one is under way
     void setStretchesHoldForTesting(int ms) { m_stretchesHoldMs = ms; }
@@ -224,6 +243,7 @@ signals:
     void statsReady(int request, const QVariantList& stats);
     void stepReady(int request, double atMs);
     void stretchesReady(int request, const QVariantList& stretches, bool ok);
+    void stretchesProblemChanged();
 
 private:
     struct Result;
@@ -277,7 +297,9 @@ private:
     // if it still lives
     static void findStretches(const std::shared_ptr<ecuio_recording_t>& reader,
                               const QPointer<RecordingView>& view, int request,
-                              uint32_t kinds, quint64 generation, int holdMs);
+                              ecuio_stretch_rules_t rules, quint64 generation,
+                              int holdMs);
+    void setStretchesProblem(const QString& words);
     void stretchesFinished(int request, ecuio_status_t rc,
                            const std::vector<ecuio_recording_stretch_t>& got,
                            quint64 generation);
@@ -328,6 +350,7 @@ private:
     int m_lastStep = 0;
     int m_lastStretches = 0;
     int m_stretchesHoldMs = 0;
+    QString m_stretchesProblem;
     // Each open's number: a result or progress posted for an earlier one
     // is dropped
     quint64 m_generation = 0;

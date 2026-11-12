@@ -19,6 +19,7 @@
 
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -702,7 +703,8 @@ double askedStep(RecordingView& v, int signal, double t, bool forward)
 }
 
 // The answer to one stretches ask, waited for on the GUI thread
-QVariantList askedStretches(RecordingView& v, bool pulls, bool cruises)
+QVariantList askedStretches(RecordingView& v, bool pulls, bool cruises,
+                            const QVariantMap& rules = {})
 {
     QVariantList got;
     bool answered = false;
@@ -712,10 +714,55 @@ QVariantList askedStretches(RecordingView& v, bool pulls, bool cruises)
                                         answered = true;
                                         EXPECT_TRUE(ok);
                                     });
-    EXPECT_GT(v.stretches(pulls, cruises), 0);
+    EXPECT_GT(v.stretches(pulls, cruises, rules), 0)
+        << v.stretchesProblem().toStdString();
     EXPECT_TRUE(waitFor([&] { return answered; }));
     QObject::disconnect(c);
     return got;
+}
+
+// A copy of a recording fixture's events.log and signals.csv in a folder
+// of dir, each line as edit leaves it, or left out when edit says false
+QString copiedFixture(const QTemporaryDir& dir, const char* name,
+                      const std::function<bool(QByteArray&)>& edit)
+{
+    const QString folder = dir.filePath(QLatin1String(name));
+    QDir().mkpath(folder);
+    for (const char* file : {"events.log", "signals.csv"}) {
+        QFile in(fixture(name) + QLatin1Char('/') + QLatin1String(file));
+        EXPECT_TRUE(in.open(QIODevice::ReadOnly));
+        QByteArray out;
+        for (QByteArray line : in.readAll().split('\n')) {
+            if (edit(line)) {
+                out += line + '\n';
+            }
+        }
+        out.chop(1); // the split's last piece had no line end
+        QFile to(folder + QLatin1Char('/') + QLatin1String(file));
+        EXPECT_TRUE(to.open(QIODevice::WriteOnly));
+        to.write(out);
+    }
+    return folder;
+}
+
+// pull-twice with no engine speed: a pull there is judged by its gain
+QString pullsWithoutRpm(const QTemporaryDir& dir)
+{
+    return copiedFixture(dir, "pull-twice", [](QByteArray& line) {
+        return !line.contains(",RPM,") && !line.startsWith("signal  RPM,");
+    });
+}
+
+// The pulls and cruises one ask finds under rules
+qsizetype found(RecordingView& v, bool pulls, bool cruises,
+                const QVariantMap& rules)
+{
+    return askedStretches(v, pulls, cruises, rules).size();
+}
+
+QVariantMap rule(const char* key, const QVariant& value)
+{
+    return {{QLatin1String(key), value}};
 }
 
 // The pulls and cruises are core's, as havne-cli view --stretches lists
@@ -885,6 +932,281 @@ TEST(RecordingViewTest, AStretchesAskOnAChangedFileSaysItFailed)
     EXPECT_FALSE(ok);
     EXPECT_EQ(count, 0);
     EXPECT_TRUE(v.stale());
+}
+
+// Each level a page sets reaches core's rule of that name: pull-twice
+// (two pulls, a stab that climbs 180 rpm, a part-throttle rise at 45 %,
+// pulls 7 s and 4 s long at 96 % and 97 %, a 925 ms lift), copies of it
+// with engine load for the throttle and with no engine speed, the cruise
+// fixture (two cruises 3 km/h apart, at 80 and 83 km/h, 12 s and 13 s
+// long), and a cruise whose throttle steps 4 %
+TEST(RecordingViewTest, AStretchesAskTakesRules)
+{
+    RecordingView v;
+    v.open(fixture("pull-twice"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_EQ(found(v, true, false, {}), 2);
+    EXPECT_EQ(found(v, true, false, rule("pullRise", 5000)), 0);
+    EXPECT_EQ(found(v, true, false, rule("pullRise", 100)), 3) << "the stab";
+    EXPECT_EQ(found(v, true, false, rule("pullLevel", 97)), 1);
+    EXPECT_EQ(found(v, true, false, rule("pullLevel", 40)), 3)
+        << "the part throttle";
+    EXPECT_EQ(found(v, true, false, rule("pullHoldS", 5)), 1);
+    EXPECT_EQ(found(v, true, false, rule("pullGapS", 0.9)), 3)
+        << "split at the lift";
+    // A level of another signal's, and the gain with engine speed in the
+    // log, change nothing; 0 is core's default
+    EXPECT_EQ(found(v, true, false, rule("pullLoadLevel", 97)), 2);
+    EXPECT_EQ(found(v, true, false, rule("pullGain", 100)), 2);
+    EXPECT_EQ(found(v, true, false,
+                    {{QStringLiteral("pullRise"), 0},
+                     {QStringLiteral("pullGapS"), 0.0}}),
+              2);
+    // Several at once: the stab let in, then every pull under 5 s out
+    EXPECT_EQ(found(v, true, false,
+                    {{QStringLiteral("pullRise"), 100},
+                     {QStringLiteral("pullHoldS"), 5}}),
+              1);
+
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    v.open(copiedFixture(dir, "pull-twice", [](QByteArray& line) {
+        line.replace("Throttle", "Engine Load");
+        return true;
+    }));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_EQ(found(v, true, false, {}), 2);
+    EXPECT_EQ(found(v, true, false, rule("pullLoadLevel", 97)), 1);
+    EXPECT_EQ(found(v, true, false, rule("pullLevel", 97)), 2)
+        << "the throttle's level, with no throttle";
+
+    QTemporaryDir bare;
+    ASSERT_TRUE(bare.isValid());
+    v.open(pullsWithoutRpm(bare));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_EQ(found(v, true, false, {}), 2);
+    EXPECT_EQ(found(v, true, false, rule("pullGain", 5)), 3) << "the stab";
+    EXPECT_EQ(found(v, true, false, rule("pullGain", 16)), 1)
+        << "the pull in top gear gains 15";
+    EXPECT_EQ(found(v, true, false, rule("pullRise", 5000)), 2)
+        << "the rise is engine speed's";
+
+    v.open(fixture("cruise"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_EQ(found(v, false, true, {}), 2);
+    EXPECT_EQ(found(v, false, true, rule("cruiseFloor", 82)), 1);
+    EXPECT_EQ(found(v, false, true, rule("cruiseHoldS", 15)), 0);
+    EXPECT_EQ(found(v, false, true, rule("cruiseSpeedBand", 4)), 1)
+        << "the two as one";
+
+    // 30 s at 100 km/h, the throttle stepping between 20 % and 24 %
+    QTemporaryDir stepped;
+    ASSERT_TRUE(stepped.isValid());
+    {
+        QFile events(stepped.filePath(QStringLiteral("events.log")));
+        ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+        events.write("ecuio session recording, format 2 (ADR-0049)\n"
+                     "started  2026-11-03 09:00:00.000 (local time)\n"
+                     "profile  test\n"
+                     "signal  Vehicle Speed,number,km/h,0,1\n"
+                     "signal  Throttle,number,%,1,2\n"
+                     "\n00:00:30.000  +30.000  end  test: 0 frames, 122 "
+                     "values, 0 records dropped, 0 notes dropped\n");
+        QFile rows(stepped.filePath(QStringLiteral("signals.csv")));
+        ASSERT_TRUE(rows.open(QIODevice::WriteOnly));
+        rows.write("host_us,signal,value,unit\n");
+        for (int k = 0; k <= 60; ++k) {
+            const QByteArray t = QByteArray::number(k * 500000);
+            rows.write(t + ",Vehicle Speed,100,km/h\n");
+            rows.write(QByteArray::number(k * 500000 + 1000) + ",Throttle," +
+                       (k % 2 == 0 ? "20" : "24") + ",%\n");
+        }
+    }
+    v.open(stepped.path());
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_EQ(found(v, false, true, {}), 0) << "a 4 % step, a 3 % band";
+    EXPECT_EQ(found(v, false, true, rule("cruiseThrottleBand", 5)), 1);
+}
+
+// A speed is in the viewer's unit: mph under imperial units, km/h to core
+TEST(RecordingViewTest, ASpeedRuleIsConvertedFromTheViewersUnit)
+{
+    RecordingView v;
+    v.open(fixture("cruise"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    // 51 km/h is under both cruises; 51 mph (82.1 km/h) only under one
+    EXPECT_EQ(found(v, false, true, rule("cruiseFloor", 51)), 2);
+    EXPECT_EQ(found(v, false, true, rule("cruiseSpeedBand", 2.5)), 2);
+    v.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    EXPECT_EQ(found(v, false, true, rule("cruiseFloor", 51)), 1);
+    // 2.5 mph is 4.02 km/h: the two cruises, 3 km/h apart, as one
+    EXPECT_EQ(found(v, false, true, rule("cruiseSpeedBand", 2.5)), 1);
+
+    // The stab gains 8 km/h: 5 mph (8.05 km/h) leaves it out, 4.9 doesn't
+    QTemporaryDir bare;
+    ASSERT_TRUE(bare.isValid());
+    v.open(pullsWithoutRpm(bare));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_EQ(found(v, true, false, rule("pullGain", 5)), 2);
+    EXPECT_EQ(found(v, true, false, rule("pullGain", 4.9)), 3);
+    v.setUnitSystem(ECUIO_UNITS_METRIC);
+    EXPECT_EQ(found(v, true, false, rule("pullGain", 5)), 3);
+}
+
+// A rule core can't take is refused where it is asked, with words that
+// name it, and no pass starts
+TEST(RecordingViewTest, AStretchesRuleOutOfRangeIsRefusedWithWords)
+{
+    RecordingView v;
+    int changes = 0;
+    QObject::connect(&v, &RecordingView::stretchesProblemChanged,
+                     [&] { ++changes; });
+    // Not open: bad rules are still named, good ones leave no words
+    EXPECT_EQ(v.stretches(true, false, rule("pullLevel", 101)), 0);
+    EXPECT_EQ(v.stretchesProblem(),
+              QStringLiteral("Pull level must be a number from 0 to 100"));
+    EXPECT_EQ(v.stretches(true, false, rule("pullLevel", 90)), 0);
+    EXPECT_EQ(v.stretchesProblem(), QString());
+    EXPECT_EQ(changes, 2);
+
+    v.open(fixture("pull-twice"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    int answers = 0;
+    QObject::connect(&v, &RecordingView::stretchesReady,
+                     [&](int, const QVariantList&, bool) { ++answers; });
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    const double inf = std::numeric_limits<double>::infinity();
+    const struct {
+        const char* key;
+        QVariant value;
+        const char* words;
+    } refused[] = {
+        {"pullLevel", 100.5, "Pull level must be a number from 0 to 100"},
+        {"pullLevel", -1, "Pull level must be a number from 0 to 100"},
+        {"pullLoadLevel", nan,
+         "Pull load level must be a number from 0 to 100"},
+        {"cruiseThrottleBand", 101,
+         "Cruise throttle band must be a number from 0 to 100"},
+        {"pullHoldS", 3600.5, "Pull hold must be a number from 0 to 3600 s"},
+        {"pullGapS", inf, "Pull gap must be a number from 0 to 3600 s"},
+        {"cruiseHoldS", -0.1, "Cruise hold must be a number from 0 to 3600 s"},
+        {"pullRise", -1, "Pull rise must be a number, 0 or more"},
+        {"pullRise", inf, "Pull rise must be a number, 0 or more"},
+        {"pullGain", 1000.5, "Pull gain must be a number from 0 to 1000 km/h"},
+        {"cruiseSpeedBand", QStringLiteral("wide"),
+         "Cruise speed band must be a number from 0 to 1000 km/h"},
+        {"cruiseFloor", true,
+         "Cruise floor must be a number from 0 to 1000 km/h"},
+        {"pullSpeed", 1, "'pullSpeed' isn't a stretch rule"},
+    };
+    changes = 0;
+    for (const auto& r : refused) {
+        EXPECT_EQ(v.stretches(true, true, rule(r.key, r.value)), 0) << r.key;
+        EXPECT_EQ(v.stretchesProblem(), QLatin1String(r.words)) << r.key;
+    }
+    EXPECT_EQ(changes, 11) << "a change for each new wording, none for the "
+                              "two refusals that repeat the one before";
+    // One bad rule among good ones refuses the ask
+    EXPECT_EQ(v.stretches(true, true,
+                          {{QStringLiteral("pullLevel"), 90},
+                           {QStringLiteral("pullRise"), -5}}),
+              0);
+    EXPECT_FALSE(waitFor([&] { return answers > 0; }, 300))
+        << "a refused ask starts no pass";
+
+    // The most of each is taken, and an ask taken clears the words
+    changes = 0;
+    EXPECT_EQ(found(v, true, false, rule("pullLevel", 100)), 0);
+    EXPECT_EQ(v.stretchesProblem(), QString());
+    EXPECT_EQ(changes, 1);
+    EXPECT_GT(v.stretches(true, false, rule("pullHoldS", 3600)), 0);
+    EXPECT_GT(v.stretches(true, false, rule("pullGain", 1000)), 0);
+    EXPECT_GT(v.stretches(true, false, rule("pullRise", 1e9)), 0);
+    // In mph the most is 1000 km/h still: 621 mph, and its words say so
+    v.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    EXPECT_GT(v.stretches(true, false, rule("cruiseFloor", 621)), 0);
+    EXPECT_EQ(v.stretches(true, false, rule("cruiseFloor", 622)), 0);
+    EXPECT_EQ(
+        v.stretchesProblem(),
+        QStringLiteral("Cruise floor must be a number from 0 to 621 mph"));
+    v.setUnitSystem(ECUIO_UNITS_METRIC);
+
+    // A refused ask leaves the one before it to answer
+    ASSERT_TRUE(waitFor([&] { return answers >= 1; }));
+    QThread::msleep(100);
+    QCoreApplication::processEvents();
+    answers = 0;
+    const int asked = v.stretches(true, false);
+    ASSERT_GT(asked, 0);
+    EXPECT_EQ(v.stretches(true, false, rule("pullLevel", -3)), 0);
+    int last = 0;
+    const auto c = QObject::connect(
+        &v, &RecordingView::stretchesReady,
+        [&](int request, const QVariantList&, bool) { last = request; });
+    EXPECT_TRUE(waitFor([&] { return last == asked; }));
+    QObject::disconnect(c);
+}
+
+// The levels a page shows as defaults are core's macros, a speed in the
+// viewer's unit, and asking with them finds what asking with none does
+TEST(RecordingViewTest, TheDefaultsAreCoresOwn)
+{
+    RecordingView v;
+    const auto value = [&](const char* key) {
+        const QVariantMap d = v.stretchDefaults();
+        EXPECT_TRUE(d.contains(QLatin1String(key))) << key;
+        return d.value(QLatin1String(key)).toDouble();
+    };
+    EXPECT_EQ(v.stretchDefaults().size(), 10);
+    EXPECT_EQ(value("pullLevel"), ECUIO_STRETCH_DEFAULT_PULL_LEVEL);
+    EXPECT_EQ(value("pullLoadLevel"), ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL);
+    EXPECT_EQ(value("pullHoldS"), ECUIO_STRETCH_DEFAULT_PULL_HOLD_US / 1e6);
+    EXPECT_EQ(value("pullGapS"), ECUIO_STRETCH_DEFAULT_PULL_GAP_US / 1e6);
+    EXPECT_EQ(value("pullRise"), ECUIO_STRETCH_DEFAULT_PULL_RISE);
+    EXPECT_EQ(value("pullGain"), ECUIO_STRETCH_DEFAULT_PULL_GAIN);
+    EXPECT_EQ(value("cruiseHoldS"), ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US / 1e6);
+    EXPECT_EQ(value("cruiseSpeedBand"),
+              ECUIO_STRETCH_DEFAULT_CRUISE_SPEED_BAND);
+    EXPECT_EQ(value("cruiseThrottleBand"),
+              ECUIO_STRETCH_DEFAULT_CRUISE_THROTTLE_BAND);
+    EXPECT_EQ(value("cruiseFloor"), ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR);
+    // Each its own: no two alike but the two levels and the two holds'
+    // neighbors, which the macros make differ where they should
+    EXPECT_NE(value("pullHoldS"), value("pullGapS"));
+    EXPECT_NE(value("pullHoldS"), value("cruiseHoldS"));
+    EXPECT_NE(value("pullGain"), value("cruiseSpeedBand"));
+    EXPECT_NE(value("cruiseSpeedBand"), value("cruiseThrottleBand"));
+
+    int changed = 0;
+    QObject::connect(&v, &RecordingView::unitSystemChanged, [&] { ++changed; });
+    v.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    EXPECT_EQ(changed, 1) << "the defaults' notify";
+    EXPECT_DOUBLE_EQ(value("cruiseFloor"), 35.0) << "35 mph";
+    EXPECT_DOUBLE_EQ(value("pullGain"),
+                     ECUIO_STRETCH_DEFAULT_PULL_GAIN / 1.609344);
+    EXPECT_DOUBLE_EQ(value("cruiseSpeedBand"),
+                     ECUIO_STRETCH_DEFAULT_CRUISE_SPEED_BAND / 1.609344);
+    EXPECT_EQ(value("pullLevel"), ECUIO_STRETCH_DEFAULT_PULL_LEVEL);
+    EXPECT_EQ(value("pullRise"), ECUIO_STRETCH_DEFAULT_PULL_RISE);
+    EXPECT_EQ(value("cruiseHoldS"), ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US / 1e6);
+
+    // Handed back as rules, in either unit system, they find what core's
+    // own defaults find
+    for (const char* name : {"pull-twice", "cruise"}) {
+        v.open(fixture(name));
+        ASSERT_TRUE(waitFor([&] { return settled(v); }));
+        for (uint32_t units : {ECUIO_UNITS_IMPERIAL, ECUIO_UNITS_METRIC}) {
+            v.setUnitSystem(static_cast<int>(units));
+            const QVariantList plain = askedStretches(v, true, true);
+            const QVariantList ruled =
+                askedStretches(v, true, true, v.stretchDefaults());
+            EXPECT_EQ(plain.size(), 2) << name;
+            EXPECT_EQ(ruled, plain) << name;
+        }
+    }
 }
 
 // RPM over 1 s to 3 s of pull-early, worked out from signals.csv by hand;

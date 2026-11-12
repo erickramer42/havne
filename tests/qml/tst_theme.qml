@@ -241,7 +241,7 @@ TestCase {
         usePalette(data.name)
         for (const r of ["primary", "textOnPrimary", "hairline", "text", "textDim", "success", "warning", "danger", "info",
                          "gaugeValue", "gaugeReadout", "gaugeNeedle", "gaugeTick", "gaugeWarn",
-                         "gaugeDanger"]) {
+                         "gaugeDanger", "stretchPull", "stretchCruise"]) {
             const h = Qt.color(Theme[r]).hsvHue * 360
             verify(h >= 0 && h <= 60, r + " is " + Theme[r] + ", hue " + h.toFixed(0) + " in " + data.name)
         }
@@ -298,9 +298,27 @@ TestCase {
         verify(textOnDanger >= 4.5, "textOnDanger on danger is " + textOnDanger.toFixed(2) + ":1 in " + data.name)
         // Control borders and the lit color against what they sit on: 3:1
         for (const [fg, bgName] of [["outline", "bg"], ["gaugeValue", "surface"],
-                                    ["gaugeNeedle", "surface"]]) {
+                                    ["gaugeNeedle", "surface"], ["stretchPull", "surface"],
+                                    ["stretchCruise", "surface"]]) {
             const c = contrast(Theme[fg], Theme[bgName])
             verify(c >= 3, fg + " on " + bgName + " is " + c.toFixed(2) + ":1 in " + data.name)
+        }
+    }
+
+    // The two stretch roles tell apart in every theme, and neither is a
+    // series color's twin: a band's edge beside a trace must not read as it
+    function test_theStretchRolesAreTwoAndTellApart_data() {
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
+    }
+    function test_theStretchRolesAreTwoAndTellApart(data) {
+        usePalette(data.name)
+        verify(!Qt.colorEqual(Theme.stretchPull, Theme.stretchCruise), "pull and cruise differ")
+        const a = Qt.color(Theme.stretchPull), b = Qt.color(Theme.stretchCruise)
+        const apart = Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b)
+        verify(apart > 0.25, "pull and cruise are " + apart.toFixed(2) + " apart in " + data.name)
+        for (const c of Theme.seriesColors) {
+            verify(!Qt.colorEqual(Theme.stretchPull, c) && !Qt.colorEqual(Theme.stretchCruise, c),
+                   "a stretch role is a series color in " + data.name)
         }
     }
 
