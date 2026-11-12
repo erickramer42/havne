@@ -433,12 +433,16 @@ jobs:
           "SCCACHE_DIR=$env:RUNNER_TEMP\sccache-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "SCCACHE_CACHE_SIZE=1G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Name the compiler cache's day
+        id: day
+        run: '"day=$((Get-Date).ToUniversalTime().ToString(''yyyyMMdd''))" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append'
+
       - name: Restore the compiler cache
         id: cc-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\sccache-cache
-          key: sccache-win-build-1-${{ github.sha }}
+          key: sccache-win-build-1-${{ steps.day.outputs.day }}
           restore-keys: sccache-win-build-1-
 
       - name: Build full app
@@ -458,11 +462,11 @@ jobs:
           sccache --show-stats | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
       - name: Save the compiler cache (dev and main)
-        if: matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        if: steps.cc-cache.outputs.cache-hit != 'true' && (matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\sccache-cache
-          key: sccache-win-build-1-${{ github.sha }}
+          key: sccache-win-build-1-${{ steps.day.outputs.day }}
 
       # ECUIO_PYTEST_REQUIRED: PythonTest.* fail rather than skip without
       # pytest
@@ -609,11 +613,16 @@ jobs:
           "SCCACHE_DIR=$env:RUNNER_TEMP\sccache-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "SCCACHE_CACHE_SIZE=1G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Name the compiler cache's day
+        id: day
+        run: '"day=$((Get-Date).ToUniversalTime().ToString(''yyyyMMdd''))" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append'
+
       - name: Restore the compiler cache
+        id: cc-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\sccache-cache
-          key: sccache-win-coverage-1-${{ github.sha }}
+          key: sccache-win-coverage-1-${{ steps.day.outputs.day }}
           restore-keys: sccache-win-coverage-1-
 
       - name: Measure coverage
@@ -634,11 +643,11 @@ jobs:
           sccache --show-stats
 
       - name: Save the compiler cache (dev and main)
-        if: matrix.name == 'gtest' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        if: steps.cc-cache.outputs.cache-hit != 'true' && (matrix.name == 'gtest' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\sccache-cache
-          key: sccache-win-coverage-1-${{ github.sha }}
+          key: sccache-win-coverage-1-${{ steps.day.outputs.day }}
 
       # A case that fails only under the tool is named in the step's log and
       # explained in its own: the step doesn't fail, so this runs always.
@@ -713,11 +722,16 @@ jobs:
           echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=1G" >> "$GITHUB_ENV"
 
+      - name: Name the compiler cache's day
+        id: day
+        run: echo "day=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
       - name: Restore the compiler cache
+        id: cc-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-macos-build-1-${{ github.sha }}
+          key: sccache-macos-build-1-${{ steps.day.outputs.day }}
           restore-keys: sccache-macos-build-1-
 
       - name: Build full app
@@ -727,11 +741,11 @@ jobs:
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Save the compiler cache (dev and main)
-        if: matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        if: steps.cc-cache.outputs.cache-hit != 'true' && (matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-macos-build-1-${{ github.sha }}
+          key: sccache-macos-build-1-${{ steps.day.outputs.day }}
 
       # ECUIO_PYTEST_REQUIRED: PythonTest.* fail rather than skip without
       # pytest
@@ -802,11 +816,16 @@ jobs:
           echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=1G" >> "$GITHUB_ENV"
 
+      - name: Name the compiler cache's day
+        id: day
+        run: echo "day=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
       - name: Restore the compiler cache
+        id: cc-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-linux-build-1-${{ github.sha }}
+          key: sccache-linux-build-1-${{ steps.day.outputs.day }}
           restore-keys: sccache-linux-build-1-
 
       # libegl1 and libopengl0: QtGui's runtime libraries, which test_qml
@@ -824,11 +843,11 @@ jobs:
           sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Save the compiler cache (dev and main)
-        if: matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        if: steps.cc-cache.outputs.cache-hit != 'true' && (matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-linux-build-1-${{ github.sha }}
+          key: sccache-linux-build-1-${{ steps.day.outputs.day }}
       # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
       # as installed on the hosted Ubuntu runners. MTU 72 takes CAN FD
       # frames (the mock's 16-byte telemetry), whatever the kernel's
