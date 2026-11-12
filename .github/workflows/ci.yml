@@ -620,6 +620,13 @@ jobs:
     if: ${{ !inputs.smoke_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Two runners, each with its own build, run alternate halves of ctest
+    # (-I k,,2: every case once across the two); the steps after the tests
+    # run on the first
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -675,10 +682,11 @@ jobs:
         env:
           ECUIO_VCAN_REQUIRED: '1'
           ECUIO_PYTEST_REQUIRED: '1'
-        run: ctest --test-dir build --output-on-failure --no-tests=error
+        run: ctest --test-dir build --output-on-failure --no-tests=error -I ${{ matrix.shard }},,2
       # The one SocketCAN case that sets the interface down and up again
       # needs CAP_NET_ADMIN; it skips in the run above, and runs here
       - name: SocketCAN as root (the interface down and up)
+        if: matrix.shard == 1
         env:
           ECUIO_VCAN_REQUIRED: '1'
           ECUIO_VCAN_ROOT_REQUIRED: '1'
@@ -689,8 +697,10 @@ jobs:
       # Core's probes fire in a running program (ADR-0034 section 4): bpftrace
       # attaches to havne-cli's and counts a mock:// stream's
       - name: USDT probes under bpftrace
+        if: matrix.shard == 1
         run: sudo sh tests/probe_trace.sh build/cli/havne-cli
       - name: Load test
+        if: matrix.shard == 1
         shell: bash   # -o pipefail: tee must not hide the bench's exit status
         run: build/tests/bench_bridge --load | tee -a "$GITHUB_STEP_SUMMARY"
 
