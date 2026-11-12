@@ -1740,7 +1740,7 @@ TestCase {
         tall(["dashUndo", "dashRedo", "dashAdd", "dashMore", "dashDone", "dashAddCell_0"])
         find(dash, "dashMore").clicked()
         // Move page left and right show only with pages to move among
-        tall(["moreRename", "moreAddPage", "moreRemovePage", "moreReset"])
+        tall(["moreRename", "moreAddPage", "moreRemovePage", "moreExport", "moreLoad", "moreReset"])
         dash.addPage()
         tall(["moreLeft", "moreRight"])
         dash.removePage()

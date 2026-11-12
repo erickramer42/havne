@@ -145,6 +145,118 @@ QtObject {
         return { doc: d, problem: "" }
     }
 
+    // ---- The layout file (ADR-0057's appendix on the layout file)
+    //
+    // A layout file is the form's stored document with two more
+    // document-level keys, which a stored text never holds: "form" (the
+    // form it was written from) and "files" (each signal file its
+    // references need, { name, sha256 }). havne-cli's `layout check` is a
+    // C++ port of importProblem, held equal to it by tests/data/layouts.
+
+    readonly property int maxFiles: 32
+    readonly property int maxFileName: 80
+    // What the two keys may add to a stored document's own bound
+    readonly property int fileKeysBytes: 16384
+
+    // A file's text for a layout of `form`: "" when doc doesn't read back
+    // as it is. `files` is [{ name, sha256 }], already narrowed to the
+    // ones the layout needs (neededFiles); key order: format, form, files,
+    // the document's other keys, then the pages
+    function exportText(doc, form, files) {
+        if (documentProblem(doc) !== "" || (form !== "phone" && form !== "desktop")
+                || !Array.isArray(files) || files.length > maxFiles
+                || !files.every(fileFits))
+            return ""
+        const listed = files.map(f => ({ name: f.name, sha256: f.sha256 }))
+        // JSON escapes a control character to 6 bytes, so names that fit
+        // fileFits can still overrun the keys' room
+        if (utf8Bytes(serialize(listed)) > fileKeysBytes)
+            return ""
+        const out = { format: doc.format, form: form, files: listed }
+        for (const k in doc) {
+            if (!(k in out) && k !== "pages")
+                out[k] = doc[k]
+        }
+        out.pages = doc.pages
+        const text = serialize(out)
+        // importProblem's bound: the document's own plus the two keys' room
+        return utf8Bytes(text) > maxBytes + fileKeysBytes ? "" : text
+    }
+
+    // The files, of `vehicleFiles` ([{ name, sha256, refs }], refs the
+    // "key:" and "id:" references the file's profile gives), that a cell
+    // of doc reads by a "key:" reference: [{ name, sha256 }]
+    function neededFiles(doc, vehicleFiles) {
+        const used = {}
+        for (const p of doc.pages) {
+            for (const c of p.cells) {
+                for (const r of c.refs)
+                    used[r] = true
+            }
+        }
+        const out = []
+        for (const f of vehicleFiles) {
+            if (f.refs.some(r => r.startsWith("key:") && used[r] === true))
+                out.push({ name: f.name, sha256: f.sha256 })
+        }
+        return out
+    }
+
+    function fileFits(f) {
+        return isObject(f) && typeof f.name === "string" && f.name.trim() !== ""
+               && codePoints(f.name) <= maxFileName
+               && typeof f.sha256 === "string" && /^[0-9a-f]{64}$/.test(f.sha256)
+    }
+
+    // Reads a layout file for `form` (the form loading it):
+    // { doc, problem, dropped, form, files, missing, notes }. problem is
+    // parse's ("none", "damaged", "newer", "dropped", "") or "otherform"
+    // (the file's form isn't the loading one: no scaling between forms,
+    // doc is the built-in layout). form is the file's own ("" for none),
+    // files its list, missing those of files whose sha256 isn't among
+    // `vehicleSha256s` (every file is missing when that isn't an array),
+    // and notes holds "no-form" when the file named none, so it was read
+    // as `form`. doc never holds the form or files keys
+    function importProblem(text, form, vehicleSha256s) {
+        const refused = problem => ({ doc: builtIn(form), problem: problem, form: "",
+                                      files: [], missing: [], notes: [] })
+        if (typeof text !== "string" || text === "")
+            return refused("none")
+        if (utf8Bytes(text) > maxBytes + fileKeysBytes)
+            return refused("damaged")
+        let d
+        try {
+            d = JSON.parse(text)
+        } catch (e) {
+            return refused("damaged")
+        }
+        if (!isObject(d))
+            return refused("damaged")
+        const declared = d.form
+        const listed = d.files
+        delete d.form
+        delete d.files
+        const r = parse(serialize(d), form)
+        if (r.problem === "damaged" || r.problem === "newer")
+            return refused(r.problem)
+        if ((declared !== undefined && declared !== "phone" && declared !== "desktop")
+                || (listed !== undefined
+                    && (!Array.isArray(listed) || listed.length > maxFiles
+                        || !listed.every(fileFits))))
+            return refused("damaged")
+        if (declared !== undefined && declared !== form)
+            return { doc: builtIn(form), problem: "otherform", form: declared,
+                     files: [], missing: [], notes: [] }
+        const files = (listed ?? []).map(f => ({ name: f.name, sha256: f.sha256 }))
+        const have = Array.isArray(vehicleSha256s) ? vehicleSha256s : []
+        const out = { doc: r.doc, problem: r.problem, form: declared ?? "", files: files,
+                      missing: files.filter(f => have.indexOf(f.sha256) < 0),
+                      notes: declared === undefined ? ["no-form"] : [] }
+        if (r.dropped !== undefined)
+            out.dropped = r.dropped
+        return out
+    }
+
     // A format 1 document, its bounds already checked, as format 2. The
     // form is the key the text came from, never guessed from the content
     function upgrade(d, form) {

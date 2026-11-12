@@ -24,6 +24,7 @@
 #include "view_lines.h"
 #include "vin_line.h"
 #include "jsonl.h"
+#include "layout_check.h"
 #include "line_ring.h"
 #include "mark_lines.h"
 #include "partial_file.h"
@@ -1309,6 +1310,37 @@ int run_signals_check(const char* path)
     return ended(out, kExitOk);
 }
 
+// layout check <file> [--form phone|desktop]: whether a dashboard layout
+// file reads, and what loading it would drop (cli/layout_check.h, held
+// equal to the app's DashboardBook by tests/data/layouts). start, then a
+// layout line; exit 0 when it reads (with pages or cells left out too), 1
+// when it is refused, 3 when the file can't be read or isn't UTF-8 text
+int run_layout_check(const char* path, const std::string& form)
+{
+    Output out;
+    write_start(out);
+    std::string bytes;
+    std::string why;
+    if (!read_whole(path, cli::layout::kFileMaxBytes, "layout file", &bytes,
+                    &why)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    if (!cli::layout::valid_utf8(bytes)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED,
+                    "the layout file isn't UTF-8 text");
+        out.flush();
+        return kExitConnect;
+    }
+    cli::layout::strip_bom(&bytes);
+    const cli::layout::Verdict v = cli::layout::check(bytes, form);
+    BigLine b(cli::layout::layout_line_bytes(v));
+    cli::layout::layout_line(b.line, v);
+    write_line(out, b.line);
+    return ended(out, v.read ? kExitOk : kExitFailed);
+}
+
 // A plugin loaded for the process's life (stream --plugin, sim --plugin):
 // its profiles keep their sets, and a session's close can outlive the
 // command's return, so it is never freed, as g_signal_file isn't
@@ -2105,6 +2137,7 @@ void usage(FILE* to)
         "       havne-cli health <recording> <out> --format json|text\n"
         "                      [--units metric|imperial] [--from S] [--to S]\n"
         "                      [--baseline <recording>]\n"
+        "       havne-cli layout check <file> [--form phone|desktop]\n"
         "       havne-cli signals check <file>\n"
         "       havne-cli signals import obdb <file> --out <file> [--year Y]\n"
         "                      [--name N] [--url U] [--commit C] [--alone]\n"
@@ -5552,6 +5585,19 @@ int run(int argc, char** argv)
         std::fprintf(stderr, "havne-cli: plugins takes list <pkg>..., check "
                              "<pkg> [--on <vcan>], or match <pkg> --vin "
                              "<VIN>\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (command == "layout") {
+        const std::string word = argc > 2 ? argv[2] : "";
+        if (word == "check" && argc == 4) {
+            return run_layout_check(argv[3], "");
+        }
+        if (word == "check" && argc == 6 && std::string(argv[4]) == "--form" &&
+            (std::string(argv[5]) == "phone" ||
+             std::string(argv[5]) == "desktop")) {
+            return run_layout_check(argv[3], argv[5]);
+        }
         usage(stderr);
         return kExitUsage;
     }

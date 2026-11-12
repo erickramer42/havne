@@ -1,0 +1,72 @@
+{
+ "format": 2,
+ "form": "desktop",
+ "pages": [
+  {
+   "name": "Engine",
+   "cells": [
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "RPM",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "ring",
+     "w": 2,
+     "h": 4,
+     "label": "Speed",
+     "refs": [
+      "id:1002"
+     ],
+     "unit": "km/h",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    }
+   ]
+  },
+  {
+   "name": "Bad",
+   "cells": [
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "RPM",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 0,
+     "h": 4,
+     "label": "RPM",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000
+     }
+    }
+   ]
+  }
+ ]
+}

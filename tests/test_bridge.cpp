@@ -10295,6 +10295,104 @@ TEST(BridgeTest, SignalFileSavedOutIsItsCopyByteForByte)
     EXPECT_FALSE(QFile::exists(out.path() + QStringLiteral("/b.json")));
 }
 
+/* A layout file (ADR-0057's appendix on the layout file): the text goes out
+ * and comes back as it was, a file already at the target is replaced whole,
+ * and a write that can't be made leaves what was there. */
+TEST(BridgeTest, ALayoutFileRoundTripsItsText)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    SessionBridge bridge;
+    const QString text =
+        QStringLiteral("{\"format\":2,\"label\":\"caf\u00e9 \U0001F600\",\"pages\":[]}");
+    const QUrl target = QUrl::fromLocalFile(dir.path() + QStringLiteral("/l.json"));
+    writeScratch(dir.path(), "l.json", QByteArray(5000, 'x'));
+    const QVariantMap saved = bridge.saveLayoutFile(text, target);
+    EXPECT_TRUE(saved.value(QStringLiteral("ok")).toBool())
+        << saved.value(QStringLiteral("words")).toString().toStdString();
+    QFile f(target.toLocalFile());
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    EXPECT_EQ(f.readAll(), text.toUtf8()) << "the text as UTF-8, replacing the file";
+    f.close();
+    const QVariantMap read = bridge.layoutFileText(target);
+    EXPECT_TRUE(read.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(read.value(QStringLiteral("text")).toString(), text);
+}
+
+TEST(BridgeTest, ALayoutFileIsReadWithinItsBoundAndAsUtf8)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    SessionBridge bridge;
+    const auto refused = [&](const QUrl& url, const char* expected) {
+        const QVariantMap r = bridge.layoutFileText(url);
+        EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool()) << expected;
+        const QString words = r.value(QStringLiteral("words")).toString();
+        EXPECT_EQ(words.toStdString(), expected);
+        EXPECT_FALSE(words.contains(dir.path()));
+        EXPECT_TRUE(r.value(QStringLiteral("text")).toString().isEmpty());
+    };
+    refused(QUrl::fromLocalFile(dir.path() + QStringLiteral("/none.json")),
+            "Couldn't read the file");
+    const qint64 most = SessionBridge::layoutFileMaxBytes;
+    const QUrl at = writeScratch(dir.path(), "at.json", QByteArray(most, ' '));
+    EXPECT_TRUE(bridge.layoutFileText(at).value(QStringLiteral("ok")).toBool());
+    const QUrl over =
+        writeScratch(dir.path(), "over.json", QByteArray(most + 1, ' '));
+    refused(over, "The file is over 82400 bytes, a layout file's most");
+    refused(writeScratch(dir.path(), "latin1.json", QByteArray("{\"a\":\"\xE9\"}")),
+            "The file isn't UTF-8 text");
+    refused(writeScratch(dir.path(), "cut.json", QByteArray("{\"a\":\"\xE2\x82\"}")),
+            "The file isn't UTF-8 text");
+    const QVariantMap bom = bridge.layoutFileText(
+        writeScratch(dir.path(), "bom.json", QByteArray("\xEF\xBB\xBF{}")));
+    EXPECT_TRUE(bom.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(bom.value(QStringLiteral("text")).toString().toStdString(), "{}")
+        << "a leading BOM is skipped, once";
+}
+
+TEST(BridgeTest, ALayoutThatCantBeSavedLeavesTheFileAsItWas)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    SessionBridge bridge;
+    const QByteArray before(3000, 'y');
+    const QUrl target = writeScratch(dir.path(), "keep.json", before);
+    const auto unchanged = [&] {
+        QFile f(target.toLocalFile());
+        EXPECT_TRUE(f.open(QIODevice::ReadOnly));
+        EXPECT_EQ(f.readAll(), before) << "an existing file is never touched";
+    };
+    // Past the bound: refused before anything is opened
+    QVariantMap r = bridge.saveLayoutFile(
+        QString(SessionBridge::layoutFileMaxBytes + 1, QLatin1Char('x')), target);
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "The layout is over 82400 bytes, a layout file's most");
+    unchanged();
+    // Nothing to save
+    r = bridge.saveLayoutFile(QString(), target);
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "There is no layout to save");
+    unchanged();
+    // A target that can't take a file: a folder stays a folder, nothing
+    // is removed, and the words name no path
+    r = bridge.saveLayoutFile(QStringLiteral("{}"),
+                              QUrl::fromLocalFile(dir.path()));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "Couldn't write the file");
+    EXPECT_TRUE(QFileInfo(dir.path()).isDir());
+    unchanged();
+    r = bridge.saveLayoutFile(
+        QStringLiteral("{}"),
+        QUrl::fromLocalFile(dir.path() + QStringLiteral("/no/such/folder/l.json")));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_FALSE(QFileInfo(dir.path() + QStringLiteral("/no")).exists());
+    unchanged();
+}
+
 // ---- An OBDb set imported in the app (ADR-0051's appendix of 2026-11-06)
 
 namespace {

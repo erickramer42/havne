@@ -6,6 +6,7 @@ import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 pragma ComponentBehavior: Bound
 
@@ -68,6 +69,9 @@ Page {
         property bool phoneDrive: false
         property int driveHints: 0
     }
+    // The vehicles' document (Main binds Settings'): the signal files a
+    // layout file names are the picked vehicle's
+    property var vehicles: VehicleBook.empty()
     // Settings' URI and profile, whose signals Add offers with no session
     property string offlineUri: ""
     onOfflineUriChanged: if (panel === "signal") refreshRows()
@@ -82,8 +86,8 @@ Page {
     readonly property bool builtInShown: doc === parsed.doc && problem !== ""
                                          && problem !== "dropped"
     // What a "dropped" read left out, in words
-    readonly property string droppedWords: {
-        const d = parsed.dropped
+    readonly property string droppedWords: droppedText(parsed.dropped)
+    function droppedText(d) {
         if (!d)
             return ""
         const words = []
@@ -328,6 +332,7 @@ Page {
         moreShown = false
         confirmReset = false
         confirmRemovePage = false
+        noteLayout("")
         clearHistory()
     }
 
@@ -365,6 +370,105 @@ Page {
         store[formKey] = texts.text
         doc = next
         return true
+    }
+
+    // ---- The layout file (ADR-0057's appendix on the layout file)
+
+    // What the last export or load said, in words; layoutNoteBad when it
+    // is a refusal
+    property string layoutNote: ""
+    property bool layoutNoteBad: false
+    function noteLayout(words, bad) {
+        layoutNote = words
+        layoutNoteBad = bad === true
+    }
+    // The picked vehicle's signal files, each with the references its
+    // profile gives: [{ name, sha256, profile, refs }]
+    function vehicleFiles() {
+        const v = VehicleBook.picked(vehicles)
+        if (!v)
+            return []
+        return v.signals.map(f => ({
+            name: f.name, sha256: f.sha256, profile: f.profile,
+            refs: Bridge.profileSignals("mock://?profile=" + f.profile).map(r => r.ref) }))
+    }
+    // The name a layout file is offered under
+    function layoutFileName() {
+        const v = VehicleBook.picked(vehicles)
+        const slug = v ? v.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") : ""
+        return "dashboard-" + (slug !== "" ? slug + "-" : "") + form + ".json"
+    }
+    // Writes this form's layout, and the signal files it needs by name, to
+    // the file at url
+    function exportLayoutTo(url) {
+        commitTyping()
+        const needed = DashboardBook.neededFiles(doc, vehicleFiles())
+        const text = DashboardBook.exportText(doc, form, needed)
+        if (text === "") {
+            noteLayout(qsTr("Not saved: this layout can't be written as a file"), true)
+            return false
+        }
+        const r = Bridge.saveLayoutFile(text, url)
+        if (!r.ok) {
+            noteLayout(qsTr("Not saved: %1").arg(r.words), true)
+            return false
+        }
+        noteLayout(needed.length === 0
+                   ? qsTr("Saved this layout to a file")
+                   : qsTr("Saved this layout to a file. It needs the signal files %1")
+                         .arg(needed.map(f => f.name).join(", ")))
+        return true
+    }
+    // Loads a layout file as this form's layout, one undo step. Refused in
+    // words for a file that can't be read, a newer one and one of the other
+    // form; never while Reset's or Remove's question is open
+    function loadLayoutFrom(url) {
+        if (confirmReset || confirmRemovePage) {
+            noteLayout(qsTr("Answer the question first"), true)
+            return false
+        }
+        const r = Bridge.layoutFileText(url)
+        if (!r.ok) {
+            noteLayout(qsTr("Not loaded: %1").arg(r.words), true)
+            return false
+        }
+        const files = vehicleFiles()
+        const read = DashboardBook.importProblem(r.text, form, files.map(f => f.sha256))
+        if (read.problem === "none") {
+            noteLayout(qsTr("Not loaded: the file is empty"), true)
+        } else if (read.problem === "damaged") {
+            noteLayout(qsTr("Not loaded: the file isn't a dashboard layout this version can read"), true)
+        } else if (read.problem === "newer") {
+            noteLayout(qsTr("Not loaded: the file was made by a newer version of Havne"), true)
+        } else if (read.problem === "otherform") {
+            noteLayout(qsTr("Not loaded: the file is a %1 layout and this is the %2 form. "
+                            + "A layout isn't scaled between forms")
+                       .arg(read.form === "phone" ? qsTr("phone") : qsTr("desktop"))
+                       .arg(form === "phone" ? qsTr("phone") : qsTr("desktop")), true)
+        } else {
+            commitTyping()
+            cancelHold()
+            selected = -1
+            panel = ""
+            const words = [qsTr("Loaded the layout")]
+            if (read.problem === "dropped")
+                words.push(qsTr("%1 left out because they couldn't be read").arg(droppedText(read.dropped)))
+            if (read.notes.indexOf("no-form") >= 0)
+                words.push(qsTr("the file named no form, so it was read as the %1 form")
+                           .arg(form === "phone" ? qsTr("phone") : qsTr("desktop")))
+            if (read.missing.length > 0)
+                words.push(qsTr("it needs signal files this vehicle lacks: %1. Import them under Signals; "
+                                + "until then those gauges read not in profile")
+                           .arg(read.missing.map(f => f.name).join(", ")))
+            const changed = edit(read.doc, stepOf("", qsTr("load a layout"), -1, -1, 0))
+            if (!changed)
+                words[0] = qsTr("The file holds the layout already shown")
+            else
+                goTo(0)
+            noteLayout(words.join(". "))
+            return changed
+        }
+        return false
     }
 
     // Back to the built-in layout: nothing stored, so a later version's
@@ -2612,11 +2716,30 @@ Page {
                 text: qsTr("Remove page")
                 onClicked: root.confirmRemovePage = true
             }
+            ThemedButton {
+                id: moreExport
+                objectName: "moreExport"
+                text: qsTr("Export layout")
+                onClicked: {
+                    root.noteLayout("")
+                    layoutSaveDialog.open()
+                }
+            }
+            ThemedButton {
+                id: moreLoad
+                objectName: "moreLoad"
+                text: qsTr("Load layout")
+                onClicked: {
+                    root.noteLayout("")
+                    layoutOpenDialog.open()
+                }
+            }
             Item {
                 objectName: "moreResetGap"
                 // The bar's width and the controls' own, never the flow's: a
                 // hidden flow sizes itself from its children, and would loop
                 readonly property real used: pageName.width + moreRemovePage.width + moreRow.spacing
+                    + moreExport.width + moreLoad.width + 2 * moreRow.spacing
                     + (moreAddPage.visible ? moreAddPage.width + moreRow.spacing : 0)
                     + (moreLeft.visible ? moreLeft.width + moreRight.width + 2 * moreRow.spacing : 0)
                 readonly property real tail: moreReset.width
@@ -2641,6 +2764,35 @@ Page {
                 text: qsTr("Reset peaks")
                 onClicked: root.resetPeaks()
             }
+        }
+        Label {
+            objectName: "dashLayoutNote"
+            visible: root.editing && root.moreShown && root.layoutNote !== ""
+            Layout.fillWidth: true
+            Layout.preferredWidth: 0
+            wrapMode: Text.WordWrap
+            color: root.layoutNoteBad ? Theme.danger : Theme.textDim
+            font.pixelSize: Theme.fontCaption
+            text: root.layoutNote
+        }
+        FileDialog {
+            id: layoutSaveDialog
+            title: qsTr("Export this layout")
+            fileMode: FileDialog.SaveFile
+            defaultSuffix: "json"
+            nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
+            currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+            currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+                         + "/" + root.layoutFileName()
+            onAccepted: root.exportLayoutTo(layoutSaveDialog.selectedFile)
+        }
+        FileDialog {
+            id: layoutOpenDialog
+            title: qsTr("Load a layout")
+            fileMode: FileDialog.OpenFile
+            nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
+            currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+            onAccepted: root.loadLayoutFrom(layoutOpenDialog.selectedFile)
         }
         RowLayout {
             objectName: "dashRemovePageConfirm"

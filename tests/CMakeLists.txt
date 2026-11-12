@@ -256,8 +256,11 @@ endif()
 if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
-        test_cli_log.cpp)
+        test_cli_log.cpp test_cli_layout.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
+    # The layout corpus havne-cli's check and the app's DashboardBook both read
+    target_compile_definitions(test_cli PRIVATE
+        ECUIO_LAYOUT_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/data/layouts")
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
     app_enable_warnings(test_cli)
@@ -644,6 +647,23 @@ if(TARGET havne-cli)
         # its own numbers, an enum's label and a computed value among
         # obd2's, and a refused file ending stream as a connect would
         set(_cli_signals ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals)
+        # A dashboard layout file's check (ADR-0057's appendix on the layout
+        # file): one that reads and names its signal files, one of the other
+        # form (refused, exit 1), a file with no form named and no --form
+        # (read as desktop, saying so) and a file that isn't there
+        set(_cli_layouts ${CMAKE_CURRENT_SOURCE_DIR}/data/layouts)
+        app_cli_golden(LayoutCheckReadsAFileAndNamesItsSignalFiles layout-check.jsonl
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/desktop-ok-with-files.json
+               --form desktop)
+        app_cli_golden(LayoutCheckRefusesTheOtherForm layout-check-other-form.jsonl --exit 1
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/phone-file-on-desktop.json
+               --form desktop)
+        app_cli_golden(LayoutCheckTakesTheFilesFormOrAssumesDesktop layout-check-no-form.jsonl
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/format1-no-form.json)
+        app_cli_golden(LayoutCheckCountsWhatLoadingDrops layout-check-dropped.jsonl
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/page-dropped.json)
+        app_cli_golden(LayoutCheckNamesAMissingFile layout-check-missing.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/none.json)
         app_cli_golden(SignalsCheckReadsAFile signals-check.jsonl
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/extras.json)
         app_cli_golden(SignalsCheckSaysEachGauge signals-check-gauges.jsonl
@@ -1039,6 +1059,11 @@ if(TARGET havne-cli)
     app_cli_usage(RecordWithoutAFolderIsUsage "stream|mock://x|--record")
     app_cli_usage(VinWithoutOneIsUsage "vin")
     app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")
+    app_cli_usage(LayoutWithoutACheckIsUsage "layout")
+    app_cli_usage(LayoutCheckWithoutAFileIsUsage "layout|check")
+    app_cli_usage(LayoutCheckAFormThatIsntOneIsUsage "layout|check|x.json|--form|tablet")
+    app_cli_usage(LayoutCheckAFormWithoutItsWordIsUsage "layout|check|x.json|--form")
+    app_cli_usage(LayoutCheckAnUnknownOptionIsUsage "layout|check|x.json|--fast")
     app_cli_usage(TwoVinsIsUsage "vin|1FAFAKE10M0000001|1FAFAKE10M0000001")
     app_cli_usage(DtcWithoutOneIsUsage "dtc")
     app_cli_usage(NotADtcIsUsage "dtc|P5301")
@@ -1577,6 +1602,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ECUIO_IMPORT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
         ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
+        ECUIO_LAYOUT_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/data/layouts"
     )
 
     # Windows: deployed like the app, into a directory of its own (the
