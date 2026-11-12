@@ -466,6 +466,7 @@ struct DriveCycle {
     float maf_gs = 0.0f;
     float oil_c = kColdStartC;
     float lambda = kLambdaLean; /* no exhaust: the sensor reads air */
+    float commanded_lambda = kLambdaLean; /* PID 0x44: the ECU's command */
     float map_kpa = kBaroKpa;   /* PID 0x0B: stopped, the outside air */
     float baro_kpa = kBaroKpa;  /* PID 0x33 */
     float battery_v = kBatteryRestV; /* PID 0x42: key on, the battery */
@@ -1156,6 +1157,7 @@ private:
             target = cmd + 0.01f * drift(t, 0.9f, 44); /* power enrichment */
         }
         lambda += (target - lambda) * 0.7f;
+        commanded_lambda = cmd;
     }
 
     /* Heat, kW and kJ/K. A quarter of the fuel's energy goes to the

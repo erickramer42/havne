@@ -8,6 +8,7 @@
 #include "ecuio/signal_sets.h"
 #include "mock_drive_cycle.h"
 #include "mock_ecu.h"
+#include "mock_pids.h"
 #include "host_clock.h"
 #include "request_setup.h"
 
@@ -36,13 +37,17 @@ struct ecuio_mock_transport {
      * Written once before the worker spawns and read-only after, so
      * thread creation publishes it; no further synchronization. */
     host_clock::time_point epoch{};
-    ecuio_mock::DriveCycle sim;    /* owned by worker: only touched on worker thread */
+    /* The drive cycle, inside the simulated ECU that answers Service 01
+     * from it (mock_pids.h): the worker's alone once it starts */
+    ecuio_sim_ecu car;
+    ecuio_mock_pids pids;  /* the set's PIDs the ECU answers: attach's */
+    ecuio_frame_t reply{}; /* the worker's, for each PID's reply */
     /* The simulated ECU's diagnostics (mock_ecu.h): an engine asking
      * only the list, read once at attach and again on each Read again
      * or clear; nullptr under ?diagnose=0. Attach's, then the worker's
      * alone. */
     std::unique_ptr<ecuio_request_engine> diag;
-    ecuio_mock_ecu ecu;          /* sim's engine, cleared or not */
+    ecuio_mock_ecu ecu;          /* car's engine, cleared or not */
     int64_t diag_now_us = 0;     /* the engine's clock (mock_ecu.h) */
     uint32_t diag_seen = 0;      /* ecuio_take_diag_request's count */
     uint32_t clear_seen[1] = {}; /* ecuio_take_clear_requests' count */
@@ -53,7 +58,7 @@ namespace {
 
 void answer_dids(ecuio_mock_transport* t, uint64_t timestamp_us);
 
-/* Whether the set reads a Service 01 PID: a value the mock never sends */
+/* Whether the set reads a Service 01 PID */
 bool reads_pids(const ecuio_signal_set_t* set)
 {
     for (uint32_t i = 0;
@@ -65,23 +70,25 @@ bool reads_pids(const ecuio_signal_set_t* set)
     return false;
 }
 
-/* Walks the simulated ECU's supported-PID bitmaps, which list no PID,
- * and hands the session channel 0's support report: core then lists the
- * set's Service 01 signals as unsupported (ADR-0039 section 6), so a
- * front end says they aren't sent rather than waiting for them. The
- * engine is the caller's to drop after: nothing is asked again. */
-void disclaim_pids(ecuio_session_t* session, ecuio_request_engine* probe,
-                   ecuio_mock_ecu* ecu)
+/* Walks the simulated ECU's supported-PID bitmaps, hands the session
+ * channel 0's support report and keeps the set's PIDs the ECU answers,
+ * which the worker sends: core lists the set's other Service 01 signals
+ * as unsupported (ADR-0039 section 6), so a front end says they aren't
+ * sent rather than waiting for them. The engine is the caller's to drop
+ * after: nothing is asked again. */
+void walk_pids(ecuio_mock_transport* t, ecuio_request_engine* probe)
 {
+    const ecuio_signal_set_t* set = t->session->active_signal_set;
     const uint32_t rx_ids[1] = {ECUIO_MOCK_ECU_RX_ID};
     ecuio_engine_init(probe, 1);
-    (void)ecuio_engine_derive(probe, session->active_signal_set, rx_ids, 1,
-                              nullptr);
+    (void)ecuio_engine_derive(probe, set, rx_ids, 1, nullptr);
     int64_t now_us = 0;
     ecuio_engine_probe(probe, now_us);
-    ecuio_mock_ecu_walk(probe, ecu, &now_us);
+    ecuio_mock_pid_walk(probe, t->car, &now_us);
     uint32_t published = 0;
-    ecuio_publish_support(session, *probe, 0, ECUIO_MOCK_ECU_RX_ID, published);
+    ecuio_publish_support(t->session, *probe, 0, ECUIO_MOCK_ECU_RX_ID,
+                          published);
+    ecuio_mock_pids_of(set, t->car, &t->pids);
 }
 
 /* Reads the simulated ECU's diagnostics to their end and hands the
@@ -123,12 +130,18 @@ void mock_worker(ecuio_mock_transport* t)
             frame.arbitration_id = ECUIO_MOCK_TELEMETRY_ARB_ID;
         }
 
-        t->sim.step();
-        ecuio_mock::encode_payload(t->sim, frame.data);
+        ecuio_sim_tick(t->car);
+        ecuio_mock::encode_payload(t->car.car, frame.data);
         t->frame_counter++;
 
         ecuio_session_dispatch_callbacks(t->session, &frame);
         answer_dids(t, frame.timestamp_us);
+        t->car.cleared = t->ecu.cleared;
+        ecuio_mock_pid_replies(t->car, t->pids, frame.timestamp_us, &t->reply,
+                               [t](const ecuio_frame_t* f) {
+                                   ecuio_session_dispatch_callbacks(t->session,
+                                                                    f);
+                               });
         if (t->diag) {
             const uint32_t before = t->diag->chans[0].diag.generation;
             ecuio_take_diag_request(t->session, t->diag.get(), t->diag_seen);
@@ -294,9 +307,9 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
 
     /* One channel, the simulated engine ECU: its identity report stays
      * empty (the mock answers no 09 here), and its support report too
-     * unless the profile reads Service 01 PIDs; its diagnostics are read
-     * now, before start, so the report is there as the session is
-     * (ADR-0037). */
+     * unless the profile reads Service 01 PIDs, which its drive cycle
+     * answers; its diagnostics are read now, before start, so the report
+     * is there as the session is (ADR-0037). */
     session->info.channel_count = 1;
     session->info.rx_ids[0] = ECUIO_MOCK_ECU_RX_ID;
     session->info.tx_ids[0] = ECUIO_MOCK_ECU_TX_ID;
@@ -308,10 +321,10 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
         session->diagnostics[0].rx_id = ECUIO_MOCK_ECU_RX_ID;
     }
     if (probe) {
-        disclaim_pids(session, probe.get(), &impl->ecu);
+        walk_pids(impl, probe.get());
     }
     if (impl->diag) {
-        impl->ecu.engine = &impl->sim;
+        impl->ecu.engine = &impl->car.car;
         ecuio_engine_init(impl->diag.get(), 1);
         ecuio_engine_diagnose(impl->diag.get(), ecuio_obd2_signal_set());
         read_diagnostics(impl);

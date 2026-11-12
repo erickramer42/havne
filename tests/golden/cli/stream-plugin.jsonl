@@ -12,5 +12,6 @@
 {"id": "0x7E9", "type": "values", "values": [{"id": 30002, "value": -39.9}]}
 {"ch": 0, "data": "62 F4 11 01", "flags": 0, "id": "0x7E9", "type": "frame"}
 {"id": "0x7E9", "type": "values", "values": [{"id": 30003, "label": "First", "value": 1}]}
-{"ch": 0, "data": "00 00 3C 00 25 3C 00 00 00 3C B8 FE 65 65 A9 30", "flags": 4, "id": "0xC0", "type": "frame"}
+{"ch": 0, "data": "41 04 00", "flags": 256, "id": "0x7E8", "type": "frame"}
+{"id": "0x7E8", "type": "values", "values": [{"id": 7001, "value": 0}]}
 {"dropped_frames": 0, "dropped_values": 0, "frames": 6, "reason": "count", "type": "end"}

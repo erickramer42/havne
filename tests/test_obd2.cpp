@@ -5335,7 +5335,17 @@ TEST(SimEcuTest, DriveValuesAreTheDriveCyclesThroughTheObd2Defs)
     EXPECT_NEAR(drive_value(ask(e, {0x01, 0x5C}), ECUIO_OBD2_SIG_OIL_TEMP_ID),
                 car.oil_c, 0.5);
     EXPECT_NEAR(drive_value(ask(e, {0x01, 0x42}), ECUIO_OBD2_SIG_BATTERY_V_ID),
-                14.1, 0.001);
+                car.battery_v, 0.001);
+    EXPECT_GT(car.battery_v, 13.5f) << "charging";
+    EXPECT_NEAR(
+        drive_value(ask(e, {0x01, 0x0B}), ECUIO_OBD2_PID_SIG_ID(0x0B, 0)),
+        car.map_kpa, 0.5);
+    EXPECT_NEAR(
+        drive_value(ask(e, {0x01, 0x44}), ECUIO_OBD2_PID_SIG_ID(0x44, 0)),
+        car.commanded_lambda, 0.0001);
+    EXPECT_NEAR(
+        drive_value(ask(e, {0x01, 0x33}), ECUIO_OBD2_PID_SIG_ID(0x33, 0)),
+        car.baro_kpa, 0.5);
     // run time since start, lambda and ambient by J1979's scaling
     const std::vector<uint8_t> run = ask(e, {0x01, 0x1F});
     ASSERT_EQ(run.size(), 4u);
@@ -5362,8 +5372,11 @@ TEST(SimEcuTest, TheKeyOnWithTheEngineStopped)
     ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
     ecuio_sim_tick(e);
     EXPECT_EQ(ask(e, {0x01, 0x0C}), (std::vector<uint8_t>{0x41, 0x0C, 0, 0}));
+    const uint16_t mv = ecuio_mock::clamp_u16(e.car.battery_v * 1000.0f);
     EXPECT_EQ(ask(e, {0x01, 0x42}),
-              (std::vector<uint8_t>{0x41, 0x42, 0x31, 0x38}));
+              (std::vector<uint8_t>{0x41, 0x42, static_cast<uint8_t>(mv >> 8),
+                                    static_cast<uint8_t>(mv)}));
+    EXPECT_LT(e.car.battery_v, 13.0f) << "the battery's own";
     EXPECT_EQ(ask(e, {0x01, 0x1F}), (std::vector<uint8_t>{0x41, 0x1F, 0, 0}));
 }
 
@@ -5392,7 +5405,7 @@ TEST(SimEcuTest, TheBitmapsListWhatEachModeAnswers)
                 listed += (bit && pid % 0x20 != 0) ? 1 : 0;
             }
         }
-        EXPECT_EQ(listed, values == ecuio_sim_values::drive ? 19 : 95);
+        EXPECT_EQ(listed, values == ecuio_sim_values::drive ? 22 : 95);
     }
 }
 

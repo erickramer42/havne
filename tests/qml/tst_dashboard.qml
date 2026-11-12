@@ -267,16 +267,16 @@ TestCase {
         }
     }
 
-    // The mock sends no Service 01 value and says so (ADR-0039 section
-    // 6): under obd2 each built-in gauge reads "not sent by this ECU"
-    // within a tick, never "waiting for data" for good
-    function test_theMocksGaugesSayWhatItNeverSends() {
+    // The demo car answers Service 01 from its drive cycle: under obd2
+    // each built-in gauge gets a value, Boost from MAP and baro, and none
+    // reads "not sent by this ECU"
+    function test_theDemoCarsGaugesGetValuesUnderObd2() {
         const page = createTemporaryObject(pageComponent, testCase)
         const all = gauges(page)
         connect("mock://demo?profile=obd2")
         for (const label in gaugeSignals) {
-            tryCompare(all[label], "note", "not sent by this ECU", 3000, label)
-            compare(all[label].hasValue, false, label)
+            tryVerify(() => all[label].hasValue, 3000, label + " gets a value")
+            compare(all[label].note, "", label)
         }
     }
 

@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <initializer_list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -45,6 +46,7 @@ extern "C" {
 #include "replay_faults.h" /* core/src: ?faults= and its draws */
 #include "mock_drive_cycle.h"
 #include "mock_ecu.h"      /* core/src: the simulated ECU's answers */
+#include "mock_pids.h"     /* core/src: the demo car's Service 01 */
 #include "def_index.h"     /* core/src: the defs a frame can match */
 #include "precise_wait.h"  /* core/src: a requesting worker's waits */
 #include "request_setup.h" /* core/src: the requests and the focus's map */
@@ -5459,33 +5461,45 @@ std::vector<uint16_t> unsupported_ids(const ecuio_session_t* session)
 
 } // namespace
 
-/* The mock sends no Service 01 value, so under a profile that reads
- * PIDs its ECU answers the supported-PID walk listing none, before the
- * session is handed out: core then lists every Service 01 signal of the
- * set, and obd2's computed Boost with them, as its ECU not sending them
- * (ADR-0039 section 6). With diagnostics on or off, before start and
- * after close. */
-TEST(CoreTest, TheMockDisclaimsTheService01SignalsItNeverSends)
+/* The PIDs the demo car's ECU answers (sim_ecu.h): the drive cycle's,
+ * and the diagnostics' readiness and counts since a clear */
+const std::vector<uint8_t> kDemoPids = {
+    0x01, 0x04, 0x05, 0x0B, 0x0C, 0x0D, 0x0F, 0x10, 0x11, 0x1F, 0x21,
+    0x24, 0x30, 0x31, 0x33, 0x41, 0x42, 0x44, 0x46, 0x4D, 0x4E, 0x5C};
+
+/* The mock answers Service 01 from its drive cycle under a profile that
+ * reads PIDs: its ECU's supported-PID walk lists what it answers before
+ * the session is handed out, and core lists the set's other Service 01
+ * signals as its ECU not sending them (ADR-0039 section 6); Boost, whose
+ * MAP and baro it sends, isn't among them. With diagnostics on or off,
+ * before start and after close. */
+TEST(CoreTest, TheMockSendsTheDemoCarsPidsAndDisclaimsTheRest)
 {
     const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
-    std::vector<uint16_t> every;
+    std::vector<uint16_t> others;
     uint32_t requests = 0;
+    uint32_t answered = 0;
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& d = set->defs[i];
-        const bool computed = (d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0;
-        if (computed || (d.mux_length == 2 && (d.mux_key >> 8) == 0x41u)) {
-            every.push_back(d.id);
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+            continue;
+        }
+        const uint8_t pid = static_cast<uint8_t>(d.mux_key);
+        const bool sent = std::find(kDemoPids.begin(), kDemoPids.end(), pid) !=
+                          kDemoPids.end();
+        if (!sent) {
+            others.push_back(d.id);
         }
         /* a request per PID: its first field's def */
-        bool first = !computed;
+        bool first = true;
         for (uint32_t k = 0; k < i && first; ++k) {
             first = set->defs[k].mux_key != d.mux_key ||
                     (set->defs[k].flags & ECUIO_DEF_FLAG_COMPUTED) != 0;
         }
         requests += first ? 1u : 0u;
+        answered += (first && sent) ? 1u : 0u;
     }
-    ASSERT_EQ(every.size(), set->count) << "obd2 holds nothing else";
-    ASSERT_EQ(every.back(), ECUIO_OBD2_SIG_BOOST_ID);
+    ASSERT_GE(answered, 15u) << "the set holds the drive cycle's PIDs";
 
     for (const char* uri :
          {"mock://a?profile=obd2&diagnose=0", "mock://a?profile=obd2"}) {
@@ -5497,14 +5511,14 @@ TEST(CoreTest, TheMockDisclaimsTheService01SignalsItNeverSends)
         EXPECT_EQ(s.rx_id, 0x7E8u);
         EXPECT_NE(s.generation, 0u) << "learned before start";
         EXPECT_EQ(s.flags, ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE);
-        EXPECT_EQ(s.ranges, 0xFFu) << "every bitmap answered";
-        EXPECT_EQ(s.pids_supported, 0u);
-        EXPECT_EQ(s.pids_through, 0x100u);
+        EXPECT_EQ(s.ranges, 0x07u) << "00, 20 and 40: the last PID is 5C";
+        EXPECT_EQ(s.pids_supported, kDemoPids.size());
+        EXPECT_EQ(s.pids_through, 0x60u);
         EXPECT_EQ(s.requests, requests);
-        EXPECT_EQ(s.dropped, requests) << "each one, by the bitmaps";
+        EXPECT_EQ(s.dropped, requests - answered) << "the rest, by the bitmaps";
         EXPECT_EQ(s.dropped_list[0].reason, ECUIO_DROP_BITMAP);
         EXPECT_EQ(s.scan_total, 0u);
-        EXPECT_EQ(unsupported_ids(session), every);
+        EXPECT_EQ(unsupported_ids(session), others);
 
         ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
         std::this_thread::sleep_for(std::chrono::milliseconds(120));
@@ -5513,8 +5527,296 @@ TEST(CoreTest, TheMockDisclaimsTheService01SignalsItNeverSends)
                   ECUIO_OK);
         EXPECT_EQ(later.generation, s.generation) << "nothing asked again";
         ecuio_session_close(session);
-        EXPECT_EQ(unsupported_ids(session), every) << "readable after close";
+        EXPECT_EQ(unsupported_ids(session), others) << "readable after close";
         ecuio_session_destroy(session);
+    }
+}
+
+/* The ids a values callback saw */
+struct SeenValues {
+    std::mutex m;
+    std::vector<uint16_t> ids;
+    std::vector<uint32_t> frame_flags;
+};
+
+void see_values(const ecuio_value_batch_t* batch, void* user)
+{
+    auto* seen = static_cast<SeenValues*>(user);
+    std::lock_guard<std::mutex> lock(seen->m);
+    for (uint32_t i = 0; i < batch->count; ++i) {
+        seen->ids.push_back(batch->values[i].signal_id);
+    }
+}
+
+void see_frames(const ecuio_frame_t* frame, void* user)
+{
+    auto* seen = static_cast<SeenValues*>(user);
+    std::lock_guard<std::mutex> lock(seen->m);
+    if (frame->arbitration_id == 0x7E8u) {
+        seen->frame_flags.push_back(frame->flags);
+    }
+}
+
+/* A running demo car under obd2 sends each PID it answers as a whole
+ * reply on 0x7E8, and Boost is worked out from its MAP and baro */
+TEST(CoreTest, TheDemoCarUnderObd2SendsItsValues)
+{
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create("mock://demo?profile=obd2&diagnose=0", &session),
+        ECUIO_OK);
+    SeenValues seen;
+    ASSERT_EQ(ecuio_register_values_callback(session, see_values, &seen),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_register_frame_callback(session, see_frames, &seen),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    ecuio_session_close(session);
+    std::lock_guard<std::mutex> lock(seen.m);
+    for (const uint16_t id :
+         {uint16_t{ECUIO_OBD2_SIG_RPM_ID}, uint16_t{ECUIO_OBD2_SIG_SPEED_ID},
+          uint16_t{ECUIO_OBD2_SIG_BATTERY_V_ID},
+          static_cast<uint16_t>(ECUIO_OBD2_PID_SIG_ID(0x0B, 0)),
+          static_cast<uint16_t>(ECUIO_OBD2_PID_SIG_ID(0x33, 0)),
+          uint16_t{ECUIO_OBD2_SIG_BOOST_ID}}) {
+        EXPECT_NE(std::find(seen.ids.begin(), seen.ids.end(), id),
+                  seen.ids.end())
+            << id;
+    }
+    ASSERT_FALSE(seen.frame_flags.empty());
+    for (const uint32_t flags : seen.frame_flags) {
+        EXPECT_EQ(flags, ECUIO_FRAME_FLAG_REASSEMBLED);
+    }
+    ecuio_session_destroy(session);
+}
+
+/* The values a callback saw of one signal, in order */
+struct OneSignal {
+    uint16_t id = 0;
+    std::mutex m;
+    std::vector<double> values;
+};
+
+void see_one(const ecuio_value_batch_t* batch, void* user)
+{
+    auto* one = static_cast<OneSignal*>(user);
+    std::lock_guard<std::mutex> lock(one->m);
+    for (uint32_t i = 0; i < batch->count; ++i) {
+        if (batch->values[i].signal_id == one->id) {
+            one->values.push_back(batch->values[i].value);
+        }
+    }
+}
+
+/* A clear on the demo car zeroes what it counts since a clear in its
+ * Service 01 values, as its diagnostics report does: the distance with
+ * the MIL on reads the fakes' 42 km before and 0 after */
+TEST(CoreTest, TheDemoCarsCountsSinceAClearFollowTheClear)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://demo?profile=obd2", &s), ECUIO_OK);
+    OneSignal mil;
+    mil.id = static_cast<uint16_t>(ECUIO_OBD2_PID_SIG_ID(0x21, 0));
+    ASSERT_EQ(ecuio_register_values_callback(s, see_one, &mil), ECUIO_OK);
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, 0, &d), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_clear_diagnostics(s, 0, d.generation), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    EXPECT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> lock(mil.m);
+            return !mil.values.empty() && mil.values.back() == 0.0;
+        },
+        2000));
+    ecuio_session_close(s);
+    std::lock_guard<std::mutex> lock(mil.m);
+    ASSERT_FALSE(mil.values.empty());
+    EXPECT_EQ(mil.values.front(), 42.0) << "the first tick's, before the clear";
+    EXPECT_EQ(mil.values.back(), 0.0);
+    ecuio_session_destroy(s);
+}
+
+/* The demo car's ECU after a number of its drive cycle's ticks, and the
+ * obd2 value each of its replies to the set's PIDs decodes to, by def id
+ * (mock_pids.h, no session and no clock) */
+struct DemoReplies {
+    ecuio_sim_ecu ecu;
+    ecuio_mock_pids pids;
+    std::map<uint16_t, double> value;
+    uint32_t replies = 0;
+
+    explicit DemoReplies(int ticks, bool cleared = false)
+    {
+        for (int i = 0; i < ticks; ++i) {
+            ecuio_sim_tick(ecu);
+        }
+        ecu.cleared = cleared;
+        const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+        ecuio_mock_pids_of(set, ecu, &pids);
+        auto frame = std::make_unique<ecuio_frame_t>();
+        ecuio_mock_pid_replies(
+            ecu, pids, 1234, frame.get(), [&](const ecuio_frame_t* f) {
+                ++replies;
+                EXPECT_EQ(f->arbitration_id, 0x7E8u);
+                EXPECT_EQ(f->flags, ECUIO_FRAME_FLAG_REASSEMBLED);
+                EXPECT_EQ(f->timestamp_us, 1234u);
+                EXPECT_EQ(f->data[0], 0x41);
+                for (uint32_t i = 0; i < set->count; ++i) {
+                    const ecuio_signal_def_t& d = set->defs[i];
+                    double v = 0.0;
+                    if (ecuio_def_applies_to_frame(&d, f) &&
+                        ecuio_decode_signal(&d, f->data, f->data_length, &v) ==
+                            ECUIO_DECODE_OK) {
+                        value[d.id] = v;
+                    }
+                }
+            });
+    }
+
+    const ecuio_mock::DriveCycle& car() const { return ecu.car; }
+
+    double at(uint16_t id) const
+    {
+        const auto it = value.find(id);
+        EXPECT_NE(it, value.end()) << "no value for " << id;
+        return it == value.end() ? std::nan("") : it->second;
+    }
+};
+
+/* 60 s in: off the cold start, pulling through the gears */
+constexpr int kDrivingTicks = 1200;
+
+uint16_t pid_id(uint8_t pid, uint8_t field = 0)
+{
+    return static_cast<uint16_t>(ECUIO_OBD2_PID_SIG_ID(pid, field));
+}
+
+/* The set's PIDs the ECU answers are sent once each a tick, in set
+ * order, never a bitmap, each a reply of its own */
+TEST(MockPidsTest, EachAnsweredPidOfTheSetIsSentOnceATick)
+{
+    const DemoReplies d(kDrivingTicks);
+    std::vector<uint8_t> want;
+    for (const uint8_t pid : kDemoPids) {
+        if (pid != 0x01 && pid != 0x41) { /* bit fields: no obd2 def */
+            want.push_back(pid);
+        }
+    }
+    std::vector<uint8_t> got(d.pids.pid, d.pids.pid + d.pids.count);
+    std::vector<uint8_t> sorted = got;
+    std::sort(sorted.begin(), sorted.end());
+    EXPECT_EQ(sorted, want);
+    EXPECT_EQ(d.replies, d.pids.count);
+    /* set order: the ten first defs' PIDs lead (04 05 0C 0D 0F 11 ...) */
+    ASSERT_GE(got.size(), 2u);
+    EXPECT_EQ(got[0], 0x04);
+    EXPECT_EQ(got[1], 0x05);
+}
+
+/* Engine: load, coolant, rpm, run time and oil, the drive cycle's */
+TEST(MockPidsTest, TheEngineGroupIsTheDriveCycles)
+{
+    const DemoReplies d(kDrivingTicks);
+    const ecuio_mock::DriveCycle& car = d.car();
+    ASSERT_TRUE(car.running);
+    EXPECT_NEAR(d.at(ECUIO_OBD2_SIG_ENGINE_LOAD_ID), car.load_pct, 0.2);
+    EXPECT_NEAR(d.at(ECUIO_OBD2_SIG_COOLANT_TEMP_ID), car.coolant_c, 0.5);
+    EXPECT_NEAR(d.at(ECUIO_OBD2_SIG_RPM_ID), car.rpm, 0.25);
+    EXPECT_NEAR(d.at(pid_id(0x1F)), d.ecu.engine_s, 1.0);
+    EXPECT_GT(d.at(pid_id(0x1F)), 30.0);
+    EXPECT_NEAR(d.at(ECUIO_OBD2_SIG_OIL_TEMP_ID), car.oil_c, 0.5);
+}
+
+/* Air: MAP, baro, intake temperature, airflow, throttle and ambient; and
+ * obd2's Boost from MAP and baro */
+TEST(MockPidsTest, TheAirGroupIsTheDriveCycles)
+{
+    const DemoReplies d(kDrivingTicks);
+    const ecuio_mock::DriveCycle& car = d.car();
+    EXPECT_NEAR(d.at(pid_id(0x0B)), car.map_kpa, 0.5);
+    EXPECT_NEAR(d.at(pid_id(0x33)), car.baro_kpa, 0.5);
+    EXPECT_NEAR(d.at(ECUIO_OBD2_SIG_IAT_ID), car.iat_c, 0.5);
+    EXPECT_NEAR(d.at(ECUIO_OBD2_SIG_MAF_ID), car.maf_gs, 0.005);
+    EXPECT_NEAR(d.at(ECUIO_OBD2_SIG_THROTTLE_ID), car.throttle_pct, 0.2);
+    EXPECT_NEAR(d.at(pid_id(0x46)), ecuio_mock::kColdStartC, 0.5);
+    /* the computed Boost's inputs both come, so it computes */
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    const ecuio_signal_def_t& boost = set->defs[set->count - 1];
+    ASSERT_EQ(boost.id, ECUIO_OBD2_SIG_BOOST_ID);
+    const ecuio_computed_t& program = set->computed[boost.table_first];
+    for (uint32_t k = 0; k < program.input_count; ++k) {
+        EXPECT_EQ(d.value.count(program.input_ids[k]), 1u) << k;
+    }
+}
+
+/* Vehicle: the road speed */
+TEST(MockPidsTest, TheVehicleGroupIsTheDriveCycles)
+{
+    const DemoReplies d(kDrivingTicks);
+    ASSERT_GT(d.car().speed_kmh, 1.0f);
+    EXPECT_NEAR(d.at(ECUIO_OBD2_SIG_SPEED_ID), d.car().speed_kmh, 0.5);
+}
+
+/* Oxygen sensors: lambda, and the steady voltage the model doesn't make */
+TEST(MockPidsTest, TheOxygenGroupIsTheDriveCycles)
+{
+    const DemoReplies d(kDrivingTicks);
+    EXPECT_NEAR(d.at(pid_id(0x24)), d.car().lambda, 0.0001);
+    EXPECT_NEAR(d.at(pid_id(0x24, 1)), 2.5, 0.001);
+}
+
+/* Fuel: the lambda the ECU commands, which the sensor follows: read in
+ * closed loop, where the command is 1.00 and the sensor wanders off it */
+TEST(MockPidsTest, TheFuelGroupIsTheDriveCycles)
+{
+    ecuio_sim_ecu probe;
+    int ticks = 0;
+    for (; ticks < 6000; ++ticks) {
+        ecuio_sim_tick(probe);
+        if (ticks > kDrivingTicks && probe.car.running &&
+            probe.car.commanded_lambda == 1.0f &&
+            std::fabs(probe.car.lambda - 1.0f) > 0.003f) {
+            ++ticks;
+            break;
+        }
+    }
+    ASSERT_LT(ticks, 6000) << "closed loop, the sensor off the command";
+    const DemoReplies d(ticks);
+    EXPECT_NEAR(d.at(pid_id(0x44)), d.car().commanded_lambda, 0.0001);
+    EXPECT_GT(std::fabs(d.at(pid_id(0x44)) - d.car().lambda), 0.002)
+        << "the command, not the sensor";
+}
+
+/* Electrical: the battery charging while the engine runs, its own with
+ * the key on and the engine stopped */
+TEST(MockPidsTest, TheElectricalGroupIsTheDriveCycles)
+{
+    const DemoReplies running(kDrivingTicks);
+    EXPECT_NEAR(running.at(ECUIO_OBD2_SIG_BATTERY_V_ID),
+                running.car().battery_v, 0.001);
+    EXPECT_GT(running.at(ECUIO_OBD2_SIG_BATTERY_V_ID), 13.5);
+    const DemoReplies key_on(1);
+    ASSERT_FALSE(key_on.car().running);
+    EXPECT_NEAR(key_on.at(ECUIO_OBD2_SIG_BATTERY_V_ID), key_on.car().battery_v,
+                0.001);
+    EXPECT_LT(key_on.at(ECUIO_OBD2_SIG_BATTERY_V_ID), 13.0);
+}
+
+/* Diagnostics: the counts since a clear, the fakes' before one and 0
+ * after, as the diagnostics report says */
+TEST(MockPidsTest, TheDiagnosticsGroupFollowsAClear)
+{
+    const DemoReplies before(kDrivingTicks);
+    EXPECT_EQ(before.at(pid_id(0x21)), 42.0);
+    EXPECT_EQ(before.at(pid_id(0x30)), 20.0);
+    EXPECT_EQ(before.at(pid_id(0x31)), 1234.0);
+    EXPECT_EQ(before.at(pid_id(0x4D)), 60.0);
+    EXPECT_EQ(before.at(pid_id(0x4E)), 3000.0);
+    const DemoReplies after(kDrivingTicks, true);
+    for (const uint8_t pid : {uint8_t{0x21}, uint8_t{0x30}, uint8_t{0x31},
+                              uint8_t{0x4D}, uint8_t{0x4E}}) {
+        EXPECT_EQ(after.at(pid_id(pid)), 0.0) << std::hex << int(pid);
     }
 }
 

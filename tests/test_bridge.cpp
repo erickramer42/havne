@@ -9298,13 +9298,14 @@ TEST(BridgeTest, ASignalFilesRowsAreReferencedByTheirKeys)
     bridge.useSignalFiles({});
 }
 
-/* The mock sends no Service 01 value, and says so: under a signal file
- * that extends obd2, obd2's rows, the file's own PID and what is computed
- * from a PID are hidden as not sent by the ECU (ADR-0039 section 6), so a
- * Dashboard cell reads "not sent by this ECU", never "waiting for data"
- * for good; the file's DID, which the mock answers, and what is computed
- * from it have values. The ECU's line is logged once. */
-TEST(BridgeTest, TheMockDisclaimsThePidsItNeverSends)
+/* The mock answers Service 01 from its drive cycle and says what it
+ * doesn't send: under a signal file that extends obd2, the PIDs its ECU
+ * lacks (the file's own among them) and what is computed from one are
+ * hidden as not sent by the ECU (ADR-0039 section 6), so a Dashboard cell
+ * reads "not sent by this ECU", never "waiting for data" for good; obd2's
+ * engine speed and Boost, the file's DID and what is computed from it
+ * have values. The ECU's line is logged once. */
+TEST(BridgeTest, TheMockSendsTheDemoCarsPidsAndHidesTheRest)
 {
     SettingsDirScope dir;
     ASSERT_TRUE(dir.valid());
@@ -9355,24 +9356,45 @@ TEST(BridgeTest, TheMockDisclaimsThePidsItNeverSends)
     EXPECT_FALSE(hasValue("Own PID"));
     EXPECT_TRUE(hidden("Of PID")) << "computed from a PID the ECU lacks";
     EXPECT_FALSE(hasValue("Of PID"));
-    EXPECT_TRUE(hidden("RPM")) << "obd2's";
-    EXPECT_TRUE(hidden("Boost")) << "obd2's computed signal";
+    EXPECT_FALSE(hidden("RPM")) << "obd2's, which the demo car sends";
+    EXPECT_FALSE(hidden("Boost"))
+        << "obd2's computed signal, from MAP and baro";
+    ASSERT_TRUE(spinUntil(
+        [&] {
+            const QVariantList now = modelRows(bridge);
+            return rowNamed(now, QStringLiteral("RPM"))
+                       .value(QStringLiteral("hasValue"))
+                       .toBool() &&
+                   rowNamed(now, QStringLiteral("Boost"))
+                       .value(QStringLiteral("hasValue"))
+                       .toBool();
+        },
+        3000));
 
-    // Every row but the file's DID and what it feeds: obd2's are refs by
-    // ID, the file's own by key
+    // obd2's rows the ECU doesn't send are hidden, the rest shown in Live
     int byId = 0;
-    for (const QString& ref : refsOf(rows)) {
-        byId += ref.startsWith(QStringLiteral("id:")) ? 1 : 0;
+    int byIdHidden = 0;
+    for (const QVariant& r : rows) {
+        const QVariantMap row = r.toMap();
+        if (row.value(QStringLiteral("ref"))
+                .toString()
+                .startsWith(QStringLiteral("id:"))) {
+            ++byId;
+            byIdHidden += row.value(QStringLiteral("hidden")).toBool() ? 1 : 0;
+        }
     }
     ASSERT_GT(byId, 100);
-    EXPECT_EQ(model->hiddenCount(), byId + 2);
-    EXPECT_EQ(bridge.liveSignalModel()->rowCount(), 2) << "Live lists the rest";
+    EXPECT_GT(byIdHidden, 50);
+    EXPECT_LT(byIdHidden, byId - 15) << "the demo car's PIDs are shown";
+    EXPECT_EQ(model->hiddenCount(), byIdHidden + 2);
+    EXPECT_EQ(bridge.liveSignalModel()->rowCount(),
+              model->rowCount() - model->hiddenCount());
 
     spinLoop(300);
     const QStringList ecu = log.filter(QStringLiteral("ECU 0x7E8: supports "));
     ASSERT_EQ(ecu.size(), 1) << log.join(QLatin1Char('\n')).toStdString();
     EXPECT_TRUE(
-        ecu.first().startsWith(QStringLiteral("ECU 0x7E8: supports 0 PIDs; ")))
+        ecu.first().startsWith(QStringLiteral("ECU 0x7E8: supports 22 PIDs")))
         << ecu.first().toStdString();
     EXPECT_TRUE(
         ecu.first().contains(QStringLiteral("(not in its supported PIDs)")))

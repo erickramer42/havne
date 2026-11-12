@@ -74,23 +74,15 @@ struct ecuio_mock_ecu {
     bool cleared = false;
 };
 
-/* The ECU's reply to q into out (8 bytes), its length, or 0: a request
- * it lacks goes unanswered, as a silent ECU's would. 01 0C reads the
- * engine speed and 01 0D the vehicle speed (unanswered with no engine
- * to read); 04 clears and answers 44, the engine running or not, as
- * some ECUs do. A supported-PID bitmap (01 00, 20, ... E0) lists the
- * next bitmap and no data PID: the mock's stream carries no Service 01
- * value, whatever the diagnostics' own asks read here. */
+/* The diagnostics list's reply to q into out (8 bytes), its length, or
+ * 0: a request it lacks goes unanswered, as a silent ECU's would. 01 0C
+ * reads the engine speed and 01 0D the vehicle speed (unanswered with no
+ * engine to read); 04 clears and answers 44, the engine running or not,
+ * as some ECUs do. The supported-PID walk asks the simulated ECU of
+ * mock_pids.h instead. */
 inline uint8_t ecuio_mock_ecu_reply(ecuio_mock_ecu* ecu, const ecuio_request& q,
                                     uint8_t* out)
 {
-    if (q.len == 2 && q.bytes[0] == 0x01 && q.bytes[1] % 0x20u == 0) {
-        out[0] = 0x41;
-        out[1] = q.bytes[1];
-        out[2] = out[3] = out[4] = 0x00;
-        out[5] = q.bytes[1] == 0xE0 ? 0x00 : 0x01;
-        return 6;
-    }
     if (q.len == 2 && q.bytes[0] == ECUIO_CLEAR_SPEED_REQUEST[0] &&
         q.bytes[1] == ECUIO_CLEAR_SPEED_REQUEST[1]) {
         if (ecu->engine == nullptr) {
@@ -155,34 +147,6 @@ inline void ecuio_mock_ecu_read(ecuio_request_engine* e, ecuio_mock_ecu* ecu,
                 continue;
             }
             *now_us += ECUIO_ENGINE_GAP_US;
-            continue;
-        }
-        uint8_t reply[8];
-        const uint8_t n =
-            ecuio_mock_ecu_reply(ecu, ecuio_engine_request_of(e, 0, r), reply);
-        ecuio_engine_sent(e, 0, r, true, *now_us);
-        if (n > 0) {
-            (void)ecuio_engine_on_frame(e, 0, reply, n, *now_us, nullptr);
-        } else {
-            *now_us += ECUIO_ENGINE_WAIT_US;
-        }
-    }
-}
-
-/* Runs channel 0's supported-PID walk (ecuio_engine_probe, started by
- * the caller) to its end against the ECU, on the engine's own clock, as
- * ecuio_mock_ecu_read runs the diagnostics. The walk goes before the
- * rotation, so only bitmaps are asked. */
-inline void ecuio_mock_ecu_walk(ecuio_request_engine* e, ecuio_mock_ecu* ecu,
-                                int64_t* now_us)
-{
-    const ecuio_engine_channel& ch = e->chans[0];
-    for (int step = 0; step < 64 && ch.walking; ++step) {
-        const int32_t r = ecuio_engine_due(e, 0, *now_us);
-        if (r == ECUIO_ENGINE_NONE) {
-            if (!ecuio_engine_expire(e, 0, *now_us)) {
-                *now_us += ECUIO_ENGINE_GAP_US;
-            }
             continue;
         }
         uint8_t reply[8];
