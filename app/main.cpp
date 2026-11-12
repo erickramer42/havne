@@ -27,7 +27,7 @@
 #include "carryover.h"
 #include "recordingexport.h"
 #include "sessionbridge.h"
-#if defined(Q_OS_ANDROID) || defined(Q_OS_WIN)
+#if defined(Q_OS_ANDROID) || defined(Q_OS_WIN) || defined(Q_OS_LINUX)
 #include "windowtheme.h"
 #endif
 #include "ecuio/version.h"
@@ -160,7 +160,8 @@ int main(int argc, char *argv[])
                 .arg(earlierProductName())
                 .arg(carriedOver));
     }
-#if defined(Q_OS_ANDROID) || defined(Q_OS_WIN)
+    // On Linux the color scheme alone: never the window's frame
+#if defined(Q_OS_ANDROID) || defined(Q_OS_WIN) || defined(Q_OS_LINUX)
     if (auto *window =
             qobject_cast<QWindow *>(engine.rootObjects().constFirst())) {
         if (auto* theme = engine.singletonInstance<QObject*>("App", "Theme")) {
