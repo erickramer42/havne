@@ -120,22 +120,36 @@ owned=""
 failed=""
 gtest_jobs=${COVERAGE_JOBS:-3}
 if [ -z "$regex" ]; then
+    # Binaries with a RUN_SERIAL case (shared logs, the fake DLL's knobs) run alone, last
+    serial=$(ctest --test-dir "$TREE" -C RelWithDebInfo -N --show-only=json-v1 2>/dev/null |
+        "${PYTHON:-python}" -c 'import json,sys,os
+for t in json.load(sys.stdin)["tests"]:
+    if any(p["name"] == "RUN_SERIAL" and p["value"] for p in t.get("properties", [])):
+        print(os.path.basename(t["command"][0]))' | tr -d '\r' | sort -u)
+    cover_one() { # <exe>: from a working directory of its own (the tool writes a log there)
+        local exe=$1 name abs
+        name=$(basename "$exe" .exe)
+        abs=$PWD
+        LOGDIR=$abs/$LOGDIR
+        mkdir -p "$LOGDIR/work-$name"
+        cd "$LOGDIR/work-$name" || return 1
+        cover "$name" 600 "$(cygpath -w "$abs/$exe")"
+        echo "$rc" > "$LOGDIR/rc-$name"
+    }
+    later=""
     for exe in "$TREE"/tests/RelWithDebInfo/test_*.exe; do
         name=$(basename "$exe" .exe)
         suites=$("$exe" --gtest_list_tests 2>/dev/null | tr -d '\r' \
             | sed -nE 's/^([A-Za-z_][A-Za-z0-9_/]*)\.( .*)?$/\1/p')
         [ -n "$suites" ] || continue
         owned="$owned|$(tr '\n' '|' <<<"$suites" | sed 's/|$//')"
-        # Binaries run side by side, as ctest -j runs their cases: a
-        # process is single-threaded under the tool, so the cores idle
-        # otherwise. Each writes its own log and raw report.
-        (
-            cover "$name" 600 "$(cygpath -w "$PWD/$exe")"
-            echo "$rc" > "$LOGDIR/rc-$name"
-        ) &
+        if grep -qx "$name.exe" <<<"$serial"; then later="$later $exe"; continue; fi
+        # Side by side, as ctest -j runs cases: a process under the tool uses one core
+        (cover_one "$exe") &
         while [ "$(jobs -rp | wc -l)" -ge "$gtest_jobs" ]; do wait -n; done
     done
     wait
+    for exe in $later; do (cover_one "$exe"); done
     for rcfile in "$LOGDIR"/rc-*; do
         [ -e "$rcfile" ] || continue
         [ "$(cat "$rcfile")" = 0 ] || failed="$failed $(basename "$rcfile" | sed 's/^rc-//')"
