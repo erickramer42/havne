@@ -566,3 +566,15 @@ adds `"more": [{"ecu", "refused"}]`, each such ECU's receive ID in
 signals the list can't name; the key is left out when there are none,
 so a line without it reads as before. `CliRefusedTest.RefusalsPastTheListAreCounted`,
 `CliRefusedRunTest.RefusalsPastTheListAreCounted`.
+
+## Note: two lines named session (2026-11-12)
+
+Two lines carry `"type":"session"`. The opening line, written once after the
+connect, describes what the session runs on (`backend`, `profile`,
+`channels`). A module's session line
+([ADR-0060](0060-extended-session-reads.md)), written by `stream` and `log`
+whenever a module's diagnostic session changes under `?session=03`, carries
+`ecu`, `asked`, `session`, `state`, `nrc`, `entries` and `lost`, and none of
+the opening line's keys. A reader tells them apart by the `ecu` key: a
+`session` line with `ecu` is a module's. Schema 1 only grows, and `stream`
+has written the module's line since v0.7.2, so neither is renamed.

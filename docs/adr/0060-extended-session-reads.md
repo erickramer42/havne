@@ -274,8 +274,8 @@ the close is about to do and not that it did.
 
 ## Appendix: the session line in the log, and Python (2026-11-10)
 
-`havne-cli log` writes `stream`'s `session` line, on each change of a
-module's session, from the same rule (`cli/scan_line.h`'s `session_due`),
+`havne-cli log` writes `stream`'s `session` line (told from the opening
+`session` line by its `ecu` key), on each change of a module's session, from the same rule (`cli/scan_line.h`'s `session_due`),
 and once more after the session closes, before the end line, so a log that
 ended between polls still says where each module stood. Without `?session=03`
 neither writes one. Python reads the same fields through

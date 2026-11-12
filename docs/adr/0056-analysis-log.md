@@ -909,10 +909,23 @@ overlaid a part-throttle rise on a pull. The pulls are the anchors:
 empty), and for a recording after the first aligned one that shows a number
 signal of the same name in the same unit (the unit's case aside), `delta` (its
 mean less the first's, null where either is empty) and `delta_from` (the
-first's place): a speed in km/h is never taken from one in mph. The mean is
-taken over exactly the samples the column counts: a column under a second its
-own samples, a wider one the whole seconds the reader places in it. The
-`roles` line has `pull_gain` in km/h, and `--stretch-level` takes
+first's place): a speed in km/h is never taken from one in mph. A column's
+`samples`, `lowest`, `highest` and `mean` are over one set of samples. In an
+unaligned view, or in columns under a second, they are the samples a query
+counts there: a column of a second or more holds the whole host seconds that
+start in it, in the recording's own time. In an aligned view (any
+`--align-on`) with columns of a second or more, that rule would fill one axis
+column from windows a part of a second apart in two recordings whose offsets
+differ by that much, and their `delta` would carry the shift (a recording
+against itself half a second later differed by up to 272 rpm at eight columns
+over 40 s). There every number of a column comes from the reader's statistics
+(`ecuio_recording_stats`, which reads the partial seconds from the rows) over
+the column's own microseconds of the recording's time, so one axis column is
+one stretch of the axis in every recording and `delta` compares like with
+like. An unaligned view keeps the query's seconds: every recording there sits
+at offset 0, so a column is the same window in each already. The axis's last
+column holds the axis's last microsecond too, in every view, so a sample
+exactly at the end is counted once. The `roles` line has `pull_gain` in km/h, and `--stretch-level` takes
 `pull-rise=` (rpm) and `pull-gain=` (speed in `--units`).
 
 **Tested against** recordings written to the logs' shape (uneven 3 to 4 Hz; a
@@ -927,3 +940,30 @@ which the CLI, the package and the viewer read to the same two pulls.
 on the axis and a Stretches panel for the levels and roles. The viewer's
 comparison uses core's defaults, and it shows no column difference: the
 `delta` is `havne-cli view`'s alone.
+
+## Appendix: the Jump row as built (2026-11-12)
+
+Section 6's Jump row and bands. The viewer asks core for the recording's
+pulls and cruises once per open (`RecordingView::stretches(pulls, cruises,
+rules)`), and the Jump row, the bands on the axis and Compare's pull numbers
+share that answer; the other recording's ask is its own. The row (previous
+and next for each kind, and a line saying "Pull 2 of 5 · 12.9 s") sits under
+the title row on the desktop and under the chart on a phone. A jump puts the
+stretch in view with the cursor at its start. Each stretch is a band drawn
+under the traces (`StripChart.decorateBelow`), pulls and cruises in their own
+colors, hidden by the Bands switch (in the panel on a phone).
+
+Stretches... opens a panel with the finder's ten levels in the viewer's units
+(throttle, load, hold, gap, engine-speed rise, speed gain, and the cruise's
+bands and floor), the defaults shown in the fields. A field left empty, or 0,
+takes core's default. The values are checked before a pass starts: a
+percentage from 0 to 100, a time up to an hour, a speed up to 1000 km/h, any
+other value refused with words naming the rule and no ask taken. The levels
+are kept between runs, and a stored level core refuses reads as the defaults,
+with the words shown. A change of the unit system asks again in the new unit.
+The roles stay core's picks.
+
+The app's alignment follows the panel's levels: Compare's pull numbers use the
+levels in force for both recordings, where `havne-cli view --align-on pull:`
+uses core's defaults unless it is given levels (`--stretch-level`, `--role`),
+so the same numbers need the same levels on both sides.
