@@ -6,10 +6,15 @@
 // Colors the platform's own window from Theme's bg, surface and text, so a
 // night theme never sits under a bright title bar or a white strip, and a
 // light look never under a dark one. The class builds on every platform;
-// main() makes one only on Windows and Android, so the color scheme follows
-// the look there and stays Dark, as main() sets it, elsewhere. Its apply
-// step: the scheme follows the look's lightness, Android colors its window
-// and its bars' icons, Windows colors the title bar.
+// main() makes one on Windows, Android and Linux, so the color scheme
+// follows the look there and stays Dark, as main() sets it, on macOS and
+// iOS. Its apply step: the scheme follows the look's lightness, Android
+// colors its window and its bars' icons, Windows colors the title bar.
+// On Linux the scheme is the whole step, and only a platform theme that
+// takes the request (the GTK one) reports it; Qt's generic theme keeps
+// Unknown. It never reaches the frame: an X11 window manager draws its own
+// from the desktop's theme, and Qt's Wayland decorations (Bradient,
+// Adwaita) keep their colors whatever the app's scheme.
 
 #pragma once
 

@@ -583,3 +583,10 @@ it), and Android's status and navigation icons turn dark.
 Note (2026-11-10): the look is named Light where it is seen (the Look
 row and the Display row's summary). Its stored key and palette name stay
 `daylight`, so a saved choice carries over.
+
+Note (2026-11-11): on Linux too the color scheme follows the look
+(`main()` makes `WindowTheme` there). It is all that changes:
+an X11 window manager draws the frame from the desktop's theme, and the
+frame Qt draws under Wayland on WSLg's Weston kept its colors under
+either scheme. The pages follow the look on every desktop
+([linux.md](../linux.md)).

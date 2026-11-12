@@ -45,6 +45,18 @@ their licenses in `usr/share/doc/havne/` inside it
   so on a Wayland desktop it runs through XWayland, which GNOME and KDE
   provide by default.
 
+**The window's frame under the Light look.** The app draws its pages,
+header and sidebar in the look's colors on every desktop, but the title
+bar around them doesn't follow the look. Under X11, and for the AppImage
+on a Wayland desktop (through XWayland), the window manager draws it
+from the desktop's theme: on Xfce with a dark theme the frame stays dark
+over the Light app, and a theme with a light frame gives a light one. A
+source build run with Qt's Wayland plugin (`QT_QPA_PLATFORM=wayland`) on
+a compositor that leaves the frame to the app, as WSLg's Weston does,
+gets one Qt draws, which keeps its own colors whatever the look. GNOME
+and KDE on Wayland haven't been tried. For a frame that matches, choose
+a desktop theme on the same side as the look.
+
 To check that the download is the one the release built:
 
 ```sh
@@ -299,7 +311,10 @@ counts the frames per CAN ID.
   15.3 and Qt 6.12.0 (from `aqtinstall`, in the home folder) with no
   warnings, and its suites pass: the core alone, 728 cases, and the
   whole app, 877, but for the locale case and the real-car recordings'
-  diff. With `vcan0` up and the kernel's ISO-TP loaded, the simulated
+  diff. The build tree's app needs `libxcb-icccm4` and `libxcb-keysyms1`
+  there, which Qt's X11 plugin loads and Xubuntu doesn't install (the
+  AppImage carries its own). With `vcan0` up and the kernel's ISO-TP
+  loaded, the simulated
   bus's 63 cases pass too, but for the one that takes the interface
   down, which needs root; and `havne-cli`, end to end: a replay of the
   committed fixture (7,074 frames, none dropped), the mock car played
