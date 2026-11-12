@@ -68,9 +68,9 @@ Page {
     // names a log's interfaces when it has several
     property bool importAsksInterface: false
     property string importNote: ""
-    // Cancel was pressed on an import under way, until it ends; and the
-    // last import ended so, which is neither made nor failed
+    // Cancel pressed on an import under way, until it ends
     property bool importStopping: false
+    // The last import was canceled: neither made nor failed
     property bool importCanceled: false
     property bool importFailed: false
     // [{ title, uri, folder, source, profile }] (Bridge.recentRecordings)

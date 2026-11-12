@@ -582,7 +582,7 @@ TestCase {
         const busy = find(page, "importBusy")
         page.refresh()
         const before = page.recordings.length
-        Harness.holdImports(Bridge.recordingImport, 60000)
+        Harness.holdImports(Bridge.recordingImport, 15000)
         try {
             page.chooseImportFile(Harness.writeScratchFile("cancel-one.log",
                 "(1.000000) can0 7E8#01\n"))
@@ -608,7 +608,12 @@ TestCase {
             verify(cancel.enabled)
             verify(find(page, "importStart").enabled)
         } finally {
+            // A worker took its hold when it started: after a failed check
+            // it is freed here, or the shared importer stays busy for the
+            // cases after this one
             Harness.holdImports(Bridge.recordingImport, 0)
+            Bridge.recordingImport.cancel()
+            tryVerify(() => !Bridge.recordingImport.busy, 20000, "the held import ends")
         }
         page.refresh()
         compare(page.recordings.length, before, "nothing was imported")

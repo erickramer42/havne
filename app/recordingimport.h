@@ -112,7 +112,7 @@ public:
     void setFailThreadForTesting(bool on) { m_failThreadForTesting = on; }
     // An import's worker waits this long, or until a stop, before core's
     // call, so a test's cancel finds one under way
-    void setHoldForTesting(int ms) { m_holdMs = ms; }
+    void setHoldForTesting(int ms) { m_holdMsForTesting = ms; }
 
     // The largest column map read, as havne-cli reads one
     static constexpr qint64 MapMaxBytes = 1024 * 1024;
@@ -139,7 +139,7 @@ private:
     // import stop. Cleared as each worker starts
     std::atomic<bool> m_stop{false};
     bool m_busy = false;
-    int m_holdMs = 0;
+    int m_holdMsForTesting = 0;
     bool m_copyLocal = false;
     QString m_label;
     bool m_failThreadForTesting = false;

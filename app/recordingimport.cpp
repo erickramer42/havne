@@ -88,7 +88,7 @@ struct Job {
     QString stamp;
     QString label;
     bool copyLocal = false;
-    int holdMs = 0;
+    int holdMsForTesting = 0;
     std::atomic<bool>* stop = nullptr;
 };
 
@@ -188,7 +188,7 @@ QVariantMap run(const Job& job)
     o.interface_utf8 = !csv && !iface.isEmpty() ? iface.constData() : nullptr;
     o.column_map_utf8 = csv ? map.constData() : nullptr;
     ecuio_import_report_t r{};
-    for (int waited = 0; waited < job.holdMs && !job.stop->load();
+    for (int waited = 0; waited < job.holdMsForTesting && !job.stop->load();
          waited += 10) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -673,7 +673,7 @@ bool RecordingImport::beginImport(const QUrl& file, int kind, const QUrl& map,
     job.stamp = QDateTime::currentDateTime().toString(
         QStringLiteral("yyyyMMdd-HHmmss"));
     job.copyLocal = m_copyLocal;
-    job.holdMs = m_holdMs;
+    job.holdMsForTesting = m_holdMsForTesting;
     job.stop = &m_stop;
     return launch(false, [job] { return run(job); });
 }

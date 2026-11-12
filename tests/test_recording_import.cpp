@@ -127,7 +127,7 @@ const QRegularExpression
 /* A worker that can't be started (the system out of threads) is a start
  * that says no, with nothing busy and nothing made, for an import and for a
  * guess alike */
-TEST(BridgeTest, AnImportWhoseThreadCantStartSaysSo)
+TEST(BridgeTest, ImportWhoseThreadCantStartSaysSo)
 {
     QTemporaryDir dir;
     RecordingImport im([&] { return dir.path(); });
@@ -298,7 +298,7 @@ TEST(BridgeTest, ImportStopsWhenTheImporterGoes)
  * core's call, through the second pass with its partial folder there, and
  * in a provider file's copy. A guess isn't stopped, and the importer
  * imports again after each */
-TEST(BridgeTest, ACanceledImportEndsCanceledAndLeavesNoRecording)
+TEST(BridgeTest, ImportCanceledEndsCanceledAndLeavesNoRecording)
 {
     QTemporaryDir dir;
     QByteArray log;
