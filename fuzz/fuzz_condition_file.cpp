@@ -7,13 +7,19 @@
 #include <ecuio/signal_sets.h>
 #include <ecuio/signals.h>
 
+#include "condition_eval.h" /* core/src: the evaluator a session judges by */
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
+#include <memory>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -173,6 +179,519 @@ void check_binding(const ecuio_condition_set_t* set, uint32_t i,
     }
 }
 
+/* A run of made-up frames through the evaluator, as a session's worker
+ * would feed it (ADR-0063 sections 2 and 3). The frames come from the
+ * input's bytes by a generator, so a file gives one run: times that
+ * stand still, creep and jump past every hold and age bound, and
+ * samples on and around each term's level and clear, now and then one
+ * that is no number or an infinity, and now and then a frame stamped a
+ * little before the time reached. Three evaluators take them: two the
+ * same frames, which must agree event for event; the third also a frame
+ * with no values halfway to each one, which must change nothing, since
+ * a deadline is settled at its own time by whichever frame comes next.
+ * Each run is also held, frame for frame, to the reference below. */
+struct made_up {
+    uint64_t state;
+    uint32_t next()
+    {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        return static_cast<uint32_t>(state >> 16);
+    }
+};
+
+/* A run's events in a form the frames' grouping can't change: a
+ * condition's changes at one time as one event, as one call gives them
+ * (two calls give two), counted and summed in no order across
+ * conditions */
+struct canon {
+    ecuio_condition_event_t last[ECUIO_CONDITION_MAX_CONDITIONS] = {};
+    bool held[ECUIO_CONDITION_MAX_CONDITIONS] = {};
+    uint64_t count = 0;
+    uint64_t sum = 0;
+
+    void flush(uint32_t c)
+    {
+        const ecuio_condition_event_t& ev = last[c];
+        uint64_t v = 0;
+        memcpy(&v, &ev.value, sizeof v);
+        uint64_t h = ev.timestamp_us * 1099511628211ull;
+        h ^= (uint64_t{ev.condition} << 48) ^ (uint64_t{ev.state} << 40) ^
+             (uint64_t{ev.flags} << 44) ^ (uint64_t{ev.term} << 36) ^ v;
+        sum += h * 1099511628211ull + (h >> 29);
+        ++count;
+    }
+    void take(const ecuio_condition_event_t& ev)
+    {
+        const uint32_t c = ev.condition;
+        if (held[c] && last[c].timestamp_us == ev.timestamp_us) {
+            const uint32_t fired = last[c].flags & ECUIO_CONDITION_FIRED;
+            last[c] = ev;
+            last[c].flags |= fired;
+            return;
+        }
+        if (held[c]) {
+            flush(c);
+        }
+        last[c] = ev;
+        held[c] = true;
+    }
+    void finish()
+    {
+        for (uint32_t c = 0; c < ECUIO_CONDITION_MAX_CONDITIONS; ++c) {
+            if (held[c]) {
+                flush(c);
+            }
+        }
+    }
+};
+
+void check_events(const ecuio_condition_eval& e, uint32_t n, uint64_t now_us)
+{
+    check(e.dropped == 0 && n <= e.events.size());
+    uint32_t per[ECUIO_CONDITION_MAX_CONDITIONS] = {};
+    for (uint32_t i = 0; i < n; ++i) {
+        const ecuio_condition_event_t& ev = e.events[i];
+        check(ev.condition < e.conditions.size());
+        const ecuio_condition_eval::condition& c = e.conditions[ev.condition];
+        check(c.available != 0 && ev.term < c.term_count);
+        check(++per[ev.condition] <= ecuio_condition_eval::kEventsPerCondition);
+        check(ev.state == ECUIO_CONDITION_OFF ||
+              ev.state == ECUIO_CONDITION_ON);
+        check((ev.flags & ~(ECUIO_CONDITION_STALE | ECUIO_CONDITION_FIRED)) ==
+              0);
+        check((ev.flags & ECUIO_CONDITION_FIRED) == 0 ||
+              ev.state == ECUIO_CONDITION_ON);
+        check(ev.timestamp_us <= now_us && !std::isnan(ev.value));
+        check(ev.generation == e.generation && ev.arbitration_id == 0 &&
+              ev.code == 0 && ev.reserved0 == 0 && ev.reserved == 0);
+        /* By time, then by index, each (condition, time) once */
+        if (i > 0) {
+            const ecuio_condition_event_t& b = e.events[i - 1];
+            check(b.timestamp_us < ev.timestamp_us ||
+                  (b.timestamp_us == ev.timestamp_us &&
+                   b.condition < ev.condition));
+        }
+    }
+    /* A condition's state is its newest event's */
+    for (uint32_t i = n; i-- > 0;) {
+        const ecuio_condition_event_t& ev = e.events[i];
+        bool newest = true;
+        for (uint32_t j = i + 1; j < n; ++j) {
+            newest = newest && e.events[j].condition != ev.condition;
+        }
+        if (newest) {
+            const ecuio_condition_state_t s = e.state_of(ev.condition);
+            check(s.state == ev.state && s.since_us == ev.timestamp_us &&
+                  s.flags == (ev.flags & ECUIO_CONDITION_STALE) &&
+                  memcmp(&s.value, &ev.value, sizeof s.value) == 0);
+        }
+    }
+}
+
+/* Section 2's rules once more, written plainly, to hold the evaluator
+ * to: every term of every condition is read at every frame and every
+ * deadline is looked for from scratch, with no index, no list of what
+ * changed and nothing kept between frames but the samples and the
+ * states. It is built from the set's public getters alone. */
+struct reference {
+    struct term {
+        uint32_t test = 0;
+        double level = 0.0;
+        double clear = 0.0;
+        bool has_clear = false;
+        uint64_t max_age_us = 0;
+        uint32_t signal_id = 0;
+        bool judged = false; /* sampled, and within its age bound */
+        bool truth = false;
+        double value = 0.0;
+        uint64_t time_us = 0;
+    };
+    struct condition {
+        bool available = false;
+        bool any = false;
+        uint64_t for_us = 0;
+        uint64_t clear_for_us = 0;
+        uint32_t term_count = 0;
+        term terms[ECUIO_CONDITION_MAX_TERMS];
+        bool on = false;
+        bool stale = true;
+        /* What its terms have said, unbroken, since toward_since_us: 0
+         * what the state is, 1 ON, 2 OFF */
+        int toward = 0;
+        uint64_t toward_since_us = 0;
+        uint32_t toward_terms = 0;
+        uint64_t fired = 0;
+        uint64_t since_us = 0;
+        double value = 0.0;
+    };
+    struct event {
+        uint64_t time_us = 0;
+        uint32_t condition = 0;
+        bool on = false;
+        bool stale = false;
+        bool fired = false;
+        /* The terms that may have settled it, as bits: one sample that
+         * changes two terms on its signal names either, and nothing a
+         * caller sees tells them apart */
+        uint32_t terms = 0;
+        double value = 0.0;
+    };
+    std::vector<condition> conditions;
+    std::vector<event> events; /* the last frame's */
+    uint64_t reached_us = 0;   /* time never goes back */
+
+    reference(const ecuio_condition_set_t* set,
+              const ecuio_signal_set_t* signals,
+              const ecuio_signal_file_t* file)
+    {
+        conditions.resize(ecuio_condition_set_count(set));
+        for (uint32_t i = 0; i < conditions.size(); ++i) {
+            condition& c = conditions[i];
+            ecuio_condition_info_t info;
+            ecuio_condition_binding_t bound;
+            check(ecuio_condition_set_get(set, i, &info) == ECUIO_OK);
+            check(ecuio_condition_set_resolve(set, i, signals, file, &bound) ==
+                  ECUIO_OK);
+            c.available = bound.why == ECUIO_CONDITION_WHY_NONE;
+            c.any = (info.flags & ECUIO_CONDITION_INFO_ANY) != 0;
+            c.for_us = info.for_us;
+            c.clear_for_us = info.clear_for_us;
+            c.term_count = info.term_count;
+            for (uint32_t k = 0; k < info.term_count; ++k) {
+                ecuio_condition_term_t t;
+                check(ecuio_condition_set_get_term(set, i, k, &t) == ECUIO_OK);
+                /* A link or a check term is not judged in a session */
+                c.available = c.available && t.kind == ECUIO_TERM_SIGNAL;
+                c.terms[k].test = t.test;
+                c.terms[k].level = t.level;
+                c.terms[k].clear = t.clear;
+                c.terms[k].has_clear = (t.flags & ECUIO_TERM_HAS_CLEAR) != 0;
+                c.terms[k].max_age_us =
+                    t.max_age_us != 0 ? t.max_age_us : ECUIO_VALUE_STALE_US;
+                c.terms[k].signal_id = bound.signal_id[k];
+            }
+        }
+    }
+
+    void tell(uint32_t index, uint64_t at_us, uint32_t terms, bool fired)
+    {
+        condition& c = conditions[index];
+        uint32_t first = 0;
+        while ((terms >> first & 1u) == 0) {
+            ++first;
+        }
+        c.since_us = at_us;
+        c.value = c.terms[first].value;
+        if (events.empty() || events.back().condition != index ||
+            events.back().time_us != at_us) {
+            events.emplace_back();
+            events.back().time_us = at_us;
+            events.back().condition = index;
+        }
+        event& e = events.back();
+        e.on = c.on;
+        e.stale = c.stale;
+        e.fired = e.fired || fired;
+        e.terms = terms;
+        e.value = c.value;
+    }
+
+    /* The condition's terms taken together at at_us, after `terms`
+     * changed */
+    void weigh(uint32_t index, uint64_t at_us, uint32_t terms)
+    {
+        condition& c = conditions[index];
+        uint32_t yes = 0;
+        uint32_t no = 0;
+        uint32_t unknown = 0;
+        for (uint32_t k = 0; k < c.term_count; ++k) {
+            ++(c.terms[k].judged ? (c.terms[k].truth ? yes : no) : unknown);
+        }
+        const bool settled = c.any ? yes > 0 : no > 0;
+        if (!settled && unknown > 0) {
+            c.toward = 0;
+            if (!c.stale) {
+                c.stale = true;
+                tell(index, at_us, terms, false);
+            }
+            return;
+        }
+        const bool holds = c.any ? yes > 0 : no == 0;
+        bool changed = c.stale;
+        bool fired = false;
+        c.stale = false;
+        if (holds == c.on) {
+            c.toward = 0;
+        } else {
+            const int toward = holds ? 1 : 2;
+            if (c.toward != toward) {
+                c.toward = toward;
+                c.toward_since_us = at_us;
+                c.toward_terms = terms;
+            }
+            if ((holds ? c.for_us : c.clear_for_us) == 0) {
+                c.toward = 0;
+                c.on = holds;
+                c.fired += holds ? 1 : 0;
+                fired = holds;
+                changed = true;
+            }
+        }
+        if (changed) {
+            tell(index, at_us, terms, fired);
+        }
+    }
+
+    void turn(uint32_t index, uint64_t at_us)
+    {
+        condition& c = conditions[index];
+        c.on = c.toward == 1;
+        c.fired += c.on ? 1 : 0;
+        c.toward = 0;
+        tell(index, at_us, c.toward_terms, c.on);
+    }
+
+    void judge(uint64_t now_us, const ecuio_value_t* values, uint32_t count)
+    {
+        events.clear();
+        if (now_us < reached_us) {
+            now_us = reached_us;
+        }
+        reached_us = now_us;
+        for (uint32_t index = 0; index < conditions.size(); ++index) {
+            condition& c = conditions[index];
+            if (!c.available) {
+                continue;
+            }
+            /* What came due before this frame, earliest first, a hold's
+             * end before an age bound at the same time */
+            for (;;) {
+                const uint64_t end =
+                    c.toward == 0
+                        ? UINT64_MAX
+                        : c.toward_since_us +
+                              (c.toward == 1 ? c.for_us : c.clear_for_us);
+                uint64_t oldest = UINT64_MAX;
+                uint32_t who = 0;
+                for (uint32_t k = 0; k < c.term_count; ++k) {
+                    const term& t = c.terms[k];
+                    if (t.judged && t.time_us + t.max_age_us < oldest) {
+                        oldest = t.time_us + t.max_age_us;
+                        who = k;
+                    }
+                }
+                if (end < now_us && end <= oldest) {
+                    turn(index, end);
+                } else if (oldest < now_us) {
+                    c.terms[who].judged = false;
+                    weigh(index, oldest, 1u << who);
+                } else {
+                    break;
+                }
+            }
+            /* The frame's values, each read by every term on its signal */
+            uint32_t settled = 0;
+            for (uint32_t i = 0; i < count; ++i) {
+                const ecuio_value_t& v = values[i];
+                if (v.kind == ECUIO_VALUE_TEXT || v.kind == ECUIO_VALUE_HEX ||
+                    std::isnan(v.value)) {
+                    continue;
+                }
+                uint32_t changed = 0;
+                for (uint32_t k = 0; k < c.term_count; ++k) {
+                    term& t = c.terms[k];
+                    if (t.signal_id != v.signal_id) {
+                        continue;
+                    }
+                    bool truth = t.truth;
+                    if (t.test == ECUIO_TERM_ABOVE) {
+                        truth = v.value > t.level ||
+                                (truth && t.has_clear && v.value > t.clear);
+                    } else if (t.test == ECUIO_TERM_BELOW) {
+                        truth = v.value < t.level ||
+                                (truth && t.has_clear && v.value < t.clear);
+                    } else {
+                        truth = (v.value == t.level) ==
+                                (t.test == ECUIO_TERM_EQUALS);
+                    }
+                    if (truth != t.truth || !t.judged) {
+                        changed |= 1u << k;
+                    }
+                    t.truth = truth;
+                    t.judged = true;
+                    t.value = v.value;
+                    t.time_us = now_us;
+                }
+                if (changed != 0) {
+                    settled = changed;
+                }
+            }
+            if (settled != 0) {
+                weigh(index, now_us, settled);
+            }
+            /* A hold that ends exactly at this frame, if its values
+             * didn't break it */
+            if (c.toward != 0 &&
+                c.toward_since_us +
+                        (c.toward == 1 ? c.for_us : c.clear_for_us) ==
+                    now_us) {
+                turn(index, now_us);
+            }
+        }
+        std::stable_sort(
+            events.begin(), events.end(), [](const event& a, const event& b) {
+                return a.time_us != b.time_us ? a.time_us < b.time_us
+                                              : a.condition < b.condition;
+            });
+    }
+
+    /* The evaluator's last frame gave these events and stands in these
+     * states */
+    void agrees(const ecuio_condition_eval& e, uint32_t n) const
+    {
+        check(n == events.size());
+        for (uint32_t i = 0; i < n; ++i) {
+            const ecuio_condition_event_t& got = e.events[i];
+            const event& want = events[i];
+            check(got.timestamp_us == want.time_us &&
+                  got.condition == want.condition);
+            check((got.state == ECUIO_CONDITION_ON) == want.on);
+            check(((got.flags & ECUIO_CONDITION_STALE) != 0) == want.stale &&
+                  ((got.flags & ECUIO_CONDITION_FIRED) != 0) == want.fired);
+            check(got.term < ECUIO_CONDITION_MAX_TERMS &&
+                  (want.terms >> got.term & 1u) != 0);
+            check(memcmp(&got.value, &want.value, sizeof got.value) == 0);
+        }
+        check(e.conditions.size() == conditions.size());
+        for (uint32_t i = 0; i < conditions.size(); ++i) {
+            const condition& c = conditions[i];
+            const ecuio_condition_state_t s = e.state_of(i);
+            check((e.conditions[i].available != 0) == c.available);
+            check((s.state == ECUIO_CONDITION_ON) == c.on &&
+                  s.fired == c.fired && s.since_us == c.since_us &&
+                  memcmp(&s.value, &c.value, sizeof s.value) == 0);
+            check(s.flags == (!c.available ? ECUIO_CONDITION_UNAVAILABLE
+                              : c.stale    ? ECUIO_CONDITION_STALE
+                                           : 0u));
+        }
+    }
+};
+
+void judge_set(const ecuio_condition_set_t* set,
+               const ecuio_signal_set_t* signals,
+               const ecuio_signal_file_t* file, uint64_t seed)
+{
+    reference plain(set, signals, file);
+    reference plain_dense(set, signals, file);
+    std::unique_ptr<ecuio_condition_eval> a =
+        ecuio_condition_eval::make(set, signals, file, 1);
+    std::unique_ptr<ecuio_condition_eval> b =
+        ecuio_condition_eval::make(set, signals, file, 1);
+    std::unique_ptr<ecuio_condition_eval> dense =
+        ecuio_condition_eval::make(set, signals, file, 1);
+    check(a->conditions.size() == ecuio_condition_set_count(set));
+    for (uint32_t i = 0; i < a->conditions.size(); ++i) {
+        ecuio_condition_binding_t bound;
+        check(ecuio_condition_set_resolve(set, i, signals, file, &bound) ==
+              ECUIO_OK);
+        const ecuio_condition_state_t s = a->state_of(i);
+        check(s.state == ECUIO_CONDITION_OFF && s.fired == 0 &&
+              s.since_us == 0);
+        check((s.flags == ECUIO_CONDITION_STALE) ==
+              (a->conditions[i].available != 0));
+        check(a->conditions[i].available == 0 ||
+              bound.why == ECUIO_CONDITION_WHY_NONE);
+    }
+    if (a->terms.empty()) {
+        return;
+    }
+    static const uint32_t kSteps[] = {0,       1,       999,     50000,
+                                      250000,  1000000, 2999999, 3000000,
+                                      3000001, 9000000, 61000000};
+    made_up r{seed | 1};
+    uint64_t now = 1000000;
+    static canon sparse_events;
+    static canon dense_events;
+    sparse_events = canon{};
+    dense_events = canon{};
+    for (int step = 0; step < 300; ++step) {
+        const uint32_t dt =
+            kSteps[r.next() % (sizeof kSteps / sizeof kSteps[0])];
+        ecuio_value_t values[4] = {};
+        const uint32_t count = r.next() % 4;
+        for (uint32_t k = 0; k < count; ++k) {
+            const ecuio_condition_eval::term& t =
+                a->terms[r.next() % a->terms.size()];
+            const double around = (r.next() & 1) != 0 ? t.level : t.clear;
+            static const double kOff[] = {-1e6, -1.0, -1e-9, 0.0,
+                                          1e-9, 1.0,  1e6};
+            double v = around + kOff[r.next() % 7];
+            if (!std::isfinite(v)) {
+                v = around;
+            }
+            const uint32_t odd = r.next() % 48;
+            if (odd < 3) {
+                v = odd == 0   ? std::numeric_limits<double>::quiet_NaN()
+                    : odd == 1 ? std::numeric_limits<double>::infinity()
+                               : -std::numeric_limits<double>::infinity();
+            }
+            values[k].signal_id = a->signals[t.signal].id;
+            values[k].kind = ECUIO_VALUE_UINT;
+            values[k].value = v;
+            for (uint32_t j = 0; j < k; ++j) {
+                /* A frame carries a def once */
+                if (values[j].signal_id == values[k].signal_id) {
+                    values[k].signal_id = 0;
+                    values[k].kind = ECUIO_VALUE_TEXT;
+                }
+            }
+        }
+        /* The frame's stamp: on from the time reached, or now and then
+         * a little before it, as two channels' frames can arrive */
+        const uint64_t at =
+            r.next() % 16 == 0 ? now - (r.next() % 5000 + 1) : now + dt;
+        /* The dense run's extra frame, with nothing in it */
+        const uint64_t half = at >= now ? now + (at - now) / 2 : at;
+        const uint32_t between = dense->judge(half, nullptr, 0);
+        check_events(*dense, between, std::max(now, half));
+        plain_dense.judge(half, nullptr, 0);
+        plain_dense.agrees(*dense, between);
+        for (uint32_t i = 0; i < between; ++i) {
+            dense_events.take(dense->events[i]);
+        }
+        now = std::max(now, at);
+        const uint32_t n = a->judge(at, values, count);
+        check(b->judge(at, values, count) == n);
+        check(n == 0 || memcmp(a->events.data(), b->events.data(),
+                               n * sizeof(ecuio_condition_event_t)) == 0);
+        check_events(*a, n, now);
+        plain.judge(at, values, count);
+        plain.agrees(*a, n);
+        const uint32_t m = dense->judge(at, values, count);
+        check_events(*dense, m, now);
+        plain_dense.judge(at, values, count);
+        plain_dense.agrees(*dense, m);
+        for (uint32_t i = 0; i < n; ++i) {
+            sparse_events.take(a->events[i]);
+        }
+        for (uint32_t i = 0; i < m; ++i) {
+            dense_events.take(dense->events[i]);
+        }
+    }
+    /* The same events, whichever frames settled them */
+    sparse_events.finish();
+    dense_events.finish();
+    check(sparse_events.count == dense_events.count &&
+          sparse_events.sum == dense_events.sum);
+    for (uint32_t i = 0; i < a->conditions.size(); ++i) {
+        const ecuio_condition_state_t x = a->state_of(i);
+        const ecuio_condition_state_t y = dense->state_of(i);
+        check(memcmp(&x, &y, sizeof x) == 0);
+    }
+}
+
 } // namespace
 
 /* The input is a condition file, or one and then, after a 0x1E byte, a
@@ -294,6 +813,16 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     ecuio_condition_info_t past;
     check(ecuio_condition_set_get(a, count, &past) ==
           ECUIO_ERR_INVALID_ARGUMENT);
+
+    /* Judged, against obd2's set and the signal file's */
+    uint64_t seed = 1469598103934665603ull;
+    for (size_t i = 0; i < size; ++i) {
+        seed = (seed ^ data[i]) * 1099511628211ull;
+    }
+    judge_set(a, ecuio_obd2_signal_set(), nullptr, seed);
+    if (file != nullptr) {
+        judge_set(a, ecuio_signal_file_set(file), file, seed);
+    }
 
     ecuio_signal_file_free(file);
     ecuio_condition_set_free(a);
