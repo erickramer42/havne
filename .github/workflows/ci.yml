@@ -443,7 +443,7 @@ jobs:
       - name: Run tests
         env:
           ECUIO_PYTEST_REQUIRED: '1'
-        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error -I ${{ matrix.shard }},,2
+        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error -I "${{ matrix.shard }},,2"
       # The replay fixture through the bridge (tests/bench_bridge.cpp): its
       # table goes to the run's summary, and the step fails only on a
       # broken invariant or a bound far below the dev machine's figures
