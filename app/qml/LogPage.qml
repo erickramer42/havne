@@ -82,7 +82,7 @@ Pane {
     }
 
     // The activity at its newest line: where Show log and Settings' Log row
-    // land, the developer's Frames view included
+    // land, the Frames view included
     function showActivityEnd() {
         page.view = "activity"
         activityLog.cursorPosition = activityLog.length
