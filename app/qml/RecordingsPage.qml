@@ -366,25 +366,33 @@ Page {
         // The list it heads. A ListView keeps its contentY when its header's
         // height changes, so a head that grows at the list's start would
         // slide under the list's top: the list goes back to its start then,
-        // unless it was scrolled on
+        // unless it was scrolled on. While a change waits for that, a contentY
+        // within the head's height of the origin is the change's, not a scroll
         property ListView list: null
         property bool listAtStart: true
+        property bool settling: false
         visible: root.pinnedViewer
         height: visible ? implicitHeight + 10 : 0
         spacing: 10
+        function settle() {
+            head.settling = true
+            Qt.callLater(head.toStart)
+        }
         function toStart() {
+            head.settling = false
             if (head.visible && head.list !== null && head.list.visible && head.listAtStart)
                 head.list.positionViewAtBeginning()
         }
-        onHeightChanged: Qt.callLater(head.toStart)
+        onHeightChanged: head.settle()
         Connections {
             target: head.list
             function onContentYChanged() {
-                head.listAtStart = head.list.contentY <= head.list.originY + 1
+                head.listAtStart = head.list.contentY
+                                   <= head.list.originY + 1 + (head.settling ? head.height : 0)
             }
-            function onHeightChanged() { Qt.callLater(head.toStart) }
-            function onOriginYChanged() { Qt.callLater(head.toStart) }
-            function onVisibleChanged() { Qt.callLater(head.toStart) }
+            function onHeightChanged() { head.settle() }
+            function onOriginYChanged() { head.settle() }
+            function onVisibleChanged() { head.settle() }
         }
         ColumnLayout {
             id: zoomSlotItem
