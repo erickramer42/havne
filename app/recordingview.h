@@ -216,7 +216,8 @@ public:
     // columnMeansReady answers with that number unless a later ask
     // replaced it: one map per signal in signalIndexes' order, { index,
     // means (`columns` numbers in display units; NaN for an empty column,
-    // one before the start and a text signal) }. Empty on a failure.
+    // one before the start and a text signal) }. Empty on a failure, an
+    // ask the task had no memory for included.
     Q_INVOKABLE int columnMeans(const QVariantList& signalIndexes, double t0Ms,
                                 double t1Ms, int columns);
     // The signal's next sample after tMs, or its previous before it
@@ -254,6 +255,8 @@ public:
     {
         return m_asks ? m_asks->stopped.load() : 0;
     }
+    // The asks' task runs out of memory at each means ask while on
+    void setLoseMeansForTesting(bool on) { m_loseMeansForTesting = on; }
 
 signals:
     void stateChanged();
@@ -305,6 +308,7 @@ private:
         std::atomic<bool> meansStale{false};
         // Asks left unanswered because a copy could not be allocated
         std::atomic<int> lost{0};
+        bool loseMeans = false;      // a test's means asks run out of memory
         int holdMs = 0;              // a test's wait before each read
         std::atomic<int> held{0};    // a test's holds begun
         std::atomic<int> stopped{0}; // means passes ended before their end
@@ -352,6 +356,8 @@ private:
                       quint64 generation);
     void meansFinished(const MeansAsk& ask, ecuio_status_t rc,
                        const std::vector<double>& got, quint64 generation);
+    // A means ask the task couldn't answer: answered with no rows
+    void meansLost(int request, quint64 generation);
     // One pass, a task of the global thread pool that holds the reader
     // open; its answer is posted to the application and reaches view only
     // if it still lives
@@ -400,6 +406,7 @@ private:
     // Made at the first ask after an open or a close that left a task behind
     std::shared_ptr<Asks> m_asks;
     int m_asksHoldMs = 0;
+    bool m_loseMeansForTesting = false;
     int m_lastAsk = 0;
     int m_lastStats = 0;
     int m_lastStep = 0;

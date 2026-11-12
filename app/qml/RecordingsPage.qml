@@ -512,6 +512,9 @@ Page {
     // view's request number, then its answer
     property var differenceWanted: null
     property var differenceAsk: null
+    // The grid a view refused to be asked for and how often: { key, count }.
+    // Asked once more at a later paint, then left until the grid changes
+    property var differenceRefused: null
     // The first's signal index -> the compared one's value at the cursor
     property var compareReadout: ({})
     property string alignOn: "start"
@@ -1108,17 +1111,26 @@ Page {
         if ((difference !== null && difference.key === w.key)
                 || (differenceAsk !== null && differenceAsk.key === w.key))
             return
+        const refused = differenceRefused !== null && differenceRefused.key === w.key
+                        ? differenceRefused.count : 0
+        if (refused >= 2)
+            return
         // The grid's ends at whole microseconds, so each column's two spans
         // lie exactly the offset apart and hold the same samples
         const t0 = Math.round(w.g0 * 1000) / 1000
         const t1 = Math.round(w.g1 * 1000) / 1000
+        // A view that refuses (0) answers nothing: the other isn't asked
         const mine = recording.columnMeans(w.pairs.map(p => p.mine), t0, t1, w.gn)
-        const theirs = compare.columnMeans(w.pairs.map(p => p.theirs), t0 - compareOffsetMs,
-                                           t1 - compareOffsetMs, w.gn)
-        differenceAsk = mine > 0 && theirs > 0
-                        ? { key: w.key, pairsKey: w.pairsKey, pairs: w.pairs, t0: t0, t1: t1,
-                            mine: mine, theirs: theirs, mineMeans: null, theirMeans: null }
-                        : null
+        const theirs = mine > 0 ? compare.columnMeans(w.pairs.map(p => p.theirs), t0 - compareOffsetMs,
+                                                      t1 - compareOffsetMs, w.gn) : 0
+        if (mine > 0 && theirs > 0) {
+            differenceRefused = null
+            differenceAsk = { key: w.key, pairsKey: w.pairsKey, pairs: w.pairs, t0: t0, t1: t1,
+                              mine: mine, theirs: theirs, mineMeans: null, theirMeans: null }
+        } else {
+            differenceAsk = null
+            differenceRefused = { key: w.key, count: refused + 1 }
+        }
     }
     // One recording's means for the ask under way; with both, the difference
     function differenceAnswered(here, request, means) {
@@ -1157,6 +1169,7 @@ Page {
         difference = null
         differenceWanted = null
         differenceAsk = null
+        differenceRefused = null
     }
 
     // The rows a second of a recording's signals at those indexes
@@ -1799,6 +1812,7 @@ Page {
 
     RecordingView {
         id: recording
+        objectName: "recordingView"
         unitSystem: Bridge.unitSystem
         onReportSaved: result => root.reportSaved(result)
         onColumnMeansReady: (request, means) => root.differenceAnswered(true, request, means)
@@ -1879,6 +1893,7 @@ Page {
 
     RecordingView {
         id: compare
+        objectName: "compareView"
         unitSystem: Bridge.unitSystem
         onColumnMeansReady: (request, means) => root.differenceAnswered(false, request, means)
         onStretchesReady: (request, found, ok) => {

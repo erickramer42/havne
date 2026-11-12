@@ -983,6 +983,7 @@ bool RecordingView::startAsks()
     {
         const std::lock_guard<std::mutex> lock(m_asks->m);
         m_asks->holdMs = m_asksHoldMs;
+        m_asks->loseMeans = m_loseMeansForTesting;
         if (m_asks->answering) {
             return true; // it takes the ask before it ends
         }
@@ -1062,6 +1063,7 @@ void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
         std::optional<StepAsk> step;
         std::optional<MeansAsk> means;
         int holdMs = 0;
+        bool loseMeans = false;
         {
             // Ending and an ask's arrival are decided under one lock, so an
             // ask put in while this runs is never left behind
@@ -1077,6 +1079,7 @@ void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
                 asks->meansStale = false;
             }
             holdMs = asks->holdMs;
+            loseMeans = asks->loseMeans;
         }
         if (holdMs > 0) {
             ++asks->held;
@@ -1129,6 +1132,9 @@ void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
         }
         try {
             if (means) {
+                if (loseMeans) {
+                    throw std::bad_alloc();
+                }
                 std::vector<double> got;
                 const ecuio_status_t rc = ownColumnMeans(
                     reader.get(), means->ids, means->t0, means->t1,
@@ -1149,6 +1155,22 @@ void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
             }
         } catch (const std::bad_alloc&) {
             ++asks->lost;
+            // A page pairs two views' means and waits for both: this one
+            // says it has none, where that much can still be posted
+            try {
+                if (means) {
+                    QMetaObject::invokeMethod(
+                        app,
+                        [view, request = means->request, generation] {
+                            if (view) {
+                                view->meansLost(request, generation);
+                            }
+                        },
+                        Qt::QueuedConnection);
+                }
+            } catch (const std::bad_alloc&) {
+                ++asks->lost; // not even that: the ask stays unanswered
+            }
         }
     }
 }
@@ -1559,6 +1581,13 @@ void RecordingView::statsFinished(
         }
     }
     emit statsReady(ask.request, out);
+}
+
+void RecordingView::meansLost(int request, quint64 generation)
+{
+    if (generation == m_generation && request == m_lastMeans) {
+        emit columnMeansReady(request, {});
+    }
 }
 
 void RecordingView::meansFinished(const MeansAsk& ask, ecuio_status_t rc,

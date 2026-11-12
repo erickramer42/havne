@@ -3612,6 +3612,98 @@ profile  raw
         compare(page.difference, null)
     }
 
+    // A page comparing a swing recording with a copy 100 rpm higher, lined
+    // up on their starts, RPM plotted, Difference still off
+    function swingCompared(name) {
+        const here = swingRecording(name, 0, 0, "rpm")
+        const higher = swingRecording(name + "-higher", 0, 100, "rpm")
+        const page = createPage()
+        page.recordings = [higher, here]
+        openRow(page, here)
+        const picks = {}
+        picks[page.shownSignals.find(s => s.name === "RPM").index] = true
+        page.plotted = picks
+        page.compareWith(higher)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        compare(page.compareOffsetMs, 0)
+        page.showAll()
+        return page
+    }
+    function differencePanes(page) {
+        return page.series(400).filter(s => s.pane !== undefined).length
+    }
+    // Draws until the drawn grid's difference has its answer
+    function differenceRead(page) {
+        tryVerify(() => {
+            page.series(400)
+            return page.difference !== null && page.difference.key === page.differenceWanted.key
+        }, 10000, "the view's difference is read")
+    }
+
+    // A view that refuses a difference's ask answers nothing, so nothing is
+    // waited for: the grid is asked once more at a later paint and then
+    // left. Another grid, with the view able again, is asked and answered
+    function test_aRefusedDifferenceAskIsAskedOnceMoreThenLeft_data() {
+        return [ { tag: "this recording", view: "recordingView" },
+                 { tag: "the compared one", view: "compareView" } ]
+    }
+    function test_aRefusedDifferenceAskIsAskedOnceMoreThenLeft(data) {
+        const page = swingCompared("refused-" + data.view)
+        const view = find(page, data.view)
+        verify(Harness.refuseViewAsks(view, true), "a RecordingView")
+        find(page, "compareDifference").toggled()
+        tryVerify(() => {
+            page.series(400)
+            return page.differenceRefused !== null && page.differenceRefused.count === 2
+        }, 10000, "asked, and once more")
+        const key = page.differenceRefused.key
+        for (let k = 0; k < 10; ++k) {
+            page.series(400)
+            wait(20)
+        }
+        compare(page.differenceRefused.count, 2, "left after the second")
+        compare(page.differenceRefused.key, key)
+        compare(page.differenceAsk, null, "no answer is waited for")
+        compare(page.difference, null)
+        compare(differencePanes(page), 0)
+
+        verify(Harness.refuseViewAsks(view, false))
+        page.setView(100000, 160000)
+        differenceRead(page)
+        compare(page.differenceRefused, null)
+        compare(differencePanes(page), 1)
+    }
+
+    // An ask a view's task has no memory for is answered empty: the page
+    // stops waiting, draws no difference for that grid and doesn't ask for
+    // it again. Another grid, with memory again, is answered
+    function test_aLostDifferenceAskIsAnsweredEmptyAndNotAskedAgain_data() {
+        return [ { tag: "this recording", view: "recordingView" },
+                 { tag: "the compared one", view: "compareView" } ]
+    }
+    function test_aLostDifferenceAskIsAnsweredEmptyAndNotAskedAgain(data) {
+        const page = swingCompared("lost-" + data.view)
+        const view = find(page, data.view)
+        verify(Harness.loseViewMeans(view, true), "a RecordingView")
+        find(page, "compareDifference").toggled()
+        differenceRead(page)
+        compare(Object.keys(page.difference.rows).length, 0, "no rows from a lost answer")
+        compare(page.differenceAsk, null, "nothing is waited for")
+        compare(differencePanes(page), 0)
+        for (let k = 0; k < 5; ++k) {
+            page.series(400)
+            wait(20)
+        }
+        compare(page.differenceAsk, null, "the grid isn't asked again")
+        compare(page.differenceRefused, null)
+
+        verify(Harness.loseViewMeans(view, false))
+        page.setView(100000, 160000)
+        differenceRead(page)
+        compare(Object.keys(page.difference.rows).length, 1)
+        compare(differencePanes(page), 1)
+    }
+
     function test_aComparedRecordingIsDrawnDashed() {
         const page = openEarly()
         const choice = find(page, "compareChoice")

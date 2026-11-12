@@ -1502,6 +1502,23 @@ TEST(RecordingViewTest, ALaterColumnMeansAskReplacesAnEarlierOne)
     QObject::disconnect(c);
 }
 
+// A means ask the task has no memory for is answered with no rows, so a
+// page pairing two views' answers isn't left waiting; the next one answers
+TEST(RecordingViewTest, AColumnMeansAskTheTaskCantAnswerSaysSo)
+{
+    RecordingView v;
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    v.setLoseMeansForTesting(true);
+    EXPECT_TRUE(askedMeans(v, {rpm}, 0, 30000, 50).empty());
+    EXPECT_EQ(askedStats(v, {rpm}, 1000, 3000).size(), 1)
+        << "the other kinds answer";
+    v.setLoseMeansForTesting(false);
+    EXPECT_EQ(askedMeans(v, {rpm}, 0, 30000, 50).size(), 1u);
+}
+
 // Only the newest ask of a kind is answered, so a dragged cursor's span
 // never shows an older one's numbers; each kind answers for itself
 TEST(RecordingViewTest, ALaterAskReplacesAnEarlierOne)
