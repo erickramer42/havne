@@ -963,12 +963,22 @@ QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,
     return out;
 }
 
-void RecordingView::startAsks()
+bool RecordingView::startAsks()
 {
-    if (!m_askWorker.joinable()) {
+    if (m_askWorker.joinable()) {
+        return true;
+    }
+    try {
+        if (m_failThreadForTesting) {
+            throw std::system_error(std::make_error_code(
+                std::errc::resource_unavailable_try_again));
+        }
         m_askWorker = std::thread(&RecordingView::answerAsks, this, m_reader,
                                   m_generation);
+    } catch (const std::system_error&) {
+        return false;
     }
+    return true;
 }
 
 void RecordingView::answerAsks(ecuio_recording_t* reader, quint64 generation)
@@ -988,29 +998,39 @@ void RecordingView::answerAsks(ecuio_recording_t* reader, quint64 generation)
             stats.swap(m_statsAsk);
             step.swap(m_stepAsk);
         }
-        if (step) {
-            uint64_t at = ECUIO_RECORDING_NONE;
-            const ecuio_status_t rc = ecuio_recording_step(
-                reader, step->signal, step->t, step->direction, &at);
-            QMetaObject::invokeMethod(
-                this,
-                [this, request = step->request, rc, at, generation] {
-                    stepFinished(request, rc, at, generation);
-                },
-                Qt::QueuedConnection);
+        // A copy that can't be allocated leaves its ask unanswered: an
+        // exception out of this thread would end the process
+        try {
+            if (step) {
+                uint64_t at = ECUIO_RECORDING_NONE;
+                const ecuio_status_t rc = ecuio_recording_step(
+                    reader, step->signal, step->t, step->direction, &at);
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, request = step->request, rc, at, generation] {
+                        stepFinished(request, rc, at, generation);
+                    },
+                    Qt::QueuedConnection);
+            }
+        } catch (const std::bad_alloc&) {
+            ++m_asksLost;
         }
-        if (stats) {
-            std::vector<ecuio_recording_stats_t> got(stats->ids.size());
-            const ecuio_status_t rc =
-                ecuio_recording_stats(reader, stats->ids.data(),
-                                      static_cast<uint32_t>(stats->ids.size()),
-                                      stats->t0, stats->t1, got.data());
-            QMetaObject::invokeMethod(
-                this,
-                [this, ask = *stats, rc, got, generation] {
-                    statsFinished(ask, rc, got, generation);
-                },
-                Qt::QueuedConnection);
+        try {
+            if (stats) {
+                std::vector<ecuio_recording_stats_t> got(stats->ids.size());
+                const ecuio_status_t rc = ecuio_recording_stats(
+                    reader, stats->ids.data(),
+                    static_cast<uint32_t>(stats->ids.size()), stats->t0,
+                    stats->t1, got.data());
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, ask = *stats, rc, got, generation] {
+                        statsFinished(ask, rc, got, generation);
+                    },
+                    Qt::QueuedConnection);
+            }
+        } catch (const std::bad_alloc&) {
+            ++m_asksLost;
         }
     }
 }
@@ -1091,7 +1111,12 @@ int RecordingView::stats(const QVariantList& signalIndexes, double t0Ms,
         const std::lock_guard<std::mutex> lock(m_askMutex);
         m_statsAsk = std::move(ask);
     }
-    startAsks();
+    if (!startAsks()) {
+        const std::lock_guard<std::mutex> lock(m_askMutex);
+        m_statsAsk.reset();
+        m_lastStats = 0;
+        return 0;
+    }
     m_askWake.notify_all();
     return m_lastStats;
 }
@@ -1113,7 +1138,12 @@ int RecordingView::step(int signal, double tMs, bool forward)
         const std::lock_guard<std::mutex> lock(m_askMutex);
         m_stepAsk = ask;
     }
-    startAsks();
+    if (!startAsks()) {
+        const std::lock_guard<std::mutex> lock(m_askMutex);
+        m_stepAsk.reset();
+        m_lastStep = 0;
+        return 0;
+    }
     m_askWake.notify_all();
     return m_lastStep;
 }

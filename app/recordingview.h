@@ -127,7 +127,8 @@ public:
     // A local target written as a content:// one is, so a test reaches the
     // picked document's removal
     void setThroughProviderForTesting(bool on) { m_throughProvider = on; }
-    // The next report's thread can't be started
+    // The next report's thread, or the statistics and step asks' thread,
+    // can't be started
     void setFailThreadForTesting(bool on) { m_failThreadForTesting = on; }
 
     // Opens the recording in folder (the one holding signals.csv), closing
@@ -265,7 +266,8 @@ private:
     bool query(const std::vector<uint32_t>& ids, double t0Ms, double t1Ms,
                uint32_t n, std::vector<ecuio_recording_column_t>& cols);
     double found(const ecuio_recording_find_t& what);
-    void startAsks();
+    // False when the asks' thread can't be started (the system is out of them)
+    bool startAsks();
     void answerAsks(ecuio_recording_t* reader, quint64 generation);
     void statsFinished(const StatsAsk& ask, ecuio_status_t rc,
                        const std::vector<ecuio_recording_stats_t>& got,
@@ -315,6 +317,8 @@ private:
     bool m_reporting = false;
     bool m_throughProvider = false;
     bool m_failThreadForTesting = false;
+    // Asks left unanswered because a copy could not be allocated
+    std::atomic<int> m_asksLost{0};
     // The asks' thread: one of each kind waits, a newer ask replacing it,
     // so a dragged cursor never builds a queue
     std::thread m_askWorker;
