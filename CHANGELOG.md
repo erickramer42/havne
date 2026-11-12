@@ -202,6 +202,16 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Settings drops `session=` from the address under every profile but UDS
   DIDs.
 - A segment row that can't be changed while a session runs is dimmed.
+- An OBDb signal set with two signals under one long name imports when the
+  name holds a character of more than one byte near its end. The number
+  added to the second name cut that character in half, and the whole import
+  was refused.
+- A recording read through its frames leaves a decoded value that isn't
+  finite out of its statistics and steps, as its summaries already did, and
+  a signal with no finite value at all no longer stops the others from being
+  read.
+- Python: `Recording.stretches()` answers an empty list for a recording with
+  no duration, where it raised.
 - Recordings viewer: Home, End, B and F go to a focused drop-down and the
   arrows keep stepping the cursor, and a click on the chart takes the focus
   back; a cursor handle can't be dragged out of the view (a drop past the
