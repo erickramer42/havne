@@ -160,10 +160,15 @@ public:
     // anchor; a shift-click selects every row from the anchor to its own
     // (a toggle when the anchor has left the ring)
     int selectedCount() const { return static_cast<int>(m_selected.size()); }
-    // A view row's time in microseconds, as the table shows it; -1 for a row
-    // that isn't there. A table keeps its place by time, since rows come and
-    // go while it's hidden
-    Q_INVOKABLE double timestampAt(int row) const;
+    // A view row's arrival number; -1 for a row that isn't there. A table
+    // keeps its place by it: rows come and go while it's hidden, and a
+    // frame's time can step back (a vendor's stamp that wraps)
+    Q_INVOKABLE double seqAt(int row) const;
+    // The view row of that arrival, or with it gone or filtered out the
+    // next row in the view's order (the first to arrive after it oldest
+    // first, before it newest first), the last row past them all; -1 with
+    // no rows
+    Q_INVOKABLE int rowAtSeq(double seq) const;
     Q_INVOKABLE void toggleSelected(int row);
     Q_INVOKABLE void selectThrough(int row);
     Q_INVOKABLE void clearSelection();

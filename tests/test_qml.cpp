@@ -25,6 +25,7 @@
 #include "pluginstore.h"
 #include "recordingexport.h"
 #include "recordingimport.h"
+#include "recordingview.h"
 #include "signalstore.h"
 #include "windowtheme.h"
 
@@ -225,6 +226,28 @@ public:
         if (auto* i = qobject_cast<RecordingImport*>(importer)) {
             i->setFailThreadForTesting(on);
         }
+    }
+
+    // A page's RecordingView (its "recordingView" or "compareView" child)
+    // can't start its asks' task while on: every ask is refused with 0.
+    // False for anything else
+    Q_INVOKABLE bool refuseViewAsks(QObject* view, bool on)
+    {
+        auto* v = qobject_cast<RecordingView*>(view);
+        if (v != nullptr) {
+            v->setFailThreadForTesting(on);
+        }
+        return v != nullptr;
+    }
+    // The view's asks' task runs out of memory at each column means ask
+    // while on. False for anything else
+    Q_INVOKABLE bool loseViewMeans(QObject* view, bool on)
+    {
+        auto* v = qobject_cast<RecordingView*>(view);
+        if (v != nullptr) {
+            v->setLoseMeansForTesting(on);
+        }
+        return v != nullptr;
     }
 
     // The importer's next imports wait this long, or until a cancel,

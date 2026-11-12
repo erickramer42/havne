@@ -400,12 +400,41 @@ int FrameListModel::rowOfSeq(quint64 seq) const
     return m_newestFirst ? count() - 1 - age : age;
 }
 
-double FrameListModel::timestampAt(int row) const
+double FrameListModel::seqAt(int row) const
 {
     if (row < 0 || row >= count()) {
         return -1;
     }
-    return static_cast<double>(rowAt(row).timestampUs);
+    return static_cast<double>(rowAt(row).seq);
+}
+
+int FrameListModel::rowAtSeq(double seq) const
+{
+    const int n = count();
+    if (n == 0) {
+        return -1;
+    }
+    const quint64 oldestSeq = m_nextSeq - static_cast<quint64>(m_count);
+    const quint64 want = seq > 0 ? static_cast<quint64>(seq) : 0;
+    // The oldest shown row at or after the arrival, by age (0 = oldest);
+    // n when every shown row arrived before it
+    int age = 0;
+    bool exact = false;
+    if (m_filter.active()) {
+        const auto it = std::lower_bound(m_shown.begin(), m_shown.end(), want);
+        age = static_cast<int>(it - m_shown.begin());
+        exact = it != m_shown.end() && *it == want;
+    } else if (want >= oldestSeq) {
+        age = static_cast<int>(
+            std::min<quint64>(want - oldestSeq, static_cast<quint64>(n)));
+        exact = age < n;
+    }
+    if (!m_newestFirst) {
+        return std::min(age, n - 1);
+    }
+    // Newest first the next row is the one that arrived before it
+    const int next = exact ? age : age - 1;
+    return n - 1 - std::max(next, 0);
 }
 
 void FrameListModel::notifySelected(int first, int last)

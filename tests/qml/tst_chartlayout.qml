@@ -203,6 +203,24 @@ TestCase {
         compare(l.plotW, chartW - chartW * 0.4)
     }
 
+    // A label wider than its column loses its unit from the end, never a
+    // digit: with room for part of the unit that part and an ellipsis, with
+    // less room than the number alone the number whole
+    function test_aLabelsCutTakesTheUnitAndKeepsTheNumberWhole() {
+        // 138 px of label room at 7 px a character: 19 characters
+        const wide = layout([series(0, [[0, 1], [1000, 2]], 0, "a very long unit name indeed")])
+        compare(wide.traces[0].label, "2 a very long unit…")
+        // 100 px wide the column is capped at 40, which leaves the label 18:
+        // less than "123456.789", let alone its unit
+        const narrow = ChartLayout.layout([series(0, [[0, 1], [1000, 123456.789]], 3, "kPa")],
+                                          100, chartH, opts())
+        compare(narrow.traces[0].label, "123456.789", "the number whole, the unit gone")
+        // Room for the number and an ellipsis, none for a letter of the unit
+        const between = ChartLayout.layout([series(0, [[0, 1], [1000, 1234.5]], 1, "kPa")],
+                                           160, chartH, opts())
+        compare(between.traces[0].label, "1234.5", "no ellipsis stands for a unit wholly cut")
+    }
+
     // A trace spans the plot's height from its own minimum to its maximum
     function test_eachTraceScalesToItsOwnRange() {
         const l = layout([series(0, [[0, 0], [1000, 100], [2000, 50]]),
@@ -662,6 +680,27 @@ TestCase {
                         { assign: { 0: "drive", 1: "drive" } })
         compare(l.panes.map(p => p.key).join("|"), "drive|unit %")
         compare(inPane(l, 1), 0)
+    }
+
+    // A series that names a pane of its own gets it, whatever its unit's
+    // pane, with its own word in the pane's label (a comparison's
+    // differences beside the signals they are of)
+    function test_aSeriesOwnPaneWinsAndNamesItsLabel() {
+        const own = (row, lo, hi) => Object.assign(ramp(row, "rpm", lo, hi),
+                                                   { pane: "difference rpm", paneLabel: "D rpm" })
+        const l = paned([ramp(0, "rpm", 800, 6000), own(1, -40, 25), ramp(2, "%", 0, 100), own(3, -5, 60)],
+                        600, { assign: { 1: "drive" } })
+        compare(l.panes.map(p => p.key).join("|"), "unit rpm|difference rpm|unit %")
+        compare(l.panes.map(p => p.label).join("|"), "rpm|D rpm|%")
+        compare([0, 1, 2, 3].map(r => inPane(l, r)).join(","), "0,1,2,1")
+        // The pane's range is its own traces', not the signal's
+        verify(l.panes[1].vMin <= -40 && l.panes[1].vMax >= 60 && l.panes[1].vMax < 800,
+               "the difference's own range: " + l.panes[1].vMin + " to " + l.panes[1].vMax)
+        // Folded past the limit, the mixed pane lists the word too
+        const folded = paned([ramp(0, "rpm", 800, 6000), ramp(2, "%", 0, 100), own(1, -40, 25)],
+                             600, { max: 2 })
+        compare(folded.panes.length, 2)
+        compare(folded.panes[1].label, "% \u00b7 D rpm")
     }
 
     // Past the limit, the last units fold into one mixed pane: no axis, its

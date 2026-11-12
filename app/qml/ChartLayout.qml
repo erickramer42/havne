@@ -84,21 +84,25 @@ QtObject {
     }
 
     // The traces grouped into panes in the order each group's first trace
-    // comes (assign, when given, a pane key per row in place of the
-    // unit's), folded past the limit: [{ key, units, axis, traces }]
+    // comes (a trace's own pane key first, then assign's for its row when
+    // given, in place of the unit's), folded past the limit: [{ key, units
+    // (what the pane's label lists: each trace's paneLabel, else its unit),
+    // axis, traces }]
     function paneGroups(traces, room, p) {
         const groups = []
         const byKey = {}
         for (const tr of traces) {
-            const given = p.assign ? p.assign[tr.row] : undefined
+            const given = tr.ownPane !== undefined ? tr.ownPane
+                        : p.assign ? p.assign[tr.row] : undefined
             const key = given !== undefined ? String(given) : paneKey(tr.unit)
             let g = byKey[key]
             if (!g) {
                 g = byKey[key] = { key: key, units: [], axis: true, traces: [] }
                 groups.push(g)
             }
-            if (g.units.indexOf(tr.unit) < 0)
-                g.units.push(tr.unit)
+            const word = tr.paneLabel !== undefined ? tr.paneLabel : tr.unit
+            if (g.units.indexOf(word) < 0)
+                g.units.push(word)
             g.traces.push(tr)
             tr.paneKey = key
         }
@@ -111,8 +115,9 @@ QtObject {
         const folded = traces.filter(tr => keys.indexOf(tr.paneKey) < 0)
         const units = []
         for (const tr of folded) {
-            if (tr.unit !== "" && units.indexOf(tr.unit) < 0)
-                units.push(tr.unit)
+            const word = tr.paneLabel !== undefined ? tr.paneLabel : tr.unit
+            if (word !== "" && units.indexOf(word) < 0)
+                units.push(word)
         }
         kept.push({ key: "mixed", units: units, axis: false, traces: folded })
         return kept
@@ -546,8 +551,10 @@ QtObject {
     //         newest sample's, or the last column's highest), labelMs
     //         (that value's sample time, handed on to its trace), scaleKey
     //         (series with the same one share a value range: one signal
-    //         in two recordings) and dash (its trace's stroke, else its
-    //         row's)
+    //         in two recordings), dash (its trace's stroke, else its
+    //         row's), pane (a pane key of its own, before the row's and the
+    //         unit's) and paneLabel (what its pane's label lists in place of
+    //         its unit)
     // opts: { gapMs, minSpanUnits, measure(text) -> width,
     //         format(value, decimals, unit) -> text,
     //         caption(seconds) -> text (a time tick's, 0 for now; optional),
@@ -632,7 +639,8 @@ QtObject {
             labelW = Math.max(labelW, opts.measure(label))
             traces.push({ sp: sp, cols: cols, row: s.row, slot: s.slot !== undefined ? s.slot : s.row, vMin: range.vMin, vMax: range.vMax,
                           flat: range.flat, label: label, value: value, decimals: s.decimals,
-                          unit: s.unit, scaleKey: s.scaleKey, dash: s.dash, labelMs: s.labelMs })
+                          unit: s.unit, scaleKey: s.scaleKey, dash: s.dash, labelMs: s.labelMs,
+                          ownPane: s.pane, paneLabel: s.paneLabel })
         }
         if (traces.length === 0)
             return null
