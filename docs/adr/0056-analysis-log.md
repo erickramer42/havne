@@ -999,5 +999,6 @@ exit 1 (`CliViewRunTest.AnInterruptEndsEachSearch`, which holds the first
 search's ask through `HAVNE_CLI_EXPORT_HOLD_MS`).
 
 Python's `Recording.stretches`, `find_threshold` and `find_marker` take no
-cancel yet, so a script's interrupt during one waits for the call to end. That is the gap
-this step leaves.
+cancel yet, so a script's interrupt during one waits for the call to end.
+That is the gap this step leaves; v0.8.0 closes it, the three ending on a
+`KeyboardInterrupt` through the `_with` calls as the other front ends do.
