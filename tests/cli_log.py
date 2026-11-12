@@ -442,19 +442,26 @@ def session_line(cli, dll, golden_file, update):
     if code != 0:
         print(f"FAIL  exit {code}: {err}")
         return 1
-    sessions = [r for r in rows if r.get("type") == "session"]
-    if not sessions:
-        print("FAIL  no session line")
-        return 1
-    last = sessions[-1]
+    # A module's session line is the one carrying ecu: the opening session
+    # line (backend, profile, channels) shares its type
     types = [r.get("type") for r in rows]
-    if types.index("session") < types.index("start") or (
-            rows[-1].get("type") != "end"):
+    opening = [r for r in rows if r.get("type") == "session" and "ecu" not in r]
+    if len(opening) != 1 or "backend" not in opening[0] or \
+            types.index("session") != rows.index(opening[0]):
+        print(f"FAIL  the opening session line: {opening!r}")
+        return 1
+    sessions = [i for i, r in enumerate(rows)
+                if r.get("type") == "session" and "ecu" in r]
+    if not sessions:
+        print("FAIL  no module's session line")
+        return 1
+    last = rows[sessions[-1]]
+    if sessions[0] < rows.index(opening[0]) or rows[-1].get("type") != "end":
         print(f"FAIL  the order of the lines {types!r}")
         return 1
     # The session line is the log's own: written before the end line, never
     # after it
-    if types.index("end") < max(i for i, t in enumerate(types) if t == "session"):
+    if types.index("end") < sessions[-1]:
         print("FAIL  a session line after the end")
         return 1
     if update:
