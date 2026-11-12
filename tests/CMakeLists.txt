@@ -1635,12 +1635,15 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     endif()
     # Files whose cases together run near ctest's bound on a slow runner
     set(_qml_split_files dashboard dashedit driveview phone)
+    # The shares a file runs as, where not three: tst_phone's longest share
+    # otherwise outlasts the rest of the suite
+    set(_qml_shares_phone 5)
     # Seconds a file's entry (or one share of it) took in a full run's
     # CTestCostData.txt, so a tree with no history starts the long ones first
     set(_qml_cost_dashboard 40)
     set(_qml_cost_dashedit 52)
     set(_qml_cost_driveview 37)
-    set(_qml_cost_phone 55)
+    set(_qml_cost_phone 33)
     set(_qml_cost_recordings 25)
     set(_qml_cost_diagnostics 7)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
@@ -1652,12 +1655,15 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         # alone opens a 10,200-frame recording, which a machine building
         # beside the suite took past 60 s in all
         # A file near the bound runs as _qml_parts ctest entries, each
-        # a disjoint share of its cases (every third one, so the slow
+        # a disjoint share of its cases (every nth one, so the slow
         # ones spread), named as the TestCase names them; QmlTest.<name>
         # then reads QmlTest.<name>-<k>of<n>
         set(_qml_parts 1)
         if(_qml_name IN_LIST _qml_split_files)
             set(_qml_parts 3)
+            if(DEFINED _qml_shares_${_qml_name})
+                set(_qml_parts ${_qml_shares_${_qml_name}})
+            endif()
         endif()
         if(_qml_parts EQUAL 1)
             add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
