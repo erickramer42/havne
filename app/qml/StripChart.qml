@@ -89,6 +89,7 @@ Canvas {
             ctx.reset()
             ctx.clearRect(0, 0, width, height)
             ctx.scale(chart.zoom, chart.zoom)
+            ctx.font = ChartLayout.labelPx + "px " + (Theme.fontFamily || "sans-serif")
             if (chart.drawn && chart.decorate)
                 chart.decorate(ctx, chart.drawn)
         }
@@ -177,6 +178,61 @@ Canvas {
         paintMaxMs = Math.max(paintMaxMs, took)
     }
 
+    // Canvas text takes no font features, so tabular figures are drawn by
+    // hand: each digit in a cell as wide as the face's widest digit, any
+    // other run of text whole (its kerning, shaping and combining marks
+    // intact). The layout measures the same way. digitW is set once per
+    // draw(), for the font that draw has set.
+    property real digitW: 0
+    property var digitWs: []
+    readonly property var runPattern: /[0-9]+|[^0-9]+/g
+
+    function setDigitW(ctx) {
+        const ws = []
+        for (let d = 0; d < 10; ++d)
+            ws.push(ctx.measureText(String(d)).width)
+        digitWs = ws
+        digitW = Math.max.apply(null, ws)
+    }
+
+    function runsOf(text) {
+        return text.match(runPattern) || []
+    }
+
+    function isDigits(run) {
+        return run.charCodeAt(0) >= 48 && run.charCodeAt(0) <= 57
+    }
+
+    function tabularWidth(ctx, text) {
+        let w = 0
+        for (const run of runsOf(text))
+            w += isDigits(run) ? run.length * digitW : ctx.measureText(run).width
+        return w
+    }
+
+    // fillText with tabular digits, at ctx.textAlign's anchor
+    function tabularText(ctx, text, x, y) {
+        const align = ctx.textAlign
+        let at = x
+        if (align === "right")
+            at -= tabularWidth(ctx, text)
+        else if (align === "center")
+            at -= tabularWidth(ctx, text) / 2
+        ctx.textAlign = "left"
+        for (const run of runsOf(text)) {
+            if (!isDigits(run)) {
+                ctx.fillText(run, at, y)
+                at += ctx.measureText(run).width
+                continue
+            }
+            for (const c of run) {
+                ctx.fillText(c, at + (digitW - digitWs[c.charCodeAt(0) - 48]) / 2, y)
+                at += digitW
+            }
+        }
+        ctx.textAlign = align
+    }
+
     function draw() {
         const ctx = getContext("2d")
         ctx.reset()
@@ -195,8 +251,9 @@ Canvas {
             return
         }
 
-        ctx.font = ChartLayout.labelPx + "px " + Theme.monoFamily   // measured and drawn in
-        const opts = { measure: text => ctx.measureText(text).width }
+        ctx.font = ChartLayout.labelPx + "px " + (Theme.fontFamily || "sans-serif")   // measured and drawn in
+        setDigitW(ctx)
+        const opts = { measure: text => tabularWidth(ctx, text) }
         for (const k in chart.layoutOpts)
             opts[k] = chart.layoutOpts[k]
         const l = ChartLayout.layout(series, shownW, shownH, opts)
@@ -239,19 +296,19 @@ Canvas {
         for (const tick of l.ticks) {
             if (!tick.captioned) continue
             ctx.textAlign = tick.align
-            ctx.fillText(tick.caption, tick.x, l.top + l.plotH + 3)
+            tabularText(ctx, tick.caption, tick.x, l.top + l.plotH + 3)
         }
         for (const pane of l.panes) {
             if (pane.label !== "") {
                 ctx.textAlign = "left"
                 ctx.textBaseline = "top"
-                ctx.fillText(pane.label, 0, pane.top)
+                tabularText(ctx, pane.label, 0, pane.top)
             }
             ctx.textAlign = "right"
             ctx.textBaseline = "middle"
             for (const tick of pane.ticks) {
                 if (tick.captioned)
-                    ctx.fillText(tick.caption, l.left - ChartLayout.axisGap, tick.y)
+                    tabularText(ctx, tick.caption, l.left - ChartLayout.axisGap, tick.y)
             }
         }
 
@@ -275,7 +332,7 @@ Canvas {
             ctx.lineTo(l.labelX + ChartLayout.swatchW, tr.labelY)
             ctx.stroke()
             ctx.fillStyle = c
-            ctx.fillText(tr.label, l.labelX + ChartLayout.swatchW + 4, tr.labelY)
+            tabularText(ctx, tr.label, l.labelX + ChartLayout.swatchW + 4, tr.labelY)
         }
         ctx.setLineDash([])
     }
