@@ -70,14 +70,17 @@ env:
 
 # Every job sets timeout-minutes at roughly 3-5x its usual duration, so a
 # hung download, build or simulator fails within minutes instead of
-# holding a runner for GitHub's 6 h default. No job waits for another:
-# each one starts at once, so a run takes as long as its longest job.
+# holding a runner for GitHub's 6 h default. No job waits for another but
+# android-build (for a runner slot): each starts at once, so a run takes as
+# long as its longest job.
 jobs:
   core-and-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # the tags, for the ABI check below
 
       # jsonschema for SchemaFixturesTest (schema/ against the committed
       # fixtures) and pytest for PythonTest.* (the havne package against
@@ -109,6 +112,29 @@ jobs:
           ECUIO_PYTEST_REQUIRED: '1'
         run: |
           ctest --test-dir build -C Release --output-on-failure --no-tests=error
+
+      # The C ABI against the newest release's (scripts/abi-check.sh,
+      # libabigail): an incompatible change fails, an addition is reported.
+      # Its own steps, run whatever the tests did, so one red doesn't hide
+      # the other; the checkout above has the tags and the base release's tree
+      - name: Install libabigail and Ninja
+        if: ${{ (success() || failure()) && !inputs.smoke_only }}
+        run: sudo apt-get update && sudo apt-get install -y abigail-tools ninja-build
+      - name: Compare the C ABI with the newest release
+        if: ${{ (success() || failure()) && !inputs.smoke_only }}
+        shell: bash
+        run: |
+          # The summary is written whatever the verdict, and the check's
+          # own status then ends the step: a failure is when it's read
+          set +e
+          bash scripts/abi-check.sh 2>&1 | tee abi.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          # The headers' verdict first: abidiff's report can run past 40
+          # lines. An error before the headers' check leaves no verdict line
+          { echo '### C ABI'; echo; echo '```'; grep -m 1 'public declaration' abi.txt || true
+            tail -n 40 abi.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
 
   # Core and its Qt-free tests under AddressSanitizer and
   # UndefinedBehaviorSanitizer; LeakSanitizer runs with ASan on Linux, so
@@ -258,6 +284,12 @@ jobs:
     if: ${{ !inputs.smoke_only }}
     runs-on: windows-latest
     timeout-minutes: 25
+    # Three runners each check a third of the files (round robin by name,
+    # scripts/tidy.sh's HAVNE_TIDY_SHARD); together they check the whole tree
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['0/3', '1/3', '2/3']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -291,6 +323,8 @@ jobs:
           "QT_PREFIX=$prefix" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: clang-tidy (core, J2534, surrogate, CLI, app)
+        env:
+          HAVNE_TIDY_SHARD: ${{ matrix.shard }}
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
             -latest -products * -property installationPath `
@@ -302,9 +336,17 @@ jobs:
           & "$env:ProgramFiles\Git\bin\bash.exe" scripts/tidy.sh --qt ($env:QT_PREFIX -replace '\\', '/') build-tidy
 
   win-build:
+    name: win-build (${{ matrix.shard }}/2)
     if: ${{ !inputs.smoke_only }}
     runs-on: windows-latest
     timeout-minutes: 20
+    # Two runners, each with its own build, run alternate halves of ctest
+    # (-I k,,2: every case once across the two); the first alone saves the
+    # caches and runs the load test
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -346,7 +388,7 @@ jobs:
           python -m aqt install-qt windows desktop 6.12.0 win64_msvc2022_64 --outputdir "${env:GITHUB_WORKSPACE}\Qt" --external 7z
 
       - name: Save Qt 6.12.0 to the cache (main only)
-        if: steps.qt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        if: steps.qt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && matrix.shard == 1
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}\Qt
@@ -368,22 +410,90 @@ jobs:
           python -m venv --system-site-packages "$env:RUNNER_TEMP\py"
           & "$env:RUNNER_TEMP\py\Scripts\python.exe" -m pip install --require-hashes -r .github/pytest-requirements.txt
 
+      # sccache from its GitHub release, checked against the SHA-256 that
+      # the release publishes. Windows' Visual Studio generator ignores a
+      # compiler launcher, so this job builds with Ninja in a Developer
+      # shell, as clang-tidy does. The cache holds compiled objects (links
+      # aren't cached), capped by SCCACHE_CACHE_SIZE; it is read on every
+      # ref and saved only on dev and main, the Qt kit's rule.
+      - name: Install sccache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = "$env:RUNNER_TEMP\sccache.zip"
+          gh release download v0.19.0 -R mozilla/sccache -p sccache-v0.19.0-x86_64-pc-windows-msvc.zip -O $zip --clobber
+          if ($LASTEXITCODE -ne 0) { Write-Error 'could not download sccache'; exit 1 }
+          $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash
+          if ($sha -ne '28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1') {
+            Write-Error "unexpected SHA-256 $sha"; exit 1
+          }
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\sccache-bin"
+          $bin = (Get-ChildItem "$env:RUNNER_TEMP\sccache-bin" -Recurse -Filter sccache.exe | Select-Object -First 1).DirectoryName
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "SCCACHE_DIR=$env:RUNNER_TEMP\sccache-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SCCACHE_CACHE_SIZE=1G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Name the compiler cache's day
+        id: day
+        run: '"day=$((Get-Date).ToUniversalTime().ToString(''yyyyMMdd''))" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append'
+
+      - name: Restore the compiler cache
+        id: cc-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\sccache-cache
+          key: sccache-win-build-1-${{ steps.day.outputs.day }}
+          restore-keys: sccache-win-build-1-
+
       - name: Build full app
         run: |
-          cmake -B build -DCMAKE_PREFIX_PATH="$env:QT_PREFIX" -DPython3_EXECUTABLE="$env:RUNNER_TEMP\py\Scripts\python.exe"
-          cmake --build build --config Release
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * -property installationPath `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation `
+            -DevCmdArguments '-arch=x64 -host_arch=x64'
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DHAVNE_EMBEDDED_DEBUG_INFO=ON `
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache `
+            -DCMAKE_PREFIX_PATH="$env:QT_PREFIX" -DPython3_EXECUTABLE="$env:RUNNER_TEMP\py\Scripts\python.exe"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          sccache --show-stats | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Save the compiler cache (dev and main)
+        if: steps.cc-cache.outputs.cache-hit != 'true' && (matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\sccache-cache
+          key: sccache-win-build-1-${{ steps.day.outputs.day }}
+
       # ECUIO_PYTEST_REQUIRED: PythonTest.* fail rather than skip without
       # pytest
       - name: Run tests
         env:
           ECUIO_PYTEST_REQUIRED: '1'
-        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
+        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error -I "${{ matrix.shard }},,2"
       # The replay fixture through the bridge (tests/bench_bridge.cpp): its
       # table goes to the run's summary, and the step fails only on a
       # broken invariant or a bound far below the dev machine's figures
       - name: Load test
+        if: matrix.shard == 1
         shell: bash
-        run: build/tests/Release/bench_bridge.exe --load | tee -a "$GITHUB_STEP_SUMMARY"
+        run: build/tests/bench_bridge.exe --load | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The Visual Studio generator is what release.yml builds with, but this
+      # job and win-coverage use Ninja (a compiler cache needs it). One shard
+      # keeps the generator, the multi-config layout and /Zi in CI: core, the
+      # shared library and the surrogate, no Qt, after the tests whatever
+      # they did, so one red doesn't hide the other.
+      - name: Configure and build with the Visual Studio generator
+        if: ${{ (success() || failure()) && matrix.shard == 2 }}
+        run: |
+          cmake -B build-vs -DHAVNE_BUILD_CORE_ONLY=ON -DBUILD_TESTING=OFF
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build-vs --config Release --target ecuio ecuio-j2534-surrogate
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
   # Line coverage for the README badge: the whole suite under
   # OpenCppCoverage (scripts/coverage.sh), uploaded to Codecov. Windows,
@@ -395,6 +505,16 @@ jobs:
     if: ${{ !inputs.smoke_only && github.event_name != 'pull_request' }}
     runs-on: windows-latest
     timeout-minutes: 30
+    # Three runners share the run, each with its own build: the gtest
+    # binaries, and two interleaved slices of ctest's other cases
+    # (scripts/coverage.sh --part). Codecov merges the three uploads of a commit.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: gtest, part: gtest }
+          - { name: ctest-1, part: 1/2 }
+          - { name: ctest-2, part: 2/2 }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -461,7 +581,7 @@ jobs:
       # discovery must skip.
       - name: Register the fake DLL as a Pass-Thru device
         run: |
-          $dll = '%GITHUB_WORKSPACE%\build-coverage\tests\RelWithDebInfo\fake_j2534.dll'
+          $dll = '%GITHUB_WORKSPACE%\build-coverage\tests\fake_j2534.dll'
           foreach ($view in '64', '32') {
             reg add "HKLM\SOFTWARE\PassThruSupport.04.04\Havne fake" /v FUNCTIONLIBRARY /t REG_EXPAND_SZ /d $dll /reg:$view /f
             if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -472,23 +592,95 @@ jobs:
           New-ItemProperty -Path "$root\Havne number" -Name FUNCTIONLIBRARY -Value 1 -PropertyType DWord -Force | Out-Null
           New-ItemProperty -Path "$root\Havne relative" -Name FUNCTIONLIBRARY -Value 'fake_j2534.dll' -PropertyType String -Force | Out-Null
 
+      # The coverage tree is a Ninja tree under sccache (the Visual Studio
+      # generator ignores a launcher; win-build (2/2) keeps that one built),
+      # so it runs from a Developer shell. The objects are /Od and /Z7, a key
+      # of their own; the gtest runner saves them on dev and main.
+      - name: Install sccache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = "$env:RUNNER_TEMP\sccache.zip"
+          gh release download v0.19.0 -R mozilla/sccache -p sccache-v0.19.0-x86_64-pc-windows-msvc.zip -O $zip --clobber
+          if ($LASTEXITCODE -ne 0) { Write-Error 'could not download sccache'; exit 1 }
+          $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash
+          if ($sha -ne '28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1') {
+            Write-Error "unexpected SHA-256 $sha"; exit 1
+          }
+          Expand-Archive $zip -DestinationPath "$env:RUNNER_TEMP\sccache-bin"
+          $bin = (Get-ChildItem "$env:RUNNER_TEMP\sccache-bin" -Recurse -Filter sccache.exe | Select-Object -First 1).DirectoryName
+          $bin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "SCCACHE_DIR=$env:RUNNER_TEMP\sccache-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SCCACHE_CACHE_SIZE=1G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Name the compiler cache's day
+        id: day
+        run: '"day=$((Get-Date).ToUniversalTime().ToString(''yyyyMMdd''))" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append'
+
+      - name: Restore the compiler cache
+        id: cc-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\sccache-cache
+          key: sccache-win-coverage-1-${{ steps.day.outputs.day }}
+          restore-keys: sccache-win-coverage-1-
+
       - name: Measure coverage
-        shell: bash
-        run: bash scripts/coverage.sh
+        shell: pwsh
+        env:
+          HAVNE_COVERAGE_NINJA: '1'
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * -property installationPath `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation `
+            -DevCmdArguments '-arch=x64 -host_arch=x64'
+          # a Windows tool in System32 must not shadow Git's: the log shows which
+          & "$env:ProgramFiles\Git\bin\bash.exe" -c 'command -v sort find timeout'
+          & "$env:ProgramFiles\Git\bin\bash.exe" scripts/coverage.sh --part ${{ matrix.part }}
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          sccache --show-stats
+
+      - name: Save the compiler cache (dev and main)
+        if: steps.cc-cache.outputs.cache-hit != 'true' && (matrix.name == 'gtest' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\sccache-cache
+          key: sccache-win-coverage-1-${{ steps.day.outputs.day }}
+
+      # A case that fails only under the tool is named in the step's log and
+      # explained in its own: the step doesn't fail, so this runs always.
+      - name: Upload coverage logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-logs-${{ matrix.name }}
+          path: Testing/coverage/cover-*.log
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: Testing/coverage/cobertura.xml
+          name: coverage-${{ matrix.name }}
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
 
   macos-build:
+    name: macos-build (${{ matrix.shard }}/2)
     if: ${{ !inputs.smoke_only }}
     runs-on: macos-latest
     # The repeat runs a test hundreds of times: 60 minutes then
     timeout-minutes: ${{ inputs.macos_repeat != '' && 60 || 15 }}
+    # Two runners, each with its own build, run alternate halves of ctest
+    # (-I k,,2: every case once across the two); the repeat is on the first
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -514,20 +706,57 @@ jobs:
           "$RUNNER_TEMP/py/bin/python" -c 'import sys; assert sys.version_info >= (3, 11), sys.version'
           "$RUNNER_TEMP/py/bin/python" -m pip install --require-hashes -r .github/pytest-requirements.txt
 
+      # sccache from its GitHub release, checked against the SHA-256 that
+      # the release publishes, as win-build's: the objects are cached
+      # (capped by SCCACHE_CACHE_SIZE), read on every ref and saved by
+      # the first shard on dev and main only
+      - name: Install sccache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.19.0 -R mozilla/sccache -p sccache-v0.19.0-aarch64-apple-darwin.tar.gz -O "$RUNNER_TEMP/sccache.tar.gz" --clobber
+          echo "a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af  $RUNNER_TEMP/sccache.tar.gz" | shasum -a 256 -c -
+          mkdir "$RUNNER_TEMP/sccache-bin"
+          tar -xzf "$RUNNER_TEMP/sccache.tar.gz" -C "$RUNNER_TEMP/sccache-bin" --strip-components 1
+          echo "$RUNNER_TEMP/sccache-bin" >> "$GITHUB_PATH"
+          echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=1G" >> "$GITHUB_ENV"
+
+      - name: Name the compiler cache's day
+        id: day
+        run: echo "day=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the compiler cache
+        id: cc-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sccache-cache
+          key: sccache-macos-build-1-${{ steps.day.outputs.day }}
+          restore-keys: sccache-macos-build-1-
+
       - name: Build full app
         run: |
-          cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python"
+          cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python"             -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache             -DCMAKE_OBJCXX_COMPILER_LAUNCHER=sccache
           cmake --build build
+          sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the compiler cache (dev and main)
+        if: steps.cc-cache.outputs.cache-hit != 'true' && (matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sccache-cache
+          key: sccache-macos-build-1-${{ steps.day.outputs.day }}
+
       # ECUIO_PYTEST_REQUIRED: PythonTest.* fail rather than skip without
       # pytest
       - name: Run tests
         env:
           ECUIO_PYTEST_REQUIRED: '1'
-        run: ctest --test-dir build --output-on-failure --no-tests=error
+        run: ctest --test-dir build --output-on-failure --no-tests=error -I ${{ matrix.shard }},,2
 
       # A manual run's regex reaches the shell only through env.
       - name: Repeat until a failure (manual runs)
-        if: ${{ inputs.macos_repeat != '' }}
+        if: ${{ inputs.macos_repeat != '' && matrix.shard == 1 }}
         env:
           REPEAT_REGEX: ${{ inputs.macos_repeat }}
           REPEAT_COUNT: ${{ inputs.macos_repeat_count }}
@@ -536,9 +765,17 @@ jobs:
             -R "$REPEAT_REGEX" --repeat "until-fail:$REPEAT_COUNT"
 
   linux-build:
+    name: linux-build (${{ matrix.shard }}/2)
     if: ${{ !inputs.smoke_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Two runners, each with its own build, run alternate halves of ctest
+    # (-I k,,2: every case once across the two); the steps after the tests
+    # run on the first
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -564,6 +801,33 @@ jobs:
           "$RUNNER_TEMP/py/bin/python" -c 'import sys; assert sys.version_info >= (3, 11), sys.version'
           "$RUNNER_TEMP/py/bin/python" -m pip install --require-hashes -r .github/pytest-requirements.txt
 
+      # sccache from its GitHub release, checked against the SHA-256 that
+      # the release publishes, as win-build's; read on every ref, saved by
+      # the first shard on dev and main only
+      - name: Install sccache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.19.0 -R mozilla/sccache -p sccache-v0.19.0-x86_64-unknown-linux-musl.tar.gz -O "$RUNNER_TEMP/sccache.tar.gz" --clobber
+          echo "aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd  $RUNNER_TEMP/sccache.tar.gz" | sha256sum -c -
+          mkdir "$RUNNER_TEMP/sccache-bin"
+          tar -xzf "$RUNNER_TEMP/sccache.tar.gz" -C "$RUNNER_TEMP/sccache-bin" --strip-components 1
+          echo "$RUNNER_TEMP/sccache-bin" >> "$GITHUB_PATH"
+          echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=1G" >> "$GITHUB_ENV"
+
+      - name: Name the compiler cache's day
+        id: day
+        run: echo "day=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the compiler cache
+        id: cc-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sccache-cache
+          key: sccache-linux-build-1-${{ steps.day.outputs.day }}
+          restore-keys: sccache-linux-build-1-
+
       # libegl1 and libopengl0: QtGui's runtime libraries, which test_qml
       # loads (offscreen, so nothing for X11 or a GPU); systemtap-sdt-dev
       # and bpftrace: core's USDT probes and the step that traces them;
@@ -573,8 +837,17 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev libegl1 libopengl0 \
             systemtap-sdt-dev bpftrace can-utils
-          cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python"
+          cmake -B build -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DPython3_EXECUTABLE="$RUNNER_TEMP/py/bin/python" \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           cmake --build build
+          sccache --show-stats | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the compiler cache (dev and main)
+        if: steps.cc-cache.outputs.cache-hit != 'true' && (matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev'))
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/sccache-cache
+          key: sccache-linux-build-1-${{ steps.day.outputs.day }}
       # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
       # as installed on the hosted Ubuntu runners. MTU 72 takes CAN FD
       # frames (the mock's 16-byte telemetry), whatever the kernel's
@@ -594,10 +867,11 @@ jobs:
         env:
           ECUIO_VCAN_REQUIRED: '1'
           ECUIO_PYTEST_REQUIRED: '1'
-        run: ctest --test-dir build --output-on-failure --no-tests=error
+        run: ctest --test-dir build --output-on-failure --no-tests=error -I ${{ matrix.shard }},,2
       # The one SocketCAN case that sets the interface down and up again
       # needs CAP_NET_ADMIN; it skips in the run above, and runs here
       - name: SocketCAN as root (the interface down and up)
+        if: matrix.shard == 1
         env:
           ECUIO_VCAN_REQUIRED: '1'
           ECUIO_VCAN_ROOT_REQUIRED: '1'
@@ -608,37 +882,12 @@ jobs:
       # Core's probes fire in a running program (ADR-0034 section 4): bpftrace
       # attaches to havne-cli's and counts a mock:// stream's
       - name: USDT probes under bpftrace
+        if: matrix.shard == 1
         run: sudo sh tests/probe_trace.sh build/cli/havne-cli
       - name: Load test
+        if: matrix.shard == 1
         shell: bash   # -o pipefail: tee must not hide the bench's exit status
         run: build/tests/bench_bridge --load | tee -a "$GITHUB_STEP_SUMMARY"
-
-  # The C ABI against the newest release's (scripts/abi-check.sh,
-  # libabigail): an incompatible change fails, an addition is reported
-  abi:
-    if: ${{ !inputs.smoke_only }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0   # the tags, and the base release's tree
-      - name: Install libabigail and Ninja
-        run: sudo apt-get update && sudo apt-get install -y abigail-tools ninja-build
-      - name: Compare the C ABI with the newest release
-        shell: bash
-        run: |
-          # The summary is written whatever the verdict, and the check's
-          # own status then ends the step: a failure is when it's read
-          set +e
-          bash scripts/abi-check.sh 2>&1 | tee abi.txt
-          status=${PIPESTATUS[0]}
-          set -e
-          # The headers' verdict first: abidiff's report can run past 40
-          # lines. An error before the headers' check leaves no verdict line
-          { echo '### C ABI'; echo; echo '```'; grep -m 1 'public declaration' abi.txt || true
-            tail -n 40 abi.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          exit "$status"
 
   # The Linux AppImage (packaging/linux/make-appimage.sh), on the oldest
   # Ubuntu it supports: an AppImage runs where glibc is at least its
@@ -791,8 +1040,12 @@ jobs:
   # Cross builds (Android, iOS) are build-only: BUILD_TESTING=OFF, because
   # gtest_discover_tests runs each test binary at build time, which can't
   # work for a target the runner can't execute.
+  # Waits for core-and-tests, the short job that frees its runner first: a
+  # manual run has more jobs than the account's 20 concurrent runners, and this
+  # one starts in that slot, whatever core-and-tests did
   android-build:
-    if: ${{ !inputs.smoke_only }}
+    needs: core-and-tests
+    if: ${{ (success() || failure()) && !inputs.smoke_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -948,19 +1201,60 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The iOS kit is the largest cache entry (about 3.6 GB): a copy
+      # The iOS kit is the largest cache entry (about 3.5 GiB): a copy
       # per branch takes the repository past the Actions cache's 10 GB
-      # and evicts the other kits, so only main saves and restores it,
-      # and other branches install it from the mirrors each run
+      # and evicts the other kits, so only main saves it; every ref
+      # restores it (a restore keeps main's entry recently used). The key
+      # is ours, not install-qt-action's own (that one holds the runner's
+      # kernel version, so a runner update would miss on every branch): it
+      # names what decides the install's bytes, so change it with the
+      # version, target or aqtinstall.
+      - name: Restore the iOS Qt kit from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/Qt
+          key: qt-ios-6.12.0-ios-autodesktop-aqt-3.3-arm64-2
+
+      # install-qt-action installs into <dir>/Qt, so dir is the workspace and
+      # the kit lands in the cached folder
       - name: Install Qt 6.12.0 (ios + macOS host)
+        if: steps.qt-cache.outputs.cache-hit != 'true'
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
-          cache: ${{ github.ref == 'refs/heads/main' }}
+          cache: false
+          dir: ${{ github.workspace }}
           version: '6.12.0'
           host: 'mac'
           target: 'ios'
           arch: 'ios'
           extra: '--autodesktop'
+
+      - name: Save the iOS Qt kit to the cache (main only)
+        if: steps.qt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/Qt
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
+
+      # What install-qt-action exports after an install, for the restored
+      # kit: the build below needs QT_ROOT_DIR and QT_HOST_PATH
+      - name: Point the build at the restored kit
+        if: steps.qt-cache.outputs.cache-hit == 'true'
+        run: |
+          kit="${{ github.workspace }}/Qt/6.12.0"
+          {
+            echo "QT_ROOT_DIR=$kit/ios"
+            echo "QT_HOST_PATH=$kit/macos"
+            echo "QT_PLUGIN_PATH=$kit/ios/plugins"
+            echo "QML2_IMPORT_PATH=$kit/ios/qml"
+          } >> "$GITHUB_ENV"
+          echo "$kit/ios/bin" >> "$GITHUB_PATH"
+
+      - name: Check the kit is there
+        run: |
+          test -x "$QT_ROOT_DIR/bin/qt-cmake" || { echo "::error::no qt-cmake under $QT_ROOT_DIR"; exit 1; }
+          test -d "$QT_HOST_PATH/bin" || { echo "::error::no host Qt at $QT_HOST_PATH"; exit 1; }
 
       # qt-cmake applies Qt's iOS toolchain and its minimum deployment
       # target (iOS 18 for Qt 6.12), so neither is set by hand.
@@ -1037,7 +1331,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Cached on main only, as ios-build's kit
+      # install-qt-action's own cache (main only), keyed by the runner's
+      # kernel; a second iOS kit beside ios-build's, which restores its own
       - name: Install Qt 6.12.0 (ios + macOS host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:

@@ -1569,7 +1569,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         list(APPEND _qml_test_env "QT_QPA_FONTDIR=${_qml_fonts}")
     endif()
     # Files whose cases together run near ctest's bound on a slow runner
-    set(_qml_split_files dashboard dashedit phone)
+    set(_qml_split_files dashboard dashedit driveview phone)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
