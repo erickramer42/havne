@@ -76,7 +76,7 @@ env:
 jobs:
   core-and-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1214,14 +1214,16 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/Qt
-          key: qt-ios-6.12.0-ios-autodesktop-aqt-3.3-arm64-1
+          key: qt-ios-6.12.0-ios-autodesktop-aqt-3.3-arm64-2
 
+      # install-qt-action installs into <dir>/Qt, so dir is the workspace and
+      # the kit lands in the cached folder
       - name: Install Qt 6.12.0 (ios + macOS host)
         if: steps.qt-cache.outputs.cache-hit != 'true'
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
           cache: false
-          dir: ${{ github.workspace }}/Qt
+          dir: ${{ github.workspace }}
           version: '6.12.0'
           host: 'mac'
           target: 'ios'
@@ -1329,7 +1331,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Cached on main only, as ios-build's kit
+      # install-qt-action's own cache (main only), keyed by the runner's
+      # kernel; a second iOS kit beside ios-build's, which restores its own
       - name: Install Qt 6.12.0 (ios + macOS host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:

@@ -144,8 +144,9 @@ for t in json.load(sys.stdin)["tests"]:
         name=$(basename "$exe" .exe)
         abs=$PWD
         LOGDIR=$abs/$LOGDIR
-        mkdir -p "$LOGDIR/work-$name"
-        cd "$LOGDIR/work-$name" || return 1
+        # a setup that fails must still leave a failing rc, never none
+        echo 1 > "$LOGDIR/rc-$name"
+        mkdir -p "$LOGDIR/work-$name" && cd "$LOGDIR/work-$name" || return 1
         cover "$name" 600 "$(cygpath -w "$abs/$exe")"
         echo "$rc" > "$LOGDIR/rc-$name"
     }
