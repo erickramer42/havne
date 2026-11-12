@@ -747,8 +747,8 @@ TestCase {
     }
 
     // The presets start closed (five buttons would fill a phone's page),
-    // open on a tap of their row, and close again; the mock's stays out of
-    // a user's view, and j2534:// is offered where there are J2534 drivers
+    // open on a tap of their row, and close again; the mock's is there
+    // for everyone, and j2534:// is offered where there are J2534 drivers
     function test_thePresetsStartClosedAndOpenOnATap() {
         const page = createPage()
         const adapter = find(page, "adapterSection")
@@ -758,13 +758,13 @@ TestCase {
         verify(!adapter.presetsOpen, "closed by default")
         for (const n of names.concat(["preset_j2534", "preset_mock"]))
             verify(!find(page, n).visible, n + " hidden while closed")
-        compare(toggle.text, "Not listed: show")
+        compare(toggle.text, "WiFi and other addresses: show")
         toggle.clicked()
         verify(adapter.presetsOpen)
-        compare(toggle.text, "Not listed: hide")
+        compare(toggle.text, "WiFi and other addresses: hide")
         for (const n of names)
             verify(find(page, n).visible, n + " shown once open")
-        verify(!find(page, "preset_mock").visible, "the mock needs developer mode")
+        verify(find(page, "preset_mock").visible, "the demo address, with developer mode off")
         toggle.clicked()
         verify(!find(page, "preset_wifi_obdx").visible, "closed again")
     }
@@ -1312,6 +1312,66 @@ TestCase {
     // (UI Automation's SetValue is a plain set, as this is)
     function type(uri, text) {
         uri.text = text
+    }
+
+    // The extended session is a box under uds-generic's DID field, composed
+    // as did= is: on adds session=03, off takes it away, and a typed
+    // session=03 ticks it
+    function test_theExtendedSessionBoxComposesSession03() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+        const box = find(page, "extSessionBox")
+        verify(!box.visible, "not under the default profile")
+        type(uri, "j2534://Vendor")
+        press(page, "profile_uds-generic")
+        verify(box.visible, "under uds-generic")
+        verify(find(page, "optionsNote").visible, "with the line on more options")
+        compare(find(page, "optionsNote").text, "More options go after ?: see the address reference")
+        verify(!box.checked)
+        box.toggle()
+        box.toggled()
+        compare(uri.text, "j2534://Vendor?profile=uds-generic&session=03")
+        find(page, "didField").text = "F190:text"
+        compare(uri.text, "j2534://Vendor?profile=uds-generic&session=03&did=F190:text")
+        box.toggle()
+        box.toggled()
+        compare(uri.text, "j2534://Vendor?profile=uds-generic&did=F190:text")
+        type(uri, "j2534://Vendor?profile=uds-generic&session=0x03")
+        verify(box.checked, "a typed session=0x03 ticks the box")
+        press(page, "profile_default")
+        verify(!box.visible)
+        compare(uri.text, "j2534://Vendor?session=0x03", "left alone under another profile")
+
+        // core refuses session= on mock:// and replay://: no box, no key
+        press(page, "profile_uds-generic")
+        verify(box.visible, "an adapter takes it")
+        press(page, "preset_mock")
+        verify(!box.visible, "not over mock://")
+        verify(uri.text.indexOf("session=") < 0, "no session= composed there: " + uri.text)
+        type(uri, "replay:///some/folder?profile=uds-generic")
+        verify(!box.visible, "not over replay://")
+        type(uri, "socketcan://vcan0?profile=uds-generic")
+        verify(box.visible, "a CAN interface requesting under uds-generic takes it")
+    }
+
+    // The vehicle, signals and recording pages say why they are dim, and
+    // what a vehicle is for
+    function test_thePagesSayWhyTheyAreLockedAndWhatAVehicleIsFor() {
+        const page = createPage()
+        page.open("vehicle")
+        verify(find(page, "vehicleNote").visible, "what a vehicle is for")
+        verify(!find(page, "vehicleLockedNote").visible, "idle: nothing locked")
+        page.open("recording")
+        verify(!find(page, "recordLockedNote").visible)
+        verify(find(page, "recordNote").visible, "what Record sessions keeps, always")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => Bridge.connected, 5000)
+        verify(find(page, "recordLockedNote").visible, "connected: Recording's line")
+        compare(find(page, "recordLockedNote").text, "Disconnect to turn recording on or off.")
+        page.open("vehicle")
+        verify(find(page, "vehicleLockedNote").visible, "connected: Vehicle's line")
+        Bridge.disconnectSession()
+        tryVerify(() => !find(page, "vehicleLockedNote").visible, 5000, "the line goes with the session")
     }
 
     // A typed URI sets the row, the hint and the DID field, and is left as
@@ -2545,6 +2605,23 @@ TestCase {
         page.readOnceFor = page.pickedId
         Bridge.readOnceResult(reply)
         compare(page.readResult.reply, "62 1E 1C 12 34")
+    }
+
+    // A file that no longer loads shows in the list's Signals row, in
+    // danger, as well as on the page
+    function test_theSignalsRowSaysAFileDoesntLoad() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "extras.json", "Extras"))
+        const row = () => page.pageList.find(r => r.key === "signals")
+        compare(row().summary, "1 file")
+        verify(row().warn !== true)
+        const info = Object.assign({}, page.signalInfo)
+        const sha = page.pickedVehicle.signals[0].sha256
+        info[sha] = Object.assign({}, info[sha], { ok: false })
+        page.signalInfo = info
+        compare(row().summary, "1 file, doesn't load")
+        verify(row().warn, "flagged for the list's danger color")
     }
 
     // A file is saved out as the vehicle has it, byte for byte (a Save

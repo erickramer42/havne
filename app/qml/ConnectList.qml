@@ -20,6 +20,8 @@ Rectangle {
     // vehicle's saved one first when absent (Settings' connectUris)
     property var recents: []
     property string vehicleUri: ""
+    // Says where a recording is played back; Home's own foot line says it
+    property bool replayHint: true
     // [{ uri, title, kind }]: Settings' connectAdapters
     property var adapters: []
     // The phone's Bluetooth, read from the singleton; a test sets them
@@ -71,16 +73,26 @@ Rectangle {
         return query < 0 ? uri : uri.substring(0, query)
     }
 
-    readonly property var recentRows: recents.map(u => ({
-        uri: u, title: Bridge.uriLabelFor(u), kind: kindOf(u), adapter: false }))
+    // A recent address whose base is a listed device shows the device's
+    // name, the address as its detail
+    function deviceOf(uri) {
+        const base = baseOf(uri)
+        return adapters.find(a => a.uri === base)
+    }
+    readonly property var recentRows: recents.map(u => {
+        const device = deviceOf(u)
+        return device === undefined
+            ? { uri: u, title: Bridge.uriLabelFor(u), kind: kindOf(u), adapter: false, detail: "" }
+            : { uri: u, title: device.title, kind: device.kind, adapter: false,
+                detail: Bridge.uriLabelFor(u) }
+    })
     // An adapter that is also a recent address shows once, under Recent
     readonly property var adapterRows: {
         const taken = recents.map(baseOf)
         const rows = adapters.filter(a => taken.indexOf(a.uri) < 0).slice(0, maxAdapterRows)
             .map(a => ({ uri: a.uri, title: a.title, kind: a.kind, adapter: true }))
-        if (Theme.developerMode)
-            rows.push({ uri: "mock://demo", title: Bridge.uriLabelFor("mock://demo"),
-                        kind: qsTr("Demo data"), adapter: true, demo: true })
+        rows.push({ uri: "mock://demo", title: Bridge.uriLabelFor("mock://demo"),
+                   kind: qsTr("Demo data"), adapter: true, demo: true })
         return rows
     }
     readonly property var rows: recentRows.concat(adapterRows)
@@ -170,6 +182,15 @@ Rectangle {
                     text: row.modelData.title
                 }
                 Label {
+                    objectName: "connectRowDetail"
+                    visible: text !== "" && !Theme.compact
+                    Layout.maximumWidth: row.width * 0.4
+                    elide: Text.ElideMiddle
+                    font.pixelSize: Theme.fontCaption
+                    color: Theme.textDim
+                    text: row.modelData.detail !== undefined ? row.modelData.detail : ""
+                }
+                Label {
                     objectName: "connectRowKind"
                     visible: text !== ""
                     font.pixelSize: Theme.fontCaption
@@ -200,9 +221,9 @@ Rectangle {
                 wrapMode: Text.WordWrap
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textDim
-                text: list.rows.length > 0
-                      ? qsTr("The gauges fill when a session runs. Pick a source, then connect.")
-                      : qsTr("The gauges fill when a session runs. Choose what to connect to in Settings.")
+                text: list.replayHint
+                      ? qsTr("Pick a source, then connect. To play a recording back, open Recordings.")
+                      : qsTr("The gauges fill when a session runs. Pick a source, then connect.")
             }
         }
 

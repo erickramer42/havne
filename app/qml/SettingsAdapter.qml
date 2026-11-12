@@ -26,6 +26,9 @@ ColumnLayout {
             text: root.host.devices.length === 0
                   ? qsTr("None found: install a Pass-Thru driver (Windows), plug in "
                          + "or pair an ELM327 adapter, or pick one below")
+                  : Theme.mobile
+                    ? qsTr("Bluetooth: %1 paired; tap one, then Connect")
+                          .arg(root.host.bluetoothAdapters.length)
                   : qsTr("J2534 interfaces: %1, serial ports: %2%3; select one to "
                          + "put its address in the field above, then Connect")
                         .arg(root.host.j2534Devices.length).arg(root.host.serialPorts.length)
@@ -91,7 +94,9 @@ ColumnLayout {
         highlightFollowsCurrentItem: false
         Layout.fillWidth: true
         Layout.preferredHeight: contentHeight
-        Layout.maximumHeight: root.host.deviceRowsShown * (root.host.deviceRowHeight + spacing) - spacing
+        // A phone's page alone scrolls: the list takes all its rows
+        Layout.maximumHeight: Theme.mobile ? contentHeight
+                              : root.host.deviceRowsShown * (root.host.deviceRowHeight + spacing) - spacing
         visible: count > 0
         clip: true
         spacing: 2
@@ -230,7 +235,7 @@ ColumnLayout {
             Accessible.role: Accessible.Button
             Accessible.checkable: true
             Accessible.checked: root.presetsOpen
-            text: root.presetsOpen ? qsTr("Not listed: hide") : qsTr("Not listed: show")
+            text: root.presetsOpen ? qsTr("WiFi and other addresses: hide") : qsTr("WiFi and other addresses: show")
             onClicked: root.presetsOpen = !root.presetsOpen
         }
         Repeater {
@@ -260,9 +265,7 @@ ColumnLayout {
                 // Wraps rather than run past a narrow page's edge
                 // (Linux's font at 320 px did)
                 width: Math.min(implicitWidth, parent.width)
-                // The mock is a developer's tool, not a device
                 visible: root.presetsOpen
-                         && (modelData.name !== "mock" || Theme.developerMode)
                          && (modelData.name !== "j2534" || root.j2534Offered)
                 enabled: root.host.idle
                 onClicked: {

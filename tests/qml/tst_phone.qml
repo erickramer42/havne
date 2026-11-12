@@ -1984,7 +1984,7 @@ TestCase {
         waitForRendering(main.contentItem)
         verify(!title.visible, "the name gives way to Start log on a phone")
         const pillText = find(main.contentItem, "linkPillText")
-        tryCompare(pillText, "text", "Live", 5000, "the state is a word, not 'Ses...'")
+        tryCompare(pillText, "text", "Connected", 5000, "the state is a word, not 'Ses...'")
         verify(!pillText.truncated, "and it fits")
         compare(find(main.contentItem, "linkPillAddress").text, "· mock://logged")
         let out = pastTheEdge(row, main.contentItem, [])
@@ -2123,6 +2123,79 @@ TestCase {
         }
         const settings = find(main.contentItem, "tabLabel_" + main.settingsPage)
         verify(settings.truncated, "Settings elides in a tab of " + settings.width)
+    }
+
+    // Other address... then a connect that works returns to the page that
+    // sent the user, and the page's arrow goes where Back goes
+    function test_aConnectFromOtherAddressReturnsToDash() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        main.gotoPage(main.dashboardPage)
+        main.openConnectFromDash()
+        compare(main.currentPage, main.settingsPage)
+        settings.uriField.text = "mock://demo"
+        settings.requestConnect("mock://demo")
+        tryCompare(main, "currentPage", main.dashboardPage, 10000, "back on Dash with the gauges")
+        verify(!settings.backLeaves)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        // The arrow, with nothing connected
+        main.gotoPage(main.dashboardPage)
+        main.openConnectFromDash()
+        find(find(settings, "settingsConnectionPage"), "settingsBack").clicked()
+        compare(main.currentPage, main.dashboardPage, "the arrow does what Back does")
+    }
+
+    // The status says Connected (Replaying for a replay) and ends in a
+    // chevron where it opens the Log; the Profile row is three segments
+    function test_thePhonesStatusAndProfileRow() {
+        const main = phoneMain()
+        const word = find(main.contentItem, "linkPillText")
+        const chevron = find(main.contentItem, "linkPillChevron")
+        verify(chevron.visible, "a button, marked")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryCompare(word, "text", "Connected", 5000)
+        verify(!chevron.visible, "not where it would squeeze a connected phone's address")
+        main.width = 600
+        waitForRendering(main.contentItem)
+        verify(chevron.visible, "with 420 px of header it shows beside the address")
+        main.width = 384
+        waitForRendering(main.contentItem)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        const row = Bridge.recordingRow(Harness.recordingFixtures + "/findings")
+        compare(Bridge.connectSession(row.uri), "")
+        tryCompare(word, "text", "Replaying", 5000)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+
+        main.openConnect()
+        const settings = find(main.contentItem, "settingsPage")
+        const segments = find(settings, "profileSegments")
+        verify(segments.visible, "the three profiles are one segmented row")
+        compare(find(settings, "profile_default").text, "Default")
+        compare(find(settings, "profile_raw").text, "Raw")
+        compare(find(settings, "profile_uds-generic").text, "UDS DIDs")
+        verify(find(settings, "profile_default").selected)
+        find(settings, "profile_raw").clicked()
+        verify(find(settings, "profile_raw").selected && !find(settings, "profile_default").selected)
+        compare(settings.profileChoice, "raw")
+    }
+
+    // On the tab-bar form the Diagnostics page's title is its tab's word,
+    // and Settings' Recording row reads the switch (off, on)
+    function test_theCodesPageAndRecordingRowUseTheirShortWords() {
+        const main = phoneMain()
+        compare(find(main.contentItem, "diagnosticsHeader").title, "Codes", "the tab's word")
+        const settings = find(main.contentItem, "settingsPage")
+        const row = () => settings.pageList.find(r => r.key === "recording")
+        try {
+            compare(row().summary, "off")
+            Bridge.recording = true
+            compare(row().summary, "on")
+        } finally {
+            Bridge.recording = false
+        }
     }
 
     // A recording's Replay connects it in one tap and lands on Live, the
@@ -2365,7 +2438,7 @@ TestCase {
         waitForRendering(main.contentItem)
         checkHeaderButtons(main, ["startLogButton", "disconnectButton"])
         if (data.zoom === 1.0)
-            verify(!find(main.contentItem, "linkPillAddress").truncated, "the address keeps its width")
+            verify(!find(main.contentItem, "linkPillText").truncated, "the word keeps its width; the address gives way first")
 
         start.clicked()
         verify(Bridge.logActive, "the log runs")
@@ -2428,16 +2501,17 @@ TestCase {
                "a touch's size: " + onGlass(pill, main).height)
 
         compare(Bridge.connectSession("mock://demo"), "", "connects")
-        tryCompare(state, "text", "Live", 5000)
+        tryCompare(state, "text", "Connected", 5000)
         compare(address.text, "· mock://demo")
         waitForRendering(main.contentItem)
-        verify(address.visible && !address.truncated, "a short address fits")
+        verify(address.visible && !find(main.contentItem, "linkPillText").truncated,
+               "the address shows and the word keeps its width")
 
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         const long = "mock://a-long-name-for-an-adapter-that-cannot-fit-beside-the-buttons"
         compare(Bridge.connectSession(long), "", "the long one connects")
-        tryCompare(state, "text", "Live", 5000)
+        tryCompare(state, "text", "Connected", 5000)
         waitForRendering(main.contentItem)
         verify(address.truncated, "the address elides")
         verify(!state.truncated && state.width >= state.implicitWidth - 0.5, "the word doesn't")
@@ -2569,12 +2643,66 @@ TestCase {
         verify(words.lineCount <= 2, "the words take " + words.lineCount + " lines at 320")
     }
 
+    // The demo row is every user's, last under Adapters, never chosen
+    // by default; a recent address of a listed device shows its name
+    function test_theDemoRowIsAlwaysThereAndNeverTheDefault() {
+        const main = phoneMain()
+        Theme.developerMode = false
+        const list = connectListOn(main, [])
+        tryVerify(() => findChild(list, "connectRow_0") !== null, 2000, "the demo row")
+        compare(find(find(list, "connectRow_0"), "connectRowKind").text, "Demo data")
+        compare(list.chosen, "", "nothing chosen with only the demo")
+        verify(!find(list, "connectRow_0").checked)
+    }
+
+    function test_aRecentAddressOfAListedDeviceTakesItsName() {
+        const main = phoneMain()
+        const list = connectListOn(main, ["elm327://COM9?profile=raw"])
+        list.adapters = [{ uri: "elm327://COM9", title: "Bench adapter", kind: "ELM327 adapter" }]
+        verify(waitForPolish(main), "laid out")
+        const row = find(list, "connectRow_0")
+        compare(find(row, "connectRowAddress").text, "Bench adapter")
+        compare(find(row, "connectRowKind").text, "ELM327 adapter")
+        compare(list.recentRows[0].detail.indexOf("elm327://COM9") >= 0, true, "the address is its detail")
+        compare(find(list, "connectAdapters").visible, true)
+    }
+
+    // A log is a recording: Mark stands beside Stop log from 720 px of
+    // header, and the readout says it is the log's time
+    function test_markStandsBesideStopLogOnAWideHeader() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1280
+        main.height = 800
+        const start = find(main.contentItem, "startLogButton")
+        const mark = find(main.contentItem, "markButton")
+        const readout = find(main.contentItem, "logReadout")
+        compare(Bridge.connectSession("mock://logged"), "")
+        try {
+            tryVerify(() => start.visible && start.enabled, 5000, "Start log")
+            verify(!mark.visible, "no Mark before the log")
+            start.clicked()
+            verify(Bridge.logActive)
+            tryVerify(() => mark.visible, 2000, "Mark beside Stop log")
+            verify(/^Logging \d+:\d\d$/.test(readout.text), readout.text)
+            const before = Bridge.markCount
+            mark.clicked()
+            tryVerify(() => Bridge.markCount === before + 1, 2000, "a marker in the log")
+            main.width = 600
+            waitForRendering(main.contentItem)
+            verify(!mark.visible, "under 720 px of header the phone's rule holds")
+            verify(!/^Logging/.test(readout.text), readout.text)
+        } finally {
+            if (Bridge.logActive)
+                Bridge.stopLog()
+        }
+    }
+
     // With no recent address and exactly one adapter, it is chosen; the
-    // developer's demo row doesn't count
+    // demo row doesn't count
     function test_aSoleAdapterIsChosen() {
         const main = phoneMain()
         const list = connectListOn(main, [])
-        Theme.developerMode = true
         try {
             find(main.contentItem, "settingsPage").serialPorts = [{ name: "COM9", device: "" }]
             tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "the port and the demo")
@@ -2583,8 +2711,6 @@ TestCase {
             verify(find(list, "connectRow_0").checked, "its row marked")
             const go = find(list, "connectGo")
             verify(go.enabled && go.highlighted && go.text === "Connect", "one tap connects")
-            Theme.developerMode = false
-            tryVerify(() => findChild(list, "connectRow_1") === null, 2000, "no demo row off developer mode")
             find(main.contentItem, "settingsPage").serialPorts =
                 [{ name: "COM9", device: "" }, { name: "COM8", device: "" }]
             tryCompare(list, "chosen", "", 2000, "two: none chosen")
@@ -2601,7 +2727,8 @@ TestCase {
             [{ name: "COM9", device: "" }, { name: "COM8", device: "" }]
         tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "the recent and COM8")
         compare(find(find(list, "connectRow_1"), "connectRowAddress").text, "COM8")
-        compare(findChild(list, "connectRow_2"), null, "COM9 once")
+        compare(find(find(list, "connectRow_2"), "connectRowKind").text, "Demo data", "COM9 once, then the demo")
+        compare(findChild(list, "connectRow_3"), null, "COM9 once")
         compare(list.chosen, "elm327://COM9?profile=obd2", "the recent one")
     }
 
@@ -2614,7 +2741,8 @@ TestCase {
             ports.push({ name: "COM" + i, device: "" })
         find(main.contentItem, "settingsPage").serialPorts = ports
         tryVerify(() => findChild(list, "connectRow_5") !== null, 2000, "six rows")
-        compare(findChild(list, "connectRow_6"), null, "no seventh")
+        compare(find(find(list, "connectRow_6"), "connectRowKind").text, "Demo data", "the demo after six")
+        compare(findChild(list, "connectRow_7"), null, "no seventh adapter")
         verify(find(list, "connectOther").visible, "the rest through Other address")
     }
 
@@ -2732,9 +2860,8 @@ TestCase {
         const main = phoneMain()
         const list = connectListOn(main, [])
         compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
-        const go = find(list, "connectGo")
         wait(0)
-        verify(go.enabled, "it only opens Settings")
+        verify(find(list, "connectOther").enabled, "Other address... still opens Settings")
     }
 
     function vehicleWith(label, uri) {
@@ -2956,12 +3083,11 @@ TestCase {
         const main = phoneMain()
         const settings = find(main.contentItem, "settingsPage")
         const list = connectListOn(main, [])
-        verify(!find(list, "connectOther").visible, "one way to Settings")
-        verify(findChild(list, "connectRow_0") === null, "no rows")
+        compare(find(find(list, "connectRow_0"), "connectRowKind").text, "Demo data", "the demo row alone")
         const go = find(list, "connectGo")
-        compare(go.text, "Connect…")
-        verify(!go.highlighted, "nothing to connect to: it opens Settings, so it isn't primary")
-        mouseClick(go)
+        compare(go.text, "Connect")
+        verify(!go.enabled && !go.highlighted, "the demo is never chosen by default")
+        mouseClick(find(list, "connectOther"))
         tryCompare(main, "currentPage", main.settingsPage, 2000)
         tryCompare(settings, "shownKey", "connection", 2000)
         verify(!Bridge.connecting && !Bridge.connected, "nothing to connect to")
