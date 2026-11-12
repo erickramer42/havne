@@ -54,10 +54,11 @@ def signal_rows(path):
 
 def stretch_seed(switches, gate, speed, measure):
     """fuzz_recording's stretches input: the switches, the default rules
-    (indexes into the harness's tables), the whole range, then each
+    but the rise, 10 on the seeds' scale of rpm / 60 (indexes into the
+    harness's tables), the whole range, then each
     signal's samples, at most 255, a time step in 10 ms and a value in
     halves under 120"""
-    rules = bytes([7, 5, 5, 0, 6, 3, 4, 6])
+    rules = bytes([7, 5, 8, 0, 6, 3, 4, 6, 14, 14])
     signals = [gate[:255], speed[:255], measure[:255]]
     out = b"S" + bytes([switches]) + rules + bytes([0, 255])
     out += bytes(len(s) for s in signals)
@@ -167,11 +168,13 @@ def main(argv):
         write(out, "fuzz_recording", name, seed)
         write(out, "fuzz_export", name, seed)
     # The stretches' rules ('S'): the pull fixture's throttle and engine
-    # speed (no speed signal, so engine speed measures), and the cruise
-    # fixture's speed and throttle, under the default rules
+    # speed (no speed signal, so engine speed measures; switch 16, the
+    # recording has an engine speed), and the cruise fixture's speed and
+    # throttle, under the default rules but the rise, 10 on the seed's
+    # scale of rpm / 60
     pulls = signal_rows("tests/fixtures/recording/pull-early/signals.csv")
     write(out, "fuzz_recording", "stretches-pull",
-          stretch_seed(0, pulls.get("Throttle", []), [],
+          stretch_seed(16, pulls.get("Throttle", []), [],
                        [(t, v / 60) for t, v in pulls.get("RPM", [])]))
     cruise = signal_rows("tests/fixtures/recording/cruise/signals.csv")
     write(out, "fuzz_recording", "stretches-cruise",
