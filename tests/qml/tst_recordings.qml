@@ -1247,6 +1247,58 @@ profile  raw
         }
     }
 
+    // About's list opens at its start when its head grows after the switch,
+    // even with a contentY reported between the head's height and its origin
+    Component {
+        id: wiggleOrigin
+        Connections {
+            property var list: null
+            target: list
+            function onOriginYChanged() {
+                list.contentY += 0.5
+                list.contentY -= 0.5
+            }
+        }
+    }
+    Component {
+        id: tallItem
+        Item { implicitHeight: 120; implicitWidth: 10 }
+    }
+    function test_aboutOpensAtItsStartWhenTheHeadGrowsLate() {
+        const page = openFindings()
+        Theme.compact = true
+        let wiggle = null
+        let tall = null
+        try {
+            page.width = 384
+            page.height = 832
+            verify(waitForPolish(page.Window.window), "laid out")
+            find(page, "detailView_about").clicked()
+            verify(waitForPolish(page.Window.window), "About laid out")
+            const findings = find(page, "findingList")
+            const headAt = () => findings.headerItem.mapToItem(findings, 0, 0).y
+            tryVerify(() => headAt() >= -0.5, 2000, "About starts at its head")
+            const before = findings.headerItem.height
+            wiggle = wiggleOrigin.createObject(page, { list: findings })
+            tall = tallItem.createObject(findings.headerItem.zoomSlot)
+            tryVerify(() => findings.headerItem.height > before + 100, 2000, "the head grew")
+            // a tryVerify's message is read at the call, so the numbers come after
+            const until = Date.now() + 2000
+            while (headAt() < -0.5 && Date.now() < until)
+                wait(20)
+            verify(headAt() >= -0.5, "back at its start: head at " + headAt()
+                   + ", contentY " + findings.contentY + ", originY " + findings.originY)
+        } finally {
+            if (tall)
+                tall.destroy()
+            if (wiggle)
+                wiggle.destroy()
+            Theme.compact = false
+            page.width = 900
+            page.height = 900
+        }
+    }
+
     // On a page taller than the viewer the room left over goes under it:
     // the zoom row stays right under the splitter, maximized too
     function test_theZoomRowStaysUnderTheChart() {
