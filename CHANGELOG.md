@@ -202,9 +202,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - Settings drops `session=` from the address under every profile but UDS
   DIDs.
 - A segment row that can't be changed while a session runs is dimmed.
-- Recordings viewer: its keys (arrows, Home, End, B, F) are off while a
-  drop-down has the focus, a cursor handle can't be dragged out of the view,
-  and Compare's readout follows the earlier of the two cursors.
+- Recordings viewer: Home, End, B and F go to a focused drop-down and the
+  arrows keep stepping the cursor, and a click on the chart takes the focus
+  back; a cursor handle can't be dragged out of the view (a drop past the
+  view's end lands on the last sample in it); and Compare's readout follows
+  the earlier of the two cursors.
 - The CSV import's preview ends a cell at a tab after a quoted cell in a
   tab-delimited file, as the import does.
 - The viewer says "Report not saved: the report couldn't start" when a health
