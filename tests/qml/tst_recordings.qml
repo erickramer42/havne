@@ -23,6 +23,26 @@ TestCase {
     // A binding error in the app's QML fails the test
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
+        setStoredRules("{}")
+        setHintSeen(false)
+    }
+
+    // The second cursor's hint flag (its Settings), so which case measures
+    // the hint line never depends on the order the cases ran in
+    function setHintSeen(seen) {
+        const store = Qt.createQmlObject("import QtCore; Settings { category: \"recordings\" }", testCase)
+        store.setValue("spanHintSeen", seen)
+        store.sync()
+        store.destroy()
+    }
+
+    // The viewer's kept stretch levels (its Settings, in the test's scratch
+    // store): a case that applies levels or plants some leaves none behind
+    function setStoredRules(text) {
+        const store = Qt.createQmlObject("import QtCore; Settings { category: \"recordings\" }", testCase)
+        store.setValue("stretchRules", text)
+        store.sync()
+        store.destroy()
     }
 
     function cleanup() {
@@ -95,6 +115,33 @@ TestCase {
         tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
         verify(waitForPolish(page.Window.window), "the viewer laid out")
         return page
+    }
+
+    // Compare's controls open above the chart from the title row's button (a
+    // phone's About holds the button), close with it, and open for a compare
+    // started from anywhere; Stop closes them
+    function test_theComparesButtonOpensItsControlsAboveTheChart() {
+        const page = createPage()
+        page.recordings = [twiceRow, earlyRow]
+        openRow(page, twiceRow)
+        const choice = find(page, "compareChoice")
+        const chart = find(page, "chartFrame")
+        verify(!choice.visible, "the controls wait for the button")
+        find(page, "compareButton").clicked()
+        verify(page.compareOpen)
+        verify(waitForPolish(page.Window.window), "laid out")
+        verify(choice.visible, "open")
+        verify(choice.mapToItem(page, 0, 0).y < chart.mapToItem(page, 0, 0).y, "above the chart")
+        find(page, "compareButton").clicked()
+        verify(!page.compareOpen && !choice.visible, "closed again")
+        page.compareWith(earlyRow)
+        verify(page.compareOpen, "a started compare opens them")
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        verify(waitForPolish(page.Window.window), "laid out")
+        verify(find(page, "compareStatus").visible, "with the status")
+        find(page, "stopCompare").clicked()
+        verify(!page.compareOpen, "Stop closes them")
+        verify(!find(page, "compareStatus").visible)
     }
 
     // A recording that ends joins the list, newest first, saying what it
@@ -181,6 +228,10 @@ TestCase {
         verify(note.visible)
         verify(Qt.colorEqual(note.color, Theme.success))
         verify(!panel.visible, "done with the file")
+        verify(page.viewing, "the import opens its recording")
+        verify(note.visible, "its words stay above the viewer")
+        page.backToList()
+        verify(!note.visible)
         verify(page.recordings.some(r => r.title.endsWith(" · CSV import")),
                "it joins the list")
 
@@ -205,6 +256,7 @@ TestCase {
                   "the import ends")
         compare(note.text, "Imported 2 frames over 0.5 s")
         verify(!panel.visible)
+        page.backToList()
         verify(page.recordings.some(r => r.title.endsWith(" · candump import")))
 
         // The next log needs no interface: the one typed for the last is gone
@@ -215,6 +267,7 @@ TestCase {
         tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
                   "the import ends")
         compare(note.text, "Imported 1 frames over 0.0 s")
+        page.backToList()
 
         page.chooseImportFile(log)
         find(page, "importKind_csv").clicked()
@@ -224,6 +277,46 @@ TestCase {
         find(page, "importCancel").clicked()
         verify(!panel.visible)
         verify(!note.visible)
+    }
+
+    // The panel's Import and Cancel stand at its head, above the columns,
+    // and a typed label names the folder
+    function test_theImportPanelPutsItsActionsFirstAndTakesALabel() {
+        const page = createPage()
+        const csv = Harness.writeScratchFile("head-log.csv",
+            "Time (ms),RPM [rpm],Load [%]
+0,800,12
+500,900,30
+")
+        page.chooseImportFile(csv)
+        const preview = guessed(page)
+        const start = find(page, "importStart")
+        const label = find(page, "importLabel")
+        verify(label.visible)
+        const head = start.mapToItem(page, 0, 0).y
+        verify(head < find(preview, "guessRow_0").mapToItem(page, 0, 0).y,
+               "Import is above the first column")
+        verify(find(page, "importCancel").mapToItem(page, 0, 0).y
+               < find(preview, "guessRow_0").mapToItem(page, 0, 0).y,
+               "Cancel is above the first column too")
+        const box = find(preview, "include")
+        verify(box.indicator.x < 40, "the include box starts its row")
+        label.text = "Cold start"
+        start.clicked()
+        tryVerify(() => page.viewing, 10000, "the import opens its recording")
+        verify(page.openedTitle.endsWith(" · Cold start"), page.openedTitle)
+        page.backToList()
+    }
+
+    // A row says its length, its kind and signals, and its marks
+    function test_aRowSaysItsLengthKindAndMarks() {
+        const page = createPage()
+        compare(page.rowFacts({ durationMs: 60000, log: true, signals: 13, marks: 0, frames: true }),
+                "1 min 0 s · log, 13 signals")
+        compare(page.rowFacts({ durationMs: 12000, log: false, signals: 5, marks: 2, frames: true }),
+                "12 s · session · 2 marks")
+        compare(page.rowFacts({ durationMs: -1, log: false, signals: 3, marks: 1, frames: false }),
+                "3 signals · 1 mark")
     }
 
     // Waits for a picked CSV's guess to show
@@ -526,6 +619,7 @@ TestCase {
         compare(note.text, "Imported 1 frames over 0.0 s")
         verify(Qt.colorEqual(note.color, Theme.success))
         verify(!panel.visible)
+        page.backToList()   // the import opened its recording
         compare(page.recordings.length, before + 1)
 
         page.chooseImportFile(Harness.writeScratchFile("cancel-two.log",
@@ -1066,6 +1160,17 @@ profile  raw
         compare(note.text, "Saved: 1 row", "this one's")
     }
 
+    // A report that can't start (here no recording is open) says so, in
+    // place of an earlier note
+    function test_aReportThatCantStartSaysSo() {
+        const page = createPage()
+        page.reportNote = "Report saved: 1 ECU, 0 trouble codes, 0 key values"
+        const url = Harness.writeScratchFile("never.json", "")
+        verify(!page.saveReportTo(url, 1), "nothing to report on")
+        compare(page.reportNote, "Report not saved: the report couldn't start")
+        verify(page.reportFailed, "in the failure's color")
+    }
+
     // Save report: the whole recording's (the zoom never narrows it), on
     // the view's thread, the picked vehicle's baseline named, the note and
     // one log line when it ends
@@ -1321,14 +1426,14 @@ profile  raw
                        + ", contentY " + findings.contentY + ", originY " + findings.originY
                        + ", head height " + findings.headerItem.height)
                 inOrder(["chartSplitter", "zoomAll", "detailView_about", "recordingInfo", "decodeChoice",
-                         "compareChoice", "checkSummary"])
+                         "checkSummary"])
                 const save = yOf("saveReport")
                 verify(save > yOf("recordingInfo") && save < yOf("decodeChoice"), "Save report in About")
                 compare(yOf("replayView"), save, "Replay beside it")
+                compare(yOf("compareButton"), save, "and Compare")
             } else {
                 inOrder(["openedTitle", "chartFrame", "chartSplitter", "zoomAll", "recordingFilter",
-                         "signalRows", "aboutHeading", "recordingInfo", "decodeChoice", "compareChoice",
-                         "checkSummary"])
+                         "signalRows", "aboutHeading", "recordingInfo", "decodeChoice", "checkSummary"])
                 const rows = find(page, "signalRows")
                 compare(rows.itemAtIndex(0).mapToItem(rows, 0, 0).y, 0, "no head over the desktop's rows")
                 verify(rows.contentHeight <= rows.height + 0.5, "the rows hold their list: "
@@ -1336,6 +1441,7 @@ profile  raw
                 const save = yOf("saveReport")
                 const replay = yOf("replayView")
                 verify(save < yOf("chartFrame") && replay < yOf("chartFrame"), "both in the title row")
+                verify(yOf("compareButton") < yOf("chartFrame"), "and Compare, beside Export")
                 const sw = find(page, "detailView_values")
                 verify(sw.visible && Math.abs(middleOf("detailView_values") - middleOf("recordingFilter")) < 3
                        && sw.mapToItem(page, 0, 0).x < find(page, "recordingFilter").mapToItem(page, 0, 0).x,
@@ -1440,6 +1546,12 @@ profile  raw
             page.height = data.h
             const chart = find(page, "chartFrame")
             const want = data.want > 0 ? data.want : page.phoneChartFloor
+            if (data.want < 0) {
+                // The Jump row stands above the chart: a page short enough
+                // to pin the viewer still has the floor for the chart
+                verify(waitForPolish(page.Window.window), "laid out")
+                page.height = data.h + find(page, "jumpRow").height + Theme.spacing
+            }
             if (data.want < 0) {
                 const room = want - 8 - ChartLayout.top - ChartLayout.axisHCursor - ChartLayout.bottomPad
                 compare(ChartLayout.panesThatFit(room, ChartLayout.paneMinH), 3, "three panes fit the floor")
@@ -1812,7 +1924,7 @@ profile  raw
     // The cursor reads each signal's value in force at its time
     function test_theCursorReadsTheValuesAtItsTime() {
         const page = openFindings()
-        compare(find(page, "cursorTime").text, "Click the chart for values")
+        compare(find(page, "cursorTime").text, "Click for values · drag to pan · wheel to zoom · double-click a pane to enlarge it")
         const row = find(page, "signalRows").itemAtIndex(0)
         compare(find(row, "cursorValue").text, "—")
         page.setCursor(5000)
@@ -2197,8 +2309,7 @@ profile  raw
             const px = atTime(page, chart, 15000)
             const py = inPlot(chart, 0).y
             mousePress(frame, px, py)
-            wait(200)
-            verify(page.hasCursorB, "the hold places it")
+            tryVerify(() => page.hasCursorB, 2000, "the hold places it")
             verify(Math.abs(page.cursorBMs - 15000) < 300, "where it was held: " + page.cursorBMs)
             compare(page.cursorMs, 5000, "the first stays")
             mouseRelease(frame, px, py)
@@ -2207,7 +2318,7 @@ profile  raw
             const view = [page.viewT0, page.viewT1]
             const to = atTime(page, chart, 25000)
             mousePress(frame, px, py)
-            wait(200)
+            tryVerify(() => tap.held, 2000, "the hold is on")
             for (let k = 1; k <= 8; ++k)
                 mouseMove(frame, px + (to - px) * k / 8, py, 10)
             verify(!isNaN(page.boxFromMs), "the drag draws the box")
@@ -2298,11 +2409,190 @@ profile  raw
 
         page.setView(10000, 12000)
         page.setCursor(11900)
+        // A step reads the cursor's time when the key is pressed and lands
+        // later: the second key waits for the first's step, or both read
+        // 11900 and neither goes off the view
         keyClick(Qt.Key_Right)
+        tryCompare(page, "cursorMs", 12000, 2000, "the last sample in view")
         keyClick(Qt.Key_Right)
-        tryVerify(() => page.cursorMs >= 12000 && page.cursorMs <= page.viewT1 && page.viewT0 > 10000,
+        tryVerify(() => page.cursorMs > 12000 && page.cursorMs <= page.viewT1 && page.viewT0 > 10000,
                   2000, "a step off the view brings it back")
         page.clearCursorB()
+    }
+
+    // The compared recording's value is read where the rows read this
+    // one's: at the earlier of two cursors
+    function test_theComparedValueFollowsTheEarlierCursor() {
+        const page = openEarly()
+        page.compareWith(lateRow)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        page.setAlignOn("rise")
+        page.alignHysteresis = 500
+        page.alignLevel = 4000
+        verify(page.compareAligned)
+        const rpm = find(page, "signalRows").model.find(s => s.name === "RPM").index
+        const atTen = page.compareValuesAt(10000)[rpm].atMs
+        const atTwenty = page.compareValuesAt(20000)[rpm].atMs
+        verify(atTen !== atTwenty, "the two times read different samples there")
+        spanned(page, 20000, 10000)
+        compare(page.compareReadout[rpm].atMs, atTen, "the earlier cursor's sample, not the first's")
+        // The dashed label's dot is at the earlier cursor too, shown while
+        // that one is in view, whatever the first cursor does
+        page.setView(5000, 15000)
+        const dashed = page.series(400).filter(s => s.dash !== undefined && s.row === rpm)
+        compare(dashed.length, 1, "the compared RPM is drawn")
+        compare(dashed[0].labelMs, atTen + page.compareOffsetMs, "its label is at the earlier cursor")
+        page.showAll()
+        page.setCursorB(30000)
+        compare(page.compareReadout[rpm].atMs, atTwenty, "the first is the earlier again")
+        page.setCursorB(10000)
+        page.clearCursorB()
+        compare(page.compareReadout[rpm].atMs, atTwenty, "one cursor: the first's")
+    }
+
+    // A handle dragged past the plot's edge stays in the view and ends on
+    // a sample
+    function test_aHandleDraggedPastTheEdgeStaysInView() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        let pressed = false
+        try {
+            const chart = panedChart(page)
+            // an end off the sample grid: the nearest sample to it lies past it
+            page.setView(10000, 19960)
+            verify(waitForPolish(page.Window.window), "laid out")
+            page.setCursor(12000)
+            page.setCursorB(15000)
+            const frame = find(page, "chartFrame")
+            const handle = find(page, "cursorHandleB")
+            const grab = find(handle, "handleDrag")
+            const from = grab.mapToItem(frame, grab.width / 2, grab.height / 2)
+            mousePress(frame, from.x, from.y)
+            pressed = true
+            const edge = frame.width - 2
+            for (let k = 1; k <= 8; ++k)
+                mouseMove(frame, from.x + (edge - from.x) * k / 8, from.y, 10)
+            verify(page.cursorBMs <= page.viewT1 + 1e-6, "inside the view: " + page.cursorBMs)
+            verify(handle.visible, "the handle is still shown")
+            mouseRelease(frame, edge, from.y)
+            pressed = false
+            verify(page.cursorBMs <= page.viewT1 + 1e-6, "ends inside the view: " + page.cursorBMs)
+            verify(handle.visible, "and the drop leaves it shown")
+            compare(page.cursorBMs, page.snapped(page.cursorBMs), "on a sample")
+        } finally {
+            if (pressed)
+                mouseRelease(find(page, "chartFrame"), 0, 0)   // a failed check leaves no button held
+            restore()
+        }
+    }
+
+    // A time is rounded to tenths as a whole: never 1:60.0
+    function test_aTimeNeverReadsSixtySeconds() {
+        const page = openEarly()
+        compare(page.timeText(119960, true), "2:00.0")
+        compare(page.timeText(59960, true), "1:00.0")
+        compare(page.timeText(59940, true), "59.9 s")
+        compare(page.timeText(3599960, true), "1:00:00.0")
+        compare(page.timeText(-59960, true), "-1:00.0")
+        compare(page.timeText(12300, true), "12.3 s")
+        compare(page.timeText(62300, true), "1:02.3")
+    }
+
+    // A decode chosen while comparing on pulls asks again for the pulls
+    // and aligns on them
+    function test_aDecodeWhileComparingOnPullsAsksAgain() {
+        const page = openFindings()
+        page.recordings = [findingsRow, earlyRow]
+        page.compareWith(earlyRow)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        const choice = find(page, "alignChoice")
+        choice.currentIndex = choice.indexOfValue("pull")
+        choice.activated(choice.currentIndex)
+        tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
+        page.compareStatus = "stale"   // what the alignment says, until it is made again
+        const decode = find(page, "decodeChoice")
+        const obd2 = decode.indexOfValue("obd2")
+        decode.activated(obd2)
+        tryVerify(() => page.pullsHere === null, 10000, "the reopen clears the pulls")
+        tryVerify(() => page.pullsHere !== null, 10000, "and they are asked for again")
+        tryVerify(() => page.compareStatus !== "stale", 10000, "and the alignment is made again")
+        verify(page.comparing, "still comparing")
+    }
+
+    // The page's keys are a focused box's own: Home and End move a
+    // ComboBox's choice, never the chart's cursor
+    function test_aFocusedBoxKeepsItsKeys() {
+        const page = openEarly()
+        page.forceActiveFocus()
+        page.setCursor(1000)
+        const choice = find(page, "compareChoice")
+        choice.forceActiveFocus()
+        verify(choice.activeFocus, "the box has the focus")
+        // Left and Right it doesn't use: the cursor still steps
+        keyClick(Qt.Key_Right)
+        tryVerify(() => page.cursorMs > 1000, 2000, "Right steps the cursor beside a focused box")
+        page.setCursor(1000)
+        keyClick(Qt.Key_End)
+        verify(page.compareOpen, "End went to the box: it picked the last recording")
+        keyClick(Qt.Key_Home)
+        keyClick("b")
+        compare(page.cursorMs, 1000, "the cursor stayed")
+        verify(!page.arrowsMoveB, "B did nothing to the cursors")
+        const before = page.maximizedTall
+        keyClick("f")
+        compare(page.maximizedTall, before, "F didn't maximize the chart")
+        // no open of the compared recording is left running
+        page.stopComparing()
+        compare(page.comparing, false, "the comparison is stopped")
+    }
+
+    // A mouse pick gives a box the focus; a press in the plot takes it back,
+    // so the chart's keys work again without a Tab
+    function test_aPressInThePlotTakesTheKeysBackFromABox() {
+        const page = openFindings()
+        const restore = growWindow(page)
+        try {
+            const chart = find(page, "chart")
+            tryVerify(() => chart.drawn !== null, 5000, "the chart is drawn")
+            const choice = find(page, "decodeChoice")
+            tryVerify(() => choice.visible && choice.width > 0, 2000, "the box shows")
+            mouseClick(choice)
+            tryVerify(() => choice.popup.opened, 2000, "the box opens")
+            verify(choice.activeFocus, "a mouse press gives the box the focus")
+            choice.popup.close()
+            tryVerify(() => !choice.popup.opened, 2000, "and closes")
+            const frame = find(page, "chartFrame")
+            const at = inPlot(chart, 0)
+            mouseClick(frame, at.x, at.y)
+            verify(!choice.activeFocus, "the press took the focus back")
+            const placed = page.cursorMs
+            verify(!isNaN(placed), "the press placed the cursor")
+            keyClick(Qt.Key_Right)
+            tryVerify(() => page.cursorMs > placed, 2000, "Right steps the cursor")
+            const stepped = page.cursorMs
+            keyClick(Qt.Key_Home)
+            tryVerify(() => page.cursorMs < stepped, 2000, "so does Home")
+        } finally {
+            restore()
+        }
+    }
+
+    // The decoded profile stays in the box after the chart is maximized
+    // and back
+    function test_theDecodeChoiceSurvivesAMaximize() {
+        const page = openFindings()
+        const choice = find(page, "decodeChoice")
+        const obd2 = choice.indexOfValue("obd2")
+        choice.activated(obd2)
+        const info = find(page, "recordingInfo")
+        tryVerify(() => info.visible && info.text.indexOf("values decoded from its frames through obd2") > 0,
+                  10000, "decoded through obd2")
+        compare(choice.currentIndex, obd2)
+        page.toggleMaximized()
+        verify(waitForPolish(page.Window.window), "maximized")
+        page.toggleMaximized()
+        verify(waitForPolish(page.Window.window), "and back")
+        compare(choice.currentIndex, obd2, "the box still reads obd2")
     }
 
     // The first cursor's hint comes once, and the second cursor ends it
@@ -2435,19 +2725,27 @@ profile  raw
     function test_aPhonesAxisStripIsATouchWide() {
         const page = openEarly()
         const chart = panedChart(page)
-        page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
-        const p = chart.drawn.panes[1]
-        const left = chart.drawn.left
-        const wider = Theme.touchTarget > left
-        const x = wider ? (left + Theme.touchTarget) / 2 : left / 2
-        const y = p.top + p.h / 2
+        // The phone's target (48) is what the strip is measured against,
+        // so the form is set before the sums
         Theme.compact = true
         try {
+            verify(waitForPolish(page.Window.window), "laid out as a phone")
+            compare(Theme.touchTarget, 48)
+            page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
+            const p = chart.drawn.panes[1]
+            const left = chart.drawn.left
+            verify(left < Theme.touchTarget, "the captions end before a touch's width: " + left)
+            const x = (left + Theme.touchTarget) / 2
+            const y = p.top + p.h / 2
             compare(page.doubleTapAt(x, y), "axis")
             compare(page.paneRanges["unit %"], undefined)
         } finally {
             Theme.compact = false
         }
+        verify(waitForPolish(page.Window.window), "laid out as a desktop")
+        const left = chart.drawn.left
+        const p = chart.drawn.panes[1]
+        const y = p.top + p.h / 2
         page.setPaneRange("unit %", { vMin: 0, vMax: 10 })
         // On the desktop the strip is the captions alone, so a point past
         // them, and past a touch where that is wider, is the plot
@@ -2724,7 +3022,7 @@ profile  raw
             compare(set.edge.pathElements[0].paths.length, 2 * bands, "trace " + i + "'s band edges")
             compare(set.fill.pathElements[0].paths.length, bands, "trace " + i + "'s band fills")
             if (lines.length > 0) {
-                verify(Qt.colorEqual(set.line.strokeColor, Theme.seriesColor(tr.row)),
+                verify(Qt.colorEqual(set.line.strokeColor, Theme.seriesColor(tr.slot)),
                        "trace " + i + " in its row's color")
                 const drawn = set.line.pathElements[0].paths[0]
                 compare(drawn.length, lines[0].points.length)
@@ -2735,7 +3033,7 @@ profile  raw
             // A trace bands or not by the chart's width when it draws
             if (bands > 0) {
                 const band = tr.pieces.filter(p => p.band)[0]
-                verify(Qt.colorEqual(set.edge.strokeColor, Theme.seriesColor(tr.row)),
+                verify(Qt.colorEqual(set.edge.strokeColor, Theme.seriesColor(tr.slot)),
                        "trace " + i + "'s band edges in its row's color")
                 const edge = set.edge.pathElements[0].paths[0]
                 compare(edge.length, band.top.length)
@@ -2750,6 +3048,330 @@ profile  raw
     // Another recording overlays the first: its signals of the same names
     // dashed beside their rows' own, sharing their scales, aligned on the
     // starts until told otherwise; Stop takes it away
+    // A trace's color follows the order signals are plotted in, not the
+    // signal's row, so signals far apart in the list never share one
+    function test_plottedSignalsNeverShareAColor() {
+        const page = createPage()
+        page.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
+        const rows = find(page, "signalRows")
+        tryVerify(() => rows.visible && rows.count === 4, 10000, "the recording opens")
+        const numbers = [0, 1, 2]   // the fourth row is text
+        verify(numbers.length >= 3, "three numbers to plot")
+        // Every number plotted, a row far from its neighbors included
+        for (const i of numbers) {
+            if (page.plotted[i] !== true)
+                page.togglePlotted(i)
+        }
+        const colors = () => page.series(400).map(t => String(Theme.seriesColor(t.slot)))
+        compare(new Set(colors()).size, numbers.length, "a color each")
+        compare(page.series(400).length, numbers.length)
+    }
+
+    // Unplotting one signal recolors none of the others; plotting it
+    // again takes the lowest free slot
+    function test_aTraceKeepsItsColorWhileItStaysPlotted() {
+        const page = createPage()
+        page.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
+        const rows = find(page, "signalRows")
+        tryVerify(() => rows.visible && rows.count === 4, 10000, "the recording opens")
+        const numbers = [0, 1, 2]   // the fourth row is text
+        for (const i of numbers) {
+            if (page.plotted[i] !== true)
+                page.togglePlotted(i)
+        }
+        const before = {}
+        for (const i of numbers)
+            before[i] = page.slotOf(i)
+        const gone = numbers[0]
+        page.togglePlotted(gone)
+        for (const i of numbers.slice(1))
+            compare(page.slotOf(i), before[i], "signal " + i + " keeps its slot")
+        page.togglePlotted(gone)
+        compare(page.slotOf(gone), before[gone], "the freed slot is taken again")
+    }
+
+    // The slots follow the order of plotting: the first signal ticked
+    // takes the first color whatever its row
+    function test_theColorsFollowTheOrderOfPlotting() {
+        const page = createPage()
+        page.open({ title: "Pull", folder: Harness.recordingFixtures + "/pull-early" })
+        const rows = find(page, "signalRows")
+        tryVerify(() => rows.visible && rows.count === 4, 10000, "the recording opens")
+        for (const i of [0, 1, 2]) {
+            if (page.plotted[i] === true)
+                page.togglePlotted(i)
+        }
+        page.togglePlotted(2)
+        page.togglePlotted(0)
+        page.togglePlotted(1)
+        compare(page.slotOf(2), 0, "the first ticked, the first color")
+        compare(page.slotOf(0), 1)
+        compare(page.slotOf(1), 2)
+        compare(page.series(400).find(t => t.row === 2).slot, 0, "and the chart draws it so")
+    }
+
+    // The Jump row steps between a recording's pulls: the stretch in view
+    // with a margin, the cursor at its start, and where it is said
+    function test_theJumpRowStepsBetweenPulls() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        compare(page.stretchesOf("pull").length, 2)
+        const status = find(page, "jumpStatus")
+        compare(status.text, "2 pulls · No cruise found")
+        verify(!find(page, "jumpPrevious_pull").enabled, "nothing before the view's start")
+        verify(find(page, "jumpNext_pull").enabled)
+
+        find(page, "jumpNext_pull").clicked()
+        compare(page.cursorMs, 18002, "the cursor at the pull's start")
+        verify(page.viewT0 <= 18002 && page.viewT1 >= 22002, "the pull is in view: " + page.viewT0 + " to " + page.viewT1)
+        verify(page.viewT1 - page.viewT0 < 20000, "zoomed to it")
+        compare(status.text, "Pull 1 of 2 · 18.0 s")
+        verify(!find(page, "jumpPrevious_pull").enabled, "no pull before the first")
+
+        find(page, "jumpNext_pull").clicked()
+        compare(page.cursorMs, 31002)
+        compare(status.text, "Pull 2 of 2 · 31.0 s")
+        verify(!find(page, "jumpNext_pull").enabled, "no pull after the last")
+
+        find(page, "jumpPrevious_pull").clicked()
+        compare(page.cursorMs, 18002)
+        compare(status.text, "Pull 1 of 2 · 18.0 s")
+
+        // A cursor moved off the stretch's start puts the counts back
+        page.setCursor(25000)
+        compare(status.text, "2 pulls · No cruise found")
+    }
+
+    // The Stretches panel asks again with its levels, shows core's defaults in
+    // its fields, and goes back to them
+    function test_theStretchesPanelReasksWithItsLevels() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        compare(page.stretchesOf("pull").length, 2)
+        find(page, "jumpStretches").clicked()
+        verify(page.stretchesOpen)
+        verify(waitForPolish(page.Window.window), "laid out")
+        verify(find(page, "stretchesPanel").visible, "the panel is up")
+        verify(find(page, "chartFrame").visible, "the desktop keeps its chart")
+        const rise = find(page, "rule_pullRise")
+        compare(rise.placeholderText, "750", "core's default shows in the field")
+        rise.text = "5000"
+        find(page, "stretchesApply").clicked()
+        verify(page.stretchList === null, "looking again after Apply")
+        compare(find(page, "jumpStatus").text, "Looking for stretches…")
+        tryVerify(() => page.stretchList !== null, 10000, "the new answer")
+        compare(page.stretchesOf("pull").length, 0, "no pull climbs 5000 rpm")
+        compare(find(page, "jumpStatus").text, "No pull found · No cruise found")
+        compare(page.stretchRules.pullRise, 5000)
+        verify(page.stretchesOpen, "the desktop's panel stays up")
+        find(page, "stretchesReset").clicked()
+        compare(rise.text, "", "the field is empty again")
+        tryVerify(() => page.stretchList !== null && page.stretchesOf("pull").length === 2, 10000,
+                  "the defaults find the two again")
+    }
+
+    // A refused level says why under the fields and leaves the earlier answer;
+    // text that is no number is said at once, with no ask
+    function test_aRefusedLevelSaysWhyAndLeavesTheListAlone() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        const problem = find(page, "stretchesProblem")
+        verify(!problem.visible, "no words before a refusal")
+        find(page, "rule_pullLevel").text = "150"
+        find(page, "stretchesApply").clicked()
+        compare(problem.text, "Pull level must be a number from 0 to 100")
+        verify(problem.visible)
+        compare(page.stretchesOf("pull").length, 2, "the earlier answer stands")
+        compare(page.stretchRules.pullLevel, undefined, "and nothing was kept")
+        find(page, "rule_pullLevel").text = ""
+        find(page, "rule_pullRise").text = "abc"
+        find(page, "stretchesApply").clicked()
+        compare(problem.text, "Engine speed rises must be a number")
+        verify(page.stretchList !== null, "no ask was made")
+    }
+
+    // A stored level that is none today reads as the defaults, the words
+    // shown, never a refused ask on open
+    function test_aStoredLevelThatIsNoneTodayReadsAsTheDefaults() {
+        setStoredRules("{\"pullLevel\": 500}")
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        compare(page.stretchesOf("pull").length, 2, "the defaults found them")
+        verify(!page.stretchFailed, "not a failed read")
+        compare(page.rulesProblem, "Pull level must be a number from 0 to 100")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        compare(find(page, "stretchesProblem").text, "Pull level must be a number from 0 to 100")
+        setStoredRules("not json")
+        compare(page.readRules("not json").pullLevel, undefined, "damaged text is no levels")
+    }
+
+    // The compared recording's pulls are counted by the same levels
+    function test_theComparedRecordingTakesTheSameLevels() {
+        const page = createPage()
+        page.recordings = [twiceRow, earlyRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        find(page, "jumpStretches").clicked()
+        find(page, "rule_pullRise").text = "5000"
+        find(page, "stretchesApply").clicked()
+        tryVerify(() => page.stretchList !== null, 10000, "the new answer")
+        page.compareWith(earlyRow)
+        page.setAlignOn("pull")
+        tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
+        compare(page.pullsHere.length, 0, "none here under that rise")
+        compare(page.pullsThere.length, 0, "and none there: one rule for both")
+    }
+
+    // The defaults a bad stored level fell back to are the compared
+    // recording's too: its ask is never the refused one
+    function test_aBadStoredLevelDoesNotRefuseTheComparedRecordingsAsk() {
+        setStoredRules("{\"pullLevel\": 500}")
+        const page = createPage()
+        page.recordings = [twiceRow, earlyRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        page.compareWith(earlyRow)
+        page.setAlignOn("pull")
+        tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
+        compare(page.pullsHere.length, 2)
+        compare(page.pullsThere.length, 1, "asked under the defaults")
+    }
+
+    // Each open starts the colors over: a recording's slots are the order it
+    // is plotted in, never the history of the one before
+    function test_aRecordingsColorsStartOverAtEachOpen() {
+        const page = createPage()
+        page.recordings = [twiceRow, earlyRow]
+        openRow(page, twiceRow)
+        for (const i of [0, 1, 2]) {
+            if (page.plotted[i] === true)
+                page.togglePlotted(i)
+        }
+        page.togglePlotted(2)
+        page.togglePlotted(0)
+        page.togglePlotted(1)
+        compare(page.slotOf(2), 0, "the first recording's order")
+        page.backToList()
+        page.recordings = [twiceRow, earlyRow]
+        openRow(page, earlyRow)
+        const plotted = [0, 1, 2].filter(i => page.plotted[i] === true)
+        verify(plotted.length >= 2, "the second recording plots some numbers")
+        for (let k = 0; k < plotted.length; ++k)
+            compare(page.slotOf(plotted[k]), k, "the lowest slots, in order")
+    }
+
+    // A refused Apply leaves the levels in force as they were, and the
+    // compared recording is asked with those, not with the defaults
+    function test_aRefusedApplyLeavesTheComparedRecordingsLevelsAlone() {
+        const page = createPage()
+        page.recordings = [twiceRow, earlyRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        page.applyStretchRules({ pullRise: 5000 })
+        tryVerify(() => page.stretchList !== null, 10000, "the new answer")
+        page.applyStretchRules({ pullLevel: 150 })
+        verify(page.rulesProblem !== "", "the refusal is said")
+        page.compareWith(earlyRow)
+        page.setAlignOn("pull")
+        tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
+        compare(page.pullsHere.length, 0, "here by the levels in force")
+        compare(page.pullsThere.length, 0, "and there by the same")
+    }
+
+    // The levels are typed in display units: a change of units asks again,
+    // here and there, reading the same numbers in the other unit
+    function test_aChangeOfUnitsAsksTheStretchesAgain() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        // 700 is a floor in km/h, and more than a mile an hour can be in mph
+        page.applyStretchRules({ cruiseFloor: 700 })
+        tryVerify(() => page.stretchList !== null, 10000, "the new answer")
+        compare(page.rulesProblem, "")
+        compare(page.stretchUnits, 0)
+        Bridge.unitSystem = 1
+        tryVerify(() => page.stretchUnits === 1, 5000, "asked again in the other unit")
+        tryVerify(() => page.stretchList !== null, 10000, "and answered")
+        verify(page.rulesProblem.indexOf("621 mph") >= 0, "700 is no floor in mph: " + page.rulesProblem)
+        compare(page.stretchesOf("pull").length, 2, "the defaults found them")
+        Bridge.unitSystem = 0
+        tryVerify(() => page.stretchUnits === 0, 5000, "and back")
+    }
+
+    // A phone's panel stands in the chart's place, and Apply returns to it
+    function test_aPhonesStretchesPanelTakesTheChartsPlaceUntilApplied() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        Theme.compact = true
+        try {
+            page.width = 384
+            page.height = 832
+            find(page, "jumpStretches").clicked()
+            verify(waitForPolish(page.Window.window), "laid out")
+            verify(find(page, "stretchesPanel").visible, "the panel is up")
+            verify(!find(page, "chartFrame").visible, "in the chart's place")
+            find(page, "rule_pullRise").text = "5000"
+            find(page, "stretchesApply").clicked()
+            verify(!page.stretchesOpen, "Apply goes back")
+            verify(waitForPolish(page.Window.window), "laid out")
+            verify(find(page, "chartFrame").visible, "to the chart")
+        } finally {
+            Theme.compact = false
+            page.width = 900
+            page.height = 900
+        }
+    }
+
+    // A kind with none is said so, and its buttons are off; a failed pass
+    // is never "none found"
+    function test_aKindWithNoStretchIsSaidSoAndAFailedPassIsNot() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        verify(!find(page, "jumpPrevious_cruise").enabled)
+        verify(!find(page, "jumpNext_cruise").enabled)
+        verify(find(page, "jumpStatus").text.indexOf("No cruise found") >= 0)
+        page.stretchFailed = true
+        compare(find(page, "jumpStatus").text, "Its stretches couldn't be read")
+        page.stretchFailed = false
+        page.stretchList = null
+        compare(find(page, "jumpStatus").text, "Looking for stretches…")
+    }
+
+    // The bands come and go with the switch, and a new open asks again
+    function test_theBandsFollowTheSwitchAndAReopenAsksAgain() {
+        const page = createPage()
+        page.recordings = [twiceRow, earlyRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        verify(page.bandsShown)
+        find(page, "jumpBands").toggled()
+        verify(!page.bandsShown, "switched off")
+        find(page, "jumpBands").toggled()
+        verify(page.bandsShown, "and on")
+        page.backToList()
+        verify(page.stretchList === null, "the list is the open's")
+        page.recordings = [twiceRow, earlyRow]
+        openRow(page, earlyRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the next recording's arrive")
+        compare(page.stretchesOf("pull").length, 1)
+    }
+
     function test_aComparedRecordingIsDrawnDashed() {
         const page = openEarly()
         const choice = find(page, "compareChoice")
@@ -2867,6 +3489,7 @@ profile  raw
         compare(page.alignOn, "pull")
         tryVerify(() => page.pullsHere !== null && page.pullsThere !== null, 10000, "the pulls arrive")
         compare(page.pullsHere.length, 2, "the stab and the part throttle are no pulls")
+        verify(page.stretchList !== null, "the Jump row's list arrived with it")
         compare(page.pullsThere.length, 1)
         verify(here.visible && there.visible)
         compare(here.count, 2)

@@ -242,6 +242,19 @@ TEST(BridgeTest, GaugeSignalsNameBoostOnTheMockAndObd2)
               QString("id:%1").arg(ECUIO_OBD2_SIG_BOOST_ID));
 }
 
+/* The built-in Lambda cell reads the demo's lambda or obd2's commanded one
+ * (PID 44 field 0): the cell's description says "commanded" */
+TEST(BridgeTest, GaugeSignalsNameLambdaOnTheMockAndObd2sCommandedOne)
+{
+    SessionBridge bridge;
+    const QVariantList lambda = bridge.gaugeSignals().value("lambda").toList();
+    ASSERT_EQ(lambda.size(), 2);
+    EXPECT_EQ(lambda[0].toString(),
+              QString("id:%1").arg(ECUIO_MOCK_SIG_LAMBDA_ID));
+    EXPECT_EQ(lambda[1].toString(),
+              QString("id:%1").arg(ECUIO_OBD2_PID_SIG_ID(0x44, 0)));
+}
+
 TEST(BridgeTest, InvalidUriReturnsError)
 {
     SessionBridge bridge;
@@ -5004,12 +5017,15 @@ TEST(BridgeTest, LiveHidesTheFieldsCoreReportsAbsent)
     int unsupported = 0;
     for (int r = 0; r < rows; ++r) {
         const ecuio_signal_def_t& d = ecuio_obd2_signal_set()->defs[r];
+        /* Boost, the set's computed def, reads MAP (0B), which this car
+         * lacks: it is unsupported with it */
         const unsigned pid = (d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0
-                                 ? 0x100u
+                                 ? 0x0Bu
                                  : d.mux_key & 0xFFu;
         unsupported += (pid <= 0x20 && pid != 0x0C) ? 1 : 0;
     }
     ASSERT_GT(unsupported, 0);
+    EXPECT_TRUE(hidden(obd2RowOf(ECUIO_OBD2_SIG_BOOST_ID)));
     EXPECT_TRUE(hidden(b3)) << "still absent after the support's judgment";
     EXPECT_EQ(model.hiddenCount(), unsupported + 1);
 
@@ -6572,6 +6588,54 @@ TEST(BridgeTest, ReplayUriForTakesTheRecordedProfile)
         << "did= only under uds-generic, which core insists on";
     EXPECT_EQ(r("mock://demo?profile=raw&profile=obd2"), base + "obd2")
         << "the last profile= wins, as in core";
+}
+
+/* A row says how long it is, whether it is a log of chosen signals or a
+ * whole session, its signal count and its marks */
+TEST(BridgeTest, ARecordingsRowSaysItsLengthKindSignalsAndMarks)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const auto make = [&root](const char* name, bool log, int marks) {
+        const QString dir =
+            root.path() + QLatin1Char('/') + QString::fromUtf8(name);
+        ASSERT_TRUE(QDir().mkpath(dir));
+        QFile frames(dir + QStringLiteral("/frames.csv"));
+        ASSERT_TRUE(frames.open(QIODevice::WriteOnly));
+        QFile events(dir + QStringLiteral("/events.log"));
+        ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+        events.write("ecuio session recording, format 2\n"
+                     "uri  mock://demo\n"
+                     "signal  A,number,km/h,1,1,1\n"
+                     "signal  B,number,%,1,2,2\n");
+        if (log) {
+            events.write("focus  A,B\n");
+        }
+        events.write("columns  local time, seconds\n\n"
+                     "09:00:25.000  +25.500  end  x\n");
+        if (marks > 0) {
+            QFile m(dir + QStringLiteral("/markers.csv"));
+            ASSERT_TRUE(m.open(QIODevice::WriteOnly));
+            m.write("host_us,label\n");
+            for (int i = 0; i < marks; ++i) {
+                m.write("1000,m\n");
+            }
+        }
+    };
+    make("20261110-090000", true, 0);
+    make("20261111-090000", false, 2);
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    const QVariantList rows = bridge.recentRecordings(10);
+    ASSERT_EQ(rows.size(), 2);
+    const QVariantMap session = rows.at(0).toMap();
+    const QVariantMap log = rows.at(1).toMap();
+    EXPECT_EQ(session.value(QStringLiteral("durationMs")).toLongLong(), 25500);
+    EXPECT_EQ(session.value(QStringLiteral("signals")).toInt(), 2);
+    EXPECT_FALSE(session.value(QStringLiteral("log")).toBool());
+    EXPECT_EQ(session.value(QStringLiteral("marks")).toInt(), 2);
+    EXPECT_TRUE(log.value(QStringLiteral("log")).toBool());
+    EXPECT_EQ(log.value(QStringLiteral("marks")).toInt(), 0);
 }
 
 TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
@@ -9234,6 +9298,97 @@ TEST(BridgeTest, ASignalFilesRowsAreReferencedByTheirKeys)
     bridge.useSignalFiles({});
 }
 
+/* The mock sends no Service 01 value, and says so: under a signal file
+ * that extends obd2, obd2's rows, the file's own PID and what is computed
+ * from a PID are hidden as not sent by the ECU (ADR-0039 section 6), so a
+ * Dashboard cell reads "not sent by this ECU", never "waiting for data"
+ * for good; the file's DID, which the mock answers, and what is computed
+ * from it have values. The ECU's line is logged once. */
+TEST(BridgeTest, TheMockDisclaimsThePidsItNeverSends)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QByteArray file(
+        R"({"havne_signals":1,"name":"Disclaimed","source":{"name":"t"},)"
+        R"("extends":"obd2","ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+        R"({"key":"did","name":"Own DID","read":{"service":"22","number":"D100"},)"
+        R"("field":{"byte":0,"bits":8}},)"
+        R"({"key":"pid","name":"Own PID","read":{"service":"01","number":"06"},)"
+        R"("field":{"byte":0,"bits":8}},)"
+        R"({"key":"of_did","name":"Of DID","kind":"computed","expr":"did * 2"},)"
+        R"({"key":"of_pid","name":"Of PID","kind":"computed","expr":"pid * 2"}]})");
+    const QString profile = useFile(bridge, from.path(), file);
+    ASSERT_FALSE(profile.isEmpty());
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://demo?profile=") + profile)
+            .isEmpty());
+    SignalListModel* model = bridge.signalModel();
+    ASSERT_TRUE(spinUntil([&] { return model->hiddenCount() > 0; }, 3000));
+    ASSERT_TRUE(spinUntil(
+        [&] {
+            return rowNamed(modelRows(bridge), QStringLiteral("Of DID"))
+                .value(QStringLiteral("hasValue"))
+                .toBool();
+        },
+        3000));
+
+    const QVariantList rows = modelRows(bridge);
+    const auto hidden = [&rows](const char* name) {
+        const QVariantMap row = rowNamed(rows, QString::fromLatin1(name));
+        EXPECT_FALSE(row.isEmpty()) << name;
+        return row.value(QStringLiteral("hidden")).toBool();
+    };
+    const auto hasValue = [&rows](const char* name) {
+        return rowNamed(rows, QString::fromLatin1(name))
+            .value(QStringLiteral("hasValue"))
+            .toBool();
+    };
+    EXPECT_FALSE(hidden("Own DID"));
+    EXPECT_TRUE(hasValue("Own DID"));
+    EXPECT_FALSE(hidden("Of DID"));
+    EXPECT_TRUE(hidden("Own PID"));
+    EXPECT_FALSE(hasValue("Own PID"));
+    EXPECT_TRUE(hidden("Of PID")) << "computed from a PID the ECU lacks";
+    EXPECT_FALSE(hasValue("Of PID"));
+    EXPECT_TRUE(hidden("RPM")) << "obd2's";
+    EXPECT_TRUE(hidden("Boost")) << "obd2's computed signal";
+
+    // Every row but the file's DID and what it feeds: obd2's are refs by
+    // ID, the file's own by key
+    int byId = 0;
+    for (const QString& ref : refsOf(rows)) {
+        byId += ref.startsWith(QStringLiteral("id:")) ? 1 : 0;
+    }
+    ASSERT_GT(byId, 100);
+    EXPECT_EQ(model->hiddenCount(), byId + 2);
+    EXPECT_EQ(bridge.liveSignalModel()->rowCount(), 2) << "Live lists the rest";
+
+    spinLoop(300);
+    const QStringList ecu = log.filter(QStringLiteral("ECU 0x7E8: supports "));
+    ASSERT_EQ(ecu.size(), 1) << log.join(QLatin1Char('\n')).toStdString();
+    EXPECT_TRUE(
+        ecu.first().startsWith(QStringLiteral("ECU 0x7E8: supports 0 PIDs; ")))
+        << ecu.first().toStdString();
+    EXPECT_TRUE(
+        ecu.first().contains(QStringLiteral("(not in its supported PIDs)")))
+        << ecu.first().toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    // The mock's own profile: nothing hidden, no ECU line
+    log.clear();
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
+    spinLoop(400);
+    EXPECT_EQ(model->hiddenCount(), 0);
+    EXPECT_TRUE(log.filter(QStringLiteral("ECU 0x7E8: supports ")).isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    bridge.useSignalFiles({});
+}
+
 /* A plugin variant's rows have refs, its file being the plugin
  * store's, in profileSignals and in a session's model alike */
 TEST(BridgeTest, APluginVariantsRowsHaveRefs)
@@ -11634,6 +11789,23 @@ TEST(BridgeTest, WindowThemeAppliesOncePerChangeOfEachColor)
     EXPECT_EQ(applied, 2);
     theme.setText(Qt::blue);
     EXPECT_EQ(applied, 3);
+}
+
+// The scheme apply() asks for follows the look's lightness each way, and
+// the first apply (at construction) asks too. The offscreen platform
+// reports Unknown whatever is asked, so the QML case that reads the
+// platform's scheme skips there: this is what pins the choice
+TEST(BridgeTest, WindowThemeAsksTheSchemeOfTheLookEachWay)
+{
+    FakeTheme theme; // black: a dark look
+    WindowTheme follower(&theme, nullptr);
+    EXPECT_EQ(follower.askedScheme(), Qt::ColorScheme::Dark);
+    theme.setBg(QColor(QLatin1String("#f3f3f1")));
+    EXPECT_EQ(follower.askedScheme(), Qt::ColorScheme::Light);
+    theme.setBg(QColor(QLatin1String("#0d0a07"))); // Night amber
+    EXPECT_EQ(follower.askedScheme(), Qt::ColorScheme::Dark);
+    theme.setBg(QColor(QLatin1String("#ffffff")));
+    EXPECT_EQ(follower.askedScheme(), Qt::ColorScheme::Light);
 }
 
 // A light look's page gets dark bar icons and the Light scheme; Dark and

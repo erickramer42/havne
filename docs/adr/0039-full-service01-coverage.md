@@ -469,3 +469,49 @@ Considered beside Appendix A, none decided:
   It couples the engine to the UI, and a recording wants every signal
   at a known pace whatever the screen shows. Not planned.
 - **Rate classes per def in the ABI** (section 3), for outside profiles.
+
+## Appendix C: what is never sent, said (2026-11-12)
+
+Section 6's list was the Service 01 signals an ECU's bitmaps leave out.
+Two cases left a row waiting for a value that could not come.
+
+**A computed signal follows its inputs.** A computed def has no PID, so
+no bitmap judged it: on a car without the barometric pressure PID,
+`obd2`'s Boost stayed in Live and on the Dashboard with no value. A
+computed def is listed with an input: `ecuio_session_get_unsupported_signals`
+lists it when an input is listed, and `ecuio_session_get_absent_signals`
+when an input is absent. An input that is computed itself is judged by
+its own inputs, eight levels deep at most, so programs that name each
+other end. An input nothing judges (a channel that has learned nothing,
+another ECU's report, a range never answered) lists nothing. The rule
+is `ecuio_computed_input_gone` in `core/src/pid_support.h`. A refused
+input (a negative reply, section 6's refused rows) is not followed: its
+row says so itself, and what reads it still waits.
+
+**The mock answers the probe.** `mock://` sends its own frame and
+answers each `62 <DID>` def of the session's set; it sends no Service
+01 value. Under `obd2`, or a signal file or plugin that extends it,
+every PID's row waited for good. At attach, when the set has a def keyed
+`41 <PID>`, the simulated ECU is walked as a real one is (an engine of
+attach's own, the bitmaps `01 00` to `01 E0`, each listing the next and
+no data PID), and channel 0's support report is published before the
+session is handed out: complete, every range answered, no PID
+supported, each Service 01 request dropped by its bitmap. Core then
+lists those signals, and what is computed from them, as section 6
+lists a car's; Live leaves them out and a Dashboard cell reads "not
+sent by this ECU". A profile with no such def (the mock's own, `raw`,
+`uds-generic`) learns nothing. The diagnostics' own asks (`01 01`,
+`01 41`, a clear's `01 0C` and `01 0D`) read the simulated ECU, not the
+stream, and are answered whatever the bitmaps list.
+
+A limit kept: the mock declares one channel, 0x7E8, and a report
+judges the defs of its own receive ID, so a file's `41 <PID>` signal
+on another ECU still waits. The closer is the mock declaring the set's
+channels.
+
+Tests: `PidSupportTest.AComputedSignalFollowsItsInputs`,
+`CoreTest.TheMockDisclaimsTheService01SignalsItNeverSends`,
+`.TheMockDisclaimsNothingUnderAProfileWithNoPids`,
+`.AComputedSignalWithAnAbsentInputIsAbsentToo`,
+`BridgeTest.TheMockDisclaimsThePidsItNeverSends`, and `QmlTest.dashboard`'s
+`test_theMocksGaugesSayWhatItNeverSends`.

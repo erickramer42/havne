@@ -35,6 +35,9 @@ Canvas {
     property var drawn: null
     // A page's marks, drawn over the traces: decorate(ctx, layout)
     property var decorate: null
+    // A page's marks drawn under the traces, after the grid: a band's fill
+    // (a translucent fill over a trace would shift its color)
+    property var decorateBelow: null
     // What drawing has cost since the page last zeroed them: paints, and
     // their total and longest time in ms (onPaint's own, to the ms)
     property int paints: 0
@@ -139,8 +142,8 @@ Canvas {
         for (let i = 0; i < traces.length; ++i) {
             const tr = traces[i]
             const set = pathsFor(i)
-            const color = Theme.seriesColor(tr.row)
-            const dash = tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.row)
+            const color = Theme.seriesColor(tr.slot)
+            const dash = tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.slot)
             const lines = [], fills = [], edges = []
             for (const piece of tr.pieces) {
                 if (!piece.band) {
@@ -289,6 +292,9 @@ Canvas {
             ctx.stroke()
         }
 
+        if (chart.decorateBelow)
+            chart.decorateBelow(ctx, l)
+
         // Captions under the time ticks; each pane's name at its axis's
         // top and its value captions right-aligned against the plot
         ctx.fillStyle = Theme.textDim
@@ -324,9 +330,9 @@ Canvas {
         ctx.textBaseline = "middle"
         for (const tr of l.traces) {
             if (!tr.labeled) continue   // no room: its row shows the value
-            const c = Theme.seriesColor(tr.row)
+            const c = Theme.seriesColor(tr.slot)
             ctx.strokeStyle = c
-            ctx.setLineDash(tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.row))
+            ctx.setLineDash(tr.dash !== undefined ? tr.dash : Theme.seriesDash(tr.slot))
             ctx.beginPath()
             ctx.moveTo(l.labelX, tr.labelY)
             ctx.lineTo(l.labelX + ChartLayout.swatchW, tr.labelY)

@@ -1631,6 +1631,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
                 TIMEOUT 180
             )
         else()
+            # The shares are read from the file: an edit configures again,
+            # or a case added to it would be in no share and never run
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                         ${_qml_test})
             file(STRINGS ${_qml_test} _qml_title REGEX "^    name: \"")
             string(REGEX REPLACE "^.*\"(.*)\".*$" "\\1" _qml_title "${_qml_title}")
             file(STRINGS ${_qml_test} _qml_cases

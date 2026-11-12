@@ -578,6 +578,18 @@ TestCase {
         verify(l.ticks[0].captioned)
     }
 
+    // A cursor's time tag sits on the caption row: the captions it would
+    // cover are left out, the others stay
+    function test_aCursorsTagCoversTheCaptionsUnderIt() {
+        const over = { span: { t0: 12000, t1: 42000 }, absolute: true }
+        const plain = layout([columns(0, [1, 2, 3], [1, 2, 3])], over)
+        over.tags = [{ ms: 20000, width: 40 }]
+        const l = layout([columns(0, [1, 2, 3], [1, 2, 3])], over)
+        const hidden = l.ticks.filter(t => !t.captioned).map(t => t.seconds)
+        compare(plain.ticks.filter(t => !t.captioned).length, 0, "all captioned without a tag")
+        compare(hidden.join(","), "20", "only the tick under the tag, and no other")
+    }
+
     // An axis aligned on another recording starts before zero: its ticks
     // run through zero on the same steps, with room for the caption at
     // either end (here the one before zero is the wider: 10 s steps, where
@@ -666,7 +678,8 @@ TestCase {
             compare(l.panes[i].axis, true, "pane " + i)
         const mixed = l.panes[data.max - 1]
         compare(mixed.axis, false)
-        compare(mixed.label, "mixed")
+        compare(mixed.label, list.slice(data.axes).map(t => t.unit).join(" · "),
+                "the folded units, joined")
         compare(mixed.ticks.length, 0)
         for (let r = data.axes; r < list.length; ++r)
             compare(inPane(l, r), data.max - 1, "row " + r + " folded")

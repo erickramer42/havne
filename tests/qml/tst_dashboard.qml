@@ -267,6 +267,19 @@ TestCase {
         }
     }
 
+    // The mock sends no Service 01 value and says so (ADR-0039 section
+    // 6): under obd2 each built-in gauge reads "not sent by this ECU"
+    // within a tick, never "waiting for data" for good
+    function test_theMocksGaugesSayWhatItNeverSends() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        const all = gauges(page)
+        connect("mock://demo?profile=obd2")
+        for (const label in gaugeSignals) {
+            tryCompare(all[label], "note", "not sent by this ECU", 3000, label)
+            compare(all[label].hasValue, false, label)
+        }
+    }
+
     // A set registered with no signal file (the mock's, copied and
     // renamed) has no refs (ADR-0057): its rows show in Live, but no
     // gauge binds them, though they carry the mock's IDs

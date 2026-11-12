@@ -724,6 +724,77 @@ TestCase {
         }
     }
 
+    // The Jump row stands under the chart on a phone, its buttons a touch's
+    // size and inside the width at 384 and 320 px
+    function test_theJumpRowFitsAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theJumpRowFitsAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "obd2" })
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const row = find(page, "jumpRow")
+        verify(row.visible, "the Jump row is shown")
+        const chartBottom = find(page, "chartFrame").mapToItem(main.contentItem, 0, find(page, "chartFrame").height).y
+        const rowTop = row.mapToItem(main.contentItem, 0, 0).y
+        verify(rowTop >= chartBottom - 0.5, "under the chart: " + rowTop + " from " + chartBottom)
+        for (const name of ["jumpPrevious_pull", "jumpNext_pull", "jumpPrevious_cruise", "jumpStretches",
+                            "jumpNext_cruise"]) {
+            const item = find(page, name)
+            const top = item.mapToItem(main.contentItem, 0, 0).y
+            const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+            verify(bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+            const right = item.mapToItem(main.contentItem, item.width, 0).x
+            verify(right <= main.contentItem.width + 0.5, name + " ends at " + right)
+        }
+        const status = find(page, "jumpStatus")
+        const edge = status.mapToItem(main.contentItem, status.width, 0).x
+        verify(edge <= main.contentItem.width + 0.5, "the status ends at " + edge)
+    }
+
+    // The Stretches panel in the chart's place on a phone: its buttons a
+    // touch's size, every field inside the width at 384 and 320 px
+    function test_theStretchesPanelFitsAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theStretchesPanelFitsAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "obd2" })
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(main), "laid out")
+        verify(find(page, "stretchesPanel").visible, "the panel is up")
+        verify(!find(page, "chartFrame").visible, "in the chart's place")
+        for (const name of ["stretchesApply", "stretchesReset", "stretchesClose", "rule_pullLevel",
+                            "rule_pullRise"]) {
+            const item = find(page, name)
+            const top = item.mapToItem(main.contentItem, 0, 0).y
+            const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+            verify(bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+            const right = item.mapToItem(main.contentItem, item.width, 0).x
+            verify(right <= main.contentItem.width + 0.5, name + " ends at " + right)
+        }
+        const panel = find(page, "stretchesPanel")
+        const bottom = panel.mapToItem(main.contentItem, 0, panel.height).y
+        verify(bottom <= main.contentItem.height + 0.5, "the panel ends at " + bottom)
+    }
+
     // A recording folder of number signals (twelve unless given), three
     // samples each
     function wideRecording(name, count) {
