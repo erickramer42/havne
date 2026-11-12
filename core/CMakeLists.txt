@@ -32,6 +32,7 @@ add_library(ecuio-core STATIC
     src/socketcan_transport.cpp
     src/signals.cpp
     src/signal_file.cpp
+    src/condition_file.cpp
     src/plugin.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp
@@ -47,6 +48,7 @@ add_library(ecuio-core STATIC
 # install. A new public header joins it; internal.h, signal_sets.h,
 # j2534_surrogate.h, j2534_ptypes.h and surrogate_protocol.h never do.
 set(ECUIO_PUBLIC_HEADERS
+    include/ecuio/conditions.h
     include/ecuio/core.h
     include/ecuio/j2534.h
     include/ecuio/obdb.h

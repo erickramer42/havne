@@ -3,7 +3,7 @@
 #
 #   python tests/schema_keys.py <source dir>
 #
-# Keeps schema/ in step with core's loaders (ADR-0051, ADR-0052): every
+# Keeps schema/ in step with core's loaders (ADR-0051, ADR-0052, ADR-0063): every
 # only_keys(<object>, {<keys>}, <context>) call in the loaders is mapped
 # below to the schema object it checks, and that object's properties are
 # exactly those keys plus "notes", with "^x-" free and nothing else
@@ -18,8 +18,8 @@ import os
 import re
 import sys
 
-LOADERS = ("core/src/signal_file.cpp", "core/src/plugin.cpp")
-SCHEMAS = ("signal-file", "plugin-manifest", "plugin-fixtures")
+LOADERS = ("core/src/signal_file.cpp", "core/src/plugin.cpp", "core/src/condition_file.cpp")
+SCHEMAS = ("signal-file", "plugin-manifest", "plugin-fixtures", "condition-file")
 
 # (loader, the call's context argument as written, its place among the
 # calls with that context in that file, from 1) -> (schema, JSON pointer)
@@ -45,6 +45,16 @@ CALLS = {
     ("plugin.cpp", '"a data file"', 1): ("plugin-manifest", "/$defs/dataFile"),
     ("plugin.cpp", '"a fixture file"', 1): ("plugin-fixtures", ""),
     ("plugin.cpp", '"a value fixture"', 1): ("plugin-fixtures", "/$defs/value"),
+    ("condition_file.cpp", '"the file"', 1): ("condition-file", ""),
+    ("condition_file.cpp", '"\\"checks\\""', 1): ("condition-file", "/$defs/checks"),
+    # read_signal_term, then read_term's link and check, then read_condition
+    ("condition_file.cpp", "what", 1): ("condition-file", "/$defs/signalTerm"),
+    ("condition_file.cpp", "what", 2): ("condition-file", "/$defs/linkTerm"),
+    ("condition_file.cpp", "what", 3): ("condition-file", "/$defs/checkTerm"),
+    ("condition_file.cpp", "what", 4): ("condition-file", "/$defs/condition"),
+    ("condition_file.cpp", "w", 1): ("condition-file", "/$defs/join"),
+    ("condition_file.cpp", "a", 1): ("condition-file", "/$defs/alert"),
+    ("condition_file.cpp", "r", 1): ("condition-file", "/$defs/record"),
 }
 
 # (source, a pattern whose group 1 is one word of the list) -> (schema,
@@ -60,6 +70,17 @@ WORDS = [
      ("signal-file", "/$defs/extends/enum")),
     ("core/src/plugin.cpp", r't\.text != "([a-z]+)"',
      ("plugin-manifest", "/properties/tiers/items/const")),
+]
+
+# (source, a pattern whose group 1 is a list's whole body, its words the
+# strings in it) -> (schema, pointer to the enum that spells it)
+LISTS = [
+    ("core/src/condition_file.cpp", r"kLinkWords\[\] = \{(.*?)\};",
+     ("condition-file", "/$defs/linkTerm/properties/link/enum")),
+    ("core/src/condition_file.cpp", r"kCheckWords\[\] = \{(.*?)\};",
+     ("condition-file", "/$defs/checkTerm/properties/check/enum")),
+    ("core/src/condition_file.cpp", r"kLevelWords\[\] = \{(.*?)\};",
+     ("condition-file", "/$defs/alert/properties/level/enum")),
 ]
 
 
@@ -234,6 +255,17 @@ def main():
         elif have != spelled:
             failures.append(f"{src}'s {sorted(have)} vs {schema}.schema.json#"
                             f"{ptr}'s {sorted(spelled)}")
+    for src, pattern, (schema, ptr) in LISTS:
+        with open(os.path.join(root, src), encoding="utf-8") as f:
+            body = re.search(pattern, strip_comments(f.read()), re.S)
+        have = re.findall(r'"([^"]*)"', body.group(1)) if body else []
+        spelled = pointer(schemas[schema], ptr)
+        if not have:
+            failures.append(f"{src}: nothing matches {pattern}: the loader "
+                            f"moved, so find its list again")
+        elif have != spelled:
+            failures.append(f"{src}'s {have} vs {schema}.schema.json#"
+                            f"{ptr}'s {spelled}")
     spelled = set(pointer(schemas["signal-file"], "/$defs/group/enum"))
     if not groups or set(groups) != spelled:
         failures.append(f"core/src/signals.cpp's groups {groups} vs "
@@ -244,7 +276,7 @@ def main():
     if failures:
         return 1
     print(f"ok  {len(calls)} only_keys calls, each its schema object's keys; "
-          f"{len(words) + 1} word lists")
+          f"{len(words) + len(LISTS) + 1} word lists")
     return 0
 
 

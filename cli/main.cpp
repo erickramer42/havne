@@ -12,6 +12,7 @@
 
 #include "can_line.h"
 #include "clear_run.h"
+#include "condition_lines.h"
 #include "diagnostics_line.h"
 #include "elm327_listener.h"
 #include "frames_lines.h"
@@ -1275,6 +1276,87 @@ int run_signals_check(const char* path)
     return ended(out, kExitOk);
 }
 
+// conditions check <file> [--signals <file> | --profile <name>] (ADR-0063
+// section 10): what the loader read, or why it refused the file, and with
+// a set of signals how each condition's references meet it. start,
+// condition_set, a condition_def line each; a file refused or unread, a
+// signal file likewise or a profile not registered: start and an error
+// line, exit 3. No end line (a list, as signals check's)
+int run_conditions_check(const cli::ConditionsCheckArgs& args)
+{
+    Output out;
+    write_start(out);
+    std::string why;
+    std::string bytes;
+    if (!read_whole(args.file, ECUIO_CONDITION_FILE_MAX_BYTES, "condition file",
+                    &bytes, &why)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    ecuio_condition_set_t* set = nullptr;
+    ecuio_status_t st =
+        ecuio_condition_set_load(bytes.data(), bytes.size(), &set);
+    if (st != ECUIO_OK) {
+        write_error(out, st);
+        out.flush();
+        return kExitConnect;
+    }
+    ecuio_signal_file_t* file = nullptr;
+    const ecuio_signal_set_t* signals = nullptr;
+    const char* against = nullptr;
+    if (args.signals != nullptr) {
+        st = load_signal_file(args.signals, &file, &why);
+        if (st == ECUIO_OK) {
+            signals = ecuio_signal_file_set(file);
+            against = ecuio_signal_file_profile(file);
+        }
+    } else if (args.profile != nullptr) {
+        st = ecuio_profile_lookup(args.profile, &signals);
+        why = std::string("no profile is named '") + args.profile + "'";
+        against = args.profile;
+    }
+    if (st != ECUIO_OK) {
+        write_error(out, st, why.c_str());
+        ecuio_condition_set_free(set);
+        out.flush();
+        return kExitConnect;
+    }
+    ecuio_check_options_t checks;
+    std::memset(&checks, 0, sizeof checks);
+    ecuio_condition_set_checks(set, &checks);
+    const char* name = ecuio_condition_set_name(set);
+    const uint32_t count = ecuio_condition_set_count(set);
+    {
+        BigLine b(512 + cli::Line::string_bytes(name) +
+                  (against != nullptr ? cli::Line::string_bytes(against) : 0));
+        cli::condition_set_line(b.line, name, count, checks, against);
+        write_line(out, b.line);
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        ecuio_condition_info_t info;
+        ecuio_condition_term_t terms[ECUIO_CONDITION_MAX_TERMS];
+        ecuio_condition_binding_t binding;
+        if (ecuio_condition_set_get(set, i, &info) != ECUIO_OK) {
+            continue;
+        }
+        for (uint32_t k = 0;
+             k < info.term_count && k < ECUIO_CONDITION_MAX_TERMS; ++k) {
+            ecuio_condition_set_get_term(set, i, k, &terms[k]);
+        }
+        const bool bound = against != nullptr &&
+                           ecuio_condition_set_resolve(set, i, signals, file,
+                                                       &binding) == ECUIO_OK;
+        BigLine b(cli::condition_def_bytes(info));
+        cli::condition_def_line(b.line, info, terms, bound ? &binding : nullptr,
+                                signals);
+        write_line(out, b.line);
+    }
+    ecuio_signal_file_free(file);
+    ecuio_condition_set_free(set);
+    return ended(out, kExitOk);
+}
+
 // A plugin loaded for the process's life (stream --plugin, sim --plugin):
 // its profiles keep their sets, and a session's close can outlive the
 // command's return, so it is never freed, as g_signal_file isn't
@@ -2068,6 +2150,8 @@ void usage(FILE* to)
         "       havne-cli signals check <file>\n"
         "       havne-cli signals import obdb <file> --out <file> [--year Y]\n"
         "                      [--name N] [--url U] [--commit C] [--alone]\n"
+        "       havne-cli conditions check <file> [--signals <file> |\n"
+        "                      --profile <name>]\n"
         "       havne-cli plugins list <pkg>...\n"
         "       havne-cli plugins check <pkg> [--on <vcan>]\n"
         "       havne-cli plugins match <pkg> --vin <VIN>\n"
@@ -2211,6 +2295,11 @@ void usage(FILE* to)
         "         out; --year takes the commands for that model year, --name,\n"
         "         --url and --commit go in the file, and --alone leaves\n"
         "         obd2 out of it.\n"
+        "conditions  check reads a condition file as a session would:\n"
+        "         each condition it holds, or why it's refused. With\n"
+        "         --signals or --profile it also says which signal each\n"
+        "         term reads in that signal file's or that profile's set,\n"
+        "         and which conditions can't be judged there and why.\n"
         "plugins  list says what each package holds, or why it's refused.\n"
         "         check reads one as a session would, then its value\n"
         "         fixtures: with --on (Linux), each answered by the\n"
@@ -2227,7 +2316,7 @@ void usage(FILE* to)
         "Exit: 0 the stream ended, 1 the CLI or its recording failed, 2 "
         "usage,\n"
         "      3 the connect, a recording's open or its check failed, or a\n"
-        "        signal file or OBDb set was refused.\n");
+        "        signal file, condition file or OBDb set was refused.\n");
 }
 
 bool parse_count(const char* text, uint64_t& out);
@@ -5072,6 +5161,18 @@ int run(int argc, char** argv)
         std::fprintf(stderr, "havne-cli: plugins takes list <pkg>..., check "
                              "<pkg> [--on <vcan>], or match <pkg> --vin "
                              "<VIN>\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (command == "conditions") {
+        cli::ConditionsCheckArgs check;
+        std::string why = "conditions takes check <file> [--signals <file> | "
+                          "--profile <name>]";
+        if (argc > 2 && std::string(argv[2]) == "check" &&
+            cli::parse_conditions_check(argc - 3, argv + 3, &check, &why)) {
+            return run_conditions_check(check);
+        }
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
         usage(stderr);
         return kExitUsage;
     }

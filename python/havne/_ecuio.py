@@ -8,10 +8,13 @@ from ctypes import (CFUNCTYPE, POINTER, Structure, Union, c_bool, c_char, c_char
                     c_size_t, c_uint, c_uint8, c_uint16, c_uint32, c_uint64,
                     c_void_p)
 
-HEADERS = ('core.h', 'j2534.h', 'obdb.h', 'plugin.h', 'profile.h', 'queue.h', 'recording.h', 'serial.h', 'signals.h', 'sim.h', 'socketcan.h', 'stream.h', 'vin.h',)
+HEADERS = ('conditions.h', 'core.h', 'j2534.h', 'obdb.h', 'plugin.h', 'profile.h', 'queue.h', 'recording.h', 'serial.h', 'signals.h', 'sim.h', 'socketcan.h', 'stream.h', 'vin.h',)
 
 # --- constants: the ECUIO_ macros, then the enumerators ---------------
 ECUIO_ABSENT_AFTER_FRAMES = 3
+ECUIO_ALERT_DANGER = 2
+ECUIO_ALERT_NONE = 0
+ECUIO_ALERT_WARNING = 1
 ECUIO_BACKEND_ELM327 = 5
 ECUIO_BACKEND_J2534_INPROC = 2
 ECUIO_BACKEND_J2534_SURROGATE = 3
@@ -97,6 +100,31 @@ ECUIO_COMPUTED_PUSH_INPUT = 0
 ECUIO_COMPUTED_ROUND = 40
 ECUIO_COMPUTED_SQRT = 39
 ECUIO_COMPUTED_SUBTRACT = 33
+ECUIO_CONDITION_ALERT_BANNER = 32
+ECUIO_CONDITION_ALERT_SOUND = 16
+ECUIO_CONDITION_FILE_FORMAT = 1
+ECUIO_CONDITION_FILE_MAX_BYTES = 0x40000
+ECUIO_CONDITION_INFO_ANY = 2
+ECUIO_CONDITION_INFO_DISABLED = 1
+ECUIO_CONDITION_KEY_MAX = 31
+ECUIO_CONDITION_MAX_AFTER_US = 0x23c34600
+ECUIO_CONDITION_MAX_BEFORE_US = 0x3938700
+ECUIO_CONDITION_MAX_CHECK_US = 0xd693a400
+ECUIO_CONDITION_MAX_CONDITIONS = 64
+ECUIO_CONDITION_MAX_FOR_US = 0x23c34600
+ECUIO_CONDITION_MAX_RATE_DROP_X100 = 0x186a0
+ECUIO_CONDITION_MAX_REFERENCES = 8
+ECUIO_CONDITION_MAX_TERMS = 4
+ECUIO_CONDITION_NAME_MAX = 40
+ECUIO_CONDITION_USE_ALERT = 1
+ECUIO_CONDITION_USE_MARK = 4
+ECUIO_CONDITION_USE_RECORD = 2
+ECUIO_CONDITION_WHY_DISABLED = 1
+ECUIO_CONDITION_WHY_ENUM_ORDER = 5
+ECUIO_CONDITION_WHY_NONE = 0
+ECUIO_CONDITION_WHY_NOT_A_NUMBER = 4
+ECUIO_CONDITION_WHY_NO_SIGNAL = 2
+ECUIO_CONDITION_WHY_UNIT = 3
 ECUIO_CSV_GUESS_DECIMAL_COMMA = 2
 ECUIO_CSV_GUESS_PREAMBLE = 4
 ECUIO_CSV_GUESS_TIME_NUMBERS = 8
@@ -246,6 +274,8 @@ ECUIO_RECORDING_SIGNALS_NAMED = 1
 ECUIO_RECORDING_SIGNALS_PRESENT = 2
 ECUIO_RECORDING_SIGNAL_ENUM = 2
 ECUIO_RECORDING_SIGNAL_TEXT = 1
+ECUIO_REFERENCE_ID = 0
+ECUIO_REFERENCE_KEY = 1
 ECUIO_SERIAL_DEVICE_LEN = 128
 ECUIO_SERIAL_NAME_LEN = 128
 ECUIO_SESSION_INFO_LISTEN_ONLY = 16
@@ -297,6 +327,19 @@ ECUIO_SUPPORT_PACKED = 8
 ECUIO_SUPPORT_PROBED = 1
 ECUIO_SUPPORT_SCAN_COMPLETE = 4
 ECUIO_SUPPORT_UNPACKED = 16
+ECUIO_TERM_ABOVE = 1
+ECUIO_TERM_BELOW = 2
+ECUIO_TERM_CHECK = 2
+ECUIO_TERM_DIFFERS = 4
+ECUIO_TERM_EQUALS = 3
+ECUIO_TERM_HAS_CLEAR = 1
+ECUIO_TERM_HAS_UNIT = 2
+ECUIO_TERM_LINK = 1
+ECUIO_TERM_LINK_HARD_FAILURE = 4
+ECUIO_TERM_LINK_NOT_OK = 1
+ECUIO_TERM_LINK_REQUEST_FAILED = 3
+ECUIO_TERM_LINK_TIMEOUT = 2
+ECUIO_TERM_SIGNAL = 0
 ECUIO_TIMING_CLOCK_ADAPTER = 2
 ECUIO_TIMING_CLOCK_HOST = 1
 ECUIO_TIMING_CLOCK_KERNEL = 3
@@ -409,6 +452,21 @@ class ecuio_check_summary_t(Structure):
     pass
 
 class ecuio_computed_t(Structure):
+    pass
+
+class ecuio_condition_binding_t(Structure):
+    pass
+
+class ecuio_condition_info_t(Structure):
+    pass
+
+class ecuio_condition_reference_t(Structure):
+    pass
+
+class ecuio_condition_set_t(Structure):
+    pass
+
+class ecuio_condition_term_t(Structure):
     pass
 
 class ecuio_csv_guess_t(Structure):
@@ -733,6 +791,46 @@ ecuio_computed_t._fields_ = [
     ('steps', (c_uint8 * 36)),
     ('constants', (c_double * 16)),
     ('reserved', (c_uint32 * 4)),
+]
+ecuio_condition_binding_t._fields_ = [
+    ('why', c_uint32),
+    ('why_term', c_uint32),
+    ('term_count', c_uint32),
+    ('reserved0', c_uint32),
+    ('reference', (c_uint32 * 4)),
+    ('signal_id', (c_uint32 * 4)),
+    ('reserved', (c_uint64 * 2)),
+]
+ecuio_condition_info_t._fields_ = [
+    ('flags', c_uint32),
+    ('uses', c_uint32),
+    ('alert_level', c_uint32),
+    ('term_count', c_uint32),
+    ('for_us', c_uint32),
+    ('clear_for_us', c_uint32),
+    ('before_us', c_uint32),
+    ('after_us', c_uint32),
+    ('reserved', (c_uint64 * 2)),
+    ('key', c_char_p),
+    ('name', c_char_p),
+]
+ecuio_condition_reference_t._fields_ = [
+    ('kind', c_uint32),
+    ('id', c_uint32),
+    ('text', (c_char * 40)),
+]
+ecuio_condition_term_t._fields_ = [
+    ('kind', c_uint32),
+    ('test', c_uint32),
+    ('level', c_double),
+    ('clear', c_double),
+    ('max_age_us', c_uint32),
+    ('flags', c_uint32),
+    ('reference_count', c_uint32),
+    ('reserved0', c_uint32),
+    ('unit', (c_char * 16)),
+    ('reserved', (c_uint64 * 2)),
+    ('references', (ecuio_condition_reference_t * 8)),
 ]
 ecuio_csv_guess_t._fields_ = [
     ('flags', c_uint32),
@@ -1188,6 +1286,14 @@ FUNCTIONS = {
     'ecuio_can_state_name': (c_char_p, [c_uint32]),  # socketcan.h
     'ecuio_clock_slept_us': (c_uint64, []),  # core.h
     'ecuio_clock_us': (c_uint64, []),  # core.h
+    'ecuio_condition_set_checks': (c_int, [POINTER(ecuio_condition_set_t), POINTER(ecuio_check_options_t)]),  # conditions.h
+    'ecuio_condition_set_count': (c_uint32, [POINTER(ecuio_condition_set_t)]),  # conditions.h
+    'ecuio_condition_set_free': (None, [POINTER(ecuio_condition_set_t)]),  # conditions.h
+    'ecuio_condition_set_get': (c_int, [POINTER(ecuio_condition_set_t), c_uint32, POINTER(ecuio_condition_info_t)]),  # conditions.h
+    'ecuio_condition_set_get_term': (c_int, [POINTER(ecuio_condition_set_t), c_uint32, c_uint32, POINTER(ecuio_condition_term_t)]),  # conditions.h
+    'ecuio_condition_set_load': (c_int, [c_char_p, c_size_t, POINTER(POINTER(ecuio_condition_set_t))]),  # conditions.h
+    'ecuio_condition_set_name': (c_char_p, [POINTER(ecuio_condition_set_t)]),  # conditions.h
+    'ecuio_condition_set_resolve': (c_int, [POINTER(ecuio_condition_set_t), c_uint32, POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_file_t), POINTER(ecuio_condition_binding_t)]),  # conditions.h
     'ecuio_decode_signal': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_uint8), c_uint16, POINTER(c_double)]),  # signals.h
     'ecuio_decode_text': (c_int, [POINTER(ecuio_signal_def_t), POINTER(c_uint8), c_uint16, c_char_p, c_uint32]),  # signals.h
     'ecuio_def_applies_to_frame': (c_int, [POINTER(ecuio_signal_def_t), POINTER(ecuio_frame_t)]),  # signals.h

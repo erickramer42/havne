@@ -91,7 +91,8 @@ app_enable_warnings(bench_recording)
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp
     test_computed_grammar.cpp
-    test_plugin.cpp)
+    test_plugin.cpp
+    test_condition_file.cpp)
 
 # test_signal_tables.cpp and test_computed.cpp check computed.h, the
 # programs' checker and stack machine, which are internal
@@ -105,7 +106,8 @@ target_link_libraries(test_signals PRIVATE
 )
 # test_plugin.cpp loads the repository's example plugin
 target_compile_definitions(test_signals PRIVATE
-    ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins")
+    ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
+    ECUIO_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
 app_enable_warnings(test_signals)
 gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
@@ -257,7 +259,7 @@ endif()
 if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
-        test_cli_log.cpp)
+        test_cli_log.cpp test_cli_conditions.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
@@ -641,6 +643,41 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/refused.json)
         app_cli_golden(SignalsCheckNamesAMissingFile signals-missing.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/none.json)
+        # A condition file through the loader (ADR-0063): what it holds;
+        # how its references meet obd2's set, the mock's and a signal
+        # file's (a level in another unit, a text signal, an enumeration
+        # above a level, a signal of another file and a condition
+        # switched off among them); one the loader refuses, one that
+        # isn't there, a profile nothing registered and a signal file
+        # refused, each in words and never the path
+        set(_cli_conditions ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/conditions)
+        app_cli_golden(ConditionsCheckReadsAFile conditions-check.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/example.json)
+        app_cli_golden(ConditionsCheckResolvesAgainstObd2 conditions-check-obd2.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/example.json
+               --profile obd2)
+        app_cli_golden(ConditionsCheckResolvesAgainstTheMock conditions-check-mock.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check --profile mock
+               ${_cli_conditions}/example.json)
+        app_cli_golden(ConditionsCheckResolvesAgainstASignalFile
+            conditions-check-signals.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/desk.json
+               --signals ${_cli_signals}/extras.json)
+        app_cli_golden(ConditionsCheckResolvesAgainstNoSignals conditions-check-raw.jsonl
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/desk.json
+               --profile raw)
+        app_cli_golden(ConditionsCheckRefusesAFile conditions-refused.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/refused.json)
+        app_cli_golden(ConditionsCheckNamesAMissingFile conditions-missing.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/none.json)
+        app_cli_golden(ConditionsCheckNamesAnUnknownProfile
+            conditions-unknown-profile.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/example.json
+               --profile obd3)
+        app_cli_golden(ConditionsCheckRefusesASignalFile conditions-refused-signals.jsonl
+            --exit 3
+            -- $<TARGET_FILE:havne-cli> conditions check ${_cli_conditions}/example.json
+               --signals ${_cli_signals}/refused.json)
         app_cli_golden(StreamDecodesThroughASignalFile stream-signals.jsonl
             -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max&from=100&to=102"
                --signals ${_cli_signals}/extras.json --values --count 40)
@@ -907,6 +944,20 @@ if(TARGET havne-cli)
     app_cli_usage(SignalsWithoutAFileIsUsage "stream|mock://x|--signals")
     app_cli_usage(SignalsForAnotherProfileIsUsage
         "stream|mock://x?profile=obd2|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json")
+    app_cli_usage(ConditionsWithoutCheckIsUsage "conditions")
+    app_cli_usage(ConditionsAnUnknownWordIsUsage "conditions|lint|c.json")
+    app_cli_usage_says(ConditionsCheckWithoutAFileIsUsage "conditions|check"
+        "conditions check takes a condition file")
+    app_cli_usage_says(ConditionsCheckTwoFilesIsUsage "conditions|check|a.json|b.json"
+        "conditions check takes one file")
+    app_cli_usage_says(ConditionsCheckSignalsWithoutAFileIsUsage
+        "conditions|check|a.json|--signals" "--signals takes one signal file")
+    app_cli_usage_says(ConditionsCheckProfileWithoutANameIsUsage
+        "conditions|check|a.json|--profile" "--profile takes one profile name")
+    app_cli_usage_says(ConditionsCheckSignalsAndAProfileIsUsage
+        "conditions|check|a.json|--signals|s.json|--profile|obd2" "not both")
+    app_cli_usage_says(ConditionsCheckAnUnknownOptionIsUsage
+        "conditions|check|a.json|--plugin|p" "unexpected '--plugin'")
     app_cli_usage(SignalsCheckWithoutAFileIsUsage "signals|check")
     app_cli_usage(SignalsWithoutCheckIsUsage "signals")
     app_cli_usage(SignalsAnUnknownWordIsUsage "signals|lint|x.json")

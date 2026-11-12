@@ -1,0 +1,13 @@
+{
+  "havne_conditions": 1,
+  "name": "Refused",
+  "notes": "Synthetic: a misspelled key, for the loader's words",
+  "conditions": [
+    {
+      "key": "pull",
+      "name": "Pull",
+      "when": { "signal": ["obd2.rpm"], "unit": "RPM",
+                "abov": 2500 }
+    }
+  ]
+}
