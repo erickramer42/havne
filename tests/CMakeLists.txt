@@ -1530,6 +1530,8 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         file(TO_CMAKE_PATH "$ENV{SystemRoot}/Fonts" _qml_fonts)
         list(APPEND _qml_test_env "QT_QPA_FONTDIR=${_qml_fonts}")
     endif()
+    # Files whose cases together run near ctest's bound on a slow runner
+    set(_qml_split_files dashboard dashedit phone)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
@@ -1538,11 +1540,59 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         # waits for what it checks with tryVerify, and tst_recordings
         # alone opens a 10,200-frame recording, which a machine building
         # beside the suite took past 60 s in all
-        add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
-        set_tests_properties(QmlTest.${_qml_name} PROPERTIES
-            ENVIRONMENT "${_qml_test_env}"
-            TIMEOUT 180
-        )
+        # A file near the bound runs as _qml_parts ctest entries, each
+        # a disjoint share of its cases (every third one, so the slow
+        # ones spread), named as the TestCase names them; QmlTest.<name>
+        # then reads QmlTest.<name>-<k>of<n>
+        set(_qml_parts 1)
+        if(_qml_name IN_LIST _qml_split_files)
+            set(_qml_parts 3)
+        endif()
+        if(_qml_parts EQUAL 1)
+            add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
+            set_tests_properties(QmlTest.${_qml_name} PROPERTIES
+                ENVIRONMENT "${_qml_test_env}"
+                TIMEOUT 180
+            )
+        else()
+            file(STRINGS ${_qml_test} _qml_title REGEX "^    name: \"")
+            string(REGEX REPLACE "^.*\"(.*)\".*$" "\\1" _qml_title "${_qml_title}")
+            file(STRINGS ${_qml_test} _qml_cases
+                 REGEX "^    function test_[A-Za-z0-9_]+\\(")
+            # A case written another way, or a second TestCase, would drop
+            # out of every share unseen
+            file(STRINGS ${_qml_test} _qml_any REGEX "function test_")
+            list(LENGTH _qml_title _qml_titles)
+            list(LENGTH _qml_cases _qml_found)
+            list(LENGTH _qml_any _qml_all)
+            if(NOT _qml_titles EQUAL 1 OR NOT _qml_found EQUAL _qml_all)
+                message(FATAL_ERROR "${_qml_test}: the split needs one TestCase name "
+                        "and every case as '    function test_x(' "
+                        "(${_qml_titles} names, ${_qml_found} of ${_qml_all} cases read)")
+            endif()
+            set(_qml_index 0)
+            foreach(_qml_case IN LISTS _qml_cases)
+                string(REGEX REPLACE "^    function (test_[A-Za-z0-9_]+)\\(.*$" "\\1"
+                       _qml_case "${_qml_case}")
+                if(NOT _qml_case MATCHES "_data$")
+                    math(EXPR _qml_share "${_qml_index} % ${_qml_parts}")
+                    list(APPEND _qml_share_${_qml_share} "${_qml_title}::${_qml_case}")
+                    math(EXPR _qml_index "${_qml_index} + 1")
+                endif()
+            endforeach()
+            math(EXPR _qml_last "${_qml_parts} - 1")
+            foreach(_qml_share RANGE 0 ${_qml_last})
+                math(EXPR _qml_k "${_qml_share} + 1")
+                set(_qml_part QmlTest.${_qml_name}-${_qml_k}of${_qml_parts})
+                add_test(NAME ${_qml_part}
+                         COMMAND test_qml -input ${_qml_test} ${_qml_share_${_qml_share}})
+                set_tests_properties(${_qml_part} PROPERTIES
+                    ENVIRONMENT "${_qml_test_env}"
+                    TIMEOUT 180
+                )
+                unset(_qml_share_${_qml_share})
+            endforeach()
+        endif()
     endforeach()
 endif()
 
