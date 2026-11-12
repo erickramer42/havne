@@ -2138,11 +2138,11 @@ TestCase {
         tryCompare(main, "currentPage", main.dashboardPage, 10000, "back on Dash with the gauges")
         verify(!settings.backLeaves)
         Bridge.disconnectSession()
-        tryVerify(() => !Bridge.connected, 5000)
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
         // The arrow, with nothing connected
         main.gotoPage(main.dashboardPage)
         main.openConnectFromDash()
-        find(settings, "settingsBack").clicked()
+        find(find(settings, "settingsConnectionPage"), "settingsBack").clicked()
         compare(main.currentPage, main.dashboardPage, "the arrow does what Back does")
     }
 
@@ -2162,12 +2162,12 @@ TestCase {
         main.width = 384
         waitForRendering(main.contentItem)
         Bridge.disconnectSession()
-        tryVerify(() => !Bridge.connected, 5000)
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
         const row = Bridge.recordingRow(Harness.recordingFixtures + "/findings")
         compare(Bridge.connectSession(row.uri), "")
         tryCompare(word, "text", "Replaying", 5000)
         Bridge.disconnectSession()
-        tryVerify(() => !Bridge.connected, 5000)
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
 
         main.openConnect()
         const settings = find(main.contentItem, "settingsPage")
@@ -2683,7 +2683,7 @@ TestCase {
             verify(!mark.visible, "no Mark before the log")
             start.clicked()
             verify(Bridge.logActive)
-            verify(mark.visible, "Mark beside Stop log")
+            tryVerify(() => mark.visible, 2000, "Mark beside Stop log")
             verify(/^Logging \d+:\d\d$/.test(readout.text), readout.text)
             const before = Bridge.markCount
             mark.clicked()
