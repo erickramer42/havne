@@ -25,6 +25,9 @@ class RecordingImport : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
+    // The next import's folder label, as typed: reduced to a safe name the
+    // way the recorder reduces one; "" keeps the format's own ("CSV import")
+    Q_PROPERTY(QString label READ label WRITE setLabel NOTIFY labelChanged)
 
 public:
     // ecuio_import's formats
@@ -41,6 +44,8 @@ public:
     RecordingImport& operator=(const RecordingImport&) = delete;
 
     bool busy() const { return m_busy; }
+    QString label() const { return m_label; }
+    void setLabel(const QString& label);
 
     // The file's kind from its first line that isn't blank: candump's
     // "(seconds) interface ID#data" is Candump, anything else Csv
@@ -105,6 +110,7 @@ public:
 
 signals:
     void busyChanged();
+    void labelChanged();
     void finished(const QVariantMap& result);
     void guessFinished(const QVariantMap& result);
 
@@ -124,6 +130,7 @@ private:
     std::atomic<bool> m_stop{false};
     bool m_busy = false;
     bool m_copyLocal = false;
+    QString m_label;
     bool m_failThreadForTesting = false;
     QString m_mapsRoot;
 };

@@ -3,7 +3,7 @@
 # surrogate/, app/) over the whole ctest suite, Windows only. One summary
 # line per step, as in verify.sh; logs and reports go to Testing/coverage/.
 #
-# Usage: scripts/coverage.sh [--tests-only] [--no-devices] [-R <ctest regex>]
+# Usage: scripts/coverage.sh [--tests-only] [--no-devices] [--part <gtest|k/n>] [-R <ctest regex>]
 #
 #   configure   build-coverage, once, if it doesn't exist: the app and the
 #               tests, RelWithDebInfo with /Od /Ob0, so there are PDBs and
@@ -34,11 +34,13 @@ mkdir -p "$LOGDIR"
 tests_only=0
 devices=1
 regex=""
+part=all
 while [ $# -gt 0 ]; do
     case "$1" in
         --tests-only) tests_only=1 ;;
         --no-devices) devices=0 ;;
         -R) regex="${2:-}"; shift ;;
+        --part) part="${2:-}"; shift ;;
         -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
         *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
     esac
@@ -83,10 +85,18 @@ if [ "$tests_only" = 0 ]; then
             echo "no Qt kit: set QT_PREFIX, or configure build first (docs/development.md, Build configurations)" >&2
             exit 2
         fi
-        run configure cmake -B "$TREE" \
+        # HAVNE_COVERAGE_NINJA=1 (CI, from a Developer shell): a Ninja tree with
+        # sccache and /Z7, since the Visual Studio generator ignores a launcher
+        gen=(); dbg=/Zi
+        if [ "${HAVNE_COVERAGE_NINJA:-0}" = 1 ]; then
+            gen=(-G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                 -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache)
+            dbg=/Z7
+        fi
+        run configure cmake -B "$TREE" "${gen[@]}" \
             -DCMAKE_PREFIX_PATH="$qt" \
-            "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=/Zi /Od /Ob0 /DNDEBUG" \
-            "-DCMAKE_C_FLAGS_RELWITHDEBINFO=/Zi /Od /Ob0 /DNDEBUG"
+            "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=$dbg /Od /Ob0 /DNDEBUG" \
+            "-DCMAKE_C_FLAGS_RELWITHDEBINFO=$dbg /Od /Ob0 /DNDEBUG"
         [ "$rc" = 0 ] || build_failed configure
         line configure ok "$dur" "$TREE"
     fi
@@ -95,13 +105,16 @@ if [ "$tests_only" = 0 ]; then
     line build ok "$dur" ""
 fi
 
+# A multi-config tree puts binaries in a folder per configuration, a Ninja tree's are one level up
+bindir=$TREE/tests/RelWithDebInfo
+grep -q '^CMAKE_GENERATOR:INTERNAL=Ninja' "$TREE/CMakeCache.txt" 2>/dev/null && bindir=$TREE/tests
 if [ "$devices" = 1 ]; then
     export ECUIO_EXPECT_J2534_DEVICES=1
 fi
 root=$(cygpath -w "$PWD")
 ctest_args=(--test-dir "$TREE" -C RelWithDebInfo --output-on-failure --no-tests=error)
 [ -n "$regex" ] && ctest_args+=(-R "$regex")
-rm -rf "$LOGDIR/html" "$LOGDIR"/raw*.xml "$LOGDIR"/cover-*.log "$LOGDIR/cobertura.xml"
+rm -rf "$LOGDIR/html" "$LOGDIR"/rc-* "$LOGDIR"/raw*.xml "$LOGDIR"/cover-*.log "$LOGDIR/cobertura.xml"
 # A program the tool starts runs under a debugger, which gives it Windows'
 # debug heap: an allocation-heavy case runs many times slower there.
 export _NO_DEBUG_HEAP=1
@@ -118,19 +131,55 @@ cover() { # cover <name> <seconds, 0 for none> <program> [args...]: into raw-<na
 start=$SECONDS
 owned=""
 failed=""
+gtest_jobs=${COVERAGE_JOBS:-3}
 if [ -z "$regex" ]; then
-    for exe in "$TREE"/tests/RelWithDebInfo/test_*.exe; do
+    # Binaries with a RUN_SERIAL case (shared logs, the fake DLL's knobs) run alone, last
+    serial=$(ctest --test-dir "$TREE" -C RelWithDebInfo -N --show-only=json-v1 2>/dev/null |
+        "${PYTHON:-python}" -c 'import json,sys,os
+for t in json.load(sys.stdin)["tests"]:
+    if any(p["name"] == "RUN_SERIAL" and p["value"] for p in t.get("properties", [])):
+        print(os.path.basename(t["command"][0]))' | tr -d '\r' | sort -u)
+    cover_one() { # <exe>: from a working directory of its own (the tool writes a log there)
+        local exe=$1 name abs
+        name=$(basename "$exe" .exe)
+        abs=$PWD
+        LOGDIR=$abs/$LOGDIR
+        # a setup that fails must still leave a failing rc, never none
+        echo 1 > "$LOGDIR/rc-$name"
+        mkdir -p "$LOGDIR/work-$name" && cd "$LOGDIR/work-$name" || return 1
+        cover "$name" 600 "$(cygpath -w "$abs/$exe")"
+        echo "$rc" > "$LOGDIR/rc-$name"
+    }
+    later=""
+    for exe in "$bindir"/test_*.exe; do
         name=$(basename "$exe" .exe)
         suites=$("$exe" --gtest_list_tests 2>/dev/null | tr -d '\r' \
             | sed -nE 's/^([A-Za-z_][A-Za-z0-9_/]*)\.( .*)?$/\1/p')
         [ -n "$suites" ] || continue
         owned="$owned|$(tr '\n' '|' <<<"$suites" | sed 's/|$//')"
-        cover "$name" 600 "$(cygpath -w "$PWD/$exe")"
-        [ "$rc" = 0 ] || failed="$failed $name"
+        case "$part" in all|gtest) ;; *) continue ;; esac
+        if grep -qx "$name.exe" <<<"$serial"; then later="$later $exe"; continue; fi
+        # Side by side, as ctest -j runs cases: a process under the tool uses one core
+        (cover_one "$exe") &
+        while [ "$(jobs -rp | wc -l)" -ge "$gtest_jobs" ]; do wait -n; done
+    done
+    wait
+    for exe in $later; do (cover_one "$exe"); done
+    for rcfile in "$LOGDIR"/rc-*; do
+        [ -e "$rcfile" ] || continue
+        [ "$(cat "$rcfile")" = 0 ] || failed="$failed $(basename "$rcfile" | sed 's/^rc-//')"
     done
     [ -z "$owned" ] || ctest_args+=(-E "^(${owned#|})\.")
 fi
-cover ctest 0 "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
+# --part: the gtest binaries alone, or the k-th of n interleaved slices of ctest's
+# other cases (ctest -I k,,n), so a runner each can share the work
+case "$part" in
+    all) ;;
+    gtest) ctest_skip=1 ;;
+    [1-9]*/[1-9]*) ctest_args+=(-I "${part%/*},,${part#*/}") ;;
+    *) echo "--part takes gtest or <k>/<n> (k from 1)" >&2; exit 2 ;;
+esac
+[ -n "${ctest_skip:-}" ] || cover ctest 0 "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
 cat "$LOGDIR"/cover-test_*.log "$LOGDIR/cover-ctest.log" > "$LOGDIR/coverage.log" 2>/dev/null
 dur=$((SECONDS - start))
 

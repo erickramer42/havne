@@ -199,7 +199,15 @@ Page {
     }
     function restore(text) {
         store[formKey] = text
-        doc = text === "" ? DashboardBook.reset(form) : DashboardBook.parse(text, form).doc
+        if (text === "")
+            showStoredLayout()
+        else
+            doc = DashboardBook.parse(text, form).doc
+    }
+    // With nothing stored the document is the stored read itself, so the
+    // built-in layout is drawn as at first run (builtInShown)
+    function showStoredLayout() {
+        doc = Qt.binding(() => root.parsed.doc)
     }
     // An undo or a redo goes from (page, cell) to (toPage, toCell). The
     // cell panel follows only when it was on the step's cell, so it never
@@ -368,7 +376,7 @@ Page {
         if (texts.unread !== "")
             store[formKey + "Unread"] = texts.unread
         store[formKey] = ""
-        doc = DashboardBook.reset(form)
+        showStoredLayout()
         confirmReset = false
         moreShown = false
         selected = -1
@@ -393,10 +401,15 @@ Page {
     // Outside edit mode nothing stays selected once the menu is gone
     function closePanel() {
         commitTyping()
+        const shown = selected
         panel = ""
         if (!editing)
             selected = -1
+        else if (shown >= 0)
+            revealRequested(shown)
     }
+    // The shown page scrolls to a cell, so what a panel edited is seen again
+    signal revealRequested(int cell)
 
     // ---- The drive view (ADR-0059): this page with every bar hidden
 
@@ -890,11 +903,13 @@ Page {
     onVisibleChanged: {
         maybeSweep()
         // Any page but Dash ends the view for good: a tab, the status's Log,
-        // and the history, as Done does: a step from outside edit mode
-        // isn't undone by a Ctrl+Z days later
+        // and the history outside edit mode, as Done does: a step from
+        // outside edit mode isn't undone by a Ctrl+Z days later. Edit mode
+        // stays open while hidden, so its history stays with it
         if (!visible) {
             leaveDrive(true)
-            clearHistory()
+            if (!editing)
+                clearHistory()
         }
     }
     Component.onCompleted: {
@@ -939,8 +954,8 @@ Page {
         return Math.round(x * 1e6) / 1e6
     }
     // A number for a field: at most four decimals, none trailing
-    function fieldText(v) {
-        return typeof v === "number" && isFinite(v) ? String(Number(v.toFixed(4))) : ""
+    function fieldText(v, places) {
+        return typeof v === "number" && isFinite(v) ? String(Number(v.toFixed(places ?? 4))) : ""
     }
     // A round tick spacing near `step`: 1, 2 or 5 times a power of ten
     function niceStep(step) {
@@ -1313,8 +1328,14 @@ Page {
             const o = cell && cell.options ? cell.options[field.option] : undefined
             return o !== undefined ? o : field.fallback
         }
+        // A converted end shows to the signal's decimals plus one (161.5565
+        // mph at 1 decimal reads 161.56), 1 place with no row to take them from
+        readonly property var entry: cell ? hub.lookup(root.lookupRefs(cell.refs ?? [])) : null
+        readonly property int places: (cell && cell.options && cell.options.decimals !== undefined
+                                       ? cell.options.decimals : entry ? entry.decimals : 0) + 1
         readonly property string shownText: cell === null ? ""
-            : root.fieldText(converted ? root.shown(cell.unit ?? "", value) : value)
+            : converted ? root.fieldText(root.shown(cell.unit ?? "", value), places)
+                        : root.fieldText(value)
         Layout.fillWidth: true
         Layout.preferredHeight: Theme.touchTarget
         text: shownText
@@ -1383,6 +1404,21 @@ Page {
                     }
                 }
 
+                // The cell itself, live, at a fixed size, so range, zones,
+                // color and size are seen as they change
+                Cell {
+                    objectName: "panelPreview"
+                    visible: panelCard.hasSignal
+                    cell: panelCard.cell
+                    shown: false
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: panelCard.kind === "bar" || panelCard.kind === "shift-light"
+                                           || panelCard.kind === "segments" || panelCard.kind === "sparkline" ? 200 : 120
+                    Layout.preferredHeight: panelCard.kind === "shift-light" ? 40
+                                          : panelCard.kind === "segments" || panelCard.kind === "sparkline" ? 100
+                                          : panelCard.kind === "bar" || panelCard.kind === "seven-segment" ? 70 : 120
+                }
+
                 // A copy of the whole cell, for this run (section 5)
                 RowLayout {
                     Layout.fillWidth: true
@@ -1442,6 +1478,15 @@ Page {
                         }
                     }
 
+                    Caption {
+                        objectName: "panelSignalName"
+                        visible: panelCard.hasSignal && panelCard.entry !== null
+                        Layout.fillWidth: true
+                        Layout.columnSpan: panelCard.phone ? 2 : 4
+                        Layout.preferredWidth: 0
+                        elide: Text.ElideRight
+                        text: panelCard.entry ? qsTr("Signal: %1").arg(panelCard.entry.name) : ""
+                    }
                     Caption {
                         objectName: "panelFromCaption"
                         visible: panelCard.hasSignal
@@ -1538,6 +1583,7 @@ Page {
                     // A checkbox, as every other yes-or-no in the app
                     ThemedCheckBox {
                         objectName: "panelPeak"
+                        Layout.columnSpan: panelCard.phone ? 2 : 4
                         text: qsTr("Peak hold")
                         Accessible.name: qsTr("Peak hold")
                         visible: root.peakKinds.indexOf(panelCard.kind) >= 0
@@ -1970,7 +2016,7 @@ Page {
                         ThemedButton {
                             required property var modelData
                             objectName: "pickSignal_" + modelData.ref
-                            text: modelData.unit !== "" ? qsTr("%1 (%2)").arg(modelData.name).arg(modelData.unit)
+                            text: modelData.unit !== "" && modelData.unit !== modelData.name ? qsTr("%1 (%2)").arg(modelData.name).arg(modelData.unit)
                                                         : modelData.name
                             onClicked: root.pickSignal(modelData)
                         }
@@ -2495,6 +2541,18 @@ Page {
             }
         }
 
+        // How a gauge is reached, while no panel is open
+        Label {
+            objectName: "dashEditHint"
+            visible: root.editing && root.panel === ""
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            font.pixelSize: Theme.fontCaption
+            text: root.form === "phone" ? qsTr("Tap a gauge to change it; hold it to move it")
+                                        : qsTr("Click a gauge to change it; hold it to move it")
+        }
+
         // The pages' controls, then a gap, then Reset (it replaces every page,
         // so it stands apart) and Reset peaks where the tool row has no room
         Flow {
@@ -2777,6 +2835,21 @@ Page {
                 readonly property var cells: page && Array.isArray(page.cells) ? page.cells : []
                 objectName: "dashPage_" + index
                 clip: true
+                Connections {
+                    target: root
+                    function onRevealRequested(cell) {
+                        if (!pageView.shown)
+                            return
+                        const item = cellRepeater.itemAt(cell)
+                        if (!item)
+                            return
+                        const top = grid.y + item.y
+                        const bottom = top + item.height
+                        const max = Math.max(0, pageView.contentHeight - pageView.height)
+                        if (top < pageView.contentY || bottom > pageView.contentY + pageView.height)
+                            pageView.contentY = Math.max(0, Math.min(max, top - root.panelMargin))
+                    }
+                }
                 contentWidth: width
                 contentHeight: grid.y + grid.height + root.panelMargin
                 interactive: root.held < 0
@@ -2990,6 +3063,7 @@ Page {
                     }
 
                     Repeater {
+                        id: cellRepeater
                         model: pageView.cells.length
 
                         Cell {

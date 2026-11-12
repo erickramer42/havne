@@ -471,9 +471,13 @@ Pane {
         return pickedVehicle === null ? 0
              : pickedVehicle.signals.filter(f => !signalOk(f.sha256)).length
     }
-    function unloadedSummary() {
+    // Of `total` files: ", doesn't load" says it of the only one; with more,
+    // the count of those that don't
+    function unloadedSummary(total) {
         const n = unloadedCount()
-        return n === 0 ? "" : n === 1 ? qsTr(", doesn't load") : qsTr(", %1 don't load").arg(n)
+        return n === 0 ? ""
+             : n === 1 ? (total === 1 ? qsTr(", doesn't load") : qsTr(", 1 doesn't load"))
+             : qsTr(", %1 don't load").arg(n)
     }
 
     // The Signals row's summary: a count of files, one or many (no
@@ -846,7 +850,7 @@ Pane {
         { key: "signals", title: qsTr("Signals"),
           summary: pickedVehicle === null ? qsTr("pick a vehicle")
                    : filesSummary(pickedVehicle.signals.length + (pickedVehicle.own !== "" ? 1 : 0))
-                     + unloadedSummary(),
+                     + unloadedSummary(pickedVehicle.signals.length + (pickedVehicle.own !== "" ? 1 : 0)),
           warn: pickedVehicle !== null && unloadedCount() > 0 },
         { key: "recording", title: qsTr("Recording"),
           summary: !Bridge.recording ? qsTr("off")
@@ -1160,7 +1164,11 @@ Pane {
         setQuery(out, "profile", profileChoice === "default" ? null : profileChoice)
         const dids = profileChoice === "uds-generic" ? didField.text.replace(/\s+/g, "") : ""
         setQuery(out, "did", dids === "" ? null : dids)
-        if (profileChoice === "uds-generic" && sessionOffered(base))
+        // Core refuses session= under any other profile; extSession keeps the
+        // choice for the way back to uds-generic
+        if (profileChoice !== "uds-generic")
+            setQuery(out, "session", null)
+        else if (sessionOffered(base))
             setQuery(out, "session", extSession ? "03" : null)
         return joinUri(base, out)
     }

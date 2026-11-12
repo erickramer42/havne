@@ -76,6 +76,7 @@ struct Job {
     QString interfaceName;
     QString root;
     QString stamp;
+    QString label;
     bool copyLocal = false;
     std::atomic<bool>* stop = nullptr;
 };
@@ -121,7 +122,10 @@ QVariantMap run(const Job& job)
     // Named and sorted as a recording is ("<stamp>[-n] <label>"), never by
     // the file's own name, which can hold a VIN or a person's name
     const QString label =
-        csv ? QStringLiteral("CSV import") : QStringLiteral("candump import");
+        !job.label.isEmpty()
+            ? job.label
+            : csv ? QStringLiteral("CSV import")
+                  : QStringLiteral("candump import");
     QString folder;
     for (int n = 1; n <= 999 && folder.isEmpty(); ++n) {
         const QString name =
@@ -178,6 +182,27 @@ QVariantMap run(const Job& job)
             !detail.isEmpty()
                 ? detail
                 : QStringLiteral("the import failed (status %1)").arg(status));
+    }
+    // A CSV that carries dates is stamped with its first row's time, not the
+    // import's: the row then says when the drive was
+    if (csv && r.utc_start_us > 0) {
+        const QString stamp =
+            QDateTime::fromMSecsSinceEpoch(
+                static_cast<qint64>(r.utc_start_us / 1000))
+                .toString(QStringLiteral("yyyyMMdd-HHmmss"));
+        for (int n = 1; n <= 999; ++n) {
+            const QString name =
+                stamp + (n > 1 ? QStringLiteral("-%1").arg(n) : QString()) +
+                QLatin1Char(' ') + label;
+            const QString target = job.root + QLatin1Char('/') + name;
+            if (target == folder) {
+                break;
+            }
+            if (!QFileInfo::exists(target) && QDir().rename(folder, target)) {
+                folder = target;
+                break;
+            }
+        }
     }
     return {{QStringLiteral("ok"), true},
             {QStringLiteral("words"), QString()},
@@ -282,11 +307,13 @@ QList<QStringList> splitRecords(const QByteArray& bytes, char delimiter,
             quoted = true;
             wasQuoted = true;
             any = true;
-        } else if (wasQuoted && isPadding(c)) {
-            any = true; // padding after the closing quote
         } else if (c == delimiter) {
+            // Before the padding test, as core's reader has it: a tab
+            // delimiter after a closing quote ends the cell
             endCell();
             any = true;
+        } else if (wasQuoted && isPadding(c)) {
+            any = true; // padding after the closing quote
         } else if (c == '\n') {
             endRecord();
         } else if (c != '\r') {
@@ -544,6 +571,36 @@ RecordingImport::~RecordingImport()
     }
 }
 
+void RecordingImport::setLabel(const QString& label)
+{
+    // Core's recorder rule (reduce_label): ASCII letters and digits, space,
+    // '-', '_', '.' and every character past ASCII; runs of spaces made
+    // one; at most 40 characters, counted whole (never half a surrogate
+    // pair); no dot or space at the end (Windows refuses them)
+    QList<char32_t> kept;
+    for (const char32_t c : label.toUcs4()) {
+        const bool ok = c > 127 || (c >= '0' && c <= '9') ||
+                        (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        c == '-' || c == '_' || c == '.' || c == ' ';
+        if (!ok || (c == ' ' && (kept.isEmpty() || kept.back() == ' '))) {
+            continue;
+        }
+        kept.append(c);
+        if (kept.size() == 40) {
+            break;
+        }
+    }
+    while (!kept.isEmpty() && (kept.back() == ' ' || kept.back() == '.')) {
+        kept.removeLast();
+    }
+    const QString out = QString::fromUcs4(kept.constData(), kept.size());
+    if (out == m_label) {
+        return;
+    }
+    m_label = out;
+    emit labelChanged();
+}
+
 int RecordingImport::guessKind(const QUrl& file) const
 {
     static const QRegularExpression candump(QStringLiteral(
@@ -591,6 +648,7 @@ bool RecordingImport::beginImport(const QUrl& file, int kind, const QUrl& map,
     job.hasMapText = hasMapText;
     job.interfaceName = interfaceName;
     job.root = m_root();
+    job.label = m_label;
     job.stamp = QDateTime::currentDateTime().toString(
         QStringLiteral("yyyyMMdd-HHmmss"));
     job.copyLocal = m_copyLocal;

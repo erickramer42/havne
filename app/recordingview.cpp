@@ -963,12 +963,22 @@ QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,
     return out;
 }
 
-void RecordingView::startAsks()
+bool RecordingView::startAsks()
 {
-    if (!m_askWorker.joinable()) {
+    if (m_askWorker.joinable()) {
+        return true;
+    }
+    try {
+        if (m_failThreadForTesting) {
+            throw std::system_error(std::make_error_code(
+                std::errc::resource_unavailable_try_again));
+        }
         m_askWorker = std::thread(&RecordingView::answerAsks, this, m_reader,
                                   m_generation);
+    } catch (const std::system_error&) {
+        return false;
     }
+    return true;
 }
 
 void RecordingView::answerAsks(ecuio_recording_t* reader, quint64 generation)
@@ -988,45 +998,208 @@ void RecordingView::answerAsks(ecuio_recording_t* reader, quint64 generation)
             stats.swap(m_statsAsk);
             step.swap(m_stepAsk);
         }
-        if (step) {
-            uint64_t at = ECUIO_RECORDING_NONE;
-            const ecuio_status_t rc = ecuio_recording_step(
-                reader, step->signal, step->t, step->direction, &at);
-            QMetaObject::invokeMethod(
-                this,
-                [this, request = step->request, rc, at, generation] {
-                    stepFinished(request, rc, at, generation);
-                },
-                Qt::QueuedConnection);
+        // A copy that can't be allocated leaves its ask unanswered: an
+        // exception out of this thread would end the process
+        try {
+            if (step) {
+                uint64_t at = ECUIO_RECORDING_NONE;
+                const ecuio_status_t rc = ecuio_recording_step(
+                    reader, step->signal, step->t, step->direction, &at);
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, request = step->request, rc, at, generation] {
+                        stepFinished(request, rc, at, generation);
+                    },
+                    Qt::QueuedConnection);
+            }
+        } catch (const std::bad_alloc&) {
+            ++m_asksLost;
         }
-        if (stats) {
-            std::vector<ecuio_recording_stats_t> got(stats->ids.size());
-            const ecuio_status_t rc =
-                ecuio_recording_stats(reader, stats->ids.data(),
-                                      static_cast<uint32_t>(stats->ids.size()),
-                                      stats->t0, stats->t1, got.data());
-            QMetaObject::invokeMethod(
-                this,
-                [this, ask = *stats, rc, got, generation] {
-                    statsFinished(ask, rc, got, generation);
-                },
-                Qt::QueuedConnection);
+        try {
+            if (stats) {
+                std::vector<ecuio_recording_stats_t> got(stats->ids.size());
+                const ecuio_status_t rc = ecuio_recording_stats(
+                    reader, stats->ids.data(),
+                    static_cast<uint32_t>(stats->ids.size()), stats->t0,
+                    stats->t1, got.data());
+                QMetaObject::invokeMethod(
+                    this,
+                    [this, ask = *stats, rc, got, generation] {
+                        statsFinished(ask, rc, got, generation);
+                    },
+                    Qt::QueuedConnection);
+            }
+        } catch (const std::bad_alloc&) {
+            ++m_asksLost;
         }
+    }
+}
+
+namespace {
+
+enum class RuleUnit { Percent, Seconds, Rpm, Speed };
+
+// One level of ecuio_stretch_rules_t as a page sets it: its key in the
+// rules map, its name in a refusal's words, core's default (%, seconds,
+// rpm or km/h) and where a value in core's unit (%, us, rpm, km/h) goes
+struct StretchRule {
+    const char* key;
+    const char* name;
+    RuleUnit unit;
+    double fallback;
+    void (*set)(ecuio_stretch_rules_t&, double);
+};
+
+uint64_t wholeUs(double us)
+{
+    return static_cast<uint64_t>(std::llround(us));
+}
+
+const StretchRule kStretchRules[] = {
+    {"pullLevel", "Pull level", RuleUnit::Percent,
+     ECUIO_STRETCH_DEFAULT_PULL_LEVEL,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_level = v; }},
+    {"pullLoadLevel", "Pull load level", RuleUnit::Percent,
+     ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_load_level = v; }},
+    {"pullHoldS", "Pull hold", RuleUnit::Seconds,
+     ECUIO_STRETCH_DEFAULT_PULL_HOLD_US / 1e6,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_hold_us = wholeUs(v); }},
+    {"pullGapS", "Pull gap", RuleUnit::Seconds,
+     ECUIO_STRETCH_DEFAULT_PULL_GAP_US / 1e6,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_gap_us = wholeUs(v); }},
+    {"pullRise", "Pull rise", RuleUnit::Rpm, ECUIO_STRETCH_DEFAULT_PULL_RISE,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_min_rise = v; }},
+    {"pullGain", "Pull gain", RuleUnit::Speed, ECUIO_STRETCH_DEFAULT_PULL_GAIN,
+     [](ecuio_stretch_rules_t& r, double v) { r.pull_min_gain = v; }},
+    {"cruiseHoldS", "Cruise hold", RuleUnit::Seconds,
+     ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US / 1e6,
+     [](ecuio_stretch_rules_t& r, double v) { r.cruise_hold_us = wholeUs(v); }},
+    {"cruiseSpeedBand", "Cruise speed band", RuleUnit::Speed,
+     ECUIO_STRETCH_DEFAULT_CRUISE_SPEED_BAND,
+     [](ecuio_stretch_rules_t& r, double v) { r.cruise_speed_band = v; }},
+    {"cruiseThrottleBand", "Cruise throttle band", RuleUnit::Percent,
+     ECUIO_STRETCH_DEFAULT_CRUISE_THROTTLE_BAND,
+     [](ecuio_stretch_rules_t& r, double v) { r.cruise_throttle_band = v; }},
+    {"cruiseFloor", "Cruise floor", RuleUnit::Speed,
+     ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR,
+     [](ecuio_stretch_rules_t& r, double v) { r.cruise_floor = v; }},
+};
+
+// The most a rule takes: a percentage, an hour, and a speed in km/h
+constexpr double kPercentMost = 100.0;
+constexpr double kSecondsMost = 3600.0;
+constexpr double kSpeedMostKmh = 1000.0;
+
+// 1 km/h in the unit system's speed unit, by core's display table
+double speedPerKmh(uint32_t units)
+{
+    ecuio_display_value_t one{};
+    return ecuio_display_convert("km/h", 0, 1.0, units, &one) ==
+                   ECUIO_DISPLAY_OK
+               ? one.value
+               : 1.0;
+}
+
+bool isNumber(const QVariant& v)
+{
+    switch (v.typeId()) {
+    case QMetaType::Double:
+    case QMetaType::Float:
+    case QMetaType::Int:
+    case QMetaType::UInt:
+    case QMetaType::LongLong:
+    case QMetaType::ULongLong:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// A page's rules map as core's struct, its speeds from the unit system's
+// unit to km/h; false with the refusal's words, naming the rule
+bool stretchRulesOf(const QVariantMap& map, uint32_t units,
+                    ecuio_stretch_rules_t* out, QString* problem)
+{
+    const double perKmh = speedPerKmh(units);
+    const bool imperial = units == ECUIO_UNITS_IMPERIAL;
+    for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
+        const StretchRule* rule = nullptr;
+        for (const StretchRule& r : kStretchRules) {
+            if (it.key() == QLatin1String(r.key)) {
+                rule = &r;
+            }
+        }
+        if (rule == nullptr) {
+            *problem =
+                QStringLiteral("'%1' isn't a stretch rule").arg(it.key());
+            return false;
+        }
+        const double shown = isNumber(it.value()) ? it.value().toDouble() : NAN;
+        double value = shown; // in core's unit
+        double most = INFINITY;
+        QString range = QStringLiteral(", 0 or more");
+        switch (rule->unit) {
+        case RuleUnit::Percent:
+            most = kPercentMost;
+            range = QStringLiteral(" from 0 to 100");
+            break;
+        case RuleUnit::Seconds:
+            most = kSecondsMost;
+            range = QStringLiteral(" from 0 to 3600 s");
+            value = shown * 1e6;
+            break;
+        case RuleUnit::Speed:
+            most = kSpeedMostKmh * perKmh;
+            range = QStringLiteral(" from 0 to %1 %2")
+                        .arg(static_cast<int>(most))
+                        .arg(imperial ? QStringLiteral("mph")
+                                      : QStringLiteral("km/h"));
+            value = shown / perKmh;
+            break;
+        case RuleUnit::Rpm:
+            break;
+        }
+        if (!std::isfinite(shown) || shown < 0.0 || shown > most) {
+            *problem = QStringLiteral("%1 must be a number%2")
+                           .arg(QLatin1String(rule->name), range);
+            return false;
+        }
+        rule->set(*out, value);
+    }
+    return true;
+}
+
+} // namespace
+
+QVariantMap RecordingView::stretchDefaults() const
+{
+    const double perKmh = speedPerKmh(m_units);
+    QVariantMap out;
+    for (const StretchRule& r : kStretchRules) {
+        out.insert(QLatin1String(r.key), r.unit == RuleUnit::Speed
+                                             ? r.fallback * perKmh
+                                             : r.fallback);
+    }
+    return out;
+}
+
+void RecordingView::setStretchesProblem(const QString& words)
+{
+    if (words != m_stretchesProblem) {
+        m_stretchesProblem = words;
+        emit stretchesProblemChanged();
     }
 }
 
 void RecordingView::findStretches(
     const std::shared_ptr<ecuio_recording_t>& reader,
-    const QPointer<RecordingView>& view, int request, uint32_t kinds,
-    quint64 generation, int holdMs)
+    const QPointer<RecordingView>& view, int request,
+    ecuio_stretch_rules_t rules, quint64 generation, int holdMs)
 {
     if (holdMs > 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(holdMs));
     }
-    ecuio_stretch_rules_t rules{};
-    rules.kinds = kinds;
-    rules.throttle = rules.engine_load = UINT32_MAX;
-    rules.vehicle_speed = rules.engine_speed = UINT32_MAX;
     ecuio_recording_info_t info{};
     ecuio_recording_get_info(reader.get(), &info);
     const uint64_t end = info.duration_us + 1;
@@ -1091,7 +1264,12 @@ int RecordingView::stats(const QVariantList& signalIndexes, double t0Ms,
         const std::lock_guard<std::mutex> lock(m_askMutex);
         m_statsAsk = std::move(ask);
     }
-    startAsks();
+    if (!startAsks()) {
+        const std::lock_guard<std::mutex> lock(m_askMutex);
+        m_statsAsk.reset();
+        m_lastStats = 0;
+        return 0;
+    }
     m_askWake.notify_all();
     return m_lastStats;
 }
@@ -1113,27 +1291,39 @@ int RecordingView::step(int signal, double tMs, bool forward)
         const std::lock_guard<std::mutex> lock(m_askMutex);
         m_stepAsk = ask;
     }
-    startAsks();
+    if (!startAsks()) {
+        const std::lock_guard<std::mutex> lock(m_askMutex);
+        m_stepAsk.reset();
+        m_lastStep = 0;
+        return 0;
+    }
     m_askWake.notify_all();
     return m_lastStep;
 }
 
-int RecordingView::stretches(bool pulls, bool cruises)
+int RecordingView::stretches(bool pulls, bool cruises, const QVariantMap& rules)
 {
-    if (m_reader == nullptr || (!pulls && !cruises)) {
+    // Judged here, before any task: a refusal is the caller's at once
+    ecuio_stretch_rules_t asked{};
+    QString problem;
+    const bool taken = stretchRulesOf(rules, m_units, &asked, &problem);
+    setStretchesProblem(problem);
+    if (!taken || m_reader == nullptr || (!pulls && !cruises)) {
         return 0;
     }
-    const uint32_t kinds = (pulls ? ECUIO_STRETCH_PULLS : 0u) |
-                           (cruises ? ECUIO_STRETCH_CRUISES : 0u);
+    asked.kinds = (pulls ? ECUIO_STRETCH_PULLS : 0u) |
+                  (cruises ? ECUIO_STRETCH_CRUISES : 0u);
+    asked.throttle = asked.engine_load = UINT32_MAX;
+    asked.vehicle_speed = asked.engine_speed = UINT32_MAX;
     const int request = ++m_lastAsk;
     try {
         // A task of the global pool with its share of the reader: a close
         // leaves it to finish, and QCoreApplication's end waits for it
         QThreadPool::globalInstance()->start(
             [reader = m_readerHold, view = QPointer<RecordingView>(this),
-             request, kinds, generation = m_generation,
+             request, asked, generation = m_generation,
              holdMs = m_stretchesHoldMs] {
-                findStretches(reader, view, request, kinds, generation, holdMs);
+                findStretches(reader, view, request, asked, generation, holdMs);
             });
     } catch (const std::bad_alloc&) {
         return 0;

@@ -228,6 +228,20 @@ void on_signal(int)
 }
 #endif
 
+// A second interrupt ends nothing from here on: called once the core call
+// it could stop has returned, before any result, error or end line.
+// HAVNE_CLI_EXPORT_TAIL_HOLD_MS (tests only) then waits, said on stderr
+void second_interrupt_over(const char* where = nullptr)
+{
+    g_second_ends.store(false);
+    const unsigned long hold_ms = env_ms("HAVNE_CLI_EXPORT_TAIL_HOLD_MS", 0);
+    if (where != nullptr && hold_ms > 0) {
+        std::fprintf(stderr, "havne-cli: holding after the %s's call\n", where);
+        std::fflush(stderr);
+        std::this_thread::sleep_for(std::chrono::milliseconds(hold_ms));
+    }
+}
+
 // secondEnds: a second interrupt ends the process at once, with the end
 // line and exit 1, for a command whose stop leaves nothing to close
 void install_handlers(bool secondEnds = false)
@@ -431,6 +445,7 @@ int open_interrupted(uint64_t, uint64_t, void* user)
 // exit 1, as clear's, since nothing was written
 int ended_interrupted(Output& out)
 {
+    second_interrupt_over(); // one end line, whatever interrupt follows
     char buf[64];
     cli::Line l(buf, sizeof buf);
     l.raw("{\"type\":\"end\"");
@@ -2168,9 +2183,13 @@ void usage(FILE* to)
         "view     reads recordings offline (the folders stream --record and\n"
         "         the app write): what each holds, then each signal's lowest,\n"
         "         highest, mean and count in N columns (100) from --from to\n"
-        "         --to seconds, and for a recording after the first aligned\n"
-        "         one its mean less the first's (delta); the plotted signals\n"
-        "         unless --signal names them,\n"
+        "         --to seconds (a sample exactly at the end is in the last\n"
+        "         column), and for a recording after the first aligned\n"
+        "         one its mean less the first's (delta); with --align-on,\n"
+        "         columns of a second or more hold exactly their own time in\n"
+        "         each recording, so a delta compares one stretch of the\n"
+        "         axis in both; the plotted signals unless --signal names\n"
+        "         them,\n"
         "         with --at the values in force then, and with --span\n"
         "         each signal's samples, first, last, lowest, highest and\n"
         "         mean from A to B seconds, both ends counted.\n"
@@ -2179,7 +2198,9 @@ void usage(FILE* to)
         "         under 1.5 s kept inside; with no engine speed, 10 km/h\n"
         "         gained) and cruises (speed within 2 km/h and\n"
         "         throttle within 3 %% for 10 s, above 35 mph (56.33 km/h)),\n"
-        "         each signal's role named on a roles line; --stretch-level\n"
+        "         each signal's role named on a roles line; pulls, cruises\n"
+        "         or all after --stretches is its word, so a folder of that\n"
+        "         name is given as ./all; --stretch-level\n"
         "         pull-throttle=, pull-load=, pull-hold=, pull-gap=,\n"
         "         pull-rise=, pull-gain=, cruise-hold=, cruise-speed-band=,\n"
         "         cruise-throttle-band= and cruise-floor= change them\n"
@@ -3304,6 +3325,7 @@ int run_health_recording(cli::HealthArgs& a)
     bool asked = false;
     const ecuio_status_t rc =
         ecuio_health_export_with(&a.options, health_interrupted, &asked, &r);
+    second_interrupt_over("health report");
     if (rc == ECUIO_ERR_CANCELED) {
         return ended_interrupted(out);
     }
@@ -3916,15 +3938,84 @@ ecuio_status_t nth_pull(const Viewed& v, uint32_t n, uint64_t* at_us)
     return rc;
 }
 
+// ecuio_recording_stats over [from_us, to_us], and for a span of one
+// microsecond, which that call refuses, the microsecond's own column
+ecuio_status_t closed_stats(const Viewed& v, const uint32_t* ids,
+                            uint32_t count, uint64_t from_us, uint64_t to_us,
+                            ecuio_recording_stats_t* out)
+{
+    if (from_us < to_us) {
+        return ecuio_recording_stats(v.r.get(), ids, count, from_us, to_us,
+                                     out);
+    }
+    std::vector<ecuio_recording_column_t> cols(count);
+    const ecuio_status_t rc = ecuio_recording_query(
+        v.r.get(), ids, count, from_us, from_us + 1, cols.data(), 1);
+    for (uint32_t k = 0; rc == ECUIO_OK && k < count; ++k) {
+        const bool text =
+            (v.signals[ids[k]].flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0;
+        out[k] = cli::stats_of_instant(cols[k], text, from_us);
+    }
+    return rc;
+}
+
+// cli::columns_own_window's views: each shown signal's count, range and
+// mean in every axis column from the reader's statistics over the column's
+// own microseconds, a row of axis.columns per signal in cols and in means
+ecuio_status_t own_columns(const Viewed& v, const cli::Axis& axis,
+                           std::vector<ecuio_recording_column_t>& cols,
+                           std::vector<double>& means)
+{
+    const size_t signals = v.shown.size();
+    cols.assign(signals * axis.columns, {});
+    std::vector<ecuio_recording_stats_t> stats(signals);
+    for (uint32_t c = 0; c < axis.columns; ++c) {
+        uint64_t from = 0;
+        uint64_t to = 0;
+        if (!cli::own_span(axis, v.offset_us, c, from, to)) {
+            continue;
+        }
+        const ecuio_status_t rc =
+            closed_stats(v, v.shown.data(), static_cast<uint32_t>(signals),
+                         from, to, stats.data());
+        if (rc != ECUIO_OK) {
+            return rc;
+        }
+        for (size_t n = 0; n < signals; ++n) {
+            cols[n * axis.columns + c] = cli::column_of_stats(stats[n]);
+            means[n * axis.columns + c] = stats[n].mean;
+        }
+    }
+    return ECUIO_OK;
+}
+
+// The axis's last microsecond (the window's t1_us), which a query's
+// half-open span leaves out: its samples into each signal's last column
+ecuio_status_t add_end(const Viewed& v, const cli::Window& w,
+                       std::vector<ecuio_recording_column_t>& cols)
+{
+    const size_t signals = v.shown.size();
+    std::vector<ecuio_recording_column_t> got(signals);
+    const ecuio_status_t rc = ecuio_recording_query(
+        v.r.get(), v.shown.data(), static_cast<uint32_t>(signals), w.t1_us,
+        w.t1_us + 1, got.data(), 1);
+    for (size_t n = 0; rc == ECUIO_OK && n < signals; ++n) {
+        cli::add_column(cols[(n + 1) * w.count - 1], got[n]);
+    }
+    return rc;
+}
+
 // Each shown signal's mean in each of the window's columns, into means
 // (a row of axis_columns per signal, NaN where a column is empty or the
 // signal is text): from the column's count and range where they give it,
 // else from the reader's statistics over the samples the column counts
 ecuio_status_t column_means(const Viewed& v, const cli::Window& w,
-                            uint32_t axis_columns,
+                            const cli::Axis& axis,
                             const std::vector<ecuio_recording_column_t>& cols,
                             std::vector<double>& means)
 {
+    const uint32_t axis_columns = axis.columns;
+    const bool ends = cli::query_leaves_end(w, axis);
     const uint32_t partial = w.partial ? 1 : 0;
     std::vector<uint32_t> ids;
     std::vector<size_t> rows;
@@ -3947,11 +4038,16 @@ ecuio_status_t column_means(const Viewed& v, const cli::Window& w,
         }
         uint64_t from = 0;
         uint64_t to = 0;
-        const bool spans =
-            partial != 0 && j == 0
-                ? cli::column_span(0, w.partial_t1_us, 1, 0, from, to)
-                : cli::column_span(w.t0_us, w.t1_us, w.count - partial,
-                                   j - partial, from, to);
+        bool spans = partial != 0 && j == 0
+                         ? cli::column_span(0, w.partial_t1_us, 1, 0, from, to)
+                         : cli::column_span(w.t0_us, w.t1_us, w.count - partial,
+                                            j - partial, from, to);
+        if (ends && j + 1 == w.count) {
+            /* The last column's samples run to the axis's end, add_end's */
+            from = spans ? from : w.t1_us;
+            to = w.t1_us;
+            spans = true;
+        }
         if (ids.empty() || !spans || from >= to) {
             continue;
         }
@@ -4123,8 +4219,7 @@ int run_view(ViewArgs& args)
                         : ecuio_recording_find(v.r.get(), &what, 0, &at);
                 if (rc != ECUIO_OK) {
                     write_start(out);
-                    write_error(out, rc,
-                                "the recording changed while it was read");
+                    write_error(out, rc, cli::read_error_detail(rc));
                     return ended(out, kExitConnect);
                 }
             }
@@ -4241,7 +4336,7 @@ int run_view(ViewArgs& args)
             found.resize((std::min<size_t>)(found.size(), count));
         }
         if (rc != ECUIO_OK) {
-            write_error(out, rc, "the recording changed while it was read");
+            write_error(out, rc, cli::read_error_detail(rc));
             return ended(out, kExitConnect);
         }
         for (const ecuio_recording_stretch_t& s : found) {
@@ -4265,9 +4360,19 @@ int run_view(ViewArgs& args)
             continue;
         }
         cli::Window w;
-        const bool any = cli::window_of(axis, v.offset_us, w);
+        const bool window = cli::window_of(axis, v.offset_us, w);
         const size_t signals = v.shown.size();
-        if (any) {
+        /* Statistics for every axis column and no query: an aligned view's
+         * wide columns, and a recording only the axis's end reaches */
+        const bool by_stats =
+            axis.to_us - v.offset_us >= 0 &&
+            (!window || cli::columns_own_window(
+                            args.align.kind != cli::AlignOn::none, axis));
+        const bool any = by_stats || window;
+        if (by_stats) {
+            w = cli::Window{};
+            w.count = axis.columns;
+        } else if (window) {
             /* Signal by signal, w.count columns each: the partial column's
              * own query first, then the rest's */
             cols.assign(signals * w.count, {});
@@ -4297,15 +4402,21 @@ int run_view(ViewArgs& args)
                             static_cast<std::ptrdiff_t>(n * w.count + partial));
                 }
             }
+            if (rc == ECUIO_OK && cli::query_leaves_end(w, axis)) {
+                rc = add_end(v, w, cols);
+            }
             if (rc != ECUIO_OK) {
-                write_error(out, rc, "the recording changed while it was read");
+                write_error(out, rc, cli::read_error_detail(rc));
                 return ended(out, kExitConnect);
             }
         }
         std::vector<double> means(signals * axis.columns, NAN);
-        if (any && column_means(v, w, axis.columns, cols, means) != ECUIO_OK) {
-            write_error(out, ECUIO_ERR_RECORDING_CHANGED,
-                        "the recording changed while it was read");
+        const ecuio_status_t mean_rc =
+            !any       ? ECUIO_OK
+            : by_stats ? own_columns(v, axis, cols, means)
+                       : column_means(v, w, axis, cols, means);
+        if (mean_rc != ECUIO_OK) {
+            write_error(out, mean_rc, cli::read_error_detail(mean_rc));
             return ended(out, kExitConnect);
         }
         std::vector<double> delta(axis.columns);
@@ -4356,8 +4467,7 @@ int run_view(ViewArgs& args)
                         v.r.get(), v.shown[n], static_cast<uint64_t>(t),
                         text.data(), static_cast<uint32_t>(text.size()), &host);
                     if (rc != ECUIO_OK) {
-                        write_error(out, rc,
-                                    "the recording changed while it was read");
+                        write_error(out, rc, cli::read_error_detail(rc));
                         return ended(out, kExitConnect);
                     }
                 }
@@ -4380,15 +4490,13 @@ int run_view(ViewArgs& args)
             const int64_t t1 = span.to_us - v.offset_us;
             std::vector<ecuio_recording_stats_t> st(v.shown.size(),
                                                     cli::no_stats());
-            if (t1 > 0) {
-                const ecuio_status_t rc = ecuio_recording_stats(
-                    v.r.get(), v.shown.data(),
-                    static_cast<uint32_t>(v.shown.size()),
+            if (t1 >= 0) {
+                const ecuio_status_t rc = closed_stats(
+                    v, v.shown.data(), static_cast<uint32_t>(v.shown.size()),
                     static_cast<uint64_t>((std::max<int64_t>)(t0, 0)),
                     static_cast<uint64_t>(t1), st.data());
                 if (rc != ECUIO_OK) {
-                    write_error(out, rc,
-                                "the recording changed while it was read");
+                    write_error(out, rc, cli::read_error_detail(rc));
                     return ended(out, kExitConnect);
                 }
                 for (ecuio_recording_stats_t& s : st) {
@@ -5139,6 +5247,7 @@ int run(int argc, char** argv)
             const ecuio_status_t sizing = ecuio_export_estimate_with(
                 &ex.options, rows.data(), static_cast<uint32_t>(rows.size()),
                 export_interrupted, &asked, sized.data());
+            second_interrupt_over("estimate");
             if (sizing == ECUIO_ERR_CANCELED) {
                 return ended_interrupted(out);
             }
@@ -5155,6 +5264,7 @@ int run(int argc, char** argv)
         ecuio_export_report_t report{};
         const ecuio_status_t rc =
             ecuio_export_with(&ex.options, export_interrupted, &asked, &report);
+        second_interrupt_over("export");
         if (rc == ECUIO_ERR_CANCELED) {
             return ended_interrupted(out);
         }
@@ -5199,6 +5309,7 @@ int run(int argc, char** argv)
             ecuio_csv_guess_t guess{};
             const ecuio_status_t grc = guess_map(im, &text, &guess, &why);
             if (grc != ECUIO_OK) {
+                second_interrupt_over();
                 write_error(out, grc, why.c_str());
                 return ended(out, kExitConnect);
             }
@@ -5210,6 +5321,7 @@ int run(int argc, char** argv)
             }
             if ((guess.flags & ECUIO_CSV_GUESS_TIME_UNIT_KNOWN) == 0) {
                 // --time-unit gives a unit only to plain numbers
+                second_interrupt_over();
                 write_error(out, ECUIO_ERR_LOAD_FAILED,
                             (guess.flags & ECUIO_CSV_GUESS_TIME_NUMBERS) != 0
                                 ? "the guessed map's time has no unit: give "
@@ -5226,6 +5338,7 @@ int run(int argc, char** argv)
         } else if (im.map_path != nullptr) {
             if (!read_whole(im.map_path, size_t{1} << 20, "column map", &map,
                             &why)) {
+                second_interrupt_over();
                 write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
                 return ended(out, kExitConnect);
             }
@@ -5235,6 +5348,7 @@ int run(int argc, char** argv)
         bool asked = false;
         const ecuio_status_t rc =
             ecuio_import_with(&im.options, import_interrupted, &asked, &report);
+        second_interrupt_over("import");
         if (rc == ECUIO_ERR_CANCELED) {
             return ended_interrupted(out);
         }

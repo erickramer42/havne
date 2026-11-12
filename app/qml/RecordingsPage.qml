@@ -154,6 +154,9 @@ Page {
         property string paneShares: "{}"
         // The second cursor's hint has been shown
         property bool spanHintSeen: false
+        // The stretches' levels the user set, as JSON by key, in display
+        // units: {} for core's defaults
+        property string stretchRules: "{}"
     }
     property alias chartHeight: viewerSettings.chartHeight
     property alias stripFolded: viewerSettings.stripFolded
@@ -305,6 +308,37 @@ Page {
     }
     // Signal index -> plotted, from the recording's default at the open
     property var plotted: ({})
+    // Signal index -> its trace's color slot, by plotted order: a signal
+    // takes the lowest free slot when plotted and keeps it while it stays
+    // plotted, so unplotting another recolors nothing
+    property var slots: ({})
+    onPlottedChanged: reconcileSlots()
+    function reconcileSlots() {
+        const next = {}
+        const taken = {}
+        for (const k of Object.keys(slots)) {
+            if (plotted[k] === true) {
+                next[k] = slots[k]
+                taken[slots[k]] = true
+            }
+        }
+        for (const k of Object.keys(plotted).map(Number).sort((a, b) => a - b)) {
+            if (plotted[k] !== true || next[k] !== undefined)
+                continue
+            let slot = 0
+            while (taken[slot])
+                ++slot
+            next[k] = slot
+            taken[slot] = true
+        }
+        slots = next
+    }
+    // Only a plotted signal is drawn, and each plotted one has a slot, so a
+    // trace never falls back to its row; the fallback is for any other caller
+    function slotOf(index) {
+        const slot = slots[index]
+        return slot === undefined ? index : slot
+    }
     // The signal rows the filter leaves (ADR-0050): the recording's own
     // list while it's off. Every filter property shares one change
     // signal, so reading active re-filters on any change; the ticks are
@@ -439,6 +473,9 @@ Page {
     // pullsHere on alignPullThere of pullsThere)
     readonly property bool comparing: compare.state !== RecordingView.Closed
     property string compareTitle: ""
+    // The Compare controls shown above the chart (the title row's Compare...
+    // opens them; a compare started from anywhere does too)
+    property bool compareOpen: false
     property bool compareAligned: false
     property real compareOffsetMs: 0
     property string compareStatus: ""
@@ -455,11 +492,43 @@ Page {
     // until its answer), and the place of the one chosen in each
     property var pullsHere: null
     property var pullsThere: null
+    // This recording's stretches, pulls and cruises in time order, from one
+    // ask per open (RecordingView.stretches; null until answered): the Jump
+    // row's list, the bands' and the alignment's pulls here. A failed ask is
+    // stretchFailed, never an empty list
+    property var stretchList: null
+    property bool stretchFailed: false
+    property int stretchAsk: 0
+    property bool bandsShown: true
+    // The Stretches panel's levels: what is in force, the panel above the
+    // chart (in its place on a phone), and the words of the last refusal
+    readonly property var stretchRules: readRules(viewerSettings.stretchRules)
+    property bool stretchesOpen: false
+    property string rulesProblem: ""
+    // The levels the last accepted ask went out with (the stored ones, or
+    // the defaults when those were refused) and the unit system they were
+    // read in: Compare's ask takes the same, and a change of units asks again
+    property var askedRules: ({})
+    property int stretchUnits: 0
+    function readRules(text) {
+        try {
+            const v = JSON.parse(text)
+            return v !== null && typeof v === "object" && !Array.isArray(v) ? v : ({})
+        } catch (e) {
+            return ({})
+        }
+    }
+    // The stretch last jumped to: its kind and its place in that kind's
+    // list, -1 for none
+    property string jumpKind: ""
+    property int jumpIndex: -1
+    onStretchListChanged: chart.requestPaint()
+    onBandsShownChanged: chart.requestPaint()
+    onJumpIndexChanged: chart.requestPaint()
     // An ask that failed (the file changed since the open): not a
     // recording with no pull
     property bool pullsHereFailed: false
     property bool pullsThereFailed: false
-    property int pullsHereAsk: 0
     property int pullsThereAsk: 0
     property int alignPullHere: 0
     property int alignPullThere: 0
@@ -567,6 +636,7 @@ Page {
         importMap = ""
         importAsksInterface = false
         importInterface.text = ""
+        importLabel.text = ""
         importNote = ""
         importFailed = false
         importOpen = true
@@ -703,7 +773,9 @@ Page {
     }
 
     function backToList() {
+        importNote = ""
         closeExport()
+        stretchesOpen = false
         recording.close()
         viewFrames.clear()
         detailView = "values"
@@ -773,6 +845,22 @@ Page {
     function centerOn(t) {
         const half = (viewT1 - viewT0) / 2
         setView(t - half, t + half)
+    }
+
+    // The cursors' time tags on the axis row, for the layout to keep its
+    // captions out from under them: the time and the tag's width
+    function cursorTags() {
+        const out = []
+        for (const ms of [cursorMs, cursorBMs]) {
+            if (isFinite(ms) && ms >= viewT0 && ms <= viewT1)
+                out.push({ ms: ms, width: Math.max(phoneShape ? Theme.touchTarget : 24,
+                                                   timeTextWidth(ms) + 8) })
+        }
+        return out
+    }
+    FontMetrics { id: tagMetrics; font.pixelSize: ChartLayout.labelPx; font.family: Theme.valueFamily }
+    function timeTextWidth(ms) {
+        return tagMetrics.advanceWidth(timeText(ms, true))
     }
 
     // A tapped time moved to the nearest sample of the first signal
@@ -981,6 +1069,7 @@ Page {
         const out = indexes.length === 0 ? [] : recording.columns(indexes, g0, g1, gn).map(c => {
             const s = sigs[c.index]
             return { columns: { lows: c.lows, highs: c.highs, t0: g0, t1: g1 }, row: c.index,
+                     slot: root.slotOf(c.index),
                      scaleKey: c.index, decimals: s.decimals, unit: s.unit,
                      labelValue: labelOf(root.readoutFrom[c.index], fromInView),
                      labelMs: labelMsOf(root.readoutFrom[c.index], 0, fromInView) }
@@ -999,8 +1088,8 @@ Page {
             const mine = pairs[k].mine
             const s = theirs[pairs[k].theirs]
             out.push({ columns: { lows: cols[k].lows, highs: cols[k].highs, t0: g0, t1: g1 },
-                       row: mine,
-                       scaleKey: mine, dash: Theme.seriesCompareDash(mine), decimals: s.decimals,
+                       row: mine, slot: root.slotOf(mine),
+                       scaleKey: mine, dash: Theme.seriesCompareDash(root.slotOf(mine)), decimals: s.decimals,
                        unit: s.unit, labelValue: labelOf(root.compareReadout[mine], inView),
                        labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs, inView) })
         }
@@ -1021,12 +1110,14 @@ Page {
     }
 
     function compareWith(row) {
+        compareOpen = true
         compareTitle = row.title
         compareAligned = false
         compareStatus = qsTr("Opening %1…").arg(row.title)
         compare.open(row.folder)
     }
     function stopComparing() {
+        compareOpen = false
         compare.close()
         compareTitle = ""
         compareStatus = ""
@@ -1051,10 +1142,136 @@ Page {
     }
     // Asks each recording for its pulls, once: the answers align again
     function askPulls() {
-        if (pullsHere === null && pullsHereAsk === 0)
-            pullsHereAsk = recording.stretches(true, false)
+        if (pullsHere === null && stretchAsk === 0)
+            askStretches()
         if (pullsThere === null && pullsThereAsk === 0)
-            pullsThereAsk = compare.stretches(true, false)
+            pullsThereAsk = compare.stretches(true, false, forcedRules())
+    }
+    // One ask for both kinds: only the newest ask per view is answered, so
+    // the Jump row, the bands and the alignment share it
+    function askStretches() {
+        if (recording.state !== RecordingView.Open)
+            return
+        rulesProblem = ""
+        stretchUnits = Bridge.unitSystem
+        let used = stretchRules
+        let request = recording.stretches(true, true, used)
+        if (request === 0 && recording.stretchesProblem !== "") {
+            // A stored level that is none today: the defaults, with the
+            // words under the panel's fields, never a refused ask
+            rulesProblem = recording.stretchesProblem
+            used = ({})
+            request = recording.stretches(true, true, used)
+        }
+        stretchAsk = request
+        if (request === 0) {
+            stretchFailed = true
+            pullsHereFailed = true
+            pullsHere = []
+        } else {
+            askedRules = used
+        }
+    }
+    // The levels in force for the compared recording's ask too, so a pull is
+    // counted by one rule in both
+    function forcedRules() {
+        return askedRules
+    }
+    // Asks again with the levels in force, here and there: a change of unit
+    // system reads the same typed numbers in the other unit
+    function reaskStretches() {
+        stretchList = null
+        stretchFailed = false
+        pullsHere = null
+        pullsHereFailed = false
+        jumpIndex = -1
+        askStretches()
+        if (compare.state === RecordingView.Open) {
+            pullsThere = null
+            alignPullThere = 0
+            pullsThereAsk = compare.stretches(true, false, askedRules)
+        }
+    }
+    // Asks again with the panel's levels. A refusal leaves the earlier answer
+    // standing and its words under the fields
+    function applyStretchRules(rules) {
+        const request = recording.stretches(true, true, rules)
+        if (request === 0) {
+            rulesProblem = recording.stretchesProblem
+            if (rulesProblem === "")
+                stretchFailed = true
+            return
+        }
+        rulesProblem = ""
+        askedRules = rules
+        stretchUnits = Bridge.unitSystem
+        viewerSettings.stretchRules = JSON.stringify(rules)
+        stretchAsk = request
+        stretchList = null
+        stretchFailed = false
+        pullsHere = null
+        jumpIndex = -1
+        if (compare.state === RecordingView.Open) {
+            pullsThere = null
+            alignPullThere = 0
+            pullsThereAsk = compare.stretches(true, false, rules)
+        }
+        // On a phone the panel stood where the chart is: back to it
+        if (Theme.compact)
+            stretchesOpen = false
+    }
+    function stretchesOf(kind) {
+        return stretchList === null ? [] : stretchList.filter(s => s.kind === kind)
+    }
+    // Where a jump goes on from: the cursor, else the view's start
+    function jumpBase() {
+        return hasCursor ? cursorMs : viewT0
+    }
+    // The place in a kind's list of the first stretch after the base, or
+    // of the last before it; -1 for none
+    function nextStretch(kind) {
+        const at = jumpBase()
+        return stretchesOf(kind).findIndex(s => s.fromMs > at + 0.5)
+    }
+    function previousStretch(kind) {
+        const at = jumpBase()
+        const list = stretchesOf(kind)
+        for (let i = list.length - 1; i >= 0; --i) {
+            if (list[i].fromMs < at - 0.5)
+                return i
+        }
+        return -1
+    }
+    // The stretch in view with a margin, the cursor at its start
+    function jump(kind, direction) {
+        const i = direction > 0 ? nextStretch(kind) : previousStretch(kind)
+        if (i < 0)
+            return
+        const s = stretchesOf(kind)[i]
+        const margin = Math.max(minSpanMs, (s.toMs - s.fromMs) / 4)
+        setView(s.fromMs - margin, s.toMs + margin)
+        setCursor(s.fromMs)
+        jumpKind = kind
+        jumpIndex = i
+    }
+    // The Jump row's line: where the last jump went while the cursor is
+    // still at its start, else how many of each were found
+    readonly property string jumpStatus: {
+        if (stretchFailed)
+            return qsTr("Its stretches couldn't be read")
+        if (stretchList === null)
+            return qsTr("Looking for stretches…")
+        const list = jumpIndex >= 0 ? stretchesOf(jumpKind) : []
+        const at = jumpIndex >= 0 ? list[jumpIndex] : undefined
+        if (at !== undefined && hasCursor && Math.abs(cursorMs - at.fromMs) < 0.5)
+            return qsTr("%1 %2 of %3 · %4").arg(jumpKind === "pull" ? qsTr("Pull") : qsTr("Cruise"))
+                       .arg(jumpIndex + 1).arg(list.length).arg(timeText(at.fromMs, true))
+        const pulls = stretchesOf("pull").length
+        const cruises = stretchesOf("cruise").length
+        return (pulls === 0 ? qsTr("No pull found")
+                            : pulls === 1 ? qsTr("1 pull") : qsTr("%1 pulls").arg(pulls)) + " · "
+               + (cruises === 0 ? qsTr("No cruise found")
+                                : cruises === 1 ? qsTr("1 cruise") : qsTr("%1 cruises").arg(cruises))
     }
     // A recording's pulls as the choices' rows: its number, start and length
     function pullRows(pulls, here) {
@@ -1240,6 +1457,23 @@ Page {
             recording.openFrames(recording.folder, value)
     }
 
+    // A row's length, whether it is a log of chosen signals or a whole
+    // session, its signal count and its marks
+    function rowFacts(row) {
+        const parts = []
+        if (row.durationMs >= 0)
+            parts.push(lengthText(row.durationMs))
+        if (row.log)
+            parts.push(row.signals === 1 ? qsTr("log, 1 signal") : qsTr("log, %1 signals").arg(row.signals))
+        else if (row.frames !== false)
+            parts.push(qsTr("session"))
+        else if (row.signals > 0)
+            parts.push(row.signals === 1 ? qsTr("1 signal") : qsTr("%1 signals").arg(row.signals))
+        if (row.marks > 0)
+            parts.push(row.marks === 1 ? qsTr("1 mark") : qsTr("%1 marks").arg(row.marks))
+        return parts.join(" · ")
+    }
+
     // A row's second line: the address it was recorded from and the
     // profile it replays under, the profile only where the address
     // doesn't name it already. A row without frames (a CSV import's
@@ -1293,7 +1527,10 @@ Page {
         id: importDialog
         title: qsTr("Import a log")
         fileMode: FileDialog.OpenFile
-        nameFilters: [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
+        // Android's picker filters by MIME type and grays out a .csv it indexes
+        // as another type: every file is offered there
+        nameFilters: Qt.platform.os === "android" ? [qsTr("All files (*)")]
+                                                  : [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         onAccepted: root.chooseImportFile(importDialog.selectedFile)
     }
@@ -1376,6 +1613,10 @@ Page {
         if (started) {
             reportFailed = false
             reportNote = qsTr("Saving the report…")
+        } else if (!recording.reporting) {
+            // Not a report already under way: the note says this one didn't start
+            reportFailed = true
+            reportNote = qsTr("Report not saved: the report couldn't start")
         }
         return started
     }
@@ -1405,26 +1646,35 @@ Page {
                 root.moveKeyed(atMs, root.stepsB)
         }
         onStretchesReady: (request, found, ok) => {
-            if (request !== root.pullsHereAsk)
+            if (request !== root.stretchAsk)
                 return
-            root.pullsHereAsk = 0
+            root.stretchAsk = 0
+            root.stretchFailed = !ok
+            root.stretchList = found
+            root.jumpIndex = -1
             root.alignPullHere = 0
             root.pullsHereFailed = !ok
-            root.pullsHere = found
-            root.align()
+            root.pullsHere = found.filter(s => s.kind === "pull")
+            if (root.comparing)
+                root.align()
         }
         onStateChanged: {
             root.reportNote = ""
             root.reportFailed = false
             root.pullsHere = null
             root.pullsHereFailed = false
-            root.pullsHereAsk = 0
+            root.stretchAsk = 0
+            root.stretchList = null
+            root.stretchFailed = false
+            root.jumpIndex = -1
+            root.stretchesOpen = false
             root.alignPullHere = 0
             if (recording.state !== RecordingView.Open)
                 return
             const defaults = {}
             for (const s of recording.signalList)
                 defaults[s.index] = s.plotted
+            root.slots = ({})
             root.plotted = defaults
             root.readout = ({})
             let rows = 0
@@ -1441,6 +1691,7 @@ Page {
             root.framesFilterOpen = false
             framesFilterPanel.clear()
             root.showAll()
+            root.askStretches()
         }
         onSignalListChanged: {
             // An open, a close or new units: a range set before means nothing
@@ -1449,6 +1700,8 @@ Page {
                 root.setCursor(root.cursorMs)
             if (root.hasCursorB)
                 root.setCursorB(root.cursorBMs)
+            if (recording.state === RecordingView.Open && root.stretchUnits !== Bridge.unitSystem)
+                root.reaskStretches()
             chart.requestPaint()
         }
     }
@@ -1507,9 +1760,9 @@ Page {
         function onFinished(result) {
             root.importFailed = !result.ok
             if (result.ok) {
-                root.importNote = root.importedWords(result)
                 root.importOpen = false
-                root.refresh()
+                root.openFolder(result.folder)
+                root.importNote = root.importedWords(result)
             } else {
                 root.importNote = result.words
                 if (root.importKind === RecordingImport.Candump)
@@ -1619,6 +1872,50 @@ Page {
                 wrapMode: Text.WrapAnywhere
                 color: Theme.text
                 text: qsTr("Import %1").arg(root.fileNameOf(root.importFile))
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                ThemedButton {
+                    objectName: "importStart"
+                    text: qsTr("Import")
+                    highlighted: true
+                    enabled: !Bridge.recordingImport.busy && root.importReady
+                    onClicked: root.startImport()
+                }
+                ThemedButton {
+                    objectName: "importCancel"
+                    text: qsTr("Cancel")
+                    enabled: !Bridge.recordingImport.busy
+                    onClicked: {
+                        root.importOpen = false
+                        root.importNote = ""
+                    }
+                }
+                Label {
+                    objectName: "importBusy"
+                    visible: Bridge.recordingImport.busy
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    color: Theme.textDim
+                    text: root.importGuessing ? qsTr("Reading...") : qsTr("Importing...")
+                }
+            }
+            // An optional name for the recording, kept as its folder's label
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing
+                Label { text: qsTr("Label"); color: Theme.textDim; font.pixelSize: Theme.fontCaption }
+                ThemedTextField {
+                    id: importLabel
+                    objectName: "importLabel"
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 0   // the row's width, not its text's
+                    placeholderText: qsTr("Optional, shown on the recording's row")
+                    inputMethodHints: Qt.ImhNoPredictiveText
+                    enabled: !Bridge.recordingImport.busy
+                    onTextChanged: Bridge.recordingImport.label = text
+                }
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -1754,41 +2051,12 @@ Page {
                     enabled: !Bridge.recordingImport.busy
                 }
             }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Theme.spacing
-                ThemedButton {
-                    objectName: "importStart"
-                    text: qsTr("Import")
-                    highlighted: true
-                    enabled: !Bridge.recordingImport.busy && root.importReady
-                    onClicked: root.startImport()
-                }
-                ThemedButton {
-                    objectName: "importCancel"
-                    text: qsTr("Cancel")
-                    enabled: !Bridge.recordingImport.busy
-                    onClicked: {
-                        root.importOpen = false
-                        root.importNote = ""
-                    }
-                }
-                Label {
-                    objectName: "importBusy"
-                    visible: Bridge.recordingImport.busy
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    color: Theme.textDim
-                    text: root.importGuessing ? qsTr("Reading...") : qsTr("Importing...")
-                }
-            }
         }
 
         // The last import's words: what it made, or why not
         Label {
             objectName: "importNote"
-            visible: root.importNote !== "" && !root.viewing
+            visible: root.importNote !== ""
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             color: root.importFailed ? Theme.danger : Theme.success
@@ -1804,7 +2072,7 @@ Page {
             color: Theme.textDim
             text: root.recordings.length > 0
                   ? qsTr("Newest first. Open one to look through it, or replay it as a session.")
-                  : qsTr("No recordings yet: turn Record on in Settings, then connect.")
+                  : qsTr("No recordings yet. Start log, in the top bar while connected, makes one; Settings, Recording keeps every session; Import brings in another logger's file.")
         }
 
         // A baseline whose folder was moved or deleted says so, on the list
@@ -1879,6 +2147,15 @@ Page {
                             objectName: "recordingTitle"
                             text: recordingRow.modelData.title
                             color: Theme.text
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Label {
+                            objectName: "recordingFacts"
+                            visible: text !== ""
+                            text: root.rowFacts(recordingRow.modelData)
+                            color: Theme.textDim
+                            font.pixelSize: Theme.fontCaption
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
@@ -1988,6 +2265,17 @@ Page {
                         text: qsTr("Save report…")
                         onClicked: reportDialog.open()
                     }
+                    // Selected while its controls are open above the chart
+                    ThemedButton {
+                        objectName: "compareButton"
+                        compact: Theme.compact
+                        Layout.fillWidth: Theme.compact
+                        Layout.preferredWidth: Theme.compact ? 1 : -1
+                        checkable: true
+                        checked: root.compareOpen
+                        text: qsTr("Compare…")
+                        onClicked: root.compareOpen = !root.compareOpen
+                    }
                 }
             }
             ThemedButton {
@@ -2047,11 +2335,66 @@ Page {
             onCloseRequested: root.closeExport()
         }
 
+        // Compare's controls, over the chart: the recording to overlay, how
+        // the two line up, and what came of it
+        ColumnLayout {
+            id: compareSlot
+            objectName: "compareSlot"
+            visible: root.compareOpen && recording.state === RecordingView.Open && !root.exportShown
+            Layout.fillWidth: true
+            spacing: Theme.spacing
+        }
+
+        // The levels that make a stretch: over the chart, so the bands stay
+        // in sight while they are tuned; on a phone in the chart's place
+        StretchesPanel {
+            id: stretchesPanel
+            objectName: "stretchesPanel"
+            visible: root.stretchesOpen && recording.state === RecordingView.Open && !root.exportShown
+            Layout.fillWidth: true
+            Layout.fillHeight: Theme.compact
+            view: recording
+            rules: root.stretchRules
+            problem: root.rulesProblem
+            bandsShown: root.bandsShown
+            onBandsToggled: root.bandsShown = !root.bandsShown
+            onApplyRequested: rules => root.applyStretchRules(rules)
+            onCloseRequested: root.stretchesOpen = false
+        }
+
+        // The Jump row over the chart on the desktop; on a phone under it,
+        // so a recording still opens onto its chart
+        ColumnLayout {
+            id: jumpAbove
+            visible: chartFrame.visible && !Theme.compact
+            Layout.fillWidth: true
+            spacing: 0
+        }
+        RecordingJumpRow {
+            id: jumpRow
+            objectName: "jumpRow"
+            parent: Theme.compact ? jumpBelow : jumpAbove
+            visible: chartFrame.visible
+            Layout.fillWidth: true
+            status: root.jumpStatus
+            canPreviousPull: root.previousStretch("pull") >= 0
+            canNextPull: root.nextStretch("pull") >= 0
+            canPreviousCruise: root.previousStretch("cruise") >= 0
+            canNextCruise: root.nextStretch("cruise") >= 0
+            bandsShown: root.bandsShown
+            stretchesOpen: root.stretchesOpen
+            onJumpRequested: (kind, direction) => root.jump(kind, direction)
+            onBandsToggled: root.bandsShown = !root.bandsShown
+            onStretchesToggled: root.stretchesOpen = !root.stretchesOpen
+        }
+
         Rectangle {
             id: chartFrame
             objectName: "chartFrame"
-            // Maximized with Frames chosen, the table has the page instead
+            // Maximized with Frames chosen, the table has the page instead;
+            // a phone's Stretches panel stands in the chart's place
             visible: recording.state === RecordingView.Open && !root.exportShown
+                     && !(Theme.compact && root.stretchesOpen)
                      && !(root.chartMaximized && root.framesShown)
             Layout.fillWidth: true
             // A share of the page, so the rows show under it; the splitter
@@ -2109,6 +2452,7 @@ Page {
                     gapMs: Theme.staleMs, minSpanUnits: 20, format: root.valueText,
                     span: { t0: root.viewT0, t1: root.viewT1 }, absolute: true,
                     caption: root.captionOf,
+                    tags: root.cursorTags(),
                     axisH: root.phoneShape && root.hasCursor ? ChartLayout.axisHCursor : ChartLayout.axisH,
                     panes: { max: root.paneLimit, minH: ChartLayout.paneMinH,
                              shares: root.paneShares, ranges: root.paneRanges,
@@ -2117,6 +2461,29 @@ Page {
                 // Findings as bars along the plot's foot, markers as dashed
                 // lines with their labels, the cursors as solid lines over
                 // their span's tint, the extremes' dots on the traces
+                decorateBelow: function(ctx, l) {
+                    if (!root.bandsShown || root.stretchList === null)
+                        return
+                    const span = root.viewT1 - root.viewT0
+                    const xOf = t => l.left + (t - root.viewT0) / span * (l.plotW - 1)
+                    const plotEnd = l.left + l.plotW
+                    const chosen = root.jumpIndex >= 0 ? root.stretchesOf(root.jumpKind)[root.jumpIndex]
+                                                       : undefined
+                    for (const s of root.stretchList) {
+                        const x0 = Math.max(l.left, xOf(s.fromMs))
+                        const x1 = Math.min(plotEnd, xOf(s.toMs))
+                        if (x1 <= x0)
+                            continue
+                        const role = s.kind === "pull" ? Theme.stretchPull : Theme.stretchCruise
+                        const here = chosen !== undefined && s.kind === root.jumpKind
+                                     && s.fromMs === chosen.fromMs
+                        ctx.fillStyle = Qt.alpha(role, here ? 0.22 : 0.15)
+                        ctx.fillRect(x0, l.top, x1 - x0, l.plotH)
+                        // The edge along the plot's top, solid
+                        ctx.fillStyle = role
+                        ctx.fillRect(x0, l.top, x1 - x0, 2)
+                    }
+                }
                 decorate: function(ctx, l) {
                     const span = root.viewT1 - root.viewT0
                     const xOf = t => l.left + (t - root.viewT0) / span * (l.plotW - 1)
@@ -2174,10 +2541,10 @@ Page {
                         ctx.beginPath()
                         ctx.arc(d.x, d.y, root.cursorDotR, 0, 2 * Math.PI)
                         if (d.filled) {
-                            ctx.fillStyle = Theme.seriesColor(d.row)
+                            ctx.fillStyle = Theme.seriesColor(d.slot)
                             ctx.fill()
                         } else {
-                            ctx.strokeStyle = Theme.seriesColor(d.row)
+                            ctx.strokeStyle = Theme.seriesColor(d.slot)
                             ctx.stroke()
                         }
                     }
@@ -2188,7 +2555,7 @@ Page {
                         const x = xOf(tr.labelMs)
                         if (x < l.left || x > plotEnd)
                             continue
-                        ctx.fillStyle = Theme.seriesColor(tr.row)
+                        ctx.fillStyle = Theme.seriesColor(tr.slot)
                         ctx.beginPath()
                         ctx.arc(x, tr.endY, root.cursorDotR, 0, 2 * Math.PI)
                         ctx.fill()
@@ -2519,7 +2886,7 @@ Page {
                         width: 8
                         height: 8
                         radius: 2
-                        color: Theme.seriesColor(stripRow.modelData.index)
+                        color: Theme.seriesColor(root.slotOf(stripRow.modelData.index))
                     }
                     Label {
                         objectName: "stripName"
@@ -2590,6 +2957,13 @@ Page {
                 }
             }
             DoubleTapHandler { onDoubleTap: viewerSettings.chartHeight = -1 }
+        }
+
+        ColumnLayout {
+            id: jumpBelow
+            visible: chartFrame.visible && Theme.compact
+            Layout.fillWidth: true
+            spacing: 0
         }
 
         // Maximized on a narrow page, the views' switch has a row of its own
@@ -2716,7 +3090,7 @@ Page {
                         font.pixelSize: Theme.compact ? Theme.fontCaption : Theme.fontBody
                         color: Theme.textDim
                         text: !root.hasCursor ? (Theme.compact ? qsTr("Tap for values")
-                                                               : qsTr("Click the chart for values"))
+                                                               : qsTr("Click for values · drag to pan · wheel to zoom · double-click a pane to enlarge it"))
                                               : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
                     }
                     RowLayout {
@@ -2982,7 +3356,8 @@ Page {
             header: Component {
                 ViewHead {
                     role: "values"
-                    width: signalRows.width
+                    // The pinned list's scrollbar lies over its right edge: the head keeps clear
+                    width: signalRows.width - (root.pinnedViewer ? 12 : 0)
                     list: signalRows
                 }
             }
@@ -3025,9 +3400,10 @@ Page {
                         readonly property bool shown: root.plotted[signalRow.signalIndex] === true
                         implicitWidth: 10; implicitHeight: 10
                         radius: 2
-                        color: shown ? Theme.seriesColor(signalRow.signalIndex) : "transparent"
+                        color: shown ? Theme.seriesColor(root.slotOf(signalRow.signalIndex)) : "transparent"
                         border.width: 1
-                        border.color: Theme.seriesColor(signalRow.signalIndex)
+                        border.color: shown ? Theme.seriesColor(root.slotOf(signalRow.signalIndex))
+                                            : Theme.textDim
                         opacity: shown ? 1.0 : 0.5
                     }
                     ColumnLayout {
@@ -3384,7 +3760,8 @@ Page {
 
                 // Another recording to overlay, and how the two line up
                 RowLayout {
-                    visible: recording.state === RecordingView.Open && !root.chartMaximized
+                    parent: compareSlot
+                    visible: recording.state === RecordingView.Open
                     Layout.fillWidth: true
                     spacing: Theme.spacing
                     ComboBox {
@@ -3414,7 +3791,8 @@ Page {
                     }
                 }
                 Flow {
-                    visible: root.comparing && recording.state === RecordingView.Open && !root.chartMaximized
+                    parent: compareSlot
+                    visible: root.comparing && recording.state === RecordingView.Open
                     Layout.fillWidth: true
                     spacing: 6
                     ComboBox {
@@ -3511,7 +3889,8 @@ Page {
                 }
                 Label {
                     objectName: "compareStatus"
-                    visible: root.comparing && recording.state === RecordingView.Open && !root.chartMaximized
+                    parent: compareSlot
+                    visible: root.comparing && recording.state === RecordingView.Open
                     Layout.fillWidth: true
                     wrapMode: Text.WordWrap
                     color: Theme.textDim

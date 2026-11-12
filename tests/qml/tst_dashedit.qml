@@ -1402,6 +1402,9 @@ TestCase {
         field.forceActiveFocus()
         tryVerify(() => field.activeFocus, 3000, "the field takes the focus")
         field.text = "Typed"
+        // The panel's preview pushes the grid down: bring B into view
+        const view = find(page, "dashPage_0")
+        view.contentY = Math.max(0, b.mapToItem(view.contentItem, 0, 0).y - 10)
         hold(page, b)
         compare(labels(page), ["Typed", "B"], "committed as the cell lifts")
         mouseRelease(b)
@@ -2055,8 +2058,10 @@ TestCase {
     }
     readonly property var anyCell: ["panelClose", "panelCopy", "panelPaste", "panelW", "panelH",
                                     "panelEarlier", "panelLater", "panelStart", "panelEnd", "panelRemove"]
-    readonly property var withSignal: ["panelLabel", "panelSignal", "panelKind", "panelFrom",
+    readonly property var withSignal: ["panelPreview", "panelLabel", "panelSignal", "panelKind", "panelFrom",
                                        "panelFromCaption", "panelTo", "panelToCaption"]
+    // Shown only while the row has a session's entry, which these cases have none of
+    readonly property var withEntry: ["panelSignalName"]
     // What the value's text and tone read: every kind that draws a value
     readonly property var valueDrawn: ["panelColdBelow", "panelWarnBelow", "panelDangerBelow",
                                        "panelWarnFrom", "panelDangerFrom", "panelDecimals", "panelColors",
@@ -2076,6 +2081,59 @@ TestCase {
         "blank": anyCell
     })
 
+    // Edit mode says how a gauge is reached, until a panel opens
+    function test_editModeHintsAtClickAndHoldUntilAPanelOpens() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        const hint = find(page, "dashEditHint")
+        verify(!hint.visible, "not outside edit mode")
+        page.startEditing()
+        verify(hint.visible)
+        verify(hint.text.startsWith("Click a gauge to change it"))
+        press(find(page, "dashCell_0_0"))
+        verify(!hint.visible, "a panel is open")
+    }
+
+    // The panel's head draws the cell it edits, live
+    function test_thePanelShowsTheCellItEdits() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        const preview = find(page, "panelPreview")
+        verify(preview.visible)
+        compare(preview.kind, "analog")
+        compare(preview.to, find(page, "dashCell_0_0").to)
+        type(find(page, "panelTo"), "5000")
+        compare(preview.to, 5000, "follows an edit")
+    }
+
+    // Close takes the page back to the cell the panel edited
+    function test_closingThePanelScrollsToItsCell() {
+        const cells = []
+        for (let i = 0; i < 12; ++i)
+            cells.push(cellOf("C" + i))
+        const page = pageOf({}, docOf(cells))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        const view = find(page, "dashPage_0")
+        view.contentY = view.contentHeight   // away from cell 0
+        const away = view.contentY
+        verify(away > 0, "the page scrolled away")
+        // Not through click(): its own scroll to the button and back would
+        // undo the page's
+        page.closePanel()
+        tryVerify(() => view.contentY < away / 2, 3000, "back near cell 0")
+    }
+
+    // An end shows to the signal's decimals plus one, never its stored noise
+    function test_anEndShowsToTheDecimalsPlusOne() {
+        const own = cellOf("Speed", "analog")
+        own.options = { from: 0, to: 161.5565, decimals: 1 }
+        const page = pageOf({}, docOf([own]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        compare(find(page, "panelTo").text, "161.56")
+    }
+
     function test_everyDrawnKindIsInTheFieldTable() {
         const page = pageOf({}, docOf([cellOf("A", "analog")]))
         compare(Object.keys(fieldsOfKind).sort(), page.drawnKinds.slice().sort())
@@ -2092,9 +2150,11 @@ TestCase {
         press(find(page, "dashCell_0_0"))
         compare(page.panel, "cell")
         const found = panelFields(page)
-        const shown = found.filter(f => f.shown).map(f => f.name).sort()
+        // The signal's name shows only while the cell's row exists, which a
+        // session left by an earlier case decides
+        const shown = found.filter(f => f.shown && f.name !== "panelSignalName").map(f => f.name).sort()
         compare(shown, fieldsOfKind[data.kind].slice().sort())
-        const listed = Object.values(fieldsOfKind).reduce((all, l) => all.concat(l), [])
+        const listed = Object.values(fieldsOfKind).reduce((all, l) => all.concat(l), withEntry)
         for (const f of found)
             verify(listed.indexOf(f.name) >= 0, f.name + " is in the table for some kind")
     }
@@ -2835,6 +2895,22 @@ TestCase {
         compare(page.undoLine, "")
         page.visible = true
         verify(!page.canUndo, "and still none when it comes back")
+    }
+
+    // Edit mode stays open while the page is hidden, so its history does too
+    function test_leavingTheDashboardMidEditKeepsTheHistory() {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        page.select(0)
+        click(page, "panelLater")
+        verify(page.canUndo, "an edit step")
+        page.visible = false
+        verify(page.editing, "edit mode stays open")
+        verify(page.canUndo, "and its history")
+        page.visible = true
+        verify(page.editing && page.canUndo, "back to the bar with Undo enabled")
+        verify(findChild(page, "dashUndo").enabled, "Undo's button is on")
+        page.stopEditing()
     }
 
     function test_theHistoryKeepsFifty() {

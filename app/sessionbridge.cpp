@@ -2370,7 +2370,8 @@ bool holdsRecording(const QString& folder)
 }
 
 // A recording folder's row for the Recordings page: { title, uri, folder,
-// source, profile, frames } (recentRecordings says what each holds)
+// source, profile, frames, durationMs, signals, log, marks } (recentRecordings
+// says what each holds)
 QVariantMap recordingRowOf(const QFileInfo& info)
 {
     // "<yyyyMMdd-HHmmss>[-n][ <label>]" (core's recorder)
@@ -2379,17 +2380,52 @@ QVariantMap recordingRowOf(const QFileInfo& info)
                        "\\d+)?(?: (.+))?$"));
     const QString folder = info.absoluteFilePath();
 
-    // The header's "uri" line, among events.log's first few
+    // events.log's header, up to its "columns" line: the "uri", each "signal"
+    // and the "focus" that only a log of chosen signals has
     QString recorded;
+    int signalCount = 0;
+    bool isLog = false;
+    qint64 durationMs = -1;
     QFile events(folder + QStringLiteral("/events.log"));
     if (events.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        for (int i = 0; i < 12 && !events.atEnd(); ++i) {
+        // A header holds a line a signal; a file with no "columns" line is read no further
+        for (int n = 0; n < 400 && !events.atEnd(); ++n) {
             const QString line = QString::fromUtf8(events.readLine()).trimmed();
-            if (line.startsWith(QLatin1String("uri "))) {
+            if (line.startsWith(QLatin1String("columns"))) {
+                break;
+            }
+            if (line.startsWith(QLatin1String("uri ")) && recorded.isEmpty()) {
                 recorded = line.mid(4).trimmed();
+            } else if (line.startsWith(QLatin1String("signal "))) {
+                ++signalCount;
+            } else if (line.startsWith(QLatin1String("focus "))) {
+                isLog = true;
+            }
+        }
+        // The last line's "+seconds" column is the recording's length
+        static const QRegularExpression kAt(
+            QStringLiteral("^\\S+\\s+\\+(\\d+(?:\\.\\d+)?)\\s"));
+        constexpr qint64 kTail = 4096;
+        events.seek(qMax<qint64>(0, events.size() - kTail));
+        const QStringList tail = QString::fromUtf8(events.readAll())
+                                     .split(QLatin1Char('\n'),
+                                            Qt::SkipEmptyParts);
+        for (auto it = tail.crbegin(); it != tail.crend(); ++it) {
+            const QRegularExpressionMatch at = kAt.match(*it);
+            if (at.hasMatch()) {
+                durationMs = qRound64(at.captured(1).toDouble() * 1000.0);
                 break;
             }
         }
+    }
+    // markers.csv: a header row, then one row each
+    int marks = 0;
+    QFile markers(folder + QStringLiteral("/markers.csv"));
+    if (markers.open(QIODevice::ReadOnly)) {
+        while (!markers.atEnd()) {
+            marks += markers.readLine().trimmed().isEmpty() ? 0 : 1;
+        }
+        marks = qMax(0, marks - 1);
     }
 
     const QRegularExpressionMatch m = kName.match(info.fileName());
@@ -2413,6 +2449,10 @@ QVariantMap recordingRowOf(const QFileInfo& info)
                          .section(QLatin1Char('&'), 0, 0);
     // Replay plays frames.csv: a folder of values alone has none to play
     row["frames"] = QFileInfo::exists(folder + QStringLiteral("/frames.csv"));
+    row["durationMs"] = durationMs;
+    row["signals"] = signalCount;
+    row["log"] = isLog;
+    row["marks"] = marks;
     return row;
 }
 
