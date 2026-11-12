@@ -2060,18 +2060,16 @@ TestCase {
         verify(Bridge.logActive, "the log runs")
         // The log's own size is a second's worth: what the row would show
         // of a 0.1 MB one is read from the function with the row's choice
-        verify(row.width < 560, "a phone's row is under 560 px: " + row.width)
+        tryVerify(() => row.width < 560, 5000, "a phone's row is under 560 px")
         verify(!main.logReadoutOneLine, "two lines on a phone")
         compare(main.logReadoutText(1000, 104858, main.logReadoutOneLine), "0:01\n0.1 MB")
         main.width = 700
-        waitForRendering(main.contentItem)
-        verify(row.width >= 560, "a wide row: " + row.width)
+        tryVerify(() => row.width >= 560, 5000, "a wide row")
         verify(main.logReadoutOneLine, "one line where the row has room")
         compare(main.logReadoutText(1000, 104858, main.logReadoutOneLine), "0:01 · 0.1 MB")
         compare(readout.font.pixelSize, Theme.fontBody, "the readout is body text")
         main.width = 559 + (main.width - row.width)
-        waitForRendering(main.contentItem)
-        verify(!main.logReadoutOneLine, "two lines again at " + row.width)
+        tryVerify(() => !main.logReadoutOneLine, 5000, "two lines again")
     }
 
     // The header ends in the one divider the look has, a hairline
