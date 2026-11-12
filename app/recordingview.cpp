@@ -330,6 +330,7 @@ void RecordingView::start(const QString& folder,
     m_progress = 0;
     const quint64 generation = ++m_generation;
     auto res = std::make_shared<Result>();
+    m_stop = std::make_shared<Stop>();
     m_worker =
         std::thread(run, res, &m_cancel, this, generation, folder, frames);
     emit progressChanged();
@@ -408,6 +409,9 @@ void RecordingView::stop()
     // A pass under way stops at its next callback; whatever it posts
     // carries the old generation and is dropped
     ++m_generation;
+    if (m_stop) {
+        m_stop->stopped = true;
+    }
     if (m_worker.joinable()) {
         m_cancel = true;
         m_worker.join();
@@ -996,9 +1000,9 @@ bool RecordingView::startAsks()
         // A task of the global pool with its share of the reader and the
         // asks: a close leaves it to finish, as a stretches pass
         QThreadPool::globalInstance()->start(
-            [asks = m_asks, reader = m_readerHold,
+            [asks = m_asks, reader = m_readerHold, stop = m_stop,
              view = QPointer<RecordingView>(this), generation = m_generation] {
-                answerAsks(asks, reader, view, generation);
+                answerAsks(asks, reader, stop, view, generation);
             });
     } catch (const std::bad_alloc&) {
         const std::lock_guard<std::mutex> lock(m_asks->m);
@@ -1013,18 +1017,19 @@ namespace {
 // Each id's mean in each of the columns over [t0, t1) of the recording's
 // time in microseconds, a row of `columns` per id in out, NaN for none:
 // every column from the statistics over its own microseconds. Ends early,
-// with ECUIO_ERR_CANCELED, once stale is set
+// with ECUIO_ERR_CANCELED, once stale or the open's stopped is set
 ecuio_status_t ownColumnMeans(ecuio_recording_t* reader,
                               const std::vector<uint32_t>& ids, int64_t t0,
                               int64_t t1, uint32_t columns,
                               const std::atomic<bool>& stale,
+                              const std::atomic<bool>& stopped,
                               std::vector<double>& out)
 {
     out.assign(ids.size() * columns, NAN);
     std::vector<ecuio_recording_stats_t> stats(ids.size());
     const double step = static_cast<double>(t1 - t0) / columns;
     for (uint32_t c = 0; c < columns; ++c) {
-        if (stale.load()) {
+        if (stale.load() || stopped.load()) {
             return ECUIO_ERR_CANCELED;
         }
         // The column's first microsecond and the next column's
@@ -1055,9 +1060,19 @@ ecuio_status_t ownColumnMeans(ecuio_recording_t* reader,
 
 void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
                                const std::shared_ptr<ecuio_recording_t>& reader,
+                               const std::shared_ptr<Stop>& stop,
                                const QPointer<RecordingView>& view,
                                quint64 generation)
 {
+    // A closed open's call isn't made: one call is at most a few hundred
+    // ms, which only the application's end waits for
+    const auto stopped = [&stop] {
+        if (!stop->stopped.load()) {
+            return false;
+        }
+        ++stop->readsStopped;
+        return true;
+    };
     for (;;) {
         std::optional<StatsAsk> stats;
         std::optional<StepAsk> step;
@@ -1095,7 +1110,7 @@ void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
         // A copy that can't be allocated leaves its ask unanswered: an
         // exception out of this task would end the process
         try {
-            if (step) {
+            if (step && !stopped()) {
                 uint64_t at = ECUIO_RECORDING_NONE;
                 const ecuio_status_t rc = ecuio_recording_step(
                     reader.get(), step->signal, step->t, step->direction, &at);
@@ -1112,7 +1127,7 @@ void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
             ++asks->lost;
         }
         try {
-            if (stats) {
+            if (stats && !stopped()) {
                 std::vector<ecuio_recording_stats_t> got(stats->ids.size());
                 const ecuio_status_t rc = ecuio_recording_stats(
                     reader.get(), stats->ids.data(),
@@ -1138,7 +1153,7 @@ void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
                 std::vector<double> got;
                 const ecuio_status_t rc = ownColumnMeans(
                     reader.get(), means->ids, means->t0, means->t1,
-                    means->columns, asks->meansStale, got);
+                    means->columns, asks->meansStale, stop->stopped, got);
                 // A pass a newer ask or a close ended has no answer
                 if (rc == ECUIO_ERR_CANCELED) {
                     ++asks->stopped;
@@ -1334,9 +1349,12 @@ void RecordingView::setStretchesProblem(const QString& words)
 
 void RecordingView::findStretches(
     const std::shared_ptr<ecuio_recording_t>& reader,
-    const QPointer<RecordingView>& view, int request,
-    ecuio_stretch_rules_t rules, quint64 generation, int holdMs)
+    const std::shared_ptr<Stop>& stop, const QPointer<RecordingView>& view,
+    int request, ecuio_stretch_rules_t rules, quint64 generation, int holdMs)
 {
+    const ecuio_cancel_t closed = [](void* user) {
+        return static_cast<const Stop*>(user)->stopped.load() ? 1 : 0;
+    };
     if (holdMs > 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(holdMs));
     }
@@ -1351,17 +1369,23 @@ void RecordingView::findStretches(
     try {
         got.resize(first);
         uint32_t count = 0;
-        rc = ecuio_recording_stretches(reader.get(), &rules, 0, end, got.data(),
-                                       first, &count);
+        rc = ecuio_recording_stretches_with(reader.get(), &rules, 0, end,
+                                            closed, stop.get(), got.data(),
+                                            first, &count);
         if (rc == ECUIO_OK && count > first) {
             got.resize(count);
-            rc = ecuio_recording_stretches(reader.get(), &rules, 0, end,
-                                           got.data(), count, &count);
+            rc = ecuio_recording_stretches_with(reader.get(), &rules, 0, end,
+                                                closed, stop.get(), got.data(),
+                                                count, &count);
         }
         got.resize(rc == ECUIO_OK ? (std::min<size_t>)(got.size(), count) : 0);
     } catch (const std::bad_alloc&) {
         got.clear();
         rc = ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    if (rc == ECUIO_ERR_CANCELED) {
+        ++stop->readsStopped; // closed: its answer would be dropped
+        return;
     }
     // An application ending reads null here (Qt 6.12 clears instance(),
     // then waits for the pool); one read non-null lives until this ends
@@ -1496,12 +1520,14 @@ int RecordingView::stretches(bool pulls, bool cruises, const QVariantMap& rules)
     const int request = ++m_lastAsk;
     try {
         // A task of the global pool with its share of the reader: a close
-        // leaves it to finish, and QCoreApplication's end waits for it
+        // stops it at its next second, and QCoreApplication's end waits
+        // for it
         QThreadPool::globalInstance()->start(
-            [reader = m_readerHold, view = QPointer<RecordingView>(this),
-             request, asked, generation = m_generation,
-             holdMs = m_stretchesHoldMs] {
-                findStretches(reader, view, request, asked, generation, holdMs);
+            [reader = m_readerHold, stop = m_stop,
+             view = QPointer<RecordingView>(this), request, asked,
+             generation = m_generation, holdMs = m_stretchesHoldMs] {
+                findStretches(reader, stop, view, request, asked, generation,
+                              holdMs);
             });
     } catch (const std::bad_alloc&) {
         return 0;

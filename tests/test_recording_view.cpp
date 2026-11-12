@@ -881,9 +881,9 @@ TEST(RecordingViewTest, OnlyTheNewestStretchesAskIsAnswered)
         << "a closed recording's answer is dropped";
 }
 
-// A pass over a long recording takes a while and core can't be told to
-// stop it: a close leaves it to end on its own, the reader open under it
-// until then, and never waits
+// A pass over a long recording takes a while: a close leaves it to stop
+// at its next second, the reader open under it until then, and never
+// waits
 TEST(RecordingViewTest, ACloseNeverWaitsForAStretchesPass)
 {
     RecordingView v;
@@ -908,12 +908,12 @@ TEST(RecordingViewTest, ACloseNeverWaitsForAStretchesPass)
     ASSERT_TRUE(waitFor([&] { return settled(v); }));
     EXPECT_EQ(askedStretches(v, false, true).size(), 2);
     answers = 0;
-    // The abandoned pass reads the closed recording to its end, and its
-    // answer goes nowhere
+    // The abandoned pass stops once its hold ends, and its answer goes
+    // nowhere
     EXPECT_FALSE(waitFor([&] { return answers > 0; }, hold + 500));
 }
 
-// The view gone mid-pass: the pass ends on its own and posts to no one
+// The view gone mid-pass: the pass stops on its own and posts to no one
 TEST(RecordingViewTest, DestroyedWithAStretchesPassUnderWayIsSafe)
 {
     QElapsedTimer timer;
@@ -929,6 +929,106 @@ TEST(RecordingViewTest, DestroyedWithAStretchesPassUnderWayIsSafe)
     EXPECT_LT(timer.elapsed(), hold / 2) << "the ask or the destructor waited";
     // Its answer arrives for a view that is gone, and is dropped
     EXPECT_FALSE(waitFor([] { return false; }, hold + 500));
+}
+
+namespace {
+
+// pull-twice's events.log over a long, dense signals.csv: speed, engine
+// speed and throttle every 10 ms, a pull every two minutes: fewer than
+// the viewer's first ask holds, so one call is a whole pass
+QString denseRecording(const QTemporaryDir& dir)
+{
+    const QString folder = dir.filePath(QStringLiteral("dense"));
+    QDir().mkpath(folder);
+    QFile::copy(fixture("pull-twice") + QStringLiteral("/events.log"),
+                folder + QStringLiteral("/events.log"));
+    QFile f(folder + QStringLiteral("/signals.csv"));
+    if (!f.open(QIODevice::WriteOnly)) {
+        return {};
+    }
+    f.write("host_us,signal,value,unit\n");
+    QByteArray chunk;
+    for (qint64 n = 0; n < 600000; ++n) {
+        const qint64 us = n * 10000;
+        const bool pull = (us / 1000000) % 120 >= 110;
+        const qint64 into = us % 120000000 - 110000000;
+        chunk += QByteArray::number(us) + ",Vehicle Speed," +
+                 QByteArray::number(pull ? 60 + into / 500000 : 60) +
+                 ",km/h\n" + QByteArray::number(us + 1) + ",RPM," +
+                 QByteArray::number(pull ? 2500 + into / 2500 : 2500) +
+                 ",rpm\n" + QByteArray::number(us + 2) + ",Throttle," +
+                 (pull ? "100.0" : "12.0") + ",%\n";
+        if (chunk.size() > (1 << 20)) {
+            f.write(chunk);
+            chunk.clear();
+        }
+    }
+    f.write(chunk);
+    return folder;
+}
+
+} // namespace
+
+// A close stops a stretches pass under way at its next second: timed
+// against a whole pass over the same recording, the pass after the close
+// ends well before a whole one would
+TEST(RecordingViewTest, ACloseStopsAStretchesPassUnderWay)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = denseRecording(dir);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }, 60000));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    QElapsedTimer timer;
+    timer.start();
+    ASSERT_GE(askedStretches(v, true, false).size(), 20);
+    const qint64 whole = timer.elapsed();
+
+    // Held, then closed at a third of a whole pass into its read
+    const int hold = 200;
+    v.setStretchesHoldForTesting(hold);
+    timer.restart();
+    ASSERT_GT(v.stretches(true, false), 0);
+    QThread::msleep(static_cast<unsigned long>(hold + whole / 3));
+    v.close();
+    ASSERT_TRUE(waitFor([&] { return v.readsStoppedForTesting() > 0; },
+                        hold + 2 * static_cast<int>(whole) + 5000))
+        << "the pass read on to its end";
+    EXPECT_LT(timer.elapsed(), hold + whole / 3 + whole / 2 + 100)
+        << "a whole pass took " << whole << " ms";
+}
+
+// A close during the asks' hold: the statistics and step reads taken
+// before it are never made, and none is answered
+TEST(RecordingViewTest, AClosedOpensStatsAndStepAreNotRead)
+{
+    RecordingView v;
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    int answers = 0;
+    QObject::connect(&v, &RecordingView::statsReady,
+                     [&](int, const QVariantList&) { ++answers; });
+    QObject::connect(&v, &RecordingView::stepReady,
+                     [&](int, double) { ++answers; });
+    const int hold = 300;
+    v.setAsksHoldForTesting(hold);
+    QElapsedTimer timer;
+    timer.start();
+    ASSERT_GT(v.stats({rpm}, 0, 30000), 0);
+    ASSERT_GT(v.step(rpm, 100, true), 0);
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
+    v.close();
+    EXPECT_EQ(v.readsStoppedForTesting(), 0) << "nothing stopped yet";
+    ASSERT_TRUE(
+        waitFor([&] { return v.readsStoppedForTesting() == 2; }, hold + 2000));
+    EXPECT_LT(timer.elapsed(), hold + 1000);
+    EXPECT_FALSE(waitFor([&] { return answers > 0; }, 300));
+    EXPECT_EQ(v.readsStoppedForTesting(), 2);
 }
 
 // A file changed since the open: the ask says it failed, with no stretch,
@@ -1587,7 +1687,7 @@ TEST(RecordingViewTest, ACloseDropsAnAskAndANewOpenAnswers)
 }
 
 // A statistics ask over a long recording with a NaN in most seconds reads
-// its raw rows, and core can't be told to stop it: a close leaves the ask
+// its raw rows, and core's call can't be stopped: a close leaves the ask
 // to end on its own, the reader open under it until then, and never waits
 TEST(RecordingViewTest, ACloseNeverWaitsForAStatsOrStepAsk)
 {
@@ -1623,8 +1723,8 @@ TEST(RecordingViewTest, ACloseNeverWaitsForAStatsOrStepAsk)
     EXPECT_LT(timer.elapsed(), hold)
         << "the new asks waited for the abandoned one";
     answers = 0;
-    // The abandoned ask reads the closed recording to its end, and its
-    // answer goes nowhere
+    // The abandoned ask makes no read once its hold ends, and nothing is
+    // answered
     EXPECT_FALSE(waitFor([&] { return answers > 0; }, hold + 500));
 }
 
