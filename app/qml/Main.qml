@@ -729,6 +729,7 @@ ApplicationWindow {
                         id: dashboardView
                         objectName: "dashboardPage"
                         offlineUri: settingsView.offlineUri
+                        vehicles: settingsView.vehicles
                         connectUris: settingsView.connectUris
                         connectVehicleUri: settingsView.vehicleUri
                         connectAdapters: settingsView.connectAdapters

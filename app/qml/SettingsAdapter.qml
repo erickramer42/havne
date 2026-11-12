@@ -12,6 +12,8 @@ ColumnLayout {
     id: root
     objectName: "adapterSection"
     required property SettingsPage host
+    // The phone's words and list; a test sets it, since Theme.mobile is the platform's
+    property bool mobile: Theme.mobile
     Layout.fillWidth: true
     spacing: Theme.spacing * 2
 
@@ -26,7 +28,7 @@ ColumnLayout {
             text: root.host.devices.length === 0
                   ? qsTr("None found: install a Pass-Thru driver (Windows), plug in "
                          + "or pair an ELM327 adapter, or pick one below")
-                  : Theme.mobile
+                  : root.mobile
                     ? qsTr("Bluetooth: %1 found; tap one, then Connect")
                           .arg(root.host.bluetoothAdapters.length)
                   : qsTr("J2534 interfaces: %1, serial ports: %2%3; select one to "
@@ -95,7 +97,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.preferredHeight: contentHeight
         // A phone's page alone scrolls: the list takes all its rows
-        Layout.maximumHeight: Theme.mobile ? contentHeight
+        Layout.maximumHeight: root.mobile ? contentHeight
                               : root.host.deviceRowsShown * (root.host.deviceRowHeight + spacing) - spacing
         visible: count > 0
         clip: true

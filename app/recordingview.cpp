@@ -413,18 +413,21 @@ void RecordingView::stop()
         m_worker.join();
         m_cancel = false;
     }
-    if (m_askWorker.joinable()) {
+    if (m_asks) {
+        bool answering = false;
         {
-            const std::lock_guard<std::mutex> lock(m_askMutex);
-            m_askStop = true;
+            const std::lock_guard<std::mutex> lock(m_asks->m);
+            answering = m_asks->answering;
+            m_asks->stats.reset();
+            m_asks->step.reset();
+            m_asks->means.reset();
+            m_asks->meansStale = true;
         }
-        m_askWake.notify_all();
-        m_askWorker.join(); // before the close: it may be reading
-        m_askStop = false;
-        m_statsAsk.reset();
-        m_stepAsk.reset();
+        if (answering) {
+            m_asks.reset(); // the task's own until it ends
+        }
     }
-    // Closed here, or when a stretches pass still reading lets go of it
+    // Closed here, or when a pass or an ask still reading lets go of it
     m_readerHold.reset();
     m_reader = nullptr;
     m_info = {};
@@ -963,74 +966,211 @@ QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,
     return out;
 }
 
+bool RecordingView::haveAsks()
+{
+    if (!m_asks) {
+        try {
+            m_asks = std::make_shared<Asks>();
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool RecordingView::startAsks()
 {
-    if (m_askWorker.joinable()) {
-        return true;
+    {
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->holdMs = m_asksHoldMs;
+        m_asks->loseMeans = m_loseMeansForTesting;
+        if (m_asks->answering) {
+            return true; // it takes the ask before it ends
+        }
+        m_asks->answering = true;
     }
     try {
         if (m_failThreadForTesting) {
-            throw std::system_error(std::make_error_code(
-                std::errc::resource_unavailable_try_again));
+            throw std::bad_alloc();
         }
-        m_askWorker = std::thread(&RecordingView::answerAsks, this, m_reader,
-                                  m_generation);
-    } catch (const std::system_error&) {
+        // A task of the global pool with its share of the reader and the
+        // asks: a close leaves it to finish, as a stretches pass
+        QThreadPool::globalInstance()->start(
+            [asks = m_asks, reader = m_readerHold,
+             view = QPointer<RecordingView>(this), generation = m_generation] {
+                answerAsks(asks, reader, view, generation);
+            });
+    } catch (const std::bad_alloc&) {
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->answering = false;
         return false;
     }
     return true;
 }
 
-void RecordingView::answerAsks(ecuio_recording_t* reader, quint64 generation)
+namespace {
+
+// Each id's mean in each of the columns over [t0, t1) of the recording's
+// time in microseconds, a row of `columns` per id in out, NaN for none:
+// every column from the statistics over its own microseconds. Ends early,
+// with ECUIO_ERR_CANCELED, once stale is set
+ecuio_status_t ownColumnMeans(ecuio_recording_t* reader,
+                              const std::vector<uint32_t>& ids, int64_t t0,
+                              int64_t t1, uint32_t columns,
+                              const std::atomic<bool>& stale,
+                              std::vector<double>& out)
+{
+    out.assign(ids.size() * columns, NAN);
+    std::vector<ecuio_recording_stats_t> stats(ids.size());
+    const double step = static_cast<double>(t1 - t0) / columns;
+    for (uint32_t c = 0; c < columns; ++c) {
+        if (stale.load()) {
+            return ECUIO_ERR_CANCELED;
+        }
+        // The column's first microsecond and the next column's
+        const int64_t from = t0 + std::llround(c * step);
+        const int64_t past =
+            c + 1 == columns ? t1 : t0 + std::llround((c + 1) * step);
+        // Before the recording, or too narrow for a closed span
+        if (past - 1 <= (std::max<int64_t>)(from, 0)) {
+            continue;
+        }
+        const ecuio_status_t rc = ecuio_recording_stats(
+            reader, ids.data(), static_cast<uint32_t>(ids.size()),
+            static_cast<uint64_t>((std::max<int64_t>)(from, 0)),
+            static_cast<uint64_t>(past - 1), stats.data());
+        if (rc != ECUIO_OK) {
+            return rc;
+        }
+        for (size_t k = 0; k < ids.size(); ++k) {
+            if (stats[k].samples > 0) {
+                out[k * columns + c] = stats[k].mean;
+            }
+        }
+    }
+    return ECUIO_OK;
+}
+
+} // namespace
+
+void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
+                               const std::shared_ptr<ecuio_recording_t>& reader,
+                               const QPointer<RecordingView>& view,
+                               quint64 generation)
 {
     for (;;) {
         std::optional<StatsAsk> stats;
         std::optional<StepAsk> step;
+        std::optional<MeansAsk> means;
+        int holdMs = 0;
+        bool loseMeans = false;
         {
-            std::unique_lock<std::mutex> lock(m_askMutex);
-            m_askWake.wait(lock, [this] {
-                return m_askStop || m_statsAsk.has_value() ||
-                       m_stepAsk.has_value();
-            });
-            if (m_askStop) {
+            // Ending and an ask's arrival are decided under one lock, so an
+            // ask put in while this runs is never left behind
+            const std::lock_guard<std::mutex> lock(asks->m);
+            if (!asks->stats && !asks->step && !asks->means) {
+                asks->answering = false;
                 return;
             }
-            stats.swap(m_statsAsk);
-            step.swap(m_stepAsk);
+            stats.swap(asks->stats);
+            step.swap(asks->step);
+            means.swap(asks->means);
+            if (means) {
+                asks->meansStale = false;
+            }
+            holdMs = asks->holdMs;
+            loseMeans = asks->loseMeans;
+        }
+        if (holdMs > 0) {
+            ++asks->held;
+            std::this_thread::sleep_for(std::chrono::milliseconds(holdMs));
+        }
+        // An application ending reads null here, as a stretches pass does
+        QCoreApplication* app = QCoreApplication::instance();
+        if (app == nullptr) {
+            const std::lock_guard<std::mutex> lock(asks->m);
+            asks->answering = false;
+            return;
         }
         // A copy that can't be allocated leaves its ask unanswered: an
-        // exception out of this thread would end the process
+        // exception out of this task would end the process
         try {
             if (step) {
                 uint64_t at = ECUIO_RECORDING_NONE;
                 const ecuio_status_t rc = ecuio_recording_step(
-                    reader, step->signal, step->t, step->direction, &at);
+                    reader.get(), step->signal, step->t, step->direction, &at);
                 QMetaObject::invokeMethod(
-                    this,
-                    [this, request = step->request, rc, at, generation] {
-                        stepFinished(request, rc, at, generation);
+                    app,
+                    [view, request = step->request, rc, at, generation] {
+                        if (view) {
+                            view->stepFinished(request, rc, at, generation);
+                        }
                     },
                     Qt::QueuedConnection);
             }
         } catch (const std::bad_alloc&) {
-            ++m_asksLost;
+            ++asks->lost;
         }
         try {
             if (stats) {
                 std::vector<ecuio_recording_stats_t> got(stats->ids.size());
                 const ecuio_status_t rc = ecuio_recording_stats(
-                    reader, stats->ids.data(),
+                    reader.get(), stats->ids.data(),
                     static_cast<uint32_t>(stats->ids.size()), stats->t0,
                     stats->t1, got.data());
                 QMetaObject::invokeMethod(
-                    this,
-                    [this, ask = *stats, rc, got, generation] {
-                        statsFinished(ask, rc, got, generation);
+                    app,
+                    [view, ask = *stats, rc, got, generation] {
+                        if (view) {
+                            view->statsFinished(ask, rc, got, generation);
+                        }
                     },
                     Qt::QueuedConnection);
             }
         } catch (const std::bad_alloc&) {
-            ++m_asksLost;
+            ++asks->lost;
+        }
+        try {
+            if (means) {
+                if (loseMeans) {
+                    throw std::bad_alloc();
+                }
+                std::vector<double> got;
+                const ecuio_status_t rc = ownColumnMeans(
+                    reader.get(), means->ids, means->t0, means->t1,
+                    means->columns, asks->meansStale, got);
+                // A pass a newer ask or a close ended has no answer
+                if (rc == ECUIO_ERR_CANCELED) {
+                    ++asks->stopped;
+                } else {
+                    QMetaObject::invokeMethod(
+                        app,
+                        [view, ask = *means, rc, got, generation] {
+                            if (view) {
+                                view->meansFinished(ask, rc, got, generation);
+                            }
+                        },
+                        Qt::QueuedConnection);
+                }
+            }
+        } catch (const std::bad_alloc&) {
+            ++asks->lost;
+            // A page pairs two views' means and waits for both: this one
+            // says it has none, where that much can still be posted
+            try {
+                if (means) {
+                    QMetaObject::invokeMethod(
+                        app,
+                        [view, request = means->request, generation] {
+                            if (view) {
+                                view->meansLost(request, generation);
+                            }
+                        },
+                        Qt::QueuedConnection);
+                }
+            } catch (const std::bad_alloc&) {
+                ++asks->lost; // not even that: the ask stays unanswered
+            }
         }
     }
 }
@@ -1258,26 +1398,65 @@ int RecordingView::stats(const QVariantList& signalIndexes, double t0Ms,
     if (ask.t1 <= ask.t0) {
         return 0;
     }
+    if (!haveAsks()) {
+        return 0;
+    }
     ask.request = ++m_lastAsk;
     m_lastStats = ask.request;
     {
-        const std::lock_guard<std::mutex> lock(m_askMutex);
-        m_statsAsk = std::move(ask);
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->stats = std::move(ask);
     }
     if (!startAsks()) {
-        const std::lock_guard<std::mutex> lock(m_askMutex);
-        m_statsAsk.reset();
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->stats.reset();
         m_lastStats = 0;
         return 0;
     }
-    m_askWake.notify_all();
     return m_lastStats;
+}
+
+int RecordingView::columnMeans(const QVariantList& signalIndexes, double t0Ms,
+                               double t1Ms, int columns)
+{
+    if (m_reader == nullptr || signalIndexes.isEmpty() || columns < 1 ||
+        columns > kMaxColumns) {
+        return 0;
+    }
+    MeansAsk ask;
+    for (const QVariant& v : signalIndexes) {
+        uint32_t i = 0;
+        if (!signalIndex(v, &i)) {
+            return 0;
+        }
+        ask.ids.push_back(i);
+    }
+    if (!signedUs(t0Ms, &ask.t0) || !signedUs(t1Ms, &ask.t1) ||
+        ask.t1 <= ask.t0 || !haveAsks()) {
+        return 0;
+    }
+    ask.columns = static_cast<uint32_t>(columns);
+    ask.request = ++m_lastAsk;
+    m_lastMeans = ask.request;
+    {
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->means = std::move(ask);
+        m_asks->meansStale = true; // an older pass under way stops
+    }
+    if (!startAsks()) {
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->means.reset();
+        m_lastMeans = 0;
+        return 0;
+    }
+    return m_lastMeans;
 }
 
 int RecordingView::step(int signal, double tMs, bool forward)
 {
     uint32_t i = 0;
-    if (m_reader == nullptr || !signalIndex(QVariant(signal), &i)) {
+    if (m_reader == nullptr || !signalIndex(QVariant(signal), &i) ||
+        !haveAsks()) {
         return 0;
     }
     StepAsk ask;
@@ -1288,16 +1467,15 @@ int RecordingView::step(int signal, double tMs, bool forward)
         forward ? ECUIO_RECORDING_STEP_FORWARD : ECUIO_RECORDING_STEP_BACKWARD;
     m_lastStep = ask.request;
     {
-        const std::lock_guard<std::mutex> lock(m_askMutex);
-        m_stepAsk = ask;
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->step = ask;
     }
     if (!startAsks()) {
-        const std::lock_guard<std::mutex> lock(m_askMutex);
-        m_stepAsk.reset();
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->step.reset();
         m_lastStep = 0;
         return 0;
     }
-    m_askWake.notify_all();
     return m_lastStep;
 }
 
@@ -1403,6 +1581,44 @@ void RecordingView::statsFinished(
         }
     }
     emit statsReady(ask.request, out);
+}
+
+void RecordingView::meansLost(int request, quint64 generation)
+{
+    if (generation == m_generation && request == m_lastMeans) {
+        emit columnMeansReady(request, {});
+    }
+}
+
+void RecordingView::meansFinished(const MeansAsk& ask, ecuio_status_t rc,
+                                  const std::vector<double>& got,
+                                  quint64 generation)
+{
+    if (generation != m_generation || ask.request != m_lastMeans) {
+        return;
+    }
+    if (rc == ECUIO_ERR_RECORDING_CHANGED) {
+        markStale();
+    }
+    QVariantList out;
+    const double none = std::numeric_limits<double>::quiet_NaN();
+    for (size_t k = 0; rc == ECUIO_OK && k < ask.ids.size(); ++k) {
+        const Signal& s = m_signals[ask.ids[k]];
+        const bool text = (s.pub.flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0;
+        QList<double> means(static_cast<qsizetype>(ask.columns), none);
+        for (uint32_t c = 0; !text && c < ask.columns; ++c) {
+            const double mean = got[k * ask.columns + c];
+            if (std::isfinite(mean)) {
+                // Every conversion is a rising line: a mean converts as a value
+                means[static_cast<qsizetype>(c)] = shown(s, mean).value;
+            }
+        }
+        out.append(QVariantMap{
+            {QStringLiteral("index"), static_cast<int>(ask.ids[k])},
+            {QStringLiteral("means"), QVariant::fromValue(means)},
+        });
+    }
+    emit columnMeansReady(ask.request, out);
 }
 
 void RecordingView::stepFinished(int request, ecuio_status_t rc, uint64_t at,

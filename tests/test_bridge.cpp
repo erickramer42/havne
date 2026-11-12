@@ -1750,24 +1750,76 @@ TEST(BridgeTest, FrameLogOrdersByArrivalNotTimestamp)
     bridge.disconnectSession();
 }
 
-TEST(BridgeTest, AFrameRowsTimeIsReadByItsViewRow)
+/* A table keeps its place by a row's arrival number, which a stamp that
+ * steps back (a vendor's 32-bit stamp wrapping) leaves in order: each row is
+ * found again by its own, in either order and under a filter, and one that
+ * has gone or is filtered out gives the next row in the view's order. */
+TEST(BridgeTest, AFrameRowIsFoundAgainByItsArrivalAcrossAStampThatStepsBack)
 {
     SessionBridge bridge;
     FrameListModel* proxy = bridge.model();
-    EXPECT_EQ(proxy->timestampAt(0), -1) << "no rows";
-    for (quint64 t : {100u, 200u, 300u}) {
+    EXPECT_EQ(proxy->seqAt(0), -1) << "no rows";
+    EXPECT_EQ(proxy->rowAtSeq(0), -1) << "no rows";
+    // The stamp wraps after the fourth frame; the IDs alternate
+    const quint64 stamps[] = {4000, 5000, 6000, 7000, 100, 200, 300, 400};
+    const int n = static_cast<int>(std::size(stamps));
+    for (int k = 0; k < n; ++k) {
         ecuio_frame_t f{};
-        f.timestamp_us = t;
+        f.timestamp_us = stamps[k];
+        f.arbitration_id = k % 2 == 0 ? 0x123 : 0x124;
+        f.data_length = 1;
+        proxy->appendFrame(f, 1);
+    }
+    ASSERT_EQ(proxy->count(), n);
+    for (const bool newestFirst : {true, false}) {
+        proxy->setNewestFirst(newestFirst);
+        for (int row = 0; row < n; ++row) {
+            // Rows are in arrival order: the kth frame's number is k
+            const int k = newestFirst ? n - 1 - row : row;
+            EXPECT_EQ(proxy->seqAt(row), k) << "row " << row;
+            EXPECT_EQ(proxy->rowAtSeq(k), row) << "row " << row;
+        }
+        EXPECT_EQ(proxy->seqAt(-1), -1);
+        EXPECT_EQ(proxy->seqAt(n), -1);
+        EXPECT_EQ(proxy->rowAtSeq(n + 5), newestFirst ? 0 : n - 1)
+            << "past them all: the newest row";
+    }
+
+    // Only 0x124's frames (arrivals 1, 3, 5, 7): one the filter leaves out
+    // gives the next shown row in the view's order
+    ASSERT_TRUE(proxy->setFilter(QStringLiteral("124"), QString(), 0, 0)
+                    .value(QStringLiteral("ids"))
+                    .toString()
+                    .isEmpty());
+    ASSERT_EQ(proxy->count(), 4);
+    proxy->setNewestFirst(false);
+    EXPECT_EQ(proxy->rowAtSeq(5), 2) << "a shown arrival is its own row";
+    EXPECT_EQ(proxy->rowAtSeq(4), 2)
+        << "oldest first: the first to arrive after";
+    EXPECT_EQ(proxy->rowAtSeq(0), 0);
+    EXPECT_EQ(proxy->rowAtSeq(8), 3) << "past them all: the last row";
+    proxy->setNewestFirst(true);
+    EXPECT_EQ(proxy->rowAtSeq(5), 1) << "a shown arrival is its own row";
+    EXPECT_EQ(proxy->rowAtSeq(4), 2)
+        << "newest first: the last to arrive before";
+    EXPECT_EQ(proxy->rowAtSeq(0), 3) << "none arrived before: the last row";
+    EXPECT_EQ(proxy->rowAtSeq(8), 0);
+    proxy->setFilter(QString(), QString(), 0, 0);
+
+    // The arrival numbers run on across a clear, so a place noted before it
+    // is before every row: the oldest one
+    proxy->clear();
+    for (int k = 0; k < 3; ++k) {
+        ecuio_frame_t f{};
+        f.timestamp_us = 50;
         f.arbitration_id = 0x123;
         f.data_length = 1;
         proxy->appendFrame(f, 1);
     }
-    EXPECT_EQ(proxy->timestampAt(0), 300) << "newest first";
-    EXPECT_EQ(proxy->timestampAt(2), 100);
+    EXPECT_EQ(proxy->seqAt(2), n) << "newest first: the oldest row is last";
+    EXPECT_EQ(proxy->rowAtSeq(3), 2);
     proxy->setNewestFirst(false);
-    EXPECT_EQ(proxy->timestampAt(0), 100) << "oldest first";
-    EXPECT_EQ(proxy->timestampAt(-1), -1);
-    EXPECT_EQ(proxy->timestampAt(3), -1);
+    EXPECT_EQ(proxy->rowAtSeq(3), 0);
 }
 
 TEST(BridgeTest, FrameLogOrdersNewestFirstByDefault)
@@ -10315,6 +10367,104 @@ TEST(BridgeTest, SignalFileSavedOutIsItsCopyByteForByte)
     refused(sha, QUrl::fromLocalFile(out.path() + QStringLiteral("/b.json")),
             "Its copy has changed since it was kept: import the file again");
     EXPECT_FALSE(QFile::exists(out.path() + QStringLiteral("/b.json")));
+}
+
+/* A layout file (ADR-0057's appendix on the layout file): the text goes out
+ * and comes back as it was, a file already at the target is replaced whole,
+ * and a write that can't be made leaves what was there. */
+TEST(BridgeTest, ALayoutFileRoundTripsItsText)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    SessionBridge bridge;
+    const QString text =
+        QStringLiteral("{\"format\":2,\"label\":\"caf\u00e9 \U0001F600\",\"pages\":[]}");
+    const QUrl target = QUrl::fromLocalFile(dir.path() + QStringLiteral("/l.json"));
+    writeScratch(dir.path(), "l.json", QByteArray(5000, 'x'));
+    const QVariantMap saved = bridge.saveLayoutFile(text, target);
+    EXPECT_TRUE(saved.value(QStringLiteral("ok")).toBool())
+        << saved.value(QStringLiteral("words")).toString().toStdString();
+    QFile f(target.toLocalFile());
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    EXPECT_EQ(f.readAll(), text.toUtf8()) << "the text as UTF-8, replacing the file";
+    f.close();
+    const QVariantMap read = bridge.layoutFileText(target);
+    EXPECT_TRUE(read.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(read.value(QStringLiteral("text")).toString(), text);
+}
+
+TEST(BridgeTest, ALayoutFileIsReadWithinItsBoundAndAsUtf8)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    SessionBridge bridge;
+    const auto refused = [&](const QUrl& url, const char* expected) {
+        const QVariantMap r = bridge.layoutFileText(url);
+        EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool()) << expected;
+        const QString words = r.value(QStringLiteral("words")).toString();
+        EXPECT_EQ(words.toStdString(), expected);
+        EXPECT_FALSE(words.contains(dir.path()));
+        EXPECT_TRUE(r.value(QStringLiteral("text")).toString().isEmpty());
+    };
+    refused(QUrl::fromLocalFile(dir.path() + QStringLiteral("/none.json")),
+            "Couldn't read the file");
+    const qint64 most = SessionBridge::layoutFileMaxBytes;
+    const QUrl at = writeScratch(dir.path(), "at.json", QByteArray(most, ' '));
+    EXPECT_TRUE(bridge.layoutFileText(at).value(QStringLiteral("ok")).toBool());
+    const QUrl over =
+        writeScratch(dir.path(), "over.json", QByteArray(most + 1, ' '));
+    refused(over, "The file is over 82400 bytes, a layout file's most");
+    refused(writeScratch(dir.path(), "latin1.json", QByteArray("{\"a\":\"\xE9\"}")),
+            "The file isn't UTF-8 text");
+    refused(writeScratch(dir.path(), "cut.json", QByteArray("{\"a\":\"\xE2\x82\"}")),
+            "The file isn't UTF-8 text");
+    const QVariantMap bom = bridge.layoutFileText(
+        writeScratch(dir.path(), "bom.json", QByteArray("\xEF\xBB\xBF{}")));
+    EXPECT_TRUE(bom.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(bom.value(QStringLiteral("text")).toString().toStdString(), "{}")
+        << "a leading BOM is skipped, once";
+}
+
+TEST(BridgeTest, ALayoutThatCantBeSavedLeavesTheFileAsItWas)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    SessionBridge bridge;
+    const QByteArray before(3000, 'y');
+    const QUrl target = writeScratch(dir.path(), "keep.json", before);
+    const auto unchanged = [&] {
+        QFile f(target.toLocalFile());
+        EXPECT_TRUE(f.open(QIODevice::ReadOnly));
+        EXPECT_EQ(f.readAll(), before) << "an existing file is never touched";
+    };
+    // Past the bound: refused before anything is opened
+    QVariantMap r = bridge.saveLayoutFile(
+        QString(SessionBridge::layoutFileMaxBytes + 1, QLatin1Char('x')), target);
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "The layout is over 82400 bytes, a layout file's most");
+    unchanged();
+    // Nothing to save
+    r = bridge.saveLayoutFile(QString(), target);
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "There is no layout to save");
+    unchanged();
+    // A target that can't take a file: a folder stays a folder, nothing
+    // is removed, and the words name no path
+    r = bridge.saveLayoutFile(QStringLiteral("{}"),
+                              QUrl::fromLocalFile(dir.path()));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "Couldn't write the file");
+    EXPECT_TRUE(QFileInfo(dir.path()).isDir());
+    unchanged();
+    r = bridge.saveLayoutFile(
+        QStringLiteral("{}"),
+        QUrl::fromLocalFile(dir.path() + QStringLiteral("/no/such/folder/l.json")));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_FALSE(QFileInfo(dir.path() + QStringLiteral("/no")).exists());
+    unchanged();
 }
 
 // ---- An OBDb set imported in the app (ADR-0051's appendix of 2026-11-06)

@@ -1038,6 +1038,74 @@ def late(cli, args, where, result, made):
     return None
 
 
+def canceled_late(cli, recording, root):
+    """A column check canceled by the first interrupt, then held before the
+    end line (HAVNE_CLI_EXPORT_TAIL_HOLD_MS) and interrupted again: the
+    second interrupt changes nothing, so the run waits out its hold and
+    writes the one interrupted end line, exit 1, nothing made. None, a
+    failure's words, or "skip" with no console"""
+    out_csv = os.path.join(root, "late-check.csv")
+    env = dict(os.environ)
+    env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
+    env["HAVNE_CLI_EXPORT_TAIL_HOLD_MS"] = str(TAIL_MS)
+    kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
+          "stdin": subprocess.DEVNULL, "env": env}
+    if os.name == "nt":
+        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    p = subprocess.Popen([cli, "export", recording, out_csv, "--format",
+                          "csv", "--signal", "Engine RPM"], **kw)
+    interrupt_with = signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT
+
+    def next_line(prefix):
+        got = []
+        reader = threading.Thread(
+            target=lambda: got.append(p.stderr.readline()))
+        reader.start()
+        reader.join(HELD_WAIT_S)
+        if reader.is_alive() or not got or not got[0].startswith(prefix):
+            p.kill()
+            p.communicate()
+            reader.join()
+            return None, (f"no {prefix.decode()!r} within {HELD_WAIT_S} s: "
+                          f"{got[0] if got else b''!r}")
+        return got[0], None
+
+    _, why = next_line(b"havne-cli: holding the column check's first ask")
+    if why:
+        return why
+    try:
+        p.send_signal(interrupt_with)
+    except OSError as e:
+        p.kill()
+        p.communicate()
+        print(f"skip  no console to send the interrupt through: {e}")
+        return "skip"
+    _, why = next_line(b"havne-cli: holding after the column check's call")
+    if why:
+        return why
+    held_at = time.monotonic()
+    p.send_signal(interrupt_with)
+    try:
+        out, err = p.communicate(timeout=TAIL_MS / 1000 + 20)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        return "still running long after its hold"
+    waited = time.monotonic() - held_at
+    lines = [json.loads(l) for l in out.decode("utf-8").splitlines()]
+    if p.returncode != 1 or [l["type"] for l in lines] != ["start", "end"]             or lines[1] != {"type": "end", "reason": "interrupted"}:
+        return (f"exit {p.returncode}, lines {lines}, "
+                f"{err.decode('utf-8', 'replace')}")
+    if waited < TAIL_MS / 1000 - 0.5:
+        return (f"ended {waited:.2f} s into a {TAIL_MS / 1000:.0f} s hold: "
+                f"the second interrupt ended it")
+    if os.path.exists(out_csv) or partial_left(out_csv):
+        return f"something was left beside {os.path.basename(out_csv)}"
+    print("ok    export --signal: a second interrupt after the canceled "
+          "column check changed nothing")
+    return None
+
+
 def interrupt_late(cli, recording):
     with tempfile.TemporaryDirectory(prefix="havne-cli-int3-") as root:
         log = os.path.join(root, "bus.log")
@@ -1063,6 +1131,12 @@ def interrupt_late(cli, recording):
             if why is not None:
                 print(f"FAIL  {case_name(args)}: {why}")
                 failed += 1
+        why = canceled_late(cli, recording, root)
+        if why == "skip":
+            return 77
+        if why is not None:
+            print(f"FAIL  export --signal: {why}")
+            failed += 1
     if failed:
         return 1
     print("ok    interrupts after core's call leave an export, its sizing, "

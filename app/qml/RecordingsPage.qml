@@ -464,13 +464,18 @@ Page {
         id: idsHeadComponent
         ViewHead { role: "ids"; list: viewerFrameIds.list }
     }
-    // A column narrower than a second reads the recording's raw rows of
-    // every signal in it (ADR-0049 section 5); a second or wider, the
-    // reader's per-second summaries. Past this many rows in view, columns
-    // stay a second wide: a 50-signal 10 Hz hour panned at two pixels a
-    // column read about 180,000 rows a frame and drew at 30 frames/s on the
-    // laptop (ADR-0049's appendix "the viewer")
+    // A column narrower than a second reads the recording's raw rows
+    // (ADR-0049 section 5); a second or wider, the reader's per-second
+    // summaries. A frame's work is the rows of the signals it draws (the
+    // reader passes by another signal's row at a twentieth of the cost):
+    // past this many of those in view, both recordings' together, columns
+    // stay a second wide (ADR-0049's appendix "the viewer")
     readonly property int rawRowsPerFrame: 20000
+    // The reader keeps 8 MiB of parsed rows, every signal's. A view that
+    // holds more reads its seconds from the file again each frame, so past
+    // this many rows of either recording in view columns stay a second
+    // wide too. A test lowers it
+    property int rawRowsCached: 150000
     // The recording's rows a second, every signal's together
     property real rowsPerSecond: 0
 
@@ -493,6 +498,23 @@ Page {
     property string compareStatus: ""
     property var compareByName: ({})
     property real compareRowsPerSecond: 0
+    // The comparison's difference traces (ADR-0056's appendix "a difference
+    // in the viewer"): for each plotted number the compared recording holds
+    // under the same name in the same unit, the compared one's mean less
+    // this one's in each column, a column the same stretch of the axis in
+    // both (RecordingView.columnMeans)
+    property bool differenceShown: false
+    // The last answer, drawn while its pairs and offset still hold: { key,
+    // pairsKey, t0, t1, rows: { <this recording's index>: [a number a
+    // column, NaN where either is empty] } }; null with none
+    property var difference: null
+    // The grid the chart last drew, and the ask under way for it: each
+    // view's request number, then its answer
+    property var differenceWanted: null
+    property var differenceAsk: null
+    // The grid a view refused to be asked for and how often: { key, count }.
+    // Asked once more at a later paint, then left until the grid changes
+    property var differenceRefused: null
     // The first's signal index -> the compared one's value at the cursor
     property var compareReadout: ({})
     property string alignOn: "start"
@@ -1061,10 +1083,108 @@ Page {
         return viewT0 + (x - chart.x - plotLeft()) / Math.max(1, plotWidth() - 1) * (viewT1 - viewT0)
     }
 
+    // What a difference is taken between: a plotted number here and the
+    // compared recording's signal of the same name in the same unit (the
+    // unit's case aside), each with samples
+    function differencePairs() {
+        if (!compareAligned || recording.state !== RecordingView.Open)
+            return []
+        const sigs = recording.signalList
+        const theirs = compare.signalList
+        return sigs.filter(s => !s.isText && root.plotted[s.index] && s.samples > 0)
+                   .map(s => ({ mine: s.index, theirs: root.compareByName[s.name] }))
+                   .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
+                                && theirs[p.theirs].samples > 0
+                                && theirs[p.theirs].unit.toLowerCase() === sigs[p.mine].unit.toLowerCase())
+    }
+    // What an answer holds for: the pairs, the offset and the units
+    function differencePairsKey(pairs) {
+        return pairs.map(p => p.mine + ":" + p.theirs).join(",") + "|" + compareOffsetMs
+               + "|" + Bridge.unitSystem
+    }
+    // Asks both recordings for the wanted grid's means, unless it is
+    // answered or asked already
+    function askDifference() {
+        const w = differenceWanted
+        if (!differenceShown || !compareAligned || w === null || w.pairs.length === 0)
+            return
+        if ((difference !== null && difference.key === w.key)
+                || (differenceAsk !== null && differenceAsk.key === w.key))
+            return
+        const refused = differenceRefused !== null && differenceRefused.key === w.key
+                        ? differenceRefused.count : 0
+        if (refused >= 2)
+            return
+        // The grid's ends at whole microseconds, so each column's two spans
+        // lie exactly the offset apart and hold the same samples
+        const t0 = Math.round(w.g0 * 1000) / 1000
+        const t1 = Math.round(w.g1 * 1000) / 1000
+        // A view that refuses (0) answers nothing: the other isn't asked
+        const mine = recording.columnMeans(w.pairs.map(p => p.mine), t0, t1, w.gn)
+        const theirs = mine > 0 ? compare.columnMeans(w.pairs.map(p => p.theirs), t0 - compareOffsetMs,
+                                                      t1 - compareOffsetMs, w.gn) : 0
+        if (mine > 0 && theirs > 0) {
+            differenceRefused = null
+            differenceAsk = { key: w.key, pairsKey: w.pairsKey, pairs: w.pairs, t0: t0, t1: t1,
+                              mine: mine, theirs: theirs, mineMeans: null, theirMeans: null }
+        } else {
+            differenceAsk = null
+            differenceRefused = { key: w.key, count: refused + 1 }
+        }
+    }
+    // One recording's means for the ask under way; with both, the difference
+    function differenceAnswered(here, request, means) {
+        const a = differenceAsk
+        if (a === null || request !== (here ? a.mine : a.theirs))
+            return
+        if (here)
+            a.mineMeans = means
+        else
+            a.theirMeans = means
+        if (a.mineMeans === null || a.theirMeans === null)
+            return
+        differenceAsk = null
+        // A read that failed answers with no rows: no difference to draw
+        const rows = {}
+        if (a.mineMeans.length === a.pairs.length && a.theirMeans.length === a.pairs.length) {
+            for (let k = 0; k < a.pairs.length; ++k) {
+                const m = a.mineMeans[k].means
+                const t = a.theirMeans[k].means
+                const d = []
+                for (let c = 0; c < m.length; ++c)
+                    d.push(t[c] - m[c])
+                rows[a.pairs[k].mine] = d
+            }
+        }
+        difference = { key: a.key, pairsKey: a.pairsKey, t0: a.t0, t1: a.t1, rows: rows }
+        chart.requestPaint()
+    }
+    function setDifferenceShown(on) {
+        differenceShown = on
+        chart.requestPaint()
+    }
+    // Another recording on either side: an answer for the one before
+    // holds for nothing
+    function forgetDifference() {
+        difference = null
+        differenceWanted = null
+        differenceAsk = null
+        differenceRefused = null
+    }
+
+    // The rows a second of a recording's signals at those indexes
+    function rowsEachSecond(list, indexes, lengthMs) {
+        let rows = 0
+        for (const i of indexes)
+            rows += list[i].samples
+        return rows / Math.max(1, lengthMs / 1000)
+    }
+
     // The chart's series: each plotted number's columns over the view, its
     // label the cursor's value while that's in view, then the compared
     // recording's of the same names, dashed. Two pixels a column, or a
-    // second when that would read more than rawRowsPerFrame rows
+    // second when that would draw more than rawRowsPerFrame rows or hold
+    // more than rawRowsCached
     function series(widthPx) {
         if (recording.state !== RecordingView.Open)
             return []
@@ -1076,9 +1196,17 @@ Page {
         if (plotted.length === 0)
             return []
         const indexes = plotted.filter(i => sigs[i].samples > 0)
+        const theirs = compareAligned ? compare.signalList : []
+        const pairs = !compareAligned ? []
+            : plotted.map(i => ({ mine: i, theirs: root.compareByName[sigs[i].name] }))
+                     .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
+                                  && theirs[p.theirs].samples > 0)
         const spanS = (viewT1 - viewT0) / 1000
         let n = Math.max(1, Math.floor((chart.drawn ? chart.drawn.plotW : widthPx * 0.8) / 2))
-        if (spanS * (rowsPerSecond + (compareAligned ? compareRowsPerSecond : 0)) > rawRowsPerFrame)
+        const drawn = rowsEachSecond(sigs, indexes, durationMs())
+                      + rowsEachSecond(theirs, pairs.map(p => p.theirs), compare.durationMs)
+        const held = Math.max(rowsPerSecond, compareAligned ? compareRowsPerSecond : 0)
+        if (spanS * drawn > rawRowsPerFrame || spanS * held > rawRowsCached)
             n = Math.max(1, Math.min(n, Math.floor(spanS)))
         // The labels follow the readout's A, the earlier of the two cursors,
         // the compared recording's too
@@ -1105,12 +1233,6 @@ Page {
                      labelValue: labelOf(root.readoutFrom[c.index], fromInView),
                      labelMs: labelMsOf(root.readoutFrom[c.index], 0, fromInView) }
         })
-        if (!compareAligned)
-            return out
-        const theirs = compare.signalList
-        const pairs = plotted.map(i => ({ mine: i, theirs: root.compareByName[sigs[i].name] }))
-                             .filter(p => p.theirs !== undefined && !theirs[p.theirs].isText
-                                          && theirs[p.theirs].samples > 0)
         if (pairs.length === 0)
             return out
         const cols = compare.columns(pairs.map(p => p.theirs), g0 - compareOffsetMs,
@@ -1124,6 +1246,32 @@ Page {
                        unit: s.unit, labelValue: labelOf(root.compareReadout[mine], fromInView),
                        labelMs: labelMsOf(root.compareReadout[mine], compareOffsetMs, fromInView) })
         }
+        if (!differenceShown)
+            return out
+        // Each difference in a pane of its own quantity, under the signals'.
+        // The last answer draws where its own columns lie while a newer
+        // grid's is read, which waits for the view to rest
+        const apart = differencePairs()
+        const pairsKey = differencePairsKey(apart)
+        const key = [g0, g1, gn, pairsKey].join("|")
+        if (difference !== null && difference.pairsKey === pairsKey) {
+            for (const p of apart) {
+                const d = difference.rows[p.mine]
+                if (d === undefined)
+                    continue
+                const s = sigs[p.mine]
+                const here = labelOf(root.readoutFrom[p.mine], fromInView)
+                const there = labelOf(root.compareReadout[p.mine], fromInView)
+                out.push({ columns: { lows: d, highs: d, t0: difference.t0, t1: difference.t1 },
+                           row: p.mine, slot: root.slotOf(p.mine), decimals: s.decimals, unit: s.unit,
+                           pane: "difference " + ChartLayout.paneKey(s.unit),
+                           paneLabel: qsTr("Δ %1").arg(s.unit), labelValue: there - here })
+            }
+        }
+        if (differenceWanted === null || differenceWanted.key !== key)
+            differenceWanted = { key: key, pairsKey: pairsKey, pairs: apart, g0: g0, g1: g1, gn: gn }
+        if (!chart.moving)
+            Qt.callLater(root.askDifference)
         return out
     }
 
@@ -1154,6 +1302,8 @@ Page {
         compareStatus = ""
         compareAligned = false
         compareReadout = ({})
+        differenceShown = false
+        forgetDifference()
         if (recording.state === RecordingView.Open)
             showAll()
     }
@@ -1662,8 +1812,10 @@ Page {
 
     RecordingView {
         id: recording
+        objectName: "recordingView"
         unitSystem: Bridge.unitSystem
         onReportSaved: result => root.reportSaved(result)
+        onColumnMeansReady: (request, means) => root.differenceAnswered(true, request, means)
         onStatsReady: (request, stats) => {
             if (request !== root.statsAsk)
                 return
@@ -1691,6 +1843,7 @@ Page {
                 root.align()
         }
         onStateChanged: {
+            root.forgetDifference()
             root.reportNote = ""
             root.reportFailed = false
             root.pullsHere = null
@@ -1740,7 +1893,9 @@ Page {
 
     RecordingView {
         id: compare
+        objectName: "compareView"
         unitSystem: Bridge.unitSystem
+        onColumnMeansReady: (request, means) => root.differenceAnswered(false, request, means)
         onStretchesReady: (request, found, ok) => {
             if (request !== root.pullsThereAsk)
                 return
@@ -1751,6 +1906,7 @@ Page {
             root.align()
         }
         onStateChanged: {
+            root.forgetDifference()
             root.pullsThere = null
             root.pullsThereFailed = false
             root.pullsThereAsk = 0
@@ -1965,37 +2121,28 @@ Page {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: Theme.spacing
-                Rectangle {
-                    implicitWidth: kindSwitch.implicitWidth + 4
-                    implicitHeight: kindSwitch.implicitHeight + 4
-                    radius: Theme.radius
-                    color: Theme.surface
-                    Row {
-                        id: kindSwitch
-                        anchors.centerIn: parent
-                        spacing: 2
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "importKind_csv"
-                            text: qsTr("CSV")
-                            selected: root.importKind === RecordingImport.Csv
-                            enabled: !Bridge.recordingImport.busy
-                            onClicked: {
-                                root.importKind = RecordingImport.Csv
-                                if (guessPreview.guess === null && !root.importGuessing)
-                                    root.guessImportFile()
-                            }
+                SegmentRow {
+                    SegmentButton {
+                        tapHeight: root.segmentHeight
+                        objectName: "importKind_csv"
+                        text: qsTr("CSV")
+                        selected: root.importKind === RecordingImport.Csv
+                        enabled: !Bridge.recordingImport.busy
+                        onClicked: {
+                            root.importKind = RecordingImport.Csv
+                            if (guessPreview.guess === null && !root.importGuessing)
+                                root.guessImportFile()
                         }
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "importKind_candump"
-                            text: qsTr("candump")
-                            selected: root.importKind === RecordingImport.Candump
-                            enabled: !Bridge.recordingImport.busy
-                            onClicked: {
-                                root.importKind = RecordingImport.Candump
-                                root.importNote = ""
-                            }
+                    }
+                    SegmentButton {
+                        tapHeight: root.segmentHeight
+                        objectName: "importKind_candump"
+                        text: qsTr("candump")
+                        selected: root.importKind === RecordingImport.Candump
+                        enabled: !Bridge.recordingImport.busy
+                        onClicked: {
+                            root.importKind = RecordingImport.Candump
+                            root.importNote = ""
                         }
                     }
                 }
@@ -3205,43 +3352,34 @@ Page {
                 id: detailSwitchSlot
                 visible: recording.hasFrames
                 // Maximized, it leads the zoom row where the row has room
-                Rectangle {
+                SegmentRow {
                     parent: root.currentHead ? root.currentHead.switchSlot
                           : !root.chartMaximized ? detailSwitchSlot
                           : root.switchInZoomRow ? zoomSwitchSlot : switchRowSlot
-                    implicitWidth: detailSwitch.implicitWidth + 4
-                    implicitHeight: detailSwitch.implicitHeight + 4
-                    radius: Theme.radius
-                    color: Theme.surface
 
-                    Row {
-                        id: detailSwitch
-                        anchors.centerIn: parent
-                        spacing: 2
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "detailView_values"
-                            text: qsTr("Values")
-                            selected: !root.framesShown && !root.aboutShown
-                            onClicked: root.detailView = "values"
-                        }
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "detailView_frames"
-                            visible: recording.hasFrames
-                            text: qsTr("Frames")
-                            selected: root.framesShown
-                            onClicked: root.detailView = "frames"
-                        }
-                        // On the pinned form About is a view of its own
-                        SegmentButton {
-                            tapHeight: root.segmentHeight
-                            objectName: "detailView_about"
-                            visible: root.pinnedViewer
-                            text: qsTr("About")
-                            selected: root.aboutShown
-                            onClicked: root.detailView = "about"
-                        }
+                    SegmentButton {
+                        tapHeight: root.segmentHeight
+                        objectName: "detailView_values"
+                        text: qsTr("Values")
+                        selected: !root.framesShown && !root.aboutShown
+                        onClicked: root.detailView = "values"
+                    }
+                    SegmentButton {
+                        tapHeight: root.segmentHeight
+                        objectName: "detailView_frames"
+                        visible: recording.hasFrames
+                        text: qsTr("Frames")
+                        selected: root.framesShown
+                        onClicked: root.detailView = "frames"
+                    }
+                    // On the pinned form About is a view of its own
+                    SegmentButton {
+                        tapHeight: root.segmentHeight
+                        objectName: "detailView_about"
+                        visible: root.pinnedViewer
+                        text: qsTr("About")
+                        selected: root.aboutShown
+                        onClicked: root.detailView = "about"
                     }
                 }
             }
@@ -3281,32 +3419,22 @@ Page {
                         Layout.fillWidth: true
                         spacing: Theme.spacing
 
-                        Rectangle {
-                            implicitWidth: framesTableSwitch.implicitWidth + 4
-                            implicitHeight: framesTableSwitch.implicitHeight + 4
-                            radius: Theme.radius
-                            color: Theme.surface
-
-                            Row {
-                                id: framesTableSwitch
-                                anchors.centerIn: parent
-                                spacing: 2
-                                SegmentButton {
-                                    tapHeight: root.segmentHeight
-                                    objectName: "framesTable_frames"
-                                    text: qsTr("List")
-                                    selected: !root.framesById
-                                    onClicked: root.framesById = false
-                                }
-                                SegmentButton {
-                                    tapHeight: root.segmentHeight
-                                    objectName: "framesTable_byId"
-                                    text: qsTr("By ID")
-                                    selected: root.framesById
-                                    onClicked: {
-                                        root.framesById = true
-                                        viewFrames.ids.refresh()
-                                    }
+                        SegmentRow {
+                            SegmentButton {
+                                tapHeight: root.segmentHeight
+                                objectName: "framesTable_frames"
+                                text: qsTr("List")
+                                selected: !root.framesById
+                                onClicked: root.framesById = false
+                            }
+                            SegmentButton {
+                                tapHeight: root.segmentHeight
+                                objectName: "framesTable_byId"
+                                text: qsTr("By ID")
+                                selected: root.framesById
+                                onClicked: {
+                                    root.framesById = true
+                                    viewFrames.ids.refresh()
                                 }
                             }
                         }
@@ -3941,6 +4069,17 @@ Page {
                         onEditingFinished: {
                             const v = root.numberOf(text)
                             root.alignHysteresis = v >= 0 ? v : 0
+                        }
+                    }
+                    ThemedCheckBox {
+                        objectName: "compareDifference"
+                        text: qsTr("Difference")
+                        enabled: root.compareAligned
+                        checked: root.differenceShown
+                        Accessible.name: qsTr("Plot the compared recording's difference from this one")
+                        onToggled: {
+                            root.setDifferenceShown(!root.differenceShown)
+                            checked = Qt.binding(() => root.differenceShown)
                         }
                     }
                 }

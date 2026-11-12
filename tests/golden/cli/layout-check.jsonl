@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"as": "desktop", "cells": 2, "dropped": {"cells": 0, "pages": 0}, "first_cell": {"h": 4, "w": 2}, "form": "desktop", "needs_files": [{"name": "Boost.json", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}], "notes": [], "ok": true, "pages": 1, "problem": "", "type": "layout", "words": null}

@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"as": "desktop", "form": "phone", "needs_files": [], "notes": [], "ok": false, "problem": "otherform", "type": "layout", "words": "the file is a phone layout, and a layout is never scaled to another form"}

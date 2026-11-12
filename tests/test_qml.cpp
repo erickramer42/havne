@@ -25,6 +25,7 @@
 #include "pluginstore.h"
 #include "recordingexport.h"
 #include "recordingimport.h"
+#include "recordingview.h"
 #include "signalstore.h"
 #include "windowtheme.h"
 
@@ -87,6 +88,26 @@ public:
     QString recordingFixtures() const
     {
         return QStringLiteral(ECUIO_RECORDING_FIXTURES);
+    }
+
+    // The shared layout corpus (tests/data/layouts, which havne-cli's
+    // test_cli runs too): each case's name, and a case's file as a URL
+    // (ext "json" for the layout, "expect.json" for its verdicts)
+    Q_INVOKABLE QStringList layoutCases() const
+    {
+        QStringList names;
+        const QStringList files = QDir(QStringLiteral(ECUIO_LAYOUT_CORPUS))
+                                      .entryList({QStringLiteral("*.expect.json")},
+                                                 QDir::Files, QDir::Name);
+        for (const QString& f : files) {
+            names << f.chopped(QStringLiteral(".expect.json").size());
+        }
+        return names;
+    }
+    Q_INVOKABLE QUrl layoutUrl(const QString& name, const QString& ext) const
+    {
+        return QUrl::fromLocalFile(QStringLiteral(ECUIO_LAYOUT_CORPUS "/") + name +
+                                   QLatin1Char('.') + ext);
     }
 
     QUrl obdbFixture() const
@@ -205,6 +226,28 @@ public:
         if (auto* i = qobject_cast<RecordingImport*>(importer)) {
             i->setFailThreadForTesting(on);
         }
+    }
+
+    // A page's RecordingView (its "recordingView" or "compareView" child)
+    // can't start its asks' task while on: every ask is refused with 0.
+    // False for anything else
+    Q_INVOKABLE bool refuseViewAsks(QObject* view, bool on)
+    {
+        auto* v = qobject_cast<RecordingView*>(view);
+        if (v != nullptr) {
+            v->setFailThreadForTesting(on);
+        }
+        return v != nullptr;
+    }
+    // The view's asks' task runs out of memory at each column means ask
+    // while on. False for anything else
+    Q_INVOKABLE bool loseViewMeans(QObject* view, bool on)
+    {
+        auto* v = qobject_cast<RecordingView*>(view);
+        if (v != nullptr) {
+            v->setLoseMeansForTesting(on);
+        }
+        return v != nullptr;
     }
 
     // The importer's next imports wait this long, or until a cancel,

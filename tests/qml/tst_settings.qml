@@ -1018,6 +1018,21 @@ TestCase {
                 "the same scheme keeps the query whole")
     }
 
+    // keepalive_ms is a key all three adapter schemes take, so a switch
+    // between them keeps it
+    function test_anotherSchemeKeepsKeepaliveMs() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+
+        type(uri, "elm327://COM5?profile=uds-generic&keepalive_ms=2000")
+        press(page, "preset_j2534")
+        compare(uri.text, "j2534://?profile=uds-generic&keepalive_ms=2000",
+                "J2534 takes keepalive_ms")
+        press(page, "preset_wifi_obdx")
+        compare(uri.text, "elm327://192.168.4.1:23?profile=uds-generic&keepalive_ms=2000",
+                "ELM327 takes keepalive_ms")
+    }
+
     // The Units row sets the bridge's unit system, connected or not, and
     // shows the one in force
     function test_unitsRowSetsTheBridge() {
@@ -1117,6 +1132,37 @@ TestCase {
         compare(uri.text, "j2534://Fake?profile=raw")
     }
 
+    // The phone's words and list (Theme.mobile is the platform's, so the
+    // section's own `mobile` stands in): the count names Bluetooth alone,
+    // and the list takes all its rows where the desktop's stops at its cap
+    function test_theMobileFormsConnectionWords_data() {
+        return [{ tag: "phone", mobile: true }, { tag: "desktop", mobile: false }]
+    }
+    function test_theMobileFormsConnectionWords(data) {
+        const page = createPage()
+        const section = find(page, "adapterSection")
+        const list = find(page, "deviceList")
+        const count = find(page, "deviceCount")
+        section.mobile = data.mobile
+        page.j2534Devices = []
+        page.canInterfaces = []
+        page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" }]
+        const ports = []
+        for (let i = 0; i < 12; ++i)
+            ports.push({ name: "COM" + (10 + i), device: "" })
+        page.serialPorts = ports
+        compare(list.count, 13)
+        if (data.mobile) {
+            compare(count.text, "Bluetooth: 1 found; tap one, then Connect")
+            tryVerify(() => list.contentHeight > 0 && Math.abs(list.height - list.contentHeight) < 1,
+                      3000, "the page alone scrolls")
+        } else {
+            verify(count.text.indexOf("J2534 interfaces: 0, serial ports: 12") >= 0, count.text)
+            tryVerify(() => list.contentHeight > 0 && list.height < list.contentHeight,
+                      3000, "the desktop's list stops at its cap")
+        }
+    }
+
     // The phone's Bluetooth adapters join the list after the ports
     // (ADR-0028 section 2): a paired classic one fills elm327://bt:<address>, a
     // BLE one elm327://ble:<address>, the query kept; the count names
@@ -1214,10 +1260,10 @@ TestCase {
         // SocketCAN asks an ECU through core's ISO-TP under a profile that
         // requests (ADR-0040): uds-generic stays with its request keys; under
         // Default, raw there, which only listens, the request keys go
-        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0"
+        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0&keepalive_ms=2000"
         compare(page.profileChoice, "uds-generic")
         tap(find(list.itemAtIndex(0), "deviceRowArea"))
-        compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0")
+        compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0&keepalive_ms=2000")
         compare(page.profileChoice, "uds-generic")
         uri.text = "j2534://?identify=0&poll=0C&baud=500000"
         compare(page.profileChoice, "default")

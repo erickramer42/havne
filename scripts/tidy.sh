@@ -6,7 +6,7 @@
 #
 # Usage: scripts/tidy.sh [<tree>]               (default build-tidy)
 #        scripts/tidy.sh --qt <kit> [<tree>]    (default build-tidy-qt)
-#        HAVNE_TIDY_SHARD=<k>/<n> scripts/tidy.sh ...   (every n-th file from the k-th)
+#        HAVNE_TIDY_SHARD=<k>/<n> scripts/tidy.sh ...   (every n-th file from the k-th, k from 1 to n)
 #
 # The tree is a Ninja (or Makefile) build with a compile database, which
 # the Visual Studio generator doesn't write, configured where cl.exe is
@@ -129,18 +129,18 @@ if [ -z "$files" ]; then
     echo "no core/, surrogate/, cli/ or app/ sources in $DB" >&2
     exit 2
 fi
-# HAVNE_TIDY_SHARD=<k>/<n> checks every n-th file from the k-th (k from 0),
+# HAVNE_TIDY_SHARD=<k>/<n> checks every n-th file from the k-th (k from 1 to n),
 # so n runners together check the whole tree
 if [ -n "${HAVNE_TIDY_SHARD:-}" ]; then
     shard_k=${HAVNE_TIDY_SHARD%/*}
     shard_n=${HAVNE_TIDY_SHARD#*/}
     case "$shard_k$shard_n" in *[!0-9]*|"") shard_k=x ;; esac
-    if [ "$shard_k" = x ] || [ "$shard_n" -lt 1 ] || [ "$shard_k" -ge "$shard_n" ]; then
-        echo "HAVNE_TIDY_SHARD='$HAVNE_TIDY_SHARD': want <k>/<n>, k below n" >&2
+    if [ "$shard_k" = x ] || [ "$shard_n" -lt 1 ] || [ "$shard_k" -lt 1 ] || [ "$shard_k" -gt "$shard_n" ]; then
+        echo "HAVNE_TIDY_SHARD='$HAVNE_TIDY_SHARD': want <k>/<n>, k from 1 to n" >&2
         exit 2
     fi
     files=$(printf '%s
-' "$files" | awk -v k="$shard_k" -v n="$shard_n" '(NR - 1) % n == k')
+' "$files" | awk -v k="$shard_k" -v n="$shard_n" '(NR - 1) % n == k - 1')
 fi
 count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')
 
