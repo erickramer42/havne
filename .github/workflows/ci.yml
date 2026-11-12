@@ -566,10 +566,17 @@ jobs:
           fail_ci_if_error: true
 
   macos-build:
+    name: macos-build (${{ matrix.shard }}/2)
     if: ${{ !inputs.smoke_only }}
     runs-on: macos-latest
     # The repeat runs a test hundreds of times: 60 minutes then
     timeout-minutes: ${{ inputs.macos_repeat != '' && 60 || 15 }}
+    # Two runners, each with its own build, run alternate halves of ctest
+    # (-I k,,2: every case once across the two); the repeat is on the first
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -604,11 +611,11 @@ jobs:
       - name: Run tests
         env:
           ECUIO_PYTEST_REQUIRED: '1'
-        run: ctest --test-dir build --output-on-failure --no-tests=error
+        run: ctest --test-dir build --output-on-failure --no-tests=error -I ${{ matrix.shard }},,2
 
       # A manual run's regex reaches the shell only through env.
       - name: Repeat until a failure (manual runs)
-        if: ${{ inputs.macos_repeat != '' }}
+        if: ${{ inputs.macos_repeat != '' && matrix.shard == 1 }}
         env:
           REPEAT_REGEX: ${{ inputs.macos_repeat }}
           REPEAT_COUNT: ${{ inputs.macos_repeat_count }}
