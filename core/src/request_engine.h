@@ -110,9 +110,10 @@
  * response time P2 (50 ms) plus 50 ms for the adapter: the longest reply
  * on the first vehicle took 83 ms. A "response pending" reply extends it
  * to P2* (5 s) plus the same margin. The floor is the least time between
- * two requests on one channel, set before any vehicle has run the
- * engine. The walk's budget fits the whole chain, eight bitmaps, at a
- * full wait each; no bitmap request goes out after it. */
+ * the starts of two writes on one channel: this default, or the driver's
+ * (ecuio_request_engine::gap_us, the URI's ?gap=). The walk's budget
+ * fits the whole chain, eight bitmaps, at a full wait each; no bitmap
+ * request goes out after it. */
 constexpr int64_t ECUIO_ENGINE_WAIT_US = 100000;
 constexpr int64_t ECUIO_ENGINE_PENDING_WAIT_US = 5050000;
 constexpr int64_t ECUIO_ENGINE_GAP_US = 20000;
@@ -381,6 +382,8 @@ struct ecuio_request_engine {
     uint32_t chan_count = 0;
     bool probe = false;         /* section 4 on: walks run, explicit answers drop */
     int64_t walk_until_us = 0;  /* the walk's budget ends */
+    /* The floor between the starts of two writes on a channel */
+    int64_t gap_us = ECUIO_ENGINE_GAP_US;
     ecuio_scan_entry scan[ECUIO_ENGINE_SCAN_MAX] = {};
     uint32_t scan_count = 0;
     bool scan_first = false;    /* the scan doesn't take turns with the rotation */
@@ -2110,10 +2113,12 @@ inline void ecuio_engine_pack_failed(ecuio_request_engine* e, uint32_t c)
 
 /* After the driver's write of request r on channel c, at now_us: a sent
  * request waits for its reply until the wait ends; one that wasn't sent
- * leaves nothing outstanding, and a one-shot stays due. The floor runs
- * from now either way. */
-inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c,
-                              int32_t r, bool sent, int64_t now_us)
+ * leaves nothing outstanding, and a one-shot stays due. The wait and the
+ * latency run from now, the write's return; the floor from start_us, the
+ * write's start (now when the driver gives none), so the write's own
+ * time isn't added to it. */
+inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c, int32_t r,
+                              bool sent, int64_t now_us, int64_t start_us = -1)
 {
     ecuio_engine_channel& ch = e->chans[c];
     ch.outstanding = sent ? r : ECUIO_ENGINE_NONE;
@@ -2122,7 +2127,23 @@ inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c,
         ch.sent_us = now_us;
         ch.last_sent_us = now_us;
     }
-    ch.next_send_us = now_us + ECUIO_ENGINE_GAP_US;
+    const int64_t from =
+        (start_us < 0 || start_us > now_us) ? now_us : start_us;
+    ch.next_send_us = from + e->gap_us;
+}
+
+/* Whether a reply may still come on any channel: a request out, or one
+ * whose wait ended with its reply not yet in (out of step). While none
+ * may, nothing the driver could read answers a request. */
+inline bool ecuio_engine_awaiting(const ecuio_request_engine* e)
+{
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        if (e->chans[c].outstanding != ECUIO_ENGINE_NONE ||
+            !e->chans[c].in_step) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* Ends channel c's request once its wait has run out: true when one

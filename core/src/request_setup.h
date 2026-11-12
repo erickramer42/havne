@@ -36,7 +36,7 @@ constexpr uint32_t ECUIO_CAN_ID_MAX = 0x1FFFFFFFu; /* 29-bit */
 constexpr uint32_t ECUIO_CAN_ID_11BIT_MAX = 0x7FFu;
 
 /* The request keys' values: filter, txid, poll, probe, identify,
- * diagnose, pack, scan, session and keepalive_ms. */
+ * diagnose, pack, scan, gap, session and keepalive_ms. */
 struct request_params {
     uint32_t rx_id = 0; /* 0 = no ?filter= override */
     uint32_t tx_id = 0; /* 0 = unset: profile's tx, else 0x7E0 */
@@ -50,7 +50,12 @@ struct request_params {
     bool scan_first = false; /* ?scan=first: the DID scan before the rotation */
     uint8_t session = ECUIO_SESSION_DEFAULT; /* ?session=03 (ADR-0060) */
     uint32_t keepalive_ms = 0; /* ?keepalive_ms=; 0 = the engine's default */
+    /* ?gap=: the floor between requests on a channel; -1 the transport's */
+    int64_t gap_us = -1;
 };
+
+/* The most ?gap= takes, in ms */
+constexpr unsigned long ECUIO_REQUEST_GAP_MAX_MS = 1000;
 
 /* Strict unsigned parse: decimal by default, '0x'/'0X' prefix enables
  * hex digits. Rejects empty digits, '+', '-', whitespace, and overflow.
@@ -118,6 +123,8 @@ inline bool ecuio_parse_number(const char* s, size_t len,
  *   scan     turns or first: uds-generic's DID scan taking turns with
  *            the rotation (the default), or asked back to back with the
  *            rotation waiting until it ends (ADR-0020)
+ *   gap      0..1000, decimal ms: the least time between the starts of
+ *            two requests on a channel (the engine's floor)
  *   session  01 or 03: uds-generic reads in the default session (01, the
  *            default: no session request at all) or enters the extended
  *            one first (ADR-0060); never 02
@@ -161,6 +168,18 @@ inline bool ecuio_request_param(const ecuio_uri::param& q, request_params* p,
             p->pack = q.val[0] == '1';
         } else {
             p->diagnose = q.val[0] == '1';
+        }
+        return true;
+    }
+    if (q.is("gap")) {
+        /* decimal only: a time, not an ID */
+        const bool hex = q.val_len >= 2 && q.val[0] == '0' &&
+                         (q.val[1] == 'x' || q.val[1] == 'X');
+        if (hex || !ecuio_parse_number(q.val, q.val_len, &v) ||
+            v > ECUIO_REQUEST_GAP_MAX_MS) {
+            *wanted = "a time in ms from 0 to 1000";
+        } else {
+            p->gap_us = static_cast<int64_t>(v) * 1000;
         }
         return true;
     }
@@ -350,6 +369,9 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                      bool* identify)
 {
     ecuio_engine_init(e, chan_count);
+    if (params.gap_us >= 0) {
+        e->gap_us = params.gap_us;
+    }
     if (params.scan_first && session->uds == nullptr) {
         ecuio_detail_set("?scan=first belongs to profile=uds-generic, the "
                          "profile that scans DIDs");

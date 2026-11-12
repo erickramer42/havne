@@ -108,7 +108,7 @@ ecuio_status_t ecuio_j2534_sur_stop_msg_filter(ecuio_j2534_sur_handle_t* handle,
                                                   unsigned long filter_id);
 
 /* Return one received message: from the cached batch if one is
- * pending, otherwise via one OP_READ (up to 16 messages). The contract
+ * pending, otherwise via one OP_READ. The contract
  * of ecuio_j2534_read_msg: ERR_TIMEOUT -> ECUIO_ERR_VEHICLE_TIMEOUT,
  * ERR_BUFFER_EMPTY -> no message, other statuses or a pipe failure ->
  * ECUIO_ERR_TRANSPORT_HARD_FAILURE; the message as the vendor gave it

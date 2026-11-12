@@ -2870,8 +2870,10 @@ TEST_F(Elm327SessionTest, RefusalsNameTheirCause)
          "?serial= needs a serial rate from 300 to 4000000, not '9'"},
         {uri("?flags=0"), ECUIO_ERR_BAD_URI,
          "elm327:// takes no query key 'flags', only baud, serial, filter, "
-         "txid, poll, probe, identify, diagnose, pack, scan, profile, did, "
-         "session and keepalive_ms"},
+         "txid, poll, probe, identify, diagnose, pack, scan, gap, profile, "
+         "did, session and keepalive_ms"},
+        {uri("?gap=1001"), ECUIO_ERR_BAD_URI,
+         "?gap= needs a time in ms from 0 to 1000, not '1001'"},
         {uri("?profile=uds-generic&did=7E8:1E1C&did=18DAF110:1E1C"),
          ECUIO_ERR_BAD_URI,
          "the channels mix 11-bit and 29-bit IDs, which one connection "
