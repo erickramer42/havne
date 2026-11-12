@@ -296,10 +296,17 @@ ecuio_status_t ecuio_session_get_absent_signals(
         return ECUIO_OK;
     }
     const uint32_t defs = static_cast<uint32_t>(session->decoder.values.size());
+    const auto absent = [&](uint32_t i) {
+        return i < defs &&
+               session->decoder.carried[i].load(std::memory_order_relaxed) ==
+                   0 &&
+               session->decoder.short_frames[i].load(
+                   std::memory_order_relaxed) >= ECUIO_ABSENT_AFTER_FRAMES;
+    };
     for (uint32_t i = 0; i < defs; ++i) {
-        if (session->decoder.carried[i].load(std::memory_order_relaxed) == 0 &&
-            session->decoder.short_frames[i].load(std::memory_order_relaxed) >=
-                ECUIO_ABSENT_AFTER_FRAMES) {
+        /* A computed def with an absent input never has a value either */
+        if (absent(i) ||
+            ecuio_computed_input_gone(*set, set->defs[i], absent)) {
             if (*count < capacity) {
                 ids[*count] = set->defs[i].id;
             }
