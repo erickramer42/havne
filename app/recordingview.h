@@ -4,6 +4,7 @@
 #pragma once
 
 #include <QObject>
+#include <QPointer>
 #include <QString>
 #include <QUrl>
 #include <QVariantList>
@@ -29,7 +30,10 @@
 // queries on the GUI thread: a column of a second or more comes from
 // its per-second summaries. A span's statistics and a cursor's step are
 // asked of a thread of their own, which lives from the first ask to the
-// close.
+// close. The recording's stretches are found by a task of the global
+// thread pool per ask that shares the reader, so a close never waits for
+// a pass over a long recording: the pass ends on its own and its answer
+// is dropped. Only the application's own end waits for one.
 class RecordingView : public QObject
 {
     Q_OBJECT
@@ -194,6 +198,20 @@ public:
     // nothing asked. stepReady answers with that number unless a later ask
     // replaced it: the sample's time, -1 at the ends or on a failure.
     Q_INVOKABLE int step(int signal, double tMs, bool forward);
+    // The recording's pulls, its cruises or both (ecuio_recording_stretches
+    // over the whole recording, core's default rules and its own pick of
+    // each role's signal), off the GUI thread: the ask's number, or 0 with
+    // nothing asked (not open, neither kind). stretchesReady answers with
+    // that number unless a later ask replaced it or the recording closed:
+    // one map per stretch in time order, { kind ("pull" or "cruise"),
+    // fromMs, toMs, start, end (a pull's measured signal at its two ends,
+    // a cruise's mean speed in both, in display units), unit, decimals,
+    // signal (the measured one's index) }, and ok: false, the list empty,
+    // when the pass failed (the file changed since the open, no memory).
+    Q_INVOKABLE int stretches(bool pulls, bool cruises);
+    // Each stretches pass waits this long before it reads, so a test can
+    // close or destroy the view while one is under way
+    void setStretchesHoldForTesting(int ms) { m_stretchesHoldMs = ms; }
 
 signals:
     void stateChanged();
@@ -205,6 +223,7 @@ signals:
     void reportSaved(const QVariantMap& result);
     void statsReady(int request, const QVariantList& stats);
     void stepReady(int request, double atMs);
+    void stretchesReady(int request, const QVariantList& stretches, bool ok);
 
 private:
     struct Result;
@@ -253,6 +272,15 @@ private:
                        quint64 generation);
     void stepFinished(int request, ecuio_status_t rc, uint64_t at,
                       quint64 generation);
+    // One pass, a task of the global thread pool that holds the reader
+    // open; its answer is posted to the application and reaches view only
+    // if it still lives
+    static void findStretches(const std::shared_ptr<ecuio_recording_t>& reader,
+                              const QPointer<RecordingView>& view, int request,
+                              uint32_t kinds, quint64 generation, int holdMs);
+    void stretchesFinished(int request, ecuio_status_t rc,
+                           const std::vector<ecuio_recording_stretch_t>& got,
+                           quint64 generation);
 
     int m_state = Closed;
     QString m_folder;
@@ -266,7 +294,11 @@ private:
     bool m_ownSignalFile = false;
     bool m_hasFrames = false;
 
+    // The open reader: m_reader for every call on it, m_readerHold its
+    // owner, shared with a stretches pass so a close mid-pass leaves the
+    // reader open until the pass ends
     ecuio_recording_t* m_reader = nullptr;
+    std::shared_ptr<ecuio_recording_t> m_readerHold;
     ecuio_recording_info_t m_info{};
     std::vector<Signal> m_signals;
     QVariantList m_markers;
@@ -294,6 +326,8 @@ private:
     int m_lastAsk = 0;
     int m_lastStats = 0;
     int m_lastStep = 0;
+    int m_lastStretches = 0;
+    int m_stretchesHoldMs = 0;
     // Each open's number: a result or progress posted for an earlier one
     // is dropped
     quint64 m_generation = 0;

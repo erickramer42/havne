@@ -53,7 +53,7 @@ ColumnLayout {
                     objectName: "settingsRowSummary"
                     visible: row.width >= 200
                     text: row.modelData.key === "log" ? list.logSummary : row.modelData.summary
-                    color: Theme.textDim
+                    color: row.modelData.warn === true ? Theme.danger : Theme.textDim
                     wrapMode: list.stacked ? Text.WordWrap : Text.NoWrap
                     maximumLineCount: list.stacked ? 2 : 1
                     elide: Text.ElideRight

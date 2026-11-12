@@ -1283,6 +1283,64 @@ taking frames alone, a row without frames still replaying, a decode
 of no frames going ahead, the check run on no frames, the decode
 choice and Replay in Settings shown without frames).
 
+### Note of 2026-11-11: a row with no time
+
+A row whose time cell is empty has no time to put its values at. The
+padding trim comes first, so a logger's last line of `, , , ` is one. The
+import leaves such a row out whole, its other cells unread, and counts it:
+the report's first reserved word is `rows_no_time` (64), with
+`reserved[1]` at 72 and the size still 80 (static-asserted, `test_c_abi`).
+`events.log` gets `import  rows left out: N with no time (the first on
+line L)` after the ignored columns' line. The row moves no clock: a time
+of day's day roll and the 100 ms step back are judged against the row
+with a time before it. A time cell that holds something that isn't a time
+is refused as before, and a file in which no row has a time is refused:
+"no row below the header has a time".
+
+The guess follows the import. A first column that rises around an empty
+cell is the time while more than half of the rows read hold one: a
+column filled in half of them or fewer is a sparse counter, and taking
+it would leave half the file out. A column named as the time is the time
+however sparse. The sampled rows with no time decide nothing about a
+signal (its kind, decimals, placeholders or counts), and a note says "N
+of the M rows read have no time (the first on line L): the import leaves
+such a row out", M being every row read. A count in a later note is then
+of the rows with a time, and says so ("holds a value in V of the N rows
+with a time", "it is empty in the first N rows with a time"), so one
+guess never gives "rows read" two numbers. A sample that is the whole
+file with no time in it is refused: in the import's words when the time
+column is named, and as "no column reads as the time" when none is named
+and the first column is empty throughout.
+
+The front ends: `havne-cli`'s csv `imported` line has `rows_no_time`
+after `columns_ignored`, and a line on standard error when it isn't 0,
+"havne-cli: N rows with no time left out"; Python's `Imported` ends with
+`rows_no_time`; the app's finished line adds the same words, ", N rows
+with no time left out" (after a count of ignored columns, "; N rows ...").
+
+Until this note the guess passed such a row by and the import refused it
+at its line, so a guessed map could fail the file it was guessed from.
+
+The CSV import calls the between-passes test hook the candump import
+calls, so "the file changed while it was read" has a test of its own
+(`CsvImportTest.AFileThatChangesBetweenItsPassesIsRefused`). The fixture
+is `tests/fixtures/import/csv/logger-d`: a row with no time part way
+down, holding values, and a last row of padding alone. Tests:
+`CsvImportTest.ARowWithNoTimeIsLeftOutAndCounted`,
+`.RowsWithNoTimeAreCountedAndNamedInTheLog`,
+`CsvGuessTest.ARowWithNoTimeIsNotedAndDecidesNoSignal`, logger-d in
+`.TheMadeUpLoggersAreGuessedAndImported`, `CliTransferTest` (the line),
+`CliTransferRunTest.csv-guess`, `PythonTest.test_import`,
+`BridgeTest.ImportCountsACsvsRowsWithNoTime` and `QmlTest.recordings`'
+`test_anImportSaysTheRowsWithNoTimeItLeftOut`. Mutation-checked
+2026-11-11 (28).
+
+A limit kept: the header search judges the rows right below a header by
+their non-empty cells, a row with no time among them, so in a file of
+three columns or fewer such a row that also holds a text can keep the
+header from being found. The guess then refuses, and an import with a
+map takes the file.
+
 ## Appendix: a column map guessed from the header (2026-11-07)
 
 Accepted 2026-11-07; step 1 built 2026-11-07, as the note "settled

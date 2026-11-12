@@ -20,6 +20,8 @@ Rectangle {
     // vehicle's saved one first when absent (Settings' connectUris)
     property var recents: []
     property string vehicleUri: ""
+    // Says where a recording is played back; Home's own foot line says it
+    property bool replayHint: true
     // [{ uri, title, kind }]: Settings' connectAdapters
     property var adapters: []
     // The phone's Bluetooth, read from the singleton; a test sets them
@@ -71,16 +73,40 @@ Rectangle {
         return query < 0 ? uri : uri.substring(0, query)
     }
 
-    readonly property var recentRows: recents.map(u => ({
-        uri: u, title: Bridge.uriLabelFor(u), kind: kindOf(u), adapter: false }))
+    // A recent address whose base is a listed device shows the device's
+    // name, the address as its detail
+    function deviceOf(uri) {
+        const base = baseOf(uri)
+        return adapters.find(a => a.uri === base)
+    }
+    // The profile an address asks for, in the words Settings uses
+    function profileWordOf(uri) {
+        const query = uri.indexOf("?")
+        const pairs = query < 0 ? [] : uri.substring(query + 1).split("&")
+        const pair = pairs.find(p => p.startsWith("profile="))
+        const name = pair === undefined ? "" : pair.substring(8)
+        return name === "" ? qsTr("Default")
+             : name === "raw" ? qsTr("Raw")
+             : name === "uds-generic" ? qsTr("UDS DIDs")
+             : name
+    }
+    // Two recents on one adapter read the same but for their profile, which
+    // the compact form puts where the kind goes
+    readonly property var recentRows: recents.map(u => {
+        const device = deviceOf(u)
+        if (device === undefined)
+            return { uri: u, title: Bridge.uriLabelFor(u), kind: kindOf(u), adapter: false, detail: "" }
+        const shared = recents.filter(r => baseOf(r) === baseOf(u)).length > 1
+        return { uri: u, title: device.title, kind: device.kind, adapter: false,
+                 detail: Bridge.uriLabelFor(u), profileWord: shared ? profileWordOf(u) : "" }
+    })
     // An adapter that is also a recent address shows once, under Recent
     readonly property var adapterRows: {
         const taken = recents.map(baseOf)
         const rows = adapters.filter(a => taken.indexOf(a.uri) < 0).slice(0, maxAdapterRows)
             .map(a => ({ uri: a.uri, title: a.title, kind: a.kind, adapter: true }))
-        if (Theme.developerMode)
-            rows.push({ uri: "mock://demo", title: Bridge.uriLabelFor("mock://demo"),
-                        kind: qsTr("Demo data"), adapter: true, demo: true })
+        rows.push({ uri: "mock://demo", title: Bridge.uriLabelFor("mock://demo"),
+                   kind: qsTr("Demo data"), adapter: true, demo: true })
         return rows
     }
     readonly property var rows: recentRows.concat(adapterRows)
@@ -134,8 +160,10 @@ Rectangle {
             checked: isChosen
             leftPadding: 12
             rightPadding: 12
-            Accessible.name: modelData.kind !== "" ? qsTr("%1, %2").arg(modelData.title).arg(modelData.kind)
-                                                   : modelData.title
+            readonly property string profileWord: modelData.profileWord !== undefined ? modelData.profileWord : ""
+            Accessible.name: (modelData.kind !== "" ? qsTr("%1, %2").arg(modelData.title).arg(modelData.kind)
+                                                    : modelData.title)
+                             + (profileWord !== "" ? ", " + profileWord : "")
             onClicked: list.picked(modelData.uri)
             contentItem: RowLayout {
                 spacing: 10
@@ -170,11 +198,20 @@ Rectangle {
                     text: row.modelData.title
                 }
                 Label {
+                    objectName: "connectRowDetail"
+                    visible: text !== "" && !Theme.compact
+                    Layout.maximumWidth: row.width * 0.4
+                    elide: Text.ElideMiddle
+                    font.pixelSize: Theme.fontCaption
+                    color: Theme.textDim
+                    text: row.modelData.detail !== undefined ? row.modelData.detail : ""
+                }
+                Label {
                     objectName: "connectRowKind"
                     visible: text !== ""
                     font.pixelSize: Theme.fontCaption
                     color: Theme.textDim
-                    text: row.modelData.kind
+                    text: Theme.compact && row.profileWord !== "" ? row.profileWord : row.modelData.kind
                 }
             }
         }
@@ -200,9 +237,9 @@ Rectangle {
                 wrapMode: Text.WordWrap
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textDim
-                text: list.rows.length > 0
-                      ? qsTr("The gauges fill when a session runs. Pick a source, then connect.")
-                      : qsTr("The gauges fill when a session runs. Choose what to connect to in Settings.")
+                text: list.replayHint
+                      ? qsTr("Pick a source, then connect. To play a recording back, open Recordings.")
+                      : qsTr("The gauges fill when a session runs. Pick a source, then connect.")
             }
         }
 
@@ -280,18 +317,18 @@ Rectangle {
 
         Label {
             objectName: "connectPickHint"
-            visible: list.rows.length > 0 && list.chosen === ""
+            visible: list.chosen === ""
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             font.pixelSize: Theme.fontCaption
             color: Theme.textDim
-            text: qsTr("Pick an adapter, then connect")
+            text: qsTr("Pick a row, then connect")
         }
 
         // A relay holds the adapter, so Connect waits for it to stop
         Label {
             objectName: "connectRelayNote"
-            visible: list.rows.length > 0 && list.chosen !== "" && Relay.running
+            visible: list.chosen !== "" && Relay.running
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
             font.pixelSize: Theme.fontCaption
@@ -330,27 +367,20 @@ Rectangle {
             ThemedButton {
                 objectName: "connectOther"
                 flat: true
-                visible: list.rows.length > 0
                 enabled: !list.busy
                 text: qsTr("Other address…")
                 onClicked: list.otherAddress()
             }
-            // Primary with a row chosen; with no row at all it opens
-            // Settings, a secondary step; with rows but none chosen it waits
+            // Primary with a row chosen; with none chosen it waits
             ThemedButton {
                 objectName: "connectGo"
                 highlighted: list.chosen !== ""
-                // A relay holds the adapter (ADR-0047); Settings' page doesn't connect
-                enabled: !list.busy && (list.chosen !== "" ? !Relay.running : list.rows.length === 0)
+                // A relay holds the adapter (ADR-0047)
+                enabled: !list.busy && list.chosen !== "" && !Relay.running
                 text: Bridge.connecting ? qsTr("Connecting…")
                     : Bridge.disconnecting ? qsTr("Disconnecting…")
-                    : list.rows.length === 0 ? qsTr("Connect…")
                     : qsTr("Connect")
                 onClicked: {
-                    if (list.chosen === "") {
-                        list.otherAddress()
-                        return
-                    }
                     list.errorText = ""
                     list.connectTo(list.chosen)
                 }

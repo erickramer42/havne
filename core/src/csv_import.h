@@ -833,6 +833,8 @@ struct outcome {
     uint64_t lines = 0;               /* physical lines read */
     uint64_t rows = 0;                /* data rows */
     uint64_t values = 0;              /* samples handed on */
+    uint64_t rows_no_time = 0;        /* rows left out: an empty time cell */
+    uint64_t first_no_time = 0;       /* the first such row's line */
     std::vector<std::string> ignored; /* header columns not taken, in order */
     bool has_utc = false;
     uint64_t utc_start_us = 0; /* the first row's UTC time */
@@ -897,7 +899,8 @@ inline const char* time_form(time_unit u)
 
 /*
  * Reads src through the map: the preamble's rows skipped, the header
- * matched by name, then each row's time and its signals' cells. Sink:
+ * matched by name, then each row's time and its signals' cells; a row
+ * whose time cell is empty is left out whole and counted. Sink:
  * bool number(uint64_t host_us, size_t signal, double v) and
  * bool text(uint64_t host_us, size_t signal, const std::string& v), each
  * false to stop (the pass then returns false with *why from
@@ -995,8 +998,11 @@ bool run(Source& src, const column_map& m, Sink& sink, outcome& out,
         }
         const std::string& cell = row[time_at];
         if (cell.empty()) {
-            *why = line_words(line_no, "the row has no time");
-            return false;
+            /* No time to put its values at: the row is left out whole */
+            if (out.rows_no_time++ == 0) {
+                out.first_no_time = line_no;
+            }
+            continue;
         }
         int64_t t = 0;
         int64_t clock = 0;
@@ -1076,7 +1082,8 @@ bool run(Source& src, const column_map& m, Sink& sink, outcome& out,
     }
     out.lines = r.lines();
     if (!any) {
-        *why = "the file holds no rows after its header";
+        *why = out.rows_no_time > 0 ? "no row below the header has a time"
+                                    : "the file holds no rows after its header";
         return false;
     }
     out.duration_us = static_cast<uint64_t>(prev - first);

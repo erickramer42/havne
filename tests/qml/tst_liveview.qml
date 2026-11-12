@@ -175,6 +175,53 @@ TestCase {
         Bridge.signalModel.toggleSubscribed(0)
     }
 
+    // The plotted rows are what Start log records: the line says so where
+    // the button is offered, and "Logging" while a log runs
+    function test_theStatusLineSaysWhatALogRecords() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const list = connectMock(page)
+        const all = list.count
+        verify(page.statusText().endsWith(" · Start log records the plotted ones"), page.statusText())
+        Bridge.startLog()
+        verify(Bridge.logActive, "a log runs")
+        compare(page.statusText(), "Logging the " + Bridge.signalModel.subscribedCount + " plotted signals")
+        Bridge.stopLog()
+        verify(!Bridge.logActive)
+        verify(page.statusText().endsWith("records the plotted ones"), page.statusText())
+
+        // one plotted signal reads in the singular
+        for (let i = list.count - 1; i >= 1; --i) {
+            if (list.itemAtIndex(i).subscribed)
+                Bridge.signalModel.toggleSubscribed(i)
+        }
+        tryCompare(Bridge.signalModel, "subscribedCount", 1, 2000, "one signal left plotted")
+        Bridge.startLog()
+        verify(Bridge.logActive, "a log runs")
+        compare(page.statusText(), "Logging the 1 plotted signal")
+        Bridge.stopLog()
+        verify(!Bridge.logActive)
+
+        // Where Start log isn't offered the note isn't made: a recorded
+        // session (Record sessions on) and a replay
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        Bridge.recording = true
+        try {
+            compare(Bridge.connectSession("mock://demo"), "")
+            tryVerify(() => Bridge.recordingActive, 5000, "the session is recorded")
+            verify(page.statusText().indexOf("Start log") < 0, page.statusText())
+        } finally {
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+            Bridge.recording = false
+        }
+        const replay = Bridge.recordingRow(Harness.recordingFixtures + "/findings")
+        compare(Bridge.connectSession(replay.uri), "", "a replay connects")
+        tryVerify(() => page.statusText().indexOf("Plotting") === 0
+                        || page.statusText().indexOf(" of ") > 0, 5000, "its line")
+        verify(page.statusText().indexOf("Start log") < 0, page.statusText())
+    }
+
     // On a phone the field says "Find" and the status line drops the 10 Hz
     // clause, since the long forms are cut at 384 dp; the field's
     // accessible name keeps the whole phrase
@@ -191,7 +238,7 @@ TestCase {
         try {
             compare(field.placeholderText, "Find")
             compare(field.Accessible.name, "Find a signal by its name or unit")
-            compare(page.statusText(), all + " of " + all + " plotted")
+            compare(page.statusText(), all + " of " + all + " plotted · Start log records them")
             field.insert(0, "temp")
             field.textEdited()
             tryCompare(list, "count", 3)
@@ -561,6 +608,39 @@ TestCase {
         verify(page.statusText().indexOf("Paused") < 0, page.statusText())
     }
 
+    // A leftward drag on a following chart pauses nothing and doesn't spend
+    // the first pause's hint, which the next pause shows
+    function test_aLeftwardDragSpendsNoHint() {
+        liveStore.setValue("pauseHintSeen", false)
+        liveStore.sync()
+        const page = pageInGrownWindow()
+        connectMock(page)
+        waitForHistory(500)
+        dragAcross(findChild(page, "chartFrame"), -200)
+        verify(!page.paused, "a leftward drag on a following chart pauses nothing")
+        liveStore.sync()
+        compare(liveStore.value("pauseHintSeen", false), false, "and spends no hint")
+        page.pause()
+        verify(findChild(page, "pauseHint").visible, "the first pause shows it")
+    }
+
+    // Under a replay Start log isn't offered, so neither the hint nor its flag
+    function test_aReplaysPauseHasNoHint() {
+        liveStore.setValue("pauseHintSeen", false)
+        liveStore.sync()
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        compare(Bridge.connectSession("replay://" + Harness.replayFixtures
+                                      + "/2026-10-25-engine-start?profile=obd2&speed=max"), "",
+                "the replay connects")
+        waitForHistory(500)
+        page.pause()
+        verify(page.paused)
+        verify(!findChild(page, "pauseHint").visible, "no hint where Start log isn't offered")
+        page.resume()
+        liveStore.sync()
+        compare(liveStore.value("pauseHintSeen", false), false, "the flag is kept for a session that records")
+    }
+
     // A drag pauses and pans back through the snapshot; a drag pushed past
     // its right edge follows now again
     function test_aDragPausesPansAndResumesAtTheEdge() {
@@ -569,18 +649,45 @@ TestCase {
                                       + "/2026-10-25-engine-start?profile=obd2&speed=max"), "",
                 "the replay connects")
         const kept = page.chartWindowS
-        findChild(page, "chartWindow_10").clicked()
-        waitForHistory(25000)
-        const frame = findChild(page, "chartFrame")
-        dragAcross(frame, 200)
-        verify(page.paused, "a drag pauses")
-        verify(page.viewEndMs < -1000, "and pans back: " + page.viewEndMs)
-        const panned = page.viewEndMs
-        dragAcross(frame, 80)
-        verify(page.paused && page.viewEndMs < panned, "a second drag pans on: " + page.viewEndMs)
-        dragAcross(frame, -600)
-        verify(!page.paused, "a drag past the right edge follows now again")
-        findChild(page, "chartWindow_" + kept).clicked()
+        // Live's stored window is put back whatever the checks find
+        try {
+            findChild(page, "chartWindow_10").clicked()
+            waitForHistory(25000)
+            const frame = findChild(page, "chartFrame")
+            dragAcross(frame, 200)
+            verify(page.paused, "a drag pauses")
+            verify(page.viewEndMs < -1000, "and pans back: " + page.viewEndMs)
+            const panned = page.viewEndMs
+            dragAcross(frame, 80)
+            verify(page.paused && page.viewEndMs < panned, "a second drag pans on: " + page.viewEndMs)
+            dragAcross(frame, -600)
+            verify(!page.paused, "a drag past the right edge follows now again")
+        } finally {
+            findChild(page, "chartWindow_" + kept).clicked()
+        }
+    }
+
+    // Space on a focused check box toggles it and leaves the chart following
+    function test_spaceOnAFocusedCheckBoxIsTheBoxsNotThePauses() {
+        if (Theme.mobile)
+            skip("Space is a desktop's key")
+        const page = pageInGrownWindow()
+        const list = connectMock(page)
+        waitForHistory(1500)
+        const box = findChild(list.itemAtIndex(0), "plotCheck")
+        verify(box.enabled, "the first mock row can be plotted")
+        const before = box.checked
+        findChild(page, "filterText").focus = false
+        box.forceActiveFocus()
+        verify(box.activeFocus, "the box has the focus")
+        keyClick(Qt.Key_Space)
+        tryCompare(box, "checked", !before, 2000, "Space toggles the box")
+        verify(!page.paused, "and the chart is not paused")
+        // the page's own focus still pauses
+        box.focus = false
+        page.forceActiveFocus()
+        keyClick(Qt.Key_Space)
+        verify(page.paused, "Space off a button pauses as before")
     }
 
     // Space pauses and resumes on a desktop, but types a space into Find a

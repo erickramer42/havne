@@ -55,8 +55,8 @@ public:
     // map, a candump log's interface named (empty: the log's only one).
     // False while one is under way. finished() follows, on this thread,
     // with { ok, words, folder, frames, values, columnsIgnored,
-    // durationUs }: words core's refusal (a line and why, never a path) or
-    // the app's, "" with ok
+    // rowsNoTime, durationUs }: words core's refusal (a line and why, never
+    // a path) or the app's, "" with ok
     Q_INVOKABLE bool start(const QUrl& file, int kind, const QUrl& map,
                            const QString& interfaceName);
 

@@ -608,6 +608,13 @@ std::string csv_events_log(const csv::column_map& m, const csv::outcome& o)
         }
         e += ")\n";
     }
+    if (o.rows_no_time > 0) {
+        e += "import  rows left out: ";
+        append_u64(e, o.rows_no_time);
+        e += " with no time (the first on line ";
+        append_u64(e, o.first_no_time);
+        e += ")\n";
+    }
     e += "profile  raw\n";
     for (const csv::signal_spec& s : m.signals) {
         e += lines::signal_line(
@@ -667,6 +674,9 @@ bool import_csv(const ecuio_import_options_t& o, const std::string& out,
         return fail("the recording's folder can't be made: %s", why);
     }
     const std::string partial = *made;
+    if (g_between_passes != nullptr) {
+        g_between_passes(g_between_passes_user);
+    }
     if (!ecuio_frames_csv::seek_to(in.get(), 0)) {
         return fail("the file can't be read again");
     }
@@ -698,7 +708,8 @@ bool import_csv(const ecuio_import_options_t& o, const std::string& out,
                                                 "it was read")
                                   : why);
         }
-        if (second.values != first.values || second.rows != first.rows) {
+        if (second.values != first.values || second.rows != first.rows ||
+            second.rows_no_time != first.rows_no_time) {
             return fail("the file changed while it was read");
         }
         if (!w.flush()) {
@@ -727,6 +738,7 @@ bool import_csv(const ecuio_import_options_t& o, const std::string& out,
     r.lines = second.lines;
     r.values = second.values;
     r.columns_ignored = second.ignored.size();
+    r.rows_no_time = second.rows_no_time;
     r.utc_start_us = second.has_utc ? second.utc_start_us : 0;
     r.duration_us = second.duration_us;
     return true;

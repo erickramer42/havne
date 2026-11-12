@@ -2893,6 +2893,22 @@ TestCase {
         verify(!page.canUndo, "and still none when it comes back")
     }
 
+    // Edit mode stays open while the page is hidden, so its history does too
+    function test_leavingTheDashboardMidEditKeepsTheHistory() {
+        const page = storedPageOf({}, twoPages())
+        page.startEditing()
+        page.select(0)
+        click(page, "panelLater")
+        verify(page.canUndo, "an edit step")
+        page.visible = false
+        verify(page.editing, "edit mode stays open")
+        verify(page.canUndo, "and its history")
+        page.visible = true
+        verify(page.editing && page.canUndo, "back to the bar with Undo enabled")
+        verify(findChild(page, "dashUndo").enabled, "Undo's button is on")
+        page.stopEditing()
+    }
+
     function test_theHistoryKeepsFifty() {
         const page = storedPageOf({}, twoPages())
         page.startEditing()

@@ -17,10 +17,9 @@ Pane {
     padding: Theme.pageMargin
     background: Rectangle { color: Theme.bg }
 
-    // The page shows the activity log; in developer mode it can show the
-    // raw frame table instead (Theme.developerMode)
+    // The page shows the activity log, or the raw frame table instead
     property string view: "activity"
-    readonly property bool showingFrames: Theme.developerMode && view === "frames"
+    readonly property bool showingFrames: view === "frames"
     readonly property int maxLogLines: 200
 
     // The tab-bar form's back arrow, where no tab is marked while the Log
@@ -83,7 +82,7 @@ Pane {
     }
 
     // The activity at its newest line: where Show log and Settings' Log row
-    // land, the developer's Frames view included
+    // land, the Frames view included
     function showActivityEnd() {
         page.view = "activity"
         activityLog.cursorPosition = activityLog.length
@@ -142,7 +141,7 @@ Pane {
                 // right change with the view; on the tab-bar form a row of its own
                 RowLayout {
                     id: wideSwitchSlot
-                    visible: Theme.developerMode && !Theme.compact
+                    visible: !Theme.compact
                     spacing: 0
                 }
 
@@ -164,17 +163,16 @@ Pane {
             }
         }
 
-        // Developer mode's switch: under the title row on the tab-bar form,
+        // The Activity | Frames switch: under the title row on the tab-bar form,
         // where the arrow, the title, the switch and Copy don't fit 320 px
         RowLayout {
             id: narrowSwitchSlot
-            visible: Theme.developerMode && Theme.compact
+            visible: Theme.compact
             spacing: 0
 
             SegmentRow {
                 objectName: "logViewSwitch"
                 parent: Theme.compact ? narrowSwitchSlot : wideSwitchSlot
-                visible: Theme.developerMode
                 SegmentButton {
                     tapHeight: page.touchMin
                     objectName: "view_activity"
@@ -232,7 +230,7 @@ Pane {
             }
         }
 
-        // ---- Developer mode: the raw frames ----
+        // ---- The raw frames ----
         ColumnLayout {
             objectName: "frameView"
             visible: page.showingFrames

@@ -18,10 +18,47 @@ ColumnLayout {
 
     // ---- Profile: the URI's query (ADR-0013, ADR-0020) ----
     // The chosen button is drawn as the primary color
-    LabeledFlow {
-        label: qsTr("Profile:")
+    // On the tab-bar form the three common profiles are one segmented row
+    // (a closed set, a tap takes effect), the others buttons under it
+    readonly property var segmentNames: ["default", "raw", "uds-generic"]
+    readonly property var segmentWords: ({ "default": qsTr("Default"), "raw": qsTr("Raw"),
+                                           "uds-generic": qsTr("UDS DIDs") })
+    readonly property var segmented: Theme.compact
+        ? root.host.profiles.filter(p => segmentNames.indexOf(p.name) >= 0) : []
+    readonly property var loose: Theme.compact
+        ? root.host.profiles.filter(p => segmentNames.indexOf(p.name) < 0) : root.host.profiles
+
+    Label {
+        visible: root.segmented.length > 0
+        text: qsTr("Profile:")
+        color: Theme.textDim
+    }
+    SegmentRow {
+        objectName: "profileSegments"
+        visible: root.segmented.length > 0
+        Layout.fillWidth: true
         Repeater {
-            model: root.host.profiles
+            model: root.segmented
+            SegmentButton {
+                required property var modelData
+                objectName: "profile_" + modelData.name
+                share: true
+                tapHeight: Theme.touchTarget
+                labelSize: Theme.fontBody
+                text: root.segmentWords[modelData.name]
+                Accessible.name: modelData.label
+                selected: root.host.profileChoice === modelData.name
+                checked: selected
+                enabled: root.host.idle
+                onClicked: root.host.chooseProfile(modelData.name)
+            }
+        }
+    }
+    LabeledFlow {
+        visible: root.loose.length > 0
+        label: root.segmented.length > 0 ? "" : qsTr("Profile:")
+        Repeater {
+            model: root.loose
             ThemedButton {
                 required property var modelData
                 objectName: "profile_" + modelData.name
@@ -69,5 +106,35 @@ ColumnLayout {
             }
             onAccepted: root.host.requestConnect(root.host.uriField.text)
         }
+    }
+
+    ThemedCheckBox {
+        id: extBox
+        objectName: "extSessionBox"
+        Layout.fillWidth: true
+        visible: root.host.profileChoice === "uds-generic" && root.host.sessionOffered(root.host.uriBase())
+        text: qsTr("Extended session (10 03)")
+        checked: root.host.extSession
+        enabled: root.host.idle
+        onToggled: {
+            root.host.extSession = checked
+            checked = Qt.binding(() => root.host.extSession)
+            root.host.recompose()
+        }
+        contentItem: Label {
+            text: extBox.text
+            color: extBox.enabled ? Theme.text : Theme.textDim
+            leftPadding: extBox.indicator.width + extBox.spacing
+            verticalAlignment: Text.AlignVCenter
+            wrapMode: Text.WordWrap
+        }
+    }
+    Label {
+        objectName: "optionsNote"
+        Layout.fillWidth: true
+        visible: root.host.profileChoice === "uds-generic"
+        wrapMode: Text.WordWrap
+        color: Theme.textDim
+        text: qsTr("More options go after ?: see the address reference")
     }
 }

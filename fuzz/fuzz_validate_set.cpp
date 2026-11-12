@@ -109,8 +109,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         if (v1.index >= channel_count) abort();
         break;
 
-    /* Names a def: every per-def code, plus DUPLICATE_ID's second of
-     * the pair */
+    /* Names a def: every per-def code, plus DUPLICATE_ID's and
+     * DUPLICATE_NAME's second of the pair */
     case ECUIO_VALIDATE_ERR_BIT_LENGTH:
     case ECUIO_VALIDATE_ERR_BIT_OFFSET:
     case ECUIO_VALIDATE_ERR_NAME:
@@ -124,6 +124,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     case ECUIO_VALIDATE_ERR_RESERVED:
     case ECUIO_VALIDATE_ERR_BYTE_ORDER:
     case ECUIO_VALIDATE_ERR_DUPLICATE_ID:
+    case ECUIO_VALIDATE_ERR_DUPLICATE_NAME:
         if (v1.index >= count) abort();
         break;
 

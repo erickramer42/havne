@@ -2,9 +2,9 @@
 {"duration_us": 25000000, "format": "core", "markers": 0, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signal_file": null, "signals": 2, "summary": true, "type": "opened", "utc_start_us": 1794236400000000}
 {"decimals": 1, "first_us": 0, "group": "Engine", "highest": 83.8, "index": 0, "last_us": 24900000, "lowest": 80, "name": "Vehicle Speed", "rank": 1, "rate_hz": 10, "recording": 0, "samples": 250, "text": false, "type": "signal", "unit": "km/h"}
 {"decimals": 1, "first_us": 1000, "group": "Air", "highest": 22.5, "index": 1, "last_us": 24901000, "lowest": 22, "name": "Throttle", "rank": 2, "rate_hz": 10, "recording": 0, "samples": 250, "text": false, "type": "signal", "unit": "%"}
-{"cruise_floor": 56.32704, "cruise_speed_band": 2, "engine_load": null, "engine_speed": null, "recording": 0, "throttle": "Throttle", "type": "roles", "vehicle_speed": "Vehicle Speed"}
+{"cruise_floor": 56.32704, "cruise_speed_band": 2, "engine_load": null, "engine_speed": null, "pull_gain": 10, "recording": 0, "throttle": "Throttle", "type": "roles", "vehicle_speed": "Vehicle Speed"}
 {"by_engine_speed": false, "by_load": false, "cut_end": false, "cut_start": false, "end": 80.3999999999999, "from_us": 0, "kind": "cruise", "length_us": 11901000, "no_throttle": false, "recording": 0, "signal": "Vehicle Speed", "start": 80.3999999999999, "to_us": 11901000, "type": "stretch"}
 {"by_engine_speed": false, "by_load": false, "cut_end": false, "cut_start": false, "end": 83.39692307692296, "from_us": 12000000, "kind": "cruise", "length_us": 12901000, "no_throttle": false, "recording": 0, "signal": "Vehicle Speed", "start": 83.39692307692296, "to_us": 24901000, "type": "stretch"}
 {"column_us": 25000000, "columns": 1, "from_us": 0, "to_us": 25000000, "type": "axis"}
-{"highest": [83.8], "lowest": [80], "recording": 0, "samples": [250], "signal": "Vehicle Speed", "type": "columns"}
-{"highest": [22.5], "lowest": [22], "recording": 0, "samples": [250], "signal": "Throttle", "type": "columns"}
+{"highest": [83.8], "lowest": [80], "mean": [81.9584], "recording": 0, "samples": [250], "signal": "Vehicle Speed", "type": "columns"}
+{"highest": [22.5], "lowest": [22], "mean": [22.25], "recording": 0, "samples": [250], "signal": "Throttle", "type": "columns"}

@@ -18,6 +18,14 @@ ColumnLayout {
     // Off until switched on, and kept between runs. It takes effect
     // at the next connect, so it's fixed while a session is up and
     // each recording covers a whole session.
+    Label {
+        objectName: "recordLockedNote"
+        visible: !root.host.idle
+        text: qsTr("Disconnect to turn recording on or off.")
+        color: Theme.textDim
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+    }
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
@@ -61,5 +69,14 @@ ColumnLayout {
             visible: Bridge.recordingFolder !== "" && !Theme.mobile
             onClicked: Qt.openUrlExternally(Bridge.recordingFolderUrl)
         }
+    }
+    Label {
+        objectName: "recordNote"
+        text: qsTr("Keeps every session whole (frames, values, events), from the next connect. "
+                   + "Start log isn't offered while it is on: the recording already holds every "
+                   + "signal, and Mark adds a marker.")
+        color: Theme.textDim
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
     }
 }

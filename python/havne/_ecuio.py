@@ -289,10 +289,12 @@ ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR = 56.32704
 ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US = 0x989680
 ECUIO_STRETCH_DEFAULT_CRUISE_SPEED_BAND = 2.0
 ECUIO_STRETCH_DEFAULT_CRUISE_THROTTLE_BAND = 3.0
-ECUIO_STRETCH_DEFAULT_PULL_GAP_US = 0xf4240
+ECUIO_STRETCH_DEFAULT_PULL_GAIN = 10.0
+ECUIO_STRETCH_DEFAULT_PULL_GAP_US = 0x16e360
 ECUIO_STRETCH_DEFAULT_PULL_HOLD_US = 0xf4240
 ECUIO_STRETCH_DEFAULT_PULL_LEVEL = 80.0
 ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL = 80.0
+ECUIO_STRETCH_DEFAULT_PULL_RISE = 750.0
 ECUIO_STRETCH_PULLS = 1
 ECUIO_SUPPORT_COMPLETE = 2
 ECUIO_SUPPORT_EXTENDED = 32
@@ -327,6 +329,7 @@ ECUIO_VALIDATE_ERR_COMPUTED = 20
 ECUIO_VALIDATE_ERR_COMPUTED_INPUT = -22
 ECUIO_VALIDATE_ERR_DECIMALS = 8
 ECUIO_VALIDATE_ERR_DUPLICATE_ID = -14
+ECUIO_VALIDATE_ERR_DUPLICATE_NAME = -25
 ECUIO_VALIDATE_ERR_DUPLICATE_RX = -13
 ECUIO_VALIDATE_ERR_ENUM = 19
 ECUIO_VALIDATE_ERR_ENUM_ENTRY = -20
@@ -872,7 +875,8 @@ ecuio_import_report_t._fields_ = [
     ('duration_us', c_uint64),
     ('values', c_uint64),
     ('columns_ignored', c_uint64),
-    ('reserved', (c_uint64 * 2)),
+    ('rows_no_time', c_uint64),
+    ('reserved', (c_uint64 * 1)),
 ]
 ecuio_inspection_t._fields_ = [
     ('verdict', c_uint8),
@@ -1201,7 +1205,9 @@ ecuio_stretch_rules_t._fields_ = [
     ('engine_load', c_uint32),
     ('vehicle_speed', c_uint32),
     ('engine_speed', c_uint32),
-    ('reserved', (c_uint64 * 4)),
+    ('pull_min_rise', c_double),
+    ('pull_min_gain', c_double),
+    ('reserved', (c_uint64 * 2)),
 ]
 ecuio_validation_t._fields_ = [
     ('code', c_int32),

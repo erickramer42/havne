@@ -1,0 +1,5 @@
+{"schema": 1, "type": "start"}
+{"base": 130, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}], "name": "Desk boost", "profile": "user.desk-boost", "signals": 2, "type": "signal_file"}
+{"bits": 16, "byte": 0, "decimals": 1, "group": "Air", "id": 11088, "kind": "number", "name": "Intake Manifold Pressure", "offset": 0, "order": "be", "rank": 0, "read": {"number": "D100", "service": "22"}, "rx": "0x7E8", "scale": 0.1, "signed": false, "type": "signal_def", "unit": "kPa"}
+{"bits": 8, "byte": 0, "decimals": 1, "group": "Air", "id": 30001, "kind": "number", "name": "Wastegate Duty", "offset": 0, "order": "be", "rank": 0, "read": {"number": "D101", "service": "22"}, "rx": "0x7E8", "scale": 0.392157, "signed": false, "type": "signal_def", "unit": "%"}
+{"converts": false, "id": 30001, "name": "Wastegate Duty", "type": "unit", "unit": "%"}

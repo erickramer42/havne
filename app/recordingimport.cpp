@@ -211,6 +211,7 @@ QVariantMap run(const Job& job)
             {QStringLiteral("values"), static_cast<double>(r.values)},
             {QStringLiteral("columnsIgnored"),
              static_cast<double>(r.columns_ignored)},
+            {QStringLiteral("rowsNoTime"), static_cast<double>(r.rows_no_time)},
             {QStringLiteral("durationUs"), static_cast<double>(r.duration_us)}};
 }
 

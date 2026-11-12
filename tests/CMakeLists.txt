@@ -647,6 +647,14 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/refused.json)
         app_cli_golden(SignalsCheckNamesAMissingFile signals-missing.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/none.json)
+        # A file standing in for obd2's MAP: the base counts what is left of
+        # obd2's, and Boost reads the file's def; one standing a text in for
+        # baro is refused, naming Boost
+        app_cli_golden(SignalsCheckCountsWhatIsLeftOfTheBase signals-check-replaces.jsonl
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/replaces.json)
+        app_cli_golden(SignalsCheckNamesTheComputedSignalAReplacementFeeds
+            signals-replaces-refused.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/replaces-text.json)
         app_cli_golden(StreamDecodesThroughASignalFile stream-signals.jsonl
             -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max&from=100&to=102"
                --signals ${_cli_signals}/extras.json --values --count 40)
@@ -789,6 +797,14 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-early
                ${_cli_pulls}/pull-late --align-on rise:RPM:4000 --hysteresis 500
                --columns 2 --signal RPM --stretches)
+        # A road log's two pulls (pull-twice: a stab at the throttle and a
+        # part-throttle rise that are none), its second laid on
+        # pull-early's first: the pulls' starts at 0, each column's mean,
+        # and the second recording's delta from the first
+        app_cli_golden(ViewAlignsOnEachRecordingsChosenPull view-align-pull.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/pull-twice
+               ${_cli_pulls}/pull-early --align-on pull:2,1 --from -1 --to 3
+               --columns 8 --signal RPM --stretches pulls)
         app_cli_golden(ViewStretchesFindsTwoCruises view-stretches-cruise.jsonl
             -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/cruise --columns 1
                --stretches cruises)
@@ -841,9 +857,20 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py stats
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-early
                     ${_cli_pulls}/pull-late)
+        add_test(NAME CliViewRunTest.ColumnMeansAndDeltasAreTheSamples
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py means
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.ADeltaIsBetweenOneNameInOneUnit
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py deltas
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
         set_tests_properties(CliViewRunTest.ColumnsCountEverySampleOnce
             CliViewRunTest.AlignedPullsAgree
-            CliViewRunTest.SpanStatisticsAreTheSamples PROPERTIES TIMEOUT 60)
+            CliViewRunTest.SpanStatisticsAreTheSamples
+            CliViewRunTest.ColumnMeansAndDeltasAreTheSamples
+            CliViewRunTest.ADeltaIsBetweenOneNameInOneUnit
+            PROPERTIES TIMEOUT 60)
         # info (ADR-0049 section 6) on a recording with one of each finding
         # (tests/fixtures/recording/findings, wire frames written by hand: a
         # gap, a rate drop, a sleep, a late ID, an overflow, a cut First
@@ -1013,6 +1040,13 @@ if(TARGET havne-cli)
     app_cli_usage(ViewHysteresisWithAnEngineStartIsUsage
         "view|x|--align-on|engine-start|--hysteresis|400")
     app_cli_usage(ViewAnEngineStartOnASignalIsUsage "view|x|--align-on|engine-start:RPM")
+    app_cli_usage(ViewAPullListThatIsEmptyIsUsage "view|x|--align-on|pull:")
+    app_cli_usage(ViewPullZeroIsUsage "view|x|--align-on|pull:0")
+    app_cli_usage(ViewAPullThatIsntANumberIsUsage "view|x|--align-on|pull:first")
+    app_cli_usage_says(ViewAPullForEachOfAnotherCountIsUsage
+        "view|x|y|--align-on|pull:1,2,3" "one for each of the 2")
+    app_cli_usage(ViewHysteresisWithAPullIsUsage
+        "view|x|--align-on|pull:1|--hysteresis|5")
     app_cli_usage(ViewFromNotBeforeToIsUsage "view|x|--from|5|--to|5")
     app_cli_usage(ViewSecondsThatArentAreUsage "view|x|--at|soon")
     app_cli_usage(ViewASpanWithoutItsEndIsUsage "view|x|--span|5")
@@ -1028,6 +1062,10 @@ if(TARGET havne-cli)
         "view|x|--stretches|--stretch-level|pull-speed=1")
     app_cli_usage(ViewANegativeStretchLevelIsUsage
         "view|x|--stretches|--stretch-level|pull-gap=-1")
+    app_cli_usage(ViewANegativePullRiseIsUsage
+        "view|x|--stretches|--stretch-level|pull-rise=-1")
+    app_cli_usage(ViewAPullGainOfWordsIsUsage
+        "view|x|--align-on|pull:1|--stretch-level|pull-gain=some")
     app_cli_usage(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal")
     app_cli_usage(ViewUnitsThatArentAreUsage "view|x|--stretches|--units|furlongs")
     app_cli_usage(ViewAnUnknownOptionIsUsage "view|x|--fast")
@@ -1531,7 +1569,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         list(APPEND _qml_test_env "QT_QPA_FONTDIR=${_qml_fonts}")
     endif()
     # Files whose cases together run near ctest's bound on a slow runner
-    set(_qml_split_files dashboard dashedit phone)
+    set(_qml_split_files dashboard dashedit driveview phone)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)

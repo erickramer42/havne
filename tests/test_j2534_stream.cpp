@@ -702,6 +702,8 @@ protected:
             defs[i].message_id = ECUIO_OBD2_ECU_ARB_ID;
             defs[i].mux_length = 2;
             defs[i].mux_key = 0x4100u | pids[i];
+            std::snprintf(defs[i].name, sizeof defs[i].name, "PID %02X",
+                          pids[i]);
         }
         *set = ecuio_signal_set_t{};
         set->layout_version = ECUIO_SIGNAL_SET_LAYOUT;
@@ -1352,6 +1354,7 @@ TEST_F(J2534AdoptionTest, RequestsGoToTheirDefsChannel)
     defs[1].message_id = 0x7E8u;
     defs[1].mux_length = 2;
     defs[1].mux_key = 0x410Cu;
+    std::snprintf(defs[1].name, sizeof defs[1].name, "%s", "Engine RPM");
     static ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 2;
@@ -1771,6 +1774,8 @@ TEST_F(J2534AdoptionTest, NegativeReplyDropsTheDidTheEcuRefuses)
     }
     defs[0].mux_key = 0x621E1Du;   /* the fake's ECU doesn't know it */
     defs[1].mux_key = 0x621E1Cu;
+    std::snprintf(defs[0].name, sizeof defs[0].name, "%s", "DID 1E1D");
+    std::snprintf(defs[1].name, sizeof defs[1].name, "%s", "DID 1E1C");
     static ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 2;

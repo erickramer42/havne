@@ -99,16 +99,61 @@ struct pull_rules {
     uint64_t gap_us;  /* the longest dip kept inside one */
     double tolerance; /* how far under its highest a trimmed pull's
                          measure may sit and still be at it */
+    double min_rise;  /* engine speed's least climb in a pull, rpm */
+    double min_gain;  /* a speed measure's least gain with no engine
+                         speed, in its unit */
 };
 
-/* Pulls: gate's runs at or above the level whose measure rose over the
- * run. With trim (a vehicle-speed measure) a run ends at the measure's
- * first sample within tolerance of its highest in the run, so the
- * limiter's flat speed ends a pull; an engine-speed measure keeps the
- * whole run, since an upshift's drop would end it at the first shift. */
+/* The most a sample of s in (from, to] stands above an earlier one, the
+ * value in force at from counted; 0 with no climb. A NaN is passed by. */
+inline double largest_climb(const samples& s, uint64_t from, uint64_t to)
+{
+    double lowest = in_force(s, from);
+    double climb = 0.0;
+    auto it =
+        std::upper_bound(s.begin(), s.end(), from,
+                         [](uint64_t v, const sample& x) { return v < x.us; });
+    for (; it != s.end() && it->us <= to; ++it) {
+        if (std::isnan(it->value)) {
+            continue;
+        }
+        if (std::isnan(lowest) || it->value < lowest) {
+            lowest = it->value;
+        } else {
+            climb = (std::max)(climb, it->value - lowest);
+        }
+    }
+    return climb;
+}
+
+/* Whether [from, to] rises as a pull must, *start and *end the measure in
+ * force at its ends: a speed measure (trim) ends above its start; engine
+ * speed climbs min_rise inside it, or with no engine speed the measure
+ * gains min_gain. A NaN at either end is no rise. */
+inline bool pull_rises(const samples& measure, bool trim,
+                       const samples* engine_speed, const pull_rules& rules,
+                       uint64_t from, uint64_t to, double* start, double* end)
+{
+    *start = in_force(measure, from);
+    *end = in_force(measure, to);
+    if (std::isnan(*start) || std::isnan(*end) || (trim && !(*end > *start))) {
+        return false;
+    }
+    if (engine_speed != nullptr) {
+        return largest_climb(*engine_speed, from, to) >= rules.min_rise;
+    }
+    return *end - *start >= rules.min_gain;
+}
+
+/* Pulls: gate's runs at or above the level that rise as pull_rises asks.
+ * With trim (a vehicle-speed measure) a run ends at the measure's first
+ * sample within tolerance of its highest in the run, so the limiter's
+ * flat speed ends a pull; an engine-speed measure keeps the whole run,
+ * since an upshift's drop would end it at the first shift. engine_speed
+ * is NULL for a recording with none. */
 inline void find_pulls(const samples& gate, const samples& measure, bool trim,
-                       const pull_rules& rules, uint32_t flags,
-                       std::vector<stretch>& out)
+                       const samples* engine_speed, const pull_rules& rules,
+                       uint32_t flags, std::vector<stretch>& out)
 {
     for (const auto& run : runs_at_or_above(gate, rules.level, rules.gap_us)) {
         const uint64_t from = gate[run.first].us;
@@ -139,9 +184,10 @@ inline void find_pulls(const samples& gate, const samples& measure, bool trim,
         if (to - from < rules.hold_us) {
             continue;
         }
-        const double start = in_force(measure, from);
-        const double end = in_force(measure, to);
-        if (!(end > start)) { /* a NaN at either end is no rise */
+        double start = NAN;
+        double end = NAN;
+        if (!pull_rises(measure, trim, engine_speed, rules, from, to, &start,
+                        &end)) {
             continue;
         }
         out.push_back(
@@ -249,11 +295,12 @@ inline void find_cruises(const samples& speed, const samples* throttle,
  * past by a sample on each side: one reaching past an edge is cut there
  * and flagged CUT_START or CUT_END, its values taken again over what is
  * left (a pull's ends, a cruise's mean), and dropped when what is left is
- * shorter than hold_us or, for a pull, no longer rises */
+ * shorter than its hold or, for a pull, no longer rises as pull_rises
+ * asks (trim and engine_speed as find_pulls took them) */
 inline void cut_to(std::vector<stretch>& found, uint64_t from_us,
-                   uint64_t to_us, uint64_t pull_hold_us,
-                   uint64_t cruise_hold_us, const samples& pull_measure,
-                   const samples& speed)
+                   uint64_t to_us, const pull_rules& pull_rule, bool trim,
+                   const samples* engine_speed, uint64_t cruise_hold_us,
+                   const samples& pull_measure, const samples& speed)
 {
     std::vector<stretch> kept;
     for (stretch s : found) {
@@ -270,13 +317,12 @@ inline void cut_to(std::vector<stretch>& found, uint64_t from_us,
             s.flags |= ECUIO_RECORDING_STRETCH_CUT_END;
         }
         const bool pull = s.kind == ECUIO_RECORDING_STRETCH_PULL;
-        if (s.to_us - s.from_us < (pull ? pull_hold_us : cruise_hold_us)) {
+        if (s.to_us - s.from_us < (pull ? pull_rule.hold_us : cruise_hold_us)) {
             continue;
         }
         if (cut && pull) {
-            s.start = in_force(pull_measure, s.from_us);
-            s.end = in_force(pull_measure, s.to_us);
-            if (!(s.end > s.start)) {
+            if (!pull_rises(pull_measure, trim, engine_speed, pull_rule,
+                            s.from_us, s.to_us, &s.start, &s.end)) {
                 continue;
             }
         } else if (cut) {
