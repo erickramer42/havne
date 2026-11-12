@@ -131,11 +131,11 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Status
 
-v0.7.2, the Dashboard and signals finished, is the latest release. Next:
+v0.7.3, the analysis viewer, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.7.3-v0.11.0 | The analysis viewer; triggered logging and alerts; the whole car through plugins; discovery of the whole bus; the scan tool |
+| v0.8.0-v0.11.0 | Triggered logging and alerts; the whole car through plugins; discovery of the whole bus; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known issues and the roadmap; [CHANGELOG.md](CHANGELOG.md) what each release changed.

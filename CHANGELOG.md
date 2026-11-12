@@ -11,6 +11,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-11-12
+
 ### Added
 
 - The recordings viewer has a Jump row: previous and next for a recording's
@@ -1638,7 +1640,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/erickramer42/havne/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/erickramer42/havne/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/erickramer42/havne/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/erickramer42/havne/compare/v0.6.0...v0.7.0

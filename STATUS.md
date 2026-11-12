@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-11, **Version:** v0.7.2,
+**Updated:** 2026-11-12, **Version:** v0.7.3,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,9 +14,12 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.7.3, the analysis viewer** (the roadmap's row
-below), with v0.8.0's computed grammar built beside it. v0.7.2,
-finishing the Dashboard and signals, is out (its section below): the
+**Current phase: v0.8.0, conditions** (the roadmap's row below), whose
+computed grammar is built. v0.7.3, the analysis viewer, is out (its section
+below): the viewer's chart in panes with two cursors and a span's
+statistics, a Jump row between a recording's pulls and cruises, Live's
+pause, and first-run words that find the way without the guide. v0.7.2,
+finishing the Dashboard and signals, came before it (its section below): the
 desktop's gauges on one panel with the pages as tabs, undo in edit mode,
 a Light look, built-in layouts by what people watch, a signal file's dial
 range, and Python's exports and health report. v0.7.1, a more modern
@@ -636,7 +639,8 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.7.0 | The dashboard and the UI: gauges built by hand from a library, an analysis log and a wide CSV, import in the app, themes for the dark, a phone-first Settings | Released |
 | v0.7.1 | A more modern look, phone first: Night as its own control, the S2 look and shared controls, the phone's five tabs, joined panel and drive view, the viewer's Export, the log's minimum time between sweeps and reads in the extended session | Released |
 | v0.7.2 | Finishing the Dashboard and signals: the desktop's gauges in the new design, undo in edit mode, a Light look, built-in layouts by what people watch, a signal file's dial range and warning levels, Python's exports and health report | Released |
-| v0.7.3-v0.11.0 | v0.7.3, the analysis viewer: the log's navigation aids, chart panes with two cursors, a recording's statistics, Live's pause, and the phone pass's fixes. v0.8.0, conditions: triggered logging, alerts and a fuller grammar for computed signals. v0.9.0, the whole car through plugins: a profile sized for every module, sessions a plugin declares, and a plugin's own conversation with a module, security access to unlock reads among it. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
+| v0.7.3 | The analysis viewer: the log's navigation aids, chart panes with two cursors, a recording's statistics, Live's pause, and the phone pass's fixes | Released |
+| v0.8.0-v0.11.0 | v0.8.0, conditions: triggered logging, alerts and a fuller grammar for computed signals. v0.9.0, the whole car through plugins: a profile sized for every module, sessions a plugin declares, and a plugin's own conversation with a module, security access to unlock reads among it. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning
@@ -716,9 +720,10 @@ PATCH may carry"): the C ABI grows, append-only
   - the demo saying which signals it never sends, and a computed signal
     hidden with its input
     ([ADR-0039](docs/adr/0039-full-service01-coverage.md)'s appendix C).
-- **Left:** the phone check of the viewer's values list, the CI
-  speed-up, the review's fixes still in flight (core, the import's
-  cancel, the viewer, the Stretches panel), then the release.
+
+  Run on the test phone with the mock before the Jump row and the
+  Recordings changes landed, not on a car; the extended session's closes are
+  tested against the fakes, with a car run owed (Known Issue #44).
 
 ### Waiting on a tester: an iPhone download
 
