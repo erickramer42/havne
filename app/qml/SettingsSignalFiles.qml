@@ -31,6 +31,15 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
+    Label {
+        objectName: "signalLockedNote"
+        visible: root.vehicle && !root.host.idle
+        text: qsTr("Disconnect to change a vehicle's signals.")
+        color: Theme.textDim
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+    }
+
     // ---- The picked vehicle's signal files (ADR-0051) ----
     Label {
         objectName: "signalFilesTitle"
@@ -117,6 +126,16 @@ ColumnLayout {
                 obdbDialog.open()
             }
         }
+    }
+
+    Label {
+        objectName: "signalImportNote"
+        visible: root.vehicle
+        text: qsTr("An OBDb set is a community list of a model's signals; a signal file is one "
+                   + "you keep yourself. Download the file first, then import it here.")
+        color: Theme.textDim
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
     }
 
     LabeledFlow {

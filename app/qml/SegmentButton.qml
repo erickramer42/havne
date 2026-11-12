@@ -1,5 +1,5 @@
 // File/layer: app/qml/SegmentButton.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.log, QmlTest.recordings, QmlTest.phone, QmlTest.settings (test_qml)
+// Testing: QML: QmlTest.segments, QmlTest.log, QmlTest.recordings, QmlTest.phone, QmlTest.settings (test_qml)
 
 import QtQuick
 import QtQuick.Controls
@@ -23,6 +23,8 @@ AbstractButton {
 
     implicitWidth: segLabel.implicitWidth + 24
     implicitHeight: seg.tapHeight
+    // A locked row (a session holds the choice) dims, as the buttons under it do
+    opacity: seg.enabled ? 1 : 0.45
     hoverEnabled: true
     Accessible.checkable: true
     Accessible.checked: seg.selected

@@ -21,6 +21,21 @@ ColumnLayout {
     // ---- Vehicle (ADR-0027): picked before a connect, its
     // connection filling the field; every change to the list is
     // made here. Locked while a session is up or in flight ----
+    Label {
+        objectName: "vehicleNote"
+        text: qsTr("A vehicle keeps its own signal files, its last address and its plotted signals.")
+        color: Theme.textDim
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+    }
+    Label {
+        objectName: "vehicleLockedNote"
+        visible: !root.host.idle
+        text: qsTr("Disconnect to add or change vehicles.")
+        color: Theme.textDim
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+    }
     LabeledFlow {
         label: qsTr("Vehicle:")
 

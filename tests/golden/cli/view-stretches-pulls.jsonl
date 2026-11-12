@@ -13,10 +13,10 @@
 {"host_us": 21500000, "index": 0, "label": "pull", "recording": 1, "type": "marker"}
 {"found": true, "host_us": 14600000, "offset_us": -14600000, "on": "rise:RPM:4000", "recording": 0, "type": "align"}
 {"found": true, "host_us": 24600000, "offset_us": -24600000, "on": "rise:RPM:4000", "recording": 1, "type": "align"}
-{"cruise_floor": 56.32704, "cruise_speed_band": 2, "engine_load": null, "engine_speed": "RPM", "recording": 0, "throttle": "Throttle", "type": "roles", "vehicle_speed": null}
+{"cruise_floor": 56.32704, "cruise_speed_band": 2, "engine_load": null, "engine_speed": "RPM", "pull_gain": 10, "recording": 0, "throttle": "Throttle", "type": "roles", "vehicle_speed": null}
 {"by_engine_speed": true, "by_load": false, "cut_end": false, "cut_start": false, "end": 6721, "from_us": -2299000, "kind": "pull", "length_us": 5600000, "no_throttle": false, "recording": 0, "signal": "RPM", "start": 2247, "to_us": 3301000, "type": "stretch"}
-{"cruise_floor": 56.32704, "cruise_speed_band": 2, "engine_load": null, "engine_speed": "RPM", "recording": 1, "throttle": "Throttle", "type": "roles", "vehicle_speed": null}
+{"cruise_floor": 56.32704, "cruise_speed_band": 2, "engine_load": null, "engine_speed": "RPM", "pull_gain": 10, "recording": 1, "throttle": "Throttle", "type": "roles", "vehicle_speed": null}
 {"by_engine_speed": true, "by_load": false, "cut_end": false, "cut_start": false, "end": 6721, "from_us": -2299000, "kind": "pull", "length_us": 5600000, "no_throttle": false, "recording": 1, "signal": "RPM", "start": 2247, "to_us": 3301000, "type": "stretch"}
 {"column_us": 20000000, "columns": 2, "from_us": -24600000, "to_us": 15400000, "type": "axis"}
-{"highest": [2019, 6806], "lowest": [1981, 1981], "recording": 0, "samples": [99, 200], "signal": "RPM", "type": "columns"}
-{"highest": [2019, 6806], "lowest": [1981, 1981], "recording": 1, "samples": [199, 200], "signal": "RPM", "type": "columns"}
+{"highest": [2019, 6806], "lowest": [1981, 1981], "mean": [1999.6161616161617, 3080.1], "recording": 0, "samples": [99, 200], "signal": "RPM", "type": "columns"}
+{"delta": [0.7054464240393372, 0], "delta_from": 0, "highest": [2019, 6806], "lowest": [1981, 1981], "mean": [2000.321608040201, 3080.1], "recording": 1, "samples": [199, 200], "signal": "RPM", "type": "columns"}

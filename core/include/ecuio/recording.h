@@ -617,22 +617,30 @@ ecuio_status_t ecuio_recording_role_signal(const ecuio_recording_t* r,
 #define ECUIO_STRETCH_PULLS   0x1u
 #define ECUIO_STRETCH_CRUISES 0x2u
 
-/* The defaults a zero field of ecuio_stretch_rules_t takes. The gap
- * outlasts an upshift's lift (about 0.55 s); the floor is 35 mph exactly
- * (1 mph = 1.609344 km/h). */
+/* The defaults a zero field of ecuio_stretch_rules_t takes, from road
+ * logs sampled at 3 to 4 Hz (ADR-0056's appendix of 2026-11-12). The gap
+ * outlasts the lift between two gears, 925 ms at the longest, and stays
+ * under the 2.2 s the closest two pulls there stood apart. The rise sits
+ * between the largest climb a false pull made (540 rpm, a launch held on
+ * the two-step; 180 rpm, a stab at the throttle) and the smallest a real
+ * pull made (1000 rpm); the gain between the stab's 8 km/h and the
+ * 14 km/h a pull in top gear gained. The cruise's floor is 35 mph
+ * exactly (1 mph = 1.609344 km/h). */
 #define ECUIO_STRETCH_DEFAULT_PULL_LEVEL           80.0
 #define ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL      80.0
 #define ECUIO_STRETCH_DEFAULT_PULL_HOLD_US         1000000u
-#define ECUIO_STRETCH_DEFAULT_PULL_GAP_US          1000000u
+#define ECUIO_STRETCH_DEFAULT_PULL_GAP_US          1500000u
+#define ECUIO_STRETCH_DEFAULT_PULL_RISE            750.0
+#define ECUIO_STRETCH_DEFAULT_PULL_GAIN            10.0
 #define ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US       10000000u
 #define ECUIO_STRETCH_DEFAULT_CRUISE_SPEED_BAND    2.0
 #define ECUIO_STRETCH_DEFAULT_CRUISE_THROTTLE_BAND 3.0
 #define ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR         56.32704
 
-/* What ecuio_recording_stretches looks for. A zero level, time or band
- * takes its default; a role index of UINT32_MAX takes core's pick
- * (ecuio_recording_role_signal). Speeds are in km/h; a speed signal in
- * mph has them converted. */
+/* What ecuio_recording_stretches looks for. A zero level, time, band,
+ * rise or gain takes its default; a role index of UINT32_MAX takes core's
+ * pick (ecuio_recording_role_signal). Speeds are in km/h; a speed signal
+ * in mph has them converted. */
 typedef struct ecuio_stretch_rules {
     uint32_t kinds;              /* ECUIO_STRETCH_*: which to find, one or
                                     both */
@@ -650,17 +658,24 @@ typedef struct ecuio_stretch_rules {
     uint32_t engine_load;
     uint32_t vehicle_speed;
     uint32_t engine_speed;
-    uint64_t reserved[4]; /* zero; ABI growth space */
+    double pull_min_rise; /* engine speed's least climb in a pull, rpm */
+    double pull_min_gain; /* km/h a pull gains at least, with no engine
+                             speed */
+    uint64_t reserved[2]; /* zero; ABI growth space */
 } ecuio_stretch_rules_t;
 
 #if defined(__cplusplus)
 static_assert(offsetof(ecuio_stretch_rules_t, throttle) == 72,
               "stretch rules throttle offset is ABI");
+static_assert(offsetof(ecuio_stretch_rules_t, pull_min_rise) == 88,
+              "stretch rules pull_min_rise offset is ABI");
 static_assert(sizeof(ecuio_stretch_rules_t) == 120,
               "ecuio_stretch_rules_t size is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(offsetof(ecuio_stretch_rules_t, throttle) == 72,
                "stretch rules throttle offset is ABI");
+_Static_assert(offsetof(ecuio_stretch_rules_t, pull_min_rise) == 88,
+               "stretch rules pull_min_rise offset is ABI");
 _Static_assert(sizeof(ecuio_stretch_rules_t) == 120,
                "ecuio_stretch_rules_t size is ABI");
 #endif
@@ -718,9 +733,14 @@ _Static_assert(sizeof(ecuio_recording_stretch_t) == 64,
  * dip's first sample to the next at the level, kept inside it; it ends
  * at vehicle speed's first sample at its highest in the run, so the
  * limiter's flat speed ends it, and speed must have risen over it. With
- * no speed signal engine speed must have risen, over the whole run
- * (BY_ENGINE_SPEED), since an upshift drops it. No throttle or load
- * signal, or neither speed, finds no pull.
+ * no speed signal the whole run is the pull (BY_ENGINE_SPEED), since an
+ * upshift drops engine speed. Engine speed must climb pull_min_rise
+ * inside the pull: the most a sample stands above an earlier one, the
+ * value in force at the pull's start counted, so a pull through an
+ * upshift that ends under where it began still counts, and a stab at
+ * the throttle or a launch held at a standstill doesn't. With no
+ * engine-speed signal vehicle speed must gain pull_min_gain instead. No
+ * throttle or load signal, or neither speed, finds no pull.
  *
  * A cruise: a run from a vehicle-speed sample at or above cruise_floor,
  * lasting cruise_hold_us, in which speed stays within cruise_speed_band
@@ -731,12 +751,12 @@ _Static_assert(sizeof(ecuio_recording_stretch_t) == 64,
  *
  * A stretch reaching past the range is cut at its edge (CUT_START,
  * CUT_END), measured again over what is left, and left out when that is
- * shorter than its hold or a pull no longer rises.
+ * shorter than its hold or a pull no longer rises as its rule asks.
  *
  * ECUIO_ERR_NULL_ARGUMENT for NULL rules or count, or NULL out with a
  * capacity; ECUIO_ERR_INVALID_ARGUMENT for kinds of 0 or one this core
- * doesn't know, nonzero flags or reserved, a negative or NaN level or
- * band, a role index past the signals or on a text signal, or
+ * doesn't know, nonzero flags or reserved, a negative or NaN level,
+ * band, rise or gain, a role index past the signals or on a text signal, or
  * from_us >= to_us; ECUIO_ERR_RECORDING_CHANGED as for a query.
  */
 ecuio_status_t ecuio_recording_stretches(const ecuio_recording_t* r,

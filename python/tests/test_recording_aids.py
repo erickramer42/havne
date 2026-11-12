@@ -6,7 +6,9 @@
 # its signals.csv (a closed span, both ends inside a second); step to
 # each side and past the ends; role_signal's picks; stretches over the
 # cruise fixture with core's rules, a level of the caller's, a range cut
-# at its edge and a role named; then the refusals.
+# at its edge and a role named; a road log's two pulls, the same ones
+# havne-cli view --stretches lists, with a rise and a gap of the
+# caller's; then the refusals.
 
 import csv
 import math
@@ -15,11 +17,12 @@ import os
 import pytest
 
 import havne
-from conftest import ROOT
+from conftest import ROOT, cli
 
 RECORDINGS = os.path.join(ROOT, "tests", "fixtures", "recording")
 PULL = os.path.join(RECORDINGS, "pull-early")
 CRUISE = os.path.join(RECORDINGS, "cruise")
+TWICE = os.path.join(RECORDINGS, "pull-twice")
 
 
 def samples_of(folder, signal):
@@ -111,6 +114,47 @@ def test_the_pull_is_found_by_engine_speed_without_a_speed_signal():
     assert pull.end > pull.start
 
 
+def test_a_road_logs_pulls_are_its_two_and_not_its_stab():
+    with havne.Recording(TWICE) as r:
+        pulls = r.stretches("pulls")
+        # Through an upshift whose lift is 925 ms, then in top gear
+        assert [(s.kind, s.signal, s.from_us, s.to_us, s.start, s.end) for s in pulls] == [
+            ("pull", "Vehicle Speed", 18_002_000, 25_000_000, 70.0, 128.0),
+            ("pull", "Vehicle Speed", 31_002_000, 35_000_000, 140.0, 155.0)]
+        assert all(s.flags == 0 for s in pulls)
+
+        # The stab at 12 s climbs 180 rpm in all: a rise of 100 lets it in,
+        # and a gain of 5 km/h doesn't, with engine speed in the log
+        assert [s.from_us for s in r.stretches("pulls", pull_min_rise=100.0)] == [
+            12_002_000, 18_002_000, 31_002_000]
+        assert r.stretches("pulls", pull_min_gain=5.0) == pulls
+        # A gap under the lift splits the first pull at it
+        assert [s.from_us for s in r.stretches("pulls", pull_gap_us=900_000)] == [
+            18_002_000, 22_427_000, 31_002_000]
+
+
+def test_the_pulls_are_the_ones_havne_cli_lists():
+    lines = cli("view", TWICE, "--stretches", "pulls", "--columns", 1)
+    listed = [(x["from_us"], x["to_us"], x["start"], x["end"], x["signal"])
+              for x in lines if x["type"] == "stretch"]
+    with havne.Recording(TWICE) as r:
+        assert listed == [(s.from_us, s.to_us, s.start, s.end, s.signal)
+                          for s in r.stretches("pulls")]
+        assert len(listed) == 2
+        # And under the caller's rules, in each one's own words
+        lines = cli("view", TWICE, "--stretches", "pulls", "--columns", 1,
+                    "--stretch-level", "pull-rise=100", "--stretch-level", "pull-gap=0.9")
+        assert [x["from_us"] for x in lines if x["type"] == "stretch"] == [
+            s.from_us for s in r.stretches("pulls", pull_min_rise=100.0, pull_gap_us=900_000)]
+        assert len([x for x in lines if x["type"] == "stretch"]) == 4
+    # The same rules count the pulls --align-on pull: lines up on: with the
+    # stab let in, the second pull is the one at 18 s
+    lines = cli("view", TWICE, "--align-on", "pull:2", "--stretch-level", "pull-rise=100",
+                "--columns", 1)
+    (align,) = [x for x in lines if x["type"] == "align"]
+    assert (align["found"], align["host_us"]) == (True, 18_002_000)
+
+
 def test_what_core_cant_answer_is_refused():
     with havne.Recording(PULL) as r:
         with pytest.raises(havne.Error) as e:
@@ -118,6 +162,12 @@ def test_what_core_cant_answer_is_refused():
         assert e.value.name == "INVALID_ARGUMENT"
         with pytest.raises(havne.Error) as e:
             r.stretches(pull_level=-1.0)
+        assert e.value.name == "INVALID_ARGUMENT"
+        with pytest.raises(havne.Error) as e:
+            r.stretches(pull_min_rise=-1.0)
+        assert e.value.name == "INVALID_ARGUMENT"
+        with pytest.raises(havne.Error) as e:
+            r.stretches(pull_min_gain=math.nan)
         assert e.value.name == "INVALID_ARGUMENT"
         with pytest.raises(havne.Error) as e:
             r.stretches(roles={"throttle": "VIN"})

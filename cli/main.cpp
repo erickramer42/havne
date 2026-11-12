@@ -58,6 +58,7 @@
 #include <cstring>
 #include <ctime>
 #include <exception>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -2166,27 +2167,35 @@ void usage(FILE* to)
         "         again. --yes is your word that the codes may go.\n"
         "view     reads recordings offline (the folders stream --record and\n"
         "         the app write): what each holds, then each signal's lowest,\n"
-        "         highest and count in N columns (100) from --from to --to\n"
-        "         seconds; the plotted signals unless --signal names them,\n"
+        "         highest, mean and count in N columns (100) from --from to\n"
+        "         --to seconds, and for a recording after the first aligned\n"
+        "         one its mean less the first's (delta); the plotted signals\n"
+        "         unless --signal names them,\n"
         "         with --at the values in force then, and with --span\n"
         "         each signal's samples, first, last, lowest, highest and\n"
         "         mean from A to B seconds, both ends counted.\n"
         "         --stretches lists the pulls (throttle at 80 %% for 1 s\n"
-        "         while speed rises) and cruises (speed within 2 km/h and\n"
+        "         while speed rises and engine speed climbs 750 rpm, a lift\n"
+        "         under 1.5 s kept inside; with no engine speed, 10 km/h\n"
+        "         gained) and cruises (speed within 2 km/h and\n"
         "         throttle within 3 %% for 10 s, above 35 mph (56.33 km/h)),\n"
         "         each signal's role named on a roles line; --stretch-level\n"
         "         pull-throttle=, pull-load=, pull-hold=, pull-gap=,\n"
-        "         cruise-hold=, cruise-speed-band=, cruise-throttle-band= and\n"
-        "         cruise-floor= change them (seconds, %%, speeds in --units),\n"
+        "         pull-rise=, pull-gain=, cruise-hold=, cruise-speed-band=,\n"
+        "         cruise-throttle-band= and cruise-floor= change them\n"
+        "         (seconds, %%, rpm, speeds in --units),\n"
         "         and --role throttle=, load=, speed= or rpm= names a\n"
         "         signal. --align-on puts\n"
         "         several on one axis, its zero at rise:<signal>:<level>\n"
         "         (reaching it after being --hysteresis below),\n"
         "         fall:<signal>:<level>, marker:<label>, utc (their\n"
-        "         wall-clock starts), or engine-start (the rpm signal\n"
+        "         wall-clock starts), engine-start (the rpm signal\n"
         "         reaching 500 after being below 100): view <run>\n"
         "         <baseline> --align-on engine-start overlays a run on a\n"
-        "         vehicle's baseline.\n"
+        "         vehicle's baseline; or pull:<n>[,<n>...], the start of\n"
+        "         each recording's nth pull as --stretches finds them, one\n"
+        "         number for all or one for each: pull:3,1 lays the first's\n"
+        "         third pull on the second's first.\n"
         "         --frames reads the values from frames.csv through a\n"
         "         profile's decode: --profile's, a --signals file's or a\n"
         "         --plugin variant's, else the recording's own signals.json\n"
@@ -3884,6 +3893,82 @@ int use_view_signals(Output& out, ViewArgs& args)
     return kExitConnect;
 }
 
+// The start of a recording's nth pull (1 the first) under its rules, over
+// the whole recording: *at_us, left alone with fewer pulls than that
+ecuio_status_t nth_pull(const Viewed& v, uint32_t n, uint64_t* at_us)
+{
+    ecuio_stretch_rules_t rules = v.rules;
+    rules.kinds = ECUIO_STRETCH_PULLS;
+    const uint64_t end = v.info.duration_us + 1;
+    /* The count first: n is the caller's, up to 100,000 */
+    uint32_t count = 0;
+    ecuio_status_t rc = ecuio_recording_stretches(v.r.get(), &rules, 0, end,
+                                                  nullptr, 0, &count);
+    if (rc != ECUIO_OK || count < n) {
+        return rc;
+    }
+    std::vector<ecuio_recording_stretch_t> found(n);
+    rc = ecuio_recording_stretches(v.r.get(), &rules, 0, end, found.data(), n,
+                                   &count);
+    if (rc == ECUIO_OK && count >= n) {
+        *at_us = found[n - 1].from_us;
+    }
+    return rc;
+}
+
+// Each shown signal's mean in each of the window's columns, into means
+// (a row of axis_columns per signal, NaN where a column is empty or the
+// signal is text): from the column's count and range where they give it,
+// else from the reader's statistics over the samples the column counts
+ecuio_status_t column_means(const Viewed& v, const cli::Window& w,
+                            uint32_t axis_columns,
+                            const std::vector<ecuio_recording_column_t>& cols,
+                            std::vector<double>& means)
+{
+    const uint32_t partial = w.partial ? 1 : 0;
+    std::vector<uint32_t> ids;
+    std::vector<size_t> rows;
+    std::vector<ecuio_recording_stats_t> stats;
+    for (uint32_t j = 0; j < w.count; ++j) {
+        ids.clear();
+        rows.clear();
+        for (size_t n = 0; n < v.shown.size(); ++n) {
+            const ecuio_recording_signal_t& s = v.signals[v.shown[n]];
+            double mean = NAN;
+            if ((s.flags & ECUIO_RECORDING_SIGNAL_TEXT) != 0) {
+                continue;
+            }
+            if (cli::mean_of_column(cols[n * w.count + j], mean)) {
+                means[n * axis_columns + w.first + j] = mean;
+            } else {
+                ids.push_back(v.shown[n]);
+                rows.push_back(n);
+            }
+        }
+        uint64_t from = 0;
+        uint64_t to = 0;
+        const bool spans =
+            partial != 0 && j == 0
+                ? cli::column_span(0, w.partial_t1_us, 1, 0, from, to)
+                : cli::column_span(w.t0_us, w.t1_us, w.count - partial,
+                                   j - partial, from, to);
+        if (ids.empty() || !spans || from >= to) {
+            continue;
+        }
+        stats.assign(ids.size(), ecuio_recording_stats_t{});
+        const ecuio_status_t rc = ecuio_recording_stats(
+            v.r.get(), ids.data(), static_cast<uint32_t>(ids.size()), from, to,
+            stats.data());
+        if (rc != ECUIO_OK) {
+            return rc;
+        }
+        for (size_t k = 0; k < ids.size(); ++k) {
+            means[rows[k] * axis_columns + w.first + j] = stats[k].mean;
+        }
+    }
+    return ECUIO_OK;
+}
+
 // A recording read offline (ADR-0049 section 5): every recording opens,
 // then the names are checked (a name in none is a usage error, before any
 // output), then the lines. A failed open or query is an error line, exit 3.
@@ -4026,8 +4111,16 @@ int run_view(ViewArgs& args)
             }
             uint64_t at = ECUIO_RECORDING_NONE;
             if (!threshold || what.signal != UINT32_MAX) {
+                const std::vector<uint32_t>& pulls = args.align.pulls;
                 const ecuio_status_t rc =
-                    ecuio_recording_find(v.r.get(), &what, 0, &at);
+                    args.align.kind == cli::AlignOn::pull
+                        ? nth_pull(
+                              v,
+                              pulls[pulls.size() == 1 ? 0
+                                                      : static_cast<size_t>(
+                                                            &v - views.data())],
+                              &at)
+                        : ecuio_recording_find(v.r.get(), &what, 0, &at);
                 if (rc != ECUIO_OK) {
                     write_start(out);
                     write_error(out, rc,
@@ -4163,6 +4256,9 @@ int run_view(ViewArgs& args)
         write_line(out, l);
     }
     std::vector<ecuio_recording_column_t> cols;
+    // Each number signal's means in the first aligned recording to show
+    // it, by name and unit, which a later recording's delta is taken from
+    std::map<std::string, std::pair<uint32_t, std::vector<double>>> firsts;
     for (uint32_t i = 0; i < views.size(); ++i) {
         const Viewed& v = views[i];
         if (!v.aligned || v.shown.empty()) {
@@ -4206,10 +4302,39 @@ int run_view(ViewArgs& args)
                 return ended(out, kExitConnect);
             }
         }
+        std::vector<double> means(signals * axis.columns, NAN);
+        if (any && column_means(v, w, axis.columns, cols, means) != ECUIO_OK) {
+            write_error(out, ECUIO_ERR_RECORDING_CHANGED,
+                        "the recording changed while it was read");
+            return ended(out, kExitConnect);
+        }
+        std::vector<double> delta(axis.columns);
         for (size_t n = 0; n < v.shown.size(); ++n) {
+            const ecuio_recording_signal_t& s = v.signals[v.shown[n]];
+            const double* mean = means.data() + n * axis.columns;
+            const double* less = nullptr;
+            uint32_t delta_from = 0;
+            if ((s.flags & ECUIO_RECORDING_SIGNAL_TEXT) == 0) {
+                const std::string key = cli::delta_key(s);
+                const auto first = firsts.find(key);
+                if (first == firsts.end()) {
+                    firsts[key] = {
+                        i, std::vector<double>(mean, mean + axis.columns)};
+                } else if (first->second.first != i) {
+                    /* Another recording's: a signal named twice has no
+                     * delta from itself */
+                    /* NaN where either column is empty */
+                    for (uint32_t c = 0; c < axis.columns; ++c) {
+                        delta[c] = mean[c] - first->second.second[c];
+                    }
+                    less = delta.data();
+                    delta_from = first->second.first;
+                }
+            }
             BigLine b(cli::columns_line_bytes(axis.columns));
-            cli::columns_line(b.line, i, v.signals[v.shown[n]], w, axis.columns,
-                              any ? cols.data() + n * w.count : nullptr);
+            cli::columns_line(b.line, i, s, w, axis.columns,
+                              any ? cols.data() + n * w.count : nullptr, mean,
+                              less, delta_from);
             write_line(out, b.line);
         }
     }
@@ -4800,7 +4925,8 @@ int run(int argc, char** argv)
                                  "havne-cli: --align-on takes "
                                  "rise:<signal>:<level>, "
                                  "fall:<signal>:<level>, marker:<label>, "
-                                 "utc or engine-start\n");
+                                 "utc, engine-start or pull:<n>[,<n>...], "
+                                 "pulls counted from 1\n");
                     return kExitUsage;
                 }
             } else if (a == "--hysteresis" && has_value) {
@@ -4833,10 +4959,20 @@ int run(int argc, char** argv)
             usage(stderr);
             return kExitUsage;
         }
-        if (!view.stretches &&
+        const bool aligns_pulls = view.align.kind == cli::AlignOn::pull;
+        if (!view.stretches && !aligns_pulls &&
             (!levels.empty() || !view.roles.empty() || has_units)) {
             std::fprintf(stderr, "havne-cli: --stretch-level, --role and "
-                                 "--units go with --stretches\n");
+                                 "--units go with --stretches or --align-on "
+                                 "pull:\n");
+            return kExitUsage;
+        }
+        if (aligns_pulls && view.align.pulls.size() != 1 &&
+            view.align.pulls.size() != view.folders.size()) {
+            std::fprintf(stderr,
+                         "havne-cli: --align-on pull: takes one pull for "
+                         "every recording, or one for each of the %u\n",
+                         static_cast<unsigned>(view.folders.size()));
             return kExitUsage;
         }
         for (const char* level : levels) {
@@ -4845,8 +4981,8 @@ int run(int argc, char** argv)
                     stderr,
                     "havne-cli: --stretch-level takes <key>=<value>, 0 or "
                     "more: pull-throttle, pull-load, pull-hold, pull-gap, "
-                    "cruise-hold, cruise-speed-band, cruise-throttle-band or "
-                    "cruise-floor\n");
+                    "pull-rise, pull-gain, cruise-hold, cruise-speed-band, "
+                    "cruise-throttle-band or cruise-floor\n");
                 return kExitUsage;
             }
         }

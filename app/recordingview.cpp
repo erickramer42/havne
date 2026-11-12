@@ -6,14 +6,17 @@
 #include "healthreport.h"
 
 #include <QByteArray>
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QList>
 #include <QMetaObject>
+#include <QThreadPool>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <new>
@@ -421,7 +424,8 @@ void RecordingView::stop()
         m_statsAsk.reset();
         m_stepAsk.reset();
     }
-    ecuio_recording_close(m_reader);
+    // Closed here, or when a stretches pass still reading lets go of it
+    m_readerHold.reset();
     m_reader = nullptr;
     m_info = {};
     m_signals.clear();
@@ -523,7 +527,8 @@ void RecordingView::finish(const std::shared_ptr<Result>& res,
         emit stateChanged();
         return;
     }
-    m_reader = res->reader;
+    m_readerHold.reset(res->reader, ecuio_recording_close);
+    m_reader = m_readerHold.get();
     res->reader = nullptr;
     ecuio_recording_get_info(m_reader, &m_info);
 
@@ -1010,6 +1015,57 @@ void RecordingView::answerAsks(ecuio_recording_t* reader, quint64 generation)
     }
 }
 
+void RecordingView::findStretches(
+    const std::shared_ptr<ecuio_recording_t>& reader,
+    const QPointer<RecordingView>& view, int request, uint32_t kinds,
+    quint64 generation, int holdMs)
+{
+    if (holdMs > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(holdMs));
+    }
+    ecuio_stretch_rules_t rules{};
+    rules.kinds = kinds;
+    rules.throttle = rules.engine_load = UINT32_MAX;
+    rules.vehicle_speed = rules.engine_speed = UINT32_MAX;
+    ecuio_recording_info_t info{};
+    ecuio_recording_get_info(reader.get(), &info);
+    const uint64_t end = info.duration_us + 1;
+    // One pass for a recording with no more stretches than this; a second
+    // only for one with more
+    const uint32_t first = 64;
+    ecuio_status_t rc = ECUIO_ERR_OUT_OF_MEMORY;
+    std::vector<ecuio_recording_stretch_t> got;
+    try {
+        got.resize(first);
+        uint32_t count = 0;
+        rc = ecuio_recording_stretches(reader.get(), &rules, 0, end, got.data(),
+                                       first, &count);
+        if (rc == ECUIO_OK && count > first) {
+            got.resize(count);
+            rc = ecuio_recording_stretches(reader.get(), &rules, 0, end,
+                                           got.data(), count, &count);
+        }
+        got.resize(rc == ECUIO_OK ? (std::min<size_t>)(got.size(), count) : 0);
+    } catch (const std::bad_alloc&) {
+        got.clear();
+        rc = ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    // An application ending reads null here (Qt 6.12 clears instance(),
+    // then waits for the pool); one read non-null lives until this ends
+    QCoreApplication* app = QCoreApplication::instance();
+    if (app == nullptr) {
+        return;
+    }
+    QMetaObject::invokeMethod(
+        app,
+        [view, request, rc, got, generation] {
+            if (view) {
+                view->stretchesFinished(request, rc, got, generation);
+            }
+        },
+        Qt::QueuedConnection);
+}
+
 int RecordingView::stats(const QVariantList& signalIndexes, double t0Ms,
                          double t1Ms)
 {
@@ -1060,6 +1116,63 @@ int RecordingView::step(int signal, double tMs, bool forward)
     startAsks();
     m_askWake.notify_all();
     return m_lastStep;
+}
+
+int RecordingView::stretches(bool pulls, bool cruises)
+{
+    if (m_reader == nullptr || (!pulls && !cruises)) {
+        return 0;
+    }
+    const uint32_t kinds = (pulls ? ECUIO_STRETCH_PULLS : 0u) |
+                           (cruises ? ECUIO_STRETCH_CRUISES : 0u);
+    const int request = ++m_lastAsk;
+    try {
+        // A task of the global pool with its share of the reader: a close
+        // leaves it to finish, and QCoreApplication's end waits for it
+        QThreadPool::globalInstance()->start(
+            [reader = m_readerHold, view = QPointer<RecordingView>(this),
+             request, kinds, generation = m_generation,
+             holdMs = m_stretchesHoldMs] {
+                findStretches(reader, view, request, kinds, generation, holdMs);
+            });
+    } catch (const std::bad_alloc&) {
+        return 0;
+    }
+    m_lastStretches = request;
+    return request;
+}
+
+void RecordingView::stretchesFinished(
+    int request, ecuio_status_t rc,
+    const std::vector<ecuio_recording_stretch_t>& got, quint64 generation)
+{
+    if (generation != m_generation || request != m_lastStretches) {
+        return;
+    }
+    if (rc == ECUIO_ERR_RECORDING_CHANGED) {
+        markStale();
+    }
+    QVariantList out;
+    for (size_t k = 0; rc == ECUIO_OK && k < got.size(); ++k) {
+        const ecuio_recording_stretch_t& g = got[k];
+        if (g.signal >= m_signals.size()) {
+            continue;
+        }
+        const ecuio_display_value_t start = shown(m_signals[g.signal], g.start);
+        out.append(QVariantMap{
+            {QStringLiteral("kind"), g.kind == ECUIO_RECORDING_STRETCH_PULL
+                                         ? QStringLiteral("pull")
+                                         : QStringLiteral("cruise")},
+            {QStringLiteral("fromMs"), toMs(g.from_us)},
+            {QStringLiteral("toMs"), toMs(g.to_us)},
+            {QStringLiteral("start"), start.value},
+            {QStringLiteral("end"), shown(m_signals[g.signal], g.end).value},
+            {QStringLiteral("unit"), QString::fromUtf8(start.unit)},
+            {QStringLiteral("decimals"), start.decimal_places},
+            {QStringLiteral("signal"), static_cast<int>(g.signal)},
+        });
+    }
+    emit stretchesReady(request, out, rc == ECUIO_OK);
 }
 
 void RecordingView::statsFinished(

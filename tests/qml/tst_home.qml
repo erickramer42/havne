@@ -82,7 +82,7 @@ TestCase {
         fuzzyCompare(column.x, (1280 - 560) / 2, 1, "centered")
         compare(find(page, "homeCoreVersion").text, "core " + Bridge.coreVersion)
         compare(find(page, "homeHint").text,
-                "Connect from here, or from Settings > Connection to choose a profile")
+                "Connect from here, or from Settings > Connection to choose a profile. To play a recording back, open Recordings.")
         const logo = find(page, "homeLogo")
         verify(logo.visible, "the logo")
         verify(logo.mapToItem(page, 0, logo.height).y <= list.mapToItem(page, 0, 0).y,
