@@ -310,9 +310,17 @@ jobs:
           & "$env:ProgramFiles\Git\bin\bash.exe" scripts/tidy.sh --qt ($env:QT_PREFIX -replace '\\', '/') build-tidy
 
   win-build:
+    name: win-build (${{ matrix.shard }}/2)
     if: ${{ !inputs.smoke_only }}
     runs-on: windows-latest
     timeout-minutes: 20
+    # Two runners, each with its own build, run alternate halves of ctest
+    # (-I k,,2: every case once across the two); the first alone saves the
+    # caches and runs the load test
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -354,7 +362,7 @@ jobs:
           python -m aqt install-qt windows desktop 6.12.0 win64_msvc2022_64 --outputdir "${env:GITHUB_WORKSPACE}\Qt" --external 7z
 
       - name: Save Qt 6.12.0 to the cache (main only)
-        if: steps.qt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        if: steps.qt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && matrix.shard == 1
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}\Qt
@@ -424,7 +432,7 @@ jobs:
           sccache --show-stats | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
 
       - name: Save the compiler cache (dev and main)
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/ci/v073-coverage-time-3'
+        if: matrix.shard == 1 && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/ci/v073-coverage-time-3')
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\sccache-cache
@@ -435,11 +443,12 @@ jobs:
       - name: Run tests
         env:
           ECUIO_PYTEST_REQUIRED: '1'
-        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error
+        run: ctest --test-dir build -C Release --output-on-failure --no-tests=error -I ${{ matrix.shard }},,2
       # The replay fixture through the bridge (tests/bench_bridge.cpp): its
       # table goes to the run's summary, and the step fails only on a
       # broken invariant or a bound far below the dev machine's figures
       - name: Load test
+        if: matrix.shard == 1
         shell: bash
         run: build/tests/bench_bridge.exe --load | tee -a "$GITHUB_STEP_SUMMARY"
 
