@@ -413,18 +413,19 @@ void RecordingView::stop()
         m_worker.join();
         m_cancel = false;
     }
-    if (m_askWorker.joinable()) {
+    if (m_asks) {
+        bool answering = false;
         {
-            const std::lock_guard<std::mutex> lock(m_askMutex);
-            m_askStop = true;
+            const std::lock_guard<std::mutex> lock(m_asks->m);
+            answering = m_asks->answering;
+            m_asks->stats.reset();
+            m_asks->step.reset();
         }
-        m_askWake.notify_all();
-        m_askWorker.join(); // before the close: it may be reading
-        m_askStop = false;
-        m_statsAsk.reset();
-        m_stepAsk.reset();
+        if (answering) {
+            m_asks.reset(); // the task's own until it ends
+        }
     }
-    // Closed here, or when a stretches pass still reading lets go of it
+    // Closed here, or when a pass or an ask still reading lets go of it
     m_readerHold.reset();
     m_reader = nullptr;
     m_info = {};
@@ -963,74 +964,116 @@ QVariantList RecordingView::valuesAt(const QVariantList& signalIndexes,
     return out;
 }
 
+bool RecordingView::haveAsks()
+{
+    if (!m_asks) {
+        try {
+            m_asks = std::make_shared<Asks>();
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool RecordingView::startAsks()
 {
-    if (m_askWorker.joinable()) {
-        return true;
+    {
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->holdMs = m_asksHoldMs;
+        if (m_asks->answering) {
+            return true; // it takes the ask before it ends
+        }
+        m_asks->answering = true;
     }
     try {
         if (m_failThreadForTesting) {
-            throw std::system_error(std::make_error_code(
-                std::errc::resource_unavailable_try_again));
+            throw std::bad_alloc();
         }
-        m_askWorker = std::thread(&RecordingView::answerAsks, this, m_reader,
-                                  m_generation);
-    } catch (const std::system_error&) {
+        // A task of the global pool with its share of the reader and the
+        // asks: a close leaves it to finish, as a stretches pass
+        QThreadPool::globalInstance()->start(
+            [asks = m_asks, reader = m_readerHold,
+             view = QPointer<RecordingView>(this), generation = m_generation] {
+                answerAsks(asks, reader, view, generation);
+            });
+    } catch (const std::bad_alloc&) {
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->answering = false;
         return false;
     }
     return true;
 }
 
-void RecordingView::answerAsks(ecuio_recording_t* reader, quint64 generation)
+void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
+                               const std::shared_ptr<ecuio_recording_t>& reader,
+                               const QPointer<RecordingView>& view,
+                               quint64 generation)
 {
     for (;;) {
         std::optional<StatsAsk> stats;
         std::optional<StepAsk> step;
+        int holdMs = 0;
         {
-            std::unique_lock<std::mutex> lock(m_askMutex);
-            m_askWake.wait(lock, [this] {
-                return m_askStop || m_statsAsk.has_value() ||
-                       m_stepAsk.has_value();
-            });
-            if (m_askStop) {
+            // Ending and an ask's arrival are decided under one lock, so an
+            // ask put in while this runs is never left behind
+            const std::lock_guard<std::mutex> lock(asks->m);
+            if (!asks->stats && !asks->step) {
+                asks->answering = false;
                 return;
             }
-            stats.swap(m_statsAsk);
-            step.swap(m_stepAsk);
+            stats.swap(asks->stats);
+            step.swap(asks->step);
+            holdMs = asks->holdMs;
+        }
+        if (holdMs > 0) {
+            ++asks->held;
+            std::this_thread::sleep_for(std::chrono::milliseconds(holdMs));
+        }
+        // An application ending reads null here, as a stretches pass does
+        QCoreApplication* app = QCoreApplication::instance();
+        if (app == nullptr) {
+            const std::lock_guard<std::mutex> lock(asks->m);
+            asks->answering = false;
+            return;
         }
         // A copy that can't be allocated leaves its ask unanswered: an
-        // exception out of this thread would end the process
+        // exception out of this task would end the process
         try {
             if (step) {
                 uint64_t at = ECUIO_RECORDING_NONE;
                 const ecuio_status_t rc = ecuio_recording_step(
-                    reader, step->signal, step->t, step->direction, &at);
+                    reader.get(), step->signal, step->t, step->direction, &at);
                 QMetaObject::invokeMethod(
-                    this,
-                    [this, request = step->request, rc, at, generation] {
-                        stepFinished(request, rc, at, generation);
+                    app,
+                    [view, request = step->request, rc, at, generation] {
+                        if (view) {
+                            view->stepFinished(request, rc, at, generation);
+                        }
                     },
                     Qt::QueuedConnection);
             }
         } catch (const std::bad_alloc&) {
-            ++m_asksLost;
+            ++asks->lost;
         }
         try {
             if (stats) {
                 std::vector<ecuio_recording_stats_t> got(stats->ids.size());
                 const ecuio_status_t rc = ecuio_recording_stats(
-                    reader, stats->ids.data(),
+                    reader.get(), stats->ids.data(),
                     static_cast<uint32_t>(stats->ids.size()), stats->t0,
                     stats->t1, got.data());
                 QMetaObject::invokeMethod(
-                    this,
-                    [this, ask = *stats, rc, got, generation] {
-                        statsFinished(ask, rc, got, generation);
+                    app,
+                    [view, ask = *stats, rc, got, generation] {
+                        if (view) {
+                            view->statsFinished(ask, rc, got, generation);
+                        }
                     },
                     Qt::QueuedConnection);
             }
         } catch (const std::bad_alloc&) {
-            ++m_asksLost;
+            ++asks->lost;
         }
     }
 }
@@ -1258,26 +1301,29 @@ int RecordingView::stats(const QVariantList& signalIndexes, double t0Ms,
     if (ask.t1 <= ask.t0) {
         return 0;
     }
+    if (!haveAsks()) {
+        return 0;
+    }
     ask.request = ++m_lastAsk;
     m_lastStats = ask.request;
     {
-        const std::lock_guard<std::mutex> lock(m_askMutex);
-        m_statsAsk = std::move(ask);
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->stats = std::move(ask);
     }
     if (!startAsks()) {
-        const std::lock_guard<std::mutex> lock(m_askMutex);
-        m_statsAsk.reset();
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->stats.reset();
         m_lastStats = 0;
         return 0;
     }
-    m_askWake.notify_all();
     return m_lastStats;
 }
 
 int RecordingView::step(int signal, double tMs, bool forward)
 {
     uint32_t i = 0;
-    if (m_reader == nullptr || !signalIndex(QVariant(signal), &i)) {
+    if (m_reader == nullptr || !signalIndex(QVariant(signal), &i) ||
+        !haveAsks()) {
         return 0;
     }
     StepAsk ask;
@@ -1288,16 +1334,15 @@ int RecordingView::step(int signal, double tMs, bool forward)
         forward ? ECUIO_RECORDING_STEP_FORWARD : ECUIO_RECORDING_STEP_BACKWARD;
     m_lastStep = ask.request;
     {
-        const std::lock_guard<std::mutex> lock(m_askMutex);
-        m_stepAsk = ask;
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->step = ask;
     }
     if (!startAsks()) {
-        const std::lock_guard<std::mutex> lock(m_askMutex);
-        m_stepAsk.reset();
+        const std::lock_guard<std::mutex> lock(m_asks->m);
+        m_asks->step.reset();
         m_lastStep = 0;
         return 0;
     }
-    m_askWake.notify_all();
     return m_lastStep;
 }
 

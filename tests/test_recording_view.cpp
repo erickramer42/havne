@@ -1387,8 +1387,50 @@ TEST(RecordingViewTest, ACloseDropsAnAskAndANewOpenAnswers)
     EXPECT_EQ(askedStats(v, {rpm}, 1000, 3000).size(), 1);
 }
 
-// An asks' thread the system can't start: a statistics or step ask says 0,
-// leaves nothing queued, and the next ask answers once threads are there
+// A statistics ask over a long recording with a NaN in most seconds reads
+// its raw rows, and core can't be told to stop it: a close leaves the ask
+// to end on its own, the reader open under it until then, and never waits
+TEST(RecordingViewTest, ACloseNeverWaitsForAStatsOrStepAsk)
+{
+    RecordingView v;
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    int answers = 0;
+    QObject::connect(&v, &RecordingView::statsReady,
+                     [&](int, const QVariantList&) { ++answers; });
+    QObject::connect(&v, &RecordingView::stepReady,
+                     [&](int, double) { ++answers; });
+    const int hold = 2000;
+    v.setAsksHoldForTesting(hold);
+    QElapsedTimer timer;
+    timer.start();
+    ASSERT_GT(v.stats({rpm}, 0, 30000), 0);
+    ASSERT_GT(v.step(rpm, 100, true), 0);
+    // The task has taken an ask and is at its read
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
+    v.close();
+    EXPECT_LT(timer.elapsed(), hold / 2)
+        << "an ask or the close waited for the read";
+    EXPECT_EQ(v.state(), RecordingView::Closed);
+
+    // Another recording opens and answers while the first ask still holds
+    v.setAsksHoldForTesting(0);
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_EQ(askedStats(v, {rpm}, 1000, 3000).size(), 1);
+    EXPECT_GE(askedStep(v, rpm, 100, true), 0.0);
+    EXPECT_LT(timer.elapsed(), hold)
+        << "the new asks waited for the abandoned one";
+    answers = 0;
+    // The abandoned ask reads the closed recording to its end, and its
+    // answer goes nowhere
+    EXPECT_FALSE(waitFor([&] { return answers > 0; }, hold + 500));
+}
+
+// An asks' task that can't be started: a statistics or step ask says 0,
+// leaves nothing queued, and the next ask answers once one can
 TEST(RecordingViewTest, AnAsksThreadThatCantStartSaysSoAndTheNextAskAnswers)
 {
     RecordingView v;
@@ -1414,17 +1456,26 @@ TEST(RecordingViewTest, AnAsksThreadThatCantStartSaysSoAndTheNextAskAnswers)
     QObject::disconnect(cs);
 }
 
+// The view gone mid-ask: the task ends on its own and posts to no one
 TEST(RecordingViewTest, DestroyedWithAnAskUnderWayIsSafe)
 {
-    auto v = std::make_unique<RecordingView>();
-    v->open(fixture("pull-early"));
-    ASSERT_TRUE(waitFor([&] { return settled(*v); }));
-    const int rpm =
-        signalNamed(*v, "RPM").value(QStringLiteral("index")).toInt();
-    ASSERT_GT(v->stats({rpm}, 0, 30000), 0);
-    ASSERT_GT(v->step(rpm, 100, true), 0);
-    v.reset();
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    QElapsedTimer timer;
+    const int hold = 1500;
+    {
+        RecordingView v;
+        v.open(fixture("pull-early"));
+        ASSERT_TRUE(waitFor([&] { return settled(v); }));
+        const int rpm =
+            signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+        v.setAsksHoldForTesting(hold);
+        timer.start();
+        ASSERT_GT(v.stats({rpm}, 0, 30000), 0);
+        ASSERT_GT(v.step(rpm, 100, true), 0);
+        ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
+    }
+    EXPECT_LT(timer.elapsed(), hold / 2) << "an ask or the destructor waited";
+    // Its answer arrives for a view that is gone, and is dropped
+    EXPECT_FALSE(waitFor([] { return false; }, hold + 500));
 }
 
 // The file gone under an open recording: a partial second's raw rows
