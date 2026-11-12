@@ -2351,7 +2351,8 @@ Page {
                         text: root.timeText(handle.at, true)
                         color: parent.moved ? Theme.bg : Theme.text
                         font.pixelSize: ChartLayout.labelPx
-                        font.family: Theme.monoFamily
+                        font.family: Theme.valueFamily
+                        font.features: Theme.valueFeatures
                     }
                 }
                 MouseArea {
