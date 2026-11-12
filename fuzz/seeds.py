@@ -22,6 +22,7 @@
 import glob
 import json
 import os
+import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -117,6 +118,26 @@ def main(argv):
         name = os.path.basename(path)
         write(out, "fuzz_obdb_import", "default_" + name, b"\x00" + data)
         write(out, "fuzz_obdb_import", "alone_2019_" + name, bytes([0x80 | 29]) + data)
+    # Two signals of one 31-byte name whose two-byte character sits across
+    # the place a repeat's number is cut in: the cut must leave it whole
+    name = "n" * 28 + "\u00e9x"
+    repeated = {"commands": [
+        {"hdr": "7E1", "rax": "7E9", "cmd": {"22": did}, "freq": 1,
+         "signals": [{"id": key, "name": name,
+                      "fmt": {"len": 8, "max": 255, "unit": "volts"}}]}
+        for did, key in (("0101", "first"), ("0102", "second"))]}
+    write(out, "fuzz_obdb_import", "repeated_name_across_a_character",
+          b"\x00" + json.dumps(repeated, ensure_ascii=False).encode("utf-8"))
+
+    # The set validator: a head (count, layout, reserved, channels, NULLs),
+    # then six bytes for each def. Two defs with ids of their own make a
+    # set it takes; with the second's repeat bit, one name twice
+    layout = int(re.search(rb"#define ECUIO_SIGNAL_SET_LAYOUT (\d+)u",
+                           read("core/include/ecuio/signals.h")).group(1))
+    two = bytes([2, layout, 0, 0, 0, 1, 0, 8, 0, 0, 0, 2, 0, 8, 0, 0, 0])
+    write(out, "fuzz_validate_set", "two_defs", two)
+    write(out, "fuzz_validate_set", "two_defs_one_name",
+          two[:15] + b"\x80" + two[16:])
 
     # The plugin loader: the folder (an odd first byte; the manifest, its
     # files in turn, then a value fixture) and the packed form (an even
@@ -164,6 +185,24 @@ def main(argv):
     events = (b"ecuio session recording, format 2 (ADR-0049)\n"
               b"profile  obd2\n\n")
     folder_seeds["wire-frames"] = b"F" + events + SEP + SEP + SEP + wire
+    # The harness's first float on 0x123: 1.0, +inf, -inf, a NaN, 2.0. The
+    # three between are no samples, at the open or read again
+    folder_seeds["float-not-finite"] = b"F" + SEP + SEP + SEP + header + (
+        b"100000,100000,0x123,0x0,3F 80 00 00\n"
+        b"200000,200000,0x123,0x0,7F 80 00 00\n"
+        b"300000,300000,0x123,0x0,FF 80 00 00\n"
+        b"400000,400000,0x123,0x0,7F C0 00 00\n"
+        b"500000,500000,0x123,0x0,40 00 00 00\n")
+    # Both floats: the first 1.0, 2.0, 3.0, the second never finite, so it
+    # has no signal and a second read again passes its values by
+    folder_seeds["float-never-finite"] = b"F" + SEP + SEP + SEP + header + (
+        b"100000,100000,0x123,0x0,3F 80 00 00 7F C0 00 00\n"
+        b"300000,300000,0x123,0x0,40 00 00 00 7F 80 00 00\n"
+        b"500000,500000,0x123,0x0,40 40 00 00 FF C0 00 00\n")
+    # signals.csv alone, a number signal whose one value is a NaN: its
+    # range reads 0 at the open and NaN in its statistics
+    folder_seeds["values-all-nan"] = (
+        b"F" + SEP + b"host_us,signal,value,unit\n0,a,nan,\n")
     for name, seed in folder_seeds.items():
         write(out, "fuzz_recording", name, seed)
         write(out, "fuzz_export", name, seed)
