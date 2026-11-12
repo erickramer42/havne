@@ -1182,19 +1182,58 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # The iOS kit is the largest cache entry (about 3.6 GB): a copy
+      # The iOS kit is the largest cache entry (about 3.5 GiB): a copy
       # per branch takes the repository past the Actions cache's 10 GB
-      # and evicts the other kits, so only main saves and restores it,
-      # and other branches install it from the mirrors each run
+      # and evicts the other kits, so only main saves it; every ref
+      # restores it (a restore keeps main's entry recently used). The key
+      # is ours, not install-qt-action's own (that one holds the runner's
+      # kernel version, so a runner update would miss on every branch): it
+      # names what decides the install's bytes, so change it with the
+      # version, target or aqtinstall.
+      - name: Restore the iOS Qt kit from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/Qt
+          key: qt-ios-6.12.0-ios-autodesktop-aqt-3.3-arm64-1
+
       - name: Install Qt 6.12.0 (ios + macOS host)
+        if: steps.qt-cache.outputs.cache-hit != 'true'
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
-          cache: ${{ github.ref == 'refs/heads/main' }}
+          cache: false
+          dir: ${{ github.workspace }}/Qt
           version: '6.12.0'
           host: 'mac'
           target: 'ios'
           arch: 'ios'
           extra: '--autodesktop'
+
+      - name: Save the iOS Qt kit to the cache (main only)
+        if: steps.qt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/Qt
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
+
+      # What install-qt-action exports after an install, for the restored
+      # kit: the build below needs QT_ROOT_DIR and QT_HOST_PATH
+      - name: Point the build at the restored kit
+        if: steps.qt-cache.outputs.cache-hit == 'true'
+        run: |
+          kit="${{ github.workspace }}/Qt/6.12.0"
+          {
+            echo "QT_ROOT_DIR=$kit/ios"
+            echo "QT_HOST_PATH=$kit/macos"
+            echo "QT_PLUGIN_PATH=$kit/ios/plugins"
+            echo "QML2_IMPORT_PATH=$kit/ios/qml"
+          } >> "$GITHUB_ENV"
+          echo "$kit/ios/bin" >> "$GITHUB_PATH"
+
+      - name: Check the kit is there
+        run: |
+          test -x "$QT_ROOT_DIR/bin/qt-cmake" || { echo "::error::no qt-cmake under $QT_ROOT_DIR"; exit 1; }
+          test -d "$QT_HOST_PATH/bin" || { echo "::error::no host Qt at $QT_HOST_PATH"; exit 1; }
 
       # qt-cmake applies Qt's iOS toolchain and its minimum deployment
       # target (iOS 18 for Qt 6.12), so neither is set by hand.
