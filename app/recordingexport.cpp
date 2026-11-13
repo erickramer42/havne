@@ -279,7 +279,7 @@ bool copyFile(const QString& from, const QString& to, CopyTo where,
         out.close();
         return out.error() == QFileDevice::NoError;
     }
-    QFile out;
+    PickedFile out;
     return openPicked(out, to, QIODevice::WriteOnly | QIODevice::Truncate) &&
            copyChunks(in, out, stop) && out.flush() && closePicked(out);
 }
