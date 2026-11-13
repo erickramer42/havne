@@ -34,6 +34,7 @@ extern "C" {
 #include "ecuio/signals.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/profile.h"
+#include "ecuio/conditions.h"
 #include "ecuio/vin.h"
 #include "fake_diagnostics.h" /* tests: the fake ECU's report, the mock's too */
 }
@@ -7005,6 +7006,117 @@ TEST(CoreTest, AComputedPickKeepsItsInputsRequested)
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "the focus leaves nothing to request: none of the picked "
                  "signals is asked on this session");
+    ecuio_session_destroy(s);
+}
+
+/* ADR-0063 section 7: a focus keeps the requests of an attached
+ * condition's signals asked, a computed signal's inputs for it, while the
+ * focus's own picks stay the caller's. A disabled condition keeps
+ * nothing; taking the conditions away parks what only they kept; with no
+ * focus nothing is parked. The picks alone decide whether a focus is
+ * askable: under ?poll=0x0C a condition on engine speed doesn't make a
+ * focus on vehicle speed one. */
+TEST(CoreTest, AFocusKeepsAnAttachedConditionsSignalsAsked)
+{
+    const auto attach = [](ecuio_session_t* s, const std::string& list) {
+        const std::string json =
+            R"({"havne_conditions":1,"conditions":[)" + list + "]}";
+        ecuio_condition_set_t* set = nullptr;
+        EXPECT_EQ(ecuio_condition_set_load(json.data(), json.size(), &set),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        const ecuio_status_t st = ecuio_session_set_conditions(s, set, nullptr);
+        ecuio_condition_set_free(set);
+        return st;
+    };
+    const auto on = [](const char* key, const char* signal, const char* unit,
+                       const char* rest) {
+        return std::string(R"({"key":")") + key + R"(","name":")" + key +
+               R"(","when":{"signal":[")" + signal + R"("],"unit":")" + unit +
+               R"(","above":1})" + rest + "}";
+    };
+    /* The PIDs kept in rotation, in PID order */
+    const auto kept = [](const ecuio_request_engine& e) {
+        std::vector<int> pids;
+        for (uint32_t k = 0; k < e.count; ++k) {
+            const ecuio_request& r = e.requests[k];
+            if (r.parked == 0 && r.len == 2 && r.bytes[0] == 0x01) {
+                pids.push_back(r.bytes[1]);
+            }
+        }
+        std::sort(pids.begin(), pids.end());
+        return pids;
+    };
+
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://focus?profile=obd2", &s), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    const uint16_t rpm = focus_id_of(set, {0x01, 0x0C});
+    request_params params;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ecuio_focus_seen seen;
+    ecuio_take_focus(s, e.get(), seen);
+
+    /* No focus: a condition parks nothing and moves no focus generation */
+    const uint32_t before = s->focus_generation.load();
+    ASSERT_EQ(attach(s, on("t", "obd2.throttle", "%", "")), ECUIO_OK);
+    EXPECT_EQ(s->focus_generation.load(), before);
+    ecuio_take_focus(s, e.get(), seen);
+    for (uint32_t k = 0; k < e->count; ++k) {
+        EXPECT_EQ(e->requests[k].parked, 0) << "row " << k;
+    }
+
+    ASSERT_EQ(ecuio_session_set_focus(s, &rpm, 1), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(kept(*e), (std::vector<int>{0x0C, 0x11})) << "throttle kept";
+    {
+        std::lock_guard<std::mutex> lock(s->focus_mutex);
+        EXPECT_EQ(s->focus_ids, std::vector<uint16_t>{rpm});
+    }
+
+    /* The same conditions again move no generation, so no sweep restarts */
+    const uint32_t focused = s->focus_generation.load();
+    ASSERT_EQ(attach(s, on("t", "obd2.throttle", "%", "")), ECUIO_OK);
+    EXPECT_EQ(s->focus_generation.load(), focused);
+
+    /* Boost carries no request: its condition keeps MAP and baro, its
+     * inputs; a disabled condition keeps nothing */
+    ASSERT_EQ(
+        attach(s, on("b", "id:7011", "kPa", "") + "," +
+                      on("off", "obd2.speed", "km/h", R"(,"enabled":false)")),
+        ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(kept(*e), (std::vector<int>{0x0B, 0x0C, 0x33}));
+
+    /* Taking the conditions away parks what only they kept */
+    ASSERT_EQ(ecuio_session_set_conditions(s, nullptr, nullptr), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(kept(*e), std::vector<int>{0x0C});
+    EXPECT_EQ(ecuio_session_set_focus(s, nullptr, 0), ECUIO_OK);
+    ecuio_session_destroy(s);
+
+    /* The picks alone decide: one request, 01 0C, under ?poll= */
+    ASSERT_EQ(ecuio_session_create("mock://focus?profile=obd2", &s), ECUIO_OK);
+    set = ecuio_session_signal_set(s);
+    const uint16_t speed = focus_id_of(set, {0x01, 0x0D});
+    request_params poll;
+    poll.has_poll = true;
+    poll.poll_pid = 0x0C;
+    auto p = std::make_unique<ecuio_request_engine>();
+    ASSERT_EQ(ecuio_build_requests(s, set, poll, s->info.rx_ids,
+                                   s->info.channel_count, p.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ASSERT_EQ(attach(s, on("r", "obd2.rpm", "RPM", "")), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_set_focus(s, &speed, 1),
+              ECUIO_ERR_INVALID_ARGUMENT);
     ecuio_session_destroy(s);
 }
 

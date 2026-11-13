@@ -1148,12 +1148,27 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
     }
     std::unique_ptr<ecuio_condition_eval> next;
     std::vector<ecuio_condition_state_t> states;
+    /* The signals the conditions read, for the focus: the evaluator holds
+     * only those of the conditions it judges */
+    std::vector<uint8_t> watched;
     try {
         if (set != nullptr) {
             next = ecuio_condition_eval::make(set, signals, file, 0);
             states.reserve(next->conditions.size());
             for (uint32_t i = 0; i < next->conditions.size(); ++i) {
                 states.push_back(next->state_of(i));
+            }
+            if (!next->signals.empty() && signals != nullptr &&
+                signals->defs != nullptr) {
+                watched.assign(signals->count, 0);
+                for (const ecuio_condition_eval::signal& w : next->signals) {
+                    for (uint32_t i = 0; i < signals->count; ++i) {
+                        if (signals->defs[i].id == w.id) {
+                            watched[i] = 1;
+                        }
+                    }
+                }
+                ecuio_computed_mark_leaves(signals, watched.data());
             }
         }
     } catch (const std::bad_alloc&) {
@@ -1185,6 +1200,17 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
         untaken = std::move(session->conditions_pending);
         session->conditions_pending = std::move(next);
         session->conditions_swap = true;
+    }
+    {
+        /* A focus keeps the conditions' signals asked (ADR-0063 section 7).
+         * A new generation restarts every sweep, so only a changed map under
+         * a focus moves it; with none, the next focus call moves it. */
+        std::lock_guard<std::mutex> lock(session->focus_mutex);
+        const bool moved = watched != session->condition_defs;
+        session->condition_defs.swap(watched);
+        if (moved && !session->focus_ids.empty()) {
+            session->focus_generation.fetch_add(1);
+        }
     }
     if (const auto hook = g_after_conditions_handover.load()) {
         hook(g_after_conditions_handover_user.load());

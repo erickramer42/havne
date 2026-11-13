@@ -641,7 +641,8 @@ inline uint64_t ecuio_focus_table_stamp(const ecuio_request_engine& e)
  * worker hasn't taken, or resolves the stored picks again when a request
  * joined parked under it (focus_joined: a scanned DID found): under the
  * session's lock, each picked def's request on the channel of its
- * message_id (ecuio_focus_row_is) marks a table row kept; then the engine
+ * message_id (ecuio_focus_row_is) marks a table row kept, and so does
+ * each attached condition's signal's (condition_defs); then the engine
  * parks the rest, or ends the focus on a count of 0. First, when the
  * table changed, the askable map is worked out again in place. A fixed
  * table, no allocation on the worker. */
@@ -672,10 +673,12 @@ inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
         focused = !session->focus_ids.empty();
         min_sweep_us = int64_t{session->focus_min_sweep_ms} * 1000;
         const size_t defs = session->focus_defs.size();
+        const size_t watched = session->condition_defs.size();
         for (uint32_t i = 0; focused && set != nullptr &&
                              set->defs != nullptr && i < set->count && i < defs;
              ++i) {
-            if (session->focus_defs[i] == 0) {
+            if (session->focus_defs[i] == 0 &&
+                (i >= watched || session->condition_defs[i] == 0)) {
                 continue;
             }
             uint8_t req[3] = {};

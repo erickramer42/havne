@@ -1054,7 +1054,10 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
  * table, not refused, asked again on a count of 0. The probe, the DID
  * scan, identification and diagnostics are untouched, and a request the
  * probe dropped stays dropped. A DID the scan finds while a focus is on
- * is asked when the focus picks it, parked otherwise. A session that asks
+ * is asked when the focus picks it, parked otherwise. The signals an
+ * attached condition reads stay asked under any focus (ADR-0063 section
+ * 7; ecuio_session_set_conditions). Whether a focus leaves something to
+ * request is judged by its picks alone. A session that asks
  * requests refuses a focus none of whose signals it can ask (passive
  * signals, broadcast frames a listener hears; Service 09's; a request
  * the probe dropped; a DID the scan hasn't found; under ?poll=, any but

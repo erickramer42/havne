@@ -335,6 +335,12 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
  * A link or a check term is not judged: its condition is unavailable
  * (ECUIO_CONDITION_WHY_NO_LINK, _NO_CHECK).
  *
+ * Under a focus (ecuio_session_set_focus) the session keeps asking the
+ * signals the conditions it judges read, a computed one's inputs among
+ * them, whether or not the focus picks them; a disabled or unavailable
+ * condition keeps nothing asked. The focus's own picks, and the
+ * recording's focus line, stay the caller's.
+ *
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session;
  * ECUIO_ERR_SESSION_CLOSED after close; ECUIO_ERR_INVALID_ARGUMENT for a
  * file whose set isn't the session's; ECUIO_ERR_IN_USE while a recorder
