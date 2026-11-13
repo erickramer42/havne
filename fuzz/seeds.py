@@ -277,6 +277,18 @@ def main(argv):
         b"2000000,2000000,0x7E8,0x100,41 0C 0F A0\n"
         b"3000000,3000000,0x7E8,0x100,41 0C 32 00\n",
         conditions))
+    # Its edges: a key past a set's 64, a cond line past the longest row
+    # (32768 bytes) and a torn last one (a copy past the loader's 256 KiB
+    # can't fit the harness's input, so RecordingTest has that one)
+    keys = b"".join(b"12:00:01.000  +1.000  cond  k%d,on,,1,0,1,1\n" % k
+                    for k in range(65))
+    small = b"{}"
+    folder_seeds["conditions-edges"] = b"3" + SEP.join((
+        b"conditions  conditions.json," +
+        hashlib.sha256(small).hexdigest().encode("ascii") + b"\n\n" + keys +
+        b"12:00:02.000  +2.000  cond  k0,off,,1,0,2,2," + b"x" * 32768 +
+        b"\n12:00:03.000  +3.000  cond  k1,off,,1,0,3,3",
+        b"host_us,signal,value,unit\n", b"", b"", small))
     for name, seed in folder_seeds.items():
         write(out, "fuzz_recording", name, seed)
         write(out, "fuzz_export", name, seed)
