@@ -793,7 +793,7 @@ public:
     Q_INVOKABLE QVariantMap importSignalText(const QString& text);
     Q_INVOKABLE QString signalFileText(const QString& sha) const;
     // A kept copy saved where the user chose (a local file, or Android's
-    // content:// from its document picker, through QFile): the copy's
+    // content:// from its document picker, by the content resolver): the copy's
     // bytes as imported or as the form wrote them, nothing added, so
     // havne-cli --signals and another vehicle read the same file. { ok,
     // words }, words never naming either path; a copy changed since it
@@ -805,21 +805,22 @@ public:
     // and { ok, words, text }, words never naming a path. The size is
     // bounded at layoutFileMaxBytes either way, a text that isn't UTF-8 is
     // refused unread, and a leading UTF-8 BOM is skipped. A local file is
-    // written whole or not at all and nothing is ever removed; a provider's
-    // document is written through its provider, which can't be atomic.
+    // written whole or not at all and is never removed; a provider's document
+    // is written in place (it can't be atomic) and a refused or failed save
+    // removes it only if it was empty when the save began.
     // Each logs one line
     Q_INVOKABLE QVariantMap saveLayoutFile(const QString& text, const QUrl& url);
     Q_INVOKABLE QVariantMap layoutFileText(const QUrl& url);
     static constexpr qint64 layoutFileMaxBytes = 66016 + 16384;
     // The Log page's Export CSV (FrameListModel::scrubbedCsv) to the file
-    // at url (a local file, or Android's content:// through QFile): { ok,
+    // at url (a local file, or Android's content:// by the content resolver): { ok,
     // words, written, leftOut, unattributed }, leftOut the identification
     // replies' and text signals' frames, words never naming the path. A
     // failed check writes nothing. Logs one line
     Q_INVOKABLE QVariantMap exportFrames(const QUrl& url);
     // Diagnostics' Save report (ADR-0054's appendix "the health report as
     // built"): the session's health to the file at url (a local file, or
-    // Android's content:// through QFile), in the format healthFormatFor
+    // Android's content:// by the content resolver), in the format healthFormatFor
     // picks from it and the dialog's filterIndex, with the values Live's
     // rows hold. No wait: a report still being read says so itself.
     // baselineFolder, the picked vehicle's baseline recording ("" none),

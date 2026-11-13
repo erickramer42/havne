@@ -3,6 +3,7 @@
 //          QmlTest.phone
 
 #include "recordingexport.h"
+#include "urlwrite.h"
 
 #include "healthreport.h"
 
@@ -265,14 +266,14 @@ bool copyFile(const QString& from, const QString& to, bool provider,
         return out.open(QIODevice::WriteOnly) && copyChunks(in, out, stop) &&
                out.commit();
     }
-    QFile out(to);
-    return out.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
-           copyChunks(in, out, stop) && out.flush();
+    QFile out;
+    return openPicked(out, to, QIODevice::WriteOnly | QIODevice::Truncate) &&
+           copyChunks(in, out, stop) && out.flush() && closePicked(out);
 }
 
 QString whereOf(const QUrl& url)
 {
-    return url.isLocalFile() ? url.toLocalFile() : url.toString();
+    return pathOfUrl(url);
 }
 
 QVariantMap runFile(const Job& job, Stop& stop)
@@ -285,7 +286,7 @@ QVariantMap runFile(const Job& job, Stop& stop)
     const bool madeEmpty = provider && isEmptyDocument(target);
     const auto dropPicked = [&] {
         if (madeEmpty) {
-            QFile::remove(target);
+            removePicked(target);
         }
     };
     // removeStaleCopies finds this folder by its name

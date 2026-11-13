@@ -47,6 +47,12 @@ bool isEmptyDocument(const QString& where);
 // for a refusal before anything is written
 void removeIfEmpty(const QString& where);
 
+// A picker through a provider has made the document url names before the
+// app writes: whether it is empty now (judged once, at entry), and its
+// removal when the save then refuses or fails
+bool pickedDocumentEmpty(const QUrl& url);
+void dropPickedDocument(const QUrl& url, bool wasEmpty);
+
 // A written report's counts in words, each noun as its count wants it:
 // "1 ECU, 3 trouble codes, 0 key values"; and the log's line, "Health
 // report saved: <summary> (2 identification items left out)"

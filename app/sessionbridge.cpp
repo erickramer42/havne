@@ -1588,10 +1588,10 @@ static QString signalCountText(int count)
 
 QVariantMap SessionBridge::importSignalFile(const QUrl& url)
 {
-    // Android's content:// URIs open through QFile as they are
-    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
     QVariantMap result;
-    if (!file.open(QIODevice::ReadOnly)) {
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
         result = {{QStringLiteral("ok"), false},
                   {QStringLiteral("words"),
                    QStringLiteral("Couldn't read the file")}};
@@ -1641,12 +1641,16 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
 {
     QString words;
     const QByteArray bytes = SignalStore::bytes(sha, &words);
+    const bool madeEmpty = pickedDocumentEmpty(url);
     bool written = false;
     if (!bytes.isEmpty()) {
         written = writeToUrl(url, bytes);
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
+    }
+    if (!written) {
+        dropPickedDocument(url, madeEmpty);
     }
     emit logMessage(
         written ? QStringLiteral("Signal file %1 saved to a file (%2 bytes)")
@@ -1663,6 +1667,7 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
 QVariantMap SessionBridge::saveLayoutFile(const QString& text, const QUrl& url)
 {
     const QByteArray bytes = text.toUtf8();
+    const bool madeEmpty = pickedDocumentEmpty(url);
     QString words;
     bool written = false;
     if (bytes.isEmpty()) {
@@ -1676,6 +1681,9 @@ QVariantMap SessionBridge::saveLayoutFile(const QString& text, const QUrl& url)
             words = QStringLiteral("Couldn't write the file");
         }
     }
+    if (!written) {
+        dropPickedDocument(url, madeEmpty);
+    }
     emit logMessage(written ? QStringLiteral("Layout saved to a file (%1 bytes)")
                                   .arg(bytes.size())
                             : QStringLiteral("Layout not saved: %1").arg(words));
@@ -1684,11 +1692,11 @@ QVariantMap SessionBridge::saveLayoutFile(const QString& text, const QUrl& url)
 
 QVariantMap SessionBridge::layoutFileText(const QUrl& url)
 {
-    // Android's content:// URIs open through QFile as they are
-    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
     QString words;
     QString text;
-    if (!file.open(QIODevice::ReadOnly)) {
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
         words = QStringLiteral("Couldn't read the file");
     } else {
         QByteArray bytes = file.read(layoutFileMaxBytes + 1);
@@ -1722,12 +1730,16 @@ QVariantMap SessionBridge::exportFrames(const QUrl& url)
 {
     const FrameListModel::ScrubbedCsv csv = m_frameLog->scrubbedCsv();
     QString words = csv.words;
+    const bool madeEmpty = pickedDocumentEmpty(url);
     bool written = false;
     if (csv.ok) {
         written = writeToUrl(url, csv.bytes);
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
+    }
+    if (!written) {
+        dropPickedDocument(url, madeEmpty);
     }
     const qulonglong leftOut = csv.identification + csv.textValues;
     emit logMessage(
@@ -1797,10 +1809,10 @@ QVariantMap SessionBridge::previewObdb(const QUrl& url, int modelYear,
 {
     m_obdbPending.clear();
     const uint32_t year = modelYear > 0 ? static_cast<uint32_t>(modelYear) : 0u;
-    // Android's content:// URIs open through QFile as they are
-    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
     ObdbImport::Preview p;
-    if (!file.open(QIODevice::ReadOnly)) {
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
         p.words = QStringLiteral("Couldn't read the file");
     } else if (file.size() > static_cast<qint64>(ECUIO_OBDB_MAX_BYTES)) {
         p.words = QStringLiteral("The file is over %1 MiB, an OBDb set's most")
@@ -1915,10 +1927,10 @@ QVariantList SessionBridge::decodeProfiles()
 
 QVariantMap SessionBridge::importPlugin(const QUrl& url)
 {
-    // Android's content:// URIs open through QFile as they are
-    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
     QVariantMap result;
-    if (!file.open(QIODevice::ReadOnly)) {
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
         result = {{QStringLiteral("ok"), false},
                   {QStringLiteral("words"),
                    QStringLiteral("Couldn't read the file")}};

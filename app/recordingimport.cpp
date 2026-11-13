@@ -2,6 +2,7 @@
 // Testing: BRIDGE: BridgeTest.Import* (test_bridge); QML: QmlTest.recordings
 
 #include "recordingimport.h"
+#include "urlwrite.h"
 
 #include <QByteArray>
 #include <QDateTime>
@@ -25,11 +26,11 @@
 
 namespace {
 
-// A picked file opens through QFile as it is: a local one by its path,
-// Android's content:// URI through its provider
+// A picked file opens through openPicked: a local one by its path,
+// Android's content:// URI by the content resolver
 QString openable(const QUrl& url)
 {
-    return url.isLocalFile() ? url.toLocalFile() : url.toString();
+    return pathOfUrl(url);
 }
 
 QVariantMap refused(const QString& words)
@@ -52,8 +53,8 @@ QVariantMap canceled()
 bool copyTo(const QUrl& url, const QString& path, bool* readable,
             const std::atomic<bool>* stop = nullptr)
 {
-    QFile in(openable(url));
-    *readable = in.open(QIODevice::ReadOnly);
+    QFile in;
+    *readable = openPicked(in, openable(url), QIODevice::ReadOnly);
     QFile out(path);
     if (!*readable || !out.open(QIODevice::WriteOnly)) {
         return false;
@@ -113,8 +114,8 @@ QVariantMap run(const Job& job)
             return refused(
                 QStringLiteral("choose the logger's column map first"));
         }
-        QFile f(openable(job.map));
-        if (!f.open(QIODevice::ReadOnly)) {
+        QFile f;
+        if (!openPicked(f, openable(job.map), QIODevice::ReadOnly)) {
             return refused(QStringLiteral("the column map can't be read"));
         }
         map = f.read(RecordingImport::MapMaxBytes + 1);
@@ -243,8 +244,8 @@ constexpr qint64 kGuessCopyBytes = 1280 * 1024;
 // The first bytes of the file into path
 bool copyHeadTo(const QUrl& url, const QString& path, bool* readable)
 {
-    QFile in(openable(url));
-    *readable = in.open(QIODevice::ReadOnly);
+    QFile in;
+    *readable = openPicked(in, openable(url), QIODevice::ReadOnly);
     QFile out(path);
     if (!*readable || !out.open(QIODevice::WriteOnly)) {
         return false;
@@ -626,8 +627,8 @@ int RecordingImport::guessKind(const QUrl& file) const
 {
     static const QRegularExpression candump(QStringLiteral(
         "^\\([0-9]+(\\.[0-9]+)?\\)\\s+\\S+\\s+[0-9A-Fa-f]{1,8}#"));
-    QFile f(openable(file));
-    if (f.open(QIODevice::ReadOnly)) {
+    QFile f;
+    if (openPicked(f, openable(file), QIODevice::ReadOnly)) {
         // The first line that isn't blank, within the file's first 64 KiB
         const QByteArray head = f.read(64 * 1024);
         for (const QByteArray& line : head.split('\n')) {

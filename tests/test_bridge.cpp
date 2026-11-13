@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <gtest/gtest.h>
+#include <functional>
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -53,6 +54,7 @@
 #include "pluginstore.h"
 #include "readonce.h"
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
+#include "urlwrite.h"
 #include "windowtheme.h"
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
@@ -10490,6 +10492,94 @@ TEST(BridgeTest, ALayoutThatCantBeSavedLeavesTheFileAsItWas)
     unchanged();
 }
 
+// A provider's document is opened by its URI as Android's Uri.parse wants it:
+// encoded, so a name the picker makes for a name taken ("report (1).csv")
+// keeps its space and parentheses apart from the path's own separators
+TEST(BridgeTest, APickedUrlIsOpenedByItsEncodedName)
+{
+    EXPECT_EQ(
+        pathOfUrl(
+            QUrl(QStringLiteral(
+                "content://com.android.externalstorage.documents/document/"
+                "primary%3ADocuments%2Freport (1).csv")))
+            .toStdString(),
+        "content://com.android.externalstorage.documents/document/"
+        "primary%3ADocuments%2Freport%20(1).csv");
+    EXPECT_EQ(pathOfUrl(QUrl::fromLocalFile(QStringLiteral("/tmp/a b (1).csv")))
+                  .toStdString(),
+              "/tmp/a b (1).csv");
+}
+
+// A picker through a provider makes the document before the app writes. A
+// QUrl that isn't a file URL stands in for a content:// one: QFile opens its
+// text as a path. A save that refuses removes only a document that was empty
+// when the save began
+TEST(BridgeTest, ARefusedSaveThroughAProviderRemovesOnlyAnEmptyDocument)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    // pathOfUrl encodes a URL: a folder whose path an encoding changes (a
+    // space or a non-ASCII name in it; a drive letter's case is no change)
+    // can't stand in for a provider's
+    if (QUrl(dir.path(), QUrl::TolerantMode)
+            .toString(QUrl::FullyEncoded)
+            .compare(dir.path(), Qt::CaseInsensitive) != 0) {
+        GTEST_SKIP() << "the temporary folder's path changes when encoded";
+    }
+    SessionBridge bridge;
+    const auto provider = [&](const QString& name) {
+        return QUrl(dir.path() + QLatin1Char('/') + name, QUrl::TolerantMode);
+    };
+    const auto make = [&](const QUrl& url, const QByteArray& bytes) {
+        QFile f(url.isLocalFile() ? url.toLocalFile() : url.toString());
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly))
+            << url.toString().toStdString();
+        f.write(bytes);
+    };
+    const auto tooBig =
+        QString(SessionBridge::layoutFileMaxBytes + 1, QLatin1Char('x'));
+    const QByteArray theirs("the user's layout");
+    struct Save {
+        const char* name;
+        std::function<QVariantMap(const QUrl&)> run;
+    };
+    const Save saves[] = {
+        {"nothing to save",
+         [&](const QUrl& u) { return bridge.saveLayoutFile(QString(), u); }},
+        {"over the bound",
+         [&](const QUrl& u) { return bridge.saveLayoutFile(tooBig, u); }},
+        {"a signal file that isn't kept",
+         [&](const QUrl& u) {
+             return bridge.saveSignalFile(QStringLiteral("0123456789abcdef"),
+                                          u);
+         }},
+    };
+    for (const Save& save : saves) {
+        SCOPED_TRACE(save.name);
+        const QUrl made = provider(QStringLiteral("made(1).json"));
+        make(made, QByteArray());
+        EXPECT_FALSE(save.run(made).value(QStringLiteral("ok")).toBool());
+        EXPECT_FALSE(QFile::exists(made.toString()))
+            << "the picker's empty document goes";
+        const QUrl chosen = provider(QStringLiteral("chosen.json"));
+        make(chosen, theirs);
+        EXPECT_FALSE(save.run(chosen).value(QStringLiteral("ok")).toBool());
+        QFile after(chosen.toString());
+        ASSERT_TRUE(after.open(QIODevice::ReadOnly));
+        EXPECT_EQ(after.readAll(), theirs) << "a replaced document stays";
+        after.close();
+        QFile::remove(chosen.toString());
+    }
+    // A local target is never removed by a refusal
+    const QUrl local =
+        QUrl::fromLocalFile(dir.path() + QStringLiteral("/local.json"));
+    make(local, QByteArray());
+    EXPECT_FALSE(bridge.saveLayoutFile(QString(), local)
+                     .value(QStringLiteral("ok"))
+                     .toBool());
+    EXPECT_TRUE(QFile::exists(local.toLocalFile()));
+}
+
 // ---- An OBDb set imported in the app (ADR-0051's appendix of 2026-11-06)
 
 namespace {
@@ -11687,6 +11777,61 @@ TEST(BridgeTest, ExportFramesWritesTheFileAndLogsOneLine)
     for (const QString& line : lines) {
         EXPECT_FALSE(line.contains(out.path())) << line.toStdString();
     }
+}
+
+// The frames CSV through a provider (a non-file QUrl stands in, as in
+// ARefusedSaveThroughAProviderRemovesOnlyAnEmptyDocument): a refused export
+// removes the picker's empty document and leaves one that held bytes, and a
+// good one writes into the empty document
+TEST(BridgeTest, ARefusedFramesExportThroughAProviderRemovesOnlyAnEmptyDocument)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    if (QUrl(dir.path(), QUrl::TolerantMode)
+            .toString(QUrl::FullyEncoded)
+            .compare(dir.path(), Qt::CaseInsensitive) != 0) {
+        GTEST_SKIP() << "the temporary folder's path changes when encoded";
+    }
+    SessionBridge bridge;
+    FrameMaker m;
+    heldForExport(*bridge.model(), m);
+    const auto provider = [&](const QString& name) {
+        return QUrl(dir.path() + QLatin1Char('/') + name, QUrl::TolerantMode);
+    };
+    const auto make = [&](const QUrl& url, const QByteArray& bytes) {
+        QFile f(url.toString());
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(bytes);
+    };
+    // A good export fills the picker's empty document
+    const QUrl fresh = provider(QStringLiteral("fresh.csv"));
+    make(fresh, QByteArray());
+    EXPECT_TRUE(
+        bridge.exportFrames(fresh).value(QStringLiteral("ok")).toBool());
+    {
+        QFile f(fresh.toString());
+        ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+        EXPECT_FALSE(f.readAll().isEmpty());
+    }
+    // A frame echoing the VIN: the check refuses
+    m.add(*bridge.model(), 0x7E8,
+          {0x62, 0xD8, 0x01, 'Z', 'Z', 'Z', 'F', 'A', 'K', 'E',
+           '1',  '1',  'M',  '0', '0', '0', '0', '0', '0', '1'},
+          6000, ECUIO_FRAME_FLAG_REASSEMBLED);
+    const QUrl made = provider(QStringLiteral("made.csv"));
+    make(made, QByteArray());
+    EXPECT_FALSE(
+        bridge.exportFrames(made).value(QStringLiteral("ok")).toBool());
+    EXPECT_FALSE(QFile::exists(made.toString()))
+        << "the picker's empty document goes";
+    const QUrl chosen = provider(QStringLiteral("chosen.csv"));
+    const QByteArray theirs("the user's earlier export\n");
+    make(chosen, theirs);
+    EXPECT_FALSE(
+        bridge.exportFrames(chosen).value(QStringLiteral("ok")).toBool());
+    QFile after(chosen.toString());
+    ASSERT_TRUE(after.open(QIODevice::ReadOnly));
+    EXPECT_EQ(after.readAll(), theirs) << "a replaced document stays";
 }
 
 // ---- The health report, Diagnostics' Save report (ADR-0054's appendix
