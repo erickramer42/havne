@@ -416,7 +416,9 @@ jobs:
       # compiler launcher, so this job builds with Ninja in a Developer
       # shell, as clang-tidy does. The cache holds compiled objects (links
       # aren't cached), capped by SCCACHE_CACHE_SIZE; it is read on every
-      # ref and saved only on dev and main, the Qt kit's rule.
+      # ref and saved only on dev and main, keyed by the ISO week: a
+      # week's first run on each saves its entry, a restore takes the
+      # newest (restore-keys), and GitHub drops an entry unread for 7 days.
       - name: Install sccache
         env:
           GH_TOKEN: ${{ github.token }}
@@ -434,16 +436,19 @@ jobs:
           "SCCACHE_DIR=$env:RUNNER_TEMP\sccache-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "SCCACHE_CACHE_SIZE=1G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Name the compiler cache's day
-        id: day
-        run: '"day=$((Get-Date).ToUniversalTime().ToString(''yyyyMMdd''))" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append'
+      - name: Name the compiler cache's week
+        id: week
+        run: |
+          $now = (Get-Date).ToUniversalTime()
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Restore the compiler cache
         id: cc-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\sccache-cache
-          key: sccache-win-build-1-${{ steps.day.outputs.day }}
+          key: sccache-win-build-1-${{ steps.week.outputs.week }}
           restore-keys: sccache-win-build-1-
 
       - name: Build full app
@@ -467,7 +472,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\sccache-cache
-          key: sccache-win-build-1-${{ steps.day.outputs.day }}
+          key: sccache-win-build-1-${{ steps.week.outputs.week }}
 
       # ECUIO_PYTEST_REQUIRED: PythonTest.* fail rather than skip without
       # pytest
@@ -614,16 +619,19 @@ jobs:
           "SCCACHE_DIR=$env:RUNNER_TEMP\sccache-cache" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "SCCACHE_CACHE_SIZE=1G" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Name the compiler cache's day
-        id: day
-        run: '"day=$((Get-Date).ToUniversalTime().ToString(''yyyyMMdd''))" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append'
+      - name: Name the compiler cache's week
+        id: week
+        run: |
+          $now = (Get-Date).ToUniversalTime()
+          $week = '{0}-W{1:D2}' -f [System.Globalization.ISOWeek]::GetYear($now), [System.Globalization.ISOWeek]::GetWeekOfYear($now)
+          "week=$week" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Restore the compiler cache
         id: cc-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\sccache-cache
-          key: sccache-win-coverage-1-${{ steps.day.outputs.day }}
+          key: sccache-win-coverage-1-${{ steps.week.outputs.week }}
           restore-keys: sccache-win-coverage-1-
 
       - name: Measure coverage
@@ -648,7 +656,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\sccache-cache
-          key: sccache-win-coverage-1-${{ steps.day.outputs.day }}
+          key: sccache-win-coverage-1-${{ steps.week.outputs.week }}
 
       # A case that fails only under the tool is named in the step's log and
       # explained in its own: the step doesn't fail, so this runs always.
@@ -685,16 +693,54 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # cache: true restores the kit from the Actions cache, keyed by the
-      # inputs and the runner's kernel; a miss installs it and saves it
+      # The kit from the Actions cache under a key of ours, the iOS kit's
+      # rule: install-qt-action's own key holds the runner's kernel, and
+      # its cache saves on any ref that misses, so each kernel update left
+      # a copy on dev, the PR and main. One copy, saved by the first shard
+      # on main's pushes; every ref restores it. The key names what decides
+      # the install's bytes: change it with the version, arch or aqtinstall
+      - name: Restore Qt 6.12.0 from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: qt-mac-6.12.0-clang_64-aqt-3.3
+
+      # On a hit the action installs no Qt (no-qt-binaries) but still sets
+      # up its Python, as on a miss; the next step sets the environment
+      # either way
       - name: Setup Qt 6.12.0
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
-          cache: true
+          cache: false
+          set-env: false
+          no-qt-binaries: ${{ steps.qt-cache.outputs.cache-hit == 'true' }}
+          dir: ${{ runner.temp }}
           version: '6.12.0'
           host: 'mac'
           target: 'desktop'
           arch: 'clang_64'
+
+      - name: Save Qt 6.12.0 to the cache (main only)
+        if: steps.qt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && matrix.shard == 1
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
+
+      # What install-qt-action exports after an install, on a hit and a
+      # miss alike
+      - name: Point the build at the kit
+        run: |
+          kit="$RUNNER_TEMP/Qt/6.12.0/macos"
+          test -x "$kit/bin/qmake" || { echo "::error::no Qt at $kit"; exit 1; }
+          {
+            echo "QT_ROOT_DIR=$kit"
+            echo "QT_PLUGIN_PATH=$kit/plugins"
+            echo "QML2_IMPORT_PATH=$kit/qml"
+            echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH:+$PKG_CONFIG_PATH:}$kit/lib/pkgconfig"
+          } >> "$GITHUB_ENV"
+          echo "$kit/bin" >> "$GITHUB_PATH"
 
       # pytest for PythonTest.* (the havne package against the shared
       # core), in a venv the configure takes as the tests' Python, as
@@ -723,16 +769,16 @@ jobs:
           echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=1G" >> "$GITHUB_ENV"
 
-      - name: Name the compiler cache's day
-        id: day
-        run: echo "day=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+      - name: Name the compiler cache's week
+        id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
 
       - name: Restore the compiler cache
         id: cc-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-macos-build-1-${{ steps.day.outputs.day }}
+          key: sccache-macos-build-1-${{ steps.week.outputs.week }}
           restore-keys: sccache-macos-build-1-
 
       - name: Build full app
@@ -746,7 +792,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-macos-build-1-${{ steps.day.outputs.day }}
+          key: sccache-macos-build-1-${{ steps.week.outputs.week }}
 
       # ECUIO_PYTEST_REQUIRED: PythonTest.* fail rather than skip without
       # pytest
@@ -780,16 +826,52 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The kit from the Actions cache, as macos-build's (see the notes
+      # there): one copy, saved by the first shard on main's pushes, which
+      # linux-appimage's x86_64 leg restores too
+      - name: Restore Qt 6.12.0 from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: qt-linux-6.12.0-linux_gcc_64-aqt-3.3
+
       # Qt 6.7+ names the Linux desktop arch linux_gcc_64 (gcc_64 no
-      # longer resolves for 6.12.0).
+      # longer resolves for 6.12.0). On a hit the action installs no Qt
+      # but still installs Qt's system packages and its Python
       - name: Install Qt 6.12.0 desktop (linux_gcc_64)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
-          cache: true
+          cache: false
+          set-env: false
+          no-qt-binaries: ${{ steps.qt-cache.outputs.cache-hit == 'true' }}
+          dir: ${{ runner.temp }}
           version: '6.12.0'
           host: 'linux'
           target: 'desktop'
           arch: 'linux_gcc_64'
+
+      - name: Save Qt 6.12.0 to the cache (main only)
+        if: steps.qt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && matrix.shard == 1
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
+
+      # What install-qt-action exports after an install, on a hit and a
+      # miss alike
+      - name: Point the build at the kit
+        run: |
+          kit="$RUNNER_TEMP/Qt/6.12.0/gcc_64"
+          test -x "$kit/bin/qmake" || { echo "::error::no Qt at $kit"; exit 1; }
+          {
+            echo "QT_ROOT_DIR=$kit"
+            echo "QT_PLUGIN_PATH=$kit/plugins"
+            echo "QML2_IMPORT_PATH=$kit/qml"
+            echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$kit/lib"
+            echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH:+$PKG_CONFIG_PATH:}$kit/lib/pkgconfig"
+          } >> "$GITHUB_ENV"
+          echo "$kit/bin" >> "$GITHUB_PATH"
 
       # pytest for PythonTest.* (the havne package against the shared
       # core), in a venv the configure takes as the tests' Python, as
@@ -817,16 +899,16 @@ jobs:
           echo "SCCACHE_DIR=$RUNNER_TEMP/sccache-cache" >> "$GITHUB_ENV"
           echo "SCCACHE_CACHE_SIZE=1G" >> "$GITHUB_ENV"
 
-      - name: Name the compiler cache's day
-        id: day
-        run: echo "day=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+      - name: Name the compiler cache's week
+        id: week
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
 
       - name: Restore the compiler cache
         id: cc-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-linux-build-1-${{ steps.day.outputs.day }}
+          key: sccache-linux-build-1-${{ steps.week.outputs.week }}
           restore-keys: sccache-linux-build-1-
 
       # libegl1 and libopengl0: QtGui's runtime libraries, which test_qml
@@ -848,7 +930,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/sccache-cache
-          key: sccache-linux-build-1-${{ steps.day.outputs.day }}
+          key: sccache-linux-build-1-${{ steps.week.outputs.week }}
       # The simulated CAN bus (tests/vcan_bus.h): vcan and can-isotp load
       # as installed on the hosted Ubuntu runners. MTU 72 takes CAN FD
       # frames (the mock's 16-byte telemetry), whatever the kernel's
@@ -908,14 +990,51 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The kit from the Actions cache, as macos-build's (see the notes
+      # there): x86_64 restores linux-build's copy, and the aarch64 leg
+      # saves its own on main's pushes
+      - name: Restore Qt 6.12.0 from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: qt-${{ matrix.qt_host }}-6.12.0-${{ matrix.qt_arch }}-aqt-3.3
+
       - name: Install Qt 6.12.0 desktop (${{ matrix.qt_arch }})
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
-          cache: true
+          cache: false
+          set-env: false
+          no-qt-binaries: ${{ steps.qt-cache.outputs.cache-hit == 'true' }}
+          dir: ${{ runner.temp }}
           version: '6.12.0'
           host: ${{ matrix.qt_host }}
           target: 'desktop'
           arch: ${{ matrix.qt_arch }}
+
+      - name: Save Qt 6.12.0 to the cache (main only)
+        if: steps.qt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && matrix.arch == 'aarch64'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
+
+      # What install-qt-action exports after an install, on a hit and a
+      # miss alike; the kit's folder is the arch less its linux_
+      - name: Point the build at the kit
+        env:
+          QT_ARCH: ${{ matrix.qt_arch }}
+        run: |
+          kit="$RUNNER_TEMP/Qt/6.12.0/${QT_ARCH#linux_}"
+          test -x "$kit/bin/qmake" || { echo "::error::no Qt at $kit"; exit 1; }
+          {
+            echo "QT_ROOT_DIR=$kit"
+            echo "QT_PLUGIN_PATH=$kit/plugins"
+            echo "QML2_IMPORT_PATH=$kit/qml"
+            echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$kit/lib"
+            echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH:+$PKG_CONFIG_PATH:}$kit/lib/pkgconfig"
+          } >> "$GITHUB_ENV"
+          echo "$kit/bin" >> "$GITHUB_PATH"
 
       # rcc's embedded files and the squashfs take the commit's time, not
       # the checkout's, so two builds of one commit match (ADR-0035 section 4)
@@ -1052,19 +1171,59 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The kit and its Linux host kit from the Actions cache, as
+      # macos-build's (see the notes there): one copy, saved on main's
+      # pushes, which release.yml's tags read
+      - name: Restore Qt 6.12.0 from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: qt-android-6.12.0-android_arm64_v8a-qtconnectivity-autodesktop-linux-aqt-3.3
+
       # Qt 6.7+ publishes Android kits under the all_os host. A mobile kit
       # needs the desktop Qt of the build host too; --autodesktop installs it.
       # qtconnectivity is QtBluetooth, the phone's links (ADR-0028 section 2).
       - name: Install Qt 6.12.0 (android_arm64_v8a + linux host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
-          cache: true
+          cache: false
+          set-env: false
+          no-qt-binaries: ${{ steps.qt-cache.outputs.cache-hit == 'true' }}
+          dir: ${{ runner.temp }}
           version: '6.12.0'
           host: 'all_os'
           target: 'android'
           arch: 'android_arm64_v8a'
           modules: 'qtconnectivity'
           extra: '--autodesktop'
+
+      - name: Save Qt 6.12.0 to the cache (main only)
+        if: steps.qt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: ${{ steps.qt-cache.outputs.cache-primary-key }}
+
+      # What install-qt-action exports after an install, on a hit and a
+      # miss alike: QT_HOST_PATH is the HostPrefix of the kit's
+      # target_qt.conf, from its bin folder
+      - name: Point the build at the kit
+        run: |
+          kit="$RUNNER_TEMP/Qt/6.12.0/android_arm64_v8a"
+          test -x "$kit/bin/qt-cmake" || { echo "::error::no qt-cmake under $kit"; exit 1; }
+          prefix=$(sed -n 's/^HostPrefix=//p' "$kit/bin/target_qt.conf" | tr -d '\r' | head -n 1)
+          host=$(realpath -ms "$kit/bin/$prefix")
+          test -n "$prefix" && test -d "$host/bin" || { echo "::error::no host Qt at '$host'"; exit 1; }
+          {
+            echo "QT_ROOT_DIR=$kit"
+            echo "QT_HOST_PATH=$host"
+            echo "QT_PLUGIN_PATH=$kit/plugins"
+            echo "QML2_IMPORT_PATH=$kit/qml"
+            echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$kit/lib"
+            echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH:+$PKG_CONFIG_PATH:}$kit/lib/pkgconfig"
+          } >> "$GITHUB_ENV"
+          echo "$kit/bin" >> "$GITHUB_PATH"
 
       # Qt 6.12 for Android wants NDK r27 and JDK 21. The Ubuntu 24.04 and
       # 26.04 images both ship them (NDK 27.x is ANDROID_NDK_ROOT's
@@ -1332,12 +1491,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # install-qt-action's own cache (main only), keyed by the runner's
-      # kernel; a second iOS kit beside ios-build's, which restores its own
+      # No cache: the action's own key holds the runner's kernel, so each
+      # kernel update would save another 3.6 GB kit beside ios-build's
       - name: Install Qt 6.12.0 (ios + macOS host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         with:
-          cache: ${{ github.ref == 'refs/heads/main' }}
+          cache: false
           version: '6.12.0'
           host: 'mac'
           target: 'ios'
