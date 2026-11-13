@@ -513,12 +513,19 @@ namespace {
 /* A copy beside the recording (signals.json, conditions.json), whether or
  * not the header names it: its length, and with the header's hash whether
  * its bytes are those. Read in pieces, so a large file costs no memory;
- * one that can't be read counts as absent. */
-void read_copy(const std::string& path, const char* sha256, uint32_t* flags,
-               uint64_t* length)
+ * one that can't be read counts as absent, and one past most bytes (its
+ * loader refuses it) is present and never read. */
+void read_copy(const std::string& path, uint64_t most, const char* sha256,
+               uint32_t* flags, uint64_t* length)
 {
     file_ptr f = open_file(path);
     if (!f) {
+        return;
+    }
+    const uint64_t size = file_size(f.get());
+    if (size > most) {
+        *flags |= ECUIO_RECORDING_SIGNALS_PRESENT;
+        *length = size;
         return;
     }
     ecuio_sha256::hasher h;
@@ -546,9 +553,10 @@ void read_copy(const std::string& path, const char* sha256, uint32_t* flags,
 
 void ecuio_recording::read_copies(const std::string& folder)
 {
-    read_copy(folder + "/" + rows::kSignalFileName, signal_file.sha256,
-              &signal_file.flags, &signal_file.length);
-    read_copy(folder + "/" + rows::kConditionsName, conditions.sha256,
+    read_copy(folder + "/" + rows::kSignalFileName, UINT64_MAX,
+              signal_file.sha256, &signal_file.flags, &signal_file.length);
+    read_copy(folder + "/" + rows::kConditionsName,
+              ECUIO_CONDITION_FILE_MAX_BYTES, conditions.sha256,
               &conditions.flags, &conditions.length);
 }
 

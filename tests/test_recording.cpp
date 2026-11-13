@@ -1934,6 +1934,31 @@ TEST(RecordingTest, CondLinesAreReadInFormat3Alone)
     EXPECT_EQ(conditions_of(v3.utf8()).lines_skipped, 1u);
 }
 
+/* A copy no loader takes (past ECUIO_CONDITION_FILE_MAX_BYTES) is present
+ * and never MATCH, its own hash named or not; one at the bound matches */
+TEST(RecordingTest, AConditionsCopyPastTheLoadersBoundNeverMatches)
+{
+    const std::string head = std::string(rows::kSignalsHeader) + "\n";
+    for (const size_t size : {static_cast<size_t>(ECUIO_CONDITION_FILE_MAX_BYTES),
+                              ECUIO_CONDITION_FILE_MAX_BYTES + size_t{1}}) {
+        const std::string json(size, ' ');
+        const std::string sha = ecuio_sha256::hex_of(json.data(), json.size());
+        Folder f;
+        f.write("events.log",
+                events_v3({"conditions  conditions.json," + sha}));
+        f.write("signals.csv", head);
+        f.write("conditions.json", json);
+        const ecuio_recording_conditions_t c = conditions_of(f.utf8());
+        const bool loads = size <= ECUIO_CONDITION_FILE_MAX_BYTES;
+        EXPECT_EQ(c.flags, ECUIO_RECORDING_CONDITIONS_NAMED |
+                               ECUIO_RECORDING_CONDITIONS_PRESENT |
+                               (loads ? ECUIO_RECORDING_CONDITIONS_MATCH : 0u))
+            << size;
+        EXPECT_EQ(c.length, size);
+        EXPECT_EQ(std::string(c.sha256), sha);
+    }
+}
+
 TEST(RecordingTest, ProgressIsCalledAndCancelsTheOpen)
 {
     const Hour& h = fixture_hour();

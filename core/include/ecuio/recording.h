@@ -577,7 +577,8 @@ ecuio_status_t ecuio_recording_get_signals(const ecuio_recording_t* r,
 /* The set of conditions it was judged by, as the open found it, and as
  * ecuio_recording_get_signals answers for the signal file. A conditions
  * line that isn't conditions.json and its SHA-256 names none; the open
- * goes on. */
+ * goes on. A conditions.json past ECUIO_CONDITION_FILE_MAX_BYTES, which
+ * ecuio_condition_set_load refuses, is present but never MATCH. */
 ecuio_status_t
 ecuio_recording_get_conditions(const ecuio_recording_t* r,
                                ecuio_recording_conditions_t* out);
