@@ -1400,18 +1400,29 @@ void RecordingView::findStretches(
     const std::shared_ptr<ecuio_recording_t>& reader,
     const std::shared_ptr<Stop>& stop, const QPointer<RecordingView>& view,
     int request, ecuio_stretch_rules_t rules, quint64 generation, int holdMs,
-    int stopAt)
+    int stopAt, int holdAt)
 {
     struct Asked {
-        const Stop* stop;
+        Stop* stop;
         int request;
         int stopAt; // a test's
+        int holdAt; // a test's
         int asks;
-    } asked{stop.get(), request, stopAt, 0};
+    } asked{stop.get(), request, stopAt, holdAt, 0};
     // A close or a newer stretches ask ends the pass at its next second
     const ecuio_cancel_t closed = [](void* user) {
         auto* a = static_cast<Asked*>(user);
         ++a->asks;
+        if (a->asks == a->holdAt) {
+            ++a->stop->stretchesHeld;
+            const auto until =
+                std::chrono::steady_clock::now() + std::chrono::seconds(60);
+            while (!a->stop->stopped.load() &&
+                   a->stop->latestStretches.load() <= a->request &&
+                   std::chrono::steady_clock::now() < until) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        }
         return a->stop->stopped.load() ||
                        a->stop->latestStretches.load() > a->request ||
                        (a->stopAt > 0 && a->asks >= a->stopAt)
@@ -1600,9 +1611,9 @@ int RecordingView::stretches(bool pulls, bool cruises, const QVariantMap& rules)
             [reader = m_readerHold, stop = m_stop,
              view = QPointer<RecordingView>(this), request, asked,
              generation = m_generation, holdMs = m_stretchesHoldMs,
-             stopAt = m_stretchesStopAt] {
+             stopAt = m_stretchesStopAt, holdAt = m_stretchesHoldAt] {
                 findStretches(reader, stop, view, request, asked, generation,
-                              holdMs, stopAt);
+                              holdMs, stopAt, holdAt);
             });
     } catch (const std::bad_alloc&) {
         return 0;

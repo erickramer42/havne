@@ -736,7 +736,7 @@ double meanOver(RecordingView& v, int signal, double t0, double t1)
 
 // The answer to one stretches ask, waited for on the GUI thread
 QVariantList askedStretches(RecordingView& v, bool pulls, bool cruises,
-                            const QVariantMap& rules = {})
+                            const QVariantMap& rules = {}, int waitMs = 10000)
 {
     QVariantList got;
     bool answered = false;
@@ -748,7 +748,7 @@ QVariantList askedStretches(RecordingView& v, bool pulls, bool cruises,
                                     });
     EXPECT_GT(v.stretches(pulls, cruises, rules), 0)
         << v.stretchesProblem().toStdString();
-    EXPECT_TRUE(waitFor([&] { return answered; }));
+    EXPECT_TRUE(waitFor([&] { return answered; }, waitMs));
     QObject::disconnect(c);
     return got;
 }
@@ -973,9 +973,8 @@ QString denseRecording(const QTemporaryDir& dir, int periodS = 120,
 
 } // namespace
 
-// A close stops a stretches pass under way at its next second: timed
-// against a whole pass over the same recording, the pass after the close
-// ends well before a whole one would
+// A close stops a stretches pass under way at its next second: a pass held
+// at an ask halfway through its read and closed there ends at that ask
 TEST(RecordingViewTest, ACloseStopsAStretchesPassUnderWay)
 {
     QTemporaryDir dir;
@@ -986,23 +985,21 @@ TEST(RecordingViewTest, ACloseStopsAStretchesPassUnderWay)
     v.open(folder);
     ASSERT_TRUE(waitFor([&] { return settled(v); }, 60000));
     ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
-    QElapsedTimer timer;
-    timer.start();
-    ASSERT_GE(askedStretches(v, true, false).size(), 20);
-    const qint64 whole = timer.elapsed();
+    // An unoptimized build on CI's macOS runner reads it in about 10 s
+    ASSERT_GE(askedStretches(v, true, false, {}, 120000).size(), 20);
+    const int whole = v.stretchesAsksForTesting();
+    ASSERT_GT(whole, 100);
 
-    // Held, then closed at a third of a whole pass into its read
-    const int hold = 200;
-    v.setStretchesHoldForTesting(hold);
-    timer.restart();
+    const int half = whole / 2;
+    v.setStretchesHoldAtAskForTesting(half);
     ASSERT_GT(v.stretches(true, false), 0);
-    QThread::msleep(static_cast<unsigned long>(hold + whole / 3));
+    ASSERT_TRUE(
+        waitFor([&] { return v.stretchesHeldForTesting() > 0; }, 120000));
     v.close();
-    ASSERT_TRUE(waitFor([&] { return v.readsStoppedForTesting() > 0; },
-                        hold + 2 * static_cast<int>(whole) + 5000))
+    ASSERT_TRUE(waitFor([&] { return v.readsStoppedForTesting() > 0; }))
         << "the pass read on to its end";
-    EXPECT_LT(timer.elapsed(), hold + whole / 3 + whole / 2 + 100)
-        << "a whole pass took " << whole << " ms";
+    EXPECT_EQ(v.stretchesAsksForTesting(), half)
+        << "a whole pass asks " << whole << " times";
 }
 
 // More stretches than a pass's first call holds: the pass asks again for
