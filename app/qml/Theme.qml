@@ -327,40 +327,71 @@ QtObject {
     })
     readonly property var colors: palettes[active]
 
-    // A gauge's picked colors (a stored name, never a hex): each at least
-    // 3:1 on its look's surface. Night has none, so a pick draws in its tint
-    // None is near the zones' colors (warning, danger, cold), which keep their meaning
-    readonly property var gaugeColorNames: ["teal", "green", "lime", "cyan", "pink", "magenta", "stone"]
+    // A gauge's picked colors (a stored name, or a custom "#rrggbb"): each
+    // name at least 3:1 on its look's surface. Night has none, so a pick draws in its tint
+    // The first seven are apart from the zones' colors (warning, danger, cold),
+    // which keep their meaning; the last five are the standard colors, and sit
+    // near the zones on purpose. A custom color is stored as "#rrggbb" instead
+    // of a name and is the user's own: no rule applies to it
+    readonly property var gaugeColorNames: ["teal", "green", "lime", "cyan", "pink", "magenta", "stone",
+                                            "red", "blue", "yellow", "truegreen", "lightblue"]
     readonly property var gaugePalettes: ({
         dark: { teal: "#3fd1c0", green: "#4ade80", lime: "#b5e04a", cyan: "#5ad8e8",
-                pink: "#f48fb1", magenta: "#e879c8", stone: "#a8a8b3" },
+                pink: "#f48fb1", magenta: "#e879c8", stone: "#a8a8b3",
+                red: "#ff601f", blue: "#34cafb", yellow: "#e5fd15",
+                truegreen: "#39ff14", lightblue: "#60a5fa" },
         daylight: { teal: "#0f7f84", green: "#1e7d3f", lime: "#4f7a0a", cyan: "#0a7d95",
-                    pink: "#b83a73", magenta: "#a81f8c", stone: "#5b5b66" }
+                    pink: "#b83a73", magenta: "#a81f8c", stone: "#5b5b66",
+                    red: "#fc5d1c", blue: "#1f9ec6", yellow: "#946c00",
+                    truegreen: "#38a721", lightblue: "#2458b8" }
     })
     // A name as the picker says it
     function gaugeColorLabel(name) {
         switch (name) {
         case "teal": return qsTr("Teal")
-        case "green": return qsTr("Green")
+        case "green": return qsTr("Light green")
         case "lime": return qsTr("Lime")
         case "cyan": return qsTr("Cyan")
         case "pink": return qsTr("Pink")
         case "magenta": return qsTr("Magenta")
         case "stone": return qsTr("Stone")
+        case "red": return qsTr("Red")
+        case "blue": return qsTr("Blue")
+        case "yellow": return qsTr("Yellow")
+        case "truegreen": return qsTr("Green")
+        case "lightblue": return qsTr("Light blue")
         default: return name
         }
     }
-    // The picked color for a stored name in the look shown, "" for none: the
-    // default, a name this version doesn't know, or Night
+    // A custom color as stored: "#rrggbb", lowercase, nothing else
+    function isGaugeHex(value) {
+        return typeof value === "string" && /^#[0-9a-f]{6}$/.test(value)
+    }
+    // The picked color for a stored name or custom hex in the look shown, ""
+    // for none: the default, a name this version doesn't know, or Night
     function gaugeColor(name) {
         const set = gaugePalettes[active]
-        return set !== undefined && typeof name === "string"
-               && Object.prototype.hasOwnProperty.call(set, name) ? set[name] : ""
+        if (set === undefined)
+            return ""
+        if (isGaugeHex(name))
+            return name
+        return typeof name === "string" && Object.prototype.hasOwnProperty.call(set, name) ? set[name] : ""
     }
-    // A name as the picker shows it, in the palette's look (Dark's when Night is on)
+    // A name as the picker shows it, in the palette's look (Dark's when Night
+    // is on); a custom color shows as itself
     function gaugeSwatch(name) {
+        if (isGaugeHex(name))
+            return name
         const set = gaugePalettes[active] ?? gaugePalettes[nightActive ? "dark" : active]
         return set !== undefined && Object.prototype.hasOwnProperty.call(set, name) ? set[name] : "transparent"
+    }
+    // WCAG's contrast of a "#rrggbb" against the look's surface (Dark's at
+    // Night): below 3 a gauge in it is hard to read, which the picker says
+    function gaugeContrast(hex) {
+        const lin = v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+        const lum = c => 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+        const a = lum(Qt.color(hex)), b = lum(Qt.color(palettes[nightActive ? "dark" : active].surface))
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
     }
 
     readonly property color bg:             colors.bg

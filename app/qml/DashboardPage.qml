@@ -1463,6 +1463,22 @@ Page {
         }
     }
 
+    // One channel of the custom color: a whole number 0 to 255, committed with its two siblings
+    component ChannelField: ThemedTextField {
+        required property int index
+        required property var row
+        Layout.fillWidth: true
+        Layout.minimumWidth: 40
+        Layout.preferredWidth: 64
+        Layout.preferredHeight: Theme.touchTarget
+        inputMethodHints: Qt.ImhDigitsOnly
+        maximumLength: 3
+        text: String(row.channel(index))
+        Accessible.name: [qsTr("Red value of the color, 0 to 255"), qsTr("Green value of the color, 0 to 255"),
+                          qsTr("Blue value of the color, 0 to 255")][index]
+        onEditingFinished: row.commit()
+    }
+
     component Caption: Label {
         color: Theme.textDim
         font.pixelSize: Theme.fontCaption
@@ -1867,13 +1883,26 @@ Page {
                         readonly property string current: panelCard.cell && panelCard.cell.options
                                                           && Theme.gaugeColorNames.indexOf(panelCard.cell.options.color) >= 0
                                                           ? panelCard.cell.options.color : ""
+                        // A custom color: "#rrggbb" as stored, else ""
+                        readonly property string custom: panelCard.cell && panelCard.cell.options
+                                                         && Theme.isGaugeHex(panelCard.cell.options.color)
+                                                         ? panelCard.cell.options.color : ""
+                        // The Custom entry's fields show while it is open or a custom color is set
+                        property bool customOpen: false
+                        readonly property bool customShown: customOpen || custom !== ""
+                        // The panel is one instance for every gauge: another gauge starts closed
+                        Connections {
+                            target: root
+                            function onSelectedChanged() { colorRow.customOpen = false }
+                            function onPageIndexChanged() { colorRow.customOpen = false }
+                        }
                         ThemedButton {
                             objectName: "panelColor_default"
                             text: qsTr("Default")
                             Accessible.name: qsTr("Default color")
                             checkable: true
-                            checked: colorRow.current === ""
-                            onClicked: root.setOptions({ color: null })
+                            checked: colorRow.current === "" && colorRow.custom === ""
+                            onClicked: { colorRow.customOpen = false; root.setOptions({ color: null }) }
                         }
                         Repeater {
                             model: Theme.gaugeColorNames
@@ -1886,7 +1915,7 @@ Page {
                                 checkable: true
                                 checked: colorRow.current === modelData
                                 Accessible.name: qsTr("Color %1").arg(Theme.gaugeColorLabel(modelData))
-                                onToggled: { toggle(); root.setOptions({ color: modelData }) }
+                                onToggled: { toggle(); colorRow.customOpen = false; root.setOptions({ color: modelData }) }
                                 contentItem: Item {}
                                 background: Rectangle {
                                     anchors.centerIn: parent
@@ -1899,6 +1928,77 @@ Page {
                                 }
                             }
                         }
+                        ThemedButton {
+                            objectName: "panelColor_custom"
+                            text: qsTr("Custom...")
+                            Accessible.name: qsTr("Custom color")
+                            // Not checkable: a click would flip the state the row's own rules decide
+                            checked: colorRow.customShown
+                            onClicked: colorRow.customOpen = !colorRow.customShown || colorRow.custom === ""
+                        }
+                    }
+                }
+
+                // Three whole numbers make a color of the user's own, stored as
+                // "#rrggbb"; nothing is refused for being hard to see, it is said
+                RowLayout {
+                    id: customRow
+                    objectName: "panelColorCustom"
+                    Layout.fillWidth: true
+                    visible: panelCard.drawsValue && colorRow.customShown
+                    spacing: 4
+                    // The color the fields start from: the stored custom one, else what the gauge draws now
+                    readonly property color base: colorRow.custom !== "" ? colorRow.custom
+                        : Theme.gaugeColor(panelCard.cell && panelCard.cell.options ? panelCard.cell.options.color : "") || Theme.gaugeValue
+                    function channel(i) { return Math.round([base.r, base.g, base.b][i] * 255) }
+                    // "#rrggbb" for three well-formed whole numbers 0 to 255, else ""
+                    function typed() {
+                        let out = "#"
+                        for (const f of [fieldR, fieldG, fieldB]) {
+                            const t = f.text.trim()
+                            if (!/^[0-9]{1,3}$/.test(t) || Number(t) > 255)
+                                return ""
+                            out += (Number(t) < 16 ? "0" : "") + Number(t).toString(16)
+                        }
+                        return out
+                    }
+                    readonly property string previewHex: { void fieldR.text; void fieldG.text; void fieldB.text; return typed() }
+                    function commit() {
+                        const hex = typed()
+                        // A focus pass-through sends editingFinished with the text unchanged: nothing to store
+                        if (hex !== "" && !Qt.colorEqual(hex, base))
+                            root.setOptions({ color: hex })
+                        fieldR.text = Qt.binding(() => String(customRow.channel(0)))
+                        fieldG.text = Qt.binding(() => String(customRow.channel(1)))
+                        fieldB.text = Qt.binding(() => String(customRow.channel(2)))
+                    }
+                    Caption { text: "R" }
+                    ChannelField { id: fieldR; objectName: "panelColorR"; index: 0; row: customRow }
+                    Caption { text: "G" }
+                    ChannelField { id: fieldG; objectName: "panelColorG"; index: 1; row: customRow }
+                    Caption { text: "B" }
+                    ChannelField { id: fieldB; objectName: "panelColorB"; index: 2; row: customRow }
+                }
+                // The preview, and under 3:1 what it means
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: customRow.visible
+                    spacing: 8
+                    Rectangle {
+                        objectName: "panelColorPreview"
+                        Layout.preferredWidth: 32
+                        Layout.preferredHeight: 32
+                        radius: 6
+                        color: customRow.previewHex !== "" ? customRow.previewHex : "transparent"
+                        border.width: 1
+                        border.color: Theme.outline
+                    }
+                    Caption {
+                        objectName: "panelColorHard"
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        visible: customRow.previewHex !== "" && Theme.gaugeContrast(customRow.previewHex) < 3
+                        text: qsTr("Hard to read on this background")
                     }
                 }
 
