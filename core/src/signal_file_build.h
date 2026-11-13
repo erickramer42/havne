@@ -85,6 +85,10 @@ void build(const parts& in, ecuio_signal_file& f);
 /* A "source" block's rules */
 void read_source(const ecuio_json::Value& source);
 
+/* An "ecus" entry's addresses, the entry one a load took: its rx, and
+ * its tx as given or the standard's for that rx */
+void ecu_addresses(const ecuio_json::Value& ecu, uint32_t* rx, uint32_t* tx);
+
 /* The loader's rules for any JSON it reads, each throwing refused */
 [[noreturn]] void refuse(const ecuio_json::Value& at, std::string words);
 [[noreturn]] void refuse(const ecuio_json::Member& at, std::string words);

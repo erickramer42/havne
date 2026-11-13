@@ -31,6 +31,12 @@
       "description": "The plugin's own version, X.Y.Z: each 0 to 65535 with no leading zero, 15 characters at most.",
       "$ref": "#/$defs/version"
     },
+    "lineage": {
+      "title": "Lineage",
+      "description": "The first 32 hex digits, in lower case, of the SHA-256 of the signal file the plugin was first made from. Havne writes it when it wraps a signal file and keeps it through every change; a package with the same id and the same lineage is a version of the same plugin. Leave it out of a plugin written by hand.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
     "requires": {
       "title": "Requires",
       "description": "What the plugin needs to load.",
