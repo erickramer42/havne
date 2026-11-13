@@ -2431,6 +2431,32 @@ TEST(RecordingViewTest, AReportWhoseThreadCantStartSaysSo)
     EXPECT_TRUE(saved[0].value(QStringLiteral("ok")).toBool());
 }
 
+// A report thread the system can't start leaves the bytes of a document the
+// user chose to replace where they were: only the picker's empty one goes
+TEST(RecordingViewTest, AReportWhoseThreadCantStartKeepsTheUsersDocument)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.setThroughProviderForTesting(true);
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    const QString picked = root.path() + QStringLiteral("/picked.txt");
+    {
+        QFile f(picked);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write("the user's earlier report");
+    }
+    v.setFailThreadForTesting(true);
+    EXPECT_FALSE(v.saveHealthReport(QUrl::fromLocalFile(picked), 0));
+    QFile f(picked);
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly)) << "the user's document went";
+    EXPECT_EQ(f.readAll(), QByteArray("the user's earlier report"));
+}
+
 // A CSV import holds values alone, and Save report stays offered on it:
 // core's report takes a folder with no frames.csv, which has no ECU and
 // says so, so the save ends and succeeds rather than failing on frames
