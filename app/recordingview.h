@@ -246,6 +246,14 @@ public:
     // Each stretches pass waits this long before it reads, so a test can
     // close or destroy the view while one is under way
     void setStretchesHoldForTesting(int ms) { m_stretchesHoldMs = ms; }
+    // Each stretches pass answers stop at its nth ask of core's cancel (0
+    // never), as a close landing there would
+    void setStretchesStopAtAskForTesting(int n) { m_stretchesStopAt = n; }
+    // The last stretches pass's asks of core's cancel, both calls together
+    int stretchesAsksForTesting() const
+    {
+        return m_stop ? m_stop->passAsks.load() : 0;
+    }
     // The same for the statistics and step asks' task, before each read
     void setAsksHoldForTesting(int ms) { m_asksHoldMs = ms; }
     // The holds this recording's asks' task has come to with an ask taken:
@@ -330,6 +338,7 @@ private:
     struct Stop {
         std::atomic<bool> stopped{false};
         std::atomic<int> readsStopped{0};
+        std::atomic<int> passAsks{0}; // a test's: the last pass's asks
     };
 
     struct FrameSet;
@@ -380,7 +389,7 @@ private:
                               const std::shared_ptr<Stop>& stop,
                               const QPointer<RecordingView>& view, int request,
                               ecuio_stretch_rules_t rules, quint64 generation,
-                              int holdMs);
+                              int holdMs, int stopAt);
     void setStretchesProblem(const QString& words);
     void stretchesFinished(int request, ecuio_status_t rc,
                            const std::vector<ecuio_recording_stretch_t>& got,
@@ -431,6 +440,7 @@ private:
     int m_lastMeans = 0;
     int m_lastStretches = 0;
     int m_stretchesHoldMs = 0;
+    int m_stretchesStopAt = 0;
     QString m_stretchesProblem;
     // Each open's number: a result or progress posted for an earlier one
     // is dropped

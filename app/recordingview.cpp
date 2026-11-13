@@ -1350,10 +1350,21 @@ void RecordingView::setStretchesProblem(const QString& words)
 void RecordingView::findStretches(
     const std::shared_ptr<ecuio_recording_t>& reader,
     const std::shared_ptr<Stop>& stop, const QPointer<RecordingView>& view,
-    int request, ecuio_stretch_rules_t rules, quint64 generation, int holdMs)
+    int request, ecuio_stretch_rules_t rules, quint64 generation, int holdMs,
+    int stopAt)
 {
+    struct Asked {
+        const Stop* stop;
+        int stopAt; // a test's
+        int asks;
+    } asked{stop.get(), stopAt, 0};
     const ecuio_cancel_t closed = [](void* user) {
-        return static_cast<const Stop*>(user)->stopped.load() ? 1 : 0;
+        auto* a = static_cast<Asked*>(user);
+        ++a->asks;
+        return a->stop->stopped.load() ||
+                       (a->stopAt > 0 && a->asks >= a->stopAt)
+                   ? 1
+                   : 0;
     };
     if (holdMs > 0) {
         std::this_thread::sleep_for(std::chrono::milliseconds(holdMs));
@@ -1369,13 +1380,13 @@ void RecordingView::findStretches(
     try {
         got.resize(first);
         uint32_t count = 0;
-        rc = ecuio_recording_stretches_with(reader.get(), &rules, 0, end,
-                                            closed, stop.get(), got.data(),
-                                            first, &count);
+        rc =
+            ecuio_recording_stretches_with(reader.get(), &rules, 0, end, closed,
+                                           &asked, got.data(), first, &count);
         if (rc == ECUIO_OK && count > first) {
             got.resize(count);
             rc = ecuio_recording_stretches_with(reader.get(), &rules, 0, end,
-                                                closed, stop.get(), got.data(),
+                                                closed, &asked, got.data(),
                                                 count, &count);
         }
         got.resize(rc == ECUIO_OK ? (std::min<size_t>)(got.size(), count) : 0);
@@ -1383,6 +1394,7 @@ void RecordingView::findStretches(
         got.clear();
         rc = ECUIO_ERR_OUT_OF_MEMORY;
     }
+    stop->passAsks = asked.asks;
     if (rc == ECUIO_ERR_CANCELED) {
         ++stop->readsStopped; // closed: its answer would be dropped
         return;
@@ -1525,9 +1537,10 @@ int RecordingView::stretches(bool pulls, bool cruises, const QVariantMap& rules)
         QThreadPool::globalInstance()->start(
             [reader = m_readerHold, stop = m_stop,
              view = QPointer<RecordingView>(this), request, asked,
-             generation = m_generation, holdMs = m_stretchesHoldMs] {
+             generation = m_generation, holdMs = m_stretchesHoldMs,
+             stopAt = m_stretchesStopAt] {
                 findStretches(reader, stop, view, request, asked, generation,
-                              holdMs);
+                              holdMs, stopAt);
             });
     } catch (const std::bad_alloc&) {
         return 0;
