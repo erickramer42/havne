@@ -988,8 +988,9 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
         }
         if (!shared) {
             if (f.channels.size() >= ECUIO_MAX_CHANNELS) {
-                refuse(e, "ecu " + q(id) + " is past the 4 ECUs one session "
-                          "reads, the base's counted");
+                refuse(e, "ecu " + q(id) + " is past the " +
+                              std::to_string(ECUIO_MAX_CHANNELS) +
+                              " ECUs one session reads, the base's counted");
             }
             for (const ecuio_channel_decl_t& c : f.channels) {
                 if (is_11_bit(c.rx_id) != is_11_bit(rx)) {

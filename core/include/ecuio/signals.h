@@ -145,12 +145,12 @@ _Static_assert(offsetof(ecuio_signal_def_t, table_count) == 102, "def table_coun
 _Static_assert(offsetof(ecuio_signal_def_t, reserved) == 104, "def reserved offset is ABI");
 #endif
 
-/* ADR-0013 section 4: profile-declared channels. rx_id is the
- * flow-control filter target (receive); tx_id is the request
- * destination. Sets declaring none (raw/mock) keep channel_count
- * 0: no filters, no requests, exactly today's behavior. This is
- * the seed of the v0.5.0 plugin filter surface: bounded, validated
- * at registration, consumed by the j2534 transport only. */
+/* ADR-0013 section 4: a set's channels, one for each ECU it asks.
+ * rx_id is the reply ID (each transport's receive filter and ISO-TP's
+ * flow-control target); tx_id is the request's. A set that declares
+ * none (raw, mock) asks nothing and filters nothing. Validated at
+ * registration; read by the requesting transports (J2534, ELM327,
+ * SocketCAN) and the simulated ECU. */
 #define ECUIO_MAX_CHANNELS 4
 
 typedef struct ecuio_channel_decl {
