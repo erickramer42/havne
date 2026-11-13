@@ -2382,6 +2382,16 @@ TEST(FolderExportTest, ARangeOpensWithAHeldLineForEachConditionOnAtItsStart)
               "22:13:25.250  +5.000  end  <why>: 5 frames, 1 values, 0 "
               "records dropped, 0 notes dropped\n");
 
+    /* The held line's +S.sss rounds half up, as the recorder's prefix */
+    FolderExported half(f, 0, 3500500, 4500000, "half");
+    ASSERT_EQ(half.rc, ECUIO_OK) << half.detail;
+    EXPECT_EQ(body_of(half.files["events.log"])
+                  .rfind("22:13:23.750  +3.501  cond  "
+                         "boost_low,on,stale held,-3.5,1,3500500,3450600\n",
+                         0),
+              0u)
+        << half.files["events.log"];
+
     /* From 0, or from before every cond line: nothing held */
     FolderExported early(f, 0, 900000, 0, "early");
     ASSERT_EQ(early.rc, ECUIO_OK) << early.detail;
@@ -2400,7 +2410,10 @@ TEST(FolderExportTest, AScrubbedCopyKeepsOnlyACondLinesKnownFields)
                             "the user's words\n";
     const std::string bad =
         "22:13:24.400  +4.150  cond  Knock,on,fired,6,0,4150000,4100000\n";
-    conditions_recording(f, odd + bad);
+    /* In the range by its +4.500 prefix, past it by its own host_us */
+    const std::string past =
+        "22:13:24.750  +4.500  cond  knock,off,,0,0,4500400,4450400\n";
+    conditions_recording(f, odd + bad + past);
     FolderExported e(f, 0, 4000000, 4500000);
     ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
     const std::string body = body_of(e.files["events.log"]);
@@ -2411,12 +2424,42 @@ TEST(FolderExportTest, AScrubbedCopyKeepsOnlyACondLinesKnownFields)
     EXPECT_EQ(body.find("blink"), std::string::npos) << body;
     EXPECT_EQ(body.find("Knock"), std::string::npos) << body;
     EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY], 1u);
+    /* A line at the range's start is in it, not held before it */
+    EXPECT_NE(
+        body.find("  cond  coolant_high,on,fired,113,0,4000000,3950000\n"),
+        std::string::npos)
+        << body;
+    EXPECT_EQ(body.find("coolant_high,on,held"), std::string::npos) << body;
+    EXPECT_EQ(body.find("4500400"), std::string::npos) << body;
 
     FolderExported raw(f, ECUIO_EXPORT_RAW, 4000000, 4500000, "raw");
     ASSERT_EQ(raw.rc, ECUIO_OK) << raw.detail;
     const std::string kept = body_of(raw.files["events.log"]);
     EXPECT_NE(kept.find(odd), std::string::npos) << kept;
     EXPECT_NE(kept.find(bad), std::string::npos) << kept;
+    EXPECT_EQ(kept.find(past), std::string::npos) << kept;
+}
+
+/* A held line's clock carries on through midnight */
+TEST(FolderExportTest, AHeldLinesClockWrapsAtMidnight)
+{
+    Folder f;
+    f.write("rec/events.log",
+            std::string("ecuio session recording, format 3 (ADR-0049)\n"
+                        "profile  raw\n") +
+                kColumns +
+                "\n"
+                "23:59:59.900  +1.000  cond  late,on,fired,1,0,1000000,"
+                "990000\n"
+                "00:00:01.000  +2.100  end  done: 0 frames, 1 values, 0 "
+                "records dropped, 0 notes dropped\n");
+    f.write("rec/signals.csv", std::string(kBomHeader) + "1500000,A,1,\n");
+    FolderExported e(f, 0, 1200000);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_EQ(body_of(e.files["events.log"]),
+              "00:00:00.100  +1.200  cond  late,on,held,1,0,1200000,1190000\n"
+              "00:00:01.000  +2.100  end  <why>: 0 frames, 1 values, 0 "
+              "records dropped, 0 notes dropped\n");
 }
 
 /* Cond lines are format 3's alone, as the reader takes them: in a format
