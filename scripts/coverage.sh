@@ -195,7 +195,11 @@ case "$part" in
     gtest) ctest_skip=1 ;;
     [1-9]*/[1-9]*) ctest_args+=(-I "${part%/*},,${part#*/}") ;;
 esac
-[ -n "${ctest_skip:-}" ] || cover ctest 0 "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
+ctest_ran=0
+if [ -z "${ctest_skip:-}" ]; then
+    cover ctest 0 "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
+    ctest_ran=1
+fi
 cat "$LOGDIR"/cover-test_*.log "$LOGDIR/cover-ctest.log" > "$LOGDIR/coverage.log" 2>/dev/null
 dur=$((SECONDS - start))
 
@@ -255,7 +259,18 @@ gtests=$(cat "$LOGDIR"/cover-test_*.log 2>/dev/null | tr -d '\r' | awk '
     /^\[  PASSED  \] [0-9]+ test/ { p += $4 }
     /^\[  FAILED  \] [0-9]+ test/ { f += $4 }
     END { if (p + f) printf "gtest %d passed, %d failed", p, f }')
-line coverage ok "$dur" "$(head -n 1 <<<"$summary"); ${gtests:-no gtest summary}; ctest ${tests:-no summary}"
+# A binary or the ctest leg that left no report is missing from the figure, so the leg fails
+# with the line that says so (the ok line would read as a pass above the failure)
+missing=""
+for name in $failed; do
+    [ -e "$LOGDIR/raw-$name.xml" ] || missing="$missing $name"
+done
+[ "$ctest_ran" = 0 ] || [ -e "$LOGDIR/raw-ctest.xml" ] || missing="$missing ctest"
+if [ -n "$missing" ]; then
+    line coverage FAIL "$dur" "NO REPORT from:$missing (the figure lacks their lines); $(head -n 1 <<<"$summary")"
+else
+    line coverage ok "$dur" "$(head -n 1 <<<"$summary"); ${gtests:-no gtest summary}; ctest ${tests:-no summary}"
+fi
 tail -n +2 <<<"$summary"
 for name in $failed; do
     echo "FAILED: $name (see $LOGDIR/cover-$name.log)"
@@ -263,12 +278,4 @@ for name in $failed; do
 done
 sed -n '/The following tests FAILED:/,$p' "$LOGDIR/cover-ctest.log" | sed -n '2,25p'
 echo "report: $LOGDIR/cobertura.xml"
-# A binary that failed and left no report is missing from the figure: fail the leg
-missing=""
-for name in $failed; do
-    [ -e "$LOGDIR/raw-$name.xml" ] || missing="$missing $name"
-done
-if [ -n "$missing" ]; then
-    echo "NO REPORT from:$missing (the figure above lacks their lines)"
-    exit 1
-fi
+[ -z "$missing" ] || exit 1
