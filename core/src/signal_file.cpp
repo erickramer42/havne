@@ -1010,6 +1010,14 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
     }
 }
 
+void ecu_addresses(const Value& ecu, uint32_t* rx, uint32_t* tx)
+{
+    *rx = hex_of(*ecu.find("rx"), 1, 8, "an ECU's rx");
+    const Value* given = ecu.find("tx");
+    *tx = given != nullptr ? hex_of(*given, 1, 8, "an ECU's tx")
+                           : standard_tx(*rx);
+}
+
 /* A signal that reads a reply: its ECU, request and field into d */
 void read_field(const Value& s, const std::string& kind,
                 const std::vector<std::pair<std::string, uint32_t>>& ecus,

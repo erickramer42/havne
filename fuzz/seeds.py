@@ -194,6 +194,27 @@ def main(argv):
     text = json.dumps(packed, ensure_ascii=False, indent=1).encode("utf-8")
     write(out, "fuzz_plugin_manifest", "packed_example-sim", b"\x00" + text + after)
 
+    # Making and changing a packed plugin: a switches byte, then a signal
+    # file to wrap, 0x1E and a signal file to put into the result; with
+    # 0x40 the first piece is a packed plugin. Each file alone under two
+    # switches, each ordered pair (the put's variant "other", then
+    # "base", which replaces the wrap's), and the example plugin with
+    # each file put as "other" and under the file's own name
+    wrap_files = [(os.path.basename(os.path.dirname(p)) + "_" + os.path.basename(p),
+                   read(os.path.relpath(p, ROOT))) for p in signal_files]
+    wrap_files += [("grammar_format2.json", json.dumps(grammar).encode()),
+                   ("chain_format2.json", json.dumps(chain).encode())]
+    for name, data in wrap_files:
+        write(out, "fuzz_plugin_wrap", "wrap_" + name, b"\x00" + data)
+        write(out, "fuzz_plugin_wrap", "wrap_options_" + name, b"\x0f" + data)
+        write(out, "fuzz_plugin_wrap", "packed_put_" + name, b"\x40" + text + SEP + data)
+        write(out, "fuzz_plugin_wrap", "packed_slug_" + name, b"\x50" + text + SEP + data)
+        for other, second in wrap_files:
+            write(out, "fuzz_plugin_wrap", "put_" + name + "_" + other,
+                  b"\x00" + data + SEP + second)
+            write(out, "fuzz_plugin_wrap", "replace_" + name + "_" + other,
+                  b"\x20" + data + SEP + second)
+
     # The recording and export harnesses: a folder, 'F' then events.log,
     # signals.csv, markers.csv and frames.csv cut at 0x1E, each opened
     # through signals.csv and through its frames, or exported and
