@@ -6724,6 +6724,121 @@ TEST(BridgeTest, ARecordingsRowCountsASignalFilesSignalsOnly)
     EXPECT_EQ(rows.at(0).toMap().value(QStringLiteral("signals")).toInt(), 500);
 }
 
+// A focus line far longer than one read names picks whose quoted names hold
+// "columns" and "signal  " after spaces: a later part of it, trimmed, starts
+// with one of them wherever the parts fall, and still counts as no line
+TEST(BridgeTest, ARecordingsRowJudgesOnlyALinesStart)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString dir = root.path() + QStringLiteral("/20261113-090000");
+    ASSERT_TRUE(QDir().mkpath(dir));
+    QFile frames(dir + QStringLiteral("/frames.csv"));
+    ASSERT_TRUE(frames.open(QIODevice::WriteOnly));
+    QByteArray focus = "focus  ";
+    for (int i = 0; focus.size() < 40000; ++i) {
+        const QByteArray pad(1 + i % 18, ' ');
+        focus += (i == 0 ? "\"" : ",\"") + pad +
+                 (i % 2 == 0 ? "columns, x" : "signal  y, z") + "\"";
+    }
+    // The case's premise: parts of 1099 or 1100 bytes both start with them
+    for (const int part : {1099, 1100}) {
+        int words = 0;
+        for (int at = part; at < focus.size(); at += part) {
+            const QByteArray rest = focus.mid(at).trimmed();
+            words += rest.startsWith("columns") || rest.startsWith("signal  ");
+        }
+        EXPECT_GE(words, 2) << part;
+    }
+    QFile events(dir + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+    events.write("ecuio session recording, format 3 (ADR-0049)\n"
+                 "uri  mock://demo\n" +
+                 focus + "\n");
+    for (int i = 0; i < 5; ++i) {
+        events.write("signal  S" + QByteArray::number(i) +
+                     ",number,km/h,1,1,1\n");
+    }
+    events.write("columns  local time, seconds\n\n"
+                 "09:00:25.000  +25.500  end  x\n");
+    events.close();
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    const QVariantList rows = bridge.recentRecordings(10);
+    ASSERT_EQ(rows.size(), 1);
+    const QVariantMap row = rows.at(0).toMap();
+    EXPECT_EQ(row.value(QStringLiteral("signals")).toInt(), 5);
+    EXPECT_TRUE(row.value(QStringLiteral("log")).toBool());
+}
+
+#ifdef _WIN32
+// A read that fails before the file's end (its bytes locked by another
+// handle) ends the header's read: the row comes back, no signal counted
+TEST(BridgeTest, ARecordingsRowEndsAtAReadThatFails)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString dir = root.path() + QStringLiteral("/20261113-100000");
+    ASSERT_TRUE(QDir().mkpath(dir));
+    QFile frames(dir + QStringLiteral("/frames.csv"));
+    ASSERT_TRUE(frames.open(QIODevice::WriteOnly));
+    frames.close();
+    const QString path = dir + QStringLiteral("/events.log");
+    {
+        QFile events(path);
+        ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+        events.write("ecuio session recording, format 3 (ADR-0049)\n"
+                     "uri  mock://demo\n");
+        for (int i = 0; i < 50; ++i) {
+            events.write("signal  S" + QByteArray::number(i) +
+                         ",number,km/h,1,1,1\n");
+        }
+        events.write("columns  local time, seconds\n\n");
+    }
+    const std::wstring native = QDir::toNativeSeparators(path).toStdWString();
+    HANDLE locker = CreateFileW(native.c_str(), GENERIC_READ | GENERIC_WRITE,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(locker, INVALID_HANDLE_VALUE);
+    OVERLAPPED whole{};
+    ASSERT_TRUE(LockFileEx(locker,
+                           LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                           0, MAXDWORD, MAXDWORD, &whole));
+    {
+        // What the row's read meets: nothing read, and not at the end
+        QFile probe(path);
+        ASSERT_TRUE(probe.open(QIODevice::ReadOnly | QIODevice::Text));
+        EXPECT_TRUE(probe.readLine(1100).isEmpty());
+        EXPECT_FALSE(probe.atEnd());
+    }
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    std::atomic<bool> done{false};
+    std::atomic<int> counted{-1};
+    std::thread reader([&] {
+        counted = bridge.recordingRow(dir)
+                      .value(QStringLiteral("signals"), -2)
+                      .toInt();
+        done = true;
+    });
+    QElapsedTimer waited;
+    waited.start();
+    while (!done && waited.elapsed() < 20000) {
+        QThread::msleep(10);
+    }
+    if (!done) {
+        // The read spins on: nothing can stop it, so the process ends here
+        ADD_FAILURE() << "the header's read never ended";
+        std::fflush(stdout);
+        std::_Exit(1);
+    }
+    reader.join();
+    UnlockFileEx(locker, 0, MAXDWORD, MAXDWORD, &whole);
+    CloseHandle(locker);
+    EXPECT_EQ(counted.load(), 0);
+}
+#endif
+
 TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
 {
     QTemporaryDir root;
