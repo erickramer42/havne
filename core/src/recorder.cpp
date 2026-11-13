@@ -1578,7 +1578,11 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                 }
             }
             if (!focus.empty()) {
-                header += "focus  " + focus + "\n";
+                /* A front end's default pick isn't a log's choice */
+                header += (session->focus_flags & ECUIO_FOCUS_DEFAULT_PICK) != 0
+                              ? "pick  "
+                              : "focus  ";
+                header += focus + "\n";
                 /* Only a session that asks has one: the others take the
                  * call and change nothing */
                 if (session->focus_requests &&

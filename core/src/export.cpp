@@ -1619,9 +1619,9 @@ private:
             return;
         }
         static const char* const kKept[] = {
-            "started  ",     "utc  ",     "core  ",     "profile  ",
-            "frame flags  ", "focus  ",   "link  ",     "signal  ",
-            "label  ",       "columns  ", "min sweep  "};
+            "started  ",     "utc  ",     "core  ",      "profile  ",
+            "frame flags  ", "focus  ",   "link  ",      "signal  ",
+            "label  ",       "columns  ", "min sweep  ", "pick  "};
         for (const char* k : kKept) {
             if (rows::starts_with(p, n, k)) {
                 events_head_.push_back(line);

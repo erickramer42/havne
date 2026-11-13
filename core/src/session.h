@@ -133,6 +133,9 @@ struct ecuio_session {
     std::vector<uint8_t> focus_defs;
     std::vector<uint8_t> condition_defs;
     uint32_t focus_min_sweep_ms = 0;
+    /* ecuio_session_set_focus_with's flags (ECUIO_FOCUS_DEFAULT_PICK), for
+     * a recording's header word */
+    uint32_t focus_flags = 0;
     std::atomic<uint32_t> focus_generation{0};
     bool focus_requests = false;
     std::vector<uint8_t> focus_askable;

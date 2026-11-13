@@ -7298,7 +7298,8 @@ TEST(CoreTest, TheUnaskedSignalsAreWhatTheFocusParks)
 
 /* ADR-0056 section 4: the call's refusals, each changing nothing, and
  * the minimum reaching the engine with the focus at the worker's take;
- * the focus's end takes it away */
+ * the focus's end takes it away. A default pick (ECUIO_FOCUS_DEFAULT_PICK)
+ * is taken as any focus and needs picks; another flag is refused. */
 TEST(CoreTest, SetFocusWithChecksItsMinimumAndTheWorkerTakesIt)
 {
     ecuio_session_t* s = nullptr;
@@ -7326,9 +7327,16 @@ TEST(CoreTest, SetFocusWithChecksItsMinimumAndTheWorkerTakesIt)
     EXPECT_EQ(info.flags & ECUIO_SESSION_INFO_REQUESTS, 0u)
         << "the mock asks nothing";
     const uint32_t generation = s->focus_generation.load();
-    EXPECT_EQ(ecuio_session_set_focus_with(s, &rpm, 1, 100, 1),
+    EXPECT_EQ(ecuio_session_set_focus_with(s, &rpm, 1, 100,
+                                           ECUIO_FOCUS_DEFAULT_PICK | 0x2u),
               ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_STREQ(ecuio_last_error_detail(), "the focus takes no flags yet");
+    EXPECT_STREQ(ecuio_last_error_detail(), "the focus takes no flag 0x2");
+    EXPECT_EQ(ecuio_session_set_focus_with(s, nullptr, 0, 0,
+                                           ECUIO_FOCUS_DEFAULT_PICK),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "a default pick goes with signals picked: with none, set no "
+                 "focus and the whole set is asked");
     EXPECT_EQ(ecuio_session_set_focus_with(s, &rpm, 1,
                                            ECUIO_FOCUS_MIN_SWEEP_MAX_MS + 1, 0),
               ECUIO_ERR_INVALID_ARGUMENT);
@@ -7349,11 +7357,29 @@ TEST(CoreTest, SetFocusWithChecksItsMinimumAndTheWorkerTakesIt)
     ecuio_take_focus(s, e.get(), seen);
     EXPECT_EQ(e->min_sweep_us, 250000);
 
-    /* The plain call is the same focus with none */
+    /* A default pick is taken as any focus, its flag the session's */
+    const auto in_rotation = [&] {
+        uint32_t n = 0;
+        for (uint32_t k = 0; k < e->count; ++k) {
+            n += e->requests[k].parked == 0 ? 1 : 0;
+        }
+        return n;
+    };
+    ASSERT_EQ(
+        ecuio_session_set_focus_with(s, &rpm, 1, 0, ECUIO_FOCUS_DEFAULT_PICK),
+        ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_TRUE(e->focused);
+    EXPECT_EQ(in_rotation(), 1u);
+    EXPECT_EQ(s->focus_flags, ECUIO_FOCUS_DEFAULT_PICK);
+
+    /* The plain call is the same focus with none, and no flag */
     ASSERT_EQ(ecuio_session_set_focus(s, &rpm, 1), ECUIO_OK);
     ecuio_take_focus(s, e.get(), seen);
     EXPECT_TRUE(e->focused);
     EXPECT_EQ(e->min_sweep_us, 0);
+    EXPECT_EQ(in_rotation(), 1u);
+    EXPECT_EQ(s->focus_flags, 0u);
 
     ASSERT_EQ(ecuio_session_set_focus_with(s, &rpm, 1, 250, 0), ECUIO_OK);
     ecuio_take_focus(s, e.get(), seen);
