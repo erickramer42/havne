@@ -16,6 +16,11 @@ Phase 1's install and nothing else. Phase 8 is background sessions
 computer is [elm327-bench-runsheet.md](elm327-bench-runsheet.md)'s
 pre-flight and BENCH prep #20.
 
+Phase 10 is the documents: Android's picker for the six open dialogs, a
+folder export, and the saves through a provider. Run it after any change
+to `app/documentpicker.*`, `app/urlwrite.h`, `DocumentOpenDialog.qml` or
+the export's folder path: no desktop test reaches their Android halves.
+
 ## Purpose
 
 Goals, in order:
@@ -28,6 +33,10 @@ Goals, in order:
    connect refused as it should be (#24, ADR-0028 step 3). An adapter
    over Bluetooth is the car's run (step 4): the MX+ takes its power
    from the car only
+5. The open dialogs, the exports and the saves reach the document the
+   phone's picker chose, a name with "(1)" included; a save to a cloud
+   provider while offline is recorded as the app words it and as the
+   provider delivers it (Phase 10)
 
 The evidence is the activity log (the Log page; copy it whole after
 each phase) and screenshots. The ELM327 wire log stays in the app's
@@ -379,6 +388,55 @@ havne-cli stream "elm327://127.0.0.1:35000?profile=uds-generic&did=1000-13FF&sca
 - [ ] Note the DIDs a second from the `scan` lines (`done` over their
       times)
 
+## Phase 10: documents (the picker, the exports, a cloud provider)
+
+**Action:** `mock://` only, no adapter. The phone's Files app at hand. A cloud documents provider that the save picker's side menu lists under "Save to" (Google Drive, Proton Drive, ...; one listed only for opening can't take a save) installed and signed in, for the last step. Back up the app's files first (Phase 5) if the phone holds recordings worth keeping.
+
+**Two files of one name.** Dashboard, Export layout, into Documents (or Downloads), as "runsheet-layout"; rename the page; Export layout again under the same name. Android's picker names the second "runsheet-layout (1).json".
+
+- [ ] Both files in the Files app, the second with "(1)"
+
+**The six open dialogs.** For each: pick the plain file, then the "(1)" file, then open it again and cancel. A cancel leaves what was there and says nothing.
+
+| Dialog (where) | Plain file | "(1)" file | Cancel |
+|---|---|---|---|
+| Load layout (Dashboard): the page name follows the file | [ ] | [ ] | [ ] |
+| Import (Recordings): a CSV, shown by its own name, not an id like `msf:1234` | [ ] | [ ] | [ ] |
+| Column map... (Recordings, Import): named | [ ] | [ ] | [ ] |
+| Import a signal file (Settings): a layout file refused in its own words ("a signal file starts with ..."), which shows the pick reached the import | [ ] | [ ] | [ ] |
+| Import an OBDb set (Settings): refused in its own words ("it has no "commands" list") | [ ] | [ ] | [ ] |
+| Import a plugin (Settings): refused in its own words ("a plugin's manifest starts with ...") | [ ] | [ ] | [ ] |
+
+For the CSV, Recordings, a recording, Export..., CSV, saved twice under one name gives a plain file and a "(1)" one.
+
+- [ ] No "Cannot set ... doesn't exist" in `adb logcat -d` (Qt's content engine refusing a "(1)" name)
+
+**A double tap.** Two quick taps on Import (Recordings):
+
+- [ ] One picker opens; the file picked is the one the panel shows
+
+**A folder export.** Recordings, a recording, Export..., Folder, Choose a folder..., Documents, Allow:
+
+- [ ] "Saved as <stamp>: N files ..."; in the Files app, a folder of that name in Documents with `frames.csv`, `signals.csv` and `events.log`, each the same size as the recording's own
+
+**Saves through the picker.** With `mock://` connected:
+
+- [ ] Export layout to a name already taken: a "(1)" file, whole (it loads through Load layout)
+- [ ] Export..., CSV, Save as...: "Saved: N rows of M signals ..."; the file's size in the Files app is not 0
+- [ ] Save report... (Diagnostics): saved, and the file opens in a text viewer
+
+**A cloud provider, online then offline.** Recordings, a recording, Export..., CSV, Save as..., and in the picker's side menu the cloud provider:
+
+- [ ] Online, as "runsheet-online.csv": the app's words: ____
+- [ ] Airplane mode on (WiFi and mobile data off too). Again, as "runsheet-offline.csv": the app's words, word for word: ____
+- [ ] Airplane mode off, a minute's wait: both files in the provider's app, each the size of a local CSV of the same recording: ____
+
+What the app can see is what the provider says before the save ends. The app closes its end of the document and then asks the provider for an error; Android's descriptor reads that once, without waiting, so a provider that fails only after it has the whole document (an upload that fails later) can't tell the app. A provider that keeps the document and uploads it later answers "Saved" offline, and that's right when the file arrives whole once online. Record what the phone shows: a "Saved" whose file never arrives whole is a finding; so is a failure in words for a file that arrives.
+
+`adb logcat -d | grep closePicked` after the offline save: "closePicked: the provider can report an error" means the provider's descriptor could have carried one back before the save ended; "can't" means it couldn't have. Either way, what it sent after the whole document was in never reaches the app.
+
+- [ ] With the provider still offline, Import (Recordings) and pick a file from the cloud provider: the app stays responsive while it waits, and the panel shows the file's name, or the picker's last part of the address when the provider gives none
+
 ## If it fails, suspect
 
 | Symptom | Suspect |
@@ -395,6 +453,12 @@ havne-cli stream "elm327://127.0.0.1:35000?profile=uds-generic&did=1000-13FF&sca
 | havne-cli through the relay: "the connection was refused" | `adb forward tcp:35000 tcp:35000` not run (or the phone replugged: run it again), or the relay not started |
 | havne-cli through the relay: "the port failed during the adapter's setup" at once | Another computer (or a second `havne-cli`) already holds the relay: it takes one at a time |
 | The relay stops with the screen off | Battery saver on, or Android stopped the service: copy `adb logcat -d | grep -i -E "havne|SessionService"` |
+| A "(1)" file opens the file picked before, or nothing | The dialog went through Qt's FileDialog, not Android's picker: copy `adb logcat -d \| grep -i -E "havne\|content"` |
+| An open dialog does nothing, with no words | The picker's result didn't reach the app: copy `adb logcat -d \| grep -i -E "havne\|ActivityResult\|OPEN_DOCUMENT"` |
+| "Android couldn't open its document picker" | Android refused to start the picker (a SecurityException): copy the logcat lines around it |
+| "No app on this phone opens documents" | The Files app (DocumentsUI) disabled, or the manifest's `<queries>` entry missing (CI checks it) |
+| The app freezes as a cloud pick returns | The provider's name asked on Android's main thread: copy the logcat lines and the APK's commit |
+| A folder export says "Couldn't write the folder" | The folder's grant: pick the folder again (Choose a folder...) and Allow |
 
 ## Post-session actions
 
