@@ -645,6 +645,29 @@ TestCase {
         verify(!Bridge.recordingImport.busy)
     }
 
+    // A refused import's words stay with the import: opening a recording
+    // from the list afterwards shows none of them
+    function test_aRefusedImportsWordsDoNotSitOverTheNextRecording() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("note-refused.csv",
+            "time (s),rpm
+0,800
+1,900
+2,950
+"))
+        const preview = guessed(page)
+        find(guessRow(preview, 0), "name").text = "n".repeat(40)
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        verify(page.importFailed)
+        verify(find(page, "importNote").visible, "the refusal is said")
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        compare(page.importNote, "", "opening a recording clears it")
+        verify(!find(page, "importNote").visible, "nothing over the recording")
+    }
+
     function test_aRefusedGuessImportKeepsItsEdits() {
         const page = createPage()
         page.chooseImportFile(Harness.writeScratchFile("guess-refused.csv",
@@ -1811,7 +1834,7 @@ profile  raw
             page.width = data.w
             verify(waitForPolish(page.Window.window), "laid out")
             find(page, "detailView_about").clicked()   // the pinned form's About holds the rows
-            find(page, "compareChoice").activated(1)
+            find(page, "compareChoice").activated(1)   // which opens Compare's controls
             tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
             const seen = []
             const problems = []
@@ -2546,7 +2569,11 @@ profile  raw
         const page = openEarly()
         page.forceActiveFocus()
         page.setCursor(1000)
+        // The box sits in Compare's controls, shown while Compare is open
+        find(page, "compareButton").clicked()
         const choice = find(page, "compareChoice")
+        verify(waitForPolish(page.Window.window), "the controls are laid out")
+        verify(choice.visible, "the box is shown")
         choice.forceActiveFocus()
         verify(choice.activeFocus, "the box has the focus")
         // Left and Right it doesn't use: the cursor still steps
@@ -2554,7 +2581,7 @@ profile  raw
         tryVerify(() => page.cursorMs > 1000, 2000, "Right steps the cursor beside a focused box")
         page.setCursor(1000)
         keyClick(Qt.Key_End)
-        verify(page.compareOpen, "End went to the box: it picked the last recording")
+        verify(page.comparing, "End went to the box: it picked the last recording")
         keyClick(Qt.Key_Home)
         keyClick("b")
         compare(page.cursorMs, 1000, "the cursor stayed")
@@ -3329,6 +3356,53 @@ profile  raw
         compare(page.stretchesOf("pull").length, 2, "the defaults found them")
         Bridge.unitSystem = 0
         tryVerify(() => page.stretchUnits === 0, 5000, "and back")
+    }
+
+    // A change of units remakes no cell: the fields keep the levels in
+    // force, so the next Apply sends them with the one typed
+    function test_aChangeOfUnitsKeepsTheStretchesFieldsFilled() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        find(page, "rule_pullRise").text = "5000"
+        find(page, "rule_cruiseFloor").text = "40"
+        find(page, "stretchesApply").clicked()
+        tryVerify(() => page.stretchList !== null, 10000, "the answer")
+        try {
+            Bridge.unitSystem = 1
+            tryVerify(() => page.stretchUnits === 1, 5000, "asked again in the other unit")
+            compare(find(page, "rule_pullRise").text, "5000", "the field keeps its level")
+            compare(find(page, "rule_cruiseFloor").text, "40", "a speed field too")
+            find(page, "rule_pullLevel").text = "50"
+            find(page, "stretchesApply").clicked()
+            compare(page.stretchRules.pullRise, 5000, "Apply sends the kept level with the typed one")
+            compare(page.stretchRules.pullLevel, 50)
+        } finally {
+            Bridge.unitSystem = 0
+        }
+    }
+
+    // A level is written and read in one locale: a comma-decimal one reads
+    // back what it wrote, never 1.125 as 1125
+    function test_theStretchesFieldsRoundTripInACommaLocale() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        const panel = find(page, "stretchesPanel")
+        panel.numberLocale = Qt.locale("de_DE")
+        compare(panel.shown(1.125), "1,125")
+        compare(panel.shown(750), "750")
+        panel.rules = ({ pullHoldS: 1.125, pullRise: 5000 })
+        compare(find(page, "rule_pullHoldS").text, "1,125", "written in the locale")
+        compare(panel.typedRules().pullHoldS, 1.125, "and read back whole")
+        compare(panel.typedRules().pullRise, 5000)
+        panel.numberLocale = Qt.locale("C")
     }
 
     // A phone's panel stands in the chart's place, and Apply returns to it

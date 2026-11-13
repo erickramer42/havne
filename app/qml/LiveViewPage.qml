@@ -127,6 +127,7 @@ Page {
         if (!paused)
             return
         snapshot = null
+        viewEndMs = 0
         cursorMs = NaN
         hintShown = false
         chart.requestPaint()
