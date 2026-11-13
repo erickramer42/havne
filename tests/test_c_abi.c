@@ -659,7 +659,9 @@ int main(void)
     if (offsetof(ecuio_record_options_t, root_utf8) != 48 ||
         sizeof(ecuio_recorder_state_t) != 200 ||
         offsetof(ecuio_recorder_state_t, reason) != 40 ||
-        ECUIO_ERR_RECORDING_FAILED != 18 || ECUIO_VALIDATE_ERR_FORMULA != 18 ||
+        offsetof(ecuio_recorder_state_t, conditions_lost) != 168 ||
+        ECUIO_CONDITION_HELD != 8 || ECUIO_ERR_RECORDING_FAILED != 18 ||
+        ECUIO_VALIDATE_ERR_FORMULA != 18 ||
         ecuio_recorder_open(&record_options, &recorder) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         recorder != NULL ||

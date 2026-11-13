@@ -69,7 +69,11 @@ typedef struct ecuio_recorder_state {
     uint64_t notes_dropped;                  /* the note queue was full */
     char reason[ECUIO_RECORDING_REASON_LEN]; /* the OS's reason for
                                                       FAILED, no path */
-    uint64_t reserved[4];                    /* zero; ABI growth space */
+    uint64_t conditions_lost;                /* condition changes the ring
+                                                and its carry had no room
+                                                for (a drop line says so);
+                                                0 without a set */
+    uint64_t reserved[3];                    /* zero; ABI growth space */
 } ecuio_recorder_state_t;
 
 #if defined(__cplusplus)

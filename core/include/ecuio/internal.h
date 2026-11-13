@@ -410,6 +410,13 @@ void ecuio_session_test_after_conditions_handover(void (*hook)(void* user),
 void ecuio_session_test_before_record_attach(void (*hook)(void* user),
                                              void* user);
 
+/* Test-only (ADR-0063 section 8): dispatch calls hook(user) on the worker
+ * once it has taken the set it judges the frame by, before it looks for a
+ * recorder, so a test can attach another set and a recorder there; NULL
+ * takes it away. One for the process. */
+void ecuio_session_test_after_dispatch_takes(void (*hook)(void* user),
+                                             void* user);
+
 #ifdef __cplusplus
 }
 #endif

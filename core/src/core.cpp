@@ -15,6 +15,8 @@
 #include "pid_support.h"     /* the signals their ECU doesn't support */
 #include "computed.h"        /* a computed pick's leaves, for a focus */
 #include "condition_eval.h"
+#include "condition_file.h" /* the set's bytes and keys, for a recording */
+#include "sha256.h"
 #include "uri_query.h"
 #include "error_detail.h"
 #include "probes.h"
@@ -1157,6 +1159,9 @@ namespace {
 /* ecuio_session_test_after_conditions_handover's (internal.h) */
 std::atomic<void (*)(void*)> g_after_conditions_handover{nullptr};
 std::atomic<void*> g_after_conditions_handover_user{nullptr};
+/* ecuio_session_test_after_dispatch_takes's (internal.h) */
+std::atomic<void (*)(void*)> g_after_dispatch_takes{nullptr};
+std::atomic<void*> g_after_dispatch_takes_user{nullptr};
 } // namespace
 
 ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
@@ -1177,6 +1182,7 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     std::unique_ptr<ecuio_condition_eval> next;
+    std::shared_ptr<const ecuio_condition_record> record;
     std::vector<ecuio_condition_state_t> states;
     /* The signals the conditions read, for the focus: the evaluator holds
      * only those of the conditions it judges */
@@ -1184,6 +1190,18 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
     try {
         if (set != nullptr) {
             next = ecuio_condition_eval::make(set, signals, file, 0);
+            /* A recorder takes this under the locks by pointer, so the
+             * hash and the copies are made here */
+            auto made = std::make_shared<ecuio_condition_record>();
+            made->bytes = set->bytes;
+            made->sha256 =
+                ecuio_sha256::hex_of(set->bytes.data(), set->bytes.size());
+            for (const ecuio_condition_set::condition& c : set->conditions) {
+                made->conditions.push_back(
+                    {c.key, c.name,
+                     (c.info.uses & ECUIO_CONDITION_USE_MARK) != 0});
+            }
+            record = std::move(made);
             states.reserve(next->conditions.size());
             for (uint32_t i = 0; i < next->conditions.size(); ++i) {
                 states.push_back(next->state_of(i));
@@ -1234,6 +1252,8 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
             session->condition_states.swap(states);
             session->condition_states_generation = generation;
         }
+        /* The record before goes with the locks, freed outside them */
+        session->conditions_record.swap(record);
         retired = std::move(session->conditions_retired);
         untaken = std::move(session->conditions_pending);
         session->conditions_pending = std::move(next);
@@ -1261,6 +1281,13 @@ void ecuio_session_test_after_conditions_handover(void (*hook)(void* user),
 {
     g_after_conditions_handover_user.store(user);
     g_after_conditions_handover.store(hook);
+}
+
+void ecuio_session_test_after_dispatch_takes(void (*hook)(void* user),
+                                             void* user)
+{
+    g_after_dispatch_takes_user.store(user);
+    g_after_dispatch_takes.store(hook);
 }
 
 ecuio_status_t
@@ -1350,6 +1377,10 @@ void ecuio_session_dispatch_callbacks(
         }
         conditions = session->conditions.get();
     }
+    if (const auto hook =
+            g_after_dispatch_takes.load(std::memory_order_relaxed)) {
+        hook(g_after_dispatch_takes_user.load());
+    }
 
     if (frames_taken) {
         for (size_t i = 0; i < frames.size(); ++i) {
@@ -1377,6 +1408,11 @@ void ecuio_session_dispatch_callbacks(
         return;
     }
     const uint32_t count = session->decoder.decode(frame);
+    /* A recording begun after the set judged frames starts from the states
+     * they left: taken before this frame moves them */
+    if (recorder != nullptr && conditions != nullptr) {
+        ecuio_recorder_hold_states(recorder, *conditions);
+    }
     const uint32_t changed =
         conditions != nullptr
             ? conditions->judge(frame->timestamp_us,
@@ -1388,8 +1424,10 @@ void ecuio_session_dispatch_callbacks(
         }
         const uint64_t zero = link->zero_us.load(std::memory_order_relaxed);
         const uint64_t host_us = now > zero ? now - zero : 0;
-        ecuio_recorder_put_frame(recorder, host_us, frame,
-                                 session->decoder.values.data(), count);
+        ecuio_recorder_put_frame(
+            recorder, host_us, frame, session->decoder.values.data(), count,
+            changed > 0 ? conditions->events.data() : nullptr, changed,
+            conditions != nullptr ? conditions->generation : 0);
         ecuio_record_unpin(*link);
     }
     if (want_values && count > 0) {

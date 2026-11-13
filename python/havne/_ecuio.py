@@ -105,6 +105,7 @@ ECUIO_CONDITION_ALERT_SOUND = 16
 ECUIO_CONDITION_FILE_FORMAT = 1
 ECUIO_CONDITION_FILE_MAX_BYTES = 0x40000
 ECUIO_CONDITION_FIRED = 2
+ECUIO_CONDITION_HELD = 8
 ECUIO_CONDITION_INFO_ANY = 2
 ECUIO_CONDITION_INFO_DISABLED = 1
 ECUIO_CONDITION_KEY_MAX = 31
@@ -1117,7 +1118,8 @@ ecuio_recorder_state_t._fields_ = [
     ('records_dropped', c_uint64),
     ('notes_dropped', c_uint64),
     ('reason', (c_char * 128)),
-    ('reserved', (c_uint64 * 4)),
+    ('conditions_lost', c_uint64),
+    ('reserved', (c_uint64 * 3)),
 ]
 ecuio_recording_column_t._fields_ = [
     ('lowest', c_double),

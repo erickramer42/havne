@@ -58,6 +58,10 @@ constexpr size_t kSha256Hex = 64;
  * plugin variant that decoded the recording, whose merged set the
  * signal file is */
 constexpr const char* kPluginKey = "plugin  ";
+/* "conditions  conditions.json,<SHA-256>" after it (ADR-0063 section 8):
+ * the set of conditions the session judged, copied beside it */
+constexpr const char* kConditionsKey = "conditions  ";
+constexpr const char* kConditionsName = "conditions.json";
 
 /* A UTF-8 byte-order mark's length at the start of a header row, or 0 */
 inline size_t bom_length(const char* p, size_t n)

@@ -322,6 +322,10 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
                                             is OFF to ON */
 #define ECUIO_CONDITION_UNAVAILABLE 0x4u /* a state's alone: never judged
                                             on this session; why says why */
+#define ECUIO_CONDITION_HELD        0x8u /* a recording's event alone: the
+                                            state the condition stood in
+                                            when the recording began, no
+                                            change (ecuio/recording.h) */
 
 /* Binds the set to the session's signals, as ecuio_condition_set_resolve
  * does, and judges it from the next frame; a NULL set takes the
@@ -340,6 +344,11 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
  * them, whether or not the focus picks them; a disabled or unavailable
  * condition keeps nothing asked. The focus's own picks, and the
  * recording's focus line, stay the caller's.
+ *
+ * A recorder attached holds the set for the recording's length: the set
+ * and every event it gives go into the recording (conditions.json, the
+ * cond lines of events.log, a marker for each firing of a condition with
+ * mark; ecuio/recording.h).
  *
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session;
  * ECUIO_ERR_SESSION_CLOSED after close; ECUIO_ERR_INVALID_ARGUMENT for a

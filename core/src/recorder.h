@@ -1,7 +1,7 @@
 // File/layer: core/src/recorder.h | internal, C++17, Qt-free; what the
 //             session and its recorder share (ADR-0049 section 1)
-// Testing: HARNESS: RecorderTest (test_core), CoreTest's no-allocation
-//          case with a recorder attached
+// Testing: HARNESS: RecorderTest, ConditionRecordingTest (test_core),
+//          CoreTest's no-allocation case with a recorder attached
 //
 // A session and its recorder each outlive the other in some teardowns,
 // so neither reaches into the other's memory: both hold a link, and the
@@ -16,6 +16,7 @@
 #ifndef ECUIO_RECORDER_H
 #define ECUIO_RECORDER_H
 
+#include "ecuio/conditions.h"
 #include "ecuio/core.h"
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
@@ -24,6 +25,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <string>
+#include <vector>
+
+struct ecuio_condition_eval;
 
 struct ecuio_record_link {
     std::atomic<ecuio_recorder_t*> active{nullptr};
@@ -34,6 +39,21 @@ struct ecuio_record_link {
      * zero. */
     std::atomic<uint64_t> zero_us{0};
     std::mutex m;
+};
+
+/* What a recording keeps of a set of conditions (ADR-0063 section 8):
+ * made by ecuio_session_set_conditions outside every lock, once per
+ * attach, and never changed after, so a recorder takes it by pointer
+ * under the session's locks */
+struct ecuio_condition_record {
+    struct entry {
+        std::string key;
+        std::string name;
+        bool mark = false;
+    };
+    std::string bytes;             /* conditions.json */
+    std::string sha256;            /* the bytes', lowercase hex */
+    std::vector<entry> conditions; /* the set's order */
 };
 
 /* The recorder taking frames, pinned; NULL (and unpinned) when none */
@@ -59,11 +79,24 @@ inline void ecuio_record_unpin(ecuio_record_link& link)
 void ecuio_record_detach(ecuio_record_link& link,
                          ecuio_recorder_t* only = nullptr);
 
-/* On the worker, pinned: one frame and the values it decoded to, as one
- * record or none. Never blocks, never allocates. */
+/* On the worker, pinned, before the frame is judged by conditions: at
+ * the recorder's first frame judged by its own set, each condition then
+ * ON is kept to go into that frame's record as a held event. Never
+ * allocates. */
+void ecuio_recorder_hold_states(ecuio_recorder_t* r,
+                                const ecuio_condition_eval& conditions);
+
+/* On the worker, pinned: one frame, the values it decoded to and the
+ * condition events it gave (generation's), as one record or none. Events
+ * of another set than the recording's are left out; a frame that doesn't
+ * fit is dropped and counted, its events carried to go in ahead of the
+ * next record. Never blocks, never allocates. */
 void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
                               const ecuio_frame_t* frame,
-                              const ecuio_value_t* values, uint32_t count);
+                              const ecuio_value_t* values, uint32_t count,
+                              const ecuio_condition_event_t* events = nullptr,
+                              uint32_t event_count = 0,
+                              uint32_t generation = 0);
 
 /* On the worker that judges the link, at each transition: its state and
  * episode count at their time, pinned here; link may be NULL. One that
