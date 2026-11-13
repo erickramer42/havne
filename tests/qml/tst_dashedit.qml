@@ -633,6 +633,25 @@ TestCase {
         compare(rows.to, 16, "a cell of 16 or fewer stops at 16")
     }
 
+    // The phone's row unit is a quarter of a column: the panel reads the
+    // height in columns, as Columns is, and the desktop keeps rows
+    function test_thePhonesHeightReadsInColumns() {
+        const cell = Object.assign(cellOf("A"), { w: 4, h: 18 })
+        const phone = pageOf({ form: "phone", width: 384, height: 832 }, docOf([cell]))
+        phone.startEditing()
+        phone.select(0)
+        const box = find(phone, "panelH")
+        compare(box.Accessible.name, "Height")
+        compare(box.textFromValue(box.value, box.locale), "4.5", "18 rows is 4.5 columns")
+        compare(box.value, 18, "the stored value is rows")
+        const desktop = pageOf({}, docOf([Object.assign(cellOf("B"), { h: 6 })]))
+        desktop.startEditing()
+        desktop.select(0)
+        const rows = find(desktop, "panelH")
+        compare(rows.Accessible.name, "Rows")
+        compare(rows.textFromValue(rows.value, rows.locale), "6")
+    }
+
     // Step 5's kinds offer their own options in the panel, the bar its two
     // switches, and the peak switch shows for the kinds that draw a peak
     function test_theNewKindsOwnOptionsAreEditable() {
