@@ -14,6 +14,7 @@
 #include <ecuio/internal.h>
 #include <ecuio/recording.h>
 #include <ecuio/signal_sets.h>
+#include "session.h" /* the record link, for a link transition */
 #include "sha256.h"
 #include "temp_name.h"
 
@@ -749,6 +750,40 @@ TEST(ConditionRecordingTest, EachRunOfLostEventsHasADropLineOfItsOwn)
               (std::vector<std::string>{lost_line(first), lost_line(second)}));
     EXPECT_EQ(cond_lines(r.folder).size() + first + second,
               r.events.all.size());
+}
+
+TEST(ConditionRecordingTest, ALinkTransitionFollowsTheEventsCarriedBeforeIt)
+{
+    Recorded r(set_of(on_rpm("flip", R"("above":2000)")), 4096);
+    ASSERT_NE(r.recorder, nullptr);
+    r.record();
+    ecuio_recorder_test_hold(r.recorder, 1);
+    for (int i = 0; i < 200; ++i) {
+        engine_speed(r.session.s, 1000000 + i * 10000u,
+                     i % 2 == 0 ? 3000 : 1000);
+    }
+    ecuio_recorder_test_hold(r.recorder, 0);
+    r.drained();
+    /* The worker's next record is a link transition, after them all */
+    ecuio_record_link_state(r.session.s->record_link.get(),
+                            ECUIO_ERR_VEHICLE_TIMEOUT, 0);
+    r.close();
+
+    size_t last_cond = 0;
+    size_t link = 0;
+    const std::vector<std::string> log = lines_of(r.folder / "events.log");
+    for (size_t i = 0; i < log.size(); ++i) {
+        const size_t at = log[i].find("  cond  ");
+        last_cond = at != std::string::npos && at < 24 ? i : last_cond;
+        link =
+            log[i].find("  link  vehicle not responding") != std::string::npos
+                ? i
+                : link;
+    }
+    ASSERT_NE(link, 0u) << "the transition is written";
+    EXPECT_EQ(cond_lines(r.folder).size(), r.events.all.size());
+    EXPECT_GT(link, last_cond)
+        << "a cond line carried from before the transition comes after it";
 }
 
 TEST(ConditionRecordingTest, AFiringOfAConditionWithMarkIsAMarker)

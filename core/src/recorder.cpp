@@ -1404,7 +1404,9 @@ void ecuio_record_link_state(ecuio_record_link* link, int32_t state,
      * and count are what a reader needs */
     r->pending_link = link_body{host_us_now(*link), state, episodes};
     r->link_pending = true;
-    put_pending_link(r);
+    if (put_pending_conditions(r)) {
+        put_pending_link(r);
+    }
     ecuio_record_unpin(*link);
 }
 
@@ -1437,7 +1439,7 @@ void ecuio_record_timing(ecuio_record_link* link,
             at = host_us_now(*link);
             stamped = true;
         }
-        if (put_pending_link(r) && put_pending_conditions(r) &&
+        if (put_pending_conditions(r) && put_pending_link(r) &&
             ring_has_room(r, size)) {
             const uint64_t h = r->head.load(std::memory_order_relaxed);
             const record_head rh{static_cast<uint32_t>(size), kRecordTiming,
@@ -1557,7 +1559,7 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
     }
     /* What was carried goes first, or the frame waits behind it, dropped;
      * its events are carried, never dropped with it */
-    if (!put_pending_link(r) || !put_pending_conditions(r) ||
+    if (!put_pending_conditions(r) || !put_pending_link(r) ||
         !ring_has_room(r, size)) {
         ++r->pending_dropped;
         r->records_dropped.fetch_add(1, std::memory_order_relaxed);
@@ -2110,16 +2112,16 @@ ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
         const uint64_t host_us = now > r->zero_us ? now - r->zero_us : 0;
         /* What the worker couldn't queue before it let go: the detach
          * waited for it, so its fields are this thread's now */
-        if (r->link_pending) {
-            r->event_line(
-                r->pending_link.host_us, "link",
-                link_text(r->pending_link.state, r->pending_link.episodes));
-        }
         for (uint32_t k = 0; k < r->carry_count; ++k) {
             r->take_event(r->carry[r->carry_start + k]);
         }
         if (r->carry_lost > 0) {
             r->lost_line(r->carry_lost_us, r->carry_lost);
+        }
+        if (r->link_pending) {
+            r->event_line(
+                r->pending_link.host_us, "link",
+                link_text(r->pending_link.state, r->pending_link.episodes));
         }
         if (r->pending_dropped > 0) {
             r->drop_line(host_us, r->pending_dropped);
