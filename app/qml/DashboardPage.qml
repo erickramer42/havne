@@ -383,7 +383,8 @@ Page {
         layoutNoteBad = bad === true
     }
     // The picked vehicle's signal files, each with the references its
-    // profile gives: [{ name, sha256, profile, refs }]
+    // profile gives: [{ name, sha256, profile, refs }]. A file whose profile
+    // isn't registered (it doesn't load) gives none
     function vehicleFiles() {
         const v = VehicleBook.picked(vehicles)
         if (!v)
@@ -402,7 +403,9 @@ Page {
     // the file at url
     function exportLayoutTo(url) {
         commitTyping()
-        const needed = DashboardBook.neededFiles(doc, vehicleFiles())
+        const files = vehicleFiles()
+        const needed = DashboardBook.neededFiles(doc, files)
+        const unloaded = files.filter(f => f.refs.length === 0).map(f => f.name)
         const text = DashboardBook.exportText(doc, form, needed)
         if (text === "") {
             noteLayout(qsTr("Not saved: this layout can't be written as a file"), true)
@@ -413,10 +416,13 @@ Page {
             noteLayout(qsTr("Not saved: %1").arg(r.words), true)
             return false
         }
-        noteLayout(needed.length === 0
-                   ? qsTr("Saved this layout to a file")
-                   : qsTr("Saved this layout to a file. It needs the signal files %1")
-                         .arg(needed.map(f => f.name).join(", ")))
+        noteLayout((needed.length === 0
+                    ? qsTr("Saved this layout to a file")
+                    : qsTr("Saved this layout to a file. It needs the signal files %1")
+                          .arg(needed.map(f => f.name).join(", ")))
+                   + (unloaded.length === 0 ? ""
+                      : qsTr(". The vehicle's signal files %1 don't load, so a gauge reading them isn't listed as needing them")
+                            .arg(unloaded.join(", "))))
         return true
     }
     // Loads a layout file as this form's layout, one undo step. Refused in

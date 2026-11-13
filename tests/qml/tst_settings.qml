@@ -1163,10 +1163,18 @@ TestCase {
         compare(list.count, 13)
         if (data.mobile) {
             compare(count.text, "Bluetooth: 1 found; tap one, then Connect")
+            page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" },
+                                      { name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true }]
+            compare(count.text, "Bluetooth: 1 found; tap one, then Connect",
+                    "a folded headset is not an adapter found")
+            page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" }]
             tryVerify(() => list.contentHeight > 0 && Math.abs(list.height - list.contentHeight) < 1,
                       3000, "the page alone scrolls")
         } else {
             verify(count.text.indexOf("J2534 interfaces: 0, serial ports: 12") >= 0, count.text)
+            page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" },
+                                      { name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true }]
+            verify(count.text.indexOf(", Bluetooth: 1") >= 0, "a folded headset is not counted: " + count.text)
             tryVerify(() => list.contentHeight > 0 && list.height < list.contentHeight,
                       3000, "the desktop's list stops at its cap")
         }

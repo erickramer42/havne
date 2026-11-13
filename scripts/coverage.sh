@@ -46,6 +46,13 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+# --part is judged where it is read: k from 1 and no more than n
+case "$part" in
+    all|gtest) ;;
+    *) if ! [[ $part =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
+           echo "--part takes gtest or <k>/<n> with k from 1 to n" >&2; exit 2
+       fi ;;
+esac
 
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) ;;
@@ -135,11 +142,16 @@ failed=""
 gtest_jobs=${COVERAGE_JOBS:-3}
 if [ -z "$regex" ]; then
     # Binaries with a RUN_SERIAL case (shared logs, the fake DLL's knobs) run alone, last
-    serial=$(ctest --test-dir "$TREE" -C RelWithDebInfo -N --show-only=json-v1 2>/dev/null |
-        "${PYTHON:-python}" -c 'import json,sys,os
+    # A list that can't be read would run the serial binaries in the parallel batch
+    listed=$(ctest --test-dir "$TREE" -C RelWithDebInfo -N --show-only=json-v1 2>"$LOGDIR/ctest-list.err") ||
+        { line coverage FAIL 0 "ctest couldn't list the tests; see $LOGDIR/ctest-list.err"; exit 1; }
+    # python alone under its own guard: in a pipeline only sort's status would count
+    serial=$("${PYTHON:-python}" -c 'import json,sys,os
 for t in json.load(sys.stdin)["tests"]:
     if any(p["name"] == "RUN_SERIAL" and p["value"] for p in t.get("properties", [])):
-        print(os.path.basename(t["command"][0]))' | tr -d '\r' | sort -u)
+        print(os.path.basename(t["command"][0]))' <<<"$listed") ||
+        { line coverage FAIL 0 "the serial list couldn't be read from ctest's JSON"; exit 1; }
+    serial=$(tr -d '\r' <<<"$serial" | sort -u)
     cover_one() { # <exe>: from a working directory of its own (the tool writes a log there)
         local exe=$1 name abs
         name=$(basename "$exe" .exe)
@@ -182,7 +194,6 @@ case "$part" in
     all) ;;
     gtest) ctest_skip=1 ;;
     [1-9]*/[1-9]*) ctest_args+=(-I "${part%/*},,${part#*/}") ;;
-    *) echo "--part takes gtest or <k>/<n> (k from 1)" >&2; exit 2 ;;
 esac
 [ -n "${ctest_skip:-}" ] || cover ctest 0 "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
 cat "$LOGDIR"/cover-test_*.log "$LOGDIR/cover-ctest.log" > "$LOGDIR/coverage.log" 2>/dev/null
@@ -252,3 +263,12 @@ for name in $failed; do
 done
 sed -n '/The following tests FAILED:/,$p' "$LOGDIR/cover-ctest.log" | sed -n '2,25p'
 echo "report: $LOGDIR/cobertura.xml"
+# A binary that failed and left no report is missing from the figure: fail the leg
+missing=""
+for name in $failed; do
+    [ -e "$LOGDIR/raw-$name.xml" ] || missing="$missing $name"
+done
+if [ -n "$missing" ]; then
+    echo "NO REPORT from:$missing (the figure above lacks their lines)"
+    exit 1
+fi

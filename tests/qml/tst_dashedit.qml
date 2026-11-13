@@ -54,6 +54,7 @@ TestCase {
         Theme.night = "off"
         Theme.look = "dark"
         Bridge.unitSystem = 0
+        Bridge.useSignalFiles([])
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
     }
@@ -3396,7 +3397,34 @@ TestCase {
         page.startEditing()
         verify(page.loadLayoutFrom(url), page.layoutNote)
         verify(page.layoutNote.indexOf("lacks") < 0, page.layoutNote)
-        Bridge.useSignalFiles([])
+    }
+
+    // A vehicle's signal file that doesn't load gives no references, so a
+    // layout can't say it needs the file: the note names the file instead
+    function test_aSignalFileThatDoesntLoadIsNamedInTheExportsNote() {
+        let vehicles = VehicleBook.add(VehicleBook.empty(), "Test car")
+        vehicles = VehicleBook.addSignals(vehicles, { sha256: "a".repeat(64), name: "Gone file",
+                                                      profile: "profile_user.gone" })
+        const own = docOf([cellOf("A"), Object.assign(cellOf("Gone"), { refs: ["key:gone"] })])
+        const page = storedPageOf({ vehicles: vehicles }, own)
+        verify(page.exportLayoutTo(layoutUrl("layout-unloaded.json")), page.layoutNote)
+        verify(page.layoutNote.indexOf("Gone file") >= 0, page.layoutNote)
+        verify(page.layoutNote.indexOf("don't load") >= 0, page.layoutNote)
+        verify(!page.layoutNoteBad, "a note, not a refusal")
+        // A vehicle whose files all load says nothing of the kind
+        const file = { havne_signals: 1, name: "Loads", source: { name: "t" },
+                       ecus: [{ id: "pcm", rx: "7E8" }],
+                       signals: [{ key: "loads", name: "Loads", read: { service: "22", number: "D101" },
+                                   field: { byte: 0, bits: 8 }, unit: "kPa" }] }
+        const r = Bridge.importSignalFile(Harness.writeScratchFile("loads.json", JSON.stringify(file)))
+        verify(r.ok, "the file imports")
+        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
+        let good = VehicleBook.add(VehicleBook.empty(), "Good car")
+        good = VehicleBook.addSignals(good, { sha256: r.sha256, name: r.name, profile: r.profile })
+        const plain = storedPageOf({ vehicles: good },
+                                   docOf([cellOf("A"), Object.assign(cellOf("Loads"), { refs: ["key:loads"] })]))
+        verify(plain.exportLayoutTo(layoutUrl("layout-plain.json")), plain.layoutNote)
+        verify(plain.layoutNote.indexOf("don't load") < 0, plain.layoutNote)
     }
 
     function test_theLayoutButtonsAreInTheMoreRow() {
