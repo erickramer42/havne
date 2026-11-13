@@ -1087,6 +1087,13 @@ ecuio_status_t ecuio_session_set_focus(
 /* The longest minimum time between sweeps, in ms */
 #define ECUIO_FOCUS_MIN_SWEEP_MAX_MS 60000u
 
+/* ecuio_session_set_focus_with's flag: the focus is a front end's
+ * default pick (the set's ranked signals, the gauges, the user's ticks),
+ * not an analysis log's choice. The session asks it as any focus; a
+ * recording's header names it "pick", not "focus", so a reader tells a
+ * session's default from a log */
+#define ECUIO_FOCUS_DEFAULT_PICK 0x1u
+
 /*
  * ecuio_session_set_focus, with a minimum time between sweeps (ADR-0056
  * section 4), for a slow adapter or a busy ECU; min_sweep_ms 0 is none,
@@ -1101,10 +1108,12 @@ ecuio_status_t ecuio_session_set_focus(
  * "Not responding" is ten unanswered requests in a row whatever the
  * minimum, so with one request a sweep an ECU that stops answering is
  * reported after ten times min_sweep_ms.
- * flags: none yet, must be 0.
+ * flags: 0, or ECUIO_FOCUS_DEFAULT_PICK.
  * ECUIO_ERR_INVALID_ARGUMENT, nothing changed and the reason in the
- * detail, for a flag, a time past ECUIO_FOCUS_MIN_SWEEP_MAX_MS, a time
- * with no signals picked, and whatever ecuio_session_set_focus refuses.
+ * detail, for any other flag, a time past ECUIO_FOCUS_MIN_SWEEP_MAX_MS, a
+ * time or ECUIO_FOCUS_DEFAULT_PICK with no signals picked (a front end
+ * whose pick is empty sets no focus: the whole set is asked), and
+ * whatever ecuio_session_set_focus refuses.
  */
 ecuio_status_t ecuio_session_set_focus_with(
     ecuio_session_t* session,

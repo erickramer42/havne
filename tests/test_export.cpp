@@ -1759,6 +1759,28 @@ TEST(CsvExportTest, WideTakesTheFocusLinesColumnsWhenNoneAreNamed)
     EXPECT_EQ(all.bytes, "Time (ms),Throttle (%)\r\n160,10.5\r\n260,11.5\r\n");
 }
 
+/* A front end's default pick names no columns: a recording with a pick
+ * line exports as one with no line, every number signal */
+TEST(CsvExportTest, WideTakesNoColumnsFromAPickLine)
+{
+    /* One folder at a time: a Folder is named for the process */
+    std::string picked;
+    {
+        Folder f;
+        recording(f, "", polled_rows(2), "profile  raw\npick  Speed,RPM\n");
+        WideExported p(f);
+        ASSERT_EQ(p.rc, ECUIO_OK) << p.detail;
+        picked = p.bytes;
+    }
+    Folder f;
+    recording(f, "", polled_rows(2), "profile  raw\n");
+    WideExported plain(f);
+    ASSERT_EQ(plain.rc, ECUIO_OK) << plain.detail;
+    EXPECT_EQ(picked, plain.bytes);
+    EXPECT_NE(picked.rfind("Time (ms),Speed (km/h),RPM (rpm)\r\n", 0), 0u)
+        << "not the pick's columns: " << picked;
+}
+
 /* A focus line that names a column twice, or a text or identification
  * signal, is the recording's fault: LOAD_FAILED with the reason, not the
  * caller's INVALID_ARGUMENT, and no file */
@@ -2200,6 +2222,19 @@ TEST(FolderExportTest, EachFileIsCopiedThroughItsClasses)
     EXPECT_EQ(wl[1], "1000,1726");
     EXPECT_EQ(wl[2], "3000,1730");
     EXPECT_EQ(r.rows, 2u);
+}
+
+/* The header's pick line, a front end's default pick, is copied as the
+ * focus line is */
+TEST(FolderExportTest, APickLineIsKept)
+{
+    Folder f;
+    recording(f, "", polled_rows(1), "profile  raw\npick  Speed,RPM\n");
+    FolderExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_NE(e.files["events.log"].find("\npick  Speed,RPM\n"),
+              std::string::npos)
+        << e.files["events.log"];
 }
 
 /* A range takes each file's rows and lines in it alone; the end line

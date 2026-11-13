@@ -498,8 +498,10 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
     if (session == nullptr || (signal_ids == nullptr && count > 0)) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (flags != 0) {
-        ecuio_detail_set("the focus takes no flags yet");
+    if ((flags & ~ECUIO_FOCUS_DEFAULT_PICK) != 0) {
+        ecuio_detail_set(
+            "the focus takes no flag 0x%x",
+            static_cast<unsigned>(flags & ~ECUIO_FOCUS_DEFAULT_PICK));
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (min_sweep_ms > ECUIO_FOCUS_MIN_SWEEP_MAX_MS) {
@@ -510,6 +512,11 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
     if (min_sweep_ms != 0 && count == 0) {
         ecuio_detail_set("a minimum time between sweeps goes with a focus: "
                          "no signals were picked");
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    if ((flags & ECUIO_FOCUS_DEFAULT_PICK) != 0 && count == 0) {
+        ecuio_detail_set("a default pick goes with signals picked: with none, "
+                         "set no focus and the whole set is asked");
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     if (session->closed.load()) {
@@ -569,6 +576,7 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
         session->focus_ids.swap(ids);
         session->focus_defs.swap(picked);
         session->focus_min_sweep_ms = min_sweep_ms;
+        session->focus_flags = flags;
     }
     /* The picks first: a worker that sees the count moved reads them */
     session->focus_generation.fetch_add(1);

@@ -340,6 +340,25 @@ def test_a_focus_takes_a_minimum_time_between_sweeps():
         assert "focus" in e.value.detail
 
 
+def test_a_default_pick_is_named_pick_in_a_recording(tmp_path):
+    """ECUIO_FOCUS_DEFAULT_PICK: a recording's header says "pick", not
+    "focus"; with no signals it is core's INVALID_ARGUMENT"""
+    with havne.Session("mock://py") as s:
+        sid, (name, unit) = next(iter(s.signals.items()))
+        with pytest.raises(havne.Error) as e:
+            s.set_focus([], default_pick=True)
+        assert e.value.name == "INVALID_ARGUMENT"
+        assert "default pick" in e.value.detail
+        s.set_focus([sid], default_pick=True)
+        rec = s.record(tmp_path)
+        folder = rec.folder
+    assert ended(folder)
+    with open(os.path.join(folder, "events.log"), encoding="utf-8") as f:
+        events = f.read()
+    assert f"\npick  {name}\n" in events
+    assert "\nfocus  " not in events
+
+
 def test_a_focus_id_outside_a_uint16_or_not_an_int_is_a_value_error():
     with havne.Session("mock://py") as s:
         sid = next(iter(s.signals))

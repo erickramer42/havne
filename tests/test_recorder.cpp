@@ -1302,6 +1302,25 @@ TEST(RecorderTest, TheHeaderHoldsTheFocusAndTheLinkAtTheAttach)
             << "no minimum time, no line: " << events;
     }
     {
+        /* A front end's default pick is named "pick", never "focus" */
+        Recording rec(root, "mock://focus-pick?profile=rec-test", 0, nullptr,
+                      {}, 0, false);
+        ASSERT_NE(rec.recorder, nullptr);
+        const uint16_t picks[2] = {2, 1};
+        ASSERT_EQ(ecuio_session_set_focus_with(rec.session, picks, 2, 0,
+                                               ECUIO_FOCUS_DEFAULT_PICK),
+                  ECUIO_OK);
+        rec.attach();
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        const std::string events = rec.file("events.log");
+        const size_t flags = events.find("\nframe flags  complete\n");
+        const size_t pick = events.find("\npick  Words,Half\n");
+        const size_t signal = events.find("\nsignal  ");
+        EXPECT_NE(pick, std::string::npos) << events;
+        EXPECT_TRUE(flags < pick && pick < signal) << events;
+        EXPECT_EQ(events.find("\nfocus  "), std::string::npos) << events;
+    }
+    {
         Recording rec(root, "mock://focus-floored?profile=rec-test", 0, nullptr,
                       {}, 0, false);
         ASSERT_NE(rec.recorder, nullptr);

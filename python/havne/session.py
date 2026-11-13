@@ -402,7 +402,7 @@ class Session:
             raise ValueError(f"a signal id is 0-65535, not {s}")
         return s
 
-    def set_focus(self, signals, min_sweep_ms=0):
+    def set_focus(self, signals, min_sweep_ms=0, default_pick=False):
         """Asks only the requests that carry these signals, until called
         again (ADR-0056 section 2): ids or names of the session's set, in
         any order; an empty list asks the whole set again. The picks run
@@ -416,14 +416,18 @@ class Session:
         adapter or a busy ECU; 0, the default, is none. One that isn't
         an int (a bool isn't) or is below 0 is a ValueError; one past
         ECUIO_FOCUS_MIN_SWEEP_MAX_MS, or one with an empty list, core's
-        INVALID_ARGUMENT."""
+        INVALID_ARGUMENT. default_pick: the focus is a front end's default
+        pick, not a log's (ECUIO_FOCUS_DEFAULT_PICK), so a recording's
+        header says "pick" in place of "focus"; with an empty list it is
+        core's INVALID_ARGUMENT (an empty pick sets no focus)."""
         if (isinstance(min_sweep_ms, bool) or not isinstance(min_sweep_ms, int)
                 or not 0 <= min_sweep_ms <= 0xFFFFFFFF):
             raise ValueError(f"min_sweep_ms is a whole number, not {min_sweep_ms!r}")
         ids = [self._signal_id(s, "the session's set") for s in signals]
         picks = (ctypes.c_uint16 * len(ids))(*ids) if ids else None
+        flags = e.ECUIO_FOCUS_DEFAULT_PICK if default_pick else 0
         check(lib.ecuio_session_set_focus_with(self._handle(), picks, len(ids),
-                                               min_sweep_ms, 0),
+                                               min_sweep_ms, flags),
               "ecuio_session_set_focus_with")
 
     def _listed(self, getter, name):
