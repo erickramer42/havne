@@ -214,8 +214,8 @@ TEST(CliLayoutTest, NumbersAreWrittenAsJavaScriptWritesThem)
     EXPECT_EQ(js_number(0.1 + 0.2), "0.30000000000000004");
 }
 
-// A lone surrogate is a character to count and, as the app stores what
-// JSON.stringify writes, U+FFFD's three bytes
+// A lone surrogate is a character to count and, as DashboardBook's
+// utf8Bytes counts it, three bytes
 TEST(CliLayoutTest, StringsAreCountedAndStoredAsTheAppDoes)
 {
     using cli::layout::code_points;

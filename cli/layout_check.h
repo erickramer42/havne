@@ -513,7 +513,7 @@ inline void put_utf8(std::string* out, uint32_t cp)
 }
 
 // A string's UTF-8 as the app stores what JSON.stringify writes: V4 writes a
-// lone surrogate unescaped, stored as its replacement character's 3 bytes
+// lone surrogate unescaped, which DashboardBook's utf8Bytes counts as 3 bytes
 inline void write_string(std::string* out, const std::u16string& s)
 {
     static const char* hex = "0123456789abcdef";
