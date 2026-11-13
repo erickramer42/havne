@@ -5557,6 +5557,113 @@ void see_frames(const ecuio_frame_t* frame, void* user)
     }
 }
 
+/* A set that declares another ECU: the mock declares its channel after
+ * the engine ECU's, and that ECU answers the supported-PID walk with
+ * bitmaps listing no data PID, so a Service 01 signal read there is listed
+ * as not sent while the same PID on the engine ECU is sent. A set's
+ * channels past ECUIO_MAX_CHANNELS, the engine ECU's first, are left out. */
+TEST(CoreTest, TheMockDeclaresTheSetsOtherEcusWhichSupportNoPid)
+{
+    static const char kTwoEcus[] =
+        R"({"havne_signals":1,"name":"Two ECUs","source":{"name":"t"},)"
+        R"("ecus":[{"id":"pcm","rx":"7E8"},{"id":"tcm","rx":"7E9"}],)"
+        R"("signals":[)"
+        R"({"key":"rpm","name":"Engine RPM","ecu":"pcm",)"
+        R"("read":{"service":"01","number":"0C"},)"
+        R"("field":{"byte":0,"bits":16,"order":"be"}},)"
+        R"({"key":"tcm_rpm","name":"TCM RPM","ecu":"tcm",)"
+        R"("read":{"service":"01","number":"0C"},)"
+        R"("field":{"byte":0,"bits":16,"order":"be"}}]})";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(kTwoEcus, sizeof kTwoEcus - 1, &file),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const char* profile = ecuio_signal_file_profile(file);
+    ASSERT_EQ(
+        ecuio_profile_register(profile, ecuio_signal_file_set(file), nullptr),
+        ECUIO_OK);
+    const uint16_t engine_rpm = ecuio_signal_file_find(file, "rpm")->id;
+    const uint16_t tcm_rpm = ecuio_signal_file_find(file, "tcm_rpm")->id;
+
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(
+        ecuio_session_create(
+            (std::string("mock://two?diagnose=0&profile=") + profile).c_str(),
+            &session),
+        ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    ASSERT_EQ(info.channel_count, 2u);
+    EXPECT_EQ(info.rx_ids[0], 0x7E8u);
+    EXPECT_EQ(info.tx_ids[0], 0x7E0u);
+    EXPECT_EQ(info.rx_ids[1], 0x7E9u);
+    EXPECT_EQ(info.tx_ids[1], 0x7E1u);
+
+    ecuio_channel_support_t engine{};
+    ASSERT_EQ(ecuio_session_get_channel_support(session, 0, &engine), ECUIO_OK);
+    EXPECT_EQ(engine.rx_id, 0x7E8u);
+    EXPECT_EQ(engine.pids_supported, kDemoPids.size());
+    ecuio_channel_support_t tcm{};
+    ASSERT_EQ(ecuio_session_get_channel_support(session, 1, &tcm), ECUIO_OK);
+    EXPECT_EQ(tcm.rx_id, 0x7E9u);
+    EXPECT_NE(tcm.generation, 0u) << "walked before start";
+    EXPECT_EQ(tcm.flags, ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE);
+    EXPECT_EQ(tcm.ranges, 0xFFu) << "every bitmap answered, each linking on";
+    EXPECT_EQ(tcm.pids_supported, 0u);
+    EXPECT_EQ(tcm.requests, 1u);
+    EXPECT_EQ(tcm.dropped, 1u);
+    EXPECT_EQ(unsupported_ids(session), std::vector<uint16_t>{tcm_rpm});
+
+    /* The engine ECU's 0C is sent; nothing on 0x7E9 */
+    SeenValues seen;
+    ASSERT_EQ(ecuio_register_values_callback(session, see_values, &seen),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    ecuio_session_close(session);
+    {
+        std::lock_guard<std::mutex> lock(seen.m);
+        EXPECT_NE(std::find(seen.ids.begin(), seen.ids.end(), engine_rpm),
+                  seen.ids.end());
+        EXPECT_EQ(std::find(seen.ids.begin(), seen.ids.end(), tcm_rpm),
+                  seen.ids.end());
+    }
+    ecuio_session_destroy(session);
+    ASSERT_EQ(ecuio_profile_unregister(profile), ECUIO_OK);
+    ecuio_signal_file_free(file);
+
+    /* A profile with no channel of its own, or with only the engine ECU's,
+     * has the one */
+    for (const char* uri : {"mock://a?diagnose=0", "mock://a?profile=obd2",
+                            "mock://a?profile=raw"}) {
+        SCOPED_TRACE(uri);
+        ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK);
+        ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+        EXPECT_EQ(info.channel_count, 1u);
+        EXPECT_EQ(info.rx_ids[0], 0x7E8u);
+        ecuio_session_destroy(session);
+    }
+
+    /* Four other ECUs: the engine ECU's channel and the first three */
+    ASSERT_EQ(ecuio_session_create("mock://a?diagnose=0&profile=uds-generic&"
+                                   "did=7E9:D100,7EA:D100,7EB:D100,7EC:D100",
+                                   &session),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    ASSERT_EQ(info.channel_count, ECUIO_MAX_CHANNELS);
+    const uint32_t want[] = {0x7E8u, 0x7E9u, 0x7EAu, 0x7EBu};
+    for (uint32_t c = 0; c < ECUIO_MAX_CHANNELS; ++c) {
+        EXPECT_EQ(info.rx_ids[c], want[c]) << c;
+        ecuio_channel_support_t s{};
+        ASSERT_EQ(ecuio_session_get_channel_support(session, c, &s), ECUIO_OK);
+        EXPECT_EQ(s.rx_id, want[c]);
+        EXPECT_EQ(s.generation, 0u) << "no PID to walk for";
+    }
+    ecuio_session_destroy(session);
+}
+
 /* A running demo car under obd2 sends each PID it answers as a whole
  * reply on 0x7E8, and Boost is worked out from its MAP and baro */
 TEST(CoreTest, TheDemoCarUnderObd2SendsItsValues)
