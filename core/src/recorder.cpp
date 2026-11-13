@@ -1927,7 +1927,11 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                                         ecuio_recording_rows::kConditionsKey,
                                         ecuio_recording_rows::kConditionsName,
                                         conditions->sha256.c_str());
-            header.insert(conditions_at, line, static_cast<size_t>(n));
+            const size_t len = n < 0 ? 0
+                               : static_cast<size_t>(n) < sizeof line
+                                   ? static_cast<size_t>(n)
+                                   : sizeof line - 1;
+            header.insert(conditions_at, line, len);
         }
         recorder->conditions = std::move(conditions);
         recorder->conditions_generation = generation;
