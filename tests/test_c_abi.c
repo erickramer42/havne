@@ -736,7 +736,9 @@ int main(void)
         ECUIO_RECORDING_CONDITIONS_PRESENT != 0x2u ||
         ECUIO_RECORDING_CONDITIONS_MATCH != 0x4u ||
         sizeof(ecuio_recording_condition_event_t) != 88 ||
+        offsetof(ecuio_recording_condition_event_t, host_us) != 0 ||
         offsetof(ecuio_recording_condition_event_t, timestamp_us) != 8 ||
+        offsetof(ecuio_recording_condition_event_t, reserved0) != 36 ||
         offsetof(ecuio_recording_condition_event_t, value) != 16 ||
         offsetof(ecuio_recording_condition_event_t, state) != 24 ||
         offsetof(ecuio_recording_condition_event_t, flags) != 28 ||

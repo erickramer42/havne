@@ -1,8 +1,8 @@
 // File/layer: core/include/ecuio/recording.h | C ABI, public interface
 // Testing: HARNESS: RecorderTest (test_core): the writer against the mock
 //          and the replay fixture, the seams in internal.h; UNIT:
-//          ConditionRecordingTest (test_core); c_abi (test_c_abi): the
-//          header as strict C and the structs' layout
+//          RecordingTest, ConditionRecordingTest (test_core); c_abi
+//          (test_c_abi): the header as strict C and the structs' layout
 #ifndef ECUIO_RECORDING_H
 #define ECUIO_RECORDING_H
 #include "ecuio/core.h" /* ecuio_status_t, ecuio_session_t */
@@ -189,7 +189,10 @@ ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
  * builds, per signal, its range and a summary for each second it has
  * samples in, beside each second's byte offset in the file; queries
  * answer from those and, zoomed in closer than a second a column, from
- * the raw rows of just the seconds they need. Once open, every call but
+ * the raw rows of just the seconds they need. The same pass keeps
+ * events.log's cond lines, a session's condition events (ADR-0063
+ * section 8; ecuio_recording_get_condition_event), and checks the copies
+ * beside the recording against their hashes. Once open, every call but
  * close is safe from several threads at once on one handle.
  */
 
