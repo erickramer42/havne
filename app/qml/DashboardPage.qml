@@ -1476,6 +1476,7 @@ Page {
         text: String(row.channel(index))
         Accessible.name: [qsTr("Red value of the color, 0 to 255"), qsTr("Green value of the color, 0 to 255"),
                           qsTr("Blue value of the color, 0 to 255")][index]
+        onTextEdited: row.edited = true
         onEditingFinished: row.commit()
     }
 
@@ -1951,6 +1952,9 @@ Page {
                     readonly property color base: colorRow.custom !== "" ? colorRow.custom
                         : Theme.gaugeColor(panelCard.cell && panelCard.cell.options ? panelCard.cell.options.color : "") || Theme.gaugeValue
                     function channel(i) { return Math.round([base.r, base.g, base.b][i] * 255) }
+                    // True once a field's text was edited by the user since it was bound: only then is a
+                    // color equal to the drawn one worth storing (a pass-through sends editingFinished too)
+                    property bool edited: false
                     // "#rrggbb" for three well-formed whole numbers 0 to 255, else ""
                     function typed() {
                         let out = "#"
@@ -1963,14 +1967,32 @@ Page {
                         return out
                     }
                     readonly property string previewHex: { void fieldR.text; void fieldG.text; void fieldB.text; return typed() }
-                    function commit() {
-                        const hex = typed()
-                        // A focus pass-through sends editingFinished with the text unchanged: nothing to store
-                        if (hex !== "" && !Qt.colorEqual(hex, base))
-                            root.setOptions({ color: hex })
+                    // The fields show the color again; what was typed is gone
+                    function rebind() {
+                        edited = false
                         fieldR.text = Qt.binding(() => String(customRow.channel(0)))
                         fieldG.text = Qt.binding(() => String(customRow.channel(1)))
                         fieldB.text = Qt.binding(() => String(customRow.channel(2)))
+                    }
+                    // A value that isn't a whole number 0 to 255 stays typed, with its reason under the fields
+                    function commit() {
+                        const hex = typed()
+                        if (hex === "")
+                            return
+                        // A focus pass-through sends editingFinished with nothing typed: nothing to store
+                        if (edited || !Qt.colorEqual(hex, base))
+                            root.setOptions({ color: hex })
+                        rebind()
+                    }
+                    // Another gauge, or the row hidden: what was left typed doesn't follow
+                    Connections {
+                        target: colorRow
+                        function onCustomShownChanged() { customRow.rebind() }
+                    }
+                    Connections {
+                        target: root
+                        function onSelectedChanged() { customRow.rebind() }
+                        function onPageIndexChanged() { customRow.rebind() }
                     }
                     Caption { text: "R" }
                     ChannelField { id: fieldR; objectName: "panelColorR"; index: 0; row: customRow }
@@ -1994,11 +2016,23 @@ Page {
                         border.color: Theme.outline
                     }
                     Caption {
+                        objectName: "panelColorWhy"
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        visible: customRow.previewHex === ""
+                        color: Theme.danger
+                        text: qsTr("Each value is a whole number from 0 to 255")
+                    }
+                    Caption {
                         objectName: "panelColorHard"
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
-                        visible: customRow.previewHex !== "" && Theme.gaugeContrast(customRow.previewHex) < 3
-                        text: qsTr("Hard to read on this background")
+                        // The look it is hard to read in (a layout can be opened under the other one); no
+                        // color is hard in both, since the two surfaces sit at the two ends of the lightness
+                        readonly property var hardIn: customRow.previewHex === "" ? []
+                            : Theme.lookNames.filter(l => Theme.gaugeContrast(customRow.previewHex, l) < 3)
+                        visible: hardIn.length > 0
+                        text: hardIn[0] === "dark" ? qsTr("Hard to read in Dark") : qsTr("Hard to read in Daylight")
                     }
                 }
 

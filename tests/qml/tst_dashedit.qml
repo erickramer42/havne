@@ -145,9 +145,10 @@ TestCase {
         if (scrolled)
             scrolled.contentY = was
     }
-    // Text typed into a field and the field left
+    // Text typed into a field and the field left; it emits textEdited, as real typing does
     function type(field, text) {
         field.text = text
+        field.textEdited()
         field.editingFinished()
     }
     function spin(box, value) {
@@ -1912,11 +1913,18 @@ TestCase {
         verify(find(page, "panelColor_custom").checked)
         verify(!find(page, "panelColor_default").checked)
         compare(find(page, "panelColorPreview").color.toString(), "#12ab9f")
+        const why = find(page, "panelColorWhy")
+        verify(!why.visible)
         for (const bad of ["256", "", "-1", "1.5", "ab", "1e2"]) {
             type(g, bad)
             compare(page.doc.pages[0].cells[0].options.color, "#12ab9f", "[" + bad + "] is refused")
-            compare(g.text, "171", "[" + bad + "] goes back to the stored number")
+            compare(g.text, bad, "[" + bad + "] stays typed")
+            verify(why.visible, "[" + bad + "] says why")
+            verify(why.text.indexOf("0 to 255") >= 0, why.text)
         }
+        type(g, "171")
+        verify(!why.visible, "a value in range takes the words away")
+        compare(g.text, "171")
         type(r, "0"); type(g, "5"); type(b, "255")
         compare(page.doc.pages[0].cells[0].options.color, "#0005ff", "a channel under 16 keeps its zero")
         click(page, "panelColor_pink")
@@ -1932,13 +1940,21 @@ TestCase {
         press(find(page, "dashCell_0_0"))
         click(page, "panelColor_custom")
         const note = find(page, "panelColorHard")
-        type(find(page, "panelColorR"), "255"); type(find(page, "panelColorG"), "255"); type(find(page, "panelColorB"), "255")
-        verify(!note.visible, "white reads on Dark")
-        type(find(page, "panelColorR"), "20"); type(find(page, "panelColorG"), "20"); type(find(page, "panelColorB"), "20")
-        compare(page.doc.pages[0].cells[0].options.color, "#141414", "stored, not refused")
-        verify(note.visible, "near-black does not read on Dark")
+        const rgb = (r, g, b) => { type(find(page, "panelColorR"), r); type(find(page, "panelColorG"), g); type(find(page, "panelColorB"), b) }
+        rgb("128", "128", "128")
+        verify(!note.visible, "a mid gray reads on both looks")
+        // Both looks are judged, whichever one is shown, and the note names the one
+        rgb("255", "255", "255")
+        compare(page.doc.pages[0].cells[0].options.color, "#ffffff", "stored, not refused")
+        verify(note.visible, "white shown on Dark is hard to read on Daylight")
+        compare(note.text, "Hard to read in Daylight")
+        rgb("20", "20", "20")
+        compare(page.doc.pages[0].cells[0].options.color, "#141414")
+        verify(note.visible, "near-black is hard to read on Dark")
+        compare(note.text, "Hard to read in Dark")
         Theme.look = "daylight"
-        verify(!note.visible, "near-black reads on Daylight")
+        verify(note.visible, "and says so under Daylight too")
+        compare(note.text, "Hard to read in Dark")
         Theme.look = "dark"
     }
 
@@ -1959,6 +1975,8 @@ TestCase {
         b.forceActiveFocus()
         verify(b.activeFocus)
         find(page, "panelColor_custom").forceActiveFocus()
+        // The window may not be active: the same pass-through by hand, with no textEdited
+        r.editingFinished(); g.editingFinished(); b.editingFinished()
         compare(page.doc.pages[0].cells[0].options.color, undefined, "nothing stored by passing through")
         compare(find(page, "dashUndo").Accessible.name.indexOf("changed"), -1, "no undo step either")
         // A changed value stored, then passed through again, adds no second step
@@ -1966,6 +1984,45 @@ TestCase {
         compare(page.doc.pages[0].cells[0].options.color, "#0a141e")
         r.forceActiveFocus(); g.forceActiveFocus(); b.forceActiveFocus()
         compare(page.doc.pages[0].cells[0].options.color, "#0a141e")
+    }
+
+    // Custom on a named pick, its own three numbers typed: the user keeps the color
+    // as a custom one (a named pick's value changes with the look, a custom one doesn't)
+    function test_aNamedColorsOwnNumbersTypedAreStoredAsACustomColor() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const cell = cellOf("A", "analog")
+        cell.options.color = "teal"
+        const page = storedPageOf({}, docOf([cell]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        const r = find(page, "panelColorR"), g = find(page, "panelColorG"), b = find(page, "panelColorB")
+        compare([r.text, g.text, b.text], ["63", "209", "192"], "the fields start at Dark's teal")
+        r.forceActiveFocus(); g.forceActiveFocus(); b.forceActiveFocus()
+        find(page, "panelColor_custom").forceActiveFocus()
+        r.editingFinished(); g.editingFinished(); b.editingFinished()
+        compare(page.doc.pages[0].cells[0].options.color, "teal", "a pass-through stores nothing")
+        type(r, "63"); type(g, "209"); type(b, "192")
+        compare(page.doc.pages[0].cells[0].options.color, "#3fd1c0", "the same numbers, typed, are stored")
+        Theme.look = "daylight"
+        compare(Theme.gaugeColor(page.doc.pages[0].cells[0].options.color), "#3fd1c0", "and stay as they are in Daylight")
+        Theme.look = "dark"
+    }
+
+    function test_aValueLeftTypedIsGoneWhenAnotherGaugeIsShown() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({}, docOf([cellOf("A", "analog"), cellOf("B", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        type(find(page, "panelColorG"), "256")
+        compare(find(page, "panelColorG").text, "256")
+        press(find(page, "dashCell_0_1"))
+        click(page, "panelColor_custom")
+        verify(find(page, "panelColorG").text !== "256", "B's fields show B's color, not A's leftover")
+        verify(!find(page, "panelColorWhy").visible)
     }
 
     function test_theCustomRowIsClosedForAnotherGauge() {
@@ -2025,6 +2082,25 @@ TestCase {
         verify(note.width > 100, "the note is not a sliver: " + note.width)
         tryVerify(() => note.mapToItem(panel, 0, 0).y >= row.mapToItem(panel, 0, 0).y + row.height - 1, 3000,
                   "the note sits under the fields")
+    }
+
+    function test_theWhyLineHasARowOfItsOwnOnAPhone() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({ form: "phone", width: 384, height: 832 }, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        type(find(page, "panelColorG"), "256")
+        const why = find(page, "panelColorWhy")
+        verify(why.visible)
+        const row = find(page, "panelColorCustom")
+        const panel = find(page, "dashCellPanel")
+        const at = row.mapToItem(panel, 0, 0)
+        verify(at.x >= -0.5 && at.x + row.width <= panel.width + 0.5, "the fields fit the card: " + row.width + " of " + panel.width)
+        tryVerify(() => why.width > 100 && why.mapToItem(panel, 0, 0).y >= row.mapToItem(panel, 0, 0).y + row.height - 1,
+                  3000, "the words are no sliver and sit under the fields: " + why.width)
+        verify(why.mapToItem(panel, 0, 0).x + why.width <= panel.width + 0.5, "inside the card")
     }
 
     function test_aCustomColorRoundTripsThroughAFileAndNightDrawsNoneOfIt() {

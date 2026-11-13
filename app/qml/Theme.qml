@@ -385,12 +385,13 @@ QtObject {
         const set = gaugePalettes[active] ?? gaugePalettes[nightActive ? "dark" : active]
         return set !== undefined && Object.prototype.hasOwnProperty.call(set, name) ? set[name] : "transparent"
     }
-    // WCAG's contrast of a "#rrggbb" against the look's surface (Dark's at
-    // Night): below 3 a gauge in it is hard to read, which the picker says
-    function gaugeContrast(hex) {
+    // WCAG's contrast of a "#rrggbb" against a look's surface (the shown
+    // look's, Dark's at Night, when none is named): below 3 a gauge in it is
+    // hard to read, which the picker says
+    function gaugeContrast(hex, look) {
         const lin = v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
         const lum = c => 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
-        const a = lum(Qt.color(hex)), b = lum(Qt.color(palettes[nightActive ? "dark" : active].surface))
+        const a = lum(Qt.color(hex)), b = lum(Qt.color(palettes[look ?? (nightActive ? "dark" : active)].surface))
         return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
     }
 
