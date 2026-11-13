@@ -379,9 +379,6 @@ TestCase {
         compare(s.opacity, 1.0)
     }
 
-    // A text row (a uds-generic TEXT def, which the mock answers each
-    // tick) shows its text where a number would go and can't be plotted;
-    // the number row beside it formats as usual
     // A row is one accessible node named by its value; its Texts are
     // ignored, so a value changing at the model's rate renames the node and
     // makes, hides or destroys none (355)
@@ -398,6 +395,9 @@ TestCase {
         compare(row.Accessible.name, row.name + ": " + value.text)
     }
 
+    // A text row (a uds-generic TEXT def, which the mock answers each
+    // tick) shows its text where a number would go and can't be plotted;
+    // the number row beside it formats as usual
     function test_textRowShowsTextAndCannotPlot() {
         const page = createTemporaryObject(pageComponent, testCase)
         compare(Bridge.connectSession("mock://demo?profile=uds-generic&did=F190:text,1E1C:u16"),
@@ -678,6 +678,29 @@ TestCase {
             verify(page.paused && page.viewEndMs < panned, "a second drag pans on: " + page.viewEndMs)
             dragAcross(frame, -600)
             verify(!page.paused, "a drag past the right edge follows now again")
+        } finally {
+            findChild(page, "chartWindow_" + kept).clicked()
+        }
+    }
+
+    // A resume leaves no pan behind: the next drag starts from the live edge,
+    // so a leftward one pauses nothing
+    function test_aDragAfterAResumeStartsFromNow() {
+        const page = pageInGrownWindow()
+        compare(Bridge.connectSession("replay://" + Harness.replayFixtures
+                                      + "/2026-10-25-engine-start?profile=obd2&speed=max"), "",
+                "the replay connects")
+        const kept = page.chartWindowS
+        try {
+            findChild(page, "chartWindow_10").clicked()
+            waitForHistory(25000)
+            const frame = findChild(page, "chartFrame")
+            dragAcross(frame, 200)
+            verify(page.paused && page.viewEndMs < -1000, "panned back: " + page.viewEndMs)
+            page.resume()
+            compare(page.viewEndMs, 0, "a resume forgets the pan")
+            dragAcross(frame, -100)
+            verify(!page.paused, "a leftward drag on the following chart pauses nothing")
         } finally {
             findChild(page, "chartWindow_" + kept).clicked()
         }
