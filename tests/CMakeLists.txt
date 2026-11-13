@@ -1611,6 +1611,14 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
         ECUIO_LAYOUT_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/data/layouts"
     )
+    # Settings keeps only a real adapter's connect, so its cases connect to
+    # havne-cli's ELM327 emulator on every platform
+    # (Harness.startElm327Emulator)
+    if(TARGET havne-cli)
+        target_compile_definitions(test_qml PRIVATE
+            HAVNE_CLI_PATH="$<TARGET_FILE:havne-cli>")
+        add_dependencies(test_qml havne-cli)
+    endif()
 
     # Windows: deployed like the app, into a directory of its own (the
     # other tests' copied Qt DLLs would otherwise point Qt at plugins

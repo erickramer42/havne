@@ -3,8 +3,14 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
+#include <QHash>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QProcess>
 #include <QStyleHints>
 #include <QKeyEvent>
 #include <QLocale>
@@ -402,13 +408,146 @@ public:
         m_armed.clear();
     }
 
+    // Whether this tree builds havne-cli (none: its emulator's cases skip)
+    Q_INVOKABLE bool hasHavneCli() const { return !havneCli().isEmpty(); }
+
+    // An ELM327 adapter on loopback: havne-cli's emulator (ADR-0055) over
+    // the simulated car's canned values, so a connect is kept on every
+    // platform. Returns its elm327:// URI, or "" with emulatorWhy() saying
+    // why; one at a time, stopped by stopElm327Emulator() or the harness.
+    Q_INVOKABLE QString startElm327Emulator()
+    {
+        stopElm327Emulator();
+        m_emulatorWhy.clear();
+        const QString cli = havneCli();
+        if (cli.isEmpty() || !QFileInfo::exists(cli)) {
+            m_emulatorWhy =
+                QStringLiteral("havne-cli isn't built beside the tests");
+            return {};
+        }
+        m_emulator = std::make_unique<QProcess>();
+        m_emulator->setProcessChannelMode(QProcess::ForwardedErrorChannel);
+        m_emulator->start(cli,
+                          {QStringLiteral("sim"),
+                           QStringLiteral("mock://emu?values=canned"),
+                           QStringLiteral("--elm327"), QStringLiteral("tcp:0"),
+                           QStringLiteral("--seconds"), QStringLiteral("120")});
+        // Its elm327 line names the port the system picked
+        QElapsedTimer waited;
+        waited.start();
+        QString uri;
+        while (uri.isEmpty() && m_emulatorWhy.isEmpty()) {
+            if (!m_emulator->canReadLine()) {
+                const qint64 left = kEmulatorStartMs - waited.elapsed();
+                if (left <= 0 || m_emulator->state() == QProcess::NotRunning ||
+                    !m_emulator->waitForReadyRead(static_cast<int>(left))) {
+                    if (!m_emulator->canReadLine())
+                        m_emulatorWhy = emulatorStartFailure();
+                }
+                continue;
+            }
+            const QJsonObject line =
+                QJsonDocument::fromJson(m_emulator->readLine()).object();
+            const QString type = line.value(QStringLiteral("type")).toString();
+            if (type == QLatin1String("elm327")) {
+                uri = QStringLiteral("elm327://") +
+                      line.value(QStringLiteral("listen")).toString();
+            } else if (type == QLatin1String("error")) {
+                m_emulatorWhy =
+                    QStringLiteral(
+                        "havne-cli's emulator refused to start: %1 (%2)")
+                        .arg(line.value(QStringLiteral("message")).toString(),
+                             line.value(QStringLiteral("detail")).toString());
+            }
+        }
+        if (uri.isEmpty()) {
+            stopElm327Emulator();
+            return {};
+        }
+        connect(m_emulator.get(), &QProcess::readyReadStandardOutput, this,
+                &Harness::readEmulator);
+        readEmulator();
+        return uri;
+    }
+    Q_INVOKABLE QString emulatorWhy() const { return m_emulatorWhy; }
+
+    // How many of the emulator's client lines carried this event
+    // (connected, closed, refused): it serves one host at a time, so a
+    // case waits for a closed before the next connect
+    Q_INVOKABLE int emulatorClients(const QString& event) const
+    {
+        return m_clientEvents.value(event);
+    }
+
+    Q_INVOKABLE void stopElm327Emulator()
+    {
+        if (m_emulator) {
+            m_emulator->disconnect(this);
+            m_emulator->kill();
+            m_emulator->waitForFinished(5000);
+            m_emulator.reset();
+        }
+        m_clientEvents.clear();
+    }
+
     // The folder the bridge lists recordings from (Setup's scratch one)
     void setRecordingsRoot(const QString& root) { m_recordingsRoot = root; }
 
 private:
+    // A cold first spawn on a loaded CI runner (Defender, Gatekeeper) can
+    // pass 10 s; a pass returns on the first line
+    static constexpr qint64 kEmulatorStartMs = 30000;
+
+    static QString havneCli()
+    {
+#ifdef HAVNE_CLI_PATH
+        return QStringLiteral(HAVNE_CLI_PATH);
+#else
+        return {};
+#endif
+    }
+
+    // Why the emulator gave no port line: still running, never started,
+    // or gone (a usage exit 2 writes no error line)
+    QString emulatorStartFailure() const
+    {
+        if (m_emulator->state() != QProcess::NotRunning) {
+            return QStringLiteral(
+                       "havne-cli's emulator didn't say its port within %1 s")
+                .arg(kEmulatorStartMs / 1000);
+        }
+        if (m_emulator->error() == QProcess::FailedToStart) {
+            return QStringLiteral("havne-cli's emulator didn't start: %1")
+                .arg(m_emulator->errorString());
+        }
+        return QStringLiteral(
+                   "havne-cli's emulator %1 with code %2 before it said its "
+                   "port")
+            .arg(m_emulator->exitStatus() == QProcess::CrashExit
+                     ? QStringLiteral("crashed")
+                     : QStringLiteral("exited"))
+            .arg(m_emulator->exitCode());
+    }
+
+    void readEmulator()
+    {
+        while (m_emulator && m_emulator->canReadLine()) {
+            const QJsonObject line =
+                QJsonDocument::fromJson(m_emulator->readLine()).object();
+            if (line.value(QStringLiteral("type")).toString() ==
+                QLatin1String("client")) {
+                ++m_clientEvents[line.value(QStringLiteral("event"))
+                                     .toString()];
+            }
+        }
+    }
+
     QStringList m_armed;
     QTemporaryDir m_scratch;
     QString m_recordingsRoot;
+    std::unique_ptr<QProcess> m_emulator;
+    QString m_emulatorWhy;
+    QHash<QString, int> m_clientEvents;
 };
 
 // The relay's adapter as main() makes it on the phone, opening at once:

@@ -70,6 +70,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Harness.clearFakeKnobs()
+        Harness.stopElm327Emulator()
         Bridge.vehicleLabel = ""
         Bridge.deleteUnusedSignalFiles([])   // the store starts empty too
         for (const p of Bridge.plugins())     // and so do the plugins
@@ -1617,21 +1618,38 @@ TestCase {
         verify(find(page, "recordBox").checked)
     }
 
-    // A restart gets back the last URI that connected, not a refused one.
-    // The mock is never kept, so this needs the fake DLL
-    function test_theLastConnectedUriComesBack() {
-        if (Harness.fakeDllPath === "")
-            skip("needs the fake J2534 DLL (Windows)")
-        const fake = "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
-        let page = createPage()
-        const error = find(page, "errorLabel")
-        find(page, "uriField").text = fake + "&profile=raw"
+    // An adapter's URI on every platform: havne-cli's ELM327 emulator on
+    // loopback (Harness), since the mock and a replay are never kept. A
+    // tree with havne-cli fails when it won't start, never skips
+    function emulatorUri() {
+        if (!Harness.hasHavneCli())
+            skip("needs havne-cli, which this tree doesn't build")
+        const uri = Harness.startElm327Emulator()
+        verify(uri !== "", Harness.emulatorWhy())
+        return uri
+    }
+
+    // Connects the field's URI and disconnects. The emulator serves one
+    // host at a time, so this waits until it has seen the host go
+    function connectAndLeave(page, uri) {
+        const closed = Harness.emulatorClients("closed")
+        find(page, "uriField").text = uri
         press(page, "connectButton")
-        tryVerify(() => Bridge.connected, 10000, "the URI connects")
+        tryVerify(() => Bridge.connected, 10000, uri + " connects")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        tryVerify(() => Harness.emulatorClients("closed") > closed, 5000,
+                  "the emulator sees the host go")
+    }
 
-        find(page, "uriField").text = fake + "&profile=uds-generic"
+    // A restart gets back the last URI that connected, not a refused one
+    function test_theLastConnectedUriComesBack() {
+        const emu = emulatorUri()
+        let page = createPage()
+        const error = find(page, "errorLabel")
+        connectAndLeave(page, emu + "?profile=raw")
+
+        find(page, "uriField").text = emu + "?profile=uds-generic"
         press(page, "connectButton")
         tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
 
@@ -1640,7 +1658,7 @@ TestCase {
         wait(10)
 
         page = createPage()
-        compare(find(page, "uriField").text, fake + "&profile=raw",
+        compare(find(page, "uriField").text, emu + "?profile=raw",
                 "the URI that connected, not the refused one")
         verify(find(page, "profile_raw").checked, "read back into the row")
     }
@@ -1687,32 +1705,24 @@ TestCase {
     // Only a connect that succeeded is written, the newest first, and the
     // list survives a restart
     function test_onlyASuccessfulConnectWritesTheRecentUris() {
-        if (Harness.fakeDllPath === "")
-            skip("needs the fake J2534 DLL (Windows)")
-        const fake = "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
-        const raw = fake + "&profile=raw"
+        const emu = emulatorUri()
+        const raw = emu + "?profile=raw"
         let page = createPage()
         sameList(page.recentUris, [], "nothing yet")
-        const field = find(page, "uriField")
-        for (const uri of [fake, raw, fake]) {
-            field.text = uri
-            press(page, "connectButton")
-            tryVerify(() => Bridge.connected, 10000, uri + " connects")
-            Bridge.disconnectSession()
-            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
-        }
-        sameList(page.recentUris, [fake, raw], "newest first, once")
+        for (const uri of [emu, raw, emu])
+            connectAndLeave(page, uri)
+        sameList(page.recentUris, [emu, raw], "newest first, once")
 
-        field.text = fake + "&profile=uds-generic"
+        find(page, "uriField").text = emu + "?profile=uds-generic"
         press(page, "connectButton")
         tryVerify(() => find(page, "errorLabel").visible, 5000, "core refuses it: no ?did=")
-        sameList(page.recentUris, [fake, raw], "a refusal writes nothing")
+        sameList(page.recentUris, [emu, raw], "a refusal writes nothing")
 
         // The page's store writes when the page goes, as at a quit
         page.destroy()
         wait(10)
         page = createPage()
-        sameList(page.recentUris, [fake, raw], "kept between runs")
+        sameList(page.recentUris, [emu, raw], "kept between runs")
     }
 
     // A replay or the mock is never kept (Recordings is a replay's way
