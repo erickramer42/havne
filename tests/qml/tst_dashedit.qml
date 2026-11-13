@@ -51,6 +51,7 @@ TestCase {
     }
 
     function cleanup() {
+        DocumentPicker.setPickerForTesting(false)
         Theme.night = "off"
         Theme.look = "dark"
         Bridge.unitSystem = 0
@@ -3232,6 +3233,36 @@ TestCase {
         page.undo()
         compare(page.doc, second, "one Undo takes the whole load back")
         verify(!page.canUndo, "and it was one step")
+    }
+
+    // Load layout through the phone's picker (finding 517): a pick of
+    // "name (1).json" after a plain one loads the second file, never the
+    // first, and a picker with no document says so
+    function test_thePickersSecondPickLoadsTheSecondFile() {
+        const plainUrl = layoutUrl("layout-picked.json")
+        const parenUrl = layoutUrl("layout-picked (1).json")
+        let src = storedPageOf({}, docOf([cellOf("Plain")]))
+        verify(src.exportLayoutTo(plainUrl), src.layoutNote)
+        src.destroy()
+        src = storedPageOf({}, docOf([cellOf("Paren")]))
+        verify(src.exportLayoutTo(parenUrl), src.layoutNote)
+        src.destroy()
+
+        const page = storedPageOf({}, docOf([cellOf("X")]))
+        const dialog = find(page, "layoutOpenDialog")
+        dialog.usePicker = true
+        DocumentPicker.setPickerForTesting(true)
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, plainUrl.toString(), "layout-picked.json")
+        compare(labels(page), ["Plain"])
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, parenUrl.toString(), "layout-picked (1).json")
+        compare(labels(page), ["Paren"], "the second pick's file")
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, "", "")
+        compare(page.layoutNote, "The picker returned no document")
+        verify(page.layoutNoteBad)
+        compare(labels(page), ["Paren"], "nothing read")
     }
 
     function test_twoQuickLoadsAreTwoUndoSteps() {

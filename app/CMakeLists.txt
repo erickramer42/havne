@@ -32,6 +32,8 @@ qt_add_library(app_ui STATIC
     bridgesingleton.h
     carryover.cpp
     carryover.h
+    documentpicker.cpp
+    documentpicker.h
     framefilter.cpp
     framefilter.h
     healthreport.cpp
@@ -85,6 +87,7 @@ qt_add_qml_module(app_ui
         qml/SegmentButton.qml
         qml/SegmentRow.qml
         qml/CsvGuessPreview.qml
+        qml/DocumentOpenDialog.qml
         qml/RecordingExportPanel.qml
         qml/RecordingJumpRow.qml
         qml/StretchesPanel.qml
@@ -180,6 +183,9 @@ if(ANDROID)
     # The foreground service held while an adapter session is up
     # (ADR-0029 section 2; its Java half is in android/src)
     target_sources(app_ui PRIVATE androidsession.cpp androidsession.h)
+    # documentpicker.cpp's activity result (QtAndroidPrivate::startActivity)
+    find_package(Qt6 6.12 REQUIRED COMPONENTS CorePrivate)
+    target_link_libraries(app_ui PRIVATE Qt6::CorePrivate)
 endif()
 # The title bar's color (windowtheme.cpp, DwmSetWindowAttribute)
 if(WIN32)
