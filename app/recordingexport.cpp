@@ -1,6 +1,6 @@
 // File/layer: app/recordingexport.cpp | Qt6 Core, app layer, C++17
 // Testing: BRIDGE: RecordingExportTest (test_bridge); QML: QmlTest.recordings,
-//          QmlTest.phone
+//          QmlTest.phone; MANUAL SMOKE: the test phone (a provider's folder)
 
 #include "recordingexport.h"
 #include "urlwrite.h"
@@ -252,19 +252,32 @@ bool copyChunks(QFile& in, QIODevice& out, const Stop& stop)
     }
 }
 
+// Where a copy goes. InTree is a new file in a provider's folder, which Qt's
+// content engine makes: the content resolver opens existing documents only
+enum class CopyTo { Local, Picked, InTree };
+
 // A local file is written whole or not at all; a provider's can't be renamed
 // into place
-bool copyFile(const QString& from, const QString& to, bool provider,
+bool copyFile(const QString& from, const QString& to, CopyTo where,
               const Stop& stop)
 {
     QFile in(from);
     if (!in.open(QIODevice::ReadOnly)) {
         return false;
     }
-    if (!provider) {
+    if (where == CopyTo::Local) {
         QSaveFile out(to);
         return out.open(QIODevice::WriteOnly) && copyChunks(in, out, stop) &&
                out.commit();
+    }
+    if (where == CopyTo::InTree) {
+        QFile out(to);
+        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+            !copyChunks(in, out, stop) || !out.flush()) {
+            return false;
+        }
+        out.close();
+        return out.error() == QFileDevice::NoError;
     }
     QFile out;
     return openPicked(out, to, QIODevice::WriteOnly | QIODevice::Truncate) &&
@@ -312,7 +325,8 @@ QVariantMap runFile(const Job& job, Stop& stop)
         }
     }
     if (job.failCopy || job.failCopyAfterBytes ||
-        !copyFile(made, target, provider, stop)) {
+        !copyFile(made, target, provider ? CopyTo::Picked : CopyTo::Local,
+                  stop)) {
         dropPicked();
         return failed(job, QStringLiteral("Couldn't write the file"));
     }
@@ -366,7 +380,7 @@ QVariantMap runFolder(const Job& job, Stop& stop)
     for (const QString& file : files) {
         if (job.failCopy ||
             !copyFile(made + QLatin1Char('/') + file,
-                      copy + QLatin1Char('/') + file, true, stop)) {
+                      copy + QLatin1Char('/') + file, CopyTo::InTree, stop)) {
             QDir(copy).removeRecursively();
             return failed(job, QStringLiteral("Couldn't write the folder"));
         }
