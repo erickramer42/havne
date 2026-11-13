@@ -617,6 +617,8 @@ GUESSED = [
     # name, values imported with the guessed map (each column's samples)
     ("logger-a", 25),
     ("logger-b", 27),
+    # a row with no time and a text among the three columns' first rows
+    ("logger-e", 12),
 ]
 
 
