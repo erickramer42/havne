@@ -987,6 +987,7 @@ bool RecordingView::startAsks()
     {
         const std::lock_guard<std::mutex> lock(m_asks->m);
         m_asks->holdMs = m_asksHoldMs;
+        m_asks->yieldHoldMs = m_yieldHoldMs;
         m_asks->loseMeans = m_loseMeansForTesting;
         if (m_asks->answering) {
             return true; // it takes the ask before it ends
@@ -1017,20 +1018,33 @@ namespace {
 // Each id's mean in each of the columns over [t0, t1) of the recording's
 // time in microseconds, a row of `columns` per id in out, NaN for none:
 // every column from the statistics over its own microseconds. Ends early,
-// with ECUIO_ERR_CANCELED, once stale or the open's stopped is set
+// with ECUIO_ERR_CANCELED, once stale or the open's stopped is set. Starts
+// at column `next` (0: out is made) and, with `waiting` set, stops before
+// a column after the first with `yielded` and `next` the column it left
+// off at, so a call again resumes there
 ecuio_status_t ownColumnMeans(ecuio_recording_t* reader,
                               const std::vector<uint32_t>& ids, int64_t t0,
                               int64_t t1, uint32_t columns,
                               const std::atomic<bool>& stale,
                               const std::atomic<bool>& stopped,
-                              std::vector<double>& out)
+                              const std::atomic<bool>& waiting, uint32_t& next,
+                              bool& yielded, std::vector<double>& out)
 {
-    out.assign(ids.size() * columns, NAN);
+    yielded = false;
+    if (next == 0) {
+        out.assign(ids.size() * columns, NAN);
+    }
     std::vector<ecuio_recording_stats_t> stats(ids.size());
     const double step = static_cast<double>(t1 - t0) / columns;
-    for (uint32_t c = 0; c < columns; ++c) {
+    const uint32_t first = next;
+    for (uint32_t c = first; c < columns; ++c) {
         if (stale.load() || stopped.load()) {
             return ECUIO_ERR_CANCELED;
+        }
+        if (c > first && waiting.load()) {
+            next = c;
+            yielded = true;
+            return ECUIO_OK;
         }
         // The column's first microsecond and the next column's
         const int64_t from = t0 + std::llround(c * step);
@@ -1053,6 +1067,7 @@ ecuio_status_t ownColumnMeans(ecuio_recording_t* reader,
             }
         }
     }
+    next = columns;
     return ECUIO_OK;
 }
 
@@ -1073,27 +1088,44 @@ void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
         ++stop->readsStopped;
         return true;
     };
+    // The means pass under way, kept across turns of the loop: it gives way
+    // to a statistics or step ask put in (`waiting`) and resumes at the next
+    // column after it, so a cursor ask never waits for a whole pass
+    std::optional<MeansAsk> pass;
+    std::vector<double> passOut;
+    uint32_t passAt = 0;
     for (;;) {
         std::optional<StatsAsk> stats;
         std::optional<StepAsk> step;
-        std::optional<MeansAsk> means;
         int holdMs = 0;
+        int yieldHoldMs = 0;
         bool loseMeans = false;
         {
             // Ending and an ask's arrival are decided under one lock, so an
             // ask put in while this runs is never left behind
             const std::lock_guard<std::mutex> lock(asks->m);
-            if (!asks->stats && !asks->step && !asks->means) {
+            if (!asks->stats && !asks->step && !asks->means && !pass) {
                 asks->answering = false;
                 return;
             }
             stats.swap(asks->stats);
             step.swap(asks->step);
-            means.swap(asks->means);
-            if (means) {
+            asks->waiting = false;
+            bool took = stats || step;
+            if (asks->means) {
+                // A newer ask replaces a pass under way: its answer is none
+                if (pass) {
+                    ++asks->stopped;
+                }
+                pass = std::move(asks->means);
+                asks->means.reset();
+                passOut.clear();
+                passAt = 0;
                 asks->meansStale = false;
+                took = true;
             }
-            holdMs = asks->holdMs;
+            holdMs = took ? asks->holdMs : 0;
+            yieldHoldMs = asks->yieldHoldMs;
             loseMeans = asks->loseMeans;
         }
         if (holdMs > 0) {
@@ -1146,37 +1178,54 @@ void RecordingView::answerAsks(const std::shared_ptr<Asks>& asks,
             ++asks->lost;
         }
         try {
-            if (means) {
+            if (pass) {
                 if (loseMeans) {
                     throw std::bad_alloc();
                 }
-                std::vector<double> got;
+                bool yielded = false;
                 const ecuio_status_t rc = ownColumnMeans(
-                    reader.get(), means->ids, means->t0, means->t1,
-                    means->columns, asks->meansStale, stop->stopped, got);
-                // A pass a newer ask or a close ended has no answer
-                if (rc == ECUIO_ERR_CANCELED) {
+                    reader.get(), pass->ids, pass->t0, pass->t1, pass->columns,
+                    asks->meansStale, stop->stopped, asks->waiting, passAt,
+                    yielded, passOut);
+                if (yielded) {
+                    ++asks->yields; // the pass stays, resumed after the ask
+                    if (yieldHoldMs > 0) {
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(yieldHoldMs));
+                    }
+                } else if (rc == ECUIO_ERR_CANCELED) {
+                    // A pass a newer means ask or a close ended has no answer
                     ++asks->stopped;
+                    if (stop->stopped.load()) {
+                        ++stop->readsStopped;
+                    }
+                    pass.reset();
                 } else {
                     QMetaObject::invokeMethod(
                         app,
-                        [view, ask = *means, rc, got, generation] {
+                        [view, ask = *pass, rc, got = std::move(passOut),
+                         generation] {
                             if (view) {
                                 view->meansFinished(ask, rc, got, generation);
                             }
                         },
                         Qt::QueuedConnection);
+                    pass.reset();
+                    passOut.clear();
                 }
             }
         } catch (const std::bad_alloc&) {
             ++asks->lost;
             // A page pairs two views' means and waits for both: this one
             // says it has none, where that much can still be posted
+            const std::optional<MeansAsk> lost = std::move(pass);
+            pass.reset();
+            passOut.clear();
             try {
-                if (means) {
+                if (lost) {
                     QMetaObject::invokeMethod(
                         app,
-                        [view, request = means->request, generation] {
+                        [view, request = lost->request, generation] {
                             if (view) {
                                 view->meansLost(request, generation);
                             }
@@ -1355,13 +1404,16 @@ void RecordingView::findStretches(
 {
     struct Asked {
         const Stop* stop;
+        int request;
         int stopAt; // a test's
         int asks;
-    } asked{stop.get(), stopAt, 0};
+    } asked{stop.get(), request, stopAt, 0};
+    // A close or a newer stretches ask ends the pass at its next second
     const ecuio_cancel_t closed = [](void* user) {
         auto* a = static_cast<Asked*>(user);
         ++a->asks;
         return a->stop->stopped.load() ||
+                       a->stop->latestStretches.load() > a->request ||
                        (a->stopAt > 0 && a->asks >= a->stopAt)
                    ? 1
                    : 0;
@@ -1396,7 +1448,12 @@ void RecordingView::findStretches(
     }
     stop->passAsks = asked.asks;
     if (rc == ECUIO_ERR_CANCELED) {
-        ++stop->readsStopped; // closed: its answer would be dropped
+        // Closed or asked again: its answer would be dropped
+        if (!stop->stopped.load() && stop->latestStretches.load() > request) {
+            ++stop->stretchesStaled;
+        } else {
+            ++stop->readsStopped;
+        }
         return;
     }
     // An application ending reads null here (Qt 6.12 clears instance(),
@@ -1442,6 +1499,7 @@ int RecordingView::stats(const QVariantList& signalIndexes, double t0Ms,
     {
         const std::lock_guard<std::mutex> lock(m_asks->m);
         m_asks->stats = std::move(ask);
+        m_asks->waiting = true;
     }
     if (!startAsks()) {
         const std::lock_guard<std::mutex> lock(m_asks->m);
@@ -1505,6 +1563,7 @@ int RecordingView::step(int signal, double tMs, bool forward)
     {
         const std::lock_guard<std::mutex> lock(m_asks->m);
         m_asks->step = ask;
+        m_asks->waiting = true;
     }
     if (!startAsks()) {
         const std::lock_guard<std::mutex> lock(m_asks->m);
@@ -1531,9 +1590,12 @@ int RecordingView::stretches(bool pulls, bool cruises, const QVariantMap& rules)
     asked.vehicle_speed = asked.engine_speed = UINT32_MAX;
     const int request = ++m_lastAsk;
     try {
+        if (m_failThreadForTesting) {
+            throw std::bad_alloc();
+        }
         // A task of the global pool with its share of the reader: a close
-        // stops it at its next second, and QCoreApplication's end waits
-        // for it
+        // or a newer stretches ask stops it at its next second, and
+        // QCoreApplication's end waits for it
         QThreadPool::globalInstance()->start(
             [reader = m_readerHold, stop = m_stop,
              view = QPointer<RecordingView>(this), request, asked,
@@ -1545,6 +1607,8 @@ int RecordingView::stretches(bool pulls, bool cruises, const QVariantMap& rules)
     } catch (const std::bad_alloc&) {
         return 0;
     }
+    // Only a pass that started ends an older one
+    m_stop->latestStretches = request;
     m_lastStretches = request;
     return request;
 }

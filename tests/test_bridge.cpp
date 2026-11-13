@@ -6692,6 +6692,38 @@ TEST(BridgeTest, ARecordingsRowSaysItsLengthKindSignalsAndMarks)
     EXPECT_EQ(log.value(QStringLiteral("marks")).toInt(), 0);
 }
 
+// A format 3 header's "signal file" line is no signal, and a header holds a
+// line for each of its signals, past 400 lines
+TEST(BridgeTest, ARecordingsRowCountsASignalFilesSignalsOnly)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString dir = root.path() + QStringLiteral("/20261112-090000");
+    ASSERT_TRUE(QDir().mkpath(dir));
+    QFile frames(dir + QStringLiteral("/frames.csv"));
+    ASSERT_TRUE(frames.open(QIODevice::WriteOnly));
+    QFile events(dir + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+    events.write(
+        "ecuio session recording, format 3 (ADR-0049)\n"
+        "uri  mock://demo\n"
+        "signal file  signals.json,"
+        "0000000000000000000000000000000000000000000000000000000000000000"
+        "\n");
+    for (int i = 0; i < 500; ++i) {
+        events.write("signal  S" + QByteArray::number(i) +
+                     ",number,km/h,1,1,1\n");
+    }
+    events.write("columns  local time, seconds\n\n"
+                 "09:00:25.000  +25.500  end  x\n");
+    events.close();
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    const QVariantList rows = bridge.recentRecordings(10);
+    ASSERT_EQ(rows.size(), 1);
+    EXPECT_EQ(rows.at(0).toMap().value(QStringLiteral("signals")).toInt(), 500);
+}
+
 TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
 {
     QTemporaryDir root;

@@ -2488,15 +2488,26 @@ QVariantMap recordingRowOf(const QFileInfo& info)
     qint64 durationMs = -1;
     QFile events(folder + QStringLiteral("/events.log"));
     if (events.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        // A header holds a line a signal; a file with no "columns" line is read no further
-        for (int n = 0; n < 400 && !events.atEnd(); ++n) {
-            const QString line = QString::fromUtf8(events.readLine()).trimmed();
+        // A header holds a line for each signal and each enum label, at most
+        // about 140 bytes each (every name byte a quote); a file with no
+        // "columns" line is read no further than that many lines at 150
+        constexpr qint64 kHeaderBytes =
+            static_cast<qint64>(ECUIO_SET_MAX_TABLE +
+                                ECUIO_SIGNAL_FILE_MAX_SIGNALS) *
+            150;
+        // A "caller" line's 1 KB and its word: a longer line is read in parts
+        constexpr qint64 kLineBytes = 1100;
+        qint64 read = 0;
+        while (read < kHeaderBytes && !events.atEnd()) {
+            const QByteArray raw = events.readLine(kLineBytes);
+            read += raw.size();
+            const QString line = QString::fromUtf8(raw).trimmed();
             if (line.startsWith(QLatin1String("columns"))) {
                 break;
             }
             if (line.startsWith(QLatin1String("uri ")) && recorded.isEmpty()) {
                 recorded = line.mid(4).trimmed();
-            } else if (line.startsWith(QLatin1String("signal "))) {
+            } else if (line.startsWith(QLatin1String("signal  "))) {
                 ++signalCount;
             } else if (line.startsWith(QLatin1String("focus "))) {
                 isLog = true;

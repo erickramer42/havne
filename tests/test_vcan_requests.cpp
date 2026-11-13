@@ -2064,12 +2064,22 @@ TEST_F(SocketCanRequestTest, TheCloseWaitsForTheReplyStillOutBefore1001)
     for (const HoldingEcu::Hold how :
          {HoldingEcu::Hold::late, HoldingEcu::Hold::late_segmented}) {
         SCOPED_TRACE(how == HoldingEcu::Hold::late ? "single" : "segmented");
+        /* a close asked after the answer went out (a loaded test thread
+         * missed its 40 ms) proves nothing: run again, three runs at most */
         CloseRun r;
-        ASSERT_NO_FATAL_FAILURE(close_over_a_held_read(how, 40ms, &r));
+        for (int run = 0; run < 3; ++run) {
+            r = CloseRun{};
+            ASSERT_NO_FATAL_FAILURE(close_over_a_held_read(how, 40ms, &r));
+            if (r.seen.reply_at == HoldingEcu::Clock::time_point{} ||
+                r.asked < r.seen.reply_at) {
+                break;
+            }
+        }
         ASSERT_NE(r.seen.reply_at, HoldingEcu::Clock::time_point{})
             << "the answer never ended (no Flow Control for a segmented one)";
         ASSERT_LT(r.asked, r.seen.reply_at)
-            << "the close was asked after the answer: nothing was still out";
+            << "the close was asked after the answer in three runs: nothing "
+               "was still out";
         EXPECT_GT(r.seen.left_at, r.seen.reply_at)
             << "10 01 went out before the answer to the request still out";
         EXPECT_LT(r.seen.left_at - r.seen.reply_at, 100ms)

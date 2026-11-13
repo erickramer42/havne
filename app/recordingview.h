@@ -139,8 +139,8 @@ public:
     // A local target written as a content:// one is, so a test reaches the
     // picked document's removal
     void setThroughProviderForTesting(bool on) { m_throughProvider = on; }
-    // The next report's thread, or the statistics and step asks' task,
-    // can't be started
+    // The next report's thread, the asks' task or a stretches pass can't be
+    // started
     void setFailThreadForTesting(bool on) { m_failThreadForTesting = on; }
 
     // Opens the recording in folder (the one holding signals.csv), closing
@@ -254,8 +254,12 @@ public:
     {
         return m_stop ? m_stop->passAsks.load() : 0;
     }
-    // The same for the statistics and step asks' task, before each read
+    // The same for the asks' task, in a turn that took a new ask, before its
+    // reads; an ask copies it in, so clearing it reaches the next ask's turn
     void setAsksHoldForTesting(int ms) { m_asksHoldMs = ms; }
+    // The asks' task waits this long after a means pass gives way, before it
+    // takes the ask it gave way to (counted in meansYieldsForTesting first)
+    void setYieldHoldForTesting(int ms) { m_yieldHoldMs = ms; }
     // The holds this recording's asks' task has come to with an ask taken:
     // a close before the first finds no read under way
     int asksHeldForTesting() const { return m_asks ? m_asks->held.load() : 0; }
@@ -264,8 +268,19 @@ public:
     {
         return m_asks ? m_asks->stopped.load() : 0;
     }
+    // The means passes that gave way to a waiting statistics or step ask
+    int meansYieldsForTesting() const
+    {
+        return m_asks ? m_asks->yields.load() : 0;
+    }
+    // The stretches passes a newer stretches ask ended
+    int stretchesStaledForTesting() const
+    {
+        return m_stop ? m_stop->stretchesStaled.load() : 0;
+    }
     // The last open's reads its close stopped: a statistics or step call
-    // not made, a stretches pass core ended. Kept until the next open
+    // not made, a means pass or a stretches pass ended. Kept until the next
+    // open
     int readsStoppedForTesting() const
     {
         return m_stop ? m_stop->readsStopped.load() : 0;
@@ -321,10 +336,17 @@ private:
         // Set by a close and by a newer means ask: a means pass under way
         // stops at its next column
         std::atomic<bool> meansStale{false};
+        // Set under `m` by a statistics or step ask put in, cleared under
+        // `m` when the task takes it: a means pass under way yields to it at
+        // its next column and resumes there
+        std::atomic<bool> waiting{false};
+        // A test's: means passes that yielded
+        std::atomic<int> yields{0};
         // Asks left unanswered because a copy could not be allocated
         std::atomic<int> lost{0};
         bool loseMeans = false;      // a test's means asks run out of memory
-        int holdMs = 0;              // a test's wait before each read
+        int holdMs = 0;      // a test's wait in a turn that took a new ask
+        int yieldHoldMs = 0; // a test's wait after a means pass gave way
         std::atomic<int> held{0};    // a test's holds begun
         std::atomic<int> stopped{0}; // means passes ended before their end
     };
@@ -339,6 +361,11 @@ private:
         std::atomic<bool> stopped{false};
         std::atomic<int> readsStopped{0};
         std::atomic<int> passAsks{0}; // a test's: the last pass's asks
+        // The newest stretches ask's number, set by the GUI thread: an
+        // older pass under way stops at its next second
+        std::atomic<int> latestStretches{0};
+        // A test's: passes a newer ask ended
+        std::atomic<int> stretchesStaled{0};
     };
 
     struct FrameSet;
@@ -433,6 +460,7 @@ private:
     // Made at the first ask after an open or a close that left a task behind
     std::shared_ptr<Asks> m_asks;
     int m_asksHoldMs = 0;
+    int m_yieldHoldMs = 0;
     bool m_loseMeansForTesting = false;
     int m_lastAsk = 0;
     int m_lastStats = 0;
