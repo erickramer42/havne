@@ -128,8 +128,8 @@ struct event_body {
 };
 static_assert(sizeof(event_body) == 40, "a ring event is 40 bytes");
 
-/* Carried events; lost counts the changes past the carry, the first of
- * them at lost_us */
+/* Carried events; lost counts one run of events past the carry, the
+ * first of them at lost_us */
 struct conditions_body {
     uint64_t host_us;
     uint32_t events;
@@ -852,11 +852,10 @@ struct ecuio_recorder {
 
     void lost_line(uint64_t host_us, uint64_t lost)
     {
-        event_line(
-            host_us, "drop",
-            "the recording lost " + std::to_string(lost) +
-                (lost == 1 ? " condition change" : " condition changes") +
-                ": the disk fell behind");
+        event_line(host_us, "drop",
+                   "the recording lost " + std::to_string(lost) +
+                       (lost == 1 ? " condition event" : " condition events") +
+                       ": the disk fell behind");
     }
 
     void take_conditions(const uint8_t* body, size_t size)
@@ -1325,8 +1324,7 @@ bool put_pending_link(ecuio_recorder_t* r)
 }
 
 /* The worker's: carried events into the ring ahead of anything else, as
- * many as fit; false while some still wait. The lost count goes with the
- * last of them. */
+ * many as fit; false while some still wait. A run's lost count goes once. */
 bool put_pending_conditions(ecuio_recorder_t* r)
 {
     constexpr uint64_t kHead = sizeof(record_head) + sizeof(conditions_body);
@@ -1340,28 +1338,27 @@ bool put_pending_conditions(ecuio_recorder_t* r)
         const uint32_t n = static_cast<uint32_t>(
             (std::min)(uint64_t{r->carry_count},
                        (room - kHead) / sizeof(event_body)));
-        const bool last = n == r->carry_count;
         const uint64_t size = kHead + uint64_t{n} * sizeof(event_body);
         const event_body* first = r->carry + r->carry_start;
         const record_head rh{static_cast<uint32_t>(size), kRecordConditions, 0};
-        const conditions_body cb{first->host_us, n, 0, last ? r->carry_lost : 0,
-                                 last ? r->carry_lost_us : 0};
+        const conditions_body cb{first->host_us, n, 0, r->carry_lost,
+                                 r->carry_lost_us};
         r->copy_in(h, &rh, sizeof rh);
         r->copy_in(h + sizeof rh, &cb, sizeof cb);
         r->copy_in(h + kHead, first, n * sizeof(event_body));
         r->head.store(h + size, std::memory_order_release);
+        r->carry_lost = 0; /* a loss after this is a run of its own */
         r->carry_start += n;
         r->carry_count -= n;
-        if (last) {
+        if (r->carry_count == 0) {
             r->carry_start = 0;
-            r->carry_lost = 0;
         }
     }
     return true;
 }
 
 /* The worker's: an event whose frame found no room waits in the carry;
- * past it, the change is counted lost */
+ * past it, the event is counted lost */
 void carry_event(ecuio_recorder_t* r, const event_body& e)
 {
     if (r->carry_count == kCarryEvents) {

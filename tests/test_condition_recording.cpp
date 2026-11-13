@@ -216,6 +216,25 @@ std::vector<std::string> kind_lines(const fs::path& folder, const char* kind)
     return out;
 }
 
+/* The drop lines that count lost condition events, in the file's order */
+std::vector<std::string> lost_lines(const fs::path& folder)
+{
+    std::vector<std::string> out;
+    for (const std::string& l : kind_lines(folder, "drop")) {
+        if (l.rfind("the recording lost ", 0) == 0) {
+            out.push_back(l);
+        }
+    }
+    return out;
+}
+
+std::string lost_line(uint64_t n)
+{
+    return "the recording lost " + std::to_string(n) +
+           (n == 1 ? " condition event" : " condition events") +
+           ": the disk fell behind";
+}
+
 /* A cond line's seven fields */
 struct Cond {
     std::string key, state, flags, value;
@@ -679,13 +698,8 @@ TEST(ConditionRecordingTest, ChangesPastTheCarryAreCountedLost)
         const std::vector<Cond> lines = cond_lines(r.folder);
         EXPECT_EQ(lines.size() + lost, r.events.all.size());
         EXPECT_GE(lines.size(), 256u) << "the carry, and what the ring held";
-        const std::string said = "the recording lost " + std::to_string(lost) +
-                                 " condition changes: the disk fell behind";
-        bool found = false;
-        for (const std::string& l : kind_lines(r.folder, "drop")) {
-            found = found || l == said;
-        }
-        EXPECT_TRUE(found) << said;
+        EXPECT_EQ(lost_lines(r.folder),
+                  std::vector<std::string>{lost_line(lost)});
         size_t at = 0;
         for (const Cond& c : lines) {
             while (at < r.events.all.size() &&
@@ -697,6 +711,44 @@ TEST(ConditionRecordingTest, ChangesPastTheCarryAreCountedLost)
                 << " the session never gave, or out of order";
         }
     }
+}
+
+TEST(ConditionRecordingTest, EachRunOfLostEventsHasADropLineOfItsOwn)
+{
+    Recorded r(set_of(on_rpm("flip", R"("above":2000)")), 4096);
+    ASSERT_NE(r.recorder, nullptr);
+    r.record();
+    uint64_t t = 1000000;
+    bool high = false;
+    const auto flood = [&](int frames) {
+        for (int i = 0; i < frames; ++i, t += 10000) {
+            high = !high;
+            engine_speed(r.session.s, t, high ? 3000 : 1000);
+        }
+    };
+    /* A run, a part of the carry taken in, a second run, then the rest */
+    ecuio_recorder_test_hold(r.recorder, 1);
+    flood(600);
+    const uint64_t first = r.state().conditions_lost;
+    ASSERT_GT(first, 0u);
+    ecuio_recorder_test_hold(r.recorder, 0);
+    r.drained();
+    flood(1);
+    ecuio_recorder_test_hold(r.recorder, 1);
+    flood(600);
+    const uint64_t second = r.state().conditions_lost - first;
+    ASSERT_GT(second, 0u);
+    ecuio_recorder_test_hold(r.recorder, 0);
+    for (int i = 0; i < 4; ++i) {
+        r.drained();
+        flood(1);
+    }
+    r.close();
+
+    EXPECT_EQ(lost_lines(r.folder),
+              (std::vector<std::string>{lost_line(first), lost_line(second)}));
+    EXPECT_EQ(cond_lines(r.folder).size() + first + second,
+              r.events.all.size());
 }
 
 TEST(ConditionRecordingTest, AFiringOfAConditionWithMarkIsAMarker)
