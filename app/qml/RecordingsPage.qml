@@ -772,6 +772,9 @@ Page {
 
     function open(row) {
         checkBaseline()
+        // An import's words belong to the import, not to the recording opened next
+        importNote = ""
+        importFailed = false
         openedTitle = row.title
         openedUri = row.uri !== undefined ? row.uri : ""
         recording.open(row.folder)
