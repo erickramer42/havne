@@ -9,6 +9,7 @@
 #include "recording_signals.h" /* cli/: a replay's own signal file */
 #include "signal_file_lines.h" /* cli/: the profile a URI selects */
 #include "refused_signals.h" /* cli/: the signals an ECU refuses, as havne-cli says them */
+#include "default_pick.h" /* cli/: the default pick, as havne-cli's --pick ranked */
 #include "scan_line.h"       /* cli/: when a module's session earns a line */
 #include "urlwrite.h"
 #include "ecuio/version.h"
@@ -801,6 +802,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
             return shownRange(e).second;
         case IsEnumRole:
             return e.facts.isEnum;
+        case UnaskedRole:
+            return e.unasked;
         default: return QVariant();
     }
 }
@@ -828,7 +831,8 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {RefRole, "ref"},
             {RangeLowRole, "rangeLow"},
             {RangeHighRole, "rangeHigh"},
-            {IsEnumRole, "isEnum"}};
+            {IsEnumRole, "isEnum"},
+            {UnaskedRole, "unasked"}};
 }
 
 bool SignalListModel::isBuiltIn(const ecuio_signal_set_t* set)
@@ -877,6 +881,11 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
     const bool hadHidden = m_hiddenCount != 0;
     m_hiddenCount = 0;
     m_ranked = false;
+    // A new set's rows start asked: the bridge applies the session's list
+    if (m_unaskedCount != 0) {
+        m_unaskedCount = 0;
+        emit unaskedCountChanged();
+    }
     if (set == nullptr || set->defs == nullptr || set->count == 0) {
         beginResetModel();
         m_entries.clear();
@@ -884,6 +893,10 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
         m_subscribedCount = 0;
         endResetModel();
         emit subscribedCountChanged();
+        if (m_tickedCount != 0) {
+            m_tickedCount = 0;
+            emit tickedCountChanged();
+        }
         if (hadHidden) emit hiddenCountChanged();
         m_clock.restart();
         return;
@@ -1108,7 +1121,7 @@ void SignalListModel::pushWindow(Entry& e, const WindowValue& w)
 QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
 {
     const auto plotted = [](const Entry& e) {
-        return e.subscribed && !e.hidden && e.histCount != 0;
+        return e.subscribed && !e.isText && !e.hidden && e.histCount != 0;
     };
     // The window ends at the newest plotted sample, the chart's "now"
     qint64 newest = std::numeric_limits<qint64>::min();
@@ -1203,23 +1216,35 @@ void SignalListModel::toggleSubscribed(int row)
 {
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
     Entry& e = m_entries[static_cast<size_t>(row)];
-    if (e.isText) return;   // nothing to plot
+    // A text row's default is unticked, so its tick is Plotted or Default
     const bool plot = !e.subscribed;
     e.choice = plot == e.plotDefault ? PlotChoice::Default
              : plot                  ? PlotChoice::Plotted
                                      : PlotChoice::Unplotted;
     judgePlotted();
+    emit ticksChanged();
 }
 
 QStringList SignalListModel::plottedNames() const
 {
     QStringList names;
     for (const Entry& e : m_entries) {
-        if (!e.isText && e.choice == PlotChoice::Plotted) {
+        if (e.choice == PlotChoice::Plotted) {
             names << QString::fromUtf8(e.name);
         }
     }
     return names;
+}
+
+std::vector<uint16_t> SignalListModel::tickedIds() const
+{
+    std::vector<uint16_t> ids;
+    for (const Entry& e : m_entries) {
+        if (e.choice == PlotChoice::Plotted) {
+            ids.push_back(e.id);
+        }
+    }
+    return ids;
 }
 
 std::vector<uint16_t> SignalListModel::plottedIds() const
@@ -1248,12 +1273,13 @@ void SignalListModel::setPlotChoices(const QStringList& plotted, const QStringLi
 {
     for (Entry& e : m_entries) {
         const QString name = QString::fromUtf8(e.name);
-        e.choice = e.isText                   ? PlotChoice::Default
-                 : unplotted.contains(name)   ? PlotChoice::Unplotted
-                 : plotted.contains(name)     ? PlotChoice::Plotted
-                                              : PlotChoice::Default;
+        e.choice = (!e.isText && unplotted.contains(name))
+                       ? PlotChoice::Unplotted
+                   : plotted.contains(name) ? PlotChoice::Plotted
+                                            : PlotChoice::Default;
     }
     judgePlotted();
+    emit ticksChanged();
 }
 
 void SignalListModel::judgePlotted()
@@ -1287,17 +1313,20 @@ void SignalListModel::judgePlotted()
     int first = -1;
     int last = -1;
     int subscribed = 0;
+    int ticked = 0;
     for (size_t row = 0; row < m_entries.size(); ++row) {
         Entry& e = m_entries[row];
-        const bool plot = !e.isText
-                       && (e.choice == PlotChoice::Plotted
-                           || (e.choice == PlotChoice::Default && e.plotDefault));
+        // A text row's tick asks it and never plots: subscribed shows the
+        // tick, and the count and chartData leave the row out
+        const bool plot = e.choice == PlotChoice::Plotted ||
+                          (e.choice == PlotChoice::Default && e.plotDefault);
         if (plot != e.subscribed) {
             e.subscribed = plot;
             if (first < 0) first = static_cast<int>(row);
             last = static_cast<int>(row);
         }
-        subscribed += (e.subscribed && !e.hidden) ? 1 : 0;
+        subscribed += (e.subscribed && !e.isText && !e.hidden) ? 1 : 0;
+        ticked += (e.subscribed && !e.hidden) ? 1 : 0;
     }
     if (first >= 0) {
         emit dataChanged(index(first), index(last), {SubscribedRole});
@@ -1305,6 +1334,10 @@ void SignalListModel::judgePlotted()
     if (subscribed != m_subscribedCount) {
         m_subscribedCount = subscribed;
         emit subscribedCountChanged();
+    }
+    if (ticked != m_tickedCount) {
+        m_tickedCount = ticked;
+        emit tickedCountChanged();
     }
 }
 
@@ -1334,6 +1367,38 @@ void SignalListModel::applyAbsent(const std::vector<uint16_t>& ids)
         }
     }
     rejudgeHidden();
+}
+
+void SignalListModel::applyUnasked(const std::vector<uint16_t>& ids)
+{
+    std::vector<uint8_t> unasked(m_entries.size(), 0);
+    for (uint16_t id : ids) {
+        const int row = m_rowOfId.value(id, -1);
+        if (row >= 0) {
+            unasked[static_cast<size_t>(row)] = 1;
+        }
+    }
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        Entry& e = m_entries[row];
+        if (e.unasked != (unasked[row] != 0)) {
+            e.unasked = unasked[row] != 0;
+            const QModelIndex i = index(static_cast<int>(row));
+            emit dataChanged(i, i, {UnaskedRole});
+        }
+    }
+    recountUnasked();
+}
+
+void SignalListModel::recountUnasked()
+{
+    int count = 0;
+    for (const Entry& e : m_entries) {
+        count += (e.unasked && !e.hidden) ? 1 : 0;
+    }
+    if (count != m_unaskedCount) {
+        m_unaskedCount = count;
+        emit unaskedCountChanged();
+    }
 }
 
 void SignalListModel::applyRefused(const std::vector<Refusal>& refused)
@@ -1384,6 +1449,7 @@ void SignalListModel::rejudgeHidden()
     emit dataChanged(index(first), index(last), {HiddenRole});
     m_hiddenCount = hidden;
     emit hiddenCountChanged();
+    recountUnasked();
     // A hidden row's default place goes to the next ranked row
     judgePlotted();
 }
@@ -1417,7 +1483,9 @@ bool LiveSignalModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceP
         m->data(i, SignalListModel::NameRole).toString(),
         m->data(i, SignalListModel::UnitRole).toString(),
         m->data(i, SignalListModel::GroupRole).toInt(),
-        m->data(i, SignalListModel::SubscribedRole).toBool());
+        m->data(i, SignalListModel::SubscribedRole).toBool() &&
+            !m->data(i, SignalListModel::IsTextRole).toBool(),
+        !m->data(i, SignalListModel::UnaskedRole).toBool());
 }
 
 void LiveSignalModel::refilter()
@@ -1468,6 +1536,8 @@ SessionBridge::SessionBridge(QObject* parent)
         pollLinkHealth();   // every tick while connected: transitions only
         pollChannelSupport();
         pollAbsentSignals();
+        pollDefaultPick(); // after the reports: their drops judge it
+        pollUnaskedSignals();
         pollChannelIdentity();
         pollChannelDiagnostics();
         pollReplayEnd();
@@ -1482,6 +1552,9 @@ SessionBridge::SessionBridge(QObject* parent)
         flushValues();
         pollRecording();
     });
+    // A tick asks its row: the default pick follows on the next tick
+    connect(m_signalModel, &SignalListModel::ticksChanged, this,
+            [this]() { m_pickDirty = true; });
 
     // The log's readout: its time and its folder's size, once a second
     m_logTimer = new QTimer(this);
@@ -2536,6 +2609,24 @@ QString SessionBridge::connectCoreOnly(const QString& uri,
 // handleFrameInternal after applyConnectedState, and its values wait in
 // the staging, sized here, for the first tick. On failure the session
 // is destroyed.
+namespace {
+
+// Whether a URI's query names poll=: such a session asks the polled
+// signals alone, whatever its pick
+bool namesPoll(const QString& uri)
+{
+    const qsizetype q = uri.indexOf(QLatin1Char('?'));
+    if (q < 0) {
+        return false;
+    }
+    const QStringList segments = uri.mid(q + 1).split(QLatin1Char('&'));
+    return std::any_of(segments.begin(), segments.end(), [](const QString& s) {
+        return s.startsWith(QLatin1String("poll="));
+    });
+}
+
+} // namespace
+
 QString SessionBridge::startSession(ecuio_session_t* session,
                                     const QString& uri)
 {
@@ -2554,6 +2645,14 @@ QString SessionBridge::startSession(ecuio_session_t* session,
     m_valuesStaged = 0;
     prepareValueStaging(ecuio_session_signal_set(session));
     m_frameLog->noteTextDefs(ecuio_session_signal_set(session));
+    // Before the start (no whole sweep first) and the recorder (its header
+    // names the pick); the vehicle's ticks come after the connect
+    m_pickSet = false;
+    m_pickIds.clear();
+    m_pickPolled = namesPoll(uri);
+    m_pickLine.clear();
+    m_pickLinePending = false;
+    applyDefaultPick(session, false, true);
     // Attached before the worker starts, so the recording holds every frame
     startRecording(session, uri);
     m_accepting.store(true, std::memory_order_release);
@@ -2610,6 +2709,10 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
         m_channelCount = std::min<uint32_t>(info.channel_count,
                                             ECUIO_SESSION_INFO_MAX_CHANNELS);
     }
+    if (m_pickLinePending) {
+        m_pickLinePending = false;
+        emit logMessage(m_pickLine);
+    }
     m_replayFrames = info.replay_frames;
     m_sleptUs = sleptUs();
     m_replayEndLogged = info.backend != ECUIO_BACKEND_REPLAY ||
@@ -2631,6 +2734,8 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_absentRead.assign((set != nullptr && set->defs != nullptr) ? set->count : 0u, 0);
     m_unsupportedRead.assign(m_absentRead.size(), 0);
     m_absentIds.clear();
+    m_unaskedRead.assign(m_absentRead.size(), 0);
+    m_unaskedIds.clear();
     for (uint32_t& g : m_identityGeneration) {
         g = 0;
     }
@@ -2885,6 +2990,7 @@ void SessionBridge::setMinSweepMs(int ms)
         return;
     }
     m_minSweepMs = ms;
+    m_pickDirty = true; // the default pick takes it too
     emit minSweepMsChanged();
 }
 
@@ -3168,13 +3274,17 @@ bool SessionBridge::startLog()
     ecuio_recorder_t* recorder = openRecorder(
         m_session, m_currentUri, QStringLiteral("Log not started"), &why);
     if (recorder == nullptr) {
-        (void)ecuio_session_set_focus(m_session, nullptr, 0);
+        if (!applyDefaultPick(m_session, true, true)) {
+            (void)ecuio_session_set_focus(m_session, nullptr, 0);
+        }
         // openRecorder wrote the activity log's line
         setLogNotice(QStringLiteral("Log not started: %1").arg(why));
         return false;
     }
     setLogNotice(QString());
     m_logActive = true;
+    // The log owns the focus; its end sets the pick again, with its line
+    m_pickLine.clear();
     m_logClock.restart();
     m_logElapsedMs = 0;
     m_logBytes = 0;
@@ -3252,14 +3362,14 @@ void SessionBridge::stopRecording(const QString& why, bool byUser,
     if (!m_logActive) {
         return;
     }
-    // A session still running asks its whole set again; one torn down
-    // took its focus with it
-    if (m_session != nullptr) {
-        (void)ecuio_session_set_focus(m_session, nullptr, 0);
-    }
     m_logTimer->stop();
     m_logElapsedMs = m_logClock.elapsed();
     m_logActive = false;
+    // A session still running asks its default pick again (the whole set
+    // on one that ranks none); one torn down took its focus with it
+    if (m_session != nullptr && !applyDefaultPick(m_session, true, true)) {
+        (void)ecuio_session_set_focus(m_session, nullptr, 0);
+    }
     countLogBytes(); // closed: the folder's final size
     // An end the user didn't ask for is told on the Dashboard; Stop
     // log's isn't, the viewer opens on it
@@ -3912,6 +4022,207 @@ void SessionBridge::pollAbsentSignals()
     }
     m_absentIds.assign(m_absentRead.begin(), m_absentRead.begin() + count);
     m_signalModel->applyAbsent(m_absentIds);
+}
+
+void SessionBridge::pollUnaskedSignals()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr ||
+        m_unaskedRead.empty()) {
+        return;
+    }
+    uint32_t count = 0;
+    if (ecuio_session_get_unasked_signals(
+            m_session, m_unaskedRead.data(),
+            static_cast<uint32_t>(m_unaskedRead.size()), &count) != ECUIO_OK) {
+        return;
+    }
+    count =
+        std::min<uint32_t>(count, static_cast<uint32_t>(m_unaskedRead.size()));
+    if (count == m_unaskedIds.size() &&
+        std::equal(m_unaskedIds.begin(), m_unaskedIds.end(),
+                   m_unaskedRead.begin())) {
+        return;
+    }
+    m_unaskedIds.assign(m_unaskedRead.begin(), m_unaskedRead.begin() + count);
+    m_signalModel->applyUnasked(m_unaskedIds);
+}
+
+void SessionBridge::setPickGauges(const QVariantList& cells)
+{
+    if (cells == m_pickGauges) {
+        return;
+    }
+    m_pickGauges = cells;
+    m_pickDirty = true;
+    emit pickGaugesChanged();
+}
+
+std::vector<uint16_t> SessionBridge::gaugeIds(const ecuio_signal_set_t* set,
+                                              const ecuio_signal_file_t* file,
+                                              const QVariantList& cells)
+{
+    std::vector<uint16_t> ids;
+    if (set == nullptr || set->defs == nullptr) {
+        return ids;
+    }
+    // Each def's refs as SignalHub keys them
+    QHash<QString, uint16_t> byRef;
+    const bool builtIn = SignalListModel::isBuiltIn(set);
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        const QString ref = SignalListModel::factsOf(file, builtIn, d).ref;
+        if (ref.isEmpty()) {
+            continue;
+        }
+        byRef.insert(ref, d.id);
+        if (ref.startsWith(QLatin1String("key:")) &&
+            d.id < ECUIO_USER_SIG_ID_BASE) {
+            byRef.insert(QStringLiteral("id:%1").arg(d.id), d.id);
+        }
+    }
+    for (const QVariant& cell : cells) {
+        for (const QString& ref : cell.toStringList()) {
+            const auto it = byRef.constFind(ref);
+            if (it != byRef.constEnd()) {
+                if (std::find(ids.begin(), ids.end(), *it) == ids.end()) {
+                    ids.push_back(*it);
+                }
+                break;
+            }
+        }
+    }
+    return ids;
+}
+
+namespace {
+
+// The default pick's activity line: its names, at most a dozen
+QString pickText(const ecuio_signal_set_t* set,
+                 const std::vector<uint16_t>& ids, int minSweepMs, bool polled)
+{
+    constexpr size_t kNamed = 12;
+    QStringList names;
+    for (uint16_t id : ids) {
+        if (static_cast<size_t>(names.size()) == kNamed) {
+            break;
+        }
+        for (uint32_t i = 0; i < set->count; ++i) {
+            if (set->defs[i].id == id) {
+                names << QString::fromUtf8(
+                    set->defs[i].name,
+                    static_cast<qsizetype>(
+                        strnlen(set->defs[i].name, sizeof set->defs[i].name)));
+                break;
+            }
+        }
+    }
+    QString list = names.join(QStringLiteral(", "));
+    if (ids.size() > static_cast<size_t>(names.size())) {
+        list += QStringLiteral(" and %1 more").arg(ids.size() - names.size());
+    }
+    const QString pace =
+        minSweepMs > 0
+            ? QStringLiteral(" (at least %1 ms between sweeps)").arg(minSweepMs)
+            : QString();
+    const QString count = signalCountText(static_cast<int>(ids.size()));
+    return polled ? QStringLiteral("Picked %1%2; ?poll= asks only the polled "
+                                   "ones among them: %3")
+                        .arg(count, pace, list)
+                  : QStringLiteral("Asking %1%2: %3").arg(count, pace, list);
+}
+
+} // namespace
+
+bool SessionBridge::applyDefaultPick(ecuio_session_t* session, bool withTicks,
+                                     bool again)
+{
+    m_pickDirty = false;
+    if (session == nullptr || m_logActive) {
+        return false;
+    }
+    ecuio_session_info_t info{};
+    if (ecuio_session_get_info(session, &info) != ECUIO_OK ||
+        (info.flags & ECUIO_SESSION_INFO_REQUESTS) == 0) {
+        return false;
+    }
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    std::vector<uint16_t> added = gaugeIds(set, fileOfSet(set), m_pickGauges);
+    if (withTicks) {
+        const std::vector<uint16_t> ticked = m_signalModel->tickedIds();
+        added.insert(added.end(), ticked.begin(), ticked.end());
+    }
+    const std::vector<uint16_t> ids = cli::default_pick(set, added);
+    if (m_pickSet && !again && ids == m_pickIds &&
+        m_minSweepMs == m_pickMinSweepMs) {
+        return true;
+    }
+    m_pickIds = ids;
+    m_pickMinSweepMs = m_minSweepMs;
+    m_pickSet = true;
+    m_pickDropped = 0;
+    if (session == m_session) {
+        for (uint32_t c = 0; c < m_channelCount; ++c) {
+            m_pickDropped += m_supportReports[c].dropped;
+        }
+    }
+    QString line;
+    const QString whole = m_pickPolled
+                              ? QStringLiteral("Asking every polled signal: ")
+                              : QStringLiteral("Asking every signal: ");
+    // Core takes a minimum only with a focus, so the whole set is unpaced
+    const QString unpaced =
+        m_minSweepMs > 0
+            ? QStringLiteral("; no minimum time between sweeps applies to it")
+            : QString();
+    if (ids.empty()) {
+        (void)ecuio_session_set_focus(session, nullptr, 0);
+        line = whole + QStringLiteral("the profile ranks none") + unpaced;
+    } else {
+        const ecuio_status_t rc = ecuio_session_set_focus_with(
+            session, ids.data(), static_cast<uint32_t>(ids.size()),
+            static_cast<uint32_t>(m_minSweepMs), ECUIO_FOCUS_DEFAULT_PICK);
+        if (rc == ECUIO_OK) {
+            line = pickText(set, ids, m_minSweepMs, m_pickPolled);
+        } else {
+            const QString detail = QString::fromUtf8(ecuio_last_error_detail());
+            (void)ecuio_session_set_focus(session, nullptr, 0);
+            line =
+                whole + (detail.isEmpty() ? failureText(rc) : detail) + unpaced;
+        }
+    }
+    if (line == m_pickLine) {
+        return true;
+    }
+    m_pickLine = line;
+    // Before the apply, the line waits for the session's own lines
+    if (session == m_session) {
+        emit logMessage(line);
+    } else {
+        m_pickLinePending = true;
+    }
+    return true;
+}
+
+void SessionBridge::pollDefaultPick()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr ||
+        m_logActive) {
+        return;
+    }
+    if (m_pickDirty) {
+        applyDefaultPick(m_session, true, false);
+        return;
+    }
+    if (!m_pickSet || m_pickIds.empty()) {
+        return;
+    }
+    uint64_t dropped = 0;
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        dropped += m_supportReports[c].dropped;
+    }
+    if (dropped > m_pickDropped) {
+        applyDefaultPick(m_session, true, true);
+    }
 }
 
 /* One channel's "ECU 0x…:" line: what its supported-PID bitmaps list,
