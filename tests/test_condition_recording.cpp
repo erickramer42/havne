@@ -1,5 +1,5 @@
 // File/layer: tests/test_condition_recording.cpp | test_core, Qt-free, C++17
-// Testing: HARNESS: ConditionRecordingTest (test_core)
+// Testing: UNIT: ConditionRecordingTest (test_core)
 //
 // A session's conditions and its recording (ADR-0063 section 8): the set
 // copied beside the recording, a cond line for each event, the states held
@@ -91,7 +91,7 @@ uint32_t generation_of(ecuio_session_t* s)
     return state.generation;
 }
 
-/* Engine speed (PID 0C, a quarter of a turn a count) on 0x7E8 at a session
+/* Engine speed (PID 0C, a quarter of a turn per count) on 0x7E8 at a session
  * time, dispatched as the worker would */
 void engine_speed(ecuio_session_t* s, uint64_t t_us, unsigned turns)
 {
@@ -108,7 +108,7 @@ void engine_speed(ecuio_session_t* s, uint64_t t_us, unsigned turns)
     ecuio_session_dispatch_callbacks(s, &f);
 }
 
-/* Throttle position (PID 11, a 255th of the travel a count) likewise */
+/* Throttle position (PID 11, a 255th of the travel per count) likewise */
 void throttle(ecuio_session_t* s, uint64_t t_us, uint8_t a)
 {
     static ecuio_frame_t f;
@@ -320,7 +320,8 @@ void attach_from_a_rival(void* user)
     Rival* r = static_cast<Rival*>(user);
     r->thread = std::thread([r] { r->rc.store(attach(r->session, "b")); });
     /* Long enough for an attach that doesn't wait to return many times
-     * over; one that waits for the link's mutex is still waiting */
+     * over; one that waits for the link's mutex is still waiting. A check
+     * that nothing happens can't poll: under load the mutant may pass. */
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     r->returned_in_the_hook.store(r->rc.load() != -1);
 }
@@ -352,22 +353,21 @@ struct Recorded {
         ASSERT_EQ(ecuio_session_record(session.s, recorder), ECUIO_OK)
             << ecuio_last_error_detail();
     }
-    /* Until the writer has drained what the ring held: its frame rows
-     * stand still over 300 ms */
+    /* Until the writer has drained what the ring held when called: two
+     * wakes, since a wake counts itself before it reads the hold, and the
+     * second's loop starts after the first's drain has ended */
     void drained() const
     {
+        const uint64_t from = ecuio_recorder_test_wakes(recorder);
         const auto give_up =
             std::chrono::steady_clock::now() + std::chrono::seconds(10);
-        uint64_t rows = UINT64_MAX;
-        while (std::chrono::steady_clock::now() < give_up) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            const uint64_t now = state().frame_rows;
-            if (now == rows) {
+        while (ecuio_recorder_test_wakes(recorder) < from + 2) {
+            if (std::chrono::steady_clock::now() >= give_up) {
+                ADD_FAILURE() << "the writer never woke twice";
                 return;
             }
-            rows = now;
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
         }
-        ADD_FAILURE() << "the writer never drained";
     }
     ecuio_recorder_state_t state() const
     {
@@ -663,7 +663,8 @@ TEST(ConditionRecordingTest, ChangesPastTheCarryAreCountedLost)
         const uint64_t lost = r.state().conditions_lost;
         EXPECT_GT(lost, 0u);
         if (through_the_ring) {
-            /* The ring takes 101 carried events a drain: three empty it */
+            /* A drained ring takes what fits of the carry, 40 bytes per
+             * event after a record's head: four drains empty a full one */
             ecuio_recorder_test_hold(r.recorder, 0);
             for (int i = 0; i < 4; ++i) {
                 r.drained();
