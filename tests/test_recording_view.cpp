@@ -933,12 +933,16 @@ TEST(RecordingViewTest, DestroyedWithAStretchesPassUnderWayIsSafe)
 
 namespace {
 
-// pull-twice's events.log over a long, dense signals.csv: speed, engine
-// speed and throttle every 10 ms, a pull every two minutes: fewer than
-// the viewer's first ask holds, so one call is a whole pass
-QString denseRecording(const QTemporaryDir& dir)
+// pull-twice's events.log over a long signals.csv: speed, engine speed
+// and throttle every stepMs, a ten-second pull every periodS seconds for
+// 6000 s. Every 120 s at 10 ms (the default) is 1.8 million rows and 50
+// pulls, fewer than the viewer's first ask holds, so one call is a whole
+// pass; every 60 s is 100, which takes a second call
+QString denseRecording(const QTemporaryDir& dir, int periodS = 120,
+                       int stepMs = 10)
 {
-    const QString folder = dir.filePath(QStringLiteral("dense"));
+    const QString folder =
+        dir.filePath(QStringLiteral("dense-%1-%2").arg(periodS).arg(stepMs));
     QDir().mkpath(folder);
     QFile::copy(fixture("pull-twice") + QStringLiteral("/events.log"),
                 folder + QStringLiteral("/events.log"));
@@ -948,10 +952,10 @@ QString denseRecording(const QTemporaryDir& dir)
     }
     f.write("host_us,signal,value,unit\n");
     QByteArray chunk;
-    for (qint64 n = 0; n < 600000; ++n) {
-        const qint64 us = n * 10000;
-        const bool pull = (us / 1000000) % 120 >= 110;
-        const qint64 into = us % 120000000 - 110000000;
+    const qint64 period = periodS * qint64{1000000};
+    for (qint64 us = 0; us < 6000 * qint64{1000000}; us += stepMs * 1000) {
+        const bool pull = us % period >= period - 10000000;
+        const qint64 into = us % period - (period - 10000000);
         chunk += QByteArray::number(us) + ",Vehicle Speed," +
                  QByteArray::number(pull ? 60 + into / 500000 : 60) +
                  ",km/h\n" + QByteArray::number(us + 1) + ",RPM," +
@@ -999,6 +1003,37 @@ TEST(RecordingViewTest, ACloseStopsAStretchesPassUnderWay)
         << "the pass read on to its end";
     EXPECT_LT(timer.elapsed(), hold + whole / 3 + whole / 2 + 100)
         << "a whole pass took " << whole << " ms";
+}
+
+// More stretches than a pass's first call holds: the pass asks again for
+// them all, and a stop landing in that second call ends it there, CANCELED
+// with no answer, rather than reading on to the recording's end
+TEST(RecordingViewTest, AStopInAPassesSecondCallEndsIt)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = denseRecording(dir, 60, 100);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }, 60000));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    ASSERT_EQ(askedStretches(v, true, false).size(), 100)
+        << "past the first call's 64";
+    const int both = v.stretchesAsksForTesting();
+    ASSERT_GT(both, 4);
+    ASSERT_EQ(both % 2, 0) << "two calls over the same range ask alike";
+
+    int answers = 0;
+    QObject::connect(&v, &RecordingView::stretchesReady,
+                     [&](int, const QVariantList&, bool) { ++answers; });
+    v.setStretchesStopAtAskForTesting(both / 2 + 2);
+    ASSERT_GT(v.stretches(true, false), 0);
+    ASSERT_TRUE(waitFor([&] { return v.readsStoppedForTesting() > 0; }))
+        << "the second call read on to its end";
+    EXPECT_EQ(v.stretchesAsksForTesting(), both / 2 + 2)
+        << "ended at the stop, its second ask";
+    EXPECT_FALSE(waitFor([&] { return answers > 0; }, 300));
 }
 
 // A close during the asks' hold: the statistics and step reads taken
