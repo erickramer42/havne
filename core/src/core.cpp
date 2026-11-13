@@ -1279,14 +1279,22 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
 void ecuio_session_test_after_conditions_handover(void (*hook)(void* user),
                                                   void* user)
 {
-    g_after_conditions_handover_user.store(user);
+    /* The user before the hook, and a clear leaves the user: a reader
+     * that took the old hook still finds its own */
+    if (hook != nullptr) {
+        g_after_conditions_handover_user.store(user);
+    }
     g_after_conditions_handover.store(hook);
 }
 
 void ecuio_session_test_after_dispatch_takes(void (*hook)(void* user),
                                              void* user)
 {
-    g_after_dispatch_takes_user.store(user);
+    /* The user before the hook, and a clear leaves the user: a reader
+     * that took the old hook still finds its own */
+    if (hook != nullptr) {
+        g_after_dispatch_takes_user.store(user);
+    }
     g_after_dispatch_takes.store(hook);
 }
 
@@ -1377,8 +1385,7 @@ void ecuio_session_dispatch_callbacks(
         }
         conditions = session->conditions.get();
     }
-    if (const auto hook =
-            g_after_dispatch_takes.load(std::memory_order_relaxed)) {
+    if (const auto hook = g_after_dispatch_takes.load()) {
         hook(g_after_dispatch_takes_user.load());
     }
 

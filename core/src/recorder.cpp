@@ -2146,7 +2146,11 @@ ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
 void ecuio_session_test_before_record_attach(void (*hook)(void* user),
                                              void* user)
 {
-    g_before_record_attach_user.store(user);
+    /* The user before the hook, and a clear leaves the user: a reader
+     * that took the old hook still finds its own */
+    if (hook != nullptr) {
+        g_before_record_attach_user.store(user);
+    }
     g_before_record_attach.store(hook);
 }
 
