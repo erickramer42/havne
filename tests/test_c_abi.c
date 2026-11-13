@@ -370,6 +370,8 @@ int main(void)
     ecuio_recording_t* reading = NULL;
     ecuio_recording_info_t reading_info;
     ecuio_recording_signals_t reading_signals;
+    ecuio_recording_conditions_t reading_conditions;
+    ecuio_recording_condition_event_t reading_event;
     ecuio_recording_signal_t reading_signal;
     ecuio_recording_marker_t reading_marker;
     ecuio_recording_column_t reading_column;
@@ -721,6 +723,26 @@ int main(void)
         sizeof(ecuio_recording_signals_t) != 128 ||
         offsetof(ecuio_recording_signals_t, length) != 8 ||
         offsetof(ecuio_recording_signals_t, sha256) != 16 ||
+        offsetof(ecuio_recording_info_t, condition_events) != 56 ||
+        offsetof(ecuio_recording_info_t, reserved) != 64 ||
+        ECUIO_RECORDING_INFO_CONDITIONS_CUT != 0x4u ||
+        ECUIO_RECORDING_MAX_CONDITION_EVENTS != 1048576u ||
+        sizeof(ecuio_recording_conditions_t) != 128 ||
+        offsetof(ecuio_recording_conditions_t, lines_skipped) != 4 ||
+        offsetof(ecuio_recording_conditions_t, length) != 8 ||
+        offsetof(ecuio_recording_conditions_t, sha256) != 16 ||
+        offsetof(ecuio_recording_conditions_t, reserved) != 88 ||
+        ECUIO_RECORDING_CONDITIONS_NAMED != 0x1u ||
+        ECUIO_RECORDING_CONDITIONS_PRESENT != 0x2u ||
+        ECUIO_RECORDING_CONDITIONS_MATCH != 0x4u ||
+        sizeof(ecuio_recording_condition_event_t) != 88 ||
+        offsetof(ecuio_recording_condition_event_t, timestamp_us) != 8 ||
+        offsetof(ecuio_recording_condition_event_t, value) != 16 ||
+        offsetof(ecuio_recording_condition_event_t, state) != 24 ||
+        offsetof(ecuio_recording_condition_event_t, flags) != 28 ||
+        offsetof(ecuio_recording_condition_event_t, term) != 32 ||
+        offsetof(ecuio_recording_condition_event_t, key) != 40 ||
+        offsetof(ecuio_recording_condition_event_t, reserved) != 72 ||
         ECUIO_RECORDING_SIGNALS_MATCH != 0x4u || ECUIO_ERR_CANCELED != 19 ||
         ECUIO_RECORDING_NONE != UINT64_MAX || ECUIO_ERR_IN_USE != 20 ||
         ECUIO_RECORDING_FIND_ENGINE_START != 3u ||
@@ -734,6 +756,10 @@ int main(void)
         ecuio_recording_get_info(NULL, &reading_info) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_get_signals(NULL, &reading_signals) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_get_conditions(NULL, &reading_conditions) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_get_condition_event(NULL, 0, &reading_event) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recorder_signal_file(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_plugin_variant_file(NULL, 0) != NULL ||

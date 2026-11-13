@@ -209,6 +209,14 @@ typedef struct ecuio_recording ecuio_recording_t; /* opaque */
                                                 frames.csv at the open
                                                 (ecuio_recording_open_frames),
                                                 not read from signals.csv */
+#define ECUIO_RECORDING_INFO_CONDITIONS_CUT                                    \
+    0x4u /* events.log holds more cond lines than
+            ECUIO_RECORDING_MAX_CONDITION_EVENTS: the first that many are
+            kept, and condition_events counts them all */
+
+/* The most cond lines the reader keeps (40 bytes each, so about 40 MiB):
+ * a condition that flaps through a long recording */
+#define ECUIO_RECORDING_MAX_CONDITION_EVENTS 1048576u
 
 /* ecuio_recording_info_t.format: events.log's header */
 #define ECUIO_RECORDING_FORMAT_UNKNOWN 0u /* none, or a first line the
@@ -231,15 +239,22 @@ typedef struct ecuio_recording_info {
     uint64_t rows_torn;       /* last rows dropped for having no newline */
     uint64_t records_dropped; /* the writer's, from the summary */
     uint64_t notes_dropped;
-    uint64_t reserved[5];     /* zero; ABI growth space */
+    uint64_t condition_events; /* events.log's cond lines that parse
+                                  (ADR-0063 section 8), every one counted;
+                                  ecuio_recording_get_condition_event */
+    uint64_t reserved[4];      /* zero; ABI growth space */
 } ecuio_recording_info_t;
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_recording_info_t) == 96,
               "ecuio_recording_info_t size is ABI");
+static_assert(offsetof(ecuio_recording_info_t, condition_events) == 56,
+              "recording info condition_events offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_recording_info_t) == 96,
                "ecuio_recording_info_t size is ABI");
+_Static_assert(offsetof(ecuio_recording_info_t, condition_events) == 56,
+               "recording info condition_events offset is ABI");
 #endif
 
 /* ecuio_recording_signal_t.flags */
@@ -431,6 +446,66 @@ _Static_assert(offsetof(ecuio_recording_signals_t, sha256) == 16,
                "recording signals sha256 offset is ABI");
 #endif
 
+/* ecuio_recording_conditions_t.flags, as the signal file's: NAMED,
+ * events.log's header names conditions.json and its SHA-256 (format 3);
+ * PRESENT, conditions.json is in the folder; MATCH, named and present,
+ * and its SHA-256 the header's */
+#define ECUIO_RECORDING_CONDITIONS_NAMED   0x1u
+#define ECUIO_RECORDING_CONDITIONS_PRESENT 0x2u
+#define ECUIO_RECORDING_CONDITIONS_MATCH   0x4u
+
+/* The set of conditions a recording's session judged (ADR-0063 section
+ * 8): copied into its folder as conditions.json, its hash on events.log's
+ * header, so ecuio_condition_set_load can load it again when MATCH */
+typedef struct ecuio_recording_conditions {
+    uint32_t flags;         /* ECUIO_RECORDING_CONDITIONS_* */
+    uint32_t lines_skipped; /* cond lines that don't parse, passed by */
+    uint64_t length;        /* conditions.json's bytes; 0 when it's absent */
+    char sha256[72];        /* the header's, 64 lowercase hex digits; ""
+                               when it names none */
+    uint64_t reserved[5];   /* zero; ABI growth space */
+} ecuio_recording_conditions_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_recording_conditions_t) == 128,
+              "ecuio_recording_conditions_t size is ABI");
+static_assert(offsetof(ecuio_recording_conditions_t, sha256) == 16,
+              "recording conditions sha256 offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_recording_conditions_t) == 128,
+               "ecuio_recording_conditions_t size is ABI");
+_Static_assert(offsetof(ecuio_recording_conditions_t, sha256) == 16,
+               "recording conditions sha256 offset is ABI");
+#endif
+
+/* One cond line: an event of the recording's set, as the session gave it
+ * (ecuio_condition_event_t), by its condition's key, since the reader
+ * never loads conditions.json. No pointer, so every offset is the same
+ * on every pointer width. */
+typedef struct ecuio_recording_condition_event {
+    uint64_t host_us;      /* the recording's time of the event */
+    uint64_t timestamp_us; /* the session's, exact */
+    double value;          /* the settling term's sample */
+    uint32_t state;        /* ECUIO_CONDITION_OFF or _ON */
+    uint32_t flags;        /* ECUIO_CONDITION_STALE, _FIRED, _HELD */
+    uint32_t term;         /* the settling term's index */
+    uint32_t reserved0;    /* zero */
+    char key[32];          /* the condition's key, terminated */
+    uint64_t reserved[2];  /* zero; ABI growth space */
+} ecuio_recording_condition_event_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_recording_condition_event_t) == 88,
+              "ecuio_recording_condition_event_t size is ABI");
+static_assert(offsetof(ecuio_recording_condition_event_t, key) == 40,
+              "recording condition event key offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_recording_condition_event_t) == 88,
+               "ecuio_recording_condition_event_t size is ABI");
+_Static_assert(offsetof(ecuio_recording_condition_event_t, key) == 40,
+               "recording condition event key offset is ABI");
+#endif
+
 /*
  * Opens the recording in folder_utf8 (the folder holding its
  * signals.csv), reading it once. *out is NULL on every failure, which
@@ -497,6 +572,22 @@ ecuio_status_t ecuio_recording_get_info(const ecuio_recording_t* r,
  * caller that finds them changed since sees the hash differ) */
 ecuio_status_t ecuio_recording_get_signals(const ecuio_recording_t* r,
                                            ecuio_recording_signals_t* out);
+/* The set of conditions it was judged by, as the open found it, and as
+ * ecuio_recording_get_signals answers for the signal file. A conditions
+ * line that isn't conditions.json and its SHA-256 names none; the open
+ * goes on. */
+ecuio_status_t
+ecuio_recording_get_conditions(const ecuio_recording_t* r,
+                               ecuio_recording_conditions_t* out);
+/* The index-th cond line in events.log's order, which the recorder writes
+ * in time order (a line that doesn't parse left out and counted in
+ * lines_skipped, an eighth field and after passed by; a flag
+ * word the reader doesn't know left out of flags). index runs below
+ * info.condition_events and below ECUIO_RECORDING_MAX_CONDITION_EVENTS;
+ * past it ECUIO_ERR_INVALID_ARGUMENT, out untouched. */
+ecuio_status_t
+ecuio_recording_get_condition_event(const ecuio_recording_t* r, uint64_t index,
+                                    ecuio_recording_condition_event_t* out);
 ecuio_status_t ecuio_recording_get_signal(const ecuio_recording_t* r,
                                           uint32_t index,
                                           ecuio_recording_signal_t* out);

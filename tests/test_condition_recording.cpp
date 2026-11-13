@@ -4,9 +4,9 @@
 // A session's conditions and its recording (ADR-0063 section 8): the set
 // copied beside the recording, a cond line for each event, the states held
 // when a recording begins mid-session, the carry past a full ring, the
-// markers, and a set that never changes under a recorder that is
-// attaching or attached. Sessions are never started, so each case is the
-// worker and every session time its own.
+// markers, a set that never changes under a recorder that is attaching
+// or attached, and the reader giving the events back. Sessions are never
+// started, so each case is the worker and every session time its own.
 
 #include <gtest/gtest.h>
 #include <ecuio/conditions.h>
@@ -864,4 +864,84 @@ TEST(ConditionRecordingTest,
         held = held || c.flags.find("held") != std::string::npos;
     }
     EXPECT_TRUE(held) << "the counted frames began with held states";
+}
+
+/* The reader gives back each event the recording holds (ADR-0063 section
+ * 8): the held state, then every change the session gave, field for
+ * field, through signals.csv and through the frames alike, and the copy
+ * matching its line */
+TEST(ConditionRecordingTest, TheReaderGivesEachEventTheSessionGave)
+{
+    const std::string json =
+        set_of(R"({"key":"high","name":"High revs","mark":true,)"
+               R"("when":{"signal":["obd2.rpm"],"unit":"RPM",)"
+               R"("above":2000}},)" +
+               on_rpm("low", R"("below":1500)"));
+    Recorded r(json);
+    ASSERT_NE(r.recorder, nullptr);
+    engine_speed(r.session.s, 1000000, 3000); /* high ON before it */
+    r.record();
+    engine_speed(r.session.s, 2000000, 3100);
+    engine_speed(r.session.s, 3000000, 1000);
+    engine_speed(r.session.s, 4000000, 3200);
+    r.close();
+
+    std::vector<ecuio_condition_event_t> given;
+    for (const ecuio_condition_event_t& e : r.events.all) {
+        if (e.timestamp_us >= 2000000) {
+            given.push_back(e);
+        }
+    }
+    ASSERT_EQ(given.size(), 4u) << "two changes at 3 s and two at 4 s";
+    const std::vector<Cond> lines = cond_lines(r.folder);
+    ASSERT_EQ(lines.size(), given.size() + 1) << "a held line first";
+    const std::string folder = r.folder.generic_u8string();
+
+    for (int frames = 0; frames < 2; ++frames) {
+        ecuio_recording_t* rec = nullptr;
+        ASSERT_EQ(frames == 0 ? ecuio_recording_open(folder.c_str(), nullptr,
+                                                     nullptr, &rec)
+                              : ecuio_recording_open_frames(
+                                    folder.c_str(), ecuio_obd2_signal_set(),
+                                    nullptr, nullptr, &rec),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_recording_info_t info{};
+        ASSERT_EQ(ecuio_recording_get_info(rec, &info), ECUIO_OK);
+        EXPECT_EQ(info.condition_events, lines.size()) << frames;
+        ecuio_recording_conditions_t c{};
+        ASSERT_EQ(ecuio_recording_get_conditions(rec, &c), ECUIO_OK);
+        EXPECT_EQ(c.flags, ECUIO_RECORDING_CONDITIONS_NAMED |
+                               ECUIO_RECORDING_CONDITIONS_PRESENT |
+                               ECUIO_RECORDING_CONDITIONS_MATCH)
+            << frames;
+        EXPECT_EQ(c.length, json.size());
+        EXPECT_EQ(std::string(c.sha256),
+                  ecuio_sha256::hex_of(json.data(), json.size()));
+        EXPECT_EQ(c.lines_skipped, 0u);
+
+        ecuio_recording_condition_event_t e{};
+        ASSERT_EQ(ecuio_recording_get_condition_event(rec, 0, &e), ECUIO_OK);
+        EXPECT_STREQ(e.key, "high");
+        EXPECT_EQ(e.state, ECUIO_CONDITION_ON);
+        EXPECT_EQ(e.flags, ECUIO_CONDITION_HELD);
+        EXPECT_EQ(e.timestamp_us, 2000000u);
+        EXPECT_EQ(e.host_us, lines[0].host_us);
+        for (size_t i = 0; i < given.size(); ++i) {
+            const ecuio_condition_event_t& g = given[i];
+            ASSERT_EQ(ecuio_recording_get_condition_event(rec, i + 1, &e),
+                      ECUIO_OK);
+            EXPECT_STREQ(e.key, g.condition == 0 ? "high" : "low") << i;
+            EXPECT_EQ(e.state, g.state) << i;
+            EXPECT_EQ(e.flags, g.flags) << i;
+            EXPECT_EQ(std::memcmp(&e.value, &g.value, sizeof e.value), 0)
+                << "the value's bits, " << i;
+            EXPECT_EQ(e.term, g.term) << i;
+            EXPECT_EQ(e.timestamp_us, g.timestamp_us) << i;
+            EXPECT_EQ(e.host_us, lines[i + 1].host_us) << i;
+        }
+        EXPECT_EQ(ecuio_recording_get_condition_event(rec, lines.size(), &e),
+                  ECUIO_ERR_INVALID_ARGUMENT);
+        ecuio_recording_close(rec);
+    }
 }

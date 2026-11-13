@@ -1,10 +1,11 @@
 // File/layer: core/src/recording_reader.cpp | C++17, Qt-free; the reader
 //             (ADR-0049 section 5)
 // Testing: UNIT: RecordingTest, RecordingFramesTest, RecordingStatsTest,
-//          RecordingStretchesTest (test_core)
+//          RecordingStretchesTest, ConditionRecordingTest (test_core)
 //
 // One pass at open reads events.log's header (the format, the UTC start,
-// each signal's kind, decimal places and plot rank) and signals.csv, and
+// each signal's kind, decimal places and plot rank) and its cond lines,
+// each kept in 40 bytes up to a cap (ADR-0063 section 8), and signals.csv, and
 // builds per signal a summary for each second of host_us it has samples
 // in, beside each second's byte offset in signals.csv. Queries answer
 // from the summaries, and closer than a second a column from the raw
@@ -26,6 +27,7 @@
 #include "recording_rows.h"
 #include "sha256.h"
 
+#include "ecuio/conditions.h"
 #include "ecuio/internal.h"
 #include "ecuio/recording.h"
 
@@ -123,6 +125,29 @@ struct marker_entry {
     uint64_t host_us;
     std::string label;
 };
+
+/* A cond line, its key by its place in the key table */
+struct condition_entry {
+    uint64_t host_us;
+    uint64_t t_us;
+    double value;
+    uint32_t term;
+    uint32_t key;
+    uint8_t state;
+    uint8_t flags;
+};
+static_assert(sizeof(condition_entry) == 40, "the cap's 40 bytes");
+static_assert(ecuio_recording_rows::kCondStale == ECUIO_CONDITION_STALE &&
+                  ecuio_recording_rows::kCondFired == ECUIO_CONDITION_FIRED &&
+                  ecuio_recording_rows::kCondHeld == ECUIO_CONDITION_HELD,
+              "a cond line's flag bits are the event's");
+static_assert(ecuio_recording_rows::kConditionKeyMax == ECUIO_CONDITION_KEY_MAX,
+              "a cond line's key is a condition's");
+static_assert(
+    ECUIO_RECORDING_CONDITIONS_NAMED == ECUIO_RECORDING_SIGNALS_NAMED &&
+        ECUIO_RECORDING_CONDITIONS_PRESENT == ECUIO_RECORDING_SIGNALS_PRESENT &&
+        ECUIO_RECORDING_CONDITIONS_MATCH == ECUIO_RECORDING_SIGNALS_MATCH,
+    "a copy's flags are read alike");
 
 /* Lines from a file, their byte offsets counted exactly (a NUL is a byte
  * like any other, so fgets and strlen won't do) */
@@ -371,10 +396,16 @@ struct ecuio_recording {
     uint64_t end_offset = 0; /* past the source's last row the open read */
     ecuio_recording_info_t info{};
     ecuio_recording_signals_t signal_file{};
+    ecuio_recording_conditions_t conditions{};
     std::vector<signal_entry> signals;
     std::unordered_map<std::string, uint32_t> by_name;
     std::vector<index_entry> index;
     std::vector<marker_entry> markers;
+    /* The cond lines kept, and their keys: each once, its place in
+     * condition_keys pointing at the map's own copy */
+    std::vector<condition_entry> condition_events;
+    std::unordered_map<std::string, uint32_t> condition_key_index;
+    std::vector<const std::string*> condition_keys;
 
     /* Opened through its frames: the set they decode with, each def's
      * signal (UINT32_MAX for one that never decoded), each def by its id,
@@ -404,7 +435,8 @@ struct ecuio_recording {
     uint32_t add_signal(const std::string& name);
     bool read_label(const char* text, size_t n, const char** why);
     bool read_events(const std::string& folder);
-    void read_signal_file(const std::string& folder);
+    void take_condition(const ecuio_recording_rows::cond_line& c);
+    void read_copies(const std::string& folder);
     bool read_signals(ecuio_open_progress_t progress, void* user,
                       bool* canceled);
     void take_set(const ecuio_signal_set_t& set);
@@ -477,35 +509,73 @@ bool ecuio_recording::read_label(const char* text, size_t n, const char** why)
 static_assert(ecuio_recording_rows::kLabelMax == ECUIO_ENUM_LABEL_MAX,
               "a label line's bound is an enum entry's");
 
-/* signals.json beside the recording, whether or not the header names
- * it: its length, and with the header's hash whether its bytes are those.
- * Read in pieces, so a large file costs no memory; one that can't be
- * read counts as absent. */
-void ecuio_recording::read_signal_file(const std::string& folder)
+namespace {
+
+/* A copy beside the recording (signals.json, conditions.json), whether or
+ * not the header names it: its length, and with the header's hash whether
+ * its bytes are those. Read in pieces, so a large file costs no memory;
+ * one that can't be read counts as absent. */
+void read_copy(const std::string& path, const char* sha256, uint32_t* flags,
+               uint64_t* length)
 {
-    file_ptr f = open_file(folder + "/" + rows::kSignalFileName);
+    file_ptr f = open_file(path);
     if (!f) {
         return;
     }
     ecuio_sha256::hasher h;
     char buf[16384];
-    uint64_t length = 0;
+    uint64_t total = 0;
     size_t got = 0;
     while ((got = std::fread(buf, 1, sizeof buf, f.get())) > 0) {
         h.add(buf, got);
-        length += got;
+        total += got;
     }
     if (std::ferror(f.get()) != 0) {
         return;
     }
-    signal_file.flags |= ECUIO_RECORDING_SIGNALS_PRESENT;
-    signal_file.length = length;
+    *flags |= ECUIO_RECORDING_SIGNALS_PRESENT;
+    *length = total;
     uint8_t digest[32];
     h.finish(digest);
-    if ((signal_file.flags & ECUIO_RECORDING_SIGNALS_NAMED) != 0 &&
-        ecuio_sha256::hex(digest) == signal_file.sha256) {
-        signal_file.flags |= ECUIO_RECORDING_SIGNALS_MATCH;
+    if ((*flags & ECUIO_RECORDING_SIGNALS_NAMED) != 0 &&
+        ecuio_sha256::hex(digest) == sha256) {
+        *flags |= ECUIO_RECORDING_SIGNALS_MATCH;
     }
+}
+
+} // namespace
+
+void ecuio_recording::read_copies(const std::string& folder)
+{
+    read_copy(folder + "/" + rows::kSignalFileName, signal_file.sha256,
+              &signal_file.flags, &signal_file.length);
+    read_copy(folder + "/" + rows::kConditionsName, conditions.sha256,
+              &conditions.flags, &conditions.length);
+}
+
+/* A cond line counted, and kept up to the cap */
+void ecuio_recording::take_condition(const rows::cond_line& c)
+{
+    if (++info.condition_events > ECUIO_RECORDING_MAX_CONDITION_EVENTS) {
+        info.flags |= ECUIO_RECORDING_INFO_CONDITIONS_CUT;
+        return;
+    }
+    uint32_t key = 0;
+    if (!condition_events.empty() &&
+        *condition_keys[condition_events.back().key] == c.key) {
+        key = condition_events.back().key; /* a flapping condition's */
+    } else {
+        const auto at = condition_key_index.emplace(
+            c.key, static_cast<uint32_t>(condition_keys.size()));
+        if (at.second) {
+            condition_keys.push_back(&at.first->first);
+        }
+        key = at.first->second;
+    }
+    condition_events.push_back(condition_entry{
+        c.host_us, c.t_us, c.value, c.term, key,
+        static_cast<uint8_t>(c.on ? ECUIO_CONDITION_ON : ECUIO_CONDITION_OFF),
+        static_cast<uint8_t>(c.flags)});
 }
 
 /* events.log: the format, the header's signals and UTC start, the
@@ -527,6 +597,7 @@ bool ecuio_recording::read_events(const std::string& folder)
     uint64_t drop_frames = 0;
     bool summary = false;
     rows::header_signal hs;
+    rows::cond_line cond;
     while (lines.next(line, &ended, &too_long)) {
         ++line_no;
         if (!ended || too_long) {
@@ -614,6 +685,18 @@ bool ecuio_recording::read_events(const std::string& folder)
                 std::memcpy(signal_file.sha256, hex.data(), hex.size());
                 signal_file.sha256[hex.size()] = '\0';
                 signal_file.flags |= ECUIO_RECORDING_SIGNALS_NAMED;
+            } else if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
+                       rows::starts_with(p, n, rows::kConditionsKey)) {
+                /* Evidence beside the data: a line that isn't the copy's
+                 * names none, and the open goes on */
+                const size_t key = std::strlen(rows::kConditionsKey);
+                std::string hex;
+                if (rows::parse_named_file(p + key, n - key,
+                                           rows::kConditionsName, &hex)) {
+                    std::memcpy(conditions.sha256, hex.data(), hex.size());
+                    conditions.sha256[hex.size()] = '\0';
+                    conditions.flags |= ECUIO_RECORDING_CONDITIONS_NAMED;
+                }
             } else if (rows::starts_with(p, n, "utc  ")) {
                 if (!rows::parse_utc(p + 5, n - 5, &info.utc_start_us)) {
                     ecuio_detail_set("events.log line %llu: the utc line "
@@ -654,6 +737,12 @@ bool ecuio_recording::read_events(const std::string& folder)
         } else if (rows::equals(e.rest, kind_len, "drop") &&
                    rows::parse_drop(text, text_len, &count)) {
             drop_frames += count;
+        } else if (rows::equals(e.rest, kind_len, "cond")) {
+            if (rows::parse_cond_line(text, text_len, &cond)) {
+                take_condition(cond);
+            } else if (conditions.lines_skipped < UINT32_MAX) {
+                ++conditions.lines_skipped;
+            }
         }
     }
     if (summary) {
@@ -1095,6 +1184,7 @@ void ecuio_recording::finish()
         }
     }
     index.shrink_to_fit();
+    condition_events.shrink_to_fit();
     info.signal_count = static_cast<uint32_t>(signals.size());
     info.marker_count = static_cast<uint32_t>(markers.size());
 }
@@ -1591,7 +1681,7 @@ ecuio_status_t ecuio_recording_open(const char* folder_utf8,
             !r->read_markers(folder)) {
             return canceled ? ECUIO_ERR_CANCELED : ECUIO_ERR_LOAD_FAILED;
         }
-        r->read_signal_file(folder);
+        r->read_copies(folder);
         r->finish();
         *out = r.release();
         return ECUIO_OK;
@@ -1637,7 +1727,7 @@ ecuio_status_t ecuio_recording_open_frames(const char* folder_utf8,
             !r->read_markers(folder)) {
             return canceled ? ECUIO_ERR_CANCELED : ECUIO_ERR_LOAD_FAILED;
         }
-        r->read_signal_file(folder);
+        r->read_copies(folder);
         r->finish();
         *out = r.release();
         return ECUIO_OK;
@@ -1663,6 +1753,39 @@ ecuio_status_t ecuio_recording_get_signals(const ecuio_recording_t* r,
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     *out = r->signal_file;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_recording_get_conditions(const ecuio_recording_t* r,
+                                              ecuio_recording_conditions_t* out)
+{
+    if (r == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *out = r->conditions;
+    return ECUIO_OK;
+}
+
+ecuio_status_t
+ecuio_recording_get_condition_event(const ecuio_recording_t* r, uint64_t index,
+                                    ecuio_recording_condition_event_t* out)
+{
+    if (r == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (index >= r->condition_events.size()) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const condition_entry& e = r->condition_events[static_cast<size_t>(index)];
+    *out = ecuio_recording_condition_event_t{};
+    out->host_us = e.host_us;
+    out->timestamp_us = e.t_us;
+    out->value = e.value;
+    out->state = e.state;
+    out->flags = e.flags;
+    out->term = e.term;
+    const std::string& key = *r->condition_keys[e.key];
+    std::memcpy(out->key, key.c_str(), key.size() + 1);
     return ECUIO_OK;
 }
 

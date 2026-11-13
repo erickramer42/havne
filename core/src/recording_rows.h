@@ -609,13 +609,14 @@ inline int64_t days_from_civil(int64_t y, unsigned m, unsigned d)
     return era * 146097 + static_cast<int64_t>(doe) - 719468;
 }
 
-/* A signal file line's value, "signals.json," and 64 lowercase hex
- * digits: the digits into hex */
-inline bool parse_signal_file(const char* p, size_t n, std::string* hex)
+/* A copy's header line value, "<file>," and 64 lowercase hex digits (the
+ * signal file's, the conditions'): the digits into hex */
+inline bool parse_named_file(const char* p, size_t n, const char* file,
+                             std::string* hex)
 {
-    const size_t name = std::strlen(kSignalFileName);
-    if (n != name + 1 + kSha256Hex ||
-        std::memcmp(p, kSignalFileName, name) != 0 || p[name] != ',') {
+    const size_t name = std::strlen(file);
+    if (n != name + 1 + kSha256Hex || std::memcmp(p, file, name) != 0 ||
+        p[name] != ',') {
         return false;
     }
     const char* digits = p + name + 1;
@@ -626,6 +627,93 @@ inline bool parse_signal_file(const char* p, size_t n, std::string* hex)
         }
     }
     hex->assign(digits, kSha256Hex);
+    return true;
+}
+
+inline bool parse_signal_file(const char* p, size_t n, std::string* hex)
+{
+    return parse_named_file(p, n, kSignalFileName, hex);
+}
+
+/* A cond line's flag words as bits, ECUIO_CONDITION_STALE, _FIRED and
+ * _HELD's values (conditions.h; the reader asserts them) */
+constexpr uint32_t kCondStale = 0x1;
+constexpr uint32_t kCondFired = 0x2;
+constexpr uint32_t kCondHeld = 0x8;
+constexpr size_t kConditionKeyMax = 31; /* ECUIO_CONDITION_KEY_MAX */
+
+/* A cond line's text (ADR-0063 section 8):
+ * "<key>,<on|off>,<flags>,<value>,<term>,<host_us>,<t_us>". A key is 1 to
+ * 31 of a-z, 0-9 and _, and no field is quoted. A flag word the reader
+ * doesn't know and any field after the seventh are passed by, so a later
+ * writer can add either. */
+struct cond_line {
+    char key[kConditionKeyMax + 1] = {};
+    bool on = false;
+    uint32_t flags = 0;
+    double value = 0.0;
+    uint32_t term = 0;
+    uint64_t host_us = 0;
+    uint64_t t_us = 0;
+};
+
+inline bool parse_cond_line(const char* p, size_t n, cond_line* c)
+{
+    const char* f[7] = {};
+    size_t len[7] = {};
+    size_t field = 0;
+    size_t start = 0;
+    for (size_t i = 0; i <= n && field < 7; ++i) {
+        if (i == n || p[i] == ',') {
+            f[field] = p + start;
+            len[field] = i - start;
+            ++field;
+            start = i + 1;
+        }
+    }
+    if (field < 7 || len[0] == 0 || len[0] > kConditionKeyMax) {
+        return false;
+    }
+    for (size_t i = 0; i < len[0]; ++i) {
+        const char k = f[0][i];
+        if (!((k >= 'a' && k <= 'z') || (k >= '0' && k <= '9') || k == '_')) {
+            return false;
+        }
+    }
+    const bool on = equals(f[1], len[1], "on");
+    if (!on && !equals(f[1], len[1], "off")) {
+        return false;
+    }
+    uint32_t flags = 0;
+    for (size_t i = 0, w = 0; i <= len[2]; ++i) {
+        if (i == len[2] || f[2][i] == ' ') {
+            const char* word = f[2] + w;
+            const size_t wl = i - w;
+            flags |= equals(word, wl, "stale")   ? kCondStale
+                     : equals(word, wl, "fired") ? kCondFired
+                     : equals(word, wl, "held")  ? kCondHeld
+                                                 : 0u;
+            w = i + 1;
+        }
+    }
+    double value = 0.0;
+    uint64_t term = 0;
+    uint64_t host_us = 0;
+    uint64_t t_us = 0;
+    if (!parse_number(f[3], len[3], &value) ||
+        !parse_count(f[4], len[4], &term) || term > UINT32_MAX ||
+        !parse_count(f[5], len[5], &host_us) ||
+        !parse_count(f[6], len[6], &t_us)) {
+        return false;
+    }
+    std::memcpy(c->key, f[0], len[0]);
+    c->key[len[0]] = '\0';
+    c->on = on;
+    c->flags = flags;
+    c->value = value;
+    c->term = static_cast<uint32_t>(term);
+    c->host_us = host_us;
+    c->t_us = t_us;
     return true;
 }
 

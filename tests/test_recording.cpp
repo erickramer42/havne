@@ -1563,6 +1563,286 @@ TEST(RecordingTest, ASignalFileLineIsReadInFormat3Only)
     EXPECT_STREQ(s.sha256, "");
 }
 
+namespace {
+
+ecuio_recording_conditions_t conditions_of(const std::string& folder)
+{
+    Reader r(folder);
+    EXPECT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    ecuio_recording_conditions_t c{};
+    EXPECT_EQ(ecuio_recording_get_conditions(r.r, &c), ECUIO_OK);
+    return c;
+}
+
+/* events_v3's events.log with these activity lines before its end line */
+std::string events_with(const std::vector<std::string>& header_lines,
+                        const std::string& activity)
+{
+    std::string s = events_v3(header_lines);
+    s.insert(s.find("12:00:10.000"), activity);
+    return s;
+}
+
+std::string cond_at(unsigned second, const std::string& text)
+{
+    char stamp[32];
+    std::snprintf(stamp, sizeof stamp, "12:00:%02u.000  +%u.000  ", second,
+                  second);
+    return stamp + std::string("cond  ") + text + "\n";
+}
+
+} // namespace
+
+/* conditions.json beside a recording reads as signals.json does, each
+ * copy by its own line and file (ADR-0063 section 8); a conditions line
+ * that isn't the copy's names none and the open goes on */
+TEST(RecordingTest, AConditionsLineAndItsCopyAreReadAsTheSignalFiles)
+{
+    const std::string head = std::string(kBom) + rows::kSignalsHeader + "\n";
+    const std::string json = "{\"havne_conditions\":1,\"conditions\":[]}\n";
+    const std::string sha = ecuio_sha256::hex_of(json.data(), json.size());
+    const std::string line = "conditions  conditions.json," + sha;
+    const uint32_t all = ECUIO_RECORDING_CONDITIONS_NAMED |
+                         ECUIO_RECORDING_CONDITIONS_PRESENT |
+                         ECUIO_RECORDING_CONDITIONS_MATCH;
+
+    /* Both copies, each matching its own line */
+    const std::string signals = "{\"havne_signals\": 1}\n";
+    const std::string signals_sha =
+        ecuio_sha256::hex_of(signals.data(), signals.size());
+    Folder both;
+    both.write("events.log",
+               events_v3({"signal file  signals.json," + signals_sha, line}));
+    both.write("signals.csv", head);
+    both.write("signals.json", signals);
+    both.write("conditions.json", json);
+    {
+        Reader r(both.utf8());
+        ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+        ecuio_recording_conditions_t c{};
+        ecuio_recording_signals_t s{};
+        ASSERT_EQ(ecuio_recording_get_conditions(r.r, &c), ECUIO_OK);
+        ASSERT_EQ(ecuio_recording_get_signals(r.r, &s), ECUIO_OK);
+        EXPECT_EQ(c.flags, all);
+        EXPECT_EQ(c.length, json.size());
+        EXPECT_EQ(std::string(c.sha256), sha);
+        EXPECT_EQ(c.lines_skipped, 0u);
+        EXPECT_EQ(s.flags, all) << "the signal file's copy is its own";
+        EXPECT_EQ(s.length, signals.size());
+        EXPECT_EQ(std::string(s.sha256), signals_sha);
+        EXPECT_EQ(ecuio_recording_get_conditions(r.r, nullptr),
+                  ECUIO_ERR_NULL_ARGUMENT);
+        EXPECT_EQ(ecuio_recording_get_conditions(nullptr, &c),
+                  ECUIO_ERR_NULL_ARGUMENT);
+    }
+
+    /* Another file's hash: present, not the bytes named */
+    Folder other("-other");
+    other.write("events.log", events_v3({"conditions  conditions.json," +
+                                         std::string(64, '0')}));
+    other.write("signals.csv", head);
+    other.write("conditions.json", json);
+    ecuio_recording_conditions_t c = conditions_of(other.utf8());
+    EXPECT_EQ(c.flags, ECUIO_RECORDING_CONDITIONS_NAMED |
+                           ECUIO_RECORDING_CONDITIONS_PRESENT);
+
+    /* No line: a file there is present, named by nothing */
+    Folder unnamed("-unnamed");
+    unnamed.write("events.log", events_v3({}));
+    unnamed.write("signals.csv", head);
+    unnamed.write("conditions.json", json);
+    c = conditions_of(unnamed.utf8());
+    EXPECT_EQ(c.flags, ECUIO_RECORDING_CONDITIONS_PRESENT);
+    EXPECT_STREQ(c.sha256, "");
+
+    /* A line and no file */
+    Folder absent("-absent");
+    absent.write("events.log", events_v3({line}));
+    absent.write("signals.csv", head);
+    c = conditions_of(absent.utf8());
+    EXPECT_EQ(c.flags, ECUIO_RECORDING_CONDITIONS_NAMED);
+    EXPECT_EQ(c.length, 0u);
+    EXPECT_EQ(std::string(c.sha256), sha);
+
+    /* A line that isn't the copy's names nothing */
+    for (const std::string& bad :
+         {std::string("conditions  conditions.json,ABC"),
+          "conditions  signals.json," + sha,
+          "conditions  conditions.json," + sha.substr(1)}) {
+        Folder f("-bad");
+        f.write("events.log", events_v3({bad}));
+        f.write("signals.csv", head);
+        f.write("conditions.json", json);
+        c = conditions_of(f.utf8());
+        EXPECT_EQ(c.flags, ECUIO_RECORDING_CONDITIONS_PRESENT) << bad;
+        EXPECT_STREQ(c.sha256, "") << bad;
+    }
+
+    /* Format 2 has no such line */
+    std::string v2 = events_v2({"RPM,number,rpm,0,0"});
+    v2.insert(v2.find("columns  "), line + "\n");
+    Folder older("-v2");
+    older.write("events.log", v2);
+    older.write("signals.csv", head);
+    c = conditions_of(older.utf8());
+    EXPECT_EQ(c.flags, 0u);
+    EXPECT_STREQ(c.sha256, "");
+}
+
+/* Each cond line in the file's order with its seven fields; a flag word
+ * the reader doesn't know and fields after the seventh passed by; a line
+ * that doesn't parse skipped and counted, the rest read as before */
+TEST(RecordingTest, CondLinesAreReadInOrderAndABadOneIsSkippedAndCounted)
+{
+    const std::string good =
+        cond_at(1, "coolant_high,on,fired,112,0,1000000,999000") +
+        cond_at(1, "coolant_high,off,stale,nan,1,1500000,1499000,x,y") +
+        cond_at(2, "pull_2,on,fired held blink,-0.5,3,2000000,"
+                   "18446744073709551615") +
+        cond_at(2, "low,on,,1e300,4294967295,2500000,2499000") +
+        cond_at(3, "coolant_high,on,fired,113,0,3000000,2999000");
+    const std::vector<std::string> bad = {
+        "Upper,on,,1,0,1,1", std::string(32, 'k') + ",on,,1,0,1,1",
+        ",on,,1,0,1,1",      "a,maybe,,1,0,1,1",
+        "a,on,,x,0,1,1",     "a,on,,1,4294967296,1,1",
+        "a,on,,1,-1,1,1",    "a,on,,1,0,1",
+        "\"a\",on,,1,0,1,1", "a,on,,1,0,1,18446744073709551616",
+    };
+    std::string activity = good;
+    for (const std::string& b : bad) {
+        activity += cond_at(4, b);
+    }
+    const std::string rows = std::string(rows::kSignalsHeader) +
+                             "\n1000000,RPM,800,rpm\n2000000,RPM,900,rpm\n";
+    Folder f;
+    f.write("events.log", events_with({"signal  RPM,number,rpm,0,1"},
+                                      cond_at(0, "a,on,,1,0,0,0") + activity));
+    f.write("signals.csv", rows);
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_recording_info_t info = r.info();
+    EXPECT_EQ(info.condition_events, 6u);
+    EXPECT_EQ(info.flags & ECUIO_RECORDING_INFO_CONDITIONS_CUT, 0u);
+    ecuio_recording_conditions_t c{};
+    ASSERT_EQ(ecuio_recording_get_conditions(r.r, &c), ECUIO_OK);
+    EXPECT_EQ(c.lines_skipped, bad.size());
+    EXPECT_EQ(c.flags, 0u) << "no line names a copy";
+
+    struct Want {
+        const char* key;
+        uint32_t state, flags;
+        double value;
+        uint32_t term;
+        uint64_t host_us, t_us;
+    };
+    const Want want[] = {
+        {"a", ECUIO_CONDITION_ON, 0, 1, 0, 0, 0},
+        {"coolant_high", ECUIO_CONDITION_ON, ECUIO_CONDITION_FIRED, 112, 0,
+         1000000, 999000},
+        {"coolant_high", ECUIO_CONDITION_OFF, ECUIO_CONDITION_STALE, NAN, 1,
+         1500000, 1499000},
+        {"pull_2", ECUIO_CONDITION_ON,
+         ECUIO_CONDITION_FIRED | ECUIO_CONDITION_HELD, -0.5, 3, 2000000,
+         UINT64_MAX},
+        {"low", ECUIO_CONDITION_ON, 0, 1e300, UINT32_MAX, 2500000, 2499000},
+        {"coolant_high", ECUIO_CONDITION_ON, ECUIO_CONDITION_FIRED, 113, 0,
+         3000000, 2999000},
+    };
+    for (size_t i = 0; i < 6; ++i) {
+        ecuio_recording_condition_event_t e;
+        std::memset(&e, 0xA5, sizeof e);
+        ASSERT_EQ(ecuio_recording_get_condition_event(r.r, i, &e), ECUIO_OK);
+        EXPECT_STREQ(e.key, want[i].key) << i;
+        EXPECT_EQ(e.state, want[i].state) << i;
+        EXPECT_EQ(e.flags, want[i].flags) << i;
+        if (std::isnan(want[i].value)) {
+            EXPECT_TRUE(std::isnan(e.value)) << i;
+        } else {
+            EXPECT_EQ(e.value, want[i].value) << i;
+        }
+        EXPECT_EQ(e.term, want[i].term) << i;
+        EXPECT_EQ(e.host_us, want[i].host_us) << i;
+        EXPECT_EQ(e.timestamp_us, want[i].t_us) << i;
+        EXPECT_EQ(e.reserved0, 0u) << i;
+        EXPECT_EQ(e.reserved[0] | e.reserved[1], 0u) << i;
+        const void* end = std::memchr(e.key, '\0', sizeof e.key);
+        ASSERT_NE(end, nullptr) << i;
+        for (const char* k = static_cast<const char*>(end); k < e.key + 32;
+             ++k) {
+            EXPECT_EQ(*k, '\0') << "the key's room past it is zero, " << i;
+        }
+    }
+    ecuio_recording_condition_event_t past;
+    std::memset(&past, 0x5A, sizeof past);
+    const ecuio_recording_condition_event_t kept = past;
+    EXPECT_EQ(ecuio_recording_get_condition_event(r.r, 6, &past),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(std::memcmp(&past, &kept, sizeof past), 0) << "out untouched";
+    EXPECT_EQ(ecuio_recording_get_condition_event(r.r, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_recording_get_condition_event(nullptr, 0, &past),
+              ECUIO_ERR_NULL_ARGUMENT);
+
+    /* The same recording with no cond lines reads the same otherwise */
+    Folder plain("-plain");
+    plain.write("events.log", events_v3({"signal  RPM,number,rpm,0,1"}));
+    plain.write("signals.csv", rows);
+    Reader p(plain.utf8());
+    ASSERT_EQ(p.rc, ECUIO_OK) << ecuio_last_error_detail();
+    ecuio_recording_info_t without = p.info();
+    EXPECT_EQ(without.condition_events, 0u);
+    ecuio_recording_conditions_t none{};
+    ASSERT_EQ(ecuio_recording_get_conditions(p.r, &none), ECUIO_OK);
+    EXPECT_EQ(none.lines_skipped, 0u);
+    EXPECT_EQ(ecuio_recording_get_condition_event(p.r, 0, &past),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    without.condition_events = info.condition_events;
+    EXPECT_EQ(std::memcmp(&without, &info, sizeof info), 0);
+    const ecuio_recording_signal_t a = r.signal(0);
+    const ecuio_recording_signal_t b = p.signal(0);
+    EXPECT_EQ(std::memcmp(&a, &b, sizeof a), 0);
+}
+
+/* Past ECUIO_RECORDING_MAX_CONDITION_EVENTS the first that many are kept
+ * and every line is counted */
+TEST(RecordingTest, CondLinesPastTheCapAreCountedAndTheFirstKept)
+{
+    const uint64_t cap = ECUIO_RECORDING_MAX_CONDITION_EVENTS;
+    std::string activity;
+    activity.reserve((cap + 2) * 48);
+    for (uint64_t i = 0; i < cap + 2; ++i) {
+        activity += "12:00:00.000  +0.000  cond  ";
+        activity += (i % 2 == 0) ? "a,on,," : "b,off,,";
+        activity += std::to_string(i) + ",0,0," + std::to_string(i) + "\n";
+    }
+    Folder f;
+    f.write("events.log", events_with({}, activity));
+    f.write("signals.csv", std::string(rows::kSignalsHeader) + "\n");
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_recording_info_t info = r.info();
+    EXPECT_EQ(info.condition_events, cap + 2);
+    EXPECT_NE(info.flags & ECUIO_RECORDING_INFO_CONDITIONS_CUT, 0u);
+    ecuio_recording_condition_event_t e{};
+    ASSERT_EQ(ecuio_recording_get_condition_event(r.r, cap - 1, &e), ECUIO_OK);
+    EXPECT_EQ(e.timestamp_us, cap - 1);
+    EXPECT_STREQ(e.key, "b");
+    EXPECT_EQ(ecuio_recording_get_condition_event(r.r, cap, &e),
+              ECUIO_ERR_INVALID_ARGUMENT);
+
+    /* At the cap exactly, nothing is cut */
+    for (int k = 0; k < 2; ++k) {
+        activity.resize(activity.rfind("12:00:00.000"));
+    }
+    Folder g("-at-cap");
+    g.write("events.log", events_with({}, activity));
+    g.write("signals.csv", std::string(rows::kSignalsHeader) + "\n");
+    Reader s(g.utf8());
+    ASSERT_EQ(s.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(s.info().condition_events, cap);
+    EXPECT_EQ(s.info().flags & ECUIO_RECORDING_INFO_CONDITIONS_CUT, 0u);
+}
+
 TEST(RecordingTest, ProgressIsCalledAndCancelsTheOpen)
 {
     const Hour& h = fixture_hour();
