@@ -1,6 +1,6 @@
 // File/layer: app/urlwrite.h | Qt6 Core, app layer, C++17, header-only
 // Testing: BRIDGE: BridgeTest, RecordingExportTest (test_bridge); MANUAL SMOKE:
-//          the test phone (a provider's document written and closed)
+//          the Android run sheet (a provider's document written and closed)
 //
 // Bytes to the file a picker chose. A local file is written whole or not
 // at all: QSaveFile writes beside it and renames, so a failed write leaves
@@ -88,11 +88,38 @@ inline bool callThrows(const QJniObject& pfd, const char* name,
     }
     return threw;
 }
+
+// Closes a ParcelFileDescriptor with closeWithError, so a provider that
+// watches its pipe is told the write failed; plain JNI, as callThrows. Closed
+// plainly when that call can't be made
+inline void closeWithError(const QJniObject& pfd)
+{
+    QJniEnvironment env;
+    jclass cls = env->GetObjectClass(pfd.object());
+    const jmethodID method =
+        cls != nullptr
+            ? env.findMethod(cls, "closeWithError", "(Ljava/lang/String;)V")
+            : nullptr;
+    if (cls != nullptr) {
+        env->DeleteLocalRef(cls);
+    }
+    jstring words =
+        method != nullptr ? env->NewStringUTF("The write failed") : nullptr;
+    env->ExceptionClear();
+    if (words != nullptr) {
+        env->CallVoidMethod(pfd.object(), method, words);
+        env->DeleteLocalRef(words);
+        env->ExceptionClear();
+    } else {
+        callThrows(pfd, "close");
+    }
+}
 #endif
 
 // A file a picker chose, open for writing: on Android it also holds the
 // provider's ParcelFileDescriptor, which closePicked closes, so the provider
-// sees a whole close and can refuse it; a descriptor detached from it can't
+// sees a whole close and can refuse it; a descriptor detached from it can't.
+// One still held at destruction wasn't written whole: the provider is told
 class PickedFile : public QFile
 {
 public:
@@ -104,8 +131,7 @@ public:
 #ifdef Q_OS_ANDROID
         if (pfd.isValid()) {
             close();
-            pfd.callMethod<void>("close");
-            QJniEnvironment().checkAndClearExceptions();
+            closeWithError(pfd);
         }
 #endif
     }
@@ -194,16 +220,27 @@ inline bool removePicked(const QString& where)
     return QFile::remove(where);
 }
 
-// Closes a picked file and says whether the close held: a provider that
-// refuses the written document at its close (checkError, then close) fails it
+// Closes a picked file and says whether the write held. On Android the pfd
+// closes last (the dup's close leaves its descriptor open): its close reads
+// the provider's status once, without waiting, and checkError after it throws
+// an error the provider sent by then. One sent only after the provider sees
+// the end of the document can't reach the app
 inline bool closePicked(PickedFile& file)
 {
     file.close();
     bool held = file.error() == QFileDevice::NoError;
 #ifdef Q_OS_ANDROID
     if (file.pfd.isValid()) {
+        // Whether this provider can report an error at all, for the log
+        qInfo("closePicked: the provider %s report an error",
+              file.pfd.callMethod<jboolean>("canDetectErrors") ? "can"
+                                                               : "can't");
+        if (held) {
+            held = !callThrows(file.pfd, "close");
+        } else {
+            closeWithError(file.pfd);
+        }
         held = !callThrows(file.pfd, "checkError") && held;
-        held = !callThrows(file.pfd, "close") && held;
         file.pfd = QJniObject();
     }
 #endif

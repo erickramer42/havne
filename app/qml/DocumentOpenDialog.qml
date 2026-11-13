@@ -1,5 +1,6 @@
 // File/layer: app/qml/DocumentOpenDialog.qml | Qt Quick, app layer
-// Testing: QML: QmlTest.documentpicker (test_qml); BENCH for Android's picker
+// Testing: QML: QmlTest.documentpicker (test_qml); MANUAL SMOKE: the Android
+//          run sheet's picker checks
 //
 // An open-mode file dialog in FileDialog's shape (title, nameFilters,
 // currentFolder, selectedFile, open(), accepted, rejected), so a page
