@@ -1,6 +1,6 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: UNIT: CoreTest, DefIndexTest, ConditionSessionTest (test_core);
-//          PidSupportTest,
+// Testing: UNIT: CoreTest, DefIndexTest, ConditionSessionTest,
+//          ConditionRecordingTest (test_core); PidSupportTest,
 //          DiagnosticsTest, InspectionTest (test_obd2); ProbeNotesTest
 //          (ctest); c_abi; HARNESS: Elm327SessionTest (test_elm327)
 
@@ -1168,11 +1168,6 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
                          "with");
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    if (session->record_link->active.load() != nullptr) {
-        ecuio_detail_set("a recording is under way, and it holds one set of "
-                         "conditions for its whole length");
-        return ECUIO_ERR_IN_USE;
-    }
     std::unique_ptr<ecuio_condition_eval> next;
     std::vector<ecuio_condition_state_t> states;
     /* The signals the conditions read, for the focus: the evaluator holds
@@ -1207,6 +1202,14 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
     std::unique_ptr<ecuio_condition_eval> retired;
     std::unique_ptr<ecuio_condition_eval> untaken;
     {
+        /* The recorder's attach takes the link's mutex too, so the check
+         * and the handover are one step to it (session.h's lock order) */
+        std::lock_guard<std::mutex> attach(session->record_link->m);
+        if (session->record_link->active.load() != nullptr) {
+            ecuio_detail_set("a recording is under way, and it holds one set "
+                             "of conditions for its whole length");
+            return ECUIO_ERR_IN_USE;
+        }
         std::lock_guard<std::mutex> lock(session->callback_mutex);
         const uint32_t generation = ++session->conditions_generation;
         if (next != nullptr) {

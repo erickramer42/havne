@@ -1,6 +1,7 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
-// Testing: UNIT: CoreTest, RecorderTest, ConditionSessionTest (test_core)
+// Testing: UNIT: CoreTest, RecorderTest, ConditionSessionTest,
+//          ConditionRecordingTest (test_core)
 
 #ifndef ECUIO_SESSION_H
 #define ECUIO_SESSION_H
@@ -147,7 +148,9 @@ struct ecuio_session {
     /* The recorder's link (ADR-0049, recorder.h): made at create and kept
      * until the session is freed, so the worker reads it without a lock;
      * ecuio_session_record puts its recorder in it, before or after start
-     * (ADR-0056 section 3) */
+     * (ADR-0056 section 3). Its mutex comes before callback_mutex:
+     * ecuio_session_set_conditions takes both, so a set never changes
+     * under an attaching recorder */
     std::shared_ptr<ecuio_record_link> record_link;
     /* The pull queues' links (queue.h, pull_queue.h), set before start and
      * kept until the session is freed (lock-free reads); value_queues

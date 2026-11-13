@@ -1,6 +1,7 @@
 // File/layer: core/src/recorder.cpp | C++17, Qt-free; the recorder
 //             (ADR-0049 sections 1 to 4)
-// Testing: UNIT: RecorderTest (test_core); BRIDGE: BridgeTest (test_bridge);
+// Testing: UNIT: RecorderTest, ConditionRecordingTest (test_core);
+//          BRIDGE: BridgeTest (test_bridge);
 //          HARNESS: Elm327SessionTest (test_elm327)
 //
 // The worker copies each frame and its values, its link transitions and
@@ -1180,6 +1181,10 @@ bool put_pending_link(ecuio_recorder_t* r)
     return true;
 }
 
+/* ecuio_session_test_before_record_attach's (internal.h) */
+std::atomic<void (*)(void*)> g_before_record_attach{nullptr};
+std::atomic<void*> g_before_record_attach_user{nullptr};
+
 uint64_t host_us_now(const ecuio_record_link& link)
 {
     const uint64_t now = ecuio_clock_us();
@@ -1654,6 +1659,9 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         if (link->active.load(std::memory_order_seq_cst) != nullptr) {
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
+        if (const auto hook = g_before_record_attach.load()) {
+            hook(g_before_record_attach_user.load());
+        }
         commit();
         link->zero_us.store(zero_us, std::memory_order_relaxed);
         link->active.store(recorder, std::memory_order_release);
@@ -1814,6 +1822,13 @@ ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
     r->sync_all();
     r->close_files();
     return r->failed() ? ECUIO_ERR_RECORDING_FAILED : ECUIO_OK;
+}
+
+void ecuio_session_test_before_record_attach(void (*hook)(void* user),
+                                             void* user)
+{
+    g_before_record_attach_user.store(user);
+    g_before_record_attach.store(hook);
 }
 
 void ecuio_recorder_test_hold(ecuio_recorder_t* recorder, int hold)
