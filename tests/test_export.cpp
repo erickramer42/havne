@@ -3577,6 +3577,39 @@ TEST(ExportTest, ASignalsJsonThatDoesntLoadRefusesAScrubbedExport)
     EXPECT_EQ(e.detail.rfind(why, 0), 0u) << e.detail;
 }
 
+/* A signals.json past the loader's bound is refused whole, never loaded
+ * from its first MiB: a file that loads, padded to the bound, decodes;
+ * one byte more refuses a scrubbed export in words naming the bound */
+TEST(ExportTest, ASignalsJsonPastTheLoadersBoundRefusesAScrubbedExport)
+{
+    const std::string json =
+        R"({"havne_signals": 1, "name": "Bound test", )"
+        R"("source": {"name": "test_export"}, )"
+        R"("ecus": [{"id": "pcm", "rx": "7E8"}], )"
+        R"("signals": [{"key": "ecu_name", "name": "ECU name", "ecu": "pcm", )"
+        R"("read": {"service": "22", "number": "D802"}, )"
+        R"("field": {"byte": 0}, "kind": "text"}]})";
+    for (const size_t size : {static_cast<size_t>(ECUIO_SIGNAL_FILE_MAX_BYTES),
+                              ECUIO_SIGNAL_FILE_MAX_BYTES + size_t{1}}) {
+        Folder f;
+        whole_recording(f);
+        f.write("rec/signals.json",
+                json + std::string(size - json.size(), ' '));
+        FolderExported e(f);
+        if (size <= ECUIO_SIGNAL_FILE_MAX_BYTES) {
+            EXPECT_EQ(e.rc, ECUIO_OK) << e.detail;
+            EXPECT_EQ(e.files["signals.json"].size(), size);
+            continue;
+        }
+        EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
+        EXPECT_EQ(e.detail,
+                  "the recording's signals.json doesn't load (it is past a "
+                  "signal file's limit of 1048576 bytes): a scrubbed export "
+                  "can't tell which signals are text");
+        EXPECT_FALSE(fs::exists(f.path / "copy"));
+    }
+}
+
 /* An identification reply on another ID that the frames end before it's
  * whole: its bytes so far are identity values all the same, so a message
  * repeating them fails the check */
