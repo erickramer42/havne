@@ -1401,12 +1401,13 @@ if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
     endforeach()
 
     # python/examples/ecu_states.ipynb run top to bottom (tests/example_notebook.py);
-    # skips without scikit-learn, nbconvert or ipykernel, as in CI
+    # skips without scikit-learn, nbconvert or ipykernel, as in CI. TIMEOUT
+    # covers a cold import of SciPy and scikit-learn from a busy disk
     add_test(NAME ExampleTest.notebook
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/example_notebook.py)
     set_tests_properties(ExampleTest.notebook PROPERTIES
         ENVIRONMENT "HAVNE_LIBRARY=$<TARGET_FILE:ecuio>;PYTHONDONTWRITEBYTECODE=1"
-        SKIP_RETURN_CODE 77 TIMEOUT 300 COST 38 LABELS "python")
+        SKIP_RETURN_CODE 77 TIMEOUT 900 COST 38 LABELS "python")
 
     # The wheel itself (tests/wheel_installed.py): made from this tree's
     # shared core, installed in a fresh venv and used from outside the

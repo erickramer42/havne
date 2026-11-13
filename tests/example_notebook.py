@@ -17,12 +17,18 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NOTEBOOK = os.path.join(ROOT, "python", "examples", "ecu_states.ipynb")
 NEEDS = ("sklearn", "numpy", "nbconvert", "nbclient", "ipykernel")
 KERNEL = "havne-example-test"
-RUN_SECONDS = 290  # under ctest's TIMEOUT of 300, so the words are this script's
+# The run's third-party modules, SciPy's files among them: read cold from a
+# disk other builds keep busy, their import alone has taken 160 s
+WARM = ("import nbconvert, nbclient, ipykernel.kernelapp, numpy, sklearn.linear_model, "
+        "sklearn.model_selection, sklearn.pipeline, sklearn.preprocessing, sklearn.tree")
+WARM_SECONDS = 600
+RUN_SECONDS = 240  # the two under ctest's TIMEOUT of 900, so the words are this script's
 
 
 def main():
@@ -40,12 +46,24 @@ def main():
         env = {**os.environ, "JUPYTER_PATH": tmp,
                "PYTHONPATH": os.path.join(ROOT, "python"),
                "PYTHONDONTWRITEBYTECODE": "1", "PYTHONIOENCODING": "utf-8"}
-        # One bound for the whole run (ctest's TIMEOUT is 300 s): a cell
-        # of its own had 120 s, which the scikit-learn import and the
-        # cross-validation crossed on a machine building beside the
-        # suite; the test measures that the notebook runs to its end and
-        # its own check holds, nothing about time, so a hung cell is the
-        # run's bound's to catch
+        # The imports first, bounded apart: a slow disk then never reads as
+        # a hung notebook, and the kernel finds the files cached
+        started = time.monotonic()
+        try:
+            warm = subprocess.run([sys.executable, "-B", "-c", WARM], capture_output=True,
+                                  text=True, encoding="utf-8", errors="replace", env=env,
+                                  timeout=WARM_SECONDS)
+        except subprocess.TimeoutExpired:
+            print(f"FAIL: the run's modules didn't import within {WARM_SECONDS} s")
+            return 1
+        if warm.returncode != 0:
+            print(warm.stderr)
+            print(f"FAIL: the run's modules didn't import (exit {warm.returncode})")
+            return 1
+        print(f"the run's modules imported in {time.monotonic() - started:.1f} s")
+        # One bound for the notebook: the test measures that it runs to its
+        # end and its own check holds, nothing about time
+        started = time.monotonic()
         try:
             run = subprocess.run([sys.executable, "-m", "nbconvert", "--to", "notebook",
                                   "--execute",
@@ -62,7 +80,8 @@ def main():
             print(run.stderr)
             print(f"FAIL: the notebook stopped (exit {run.returncode})")
             return 1
-    print("the notebook ran to its end, its own check held")
+    print(f"the notebook ran to its end in {time.monotonic() - started:.1f} s, "
+          "its own check held")
     return 0
 
 
