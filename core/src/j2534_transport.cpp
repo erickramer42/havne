@@ -437,17 +437,7 @@ void leave_sessions(ecuio_j2534_transport* t, link_health& h)
     read_outcome o;
     for (;;) {
         const int64_t now = engine_now_us(t);
-        int64_t until = 0;
-        for (uint32_t c = 0; c < e.chan_count; ++c) {
-            const ecuio_engine_channel& ch = e.chans[c];
-            if (leave[c] && ch.outstanding != ECUIO_ENGINE_NONE &&
-                ch.deadline_us > until) {
-                until = ch.deadline_us;
-            }
-        }
-        if (until > start + J2534_LEAVE_WAIT_US) {
-            until = start + J2534_LEAVE_WAIT_US;
-        }
+        const int64_t until = ecuio_engine_leave_wait_until(&e, leave, start);
         if (until <= now) {
             break;
         }
