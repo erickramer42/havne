@@ -574,7 +574,9 @@ ecuio_status_t ecuio_recording_get_info(const ecuio_recording_t* r,
 /* The signal file it was decoded with, as the open found it: signals.json
  * is hashed then, so MATCH says the bytes there now are the ones that
  * decoded it (a caller reads them from <folder>/signals.json, and a
- * caller that finds them changed since sees the hash differ) */
+ * caller that finds them changed since sees the hash differ). A
+ * signals.json past ECUIO_SIGNAL_FILE_MAX_BYTES, which
+ * ecuio_signal_file_load refuses, is present but never MATCH. */
 ecuio_status_t ecuio_recording_get_signals(const ecuio_recording_t* r,
                                            ecuio_recording_signals_t* out);
 /* The set of conditions it was judged by, as the open found it, and as

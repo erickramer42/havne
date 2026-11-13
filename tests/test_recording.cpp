@@ -1959,6 +1959,33 @@ TEST(RecordingTest, AConditionsCopyPastTheLoadersBoundNeverMatches)
     }
 }
 
+/* signals.json takes its loader's bound as conditions.json does: one at
+ * ECUIO_SIGNAL_FILE_MAX_BYTES matches, one byte more never does */
+TEST(RecordingTest, ASignalFilePastTheLoadersBoundNeverMatches)
+{
+    const std::string head = std::string(rows::kSignalsHeader) + "\n";
+    for (const size_t size : {static_cast<size_t>(ECUIO_SIGNAL_FILE_MAX_BYTES),
+                              ECUIO_SIGNAL_FILE_MAX_BYTES + size_t{1}}) {
+        const std::string json(size, ' ');
+        const std::string sha = ecuio_sha256::hex_of(json.data(), json.size());
+        Folder f;
+        f.write("events.log", events_v3({"signal file  signals.json," + sha}));
+        f.write("signals.csv", head);
+        f.write("signals.json", json);
+        Reader r(f.utf8());
+        ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+        ecuio_recording_signals_t s{};
+        ASSERT_EQ(ecuio_recording_get_signals(r.r, &s), ECUIO_OK);
+        const bool loads = size <= ECUIO_SIGNAL_FILE_MAX_BYTES;
+        EXPECT_EQ(s.flags, ECUIO_RECORDING_SIGNALS_NAMED |
+                               ECUIO_RECORDING_SIGNALS_PRESENT |
+                               (loads ? ECUIO_RECORDING_SIGNALS_MATCH : 0u))
+            << size;
+        EXPECT_EQ(s.length, size);
+        EXPECT_EQ(std::string(s.sha256), sha);
+    }
+}
+
 TEST(RecordingTest, ProgressIsCalledAndCancelsTheOpen)
 {
     const Hour& h = fixture_hour();
