@@ -21,6 +21,7 @@
 
 namespace {
 
+using cli::layout::File;
 using cli::layout::Json;
 using cli::layout::Verdict;
 
@@ -158,6 +159,17 @@ TEST(CliLayoutTest, AnEmptyFileIsNothingToRead)
     EXPECT_EQ(checked("", "desktop").problem, "none");
 }
 
+// With no form named, a file refused before its form is read is read as
+// desktop, as a readable file naming no form is
+TEST(CliLayoutTest, ARefusalBeforeTheFormIsReadIsAsDesktop)
+{
+    EXPECT_EQ(checked("", "").as, "desktop");
+    EXPECT_EQ(checked("[", "").as, "desktop");
+    EXPECT_EQ(checked(std::string(cli::layout::kFileMaxBytes + 1, ' '), "").as,
+              "desktop");
+    EXPECT_EQ(checked("[", "phone").as, "phone");
+}
+
 // The app's bound on what it reads: past it the file is refused at once
 TEST(CliLayoutTest, ATextPastTheFilesBoundIsDamaged)
 {
@@ -202,7 +214,8 @@ TEST(CliLayoutTest, NumbersAreWrittenAsJavaScriptWritesThem)
     EXPECT_EQ(js_number(0.1 + 0.2), "0.30000000000000004");
 }
 
-// A lone surrogate is a character to count and six bytes to store
+// A lone surrogate is a character to count and, as the app stores what
+// JSON.stringify writes, U+FFFD's three bytes
 TEST(CliLayoutTest, StringsAreCountedAndStoredAsTheAppDoes)
 {
     using cli::layout::code_points;
@@ -211,7 +224,8 @@ TEST(CliLayoutTest, StringsAreCountedAndStoredAsTheAppDoes)
     EXPECT_EQ(code_points(u"\xDE00\xD83D"), 2u);
     std::string out;
     cli::layout::write_string(&out, u"a\xD83D" u"b\"\\\n\x01");
-    EXPECT_EQ(out, "\"a\\ud83db\\\"\\\\\\n\\u0001\"");
+    EXPECT_EQ(out, "\"a\xEF\xBF\xBD"
+                   "b\\\"\\\\\\n\\u0001\"");
     out.clear();
     cli::layout::write_string(&out, u"\xD83D\xDE00");
     EXPECT_EQ(out, "\"\xF0\x9F\x98\x80\"");
@@ -231,4 +245,30 @@ TEST(CliLayoutTest, TheLineSaysWhatTheFileIs)
               std::string::npos)
         << line;
     EXPECT_NE(line.find("\"words\":null"), std::string::npos) << line;
+}
+
+// A file's name is written whole, a NUL among its bytes too
+TEST(CliLayoutTest, AFilesNameIsWrittenWithItsLength)
+{
+    Verdict v = checked(read_case("desktop-ok-with-files"), "desktop");
+    ASSERT_FALSE(v.files.empty());
+    v.files[0].name = std::string("a\0b.json", 8);
+    std::vector<char> buf(cli::layout::layout_line_bytes(v));
+    cli::Line l(buf.data(), buf.size());
+    cli::layout::layout_line(l, v);
+    ASSERT_TRUE(l.finish());
+    const std::string line(l.data(), l.size());
+    EXPECT_NE(line.find("{\"name\":\"a\\u0000b.json\""), std::string::npos)
+        << line;
+
+    // The line's room holds every name at its longest, each byte a NUL's
+    // six-byte escape
+    v.files.resize(cli::layout::kMaxFiles, v.files[0]);
+    for (File& f : v.files) {
+        f.name = std::string(cli::layout::kMaxFileName, '\0');
+    }
+    std::vector<char> tight(cli::layout::layout_line_bytes(v));
+    cli::Line t(tight.data(), tight.size());
+    cli::layout::layout_line(t, v);
+    EXPECT_TRUE(t.finish());
 }

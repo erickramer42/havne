@@ -264,6 +264,10 @@ if(TARGET havne-cli)
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
     app_enable_warnings(test_cli)
+    # The layout corpus nests 1024 levels: havne-cli's stack (cli/CMakeLists.txt)
+    if(MSVC)
+        target_link_options(test_cli PRIVATE /STACK:8388608)
+    endif()
     gtest_discover_tests(test_cli DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
 
     if(Python3_Interpreter_FOUND)
@@ -665,6 +669,21 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/page-dropped.json)
         app_cli_golden(LayoutCheckNamesAMissingFile layout-check-missing.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/none.json)
+        # The app's read before any rule: a file of exactly the bound, its BOM
+        # counted as the app counts it, reads; one byte more is refused, and
+        # so is a file in Latin-1
+        set(_cli_layout_files ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/layouts)
+        app_cli_golden(LayoutCheckReadsAFileOfTheBoundWithABom layout-check-at-the-bound.jsonl
+            -- $<TARGET_FILE:havne-cli> layout check
+               ${_cli_layout_files}/bom-at-the-bound.json)
+        # The deepest nesting the app reads, on havne-cli's own main thread
+        app_cli_golden(LayoutCheckReadsTheDeepestNesting layout-check-nesting.jsonl
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/nesting-1024.json)
+        app_cli_golden(LayoutCheckCountsABomInTheBound layout-check-over.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> layout check
+               ${_cli_layout_files}/bom-over-the-bound.json)
+        app_cli_golden(LayoutCheckRefusesAFileThatIsntUtf8 layout-check-latin1.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layout_files}/latin1.json)
         app_cli_golden(SignalsCheckReadsAFile signals-check.jsonl
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/extras.json)
         app_cli_golden(SignalsCheckSaysEachGauge signals-check-gauges.jsonl

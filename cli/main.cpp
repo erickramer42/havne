@@ -1343,7 +1343,8 @@ int run_signals_check(const char* path)
 // file reads, and what loading it would drop (cli/layout_check.h, held
 // equal to the app's DashboardBook by tests/data/layouts). start, then a
 // layout line; exit 0 when it reads (with pages or cells left out too), 1
-// when it is refused, 3 when the file can't be read or isn't UTF-8 text
+// when it is refused, 3 when the file can't be read, passes the bound or
+// isn't UTF-8 text
 int run_layout_check(const char* path, const std::string& form)
 {
     Output out;
@@ -1353,14 +1354,20 @@ int run_layout_check(const char* path, const std::string& form)
     if (!read_whole(path, cli::layout::kFileMaxBytes, "layout file", &bytes,
                     &why)) {
         write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
+    }
+    // The app's bound counts the whole file, a BOM included, before it reads
+    if (bytes.size() > static_cast<size_t>(cli::layout::kFileMaxBytes)) {
+        const std::string words = "the file is over " +
+                                  std::to_string(cli::layout::kFileMaxBytes) +
+                                  " bytes, a layout file's most";
+        write_error(out, ECUIO_ERR_LOAD_FAILED, words.c_str());
+        return ended(out, kExitConnect);
     }
     if (!cli::layout::valid_utf8(bytes)) {
         write_error(out, ECUIO_ERR_LOAD_FAILED,
                     "the layout file isn't UTF-8 text");
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     cli::layout::strip_bom(&bytes);
     const cli::layout::Verdict v = cli::layout::check(bytes, form);

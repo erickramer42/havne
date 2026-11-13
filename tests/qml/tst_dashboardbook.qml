@@ -1412,6 +1412,11 @@ TestCase {
         compare(DashboardBook.importProblem("", "desktop", []).problem, "none")
     }
 
+    // The bridge reads a layout file up to the bound the book judges by
+    function test_theBridgesFileBoundIsTheBooks() {
+        compare(Bridge.layoutFileMaxBytes, DashboardBook.maxBytes + DashboardBook.fileKeysBytes)
+    }
+
     // havne-cli's `layout check` is a C++ port of importProblem: both read
     // every case of tests/data/layouts to the verdicts beside it
     function test_theLayoutCorpus_data() {

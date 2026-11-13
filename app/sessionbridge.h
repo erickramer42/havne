@@ -1,5 +1,6 @@
 // File/layer: app/sessionbridge.h | Qt6 Core, app layer, C++17
-// Testing: UNIT: CoreTest (test_core); BRIDGE: BridgeTest (test_bridge)
+// Testing: UNIT: CoreTest (test_core); BRIDGE: BridgeTest (test_bridge);
+//          QML: QmlTest.dashboardbook
 
 #pragma once
 
@@ -648,6 +649,9 @@ class SessionBridge : public QObject
     // The age past which a value is stale (ECUIO_VALUE_STALE_US), in ms:
     // Theme.staleMs, so the UI dims what core's computed signals refuse
     Q_PROPERTY(int valueStaleMs READ valueStaleMs CONSTANT)
+    // A layout file's byte bound (layoutFileText), which DashboardBook's
+    // maxBytes + fileKeysBytes must equal
+    Q_PROPERTY(int layoutFileMaxBytes READ layoutFileBound CONSTANT)
     // A Read once is running (readOnce); no session connects meanwhile
     Q_PROPERTY(bool readingOnce READ readingOnce NOTIFY readingOnceChanged)
     // The signals the Dashboard's gauges read: each gauge's key ("rpm",
@@ -812,6 +816,10 @@ public:
     Q_INVOKABLE QVariantMap saveLayoutFile(const QString& text, const QUrl& url);
     Q_INVOKABLE QVariantMap layoutFileText(const QUrl& url);
     static constexpr qint64 layoutFileMaxBytes = 66016 + 16384;
+    static int layoutFileBound()
+    {
+        return static_cast<int>(layoutFileMaxBytes);
+    }
     // The Log page's Export CSV (FrameListModel::scrubbedCsv) to the file
     // at url (a local file, or Android's content:// by the content resolver): { ok,
     // words, written, leftOut, unattributed }, leftOut the identification

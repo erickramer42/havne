@@ -46,7 +46,8 @@ constexpr int kMaxFileName = 80;
 // What the form and files keys may add to a stored document's bound
 constexpr int kFileKeysBytes = 16384;
 constexpr int kFileMaxBytes = kMaxBytes + kFileKeysBytes;
-constexpr int kMaxDepth = 512;
+// V4's JSON.parse refuses a 1025th level of objects and arrays (Qt 6.12)
+constexpr int kMaxDepth = 1024;
 
 struct Json {
     enum Kind { Null, Bool, Num, Str, Arr, Obj };
@@ -346,10 +347,13 @@ private:
 
     bool value(Json* out, int depth)
     {
-        if (depth > kMaxDepth || m_i >= m_s.size()) {
+        if (m_i >= m_s.size()) {
             return false;
         }
         const char c = m_s[m_i];
+        if ((c == '{' || c == '[') && depth >= kMaxDepth) {
+            return false;
+        }
         if (c == '{') {
             ++m_i;
             out->kind = Json::Obj;
@@ -508,7 +512,8 @@ inline void put_utf8(std::string* out, uint32_t cp)
     }
 }
 
-// A string's UTF-8 as JSON.stringify writes it (a lone surrogate escaped)
+// A string's UTF-8 as the app stores what JSON.stringify writes: V4 writes a
+// lone surrogate unescaped, stored as its replacement character's 3 bytes
 inline void write_string(std::string* out, const std::u16string& s)
 {
     static const char* hex = "0123456789abcdef";
@@ -520,10 +525,7 @@ inline void write_string(std::string* out, const std::u16string& s)
             put_utf8(out, 0x10000 + ((u - 0xD800) << 10) + (s[i + 1] - 0xDC00));
             ++i;
         } else if (u >= 0xD800 && u <= 0xDFFF) {
-            *out += "\\u";
-            for (int sh = 12; sh >= 0; sh -= 4) {
-                *out += hex[(u >> sh) & 0xF];
-            }
+            put_utf8(out, 0xFFFD);
         } else if (u == '"') {
             *out += "\\\"";
         } else if (u == '\\') {
@@ -609,12 +611,14 @@ inline size_t code_points(const std::u16string& s)
     return n;
 }
 
-// JavaScript's String.prototype.trim: white space and line terminators
+// V4's String.prototype.trim: ECMAScript's white space and line terminators,
+// and U+0085, which V4 takes too (Qt 6.12)
 inline bool js_space(char16_t c)
 {
-    return (c >= 0x09 && c <= 0x0D) || c == 0x20 || c == 0xA0 || c == 0x1680 ||
-           (c >= 0x2000 && c <= 0x200A) || c == 0x2028 || c == 0x2029 ||
-           c == 0x202F || c == 0x205F || c == 0x3000 || c == 0xFEFF;
+    return (c >= 0x09 && c <= 0x0D) || c == 0x20 || c == 0x85 || c == 0xA0 ||
+           c == 0x1680 || (c >= 0x2000 && c <= 0x200A) || c == 0x2028 ||
+           c == 0x2029 || c == 0x202F || c == 0x205F || c == 0x3000 ||
+           c == 0xFEFF;
 }
 
 inline std::u16string js_trim(const std::u16string& s)
@@ -845,7 +849,7 @@ inline std::string utf8_of(const std::u16string& s)
 inline Verdict check(const std::string& text, const std::string& as)
 {
     Verdict v;
-    v.as = as;
+    v.as = as.empty() ? "desktop" : as;
     if (text.empty()) {
         v.problem = "none";
         return v;
@@ -1059,7 +1063,7 @@ inline size_t layout_line_bytes(const Verdict& v)
 {
     size_t n = 1024;
     for (const File& f : v.files) {
-        n += Line::string_bytes(f.name.c_str()) + 128;
+        n += Line::string_bytes(f.name.data(), f.name.size()) + 128;
     }
     return n;
 }
@@ -1112,7 +1116,7 @@ inline void layout_line(Line& l, const Verdict& v)
             l.ch(',');
         }
         l.raw("{\"name\":");
-        l.string(v.files[i].name.c_str(), SIZE_MAX);
+        l.string_exact(v.files[i].name.data(), v.files[i].name.size());
         l.raw(",\"sha256\":");
         l.string(v.files[i].sha256.c_str(), SIZE_MAX);
         l.ch('}');
