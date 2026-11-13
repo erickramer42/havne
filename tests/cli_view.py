@@ -48,7 +48,8 @@
 # started or aligned. interrupt: a view held at its first search's ask
 # (the stretches, a pull to align on, a level's rise) and interrupted ends
 # with the interrupted end line and exit 1, and writes nothing the search
-# would have given.
+# would have given; and the same at the first ask of a search's second
+# call, the stretches its count asked for.
 
 import csv
 import json
@@ -653,11 +654,18 @@ HOLD_MS = 20000
 HELD_WAIT_S = 30
 
 
-def interrupted_view(cli, args):
-    """view args held at its first search's ask, then interrupted: None, a
-    failure's words, or "skip" with no console"""
+# A second call's case: the first call's hold runs out, the second's is
+# interrupted
+SECOND_HOLD_MS = 3000
+
+
+def interrupted_view(cli, args, second=False):
+    """view args held at its first search's ask (with second, at the first
+    ask of that search's second call), then interrupted: None, a failure's
+    words, or "skip" with no console"""
     env = dict(os.environ)
-    env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
+    hold_ms = SECOND_HOLD_MS if second else HOLD_MS
+    env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(hold_ms)
     kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
           "stdin": subprocess.DEVNULL, "env": env}
     if os.name == "nt":
@@ -668,13 +676,26 @@ def interrupted_view(cli, args):
     reader.start()
     reader.join(HELD_WAIT_S)
     if reader.is_alive() or not held or \
-            not held[0].startswith(b"havne-cli: holding the view's"):
+            not held[0].startswith(b"havne-cli: holding the view's first"):
         p.kill()
         _, err = p.communicate()
         reader.join()
         return (f"didn't hold at the view's first ask within {HELD_WAIT_S} "
                 f"s: exit {p.returncode}, "
                 f"{(held[0] if held else b'') + err!r}")
+    if second:
+        reader = threading.Thread(
+            target=lambda: held.append(p.stderr.readline()))
+        reader.start()
+        reader.join(HELD_WAIT_S)
+        if reader.is_alive() or len(held) < 2 or not held[1].startswith(
+                b"havne-cli: holding the view's second search's first ask"):
+            p.kill()
+            out, err = p.communicate()
+            reader.join()
+            return (f"didn't hold at the second call's first ask within "
+                    f"{HELD_WAIT_S} s: exit {p.returncode}, "
+                    f"{b''.join(held[1:]) + err!r}")
     try:
         p.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt"
                       else signal.SIGINT)
@@ -700,22 +721,28 @@ def interrupted_view(cli, args):
              if l["type"] in ("align", "stretch", "axis", "columns", "error")]
     if found:
         return f"an interrupted view wrote {found}"
-    print(f"ok    view {' '.join(args[1:])}: interrupted, ended {took:.2f} s "
-          f"after it")
+    if second and took > hold_ms / 2000:
+        return f"ended {took:.2f} s after the interrupt: the hold ran out"
+    where = "its second call" if second else "its first search"
+    print(f"ok    view {' '.join(args[1:])}: interrupted in {where}, ended "
+          f"{took:.2f} s after it")
     return None
 
 
 def interrupt(cli, folders):
     """Each of view's searches interrupted at its first ask"""
     bad = 0
-    for args in ([folders[0], "--stretches", "pulls"],
-                 [folders[0], "--align-on", "pull:1"],
-                 [folders[0], "--align-on", "rise:RPM:3000"]):
-        why = interrupted_view(cli, args)
+    for args, second in (([folders[0], "--stretches", "pulls"], False),
+                         ([folders[0], "--align-on", "pull:1"], False),
+                         ([folders[0], "--align-on", "rise:RPM:3000"], False),
+                         ([folders[0], "--stretches", "pulls"], True),
+                         ([folders[0], "--align-on", "pull:1"], True)):
+        why = interrupted_view(cli, args, second)
         if why == "skip":
             return 77
         if why is not None:
-            print(f"FAIL  view {' '.join(args[1:])}: {why}")
+            print(f"FAIL  view {' '.join(args[1:])}"
+                  f"{' (second call)' if second else ''}: {why}")
             bad += 1
     return 1 if bad else 0
 

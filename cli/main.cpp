@@ -449,6 +449,13 @@ int view_interrupted(void* user)
     return interrupted_at(static_cast<bool*>(user), "view");
 }
 
+// The second call of a search's pair (the stretches a count asked for):
+// its first ask held under its own name, so a test's interrupt lands there
+int view_second_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "view's second search");
+}
+
 // view's opens stop at an interrupt, with no hold
 int view_open_interrupted(uint64_t, uint64_t, void*)
 {
@@ -3980,9 +3987,10 @@ ecuio_status_t nth_pull(const Viewed& v, uint32_t n, bool* asked,
         return rc;
     }
     std::vector<ecuio_recording_stretch_t> found(n);
+    bool second = false;
     rc = ecuio_recording_stretches_with(v.r.get(), &rules, 0, end,
-                                        view_interrupted, asked, found.data(),
-                                        n, &count);
+                                        view_second_interrupted, &second,
+                                        found.data(), n, &count);
     if (rc == ECUIO_OK && count >= n) {
         *at_us = found[n - 1].from_us;
     }
@@ -4396,9 +4404,10 @@ int run_view(ViewArgs& args)
             &count);
         std::vector<ecuio_recording_stretch_t> found(count);
         if (rc == ECUIO_OK && count != 0) {
+            bool second = false;
             rc = ecuio_recording_stretches_with(
                 v.r.get(), &v.rules, static_cast<uint64_t>(t0),
-                static_cast<uint64_t>(t1), view_interrupted, &asked,
+                static_cast<uint64_t>(t1), view_second_interrupted, &second,
                 found.data(), count, &count);
             found.resize((std::min<size_t>)(found.size(), count));
         }
