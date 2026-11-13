@@ -1612,11 +1612,12 @@ profile  raw
     }
 
     // The chart's height until the splitter sets one: 45 % of the page on
-    // the desktop, 40 % on a phone, never under what three panes, their
-    // seams and the time axis need there
+    // the desktop, 40 % less the 8 px of the Jump row's top margin on a
+    // phone, never under what three panes, their seams and the time axis
+    // need there
     function test_theChartTakesAShareOfThePage_data() {
         return [{ tag: "desktop", w: 1280, h: 720, phone: false, want: 0.45 * 720 },
-                { tag: "phone", w: 384, h: 832, phone: true, want: 0.4 * 832 },
+                { tag: "phone", w: 384, h: 832, phone: true, want: 0.4 * 832 - 8 },
                 { tag: "short phone", w: 384, h: 500, phone: true, want: -1 }]
     }
     function test_theChartTakesAShareOfThePage(data) {
@@ -1630,10 +1631,11 @@ profile  raw
             const chart = find(page, "chartFrame")
             const want = data.want > 0 ? data.want : page.phoneChartFloor
             if (data.want < 0) {
-                // The Jump row stands above the chart: a page short enough
-                // to pin the viewer still has the floor for the chart
+                // The Jump row stands above the chart, with its top margin of
+                // 8: a page short enough to pin the viewer still has the floor
+                // for the chart
                 verify(waitForPolish(page.Window.window), "laid out")
-                page.height = data.h + find(page, "jumpRow").height + Theme.spacing
+                page.height = data.h + find(page, "jumpRow").height + Theme.spacing + 8
             }
             if (data.want < 0) {
                 const room = want - 8 - ChartLayout.top - ChartLayout.axisHCursor - ChartLayout.bottomPad

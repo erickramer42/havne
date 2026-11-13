@@ -903,6 +903,34 @@ TestCase {
         }
     }
 
+    // A press 16 px under the splitter is still its grip's: the Jump row's
+    // buttons below it keep out of the grip's reach (the drag moves the
+    // chart's stored height)
+    function test_theSplittersGripWorksUnderItBesideTheJumpRow() {
+        const v = uprightViewer({ title: "Pulls", uri: "replay://x?profile=obd2", source: "",
+                                  folder: Harness.recordingFixtures + "/pull-twice", profile: "obd2" })
+        const main = v.main
+        const page = v.page
+        const splitter = find(page, "chartSplitter")
+        tryVerify(() => splitter.visible, 5000, "the splitter shows")
+        verify(find(page, "jumpRow").visible, "the Jump row is under the chart")
+        tryVerify(() => find(page, "jumpNext_pull").enabled, 10000, "the pulls are found")
+        compare(page.chartHeight, -1, "the chart's height is its own")
+        const root = main.contentItem
+        const foot = splitter.mapToItem(root, 0, splitter.height).y
+        // Over a Jump button, where a press under the grip would land
+        const button = find(page, "jumpNext_pull")
+        verify(button.visible, "a Jump button")
+        const x = button.mapToItem(root, button.width / 2, 0).x
+        const seq = touchEvent(root)
+        seq.press(0, root, x, foot + 16).commit()
+        verify(!button.pressed, "no Jump button takes the press meant for the grip")
+        for (let d = 4; d <= 48; d += 4)
+            seq.move(0, root, x, foot + 16 - d).commit()
+        seq.release(0, root, x, foot + 16 - 48).commit()
+        verify(page.chartHeight > 0, "the drag from the grip's lower reach set the height: " + page.chartHeight)
+    }
+
     // A phone upright pins the title row, the chart and its splitter, and
     // under them one list scrolls in each view: Values' rows, the Frames
     // table and About's findings, each with its view's controls at its head

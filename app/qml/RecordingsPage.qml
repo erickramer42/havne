@@ -182,7 +182,9 @@ Page {
     readonly property real phoneChartFloor: 3 * ChartLayout.paneMinH + 2 * ChartLayout.paneGap
                                             + ChartLayout.top + ChartLayout.axisHCursor
                                             + ChartLayout.bottomPad + 8
-    readonly property real defaultChartHeight: phoneShape ? Math.max(phoneChartFloor, scroller.height * 0.4)
+    // A phone's chart gives up the 8 px the Jump row's top margin takes, so the
+    // first row of data stays on the first screen
+    readonly property real defaultChartHeight: phoneShape ? Math.max(phoneChartFloor, scroller.height * 0.4 - 8)
                                                           : Math.max(200, scroller.height * 0.45)
     // Pinned, the page never scrolls: the chart gives way down to 200 so
     // the view's list keeps this much under the splitter
@@ -3183,6 +3185,9 @@ Page {
             id: jumpBelow
             visible: chartFrame.visible && Theme.compact
             Layout.fillWidth: true
+            // The splitter's grip reaches this far below it (its margin less
+            // the column's spacing), so the Jump row's buttons stay out of it
+            Layout.topMargin: root.phoneShape ? 8 : 0
             spacing: 0
         }
 
