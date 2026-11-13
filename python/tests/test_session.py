@@ -1,14 +1,15 @@
 # File/layer: python/tests/test_session.py | pytest
 # Testing: HARNESS, PythonTest.test_session: the package against the
-#          shared core on mock://, the simulated car, the ELM327
-#          emulator (havne-cli sim --elm327)
+#          shared core on mock://, the simulated car, a replay folder,
+#          the ELM327 emulator (havne-cli sim --elm327)
 #
 # Sessions and streams: values with their names and units, frames whole,
 # a slow reader's drops counted and said once, a close from another
 # thread ending the iteration, core's refusals as havne.Error, the
 # caller's word passed to a clear, and a clear of the simulated car
-# through core's gate. A session, sim or recording left unclosed is
-# released when it's collected (a stream a script keeps keeps its session).
+# through core's gate, and the unsupported and absent signals. A session,
+# sim or recording left unclosed is released when it's collected (a stream
+# a script keeps keeps its session).
 
 import gc
 import json
@@ -431,3 +432,69 @@ def test_session_state_gives_a_refusal_its_code_and_nothing_else_does(monkeypatc
         report.session = 3
         entered = s.session_state(0)
         assert entered.state == "entered" and entered.session == "03" and entered.nrc is None
+
+
+def test_a_session_with_nothing_to_judge_lists_no_unsupported_or_absent_signal():
+    with havne.Session("mock://py") as s:
+        assert s.unsupported_signals() == []
+        assert s.absent_signals() == []
+
+
+def test_the_mock_under_obd2_lists_every_signal_unsupported():
+    """mock:// answers its PID bitmaps at create, listing no PID, so every
+    Service 01 signal (and the computed Boost) is unsupported before start"""
+    with havne.Session("mock://py?profile=obd2&diagnose=0") as s:
+        everything = list(s.signals)
+        assert s.unsupported_signals() == everything, "the set's order"
+        assert s.absent_signals() == []
+
+
+def short_reply_replay(tmp_path, frames):
+    """A replay folder (frames.csv alone, as the fixture) of frames answers
+    to PID 55 that end after bank 1's byte"""
+    folder = tmp_path / f"short-{frames}"
+    folder.mkdir(exist_ok=True)
+    rows = [f"{10000 * k},{10000 * k},0x7E8,0x0,41 55 80" for k in range(frames)]
+    text = "\n".join(["host_us,timestamp_us,id,flags,data", *rows]) + "\n"
+    (folder / "frames.csv").write_text(text, encoding="utf-8", newline="\n")
+    return "replay://" + str(folder).replace("\\", "/") + "?profile=obd2&speed=max"
+
+
+def test_a_field_past_every_reply_is_absent_once_enough_replies_have_ended(tmp_path):
+    """A replay of PID 55 answered with bank 1's byte alone: bank 3's
+    signal is absent after ECUIO_ABSENT_AFTER_FRAMES replies, not before,
+    and not while no values stream is open"""
+    n = c.ECUIO_ABSENT_AFTER_FRAMES
+    for frames, opened, want in ((n - 1, True, False), (n, True, True), (n, False, False)):
+        with havne.Session(short_reply_replay(tmp_path, frames)) as s:
+            ids = {name: sid for sid, (name, _) in s.signals.items()}
+            values = s.values(capacity=c.ECUIO_QUEUE_MAX_VALUES) if opened else None
+            s.start()
+            if values is not None:
+                list(values)             # ends at the replay's last frame
+            else:
+                time.sleep(0.5)
+            absent = s.absent_signals()
+            assert (ids["Rear O2 Short Trim B3"] in absent) is want, (frames, opened, absent)
+            assert ids["Rear O2 Short Trim B1"] not in absent, "bank 1's byte arrived"
+            assert absent == sorted(absent, key=list(s.signals).index), "the set's order"
+
+
+def test_a_list_that_grew_between_the_count_and_the_fill_is_read_again():
+    """core says 3, then 5: the short fill is no answer. A stand-in for the
+    getter, since no session grows its list between two calls on demand"""
+    asks = []
+
+    def getter(handle, ids, capacity, count):
+        asks.append(capacity)
+        count._obj.value = 3 if len(asks) == 1 else 5
+        for i in range(min(capacity, count._obj.value) if ids else 0):
+            ids[i] = 100 + i
+        return 0
+
+    class Stub:
+        def _handle(self):
+            return None
+
+    assert havne.Session._listed(Stub(), getter, "stub") == [100, 101, 102, 103, 104]
+    assert asks == [0, 3, 5]

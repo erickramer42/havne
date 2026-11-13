@@ -426,6 +426,41 @@ class Session:
                                                min_sweep_ms, 0),
               "ecuio_session_set_focus_with")
 
+    def _listed(self, getter, name):
+        """The ids a count-and-buffer getter lists (capacity 0 asks the
+        count; a list that grew between the two calls is read again)"""
+        handle = self._handle()
+        count = ctypes.c_uint32(0)
+        check(getter(handle, None, 0, ctypes.byref(count)), name)
+        while True:
+            room = count.value
+            ids = (ctypes.c_uint16 * max(room, 1))()
+            check(getter(handle, ids, room, ctypes.byref(count)), name)
+            if count.value <= room:
+                return list(ids[:count.value])
+
+    def unsupported_signals(self):
+        """The ids, in the set's order, of the Service 01 signals their ECU
+        says it doesn't support (ecuio_session_get_unsupported_signals):
+        the PID's bitmap leaves it out, and a computed signal with such an
+        input is listed with it. Empty until a bitmap has been answered
+        and on a profile with no Service 01 signals. mock:// answers its
+        bitmaps at create, listing no PID, so under profile=obd2 it lists
+        every signal."""
+        return self._listed(lib.ecuio_session_get_unsupported_signals,
+                            "ecuio_session_get_unsupported_signals")
+
+    def absent_signals(self):
+        """The ids, in the set's order, of the signals the session's frames
+        name but don't carry (ecuio_session_get_absent_signals): a field
+        past the end of every reply for ECUIO_ABSENT_AFTER_FRAMES frames,
+        as an ECU that answers PID 55 with bank 1's byte alone; a signal
+        that arrives later leaves the list. Judged from the values decoded
+        for a values stream, so with none open (values() before start())
+        it is empty."""
+        return self._listed(lib.ecuio_session_get_absent_signals,
+                            "ecuio_session_get_absent_signals")
+
     def unasked_signals(self):
         """The ids, in the set's order, of the signals the focus leaves
         unasked (ecuio_session_get_unasked_signals): those whose request
