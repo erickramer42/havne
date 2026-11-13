@@ -56,7 +56,7 @@ entry := [<ecu>:]<DID>[-<DID>][:<type>]
   `?profile=uds-generic` with no `did=`. Both say so before anything
   attaches, like a bad `?profile=`.
 - Limits, each refused at create with the detail set:
-  `ECUIO_PROFILE_MAX_REQUESTS` (128) DIDs to poll,
+  `ECUIO_PROFILE_MAX_REQUESTS` DIDs to poll,
   `ECUIO_ENGINE_SCAN_MAX` (1024) to scan, `ECUIO_MAX_CHANNELS` (4) ECUs.
   A DID listed twice is kept once.
 
