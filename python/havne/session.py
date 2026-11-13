@@ -468,19 +468,8 @@ class Session:
         focus and on a session that asks nothing (mock://, replay://, a
         listener); the worker judges each focus as it takes it, so a list
         read at once after set_focus may still be the last one's."""
-        handle = self._handle()
-        count = ctypes.c_uint32(0)
-        check(lib.ecuio_session_get_unasked_signals(handle, None, 0,
-                                                    ctypes.byref(count)),
-              "ecuio_session_get_unasked_signals")
-        while True:
-            ids = (ctypes.c_uint16 * max(count.value, 1))()
-            room = count.value
-            check(lib.ecuio_session_get_unasked_signals(handle, ids, room,
-                                                        ctypes.byref(count)),
-                  "ecuio_session_get_unasked_signals")
-            if count.value <= room:
-                return list(ids[:count.value])
+        return self._listed(lib.ecuio_session_get_unasked_signals,
+                            "ecuio_session_get_unasked_signals")
 
     def start(self):
         check(lib.ecuio_session_start(self._handle()), "ecuio_session_start")
