@@ -183,7 +183,7 @@ if(ANDROID)
     # The foreground service held while an adapter session is up
     # (ADR-0029 section 2; its Java half is in android/src)
     target_sources(app_ui PRIVATE androidsession.cpp androidsession.h)
-    # documentpicker.cpp's activity result (QtAndroidPrivate::startActivity)
+    # documentpicker.cpp's activity results (QtAndroidPrivate's listener)
     find_package(Qt6 6.12 REQUIRED COMPONENTS CorePrivate)
     target_link_libraries(app_ui PRIVATE Qt6::CorePrivate)
 endif()

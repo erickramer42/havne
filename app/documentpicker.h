@@ -1,5 +1,6 @@
 // File/layer: app/documentpicker.h | Qt6 Core/Qml, app layer, C++17
-// Testing: QML: QmlTest.documentpicker (test_qml); BENCH for Android's picker
+// Testing: QML: QmlTest.documentpicker (test_qml); MANUAL SMOKE: the Android
+//          run sheet's picker checks
 //
 // Android's own document picker (ACTION_OPEN_DOCUMENT) for the open-mode
 // dialogs. Qt Quick's FileDialog checks a pick through Qt's content file
@@ -17,6 +18,8 @@
 #include <QUrl>
 #include <QtQmlIntegration>
 
+#include <memory>
+
 class DocumentPicker : public QObject
 {
     Q_OBJECT
@@ -30,6 +33,7 @@ public:
     static constexpr int kResultOk = -1;
 
     explicit DocumentPicker(QObject* parent = nullptr);
+    ~DocumentPicker() override;
 
     bool available() const;
 
@@ -39,14 +43,23 @@ public:
     // dropped, so a pick whose answer never comes holds nothing up
     Q_INVOKABLE int pick();
 
-    // The activity's request code for a pick: Qt keeps one callback for each
-    // code, so a second pick under one code would take the first's place.
-    // 256 in turn, inside the 16 bits Android allows
-    Q_INVOKABLE int requestCodeOf(int request) const
+    // The activity's request code for a pick: a result is matched to the pick
+    // under way by its code, so two picks in a row never share one. 256 in
+    // turn, inside the 16 bits Android allows
+    Q_INVOKABLE int requestCodeOf(int request) const { return codeOf(request); }
+    static constexpr int kRequestCodeBase = 0x4400;
+    static constexpr int codeOf(int request)
     {
         return kRequestCodeBase + (request & 0xFF);
     }
-    static constexpr int kRequestCodeBase = 0x4400;
+    static constexpr bool ownsRequestCode(int code)
+    {
+        return code >= kRequestCodeBase && code <= kRequestCodeBase + 0xFF;
+    }
+
+    // The pick an activity result's code answers: the pick under way when the
+    // code is its, else 0 (a stale or another's result)
+    Q_INVOKABLE int requestOfCode(int code) const;
 
     // A pick's answer as Android hands it: the result code, the document's
     // URI as text ("" for none) and its display name ("" when unknown)
@@ -65,6 +78,10 @@ signals:
 private:
     void start(int request);
     void failLater(int request, const QString& words);
+
+    // Android's activity results for the picker's codes (empty elsewhere)
+    struct ResultListener;
+    std::unique_ptr<ResultListener> m_listener;
 
     int m_last = 0;
     int m_pending = 0;

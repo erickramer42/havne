@@ -149,8 +149,8 @@ TestCase {
         compare(s.d.selectedName, "second.json")
     }
 
-    // Qt keeps one activity callback for each request code: two picks in a
-    // row never share one, and every code is inside Android's 16 bits
+    // An activity result finds its pick by its code: two picks in a row never
+    // share one, and every code is inside Android's 16 bits
     function test_eachPickHasARequestCodeOfItsOwn() {
         let codes = []
         for (let request = 1; request <= 300; ++request) {
@@ -161,6 +161,24 @@ TestCase {
         for (let i = 1; i < codes.length; ++i)
             verify(codes[i] !== codes[i - 1], "a pick's code differs from the one before: " + (i + 1))
         compare(new Set(codes.slice(0, 256)).size, 256, "256 in turn before one comes back")
+    }
+
+    // Android's result carries only the code: it answers the pick under way
+    // alone, never a stale pick, another code or a pick already answered
+    function test_aResultCodeFindsOnlyThePickUnderWay() {
+        const s = spied()
+        s.d.open()
+        const older = s.d.request
+        const olderCode = DocumentPicker.requestCodeOf(older)
+        compare(DocumentPicker.requestOfCode(olderCode), older)
+        compare(DocumentPicker.requestOfCode(olderCode + 1), 0, "the next code is no pick's")
+        compare(DocumentPicker.requestOfCode(olderCode - 1), 0, "nor the one before")
+        s.d.open()
+        const newer = s.d.request
+        compare(DocumentPicker.requestOfCode(olderCode), 0, "a newer pick makes the older code stale")
+        compare(DocumentPicker.requestOfCode(DocumentPicker.requestCodeOf(newer)), newer)
+        DocumentPicker.deliver(newer, ok, providerUri, "x.json")
+        compare(DocumentPicker.requestOfCode(DocumentPicker.requestCodeOf(newer)), 0, "answered: no pick under way")
     }
 
     // Elsewhere the dialog is Qt's FileDialog, and its answer is the dialog's
