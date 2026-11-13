@@ -1181,6 +1181,29 @@ TestCase {
         }
     }
 
+    // A phone with only a headset paired has no adapter to connect to: the
+    // count and the Connection row say so, as the connect list does
+    function test_aFoldedHeadsetAloneIsNoAdapterFound_data() {
+        return [{ tag: "phone", mobile: true }, { tag: "desktop", mobile: false }]
+    }
+    function test_aFoldedHeadsetAloneIsNoAdapterFound(data) {
+        const page = createPage()
+        const section = find(page, "adapterSection")
+        const count = find(page, "deviceCount")
+        section.mobile = data.mobile
+        page.j2534Devices = []
+        page.canInterfaces = []
+        page.serialPorts = []
+        page.bluetoothAdapters = [{ name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true }]
+        verify(count.text.indexOf("None found") === 0, count.text)
+        verify(page.pageList.find(p => p.key === "connection").summary.indexOf("none found") === 0,
+               "the Connection row agrees")
+        page.bluetoothAdapters = [{ name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true },
+                                  { name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" }]
+        verify(count.text.indexOf("None found") !== 0, count.text)
+        verify(page.pageList.find(p => p.key === "connection").summary.indexOf("1 found") === 0)
+    }
+
     // The phone's Bluetooth adapters join the list after the ports
     // (ADR-0028 section 2): a paired classic one fills elm327://bt:<address>, a
     // BLE one elm327://ble:<address>, the query kept; the count names

@@ -97,6 +97,10 @@ Pane {
             other: a.other === true
         })))
 
+    // The rows the connect list shows: a paired headset, watch or health
+    // device is folded under "Other paired devices" there and isn't counted
+    readonly property int devicesShown: devices.filter(d => d.other !== true).length
+
     // A CAN interface's row: what it is, its state past error-active, and
     // why a connect would be refused before one is tried: listen-only to
     // listen, one-shot to send requests (ADR-0040 section 2), naming only
@@ -844,7 +848,7 @@ Pane {
     readonly property string shownKey: twoPane && pageKey === "" ? "connection" : pageKey
     readonly property var pageList: [
         { key: "connection", title: qsTr("Connection"),
-          summary: (devices.length === 0 ? qsTr("none found") : qsTr("%1 found").arg(devices.length))
+          summary: (devicesShown === 0 ? qsTr("none found") : qsTr("%1 found").arg(devicesShown))
                    + " · " + profileLabel() },
         { key: "vehicle", title: qsTr("Vehicle"),
           summary: (pickedVehicle !== null ? pickedVehicle.label : qsTr("None"))

@@ -28,7 +28,7 @@ ColumnLayout {
 
         Label {
             objectName: "deviceCount"
-            text: root.host.devices.length === 0
+            text: root.host.devicesShown === 0
                   ? qsTr("None found: install a Pass-Thru driver (Windows), plug in "
                          + "or pair an ELM327 adapter, or pick one below")
                   : root.mobile
@@ -43,7 +43,7 @@ ColumnLayout {
                              + (Bluetooth.available || root.bluetoothFound > 0
                                 ? qsTr(", Bluetooth: %1").arg(root.bluetoothFound)
                                 : ""))
-            color: root.host.devices.length === 0 ? Theme.textDim : Theme.text
+            color: root.host.devicesShown === 0 ? Theme.textDim : Theme.text
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
