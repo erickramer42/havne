@@ -212,12 +212,16 @@ ecuio_status_t ecuio_session_get_absent_signals(
  * section 6): a def keyed 41 <PID> at the payload's start whose PID the
  * supported-PID bitmaps of the channel its message ID names leave out
  * (ecuio_session_get_channel_support). A range whose bitmap was never
- * answered, a channel that has learned nothing yet, and every other def
- * judge nothing. A rescan that finds a PID takes its signals off the
- * list. A computed signal (ECUIO_DEF_FLAG_COMPUTED) with such an input
- * is listed with it: it can't be computed. mock:// answers the bitmaps
- * too, listing no PID, so under a profile with Service 01 signals it
- * lists them all: it sends none of their values.
+ * answered judges nothing, unless the walk completed with the chain
+ * ended before it (the last answered bitmap's link to the next clear):
+ * then every PID of that range is unsupported. A channel that has
+ * learned nothing yet and every other def judge nothing. A rescan that
+ * finds a PID takes its signals off the list. A computed signal
+ * (ECUIO_DEF_FLAG_COMPUTED) with such an input is listed with it: it
+ * can't be computed. mock://
+ * answers the demo car's PIDs, and no PID for its other ECUs, so under
+ * a profile with Service 01 signals it lists those the demo car doesn't
+ * support and every one of another ECU's.
  *
  * Fills ids with up to capacity signal ids, in the set's order, and
  * *count with how many there are; capacity 0 (ids may be NULL) asks
