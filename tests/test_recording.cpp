@@ -488,6 +488,42 @@ TEST(RecordingRowsTest, ASignalFileLineIsItsNameAndAHash)
     }
 }
 
+/* A cond line's text is written fired, stale, held in that order, and
+ * each text the writer gives parses back to its fields */
+TEST(RecordingRowsTest, ACondLinesTextIsWrittenInOneOrderAndReadsBack)
+{
+    rows::cond_line c;
+    std::memcpy(c.key, "boost_low", 9);
+    c.on = true;
+    c.value = -3.5;
+    c.term = 2;
+    c.host_us = 1500000;
+    c.t_us = 1450000;
+    const std::pair<uint32_t, const char*> cases[] = {
+        {0, ""},
+        {rows::kCondFired, "fired"},
+        {rows::kCondStale | rows::kCondHeld, "stale held"},
+        {rows::kCondFired | rows::kCondStale | rows::kCondHeld,
+         "fired stale held"},
+    };
+    for (const auto& k : cases) {
+        c.flags = k.first;
+        std::string text;
+        rows::append_cond_text(text, c);
+        EXPECT_EQ(text, std::string("boost_low,on,") + k.second +
+                            ",-3.5,2,1500000,1450000");
+        rows::cond_line back;
+        ASSERT_TRUE(rows::parse_cond_line(text.data(), text.size(), &back))
+            << text;
+        EXPECT_STREQ(back.key, c.key);
+        EXPECT_EQ(back.flags, c.flags) << text;
+        EXPECT_EQ(back.value, c.value);
+        EXPECT_EQ(back.term, c.term);
+        EXPECT_EQ(back.host_us, c.host_us);
+        EXPECT_EQ(back.t_us, c.t_us);
+    }
+}
+
 // ---- The reader -----------------------------------------------------------
 
 TEST(RecordingTest, AFolderTheRecorderWroteOpensWithItsHeader)

@@ -1181,11 +1181,15 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * folder (the caller names it; the source's name, which may hold the
  * vehicle's label, is never carried): frames.csv's kept rows as
  * recorded, signals.csv by the CSV's classes, events.log's header and
- * its link, drop, asleep and end lines (the URI's authority as
+ * its link, drop, asleep, cond and end lines (the URI's authority as
  * <path>, <address> or <label>, the vehicle's label as <vehicle>, the
- * caller's notes left out), markers.csv with its labels as typed,
- * latency.csv and signals.json, each file through the check; a file it
- * doesn't know is left out and counted (files_left_out).
+ * caller's notes left out, a format 3 cond line by its own host_us and
+ * written again from its fields, one that doesn't parse left out),
+ * markers.csv with its labels as typed, latency.csv, signals.json and
+ * conditions.json, each file through the check; a file it doesn't know
+ * is left out and counted (files_left_out). A range starting after a
+ * cond line opens with a held cond line for each condition ON there,
+ * from the lines before it, so its events read true alone.
  * Deterministic: the same recording and options give the same bytes.
  * report may be NULL; on any failure it holds zeros but failed_class.
  * ECUIO_OK;

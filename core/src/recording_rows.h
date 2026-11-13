@@ -717,6 +717,37 @@ inline bool parse_cond_line(const char* p, size_t n, cond_line* c)
     return true;
 }
 
+/* A cond line's text as the recorder writes it, the flag words in the
+ * order fired, stale, held: parse_cond_line's inverse for the words it
+ * knows */
+inline void append_cond_text(std::string& out, const cond_line& c)
+{
+    out += c.key;
+    out += c.on ? ",on," : ",off,";
+    const char* sep = "";
+    if ((c.flags & kCondFired) != 0) {
+        out += "fired";
+        sep = " ";
+    }
+    if ((c.flags & kCondStale) != 0) {
+        out += sep;
+        out += "stale";
+        sep = " ";
+    }
+    if ((c.flags & kCondHeld) != 0) {
+        out += sep;
+        out += "held";
+    }
+    out += ',';
+    append_value(out, c.value);
+    char buf[72];
+    const int n = std::snprintf(buf, sizeof buf, ",%lu,%llu,%llu",
+                                static_cast<unsigned long>(c.term),
+                                static_cast<unsigned long long>(c.host_us),
+                                static_cast<unsigned long long>(c.t_us));
+    out.append(buf, static_cast<size_t>(n));
+}
+
 /* "yyyy-MM-ddTHH:mm:ss.zzzZ" as microseconds since 1970 UTC */
 inline bool parse_utc(const char* p, size_t n, uint64_t* out)
 {

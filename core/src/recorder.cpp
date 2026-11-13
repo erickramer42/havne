@@ -822,27 +822,18 @@ struct ecuio_recorder {
             return;
         }
         const ecuio_condition_record::entry& c = set->conditions[e.condition];
-        cond_text = c.key;
-        cond_text += e.state == ECUIO_CONDITION_ON ? ",on," : ",off,";
-        bool first = true;
-        for (const auto& word :
-             {std::make_pair(ECUIO_CONDITION_FIRED, "fired"),
-              std::make_pair(ECUIO_CONDITION_STALE, "stale"),
-              std::make_pair(ECUIO_CONDITION_HELD, "held")}) {
-            if ((e.flags & word.first) != 0) {
-                cond_text += first ? "" : " ";
-                cond_text += word.second;
-                first = false;
-            }
-        }
-        cond_text += ',';
-        ecuio_recording_rows::append_value(cond_text, e.value);
-        cond_text += ',';
-        append_u64(cond_text, e.term);
-        cond_text += ',';
-        append_u64(cond_text, e.host_us);
-        cond_text += ',';
-        append_u64(cond_text, e.t_us);
+        ecuio_recording_rows::cond_line line;
+        const size_t key_len =
+            c.key.size() < sizeof line.key ? c.key.size() : sizeof line.key - 1;
+        std::memcpy(line.key, c.key.data(), key_len);
+        line.on = e.state == ECUIO_CONDITION_ON;
+        line.flags = e.flags;
+        line.value = e.value;
+        line.term = e.term;
+        line.host_us = e.host_us;
+        line.t_us = e.t_us;
+        cond_text.clear();
+        ecuio_recording_rows::append_cond_text(cond_text, line);
         event_line(e.host_us, "cond", cond_text);
         if ((e.flags & ECUIO_CONDITION_FIRED) != 0 && c.mark) {
             add_marker(e.host_us, c.name);

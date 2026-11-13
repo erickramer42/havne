@@ -5,8 +5,9 @@
 // copied beside the recording, a cond line for each event, the states held
 // when a recording begins mid-session, the carry past a full ring, the
 // markers, a set that never changes under a recorder that is attaching
-// or attached, and the reader giving the events back. Sessions are never
-// started, so each case is the worker and every session time its own.
+// or attached, the reader giving the events back and a folder export
+// keeping them. Sessions are never started, so each case is the worker
+// and every session time its own.
 
 #include <gtest/gtest.h>
 #include <ecuio/conditions.h>
@@ -18,6 +19,7 @@
 #include "sha256.h"
 #include "temp_name.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -944,4 +946,99 @@ TEST(ConditionRecordingTest, TheReaderGivesEachEventTheSessionGave)
                   ECUIO_ERR_INVALID_ARGUMENT);
         ecuio_recording_close(rec);
     }
+}
+
+/* A folder export keeps the set and its events (ADR-0063 section 8):
+ * conditions.json and its header line, each cond line as written, raw or
+ * scrubbed; a range opens with a held line for each condition ON at its
+ * start, and the copy reads back as a recording of its own */
+TEST(ConditionRecordingTest, AFolderExportKeepsTheSetAndARangeOpensWithTheHeld)
+{
+    const std::string json =
+        set_of(on_rpm("high", R"("above":2000)", R"(,"mark":true)") + "," +
+               on_rpm("low", R"("below":1500)"));
+    Recorded r(json);
+    ASSERT_NE(r.recorder, nullptr);
+    r.record();
+    /* 20 ms apart, so a range can start between two frames' lines */
+    const int rpms[] = {3000, 1000, 3100, 1200};
+    for (int i = 0; i < 4; ++i) {
+        engine_speed(r.session.s, 1000000u * (i + 1), rpms[i]);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    r.close();
+    const std::vector<std::string> source = kind_lines(r.folder, "cond");
+    const std::vector<Cond> parsed = cond_lines(r.folder);
+    ASSERT_EQ(source.size(), 8u) << "two at each frame (low's first is off)";
+    const std::string sha = ecuio_sha256::hex_of(json.data(), json.size());
+
+    auto exported = [&](const char* name, uint32_t flags, uint64_t from_us) {
+        const std::string in = r.folder.generic_u8string();
+        const std::string out = (r.root.path / name).generic_u8string();
+        ecuio_export_options_t o{};
+        o.format = ECUIO_EXPORT_FOLDER;
+        o.flags = flags;
+        o.from_us = from_us;
+        o.folder_utf8 = in.c_str();
+        o.out_path_utf8 = out.c_str();
+        ecuio_export_report_t report{};
+        EXPECT_EQ(ecuio_export(&o, &report), ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(report.files_left_out, 0u) << name;
+        return r.root.path / name;
+    };
+
+    for (const uint32_t flags : {0u, static_cast<uint32_t>(ECUIO_EXPORT_RAW)}) {
+        const fs::path copy =
+            exported(flags == 0 ? "scrubbed" : "raw", flags, 0);
+        EXPECT_EQ(read_bytes(copy / "conditions.json"), json) << flags;
+        const std::vector<std::string> head = lines_of(copy / "events.log");
+        EXPECT_NE(std::find(head.begin(), head.end(),
+                            "conditions  conditions.json," + sha),
+                  head.end())
+            << flags;
+        EXPECT_EQ(kind_lines(copy, "cond"), source) << flags;
+        EXPECT_EQ(lines_of(copy / "markers.csv"),
+                  lines_of(r.folder / "markers.csv"))
+            << flags;
+    }
+
+    /* From just after the second frame's changes: low stands ON there */
+    const Cond& low_on = parsed[3];
+    ASSERT_EQ(low_on.key + "," + low_on.state, "low,on");
+    const uint64_t from = low_on.host_us + 1;
+    const fs::path ranged = exported("ranged", 0, from);
+    const std::vector<Cond> got = cond_lines(ranged);
+    ASSERT_EQ(got.size(), 5u) << "a held line, then the last four";
+    EXPECT_EQ(got[0].key, "low");
+    EXPECT_EQ(got[0].state, "on");
+    EXPECT_EQ(got[0].flags, "held");
+    EXPECT_EQ(got[0].value, low_on.value);
+    EXPECT_EQ(got[0].term, low_on.term);
+    EXPECT_EQ(got[0].host_us, from);
+    EXPECT_EQ(got[0].t_us, low_on.t_us + 1);
+    const std::vector<std::string> kept = kind_lines(ranged, "cond");
+    for (size_t i = 1; i < kept.size(); ++i) {
+        EXPECT_EQ(kept[i], source[i + 3]) << i;
+    }
+
+    ecuio_recording_t* rec = nullptr;
+    const std::string folder = ranged.generic_u8string();
+    ASSERT_EQ(ecuio_recording_open(folder.c_str(), nullptr, nullptr, &rec),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_recording_conditions_t c{};
+    ASSERT_EQ(ecuio_recording_get_conditions(rec, &c), ECUIO_OK);
+    EXPECT_EQ(c.flags, ECUIO_RECORDING_CONDITIONS_NAMED |
+                           ECUIO_RECORDING_CONDITIONS_PRESENT |
+                           ECUIO_RECORDING_CONDITIONS_MATCH);
+    ecuio_recording_info_t info{};
+    ASSERT_EQ(ecuio_recording_get_info(rec, &info), ECUIO_OK);
+    EXPECT_EQ(info.condition_events, 5u);
+    ecuio_recording_condition_event_t e{};
+    ASSERT_EQ(ecuio_recording_get_condition_event(rec, 0, &e), ECUIO_OK);
+    EXPECT_STREQ(e.key, "low");
+    EXPECT_EQ(e.flags, ECUIO_CONDITION_HELD);
+    EXPECT_EQ(e.host_us, from);
+    ecuio_recording_close(rec);
 }
