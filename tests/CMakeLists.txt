@@ -1722,6 +1722,11 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
             endforeach()
             math(EXPR _qml_last "${_qml_parts} - 1")
             foreach(_qml_share RANGE 0 ${_qml_last})
+                # An empty share would run the whole file
+                if(NOT _qml_share_${_qml_share})
+                    message(FATAL_ERROR "${_qml_test}: ${_qml_parts} shares of "
+                            "${_qml_found} cases leave share ${_qml_share} empty")
+                endif()
                 math(EXPR _qml_k "${_qml_share} + 1")
                 set(_qml_part QmlTest.${_qml_name}-${_qml_k}of${_qml_parts})
                 add_test(NAME ${_qml_part}

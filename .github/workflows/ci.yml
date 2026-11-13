@@ -501,7 +501,8 @@ jobs:
   # because only here do the J2534 stack and the surrogate run. On pushes
   # and manual runs, not pull requests: it is a second, unoptimized build.
   # Pass/fail stays with win-build; a timing case that misses its bounds
-  # under the tool lowers the number, it doesn't fail this job.
+  # under the tool lowers the number. The job fails only when a binary
+  # leaves no report, or none was made.
   win-coverage:
     if: ${{ !inputs.smoke_only && github.event_name != 'pull_request' }}
     runs-on: windows-latest
@@ -651,7 +652,9 @@ jobs:
           key: sccache-win-coverage-1-${{ steps.day.outputs.day }}
 
       # A case that fails only under the tool is named in the step's log and
-      # explained in its own: the step doesn't fail, so this runs always.
+      # explained in its own: the step fails when a report is missing, and
+      # then the Codecov upload and the sccache save are skipped, so this
+      # runs always.
       - name: Upload coverage logs
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
