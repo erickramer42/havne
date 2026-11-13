@@ -4,7 +4,6 @@
 
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 
 pragma ComponentBehavior: Bound
@@ -123,10 +122,15 @@ ColumnLayout {
         }
     }
 
-    FileDialog {
+    DocumentOpenDialog {
         id: pluginDialog
+        objectName: "pluginDialog"
         title: qsTr("Import a plugin")
         nameFilters: [qsTr("Plugins (*.havne-plugin.json)"), qsTr("All files (*)")]
         onAccepted: root.host.importPlugin(pluginDialog.selectedFile)
+        onFailed: words => {
+            root.host.pluginNote = ""
+            root.host.pluginProblem = words
+        }
     }
 }

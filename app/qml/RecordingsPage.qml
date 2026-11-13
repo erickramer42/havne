@@ -53,8 +53,12 @@ Page {
     // here), a CSV's column map, and the last import's words: what it
     // made, or why not
     property url importFile: ""
+    // The picked file's and map's names as shown (a provider's URL ends in
+    // an id, not the name)
+    property string importFileName: ""
     property int importKind: RecordingImport.Csv
     property url importMap: ""
+    property string importMapFileName: ""
     property bool importOpen: false
     // A CSV with no column map file is imported through the map guessed
     // from its header (CsvGuessPreview); picking a map file skips the guess
@@ -663,9 +667,11 @@ Page {
         return text.substring(text.lastIndexOf("/") + 1)
     }
 
-    // A file picked to import: its kind guessed, the rest asked for
-    function chooseImportFile(url) {
+    // A file picked to import: its kind guessed, the rest asked for. name is
+    // the picker's for it, else the URL's last part
+    function chooseImportFile(url, name) {
         importFile = url
+        importFileName = name || fileNameOf(url)
         importKind = Bridge.recordingImport.guessKind(url)
         importMap = ""
         importAsksInterface = false
@@ -692,11 +698,18 @@ Page {
 
     // A map file chosen (the dialog, or one saved earlier) instead of the
     // guess
-    function chooseImportMap(url) {
+    function chooseImportMap(url, name) {
         importMap = url
+        importMapFileName = name || fileNameOf(url)
         importNote = ""
         importFailed = false
         guessPreview.clear()
+    }
+
+    // The picker couldn't give a file or a map
+    function importPickFailed(words) {
+        importNote = words
+        importFailed = true
     }
 
     // Back to the guess after a map file was chosen
@@ -1708,24 +1721,23 @@ Page {
     }
 
     // Import's file and a CSV's column map
-    FileDialog {
+    DocumentOpenDialog {
         id: importDialog
+        objectName: "importDialog"
         title: qsTr("Import a log")
-        fileMode: FileDialog.OpenFile
-        // Android's picker filters by MIME type and grays out a .csv it indexes
-        // as another type: every file is offered there
-        nameFilters: Qt.platform.os === "android" ? [qsTr("All files (*)")]
-                                                  : [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
+        nameFilters: [qsTr("Logs (*.csv *.log *.txt)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: root.chooseImportFile(importDialog.selectedFile)
+        onAccepted: root.chooseImportFile(importDialog.selectedFile, importDialog.selectedName)
+        onFailed: words => root.importPickFailed(words)
     }
-    FileDialog {
+    DocumentOpenDialog {
         id: mapDialog
+        objectName: "mapDialog"
         title: qsTr("The logger's column map")
-        fileMode: FileDialog.OpenFile
         nameFilters: [qsTr("Column maps (*.json)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: root.chooseImportMap(mapDialog.selectedFile)
+        onAccepted: root.chooseImportMap(mapDialog.selectedFile, mapDialog.selectedName)
+        onFailed: words => root.importPickFailed(words)
     }
 
     // Save report's file: text first, the one a shop or a buyer reads
@@ -2067,7 +2079,7 @@ Page {
                 Layout.fillWidth: true
                 wrapMode: Text.WrapAnywhere
                 color: Theme.text
-                text: qsTr("Import %1").arg(root.fileNameOf(root.importFile))
+                text: qsTr("Import %1").arg(root.importFileName)
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -2174,7 +2186,7 @@ Page {
                     Layout.fillWidth: true
                     wrapMode: Text.WrapAnywhere
                     color: root.importMap.toString() !== "" ? Theme.text : Theme.textDim
-                    text: root.importMap.toString() !== "" ? root.fileNameOf(root.importMap)
+                    text: root.importMap.toString() !== "" ? root.importMapFileName
                                                          : qsTr("Guessed from the header")
                 }
             }

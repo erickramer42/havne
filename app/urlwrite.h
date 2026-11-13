@@ -32,6 +32,13 @@ inline QString pathOfUrl(const QUrl& url)
                              : url.toString(QUrl::FullyEncoded);
 }
 
+// The URL of a URI as Android's picker gives it, encoded: pathOfUrl gives the
+// same text back, so the content resolver is asked for the document picked
+inline QUrl pickedUrl(const QString& uri)
+{
+    return QUrl::fromEncoded(uri.toUtf8(), QUrl::TolerantMode);
+}
+
 #ifdef Q_OS_ANDROID
 // Qt's content file engine can't open a document whose name holds
 // parentheses ("report (1).csv", which the picker makes for a name taken):

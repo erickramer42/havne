@@ -46,6 +46,7 @@ TestCase {
     }
 
     function cleanup() {
+        DocumentPicker.setPickerForTesting(false)
         Relay.stop()   // a failed case must not leave Replay off for the next
         Bridge.unitSystem = 0
         Theme.developerMode = false
@@ -200,6 +201,44 @@ TestCase {
         verify(!find(page, "replayView").visible, "no Replay of the view")
         verify(!find(page, "decodeChoice").visible, "no frames to decode")
         compare(page.series(400).length, 3, "its numbers are plotted")
+    }
+
+    // Through the phone's picker: the panel names the file and the map as the
+    // picker does (a provider's URL ends in an id), and a picker with no
+    // document says so
+    function test_aPickedLogAndMapAreNamedAsThePickerNamesThem() {
+        const page = createPage()
+        const csv = Harness.writeScratchFile("picked-log.csv", "time,rpm\n0,800\n0.5,900\n")
+        const map = Harness.writeScratchFile("picked-map.json",
+            '{"havne_column_map": 1, "time": {"column": "time", "unit": "s"}, '
+            + '"signals": [{"column": "rpm", "name": "RPM", "unit": "rpm"}]}')
+        DocumentPicker.setPickerForTesting(true)
+        const files = find(page, "importDialog")
+        files.usePicker = true
+        files.open()
+        DocumentPicker.deliver(files.request, -1, csv.toString(), "logger (1).csv")
+        verify(find(page, "importPanel").visible)
+        compare(page.importFile, csv, "the picked URL as it came")
+        compare(find(page, "importFileName").text, "Import logger (1).csv")
+        tryVerify(() => !page.importGuessing, 10000, "the guess ends")
+
+        const maps = find(page, "mapDialog")
+        maps.usePicker = true
+        maps.open()
+        DocumentPicker.deliver(maps.request, -1, map.toString(), "map (1).json")
+        compare(page.importMap, map)
+        compare(find(page, "importMapName").text, "map (1).json")
+        maps.open()
+        DocumentPicker.deliver(maps.request, -1, "", "")
+        compare(find(page, "importNote").text, "The picker returned no document")
+        compare(page.importMap, map, "nothing read")
+
+        page.importNote = ""
+        files.open()
+        DocumentPicker.deliver(files.request, -1, "", "")
+        compare(find(page, "importNote").text, "The picker returned no document",
+                "the log's own picker says so too")
+        compare(page.importFile, csv, "the log picked before stays")
     }
 
     // Import: a picked file's kind guessed from its first line; a CSV

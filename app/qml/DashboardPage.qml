@@ -2894,13 +2894,14 @@ Page {
                          + "/" + root.layoutFileName()
             onAccepted: root.exportLayoutTo(layoutSaveDialog.selectedFile)
         }
-        FileDialog {
+        DocumentOpenDialog {
             id: layoutOpenDialog
+            objectName: "layoutOpenDialog"
             title: qsTr("Load a layout")
-            fileMode: FileDialog.OpenFile
             nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
             currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
             onAccepted: root.loadLayoutFrom(layoutOpenDialog.selectedFile)
+            onFailed: words => root.noteLayout(words, true)
         }
         RowLayout {
             objectName: "dashRemovePageConfirm"

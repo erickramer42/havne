@@ -57,6 +57,7 @@ TestCase {
     // land before the disconnect, or the next case meets a connected
     // bridge and fails for the wrong reason
     function cleanup() {
+        DocumentPicker.setPickerForTesting(false)
         Theme.compact = false
         Theme.dense = false
         Theme.look = "dark"
@@ -2142,6 +2143,45 @@ TestCase {
         compare(find(find(page, "signalFile_1"), "signalFileText").text,
                 "Pair: 2 signals, profile user.pair")
         compare(page.vehicleProfiles[1].hint, "Your signal file Pair: 2 signals")
+    }
+
+    // Through the phone's picker: each of the Signals page's three opens
+    // hands its pick to its import, and a picker with no document says so
+    function test_theSignalsPagesPicksReachTheirImports() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        DocumentPicker.setPickerForTesting(true)
+        const signals = find(page, "signalImportDialog")
+        signals.usePicker = true
+        signals.open()
+        DocumentPicker.deliver(signals.request, -1,
+            Harness.writeScratchFile("picked (1).json", signalFileText("Picked")).toString(),
+            "picked (1).json")
+        compare(find(page, "signalNote").text, "Picked added: 1 signal, profile user.picked")
+        for (const name of ["signalImportDialog", "obdbDialog"]) {
+            const d = find(page, name)
+            d.usePicker = true
+            d.open()
+            page.signalNote = "an earlier import's note"
+            DocumentPicker.deliver(d.request, -1, "", "")
+            compare(find(page, "signalProblem").text, "The picker returned no document", name)
+            compare(find(page, "signalNote").text, "", "no earlier note beside the words: " + name)
+            page.signalProblem = ""
+        }
+
+        const plugins = find(page, "pluginDialog")
+        plugins.usePicker = true
+        plugins.open()
+        DocumentPicker.deliver(plugins.request, -1,
+            Harness.writeScratchFile("bad (1).havne-plugin.json", "{}").toString(), "bad (1).havne-plugin.json")
+        const refused = find(page, "pluginProblem").text
+        verify(refused !== "" && refused !== "The picker returned no document",
+               "the pick reached the import, which refused it: " + refused)
+        page.pluginNote = "an earlier import's note"
+        plugins.open()
+        DocumentPicker.deliver(plugins.request, -1, "", "")
+        compare(find(page, "pluginProblem").text, "The picker returned no document")
+        compare(find(page, "pluginNote").text, "", "no earlier note beside the words")
     }
 
     function test_aRefusedOrClashingFileIsNotAdded() {

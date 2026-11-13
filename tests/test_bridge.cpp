@@ -10510,6 +10510,33 @@ TEST(BridgeTest, APickedUrlIsOpenedByItsEncodedName)
               "/tmp/a b (1).csv");
 }
 
+// Android's document picker hands back a URI's text, encoded: the URL made of
+// it opens by that same text, so the content resolver is asked for the
+// document picked, its escapes and parentheses as they came
+TEST(BridgeTest, APickersUriOpensByTheTextItCameAs)
+{
+    for (const char* uri : {
+             "content://com.android.externalstorage.documents/document/"
+             "primary%3ADownload%2Fname%20(1).json",
+             "content://com.android.externalstorage.documents/document/"
+             "primary%3ADownload%2Fname%20%281%29.json",
+             "content://com.android.providers.downloads.documents/document/"
+             "msf%3A1000000034",
+             "content://com.android.providers.media.documents/document/"
+             "document%3A42",
+             "content://com.google.android.apps.docs.storage/document/"
+             "acc%3D1%3Bdoc%3Dencoded%3DAbC-_d%2Be%3D%3D",
+             "content://com.android.externalstorage.documents/document/"
+             "primary%3ADocuments%2F%C3%B8l%20%26%20%23%20%25.json",
+         }) {
+        const QString text = QString::fromLatin1(uri);
+        const QUrl url = pickedUrl(text);
+        EXPECT_TRUE(url.isValid()) << uri;
+        EXPECT_FALSE(url.isLocalFile()) << uri;
+        EXPECT_EQ(pathOfUrl(url).toStdString(), uri);
+    }
+}
+
 // A picker through a provider makes the document before the app writes. A
 // QUrl that isn't a file URL stands in for a content:// one: QFile opens its
 // text as a path. A save that refuses removes only a document that was empty
