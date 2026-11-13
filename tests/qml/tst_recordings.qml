@@ -911,10 +911,18 @@ profile  raw
         verify(find(panel, "exportRows_100").enabled && find(panel, "exportRows_250").enabled,
                "still choosable")
         find(panel, "exportRows_custom").clicked()
+        const sizedAt = ms => panel.sizes.some(s => s.rowMs === ms)
+        panel.customText = "50"
+        tryVerify(() => sizedAt(50), 10000, "the custom interval sized")
+        compare(textOf("exportRows_custom"), "no fewer rows than every sweep",
+                "a typed interval finer than the recording says so too")
         panel.customText = "1000"
-        tryVerify(() => panel.sizes.length === 4, 10000, "the custom interval sized")
+        tryVerify(() => sizedAt(1000), 10000, "the custom interval sized again")
         verify(/ rows?, /.test(textOf("exportRows_custom")), "a slower interval still saves: "
                + textOf("exportRows_custom"))
+        // No row at all (a range holding no sample) has no rate to be slower than
+        panel.sizes = [{ rowMs: 0, rows: 0, bytes: 80 }, { rowMs: 100, rows: 0, bytes: 80 }]
+        compare(panel.sizeOf(100), "0 rows, 80 B", "no rows is a size, not the note")
         restoreExportChoices(panel)
     }
 
