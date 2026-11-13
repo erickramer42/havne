@@ -1,6 +1,6 @@
 # File/layer: python/havne/_asks.py | Python 3.11+, the havne package
 # Testing: PythonTest.test_import, PythonTest.test_export,
-#          PythonTest.test_health
+#          PythonTest.test_health, PythonTest.test_recording_aids
 #
 # The stop core asks about during a long call (ecuio_cancel_t, and the
 # reader's open progress, ecuio_open_progress_t): the caller's cancel, an
