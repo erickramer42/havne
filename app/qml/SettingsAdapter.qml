@@ -14,6 +14,9 @@ ColumnLayout {
     required property SettingsPage host
     // The phone's words and list; a test sets it, since Theme.mobile is the platform's
     property bool mobile: Theme.mobile
+    // The adapters the connect list shows: a paired headset, watch or health
+    // device is folded under "Other paired devices" there and isn't counted
+    readonly property int bluetoothFound: root.host.bluetoothAdapters.filter(a => a.other !== true).length
     Layout.fillWidth: true
     spacing: Theme.spacing * 2
 
@@ -30,15 +33,15 @@ ColumnLayout {
                          + "or pair an ELM327 adapter, or pick one below")
                   : root.mobile
                     ? qsTr("Bluetooth: %1 found; tap one, then Connect")
-                          .arg(root.host.bluetoothAdapters.length)
+                          .arg(root.bluetoothFound)
                   : qsTr("J2534 interfaces: %1, serial ports: %2%3; select one to "
                          + "put its address in the field above, then Connect")
                         .arg(root.host.j2534Devices.length).arg(root.host.serialPorts.length)
                         .arg((root.host.canInterfaces.length > 0
                               ? qsTr(", CAN interfaces: %1").arg(root.host.canInterfaces.length)
                               : "")
-                             + (Bluetooth.available || root.host.bluetoothAdapters.length > 0
-                                ? qsTr(", Bluetooth: %1").arg(root.host.bluetoothAdapters.length)
+                             + (Bluetooth.available || root.bluetoothFound > 0
+                                ? qsTr(", Bluetooth: %1").arg(root.bluetoothFound)
                                 : ""))
             color: root.host.devices.length === 0 ? Theme.textDim : Theme.text
             wrapMode: Text.WordWrap
