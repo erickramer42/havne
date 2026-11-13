@@ -36,7 +36,7 @@ constexpr int kScanMs = 8000;
 
 #ifdef Q_OS_ANDROID
 // Android's paired devices (BluetoothAdapter.getBondedDevices), which Qt
-// doesn't list: { name, address, kind }, a device of type LE "ble", any
+// doesn't list: { name, address, kind, other }, a device of type LE "ble", any
 // other "bt". Needs BLUETOOTH_CONNECT; empty without the adapter.
 QVariantList bondedDevices()
 {
@@ -81,9 +81,18 @@ QVariantList bondedDevices()
             device.callObjectMethod("getName", "()Ljava/lang/String;")
                 .toString();
         const jint type = device.callMethod<jint>("getType", "()I");
+        // BluetoothClass major classes of the gear no OBD adapter reports
+        // (AUDIO_VIDEO 0x400, WEARABLE 0x700, HEALTH 0x900)
+        const QJniObject cls = device.callObjectMethod(
+            "getBluetoothClass", "()Landroid/bluetooth/BluetoothClass;");
+        const jint major =
+            cls.isValid() ? cls.callMethod<jint>("getMajorDeviceClass", "()I")
+                          : 0;
+        const bool other = major == 0x400 || major == 0x700 || major == 0x900;
         constexpr jint kDeviceTypeLe = 2; // BluetoothDevice.DEVICE_TYPE_LE
         out.append(QVariantMap{{QStringLiteral("name"), name},
                                {QStringLiteral("address"), address},
+                               {QStringLiteral("other"), other},
                                {QStringLiteral("kind"),
                                 type == kDeviceTypeLe ? QStringLiteral("ble")
                                                       : QStringLiteral("bt")}});
