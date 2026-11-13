@@ -6,6 +6,11 @@ add_executable(havne-cli main.cpp)
 find_package(Threads REQUIRED)
 target_link_libraries(havne-cli PRIVATE ecuio-core Threads::Threads)
 app_enable_warnings(havne-cli)
+# layout check's reader recurses once a level, to 1024: Windows' 1 MB main
+# stack holds about 1300 in a Debug build, so take Linux's and macOS's 8 MB
+if(MSVC)
+    target_link_options(havne-cli PRIVATE /STACK:8388608)
+endif()
 app_add_version_resource(havne-cli havne-cli "Havne command-line client")
 install(TARGETS havne-cli RUNTIME DESTINATION bin)   # the core package (ADR-0035)
 

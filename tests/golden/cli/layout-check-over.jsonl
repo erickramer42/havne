@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"code": 7, "detail": "the file is over 82400 bytes, a layout file's most", "message": "couldn't open what was named", "type": "error"}
