@@ -739,8 +739,11 @@ TEST(SignalFileTest, EveryRefusalSaysWhereAndWhy)
 
 TEST(SignalFileTest, TheRequestsMustFitTheEngine)
 {
-    /* One DID a signal: 256 fit, 257 don't */
-    const auto file = [](unsigned n) {
+    /* One DID a signal: a file alone fits the cap with every signal it
+     * may hold; on obd2, whose requests count, it passes the cap */
+    static_assert(ECUIO_SIGNAL_FILE_MAX_SIGNALS >= ECUIO_PROFILE_MAX_REQUESTS,
+                  "one file can hold a full request table");
+    const auto file = [](unsigned n, bool on_obd2) {
         std::string s;
         for (unsigned i = 0; i < n; ++i) {
             char sig[160];
@@ -749,12 +752,22 @@ TEST(SignalFileTest, TheRequestsMustFitTheEngine)
                           i ? "," : "", i, i, 0x1000 + i);
             s += sig;
         }
-        return one(s);
+        std::string json = one(s);
+        if (on_obd2) {
+            json.insert(json.find(',') + 1, R"("extends":"obd2",)");
+        }
+        return json;
     };
-    File fits = load(file(ECUIO_PROFILE_MAX_REQUESTS));
-    EXPECT_NE(fits, nullptr) << ecuio_last_error_detail();
-    EXPECT_NE(refusal(file(ECUIO_PROFILE_MAX_REQUESTS + 1)).find("more than 256 requests"),
-              std::string::npos);
+    File fits = load(file(ECUIO_PROFILE_MAX_REQUESTS, false));
+    ASSERT_NE(fits, nullptr) << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_signal_file_set(fits.get())->count,
+              ECUIO_PROFILE_MAX_REQUESTS);
+    const std::string past = refusal(file(ECUIO_PROFILE_MAX_REQUESTS, true));
+    EXPECT_NE(past.find("the signals ask more than " +
+                        std::to_string(ECUIO_PROFILE_MAX_REQUESTS) +
+                        " requests, the base's counted"),
+              std::string::npos)
+        << past;
 }
 
 TEST(SignalFileTest, NullsAndTheLoadersBounds)

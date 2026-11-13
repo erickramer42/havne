@@ -1757,16 +1757,18 @@ TEST(RequestEngineTest, ALateReplyStillAnswersItsScannedDid) {
 TEST(RequestEngineTest, ScanFoundWithAFullTableIsCountedButNotPolled) {
     ecuio_request_engine e;
     ecuio_engine_init(&e, 1);
+    /* DIDs 0x2000 on, one apart, so the table fills whatever its size */
     for (uint32_t i = 0; i < ECUIO_PROFILE_MAX_REQUESTS; ++i) {
-        const uint8_t req[2] = {0x01, static_cast<uint8_t>(i)};
-        ASSERT_EQ(ecuio_engine_add(&e, 0, req, 2), ecuio_engine_add_result::added);
+        const uint16_t did = static_cast<uint16_t>(0x2000 + i);
+        const uint8_t req[3] = {0x22, static_cast<uint8_t>(did >> 8),
+                                static_cast<uint8_t>(did)};
+        ASSERT_EQ(ecuio_engine_add(&e, 0, req, 3),
+                  ecuio_engine_add_result::added);
     }
     ASSERT_TRUE(ecuio_engine_scan_add(&e, 0, 0x1E1C));
     int64_t now = 0;
     ASSERT_NO_FATAL_FAILURE(send_rotation(&e, 0, 0, now));
-    const uint8_t reply[3] = {0x41, 0x00, 0x00};
-    EXPECT_EQ(ecuio_engine_on_frame(&e, 0, reply, 3, now + kMs, nullptr),
-              ecuio_reply::positive);
+    EXPECT_EQ(answer_did(&e, 0, 0x2000, now + kMs), ecuio_reply::positive);
     now += ECUIO_ENGINE_GAP_US;
     ASSERT_NO_FATAL_FAILURE(send_scan_request(&e, 0, 0x1E1C, now));
     EXPECT_EQ(answer_did(&e, 0, 0x1E1C, now + kMs), ecuio_reply::positive);

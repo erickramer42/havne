@@ -1,6 +1,7 @@
 // File/layer: core/include/ecuio/profile.h | C ABI, public
-// Testing: UNIT: CoreTest (test_core); RequestTimingTest (test_obd2); BRIDGE:
-//          BridgeTest (test_bridge)
+// Testing: UNIT: CoreTest, ObdbImportTest (test_core); RequestEngineTest,
+//          RequestTimingTest (test_obd2); SignalFileTest (test_signals);
+//          BRIDGE: BridgeTest (test_bridge)
 
 #ifndef ECUIO_PROFILE_H
 #define ECUIO_PROFILE_H
@@ -46,7 +47,7 @@ extern "C" {
 /* The most requests a set's defs may derive (ADR-0015 section 2): one per
  * distinct request and channel, so defs read from one reply count
  * once. */
-#define ECUIO_PROFILE_MAX_REQUESTS 256
+#define ECUIO_PROFILE_MAX_REQUESTS 1024
 
 /* Register a name for a signal set, replacing a non-built-in profile of
  * the same name (last wins). The name is 1..ECUIO_PROFILE_NAME_MAX

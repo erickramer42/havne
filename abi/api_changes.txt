@@ -9,6 +9,5 @@
 #
 # For example:
 # ECUIO_PROFILE_MAX_REQUESTS  vX.Y.0 raises the cap (CHANGELOG.md)
-ECUIO_PROFILE_MAX_REQUESTS  v0.5.0 raises the cap to 256 (ADR-0051, CHANGELOG.md)
-ECUIO_SIGNAL_SET_LAYOUT  v0.5.0 moves the set to layout 4, the enum and computed tables (ADR-0051, CHANGELOG.md)
+ECUIO_PROFILE_MAX_REQUESTS  v0.8.0 raises the cap to 1024 (ADR-0051, CHANGELOG.md)
 ECUIO_SIGNAL_FILE_FORMAT  v0.8.0 raises the newest format this core reads to 2, the computed grammar (ADR-0062, CHANGELOG.md)
