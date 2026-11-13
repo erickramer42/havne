@@ -157,6 +157,11 @@ the locale, as the recordings' reader does. JSON has no comments: a
   stable key list `obd2` publishes); at most 4 inputs and 16
   operations, no functions. A computed signal can't feed another in
   format 1, so there's no order or cycle to check.
+
+  Note of 2026-11-13: format 2 ([ADR-0062](0062-computed-grammar.md))
+  adds functions, comparisons, `if`, and computed signals that read
+  each other up to 8 deep; a file that uses any of them says
+  `"havne_signals": 2`, and format 1 stays as this bullet gives it.
 - **`max_age`** (computed only, optional): seconds per input, 0.1-60,
   past which that input is too old to compute from. An input it doesn't
   name takes the stale age (section 5).
@@ -264,6 +269,12 @@ a 3 s bound on baro would blank boost for part of every baro cycle.
 Live still dims an input past 3 s like any signal; the computed value
 goes quiet only when an input passes its own bound.
 
+Note of 2026-11-13: in format 2 (ADR-0062 sections 3 to 5) an input
+with no value goes to the program as no value, so an `if`'s branch not
+taken can read a signal that has gone quiet; a computed input is worked
+out at the frame from the leaves under it and takes no age bound of its
+own. Format 1's programs give the values this section gives.
+
 ### 6. Core's changes, and which break the ABI
 
 ADR-0048: a 0.x minor version may break the C ABI on purpose, each
@@ -333,6 +344,9 @@ of that license against these plans, not legal advice:
   smaller, but not enough for a power estimate. Functions (min, max,
   abs), conditionals and computed signals feeding each other are left
   for when a signal needs them; they would be a format bump.
+
+  Note of 2026-11-13: functions, conditionals and computed signals
+  feeding each other came as format 2 (ADR-0062).
 - **One fixed age bound for computed inputs:** simpler, but a bound
   short enough for MAP blanks boost between baro reads, and one long
   enough for baro combines a stale MAP.

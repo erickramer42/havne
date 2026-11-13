@@ -11,7 +11,7 @@
   [ADR-0049](0049-recordings-in-core.md) (the recorder, markers, the
   reader, the frames check); [ADR-0051](0051-signal-files.md) (signal
   files, computed signals, the stale age, the strict JSON reader);
-  ADR-0062 (the computed grammar of
+  [ADR-0062](0062-computed-grammar.md) (the computed grammar of
   signal-file format 2: functions, conditionals, computed signals that
   read each other), built first;
   [ADR-0056](0056-analysis-log.md) (a recorder attached to a running
