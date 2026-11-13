@@ -790,3 +790,51 @@ the mapping copies the number and the two comparisons differ only at the
 exact level. A file gauge with a range and no levels takes the table's zones
 for a common signal (its range still wins); a shift light on engine speed
 always starts from the shift band, whatever the file's gauge.
+
+## Appendix: 1024 requests (2026-11-13)
+
+`ECUIO_PROFILE_MAX_REQUESTS` rises from 256 to 1024 (v0.8.0). An OBDb
+import of a whole car's set passed 256 requests and left signals out;
+at 1024 one file's signals (`ECUIO_SIGNAL_FILE_MAX_SIGNALS`, also 1024)
+fit a session on their own, and a file that extends `obd2` keeps
+1024 less `obd2`'s requests. `uds-generic`'s polled limit follows it,
+and its ID band (20000, plus the polled and the scanned) still ends
+below the files' band at 30000.
+
+What the cap sizes, measured with `sizeof` (GCC, 64-bit):
+
+| Where | At 256 | At 1024 | Lives |
+|---|---|---|---|
+| Reply timing's table (`request_timing.h`): two histograms for each request, 1,464 bytes for each row | 375 KB | 1.5 MB | heap, one for each session with a rotation |
+| The session (`session.h`): its public timing rows, 80 bytes for each row, among the rest | 29.8 KB | 91.3 KB | every session, mock and replay too |
+| The request engine (`request_engine.h`): 16 bytes for each request, beside the scan table | 20.2 KB | 32.4 KB | each requesting transport's state; registration's count check holds one on the stack |
+| The recorder's and the CLI's timing totals | 2 KB | 8 KB | each recorder, `run_stream`'s stack |
+
+A session that asks requests holds about 1.2 MB more than at 256, the
+timing table most of it; one that asks nothing about 60 KB more. The
+app runs one session at a time, so on a phone that is 1.2 MB of heap
+once. v0.8.0 keeps the tables fixed in size.
+
+What a full table costs the worker (one channel of 1024 DIDs, GCC -O2,
+on a desktop running other builds: an upper bound): a rotation request
+(due, sent, its reply) takes 6.6 us against 1.7 us for a full table of
+256; the once-a-second timing publish copies 1024 rows in 0.75 ms;
+working out which defs are askable and taking a focus on every def,
+each defs times requests, take 1.6 ms and 2.3 ms, and deriving the
+table at create or a file's load 1.1 ms. Against an ECU's 10 to 50 ms
+for each request, the rotation's own cost stays under a thousandth. What a
+full table does cost is time: a sweep of 1024 requests at 10 ms each
+is about 10 s, at an ELM327's 50 ms about 50 s, which is why a session
+asks a default pick rather than the whole set
+([ADR-0056](0056-analysis-log.md)'s appendix "a front end's default
+pick").
+
+A recording's timing record (every 10 s) is the rows' 80 bytes each:
+80 KB for a full table, inside the 4 MiB default ring; a caller's ring
+under about 82 KB would drop every timing record of a full table.
+
+The larger session doesn't move the decode path: an A/B of the build
+before and after (`scripts/bench_ab.py`, five runs each alternated, on
+a desktop running other work) put every figure inside both builds'
+spread, the decode at 1.00 to 1.02 of the base, the bridge's load at
+0.91 to 0.98, reply timing at 1.00 over J2534.

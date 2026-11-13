@@ -515,3 +515,6 @@ had:
 [ADR-0051](0051-signal-files.md) raises `ECUIO_PROFILE_MAX_REQUESTS`
 from 128 to 256, so `obd2` and a user's own signals fit one session.
 The table above keeps the number as decided.
+
+Note of 2026-11-13: v0.8.0 raises it to 1024
+([ADR-0051](0051-signal-files.md)'s appendix "1024 requests").
