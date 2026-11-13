@@ -13,6 +13,7 @@
 # read_frames reads its frames.csv back as recorded (ADR-0049's appendix
 # "frames read back"). stats, step, role_signal and stretches are the
 # chart's span statistics and cursor step and ADR-0056's navigation aids.
+# stretches, find_threshold and find_marker take cancel=, as the imports do.
 
 import ctypes
 import json
@@ -170,28 +171,37 @@ class Recording:
               "ecuio_recording_text_at")
         return text(buf.raw), None if at.value == NONE else at.value
 
-    def find_threshold(self, signal, level, rising=True, hysteresis=0.0, from_us=0):
+    def find_threshold(self, signal, level, rising=True, hysteresis=0.0, from_us=0,
+                       cancel=None):
         """The first time at or after from_us the signal reaches level,
-        rising or falling past its hysteresis; None if it never does"""
+        rising or falling past its hysteresis; None if it never does.
+        cancel is find_marker's"""
         what = e.ecuio_recording_find_t()
         what.kind = e.ECUIO_RECORDING_FIND_THRESHOLD
         what.signal = self.signal(signal).index
         what.direction = e.ECUIO_RECORDING_FIND_RISING if rising else e.ECUIO_RECORDING_FIND_FALLING
         what.level = level
         what.hysteresis = hysteresis
-        return self._find(what, from_us)
+        return self._find(what, from_us, cancel)
 
-    def find_marker(self, label, from_us=0):
-        """The first marker labeled label at or after from_us; None if none"""
+    def find_marker(self, label, from_us=0, cancel=None):
+        """The first marker labeled label at or after from_us; None if none.
+        cancel, a callable taking no arguments, is asked on the calling
+        thread at most once for each second the search reads (a find the
+        summaries answer may ask once); a true answer ends the search with
+        Error ECUIO_ERR_CANCELED. An exception it raises ends it and is
+        raised. A Ctrl+C on the main thread stops a long search at its next
+        ask, with or without cancel"""
         what = e.ecuio_recording_find_t()
         what.kind = e.ECUIO_RECORDING_FIND_MARKER
         what.label_utf8 = utf8(label)
-        return self._find(what, from_us)
+        return self._find(what, from_us, cancel)
 
-    def _find(self, what, from_us):
+    def _find(self, what, from_us, cancel):
         at = ctypes.c_uint64()
-        check(lib.ecuio_recording_find(self._r, ctypes.byref(what), from_us, ctypes.byref(at)),
-              "ecuio_recording_find")
+        check(_Asks(cancel).run(lambda callback: lib.ecuio_recording_find_with(
+            self._r, ctypes.byref(what), from_us, callback, None, ctypes.byref(at))),
+            "ecuio_recording_find_with")
         return None if at.value == NONE else at.value
 
     def stats(self, signals, t0_us, t1_us):
@@ -225,7 +235,7 @@ class Recording:
               "ecuio_recording_role_signal")
         return None if index.value == _NO_INDEX else self.signals[index.value]
 
-    def stretches(self, kinds="all", from_us=0, to_us=None, roles=None, **levels):
+    def stretches(self, kinds="all", from_us=0, to_us=None, roles=None, cancel=None, **levels):
         """The pulls and cruises (kinds 'pulls', 'cruises' or 'all') within
         the closed range [from_us, to_us] (to_us the recording's end by
         default; an empty default range answers []), in time order, as
@@ -234,7 +244,7 @@ class Recording:
         core's pick; levels are ecuio_stretch_rules_t's own fields in its
         units (pull_level=85, pull_gap_us=750_000, pull_min_rise in rpm,
         pull_min_gain and cruise_floor in km/h), each left out taking
-        core's default"""
+        core's default. cancel is find_marker's"""
         rules = e.ecuio_stretch_rules_t()
         if kinds not in _KINDS:
             raise ValueError(f"kinds is 'pulls', 'cruises' or 'all', not {kinds!r}")
@@ -249,26 +259,35 @@ class Recording:
                 raise TypeError(f"stretches() has no level {name!r}")
             setattr(rules, name, value)
         count = ctypes.c_uint32()
-        if to_us is None and self.info.duration_us <= from_us:
+        empty = to_us is None and self.info.duration_us <= from_us
+        if empty:
             # Nothing past from_us (a recording whose samples sit at one
             # time): core refuses an empty range, so it judges the rules
             # over a microsecond and the answer is no stretch
-            check(lib.ecuio_recording_stretches(self._r, ctypes.byref(rules), from_us,
-                                                from_us + 1, None, 0, ctypes.byref(count)),
-                  "ecuio_recording_stretches")
-            return []
-        if to_us is None:
+            to_us = from_us + 1
+        elif to_us is None:
             to_us = self.info.duration_us
-        check(lib.ecuio_recording_stretches(self._r, ctypes.byref(rules), from_us, to_us,
-                                            None, 0, ctypes.byref(count)),
-              "ecuio_recording_stretches")
-        if count.value == 0:
+        out = None
+
+        def work(callback):
+            # One run holds the Ctrl+C handler over both passes (the size,
+            # then the fill); a refusal is returned for check, so a stop
+            # or an exception the cancel raised is the run's to raise
+            nonlocal out
+            rc = lib.ecuio_recording_stretches_with(
+                self._r, ctypes.byref(rules), from_us, to_us, callback, None, None, 0,
+                ctypes.byref(count))
+            if rc != e.ECUIO_OK or empty or count.value == 0:
+                return rc
+            out = (e.ecuio_recording_stretch_t * count.value)()
+            return lib.ecuio_recording_stretches_with(
+                self._r, ctypes.byref(rules), from_us, to_us, callback, None, out,
+                count.value, ctypes.byref(count))
+
+        check(_Asks(cancel).run(work), "ecuio_recording_stretches_with")
+        if empty or out is None:
             return []
-        capacity = count.value
-        out = (e.ecuio_recording_stretch_t * capacity)()
-        check(lib.ecuio_recording_stretches(self._r, ctypes.byref(rules), from_us, to_us,
-                                            out, capacity, ctypes.byref(count)),
-              "ecuio_recording_stretches")
+        capacity = len(out)
         return [Stretch("pull" if s.kind == e.ECUIO_RECORDING_STRETCH_PULL else "cruise",
                         self.signals[s.signal].name, s.from_us, s.to_us, s.start, s.end,
                         s.flags)

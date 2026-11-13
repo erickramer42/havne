@@ -2788,6 +2788,50 @@ TestCase {
         compare(hint.text, "Pick a row, then connect", "it asks for a row, not an adapter")
     }
 
+    // Audio, wearable and health gear the phone has paired sits under a
+    // fold, never among the adapters; a pick from it keeps it open
+    function test_otherPairedDevicesSitUnderAFold() {
+        const main = phoneMain()
+        const list = connectListOn(main, [], [
+            { name: "OBD adapter", address: "00:11:22:33:44:55", kind: "bt" },
+            { name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true },
+            { name: "Heart strap", address: "FF:FF:FF:FF:FF:FF", kind: "ble", other: true }])
+        const fold = find(list, "connectOtherDevices")
+        tryVerify(() => fold.visible, 2000, "the fold shows")
+        compare(fold.text, "Other paired devices (2)")
+        verify(findChild(list, "connectRow_0") !== null, "the adapter")
+        compare(find(find(list, "connectRow_0"), "connectRowAddress").text, "OBD adapter")
+        // The demo is the adapters' last row; the others are not drawn closed
+        compare(find(find(list, "connectRow_1"), "connectRowKind").text, "Demo data")
+        compare(findChild(list, "connectRow_2"), null, "the headset is hidden")
+        fold.clicked()
+        tryVerify(() => findChild(list, "connectRow_3") !== null, 2000, "opened")
+        compare(find(find(list, "connectRow_2"), "connectRowAddress").text, "Headset")
+        compare(fold.text, "Hide other paired devices (2)")
+        find(list, "connectRow_2").clicked()
+        tryCompare(list, "chosen", "elm327://bt:AA:BB:CC:DD:EE:FF", 2000, "still pickable")
+        verify(!fold.enabled, "no Hide while the pick is inside")
+        compare(fold.text, "Other paired devices (2)", "and it does not promise one")
+        fold.clicked()
+        tryCompare(list, "otherShown", true, 2000, "open while one of them is chosen")
+        verify(findChild(list, "connectRow_2") !== null, "the picked row stays")
+    }
+
+    // A paired headset is no adapter: with only gear of that kind paired,
+    // the list still says where to pair one
+    function test_onlyOtherPairedDevicesStillAskForAnAdapter() {
+        const main = phoneMain()
+        const list = connectListOn(main, [])
+        list.bluetoothAvailable = true
+        list.bluetoothPermission = "granted"
+        find(main.contentItem, "settingsPage").bluetoothAdapters =
+            [{ name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true }]
+        verify(waitForPolish(main), "laid out")
+        tryVerify(() => find(list, "connectBluetoothNone").visible, 2000, "where to pair, with a headset only")
+        list.bluetoothAvailable = false
+        list.bluetoothPermission = "unavailable"
+    }
+
     function test_aRecentAddressOfAListedDeviceTakesItsName() {
         const main = phoneMain()
         const list = connectListOn(main, ["elm327://COM9?profile=raw"])

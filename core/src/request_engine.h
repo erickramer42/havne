@@ -1928,6 +1928,26 @@ inline bool ecuio_engine_session_leave(ecuio_request_engine* e, uint32_t c,
     return true;
 }
 
+/* At a close begun at start_us, how long a request still out on a
+ * channel leave[] marks is read for before its 10 01: to the latest such
+ * deadline, never past start_us + ECUIO_ENGINE_WAIT_US, so a 78 extends
+ * nothing. 0 when none is out. */
+inline int64_t ecuio_engine_leave_wait_until(const ecuio_request_engine* e,
+                                             const bool* leave,
+                                             int64_t start_us)
+{
+    int64_t until = 0;
+    for (uint32_t c = 0; c < e->chan_count; ++c) {
+        const ecuio_engine_channel& ch = e->chans[c];
+        if (leave[c] && ch.outstanding != ECUIO_ENGINE_NONE &&
+            ch.deadline_us > until) {
+            until = ch.deadline_us;
+        }
+    }
+    const int64_t bound = start_us + ECUIO_ENGINE_WAIT_US;
+    return (until > bound) ? bound : until;
+}
+
 /* Rotation request r has just been chosen on channel c at now_us: counts
  * its rows toward the sweep. The rows are consecutive in the rotation's
  * one class (a focus runs its picks fast), so as many as the rotation

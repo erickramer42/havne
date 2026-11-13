@@ -545,3 +545,13 @@ for each group of the PIDs it answers),
 `BridgeTest.TheMockSendsTheDemoCarsPidsAndHidesTheRest` and
 `QmlTest.dashboard`'s `test_theDemoCarsGaugesGetValuesUnderObd2`. The
 limit above, one channel, stands.
+
+Note of 2026-11-12, the other ECUs: the one channel above is lifted. The
+mock declares the engine ECU's channel first, then each other channel
+the set declares (a signal file's or plugin's `ecus`, `uds-generic`'s
+`<ecu>:` prefixes), once each, `ECUIO_MAX_CHANNELS` in all. Each other
+ECU answers the walk with chained bitmaps that list no data PID, the
+last at 0xE0, so a Service 01 signal read there is listed as not sent
+while the same PID on the engine ECU is sent; a channel with no Service
+01 signal isn't walked. The mock still sends PIDs on 0x7E8 alone, and
+reads diagnostics there alone. `CoreTest.TheMockDeclaresTheSetsOtherEcusWhichSupportNoPid`.

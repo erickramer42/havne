@@ -7,6 +7,8 @@
 // hands on a reply for each of the set's PIDs among them, as a requesting
 // transport hands on an ECU's replies. A PID the ECU lacks is left out by
 // its bitmaps, so core lists its signals as not sent (ADR-0039 section 6).
+// Each other ECU the set declares answers the walk with bitmaps that list
+// no data PID, so its Service 01 signals are not sent either.
 
 #ifndef ECUIO_MOCK_PIDS_H
 #define ECUIO_MOCK_PIDS_H
@@ -88,28 +90,46 @@ inline void ecuio_mock_pid_replies(ecuio_sim_ecu& ecu,
     }
 }
 
-/* Runs channel 0's supported-PID walk (ecuio_engine_probe, started by
- * the caller) to its end against the ECU, on the engine's own clock
- * (*now_us, which only moves forward), with nothing else asked. The walk
- * goes before the rotation, so only bitmaps are asked. */
-inline void ecuio_mock_pid_walk(ecuio_request_engine* e, ecuio_sim_ecu& ecu,
-                                int64_t* now_us)
+/* An ECU that supports no data PID: a supported-PID request (01 00 to
+ * 01 E0) is answered by its bitmap holding the next bitmap's bit alone,
+ * E0's none, into out; its length, or 0 for anything else (silence) */
+inline uint32_t ecuio_mock_no_pid_reply(const uint8_t* req, uint32_t len,
+                                        uint8_t* out)
 {
-    const ecuio_engine_channel& ch = e->chans[0];
+    if (len != 2 || req[0] != 0x01 || req[1] % 0x20u != 0) {
+        return 0;
+    }
+    out[0] = 0x41;
+    out[1] = req[1];
+    out[2] = out[3] = out[4] = 0;
+    out[5] = req[1] < 0xE0 ? 0x01 : 0x00;
+    return 6;
+}
+
+/* Runs channel c's supported-PID walk (ecuio_engine_probe, started by
+ * the caller) to its end, each request answered by answer(bytes, len,
+ * out) (its length, 0 for none), on the engine's own clock (*now_us,
+ * which only moves forward), with nothing else asked. The walk goes
+ * before the rotation, so only bitmaps are asked. */
+template <typename Answer>
+inline void ecuio_mock_pid_walk(ecuio_request_engine* e, uint32_t c,
+                                Answer answer, int64_t* now_us)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
     for (int step = 0; step < 64 && ch.walking; ++step) {
-        const int32_t r = ecuio_engine_due(e, 0, *now_us);
+        const int32_t r = ecuio_engine_due(e, c, *now_us);
         if (r == ECUIO_ENGINE_NONE) {
-            if (!ecuio_engine_expire(e, 0, *now_us)) {
+            if (!ecuio_engine_expire(e, c, *now_us)) {
                 *now_us += ECUIO_ENGINE_GAP_US;
             }
             continue;
         }
-        const ecuio_request& q = ecuio_engine_request_of(e, 0, r);
+        const ecuio_request& q = ecuio_engine_request_of(e, c, r);
         uint8_t reply[ECUIO_SIM_REPLY_MAX];
-        const uint32_t n = ecuio_sim_answer(ecu, q.bytes, q.len, false, reply);
-        ecuio_engine_sent(e, 0, r, true, *now_us);
+        const uint32_t n = answer(q.bytes, q.len, reply);
+        ecuio_engine_sent(e, c, r, true, *now_us);
         if (n > 0) {
-            (void)ecuio_engine_on_frame(e, 0, reply, static_cast<uint16_t>(n),
+            (void)ecuio_engine_on_frame(e, c, reply, static_cast<uint16_t>(n),
                                         *now_us, nullptr);
         } else {
             *now_us += ECUIO_ENGINE_WAIT_US;

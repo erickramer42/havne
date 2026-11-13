@@ -1666,10 +1666,12 @@ Page {
                         value: panelCard.cell ? panelCard.cell.w : 1
                         onValueModified: root.resize(value, panelCard.cell.h)
                     }
-                    Caption { text: qsTr("Rows") }
+                    Caption { text: root.phoneForm ? qsTr("Height") : qsTr("Rows") }
                     SpinBox {
                         objectName: "panelH"
-                        Accessible.name: qsTr("Rows")
+                        Accessible.name: root.phoneForm ? qsTr("Height") : qsTr("Rows")
+                        // The phone reads it in columns, the unit Columns uses
+                        textFromValue: v => root.phoneForm ? DashboardBook.heightInColumns(v) : String(v)
                         Layout.preferredHeight: Theme.touchTarget
                         // A stored h under the phone's step stays reachable
                         from: root.phoneForm && panelCard.cell

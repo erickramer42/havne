@@ -382,6 +382,10 @@ TestCase {
     // ---- The phone's height control
 
     function test_aRowStepMovesToTheNextMultipleOfThree() {
+        compare(DashboardBook.heightInColumns(18), "4.5", "a square dial's 18 rows")
+        compare(DashboardBook.heightInColumns(12), "3")
+        compare(DashboardBook.heightInColumns(3), "0.75", "one step")
+        compare(DashboardBook.heightInColumns(7), "1.75", "a stored odd height")
         compare(DashboardBook.stepRows(12, true), 15)
         compare(DashboardBook.stepRows(12, false), 9)
         compare(DashboardBook.stepRows(4, true), 6, "a stored odd h, up")

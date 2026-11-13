@@ -802,6 +802,12 @@ QtObject {
         })
     }
 
+    // A height in rows as the columns it spans: the phone's row is a quarter
+    // of a column, so 18 reads "4.5" and 3 reads "0.75"
+    function heightInColumns(h) {
+        return String(Math.round(h * 25) / 100)
+    }
+
     // The phone's height control: the next multiple of the scale up or
     // down, and no lower than one scale's rows (a stored odd h stays until
     // a step moves it)
