@@ -401,11 +401,12 @@ struct ecuio_recording {
     std::unordered_map<std::string, uint32_t> by_name;
     std::vector<index_entry> index;
     std::vector<marker_entry> markers;
-    /* The cond lines kept, and their keys: each once, its place in
-     * condition_keys pointing at the map's own copy */
+    /* The cond lines kept, and their keys, each once: a set's most, so
+     * a lookup is a short scan that allocates nothing */
     std::vector<condition_entry> condition_events;
-    std::unordered_map<std::string, uint32_t> condition_key_index;
-    std::vector<const std::string*> condition_keys;
+    char condition_keys[ECUIO_CONDITION_MAX_CONDITIONS]
+                       [ECUIO_CONDITION_KEY_MAX + 1] = {};
+    uint32_t condition_key_count = 0;
 
     /* Opened through its frames: the set they decode with, each def's
      * signal (UINT32_MAX for one that never decoded), each def by its id,
@@ -435,7 +436,7 @@ struct ecuio_recording {
     uint32_t add_signal(const std::string& name);
     bool read_label(const char* text, size_t n, const char** why);
     bool read_events(const std::string& folder);
-    void take_condition(const ecuio_recording_rows::cond_line& c);
+    bool take_condition(const ecuio_recording_rows::cond_line& c);
     void read_copies(const std::string& folder);
     bool read_signals(ecuio_open_progress_t progress, void* user,
                       bool* canceled);
@@ -553,29 +554,38 @@ void ecuio_recording::read_copies(const std::string& folder)
               &conditions.flags, &conditions.length);
 }
 
-/* A cond line counted, and kept up to the cap */
-void ecuio_recording::take_condition(const rows::cond_line& c)
+/* A cond line counted, and kept up to the cap; false for a key past a
+ * set's most, which no writer makes */
+bool ecuio_recording::take_condition(const rows::cond_line& c)
 {
-    if (++info.condition_events > ECUIO_RECORDING_MAX_CONDITION_EVENTS) {
-        info.flags |= ECUIO_RECORDING_INFO_CONDITIONS_CUT;
-        return;
-    }
-    uint32_t key = 0;
+    uint32_t key = condition_key_count;
     if (!condition_events.empty() &&
-        *condition_keys[condition_events.back().key] == c.key) {
+        std::strcmp(condition_keys[condition_events.back().key], c.key) == 0) {
         key = condition_events.back().key; /* a flapping condition's */
     } else {
-        const auto at = condition_key_index.emplace(
-            c.key, static_cast<uint32_t>(condition_keys.size()));
-        if (at.second) {
-            condition_keys.push_back(&at.first->first);
+        for (uint32_t k = 0; k < condition_key_count; ++k) {
+            if (std::strcmp(condition_keys[k], c.key) == 0) {
+                key = k;
+                break;
+            }
         }
-        key = at.first->second;
+    }
+    if (key == condition_key_count) {
+        if (condition_key_count == ECUIO_CONDITION_MAX_CONDITIONS) {
+            return false;
+        }
+        std::memcpy(condition_keys[key], c.key, std::strlen(c.key) + 1);
+        ++condition_key_count;
+    }
+    if (++info.condition_events > ECUIO_RECORDING_MAX_CONDITION_EVENTS) {
+        info.flags |= ECUIO_RECORDING_INFO_CONDITIONS_CUT;
+        return true;
     }
     condition_events.push_back(condition_entry{
         c.host_us, c.t_us, c.value, c.term, key,
         static_cast<uint8_t>(c.on ? ECUIO_CONDITION_ON : ECUIO_CONDITION_OFF),
         static_cast<uint8_t>(c.flags)});
+    return true;
 }
 
 /* events.log: the format, the header's signals and UTC start, the
@@ -738,9 +748,9 @@ bool ecuio_recording::read_events(const std::string& folder)
                    rows::parse_drop(text, text_len, &count)) {
             drop_frames += count;
         } else if (rows::equals(e.rest, kind_len, "cond")) {
-            if (rows::parse_cond_line(text, text_len, &cond)) {
-                take_condition(cond);
-            } else if (conditions.lines_skipped < UINT32_MAX) {
+            if (!(rows::parse_cond_line(text, text_len, &cond) &&
+                  take_condition(cond)) &&
+                conditions.lines_skipped < UINT32_MAX) {
                 ++conditions.lines_skipped;
             }
         }
@@ -1784,8 +1794,7 @@ ecuio_recording_get_condition_event(const ecuio_recording_t* r, uint64_t index,
     out->state = e.state;
     out->flags = e.flags;
     out->term = e.term;
-    const std::string& key = *r->condition_keys[e.key];
-    std::memcpy(out->key, key.c_str(), key.size() + 1);
+    std::memcpy(out->key, r->condition_keys[e.key], sizeof out->key);
     return ECUIO_OK;
 }
 

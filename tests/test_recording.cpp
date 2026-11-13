@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "ecuio/conditions.h"
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
@@ -1841,6 +1842,38 @@ TEST(RecordingTest, CondLinesPastTheCapAreCountedAndTheFirstKept)
     ASSERT_EQ(s.rc, ECUIO_OK) << ecuio_last_error_detail();
     EXPECT_EQ(s.info().condition_events, cap);
     EXPECT_EQ(s.info().flags & ECUIO_RECORDING_INFO_CONDITIONS_CUT, 0u);
+}
+
+/* A set holds at most ECUIO_CONDITION_MAX_CONDITIONS keys: a line naming
+ * one more is none a writer makes, skipped and counted, and the keys
+ * already held go on being read */
+TEST(RecordingTest, CondLinesPastASetsKeysAreSkippedAndCounted)
+{
+    const uint32_t most = ECUIO_CONDITION_MAX_CONDITIONS;
+    std::string activity;
+    for (uint32_t k = 0; k <= most; ++k) {
+        activity += cond_at(1, "k" + std::to_string(k) + ",on,,1,0,1,1");
+    }
+    activity += cond_at(2, "k0,off,,2,0,2,2");
+    activity += cond_at(2, "k" + std::to_string(most) + ",off,,2,0,2,2");
+    activity += cond_at(2, "k" + std::to_string(most - 1) + ",off,,2,0,2,2");
+    Folder f;
+    f.write("events.log", events_with({}, activity));
+    f.write("signals.csv", std::string(rows::kSignalsHeader) + "\n");
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(r.info().condition_events, most + 2u);
+    ecuio_recording_conditions_t c{};
+    ASSERT_EQ(ecuio_recording_get_conditions(r.r, &c), ECUIO_OK);
+    EXPECT_EQ(c.lines_skipped, 2u) << "the key past a set's most, twice";
+    const std::string want[] = {"k0", "k" + std::to_string(most - 1)};
+    for (uint32_t i = 0; i < 2; ++i) {
+        ecuio_recording_condition_event_t e{};
+        ASSERT_EQ(ecuio_recording_get_condition_event(r.r, most + i, &e),
+                  ECUIO_OK);
+        EXPECT_EQ(std::string(e.key), want[i]);
+        EXPECT_EQ(e.state, ECUIO_CONDITION_OFF);
+    }
 }
 
 TEST(RecordingTest, ProgressIsCalledAndCancelsTheOpen)

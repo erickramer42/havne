@@ -214,8 +214,9 @@ typedef struct ecuio_recording ecuio_recording_t; /* opaque */
             ECUIO_RECORDING_MAX_CONDITION_EVENTS: the first that many are
             kept, and condition_events counts them all */
 
-/* The most cond lines the reader keeps (40 bytes each, so about 40 MiB):
- * a condition that flaps through a long recording */
+/* The most cond lines the reader keeps (40 bytes each, so about 40 MiB,
+ * beside a table of at most ECUIO_CONDITION_MAX_CONDITIONS keys): a
+ * condition that flaps through a long recording */
 #define ECUIO_RECORDING_MAX_CONDITION_EVENTS 1048576u
 
 /* ecuio_recording_info_t.format: events.log's header */
@@ -580,8 +581,9 @@ ecuio_status_t
 ecuio_recording_get_conditions(const ecuio_recording_t* r,
                                ecuio_recording_conditions_t* out);
 /* The index-th cond line in events.log's order, which the recorder writes
- * in time order (a line that doesn't parse left out and counted in
- * lines_skipped, an eighth field and after passed by; a flag
+ * in time order (a line that doesn't parse, or names a key past the
+ * ECUIO_CONDITION_MAX_CONDITIONS a set holds, left out and counted in
+ * lines_skipped; an eighth field and after passed by; a flag
  * word the reader doesn't know left out of flags). index runs below
  * info.condition_events and below ECUIO_RECORDING_MAX_CONDITION_EVENTS;
  * past it ECUIO_ERR_INVALID_ARGUMENT, out untouched. */

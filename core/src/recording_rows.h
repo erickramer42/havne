@@ -706,8 +706,8 @@ inline bool parse_cond_line(const char* p, size_t n, cond_line* c)
         !parse_count(f[6], len[6], &t_us)) {
         return false;
     }
+    std::memset(c->key, 0, sizeof c->key);
     std::memcpy(c->key, f[0], len[0]);
-    c->key[len[0]] = '\0';
     c->on = on;
     c->flags = flags;
     c->value = value;
