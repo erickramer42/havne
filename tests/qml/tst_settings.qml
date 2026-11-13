@@ -2154,8 +2154,10 @@ TestCase {
             const d = find(page, name)
             d.usePicker = true
             d.open()
+            page.signalNote = "an earlier import's note"
             DocumentPicker.deliver(d.request, -1, "", "")
             compare(find(page, "signalProblem").text, "The picker returned no document", name)
+            compare(find(page, "signalNote").text, "", "no earlier note beside the words: " + name)
             page.signalProblem = ""
         }
 
@@ -2167,9 +2169,11 @@ TestCase {
         const refused = find(page, "pluginProblem").text
         verify(refused !== "" && refused !== "The picker returned no document",
                "the pick reached the import, which refused it: " + refused)
+        page.pluginNote = "an earlier import's note"
         plugins.open()
         DocumentPicker.deliver(plugins.request, -1, "", "")
         compare(find(page, "pluginProblem").text, "The picker returned no document")
+        compare(find(page, "pluginNote").text, "", "no earlier note beside the words")
     }
 
     function test_aRefusedOrClashingFileIsNotAdded() {

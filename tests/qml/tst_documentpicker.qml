@@ -4,6 +4,7 @@
 import QtQuick
 import QtTest
 import App
+import AppTest
 
 // The open dialogs' own picker (DocumentPicker, DocumentOpenDialog.qml):
 // each answer reaches the dialog that asked, as Android's would. The desktop
@@ -131,6 +132,88 @@ TestCase {
         DocumentPicker.deliver(0, ok, providerUri, "x.json")
         DocumentPicker.deliver(request + 100, ok, providerUri, "x.json")
         compare(pickedSpy.count, 1)
+    }
+
+    // A second open of one dialog before the first answer: the first answer
+    // is dropped and the second is taken once
+    function test_aSecondOpenWhileAPickIsOutTakesOnlyTheSecond() {
+        const s = spied()
+        s.d.open()
+        const first = s.d.request
+        s.d.open()
+        verify(s.d.request !== first, "a pick of its own")
+        DocumentPicker.deliver(first, ok, providerUri, "first.json")
+        compare(s.accepted, 0, "the first pick's answer is stale")
+        DocumentPicker.deliver(s.d.request, ok, providerUri, "second.json")
+        compare(s.accepted, 1)
+        compare(s.d.selectedName, "second.json")
+    }
+
+    // Qt keeps one activity callback for each request code: two picks in a
+    // row never share one, and every code is inside Android's 16 bits
+    function test_eachPickHasARequestCodeOfItsOwn() {
+        let codes = []
+        for (let request = 1; request <= 300; ++request) {
+            const code = DocumentPicker.requestCodeOf(request)
+            verify(code > 0 && code <= 0xFFFF, "a 16-bit code: " + code)
+            codes.push(code)
+        }
+        for (let i = 1; i < codes.length; ++i)
+            verify(codes[i] !== codes[i - 1], "a pick's code differs from the one before: " + (i + 1))
+        compare(new Set(codes.slice(0, 256)).size, 256, "256 in turn before one comes back")
+    }
+
+    // Elsewhere the dialog is Qt's FileDialog, and its answer is the dialog's
+    function test_qtsDialogsAnswerIsTheDialogs() {
+        const d = createTemporaryObject(plainComponent, testCase)
+        verify(d)
+        let accepted = 0
+        let rejected = 0
+        d.accepted.connect(() => accepted++)
+        d.rejected.connect(() => rejected++)
+        // A file that exists: Qt's dialog refuses one that doesn't
+        const url = Harness.writeScratchFile("qt-dialog (1).json", "{}")
+        d.fileDialog.selectedFile = url
+        d.fileDialog.accepted()
+        compare(accepted, 1)
+        compare(d.selectedFile, url, "the dialog's pick")
+        compare(d.selectedName, "qt-dialog (1).json")
+        d.fileDialog.rejected()
+        compare(rejected, 1)
+        compare(accepted, 1, "a cancel accepts nothing")
+    }
+
+    // A failure that can't start is the newest pick's alone: an older
+    // dialog's queued words are dropped
+    function test_aStaleFailureIsDropped() {
+        DocumentPicker.setPickerForTesting(false)
+        const a = spied()
+        const b = spied()
+        a.d.open()
+        b.d.open()
+        tryVerify(() => b.failed.length === 1)
+        wait(0)
+        compare(a.failed, [], "the older pick's words are dropped")
+    }
+
+    // A dialog gone with its pick out: the next dialog's pick starts and is
+    // answered, and the gone one's late answer reaches no one
+    function test_aDialogGoneWithItsPickOutHoldsNothingUp() {
+        const gone = pickerComponent.createObject(testCase)
+        verify(gone)
+        gone.open()
+        const request = gone.request
+        gone.destroy()
+        wait(0)
+        const s = spied()
+        s.d.open()
+        verify(s.d.request > 0 && s.d.request !== request, "a pick of its own")
+        DocumentPicker.deliver(s.d.request, ok, providerUri, "next.json")
+        compare(s.accepted, 1)
+        compare(s.d.selectedName, "next.json")
+        DocumentPicker.deliver(request, ok, providerUri, "late.json")
+        compare(pickedSpy.count, 1, "the late answer is dropped")
+        compare(s.accepted, 1)
     }
 
     // Off Android with no stand-in, a pick fails in words; they come after

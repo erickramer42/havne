@@ -12,11 +12,8 @@
 #include <QJniEnvironment>
 #include <QJniObject>
 #include <QtCore/qcoreapplication_platform.h>
-// Private API, no compatibility promise: a Qt that changes it breaks this
-// file's compile in CI's android-build. The fallback is a transparent
-// activity of our own in app/android/src that launches the picker and hands
-// the result to a native method (registerForActivityResult needs androidx's
-// ComponentActivity, which QtActivity isn't)
+// Private API: a Qt that changes it breaks CI's android-build, and the way
+// out is an activity of our own handing the picker's result to native code
 #include <QtCore/private/qandroidextras_p.h>
 #endif
 
@@ -64,9 +61,6 @@ void DocumentPicker::failLater(int request, const QString& words)
 #ifdef Q_OS_ANDROID
 namespace {
 
-// Any number: Qt maps each receiver to a request code of its own
-constexpr int kRequestCode = 0x4450;
-
 // A QJniObject call clears a Java exception before it returns, so each
 // answer here is judged by what came back: an invalid object, or false
 
@@ -80,8 +74,7 @@ QJniObject javaText(const char* text)
 QString displayName(const QJniObject& uri)
 {
     QJniEnvironment env;
-    // Plain JNI, checked: a null projection asks for every column, and
-    // getString(0) would read another's
+    // Plain JNI, checked: a null projection asks for every column
     const jclass text = env.findClass("java/lang/String");
     jobjectArray columns =
         text == nullptr
@@ -100,10 +93,14 @@ QString displayName(const QJniObject& uri)
     env->DeleteLocalRef(columns);
     QString name;
     if (cursor.isValid()) {
-        if (cursor.callMethod<jboolean>("moveToFirst")) {
+        // By name: a provider may answer more columns than were asked
+        const jint column =
+            cursor.callMethod<jint>("getColumnIndex", "(Ljava/lang/String;)I",
+                                    javaText("_display_name").object());
+        if (column >= 0 && cursor.callMethod<jboolean>("moveToFirst")) {
             name = cursor
                        .callObjectMethod("getString", "(I)Ljava/lang/String;",
-                                         jint(0))
+                                         column)
                        .toString();
         }
         cursor.callMethod<void>("close");
@@ -145,10 +142,10 @@ void DocumentPicker::start(int request)
         return;
     }
     const QPointer<DocumentPicker> self(this);
-    // On Android's main thread: the URI read there (data is a local
-    // reference), the answer queued to the GUI thread
+    // On Android's main thread: the URI and name read there (a provider's
+    // query too; a slow one holds that thread), the answer queued to the GUI
     QtAndroidPrivate::startActivity(
-        intent, kRequestCode,
+        intent, requestCodeOf(request),
         [self, request](int, int resultCode, const QJniObject& data) {
             QString uri;
             QString name;

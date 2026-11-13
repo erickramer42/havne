@@ -3235,7 +3235,7 @@ TestCase {
         verify(!page.canUndo, "and it was one step")
     }
 
-    // Load layout through the phone's picker (finding 517): a pick of
+    // Load layout through the phone's picker: a pick of
     // "name (1).json" after a plain one loads the second file, never the
     // first, and a picker with no document says so
     function test_thePickersSecondPickLoadsTheSecondFile() {

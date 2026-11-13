@@ -26,19 +26,27 @@ class DocumentPicker : public QObject
     Q_PROPERTY(bool available READ available CONSTANT)
 
 public:
-    // Android's Activity.RESULT_OK and RESULT_CANCELED
+    // Android's Activity.RESULT_OK; any other code is a cancel
     static constexpr int kResultOk = -1;
-    static constexpr int kResultCanceled = 0;
 
     explicit DocumentPicker(QObject* parent = nullptr);
 
     bool available() const;
 
-    // Shows the picker and returns this pick's request number. Exactly one
+    // Shows the picker and returns this pick's request number. At most one
     // of picked, canceled and failed answers it, later on the GUI thread; a
     // newer pick makes an older one's answer stale, and a stale answer is
     // dropped, so a pick whose answer never comes holds nothing up
     Q_INVOKABLE int pick();
+
+    // The activity's request code for a pick: Qt keeps one callback for each
+    // code, so a second pick under one code would take the first's place.
+    // 256 in turn, inside the 16 bits Android allows
+    Q_INVOKABLE int requestCodeOf(int request) const
+    {
+        return kRequestCodeBase + (request & 0xFF);
+    }
+    static constexpr int kRequestCodeBase = 0x4400;
 
     // A pick's answer as Android hands it: the result code, the document's
     // URI as text ("" for none) and its display name ("" when unknown)

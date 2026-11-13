@@ -203,11 +203,6 @@ TestCase {
         compare(page.series(400).length, 3, "its numbers are plotted")
     }
 
-    // Import: a picked file's kind guessed from its first line; a CSV
-    // given a column map file imports through it and joins the list (the
-    // guess is skipped); a candump
-    // log of two buses is refused in core's words, the interface field
-    // shows, and the bus named imports; the kind switches; Cancel closes
     // Through the phone's picker: the panel names the file and the map as the
     // picker does (a provider's URL ends in an id), and a picker with no
     // document says so
@@ -237,8 +232,20 @@ TestCase {
         DocumentPicker.deliver(maps.request, -1, "", "")
         compare(find(page, "importNote").text, "The picker returned no document")
         compare(page.importMap, map, "nothing read")
+
+        page.importNote = ""
+        files.open()
+        DocumentPicker.deliver(files.request, -1, "", "")
+        compare(find(page, "importNote").text, "The picker returned no document",
+                "the log's own picker says so too")
+        compare(page.importFile, csv, "the log picked before stays")
     }
 
+    // Import: a picked file's kind guessed from its first line; a CSV
+    // given a column map file imports through it and joins the list (the
+    // guess is skipped); a candump
+    // log of two buses is refused in core's words, the interface field
+    // shows, and the bus named imports; the kind switches; Cancel closes
     function test_importMakesARecordingOfALoggersFile() {
         const page = createPage()
         verify(find(page, "importButton").visible)
