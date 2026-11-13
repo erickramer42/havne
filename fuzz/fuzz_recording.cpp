@@ -1,6 +1,7 @@
 // File/layer: fuzz/fuzz_recording.cpp | C++17, Qt-free, libFuzzer
 // Testing: FUZZ: fuzz_recording (rows, a folder, the stretches' rules)
 
+#include <ecuio/conditions.h>
 #include <ecuio/core.h>
 #include <ecuio/recording.h>
 #include <ecuio/signals.h>
@@ -36,6 +37,55 @@ namespace {
 bool same_bits(double a, double b)
 {
     return memcmp(&a, &b, sizeof a) == 0;
+}
+
+constexpr uint32_t kCondFlags =
+    ECUIO_CONDITION_STALE | ECUIO_CONDITION_FIRED | ECUIO_CONDITION_HELD;
+
+/* A key in room of `room` bytes: terminated, 1 to 31 of a-z, 0-9 and _,
+ * the rest of the room zero */
+bool condition_key(const char* key, size_t room)
+{
+    const void* end = memchr(key, '\0', room);
+    if (end == nullptr) {
+        return false;
+    }
+    const size_t n = static_cast<size_t>(static_cast<const char*>(end) - key);
+    if (n == 0 || n > ECUIO_CONDITION_KEY_MAX) {
+        return false;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        const char k = key[i];
+        if (!((k >= 'a' && k <= 'z') || (k >= '0' && k <= '9') || k == '_')) {
+            return false;
+        }
+    }
+    for (size_t i = n; i < room; ++i) {
+        if (key[i] != '\0') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* A SHA-256 in room of `room` bytes: "" or 64 lowercase hex digits */
+bool sha256_text(const char* text, size_t room)
+{
+    const void* end = memchr(text, '\0', room);
+    if (end == nullptr) {
+        return false;
+    }
+    const size_t n = static_cast<size_t>(static_cast<const char*>(end) - text);
+    if (n != 0 && n != 64) {
+        return false;
+    }
+    for (size_t i = 0; i < n; ++i) {
+        const char c = text[i];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void one_line(const char* p, size_t n)
@@ -121,6 +171,29 @@ void one_line(const char* p, size_t n)
     (void)rows::parse_end(p, n, &records, &notes);
     uint64_t frames = 0;
     (void)rows::parse_drop(p, n, &frames);
+
+    /* A copy's line: 64 lowercase hex digits */
+    std::string hex;
+    if (rows::parse_named_file(p, n, rows::kConditionsName, &hex) &&
+        !sha256_text(hex.c_str(), hex.size() + 1)) {
+        abort();
+    }
+
+    /* A cond line: a key of 1 to 31 of a-z, 0-9 and _, known flag bits
+     * alone, and two parses alike, NaN bits included */
+    rows::cond_line c1;
+    rows::cond_line c2;
+    const bool cond = rows::parse_cond_line(p, n, &c1);
+    if (cond != rows::parse_cond_line(p, n, &c2)) {
+        abort();
+    }
+    if (cond && (!condition_key(c1.key, sizeof c1.key) ||
+                 (c1.flags & ~kCondFlags) != 0 || strcmp(c1.key, c2.key) != 0 ||
+                 c1.on != c2.on || c1.flags != c2.flags ||
+                 !same_bits(c1.value, c2.value) || c1.term != c2.term ||
+                 c1.host_us != c2.host_us || c1.t_us != c2.t_us)) {
+        abort();
+    }
 }
 
 /* Every line of the input, each a heap copy of its exact size, so ASan
@@ -222,7 +295,71 @@ struct opened {
     ecuio_status_t rc = ECUIO_OK;
     std::string detail;
     ecuio_recording_info_t info{};
+    ecuio_recording_conditions_t conditions{};
+    std::vector<ecuio_recording_condition_event_t> events;
 };
+
+/* The copy and the cond lines (ADR-0063 section 8): flags and hash in
+ * their forms, each event kept in its fields' forms with zero reserved
+ * words, as many as the count up to the cap, and none past them */
+void read_conditions(const ecuio_recording_t* r, opened& o)
+{
+    ecuio_recording_conditions_t& c = o.conditions;
+    memset(&c, 0xA5, sizeof c);
+    if (ecuio_recording_get_conditions(r, &c) != ECUIO_OK) {
+        abort();
+    }
+    const uint32_t named = ECUIO_RECORDING_CONDITIONS_NAMED;
+    const uint32_t present = ECUIO_RECORDING_CONDITIONS_PRESENT;
+    const uint32_t match = ECUIO_RECORDING_CONDITIONS_MATCH;
+    if ((c.flags & ~(named | present | match)) != 0 ||
+        ((c.flags & match) != 0 &&
+         (c.flags & (named | present)) != (named | present)) ||
+        ((c.flags & present) == 0 && c.length != 0) ||
+        !sha256_text(c.sha256, sizeof c.sha256) ||
+        ((c.flags & named) != 0) != (c.sha256[0] != '\0')) {
+        abort();
+    }
+    for (uint64_t w : c.reserved) {
+        if (w != 0) {
+            abort();
+        }
+    }
+    const uint64_t count = o.info.condition_events;
+    const bool cut = count > ECUIO_RECORDING_MAX_CONDITION_EVENTS;
+    if (cut != ((o.info.flags & ECUIO_RECORDING_INFO_CONDITIONS_CUT) != 0)) {
+        abort();
+    }
+    const uint64_t kept = cut ? ECUIO_RECORDING_MAX_CONDITION_EVENTS : count;
+    o.events.resize(static_cast<size_t>(kept));
+    for (uint64_t i = 0; i < kept; ++i) {
+        ecuio_recording_condition_event_t& e = o.events[i];
+        memset(&e, 0xA5, sizeof e);
+        if (ecuio_recording_get_condition_event(r, i, &e) != ECUIO_OK ||
+            !condition_key(e.key, sizeof e.key) ||
+            e.state > ECUIO_CONDITION_ON || (e.flags & ~kCondFlags) != 0 ||
+            e.reserved0 != 0 || e.reserved[0] != 0 || e.reserved[1] != 0) {
+            abort();
+        }
+    }
+    ecuio_recording_condition_event_t past;
+    memset(&past, 0x5A, sizeof past);
+    const ecuio_recording_condition_event_t untouched = past;
+    if (ecuio_recording_get_condition_event(r, kept, &past) !=
+            ECUIO_ERR_INVALID_ARGUMENT ||
+        memcmp(&past, &untouched, sizeof past) != 0) {
+        abort();
+    }
+}
+
+bool same_conditions(const opened& a, const opened& b)
+{
+    return memcmp(&a.conditions, &b.conditions, sizeof a.conditions) == 0 &&
+           a.events.size() == b.events.size() &&
+           (a.events.empty() ||
+            memcmp(a.events.data(), b.events.data(),
+                   a.events.size() * sizeof a.events[0]) == 0);
+}
 
 /* The closed span over a signal's every sample (ecuio_recording_stats):
  * the open's count, and for a number its range, with the extremes' times
@@ -406,6 +543,7 @@ opened open_and_query(const ecuio_signal_set_t* set)
             (set != nullptr)) {
         abort();
     }
+    read_conditions(r, o);
     for (uint32_t k = 0; k < o.info.signal_count; ++k) {
         ecuio_recording_signal_t s{};
         if (ecuio_recording_get_signal(r, k, &s) != ECUIO_OK ||
@@ -997,13 +1135,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         each_line(data + 1, size - 1);
         return 0;
     }
-    /* events.log, signals.csv, markers.csv, frames.csv: absent past the
-     * cuts given */
-    const uint8_t* parts[4] = {};
-    size_t lens[4] = {};
+    /* events.log, signals.csv, markers.csv, frames.csv, conditions.json:
+     * absent past the cuts given */
+    const uint8_t* parts[5] = {};
+    size_t lens[5] = {};
     size_t count = 0;
     size_t start = 1;
-    for (size_t i = 1; i <= size && count < 4; ++i) {
+    for (size_t i = 1; i <= size && count < 5; ++i) {
         if (i == size || data[i] == 0x1E) {
             parts[count] = data + start;
             lens[count] = i - start;
@@ -1022,16 +1160,33 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     write_file("signals.csv", parts[1], lens[1], count > 1);
     write_file("markers.csv", parts[2], lens[2], count > 2);
     write_file("frames.csv", parts[3], lens[3], count > 3);
+    write_file("conditions.json", parts[4], lens[4], count > 4);
     /* signals.csv, then the frames through obd2 (packed replies split),
-     * the mock's set (a computed signal) and a float, each twice alike */
+     * the mock's set (a computed signal) and a float, each twice alike;
+     * every open that succeeds reads the same conditions from events.log */
     const ecuio_signal_set_t* sets[] = {nullptr, ecuio_obd2_signal_set(),
                                         ecuio_mock_signal_set(), float_set()};
+    opened first_ok;
+    bool any_ok = false;
     for (const ecuio_signal_set_t* set : sets) {
         const opened a = open_and_query(set);
         const opened b = open_and_query(set);
         if (a.rc != b.rc || a.detail != b.detail ||
-            memcmp(&a.info, &b.info, sizeof a.info) != 0) {
+            memcmp(&a.info, &b.info, sizeof a.info) != 0 ||
+            !same_conditions(a, b)) {
             abort();
+        }
+        if (a.rc != ECUIO_OK) {
+            continue;
+        }
+        if (any_ok &&
+            (!same_conditions(a, first_ok) ||
+             a.info.condition_events != first_ok.info.condition_events)) {
+            abort();
+        }
+        if (!any_ok) {
+            first_ok = a;
+            any_ok = true;
         }
     }
     const checked x = check_folder(0);
