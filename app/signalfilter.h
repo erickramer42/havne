@@ -14,14 +14,16 @@
 // Live's list (LiveSignalModel holds one) and the Recordings page's
 // signal rows (the page makes its own), so both filter alike. A row
 // shows when every word typed is in its name or its unit, ignoring
-// case; when it's plotted, if plottedOnly; and when its group is chosen,
-// or none is. QtCore only: test_bridge compiles it.
+// case; when it's plotted, if plottedOnly; when the session asks it, if
+// askedOnly (Live's alone: a recording asks nothing); and when its group
+// is chosen, or none is. QtCore only: test_bridge compiles it.
 class SignalFilter : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QString text READ text WRITE setText NOTIFY changed)
     Q_PROPERTY(
         bool plottedOnly READ plottedOnly WRITE setPlottedOnly NOTIFY changed)
+    Q_PROPERTY(bool askedOnly READ askedOnly WRITE setAskedOnly NOTIFY changed)
     // The chosen groups' codes (ECUIO_SIGNAL_GROUP_*), in code order
     Q_PROPERTY(QVariantList groups READ groups NOTIFY changed)
     // Anything narrows the list
@@ -34,11 +36,15 @@ public:
     void setText(const QString& text);
     bool plottedOnly() const { return m_plottedOnly; }
     void setPlottedOnly(bool on);
+    bool askedOnly() const { return m_askedOnly; }
+    void setAskedOnly(bool on);
     QVariantList groups() const;
     bool active() const;
 
+    // asked: the session asks the row (the default pick's "not asked"
+    // rows aren't)
     Q_INVOKABLE bool matches(const QString& name, const QString& unit,
-                             int group, bool plotted) const;
+                             int group, bool plotted, bool asked = true) const;
     Q_INVOKABLE bool chosen(int group) const;
     Q_INVOKABLE void toggleGroup(int group);
     Q_INVOKABLE void clear();
@@ -57,5 +63,6 @@ private:
     QString m_text;
     QStringList m_words; // the text's words, case-folded
     bool m_plottedOnly = false;
+    bool m_askedOnly = false;
     std::set<int> m_groups;
 };

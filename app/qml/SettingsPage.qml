@@ -1412,7 +1412,8 @@ Pane {
     Connections {
         target: Bridge.signalModel
 
-        function onSubscribedCountChanged() {
+        // Once for each change of choices, a text row's tick included
+        function onTicksChanged() {
             if (page.plottedApplied && page.pickedVehicle !== null
                     && VehicleBook.isAdapterUri(Bridge.currentUri))
                 page.rememberPlotting()

@@ -13,6 +13,7 @@
 #include "can_line.h"
 #include "clear_run.h"
 #include "condition_lines.h"
+#include "default_pick.h"
 #include "diagnostics_line.h"
 #include "elm327_listener.h"
 #include "frames_lines.h"
@@ -2231,10 +2232,11 @@ void usage(FILE* to)
         "                         [--until-scanned] [--record <folder> "
         "[--label <name>]]\n"
         "                         [--signals <file> | --plugin <pkg>]\n"
-        "                         [--conditions <file>]\n"
+        "                         [--conditions <file>] [--pick ranked]\n"
         "       havne-cli log <uri> <folder> [--signal <name>]... "
-        "[--min-sweep <ms>]\n"
-        "                      [--label <name>] [--seconds S]\n"
+        "[--pick ranked]\n"
+        "                      [--min-sweep <ms>] [--label <name>] "
+        "[--seconds S]\n"
         "                      [--signals <file> | --plugin <pkg>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli clear <uri> --yes [--engine-running [--moving]]\n"
@@ -2318,15 +2320,24 @@ void usage(FILE* to)
         "         --plugin loads a plugin (a folder or a packed file) and\n"
         "         registers its variants as plugin.<id>.<variant>; the URI's\n"
         "         profile= names the one to read.\n"
+        "         --pick ranked asks only the profile's ranked signals (the\n"
+        "         ones a UI plots first: the app's default pick without its\n"
+        "         gauges and ticks), and a focus line names them; a profile\n"
+        "         that ranks none, a session that asks nothing (the mock, a\n"
+        "         replay) and a pick core refuses leave the whole set asked,\n"
+        "         said on standard error.\n"
         "log      records the session <uri> names to a folder of its own in\n"
         "         <folder>, as stream --record does, asking only the signals\n"
         "         --signal names (every one with none) so each is read as\n"
         "         often as the bus allows; export then takes those columns\n"
-        "         by itself. Writes a log line every 10 s with the\n"
-        "         recording's size, no frames or values. Runs until Ctrl+C,\n"
-        "         S seconds, a failed recording or a replay's last frame; a\n"
-        "         lost link is logged and waited out. --signals and --plugin\n"
-        "         as stream's.\n"
+        "         by itself. --pick ranked adds the profile's ranked signals\n"
+        "         to them, the recording naming them a pick, not a log's\n"
+        "         focus; on a profile that ranks none or a session that asks\n"
+        "         nothing it adds none (no names: the whole set). Writes a\n"
+        "         log line every 10 s with the recording's size, no frames\n"
+        "         or values. Runs until Ctrl+C, S seconds, a failed recording\n"
+        "         or a replay's last frame; a lost link is logged and waited\n"
+        "         out. --signals and --plugin as stream's.\n"
         "play     (Linux) writes a session's frames to a virtual CAN "
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
@@ -2554,6 +2565,7 @@ struct StreamArgs {
     const char* signals = nullptr; // --signals' file
     const char* plugin = nullptr;  // --plugin's package
     const char* conditions = nullptr; // --conditions' file
+    bool pick_ranked = false;         // --pick ranked
 };
 
 // The markers typed into stream --record (ADR-0049 section 4): a thread
@@ -2763,6 +2775,16 @@ void poll_health(Output& out, ecuio_session_t* session, int32_t* last_error,
     write_line(out, l);
 }
 
+// Whether a session asks its signals (an adapter's, a sim's): the mock,
+// a replay and a listening session take no pick, as in the app
+bool session_asks(ecuio_session_t* session)
+{
+    ecuio_session_info_t info;
+    std::memset(&info, 0, sizeof info);
+    return ecuio_session_get_info(session, &info) == ECUIO_OK &&
+           (info.flags & ECUIO_SESSION_INFO_REQUESTS) != 0;
+}
+
 // A replay that doesn't loop has ended when every row is read and every
 // row its faults didn't take (ADR-0041) has been written: frames lost to
 // ?faults= never arrive, so the rows alone would wait forever
@@ -2889,6 +2911,28 @@ int run_stream(const StreamArgs& args)
         conditions = nullptr;
         ecuio_register_conditions_callback(session, on_conditions,
                                            stream.get());
+    }
+    // --pick ranked before a recording attaches, so its header names the
+    // pick; as in the app, a refused pick leaves the whole set asked
+    if (args.pick_ranked) {
+        const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+        const std::vector<uint16_t> ids = cli::default_pick(set, {});
+        if (!session_asks(session)) {
+            std::fprintf(stderr, "havne-cli: the session asks no signal: "
+                                 "--pick ranked picks none\n");
+        } else if (ids.empty()) {
+            std::fprintf(stderr, "havne-cli: the profile ranks no signal: "
+                                 "--pick ranked asks every one\n");
+        } else if (ecuio_session_set_focus_with(
+                       session, ids.data(), static_cast<uint32_t>(ids.size()),
+                       0, ECUIO_FOCUS_DEFAULT_PICK) != ECUIO_OK) {
+            std::fprintf(stderr, "havne-cli: asking every signal: %s\n",
+                         ecuio_last_error_detail());
+        } else {
+            BigLine b(cli::focus_line_bytes(ids.size()));
+            cli::focus_line(b.line, set, ids, 0, true);
+            write_line(out, b.line);
+        }
     }
     ecuio_recorder_t* recorder = nullptr;
     bool recording_failed = false;
@@ -3269,11 +3313,31 @@ int run_log(const cli::LogArgs& args)
             ? info.channel_count
             : ECUIO_SESSION_INFO_MAX_CHANNELS;
     cli::SessionSeen session_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    // --pick ranked: the names join the set's ranked signals as a default
+    // pick; with no pick to make, the names alone are the focus
+    uint32_t flags = 0;
+    uint32_t min_sweep_ms = args.min_sweep_ms;
+    if (args.pick_ranked) {
+        const std::vector<uint16_t> picked = cli::default_pick(set, ids);
+        if (!session_asks(session)) {
+            std::fprintf(stderr, "havne-cli: the session asks no signal: "
+                                 "--pick ranked adds none\n");
+        } else if (picked.empty()) {
+            std::fprintf(stderr, "havne-cli: the profile ranks no signal: "
+                                 "--pick ranked adds none\n");
+        } else {
+            ids = picked;
+            flags = ECUIO_FOCUS_DEFAULT_PICK;
+        }
+    }
+    if (ids.empty()) {
+        min_sweep_ms = 0; // no focus: the whole set, which takes no minimum
+    }
     // The focus before the recorder attaches: the header's focus line is
     // the focus at the attach
     st = ecuio_session_set_focus_with(
         session, ids.empty() ? nullptr : ids.data(),
-        static_cast<uint32_t>(ids.size()), args.min_sweep_ms, 0);
+        static_cast<uint32_t>(ids.size()), min_sweep_ms, flags);
     if (st != ECUIO_OK) {
         write_error(out, st, ecuio_last_error_detail());
         out.flush();
@@ -3282,7 +3346,8 @@ int run_log(const cli::LogArgs& args)
     }
     {
         BigLine b(cli::focus_line_bytes(ids.size()));
-        cli::focus_line(b.line, set, ids, args.min_sweep_ms);
+        cli::focus_line(b.line, set, ids, min_sweep_ms,
+                        flags == ECUIO_FOCUS_DEFAULT_PICK);
         write_line(out, b.line);
     }
     ecuio_recorder_t* recorder = nullptr;
@@ -5922,6 +5987,12 @@ int run(int argc, char** argv)
             std::fprintf(stderr,
                          "havne-cli: --conditions takes one condition file\n");
             return kExitUsage;
+        } else if (a == "--pick") {
+            if (i + 1 >= argc || !cli::parse_pick(argv[++i])) {
+                std::fprintf(stderr, "havne-cli: %s\n", cli::pick_why());
+                return kExitUsage;
+            }
+            args.pick_ranked = true;
         } else if (a.rfind("--", 0) == 0 || args.uri) {
             std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
             usage(stderr);
