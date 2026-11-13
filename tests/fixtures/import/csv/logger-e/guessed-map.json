@@ -1,0 +1,11 @@
+{
+  "havne_column_map": 1,
+  "header_row": 1,
+  "delimiter": ",",
+  "decimal": ".",
+  "time": {"column": "Time (s)", "unit": "s"},
+  "signals": [
+    {"column": "Engine speed (rpm)", "name": "Engine speed", "unit": "rpm", "kind": "number", "decimals": 0},
+    {"column": "Gear", "name": "Gear", "kind": "text"}
+  ]
+}

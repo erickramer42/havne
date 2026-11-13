@@ -436,6 +436,13 @@ int health_interrupted(void* user)
     return interrupted_at(static_cast<bool*>(user), "health report");
 }
 
+// The sweep's sizing before an export at an interval asks as the export
+// does, its first ask held under its own name
+int interval_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "interval check");
+}
+
 // The column check's open (ecuio_open_progress_t) asks as the export does
 int open_interrupted(uint64_t, uint64_t, void* user)
 {
@@ -2298,7 +2305,11 @@ void usage(FILE* to)
         "         each file checked for the car's identity; a check that\n"
         "         finds any writes nothing. --estimate writes no file: the\n"
         "         wide CSV's rows and bytes, exact, at --rows' interval, or\n"
-        "         for a row a sweep, every 100 ms and every 250 ms.\n"
+        "         for one row per sweep, every 100 ms and every 250 ms. An\n"
+        "         interval that gives no fewer rows than every sweep (the\n"
+        "         recording is slower than it) says so with\n"
+        "         no_fewer_than_sweep, and export on stderr too; export's\n"
+        "         --rows <ms> sizes the sweep first for it, a pass more.\n"
         "health   writes a car's health as one scrubbed file, JSON or a\n"
         "         text for a person: the vehicle from its VIN (model year,\n"
         "         make, check digit; never the VIN), the inspection's\n"
@@ -5327,7 +5338,8 @@ int run(int argc, char** argv)
             return ended_interrupted(out, "column check");
         }
         if (ex.estimate) {
-            const std::vector<uint32_t> rows = cli::estimate_intervals(ex);
+            const std::vector<uint32_t> shown = cli::estimate_intervals(ex);
+            const std::vector<uint32_t> rows = cli::with_sweep(shown);
             std::vector<ecuio_export_estimate_t> sized(rows.size());
             const ecuio_status_t sizing = ecuio_export_estimate_with(
                 &ex.options, rows.data(), static_cast<uint32_t>(rows.size()),
@@ -5341,10 +5353,28 @@ int run(int argc, char** argv)
                 return ended(out, kExitConnect);
             }
             BigLine sizes(1024);
-            cli::estimate_line(sizes.line, rows.data(), sized.data(),
-                               sized.size(), say_missing());
+            cli::estimate_line(
+                sizes.line, rows.data(), sized.data(), shown.size(),
+                say_missing(),
+                cli::sweep_rows_of(rows.data(), sized.data(), sized.size()));
             write_line(out, sizes.line);
             return ended(out, kExitOk);
+        }
+        // An interval is judged against the sweep's rows, sized first so an
+        // interrupt here leaves nothing written: one pass more
+        uint64_t sweep_rows = UINT64_MAX;
+        if (ex.options.format == ECUIO_EXPORT_CSV &&
+            ex.options.layout == ECUIO_CSV_WIDE && ex.options.row_ms > 0) {
+            const uint32_t sweep = 0;
+            ecuio_export_estimate_t sized{};
+            const ecuio_status_t sizing = ecuio_export_estimate_with(
+                &ex.options, &sweep, 1, interval_interrupted, &asked, &sized);
+            if (sizing == ECUIO_ERR_CANCELED) {
+                return ended_interrupted(out);
+            }
+            if (sizing == ECUIO_OK) {
+                sweep_rows = sized.rows;
+            }
         }
         ecuio_export_report_t report{};
         const ecuio_status_t rc =
@@ -5363,8 +5393,16 @@ int run(int argc, char** argv)
             write_error(out, rc);
             return ended(out, kExitConnect);
         }
-        cli::exported_line(l, ex, report, say_missing());
+        const bool no_fewer = cli::no_fewer_than_sweep(ex.options.row_ms,
+                                                       report.rows, sweep_rows);
+        cli::exported_line(l, ex, report, say_missing(), no_fewer);
         write_line(out, l);
+        if (no_fewer) {
+            std::fprintf(stderr,
+                         "havne-cli: every %u ms gives no fewer rows than "
+                         "every sweep: the recording is slower than that\n",
+                         static_cast<unsigned>(ex.options.row_ms));
+        }
         return ended(out, kExitOk);
     }
     if (command == "import") {

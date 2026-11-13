@@ -18,6 +18,7 @@
 
 #include "csv_import.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -257,11 +258,29 @@ struct bounded_source {
     int get() { return at < n ? p[at++] : -1; }
 };
 
+/* The column the guess would take as the time under this header: the
+ * first named as one and not twice, else the first (decide_time's order) */
+inline size_t time_column_of(const std::vector<std::string>& head)
+{
+    for (size_t i = 0; i < head.size(); ++i) {
+        std::string name;
+        std::string unit;
+        bool bracketed = false;
+        split_header(head[i], &name, &unit, &bracketed);
+        if (named_as_time(name) &&
+            std::count(head.begin(), head.end(), head[i]) == 1) {
+            return i;
+        }
+    }
+    return 0;
+}
+
 /* Whether the record at off reads as a header split by delimiter: two or
  * more cells, more than half of its non-empty ones not numbers or times,
  * then up to kCheckRows rows of its cell count, each with more than half
  * of its non-empty cells numbers or times, read as the import reads them,
- * padding trimmed (a row of empty cells skipped;
+ * padding trimmed (a row of empty cells skipped, and so is one that fails
+ * the numbers' rule with its cell in time_column_of empty;
  * a row the kCheckBytes window ends inside ends the rows, as the file's
  * end would) */
 inline bool header_at(const unsigned char* p, size_t n, size_t off,
@@ -292,6 +311,7 @@ inline bool header_at(const unsigned char* p, size_t n, size_t off,
     if (filled == 0 || (filled - numbers) * 2 <= filled) {
         return false;
     }
+    const size_t time_at = time_column_of(head);
     uint32_t rows = 0;
     while (rows < kCheckRows) {
         const int got = r.next(row, &line, &why);
@@ -325,6 +345,9 @@ inline bool header_at(const unsigned char* p, size_t n, size_t off,
             continue; /* a row of empty cells says nothing */
         }
         if (row_numbers * 2 <= row_filled) {
+            if (row[time_at].empty()) {
+                continue; /* the import leaves it out unread */
+            }
             return false;
         }
         ++rows;
