@@ -1,10 +1,14 @@
 // File/layer: tests/test_cli_log.cpp | test_cli, Qt-free, C++17
-// Testing: UNIT: CliLogTest (test_cli)
+// Testing: UNIT: CliLogTest, CliPickTest (test_cli)
 //
 // cli/log_lines.h: the log command's arguments, the picks resolved
-// against a set, its lines and the log line's ticker.
+// against a set, its lines and the log line's ticker; cli/default_pick.h
+// (CliPickTest), the default pick --pick ranked and the app share.
 
+#include "default_pick.h"
 #include "log_lines.h"
+
+#include "ecuio/profile.h"
 
 #include <gtest/gtest.h>
 
@@ -101,7 +105,97 @@ TEST(CliLogTest, AMinimumTimeBetweenSweepsIsTakenWithPicks)
     }
     EXPECT_EQ(
         why_of({"havne-cli", "log", "mock://x", "out", "--min-sweep", "250"}),
-        "--min-sweep goes with --signal: it paces the picked signals");
+        "--min-sweep goes with --signal or --pick ranked: it paces the "
+        "picked signals");
+    {
+        Args a({"havne-cli", "log", "mock://x", "out", "--pick", "ranked",
+                "--min-sweep", "250"});
+        cli::LogArgs la;
+        std::string why;
+        ASSERT_TRUE(cli::parse_log(a.argc(), a.argv.data(), la, &why)) << why;
+        EXPECT_EQ(la.min_sweep_ms, 250U);
+    }
+}
+
+/* --pick takes "ranked" alone, with or without --signal */
+TEST(CliLogTest, PickTakesRankedAlone)
+{
+    Args a({"havne-cli", "log", "mock://x", "out", "--pick", "ranked",
+            "--signal", "RPM"});
+    cli::LogArgs la;
+    std::string why;
+    ASSERT_TRUE(cli::parse_log(a.argc(), a.argv.data(), la, &why)) << why;
+    EXPECT_TRUE(la.pick_ranked);
+    ASSERT_EQ(la.names.size(), 1U);
+    cli::LogArgs plain;
+    Args b({"havne-cli", "log", "mock://x", "out"});
+    ASSERT_TRUE(cli::parse_log(b.argc(), b.argv.data(), plain, &why)) << why;
+    EXPECT_FALSE(plain.pick_ranked);
+    const std::string words =
+        "--pick takes 'ranked': the profile's ranked signals";
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "out", "--pick", "all"}),
+              words);
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "out", "--pick"}), words);
+    EXPECT_TRUE(cli::parse_pick("ranked"));
+    EXPECT_FALSE(cli::parse_pick("Ranked"));
+    EXPECT_FALSE(cli::parse_pick(nullptr));
+}
+
+/* The focus line says a default pick after the signals, before any
+ * minimum */
+TEST(CliLogTest, TheFocusLineNamesAPick)
+{
+    Set s;
+    const std::vector<uint16_t> ids = {10, 11};
+    EXPECT_EQ(
+        text([&](cli::Line& l) { cli::focus_line(l, &s.set, ids, 250, true); }),
+        "{\"type\":\"focus\",\"signals\":[{\"id\":10,\"name\":\"RPM\"},"
+        "{\"id\":11,\"name\":\"Vehicle Speed\"}],\"pick\":\"ranked\","
+        "\"min_sweep_ms\":250}");
+    EXPECT_EQ(
+        text([&](cli::Line& l) { cli::focus_line(l, &s.set, {}, 0, true); }),
+        "{\"type\":\"focus\",\"signals\":[],\"pick\":\"ranked\"}");
+}
+
+/* The default pick (cli/default_pick.h): a set's ranked number defs and
+ * the ids added, in the set's order, each once; a text's rank doesn't
+ * count, an id the set lacks is passed by, and a set that ranks none is
+ * asked whole (an empty pick) */
+TEST(CliPickTest, ThePickIsTheRankedDefsAndTheAddedInTheSetsOrder)
+{
+    Set s;
+    EXPECT_FALSE(cli::set_ranks(&s.set));
+    EXPECT_FALSE(cli::set_ranks(nullptr));
+    EXPECT_TRUE(cli::default_pick(&s.set, {11, 13}).empty())
+        << "a set that ranks none is asked whole";
+
+    s.defs[3].plot_rank = 1; /* the text: no rank of the pick's */
+    EXPECT_FALSE(cli::set_ranks(&s.set));
+    EXPECT_FALSE(cli::ranked_def(s.defs[3]));
+
+    s.defs[2].plot_rank = 2; /* Coolant Temp */
+    EXPECT_TRUE(cli::set_ranks(&s.set));
+    EXPECT_EQ(cli::default_pick(&s.set, {}), std::vector<uint16_t>{12});
+    EXPECT_EQ(cli::default_pick(&s.set, {13, 99, 10, 12, 10}),
+              (std::vector<uint16_t>{10, 12, 13}));
+    EXPECT_TRUE(cli::default_pick(nullptr, {10}).empty());
+}
+
+/* obd2's pick with nothing added is obd2's ranked signals */
+TEST(CliPickTest, Obd2sPickIsItsRankedSignals)
+{
+    const ecuio_signal_set_t* obd2 = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("obd2", &obd2), ECUIO_OK);
+    const std::vector<uint16_t> pick = cli::default_pick(obd2, {});
+    EXPECT_EQ(pick.size(), 14U);
+    for (uint16_t id : pick) {
+        bool ranked = false;
+        for (uint32_t i = 0; i < obd2->count; ++i) {
+            ranked = ranked ||
+                     (obd2->defs[i].id == id && obd2->defs[i].plot_rank != 0);
+        }
+        EXPECT_TRUE(ranked) << id;
+    }
 }
 
 /* The focus line says the minimum only when one is set, after the picks,
