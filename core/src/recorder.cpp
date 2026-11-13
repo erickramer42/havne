@@ -10,11 +10,11 @@
 // signals.csv, events.log's link and cond lines, markers.csv and
 // latency.csv in ADR-0017's rows, and the caller's notes and marks, which
 // come through a queue of their own, into events.log and markers.csv. A
-// frame's condition events ride in its record and are never lost to a
-// full ring: a frame that doesn't fit leaves them in a carry that goes in
-// ahead of the next record (ADR-0063 section 8). The writer
-// never holds the session: what it writes reached it through the ring
-// or the queue, or was copied at attach.
+// frame's condition events ride in its record; a frame that doesn't fit
+// leaves them in a carry of 256 that goes in ahead of the next record, and
+// past it they are counted and said in a drop line (ADR-0063 section 8).
+// The writer never holds the session: what it writes reached it through
+// the ring or the queue, or was copied at attach.
 
 #include "recorder.h"
 
@@ -629,9 +629,8 @@ struct ecuio_recorder {
     link_body pending_link{};
     uint64_t timing_next_us = kTimingEveryUs;
 
-    /* The set of conditions the recording holds and its attach, fixed at
-     * attach (NULL: none); the held states and the carried events are the
-     * worker's alone, then close's */
+    /* The recording's set of conditions (NULL: none) and its attach, fixed
+     * at attach; held states and the carry are the worker's, then close's */
     std::shared_ptr<const ecuio_condition_record> conditions;
     uint32_t conditions_generation = 0;
     bool held_taken = false;

@@ -1,7 +1,8 @@
 // File/layer: core/src/recording_rows.h | internal, C++17, Qt-free,
 //             header-only; ALL platforms
-// Testing: UNIT: RecordingRowsTest, RecordingTest (test_core); JsonTest
-//          (test_core); CsvExportTest and CsvGuessTest (kSparseTimes);
+// Testing: UNIT: RecordingRowsTest, RecordingTest, ConditionRecordingTest,
+//          JsonTest (test_core); CsvExportTest and CsvGuessTest
+//          (kSparseTimes);
 //          FUZZ: fuzz_recording, fuzz_json
 //
 // The rows of a recording as the reader parses them (ADR-0049 section 5):

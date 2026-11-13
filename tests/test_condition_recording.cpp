@@ -373,9 +373,8 @@ struct Recorded {
         ASSERT_EQ(ecuio_session_record(session.s, recorder), ECUIO_OK)
             << ecuio_last_error_detail();
     }
-    /* Until the writer has drained what the ring held when called: two
-     * wakes, since a wake counts itself before it reads the hold, and the
-     * second's loop starts after the first's drain has ended */
+    /* Until the writer drained what the ring held: a wake counts itself
+     * before it reads the hold, so the second wake follows a drain */
     void drained() const
     {
         const uint64_t from = ecuio_recorder_test_wakes(recorder);

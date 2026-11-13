@@ -1,7 +1,8 @@
 // File/layer: core/include/ecuio/recording.h | C ABI, public interface
 // Testing: HARNESS: RecorderTest (test_core): the writer against the mock
-//          and the replay fixture, the seams in internal.h; UNIT
-//          (test_c_abi): the header as strict C and the structs' layout
+//          and the replay fixture, the seams in internal.h; UNIT:
+//          ConditionRecordingTest (test_core); c_abi (test_c_abi): the
+//          header as strict C and the structs' layout
 #ifndef ECUIO_RECORDING_H
 #define ECUIO_RECORDING_H
 #include "ecuio/core.h" /* ecuio_status_t, ecuio_session_t */
@@ -20,6 +21,17 @@ extern "C" {
  * drains it into one folder: frames.csv, signals.csv, events.log,
  * latency.csv when the session times requests, markers.csv once marked.
  * A full ring drops records and counts them; it never blocks the worker.
+ *
+ * A session with a set of conditions attached (ecuio/conditions.h,
+ * ADR-0063) gives its recording the set and its events: conditions.json
+ * (the set's bytes) and a "conditions" header line with their SHA-256 in
+ * events.log, a "cond" line for each event (key, state, flags, value,
+ * term, host_us, t_us), a "held" line for each condition already ON when
+ * a recording begins after the set has judged frames, and a markers.csv
+ * row at each firing of a condition with mark. A frame the ring has no
+ * room for leaves its events in a carry of 256 that goes in ahead of the
+ * next record; events past it are counted (conditions_lost) and said in a
+ * drop line.
  *
  * The recorder outlives its session: ecuio_session_destroy detaches it,
  * and notes and marks are taken until ecuio_recorder_close, so a

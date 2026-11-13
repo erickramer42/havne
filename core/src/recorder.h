@@ -1,7 +1,8 @@
 // File/layer: core/src/recorder.h | internal, C++17, Qt-free; what the
 //             session and its recorder share (ADR-0049 section 1)
-// Testing: HARNESS: RecorderTest, ConditionRecordingTest (test_core),
-//          CoreTest's no-allocation case with a recorder attached
+// Testing: HARNESS: RecorderTest (test_core), CoreTest's no-allocation
+//          case with a recorder attached; UNIT: ConditionRecordingTest
+//          (test_core)
 //
 // A session and its recorder each outlive the other in some teardowns,
 // so neither reaches into the other's memory: both hold a link, and the
@@ -12,7 +13,9 @@
 // (`pins` raised before the load and lowered after the use), and
 // detaching clears it and waits for `pins` to reach zero, so the
 // recorder is never freed under a worker still writing to it. `m`
-// orders attaches and the two sides' detaches.
+// orders attaches and the two sides' detaches, and a set of conditions'
+// attach, which holds it through its check and handover so a recording's
+// set never changes under it.
 #ifndef ECUIO_RECORDER_H
 #define ECUIO_RECORDER_H
 

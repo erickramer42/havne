@@ -1,7 +1,7 @@
 // File/layer: core/include/ecuio/conditions.h | C ABI, public
 // Testing: UNIT: ConditionFileTest, ConditionEvalTest (test_signals),
-//          ConditionSessionTest, QueueTest (test_core); c_abi; FUZZ:
-//          fuzz_condition_file
+//          ConditionSessionTest, ConditionRecordingTest, QueueTest
+//          (test_core); c_abi; FUZZ: fuzz_condition_file
 
 #ifndef ECUIO_CONDITIONS_H
 #define ECUIO_CONDITIONS_H
@@ -348,7 +348,9 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
  * A recorder attached holds the set for the recording's length: the set
  * and every event it gives go into the recording (conditions.json, the
  * cond lines of events.log, a marker for each firing of a condition with
- * mark; ecuio/recording.h).
+ * mark; ecuio/recording.h). A full ring's events wait in a carry of 256;
+ * past it they are counted in the recorder's conditions_lost and said in
+ * a drop line.
  *
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session;
  * ECUIO_ERR_SESSION_CLOSED after close; ECUIO_ERR_INVALID_ARGUMENT for a
