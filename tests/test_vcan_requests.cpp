@@ -22,6 +22,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -1811,4 +1812,291 @@ TEST_F(SimBusTest, ASimOnABusRefusesAnAsk)
     EXPECT_NE(std::string(ecuio_last_error_detail()).find("bus"),
               std::string::npos);
     EXPECT_EQ(sim.stats().requests, 0u);
+}
+
+namespace {
+
+/* The engine ECU on a raw socket, for the close's cases (ADR-0060): 10 03
+ * entered, 10 01 left, 3E 00 and D200 answered at once, until hold()
+ * keeps the next D200's answer: sent late after the request, as a First
+ * Frame late and its Consecutive Frame on the tester's Flow Control
+ * (late_segmented), never sent (silent), or never sent with a 7F 22 78
+ * every 40 ms in its place (pending). Each time is the ECU thread's
+ * steady_clock. */
+class HoldingEcu
+{
+public:
+    enum class Hold { none, late, late_segmented, silent, pending };
+    using Clock = std::chrono::steady_clock;
+    struct Seen {
+        unsigned reads = 0;           /* D200 answered */
+        Clock::time_point held_at{};  /* the held D200 arrived */
+        Clock::time_point reply_at{}; /* its late answer's last frame */
+        Clock::time_point left_at{};  /* the first 10 01 after the hold */
+    };
+
+    HoldingEcu() : raw_(vcan_bus::open_raw()), stop_(::eventfd(0, EFD_CLOEXEC))
+    {
+        if (ok()) {
+            thread_ = std::thread([this] { run(); });
+        }
+    }
+    HoldingEcu(const HoldingEcu&) = delete;
+    HoldingEcu& operator=(const HoldingEcu&) = delete;
+    ~HoldingEcu()
+    {
+        if (thread_.joinable()) {
+            const uint64_t one = 1;
+            (void)!::write(stop_.get(), &one, sizeof(one));
+            thread_.join();
+        }
+    }
+    bool ok() const { return raw_.ok() && stop_.ok(); }
+    void hold(Hold how, std::chrono::milliseconds late)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        hold_ = how;
+        late_ = late;
+    }
+    /* Waits up to limit for the held D200 */
+    bool held(std::chrono::milliseconds limit)
+    {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return cv_.wait_for(
+            lock, limit, [&] { return seen_.held_at != Clock::time_point{}; });
+    }
+    Seen seen()
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return seen_;
+    }
+
+private:
+    void send(std::initializer_list<uint8_t> bytes)
+    {
+        can_frame f{};
+        f.can_id = vcan_bus::kReply;
+        f.can_dlc = 8;
+        std::memset(f.data, vcan_bus::kPad, sizeof f.data);
+        f.data[0] = static_cast<uint8_t>(bytes.size());
+        std::copy(bytes.begin(), bytes.end(), f.data + 1);
+        (void)!::write(raw_.get(), &f, sizeof f);
+    }
+    /* One frame as given, PCI included */
+    void send_frame(std::initializer_list<uint8_t> bytes)
+    {
+        can_frame f{};
+        f.can_id = vcan_bus::kReply;
+        f.can_dlc = 8;
+        std::memset(f.data, vcan_bus::kPad, sizeof f.data);
+        std::copy(bytes.begin(), bytes.end(), f.data);
+        (void)!::write(raw_.get(), &f, sizeof f);
+    }
+
+    /* The tester's Flow Control: the held answer's Consecutive Frame */
+    void flow_control(Clock::time_point now)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (hold_ == Hold::late_segmented && first_sent_ &&
+            seen_.reply_at == Clock::time_point{}) {
+            send_frame({0x21, 0xBB, 0xCC, 0xDD, 0xEE});
+            seen_.reply_at = now;
+        }
+    }
+
+    void take(const uint8_t* q, size_t n, Clock::time_point now)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (n == 2 && q[0] == 0x10 && q[1] == 0x03) {
+            send({0x50, 0x03, 0x00, 0x32, 0x01, 0xF4});
+        } else if (n == 2 && q[0] == 0x10 && q[1] == 0x01) {
+            if (seen_.held_at != Clock::time_point{} &&
+                seen_.left_at == Clock::time_point{}) {
+                seen_.left_at = now;
+            }
+            send({0x50, 0x01, 0x00, 0x32, 0x01, 0xF4});
+        } else if (n == 2 && q[0] == 0x3E && q[1] == 0x00) {
+            send({0x7E, 0x00});
+        } else if (n == 3 && q[0] == 0x22 && q[1] == 0xD2 && q[2] == 0x00) {
+            if (hold_ == Hold::none || seen_.held_at != Clock::time_point{}) {
+                send({0x62, 0xD2, 0x00, 0x12, 0x34});
+                ++seen_.reads;
+                return;
+            }
+            seen_.held_at = now;
+            next_ = (hold_ == Hold::late || hold_ == Hold::late_segmented)
+                        ? now + late_
+                        : now;
+            cv_.notify_all();
+        } else if (n >= 1) {
+            send({0x7F, q[0], 0x11});
+        }
+    }
+
+    /* Sends the held answer's next step once it's due; the wait until
+     * the step after, -1 for none */
+    int timed(Clock::time_point now)
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const bool owed =
+            seen_.held_at != Clock::time_point{} &&
+            seen_.left_at == Clock::time_point{} &&
+            ((hold_ == Hold::late && seen_.reply_at == Clock::time_point{}) ||
+             (hold_ == Hold::late_segmented && !first_sent_) ||
+             hold_ == Hold::pending);
+        if (!owed) {
+            return -1;
+        }
+        if (now < next_) {
+            return static_cast<int>(
+                std::chrono::ceil<std::chrono::milliseconds>(next_ - now)
+                    .count());
+        }
+        if (hold_ == Hold::late) {
+            send({0x62, 0xD2, 0x00, 0x12, 0x34});
+            seen_.reply_at = Clock::now();
+            return -1;
+        }
+        if (hold_ == Hold::late_segmented) {
+            send_frame({0x10, 0x0A, 0x62, 0xD2, 0x00, 0x12, 0x34, 0xAA});
+            first_sent_ = true;
+            return -1;
+        }
+        send({0x7F, 0x22, 0x78});
+        next_ = now + 40ms;
+        return 40;
+    }
+
+    void run()
+    {
+        for (;;) {
+            const int timeout = timed(Clock::now());
+            pollfd p[2] = {{raw_.get(), POLLIN, 0}, {stop_.get(), POLLIN, 0}};
+            if (::poll(p, 2, timeout) < 0 && errno != EINTR) {
+                return;
+            }
+            if (p[1].revents != 0) {
+                return;
+            }
+            if ((p[0].revents & POLLIN) == 0) {
+                continue;
+            }
+            can_frame f{};
+            if (::read(raw_.get(), &f, sizeof f) !=
+                    static_cast<ssize_t>(sizeof f) ||
+                f.can_id != vcan_bus::kRequest || f.can_dlc < 1) {
+                continue;
+            }
+            if ((f.data[0] >> 4) == 3) {
+                flow_control(Clock::now());
+            } else if ((f.data[0] >> 4) == 0 && f.data[0] + 1u <= f.can_dlc) {
+                take(f.data + 1, f.data[0], Clock::now());
+            }
+        }
+    }
+
+    vcan_bus::Fd raw_;
+    vcan_bus::Fd stop_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    Hold hold_ = Hold::none;
+    std::chrono::milliseconds late_{0};
+    bool first_sent_ = false;
+    Clock::time_point next_{};
+    Seen seen_;
+    std::thread thread_;
+};
+
+/* What a close over a held D200 came to: the ECU's times, when the close
+ * was asked and returned, and D200's reply timing after the close */
+struct CloseRun {
+    HoldingEcu::Seen seen;
+    HoldingEcu::Clock::time_point asked{};
+    HoldingEcu::Clock::time_point closed{};
+    ecuio_request_timing_t d200{};
+};
+
+/* A session reading D200 in the extended session; its next D200 held as
+ * how says, and the close asked once that read is out */
+void close_over_a_held_read(HoldingEcu::Hold how,
+                            std::chrono::milliseconds late, CloseRun* out)
+{
+    HoldingEcu ecu;
+    ASSERT_TRUE(ecu.ok());
+    Session s("?profile=uds-generic&did=D200:u16&session=03"
+              "&identify=0&diagnose=0");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    ASSERT_TRUE(wait_for([&] { return ecu.seen().reads >= 3; }, 5000ms))
+        << "D200 read " << ecu.seen().reads << " times";
+    ecu.hold(how, late);
+    ASSERT_TRUE(ecu.held(2000ms));
+    out->asked = HoldingEcu::Clock::now();
+    ecuio_session_close(s.get());
+    out->closed = HoldingEcu::Clock::now();
+    EXPECT_TRUE(wait_for(
+        [&] { return ecu.seen().left_at != HoldingEcu::Clock::time_point{}; },
+        1000ms))
+        << "no 10 01 after the held read";
+    out->seen = ecu.seen();
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    ASSERT_EQ(ecuio_session_get_timing(s.get(), &t, rows.data(),
+                                       static_cast<uint32_t>(rows.size()),
+                                       &count),
+              ECUIO_OK);
+    for (uint32_t i = 0; i < count && i < rows.size(); ++i) {
+        if (rows[i].length == 3 && rows[i].request[0] == 0x22 &&
+            rows[i].request[1] == 0xD2 && rows[i].request[2] == 0x00) {
+            out->d200 = rows[i];
+        }
+    }
+}
+
+} // namespace
+
+/* ADR-0060's close over a request still out: the module answering it
+ * hears 10 01 after its answer, never before, so it isn't left in the
+ * extended session to wait out S3; a segmented answer gets its Flow
+ * Control at the close and ends before 10 01 too */
+TEST_F(SocketCanRequestTest, TheCloseWaitsForTheReplyStillOutBefore1001)
+{
+    for (const HoldingEcu::Hold how :
+         {HoldingEcu::Hold::late, HoldingEcu::Hold::late_segmented}) {
+        SCOPED_TRACE(how == HoldingEcu::Hold::late ? "single" : "segmented");
+        CloseRun r;
+        ASSERT_NO_FATAL_FAILURE(close_over_a_held_read(how, 40ms, &r));
+        ASSERT_NE(r.seen.reply_at, HoldingEcu::Clock::time_point{})
+            << "the answer never ended (no Flow Control for a segmented one)";
+        ASSERT_LT(r.asked, r.seen.reply_at)
+            << "the close was asked after the answer: nothing was still out";
+        EXPECT_GT(r.seen.left_at, r.seen.reply_at)
+            << "10 01 went out before the answer to the request still out";
+        EXPECT_LT(r.seen.left_at - r.seen.reply_at, 100ms)
+            << "the close waited on past the answer";
+        /* the final timing, published after the close: each D200 the ECU
+         * answered at once, and the held one, answered or timed out */
+        EXPECT_EQ(r.d200.answered + r.d200.timeouts, r.seen.reads + 1)
+            << "the held answer never reached the engine at the close";
+        EXPECT_LT(r.closed - r.asked, 1000ms);
+    }
+}
+
+/* An answer that never comes, the module silent or answering 78 on and
+ * on, holds the close for the request's wait and no longer: 10 01 goes
+ * out within the engine's wait (100 ms) of the close */
+TEST_F(SocketCanRequestTest, AnAnswerThatNeverComesHoldsTheCloseToItsBound)
+{
+    for (const HoldingEcu::Hold how :
+         {HoldingEcu::Hold::silent, HoldingEcu::Hold::pending}) {
+        SCOPED_TRACE(how == HoldingEcu::Hold::silent ? "silent" : "pending");
+        CloseRun r;
+        ASSERT_NO_FATAL_FAILURE(close_over_a_held_read(how, 0ms, &r));
+        EXPECT_EQ(r.seen.reply_at, HoldingEcu::Clock::time_point{});
+        EXPECT_GE(r.seen.left_at - r.seen.held_at, 90ms)
+            << "10 01 went out before the request's wait ended";
+        EXPECT_LT(r.seen.left_at - r.asked, 400ms)
+            << "the close waited past its bound";
+        EXPECT_LT(r.closed - r.asked, 1000ms);
+    }
 }
