@@ -32,6 +32,7 @@ Instantiator {
         required property bool hasValue
         required property double ageMs   // -1 = never arrived
         required property bool hidden    // the ECU lacks it
+        required property bool unasked   // the session's focus leaves it unasked
         required property string refusedCode // the ECU's refusal ("7F 22 31"), "" none
         required property bool isText
         required property bool isEnum

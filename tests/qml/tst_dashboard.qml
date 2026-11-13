@@ -89,6 +89,7 @@ TestCase {
         Theme.now = () => new Date()
         Theme.shortLayout = false
         Bridge.unitSystem = 0
+        Bridge.pickGauges = []
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.useSignalFiles([])
@@ -278,6 +279,40 @@ TestCase {
             tryCompare(all[label], "note", "not sent by this ECU", 3000, label)
             compare(all[label].hasValue, false, label)
         }
+    }
+
+    // The refs the default pick takes from the page (pickRefs): one list
+    // for each cell of every page, each holding the cell's refs and their
+    // counterparts in the built-in sets, a blank cell's none
+    function test_thePicksRefsAreEachCellsLookupRefs() {
+        const page = pageOf({}, docOf([
+            { kind: "digital", w: 2, h: 4, label: "Engine", refs: ["id:7003"] },
+            { kind: "blank", w: 2, h: 4, label: "", refs: [] }]))
+        compare(page.pickRefs.length, 2)
+        for (const ref of Bridge.gaugeSignals.rpm)
+            verify(page.pickRefs[0].indexOf(ref) >= 0, ref + " among " + page.pickRefs[0])
+        compare(page.pickRefs[0][0], "id:7003", "the cell's own ref first")
+        compare(page.pickRefs[1].length, 0, "a blank cell picks nothing")
+    }
+
+    // A gauge whose signal the session's focus leaves unasked (a log that
+    // didn't tick it) says "not asked" in place of a last value that would
+    // read as no new data; asked again, it shows its value. The mock asks
+    // nothing, so the case marks the row as the bridge would.
+    function test_aGaugeWhoseSignalIsntAskedSaysSo() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        const hub = createTemporaryObject(hubComponent, testCase)
+        const all = gauges(page)
+        connect("mock://demo")
+        const label = Object.keys(gaugeSignals)[0]
+        tryVerify(() => all[label].hasValue, 3000, label + " gets a value")
+        const name = hub.lookup(refsOf(label)).name
+        Harness.markUnasked([name])
+        tryCompare(all[label], "note", "not asked", 1000, label)
+        compare(all[label].hasValue, false, label)
+        Harness.markUnasked([])
+        tryVerify(() => all[label].hasValue, 1000, label + " shows its value again")
+        compare(all[label].note, "", label)
     }
 
     // A set registered with no signal file (the mock's, copied and
@@ -1021,6 +1056,8 @@ TestCase {
         const page = pageOf({}, doc, false)
         const all = gauges(page)
         const gone = gaugeOf(findChild(page, "dashCell_0_" + (doc.pages[0].cells.length - 1)))
+        // Main's binding: the gauges join the pick, so the unranked DID is asked
+        Bridge.pickGauges = page.pickRefs
         compare(Bridge.connectSession("j2534://" + Harness.fakeDllPath + "?profile="
                                       + r.profile + "&identify=0&diagnose=0"), "")
         tryCompare(all["Oil temp"], "note", "not sent by this ECU", 5000)

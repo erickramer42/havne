@@ -597,6 +597,13 @@ if(TARGET havne-cli)
                 $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliLogRunTest.AMinimumTimeBetweenSweepsLimitsTheRows
             PROPERTIES TIMEOUT 120)
+        # --pick ranked (ADR-0056's default pick): log and stream ask the
+        # ranked signals and a recording names them on its pick line
+        add_test(NAME CliLogRunTest.PickRankedAsksTheRankedSignals
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} pick
+                $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliLogRunTest.PickRankedAsksTheRankedSignals
+            PROPERTIES TIMEOUT 120)
         add_test(NAME CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} fails $<TARGET_FILE:havne-cli>)
         add_test(NAME CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
@@ -1071,6 +1078,12 @@ if(TARGET havne-cli)
     app_cli_usage(LogMinSweepWithoutASignalIsUsage "log|mock://x|out|--min-sweep|250")
     app_cli_usage(LogMinSweepPastItsMostIsUsage "log|mock://x|out|--signal|RPM|--min-sweep|60001")
     app_cli_usage(LogMinSweepOfZeroIsUsage "log|mock://x|out|--signal|RPM|--min-sweep|0")
+    app_cli_usage_says(LogPickOtherThanRankedIsUsage "log|mock://x|out|--pick|all"
+        "--pick takes 'ranked'")
+    app_cli_usage_says(StreamPickOtherThanRankedIsUsage "stream|mock://x|--pick|all"
+        "--pick takes 'ranked'")
+    app_cli_usage_says(StreamPickWithoutAWordIsUsage "stream|mock://x|--pick"
+        "--pick takes 'ranked'")
     app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
     app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
     app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")

@@ -604,7 +604,7 @@ ApplicationWindow {
                             highlighted: true
                             visible: Bridge.connected && !Bridge.recordingActive
                                      && !Bridge.currentUri.toLowerCase().startsWith("replay://")
-                            enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
+                            enabled: !Bridge.disconnecting && Bridge.signalModel.tickedCount > 0
                             text: qsTr("Start log")
                             Accessible.name: qsTr("Start a log of the ticked signals")
                             onClicked: Bridge.startLog()
@@ -728,6 +728,12 @@ ApplicationWindow {
                     DashboardPage {
                         id: dashboardView
                         objectName: "dashboardPage"
+                        // The gauges join the session's default pick
+                        Binding {
+                            target: Bridge
+                            property: "pickGauges"
+                            value: dashboardView.pickRefs
+                        }
                         offlineUri: settingsView.offlineUri
                         connectUris: settingsView.connectUris
                         connectVehicleUri: settingsView.vehicleUri

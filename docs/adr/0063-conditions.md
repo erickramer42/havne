@@ -2,7 +2,9 @@
 
 - **Status:** Accepted. Built: section 12's steps 2 and 3, the
   condition loader and the evaluator (the two appendices of
-  2026-11-12). The steps after them are not built. "Decided" at the end
+  2026-11-12), and step 5's focus half (the appendix "the focus keeping
+  a condition's signals"). Step 4, the rest of step 5 and the steps
+  after it are not built. "Decided" at the end
   records each choice.
 - **Date:** 2026-11-10.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (requests as data,
@@ -11,7 +13,7 @@
   [ADR-0049](0049-recordings-in-core.md) (the recorder, markers, the
   reader, the frames check); [ADR-0051](0051-signal-files.md) (signal
   files, computed signals, the stale age, the strict JSON reader);
-  ADR-0062 (the computed grammar of
+  [ADR-0062](0062-computed-grammar.md) (the computed grammar of
   signal-file format 2: functions, conditionals, computed signals that
   read each other), built first;
   [ADR-0056](0056-analysis-log.md) (a recorder attached to a running
@@ -1208,3 +1210,27 @@ term, a replay of a recording giving the live session's events),
 `CliConditionTest`, goldens and usage cases, `PythonTest.test_conditions`
 (the replay's events equal to `havne-cli`'s lines), `c_abi`, and
 `fuzz_condition_file`, which judges each loaded set.
+
+## Appendix: the focus keeping a condition's signals, as built (2026-11-13)
+
+Step 5's focus half (section 7, decision 11). While a focus is on, the
+requests carrying an attached condition's signals stay asked; a
+computed signal counts as its inputs, through its chain. With no focus
+nothing changes. A disabled condition, and one that can't be judged on
+the session (its signal missing, its unit another, a link or check
+term), keeps nothing asked: the signals kept are the ones the
+evaluator judges.
+
+`ecuio_session_set_conditions` works the conditions' signals out once,
+as one byte for each def of the session's set, and the worker adds
+them to the picks each time it takes the focus. Conditions that change
+the signals kept, attached or removed under a focus, start a new sweep,
+as a focus call does, and the minimum time between sweeps stands; the
+same conditions again, or any attach with no focus, change nothing, so
+a caller re-attaching them can't keep a sweep from ending.
+
+Only the caller's picks decide whether a focus leaves something to
+request: a focus none of whose picks the session can ask is refused
+even when a condition's signal would be asked. The call's answer then
+never depends on which conditions are loaded. The focus's own picks,
+and a recording's `focus` line, stay the caller's.

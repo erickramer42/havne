@@ -94,6 +94,16 @@ Page {
         return words.join(qsTr(" and "))
     }
     readonly property var pages: doc && Array.isArray(doc.pages) ? doc.pages : []
+    // Every page's cells' refs (lookupRefs): Main hands them to
+    // Bridge.pickGauges, so the default pick asks what the gauges show
+    readonly property var pickRefs: {
+        const all = []
+        for (const p of pages) {
+            for (const c of (Array.isArray(p.cells) ? p.cells : []))
+                all.push(lookupRefs(c && Array.isArray(c.refs) ? c.refs : []))
+        }
+        return all
+    }
     property bool problemDismissed: false
     // A different stored text is a different problem, so its line shows again
     readonly property string storedText: form === "phone" ? store.phone : store.desktop
@@ -1027,7 +1037,10 @@ Page {
         readonly property string label: cell && typeof cell.label === "string" ? cell.label : ""
         readonly property SignalHub.Entry entry: hub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
 
+        // A signal the session isn't asking has no value to show: its
+        // last one would read as no new data (the note says not asked)
         readonly property bool hasValue: Bridge.connected && entry !== null && entry.hasValue
+                                         && !entry.unasked
         readonly property real value: entry ? entry.value : 0
         readonly property real windowHigh: entry ? entry.windowHigh : 0
         readonly property real windowLow: entry ? entry.windowLow : 0
@@ -1052,6 +1065,7 @@ Page {
             // never answered it
             else if (entry.hidden) words = qsTr("not sent by this ECU")
             else if (entry.refusedCode !== "") words = qsTr("refused (%1)").arg(entry.refusedCode)
+            else if (entry.unasked) words = qsTr("not asked")
             else if (!entry.hasValue) words = qsTr("waiting for data")
             return words !== "" && mismatch ? qsTr("%1 (expected %2)").arg(words).arg(expectedUnit)
                                             : words
@@ -2282,7 +2296,7 @@ Page {
                     highlighted: true
                     visible: Bridge.connected && !Bridge.recordingActive
                              && !root.isReplay(Bridge.currentUri)
-                    enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
+                    enabled: !Bridge.disconnecting && Bridge.signalModel.tickedCount > 0
                     text: qsTr("Start log")
                     Accessible.name: qsTr("Start a log of the ticked signals")
                     onClicked: Bridge.startLog()

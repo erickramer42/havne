@@ -9,6 +9,7 @@
 #   python tests/cli_log.py closed-pipe <havne-cli>
 #   python tests/cli_log.py focus-refused <havne-cli> <fake_j2534.dll>   (Windows)
 #   python tests/cli_log.py pace <havne-cli>
+#   python tests/cli_log.py pick <havne-cli>
 #   python tests/cli_log.py session <havne-cli> <fake_j2534.dll> <golden> [--update]   (Windows)
 #
 # demo: mock://demo logged for 2 s with two signals picked, the log line's
@@ -34,7 +35,14 @@
 # minimum and with 250 ms, the focus line and the header saying so only
 # with one, and the wide export's sweep rows at most the time allows
 # (a ceiling alone: load takes rows away from both runs, so it can't fail
-# it), with at least one.
+# it), with at least one. pick, over the emulator's ELM327: --pick ranked
+# under obd2 joins a --signal to the ranked ones in the set's order, its
+# focus line saying pick ranked and events.log naming them on a pick
+# line, never a focus line; under uds-generic (which ranks none) the
+# names alone are a log's focus with its minimum, and with no names the
+# whole set has none; on the mock (which asks nothing) no pick; stream
+# --pick ranked writes its focus line after the session line, and a pick
+# core refuses (?poll=0x2F) leaves the whole set asked, exit 0.
 
 import csv
 import json
@@ -473,9 +481,137 @@ def session_line(cli, dll, golden_file, update):
     return golden.report(golden.compare([last], expected, set()), golden_file)
 
 
+# obd2's ranked signals (kPlotOrder) in the set's order, Fuel Level
+# (unranked) among them where the set holds it
+OBD2_PICK = ["Engine Load", "Coolant Temp", "RPM", "Vehicle Speed",
+             "Intake Air Temp", "Fuel Level", "Battery Voltage", "MAF",
+             "Engine Oil Temp"]
+
+
+def header_lines(folder, word):
+    text = (folder / "events.log").read_bytes().decode("utf-8")
+    return [l for l in text.splitlines() if l.startswith(word + "  ")]
+
+
+def pick_run(cli, args):
+    """A run of args; its exit, rows, standard error and the one folder made"""
+    with tempfile.TemporaryDirectory(prefix="havne-cli-pick-") as root:
+        code, rows, err = run(cli, [a.replace("<root>", root) for a in args])
+        folders = [p for p in Path(root).iterdir() if p.is_dir()]
+        header = {}
+        if len(folders) == 1:
+            header = {w: header_lines(folders[0], w) for w in ("pick", "focus")}
+        return code, rows, err, header
+
+
+def focus_of(rows):
+    found = [r for r in rows if r.get("type") == "focus"]
+    return found[0] if found else None
+
+
+def pick(cli):
+    emulator = Emulator(cli)
+    try:
+        return pick_cases(cli, f"elm327://127.0.0.1:{emulator.port}")
+    finally:
+        emulator.end()
+
+
+def pick_cases(cli, elm):
+    obd2 = elm + "?profile=obd2&identify=0&diagnose=0&probe=0"
+    # A session that asks: the ranked signals and the names, a pick
+    code, rows, err, header = pick_run(cli, [
+        "log", obd2, "<root>", "--seconds", "1", "--pick", "ranked",
+        "--signal", "Fuel Level"])
+    focus = focus_of(rows)
+    names = [s["name"] for s in (focus or {}).get("signals", [])]
+    if code != 0 or focus is None or focus.get("pick") != "ranked" or \
+            len(names) != 15 or names[:len(OBD2_PICK)] != OBD2_PICK:
+        print(f"FAIL  the pick's focus line {focus}, exit {code}\n{err}")
+        return 1
+    if len(header["pick"]) != 1 or header["focus"] or \
+            not header["pick"][0].startswith("pick  " + ",".join(OBD2_PICK)):
+        print(f"FAIL  the header's pick {header!r}")
+        return 1
+
+    # A profile that ranks none: the names alone, a log's focus with its
+    # minimum; with no names the whole set, which takes no minimum
+    uds = elm + "?profile=uds-generic&did=1E1C:u16,F190:text&identify=0&diagnose=0"
+    code, rows, err, header = pick_run(cli, [
+        "log", uds, "<root>", "--seconds", "1", "--pick", "ranked",
+        "--signal", "DID 1E1C", "--min-sweep", "250"])
+    focus = focus_of(rows)
+    if code != 0 or "ranks no signal" not in err or focus is None or \
+            [s["name"] for s in focus["signals"]] != ["DID 1E1C"] or \
+            "pick" in focus or focus.get("min_sweep_ms") != 250:
+        print(f"FAIL  the unranked names' focus {focus}, exit {code}, {err!r}")
+        return 1
+    if header["pick"] or len(header["focus"]) != 1:
+        print(f"FAIL  the unranked names' header {header!r}")
+        return 1
+    code, rows, err, header = pick_run(cli, [
+        "log", uds, "<root>", "--seconds", "1", "--pick", "ranked",
+        "--min-sweep", "250"])
+    focus = focus_of(rows)
+    if code != 0 or "ranks no signal" not in err or focus is None or \
+            focus["signals"] != [] or "pick" in focus or "min_sweep_ms" in focus:
+        print(f"FAIL  the unranked whole set's focus {focus}, exit {code}, {err!r}")
+        return 1
+    if header["pick"] or header["focus"]:
+        print(f"FAIL  a set asked whole names a pick or a focus {header!r}")
+        return 1
+
+    # The mock asks nothing: no pick, the names an ordinary focus
+    code, rows, err, header = pick_run(cli, [
+        "log", "mock://demo?profile=obd2", "<root>", "--seconds", "1",
+        "--pick", "ranked", "--signal", "Fuel Level"])
+    focus = focus_of(rows)
+    if code != 0 or "asks no signal" not in err or focus is None or \
+            [s["name"] for s in focus["signals"]] != ["Fuel Level"] or \
+            "pick" in focus or header["pick"]:
+        print(f"FAIL  the mock's log {focus} {header!r}, exit {code}, {err!r}")
+        return 1
+    code, rows, err, header = pick_run(cli, [
+        "stream", "mock://demo?profile=obd2", "--count", "3", "--pick",
+        "ranked", "--record", "<root>"])
+    if code != 0 or "asks no signal" not in err or focus_of(rows) is not None \
+            or header["pick"]:
+        print(f"FAIL  the mock's stream {header!r}, exit {code}, {err!r}")
+        return 1
+
+    # stream on a session that asks: the ranked signals, a pick
+    code, rows, err, header = pick_run(cli, [
+        "stream", obd2, "--seconds", "1", "--pick", "ranked", "--record",
+        "<root>"])
+    types = [r.get("type") for r in rows]
+    focus = focus_of(rows)
+    if code != 0 or focus is None or len(focus["signals"]) != 14 or \
+            types.index("focus") != types.index("session") + 1:
+        print(f"FAIL  stream's lines {types!r}, exit {code}\n{err}")
+        return 1
+    if len(header["pick"]) != 1 or \
+            not header["pick"][0].startswith("pick  Engine Load,"):
+        print(f"FAIL  stream's recording names {header!r}")
+        return 1
+
+    # A pick core refuses (?poll= asks none of the ranked ones) leaves the
+    # whole set asked, as in the app, and the run goes on
+    polled = elm + "?profile=obd2&poll=0x2F&identify=0&diagnose=0"
+    code, rows, err, header = pick_run(cli, [
+        "stream", polled, "--seconds", "1", "--pick", "ranked"])
+    if code != 0 or "asking every signal: the focus leaves nothing" not in err \
+            or focus_of(rows) is not None:
+        print(f"FAIL  a refused pick: exit {code}, {err!r}")
+        return 1
+    print("ok    --pick ranked asks the ranked signals and names them a pick")
+    return 0
+
+
 def main(argv):
     if len(argv) >= 3 and argv[1] == "demo":
         return demo(argv[2])
+    if len(argv) >= 3 and argv[1] == "pick":
+        return pick(argv[2])
     if len(argv) >= 3 and argv[1] == "fails":
         return fails(argv[2])
     if len(argv) >= 4 and argv[1] == "replay":

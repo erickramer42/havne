@@ -1087,11 +1087,13 @@ ecuio_status_t ecuio_session_set_focus(
 /* The longest minimum time between sweeps, in ms */
 #define ECUIO_FOCUS_MIN_SWEEP_MAX_MS 60000u
 
-/* ecuio_session_set_focus_with's flag: the focus is a front end's
- * default pick (the set's ranked signals, the gauges, the user's ticks),
- * not an analysis log's choice. The session asks it as any focus; a
- * recording's header names it "pick", not "focus", so a reader tells a
- * session's default from a log */
+/* ecuio_session_set_focus_with's flag: the signal ids given are a front
+ * end's default pick (the set's ranked signals, the gauges, the user's
+ * ticks), not an analysis log's choice. The ids are the pick, asked as any
+ * focus is; the flag changes only a recording's header line, "pick" in
+ * place of "focus", read when the recording attaches, so a reader tells a
+ * session's default from a log. Each call sets the flag afresh: a call
+ * without it (ecuio_session_set_focus among them) clears it */
 #define ECUIO_FOCUS_DEFAULT_PICK 0x1u
 
 /*
@@ -1111,9 +1113,9 @@ ecuio_status_t ecuio_session_set_focus(
  * flags: 0, or ECUIO_FOCUS_DEFAULT_PICK.
  * ECUIO_ERR_INVALID_ARGUMENT, nothing changed and the reason in the
  * detail, for any other flag, a time past ECUIO_FOCUS_MIN_SWEEP_MAX_MS, a
- * time or ECUIO_FOCUS_DEFAULT_PICK with no signals picked (a front end
- * whose pick is empty sets no focus: the whole set is asked), and
- * whatever ecuio_session_set_focus refuses.
+ * time with no signals picked, ECUIO_FOCUS_DEFAULT_PICK with no signals
+ * picked (a front end whose pick is empty sets no focus, and the whole set
+ * is asked), and whatever ecuio_session_set_focus refuses.
  */
 ecuio_status_t ecuio_session_set_focus_with(
     ecuio_session_t* session,

@@ -175,19 +175,19 @@ TestCase {
         Bridge.signalModel.toggleSubscribed(0)
     }
 
-    // The plotted rows are what Start log records: the line says so where
+    // The ticked rows are what Start log records: the line says so where
     // the button is offered, and "Logging" while a log runs
     function test_theStatusLineSaysWhatALogRecords() {
         const page = createTemporaryObject(pageComponent, testCase.parent)
         const list = connectMock(page)
         const all = list.count
-        verify(page.statusText().endsWith(" · Start log records the plotted ones"), page.statusText())
+        verify(page.statusText().endsWith(" · Start log records the ticked ones"), page.statusText())
         Bridge.startLog()
         verify(Bridge.logActive, "a log runs")
-        compare(page.statusText(), "Logging the " + Bridge.signalModel.subscribedCount + " plotted signals")
+        compare(page.statusText(), "Logging the " + Bridge.signalModel.tickedCount + " ticked signals")
         Bridge.stopLog()
         verify(!Bridge.logActive)
-        verify(page.statusText().endsWith("records the plotted ones"), page.statusText())
+        verify(page.statusText().endsWith("records the ticked ones"), page.statusText())
 
         // one plotted signal reads in the singular
         for (let i = list.count - 1; i >= 1; --i) {
@@ -197,7 +197,7 @@ TestCase {
         tryCompare(Bridge.signalModel, "subscribedCount", 1, 2000, "one signal left plotted")
         Bridge.startLog()
         verify(Bridge.logActive, "a log runs")
-        compare(page.statusText(), "Logging the 1 plotted signal")
+        compare(page.statusText(), "Logging the 1 ticked signal")
         Bridge.stopLog()
         verify(!Bridge.logActive)
 
@@ -380,9 +380,8 @@ TestCase {
     }
 
     // A text row (a uds-generic TEXT def, which the mock answers each
-    // tick) shows its text where a number would go and can't be plotted;
-    // the number row beside it formats as usual
-    function test_textRowShowsTextAndCannotPlot() {
+    // tick) shows its text; its tick asks it and plots nothing
+    function test_textRowShowsTextAndItsTickAsksIt() {
         const page = createTemporaryObject(pageComponent, testCase)
         compare(Bridge.connectSession("mock://demo?profile=uds-generic&did=F190:text,1E1C:u16"),
                 "", "uds-generic connects")
@@ -398,12 +397,90 @@ TestCase {
         const textValue = findChild(textRow, "valueLabel")
         verify(textValue.text.startsWith("MOCK F190 #"), "text shown: " + textValue.text)
         compare(textValue.text, textRow.text)
-        verify(!findChild(textRow, "plotCheck").enabled, "a text row can't be plotted")
+        const textBox = findChild(textRow, "plotCheck")
+        verify(textBox.enabled, "a text row can be ticked")
         verify(!textRow.subscribed)
+        verify(textBox.Accessible.name.startsWith("Ask "), textBox.Accessible.name)
+        const plotted = Bridge.signalModel.subscribedCount
+        const ticked = Bridge.signalModel.tickedCount
+        textBox.toggle()
+        textBox.toggled()
+        tryVerify(() => textRow.subscribed, 1000, "the tick took")
+        compare(Bridge.signalModel.subscribedCount, plotted, "a text row plots nothing")
+        compare(Bridge.signalModel.tickedCount, ticked + 1, "a log counts it")
+        compare(findChild(textRow, "swatch").color, Qt.rgba(0, 0, 0, 0), "no trace to fill")
+        verify(Bridge.signalModel.plottedNames().indexOf(textRow.name) >= 0,
+               "the vehicle keeps the text row's tick")
+        const filter = Bridge.liveSignalModel.filter
+        filter.plottedOnly = true
+        tryCompare(list, "count", 1, 1000, "Plotted only leaves the text row out")
+        filter.clear()
+        tryCompare(list, "count", 2)
+        tryVerify(() => list.itemAtIndex(1) !== null, 2000, "both rows again")
 
-        const numberValue = findChild(numberRow, "valueLabel")
+        // With the text row alone ticked, Start log takes it
+        Bridge.signalModel.toggleSubscribed(list.itemAtIndex(1).row)
+        tryCompare(Bridge.signalModel, "subscribedCount", 0)
+        compare(Bridge.signalModel.tickedCount, 1)
+        Bridge.startLog()
+        verify(Bridge.logActive, "a log of the text row runs")
+        compare(page.statusText(), "Logging the 1 ticked signal")
+        Bridge.stopLog()
+        verify(!Bridge.logActive)
+        Bridge.signalModel.toggleSubscribed(list.itemAtIndex(1).row)
+        tryVerify(() => list.itemAtIndex(1) !== null && list.itemAtIndex(1).subscribed, 2000)
+
+        const numberRowNow = list.itemAtIndex(1)
+        const numberValue = findChild(numberRowNow, "valueLabel")
         verify(/^\d+/.test(numberValue.text.trim()), "a number shown: " + numberValue.text)
-        verify(findChild(numberRow, "plotCheck").enabled, "a number row can be plotted")
+        verify(findChild(numberRowNow, "plotCheck").enabled, "a number row can be plotted")
+        verify(findChild(numberRowNow, "plotCheck").Accessible.name.startsWith("Plot "))
+    }
+
+    // A row the session's focus leaves unasked says "Not asked", dimmed,
+    // where its value would be, and the line under the list counts them;
+    // Asked only leaves them out. The mock asks nothing, so the case marks
+    // the row through the model as the bridge would.
+    function test_anUnaskedRowSaysSoAndIsCounted() {
+        // In the window's content item, where the note's visible is its own
+        const page = createTemporaryObject(pageComponent, testCase.Window.window.contentItem)
+        compare(Bridge.connectSession("mock://demo?profile=uds-generic&did=F190:text,1E1C:u16"),
+                "", "uds-generic connects")
+        const list = findChild(page, "signalList")
+        tryVerify(() => list.itemAtIndex(1) !== null, 2000, "both rows have delegates")
+        const numberRow = list.itemAtIndex(1)
+        tryVerify(() => numberRow.hasValue, 3000, "the mock answered 1E1C")
+        const note = findChild(page, "unaskedNote")
+        verify(!note.visible, "nothing unasked yet")
+
+        Harness.markUnasked([numberRow.name])
+        const value = findChild(numberRow, "valueLabel")
+        tryCompare(value, "text", "Not asked")
+        compare(value.color, Theme.textDim)
+        tryVerify(() => note.visible, 1000, "the line shows")
+        compare(note.text, "1 signal not asked: tick its row to ask it")
+        // A log keeps the signals it started with: no tick asks a row then
+        Bridge.startLog()
+        verify(Bridge.logActive, "a log runs")
+        compare(note.text, "1 signal not asked while the log runs")
+        Bridge.stopLog()
+        verify(!Bridge.logActive)
+        compare(note.text, "1 signal not asked: tick its row to ask it")
+
+        const filter = Bridge.liveSignalModel.filter
+        filter.askedOnly = true
+        tryCompare(list, "count", 1)
+        filter.clear()
+        tryCompare(list, "count", 2)
+        Harness.markUnasked([])
+        tryVerify(() => !note.visible, 1000, "an asked row clears the line")
+        // The filter made the row's delegate again at a polish: until then
+        // itemAtIndex gives the one going
+        tryVerify(() => {
+            const row = list.itemAtIndex(1)
+            // The mock's 1E1C value, a number: neither "Not asked" nor "—"
+            return row !== null && /\d/.test(findChild(row, "valueLabel").text)
+        }, 2000, "the row asked again shows its value")
     }
 
     // An enum row (ADR-0051) shows its label where the number would go:

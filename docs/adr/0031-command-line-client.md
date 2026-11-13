@@ -115,6 +115,11 @@ for, they print plain text there.
   removed within a schema. A change that breaks a reader raises
   `schema`.
 
+Note of 2026-11-13: schema 1 grows by keys for format 2
+([ADR-0062](0062-computed-grammar.md) section 9): `signal_file`'s
+`format`, a computed `signal_def`'s `expr`, and a computed input's
+`"max_age_us":null,"computed":true`.
+
 ### 4. Threads: the worker formats, the main thread writes
 
 The callbacks run on the worker, where blocking delays the session
