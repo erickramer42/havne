@@ -2495,12 +2495,22 @@ QVariantMap recordingRowOf(const QFileInfo& info)
             static_cast<qint64>(ECUIO_SET_MAX_TABLE +
                                 ECUIO_SIGNAL_FILE_MAX_SIGNALS) *
             150;
-        // A "caller" line's 1 KB and its word: a longer line is read in parts
+        // A line longer than a read (a "focus" line names every pick) comes in
+        // parts, and only the part that starts it is judged
         constexpr qint64 kLineBytes = 1100;
         qint64 read = 0;
+        bool startsLine = true;
         while (read < kHeaderBytes && !events.atEnd()) {
             const QByteArray raw = events.readLine(kLineBytes);
+            if (raw.isEmpty()) {
+                break; // a read that failed before the end
+            }
             read += raw.size();
+            const bool judged = startsLine;
+            startsLine = raw.endsWith('\n');
+            if (!judged) {
+                continue;
+            }
             const QString line = QString::fromUtf8(raw).trimmed();
             if (line.startsWith(QLatin1String("columns"))) {
                 break;
