@@ -2488,6 +2488,45 @@ TEST(FolderExportTest, ACondLineInFormat2IsAKindTheExportDoesntKnow)
         << kept;
 }
 
+/* A scrubbed copy keeps a copy's header line only as the name and hash
+ * the readers take, and an activity line only when its clock's places are
+ * digits: text anywhere else there is unchecked. A raw copy keeps the
+ * header lines as they are. */
+TEST(FolderExportTest, AScrubbedCopyKeepsOnlyHeaderLinesAndClocksThatRead)
+{
+    Folder f;
+    conditions_recording(f, "2x:13:24.350  +4.100  cond  "
+                            "knock,on,fired,7,0,4100000,4050000\n"
+                            "22:13:24.360  +4.110  link  vehicle not "
+                            "responding (state 8, 1 episode)\n");
+    std::string events = read_file(f.path / "rec" / "events.log");
+    const std::string good = "conditions  conditions.json,";
+    const size_t at = events.find(good);
+    ASSERT_NE(at, std::string::npos);
+    const std::string kept_line = events.substr(at, events.find('\n', at) - at);
+    events.insert(at, "conditions  conditions.json,the user's words\n"
+                      "signal file  signals.json," +
+                          std::string(64, '0') + ",more\n");
+    f.write("rec/events.log", events);
+
+    FolderExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    const std::string& out = e.files["events.log"];
+    EXPECT_NE(out.find("\n" + kept_line + "\n"), std::string::npos) << out;
+    EXPECT_EQ(out.find("the user's words"), std::string::npos) << out;
+    EXPECT_EQ(out.find(",more"), std::string::npos) << out;
+    EXPECT_EQ(out.find("2x:13"), std::string::npos) << out;
+    EXPECT_NE(out.find("22:13:24.360  +4.110  link  "), std::string::npos)
+        << out;
+    EXPECT_EQ(e.report.left_out[ECUIO_EXPORT_LEFT_OUT_ACTIVITY], 3u)
+        << "two header lines and the line whose clock doesn't read";
+
+    FolderExported raw(f, ECUIO_EXPORT_RAW, 0, 0, "raw");
+    ASSERT_EQ(raw.rc, ECUIO_OK) << raw.detail;
+    EXPECT_NE(raw.files["events.log"].find("the user's words"),
+              std::string::npos);
+}
+
 /* A range's held lines take a set's most keys, as the reader does: with
  * coolant_high and boost_low first, k61 is the 64th key before the range
  * and held, k62 the 65th and not */

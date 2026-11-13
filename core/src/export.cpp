@@ -65,6 +65,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -1632,9 +1633,24 @@ private:
                 return;
             }
         }
-        if (rows::starts_with(p, n, rows::kSignalFileKey) ||
-            rows::starts_with(p, n, rows::kPluginKey) ||
-            rows::starts_with(p, n, rows::kConditionsKey)) {
+        /* A copy's line only as the name and hash the readers take: any
+         * other text there is unchecked */
+        const std::pair<const char*, const char*> copies[] = {
+            {rows::kSignalFileKey, rows::kSignalFileName},
+            {rows::kConditionsKey, rows::kConditionsName}};
+        for (const auto& copy : copies) {
+            if (rows::starts_with(p, n, copy.first)) {
+                const size_t k = std::strlen(copy.first);
+                std::string hex;
+                if (rows::parse_named_file(p + k, n - k, copy.second, &hex)) {
+                    events_head_.push_back(line);
+                } else {
+                    ++events_left_;
+                }
+                return;
+            }
+        }
+        if (rows::starts_with(p, n, rows::kPluginKey)) {
             events_head_.push_back(line);
             return;
         }

@@ -2,8 +2,8 @@
 //             header-only; ALL platforms
 // Testing: UNIT: RecordingRowsTest, RecordingTest, ConditionRecordingTest,
 //          JsonTest (test_core); CsvExportTest and CsvGuessTest
-//          (kSparseTimes);
-//          FUZZ: fuzz_recording, fuzz_json
+//          (kSparseTimes); FolderExportTest (the cond lines);
+//          FUZZ: fuzz_recording, fuzz_json, fuzz_export
 //
 // The rows of a recording as the reader parses them (ADR-0049 section 5):
 // signals.csv's and markers.csv's CSV rows, events.log's header lines and
@@ -789,10 +789,16 @@ struct event_line {
 
 inline bool parse_event_line(const char* p, size_t n, event_line* e)
 {
-    /* "HH:mm:ss.zzz" then two spaces and '+' */
+    /* "HH:mm:ss.zzz", its places digits, then two spaces and '+' */
     if (n < 15 || p[2] != ':' || p[5] != ':' || p[8] != '.' || p[12] != ' ' ||
         p[13] != ' ' || p[14] != '+') {
         return false;
+    }
+    static constexpr size_t kDigits[] = {0, 1, 3, 4, 6, 7, 9, 10, 11};
+    for (const size_t d : kDigits) {
+        if (p[d] < '0' || p[d] > '9') {
+            return false;
+        }
     }
     size_t i = 15;
     const size_t whole = i;

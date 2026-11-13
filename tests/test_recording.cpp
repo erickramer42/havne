@@ -391,6 +391,12 @@ TEST(RecordingRowsTest, EventsLogsLinesParse)
     ASSERT_TRUE(rows::parse_drop(text, text_len, &frames));
     EXPECT_EQ(frames, 312u);
     EXPECT_FALSE(rows::parse_event_line("end      x", 10, &e));
+    /* Each of the clock's places must be a digit */
+    for (const size_t d : {0, 1, 3, 4, 6, 7, 9, 10, 11}) {
+        std::string bad = ev;
+        bad[d] = 'x';
+        EXPECT_FALSE(rows::parse_event_line(bad.data(), bad.size(), &e)) << d;
+    }
 
     uint64_t records = 0;
     uint64_t notes = 0;
