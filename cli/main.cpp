@@ -395,12 +395,13 @@ int ended(Output& out, int code)
 }
 
 // export's cancel (ecuio_export_with), its column check's, import's
-// (ecuio_import_with) and a recording's health report's
-// (ecuio_health_export_with): Ctrl+C or SIGTERM stops it, and core removes
-// what it had begun. HAVNE_CLI_EXPORT_HOLD_MS (tests only) holds the
-// run's first ask that long, naming whose it is on stderr, so a test's
-// interrupt lands there; with HAVNE_CLI_EXPORT_HOLD_DEAF set the hold
-// ignores the interrupt, so a second one can arrive while the run waits
+// (ecuio_import_with), a recording's health report's
+// (ecuio_health_export_with) and view's searches': Ctrl+C or SIGTERM
+// stops it, and core removes what it had begun. HAVNE_CLI_EXPORT_HOLD_MS
+// (tests only) holds the run's first ask that long, naming whose it is on
+// stderr, so a test's interrupt lands there; with HAVNE_CLI_EXPORT_HOLD_DEAF
+// set the hold ignores the interrupt, so a second one can arrive while the
+// run waits
 int interrupted_at(bool* asked, const char* where)
 {
     if (!*asked) {
@@ -439,6 +440,19 @@ int health_interrupted(void* user)
 int open_interrupted(uint64_t, uint64_t, void* user)
 {
     return interrupted_at(static_cast<bool*>(user), "column check");
+}
+
+// view's searches (ecuio_recording_find_with, _stretches_with) ask as the
+// export does
+int view_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "view");
+}
+
+// view's opens stop at an interrupt, with no hold
+int view_open_interrupted(uint64_t, uint64_t, void*)
+{
+    return g_interrupted.load() ? 1 : 0;
 }
 
 // An export, its sizing, an import or a recording's health report stopped
@@ -3821,7 +3835,7 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
 {
     if (!args.frames) {
         const ecuio_status_t st =
-            ecuio_recording_open(folder, nullptr, nullptr, r);
+            ecuio_recording_open(folder, view_open_interrupted, nullptr, r);
         *why = ecuio_last_error_detail();
         return st;
     }
@@ -3869,8 +3883,8 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
         }
         *decoded = source.profile;
     }
-    const ecuio_status_t st =
-        ecuio_recording_open_frames(folder, set, nullptr, nullptr, r);
+    const ecuio_status_t st = ecuio_recording_open_frames(
+        folder, set, view_open_interrupted, nullptr, r);
     *why = ecuio_last_error_detail();
     ecuio_signal_file_free(file); /* the reader keeps its own copy */
     return st;
@@ -3950,22 +3964,25 @@ int use_view_signals(Output& out, ViewArgs& args)
 }
 
 // The start of a recording's nth pull (1 the first) under its rules, over
-// the whole recording: *at_us, left alone with fewer pulls than that
-ecuio_status_t nth_pull(const Viewed& v, uint32_t n, uint64_t* at_us)
+// the whole recording: *at_us, left alone with fewer pulls than that.
+// asked is view_interrupted's
+ecuio_status_t nth_pull(const Viewed& v, uint32_t n, bool* asked,
+                        uint64_t* at_us)
 {
     ecuio_stretch_rules_t rules = v.rules;
     rules.kinds = ECUIO_STRETCH_PULLS;
     const uint64_t end = v.info.duration_us + 1;
     /* The count first: n is the caller's, up to 100,000 */
     uint32_t count = 0;
-    ecuio_status_t rc = ecuio_recording_stretches(v.r.get(), &rules, 0, end,
-                                                  nullptr, 0, &count);
+    ecuio_status_t rc = ecuio_recording_stretches_with(
+        v.r.get(), &rules, 0, end, view_interrupted, asked, nullptr, 0, &count);
     if (rc != ECUIO_OK || count < n) {
         return rc;
     }
     std::vector<ecuio_recording_stretch_t> found(n);
-    rc = ecuio_recording_stretches(v.r.get(), &rules, 0, end, found.data(), n,
-                                   &count);
+    rc = ecuio_recording_stretches_with(v.r.get(), &rules, 0, end,
+                                        view_interrupted, asked, found.data(),
+                                        n, &count);
     if (rc == ECUIO_OK && count >= n) {
         *at_us = found[n - 1].from_us;
     }
@@ -4109,6 +4126,10 @@ int run_view(ViewArgs& args)
     if (used >= 0) {
         return used;
     }
+    // An interrupt ends the opens and searches at their next ask, and the
+    // lines between recordings: the interrupted end line, exit 1
+    install_handlers();
+    bool asked = false;
     std::vector<Viewed> views(args.folders.size());
     for (size_t i = 0; i < args.folders.size(); ++i) {
         ecuio_recording_t* r = nullptr;
@@ -4116,6 +4137,10 @@ int run_view(ViewArgs& args)
         std::string why;
         const ecuio_status_t rc =
             open_viewed(args, args.folders[i], &r, &decoded, &why);
+        if (rc == ECUIO_ERR_CANCELED && g_interrupted.load()) {
+            write_start(out);
+            return ended_interrupted(out);
+        }
         if (rc != ECUIO_OK) {
             write_start(out);
             write_error(out, rc, why.c_str());
@@ -4249,8 +4274,14 @@ int run_view(ViewArgs& args)
                               pulls[pulls.size() == 1 ? 0
                                                       : static_cast<size_t>(
                                                             &v - views.data())],
-                              &at)
-                        : ecuio_recording_find(v.r.get(), &what, 0, &at);
+                              &asked, &at)
+                        : ecuio_recording_find_with(v.r.get(), &what, 0,
+                                                    view_interrupted, &asked,
+                                                    &at);
+                if (rc == ECUIO_ERR_CANCELED) {
+                    write_start(out);
+                    return ended_interrupted(out);
+                }
                 if (rc != ECUIO_OK) {
                     write_start(out);
                     write_error(out, rc, cli::read_error_detail(rc));
@@ -4359,15 +4390,20 @@ int run_view(ViewArgs& args)
             continue;
         }
         uint32_t count = 0;
-        ecuio_status_t rc = ecuio_recording_stretches(
+        ecuio_status_t rc = ecuio_recording_stretches_with(
             v.r.get(), &v.rules, static_cast<uint64_t>(t0),
-            static_cast<uint64_t>(t1), nullptr, 0, &count);
+            static_cast<uint64_t>(t1), view_interrupted, &asked, nullptr, 0,
+            &count);
         std::vector<ecuio_recording_stretch_t> found(count);
         if (rc == ECUIO_OK && count != 0) {
-            rc = ecuio_recording_stretches(
+            rc = ecuio_recording_stretches_with(
                 v.r.get(), &v.rules, static_cast<uint64_t>(t0),
-                static_cast<uint64_t>(t1), found.data(), count, &count);
+                static_cast<uint64_t>(t1), view_interrupted, &asked,
+                found.data(), count, &count);
             found.resize((std::min<size_t>)(found.size(), count));
+        }
+        if (rc == ECUIO_ERR_CANCELED) {
+            return ended_interrupted(out);
         }
         if (rc != ECUIO_OK) {
             write_error(out, rc, cli::read_error_detail(rc));
@@ -4390,6 +4426,9 @@ int run_view(ViewArgs& args)
     std::map<std::string, std::pair<uint32_t, std::vector<double>>> firsts;
     for (uint32_t i = 0; i < views.size(); ++i) {
         const Viewed& v = views[i];
+        if (g_interrupted.load()) {
+            return ended_interrupted(out);
+        }
         if (!v.aligned || v.shown.empty()) {
             continue;
         }
@@ -4515,6 +4554,9 @@ int run_view(ViewArgs& args)
     for (const cli::Span& span : args.spans) {
         for (uint32_t i = 0; i < views.size(); ++i) {
             const Viewed& v = views[i];
+            if (g_interrupted.load()) {
+                return ended_interrupted(out);
+            }
             if (!v.aligned || v.shown.empty()) {
                 continue;
             }

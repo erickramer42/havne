@@ -30,8 +30,9 @@
 // its per-second summaries. A span's statistics, a cursor's step and the
 // recording's stretches are answered by tasks of the global thread pool
 // that share the reader, so a close never waits for a pass over a long
-// recording: the pass ends on its own and its answer is dropped. Only the
-// application's own end waits for one.
+// recording: it stops a stretches pass at its next second and a call not
+// yet made, a call under way ends on its own, and the answer is dropped.
+// Only the application's own end waits for one.
 class RecordingView : public QObject
 {
     Q_OBJECT
@@ -255,6 +256,12 @@ public:
     {
         return m_asks ? m_asks->stopped.load() : 0;
     }
+    // The last open's reads its close stopped: a statistics or step call
+    // not made, a stretches pass core ended. Kept until the next open
+    int readsStoppedForTesting() const
+    {
+        return m_stop ? m_stop->readsStopped.load() : 0;
+    }
     // The asks' task runs out of memory at each means ask while on
     void setLoseMeansForTesting(bool on) { m_loseMeansForTesting = on; }
 
@@ -317,6 +324,13 @@ private:
         ecuio_recording_signal_t pub;
         bool plotted = false;
     };
+    // An open's stop, shared with its asks' task and stretches passes: set
+    // by the close, a new open or the destructor, so a read under way ends
+    // at its next check and none starts
+    struct Stop {
+        std::atomic<bool> stopped{false};
+        std::atomic<int> readsStopped{0};
+    };
 
     struct FrameSet;
     static void run(const std::shared_ptr<Result>& res,
@@ -347,6 +361,7 @@ private:
     // stretches pass posts its own
     static void answerAsks(const std::shared_ptr<Asks>& asks,
                            const std::shared_ptr<ecuio_recording_t>& reader,
+                           const std::shared_ptr<Stop>& stop,
                            const QPointer<RecordingView>& view,
                            quint64 generation);
     void statsFinished(const StatsAsk& ask, ecuio_status_t rc,
@@ -362,6 +377,7 @@ private:
     // open; its answer is posted to the application and reaches view only
     // if it still lives
     static void findStretches(const std::shared_ptr<ecuio_recording_t>& reader,
+                              const std::shared_ptr<Stop>& stop,
                               const QPointer<RecordingView>& view, int request,
                               ecuio_stretch_rules_t rules, quint64 generation,
                               int holdMs);
@@ -387,6 +403,8 @@ private:
     // mid-pass leaves the reader open until the pass ends
     ecuio_recording_t* m_reader = nullptr;
     std::shared_ptr<ecuio_recording_t> m_readerHold;
+    // The open's stop, made at each open and set when it ends
+    std::shared_ptr<Stop> m_stop;
     ecuio_recording_info_t m_info{};
     std::vector<Signal> m_signals;
     QVariantList m_markers;
