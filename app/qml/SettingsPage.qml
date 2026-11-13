@@ -60,7 +60,8 @@ Pane {
     property var canInterfaces: []
 
     // The phone's Bluetooth adapters (ADR-0028 section 2): [{ name, address,
-    // kind }], kind "bt" (classic, paired) or "ble". Empty off Android
+    // kind, other }], kind "bt" (classic, paired) or "ble", other true for
+    // audio, wearable and health gear. Empty off Android
     property var bluetoothAdapters: Bluetooth.adapters
 
     // Each device's versions as last seen at a connect, { base: text }
@@ -92,7 +93,8 @@ Pane {
             detail: a.kind === "ble" ? qsTr("Bluetooth LE · %1").arg(a.address)
                                      : qsTr("Bluetooth, paired · %1").arg(a.address),
             kind: a.kind === "ble" ? qsTr("Bluetooth LE") : qsTr("Bluetooth"),
-            base: "elm327://" + a.kind + ":" + a.address
+            base: "elm327://" + a.kind + ":" + a.address,
+            other: a.other === true
         })))
 
     // A CAN interface's row: what it is, its state past error-active, and
@@ -1305,7 +1307,7 @@ Pane {
     // interfaces, the serial ports, the CAN interfaces and the phone's
     // Bluetooth adapters, as Connection's device list has them
     readonly property var connectAdapters: devices.map(d => ({
-            uri: d.base, title: d.title, kind: d.kind
+            uri: d.base, title: d.title, kind: d.kind, other: d.other === true
         }))
     // Dash's Connect: the field shows it as typed text, before the connect
     function connectFromList(uri) {
