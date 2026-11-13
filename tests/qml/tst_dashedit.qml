@@ -1822,7 +1822,12 @@ TestCase {
         return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2])
     }
 
-    function test_everyNamedColorIsReadableAndApartFromTheZones() {
+    // The original seven keep ADR-0057's rule against the zones; the five
+    // standard colors sit near them on purpose (readable only)
+    readonly property var originalColors: ["teal", "green", "lime", "cyan", "pink", "magenta", "stone"]
+    readonly property var standardColors: ["red", "blue", "yellow", "truegreen", "lightblue"]
+
+    function test_everyNamedColorIsReadableAndTheOriginalsAreApartFromTheZones() {
         for (const look of ["dark", "daylight"]) {
             const p = Theme.palettes[look]
             const surface = Qt.color(p.surface)
@@ -1830,11 +1835,213 @@ TestCase {
             for (const name of Theme.gaugeColorNames) {
                 const c = Qt.color(Theme.gaugePalettes[look][name])
                 verify(contrast(c, surface) >= 3, name + " on " + look + ": " + contrast(c, surface))
-                for (const z of zones)
-                    verify(apart(c, z) >= 25, name + " on " + look + " is " + apart(c, z) + " from a zone color")
+                if (originalColors.indexOf(name) >= 0)
+                    for (const z of zones)
+                        verify(apart(c, z) >= 25, name + " on " + look + " is " + apart(c, z) + " from a zone color")
             }
         }
-        verify(Theme.gaugeColorNames.length >= 6 && Theme.gaugeColorNames.length <= 8)
+        compare(Theme.gaugeColorNames.slice(0, 7), originalColors, "the original seven keep their names and order")
+        compare(Theme.gaugeColorNames.slice(7), standardColors)
+        compare(Theme.gaugeColorNames.length, 12)
+        for (const name of Object.keys(Theme.gaugePalettes.dark))
+            verify(Theme.gaugeColorNames.indexOf(name) >= 0, name + " is listed")
+    }
+
+    function test_theStandardColorsResolveInBothLooksAndNightHasNone() {
+        const expected = { red: ["#ff601f", "#fc5d1c"], blue: ["#34cafb", "#1f9ec6"], yellow: ["#e5fd15", "#946c00"],
+                           truegreen: ["#39ff14", "#38a721"], lightblue: ["#60a5fa", "#2458b8"],
+                           green: ["#4ade80", "#1e7d3f"] }
+        const labels = { red: "Red", blue: "Blue", yellow: "Yellow", truegreen: "Green", lightblue: "Light blue",
+                         green: "Light green" }
+        Theme.night = "off"
+        for (const name of Object.keys(expected)) {
+            Theme.look = "dark"
+            compare(Theme.gaugeColor(name), expected[name][0], name + " in Dark")
+            Theme.look = "daylight"
+            compare(Theme.gaugeColor(name), expected[name][1], name + " in Daylight")
+            compare(Theme.gaugeColorLabel(name), labels[name])
+        }
+        Theme.night = "on"
+        for (const name of Object.keys(expected))
+            compare(Theme.gaugeColor(name), "", name + " at Night")
+        Theme.night = "off"
+        Theme.look = "dark"
+    }
+
+    function test_aCustomColorIsOnlyAWellFormedLowercaseHex() {
+        Theme.night = "off"
+        for (const look of ["dark", "daylight"]) {
+            Theme.look = look
+            compare(Theme.gaugeColor("#12ab9f"), "#12ab9f", look)
+            compare(Theme.gaugeSwatch("#12ab9f"), "#12ab9f")
+            for (const bad of ["#12345", "#1234567", "red ", "#ABCDEF", "12ab9f", "#12ab9g", " #12ab9f", "#12ab9f ", 256, null])
+                compare(Theme.gaugeColor(bad), "", String(bad))
+        }
+        Theme.night = "on"
+        compare(Theme.gaugeColor("#12ab9f"), "", "Night has none")
+        compare(Theme.gaugeSwatch("#12ab9f"), "#12ab9f", "the picker still shows it")
+        Theme.night = "off"
+        Theme.look = "dark"
+    }
+
+    function test_thePickerOffersEveryNamedColorAndACustomEntry() {
+        const page = storedPageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        for (const name of Theme.gaugeColorNames)
+            verify(find(page, "panelColor_" + name), name + " is in the picker")
+        verify(find(page, "panelColor_custom"))
+        verify(!find(page, "panelColorCustom").visible, "the fields wait for Custom")
+        click(page, "panelColor_truegreen")
+        compare(page.doc.pages[0].cells[0].options.color, "truegreen")
+    }
+
+    function test_theCustomFieldsMakeAHexAndRefuseWhatIsNotAColor() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        verify(find(page, "panelColorCustom").visible)
+        const r = find(page, "panelColorR"), g = find(page, "panelColorG"), b = find(page, "panelColorB")
+        type(r, "18"); type(g, "171"); type(b, "159")
+        compare(page.doc.pages[0].cells[0].options.color, "#12ab9f")
+        verify(find(page, "panelColor_custom").checked)
+        verify(!find(page, "panelColor_default").checked)
+        compare(find(page, "panelColorPreview").color.toString(), "#12ab9f")
+        for (const bad of ["256", "", "-1", "1.5", "ab", "1e2"]) {
+            type(g, bad)
+            compare(page.doc.pages[0].cells[0].options.color, "#12ab9f", "[" + bad + "] is refused")
+            compare(g.text, "171", "[" + bad + "] goes back to the stored number")
+        }
+        type(r, "0"); type(g, "5"); type(b, "255")
+        compare(page.doc.pages[0].cells[0].options.color, "#0005ff", "a channel under 16 keeps its zero")
+        click(page, "panelColor_pink")
+        compare(page.doc.pages[0].cells[0].options.color, "pink", "a named pick takes the place")
+        verify(!find(page, "panelColorCustom").visible)
+    }
+
+    function test_aCustomColorHardToReadSaysSoAndIsStillStored() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        const note = find(page, "panelColorHard")
+        type(find(page, "panelColorR"), "255"); type(find(page, "panelColorG"), "255"); type(find(page, "panelColorB"), "255")
+        verify(!note.visible, "white reads on Dark")
+        type(find(page, "panelColorR"), "20"); type(find(page, "panelColorG"), "20"); type(find(page, "panelColorB"), "20")
+        compare(page.doc.pages[0].cells[0].options.color, "#141414", "stored, not refused")
+        verify(note.visible, "near-black does not read on Dark")
+        Theme.look = "daylight"
+        verify(!note.visible, "near-black reads on Daylight")
+        Theme.look = "dark"
+    }
+
+    // Qt sends editingFinished when a field loses focus with its text unchanged
+    // (type() calls it by hand and can't see this): a pass-through stores nothing
+    function test_tabbingThroughTheCustomFieldsStoresNothing() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        const r = find(page, "panelColorR"), g = find(page, "panelColorG"), b = find(page, "panelColorB")
+        r.forceActiveFocus()
+        verify(r.activeFocus)
+        g.forceActiveFocus()
+        verify(g.activeFocus)
+        b.forceActiveFocus()
+        verify(b.activeFocus)
+        find(page, "panelColor_custom").forceActiveFocus()
+        compare(page.doc.pages[0].cells[0].options.color, undefined, "nothing stored by passing through")
+        compare(find(page, "dashUndo").Accessible.name.indexOf("changed"), -1, "no undo step either")
+        // A changed value stored, then passed through again, adds no second step
+        type(r, "10"); type(g, "20"); type(b, "30")
+        compare(page.doc.pages[0].cells[0].options.color, "#0a141e")
+        r.forceActiveFocus(); g.forceActiveFocus(); b.forceActiveFocus()
+        compare(page.doc.pages[0].cells[0].options.color, "#0a141e")
+    }
+
+    function test_theCustomRowIsClosedForAnotherGauge() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({}, docOf([cellOf("A", "analog"), cellOf("B", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        verify(find(page, "panelColorCustom").visible)
+        press(find(page, "dashCell_0_1"))
+        verify(!find(page, "panelColorCustom").visible, "B has no custom color and shows none")
+        verify(!find(page, "panelColor_custom").checked)
+        press(find(page, "dashCell_0_0"))
+        verify(!find(page, "panelColorCustom").visible, "A is closed again too")
+    }
+
+    function test_theCustomButtonStaysCheckedWithItsRowShown() {
+        Theme.night = "off"
+        const cell = cellOf("A", "analog")
+        cell.options.color = "#12ab9f"
+        const page = storedPageOf({}, docOf([cell]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        verify(find(page, "panelColorCustom").visible)
+        click(page, "panelColor_custom")
+        verify(find(page, "panelColorCustom").visible, "a stored custom color keeps its row")
+        verify(find(page, "panelColor_custom").checked, "and the button says so")
+    }
+
+    function test_theContrastNoteJudgesAgainstDarkAtNight() {
+        const gray = Qt.color("#5a5a62")
+        Theme.look = "daylight"
+        Theme.night = "on"
+        const against = Qt.color(Theme.palettes.dark.surface)
+        verify(Math.abs(Theme.gaugeContrast("#5a5a62") - contrast(gray, against)) < 0.001,
+               "Night's color isn't drawn, so the note uses Dark's surface: " + Theme.gaugeContrast("#5a5a62"))
+        Theme.night = "off"
+        verify(Math.abs(Theme.gaugeContrast("#5a5a62") - contrast(gray, Qt.color(Theme.palettes.daylight.surface))) < 0.001)
+        Theme.look = "dark"
+    }
+
+    function test_theHardToReadNoteHasARowOfItsOwnOnAPhone() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({ form: "phone", width: 384, height: 832 }, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        type(find(page, "panelColorR"), "20"); type(find(page, "panelColorG"), "20"); type(find(page, "panelColorB"), "20")
+        const note = find(page, "panelColorHard")
+        verify(note.visible)
+        const row = find(page, "panelColorCustom")
+        const panel = find(page, "dashCellPanel")
+        const at = row.mapToItem(panel, 0, 0)
+        verify(at.x >= -0.5 && at.x + row.width <= panel.width + 0.5, "the fields fit the card: " + at.x + " + " + row.width + " of " + panel.width)
+        verify(note.width > 100, "the note is not a sliver: " + note.width)
+        tryVerify(() => note.mapToItem(panel, 0, 0).y >= row.mapToItem(panel, 0, 0).y + row.height - 1, 3000,
+                  "the note sits under the fields")
+    }
+
+    function test_aCustomColorRoundTripsThroughAFileAndNightDrawsNoneOfIt() {
+        const cell = cellOf("A", "digital")
+        cell.options.color = "#12ab9f"
+        const url = layoutUrl("layout-custom-color.json")
+        let page = storedPageOf({}, docOf([cell]))
+        verify(page.exportLayoutTo(url), page.layoutNote)
+        page.destroy()
+        page = storedPageOf({}, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        compare(page.doc.pages[0].cells[0].options.color, "#12ab9f")
+        page.destroy()
+        const g = colored("digital", "dark", "#12ab9f")
+        verify(Qt.colorEqual(find(g, "readout").color, "#12ab9f"), "drawn")
+        Theme.night = "on"
+        verify(Qt.colorEqual(find(g, "readout").color, Theme.gaugeReadout), "Night draws its own")
+        Theme.night = "off"
     }
 
     function test_aStoredNameIsOnlyAFixedOne() {
