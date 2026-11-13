@@ -241,7 +241,8 @@ typedef struct ecuio_recording_info {
     uint64_t records_dropped; /* the writer's, from the summary */
     uint64_t notes_dropped;
     uint64_t condition_events; /* events.log's cond lines that parse
-                                  (ADR-0063 section 8), every one counted;
+                                  (ADR-0063 section 8; format 3), every
+                                  one counted;
                                   ecuio_recording_get_condition_event */
     uint64_t reserved[4];      /* zero; ABI growth space */
 } ecuio_recording_info_t;
@@ -581,10 +582,13 @@ ecuio_status_t
 ecuio_recording_get_conditions(const ecuio_recording_t* r,
                                ecuio_recording_conditions_t* out);
 /* The index-th cond line in events.log's order, which the recorder writes
- * in time order (a line that doesn't parse, or names a key past the
- * ECUIO_CONDITION_MAX_CONDITIONS a set holds, left out and counted in
- * lines_skipped; an eighth field and after passed by; a flag
- * word the reader doesn't know left out of flags). index runs below
+ * in time order. A cond line is a format 3 activity line whose kind is
+ * cond; one that doesn't parse (a torn last line or one past the longest
+ * row among them), or names a key past the ECUIO_CONDITION_MAX_CONDITIONS
+ * a set holds, is left out and counted in lines_skipped; an eighth field
+ * and after are passed by, and a flag word the reader doesn't know is
+ * left out of flags. A line whose time doesn't read is no activity line,
+ * of any kind. index runs below
  * info.condition_events and below ECUIO_RECORDING_MAX_CONDITION_EVENTS;
  * past it ECUIO_ERR_INVALID_ARGUMENT, out untouched. */
 ecuio_status_t

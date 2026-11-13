@@ -184,11 +184,9 @@ public:
             const size_t take =
                 nl != nullptr ? static_cast<size_t>(nl - s) : len_ - pos_;
             if (!*too_long) {
-                if (line.size() + take > rows::kRowMax + 1) {
-                    *too_long = true;
-                } else {
-                    line.append(s, take);
-                }
+                const size_t room = rows::kRowMax + 1 - line.size();
+                *too_long = take > room;
+                line.append(s, *too_long ? room : take);
             }
             pos_ += take;
             offset_ += take;
@@ -608,10 +606,32 @@ bool ecuio_recording::read_events(const std::string& folder)
     bool summary = false;
     rows::header_signal hs;
     rows::cond_line cond;
+    /* A format 3 activity line of kind cond, by its time and kind alone */
+    const auto cond_kind = [this, &in_header](const std::string& l) {
+        rows::event_line e;
+        const char* text = nullptr;
+        size_t text_len = 0;
+        size_t kind_len = 0;
+        return info.format == ECUIO_RECORDING_FORMAT_ENUMS && !in_header &&
+               rows::parse_event_line(l.data(), l.size(), &e) &&
+               rows::split_kind(e.rest, e.rest_len, &text, &text_len,
+                                &kind_len) &&
+               rows::equals(e.rest, kind_len, "cond");
+    };
+    const auto skip_condition = [this] {
+        if (conditions.lines_skipped < UINT32_MAX) {
+            ++conditions.lines_skipped;
+        }
+    };
     while (lines.next(line, &ended, &too_long)) {
         ++line_no;
         if (!ended || too_long) {
-            continue; /* a torn last line, or one no writer makes */
+            /* A torn last line, or one no writer makes: a cond line's is
+             * counted as one that doesn't parse */
+            if (line_no > 1 && cond_kind(line)) {
+                skip_condition();
+            }
+            continue;
         }
         const char* p = line.data();
         size_t n = line.size();
@@ -747,11 +767,11 @@ bool ecuio_recording::read_events(const std::string& folder)
         } else if (rows::equals(e.rest, kind_len, "drop") &&
                    rows::parse_drop(text, text_len, &count)) {
             drop_frames += count;
-        } else if (rows::equals(e.rest, kind_len, "cond")) {
+        } else if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
+                   rows::equals(e.rest, kind_len, "cond")) {
             if (!(rows::parse_cond_line(text, text_len, &cond) &&
-                  take_condition(cond)) &&
-                conditions.lines_skipped < UINT32_MAX) {
-                ++conditions.lines_skipped;
+                  take_condition(cond))) {
+                skip_condition();
             }
         }
     }

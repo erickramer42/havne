@@ -1876,6 +1876,64 @@ TEST(RecordingTest, CondLinesPastASetsKeysAreSkippedAndCounted)
     }
 }
 
+/* A crash's torn last line and a line past the longest row are no lines a
+ * reader takes: a cond line among them is counted as one that doesn't
+ * parse, and a line of another kind isn't */
+TEST(RecordingTest, ATornOrOverLongCondLineIsSkippedAndCounted)
+{
+    const std::string head = std::string(rows::kSignalsHeader) + "\n";
+    const std::string long_tail(rows::kRowMax, 'x');
+    Folder f;
+    f.write("events.log",
+            events_with({}, cond_at(1, "a,on,,1,0,1,1") +
+                                cond_at(2, "a,off,,1,0,2,2," + long_tail) +
+                                "12:00:03.000  +3.000  note  " + long_tail +
+                                "\n") +
+                "12:00:11.000  +11.000  cond  a,on,fired,3,0,11000000,"
+                "11000000");
+    f.write("signals.csv", head);
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(r.info().condition_events, 1u);
+    ecuio_recording_conditions_t c{};
+    ASSERT_EQ(ecuio_recording_get_conditions(r.r, &c), ECUIO_OK);
+    EXPECT_EQ(c.lines_skipped, 2u) << "the over-long and the torn cond line";
+
+    Folder note("-note");
+    note.write("events.log", events_v3({}) + "12:00:11.000  +11.000  note  a");
+    note.write("signals.csv", head);
+    EXPECT_EQ(conditions_of(note.utf8()).lines_skipped, 0u);
+}
+
+/* Only format 3 holds cond lines: in an older or unknown events.log a line
+ * of that kind is neither read nor counted */
+TEST(RecordingTest, CondLinesAreReadInFormat3Alone)
+{
+    const std::string head = std::string(rows::kSignalsHeader) + "\n";
+    const std::string lines =
+        cond_at(1, "a,on,,1,0,1,1") + cond_at(2, "Bad,on,,1,0,1,1");
+    std::string v2 = events_v2({});
+    v2.insert(v2.find("12:00:10.000"), lines);
+    const std::string unknown = "a log of some other tool\n\n" + lines;
+    for (const std::string& events : {v2, unknown}) {
+        Folder f;
+        f.write("events.log", events);
+        f.write("signals.csv", head);
+        Reader r(f.utf8());
+        ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+        EXPECT_EQ(r.info().condition_events, 0u) << events.substr(0, 40);
+        EXPECT_EQ(conditions_of(f.utf8()).lines_skipped, 0u)
+            << events.substr(0, 40);
+    }
+    Folder v3("-v3");
+    v3.write("events.log", events_with({}, lines));
+    v3.write("signals.csv", head);
+    Reader r(v3.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(r.info().condition_events, 1u) << "the same lines in format 3";
+    EXPECT_EQ(conditions_of(v3.utf8()).lines_skipped, 1u);
+}
+
 TEST(RecordingTest, ProgressIsCalledAndCancelsTheOpen)
 {
     const Hour& h = fixture_hour();
