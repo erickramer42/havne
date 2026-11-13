@@ -316,14 +316,14 @@ Page {
         // Refusals past an ECU's report list leave their rows blank: say
         // how many, since the rows can't
         const unnamed = Bridge.refusedUnnamed !== "" ? " · " + Bridge.refusedUnnamed : ""
-        // The plotted signals are what a log records: said while it runs,
-        // and where Start log is offered
+        // The ticked signals, text rows among them, are what a log records:
+        // said while it runs, and where Start log is offered
         if (Bridge.logActive)
-            return (Bridge.signalModel.subscribedCount === 1 ? qsTr("Logging the 1 plotted signal")
-                    : qsTr("Logging the %1 plotted signals").arg(Bridge.signalModel.subscribedCount)) + unnamed
+            return (Bridge.signalModel.tickedCount === 1 ? qsTr("Logging the 1 ticked signal")
+                    : qsTr("Logging the %1 ticked signals").arg(Bridge.signalModel.tickedCount)) + unnamed
         const logNote = !startLogOffered
             ? "" : (Theme.compact ? qsTr(" · Start log records them")
-                                  : qsTr(" · Start log records the plotted ones"))
+                                  : qsTr(" · Start log records the ticked ones"))
         if (Bridge.liveSignalModel.filter.active)
             return (Theme.compact ? qsTr("%1 of %2 shown · %3 plotted")
                                   : qsTr("Showing %1 of %2 signals · plotting %3"))
@@ -381,6 +381,7 @@ Page {
                 visible: Bridge.connected && Bridge.liveSignalModel.shownCount > 0
                 filter: Bridge.liveSignalModel.filter
                 codes: Bridge.liveSignalModel.groups
+                askedShown: true
             }
         }
 
@@ -501,6 +502,7 @@ Page {
                 required property bool isText
                 required property bool subscribed
                 required property bool hasValue
+                required property bool unasked          // the focus leaves it unasked
                 // The model notifies AgeMsRole per batch and on every
                 // coalesce tick (refreshAges), so a row that stops
                 // updating still re-evaluates and dims. A delegate-side
@@ -519,15 +521,17 @@ Page {
                     anchors.leftMargin: 12
                     anchors.rightMargin: 12
 
-                    // Plots the row on the chart; the value keeps
-                    // updating either way, here and on the Dashboard
+                    // Plots the row on the chart and asks it; the value
+                    // keeps updating either way, here and on the
+                    // Dashboard. A text row's tick asks it alone
                     ThemedCheckBox {
                         id: plotBox
                         objectName: "plotCheck"
                         checked: signalDelegate.subscribed
-                        enabled: !signalDelegate.isText   // nothing to plot
                         onToggled: Bridge.signalModel.toggleSubscribed(signalDelegate.row)
-                        Accessible.name: qsTr("Plot %1").arg(signalDelegate.name)
+                        Accessible.name: signalDelegate.isText
+                                         ? qsTr("Ask %1").arg(signalDelegate.name)
+                                         : qsTr("Plot %1").arg(signalDelegate.name)
                     }
                     // The chart's legend: this row's trace color, hollow
                     // while the signal isn't plotted
@@ -541,10 +545,12 @@ Page {
                                                        : "transparent"
                         implicitWidth: 10; implicitHeight: 10   // layout-managed
                         radius: 2
-                        color: signalDelegate.subscribed ? swatch.trace : "transparent"
+                        // Filled for a plotted trace: a ticked text row is asked, never drawn
+                        readonly property bool drawn: signalDelegate.subscribed && !signalDelegate.isText
+                        color: swatch.drawn ? swatch.trace : "transparent"
                         border.width: 1
                         border.color: swatch.trace
-                        opacity: signalDelegate.subscribed ? 1.0 : 0.5
+                        opacity: swatch.drawn ? 1.0 : 0.5
                     }
                     Label {
                         id: nameLabel
@@ -577,13 +583,16 @@ Page {
                                         signalDelegate.width - 24 - nameLabel.x
                                         - nameLabel.implicitWidth - 12)
                         // A signal its ECU refused says so, with the code
-                        // by name (ADR-0051 section 3); one not yet
-                        // answered renders "—", not a fabricated 0.
+                        // by name (ADR-0051 section 3); one the session
+                        // isn't asking says that, whatever it last read;
+                        // one not yet answered renders "—", not a
+                        // fabricated 0.
                         text: !Bridge.connected ? qsTr("—")
                               : signalDelegate.refused !== ""
                                 ? (refusedFits || signalDelegate.refusedCode === ""
                                    ? signalDelegate.refused
                                    : qsTr("Refused (%1)").arg(signalDelegate.refusedCode))
+                              : signalDelegate.unasked ? qsTr("Not asked")
                               : !signalDelegate.hasValue ? qsTr("—")
                               : signalDelegate.isText ? signalDelegate.text
                               : signalDelegate.label !== "" ? signalDelegate.label
@@ -598,7 +607,9 @@ Page {
                             signalDelegate.width - 24 - plotBox.width - swatch.width
                             - nameLabel.Layout.minimumWidth - 3 * rowLayout.spacing))
                         elide: Text.ElideRight
-                        color: signalDelegate.refused !== "" ? Theme.textDim : Theme.text
+                        color: signalDelegate.refused !== ""
+                               || (signalDelegate.unasked && Bridge.connected)
+                               ? Theme.textDim : Theme.text
                         font.pixelSize: Theme.fontEmphasis
                         // The value face, its digits tabular, so a reading
                         // doesn't jitter as its digits change
@@ -626,6 +637,26 @@ Page {
                   ? qsTr("1 signal hidden: the ECU doesn't send it")
                   : qsTr("%1 signals hidden: the ECU doesn't send them")
                         .arg(Bridge.signalModel.hiddenCount)
+        }
+        // What the focus leaves unasked (ADR-0056 section 2): a tick asks a
+        // row, except under a log, whose signals stay as it started
+        Label {
+            id: unaskedNote
+            objectName: "unaskedNote"
+            visible: Bridge.connected && Bridge.signalModel.unaskedCount > 0
+                     && !root.chartMaximized
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: Bridge.logActive
+                  ? (Bridge.signalModel.unaskedCount === 1
+                     ? qsTr("1 signal not asked while the log runs")
+                     : qsTr("%1 signals not asked while the log runs")
+                           .arg(Bridge.signalModel.unaskedCount))
+                  : Bridge.signalModel.unaskedCount === 1
+                  ? qsTr("1 signal not asked: tick its row to ask it")
+                  : qsTr("%1 signals not asked: tick a row to ask it")
+                        .arg(Bridge.signalModel.unaskedCount)
         }
 
         // The chart's time window: the last N seconds of every trace. The
