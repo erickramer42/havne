@@ -234,6 +234,32 @@ ecuio_status_t ecuio_session_get_unsupported_signals(
 );
 
 /*
+ * The signals the session's focus leaves unasked (ADR-0056 section 2;
+ * ecuio_session_set_focus): a def whose request the focus parks, and a
+ * computed signal (ECUIO_DEF_FLAG_COMPUTED) with such an input, followed
+ * through its chain. A def that shares a reply with a pick is asked, so
+ * it isn't listed. Neither is a passive def (no request: a broadcast
+ * frame), Service 09's, a def whose request the probe or an NRC dropped
+ * (the unsupported and absent lists and the support report say those),
+ * nor a DID the scan hasn't found. Empty with no focus, and on a session
+ * that asks nothing (ECUIO_SESSION_INFO_REQUESTS clear). Judged by the
+ * worker as it takes each focus and whenever its table changes, so it
+ * follows a focus call between two requests; a focus set before start is
+ * listed once the worker has begun.
+ *
+ * Fills ids with up to capacity signal ids, in the set's order, and
+ * *count with how many there are; capacity 0 (ids may be NULL) asks
+ * the count. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session or
+ * count, or NULL ids with a capacity. Readable after close.
+ */
+ecuio_status_t ecuio_session_get_unasked_signals(
+    const ecuio_session_t* session,
+    uint16_t* ids,
+    uint32_t capacity,
+    uint32_t* count
+);
+
+/*
  * Service 01 replies that carried more than their first PID's record
  * but wouldn't split into records (ADR-0039 Appendix A): a PID of no
  * known length, one twice, or records that don't end at the reply's

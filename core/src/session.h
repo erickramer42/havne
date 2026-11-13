@@ -128,7 +128,7 @@ struct ecuio_session {
      * for none; condition_defs (one byte per def, empty with no conditions)
      * the attached conditions' signals, a computed one's inputs among them,
      * which any focus keeps asked (ADR-0063 section 7). */
-    std::mutex focus_mutex;
+    mutable std::mutex focus_mutex;
     std::vector<uint16_t> focus_ids;
     std::vector<uint8_t> focus_defs;
     std::vector<uint8_t> condition_defs;
@@ -136,6 +136,9 @@ struct ecuio_session {
     std::atomic<uint32_t> focus_generation{0};
     bool focus_requests = false;
     std::vector<uint8_t> focus_askable;
+    /* One byte per def, sized with focus_askable: 1 for a def the focus the
+     * worker took leaves unasked (ecuio_focus_unasked), under the mutex */
+    std::vector<uint8_t> focus_unasked;
     /* The URI create was given, for a recording's header */
     std::string uri;
     /* A replay's: its source's frame flags line (ADR-0049 section 2),

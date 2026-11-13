@@ -1,6 +1,7 @@
 # File/layer: python/tests/test_session.py | pytest
 # Testing: HARNESS, PythonTest.test_session: the package against the
-#          shared core on mock://, the simulated car
+#          shared core on mock://, the simulated car, the ELM327
+#          emulator (havne-cli sim --elm327)
 #
 # Sessions and streams: values with their names and units, frames whole,
 # a slow reader's drops counted and said once, a close from another
@@ -10,8 +11,10 @@
 # released when it's collected (a stream a script keeps keeps its session).
 
 import gc
+import json
 import logging
 import os
+import subprocess
 import threading
 import time
 import weakref
@@ -344,6 +347,58 @@ def test_a_focus_id_outside_a_uint16_or_not_an_int_is_a_value_error():
                 s.set_focus([bad])
         s.set_focus([sid])
 
+
+def test_a_session_that_asks_nothing_leaves_nothing_unasked():
+    with havne.Session("mock://py") as s:
+        assert s.unasked_signals() == []
+        s.set_focus([next(iter(s.signals))])
+        s.start()
+        time.sleep(0.2)
+        assert s.unasked_signals() == [], "the mock asks nothing"
+
+
+def test_the_unasked_signals_follow_the_focus_on_a_session_that_asks():
+    """Through the ELM327 emulator (havne-cli sim --elm327 tcp:0): a focus
+    on engine speed leaves vehicle speed and Boost (whose MAP is parked)
+    unasked, never engine speed itself; its end leaves none"""
+    cli = os.environ.get("HAVNE_CLI", "")
+    if not cli:
+        pytest.skip("HAVNE_CLI names no havne-cli")
+    emu = subprocess.Popen([cli, "sim", "mock://emu?values=canned", "--elm327", "tcp:0",
+                            "--seconds", "120"], stdout=subprocess.PIPE, text=True)
+    try:
+        port = None
+        for line in emu.stdout:
+            j = json.loads(line)
+            assert j["type"] != "error", j
+            if j["type"] == "elm327":
+                port = j["listen"].rsplit(":", 1)[1]
+                break
+        assert port, "the emulator said where it listens"
+        with havne.Session(f"elm327://127.0.0.1:{port}?profile=obd2") as s:
+            ids = {name: sid for sid, (name, unit) in s.signals.items()}
+            s.set_focus(["RPM"])
+            s.start()
+
+            def wait_for(done):
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    got = s.unasked_signals()
+                    if done(got):
+                        return got
+                    time.sleep(0.05)
+                return s.unasked_signals()
+
+            unasked = wait_for(lambda got: len(got) > 0)
+            assert ids["Vehicle Speed"] in unasked
+            assert ids["Boost"] in unasked
+            assert ids["RPM"] not in unasked
+            assert unasked == sorted(unasked, key=list(s.signals).index), "the set's order"
+            s.set_focus([])
+            assert wait_for(lambda got: got == []) == []
+    finally:
+        emu.terminate()
+        emu.communicate(timeout=60)
 
 
 def test_a_session_asks_no_extended_session_unless_the_uri_does():

@@ -1511,6 +1511,7 @@ FUNCTIONS = {
     'ecuio_session_get_info': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_session_info_t)]),  # core.h
     'ecuio_session_get_replay_faults': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_replay_faults_t)]),  # core.h
     'ecuio_session_get_timing': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_session_timing_t), POINTER(ecuio_request_timing_t), c_uint32, POINTER(c_uint32)]),  # profile.h
+    'ecuio_session_get_unasked_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h
     'ecuio_session_get_unsplit_replies': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint64)]),  # profile.h
     'ecuio_session_get_unsupported_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h
     'ecuio_session_read_diagnostics': (c_int, [POINTER(ecuio_session_t)]),  # core.h

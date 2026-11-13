@@ -340,6 +340,33 @@ ecuio_status_t ecuio_session_get_unsupported_signals(
     return ECUIO_OK;
 }
 
+ecuio_status_t ecuio_session_get_unasked_signals(const ecuio_session_t* session,
+                                                 uint16_t* ids,
+                                                 uint32_t capacity,
+                                                 uint32_t* count)
+{
+    if (session == nullptr || count == nullptr ||
+        (ids == nullptr && capacity > 0)) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *count = 0;
+    const ecuio_signal_set_t* set = session->active_signal_set;
+    if (set == nullptr || set->defs == nullptr) {
+        return ECUIO_OK;
+    }
+    std::lock_guard<std::mutex> lock(session->focus_mutex);
+    const size_t n = session->focus_unasked.size();
+    for (uint32_t i = 0; i < set->count && i < n; ++i) {
+        if (session->focus_unasked[i] != 0) {
+            if (*count < capacity) {
+                ids[*count] = set->defs[i].id;
+            }
+            ++*count;
+        }
+    }
+    return ECUIO_OK;
+}
+
 ecuio_status_t ecuio_session_get_unsplit_replies(const ecuio_session_t* session,
                                                 uint64_t* count)
 {

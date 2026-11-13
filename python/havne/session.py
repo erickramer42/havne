@@ -426,6 +426,27 @@ class Session:
                                                min_sweep_ms, 0),
               "ecuio_session_set_focus_with")
 
+    def unasked_signals(self):
+        """The ids, in the set's order, of the signals the focus leaves
+        unasked (ecuio_session_get_unasked_signals): those whose request
+        it parks, and a computed one with such an input. Empty with no
+        focus and on a session that asks nothing (mock://, replay://, a
+        listener); the worker judges each focus as it takes it, so a list
+        read at once after set_focus may still be the last one's."""
+        handle = self._handle()
+        count = ctypes.c_uint32(0)
+        check(lib.ecuio_session_get_unasked_signals(handle, None, 0,
+                                                    ctypes.byref(count)),
+              "ecuio_session_get_unasked_signals")
+        while True:
+            ids = (ctypes.c_uint16 * max(count.value, 1))()
+            room = count.value
+            check(lib.ecuio_session_get_unasked_signals(handle, ids, room,
+                                                        ctypes.byref(count)),
+                  "ecuio_session_get_unasked_signals")
+            if count.value <= room:
+                return list(ids[:count.value])
+
     def start(self):
         check(lib.ecuio_session_start(self._handle()), "ecuio_session_start")
 

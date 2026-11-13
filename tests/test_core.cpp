@@ -7120,6 +7120,182 @@ TEST(CoreTest, AFocusKeepsAnAttachedConditionsSignalsAsked)
     ecuio_session_destroy(s);
 }
 
+/* ecuio_session_get_unasked_signals: the defs a focus parks, a computed
+ * one with a parked input, in the set's order; a def that shares a pick's
+ * reply, a dropped request's and a passive def are never listed; no
+ * focus lists nothing, and the list stays readable after close. The
+ * requests are built on mock sessions and the worker's take is driven by
+ * hand, as in the cases above. */
+TEST(CoreTest, TheUnaskedSignalsAreWhatTheFocusParks)
+{
+    const auto unasked = [](const ecuio_session_t* s) {
+        uint32_t n = 0;
+        EXPECT_EQ(ecuio_session_get_unasked_signals(s, nullptr, 0, &n),
+                  ECUIO_OK);
+        std::vector<uint16_t> ids(n);
+        uint32_t again = 0;
+        EXPECT_EQ(ecuio_session_get_unasked_signals(s, ids.data(), n, &again),
+                  ECUIO_OK);
+        EXPECT_EQ(again, n);
+        return ids;
+    };
+    const auto pid_of = [](const ecuio_signal_def_t& d) {
+        return d.mux_length == 2 && d.mux_offset == 0 &&
+                       (d.mux_key >> 8) == 0x41
+                   ? static_cast<int>(d.mux_key & 0xFF)
+                   : -1;
+    };
+    const auto ids_of = [](const ecuio_signal_set_t* set, auto keep) {
+        std::vector<uint16_t> ids;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            if (keep(set->defs[i])) {
+                ids.push_back(set->defs[i].id);
+            }
+        }
+        return ids;
+    };
+
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://unasked?profile=obd2", &s),
+              ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    request_params params;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ecuio_focus_seen seen;
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_TRUE(unasked(s).empty()) << "no focus";
+
+    /* A focus on O2 S1's first field (PID 24): its second shares the reply */
+    uint16_t lambda = 0;
+    for (uint32_t i = 0; i < set->count && lambda == 0; ++i) {
+        if (pid_of(set->defs[i]) == 0x24) {
+            lambda = set->defs[i].id;
+        }
+    }
+    ASSERT_NE(lambda, 0);
+    ASSERT_EQ(ecuio_session_set_focus(s, &lambda, 1), ECUIO_OK);
+    EXPECT_TRUE(unasked(s).empty()) << "the worker hasn't taken it yet";
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(unasked(s),
+              ids_of(set,
+                     [&](const ecuio_signal_def_t& d) {
+                         const bool computed =
+                             (d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0;
+                         return computed ||
+                                (pid_of(d) >= 0 && pid_of(d) != 0x24);
+                     }))
+        << "every other Service 01 def, and Boost, whose MAP is parked";
+
+    /* A focus on Boost asks MAP and baro, so Boost isn't listed */
+    const uint16_t boost = ECUIO_OBD2_SIG_BOOST_ID;
+    ASSERT_EQ(ecuio_session_set_focus(s, &boost, 1), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(unasked(s), ids_of(set, [&](const ecuio_signal_def_t& d) {
+                  const int pid = pid_of(d);
+                  return pid >= 0 && pid != 0x0B && pid != 0x33;
+              }));
+
+    /* A dropped request leaves the list as the table changes */
+    uint32_t rpm_row = e->count;
+    for (uint32_t k = 0; k < e->count; ++k) {
+        if (e->requests[k].len == 2 && e->requests[k].bytes[1] == 0x0C) {
+            rpm_row = k;
+        }
+    }
+    ASSERT_LT(rpm_row, e->count);
+    ecuio_engine_drop(e.get(), rpm_row, ECUIO_DROP_NOT_SUPPORTED, 0x12);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(unasked(s), ids_of(set, [&](const ecuio_signal_def_t& d) {
+                  const int pid = pid_of(d);
+                  return pid >= 0 && pid != 0x0B && pid != 0x33 && pid != 0x0C;
+              }));
+
+    /* The capacity takes the first, the count is all of them */
+    const std::vector<uint16_t> all = unasked(s);
+    ASSERT_GE(all.size(), 2u);
+    uint16_t two[2] = {};
+    uint32_t n = 0;
+    EXPECT_EQ(ecuio_session_get_unasked_signals(s, two, 2, &n), ECUIO_OK);
+    EXPECT_EQ(n, all.size());
+    EXPECT_EQ(two[0], all[0]);
+    EXPECT_EQ(two[1], all[1]);
+    EXPECT_EQ(ecuio_session_get_unasked_signals(nullptr, two, 2, &n),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_unasked_signals(s, nullptr, 2, &n),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_unasked_signals(s, two, 2, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+
+    /* Readable after close */
+    ecuio_session_close(s);
+    EXPECT_EQ(unasked(s), all);
+    ecuio_session_destroy(s);
+
+    /* The focus's end lists nothing */
+    ASSERT_EQ(ecuio_session_create("mock://unasked?profile=obd2", &s),
+              ECUIO_OK);
+    set = ecuio_session_signal_set(s);
+    auto f = std::make_unique<ecuio_request_engine>();
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, f.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ecuio_focus_seen fresh;
+    ASSERT_EQ(ecuio_session_set_focus(s, &boost, 1), ECUIO_OK);
+    ecuio_take_focus(s, f.get(), fresh);
+    EXPECT_FALSE(unasked(s).empty());
+    ASSERT_EQ(ecuio_session_set_focus(s, nullptr, 0), ECUIO_OK);
+    ecuio_take_focus(s, f.get(), fresh);
+    EXPECT_TRUE(unasked(s).empty()) << "the focus ended";
+    ecuio_session_destroy(s);
+
+    /* A passive def has no request, so it is never unasked */
+    static ecuio_signal_def_t defs[3];
+    defs[0] = value_def(61001, ECUIO_VALUE_UINT, ECUIO_OBD2_ECU_ARB_ID);
+    defs[1] = value_def(61002, ECUIO_VALUE_UINT, 0x3E8);
+    defs[2] = value_def(61003, ECUIO_VALUE_UINT, ECUIO_OBD2_ECU_ARB_ID);
+    for (ecuio_signal_def_t& d : defs) {
+        d.bit_length = 8;
+    }
+    for (uint32_t i : {0u, 2u}) {
+        defs[i].mux_length = 2;
+        defs[i].start_byte = 2;
+    }
+    defs[0].mux_key = 0x410C;
+    defs[2].mux_key = 0x410D;
+    static ecuio_channel_decl_t channel[1] = {{ECUIO_OBD2_ECU_ARB_ID, 0x7E0}};
+    static ecuio_signal_set_t passive{};
+    passive.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    passive.defs = defs;
+    passive.count = 3;
+    passive.channels = channel;
+    passive.channel_count = 1;
+    ASSERT_EQ(ecuio_profile_register("unasked-passive", &passive, nullptr),
+              ECUIO_OK);
+    ASSERT_EQ(
+        ecuio_session_create("mock://unasked?profile=unasked-passive", &s),
+        ECUIO_OK);
+    auto g = std::make_unique<ecuio_request_engine>();
+    ASSERT_EQ(ecuio_build_requests(s, &passive, params, s->info.rx_ids,
+                                   s->info.channel_count, g.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ecuio_focus_seen third;
+    const uint16_t first = 61001;
+    ASSERT_EQ(ecuio_session_set_focus(s, &first, 1), ECUIO_OK);
+    ecuio_take_focus(s, g.get(), third);
+    EXPECT_EQ(unasked(s), std::vector<uint16_t>{61003});
+    ecuio_session_destroy(s);
+    EXPECT_EQ(ecuio_profile_unregister("unasked-passive"), ECUIO_OK);
+}
+
 /* ADR-0056 section 4: the call's refusals, each changing nothing, and
  * the minimum reaching the engine with the focus at the worker's take;
  * the focus's end takes it away */

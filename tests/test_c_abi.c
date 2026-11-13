@@ -448,6 +448,8 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_get_unsupported_signals(NULL, NULL, 0, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_unasked_signals(NULL, NULL, 0, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_identity_vin(NULL, NULL, ECUIO_VIN_TEXT_LEN) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_get_unsplit_replies(NULL, NULL) !=
