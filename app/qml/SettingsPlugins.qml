@@ -1,6 +1,6 @@
 // File/layer: app/qml/SettingsPlugins.qml | Qt6 Quick, UI layer
 // Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
-// The app's plugins and the VIN's variant matches: one part of SettingsPage, which holds the state
+// The app's plugins and the picked vehicle's variants, the VIN's matches first: one part of SettingsPage, which holds the state
 
 import QtQuick
 import QtQuick.Controls
@@ -14,8 +14,8 @@ ColumnLayout {
     Layout.fillWidth: true
     spacing: Theme.spacing * 2
 
-    // ---- The app's plugins (ADR-0052): every vehicle's, the
-    // picked one's variant proposed by its VIN ----
+    // ---- The app's plugins (ADR-0052): every vehicle's, each
+    // variant the picked one's to pick ----
     Label {
         objectName: "pluginsTitle"
         text: qsTr("Plugins")
@@ -88,31 +88,59 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
-    // The variants the VIN proposes for the picked vehicle; the
-    // user picks one (ADR-0052 section 5)
+    // Every loaded plugin's variants for the picked vehicle, those a VIN
+    // matched first; the user picks one, VIN or none (ADR-0052 section 5
+    // and its appendix of 2026-11-13)
     Label {
         objectName: "pluginMatchesText"
-        visible: root.host.pickedVehicle !== null && root.host.pluginList.length > 0
-        text: root.host.pluginMatches.length > 0
-            ? qsTr("For this car, by its VIN:")
-            : qsTr("No match yet: plugins are proposed once the car's VIN is "
-                   + "read, or one is typed in the VIN lookup")
+        visible: root.host.pluginVariants.matched.length > 0
+        text: qsTr("For this car, by its VIN:")
         color: Theme.textDim
         wrapMode: Text.Wrap
         Layout.fillWidth: true
     }
     Flow {
-        visible: root.host.pickedVehicle !== null
+        visible: root.host.pluginVariants.matched.length > 0
         Layout.fillWidth: true
         spacing: Theme.spacing
         Repeater {
-            model: root.host.pickedVehicle !== null ? root.host.pluginMatches : []
+            model: root.host.pluginVariants.matched
             ThemedButton {
                 required property var modelData
                 required property int index
                 objectName: "pluginMatch_" + index
                 width: Math.min(implicitWidth, parent.width)
-                text: qsTr("%1: %2").arg(modelData.name, modelData.variant)
+                text: modelData.label
+                checkable: true
+                checked: root.host.pickedVehicle !== null
+                             && root.host.pickedVehicle.plugin === modelData.profile
+                enabled: root.host.idle
+                onClicked: root.host.pickPluginVariant(modelData.profile)
+            }
+        }
+    }
+    Label {
+        objectName: "pluginOthersText"
+        visible: root.host.pluginVariants.others.length > 0
+        text: root.host.pluginVariants.matched.length > 0
+            ? qsTr("Other plugins:")
+            : qsTr("Pick a variant for this vehicle:")
+        color: Theme.textDim
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+    }
+    Flow {
+        visible: root.host.pluginVariants.others.length > 0
+        Layout.fillWidth: true
+        spacing: Theme.spacing
+        Repeater {
+            model: root.host.pluginVariants.others
+            ThemedButton {
+                required property var modelData
+                required property int index
+                objectName: "pluginOther_" + index
+                width: Math.min(implicitWidth, parent.width)
+                text: modelData.label
                 checkable: true
                 checked: root.host.pickedVehicle !== null
                              && root.host.pickedVehicle.plugin === modelData.profile

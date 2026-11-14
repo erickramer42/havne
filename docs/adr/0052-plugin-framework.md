@@ -583,3 +583,38 @@ from `schema/signal-file.schema.json` by reference (that ADR's appendix
   `SchemaFixturesTest` validates every committed plugin, its data files
   and fixture files, and runs the manifest's edge cases through
   `havne-cli plugins check` too.
+
+## Appendix: every variant offered in the app (2026-11-13)
+
+Section 5's app half asked for a VIN before anything could be picked: a
+car whose VIN wasn't read, or a session that had ended before its
+identity was whole, left an imported plugin with no way to become the
+vehicle's pick, and nothing should ask a user to know a VIN. The app
+lists every imported variant in the picked vehicle's section,
+whether or not a VIN is known:
+
+- **The VIN's matches are marked and first.** The variants a VIN covers
+  come under "For this car, by its VIN:", the rest under "Other
+  plugins:" (with no match, all of them under "Pick a variant for this
+  vehicle:"). The matches are the VIN typed in the lookup's, else the
+  session's (while it runs) and those kept on the vehicle.
+- **A session's matches are kept on the vehicle its VIN identified**
+  (the vehicle book's optional `vinMatches`: the variants' profile
+  names), so the marks are there with no session. The VIN itself is
+  never stored (ADR-0027 section 3), but the list implies what those
+  plugins' `match` covers, a manufacturer code and a range of model
+  years: about as much as the user's own pick of a variant says. A
+  session whose VIN is no vehicle's keeps nothing. The next
+  identification replaces them, Forget VIN clears them, a copy made by
+  Duplicate has none (nor the VIN key), a removed plugin's profiles
+  leave every vehicle's, and so do a replaced plugin's, since its new
+  version's `match` may not cover the car.
+- **A pick that doesn't load is shown.** A vehicle's pick whose plugin
+  no longer loads, or whose variant a newer version dropped, is listed
+  after the others as "doesn't load", so it can be undone there.
+- **The choice is still the user's.** Nothing is picked for the
+  vehicle by a match (ADR-0013 section 3 holds); a marked variant and
+  an unmarked one are picked the same way.
+
+`havne-cli plugins match` is unchanged: it lists the variants a VIN
+covers, and `stream` reads the variant its URI names.

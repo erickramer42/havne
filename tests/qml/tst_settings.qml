@@ -2521,12 +2521,45 @@ TestCase {
 
     // ---- The app's plugins (ADR-0052) ----
 
-    // A packed plugin imported is listed with its variants; the VIN
-    // (typed in the lookup here: the mock has none) proposes the variants
-    // it covers for the picked vehicle, and the one picked is kept in the
-    // vehicle, read through the URI's profile, offered under Profile
-    // and connected; removed, it goes from the list and the row. An
-    // import of its id replaces it, and a package core refuses says so
+    // With no VIN at all, every loaded plugin's variants are the picked
+    // vehicle's to pick (ADR-0052's appendix of 2026-11-13): none marked,
+    // nothing asking for a VIN, and the one picked is the vehicle's, in
+    // the URI's profile and offered under Profile; no vehicle, no variants
+    function test_aVariantIsPickedWithNoVinKnown() {
+        const page = createPage()
+        page.open("signals")
+        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
+        verify(findChild(page, "pluginOther_0") === null, "no vehicle picked")
+        verify(!find(page, "pluginOthersText").visible)
+
+        press(page, "vehicleNew")
+        verify(!find(page, "pluginMatchesText").visible, "nothing marked")
+        verify(findChild(page, "pluginMatch_0") === null)
+        const others = find(page, "pluginOthersText")
+        verify(others.visible)
+        compare(others.text, "Pick a variant for this vehicle:")
+        verify(!others.text.includes("VIN"))
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOther_1").text, "Example: the simulated car: my2019")
+
+        const field = find(page, "uriField")
+        field.text = "elm327://COM9"
+        press(page, "pluginOther_1")
+        compare(page.pickedVehicle.plugin, "plugin.example-sim.my2019")
+        compare(field.text, "elm327://COM9?profile=plugin.example-sim.my2019")
+        verify(find(page, "pluginOther_1").checked)
+        verify(!find(page, "pluginOther_0").checked)
+        const choice = find(page, "profile_plugin.example-sim.my2019")
+        compare(choice.text, "Example: the simulated car: my2019")
+        verify(choice.checked)
+    }
+
+    // A packed plugin imported is listed with its variants; a VIN typed
+    // in the lookup (the mock has none) puts the variants it covers first
+    // under its own caption, the rest after, and the one picked is kept
+    // in the vehicle, read through the URI's profile, offered under
+    // Profile and connected; removed, it goes from the list and the row.
+    // An import of its id replaces it, and a package core refuses says so
     function test_aPluginIsImportedMatchedByTheVinAndConnected() {
         const page = createPage()
         page.open("signals")
@@ -2541,14 +2574,24 @@ TestCase {
         compare(Harness.storedPlugins().length, 1)
 
         press(page, "vehicleNew")
-        verify(find(page, "pluginMatchesText").text.startsWith("No match yet"))
         verify(findChild(page, "pluginMatch_0") === null)
         find(page, "vinLookupField").text = "ZZZFAKE11M0000001"   // 2021
-        compare(find(page, "pluginMatchesText").text, "For this car, by its VIN:")
+        const matched = find(page, "pluginMatchesText")
+        verify(matched.visible)
+        compare(matched.text, "For this car, by its VIN:")
         compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
         compare(find(page, "pluginMatch_1").text, "Example: the simulated car: my2019")
+        verify(!find(page, "pluginOthersText").visible, "both matched, none other")
+        tryVerify(() => findChild(page, "pluginOther_0") === null, 1000)
         find(page, "vinLookupField").text = "ZZZFAKE11G0000001"   // 2016
         tryVerify(() => findChild(page, "pluginMatch_1") === null, 1000, "before my2019")
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOthersText").text, "Other plugins:")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019",
+                "the variant it doesn't cover after, still offered")
+        tryVerify(() => find(page, "pluginMatch_0").mapToItem(page, 0, 0).y
+                        < find(page, "pluginOther_0").mapToItem(page, 0, 0).y, 1000,
+                  "the match comes first, once the flows are placed")
         find(page, "vinLookupField").text = "ZZZFAKE11M0000001"
 
         const field = find(page, "uriField")
@@ -2585,40 +2628,167 @@ TestCase {
     }
 
 
-    // A session's VIN proposes variants (ADR-0052 section 5); nothing that
-    // changes the vehicle is used while it runs, and once it ends its
-    // matches stay to be picked, though the VIN goes with the session. A
-    // pick pressed again is undone, and a button never runs past the page
-    function test_aSessionsVinProposesVariantsPickedOnceItEnds() {
-        const page = createPage()
+    // A session's VIN marks the variants it covers (ADR-0052 section 5);
+    // nothing that changes the vehicle is used while it runs. Its matches
+    // are kept on the vehicle the VIN identified, by their profiles alone,
+    // never another car's, and stay once the VIN goes with the session:
+    // through the plugins read again, a page made again, and another
+    // vehicle's turn, which shows none of them; a replaced plugin takes
+    // its own. A session whose VIN is no vehicle's marks them only while
+    // it runs. A pick, and the pick pressed again to undo it, keep the
+    // button and its focus, and a button never runs past the page
+    function test_aSessionsVinMatchesStayWithItsVehicle() {
+        let page = createPage()
         press(page, "vehicleNew")
+        const car = page.pickedVehicle.id
         verify(page.importPlugin(Harness.writeExamplePlugin("example.havne-plugin.json")))
         find(page, "uriField").text = "mock://demo"
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 5000, "connected")
-        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // a 2021 the example covers
-        tryVerify(() => findChild(page, "pluginMatch_1") !== null, 1000, "proposed")
+        Bridge.identifyForTesting("ZZZFAKE11G0000001")   // a 2016: base alone
+        tryVerify(() => findChild(page, "pluginMatch_0") !== null, 1000, "marked while it runs")
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019")
+        compare(page.pickedVehicle.vinMatches, [], "the VIN is no vehicle's: nothing kept")
         verify(!find(page, "pluginMatch_0").enabled)
+        verify(!find(page, "pluginOther_0").enabled)
         verify(!find(page, "signalImport").enabled)
         verify(!find(page, "formSave").enabled)
         verify(!find(page, "pluginImport").enabled)
+
+        // The VIN names the picked vehicle (an adapter's recognize does
+        // it; the mock's URI is no adapter's, so the key is set here)
+        const salt = page.vehicles.salt !== "" ? page.vehicles.salt : Bridge.newSalt()
+        const doc = VehicleBook.copy(page.vehicles)
+        doc.salt = salt
+        page.saveVehicles(VehicleBook.change(doc, v => v.vinKey = Bridge.vinKey(salt)))
+        Bridge.identifyForTesting("ZZZFAKE11G0000001")
+        compare(page.pickedVehicle.vinMatches, ["plugin.example-sim.base"])
+        verify(!VehicleBook.serialize(page.vehicles).includes("ZZZFAKE"), "never the VIN")
+
+        // Another car's VIN with this vehicle picked (a replay of it, which
+        // recognizes no vehicle) marks its own while it runs, keeps nothing
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // 2021: both
+        tryVerify(() => findChild(page, "pluginMatch_1") !== null, 1000, "the session's marked")
+        compare(page.pickedVehicle.vinMatches, ["plugin.example-sim.base"], "not another car's")
+
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000)
-        verify(findChild(page, "pluginMatch_0") !== null, "the session's matches stay")
+        compare(Bridge.pluginMatches(""), [], "the VIN went with the session")
         compare(find(page, "pluginMatchesText").text, "For this car, by its VIN:")
+        tryVerify(() => findChild(page, "pluginMatch_1") === null, 1000, "the vehicle's alone")
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019")
         verify(find(page, "pluginMatch_0").enabled)
-        press(page, "pluginMatch_0")
+
+        // What an import or a removal runs after the session asks the
+        // bridge again, with no VIN
+        page.loadPlugins()
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        tryVerify(() => findChild(page, "pluginMatch_1") === null, 1000)
+
+        // The page made again (the app's next start) reads them from the book
+        page.destroy()
+        wait(10)
+        page = createPage()
+        compare(page.pickedVehicle.id, car)
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019")
+
+        // A VIN typed in the lookup is the one asked about, in their place
+        find(page, "vinLookupField").text = "1FAFAKE13Y0000001"   // another manufacturer
+        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "the typed VIN's: none")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
+        find(page, "vinLookupField").text = ""
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+
+        // Another vehicle has none of them; its own turn back has them
+        press(page, "vehicleNew")
+        verify(!find(page, "pluginMatchesText").visible)
+        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "not this one's")
+        compare(find(page, "pluginOthersText").text, "Pick a variant for this vehicle:")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
+        page.saveVehicles(VehicleBook.pick(page.vehicles, car))
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+
+        // The pressed button stays, with its focus, through the save
+        find(page, "uriField").text = "mock://demo"
+        const button = find(page, "pluginMatch_0")
+        button.forceActiveFocus()
+        verify(button.activeFocus)
+        button.clicked()
         compare(page.pickedVehicle.plugin, "plugin.example-sim.base")
         compare(find(page, "uriField").text, "mock://demo?profile=plugin.example-sim.base")
-        press(page, "pluginMatch_0")
+        verify(find(page, "pluginMatch_0") === button, "the same button after the pick")
+        verify(button.checked)
+        verify(button.activeFocus, "the pick keeps the focus")
+        button.clicked()
         compare(page.pickedVehicle.plugin, "", "pressed again, undone")
         compare(find(page, "uriField").text, "mock://demo")
+        verify(find(page, "pluginMatch_0") === button && button.activeFocus, "and once undone")
 
-        // Its row narrower than its text (a phone, a long plugin name)
-        const button = find(page, "pluginMatch_0")
-        button.parent.width = 100
-        verify(button.implicitWidth > 100)
-        verify(button.width <= 100, button.width + " in a row of 100")
+        // A replacement takes the replaced plugin's matches (its new
+        // version's match may not cover the car) and keeps the pick
+        press(page, "pluginMatch_0")
+        verify(page.importPlugin(Harness.writeExamplePlugin("newer.havne-plugin.json", "1.1.0")))
+        compare(page.pickedVehicle.vinMatches, [])
+        compare(page.pickedVehicle.plugin, "plugin.example-sim.base", "the pick kept")
+        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "no mark")
+        compare(find(page, "pluginOthersText").text, "Pick a variant for this vehicle:")
+        verify(find(page, "pluginOther_0").checked)
+        verify(findChild(page, "pluginOther_2") === null, "a pick that loads is listed once")
+        press(page, "pluginOther_0")
+        compare(page.pickedVehicle.plugin, "")
+
+        // A session whose VIN is no vehicle's: marked while it runs alone
+        press(page, "vehicleNew")
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected again")
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // 2021: both
+        tryVerify(() => findChild(page, "pluginMatch_1") !== null, 1000, "both marked")
+
+        // Either list's row narrower than its text (a phone, a long name)
+        const match = find(page, "pluginMatch_0")
+        match.parent.width = 100
+        verify(match.implicitWidth > 100)
+        verify(match.width <= 100, match.width + " in a row of 100")
+
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "gone with the VIN")
+        compare(find(page, "pluginOther_1").text, "Example: the simulated car: my2019")
+        const other = find(page, "pluginOther_1")
+        other.parent.width = 100
+        verify(other.implicitWidth > 100)
+        verify(other.width <= 100, other.width + " in a row of 100")
+        compare(page.pickedVehicle.vinMatches, [], "nothing kept on this one")
+    }
+
+    // A copy that doesn't load lists no variant and leaves the others'
+    // listed; a vehicle's pick that doesn't load (its plugin refused, or
+    // its variant gone from a newer version) is listed after them, so it
+    // can be undone there
+    function test_aPickThatDoesntLoadIsShownAndUndone() {
+        const page = createPage()
+        page.open("signals")
+        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
+        press(page, "vehicleNew")
+        page.pluginList = [{ sha256: "0".repeat(64), ok: false, words: "a load failed for the test" }]
+            .concat(page.pluginList)
+        compare(find(find(page, "plugin_0"), "pluginText").text, "a load failed for the test")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOther_1").text, "Example: the simulated car: my2019")
+        verify(findChild(page, "pluginOther_2") === null)
+
+        page.saveVehicles(VehicleBook.setPlugin(page.vehicles, "plugin.gone.base"))
+        const gone = find(page, "pluginOther_2")
+        compare(gone.text, "plugin.gone.base: doesn't load")
+        verify(gone.checked)
+        verify(!find(page, "pluginOther_0").checked)
+        press(page, "pluginOther_2")
+        compare(page.pickedVehicle.plugin, "", "undone")
+        tryVerify(() => findChild(page, "pluginOther_2") === null, 1000, "and gone from the list")
     }
 
     // A copy's own signals are its own: its own file is copied under a
