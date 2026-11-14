@@ -1582,6 +1582,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_viewer_frames.cpp
         test_recording_import.cpp
         test_recording_export.cpp
+        test_one_store.cpp
         ../app/recordingview.cpp
         ../app/recordingexport.cpp
         ../app/recordingframes.cpp

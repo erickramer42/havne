@@ -889,6 +889,94 @@ public:
     // section 3); { sha256, id, name, variant, profile } each, none
     // without a VIN. A proposal only: the user picks
     Q_INVOKABLE QVariantList pluginMatches(const QString& typedVin) const;
+    // One store (ADR-0064): every import ends in the plugin store.
+    // readImport reads the file at url as importPlugin does, once, and
+    // tells its kind by its first key: { ok, words, kind }; a byte-order
+    // mark before the text is passed by. A package ("plugin") goes in at
+    // once, importPlugin's result with it (updated: the version of the
+    // user's own plugin it updated in place; replacedProfiles: the
+    // profiles of the version it took the place of). A signal file
+    // ("signals") is held as the one pending import, nothing kept: name,
+    // id (the plugin id a wrap gives it) and variant (the id a variant
+    // made from it takes) say what it would be. An OBDb set ("obdb") is
+    // held too, for previewObdbImport, whose report comes first: it
+    // converts the held bytes as previewObdb converts a file's, as often
+    // as the year or the name is changed. Words never name the path.
+    // Each logs one line
+    Q_INVOKABLE QVariantMap readImport(const QUrl& url);
+    Q_INVOKABLE QVariantMap previewObdbImport(int modelYear,
+                                              const QString& name);
+    // The pending signal file kept: as a new plugin of the user's own
+    // (into ""), imported for vehicle (the vehicle's id, "" for none),
+    // or as the variant named of the user's own plugin with the hash
+    // into, added or put in that variant's place. The plugin's entry
+    // (plugins()), plus kept, replaced and, for a variant, notes (core's
+    // words when an ECU of the file's took another id). A file that made
+    // a plugin here already answers with that plugin (kept), and with
+    // words when the plugin has changed since; words on a kept result
+    // are for the user, and reach the log. A refusal leaves the file
+    // pending, so a changed variant id or a disconnect can be followed
+    // by Keep again. keepSignalText is the same for a file given as text
+    // (the form's), with nothing pending. Each logs one line
+    Q_INVOKABLE QVariantMap keepSignals(const QString& into,
+                                        const QString& variant,
+                                        const QString& vehicle);
+    Q_INVOKABLE QVariantMap keepSignalText(const QString& text,
+                                           const QString& into,
+                                           const QString& variant,
+                                           const QString& vehicle);
+    // Everything an import holds forgotten: the file read and an OBDb
+    // set converted from it
+    Q_INVOKABLE void dropImport()
+    {
+        m_importPending.clear();
+        m_importKind.clear();
+        m_obdbPending.clear();
+    }
+    // The pending converted set (previewObdbImport's or previewObdb's)
+    // kept as a plugin of the user's own, imported for vehicle: its
+    // variant is my<year> when the model year was typed (yearTyped) and
+    // base when it was decoded from a VIN or there is none, so no
+    // variant id carries a VIN's year. It goes to that vehicle's earlier
+    // conversion of the same name: in its place (replaced, with
+    // replacedProfiles for a pick to follow) while that plugin has one
+    // variant, as a variant of it (merged) once it has more. A refusal
+    // leaves the set pending. Logs one line
+    Q_INVOKABLE QVariantMap keepObdbPlugin(const QString& vehicle,
+                                           bool yearTyped);
+    // A variant removed from a plugin of the user's own (never its last),
+    // and a plugin marked as the user's own; each logs one line
+    Q_INVOKABLE QVariantMap dropPluginVariant(const QString& sha,
+                                              const QString& variant);
+    Q_INVOKABLE QVariantMap markPluginMine(const QString& sha);
+    // A vehicle forgotten (its id), or every vehicle: what the store
+    // holds as imported for it is released, so a vehicle later given
+    // that id starts with no imports of its own. The plugins stay.
+    // { ok, words, count }: count the plugins released. Logs one line
+    // when any was
+    Q_INVOKABLE QVariantMap forgetVehicleImports(const QString& vehicle);
+    Q_INVOKABLE QVariantMap forgetAllVehicleImports();
+    // Export plugin: the store's packed copy written to url byte for
+    // byte (a local file, or Android's content:// through QFile), so the
+    // file loads wherever the copy does and holds nothing of the store's
+    // index. { ok, words }, words never naming a path. Logs one line
+    Q_INVOKABLE QVariantMap exportPlugin(const QString& sha, const QUrl& url);
+    // A vehicle's picks (ADR-0064 Q5), kept by the vehicle book as an
+    // ordered list of profiles. offeredVariants lists every variant of
+    // every plugin for the vehicle (PluginStore::offered: forThisCar
+    // first, picked marked), the VIN typed or with "" the session's;
+    // pickRow gives the picks as the profile row shows them (missing,
+    // and on an adapter the one that stands in for Default); pickVariant
+    // adds a profile last ({ ok, words, picks }) and unpickVariant
+    // takes one out
+    Q_INVOKABLE QVariantList offeredVariants(const QString& vehicle,
+                                             const QString& typedVin,
+                                             const QStringList& picks);
+    Q_INVOKABLE QVariantList pickRow(const QStringList& picks, bool adapter);
+    Q_INVOKABLE QVariantMap pickVariant(const QStringList& picks,
+                                        const QString& profile);
+    Q_INVOKABLE QStringList unpickVariant(const QStringList& picks,
+                                          const QString& profile);
     // The profiles a recording's frames can decode through in the viewer
     // (RecordingView::openFrames; ADR-0049's appendix of 2026-11-06): the
     // built-in obd2 and mock, each signal file the vehicles' book has
@@ -1582,6 +1670,15 @@ private:
     ReadOnce m_readOnce;
     SignalStore m_signalStore;
     QByteArray m_obdbPending; // previewObdb's converted file, until kept
+    int m_obdbPendingYear = 0;  // the model year it was converted for
+    QByteArray m_importPending; // readImport's file, until kept or dropped
+    QString m_importKind;       // what it is: "signals" or "obdb"
+    QVariantMap previewObdbBytes(const QByteArray& bytes,
+                                 const QString& refusal, int modelYear,
+                                 const QString& name);
+    // A signal file into the plugin store, as a new plugin or a variant
+    QVariantMap keepFile(const QByteArray& file, const QString& into,
+                         const QString& variant, const QString& vehicle);
     PluginStore m_pluginStore;
     // Recordings' own signal files by their hash, each registered under
     // its rec.<16 hex> profile until the bridge closes, as the store keeps
