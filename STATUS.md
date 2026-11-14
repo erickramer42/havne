@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-13, **Version:** v0.7.3,
+**Updated:** 2026-11-14, **Version:** v0.7.4,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,9 +14,13 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.7.4, follow-ups on the dashboard and the viewer**
-(the roadmap's row below), with v0.8.0's computed grammar built beside
-it. v0.7.3, the analysis viewer, is out (its section
+**Current phase: v0.8.0, conditions** (the roadmap's row below), whose
+computed grammar is built. v0.7.4, follow-ups on the dashboard and the
+viewer, is out (its section below): a Dashboard layout saved to a file
+and loaded back, more gauge colors, steady trends on the Dashboard and
+Live's chart, every plugin variant offered for a vehicle, Compare's
+difference trace, the demo car under `obd2`, and Android's own document
+picker. v0.7.3, the analysis viewer, came before it (its section
 below): the viewer's chart in panes with two cursors and a span's
 statistics, a Jump row between a recording's pulls and cruises, Live's
 pause, and first-run words that find the way without the guide. v0.7.2,
@@ -480,8 +484,8 @@ background too ([roadmap](#roadmap)).
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 2225 ctest cases on Windows (both trees rebuilt,
-  2026-11-13), all passing but six skips (the cross-arch case and
+- **Tests:** 2232 ctest cases on Windows (both trees rebuilt,
+  2026-11-14), all passing but six skips (the cross-arch case and
   the real-car recordings' diff, run locally; three cases that run on
   Linux only, Read once over SocketCAN and the Python package's vcan
   and ISO-TP fuzzing cases; and the Wireshark export's `tshark` run,
@@ -652,7 +656,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.7.1 | A more modern look, phone first: Night as its own control, the S2 look and shared controls, the phone's five tabs, joined panel and drive view, the viewer's Export, the log's minimum time between sweeps and reads in the extended session | Released |
 | v0.7.2 | Finishing the Dashboard and signals: the desktop's gauges in the new design, undo in edit mode, a Light look, built-in layouts by what people watch, a signal file's dial range and warning levels, Python's exports and health report | Released |
 | v0.7.3 | The analysis viewer: the log's navigation aids, chart panes with two cursors, a recording's statistics, Live's pause, and the phone pass's fixes | Released |
-| v0.7.4 | Follow-ups on v0.7.3's theme: a Dashboard layout exported and loaded, more gauge colors, every plugin variant offered for a vehicle, the viewer's difference trace, the demo car under obd2, and Android's own document picker | In progress |
+| v0.7.4 | Follow-ups on v0.7.3's theme: a Dashboard layout exported and loaded, more gauge colors, every plugin variant offered for a vehicle, the viewer's difference trace, the demo car under obd2, and Android's own document picker | Released |
 | v0.8.0-v0.11.0 | v0.8.0, conditions: triggered logging, alerts and a fuller grammar for computed signals. v0.9.0, the whole car through plugins: a profile sized for every module, sessions a plugin declares, and a plugin's own conversation with a module, security access to unlock reads among it. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
@@ -740,7 +744,8 @@ PATCH may carry"): the C ABI grows, append-only
 
 ### v0.7.4: follow-ups on the dashboard and the viewer
 
-A patch on v0.7.1's theme
+For people who build a Dashboard and compare recordings. A patch on
+v0.7.1's theme
 ([ADR-0048](docs/adr/0048-semantic-versioning.md)'s appendix "what a
 PATCH may carry"): the C ABI grows, append-only
 (`ecuio_recording_stretches_with`, `ecuio_recording_find_with`).
@@ -751,6 +756,13 @@ PATCH may carry"): the C ABI grows, append-only
     ([ADR-0057](docs/adr/0057-dashboards.md)'s appendix on the layout
     file); five more gauge colors and one of the user's own (its note of
     2026-11-13);
+  - the Dashboard's sparkline and Number tile reading their trace from
+    the model's history, so a trace survives a page change and a spike
+    keeps its place (ADR-0057's note "a trace reads the model's
+    history"), and Live's chart steady as it scrolls: a slice's extremes
+    in time order, a scale that narrows only when the trace has shrunk
+    well inside it, and a plot whose width holds as a value's digits
+    change;
   - every imported plugin variant offered for the picked vehicle with
     no VIN needed, the VIN's matches first and kept with the vehicle
     ([ADR-0052](docs/adr/0052-plugin-framework.md)'s appendix "every
@@ -779,12 +791,16 @@ PATCH may carry"): the C ABI grows, append-only
   - the phone's display line without sizes, the relay's refusal in the
     log, the viewer's grips at a touch's size, single accessible rows,
     a panel's height in columns, and other paired devices folded out of
-    the connect list.
+    the connect list;
+  - two tests steady on CI's slower macOS runners: a dense recording's
+    whole passes given 120 s, and the ELM327 chatty close's knobs set
+    under the lock that counts its requests.
 
   Run on the test phone with the mock, not on a car: the six open
   dialogs, the exports through a provider, a layout's export, uninstall
-  and load, and the viewer's grips by finger. The connect list's fold
-  has not been looked at there.
+  and load, the viewer's grips by finger, and the Dashboard's trends
+  under `mock://demo`. Live's chart and the connect list's fold have not
+  been looked at there.
 
 ### Waiting on a tester: an iPhone download
 

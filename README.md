@@ -131,7 +131,7 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Status
 
-v0.7.3, the analysis viewer, is the latest release. Next:
+v0.7.4, follow-ups on the Dashboard and the viewer, is the latest release. Next:
 
 | Version | Plan |
 |---|---|

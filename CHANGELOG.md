@@ -11,6 +11,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-11-14
+
 ### Added
 
 - Dashboards: export a layout to a file and load one back from Dash's
@@ -1771,7 +1773,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/erickramer42/havne/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/erickramer42/havne/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/erickramer42/havne/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/erickramer42/havne/compare/v0.7.0...v0.7.1
