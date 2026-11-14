@@ -10,7 +10,7 @@
 #include "ecuio/profile.h"
 #include "session.h"
 #include "uds_generic.h"
-#include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, for the names */
+#include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, the names and the VIN */
 #include "diagnostics.h"      /* the trouble codes' and monitors' words */
 #include "pid_support.h"     /* the signals their ECU doesn't support */
 #include "computed.h"        /* a computed pick's leaves, for a focus */
@@ -607,46 +607,8 @@ ecuio_status_t ecuio_identity_vin(const ecuio_channel_identity_t* identity,
     if (out_cap < ECUIO_VIN_TEXT_LEN) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    char from_service09[ECUIO_VIN_TEXT_LEN] = "";
-    char from_f190[ECUIO_VIN_TEXT_LEN] = "";
-    const uint32_t items =
-        std::min<uint32_t>(identity->items, ECUIO_IDENTITY_MAX_ITEMS);
-    for (uint32_t i = 0; i < items; ++i) {
-        const ecuio_identity_item_t& it = identity->list[i];
-        char* into = nullptr;
-        if (it.length == 2 && it.request[0] == 0x09 && it.request[1] == 0x02) {
-            into = from_service09;
-        } else if (it.length == 3 && it.request[0] == 0x22 &&
-                   it.request[1] == 0xF1 && it.request[2] == 0x90) {
-            into = from_f190;
-        }
-        if (into == nullptr || it.outcome != ECUIO_IDENTITY_ANSWERED) {
-            continue;
-        }
-        char vin[ECUIO_VIN_TEXT_LEN];
-        uint32_t n = 0;
-        bool fits = true;
-        for (uint32_t k = 0; k < it.text_length && k < ECUIO_IDENTITY_TEXT_LEN;
-             ++k) {
-            char c = it.text[k];
-            if (c >= 'a' && c <= 'z') {
-                c = static_cast<char>(c - 'a' + 'A');
-            } else if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) {
-                continue;
-            }
-            if (n == ECUIO_VIN_TEXT_LEN - 1) {
-                fits = false;
-                break;
-            }
-            vin[n++] = c;
-        }
-        if (fits && n == ECUIO_VIN_TEXT_LEN - 1) {
-            vin[n] = '\0';
-            std::memcpy(into, vin, sizeof vin);
-        }
-    }
-    const char* vin = from_service09[0] != '\0' ? from_service09 : from_f190;
-    std::memcpy(out, vin, ECUIO_VIN_TEXT_LEN);
+    const ecuio_ident_vin vin = ecuio_identity_vin_of(*identity);
+    std::memcpy(out, vin.text, ECUIO_VIN_TEXT_LEN);
     return ECUIO_OK;
 }
 
