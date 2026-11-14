@@ -6,13 +6,13 @@ import QtQuick
 import QtQuick.Shapes
 
 // One trace over a window (ADR-0057 section 1): the newest value at its end,
-// the window's low and high as a scale. DigitalGauge's ShapePath trace with
-// a longer window: at 10 Hz at most 1,200 samples, drawn as about one point
-// per 1.5 px of width. It samples only while its page is the one shown and
-// the app is active (`shown`, from the dashboard: a SwipeView keeps its
-// neighbors visible, so `visible` alone would not stop them), and it starts
-// its trace again when it stops being shown, on Reset peaks (a connect, a
-// change of units) and never keeps a value that is not a number. The trace
+// the window's low and high as a scale. It draws the model's history of its
+// signal (`traceSource.trace`, every window's lowest, highest and newest),
+// sliced from time 0 at about one point per 1.5 px, so a spike keeps its
+// height and place as the trace scrolls, and nothing is lost when its page
+// is left: the ring is the model's. It reads only while its page is the one
+// shown and the app is active (`shown`, from the dashboard: a SwipeView keeps
+// its neighbors visible, so `visible` alone would not stop them). The trace
 // is a glance, Live's chart is the record.
 GaugeBase {
     id: gauge
@@ -22,67 +22,38 @@ GaugeBase {
     // Whether the dashboard's page holding this gauge is the one on screen
     // and the app is active
     property bool shown: true
+    // What the trace reads (Bridge.signalModel, a test's stand-in) and the
+    // def it reads; null or -1 reads nothing
+    property var traceSource: null
+    property int signalId: -1
 
     readonly property int span: Math.max(10, Math.min(120, Math.round(windowS)))
-    readonly property int historyLength: span * 10
-    property var history: []
+    readonly property int windowMs: span * 1000
+    // [ts, val, ...] oldest first, as read last
+    property var samples: []
 
-    onPeaksReset: history = []
-    onShownChanged: if (!shown) history = []
-    onVisibleChanged: if (!visible) history = []
-
-    // One sample every 100 ms while a value is coming: a value that holds
-    // still still advances the trace, so the x axis stays time
+    // A read every 100 ms (the bridge's tick) while shown: the window ends
+    // at the newest sample, so the trace scrolls as values arrive
     Timer {
+        objectName: "traceReader"
         interval: 100
         repeat: true
-        running: gauge.hasValue && gauge.visible && gauge.shown
-        onTriggered: gauge.takeSample()
+        running: gauge.visible && gauge.shown && gauge.traceSource !== null && gauge.signalId >= 0
+        triggeredOnStart: true
+        onTriggered: gauge.readTrace()
     }
-    function takeSample() {
-        if (!isFinite(value))
+    function readTrace() {
+        if (traceSource === null || signalId < 0)
             return
-        const h = history.slice(1 - historyLength)
-        h.push(value)
-        history = h
+        samples = traceSource.trace(signalId, windowMs, Math.max(1, Math.floor(trace.width / 3)))
     }
+    onSignalIdChanged: samples = []
 
-    // The window's own low and high, padded to at least 4 % of full scale
-    // so idle noise doesn't fill the box
-    readonly property var extent: {
-        if (history.length < 1)
-            return { lo: from, hi: to }
-        let lo = Infinity, hi = -Infinity
-        for (const v of history) {
-            if (v < lo) lo = v
-            if (v > hi) hi = v
-        }
-        const minSpan = (to - from) * 0.04
-        if (hi - lo < minSpan) {
-            const mid = (hi + lo) / 2
-            lo = mid - minSpan / 2
-            hi = mid + minSpan / 2
-        }
-        return { lo: lo, hi: hi }
-    }
+    readonly property var extent: traceExtent(samples)
 
-    // The trace's points for a box, newest at the right edge, one point per
-    // 1.5 px at most (the newest kept). A flat range draws a midline
+    // The trace's pieces for a box
     function tracePoints(w, h) {
-        const n = history.length
-        if (n < 2 || w <= 0)
-            return []
-        const step = w / (historyLength - 1)
-        const stride = Math.max(1, Math.ceil(n / (w / 1.5 + 1)))
-        const range = extent.hi - extent.lo
-        const points = []
-        for (let i = n - 1; i >= 0; i -= stride) {
-            const y = range > 0 && isFinite(range)
-                ? h - 2 - (history[i] - extent.lo) / range * (h - 4) : h / 2
-            points.push(Qt.point(w - (n - 1 - i) * step, y))
-        }
-        points.reverse()
-        return points
+        return tracePieces(samples, windowMs, w, h, extent.lo, extent.hi)
     }
 
     implicitHeight: 96
@@ -164,7 +135,7 @@ GaugeBase {
             id: highText
             objectName: "scaleHigh"
             Accessible.ignored: true
-            text: gauge.history.length > 0 ? gauge.format(gauge.extent.hi) : ""
+            text: gauge.samples.length > 0 ? gauge.format(gauge.extent.hi) : ""
             font.pixelSize: 10
             font.features: Theme.valueFeatures
             color: Qt.alpha(Theme.textDim, 0.8)
@@ -174,7 +145,7 @@ GaugeBase {
             id: lowText
             objectName: "scaleLow"
             Accessible.ignored: true
-            text: gauge.history.length > 0 ? gauge.format(gauge.extent.lo) : ""
+            text: gauge.samples.length > 0 ? gauge.format(gauge.extent.lo) : ""
             font.pixelSize: 10
             font.features: Theme.valueFeatures
             color: Qt.alpha(Theme.textDim, 0.8)
@@ -220,7 +191,7 @@ GaugeBase {
             fillColor: "transparent"
             joinStyle: ShapePath.RoundJoin
             capStyle: ShapePath.RoundCap
-            PathPolyline { path: trace.points }
+            PathMultiline { paths: trace.points }
         }
     }
 }

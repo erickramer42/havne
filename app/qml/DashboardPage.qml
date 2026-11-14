@@ -1141,6 +1141,9 @@ Page {
         readonly property real value: entry ? entry.value : 0
         readonly property real windowHigh: entry ? entry.windowHigh : 0
         readonly property real windowLow: entry ? entry.windowLow : 0
+        // A trace reads the model's history of the def, kept whatever page shows
+        readonly property var traceSource: Bridge.signalModel
+        readonly property int signalId: entry ? entry.id : -1
         readonly property bool stale: hasValue && entry.ageMs > Theme.staleMs
         // An enumeration's label, which only `digital` is offered
         readonly property string valueLabel: entry && entry.isEnum ? entry.label : ""
@@ -1273,8 +1276,8 @@ Page {
             "bar": ["scaleMarks", "vertical", "marks"],
             "segments": ["cells", "rise"],
             "seven-segment": ["digits"],
-            "sparkline": ["windowS", "shown"],
-            "digital": ["description", "valueLabel", "shown"],
+            "sparkline": ["windowS", "shown", "traceSource", "signalId"],
+            "digital": ["description", "valueLabel", "shown", "traceSource", "signalId"],
             "shift-light": ["count", "ledSpacing"]
         })
 
@@ -2164,13 +2167,15 @@ Page {
                                     g.value = 60
                                     g.label = root.kindNames[kindTile.modelData]
                                     // A sparkline's still is a made-up trace, and it
-                                    // takes no samples of its own
+                                    // reads nothing (no source)
                                     if (kindTile.modelData === "sparkline") {
                                         const spark = item as SparkGauge
                                         spark.shown = false
                                         spark.windowS = 12   // 120 points at 10 Hz fill the box
-                                        spark.history = Array.from({ length: 120 },
-                                                                   (_, i) => 55 + 25 * Math.sin(i / 10))
+                                        const still = []
+                                        for (let i = 0; i < 120; ++i)
+                                            still.push(i * 100, 55 + 25 * Math.sin(i / 10))
+                                        spark.samples = still
                                     }
                                 }
                             }
