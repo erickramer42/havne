@@ -41,6 +41,19 @@ Value.__doc__ = ("A decoded value: its frame's time and ID, its def's id, name a
                  "unit, ECUIO_VALUE_* kind, the number (an enum's raw one) and the "
                  "text (a TEXT or HEX value's, an enum's label), else None")
 
+RecorderState = namedtuple("RecorderState", "state frame_rows value_rows records_dropped "
+                                            "notes_dropped reason conditions_lost")
+RecorderState.__doc__ = ("A recorder's state: \"active\", \"detached\" (its session destroyed; "
+                         "notes go on) or \"failed\"; the rows written to frames.csv and "
+                         "signals.csv; records the full ring dropped and notes the full queue "
+                         "dropped; the OS's reason for a failed write, else None; and the "
+                         "condition events the ring and its carry had no room for, which a "
+                         "drop line in events.log names too")
+
+_RECORDER_STATES = {e.ECUIO_RECORDING_ACTIVE: "active",
+                    e.ECUIO_RECORDING_DETACHED: "detached",
+                    e.ECUIO_RECORDING_FAILED: "failed"}
+
 ModuleSession = namedtuple("ModuleSession", "ecu asked session state nrc entries lost")
 ModuleSession.__doc__ = ("One module's extended session (ADR-0060), in havne-cli's words: its "
                          "reply ID as \"0x7E8\", the session asked and the one in force "
@@ -182,9 +195,14 @@ class Stream:
 class Recorder:
     """A recording of a session (ADR-0049), opened before or after its
     start (ADR-0056 section 3) and counting from then; it outlives the
-    session, so notes and marks go on until close()"""
+    session, so notes and marks go on until close(); state() says what it
+    wrote and lost"""
 
     def __init__(self, session, root, label=None):
+        self._closed_state = None
+        # Every use of the handle and close() hold it, so no call runs on a freed one;
+        # reentrant: the session's finalizer may close it on a thread that holds it
+        self._lock = threading.RLock()
         opts = e.ecuio_record_options_t()
         opts.root_utf8 = utf8(str(root))
         opts.label_utf8 = utf8(label) if label else None
@@ -207,23 +225,56 @@ class Recorder:
     @property
     def folder(self):
         n = ctypes.c_uint32()
-        lib.ecuio_recorder_get_folder(self._r, None, 0, ctypes.byref(n))
-        buf = ctypes.create_string_buffer(n.value + 1)
-        check(lib.ecuio_recorder_get_folder(self._r, buf, n.value + 1, ctypes.byref(n)),
-              "ecuio_recorder_get_folder")
+        with self._lock:
+            lib.ecuio_recorder_get_folder(self._r, None, 0, ctypes.byref(n))
+            buf = ctypes.create_string_buffer(n.value + 1)
+            check(lib.ecuio_recorder_get_folder(self._r, buf, n.value + 1, ctypes.byref(n)),
+                  "ecuio_recorder_get_folder")
         return text(buf.raw)
 
     def note(self, line):
-        check(lib.ecuio_recorder_note(self._r, utf8(line)), "ecuio_recorder_note")
+        with self._lock:
+            check(lib.ecuio_recorder_note(self._r, utf8(line)), "ecuio_recorder_note")
 
     def mark(self, label):
-        check(lib.ecuio_recorder_mark(self._r, utf8(label)), "ecuio_recorder_mark")
+        with self._lock:
+            check(lib.ecuio_recorder_mark(self._r, utf8(label)), "ecuio_recorder_mark")
+
+    @staticmethod
+    def _read_state(r):
+        s = e.ecuio_recorder_state_t()
+        check(lib.ecuio_recorder_get_state(r, ctypes.byref(s)), "ecuio_recorder_get_state")
+        return RecorderState(_RECORDER_STATES.get(s.state, "unknown"), s.frame_rows,
+                             s.value_rows, s.records_dropped, s.notes_dropped,
+                             text(s.reason) if s.state == e.ECUIO_RECORDING_FAILED else None,
+                             s.conditions_lost)
+
+    def state(self):
+        """Its RecorderState now; after close(), the one the close read
+        first. The rows are what the writer had written then (the close
+        writes the rest); the drops and conditions_lost are counted as
+        records go in, so they are final once the session was destroyed
+        before the close, as Session.close() does"""
+        with self._lock:
+            if self._r is None:
+                return self._closed_state
+            return self._read_state(self._r)
 
     def close(self, why=None):
-        if self._r is not None:
+        """Closes the recording (its files end whole, with the summary)
+        and returns the state read just before; None when it was closed
+        already. A write that failed raises Error after the close; so does
+        a state that couldn't be read, the recording closed all the same."""
+        with self._lock:
+            if self._r is None:
+                return None
             r, self._r = self._r, None
-            check(lib.ecuio_recorder_close(r, utf8(why) if why else None),
-                  "ecuio_recorder_close")
+            try:
+                self._closed_state = self._read_state(r)
+            finally:
+                check(lib.ecuio_recorder_close(r, utf8(why) if why else None),
+                      "ecuio_recorder_close")
+            return self._closed_state
 
 
 class Session:

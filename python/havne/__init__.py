@@ -18,10 +18,10 @@
 from ._version import __version__
 from ._lib import path as library_path, version as core_version
 from .errors import CheckFailed, Error, LibraryNotFound, LibraryVersionError, status_name
-from .session import Frame, Recorder, Session, Stream, Value
-from .recording import (Column, GuessedMap, Imported, Marker, RecordedFrame, Recording,
-                        Signal, Stats, Stretch, guess_csv_map, import_candump, import_csv,
-                        read_frames)
+from .session import Frame, Recorder, RecorderState, Session, Stream, Value
+from .recording import (Column, GuessedMap, Imported, Marker, RecordedConditionEvent,
+                        RecordedConditions, RecordedFrame, Recording, Signal, Stats, Stretch,
+                        guess_csv_map, import_candump, import_csv, read_frames)
 from .export import (Estimate, EstimatedSize, Exported, LeftOut, estimate_csv, export_csv,
                      export_folder, export_pcapng)
 from .health import HealthReport, health_report
@@ -35,8 +35,9 @@ from . import _ecuio as c
 __all__ = [
     "__version__", "library_path", "core_version", "c",
     "Error", "CheckFailed", "LibraryNotFound", "LibraryVersionError", "status_name",
-    "Session", "Stream", "Frame", "Value", "Recorder",
+    "Session", "Stream", "Frame", "Value", "Recorder", "RecorderState",
     "Recording", "Signal", "Marker", "Column", "Stats", "Stretch",
+    "RecordedConditions", "RecordedConditionEvent",
     "import_csv", "import_candump", "Imported", "read_frames", "RecordedFrame",
     "guess_csv_map", "GuessedMap",
     "export_pcapng", "export_csv", "export_folder", "Exported", "LeftOut",

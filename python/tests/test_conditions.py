@@ -11,18 +11,29 @@
 # judged under obd2, its events equal to havne-cli stream's lines; the
 # states before a frame and across attaches; keys bound through the
 # session's signal file; a plugin's variant resolved; an attach refused
-# while a recording is open.
+# while a recording is open. Then a recording's set and events
+# (tests/fixtures/recording/conditions) against events.log read here and
+# havne-cli view's lines, a held line from a ranged folder export, a copy
+# changed, gone, too long or refused, a list cut at core's most, a cond
+# line that doesn't parse, the replay above recorded, and a recorder's
+# state, read while another thread closes it and when its read fails.
 
+import ctypes
 import gc
+import hashlib
 import json
 import os
+import shutil
 import subprocess
+import threading
+import time
 
 import pytest
 
 import havne
+from havne._core import lib
 
-from conftest import PLUGINS, ROOT, SIGNALS, replay_uri
+from conftest import FINDINGS, PLUGINS, ROOT, SIGNALS, replay_uri
 
 CONDITIONS = os.path.join(ROOT, "tests", "fixtures", "conditions")
 EXAMPLE = os.path.join(CONDITIONS, "example.json")
@@ -371,3 +382,278 @@ def test_an_interrupt_after_core_attached_keeps_the_attach(monkeypatch):
         s.set_conditions(havne.ConditionSet(ONE % "second"))
         state, = s.condition_states()
         assert (state.key, state.generation) == ("second", 2)
+
+
+RECORDED = os.path.join(ROOT, "tests", "fixtures", "recording", "conditions")
+
+
+def cond_lines(folder):
+    """events.log's cond lines by Python alone, in a RecordedConditionEvent's order"""
+    out = []
+    with open(os.path.join(folder, "events.log"), encoding="utf-8") as f:
+        for line in f:
+            if "  cond  " not in line:
+                continue
+            key, state, flags, value, term, host_us, t_us = (
+                line.rstrip("\n").split("  cond  ", 1)[1].split(","))
+            words = flags.split()
+            out.append((int(host_us), int(t_us), key, state, "fired" in words,
+                        "stale" in words, "held" in words, float(value), int(term)))
+    return out
+
+
+def test_a_recordings_set_and_events_are_read():
+    with havne.Recording(RECORDED) as r:
+        with open(os.path.join(RECORDED, "conditions.json"), "rb") as f:
+            copy = f.read()
+        assert r.conditions == havne.RecordedConditions(
+            hashlib.sha256(copy).hexdigest(), True, True, 7, 0, False)
+        events = r.condition_events()
+        assert [tuple(ev) for ev in events] == cond_lines(RECORDED)
+        assert events[2] == havne.RecordedConditionEvent(
+            7251000, 7250000, "coolant_high", "on", True, False, False, 111.0, 0)
+        assert events[-1].stale and not events[-1].fired
+        loaded = r.condition_set()
+    assert (loaded.name, [c.key for c in loaded.conditions]) == (
+        "Fixture", ["coolant_high", "rpm_high"])
+
+    cli = os.environ.get("HAVNE_CLI")
+    if not cli:
+        pytest.skip("no havne-cli in this tree (HAVNE_CLI)")
+    out = subprocess.run([cli, "view", RECORDED, "--columns", "3"], capture_output=True,
+                         check=True, timeout=120).stdout
+    lines = [json.loads(line) for line in out.decode("utf-8").splitlines()]
+    said = [(r["host_us"], r["t_us"], r["key"], r["state"], r["fired"], r["stale"], r["held"],
+             r["value"], r["term"]) for r in lines if r["type"] == "condition"]
+    assert said == [tuple(ev) for ev in events]
+
+
+def test_a_cut_list_says_so(monkeypatch):
+    """Past ECUIO_RECORDING_MAX_CONDITION_EVENTS cond lines core keeps the
+    first that many and says so in the info's flags (a million lines a
+    case can't write: the flag is set on core's answer)"""
+    real = lib.ecuio_recording_get_info
+
+    def cut(r, out):
+        rc = real(r, out)
+        out._obj.flags |= havne.c.ECUIO_RECORDING_INFO_CONDITIONS_CUT
+        return rc
+
+    monkeypatch.setattr(lib, "ecuio_recording_get_info", cut)
+    with havne.Recording(RECORDED) as r:
+        assert r.conditions.cut and r.conditions.events == 7
+
+
+def test_a_long_list_stops_at_cores_most(monkeypatch):
+    """condition_events() asks for no event past the most core keeps"""
+    monkeypatch.setattr(havne.c, "ECUIO_RECORDING_MAX_CONDITION_EVENTS", 3)
+    with havne.Recording(RECORDED) as r:
+        assert r.conditions.events == 7
+        assert [tuple(ev) for ev in r.condition_events()] == cond_lines(RECORDED)[:3]
+
+
+def test_a_cond_line_that_doesnt_parse_is_counted_and_left_out(tmp_path):
+    torn = tmp_path / "torn"
+    shutil.copytree(RECORDED, torn)
+    log = torn / "events.log"
+    whole = "cond  rpm_high,off,,4720,0,13376000,13375000"
+    data = log.read_bytes().decode("utf-8")
+    assert data.count(whole) == 1
+    log.write_bytes(data.replace(whole, "cond  rpm_high,off,,4720,0,13376000").encode("utf-8"))
+    with havne.Recording(torn) as r:
+        assert (r.conditions.events, r.conditions.lines_skipped) == (6, 1)
+        assert [tuple(ev) for ev in r.condition_events()] == [
+            ev for ev in cond_lines(RECORDED) if ev[0] != 13376000]
+
+
+def test_a_range_opens_with_the_states_held(tmp_path):
+    """A folder export from 10 s holds coolant_high ON then as a held line"""
+    out = tmp_path / "from-10s"
+    havne.export_folder(RECORDED, str(out), from_us=10_000_000)
+    with havne.Recording(out) as r:
+        events = r.condition_events()
+    assert events[0] == havne.RecordedConditionEvent(
+        10000000, 9999000, "coolant_high", "on", False, False, True, 111.0, 0)
+    assert [ev.held for ev in events].count(True) == 1
+
+
+def test_a_copy_that_changed_or_went_is_refused_and_none_is_none(tmp_path):
+    changed = tmp_path / "changed"
+    shutil.copytree(RECORDED, changed)
+    with open(changed / "conditions.json", "ab") as f:
+        f.write(b" ")
+    with havne.Recording(changed) as r:
+        assert (r.conditions.present, r.conditions.matches) == (True, False)
+        with pytest.raises(ValueError, match="doesn't match its hash"):
+            r.condition_set()
+        assert len(r.condition_events()) == 7, "the events are read all the same"
+    os.remove(changed / "conditions.json")
+    with havne.Recording(changed) as r:
+        assert r.conditions.sha256 is not None and not r.conditions.present
+        with pytest.raises(ValueError, match="is missing"):
+            r.condition_set()
+
+    with havne.Recording(FINDINGS) as r:
+        assert r.conditions == havne.RecordedConditions(None, False, False, 0, 0, False)
+        assert r.condition_events() == []
+        assert r.condition_set() is None
+
+
+def copy_with_conditions(tmp_path, name, data):
+    """The fixture copied with conditions.json replaced and the header naming its hash"""
+    folder = tmp_path / name
+    shutil.copytree(RECORDED, folder)
+    old = hashlib.sha256((folder / "conditions.json").read_bytes()).hexdigest()
+    (folder / "conditions.json").write_bytes(data)
+    log = folder / "events.log"
+    text = log.read_bytes().decode("utf-8")
+    assert text.count(old) == 1
+    log.write_bytes(text.replace(old, hashlib.sha256(data).hexdigest()).encode("utf-8"))
+    return folder
+
+
+def test_a_matching_copy_the_loader_refuses_raises_its_words(tmp_path):
+    folder = copy_with_conditions(tmp_path, "refused", b'{"havne_conditions": 2}')
+    with havne.Recording(folder) as r:
+        assert (r.conditions.present, r.conditions.matches) == (True, True)
+        with pytest.raises(havne.Error) as raised:
+            r.condition_set()
+    assert not isinstance(raised.value, ValueError)
+
+
+def test_a_copy_past_the_loaders_bound_says_so(tmp_path):
+    folder = copy_with_conditions(
+        tmp_path, "long", b" " * (havne.c.ECUIO_CONDITION_FILE_MAX_BYTES + 1))
+    with havne.Recording(folder) as r:
+        with pytest.raises(ValueError, match="longer than a set of conditions can be"):
+            r.condition_set()
+
+
+def test_a_recorded_replay_holds_the_events_the_session_gave(tmp_path):
+    """The replay test_a_replay_fires_its_conditions_as_havne_cli_says
+    judges, recorded: its cond lines are the session's events, the copy
+    is the set, and the recorder lost none"""
+    with havne.Session(replay_uri("?profile=obd2&speed=max")) as s:
+        events = s.conditions(capacity=havne.c.ECUIO_QUEUE_MAX_CONDITIONS)
+        s.set_conditions(havne.ConditionSet(path=REPLAY_SET))
+        recorder = s.record(str(tmp_path))
+        folder = recorder.folder
+        assert recorder.state().state == "active"
+        s.start()
+        got = list(events)
+    state = recorder.state()
+    assert state.state == "detached", "read by the close, after the session's destroy"
+    assert (state.records_dropped, state.conditions_lost, state.reason) == (0, 0, None)
+    assert recorder.close() is None, "closed already, by the session's close"
+    with havne.Recording(folder) as r:
+        recorded = r.condition_events()
+        assert r.conditions.matches
+        loaded = r.condition_set()
+    assert [(ev.timestamp_us, ev.key, ev.state, ev.fired, ev.stale, ev.value, ev.term)
+            for ev in recorded] == [tuple(ev)[:7] for ev in got]
+    assert not any(ev.held for ev in recorded)
+    hosts = [ev.host_us for ev in recorded]
+    assert hosts == sorted(hosts), "a replay at max writes no event before the frame before it"
+    assert [c.key for c in loaded.conditions] == ["running", "turning", "rpm_fresh", "link"]
+
+
+def test_a_recorders_state_is_cores(tmp_path, monkeypatch):
+    with havne.Session("mock://conditions") as s:
+        recorder = s.record(str(tmp_path))
+
+        def failed(_r, out):
+            st = out._obj
+            st.state = havne.c.ECUIO_RECORDING_FAILED
+            st.frame_rows, st.value_rows, st.records_dropped = 5, 6, 7
+            st.notes_dropped, st.conditions_lost = 8, 9
+            st.reason = b"the disk is full"
+            return 0
+
+        monkeypatch.setattr(lib, "ecuio_recorder_get_state", failed)
+        assert recorder.state() == havne.RecorderState(
+            "failed", 5, 6, 7, 8, "the disk is full", 9)
+        monkeypatch.undo()
+        assert recorder.state() == havne.RecorderState("active", 0, 0, 0, 0, None, 0)
+        closed = recorder.close("done")
+        assert closed.state == "active"
+        assert recorder.state() == closed, "the state the close read"
+        assert recorder.close() is None
+
+
+def test_a_close_whose_state_cant_be_read_still_closes(tmp_path, monkeypatch):
+    with havne.Session("mock://conditions") as s:
+        recorder = s.record(str(tmp_path))
+        folder = recorder.folder
+        monkeypatch.setattr(lib, "ecuio_recorder_get_state",
+                            lambda _r, _out: havne.c.ECUIO_ERR_INVALID_ARGUMENT)
+        closes = counted(monkeypatch, "ecuio_recorder_close")
+        with pytest.raises(havne.Error):
+            recorder.close("done")
+        assert closes == [1]
+        assert recorder.close() is None and recorder.state() is None
+    with open(os.path.join(folder, "events.log"), encoding="utf-8") as f:
+        assert "  end  done" in f.read()
+
+
+def poll_while_closed(recorder):
+    """Reads recorder.state() on a thread until close() returns, then once
+    more: the reads, any exception, and close()'s answer"""
+    reads, failed, stop, started = [], [], threading.Event(), threading.Event()
+
+    def poll():
+        try:
+            while not stop.is_set():
+                reads.append(recorder.state())
+                started.set()
+            reads.append(recorder.state())
+        except Exception as err:  # noqa: BLE001 (reported by the case)
+            failed.append(err)
+            started.set()
+
+    t = threading.Thread(target=poll)
+    t.start()
+    assert started.wait(10)
+    closed = recorder.close()
+    stop.set()
+    t.join(10)
+    assert not t.is_alive()
+    return reads, failed, closed
+
+
+def test_a_state_polled_while_another_thread_closes_is_whole(tmp_path):
+    for run in range(20):
+        with havne.Session("mock://conditions") as s:
+            reads, failed, closed = poll_while_closed(s.record(str(tmp_path / str(run))))
+        assert failed == [] and closed is not None
+        assert all(isinstance(st, havne.RecorderState) for st in reads)
+        assert reads[-1] == closed, "after the close, the state it read"
+
+
+def test_a_close_waits_for_a_state_read_under_way(tmp_path, monkeypatch):
+    """A state read held 50 ms inside core: the close waits it out, so no
+    read meets the freed handle (each read checks, then calls core)"""
+    real_state, real_close = lib.ecuio_recorder_get_state, lib.ecuio_recorder_close
+    freed, met_freed = set(), []
+
+    def handle(r):
+        return ctypes.cast(r, ctypes.c_void_p).value
+
+    def slow_state(r, out):
+        time.sleep(0.05)
+        if handle(r) in freed:
+            met_freed.append(handle(r))
+            return havne.c.ECUIO_ERR_INVALID_ARGUMENT
+        return real_state(r, out)
+
+    def close(r, why):
+        freed.add(handle(r))
+        return real_close(r, why)
+
+    monkeypatch.setattr(lib, "ecuio_recorder_get_state", slow_state)
+    monkeypatch.setattr(lib, "ecuio_recorder_close", close)
+    for run in range(5):
+        with havne.Session("mock://conditions") as s:
+            reads, failed, closed = poll_while_closed(s.record(str(tmp_path / str(run))))
+        freed.clear()
+        assert (met_freed, failed) == ([], [])
+        assert reads[-1] == closed
