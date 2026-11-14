@@ -1199,12 +1199,79 @@ void read_source(const Value& source)
     if (source_name == nullptr) {
         refuse(source, "\"source\" needs a \"name\"");
     }
-    text_of(*source_name, 1, 512, "the source's name");
+    text_of(*source_name, 1, ECUIO_SOURCE_TEXT_MAX, "the source's name");
     for (const char* k : {"url", "commit", "license", "modified"}) {
         if (const Value* v = source.find(k)) {
-            text_of(*v, 1, 512, std::string("the source's ") + k);
+            text_of(*v, 1, ECUIO_SOURCE_TEXT_MAX,
+                    std::string("the source's ") + k);
         }
     }
+}
+
+/* ASCII alone, as profile_of reads a name: the process's locale (Qt and
+ * Python set one) would make a high byte a letter in some */
+bool share_alike(const std::string& license)
+{
+    std::string t;
+    for (char c : license) {
+        t += (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+    }
+    const auto alnum = [](char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+    };
+    /* "CC", "BY", ["NC",] "SA" from at, each part after a space or a
+     * hyphen; the end of the name not inside a longer word */
+    const auto name_at = [&](size_t at) {
+        size_t i = at;
+        const auto part = [&](const char* p, bool first) {
+            if (!first) {
+                if (i >= t.size() || (t[i] != '-' && t[i] != ' ')) {
+                    return false;
+                }
+                ++i;
+            }
+            if (t.compare(i, 2, p) != 0) {
+                return false;
+            }
+            i += 2;
+            return true;
+        };
+        if (!part("CC", true) || !part("BY", false)) {
+            return false;
+        }
+        const size_t before_nc = i;
+        if (!part("NC", false)) {
+            i = before_nc;
+        }
+        return part("SA", false) && (i == t.size() || !alnum(t[i]));
+    };
+    for (size_t at = t.find("CC"); at != std::string::npos;
+         at = t.find("CC", at + 1)) {
+        if ((at == 0 || (!alnum(t[at - 1]) && t[at - 1] != '-')) &&
+            name_at(at)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void take_source(const Value& source, ecuio_signal_source_t& out)
+{
+    out = ecuio_signal_source_t{};
+    const auto put = [&source](const char* key, char* to) {
+        if (const Value* v = source.find(key)) {
+            /* read_source bounds it at ECUIO_SOURCE_TEXT_MAX: the NUL fits */
+            std::copy_n(v->text.data(),
+                        std::min<size_t>(v->text.size(), ECUIO_SOURCE_TEXT_MAX),
+                        to);
+        }
+    };
+    put("name", out.name);
+    put("url", out.url);
+    put("commit", out.commit);
+    put("license", out.license);
+    put("modified", out.modified);
+    out.flags = share_alike(out.license) ? ECUIO_SOURCE_SHARE_ALIKE : 0u;
 }
 
 uint32_t format_of(const Value& root, const char* what)
@@ -1256,6 +1323,7 @@ void read_file(const Value& root, ecuio_signal_file& f)
         refuse(root, "the file needs a \"source\": where its signals come from");
     }
     read_source(*source);
+    take_source(*source, f.source);
 
     p.extends = root.find("extends");
     p.ecus = root.find("ecus");
@@ -1861,6 +1929,33 @@ ecuio_signal_file_gauge(const ecuio_signal_file_t* file,
         }
     }
     return nullptr;
+}
+
+ecuio_status_t ecuio_signal_file_source(const ecuio_signal_file_t* file,
+                                        ecuio_signal_source_t* out)
+{
+    if (file == nullptr || out == nullptr) {
+        ecuio_detail_set("the source needs a file and a struct to fill");
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (out->struct_size < sizeof(ecuio_signal_source_t)) {
+        ecuio_detail_set("the source's struct_size is %u, under its %u bytes",
+                         static_cast<unsigned>(out->struct_size),
+                         static_cast<unsigned>(sizeof(ecuio_signal_source_t)));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *out = file->source;
+    out->struct_size = sizeof(ecuio_signal_source_t);
+    return ECUIO_OK;
+}
+
+const char* ecuio_signal_file_text(const ecuio_signal_file_t* file,
+                                   size_t* length)
+{
+    if (length != nullptr) {
+        *length = file != nullptr ? file->bytes.size() : 0;
+    }
+    return file != nullptr ? file->bytes.c_str() : "";
 }
 
 void ecuio_signal_file_free(ecuio_signal_file_t* file)

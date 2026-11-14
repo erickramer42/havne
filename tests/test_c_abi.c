@@ -97,6 +97,15 @@ typedef char abi_gauge_size_check[(sizeof(ecuio_signal_gauge_t) == 48) ? 1 : -1]
 typedef char abi_gauge_warn_high_check[(offsetof(ecuio_signal_gauge_t, warn_high) == 24) ? 1 : -1];
 typedef char abi_gauge_flags_check[(offsetof(ecuio_signal_gauge_t, flags) == 32) ? 1 : -1];
 typedef char abi_gauge_reserved_check[(offsetof(ecuio_signal_gauge_t, reserved) == 36) ? 1 : -1];
+typedef char
+    abi_source_size_check[(sizeof(ecuio_signal_source_t) == 2632) ? 1 : -1];
+typedef char abi_source_name_check[(offsetof(ecuio_signal_source_t, name) == 32)
+                                       ? 1
+                                       : -1];
+typedef char abi_source_license_check
+    [(offsetof(ecuio_signal_source_t, license) == 1592) ? 1 : -1];
+typedef char abi_source_modified_check
+    [(offsetof(ecuio_signal_source_t, modified) == 2112) ? 1 : -1];
 typedef char abi_validation_size_check[(sizeof(ecuio_validation_t) == 16) ? 1 : -1];
 typedef char abi_validation_index_check[(offsetof(ecuio_validation_t, index) == 4) ? 1 : -1];
 typedef char abi_validation_reserved_check[(offsetof(ecuio_validation_t, reserved) == 8) ? 1 : -1];
@@ -507,8 +516,9 @@ int main(void)
     }
     {
         /* A gauge read from C: a def with one, a def without, a NULL def,
-         * and the file's format and its signals' expressions;
-         * then a packed plugin's requires.core, its patch past a byte */
+         * and the file's format, its signals' expressions and its source;
+         * then a packed plugin's requires.core, its patch past a byte, and
+         * its variant's source, the data file's own */
         static const char kGauged[] =
             "{\"havne_signals\":1,\"name\":\"C gauges\","
             "\"source\":{\"name\":\"Havne's tests\"},"
@@ -529,7 +539,9 @@ int main(void)
             "\"source\":{\"name\":\"Havne's tests\"},\"tiers\":[\"data\"],"
             "\"ecus\":[{\"id\":\"pcm\",\"rx\":\"7E8\"}],"
             "\"variants\":[{\"id\":\"base\",\"files\":[\"a.json\"]}],"
-            "\"files\":{\"a.json\":{\"havne_signals\":1,\"signals\":["
+            "\"files\":{\"a.json\":{\"havne_signals\":1,"
+            "\"source\":{\"name\":\"OBDb\",\"license\":\"CC-BY-SA-4.0\"},"
+            "\"signals\":["
             "{\"key\":\"rpm\",\"name\":\"Engine Speed\",\"ecu\":\"pcm\","
             "\"read\":{\"service\":\"22\",\"number\":\"F40C\"},"
             "\"field\":{\"byte\":0,\"bits\":16},\"unit\":\"rpm\"}]}}}";
@@ -538,6 +550,12 @@ int main(void)
         const ecuio_signal_gauge_t* gauge = NULL;
         const ecuio_signal_def_t* volts = NULL;
         const ecuio_signal_def_t* load = NULL;
+        /* A caller's struct grown past core's: core fills its own size */
+        struct {
+            ecuio_signal_source_t source;
+            uint32_t after;
+        } grown;
+        ecuio_signal_source_t* const source = &grown.source;
         uint16_t major = 1;
         uint16_t minor = 1;
         uint16_t patch = 1;
@@ -565,6 +583,26 @@ int main(void)
             ecuio_signal_file_free(file);
             return 1;
         }
+        {
+            size_t length = 0;
+            const char* text = ecuio_signal_file_text(file, &length);
+            if (length != sizeof kGauged - 1 || strcmp(text, kGauged) != 0) {
+                ecuio_signal_file_free(file);
+                return 1;
+            }
+        }
+        memset(&grown, 0xAA, sizeof grown);
+        source->struct_size = (uint32_t)sizeof grown;
+        if (ecuio_signal_file_source(file, source) != ECUIO_OK ||
+            source->struct_size != sizeof(ecuio_signal_source_t) ||
+            grown.after != 0xAAAAAAAAu || source->flags != 0u ||
+            source->reserved[5] != 0u ||
+            strcmp(source->name, "Havne's tests") != 0 ||
+            source->license[0] != 0 ||
+            source->modified[ECUIO_SOURCE_TEXT_LEN - 1] != 0) {
+            ecuio_signal_file_free(file);
+            return 1;
+        }
         ecuio_signal_file_free(file);
         if (ecuio_plugin_load(kPacked, sizeof kPacked - 1, NULL, NULL,
                               &plugin) != ECUIO_OK) {
@@ -572,7 +610,12 @@ int main(void)
         }
         if (ecuio_plugin_requires_core(plugin, &major, &minor, &patch) !=
                 ECUIO_OK ||
-            major != 0u || minor != 5u || patch != 258u) {
+            major != 0u || minor != 5u || patch != 258u ||
+            ecuio_signal_file_source(ecuio_plugin_variant_file(plugin, 0),
+                                     source) != ECUIO_OK ||
+            strcmp(source->name, "OBDb") != 0 ||
+            strcmp(source->license, "CC-BY-SA-4.0") != 0 ||
+            source->flags != ECUIO_SOURCE_SHARE_ALIKE) {
             ecuio_plugin_free(plugin);
             return 1;
         }
