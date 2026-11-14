@@ -3884,6 +3884,25 @@ TEST(ExportTest, TheHeaderReadJoinsFocusLinesAndPassesALinePastARow)
     EXPECT_TRUE(h.focus.empty());
     EXPECT_EQ(h.signals.size(), 2u);
     EXPECT_EQ(h.text_names, std::vector<std::string>{"Words"});
+
+    /* A line one byte past a row's room: what is left of it is its line
+     * end alone, which isn't the header's blank last line */
+    std::string exact = "focus  ";
+    exact.resize(ecuio_recording_rows::kRowMax + 1, 'x');
+    f.write("rec/events.log", head + exact + "\n" + signals + kColumns + "\n");
+    h = ecuio_recording_set::read_header(f.utf8("rec"));
+    EXPECT_TRUE(h.focus.empty());
+    EXPECT_EQ(h.signals.size(), 2u);
+
+    /* What is left past two rows' room is no line of its own, though it
+     * reads as a focus line */
+    std::string caller = "caller  ";
+    caller.resize(2 * (ecuio_recording_rows::kRowMax + 1), 'y');
+    f.write("rec/events.log",
+            head + caller + "focus  Ghost\n" + signals + kColumns + "\n");
+    h = ecuio_recording_set::read_header(f.utf8("rec"));
+    EXPECT_TRUE(h.focus.empty());
+    EXPECT_EQ(h.signals.size(), 2u);
 }
 
 } // namespace
