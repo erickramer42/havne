@@ -119,8 +119,8 @@ def log(cli, fixture):
             ok = False
         got = cond_lines(events)
         expected = cond_lines(os.path.join(fixture, "events.log"))
-        # host_us is this run's: at max speed a stale event's lies back
-        # past the attach and reads 0
+        # host_us is this run's own: at max speed a stale event's is the
+        # host_us of the frame before it
         if [without_host(g) for g in got] != \
                 [without_host(e) for e in expected]:
             print(f"FAIL  the events {got}, want {expected}")

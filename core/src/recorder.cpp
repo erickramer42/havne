@@ -642,6 +642,9 @@ struct ecuio_recorder {
     uint64_t carry_lost = 0;
     uint64_t carry_lost_us = 0;
     std::atomic<uint64_t> conditions_lost{0};
+    /* The worker's: the host_us of the last frame put into the ring, no
+     * event of a later frame placed before it */
+    uint64_t put_host_us = 0;
 
     /* The signal file decoding the session to come, set before attach
      * (ecuio_recorder_signal_file): the set it must be, its bytes and
@@ -1514,13 +1517,14 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
             ? events[0].timestamp_us
             : frame->timestamp_us;
     /* An event's recording time: the frame's, less how far its own time
-     * lies before the frame's */
+     * lies before the frame's, never before the frame put before it */
+    const uint64_t floor_us = (std::min)(r->put_host_us, host_us);
     const auto host_of = [&](uint64_t t_us) {
         if (t_us >= frame->timestamp_us) {
             return host_us;
         }
         const uint64_t back = frame->timestamp_us - t_us;
-        return back < host_us ? host_us - back : uint64_t{0};
+        return back < host_us - floor_us ? host_us - back : floor_us;
     };
     const auto event_at = [&](uint32_t k) {
         event_body e{};
@@ -1596,6 +1600,7 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
         at += sizeof e;
     }
     r->head.store(h + size, std::memory_order_release);
+    r->put_host_us = host_us;
 }
 
 ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,

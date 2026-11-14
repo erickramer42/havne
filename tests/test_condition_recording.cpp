@@ -562,10 +562,10 @@ TEST(ConditionRecordingTest, AHoldsEndIsWrittenAtItsOwnTime)
     Recorded r(set_of(on_rpm("held", R"("above":2000)", R"(,"for":0.1)")));
     ASSERT_NE(r.recorder, nullptr);
     r.record();
-    /* The recording's clock past the hold's distance from its frame, so
-     * the line's time is the frame's moved back, not the clamp at zero */
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
     engine_speed(r.session.s, 10000000, 3000);
+    /* The frames' host gap past their session gap, so the line's time is
+     * the frame's moved back, not the clamp at the frame before */
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
     engine_speed(r.session.s, 10250000, 3000);
     r.close();
 
@@ -579,6 +579,34 @@ TEST(ConditionRecordingTest, AHoldsEndIsWrittenAtItsOwnTime)
     ASSERT_GT(hosts.at(10250000), 150000u);
     EXPECT_EQ(lines[1].host_us, hosts.at(10250000) - 150000u)
         << "the frame that settled it, less the 150 ms between";
+}
+
+TEST(ConditionRecordingTest,
+     AnEventFasterThanRealTimeIsNeverBeforeTheFrameBefore)
+{
+    Recorded r(set_of(on_rpm("high", R"("above":2000)")));
+    ASSERT_NE(r.recorder, nullptr);
+    r.record();
+    /* Host time past the attach, so the frame's time can't read 0 */
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    engine_speed(r.session.s, 1000000, 3000);
+    /* A minute of session time at once, as a replay at max: the stale
+     * event at 4 s lies far further back than the host time since */
+    engine_speed(r.session.s, 61000000, 3000);
+    r.close();
+
+    const std::vector<Cond> lines = cond_lines(r.folder);
+    const std::map<uint64_t, uint64_t> hosts = frame_hosts(r.folder);
+    ASSERT_EQ(hosts.count(1000000), 1u);
+    ASSERT_GE(hosts.at(1000000), 50000u);
+    ASSERT_EQ(lines.size(), 3u) << "fired, stale, then judged again";
+    EXPECT_EQ(lines[1].t_us, 4000000u) << "stale at the sample's bound";
+    EXPECT_NE(lines[1].flags.find("stale"), std::string::npos);
+    EXPECT_EQ(lines[1].host_us, hosts.at(1000000))
+        << "no earlier than the frame before it, not 0";
+    for (size_t i = 1; i < lines.size(); ++i) {
+        EXPECT_GE(lines[i].host_us, lines[i - 1].host_us) << i;
+    }
 }
 
 TEST(ConditionRecordingTest, ARecordingBegunMidSessionStartsFromTheStatesHeld)
