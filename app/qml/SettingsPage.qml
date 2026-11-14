@@ -283,9 +283,8 @@ Pane {
                                       && pickedVehicle.id === obdbVehicle
 
     // The connected car's model year once its VIN names the picked
-    // vehicle (its VIN key), kept while the page lives, as the plugins'
-    // matches stay once the session ends; the VIN itself stays in the
-    // bridge, and the year is never stored
+    // vehicle (its VIN key), kept while the page lives; the VIN itself
+    // stays in the bridge, and the year is never stored
     property int obdbCarYear: 0
     property string obdbCarVehicle: ""
 
@@ -405,9 +404,9 @@ Pane {
 
     // ---- The app's plugins (ADR-0052) ----
     // The bridge's list (PluginStore): each loaded plugin with its
-    // variants, or a copy that no longer loads; the variants its VIN
-    // proposes for the car (the session's VIN or the one the lookup holds,
-    // never stored); and what the last import or removal said
+    // variants, or a copy that no longer loads; the variants a VIN
+    // matches (the one the lookup holds, else the session's, which goes
+    // with the session); and what the last import or removal said
     property var pluginList: []
     property var pluginMatches: []
     property string pluginProblem: ""
@@ -422,17 +421,67 @@ Pane {
         pluginMatches = Bridge.pluginMatches(vinLookupField.text)
     }
 
+    // The session's matches kept on the vehicle its VIN identified, so
+    // they are marked with no session (ADR-0052's appendix of 2026-11-13);
+    // only that vehicle's: a replay of another car names none
+    function noteVinMatches() {
+        if (pickedVehicle === null || pickedVehicle.vinKey === ""
+                || Bridge.vinKey(vehicles.salt) !== pickedVehicle.vinKey)
+            return
+        const profiles = Bridge.pluginMatches("").map(m => m.profile)
+        if (JSON.stringify(profiles) !== JSON.stringify(pickedVehicle.vinMatches))
+            saveVehicles(VehicleBook.setVinMatches(vehicles, profiles))
+    }
+
+    // Every loaded plugin's variants, for the picked vehicle to pick one:
+    // those a VIN matched (the lookup's, else the session's and the ones
+    // kept on the vehicle) first, the rest after, then a pick that doesn't
+    // load, so it can be undone; the choice is the user's. A Repeater keeps
+    // its buttons for lists equal in value, so a pick keeps the focus
+    readonly property var pluginVariants: {
+        const shown = { matched: [], others: [] }
+        if (pickedVehicle === null)
+            return shown
+        const marked = pluginMatches.map(m => m.profile)
+            .concat(vinLookupField.text.trim() === "" ? pickedVehicle.vinMatches : [])
+        const loaded = []
+        for (const p of pluginList) {
+            if (!p.ok)
+                continue
+            for (let i = 0; i < p.profiles.length; ++i) {
+                const v = { profile: p.profiles[i], label: qsTr("%1: %2").arg(p.name, p.variants[i]) }
+                loaded.push(v.profile)
+                if (marked.indexOf(v.profile) >= 0)
+                    shown.matched.push(v)
+                else
+                    shown.others.push(v)
+            }
+        }
+        const pick = pickedVehicle.plugin
+        if (pick !== "" && loaded.indexOf(pick) < 0)
+            shown.others.push({ profile: pick, label: qsTr("%1: doesn't load").arg(pick) })
+        return shown
+    }
+
     function pluginText(p) {
         return p.ok ? qsTr("%1 %2: %3").arg(p.name, p.version, p.variants.join(", "))
                     : p.words
     }
 
+    // A plugin replaced takes its VIN matches with it: the new version's
+    // match may not cover the car, and the next identification marks again
     function importPlugin(url) {
         pluginNote = ""
         const r = Bridge.importPlugin(url)
         if (!r.ok) {
             pluginProblem = r.words
             return false
+        }
+        if (r.replaced !== "") {
+            // pluginList is the list before the import until loadPlugins()
+            const old = pluginList.find(p => p.ok && p.id === r.id)
+            if (old !== undefined)
+                saveVehicles(VehicleBook.dropVinMatches(vehicles, old.profiles))
         }
         pluginProblem = ""
         pluginNote = r.replaced !== ""
@@ -1396,15 +1445,15 @@ Pane {
         function onConnectedChanged() {
             if (!Bridge.connected)
                 page.plottedApplied = false
-            // A new session reads its VIN again; at its end the matches
-            // the VIN proposed stay to be picked (the VIN goes with it)
-            if (Bridge.connected)
-                page.refreshMatches()
+            // The session's VIN, read again at each, goes at its end; the
+            // matches it made stay on the vehicle it identified
+            page.refreshMatches()
         }
 
         function onVehicleIdentified() {
             page.recognizeVehicle()
             page.refreshMatches()
+            page.noteVinMatches()
             page.noteCarYear()
         }
 
