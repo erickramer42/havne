@@ -2111,15 +2111,11 @@ QVariantMap SessionBridge::readImport(const QUrl& url)
     return result;
 }
 
-QVariantMap SessionBridge::keepFile(const QByteArray& file, const QString& into,
-                                    const QString& variant,
-                                    const QString& vehicle)
+// The activity log's line for a wrap (into "") or a put: what the user
+// is told beside the plugin is core's notes, then the store's words (an
+// index it couldn't write, a file here already)
+static QString keptLine(const QVariantMap& result, const QString& into)
 {
-    const QVariantMap result =
-        into.isEmpty() ? m_pluginStore.wrap(file, {vehicle, variant})
-                       : m_pluginStore.put(into, variant, file);
-    // What the user is told beside the plugin: core's notes, then the
-    // store's words (an index it couldn't write, a file here already)
     QString said;
     for (const char* key : {"notes", "words"}) {
         const QString text = result.value(QLatin1String(key)).toString();
@@ -2128,22 +2124,31 @@ QVariantMap SessionBridge::keepFile(const QByteArray& file, const QString& into,
         }
     }
     const bool here = result.value(QStringLiteral("kept")).toBool();
-    emit logMessage(
-        result.value(QStringLiteral("ok")).toBool()
-            ? QStringLiteral("%1: %2 %3 (%4)%5")
-                  .arg(!into.isEmpty() ? QStringLiteral("Plugin changed")
-                       : here          ? QStringLiteral("Plugin already here")
-                                       : QStringLiteral("Plugin made"),
-                       result.value(QStringLiteral("name")).toString(),
-                       result.value(QStringLiteral("version")).toString(),
-                       result.value(QStringLiteral("profiles"))
-                           .toStringList()
-                           .join(QStringLiteral(", ")),
-                       said)
-            : QStringLiteral("%1: %2").arg(
-                  into.isEmpty() ? QStringLiteral("Plugin not made")
-                                 : QStringLiteral("Plugin not changed"),
-                  result.value(QStringLiteral("words")).toString()));
+    return result.value(QStringLiteral("ok")).toBool()
+               ? QStringLiteral("%1: %2 %3 (%4)%5")
+                     .arg(!into.isEmpty() ? QStringLiteral("Plugin changed")
+                          : here ? QStringLiteral("Plugin already here")
+                                 : QStringLiteral("Plugin made"),
+                          result.value(QStringLiteral("name")).toString(),
+                          result.value(QStringLiteral("version")).toString(),
+                          result.value(QStringLiteral("profiles"))
+                              .toStringList()
+                              .join(QStringLiteral(", ")),
+                          said)
+               : QStringLiteral("%1: %2").arg(
+                     into.isEmpty() ? QStringLiteral("Plugin not made")
+                                    : QStringLiteral("Plugin not changed"),
+                     result.value(QStringLiteral("words")).toString());
+}
+
+QVariantMap SessionBridge::keepFile(const QByteArray& file, const QString& into,
+                                    const QString& variant,
+                                    const QString& vehicle)
+{
+    const QVariantMap result =
+        into.isEmpty() ? m_pluginStore.wrap(file, {vehicle, variant})
+                       : m_pluginStore.put(into, variant, file);
+    emit logMessage(keptLine(result, into));
     return result;
 }
 
@@ -2304,6 +2309,52 @@ QVariantMap SessionBridge::exportPlugin(const QString& sha, const QUrl& url)
                       .arg(sha.left(12), words));
     return {{QStringLiteral("ok"), written},
             {QStringLiteral("words"), written ? QString() : words}};
+}
+
+QVariantMap SessionBridge::pluginExportNote(const QString& sha)
+{
+    return m_pluginStore.exportNote(sha);
+}
+
+QVariantMap SessionBridge::pluginVariantText(const QString& sha,
+                                             const QString& variant)
+{
+    return m_pluginStore.variantText(sha, variant);
+}
+
+QVariantMap SessionBridge::saveVariantFile(const QString& sha,
+                                           const QString& variant,
+                                           const QUrl& url)
+{
+    QString words;
+    const QByteArray bytes = m_pluginStore.variantBytes(sha, variant, &words);
+    bool written = false;
+    if (!bytes.isEmpty()) {
+        written = writeToUrl(url, bytes);
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    emit logMessage(
+        written ? QStringLiteral("Variant %1 of plugin %2 saved as a signal "
+                                 "file (%3 bytes)")
+                      .arg(variant, sha.left(12))
+                      .arg(bytes.size())
+                : QStringLiteral("Variant %1 of plugin %2 not saved: %3")
+                      .arg(variant, sha.left(12), words));
+    return {{QStringLiteral("ok"), written},
+            {QStringLiteral("words"), written ? QString() : words}};
+}
+
+QVariantMap SessionBridge::copyVariant(const QString& sha,
+                                       const QString& variant,
+                                       const QString& into,
+                                       const QString& newVariant)
+{
+    const QVariantMap result =
+        m_pluginStore.copyVariant(sha, variant, into, newVariant);
+    emit logMessage(keptLine(result, into));
+    return result;
 }
 
 QVariantList SessionBridge::offeredVariants(const QString& vehicle,

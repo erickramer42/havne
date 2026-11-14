@@ -1070,6 +1070,122 @@ QByteArray PluginStore::packed(const QString& sha, QString* words) const
     return bytes;
 }
 
+QByteArray PluginStore::variantBytes(const QString& sha, const QString& variant,
+                                     QString* words)
+{
+    (void)all();
+    const auto it = m_held.find(sha);
+    if (it == m_held.end()) {
+        *words = QStringLiteral("The store has no such plugin");
+        return {};
+    }
+    const qsizetype i = it->second.variants.indexOf(variant);
+    if (i < 0) {
+        *words = QStringLiteral("%1 has no variant '%2'")
+                     .arg(it->second.name, variant);
+        return {};
+    }
+    // Borrowed until the plugin is freed: copied before anything frees it
+    size_t length = 0;
+    const char* text = ecuio_signal_file_text(
+        ecuio_plugin_variant_file(it->second.plugin, static_cast<uint32_t>(i)),
+        &length);
+    return {text, static_cast<qsizetype>(length)};
+}
+
+QVariantMap PluginStore::variantText(const QString& sha, const QString& variant)
+{
+    QString words;
+    const QByteArray bytes = variantBytes(sha, variant, &words);
+    if (bytes.isEmpty()) {
+        return refusal(words);
+    }
+    return {{QStringLiteral("ok"), true},
+            {QStringLiteral("words"), QString()},
+            {QStringLiteral("text"), QString::fromUtf8(bytes)}};
+}
+
+QVariantMap PluginStore::exportNote(const QString& sha)
+{
+    (void)all();
+    const auto it = m_held.find(sha);
+    if (it == m_held.end()) {
+        return refusal(QStringLiteral("The store has no such plugin"));
+    }
+    const Held& h = it->second;
+    QVariantList shared;
+    QStringList lines;
+    for (qsizetype i = 0; i < h.variants.size(); ++i) {
+        ecuio_signal_source_t source{};
+        source.struct_size = sizeof source;
+        if (ecuio_signal_file_source(
+                ecuio_plugin_variant_file(h.plugin, static_cast<uint32_t>(i)),
+                &source) != ECUIO_OK ||
+            (source.flags & ECUIO_SOURCE_SHARE_ALIKE) == 0) {
+            continue;
+        }
+        const QString license = QString::fromUtf8(source.license);
+        // havne-cli plugins check's words (cli/plugin_lines.h)
+        const QString line =
+            QStringLiteral("Variant '%1' holds data under %2, a share-alike "
+                           "license: whoever passes the plugin on keeps that "
+                           "license and the variant's source with it")
+                .arg(h.variants.at(i), license);
+        shared << QVariantMap{{QStringLiteral("variant"), h.variants.at(i)},
+                              {QStringLiteral("license"), license},
+                              {QStringLiteral("words"), line}};
+        lines << line;
+    }
+    return {{QStringLiteral("ok"), true},
+            {QStringLiteral("words"), QString()},
+            {QStringLiteral("note"), lines.join(QLatin1Char('\n'))},
+            {QStringLiteral("shareAlike"), shared}};
+}
+
+QVariantMap PluginStore::copyVariant(const QString& sha, const QString& variant,
+                                     const QString& into,
+                                     const QString& newVariant)
+{
+    QString words;
+    const QByteArray file = variantBytes(sha, variant, &words);
+    if (file.isEmpty()) {
+        return refusal(words);
+    }
+    const QString from = m_held.at(sha).name;
+    // A copy never takes a variant's place: the user names it. A plugin
+    // not held or not the user's own is put's to refuse
+    if (into == sha) {
+        return refusal(QStringLiteral("Copy to another plugin: this variant "
+                                      "is already in %1")
+                           .arg(from));
+    }
+    const auto target = m_held.find(into);
+    if (target != m_held.end() && isMine(target->second.id)) {
+        const QString made =
+            newVariant.isEmpty()
+                ? describe(file).value(QStringLiteral("variant")).toString()
+                : newVariant;
+        if (target->second.variants.contains(made)) {
+            return refusal(QStringLiteral("%1 already has a variant '%2': "
+                                          "give the copy another name")
+                               .arg(target->second.name, made));
+        }
+    }
+    QVariantMap result = into.isEmpty() ? wrap(file, {QString(), newVariant})
+                                        : put(into, newVariant, file);
+    if (!result.value(QStringLiteral("ok")).toBool()) {
+        return result;
+    }
+    const QString follows =
+        QStringLiteral("The copy won't follow %1's updates to %2")
+            .arg(from, variant);
+    const QString notes = result.value(QStringLiteral("notes")).toString();
+    result.insert(QStringLiteral("notes"),
+                  notes.isEmpty() ? follows
+                                  : notes + QStringLiteral("; ") + follows);
+    return result;
+}
+
 QVariantList PluginStore::matches(const QString& vin, int latestModelYear) const
 {
     QString text = vin.toUpper();

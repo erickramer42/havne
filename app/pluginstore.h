@@ -150,6 +150,35 @@ public:
     // longer hashes to its name
     QByteArray packed(const QString& sha, QString* words) const;
 
+    // A variant's signal file (ADR-0064 Q7): its files merged and written
+    // as one, with a notes line naming the plugin, its version and the
+    // variant, which loads anywhere a signal file does, under
+    // user.<the plugin's name>. Empty, with words why, for a plugin or a
+    // variant the store doesn't hold. Save as a signal file writes it
+    QByteArray variantBytes(const QString& sha, const QString& variant,
+                            QString* words);
+    // The same as text, for the form: { ok, words, text }
+    QVariantMap variantText(const QString& sha, const QString& variant);
+
+    // What Export plugin says before its save dialog (ADR-0064 Q7):
+    // { ok, words, note, shareAlike }, shareAlike a { variant, license,
+    // words } for each variant whose source's license is Creative
+    // Commons' share-alike, in the plugin's order, its words those
+    // havne-cli plugins check gives; note those words one a line, ""
+    // when no variant is
+    QVariantMap exportNote(const QString& sha);
+
+    // Copy to my plugin (ADR-0064 Q8): a variant's signal file into a
+    // plugin of the user's own, a new one (into "": wrap's rules, for no
+    // vehicle, variant newVariant) or one held (put's rules: into must
+    // be the user's own), its source kept. Refused into the plugin it is
+    // in, and as a variant into already has (newVariant, else the file's
+    // name as core cuts it): a copy never takes a variant's place. wrap's
+    // or put's answer, its notes ending with the line that the copy
+    // won't follow the original's updates
+    QVariantMap copyVariant(const QString& sha, const QString& variant,
+                            const QString& into, const QString& newVariant);
+
     // The variants the plugins loaded propose for a VIN (ADR-0052
     // section 5), in the plugins' order then the manifest's: { sha256,
     // id, name, variant, profile }; none for text that isn't a VIN

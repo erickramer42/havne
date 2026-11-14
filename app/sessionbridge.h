@@ -961,6 +961,25 @@ public:
     // file loads wherever the copy does and holds nothing of the store's
     // index. { ok, words }, words never naming a path. Logs one line
     Q_INVOKABLE QVariantMap exportPlugin(const QString& sha, const QUrl& url);
+    // The note Export plugin shows before its save dialog: the store's
+    // exportNote, { ok, words, note, shareAlike }
+    Q_INVOKABLE QVariantMap pluginExportNote(const QString& sha);
+    // A variant's signal-file text, which the form edits: { ok, words,
+    // text }
+    Q_INVOKABLE QVariantMap pluginVariantText(const QString& sha,
+                                              const QString& variant);
+    // Save as a signal file: the variant's signal file written to url as
+    // exportPlugin writes. { ok, words }, words never naming a path. Logs
+    // one line
+    Q_INVOKABLE QVariantMap saveVariantFile(const QString& sha,
+                                            const QString& variant,
+                                            const QUrl& url);
+    // Copy to my plugin: the store's copyVariant, into "" a new plugin.
+    // Logs one line, as a keep does
+    Q_INVOKABLE QVariantMap copyVariant(const QString& sha,
+                                        const QString& variant,
+                                        const QString& into,
+                                        const QString& newVariant);
     // A vehicle's picks (ADR-0064 Q5), kept by the vehicle book as an
     // ordered list of profiles. offeredVariants lists every variant of
     // every plugin for the vehicle (PluginStore::offered: forThisCar
