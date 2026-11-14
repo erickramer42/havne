@@ -374,8 +374,9 @@ _Static_assert(sizeof(ecuio_recording_stats_t) == 96,
 #define ECUIO_RECORDING_STEP_FORWARD  1u
 #define ECUIO_RECORDING_STEP_BACKWARD 2u
 
-/* Called on the opening thread every few megabytes; a nonzero return
- * cancels the open */
+/* Called on the opening thread every few megabytes: of events.log first,
+ * bytes_read then 0 and bytes_total the data file's, then of the data
+ * file; a nonzero return cancels the open */
 typedef int (*ecuio_open_progress_t)(uint64_t bytes_read,
                                      uint64_t bytes_total, void* user_data);
 
