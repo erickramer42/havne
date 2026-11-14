@@ -12,8 +12,11 @@
 #include <QQmlExtensionPlugin>
 #include <QQuickStyle>
 #include <QSettings>
+#include <QStringList>
 #include <QStyleHints>
 #include <QWindow>
+
+#include <utility>
 
 #ifdef Q_OS_ANDROID
 #include "androidsession.h"
@@ -147,6 +150,14 @@ int main(int argc, char *argv[])
     AndroidSession androidSession(&bridge, &relay);
 #endif
 
+    // The vehicles' signal files moved into the plugin store, once, before
+    // any page reads the vehicle book (ADR-0064 Q6)
+    QStringList storesMoved;
+    {
+        QSettings preferences;
+        storesMoved = bridge.migrateStores(preferences);
+    }
+
     QQmlApplicationEngine engine;
     engine.loadFromModule("App", "Main");
 
@@ -159,6 +170,9 @@ int main(int argc, char *argv[])
             QStringLiteral("Preferences carried over from %1: %2 settings")
                 .arg(earlierProductName())
                 .arg(carriedOver));
+    }
+    for (const QString& line : std::as_const(storesMoved)) {
+        bridge.logEvent(line);
     }
     // On Linux the color scheme alone: never the window's frame
 #if defined(Q_OS_ANDROID) || defined(Q_OS_WIN) || defined(Q_OS_LINUX)
