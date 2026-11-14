@@ -5,6 +5,7 @@
 #include "carryover.h"
 #include "healthreport.h"
 #include "obdbimport.h"
+#include "storemigration.h"
 #include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
 #include "recording_signals.h" /* cli/: a replay's own signal file */
 #include "signal_file_lines.h" /* cli/: the profile a URI selects */
@@ -2282,6 +2283,11 @@ QVariantMap SessionBridge::forgetAllVehicleImports()
         emit logMessage(line);
     }
     return result;
+}
+
+QStringList SessionBridge::migrateStores(QSettings& prefs)
+{
+    return StoreMigration::run(prefs, m_pluginStore).lines;
 }
 
 QVariantMap SessionBridge::exportPlugin(const QString& sha, const QUrl& url)
