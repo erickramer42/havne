@@ -1439,3 +1439,126 @@ The built-in Boost cell's refs are `id:13001` (the demo's) and `id:7011`
 pressure), so a gauge for Boost reads on a car as on the demo; the table in
 "the built-in layout by what people watch" listing `id:13001` alone is the
 demo's half.
+
+## Appendix: the layout file (2026-11-13)
+
+A form's dashboard can be written to a file and loaded from one, so a
+layout survives an uninstall or a new machine and can be shared.
+
+**The file** is the form's stored document (format 2) with two more
+document-level keys, which a stored text never holds:
+
+- `form`: `"phone"` or `"desktop"`, the form it was written from.
+- `files`: the signal files its references need, each
+  `{ "name", "sha256" }` (at most 32; a name of 1 to 80 characters; the
+  hash 64 lowercase hex digits).
+
+Key order is `format`, `form`, `files`, the document's other keys, then
+`pages`. The format does not change: a reader that does not know the
+keys keeps them, as it keeps any key it does not know. A load applies
+only the document: the two keys are the file's, so the stored text is
+what an edit would have written.
+
+**The form rule.** A file names the form it came from and is refused on
+the other: a phone layout is not scaled to the desktop's columns, or the
+reverse. A file with no `form` (a stored text copied by hand, or a
+format 1 text) is read as the form loading it, and the load says so.
+Only a format 1 file's upgrade depends on the form read as.
+
+**The signal files.** A cell reads a signal file's def by a `key:<key>`
+reference (`id:<n>` references name a built-in set's def and need no
+file). The export lists each of the picked vehicle's signal files that
+holds a key a cell references, found through `Bridge.profileSignals`
+for the file's own profile, never by reading the file's JSON in the
+page; a vehicle's file that doesn't load is named in the export's note,
+so it isn't taken for one the layout doesn't need. The load compares the
+listed hashes with the vehicle's and names the files it lacks; the
+layout still loads whole, and a gauge whose file is missing reads "not
+in profile" until the file is imported. Files are named, never bundled:
+sharing a signal file is Save signal file's job.
+
+**The rules live in `DashboardBook`**: `exportText(doc, form, files)`
+(the text, or "" when the document does not read back as it is),
+`neededFiles(doc, vehicleFiles)` and `importProblem(text, form,
+vehicleSha256s)`, which gives the document, the problem (parse's, or
+`otherform`), the dropped counts, the file's `form` and `files`, the
+missing ones and the notes (`no-form`). A file is read up to the stored
+text's bound plus 16 KiB for the two keys (82,400 bytes, a byte order
+mark counted), and one over it is refused unread. Inside that, the
+document is bounded by what a write would store, so whitespace outside
+strings does not count.
+
+**havne-cli's check.** `havne-cli layout check <file> [--form
+phone|desktop]` runs the same rules with no app: a C++ port in
+`cli/layout_check.h` (public headers only), with its own JSON reader
+and the byte count of what `JSON.stringify` would write. It writes a
+`layout` line (`ok`, `problem`, `as`, `form`, `pages`, `cells`,
+`dropped`, `first_cell`, `needs_files`, `notes`, `words`) and exits 0
+when the file reads (with pages or cells dropped too), 1 when it is
+refused and 3 when the file cannot be read, is over the file's bound or
+is not UTF-8. With no `--form` the file's own is taken, and a file that
+names none is read as desktop, which a note says. The CLI has no
+vehicle, so it lists `needs_files` and never judges which are missing.
+The port follows the app's JavaScript reader at its edges: objects and
+arrays nest to 1024 levels, a name's trim takes U+0085, and a lone
+surrogate counts as the three bytes it is stored as. MSVC links
+`havne-cli` with an 8 MB stack, since the reader recurses once for each
+level and Windows' 1 MB main thread held about 1,300 levels in a Debug
+build.
+
+**The contract is a corpus.** `tests/data/layouts/<case>.json` with
+`<case>.expect.json` (one verdict for each form it is read as) is read
+by `tst_dashboardbook` through `DashboardBook.importProblem` and by
+`test_cli` through the port, so a rule changed on one side fails the
+other. A reader's own edges are covered by the cases: each bound at and
+over it, each cell and page rule, numbers past a double (a read that
+fails in both), escapes and surrogate pairs in names, a lone surrogate
+at and over the bound, the deepest nesting and one level past it, a
+repeated key, one byte order mark and two, a format 1 file read as each
+form, and a file whose whitespace alone is past the document's bound.
+Two files stay outside the corpus, since the app refuses them before
+its rules: one over the file's bound and one that isn't UTF-8, each a
+`havne-cli` golden.
+
+## Note: more gauge colors and a custom one (2026-11-13)
+
+This note replaces "Note: the color rule (2026-11-11)" where they differ:
+that note's set of seven, and its leaving out red, amber, orange and blue,
+are not the whole picker. The set of picked colors grows from seven to
+twelve names, and a gauge's color can also be a color of the user's own.
+The seven names and their values (teal, green, lime, cyan, pink, magenta,
+stone) are unchanged, and the rule of "Note: the color rule" still holds
+for them: 3:1 on the look's surface and at least 25 apart in CIE L*a*b*
+from the zone colors and the default needle. The pick `green` reads
+"Light green" in the picker; its stored name stays.
+
+The five added names are the standard colors, appended in this order:
+`red`, `blue`, `yellow`, `truegreen` (labeled "Green") and `lightblue`
+(labeled "Light blue"). They are exempt from the zone-distance rule by
+name: red sits beside danger and the needle, yellow beside warning,
+`lightblue` is the cold color itself, and `blue` and `truegreen` are bright
+standard hues. Each still holds 3:1 on its look's surface, in Dark and in
+Light. Dark's values follow a reference dashboard's four colors, moved
+only as far as needed to keep `blue` and `yellow` 10 apart (CIEDE2000) from
+cyan and lime; Light's are the same hues darkened to 3:1 on white, and
+Light's yellow is a dark gold, since no yellow reaches 3:1 on white.
+`QmlTest.dashedit`'s
+`test_everyNamedColorIsReadableAndTheOriginalsAreApartFromTheZones` holds
+the readability of every name, the zone rule for the first seven, the
+order and the count (12).
+
+A custom color is stored in the gauge's existing `color` option as
+"#rrggbb", lowercase, and nothing else is a custom color: an uppercase
+digit, a short or long form, a stray space or a non-string draws the
+default. It is made from three whole numbers 0 to 255 in the Color row's
+"Custom..." entry. A value that isn't one stays typed with the reason
+under the fields, and nothing is stored until every value is usable; a
+valid color is stored when a field was edited, so the fields a focus only
+passes through store nothing. No contrast or distance rule applies to it,
+since it is the user's own choice: where it falls below 3:1 on a look's
+surface the picker names that look as hard to read in, whichever look is
+shown, and stores the color all the same. Night draws no pick, named or
+custom, as before. A layout file carries the string as it does a name:
+`havne-cli`'s layout check takes any string for `color`, the app's load
+takes any string, and a build without this note draws the default for a
+"#rrggbb" it doesn't know and loses nothing else.

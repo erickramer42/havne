@@ -167,6 +167,8 @@ Dates are commit dates.
 | 2026-11-08 | The analysis log ([ADR-0056](adr/0056-analysis-log.md)): a running session narrowed to picked signals (`69bd149`), a recorder attached to it (`28b1cbd`), the wide CSV and its estimate (`afa8f7f`), `havne-cli log` (`be31b7d`) and the app's Start log and Stop log (`b11049e`); on the test car over ELM327 on native Linux, the MX+ and the VX measured at 1, 4 and 8 signals ([2026-11-08-linux-car](bench-sessions/2026-11-08-linux-car.md)) |
 | 2026-11-08 | Configurable dashboards ([ADR-0057](adr/0057-dashboards.md)): core names a signal file's key and a def's range (`5e57a6e`), the bridge and the hub by reference (`f6f4fbf`), the document's rules (`bd687f5`), the renderer (`0545d98`), edit mode, three more kinds (`4a152e3`), and the Low glare and Night themes with the gauges' roles in `Theme` (`c212e7a`) |
 | 2026-11-08 | Settings as a list of pages (`daa57d9`), the phone's tab bar at touch size (`727f6db`), the CSV map guessed from the header and edited in the Import panel (`923930b`), the Log page's ID mask, length and time filters, and the viewer's Frames view (`98c20cb`) |
+| 2026-11-12 | v0.7.4's follow-ups: a Dashboard layout exported and loaded, with `havne-cli layout check` reading one corpus with the app ([ADR-0057](adr/0057-dashboards.md)'s appendix on the layout file; `7fc156be`, `092bc6f2`); the viewer's difference trace (`6b42ad61`); the demo car answering OBD-II (`e9ae67ff`); a cancel for the reader's searches in core, `havne-cli view` and Python (`e53d4dab`, `51dfb407`, `90e0e382`); SocketCAN's close waiting for a request still out (`33f3b46c`); a provider's document opened through Android's content resolver and its descriptor kept to the write's close (`ad8f1cd9`, `0db1ac6b`); CI's Qt kits kept as one cached copy each (`1765e312`) |
+| 2026-11-13 | The open dialogs through Android's own document picker (`cda389c5`, `d179d85e`, `cfbca201`), a picked document closed before its error is asked (`754ba1eb`), and five more gauge colors with a custom one (`a5065b7a`) |
 
 ## Lessons learned
 
@@ -1308,3 +1310,60 @@ fed it a value past that, and the worker hung in the search. A histogram
 fed from a new caller meets values its first caller never made, so a
 search over a bounded type stops at the type's end, not at what the
 callers have sent so far.
+
+**2026-11-12: Qt's Android content engine and a name with parentheses:**
+Qt 6.12's Android content file engine fails on a document named with
+parentheses: `exists()` is false, and a write tries to create it under a
+parent it cannot resolve ("Cannot create file, parent doesn't exist or
+not a directory"). Encoding the name (`%20`, `%28`, `%29`) did not help;
+the descriptor from `ContentResolver.openFileDescriptor` does. The first
+repro on the test phone was the default export name twice in a row: the
+picker names the second "name (1)". The same fault was why the empty
+leftovers stayed, since the empty-at-entry judgment asked `exists()`. A
+folder export is the other way round: the resolver opens existing
+documents only, so the files of a new folder still go through the
+engine, which makes them.
+
+**2026-11-13: the open half of the same fault:** Qt Quick's `FileDialog`
+on Android checks an open-mode pick through the engine, which takes a
+document named with parentheses for missing; the dialog then refuses the
+pick and keeps its previous `selectedFile`, so a page reads the file
+picked before, without a word when that one still exists. No read path
+can fix it, because the URL never reaches the page. The six open dialogs
+ask ACTION_OPEN_DOCUMENT themselves (`startActivityForResult` through
+plain JNI, the results through Qt's private activity-result listener; a
+helper activity of our own is the fallback if Qt drops that API) and
+hand the URI on as it came. The activity result arrives on Android's
+main thread, so only the URI is read there (the intent is a local
+reference) and the rest is posted on. Qt's JNI calls clear a Java
+exception unseen, so the picker is resolved first for its own words,
+which needs the manifest's `<queries>` from Android 11, and launched
+through plain JNI, whose exception is checked.
+
+**2026-11-13: a ParcelFileDescriptor reads its peer's status once:**
+`close()` and `checkError()` each read the peer's status once, without
+waiting (AOSP's `readCommStatus` on a non-blocking socket), and
+`close()` reads it before it closes the data descriptor. So a writer
+sees a provider's refusal only when the provider sent it before the
+writer's close; a cloud provider that uploads after the end of input
+can't report a failed upload through the descriptor. The order that sees
+the most is `close()` (the `dup` first, then the descriptor), then
+`checkError()`, which returns the status `close()` read. On the test
+phone a save to a cloud provider with the network off read as saved, and
+the provider uploaded it once the network was back.
+
+**2026-11-12: a split test file's cases that leaned on each other:**
+splitting a long QML test file into shares, every nth case to a process
+of its own, put cases in new company. One had passed only because an
+earlier case left a session connected; in its share it failed. Each
+case sets up what it reads (a `cleanup()` or `init()` that disconnects,
+the rows it checks made in the case), and a file with fewer cases than
+shares is a configure error, so an empty share can't pass by running
+nothing.
+
+**2026-11-12: a close-mid-task case that had nothing to close:** a case
+for "a close never waits for a task under way" closed straight after
+queuing the task. The close emptied the queue before the pool had
+taken the work, so the case passed with nothing running, and two
+mutants of the code it guards survived. The case waits until the task
+has taken its work (a hold the task reports), then closes.

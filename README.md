@@ -17,7 +17,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 ## Engineering highlights
 
 - **Vendor drivers run out of process.** Each J2534 DLL runs in a surrogate of its own architecture, so a crashing driver ends its process, not the app ([ADR-0025](docs/adr/0025-one-j2534-backend.md)).
-- **Fast paths, measured.** The worker decodes with no allocation per frame; a recorded engine start replays at over 300,000 frames a second on the dev machine, and CI repeats the load test ([load test](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
+- **Fast paths, measured.** Decoding allocates nothing per frame; a recorded engine start replays at over 300,000 frames a second on the dev machine, and CI reruns it ([load test](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
 - **Measured on a real car.** A second controller on its bus showed Havne's adapter read adding 52 ms; fixing it cut latency from 65.5-73.7 ms to 16.4 ms ([session sheet](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
 - **Protocol logic with no I/O, fuzzed.** The request engine, ISO-TP and the ELM327 layer take no I/O or clock, so rules are unit tests; parsers run fuzzed in CI ([ADR-0015](docs/adr/0015-request-engine.md)).
 - **A user's signals are data.** Signal files are JSON that core reads from bytes and refuses at load with line and column, so every platform loads them alike ([ADR-0051](docs/adr/0051-signal-files.md)).
@@ -27,14 +27,14 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 
 ## What it does
 
-- **Live data:** a Dashboard built from eight kinds of gauge, Live's table and chart, a Light look for the sun and a Night mode in amber or red, on a schedule if you like; on a phone, a drive view with every bar hidden ([ADR-0057](docs/adr/0057-dashboards.md), [ADR-0059](docs/adr/0059-drive-view.md)).
+- **Live data:** a Dashboard of eight gauge kinds, Live's table and chart, a Light look, Night in amber or red, optionally scheduled, and a phone's drive view ([ADR-0057](docs/adr/0057-dashboards.md), [ADR-0059](docs/adr/0059-drive-view.md)).
 - **Adapters:** J2534 on Windows; ELM327 over serial, Bluetooth or WiFi, kept running in the background on Android; SocketCAN on Linux, asking so far on a virtual bus ([docs/linux.md](docs/linux.md)).
 - **Diagnose:** each ECU's stored, pending and permanent codes with titles, readiness, the freeze frame and an inspection verdict; a clear asks first and saves the report ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
 - **Profiles, chosen by the URI:** `obd2` polls every Service 01 reading the car supports, `uds-generic` the identifiers you name, `raw` logs frames ([ADR-0039](docs/adr/0039-full-service01-coverage.md)).
 - **Your own signals:** signal files and plugins for Service 01 PIDs and Service 22 DIDs on up to four modules, written in Settings or imported from an OBDb set ([signal-files.md](docs/signal-files.md)).
 - **Record and review:** every frame and value of a session; the Recordings page pans, zooms, overlays a second run and shows the frames; `replay://` plays one back ([ADR-0049](docs/adr/0049-recordings-in-core.md)).
 - **Analysis log:** Start log records the picked signals at the bus's own rate, and `havne-cli export` writes them as a wide CSV, a row a sweep ([ADR-0056](docs/adr/0056-analysis-log.md)).
-- **Share:** `havne-cli` and the app's viewer export a recording scrubbed as pcapng, CSV or a folder; the app also saves a health report; candump logs and other loggers' CSVs import in both ([ADR-0054](docs/adr/0054-exports-and-imports.md)).
+- **Share:** `havne-cli` and the app export a recording scrubbed as pcapng, CSV or a folder, save a health report, and import candump logs and other loggers' CSVs ([ADR-0054](docs/adr/0054-exports-and-imports.md)).
 - **`havne-cli` and Python:** any session as JSON lines or iterators, recordings viewed and exported offline, the simulated car served as an ELM327 adapter ([ADR-0031](docs/adr/0031-command-line-client.md), [ADR-0053](docs/adr/0053-python-bindings.md)).
 - **A simulated vehicle:** a modeled car through a cold start, pulls onto the limiter and a quarter mile, so every page runs with no hardware.
 
@@ -44,7 +44,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 </thead>
 <tbody>
 <tr>
-<td><a href="docs/images/phone-drive-view.png"><img src="docs/images/phone-drive-view.png" alt="The phone layout's drive view: every bar hidden, the gauges filling the screen in a pull at 6,044 rpm, boost 16.0 psi" width="240"></a></td>
+<td><a href="docs/images/phone-drive-view.png"><img src="docs/images/phone-drive-view.png" alt="The phone's drive view in a pull at 6,044 rpm, boost 16.0 psi" width="240"></a></td>
 <td><a href="docs/images/phone-codes.png"><img src="docs/images/phone-codes.png" alt="Codes on the test phone: the inspection verdict, the check-engine light, and stored, pending and permanent codes with their titles" width="240"></a></td>
 <td><a href="docs/images/phone-dashboard-night.png"><img src="docs/images/phone-dashboard-night.png" alt="The phone layout's Dashboard with Night on in red" width="240"></a></td>
 </tr>

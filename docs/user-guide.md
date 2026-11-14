@@ -52,7 +52,9 @@ done from Recordings.
 - **Android:** pair the adapter in Android's Bluetooth settings first.
   On Dash, the list says Havne needs Android's permission to list paired
   adapters: press **Allow** and allow nearby devices. The paired adapter
-  then appears under **Adapters**. A Bluetooth LE adapter isn't paired:
+  then appears under **Adapters**. A paired headset, watch or health
+  device is listed apart, under **Other paired devices**. A Bluetooth LE
+  adapter isn't paired:
   press **Scan** to find it. If Android stops asking, **Open settings**
   goes to Havne's page in Android's settings, where the permission can
   be turned on.
@@ -110,7 +112,9 @@ Units follow **Settings, Display, Units** (metric or imperial).
    range, zones and size stay, and settings only the old kind used come
    back if you change back), the range (**From** and **To**), the zones
    (**Cold below**, **Warning below**, **Danger below**, **Warning from**,
-   **Danger from**), decimals, **Color**, its size in columns and rows,
+   **Danger from**), decimals, **Color**, its size (**Columns** and
+   **Rows**; on a phone, **Columns** and **Height**, both counted in
+   columns),
    **Peak hold**, its place (**Move earlier**, **Move later**), **Copy**
    and **Paste after**. **Close** shuts the panel.
 
@@ -118,8 +122,11 @@ Units follow **Settings, Display, Units** (metric or imperial).
    and danger can be set above or below a value. A new gauge on a common
    signal starts with generic zones for a gasoline engine, not a diagnosis;
    they are ordinary values to type over or clear. Zones, Decimals and Color
-   apply to every kind but Shift lights. Color is a set of seven, or
-   Default (the look's own); a warning zone and Night still draw in their
+   apply to every kind but Shift lights. Color is one of a set of named
+   colors, **Custom...** (a color of your own from three numbers, red,
+   green and blue, each 0 to 255) or Default (the look's own); a color
+   hard to read on one of the looks says so and is kept all the same. A
+   warning zone and Night still draw in their
    colors, and at Night the row is dimmed, with a note: Night draws every
    gauge in its own tint, and your pick comes back by day.
 4. **Move a gauge:** hold it and drag it to its new place.
@@ -128,6 +135,19 @@ Units follow **Settings, Display, Units** (metric or imperial).
 6. **Pages:** the tabs above the gauges are the pages; **+** adds one.
    **Page** holds the shown page's name and **Remove page**, and
    **Reset**, which replaces every page with the built-in layout.
+
+   **Export layout** writes this form's layout to a `.json` file, and
+   **Load layout** reads one back. A file names the form it came from
+   (phone or desktop) and is refused on the other: layouts are not scaled
+   between forms. Where a gauge reads a signal file's signal, the export
+   lists that file by name, and loading says which files this vehicle
+   does not have, so you can import them under Signals; the gauges read
+   "not in profile" until you do. A load is one undo step, so Undo takes
+   the previous layout back. A file that cannot be read, or was made by a
+   newer version, is refused with the reason and changes nothing; gauges
+   or pages in a file that cannot be read are left out and counted.
+   `havne-cli layout check <file>` reads a layout file as Load layout
+   would, with no app.
 7. **Undo** and **Redo** step back and forth through the changes made
    since **Edit**; on the desktop, Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y)
    do the same, in edit mode or out of it. A change made from a panel
@@ -224,7 +244,10 @@ is left out, and the import says how many it left out.
 pull you choose in each: a pull is full throttle for a second or more
 while the car accelerates. Each recording's pulls are listed with their
 start and length; the first of each is chosen to begin with. Use it to
-lay a pull from before a change over the same pull after it. With
+lay a pull from before a change over the same pull after it.
+**Difference** adds, for each plotted signal both recordings hold in the
+same unit, a trace of the compared recording less this one, in a pane of
+its own: a flat line at zero means the two agree there. With
 `havne-cli view`, `--align-on pull:2` puts every recording's second pull
 at 0, and `pull:3,1` the first recording's third and the second's first;
 each `columns` line then carries the column's `mean`, and the later
