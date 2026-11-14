@@ -1,11 +1,13 @@
 # ADR-0063: Conditions: one model in core, stored as data and judged on the worker, for triggered logging, alerts and markers
 
-- **Status:** Accepted. Built: section 12's steps 2 and 3, the
-  condition loader and the evaluator (the two appendices of
-  2026-11-12), and step 5's focus half (the appendix "the focus keeping
-  a condition's signals"). Step 4, the rest of step 5 and the steps
-  after it are not built. "Decided" at the end
-  records each choice.
+- **Status:** Accepted. Built: section 12's steps 1 to 4 (the
+  computed grammar of ADR-0062, the condition loader, the evaluator,
+  and what a recording holds, with `havne-cli` and the Python package
+  reading it; the appendices of 2026-11-12 to 2026-11-14) and step 5's
+  focus half (the appendix "the focus keeping a condition's signals").
+  Not built: the armed recorder, link terms and the live checks, the
+  app, and `ecuio_recording_evaluate`. "Decided" at the end records each
+  choice.
 - **Date:** 2026-11-10.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (requests as data,
   read-only by construction); [ADR-0024](0024-decode-on-the-worker.md)
@@ -908,7 +910,8 @@ all as recommended: a term holds no expression (section 11).
 6. **A stale input:** the state is kept and flagged; `record` reads it
    as OFF (section 2).
 7. **The default age bound:** `ECUIO_VALUE_STALE_US`, with `max_age`
-   per term.
+   per term. Amended 2026-11-13: the signal's pace (the evaluator's
+   appendix).
 8. **Changing a set mid-session:** allowed between two frames, refused
    while a recorder is attached (section 6).
 9. **Triggered logging:** an armed recorder in core, the ring as its
@@ -1211,6 +1214,41 @@ term, a replay of a recording giving the live session's events),
 (the replay's events equal to `havne-cli`'s lines), `c_abi`, and
 `fuzz_condition_file`, which judges each loaded set.
 
+**A signal the session doesn't get (2026-11-13).** Once the session has
+started, a condition reads UNAVAILABLE with
+`ECUIO_CONDITION_WHY_NOT_RECEIVED` (8) in
+`ecuio_session_get_condition_states` while a term reads a signal the
+session reports it doesn't get (unsupported or absent, ADR-0039
+section 6's lists; its request dropped or not asked; or computed from
+such a signal) and has had no sample of since the attach: any such term
+of an `all`, which can't turn ON without it, and every term of an
+`any`. An `any` with a term on a received signal reads as that term
+judges it. Only the states' getter says so, from the lists at each
+call, so availability can change after the attach (a scanned DID found,
+a re-walk); section 2's "an unavailable condition is never judged" is
+the bind's kind, which can't. The evaluator's events and the `cond`
+lines are unchanged, and a replay, which has no lists, judges as
+before. A term still reads the first reference the set provides
+(section 2): trying the next would make a condition's def depend on the
+ECU's answers and differ between a session and its replay.
+
+**The default age bound follows each signal (2026-11-13).** Section 2's
+default (`ECUIO_VALUE_STALE_US` for a term with no `max_age`) is
+replaced, reversing the alternative this record set aside ("an age
+bound that follows each signal's pace"): a slow sweep went STALE and
+back between each pair of samples. A term with no `max_age` is bounded
+by its signal's pace: three times the larger of the last gap between its
+samples and their running average, at least `ECUIO_VALUE_STALE_US` and
+at most 60 s (the longest `max_age` a term may set), and
+`ECUIO_VALUE_STALE_US` before a second sample. Both measures are
+needed: the last gap alone fails gaps that alternate short and long,
+and the average alone lags a slowdown. A pace that shortens moves the
+deadline earlier. The gaps are the frames' times, as every rule here
+is, so a replay and a recording's read give the same flags. A gauge
+still dims at `ECUIO_VALUE_STALE_US` on the host's clock: a value's age
+shown and a condition's judgment are different questions. A term's
+`max_age` still decides for that term.
+
 ## Appendix: the focus keeping a condition's signals, as built (2026-11-13)
 
 Step 5's focus half (section 7, decision 11). While a focus is on, the
@@ -1234,3 +1272,115 @@ request: a focus none of whose picks the session can ask is refused
 even when a condition's signal would be asked. The call's answer then
 never depends on which conditions are loaded. The focus's own picks,
 and a recording's `focus` line, stay the caller's.
+
+## Appendix: the recording as built (2026-11-14)
+
+Section 12's step 4: what a recording holds of a session's conditions,
+its reader, a replay's own copy, and `havne-cli` and the Python package
+over both. Core's files are `core/src/recorder.cpp`,
+`core/src/recording_rows.h`, `core/src/recording_reader.cpp` and
+`core/src/export.cpp`; the ABI is in `ecuio/recording.h`. The armed
+recorder (section 7), and with it a window's own folder, is not built:
+every recording here is a log or a Record session.
+
+**The numbering.** The branch that built this step called its front
+ends "step 5" and "step 6". They are this step's: the ADR's step 5 is
+the armed recorder and step 6 the link terms and live checks.
+
+**What the recorder writes.** `ecuio_session_set_conditions` builds the
+set's record (its bytes, their SHA-256, each condition's key, name and
+`mark`) before any lock and keeps it with the attach's generation.
+`ecuio_session_record` puts `conditions  conditions.json,<SHA-256>`
+after `plugin` in the header, and the writer writes `conditions.json`
+before the header. Each event is a `cond` line:
+`cond  <key>,<on|off>,<flags>,<value>,<term>,<host_us>,<t_us>`. The
+flags are the words `fired`, `stale` and `held`, in that order, or none;
+`value` is the term's value, `term` the index of the term that changed
+it, `host_us` the recording's clock and `t_us` the session's. A
+condition with `mark` also gets a `markers.csv` row at each firing,
+named for the condition. Section 8's sketch of the line had four fields;
+the line has seven. Nothing allocates on the worker.
+
+**A recording begun after the judging started.** The recorder's first
+frame of its set's generation keeps a line for each condition then ON,
+flagged `held` (and `stale` when it was), at the frame's time or its
+first event's when that is earlier. These are the `condition  <key>,on`
+lines section 8 asked for, written as `cond` lines so a reader needs one
+rule. A recording that begins with every condition OFF holds none.
+
+**An event's recording time.** `host_us` is the frame's less how far the
+event lies before the frame in session time, and never before the
+`host_us` of the frame the recorder put before it. A replay faster than
+real time runs session time ahead of host time, so the lag can reach
+past the recording's start; the line then takes the earlier frame's
+time, which it follows in session time. `t_us` keeps the event's own
+time. At real speed the lag lands after that frame and nothing changes.
+
+**A full ring.** A frame's events ride in its record. A frame that
+doesn't fit leaves them in a carry of 256 that goes in ahead of the next
+record, as many as fit at a time, and a close writes what is still held.
+Past the carry an event is counted, in `conditions_lost` in
+`ecuio_recorder_state_t` and the CLI's closed line, and each run of
+them is said once as `drop  the recording lost N condition event[s]: the
+disk fell behind` at the run's first time.
+
+**The set against a recorder.** A recorder attached to a session holds
+one set for its whole length: `ecuio_session_set_conditions` is refused
+with `ECUIO_ERR_IN_USE` while one is attached (section 6). The check
+and a recorder's attach take the record link's mutex, then
+`callback_mutex`, then `condition_states_mutex`, so a set can't be
+swapped between the recorder's attach and the check.
+
+**The reader** (`ecuio_recording_open`). `read_events` takes the
+header's `conditions` line and each `cond` line of a format 3
+recording. A line that doesn't parse, or names a key past the set's
+most (`ECUIO_CONDITION_MAX_CONDITIONS`), is counted in `lines_skipped`.
+The first `ECUIO_RECORDING_MAX_CONDITION_EVENTS` (1,048,576) events are
+kept, in file order; every line is counted in `info.condition_events`
+and the rest flag `ECUIO_RECORDING_INFO_CONDITIONS_CUT`.
+`ecuio_recording_get_conditions` answers with the signal file's three
+flags (NAMED, PRESENT, MATCH), the hash and the copy's length, and
+`ecuio_recording_get_condition_event` one event with its key as text,
+since the reader never loads the set. A copy past the loader's bound is
+PRESENT and never read or matched.
+
+**A recording's export.** The folder export copies `conditions.json`
+whole under the scrub's check and keeps the header's `conditions` line
+only as the reader reads it. A range keeps the `cond` lines inside it,
+by each line's own `host_us`, and opens with a `held` line for each
+condition ON at its start (carrying the last line's flags, value and
+term), so the copy reads as a recording that began there. A scrubbed
+copy writes each line again from the fields the reader knows; raw keeps
+them as they are.
+
+**A replay with its recording's copy.** `havne-cli` attaches the
+recording's own `conditions.json` to a `replay://` stream when no
+`--conditions` file is named, if events.log's header names it and the
+reader finds it PRESENT and MATCH; a copy named and not taken is said on
+stderr and the replay judges none. It settles the events the `cond`
+lines hold at any `speed=`. `log` of a replay doesn't take the copy. The
+app does not attach it yet.
+
+**havne-cli.** `view` and `info` list a recording's events: the
+`opened` line's `conditions` object (null when the recording names no
+set and holds no event, else the hash, `present`, `matches`, `events`,
+`lines_skipped` and `cut`) and a `condition` line for each event, after
+the signal lines. `log --conditions <file>` attaches a file before the
+focus and the recording, and its closed line adds `conditions_lost` when
+that is nonzero. `stream`'s `conditions` line names its `source`: `file`
+or `recording`.
+
+**Python.** `Recording.conditions`, `condition_events()`
+(`RecordedConditionEvent`) and `condition_set()` (the copy loaded; a
+`ValueError` when it is missing or doesn't match the header's hash),
+and `Recorder.state()` (`RecorderState`, `conditions_lost` among it).
+`Recorder.close()` returns the state read before it. A recorder's calls
+and its close hold one lock, so a state polled on another thread never
+reads a freed recorder.
+
+**Tests:** `ConditionRecordingTest` (the events and held lines, the
+carry and the lost count, the reader against the callback's events, a
+folder export and a range, the set swap against an attach through a
+hook), `RecordingTest` and `RecordingRowsTest` (the reader's cases and
+the line's text both ways), `FolderExportTest`, `CliConditionTest`,
+`CliConditionsRunTest`, `CliReplayTest` and `PythonTest.test_conditions`.
