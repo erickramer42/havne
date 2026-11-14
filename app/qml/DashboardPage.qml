@@ -2032,7 +2032,7 @@ Page {
                         readonly property var hardIn: customRow.previewHex === "" ? []
                             : Theme.lookNames.filter(l => Theme.gaugeContrast(customRow.previewHex, l) < 3)
                         visible: hardIn.length > 0
-                        text: hardIn[0] === "dark" ? qsTr("Hard to read in Dark") : qsTr("Hard to read in Daylight")
+                        text: hardIn[0] === "dark" ? qsTr("Hard to read in Dark") : qsTr("Hard to read in Light")
                     }
                 }
 

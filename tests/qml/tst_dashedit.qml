@@ -1946,8 +1946,8 @@ TestCase {
         // Both looks are judged, whichever one is shown, and the note names the one
         rgb("255", "255", "255")
         compare(page.doc.pages[0].cells[0].options.color, "#ffffff", "stored, not refused")
-        verify(note.visible, "white shown on Dark is hard to read on Daylight")
-        compare(note.text, "Hard to read in Daylight")
+        verify(note.visible, "white shown on Dark is hard to read on Light")
+        compare(note.text, "Hard to read in Light")
         rgb("20", "20", "20")
         compare(page.doc.pages[0].cells[0].options.color, "#141414")
         verify(note.visible, "near-black is hard to read on Dark")
