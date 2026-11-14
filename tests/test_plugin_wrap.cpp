@@ -558,10 +558,22 @@ TEST(PluginWrapTest, TheOptionsNameTheIdTheVariantAndTheMatch)
     EXPECT_EQ(ecuio_plugin_match(d.get(), &v, nullptr, 0, &n), ECUIO_OK);
     EXPECT_EQ(n, 0u);
 
-    /* An options struct from a later header, longer than this one */
-    ecuio_plugin_wrap_options_t longer = options();
-    longer.struct_size = sizeof longer + 8;
-    EXPECT_EQ(ok(wrap(file_a(), &longer)), ok(wrap(file_a())));
+    /* An options struct from a later header, longer than this one: what
+     * lies past the struct is never read, and the flag bit a later field
+     * comes with is what this core refuses */
+    struct Later {
+        ecuio_plugin_wrap_options_t known;
+        uint32_t newer[2];
+    };
+    Later later{};
+    later.known = options();
+    later.known.struct_size = sizeof later;
+    later.newer[0] = 0xFFFFFFFFu;
+    later.newer[1] = 7;
+    EXPECT_EQ(ok(wrap(file_a(), &later.known)), ok(wrap(file_a())));
+    later.known.flags = 1;
+    EXPECT_EQ(refused(wrap(file_a(), &later.known)),
+              "the options' flags and reserved words are zero");
 }
 
 // The generated id is the file's name as user.<slug>'s slug, cut to the

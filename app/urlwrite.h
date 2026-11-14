@@ -1,5 +1,5 @@
 // File/layer: app/urlwrite.h | Qt6 Core, app layer, C++17, header-only
-// Testing: BRIDGE: BridgeTest (test_bridge)
+// Testing: BRIDGE: BridgeTest (test_bridge); content:// on the phone only
 //
 // Bytes to the file a picker chose. A local file is written whole or not
 // at all: QSaveFile writes beside it and renames, so a failed write leaves
@@ -22,6 +22,11 @@ inline bool writeToUrl(const QUrl& url, const QByteArray& bytes)
                out.write(bytes) == bytes.size() && out.commit();
     }
     QFile out(url.toString());
-    return out.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
-           out.write(bytes) == bytes.size() && out.flush();
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+        out.write(bytes) != bytes.size() || !out.flush()) {
+        return false;
+    }
+    // A provider may refuse the document only at its close
+    out.close();
+    return out.error() == QFileDevice::NoError;
 }

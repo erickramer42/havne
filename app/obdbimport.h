@@ -1,5 +1,6 @@
 // File/layer: app/obdbimport.h | Qt6 Core, app layer, C++17
-// Testing: BRIDGE: ObdbImportTest, BridgeTest.Obdb* (test_bridge)
+// Testing: BRIDGE: ObdbImportTest, BridgeTest.Obdb*, BridgeTest.OneStore*
+//          (test_bridge)
 //
 // An OBDb signal set imported in the app (ADR-0051 section 7 and its
 // appendix of 2026-11-06): core's converter (ecuio_obdb_import) runs on
@@ -47,9 +48,11 @@ public:
     static QVariantMap report(const Preview& p, const QString& name,
                               uint32_t modelYear);
 
-    // A signal file's bytes the converter wrote: its source block is the
-    // one ecuio_obdb_import gives every file, so a re-import may replace
-    // it and a file the user named and wrote is never taken for one
+    // A signal file's bytes the converter wrote, or the packed plugin a
+    // wrap made of one (the wrap moves the file's source to the
+    // manifest): its source block is the one ecuio_obdb_import gives
+    // every file, so a re-import may replace it and a file the user
+    // named and wrote is never taken for one
     static bool isConversion(const QByteArray& bytes);
 
     // The model year a VIN gives by ADR-0043's decode (spaces dropped,

@@ -354,10 +354,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
             check(made.status == alone_s && made.words == alone_words);
         } else {
             /* A file that loads wraps, but for one too large or too
-             * deep once it is written out inside a package */
+             * deep once it is written out inside a package: only the
+             * words of those two bounds pass, so a variant that reads
+             * back as another set stops the run */
             check(made.status == ECUIO_ERR_OUT_OF_MEMORY ||
-                  made.words.find("don't make one signal file") !=
-                      std::string::npos ||
                   made.words.find("past the limit of") != std::string::npos ||
                   made.words.find("nested deeper than") != std::string::npos);
         }
