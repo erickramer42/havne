@@ -2240,7 +2240,8 @@ TEST(FolderExportTest, APickLineIsKept)
 
 /* A focus change's lines, a pick's and an ended focus's, are kept in
  * the range as the link lines are, scrubbed or raw; the notes beside
- * them are not */
+ * them are not. A range opens with the last change before it, its lines
+ * at the range's start, ahead of the range's own */
 TEST(FolderExportTest, AFocusChangesLinesAreKeptInTheRange)
 {
     Folder f;
@@ -2251,18 +2252,56 @@ TEST(FolderExportTest, AFocusChangesLinesAreKeptInTheRange)
     const std::string none =
         "22:13:22.250  +2.000  focus  none: every signal asked\n";
     const std::string note = "22:13:22.250  +2.000  note  Asking 2 signals\n";
-    f.write("rec/events.log", events_log() + pick + more + none + note);
+    const std::string link = "22:13:22.850  +2.600  link  vehicle not "
+                             "responding (state 8, 1 episode)\n";
+    const std::string end = "22:13:24.250  +4.000  end  Disconnected by the "
+                            "user: 3 frames, 2 values, 0 records dropped, 0 "
+                            "notes dropped\n";
+    f.write("rec/events.log",
+            events_log() + pick + more + none + note + link + end);
     FolderExported whole(f);
     ASSERT_EQ(whole.rc, ECUIO_OK) << whole.detail;
     const std::string copied = whole.files["events.log"];
     EXPECT_NE(copied.find(pick + more + none), std::string::npos) << copied;
     EXPECT_EQ(copied.find("note  Asking"), std::string::npos) << copied;
 
-    FolderExported ranged(f, 0, 1500000, 2500000, "ranged");
-    ASSERT_EQ(ranged.rc, ECUIO_OK) << ranged.detail;
-    const std::string in_range = ranged.files["events.log"];
-    EXPECT_NE(in_range.find(none), std::string::npos) << in_range;
-    EXPECT_EQ(in_range.find("  pick  "), std::string::npos) << in_range;
+    const std::string held =
+        "22:13:21.750  +1.500  pick  2 signals: Speed,RPM\n"
+        "22:13:21.750  +1.500  pick  more: \"a,b\"\n";
+    for (uint32_t flags : {0u, static_cast<uint32_t>(ECUIO_EXPORT_RAW)}) {
+        FolderExported ranged(f, flags, 1500000, 2500000,
+                              flags == 0 ? "ranged" : "ranged-raw");
+        ASSERT_EQ(ranged.rc, ECUIO_OK) << ranged.detail;
+        const std::string in_range = ranged.files["events.log"];
+        EXPECT_NE(in_range.find(held + none), std::string::npos) << in_range;
+        EXPECT_EQ(in_range.find("+1.000  pick"), std::string::npos) << in_range;
+    }
+
+    /* The last change before the range is the one held, ahead of a link
+     * line or the end line that opens the range */
+    FolderExported late(f, 0, 2500400, 2800000, "late");
+    ASSERT_EQ(late.rc, ECUIO_OK) << late.detail;
+    const std::string after = late.files["events.log"];
+    EXPECT_NE(after.find("\n22:13:22.750  +2.500  focus  none: every signal "
+                         "asked\n" +
+                         link),
+              std::string::npos)
+        << after;
+    EXPECT_EQ(after.find("  pick  "), std::string::npos) << after;
+    EXPECT_EQ(after.find("+2.000  focus"), std::string::npos) << after;
+    FolderExported last(f, 0, 3000000, 0, "last");
+    ASSERT_EQ(last.rc, ECUIO_OK) << last.detail;
+    EXPECT_NE(last.files["events.log"].find(
+                  "\n22:13:23.250  +3.000  focus  none: every signal asked\n"
+                  "22:13:24.250  +4.000  end  <why>: "),
+              std::string::npos)
+        << last.files["events.log"];
+
+    /* A range before any change holds nothing */
+    FolderExported early(f, 0, 500000, 900000, "early");
+    ASSERT_EQ(early.rc, ECUIO_OK) << early.detail;
+    EXPECT_EQ(early.files["events.log"].find("  pick  "), std::string::npos);
+    EXPECT_EQ(early.files["events.log"].find("  focus  "), std::string::npos);
 }
 
 /* A range takes each file's rows and lines in it alone; the end line

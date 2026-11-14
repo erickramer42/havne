@@ -1073,7 +1073,8 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * recorded, signals.csv by the CSV's classes, events.log's header and
  * its link, drop, asleep, focus, pick and end lines (the URI's authority as
  * <path>, <address> or <label>, the vehicle's label as <vehicle>, the
- * caller's notes left out), markers.csv with its labels as typed,
+ * caller's notes left out; a range opens with the last focus or pick
+ * change before it, at its start), markers.csv with its labels as typed,
  * latency.csv and signals.json, each file through the check; a file it
  * doesn't know is left out and counted (files_left_out).
  * Deterministic: the same recording and options give the same bytes.
