@@ -125,6 +125,31 @@ struct item {
                           its lines, a NUL between two */
 };
 
+/* A focus as a recording names it: the picks in order, its kind word,
+ * and the minimum time between sweeps of a session that asks */
+struct focus_named {
+    std::vector<uint16_t> ids;
+    bool pick = false;
+    uint32_t min_sweep_ms = 0;
+
+    bool operator==(const focus_named& o) const
+    {
+        return ids == o.ids && pick == o.pick && min_sweep_ms == o.min_sweep_ms;
+    }
+};
+
+/* The session's focus; the caller holds focus_mutex */
+focus_named focus_now(const ecuio_session_t* session)
+{
+    focus_named f;
+    f.ids = session->focus_ids;
+    f.pick = (session->focus_flags & ECUIO_FOCUS_DEFAULT_PICK) != 0;
+    /* Only a session that asks has one: the others take it and change
+     * nothing */
+    f.min_sweep_ms = session->focus_requests ? session->focus_min_sweep_ms : 0;
+    return f;
+}
+
 bool is_text_kind(uint8_t kind)
 {
     return kind == ECUIO_VALUE_TEXT || kind == ECUIO_VALUE_HEX;
@@ -652,6 +677,10 @@ struct ecuio_recorder {
     std::deque<item> items;
     uint32_t note_cap = kDefaultNoteLines;
     std::atomic<uint64_t> notes_dropped{0};
+
+    /* The focus the header or the last focus line named: set at attach,
+     * then read and written under the session's focus_mutex */
+    focus_named named_focus;
 
     std::thread writer;
     std::mutex wake_m;
@@ -1543,7 +1572,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
     std::string header;
     uint64_t zero_us = 0;
     uint64_t slept_at_attach = 0;
-    uint32_t focus_seen = 0;
+    focus_named named_focus;
     std::chrono::system_clock::time_point start_wall{};
     try {
         const ecuio_signal_set_t* set = session->active_signal_set;
@@ -1612,27 +1641,19 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
          * so a reader needn't wait for a transition */
         {
             std::lock_guard<std::mutex> f(session->focus_mutex);
-            focus_seen = session->focus_generation.load();
-            size_t named = 0;
-            /* As many lines as the names take; a reader appends them */
-            for (const std::string& part :
-                 focus_parts(set, session->focus_ids, &named)) {
-                /* A front end's default pick isn't a log's choice */
-                header += (session->focus_flags & ECUIO_FOCUS_DEFAULT_PICK) != 0
-                              ? "pick  "
-                              : "focus  ";
-                header += part + "\n";
-            }
-            if (named > 0) {
-                /* Only a session that asks has one: the others take the
-                 * call and change nothing */
-                if (session->focus_requests &&
-                    session->focus_min_sweep_ms != 0) {
-                    header += "min sweep  " +
-                              std::to_string(session->focus_min_sweep_ms) +
-                              " ms\n";
-                }
-            }
+            named_focus = focus_now(session);
+        }
+        size_t named = 0;
+        /* As many lines as the names take; a reader appends them */
+        for (const std::string& part :
+             focus_parts(set, named_focus.ids, &named)) {
+            /* A front end's default pick isn't a log's choice */
+            header += named_focus.pick ? "pick  " : "focus  ";
+            header += part + "\n";
+        }
+        if (named > 0 && named_focus.min_sweep_ms != 0) {
+            header += "min sweep  " + std::to_string(named_focus.min_sweep_ms) +
+                      " ms\n";
         }
         if (session->started) {
             int32_t state = ECUIO_OK;
@@ -1688,6 +1709,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         recorder->zero_us = zero_us;
         recorder->slept_at_attach = slept_at_attach;
         recorder->start_wall = start_wall;
+        recorder->named_focus = std::move(named_focus);
     };
     {
         /* Under the mutex that orders detaches, so a closing recorder or a
@@ -1704,15 +1726,53 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         link->active.store(recorder, std::memory_order_release);
     }
     recorder->attached.store(true, std::memory_order_release);
-    /* A focus changed between the header's read and the attach would be
-     * in neither: the link's mutex orders it against the attach */
-    if (session->focus_generation.load() != focus_seen) {
-        ecuio_record_focus(session);
-    }
+    /* A focus set since the header's read may have found no recorder to
+     * pin; the compare keeps it from being written twice */
+    ecuio_record_focus(session);
     return ECUIO_OK;
 }
 
 } // extern "C"
+
+namespace {
+
+/* The focus's activity lines into the pinned recorder's note queue: the
+ * count, the minimum when there is one, then the names */
+void push_focus(ecuio_recorder_t* r, const ecuio_signal_set_t* set,
+                const focus_named& f)
+{
+    size_t named = 0;
+    const std::vector<std::string> parts = focus_parts(set, f.ids, &named);
+    std::string lines;
+    if (parts.empty()) {
+        lines = "none: every signal asked";
+    }
+    for (size_t k = 0; k < parts.size(); ++k) {
+        if (k == 0) {
+            lines +=
+                std::to_string(named) + (named == 1 ? " signal" : " signals");
+            if (f.min_sweep_ms != 0) {
+                lines += ", at least " + std::to_string(f.min_sweep_ms) +
+                         " ms between sweeps";
+            }
+            lines += ": ";
+        } else {
+            lines += std::string(1, '\0') + "more: ";
+        }
+        lines += parts[k];
+    }
+    const uint64_t now = ecuio_clock_us();
+    const uint64_t host_us = now > r->zero_us ? now - r->zero_us : 0;
+    std::lock_guard<std::mutex> g(r->note_m);
+    if (r->items.size() >= r->note_cap) {
+        r->notes_dropped.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        r->items.push_back(item{item_kind::focus, host_us,
+                                f.pick ? "pick" : "focus", std::move(lines)});
+    }
+}
+
+} // namespace
 
 void ecuio_record_focus(ecuio_session_t* session)
 {
@@ -1726,35 +1786,18 @@ void ecuio_record_focus(ecuio_session_t* session)
         return;
     }
     try {
-        std::vector<uint16_t> ids;
-        bool pick = false;
+        focus_named f;
+        bool changed = false;
         {
-            std::lock_guard<std::mutex> f(session->focus_mutex);
-            ids = session->focus_ids;
-            pick = (session->focus_flags & ECUIO_FOCUS_DEFAULT_PICK) != 0;
+            std::lock_guard<std::mutex> g(session->focus_mutex);
+            f = focus_now(session);
+            changed = !(f == r->named_focus);
+            if (changed) {
+                r->named_focus = f;
+            }
         }
-        size_t named = 0;
-        const std::vector<std::string> parts =
-            focus_parts(session->active_signal_set, ids, &named);
-        std::string lines;
-        if (parts.empty()) {
-            pick = false;
-            lines = "none: every signal asked";
-        }
-        for (size_t k = 0; k < parts.size(); ++k) {
-            lines += k == 0 ? std::to_string(named) +
-                                  (named == 1 ? " signal: " : " signals: ")
-                            : std::string(1, '\0') + "more: ";
-            lines += parts[k];
-        }
-        const uint64_t now = ecuio_clock_us();
-        const uint64_t host_us = now > r->zero_us ? now - r->zero_us : 0;
-        std::lock_guard<std::mutex> g(r->note_m);
-        if (r->items.size() >= r->note_cap) {
-            r->notes_dropped.fetch_add(1, std::memory_order_relaxed);
-        } else {
-            r->items.push_back(item{item_kind::focus, host_us,
-                                    pick ? "pick" : "focus", std::move(lines)});
+        if (changed) {
+            push_focus(r, session->active_signal_set, f);
         }
     } catch (...) {
         /* The focus stands; its line is lost, counted as a note */

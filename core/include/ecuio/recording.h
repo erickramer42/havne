@@ -120,8 +120,11 @@ ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
  * as the names take, each under 4 KiB of them, which a reader appends).
  * A focus set or ended while the recorder takes frames is an activity
  * line of that kind word: "N signals: " and the names as the header
- * writes them, "more: " and the rest on further lines of the same time,
- * or "none: every signal asked". Reply timing's counts in latency.csv are
+ * writes them (", at least M ms between sweeps" after the count when the
+ * session asks requests and has a minimum), "more: " and the rest on
+ * further lines of the same time, or "none: every signal asked"; a call
+ * that changes none of the picks, the kind or the minimum writes no
+ * line. Reply timing's counts in latency.csv are
  * the session's, cumulative since it started, so a recording begun
  * mid-session finds them already counted up. A session takes one
  * recorder at a time: once that one is closed, another can attach, and

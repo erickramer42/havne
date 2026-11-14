@@ -1554,6 +1554,53 @@ TEST(RecorderTest, AFocusChangedAfterTheAttachIsAnActivityLine)
     }
 }
 
+/* A focus line comes only when the picks or their kind change: a call
+ * that repeats the focus the header or the last line named writes none,
+ * and on a session that asks nothing (the mock) a minimum alone is no
+ * change; a whole set asked again is no line either */
+TEST(RecorderTest, AFocusLineComesOnlyOnAChange)
+{
+    register_profile();
+    Root root;
+    {
+        Recording rec(root, "mock://same?profile=rec-test", 0, nullptr, {}, 0,
+                      false);
+        ASSERT_NE(rec.recorder, nullptr);
+        const uint16_t half = 1;
+        ASSERT_EQ(ecuio_session_set_focus(rec.session, &half, 1), ECUIO_OK);
+        rec.attach();
+        ASSERT_EQ(ecuio_session_set_focus(rec.session, &half, 1), ECUIO_OK);
+        ASSERT_EQ(ecuio_session_set_focus_with(rec.session, &half, 1, 250, 0),
+                  ECUIO_OK);
+        ASSERT_EQ(ecuio_session_set_focus_with(rec.session, &half, 1, 0,
+                                               ECUIO_FOCUS_DEFAULT_PICK),
+                  ECUIO_OK);
+        ASSERT_EQ(ecuio_session_set_focus_with(rec.session, &half, 1, 0,
+                                               ECUIO_FOCUS_DEFAULT_PICK),
+                  ECUIO_OK);
+        ASSERT_EQ(ecuio_session_set_focus(rec.session, nullptr, 0), ECUIO_OK);
+        ASSERT_EQ(ecuio_session_set_focus(rec.session, nullptr, 0), ECUIO_OK);
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        const std::string events = rec.file("events.log");
+        EXPECT_NE(events.find("\nfocus  Half\n"), std::string::npos) << events;
+        EXPECT_EQ(activity_of(events, "pick"),
+                  std::vector<std::string>{"1 signal: Half"})
+            << events;
+        EXPECT_EQ(activity_of(events, "focus"),
+                  std::vector<std::string>{"none: every signal asked"})
+            << events;
+    }
+    {
+        Recording rec(root, "mock://whole?profile=rec-test");
+        ASSERT_NE(rec.recorder, nullptr);
+        ASSERT_EQ(ecuio_session_set_focus(rec.session, nullptr, 0), ECUIO_OK);
+        ASSERT_EQ(ecuio_session_set_focus(rec.session, nullptr, 0), ECUIO_OK);
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        const std::string events = rec.file("events.log");
+        EXPECT_TRUE(activity_of(events, "focus").empty()) << events;
+    }
+}
+
 /* A session takes one recorder at a time: a second is refused while the
  * first is attached and taken once the first has closed, counting from
  * its own attach; the refusal left it as it was, so its recording has
