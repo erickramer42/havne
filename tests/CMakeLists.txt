@@ -503,6 +503,13 @@ if(TARGET havne-cli)
                         session $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
             set_tests_properties(CliSessionRunTest.TheStreamNamesEachModulesSession
                 PROPERTIES TIMEOUT 60)
+            # The vehicle line comes once the VIN is in, the rest of the
+            # identification still out (ADR-0027 section 3)
+            add_test(NAME CliVinRunTest.TheStreamNamesTheVehicleWhileItsIdentificationIsOut
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
+                        vehicle $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
+            set_tests_properties(CliVinRunTest.TheStreamNamesTheVehicleWhileItsIdentificationIsOut
+                PROPERTIES TIMEOUT 60)
         elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             add_test(NAME CliRefusedRunTest.ADidTheSimulatedEcuRefusesIsNamed
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py

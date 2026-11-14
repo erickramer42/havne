@@ -853,6 +853,51 @@ TEST(CliVinTest, AnIdentityLineCarriesItsItemsAndVin)
     EXPECT_EQ(none.substr(none.size() - 12), ",\"vin\":null}");
 }
 
+/* ADR-0027 section 3: the vehicle line comes once core flags the VIN in,
+ * the rest of the list still out, and once per new VIN */
+TEST(CliVinTest, TheVehicleLineComesOnceTheVinIsIn)
+{
+    ecuio_channel_identity_t id{};
+    id.rx_id = 0x7E8;
+    id.items = 2;
+    auto item = [&id](uint32_t i, uint8_t a, uint8_t b, uint8_t outcome,
+                      const char* text) {
+        ecuio_identity_item_t& it = id.list[i];
+        it.request[0] = a;
+        it.request[1] = b;
+        it.length = 2;
+        it.outcome = outcome;
+        std::snprintf(it.text, sizeof it.text, "%s", text);
+        it.text_length = static_cast<uint8_t>(std::strlen(it.text));
+    };
+    item(0, 0x09, 0x02, ECUIO_IDENTITY_ANSWERED, "1FAFAKE10M0000001");
+    item(1, 0x09, 0x04, ECUIO_IDENTITY_UNASKED, "");
+    char seen[ECUIO_VIN_TEXT_LEN] = "";
+    EXPECT_FALSE(cli::vehicle_due(id, seen)) << "core hasn't flagged it";
+    id.flags = ECUIO_IDENTITY_VIN;
+    EXPECT_TRUE(cli::vehicle_due(id, seen));
+    EXPECT_STREQ(seen, "1FAFAKE10M0000001");
+    EXPECT_FALSE(cli::vehicle_due(id, seen)) << "once per VIN";
+    id.flags |= ECUIO_IDENTITY_COMPLETE;
+    EXPECT_FALSE(cli::vehicle_due(id, seen)) << "nor again once complete";
+
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::vehicle_line(l, id, 2027);
+    const std::string line(l.data(), l.size());
+    EXPECT_EQ(line.substr(0, line.find(",\"source\":")),
+              "{\"type\":\"vehicle\",\"rx\":\"0x7E8\","
+              "\"vin\":{\"vin\":\"1FAFAKE10M0000001\",\"decoded\":true,"
+              "\"model_year\":2021,\"year_earlier\":false,\"make\":\"Ford\","
+              "\"wmi\":\"1FA\",\"check_digit\":\"0\",\"check_matches\":true");
+    EXPECT_EQ(line.substr(line.size() - 2), "}}");
+
+    std::snprintf(id.list[0].text, sizeof id.list[0].text, "%s",
+                  "1FAFAKE13Y0000001");
+    EXPECT_TRUE(cli::vehicle_due(id, seen)) << "another VIN is new";
+    EXPECT_STREQ(seen, "1FAFAKE13Y0000001");
+}
+
 /* ADR-0044: a code's title, null for one the list lacks (a chassis code,
  * a manufacturer's), the freeze frame's beside its code */
 TEST(CliDtcTest, ATitleOrNull)
