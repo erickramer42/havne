@@ -102,6 +102,44 @@ TestCase {
         SignalSpy { signalName: "painted" }
     }
 
+    // Live's chart holds its label column, crowded drawing and ranges from
+    // paint to paint, and lets them go at a new window, a resume and the
+    // session's end
+    function test_theChartHoldsItsLayoutWhileASessionRuns() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        const chart = findChild(page, "chart")
+        verify(chart.holds, "Live's chart holds")
+        // A 300 px column shows only under the label cap, 0.4 of the chart
+        verify(chart.shownW * 0.4 > 300 + ChartLayout.swatchW + ChartLayout.labelGap,
+               "a chart " + chart.shownW + " px wide")
+        connectMock(page)
+        tryVerify(() => chart.held !== null, 5000, "a paint keeps what it held")
+        const plant = () => {
+            tryVerify(() => chart.held !== null, 5000, "a paint keeps what it held")
+            chart.held = { key: chart.held.key, labelW: 300, dense: chart.held.dense,
+                           ranges: chart.held.ranges }
+            tryVerify(() => chart.held.labelW === 300 && chart.drawn
+                            && chart.drawn.plotW <= chart.shownW - 300, 5000,
+                      "a paint keeps a held column")
+        }
+        const letGo = what => tryVerify(() => chart.held === null || chart.held.labelW < 300,
+                                        5000, what + " lets it go")
+        plant()
+        const kept = page.chartWindowS
+        findChild(page, "chartWindow_" + (kept === 60 ? 10 : 60)).clicked()
+        letGo("a new window")
+        findChild(page, "chartWindow_" + kept).clicked()
+        compare(page.chartWindowS, kept)
+        plant()
+        page.pause()
+        page.resume()
+        letGo("a resume")
+        plant()
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        letGo("the session's end")
+    }
+
     // F on a desktop's keyboard maximizes the chart and gives the list
     // back; typed into Find a signal it's a letter of the filter and
     // leaves the chart as it was. In the test's window, which the keys go to
@@ -469,9 +507,11 @@ TestCase {
         compare(Bridge.connectSession(uri), "", uri + " connects")
         const list = findChild(page, "signalList")
         const all = Bridge.signalModel.rowCount()
+        // The walk can answer 0x0A's bitmap range before 0x5C's: the note
+        // reads one signal first
         tryVerify(() => note.visible, 5000, "the note shows")
-        compare(note.text, "2 signals hidden: the ECU doesn't send them")
-        compare(list.count, all - 2, "Live lists the rest")
+        tryCompare(note, "text", "2 signals hidden: the ECU doesn't send them", 5000)
+        tryCompare(list, "count", all - 2, 5000, "Live lists the rest")
         compare(Bridge.signalModel.rowCount(), all, "the model keeps every row")
         for (let r = 0; r < list.count; ++r) {
             list.positionViewAtIndex(r, ListView.Contain)
