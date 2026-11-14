@@ -11,7 +11,8 @@
 # made-up logger's map on one line before its file. Each seed is in the harness's own form (fuzz/README.md): the
 # JSON harness's first byte picks its bounds, the OBDb harness's its
 # options, the plugin harness's its form, the recording and export
-# harnesses' a folder ('F'), with the pieces cut at 0x1E bytes, or the
+# harnesses' a folder ('F', or '3' for format 3's first line), with the
+# pieces cut at 0x1E bytes (a recording's conditions in a fifth), or the
 # stretches' rules ('S') over two fixtures' samples. Started from
 # these, a 60 s run reaches the loaders behind the JSON reader; from
 # nothing, it barely leaves the reader. Built from the fixtures, never
@@ -24,6 +25,7 @@
 #   ./build-fuzz/fuzz/fuzz_signal_file corpus/fuzz_signal_file -max_total_time=60
 
 import glob
+import hashlib
 import json
 import os
 import re
@@ -266,6 +268,48 @@ def main(argv):
     # range reads 0 at the open and NaN in its statistics
     folder_seeds["values-all-nan"] = (
         b"F" + SEP + b"host_us,signal,value,unit\n0,a,nan,\n")
+    # A session's conditions ('3', then a fifth part, conditions.json):
+    # the header's conditions line with the copy's hash, a held line,
+    # changes, an unknown flag word, an eighth field and a key the reader
+    # skips (ADR-0063 section 8)
+    conditions = (b'{"havne_conditions":1,"conditions":[{"key":"high",'
+                  b'"name":"High revs","mark":true,"when":{"signal":'
+                  b'["obd2.rpm"],"unit":"RPM","above":2000}}]}')
+    events = (b"profile  obd2\nframe flags  complete\n"
+              b"signal  RPM,number,RPM,0,1\n"
+              b"conditions  conditions.json," +
+              hashlib.sha256(conditions).hexdigest().encode("ascii") +
+              b"\n\n"
+              b"12:00:01.000  +1.000  cond  high,on,held,3000,0,1000000,1000000\n"
+              b"12:00:02.000  +2.000  cond  high,off,,1000,0,2000000,2000000\n"
+              b"12:00:03.000  +3.000  cond  high,on,fired stale,3200,0,3000000,"
+              b"3000000,later\n"
+              b"12:00:03.000  +3.000  cond  low,on,fired blink,nan,1,3000000,"
+              b"2999000\n"
+              b"12:00:04.000  +4.000  cond  High,on,,1,0,1,1\n"
+              b"12:00:05.000  +5.000  end  done: 3 frames, 3 values, "
+              b"0 records dropped, 0 notes dropped\n")
+    folder_seeds["conditions"] = b"3" + SEP.join((
+        events,
+        b"host_us,signal,value,unit\n1000000,RPM,3000,RPM\n"
+        b"2000000,RPM,1000,RPM\n3000000,RPM,3200,RPM\n",
+        b"host_us,label\n3000000,High revs\n",
+        header + b"1000000,1000000,0x7E8,0x100,41 0C 2E E0\n"
+        b"2000000,2000000,0x7E8,0x100,41 0C 0F A0\n"
+        b"3000000,3000000,0x7E8,0x100,41 0C 32 00\n",
+        conditions))
+    # Its edges: a key past a set's 64, a cond line past the longest row
+    # (32768 bytes) and a torn last one (a copy past the loader's 256 KiB
+    # can't fit the harness's input, so RecordingTest has that one)
+    keys = b"".join(b"12:00:01.000  +1.000  cond  k%d,on,,1,0,1,1\n" % k
+                    for k in range(65))
+    small = b"{}"
+    folder_seeds["conditions-edges"] = b"3" + SEP.join((
+        b"conditions  conditions.json," +
+        hashlib.sha256(small).hexdigest().encode("ascii") + b"\n\n" + keys +
+        b"12:00:02.000  +2.000  cond  k0,off,,1,0,2,2," + b"x" * 32768 +
+        b"\n12:00:03.000  +3.000  cond  k1,off,,1,0,3,3",
+        b"host_us,signal,value,unit\n", b"", b"", small))
     for name, seed in folder_seeds.items():
         write(out, "fuzz_recording", name, seed)
         write(out, "fuzz_export", name, seed)

@@ -1,6 +1,7 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
-// Testing: UNIT: CoreTest, RecorderTest, ConditionSessionTest (test_core)
+// Testing: UNIT: CoreTest, RecorderTest, ConditionSessionTest,
+//          ConditionRecordingTest (test_core)
 
 #ifndef ECUIO_SESSION_H
 #define ECUIO_SESSION_H
@@ -34,6 +35,9 @@ struct ecuio_session {
      * and the session_start probe marks the first only (ADR-0034 section 4).
      * The session's one caller alone reads and writes it. */
     bool started = false;
+    /* started's copy for any thread: the conditions' states judge what the
+     * session gets only once it runs */
+    std::atomic<bool> ran{false};
     std::mutex callback_mutex;
     std::vector<std::pair<ecuio_frame_callback_t, void*>> callbacks;
     /* Under the same mutex: the values callbacks (ADR-0024) */
@@ -54,8 +58,10 @@ struct ecuio_session {
     std::unique_ptr<ecuio_condition_eval> conditions_pending;
     std::unique_ptr<ecuio_condition_eval> conditions_retired;
     bool conditions_swap = false;
-    /* Under the same mutex: the attaches so far */
+    /* Under the same mutex: the attaches so far, and what a recording
+     * keeps of the newest attach's set (recorder.h; NULL with none) */
     uint32_t conditions_generation = 0;
+    std::shared_ptr<const ecuio_condition_record> conditions_record;
     /* The states of the newest attach (ecuio_session_get_condition_states),
      * under their mutex: set whole by the attach before the worker can
      * take its set (their mutex inside callback_mutex, never the other
@@ -64,6 +70,20 @@ struct ecuio_session {
     mutable std::mutex condition_states_mutex;
     std::vector<ecuio_condition_state_t> condition_states;
     uint32_t condition_states_generation = 0;
+    /* Set with the states: each condition's signal terms' def ids and its
+     * join, for the getter's ECUIO_CONDITION_WHY_NOT_RECEIVED (count 0 for
+     * one the bind left unavailable), and its terms sampled since the
+     * attach (a bit each), which the worker sets at a signal's first
+     * sample (ecuio_condition_eval::sampled_terms) */
+    struct condition_read {
+        uint16_t ids[ECUIO_CONDITION_MAX_TERMS] = {};
+        uint8_t count = 0;
+        uint8_t any = 0;
+        uint8_t sampled = 0; /* a bit per term */
+    };
+    static_assert(ECUIO_CONDITION_MAX_TERMS <= 8,
+                  "condition_read's sampled holds a bit per term");
+    std::vector<condition_read> condition_reads;
     ecuio_transport_t* transport = nullptr;
     /* The profile's set: the registry's static one, or, under
      * uds-generic, the session's own below (ADR-0020). */
@@ -150,7 +170,9 @@ struct ecuio_session {
     /* The recorder's link (ADR-0049, recorder.h): made at create and kept
      * until the session is freed, so the worker reads it without a lock;
      * ecuio_session_record puts its recorder in it, before or after start
-     * (ADR-0056 section 3) */
+     * (ADR-0056 section 3). Its mutex comes before callback_mutex:
+     * ecuio_session_set_conditions takes both, so a set never changes
+     * under an attaching recorder */
     std::shared_ptr<ecuio_record_link> record_link;
     /* The pull queues' links (queue.h, pull_queue.h), set before start and
      * kept until the session is freed (lock-free reads); value_queues

@@ -105,6 +105,7 @@ ECUIO_CONDITION_ALERT_SOUND = 16
 ECUIO_CONDITION_FILE_FORMAT = 1
 ECUIO_CONDITION_FILE_MAX_BYTES = 0x40000
 ECUIO_CONDITION_FIRED = 2
+ECUIO_CONDITION_HELD = 8
 ECUIO_CONDITION_INFO_ANY = 2
 ECUIO_CONDITION_INFO_DISABLED = 1
 ECUIO_CONDITION_KEY_MAX = 31
@@ -128,6 +129,7 @@ ECUIO_CONDITION_WHY_DISABLED = 1
 ECUIO_CONDITION_WHY_ENUM_ORDER = 5
 ECUIO_CONDITION_WHY_NONE = 0
 ECUIO_CONDITION_WHY_NOT_A_NUMBER = 4
+ECUIO_CONDITION_WHY_NOT_RECEIVED = 8
 ECUIO_CONDITION_WHY_NO_CHECK = 7
 ECUIO_CONDITION_WHY_NO_LINK = 6
 ECUIO_CONDITION_WHY_NO_SIGNAL = 2
@@ -266,6 +268,9 @@ ECUIO_QUEUE_TEXT_MAX = 128
 ECUIO_QUEUE_VALUES = 2
 ECUIO_QUEUE_VALUE_TEXT_CUT = 1
 ECUIO_RECORDING_ACTIVE = 1
+ECUIO_RECORDING_CONDITIONS_MATCH = 4
+ECUIO_RECORDING_CONDITIONS_NAMED = 1
+ECUIO_RECORDING_CONDITIONS_PRESENT = 2
 ECUIO_RECORDING_DETACHED = 2
 ECUIO_RECORDING_FAILED = 3
 ECUIO_RECORDING_FIND_ENGINE_START = 3
@@ -277,8 +282,10 @@ ECUIO_RECORDING_FORMAT_CORE = 2
 ECUIO_RECORDING_FORMAT_ENUMS = 3
 ECUIO_RECORDING_FORMAT_OLDER = 1
 ECUIO_RECORDING_FORMAT_UNKNOWN = 0
+ECUIO_RECORDING_INFO_CONDITIONS_CUT = 4
 ECUIO_RECORDING_INFO_FRAMES = 2
 ECUIO_RECORDING_INFO_NO_SUMMARY = 1
+ECUIO_RECORDING_MAX_CONDITION_EVENTS = 0x100000
 ECUIO_RECORDING_NONE = 0xffffffffffffffff
 ECUIO_RECORDING_REASON_LEN = 128
 ECUIO_RECORDING_ROLE_ENGINE_LOAD = 4
@@ -613,6 +620,12 @@ class ecuio_recorder_t(Structure):
     pass
 
 class ecuio_recording_column_t(Structure):
+    pass
+
+class ecuio_recording_condition_event_t(Structure):
+    pass
+
+class ecuio_recording_conditions_t(Structure):
     pass
 
 class ecuio_recording_find_t(Structure):
@@ -1137,13 +1150,32 @@ ecuio_recorder_state_t._fields_ = [
     ('records_dropped', c_uint64),
     ('notes_dropped', c_uint64),
     ('reason', (c_char * 128)),
-    ('reserved', (c_uint64 * 4)),
+    ('conditions_lost', c_uint64),
+    ('reserved', (c_uint64 * 3)),
 ]
 ecuio_recording_column_t._fields_ = [
     ('lowest', c_double),
     ('highest', c_double),
     ('samples', c_uint32),
     ('flags', c_uint32),
+]
+ecuio_recording_condition_event_t._fields_ = [
+    ('host_us', c_uint64),
+    ('timestamp_us', c_uint64),
+    ('value', c_double),
+    ('state', c_uint32),
+    ('flags', c_uint32),
+    ('term', c_uint32),
+    ('reserved0', c_uint32),
+    ('key', (c_char * 32)),
+    ('reserved', (c_uint64 * 2)),
+]
+ecuio_recording_conditions_t._fields_ = [
+    ('flags', c_uint32),
+    ('lines_skipped', c_uint32),
+    ('length', c_uint64),
+    ('sha256', (c_char * 72)),
+    ('reserved', (c_uint64 * 5)),
 ]
 ecuio_recording_find_t._fields_ = [
     ('kind', c_uint32),
@@ -1165,7 +1197,8 @@ ecuio_recording_info_t._fields_ = [
     ('rows_torn', c_uint64),
     ('records_dropped', c_uint64),
     ('notes_dropped', c_uint64),
-    ('reserved', (c_uint64 * 5)),
+    ('condition_events', c_uint64),
+    ('reserved', (c_uint64 * 4)),
 ]
 ecuio_recording_marker_t._fields_ = [
     ('host_us', c_uint64),
@@ -1514,6 +1547,8 @@ FUNCTIONS = {
     'ecuio_recording_close': (None, [POINTER(ecuio_recording_t)]),  # recording.h
     'ecuio_recording_enum_label': (c_char_p, [POINTER(ecuio_recording_t), c_uint32, c_uint32]),  # recording.h
     'ecuio_recording_find': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_find_t), c_uint64, POINTER(c_uint64)]),  # recording.h
+    'ecuio_recording_get_condition_event': (c_int, [POINTER(ecuio_recording_t), c_uint64, POINTER(ecuio_recording_condition_event_t)]),  # recording.h
+    'ecuio_recording_get_conditions': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_conditions_t)]),  # recording.h
     'ecuio_recording_get_info': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_info_t)]),  # recording.h
     'ecuio_recording_get_labels': (c_int, [POINTER(ecuio_recording_t), c_uint32, POINTER(ecuio_enum_entry_t), c_uint32, POINTER(c_uint32)]),  # recording.h
     'ecuio_recording_get_marker': (c_int, [POINTER(ecuio_recording_t), c_uint32, POINTER(ecuio_recording_marker_t)]),  # recording.h

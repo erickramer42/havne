@@ -1,6 +1,6 @@
 {"schema": 1, "type": "start"}
 {"backend": "replay", "baud": 0, "channels": [], "profile": "obd2", "protocol_id": 0, "replay": {"frames": 7074, "loop": false, "span_ms": 297446, "speed_milli": 0}, "type": "session"}
-{"conditions": [{"alert": "warning", "available": true, "key": "running", "mark": true, "record": false, "why": null}, {"alert": null, "available": true, "key": "turning", "mark": false, "record": false, "why": null}, {"alert": null, "available": true, "key": "rpm_fresh", "mark": false, "record": false, "why": null}, {"alert": null, "available": false, "key": "link", "mark": false, "record": true, "why": "no_link"}], "generation": 1, "name": "Engine start", "type": "conditions"}
+{"conditions": [{"alert": "warning", "available": true, "key": "running", "mark": true, "record": false, "why": null}, {"alert": null, "available": true, "key": "turning", "mark": false, "record": false, "why": null}, {"alert": null, "available": true, "key": "rpm_fresh", "mark": false, "record": false, "why": null}, {"alert": null, "available": false, "key": "link", "mark": false, "record": true, "why": "no_link"}], "generation": 1, "name": "Engine start", "source": "file", "type": "conditions"}
 {"ch": 0, "data": "41 00 FE 7F A8 13", "flags": 0, "id": "0x7E8", "t_us": 0, "type": "frame"}
 {"ch": 0, "data": "41 20 A0 17 F0 11", "flags": 0, "id": "0x7E8", "t_us": 30142, "type": "frame"}
 {"ch": 0, "data": "41 40 FE D0 8C 81", "flags": 0, "id": "0x7E8", "t_us": 49999, "type": "frame"}

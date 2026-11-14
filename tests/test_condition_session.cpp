@@ -18,6 +18,7 @@
 #include <ecuio/signal_sets.h>
 #include <ecuio/signals.h>
 #include "temp_name.h"
+#include "worker_hold.h"
 
 #include <atomic>
 #include <chrono>
@@ -367,24 +368,25 @@ TEST(ConditionSessionTest, AFramesEventsFollowItsValuesInOneCall)
                            "[4000000 g1 c1 on stale t0 v3500] "
                            "[5500000 g1 c0 on t0 v9500] "
                            "[5500000 g1 c1 off t0 v9500]");
-    /* A frame that decodes nothing still settles what is due */
+    /* A frame that decodes nothing still settles what is due: engine
+     * speed's 4.5 s gap bounds its sample at 13.5 s, to 19 s */
     static ecuio_frame_t other;
     std::memset(&other, 0, sizeof other);
     other.arbitration_id = 0x123;
-    other.timestamp_us = 9 * kSecond;
+    other.timestamp_us = 19500000;
     other.data_length = 2;
     ecuio_session_dispatch_callbacks(s.s, &other);
-    EXPECT_EQ(seen.text(), "frame 9000000\n"
-                           "events [8500000 g1 c0 on stale t0 v9500] "
-                           "[8500000 g1 c1 off stale t0 v9500]");
+    EXPECT_EQ(seen.text(), "frame 19500000\n"
+                           "events [19000000 g1 c0 on stale t0 v9500] "
+                           "[19000000 g1 c1 off stale t0 v9500]");
 
     EXPECT_EQ(ecuio_unregister_conditions_callback(s.s, on_conditions, &seen),
               ECUIO_OK);
     EXPECT_EQ(ecuio_unregister_conditions_callback(s.s, on_conditions, &seen),
               ECUIO_OK)
         << "idempotent";
-    engine_speed(s.s, 10, 100);
-    EXPECT_EQ(seen.text(), "frame 10000000\nvalues 10000000");
+    engine_speed(s.s, 20, 100);
+    EXPECT_EQ(seen.text(), "frame 20000000\nvalues 20000000");
     EXPECT_EQ(states_of(s.s)[0].state, ECUIO_CONDITION_OFF)
         << "judged with no callback";
     EXPECT_EQ(ecuio_register_conditions_callback(nullptr, on_conditions, &seen),
@@ -704,6 +706,165 @@ TEST(ConditionSessionTest, ATermOnAComputedSignalGoesStaleWithItsLeaf)
     }
     EXPECT_EQ(ecuio_profile_unregister(profile.c_str()), ECUIO_OK);
     ecuio_signal_file_free(file);
+}
+
+/* Fuel pressure (PID 0A), which the mock under obd2 lists unsupported */
+std::string fuel_pressure()
+{
+    return R"({"signal":["obd2.pid_0a"],"unit":"kPa","above":1})";
+}
+
+/* The states once the running session has marked condition 0, within 5 s */
+std::vector<ecuio_condition_state_t> marked(ecuio_session_t* s)
+{
+    std::vector<ecuio_condition_state_t> st;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    do {
+        st = states_of(s);
+        if (st[0].flags == ECUIO_CONDITION_UNAVAILABLE) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    } while (std::chrono::steady_clock::now() < deadline);
+    return st;
+}
+
+bool not_received(const ecuio_condition_state_t& st)
+{
+    return st.flags == ECUIO_CONDITION_UNAVAILABLE &&
+           st.why == ECUIO_CONDITION_WHY_NOT_RECEIVED;
+}
+
+/* A session with no requests says what its support report disclaims: the
+ * mock under obd2 lists fuel pressure unsupported, so once the session
+ * runs a condition on it can't be judged and says why. An any with a term
+ * on engine speed reads as engine speed judges it. */
+TEST(ConditionSessionTest, AConditionOnASignalTheMockDisclaimsSaysSo)
+{
+    WorkerHold hold;
+    Session s("mock://x?profile=obd2");
+    WorkerHold::Release unhold{hold};
+    ASSERT_NE(s.s, nullptr);
+    ASSERT_EQ(hold.attach(s.s), ECUIO_OK);
+    ASSERT_EQ(
+        attach(s.s, condition(0, fuel_pressure()) + "," +
+                        condition(1, R"({"any":[)" + rpm(R"("above":3000)") +
+                                         "," + fuel_pressure() + "]}")),
+        ECUIO_OK);
+    EXPECT_EQ(states_of(s.s)[0].flags, ECUIO_CONDITION_STALE)
+        << "nothing marked before the session runs";
+    ASSERT_EQ(ecuio_session_start(s.s), ECUIO_OK);
+    std::vector<ecuio_condition_state_t> st = marked(s.s);
+    EXPECT_TRUE(not_received(st[0]))
+        << "flags " << st[0].flags << ", why " << st[0].why;
+    EXPECT_TRUE(not_received(st[1])) << "every term of the any";
+    ASSERT_TRUE(hold.hold(5000));
+    engine_speed(s.s, 1, 800);
+    hold.release();
+    st = states_of(s.s);
+    EXPECT_TRUE(not_received(st[0]));
+    EXPECT_EQ(st[1].flags & ECUIO_CONDITION_UNAVAILABLE, 0u)
+        << "engine speed sampled: the any is its to judge";
+    EXPECT_EQ(st[1].why, ECUIO_CONDITION_WHY_NONE);
+}
+
+/* An all with a term on a signal the session doesn't get can't turn ON,
+ * whatever its other terms read: marked while engine speed reads below
+ * its level (OFF), above it (the join unjudged) and below again. A sample
+ * of the disclaimed signal itself, with no event (the all stays OFF),
+ * ends it: the worker publishes a first sample whether or not it changes
+ * a state. */
+TEST(ConditionSessionTest,
+     AnAllWithATermNeverSampledSaysSoWhateverItsOthersRead)
+{
+    WorkerHold hold;
+    Session s("mock://x?profile=obd2");
+    WorkerHold::Release unhold{hold};
+    ASSERT_NE(s.s, nullptr);
+    ASSERT_EQ(hold.attach(s.s), ECUIO_OK);
+    ASSERT_EQ(attach(s.s, condition(0, R"({"all":[)" + rpm(R"("above":3000)") +
+                                           "," + fuel_pressure() + "]}")),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s.s), ECUIO_OK);
+    EXPECT_TRUE(not_received(marked(s.s)[0]));
+    Seen seen;
+    ASSERT_EQ(ecuio_register_conditions_callback(s.s, on_conditions, &seen),
+              ECUIO_OK);
+    ASSERT_TRUE(hold.hold(5000));
+    engine_speed(s.s, 1, 800);
+    const ecuio_condition_state_t off = states_of(s.s)[0];
+    engine_speed(s.s, 2, 3500);
+    const ecuio_condition_state_t unjudged = states_of(s.s)[0];
+    engine_speed(s.s, 3, 800);
+    const std::string before = seen.text();
+    reply(s.s, 4, 0x0A, 50); /* 150 kPa */
+    const std::string at_sample = seen.text();
+    hold.release();
+    ASSERT_EQ(ecuio_unregister_conditions_callback(s.s, on_conditions, &seen),
+              ECUIO_OK);
+    EXPECT_TRUE(not_received(off)) << "judged OFF by engine speed";
+    EXPECT_NE(off.since_us, 0u);
+    EXPECT_TRUE(not_received(unjudged)) << "engine speed above its level";
+    EXPECT_NE(before, "");
+    EXPECT_EQ(at_sample, "") << "the sample changed no state";
+    const ecuio_condition_state_t sampled = states_of(s.s)[0];
+    EXPECT_EQ(sampled.flags & ECUIO_CONDITION_UNAVAILABLE, 0u);
+    EXPECT_EQ(sampled.why, ECUIO_CONDITION_WHY_NONE);
+}
+
+/* ecuio_session_test_after_dispatch_takes for a scope */
+struct AfterTakes {
+    AfterTakes(void (*hook)(void*), void* user)
+    {
+        ecuio_session_test_after_dispatch_takes(hook, user);
+    }
+    ~AfterTakes() { ecuio_session_test_after_dispatch_takes(nullptr, nullptr); }
+    AfterTakes(const AfterTakes&) = delete;
+    AfterTakes& operator=(const AfterTakes&) = delete;
+};
+
+/* Attaches a set whose condition 0 reads fuel pressure, once */
+struct AttachFuel {
+    ecuio_session_t* s = nullptr;
+    ecuio_status_t status = ECUIO_ERR_INVALID_ARGUMENT;
+    bool done = false;
+    static void run(void* user)
+    {
+        auto* a = static_cast<AttachFuel*>(user);
+        if (!a->done) {
+            a->done = true;
+            a->status = attach(a->s, condition(0, fuel_pressure()));
+        }
+    }
+};
+
+/* A frame taken by the set before an attach marks nothing in the newer
+ * attach's states: engine speed is a first sample for that set's
+ * condition 0, and the newer set's condition 0, on fuel pressure, still
+ * reads not received. The test's own dispatch, with the worker held, takes
+ * the set, then the hook attaches the next. */
+TEST(ConditionSessionTest, AFirstSampleUnderTheSetBeforeMarksNothingInTheNext)
+{
+    WorkerHold hold;
+    Session s("mock://x?profile=obd2");
+    WorkerHold::Release unhold{hold};
+    ASSERT_NE(s.s, nullptr);
+    ASSERT_EQ(hold.attach(s.s), ECUIO_OK);
+    ASSERT_EQ(attach(s.s, condition(0, rpm(R"("above":3000)"))), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s.s), ECUIO_OK);
+    ASSERT_TRUE(hold.hold(5000));
+    AttachFuel next;
+    next.s = s.s;
+    {
+        AfterTakes hook(&AttachFuel::run, &next);
+        engine_speed(s.s, 1, 800);
+    }
+    hold.release();
+    ASSERT_TRUE(next.done);
+    ASSERT_EQ(next.status, ECUIO_OK);
+    const ecuio_condition_state_t st = marked(s.s)[0];
+    EXPECT_TRUE(not_received(st)) << "flags " << st.flags << ", why " << st.why;
 }
 
 /* One evaluator, two ways: the mock's worker judging its own frames, and

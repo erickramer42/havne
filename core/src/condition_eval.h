@@ -11,13 +11,17 @@
 // the same frames give the same events at the same times, live, replayed
 // or read back. judge allocates nothing. Its clock never goes back: a
 // frame stamped earlier than the one before it (two channels' frames can
-// arrive a little out of order) is judged at that one's time, so a sample
-// only ever moves a deadline later and events never go back in time.
+// arrive a little out of order) is judged at that one's time, so no
+// deadline falls before a time already judged and events never go back
+// in time.
 //
 // A term keeps its truth (hysteresis: `above` with `clear` turns true
 // above the level and false at or below clear) and reads its signal's
 // newest sample. A sample older than the term's age bound can't be
-// judged. A condition joins its terms three ways (true, false, not
+// judged: its own max_age, or else its signal's pace (kPaceTimes its
+// recent gap, from kPaceFloorUs to kPaceTimes x kPaceCapUs), so a slow
+// sweep holds between its samples and a signal that stops still goes
+// stale. A condition joins its terms three ways (true, false, not
 // judged), turns ON once they have held `for` and OFF once they have
 // failed `clear_for`, and while it can't be judged keeps its state and is
 // STALE.
@@ -53,11 +57,20 @@ struct ecuio_condition_eval {
      * ECUIO_CONDITION_MAX_TERMS), so a probe is short */
     static constexpr uint32_t kHashSlots = 512;
     static constexpr uint16_t kEmpty = UINT16_MAX;
+    /* The default age bound: kPaceTimes the larger of the signal's last
+     * gap and its running average (each gap weighted a quarter, the first
+     * its start, each counted up to the longest max_age a term may set),
+     * from ECUIO_VALUE_STALE_US to kPaceTimes that longest, so a sweep of
+     * the longest minimum a focus takes holds; the floor alone before a
+     * second sample */
+    static constexpr uint64_t kPaceTimes = 3;
+    static constexpr uint64_t kPaceFloorUs = ECUIO_VALUE_STALE_US;
+    static constexpr uint64_t kPaceCapUs = ECUIO_COMPUTED_MAX_AGE_US;
 
     struct term {
         double level = 0.0;
         double clear = 0.0;
-        uint64_t max_age_us = 0;
+        uint64_t max_age_us = 0; /* its own; 0: its signal's pace */
         uint32_t condition = 0;
         uint16_t signal = 0;    /* its signal, in `signals` */
         uint16_t next = kEmpty; /* the next term reading that signal */
@@ -71,8 +84,12 @@ struct ecuio_condition_eval {
     struct signal {
         double value = 0.0;
         uint64_t time_us = 0; /* the frame time the sample came at */
+        uint64_t fresh_until_us = 0; /* a term on its pace is fresh to */
         uint32_t first_point = 0;
         uint32_t point_count = 0;
+        /* The gaps' running average, each gap counted to kPaceCapUs; 0
+         * before a second sample */
+        uint32_t mean_us = 0;
         uint16_t id = 0;
         uint16_t first_term = kEmpty;
         uint16_t unjudged = 0; /* its terms with judged clear */
@@ -85,8 +102,8 @@ struct ecuio_condition_eval {
     struct condition {
         uint64_t hold_end_us = 0;
         /* No later than its earliest deadline; UINT64_MAX with none. A
-         * new sample only moves a deadline later, so it isn't updated
-         * for one. */
+         * new sample moves a term's own age bound only later, so it isn't
+         * updated for one; a pace that shortens moves it (feed). */
         uint64_t check_us = UINT64_MAX;
         uint64_t since_us = 0;
         uint64_t fired = 0;
@@ -123,6 +140,10 @@ struct ecuio_condition_eval {
     uint64_t next_check_us = UINT64_MAX;
     uint64_t frame = 0;
     uint64_t newest_us = 0; /* the latest time judge was given */
+    /* Signals sampled since the make, counted at each one's first
+     * sample; the session publishes sampled_terms when it moves */
+    uint32_t first_samples = 0;
+    uint32_t first_samples_published = 0;
     uint32_t generation = 0;
     /* Events that found the buffer full: the bound above broken. Never
      * counts in a correct build; fuzz_condition_file holds it to 0. */
@@ -145,14 +166,19 @@ struct ecuio_condition_eval {
     /* Condition index's state as it stands */
     ecuio_condition_state_t state_of(uint32_t index) const;
 
+    /* Condition index's terms whose signal has a sample since the make,
+     * a bit each from term 0; 0 for a condition left unavailable */
+    uint8_t sampled_terms(uint32_t index) const;
+
     /* The bytes the evaluator holds: its own and its vectors' */
     size_t bytes() const;
 
 private:
     enum class joined : uint8_t { no, yes, unjudged };
     joined join(const condition& c) const;
+    uint64_t expiry(const term& t) const;
     void feed(uint64_t now_us, const ecuio_value_t& v);
-    void sample(uint16_t index, uint64_t now_us);
+    void sample(uint16_t index);
     void rejoin(uint32_t index, uint64_t at_us, uint32_t decider);
     void settle(uint64_t now_us, bool hold_at_now);
     void settle_one(uint32_t index, uint64_t now_us, bool hold_at_now);

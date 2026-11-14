@@ -3,7 +3,7 @@
 //             test_core, test_elm327, test_j2534_load and
 //             test_j2534_routing
 // Testing: UNIT: CoreTest, RecorderTest, ImportTest,
-//          ConditionSessionTest (test_core);
+//          ConditionSessionTest, ConditionRecordingTest (test_core);
 //          test_elm327; HARNESS: test_j2534_load; test_j2534_routing
 
 #ifndef ECUIO_INTERNAL_H
@@ -402,6 +402,20 @@ void ecuio_import_test_between_passes(void (*hook)(void* user), void* user);
  * dispatches a frame there; NULL takes it away. One for the process. */
 void ecuio_session_test_after_conditions_handover(void (*hook)(void* user),
                                                   void* user);
+
+/* Test-only (ADR-0063 section 8): ecuio_session_record calls hook(user)
+ * on its caller's thread under the link's mutex, just before the recorder
+ * takes frames, so a test can try a new set of conditions there; NULL
+ * takes it away. One for the process. */
+void ecuio_session_test_before_record_attach(void (*hook)(void* user),
+                                             void* user);
+
+/* Test-only (ADR-0063 section 8): dispatch calls hook(user) on the worker
+ * once it has taken the set it judges the frame by, before it looks for a
+ * recorder, so a test can attach another set and a recorder there; NULL
+ * takes it away. One for the process. */
+void ecuio_session_test_after_dispatch_takes(void (*hook)(void* user),
+                                             void* user);
 
 #ifdef __cplusplus
 }

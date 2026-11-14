@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -285,6 +286,33 @@ TEST(CliLogTest, BadArgumentsSayWhy)
     EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--signals", "s",
                       "--plugin", "p"}),
               "--signals and --plugin each give the profile: one at a time");
+    const std::string conditions_why = "--conditions takes one condition file";
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--conditions"}),
+              conditions_why);
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--conditions", ""}),
+              conditions_why);
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--conditions",
+                      "c.json", "--conditions", "d.json"}),
+              conditions_why);
+}
+
+TEST(CliLogTest, AConditionFileIsTakenBeforeOrAfterTheWords)
+{
+    Args a({"havne-cli", "log", "--conditions", "c.json", "mock://x", "out"});
+    cli::LogArgs la;
+    std::string why;
+    ASSERT_TRUE(cli::parse_log(a.argc(), a.argv.data(), la, &why)) << why;
+    EXPECT_STREQ(la.conditions, "c.json");
+    EXPECT_STREQ(la.uri, "mock://x");
+    EXPECT_STREQ(la.folder, "out");
+    Args b({"havne-cli", "log", "mock://x", "out", "--conditions", "c.json"});
+    cli::LogArgs lb;
+    ASSERT_TRUE(cli::parse_log(b.argc(), b.argv.data(), lb, &why)) << why;
+    EXPECT_STREQ(lb.conditions, "c.json");
+    Args c({"havne-cli", "log", "mock://x", "out"});
+    cli::LogArgs lc;
+    ASSERT_TRUE(cli::parse_log(c.argc(), c.argv.data(), lc, &why)) << why;
+    EXPECT_EQ(lc.conditions, nullptr);
 }
 
 TEST(CliLogTest, ThePicksResolveInOrderAndATypoOrARepeatIsRefused)
@@ -377,4 +405,22 @@ TEST(CliLogTest, ALogLineIsDueEachPeriodAndOnceAfterAStall)
     cli::LogTicker u(1000, 10);
     EXPECT_FALSE(u.due(500));
     EXPECT_TRUE(u.due(1010));
+}
+
+TEST(CliLogTest, TheRecordingsBytesCountEachOfItsFiles)
+{
+    const std::map<std::string, uint64_t> sizes = {
+        {"f/frames.csv", 1},       {"f/signals.csv", 2},
+        {"f/events.log", 4},       {"f/markers.csv", 8},
+        {"f/latency.csv", 16},     {"f/signals.json", 32},
+        {"f/conditions.json", 64}, {"f/notes.txt", 128}};
+    EXPECT_EQ(cli::recording_bytes("f",
+                                   [&](const std::string& path) {
+                                       const auto it = sizes.find(path);
+                                       return it == sizes.end() ? uint64_t{0}
+                                                                : it->second;
+                                   }),
+              127u)
+        << "each of a recording's files, conditions.json among them, and "
+           "nothing else";
 }

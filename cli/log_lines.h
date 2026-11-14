@@ -43,6 +43,7 @@ struct LogArgs {
     const char* plugin = nullptr;   /* --plugin's package */
     std::vector<const char*> names; /* --signal, in order */
     uint32_t min_sweep_ms = 0;      /* --min-sweep; 0 none */
+    const char* conditions = nullptr; /* --conditions' file */
     bool pick_ranked = false;       /* --pick ranked */
 };
 
@@ -118,6 +119,12 @@ inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
             a.signals = argv[++i];
         } else if (s == "--plugin" && has_value) {
             a.plugin = argv[++i];
+        } else if (s == "--conditions") {
+            if (!has_value || a.conditions != nullptr || *argv[i + 1] == '\0') {
+                *why = "--conditions takes one condition file";
+                return false;
+            }
+            a.conditions = argv[++i];
         } else if (s == "--pick") {
             if (!has_value || !parse_pick(argv[++i])) {
                 *why = pick_why();
@@ -246,6 +253,21 @@ struct LogReadout {
     uint64_t bytes = 0;   /* the folder's files */
     uint64_t values = 0;  /* rows written to signals.csv */
 };
+
+// The bytes of a recording's files in folder: size_of(path) gives a
+// file's size, 0 for one that isn't there
+template <typename SizeOf>
+uint64_t recording_bytes(const std::string& folder, SizeOf size_of)
+{
+    static const char* const kFiles[] = {
+        "frames.csv",  "signals.csv",  "events.log",     "markers.csv",
+        "latency.csv", "signals.json", "conditions.json"};
+    uint64_t total = 0;
+    for (const char* name : kFiles) {
+        total += size_of(folder + "/" + name);
+    }
+    return total;
+}
 
 // {"type":"log", seconds, bytes, values}
 inline void log_line(Line& l, const LogReadout& r)

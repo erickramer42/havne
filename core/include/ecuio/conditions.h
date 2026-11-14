@@ -1,7 +1,7 @@
 // File/layer: core/include/ecuio/conditions.h | C ABI, public
 // Testing: UNIT: ConditionFileTest, ConditionEvalTest (test_signals),
-//          ConditionSessionTest, QueueTest (test_core); c_abi; FUZZ:
-//          fuzz_condition_file
+//          ConditionSessionTest, ConditionRecordingTest, QueueTest
+//          (test_core); c_abi; FUZZ: fuzz_condition_file
 
 #ifndef ECUIO_CONDITIONS_H
 #define ECUIO_CONDITIONS_H
@@ -163,7 +163,7 @@ typedef struct ecuio_condition_term {
     double   clear;           /* with ECUIO_TERM_HAS_CLEAR; 0 otherwise */
     uint32_t max_age_us;      /* a signal term's age bound,
                                  ECUIO_COMPUTED_MIN_AGE_US to _MAX_; 0 for
-                                 ECUIO_VALUE_STALE_US */
+                                 its signal's pace (below) */
     uint32_t flags;           /* ECUIO_TERM_HAS_*; any other bit zero */
     uint32_t reference_count; /* a signal term: 1 to
                                  ECUIO_CONDITION_MAX_REFERENCES; else 0 */
@@ -197,6 +197,10 @@ ecuio_status_t ecuio_condition_set_get_term(const ecuio_condition_set_t* set,
 #define ECUIO_CONDITION_WHY_NO_CHECK     7u /* a check term, and the session
                                                doesn't run that check on its
                                                frames */
+#define ECUIO_CONDITION_WHY_NOT_RECEIVED 8u /* a state's alone: a term reads
+                                               a signal the session reports
+                                               it doesn't get (the states'
+                                               getter, below) */
 
 /* How one condition's terms meet a set of signals */
 typedef struct ecuio_condition_binding {
@@ -301,6 +305,13 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
  * on the frames' own time: a term keeps the truth of its newest sample,
  * a sample older than the term's age bound can't be judged, and a
  * condition whose terms can't be judged keeps its state and is STALE.
+ * The bound is the term's max_age, or else its signal's pace: three
+ * times the larger of the last gap between its samples and the gaps'
+ * running average (each new gap weighted a quarter, the first its
+ * start, each counted up to ECUIO_COMPUTED_MAX_AGE_US), from
+ * ECUIO_VALUE_STALE_US to three times ECUIO_COMPUTED_MAX_AGE_US, and
+ * ECUIO_VALUE_STALE_US alone before a second sample. So a slow sweep
+ * isn't STALE between its samples, and a signal that stops still is.
  * A value that is no number (a NaN) is no sample; an infinity is one.
  * Time never goes back: a frame stamped earlier than the one before it
  * (two channels' frames can arrive a little out of order) is judged at
@@ -320,8 +331,17 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
                                             the state is the one kept */
 #define ECUIO_CONDITION_FIRED       0x2u /* an event's alone: this change
                                             is OFF to ON */
-#define ECUIO_CONDITION_UNAVAILABLE 0x4u /* a state's alone: never judged
-                                            on this session; why says why */
+#define ECUIO_CONDITION_UNAVAILABLE 0x4u /* a state's alone: the session
+                                            can't judge it to ON, and why
+                                            says why: a bind's reason
+                                            (never judged), or the states'
+                                            getter's NOT_RECEIVED, which
+                                            comes and goes while the
+                                            condition's events still come */
+#define ECUIO_CONDITION_HELD        0x8u /* a recording's event alone: the
+                                            state the condition stood in
+                                            when the recording began, no
+                                            change (ecuio/recording.h) */
 
 /* Binds the set to the session's signals, as ecuio_condition_set_resolve
  * does, and judges it from the next frame; a NULL set takes the
@@ -340,6 +360,13 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
  * them, whether or not the focus picks them; a disabled or unavailable
  * condition keeps nothing asked. The focus's own picks, and the
  * recording's focus line, stay the caller's.
+ *
+ * A recorder attached holds the set for the recording's length: the set
+ * and every event it gives go into the recording (conditions.json, the
+ * cond lines of events.log, a marker for each firing of a condition with
+ * mark; ecuio/recording.h). A full ring's events wait in a carry of 256;
+ * past it they are counted in the recorder's conditions_lost and said in
+ * a drop line.
  *
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session;
  * ECUIO_ERR_SESSION_CLOSED after close; ECUIO_ERR_INVALID_ARGUMENT for a
@@ -405,7 +432,24 @@ typedef struct ecuio_condition_state {
  * the set attached holds (0 with none), and the first capacity are
  * copied. Any thread; readable after close, when the states are the
  * last the session held. ECUIO_ERR_NULL_ARGUMENT for a NULL session or
- * out_count, or a NULL out with a capacity. */
+ * out_count, or a NULL out with a capacity.
+ *
+ * Once the session has started, a condition reads
+ * ECUIO_CONDITION_UNAVAILABLE with ECUIO_CONDITION_WHY_NOT_RECEIVED while
+ * a term reads a signal the session reports it doesn't get and has had
+ * no sample of since the attach: the signal is unsupported or absent
+ * (ecuio/profile.h's lists), its request was dropped (a refusal, the
+ * probe, a DID the scan hasn't found, a PID ?poll= doesn't ask), or it is
+ * computed from such a signal. Any such term does it, since an all can't
+ * turn ON without it, whatever its other terms read; with
+ * ECUIO_CONDITION_INFO_ANY every term must be such, so an any with a term
+ * on a signal received reads as that term judges it (STALE while it is
+ * false). A term sampled once is judged as any other, and goes STALE if
+ * its signal stops. Judged at each call from the lists as they stand, so
+ * availability can change after the attach (a scanned DID found, a
+ * re-walk): read it again rather than keep it. A term's later references
+ * are never tried (ADR-0063 section 2: the first the set provides is the
+ * one read). */
 ecuio_status_t ecuio_session_get_condition_states(
     ecuio_session_t* session, ecuio_condition_state_t* out, uint32_t capacity,
     uint32_t* out_count);

@@ -1,7 +1,6 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
 // Testing: UNIT: CoreTest, DefIndexTest, ConditionSessionTest,
-//          RecorderTest (test_core);
-//          PidSupportTest,
+//          RecorderTest, ConditionRecordingTest (test_core); PidSupportTest,
 //          DiagnosticsTest, InspectionTest (test_obd2); ProbeNotesTest
 //          (ctest); c_abi; HARNESS: Elm327SessionTest (test_elm327)
 
@@ -16,6 +15,8 @@
 #include "pid_support.h"     /* the signals their ECU doesn't support */
 #include "computed.h"        /* a computed pick's leaves, for a focus */
 #include "condition_eval.h"
+#include "condition_file.h" /* the set's bytes and keys, for a recording */
+#include "sha256.h"
 #include "uri_query.h"
 #include "error_detail.h"
 #include "probes.h"
@@ -981,6 +982,7 @@ ecuio_status_t ecuio_session_start(ecuio_session_t* session)
         session->transport->ops->start(session, session->transport->impl);
     if (st == ECUIO_OK && !session->started) {
         session->started = true;
+        session->ran.store(true);
         ECUIO_PROBE2(session_start, session, session->info.backend);
     }
     return st;
@@ -1126,6 +1128,9 @@ namespace {
 /* ecuio_session_test_after_conditions_handover's (internal.h) */
 std::atomic<void (*)(void*)> g_after_conditions_handover{nullptr};
 std::atomic<void*> g_after_conditions_handover_user{nullptr};
+/* ecuio_session_test_after_dispatch_takes's (internal.h) */
+std::atomic<void (*)(void*)> g_after_dispatch_takes{nullptr};
+std::atomic<void*> g_after_dispatch_takes_user{nullptr};
 } // namespace
 
 ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
@@ -1145,22 +1150,41 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
                          "with");
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
-    if (session->record_link->active.load() != nullptr) {
-        ecuio_detail_set("a recording is under way, and it holds one set of "
-                         "conditions for its whole length");
-        return ECUIO_ERR_IN_USE;
-    }
     std::unique_ptr<ecuio_condition_eval> next;
+    std::shared_ptr<const ecuio_condition_record> record;
     std::vector<ecuio_condition_state_t> states;
+    std::vector<ecuio_session::condition_read> reads;
     /* The signals the conditions read, for the focus: the evaluator holds
      * only those of the conditions it judges */
     std::vector<uint8_t> watched;
     try {
         if (set != nullptr) {
             next = ecuio_condition_eval::make(set, signals, file, 0);
+            /* A recorder takes this under the locks by pointer, so the
+             * hash and the copies are made here */
+            auto made = std::make_shared<ecuio_condition_record>();
+            made->bytes = set->bytes;
+            made->sha256 =
+                ecuio_sha256::hex_of(set->bytes.data(), set->bytes.size());
+            for (const ecuio_condition_set::condition& c : set->conditions) {
+                made->conditions.push_back(
+                    {c.key, c.name,
+                     (c.info.uses & ECUIO_CONDITION_USE_MARK) != 0});
+            }
+            record = std::move(made);
             states.reserve(next->conditions.size());
+            reads.resize(next->conditions.size());
             for (uint32_t i = 0; i < next->conditions.size(); ++i) {
                 states.push_back(next->state_of(i));
+                const ecuio_condition_eval::condition& c = next->conditions[i];
+                reads[i].any = c.any;
+                for (uint32_t k = 0; c.available != 0 && k < c.term_count &&
+                                     k < ECUIO_CONDITION_MAX_TERMS;
+                     ++k) {
+                    const auto& t = next->terms[c.first_term + k];
+                    reads[i].ids[k] = next->signals[t.signal].id;
+                    reads[i].count = static_cast<uint8_t>(k + 1);
+                }
             }
             if (!next->signals.empty() && signals != nullptr &&
                 signals->defs != nullptr) {
@@ -1184,6 +1208,14 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
     std::unique_ptr<ecuio_condition_eval> retired;
     std::unique_ptr<ecuio_condition_eval> untaken;
     {
+        /* The recorder's attach takes the link's mutex too, so the check
+         * and the handover are one step to it (session.h's lock order) */
+        std::lock_guard<std::mutex> attach(session->record_link->m);
+        if (session->record_link->active.load() != nullptr) {
+            ecuio_detail_set("a recording is under way, and it holds one set "
+                             "of conditions for its whole length");
+            return ECUIO_ERR_IN_USE;
+        }
         std::lock_guard<std::mutex> lock(session->callback_mutex);
         const uint32_t generation = ++session->conditions_generation;
         if (next != nullptr) {
@@ -1198,8 +1230,11 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
             std::lock_guard<std::mutex> states_lock(
                 session->condition_states_mutex);
             session->condition_states.swap(states);
+            session->condition_reads.swap(reads);
             session->condition_states_generation = generation;
         }
+        /* The record before goes with the locks, freed outside them */
+        session->conditions_record.swap(record);
         retired = std::move(session->conditions_retired);
         untaken = std::move(session->conditions_pending);
         session->conditions_pending = std::move(next);
@@ -1225,8 +1260,23 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
 void ecuio_session_test_after_conditions_handover(void (*hook)(void* user),
                                                   void* user)
 {
-    g_after_conditions_handover_user.store(user);
+    /* The user before the hook, and a clear leaves the user: a reader
+     * that took the old hook still finds its own */
+    if (hook != nullptr) {
+        g_after_conditions_handover_user.store(user);
+    }
     g_after_conditions_handover.store(hook);
+}
+
+void ecuio_session_test_after_dispatch_takes(void (*hook)(void* user),
+                                             void* user)
+{
+    /* The user before the hook, and a clear leaves the user: a reader
+     * that took the old hook still finds its own */
+    if (hook != nullptr) {
+        g_after_dispatch_takes_user.store(user);
+    }
+    g_after_dispatch_takes.store(hook);
 }
 
 ecuio_status_t
@@ -1257,6 +1307,121 @@ ecuio_unregister_conditions_callback(ecuio_session_t* session,
     return ECUIO_OK;
 }
 
+namespace {
+
+/* Available, with a term whose signal has no sample since the attach */
+bool unsampled(const ecuio_condition_state_t& s,
+               const ecuio_session::condition_read& r)
+{
+    return (s.flags & ECUIO_CONDITION_UNAVAILABLE) == 0 && r.count != 0 &&
+           r.sampled != (1u << r.count) - 1u;
+}
+
+/* One byte per def of the session's set: 1 for a def the session reports
+ * it doesn't get (unsupported, absent, its request dropped), or computed
+ * from one. On the caller's thread, from the lists as they stand. */
+void defs_not_received(ecuio_session_t* session, std::vector<uint8_t>& gone)
+{
+    const ecuio_signal_set_t* set = session->active_signal_set;
+    gone.clear();
+    if (set == nullptr || set->defs == nullptr || set->count == 0) {
+        return;
+    }
+    gone.assign(set->count, 0);
+    std::vector<std::pair<uint16_t, uint32_t>> by_id;
+    by_id.reserve(set->count);
+    for (uint32_t i = 0; i < set->count; ++i) {
+        by_id.emplace_back(set->defs[i].id, i);
+    }
+    std::sort(by_id.begin(), by_id.end());
+    const auto mark = [&](const uint16_t* ids, uint32_t n) {
+        for (uint32_t k = 0; k < n; ++k) {
+            const auto it = std::lower_bound(by_id.begin(), by_id.end(),
+                                             std::make_pair(ids[k], 0u));
+            if (it != by_id.end() && it->first == ids[k]) {
+                gone[it->second] = 1;
+            }
+        }
+    };
+    using list_fn = ecuio_status_t (*)(const ecuio_session_t*, uint16_t*,
+                                       uint32_t, uint32_t*);
+    for (const list_fn list : {&ecuio_session_get_unsupported_signals,
+                               &ecuio_session_get_absent_signals}) {
+        uint32_t n = 0;
+        if (list(session, nullptr, 0, &n) != ECUIO_OK || n == 0) {
+            continue;
+        }
+        std::vector<uint16_t> ids(n);
+        uint32_t got = 0;
+        if (list(session, ids.data(), n, &got) == ECUIO_OK) {
+            mark(ids.data(), std::min(got, n));
+        }
+    }
+    /* A def with a request whose row is gone from the table */
+    std::vector<uint8_t> dropped(set->count, 0);
+    {
+        std::lock_guard<std::mutex> lock(session->focus_mutex);
+        for (uint32_t i = 0; session->focus_requests && i < set->count &&
+                             i < session->focus_askable.size();
+             ++i) {
+            uint8_t req[3] = {};
+            uint8_t len = 0;
+            dropped[i] =
+                session->focus_askable[i] == 0 &&
+                        ecuio_engine_request_for_def(&set->defs[i], req, &len)
+                    ? 1
+                    : 0;
+        }
+    }
+    const auto was_dropped = [&](uint32_t i) { return dropped[i] != 0; };
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (dropped[i] != 0 ||
+            ecuio_computed_input_gone(*set, set->defs[i], was_dropped)) {
+            gone[i] = 1;
+        }
+    }
+}
+
+/* ECUIO_CONDITION_WHY_NOT_RECEIVED for each condition whose terms read a
+ * def not received and unsampled since the attach: any term (an all can't
+ * turn ON), or every term of an ANY */
+void mark_not_received(ecuio_session_t* session,
+                       const std::vector<ecuio_session::condition_read>& reads,
+                       ecuio_condition_state_t* out, uint32_t n)
+{
+    std::vector<uint8_t> gone;
+    defs_not_received(session, gone);
+    const ecuio_signal_set_t* set = session->active_signal_set;
+    if (gone.empty()) {
+        return;
+    }
+    const auto received = [&](uint16_t id) {
+        for (uint32_t i = 0; i < set->count; ++i) {
+            if (set->defs[i].id == id) {
+                return gone[i] == 0;
+            }
+        }
+        return true;
+    };
+    for (uint32_t i = 0; i < n && i < reads.size(); ++i) {
+        const ecuio_session::condition_read& r = reads[i];
+        if (!unsampled(out[i], r)) {
+            continue;
+        }
+        uint32_t missing = 0;
+        for (uint32_t k = 0; k < r.count; ++k) {
+            const bool sampled = ((r.sampled >> k) & 1u) != 0;
+            missing += sampled || received(r.ids[k]) ? 0u : 1u;
+        }
+        if (r.any != 0 ? missing == r.count : missing > 0) {
+            out[i].flags = ECUIO_CONDITION_UNAVAILABLE;
+            out[i].why = ECUIO_CONDITION_WHY_NOT_RECEIVED;
+        }
+    }
+}
+
+} // namespace
+
 ecuio_status_t ecuio_session_get_condition_states(ecuio_session_t* session,
                                                   ecuio_condition_state_t* out,
                                                   uint32_t capacity,
@@ -1266,13 +1431,37 @@ ecuio_status_t ecuio_session_get_condition_states(ecuio_session_t* session,
         (out == nullptr && capacity > 0)) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    std::lock_guard<std::mutex> lock(session->condition_states_mutex);
-    const uint32_t count =
-        static_cast<uint32_t>(session->condition_states.size());
-    for (uint32_t i = 0; i < count && i < capacity; ++i) {
-        out[i] = session->condition_states[i];
+    std::vector<ecuio_session::condition_read> reads;
+    uint32_t count = 0;
+    /* Before start the session has received nothing to judge by */
+    bool unjudged = false;
+    const bool ran = session->ran.load();
+    {
+        std::lock_guard<std::mutex> lock(session->condition_states_mutex);
+        count = static_cast<uint32_t>(session->condition_states.size());
+        const std::vector<ecuio_session::condition_read>& now =
+            session->condition_reads;
+        for (uint32_t i = 0; i < count && i < capacity; ++i) {
+            out[i] = session->condition_states[i];
+            unjudged = unjudged ||
+                       (ran && i < now.size() && unsampled(out[i], now[i]));
+        }
+        try {
+            if (unjudged) {
+                reads = session->condition_reads;
+            }
+        } catch (const std::bad_alloc&) {
+            unjudged = false; /* the states as the worker left them */
+        }
     }
     *out_count = count;
+    if (unjudged) {
+        try {
+            mark_not_received(session, reads, out, std::min(count, capacity));
+        } catch (const std::bad_alloc&) {
+            return ECUIO_OK; /* the states as copied: none marked yet */
+        }
+    }
     return ECUIO_OK;
 }
 
@@ -1316,6 +1505,9 @@ void ecuio_session_dispatch_callbacks(
         }
         conditions = session->conditions.get();
     }
+    if (const auto hook = g_after_dispatch_takes.load()) {
+        hook(g_after_dispatch_takes_user.load());
+    }
 
     if (frames_taken) {
         for (size_t i = 0; i < frames.size(); ++i) {
@@ -1343,6 +1535,11 @@ void ecuio_session_dispatch_callbacks(
         return;
     }
     const uint32_t count = session->decoder.decode(frame);
+    /* A recording begun after the set judged frames starts from the states
+     * they left: taken before this frame moves them */
+    if (recorder != nullptr && conditions != nullptr) {
+        ecuio_recorder_hold_states(recorder, *conditions);
+    }
     const uint32_t changed =
         conditions != nullptr
             ? conditions->judge(frame->timestamp_us,
@@ -1354,8 +1551,10 @@ void ecuio_session_dispatch_callbacks(
         }
         const uint64_t zero = link->zero_us.load(std::memory_order_relaxed);
         const uint64_t host_us = now > zero ? now - zero : 0;
-        ecuio_recorder_put_frame(recorder, host_us, frame,
-                                 session->decoder.values.data(), count);
+        ecuio_recorder_put_frame(
+            recorder, host_us, frame, session->decoder.values.data(), count,
+            changed > 0 ? conditions->events.data() : nullptr, changed,
+            conditions != nullptr ? conditions->generation : 0);
         ecuio_record_unpin(*link);
     }
     if (want_values && count > 0) {
@@ -1380,6 +1579,21 @@ void ecuio_session_dispatch_callbacks(
         }
     }
 
+    /* A signal's first sample since the attach: the terms sampled, for
+     * the states' getter, while the attach is still the newest */
+    if (conditions != nullptr &&
+        conditions->first_samples != conditions->first_samples_published) {
+        conditions->first_samples_published = conditions->first_samples;
+        std::lock_guard<std::mutex> lock(session->condition_states_mutex);
+        if (session->condition_states_generation == conditions->generation) {
+            std::vector<ecuio_session::condition_read>& reads =
+                session->condition_reads;
+            for (uint32_t i = 0;
+                 i < reads.size() && i < conditions->conditions.size(); ++i) {
+                reads[i].sampled = conditions->sampled_terms(i);
+            }
+        }
+    }
     /* Last, what the frame changed among the conditions: the states, for
      * the attach they still belong to, then the callbacks and queues */
     if (changed == 0) {

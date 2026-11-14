@@ -7208,6 +7208,54 @@ TEST(BridgeTest, ARecordingsRowSaysItsLengthKindSignalsAndMarks)
     EXPECT_EQ(log.value(QStringLiteral("marks")).toInt(), 0);
 }
 
+/* A requesting session's recording with a set of conditions and a default
+ * pick: its header holds conditions, pick, min sweep and link lines among
+ * those the row reads (core's begins "co" too). The row is a session's,
+ * not a log's, with every signal counted and the uri read */
+TEST(BridgeTest, ARowReadsPastTheConditionsPickAndMinSweepLines)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString dir = root.path() + QStringLiteral("/20261114-090000");
+    ASSERT_TRUE(QDir().mkpath(dir));
+    {
+        QFile frames(dir + QStringLiteral("/frames.csv"));
+        ASSERT_TRUE(frames.open(QIODevice::WriteOnly));
+        QFile events(dir + QStringLiteral("/events.log"));
+        ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+        events.write("ecuio session recording, format 3 (ADR-0049)\n"
+                     "started  2026-11-14 09:00:00.000 (local time)\n"
+                     "core  0.8.0\n"
+                     "uri  elm327://COM5?profile=obd2\n"
+                     "profile  obd2\n"
+                     "conditions  conditions.json,");
+        events.write(QByteArray(64, '0'));
+        events.write("\n"
+                     "frame flags  complete\n"
+                     "pick  \"A\",\"B\"\n"
+                     "min sweep  100 ms\n"
+                     "link  healthy (state 0, 0 episodes)\n"
+                     "signal  A,number,km/h,1,1,1\n"
+                     "signal  B,number,%,1,2,2\n"
+                     "signal  C,number,C,0,0,3\n"
+                     "columns  local time, seconds\n\n"
+                     "09:00:25.000  +25.500  end  x\n");
+    }
+    SessionBridge bridge;
+    const QVariantMap row = bridge.recordingRow(dir);
+    ASSERT_FALSE(row.isEmpty());
+    EXPECT_FALSE(row.value(QStringLiteral("log")).toBool())
+        << "a default pick is no log's focus";
+    EXPECT_EQ(row.value(QStringLiteral("signals")).toInt(), 3);
+    const QString uri = row.value(QStringLiteral("uri")).toString();
+    EXPECT_TRUE(uri.startsWith(QStringLiteral("replay://")) &&
+                uri.endsWith(QStringLiteral("/20261114-090000?profile=obd2")))
+        << uri.toStdString();
+    EXPECT_EQ(row.value(QStringLiteral("source")).toString(),
+              QStringLiteral("elm327://COM5?profile=obd2"));
+    EXPECT_EQ(row.value(QStringLiteral("durationMs")).toLongLong(), 25500);
+}
+
 TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
 {
     QTemporaryDir root;

@@ -1,0 +1,17 @@
+{
+  "havne_conditions": 1,
+  "name": "Unread",
+  "notes": "Synthetic: written for Havne's tests; under obd2 the mock disclaims PID 0A, so its term is never received; the mock has no link",
+  "conditions": [
+    {
+      "key": "fuel_high",
+      "name": "Fuel pressure high",
+      "when": { "signal": ["obd2.pid_0a"], "unit": "kPa", "above": 400 }
+    },
+    {
+      "key": "link",
+      "name": "Link fault",
+      "when": { "link": "not_ok" }
+    }
+  ]
+}

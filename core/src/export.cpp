@@ -1,7 +1,7 @@
 // File/layer: core/src/export.cpp | C++17, Qt-free; a recording out to
 //             another tool's format (ADR-0054 sections 1 and 3)
 // Testing: UNIT: ExportTest, CsvExportTest, FolderExportTest,
-//          ExportCancelTest (test_core)
+//          ExportCancelTest, ConditionRecordingTest (test_core)
 //
 // ecuio_export: frames.csv read twice. The first pass classifies every
 // frame (scrub.h), the frames of ISO-TP messages as they crossed the bus
@@ -25,11 +25,13 @@
 // The folder export (ADR-0054's appendix "the folder export as built"): a
 // scrubbed copy of the recording, each file it knows rewritten by the
 // classes (frames.csv by the plan, kept rows as recorded; signals.csv by
-// the CSV's classes; events.log line by line; markers.csv, latency.csv
-// and signals.json as they are), each through its own file check, under
-// a name of its own beside <out> (folder_files.h's partial_name) until
-// every one passes. A range opens with the last focus change before it,
-// so a copy says which signals were asked.
+// the CSV's classes; events.log line by line; markers.csv, latency.csv,
+// signals.json and conditions.json as they are), each through its own
+// file check, under a name of its own beside <out> (folder_files.h's
+// partial_name) until every one passes. A range opens with a held cond
+// line for each condition ON at its start (ADR-0063 section 8), and with
+// the last focus change before it, so a copy says which signals were
+// asked.
 //
 // The caller's cancel (ecuio_export_with) is asked as each pass and each
 // file of a copy begins, and every kCancelRows rows; a stop is a failure
@@ -49,6 +51,7 @@
 #include "request_timing.h" /* timing_hist: a column's usual interval */
 #include "scrub.h"
 
+#include "ecuio/conditions.h"
 #include "ecuio/core.h"
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
@@ -64,6 +67,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -1593,6 +1597,7 @@ private:
                     return true;
                 }
                 has_events_ = true;
+                format3_ = line == rows::kFormat3;
                 events_head_.push_back(line);
                 continue;
             }
@@ -1608,6 +1613,7 @@ private:
                 activity_line(line);
             }
         }
+        put_held();
         put_focus_held();
         return true;
     }
@@ -1630,8 +1636,24 @@ private:
                 return;
             }
         }
-        if (rows::starts_with(p, n, rows::kSignalFileKey) ||
-            rows::starts_with(p, n, rows::kPluginKey)) {
+        /* A copy's line only as the name and hash the readers take: any
+         * other text there is unchecked */
+        const std::pair<const char*, const char*> copies[] = {
+            {rows::kSignalFileKey, rows::kSignalFileName},
+            {rows::kConditionsKey, rows::kConditionsName}};
+        for (const auto& copy : copies) {
+            if (rows::starts_with(p, n, copy.first)) {
+                const size_t k = std::strlen(copy.first);
+                std::string hex;
+                if (rows::parse_named_file(p + k, n - k, copy.second, &hex)) {
+                    events_head_.push_back(line);
+                } else {
+                    ++events_left_;
+                }
+                return;
+            }
+        }
+        if (rows::starts_with(p, n, rows::kPluginKey)) {
             events_head_.push_back(line);
             return;
         }
@@ -1663,6 +1685,10 @@ private:
         const std::string kind(e.rest, kind_len);
         const std::string head(line.data(),
                                static_cast<size_t>(e.rest - line.data()));
+        if (kind == "cond" && format3_) {
+            cond_activity(line, head, text, text_len, e.ms);
+            return;
+        }
         if (kind == "end") {
             uint64_t records = 0;
             uint64_t notes = 0;
@@ -1703,6 +1729,66 @@ private:
     {
         if (held_at_ == SIZE_MAX) {
             held_at_ = events_body_.size();
+        }
+    }
+
+    /* A format 3 cond line, in the range by its own host_us: a scrubbed
+     * copy writes it again from its fields, so a word or field the export
+     * doesn't know stays out, and leaves out one that doesn't parse. One
+     * before the range sets the state its held lines start from. */
+    void cond_activity(const std::string& line, const std::string& head,
+                       const char* text, size_t text_len, uint64_t ms)
+    {
+        rows::cond_line c;
+        if (!rows::parse_cond_line(text, text_len, &c)) {
+            if (!in_range(ms * 1000)) {
+                return;
+            }
+            if (raw_) {
+                range_starts();
+                events_body_.push_back(line);
+            } else {
+                ++events_left_;
+            }
+            return;
+        }
+        if (c.host_us < o_.from_us) {
+            hold_before(c, line);
+            return;
+        }
+        if (!in_range(c.host_us)) {
+            return;
+        }
+        range_starts();
+        if (raw_) {
+            events_body_.push_back(line);
+            return;
+        }
+        std::string out = head + "cond  ";
+        rows::append_cond_text(out, c);
+        events_body_.push_back(out);
+    }
+
+    /* Each key's last line before the range, up to a set's most keys (a
+     * line naming another is one no writer makes, as the reader holds),
+     * and the latest line's clock and times */
+    void hold_before(const rows::cond_line& c, const std::string& line)
+    {
+        uint32_t i = 0;
+        while (i < held_keys_ && std::strcmp(held_[i].key, c.key) != 0) {
+            ++i;
+        }
+        if (i == held_keys_) {
+            if (held_keys_ == ECUIO_CONDITION_MAX_CONDITIONS) {
+                return;
+            }
+            ++held_keys_;
+        }
+        held_[i] = c;
+        if (!held_seen_ || c.host_us >= held_last_.host_us) {
+            held_last_ = c;
+            held_clock_ = line.substr(0, 12);
+            held_seen_ = true;
         }
     }
 
@@ -1750,6 +1836,46 @@ private:
                       static_cast<unsigned long long>(at / 1000 % 60),
                       static_cast<unsigned long long>(at % 1000));
         return buf;
+    }
+
+    /* A range that starts after a cond line opens with a held line for
+     * each condition then ON (ADR-0063 section 8), at the range's start:
+     * the state, stale and value the key's last line gave, the session
+     * time and clock the latest line's carried on to the start (the clock
+     * within a millisecond of the recorder's) */
+    void put_held()
+    {
+        if (o_.from_us == 0 || !held_seen_) {
+            return;
+        }
+        const uint64_t from = o_.from_us;
+        const uint64_t step = from - held_last_.host_us;
+        const uint64_t ms = from / 1000 + (from % 1000 >= 500 ? 1 : 0);
+        char seconds[48];
+        std::snprintf(seconds, sizeof seconds, "  +%llu.%03llu  cond  ",
+                      static_cast<unsigned long long>(ms / 1000),
+                      static_cast<unsigned long long>(ms % 1000));
+        const std::string head =
+            clock_after(held_clock_, from / 1000 - held_last_.host_us / 1000) +
+            seconds;
+        std::vector<std::string> lines;
+        for (uint32_t i = 0; i < held_keys_; ++i) {
+            rows::cond_line c = held_[i];
+            if (!c.on) {
+                continue;
+            }
+            c.flags = (c.flags & rows::kCondStale) | rows::kCondHeld;
+            c.host_us = from;
+            c.t_us = UINT64_MAX - held_last_.t_us < step
+                         ? UINT64_MAX
+                         : held_last_.t_us + step;
+            std::string out = head;
+            rows::append_cond_text(out, c);
+            lines.push_back(out);
+        }
+        const size_t at = held_at_ == SIZE_MAX ? events_body_.size() : held_at_;
+        events_body_.insert(events_body_.begin() + static_cast<ptrdiff_t>(at),
+                            lines.begin(), lines.end());
     }
 
     /* A range that starts after a focus change opens with the focus then
@@ -1843,9 +1969,9 @@ private:
     /* The files a folder holds that the export doesn't know */
     void count_unknown(const std::string& folder)
     {
-        static const char* const kKnown[] = {"events.log",  "frames.csv",
-                                             "signals.csv", "markers.csv",
-                                             "latency.csv", "signals.json"};
+        static const char* const kKnown[] = {
+            "events.log",  "frames.csv",   "signals.csv",    "markers.csv",
+            "latency.csv", "signals.json", "conditions.json"};
         std::vector<std::string> names;
         if (!files::list_folder(folder, &names)) {
             return;
@@ -2011,14 +2137,15 @@ private:
         return true;
     }
 
-    bool copy_signal_file(const std::string& folder)
+    /* signals.json or conditions.json whole, when the folder has it */
+    bool copy_file(const std::string& folder, const char* name)
     {
         std::string why;
-        file_ptr f(files::open_file(folder + "/signals.json", false, &why));
+        file_ptr f(files::open_file(folder + "/" + name, false, &why));
         if (!f) {
             return true;
         }
-        if (!begin_file(partial_, "signals.json")) {
+        if (!begin_file(partial_, name)) {
             return false;
         }
         char chunk[1u << 14];
@@ -2029,7 +2156,7 @@ private:
                 return false;
             }
         }
-        return end_file("signals.json");
+        return end_file(name);
     }
 
     bool write_folder(const std::string& folder)
@@ -2080,7 +2207,8 @@ private:
              !end_file("latency.csv"))) {
             return false;
         }
-        return copy_signal_file(folder);
+        return copy_file(folder, rows::kSignalFileName) &&
+               copy_file(folder, rows::kConditionsName);
     }
 
     /* The folder export's passes: every count first, then each file */
@@ -2174,6 +2302,7 @@ private:
     ecuio_cancel_t cancel_ = nullptr;
     void* cancel_user_ = nullptr;
     uint32_t unasked_ = 0;
+    uint32_t held_keys_ = 0; /* the folder export's, beside held_ */
     /* The folder export's */
     std::string partial_;
     std::vector<std::string> written_paths_;
@@ -2181,13 +2310,19 @@ private:
     bool has_frames_ = false;
     bool has_values_ = false;
     bool has_events_ = false;
+    bool format3_ = false; /* cond lines are format 3's alone, as read */
     bool has_markers_ = false;
     bool has_latency_ = false;
+    bool held_seen_ = false; /* a cond line before the range */
     std::vector<std::string> events_head_;
     std::vector<std::string> events_body_;
     std::vector<std::string> markers_;
     std::vector<std::string> latency_;
     uint64_t events_left_ = 0;
+    /* A range's held lines: each key's last cond line before it */
+    rows::cond_line held_[ECUIO_CONDITION_MAX_CONDITIONS];
+    rows::cond_line held_last_;
+    std::string held_clock_;
     /* A range's held lines: the last focus change before it, each line
      * from its kind word on, and that change's clock and time */
     std::vector<std::string> focus_held_;

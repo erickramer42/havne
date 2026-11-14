@@ -150,7 +150,7 @@ ecuio_condition_reference_t reference_of(const Value& v,
                                          const std::string& what)
 {
     ecuio_condition_reference_t r{};
-    const std::string& text =
+    const std::string text =
         text_of(v, 1, sizeof r.text - 1, what + "'s reference");
     copy_text(r.text, sizeof r.text, text);
     if (text.compare(0, 3, "id:") == 0) {
