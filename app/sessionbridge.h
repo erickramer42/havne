@@ -1348,6 +1348,7 @@ private:
     // An activity line core's recording writes in its own form (a link
     // transition, a sleep): shown, never noted
     void logUnnoted(const QString& line);
+    void writePickLine();
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
     void notifyFrameCounts();   // GUI thread: frameCount and guiNotifyCount, if they moved
     void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
@@ -1523,6 +1524,7 @@ private:
     bool m_pickDirty = false;        // the ticks, gauges or minimum moved
     bool m_pickLinePending = false;  // startSession's line, not yet out
     QString m_pickLine;              // the activity line last written
+    bool m_pickLineCore = false;     // core's recorder writes it itself
     uint64_t m_pickDropped = 0;      // the reports' drops at the last set
     std::vector<uint16_t> m_unaskedRead;
     std::vector<uint16_t> m_unaskedIds;

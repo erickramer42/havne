@@ -5233,6 +5233,25 @@ TEST(PidSupportTest, AComputedSignalFollowsItsInputs)
     EXPECT_EQ(ids[0], 11);
 }
 
+/* A chain as deep as the validator takes is followed to its end: 100
+ * reads the PID the car lacks, each next def reads the one before */
+TEST(PidSupportTest, AChainAsDeepAsTheValidatorTakesIsFollowedToItsEnd)
+{
+    const ecuio_channel_support_t car = first_vehicle();
+    ASSERT_TRUE(ecuio_pid_marked_unsupported(car, 0x5C));
+    std::vector<ecuio_signal_def_t> defs = {pid_def(11, 0x5C)};
+    std::vector<ecuio_computed_t> programs;
+    std::vector<uint16_t> want = {11};
+    for (uint16_t k = 0; k < ECUIO_COMPUTED_MAX_DEPTH; ++k) {
+        const uint16_t id = static_cast<uint16_t>(100 + k);
+        defs.push_back(computed_over(id, k));
+        programs.push_back(program_of(
+            {k == 0 ? uint16_t{11} : static_cast<uint16_t>(id - 1)}));
+        want.push_back(id);
+    }
+    EXPECT_EQ(unsupported_of(defs, programs, car), want);
+}
+
 // ---- Trouble-code titles (ADR-0044): Wal33D's generic list, SAE J2012's
 // powertrain and network ranges only
 

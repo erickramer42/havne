@@ -2711,7 +2711,7 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     }
     if (m_pickLinePending) {
         m_pickLinePending = false;
-        emit logMessage(m_pickLine);
+        writePickLine();
     }
     m_replayFrames = info.replay_frames;
     m_sleptUs = sleptUs();
@@ -3434,6 +3434,17 @@ void SessionBridge::logUnnoted(const QString& line)
     m_noting = false;
     emit logMessage(line);
     m_noting = true;
+}
+
+void SessionBridge::writePickLine()
+{
+    // A pick core took is in the recording as core's own pick line; a
+    // whole set's line says why, which core's line doesn't
+    if (m_pickLineCore) {
+        logUnnoted(m_pickLine);
+    } else {
+        emit logMessage(m_pickLine);
+    }
 }
 
 void SessionBridge::setLogPaused(bool paused)
@@ -4166,6 +4177,7 @@ bool SessionBridge::applyDefaultPick(ecuio_session_t* session, bool withTicks,
         }
     }
     QString line;
+    bool picked = false;
     const QString whole = m_pickPolled
                               ? QStringLiteral("Asking every polled signal: ")
                               : QStringLiteral("Asking every signal: ");
@@ -4183,6 +4195,7 @@ bool SessionBridge::applyDefaultPick(ecuio_session_t* session, bool withTicks,
             static_cast<uint32_t>(m_minSweepMs), ECUIO_FOCUS_DEFAULT_PICK);
         if (rc == ECUIO_OK) {
             line = pickText(set, ids, m_minSweepMs, m_pickPolled);
+            picked = true;
         } else {
             const QString detail = QString::fromUtf8(ecuio_last_error_detail());
             (void)ecuio_session_set_focus(session, nullptr, 0);
@@ -4194,9 +4207,10 @@ bool SessionBridge::applyDefaultPick(ecuio_session_t* session, bool withTicks,
         return true;
     }
     m_pickLine = line;
+    m_pickLineCore = picked;
     // Before the apply, the line waits for the session's own lines
     if (session == m_session) {
-        emit logMessage(line);
+        writePickLine();
     } else {
         m_pickLinePending = true;
     }

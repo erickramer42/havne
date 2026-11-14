@@ -1598,6 +1598,63 @@ TEST(RecordingTest, ProgressIsCalledAndCancelsTheOpen)
     }
 }
 
+/* A long events.log is asked through too: every 4 MiB of it, bytes_read
+ * 0 and bytes_total the data file's, so an open stops there, through
+ * signals.csv and through frames.csv alike */
+TEST(RecordingTest, ALongEventsLogIsAskedThroughAndStopsTheOpen)
+{
+    Folder f;
+    std::string events = events_v2({"RPM,number,rpm,0,1"}, nullptr);
+    const std::string note =
+        "12:00:01.000  +1.000  note  " + std::string(100, 'x') + "\n";
+    while (events.size() < (9u << 20)) {
+        events += note;
+    }
+    f.write("events.log", events);
+    const std::string values =
+        std::string(kBom) + rows::kSignalsHeader + "\n10,RPM,800,rpm\n";
+    f.write("signals.csv", values);
+    const std::string frames = "host_us,timestamp_us,id,flags,data\n";
+    f.write("frames.csv", frames);
+    struct Seen {
+        std::vector<std::pair<uint64_t, uint64_t>> asks;
+        bool stop = false;
+    };
+    auto progress = [](uint64_t read, uint64_t total, void* user) {
+        auto* s = static_cast<Seen*>(user);
+        s->asks.emplace_back(read, total);
+        return s->stop ? 1 : 0;
+    };
+    const ecuio_signal_set_t* mock = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("mock", &mock), ECUIO_OK);
+    const auto open = [&](bool through_frames, Seen* s) {
+        ecuio_recording_t* r = nullptr;
+        const ecuio_status_t rc =
+            through_frames
+                ? ecuio_recording_open_frames(f.utf8().c_str(), mock, progress,
+                                              s, &r)
+                : ecuio_recording_open(f.utf8().c_str(), progress, s, &r);
+        ecuio_recording_close(r);
+        return rc;
+    };
+    for (bool through_frames : {false, true}) {
+        SCOPED_TRACE(through_frames ? "frames.csv" : "signals.csv");
+        const uint64_t data = through_frames ? frames.size() : values.size();
+        Seen whole;
+        EXPECT_NE(open(through_frames, &whole), ECUIO_ERR_CANCELED);
+        ASSERT_GE(whole.asks.size(), 3u);
+        EXPECT_EQ(whole.asks[0], std::make_pair(uint64_t{0}, data));
+        EXPECT_EQ(whole.asks[1], std::make_pair(uint64_t{0}, data));
+        EXPECT_EQ(whole.asks[2], std::make_pair(uint64_t{0}, data))
+            << "the data file's first ask";
+
+        Seen stopped;
+        stopped.stop = true;
+        EXPECT_EQ(open(through_frames, &stopped), ECUIO_ERR_CANCELED);
+        EXPECT_EQ(stopped.asks.size(), 1u) << "the first ask stops it";
+    }
+}
+
 TEST(RecordingTest, RowsWrittenAfterTheOpenArentSeenAndAChangeIsSaid)
 {
     Folder f;

@@ -1,5 +1,6 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: UNIT: CoreTest, DefIndexTest, ConditionSessionTest (test_core);
+// Testing: UNIT: CoreTest, DefIndexTest, ConditionSessionTest,
+//          RecorderTest (test_core);
 //          PidSupportTest,
 //          DiagnosticsTest, InspectionTest (test_obd2); ProbeNotesTest
 //          (ctest); c_abi; HARNESS: Elm327SessionTest (test_elm327)
@@ -528,8 +529,13 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
     std::vector<uint16_t> ids;
     std::vector<uint8_t> picked;
     try {
-        if (count > 0) {
-            ids.assign(signal_ids, signal_ids + count);
+        /* Each pick once, at its first place: the recording names it once */
+        std::vector<uint8_t> seen(count > 0 ? 65536u : 0u, 0);
+        for (uint32_t k = 0; k < count; ++k) {
+            if (seen[signal_ids[k]] == 0) {
+                seen[signal_ids[k]] = 1;
+                ids.push_back(signal_ids[k]);
+            }
         }
         picked.assign(defs, 0);
     } catch (...) {
@@ -580,6 +586,7 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
     }
     /* The picks first: a worker that sees the count moved reads them */
     session->focus_generation.fetch_add(1);
+    ecuio_record_focus(session);
     return ECUIO_OK;
 }
 

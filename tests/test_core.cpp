@@ -6847,6 +6847,26 @@ TEST(CoreTest, SetFocusTakesTheSetsIdsAndRefusesTheRest)
     ecuio_session_destroy(raw);
 }
 
+/* A pick given twice is picked once, at its first place, so a
+ * recording's focus names each signal once */
+TEST(CoreTest, APickGivenTwiceIsPickedOnceAtItsFirstPlace)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://focus-twice", &s), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    ASSERT_GE(set->count, 2u);
+    const uint16_t a = set->defs[0].id;
+    const uint16_t b = set->defs[1].id;
+    const uint16_t ids[5] = {b, a, b, b, a};
+    ASSERT_EQ(ecuio_session_set_focus(s, ids, 5), ECUIO_OK);
+    {
+        std::lock_guard<std::mutex> lock(s->focus_mutex);
+        EXPECT_EQ(s->focus_ids, (std::vector<uint16_t>{b, a}));
+    }
+    ecuio_session_destroy(s);
+}
+
 /* The focus call clears the thread's detail on entry, so a refusal that
  * sets none (a NULL, a closed session) or a success leaves no stale
  * words from an earlier call */

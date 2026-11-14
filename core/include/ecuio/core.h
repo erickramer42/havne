@@ -1079,10 +1079,12 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
  * Takes effect on the worker between two requests, never inside an
  * exchange; before start it applies from the first pass. mock://,
  * replay:// and a listening session ask nothing, so they accept any
- * focus and change nothing. Returns at once. The session's one caller
- * may call it from any thread, while the worker runs (the picks reach it
- * under a lock), but not at the same time as another call on the
- * session, ecuio_session_close among them.
+ * focus and change nothing. An id given twice is picked once, at its
+ * first place. A recorder taking the session's frames gets each focus
+ * set or ended as an activity line (ecuio_session_record). Returns at
+ * once. The session's one caller may call it from any thread, while the
+ * worker runs (the picks reach it under a lock), but not at the same
+ * time as another call on the session, ecuio_session_close among them.
  * The detail (ecuio_last_error_detail) is cleared on entry.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL session, or NULL ids with a count;
  * ECUIO_ERR_INVALID_ARGUMENT, nothing changed and the reason in the
@@ -1101,10 +1103,11 @@ ecuio_status_t ecuio_session_set_focus(
 /* ecuio_session_set_focus_with's flag: the signal ids given are a front
  * end's default pick (the set's ranked signals, the gauges, the user's
  * ticks), not an analysis log's choice. The ids are the pick, asked as any
- * focus is; the flag changes only a recording's header line, "pick" in
- * place of "focus", read when the recording attaches, so a reader tells a
- * session's default from a log. Each call sets the flag afresh: a call
- * without it (ecuio_session_set_focus among them) clears it */
+ * focus is; the flag changes only a recording's word for it, "pick" in
+ * place of "focus", on the header's lines and on a change's activity
+ * line, so a reader tells a session's default from a log. Each call sets
+ * the flag afresh: a call without it (ecuio_session_set_focus among
+ * them) clears it */
 #define ECUIO_FOCUS_DEFAULT_PICK 0x1u
 
 /*
