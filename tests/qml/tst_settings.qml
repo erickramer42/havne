@@ -2022,6 +2022,80 @@ TestCase {
                 "the picked vehicle's own file, before any connect")
     }
 
+    // With Default chosen and no URI typed (as after a restart) the list
+    // falls back to the picked vehicle's sets: its plugin first, then its
+    // files that load; the sets and the profiles' names reach the Dashboard
+    function test_theOfflineUriFallsBackToTheVehiclesPick() {
+        const page = createPage()
+        page.uriField.text = ""
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "fallback.json", "Fallback"))
+        page.chooseProfile("default")
+        compare(page.offlineUri, "mock://?profile=user.fallback", "the vehicle's file")
+        compare(Bridge.profileSignals(page.offlineUri).map(r => r.name), ["A"])
+
+        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
+        page.pickPluginVariant("plugin.example-sim.my2019")
+        page.chooseProfile("default")
+        compare(page.offlineUri, "mock://?profile=plugin.example-sim.my2019", "the plugin comes first")
+        compare(JSON.stringify(page.pickedSets),
+                JSON.stringify([{ profile: "plugin.example-sim.my2019", name: "Example: the simulated car",
+                                  variant: "my2019" },
+                                { profile: "user.fallback", name: "Fallback", variant: "" }]))
+        compare(page.profileNames["plugin.example-sim.base"], "Example: the simulated car",
+                "every variant of a loaded plugin by its name")
+        compare(page.profileNames["user.fallback"], "Fallback")
+
+        page.uriField.text = "mock://demo"
+        compare(page.offlineUri, "mock://demo", "a typed URI still wins")
+        page.uriField.text = ""
+        press(page, "vehicle_none")
+        compare(page.offlineUri, "", "no vehicle, nothing to fall back to")
+        compare(page.pickedSets.length, 0)
+    }
+
+    // An adapter's address under Default (the vehicle's saved one, restored
+    // at a restart) lists the vehicle's first set that reads all of obd2,
+    // which stands in for Default there; a typed profile= or the Profile
+    // row's choice still wins, and a plugin removed after its pick leaves
+    // the address as it is
+    function test_anAdaptersAddressListsTheVehiclesObd2StandIn() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "standin.json", "Standin"))
+        page.uriField.text = "elm327://COM3"
+        compare(page.profileChoice, "default")
+        compare(page.offlineUri, "elm327://COM3", "a file that doesn't read obd2 stands in for nothing")
+
+        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
+        page.pickPluginVariant("plugin.example-sim.my2019")
+        page.uriField.text = "elm327://COM3"
+        compare(page.offlineUri, "mock://?profile=plugin.example-sim.my2019", "the plugin, which extends obd2")
+        verify(Bridge.profileSignals(page.offlineUri).some(r => r.ref === "key:clutch_slip"),
+               "the plugin's own signals are listed")
+        page.uriField.text = "j2534://Some Adapter"
+        compare(page.offlineUri, "mock://?profile=plugin.example-sim.my2019", "on any adapter")
+        page.uriField.text = "mock://demo"
+        compare(page.offlineUri, "mock://demo", "not on the demo, whose Default isn't obd2")
+
+        page.uriField.text = "elm327://COM3?profile=raw"
+        compare(page.offlineUri, "elm327://COM3?profile=raw", "a typed profile= wins")
+        page.uriField.text = "elm327://COM3"
+        page.chooseProfile("uds-generic")
+        compare(page.offlineUri, page.uriField.text, "the Profile row's choice wins")
+        verify(page.offlineUri.indexOf("profile=uds-generic") >= 0, page.offlineUri)
+
+        page.chooseProfile("default")
+        compare(page.uriField.text, "elm327://COM3")
+        page.removePlugin(page.pluginList[0].sha256)
+        compare(page.pickedVehicle.plugin, "", "the pick goes with the plugin")
+        compare(page.offlineUri, "elm327://COM3", "and the address is listed as it is")
+        page.uriField.text = ""
+        compare(page.offlineUri, "mock://?profile=user.standin", "the vehicle's file, with no address")
+    }
+
     function test_anImportedFileIsTheVehiclesAndAProfile() {
         let page = createPage()
         verify(!find(page, "signalFilesTitle").visible, "no vehicle, no files")

@@ -637,6 +637,16 @@ QtObject {
             return true
         })
     }
+    // Cells added at the page's end in one write: none of them past the
+    // page's room or not plain, else the write is refused whole
+    function addCells(doc, page, cells) {
+        return write(doc, d => {
+            if (!hasPage(d, page) || !Array.isArray(cells) || !cells.every(c => plain(c)))
+                return false
+            d.pages[page].cells = d.pages[page].cells.concat(cells)
+            return true
+        })
+    }
 
     function removeCell(doc, page, index) {
         return write(doc, d => {
