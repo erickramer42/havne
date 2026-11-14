@@ -168,6 +168,8 @@ inline const char* condition_why_word(uint32_t why)
         return "no_link";
     case ECUIO_CONDITION_WHY_NO_CHECK:
         return "no_check";
+    case ECUIO_CONDITION_WHY_NOT_RECEIVED:
+        return "not_received";
     default:
         return "unknown";
     }

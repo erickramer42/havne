@@ -35,6 +35,9 @@ struct ecuio_session {
      * and the session_start probe marks the first only (ADR-0034 section 4).
      * The session's one caller alone reads and writes it. */
     bool started = false;
+    /* started's copy for any thread: the conditions' states judge what the
+     * session gets only once it runs */
+    std::atomic<bool> ran{false};
     std::mutex callback_mutex;
     std::vector<std::pair<ecuio_frame_callback_t, void*>> callbacks;
     /* Under the same mutex: the values callbacks (ADR-0024) */
@@ -67,6 +70,15 @@ struct ecuio_session {
     mutable std::mutex condition_states_mutex;
     std::vector<ecuio_condition_state_t> condition_states;
     uint32_t condition_states_generation = 0;
+    /* Set with the states: each condition's signal terms' def ids and its
+     * join, for the getter's ECUIO_CONDITION_WHY_NOT_RECEIVED (count 0 for
+     * one the bind left unavailable) */
+    struct condition_read {
+        uint16_t ids[ECUIO_CONDITION_MAX_TERMS] = {};
+        uint8_t count = 0;
+        uint8_t any = 0;
+    };
+    std::vector<condition_read> condition_reads;
     ecuio_transport_t* transport = nullptr;
     /* The profile's set: the registry's static one, or, under
      * uds-generic, the session's own below (ADR-0020). */

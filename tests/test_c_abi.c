@@ -663,6 +663,7 @@ int main(void)
         offsetof(ecuio_recorder_state_t, reason) != 40 ||
         offsetof(ecuio_recorder_state_t, conditions_lost) != 168 ||
         ECUIO_CONDITION_HELD != 8 || ECUIO_ERR_RECORDING_FAILED != 18 ||
+        ECUIO_CONDITION_WHY_NOT_RECEIVED != 8 ||
         ECUIO_VALIDATE_ERR_FORMULA != 18 ||
         ecuio_recorder_open(&record_options, &recorder) !=
             ECUIO_ERR_NULL_ARGUMENT ||

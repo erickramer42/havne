@@ -66,8 +66,8 @@ ConditionState = collections.namedtuple(
     "ConditionState", "key state stale available why since_us fired value generation")
 ConditionState.__doc__ = """A condition's state in a session: "on" or
 "off", stale, whether the session can judge it and else why not (a
-Binding's words, and "no_link" and "no_check" for a term the session
-doesn't judge), the time of its last event, its firings since the attach
+Binding's words, "no_link" and "no_check" for a term the session
+doesn't judge, and "not_received" for a signal it reports it doesn't get), the time of its last event, its firings since the attach
 and the sample that settled its last event"""
 
 _TESTS = {e.ECUIO_TERM_ABOVE: "above", e.ECUIO_TERM_BELOW: "below",
@@ -84,7 +84,8 @@ _WHYS = {e.ECUIO_CONDITION_WHY_DISABLED: "disabled",
          e.ECUIO_CONDITION_WHY_NOT_A_NUMBER: "not_a_number",
          e.ECUIO_CONDITION_WHY_ENUM_ORDER: "enum_order",
          e.ECUIO_CONDITION_WHY_NO_LINK: "no_link",
-         e.ECUIO_CONDITION_WHY_NO_CHECK: "no_check"}
+         e.ECUIO_CONDITION_WHY_NO_CHECK: "no_check",
+         e.ECUIO_CONDITION_WHY_NOT_RECEIVED: "not_received"}
 _NONE = 0xFFFFFFFF
 
 

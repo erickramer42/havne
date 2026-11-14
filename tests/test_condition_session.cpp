@@ -706,6 +706,33 @@ TEST(ConditionSessionTest, ATermOnAComputedSignalGoesStaleWithItsLeaf)
     ecuio_signal_file_free(file);
 }
 
+/* A session with no requests says what its support report disclaims: the
+ * mock under obd2 lists fuel pressure (PID 0A) unsupported, so once the
+ * session runs a condition on it can't be judged and says why */
+TEST(ConditionSessionTest, AConditionOnASignalTheMockDisclaimsSaysSo)
+{
+    Session s("mock://x?profile=obd2");
+    ASSERT_NE(s.s, nullptr);
+    ASSERT_EQ(attach(s.s, condition(0, R"({"signal":["obd2.pid_0a"],)"
+                                       R"("unit":"kPa","above":1})")),
+              ECUIO_OK);
+    EXPECT_EQ(states_of(s.s)[0].flags, ECUIO_CONDITION_STALE)
+        << "nothing marked before the session runs";
+    ASSERT_EQ(ecuio_session_start(s.s), ECUIO_OK);
+    ecuio_condition_state_t st{};
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    do {
+        st = states_of(s.s)[0];
+        if (st.flags == ECUIO_CONDITION_UNAVAILABLE) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    } while (std::chrono::steady_clock::now() < deadline);
+    EXPECT_EQ(st.flags, ECUIO_CONDITION_UNAVAILABLE);
+    EXPECT_EQ(st.why, ECUIO_CONDITION_WHY_NOT_RECEIVED);
+}
+
 /* One evaluator, two ways: the mock's worker judging its own frames, and
  * a replay of the recording of them at full speed. The events are equal
  * by condition, state, flags, term, value and time from the first frame;

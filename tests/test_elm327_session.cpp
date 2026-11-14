@@ -5,9 +5,11 @@
 
 #include <gtest/gtest.h>
 
+#include "ecuio/conditions.h"
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
+#include "ecuio/signals.h"
 #include "ecuio/recording.h"
 #include "elm327_log.h" /* core/src */
 #include "elm327_protocol.h" /* core/src: elm327_pack_count */
@@ -4247,4 +4249,143 @@ TEST(Elm327StreamTest, ThePortTakesOnlyTheOpenLinksBytes)
     EXPECT_FALSE(
         port.ops->write(port.impl, reinterpret_cast<const uint8_t*>("\r"), 1));
     port.ops->close(port.impl);
+}
+
+/* A condition never judged whose signal the session reports it doesn't
+ * get says so once the session runs (ECUIO_CONDITION_WHY_NOT_RECEIVED):
+ * a PID the bitmaps leave out (unsupported), a DID the ECU refuses (7F 22
+ * 31, its request dropped) and a signal computed from it, a field past
+ * its replies (absent); any term of an all, every term of an any (an any
+ * with a received term false and the other unjudged is never judged and
+ * says nothing). A received signal's conditions are judged, a computed
+ * one's too */
+TEST_F(Elm327SessionTest, AConditionOnASignalTheSessionDoesntGetSaysSo)
+{
+    Withheld speed({0x0D});
+    const std::string json =
+        R"({"havne_signals": 1, "name": "Not received",)"
+        R"( "source": {"name": "test_elm327_session"}, "extends": "obd2",)"
+        R"( "ecus": [{"id": "pcm", "rx": "7E8"}], "signals": [)"
+        R"({"key": "good", "name": "Good", "ecu": "pcm",)"
+        R"( "read": {"service": "22", "number": "1E1C"},)"
+        R"( "field": {"byte": 0, "bits": 16}, "unit": "kPa"},)"
+        R"({"key": "bad", "name": "Bad", "ecu": "pcm",)"
+        R"( "read": {"service": "22", "number": "ABCD"},)"
+        R"( "field": {"byte": 0, "bits": 16}, "unit": "kPa"},)"
+        R"({"key": "twice", "name": "Twice", "kind": "computed",)"
+        R"( "expr": "bad * 2", "unit": "kPa"},)"
+        R"({"key": "fine", "name": "Fine", "kind": "computed",)"
+        R"( "expr": "good * 2", "unit": "kPa"},)"
+        R"({"key": "past", "name": "Past", "ecu": "pcm",)"
+        R"( "read": {"service": "22", "number": "1E1C"},)"
+        R"( "field": {"byte": 4, "bits": 8}, "unit": "kPa"}]})";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const std::string profile = ecuio_signal_file_profile(file);
+    ASSERT_EQ(ecuio_profile_register(profile.c_str(),
+                                     ecuio_signal_file_set(file), nullptr),
+              ECUIO_OK);
+    {
+        Session s;
+        ASSERT_EQ(
+            s.create(uri("?profile=" + profile + "&identify=0&diagnose=0")),
+            ECUIO_OK)
+            << ecuio_last_error_detail();
+        const auto term = [](const char* ref, const char* unit) {
+            return std::string(R"({"signal":[")") + ref + R"("],"unit":")" +
+                   unit + R"(","above":1})";
+        };
+        const std::string rpm = term("obd2.rpm", "RPM");
+        const std::string kmh = term("obd2.speed", "km/h");
+        const std::string bad = term("key:bad", "kPa");
+        /* False on every value: an any of it stays unjudged, never
+         * judged, while its other term can't be judged */
+        const std::string fine_low =
+            R"({"signal":["key:fine"],"unit":"kPa","below":1})";
+        const std::string whens[] = {
+            rpm,                                         /* 0 received */
+            bad,                                         /* 1 refused */
+            term("key:twice", "kPa"),                    /* 2 computed */
+            kmh,                                         /* 3 unsupported */
+            R"({"all":[)" + rpm + "," + kmh + "]}",      /* 4 */
+            R"({"any":[)" + rpm + "," + kmh + "]}",      /* 5 */
+            R"({"any":[)" + kmh + "," + bad + "]}",      /* 6 */
+            term("key:good", "kPa"),                     /* 7 received */
+            term("key:fine", "kPa"),                     /* 8 computed */
+            term("key:past", "kPa"),                     /* 9 absent */
+            R"({"any":[)" + kmh + "," + fine_low + "]}", /* 10 */
+        };
+        std::string conditions = R"({"havne_conditions":1,"conditions":[)";
+        for (size_t i = 0; i < 11; ++i) {
+            const std::string k = std::to_string(i);
+            conditions += (i == 0 ? "" : ",") + std::string(R"({"key":"c)") +
+                          k + R"(","name":"C)" + k + R"(","when":)" + whens[i] +
+                          "}";
+        }
+        conditions += "]}";
+        ecuio_condition_set_t* set = nullptr;
+        ASSERT_EQ(ecuio_condition_set_load(conditions.data(), conditions.size(),
+                                           &set),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        ASSERT_EQ(ecuio_session_set_conditions(s.s, set, file), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_condition_set_free(set);
+        ecuio_condition_state_t st[11] = {};
+        uint32_t n = 0;
+        ASSERT_EQ(ecuio_session_get_condition_states(s.s, st, 11, &n),
+                  ECUIO_OK);
+        for (size_t i = 0; i < 11; ++i) {
+            EXPECT_EQ(st[i].flags, ECUIO_CONDITION_STALE)
+                << i << ": nothing judged before the session runs";
+        }
+        s.start();
+        const auto not_received = [&](size_t i) {
+            return st[i].flags == ECUIO_CONDITION_UNAVAILABLE &&
+                   st[i].why == ECUIO_CONDITION_WHY_NOT_RECEIVED;
+        };
+        const auto settled = [&] {
+            EXPECT_EQ(ecuio_session_get_condition_states(s.s, st, 11, &n),
+                      ECUIO_OK);
+            return st[0].since_us != 0 && st[7].since_us != 0 &&
+                   st[8].since_us != 0 && not_received(1) && not_received(2) &&
+                   not_received(3) && not_received(4) && not_received(6) &&
+                   not_received(9);
+        };
+        EXPECT_TRUE(wait_for(settled, 5000));
+        for (size_t i = 0; i < 11; ++i) {
+            const bool want = i != 0 && i != 5 && i != 7 && i != 8 && i != 10;
+            EXPECT_EQ(not_received(i), want)
+                << i << ": flags " << st[i].flags << ", why " << st[i].why;
+        }
+        EXPECT_NE(st[5].since_us, 0u) << "an any judged by its engine speed";
+        EXPECT_EQ(st[10].flags, ECUIO_CONDITION_STALE)
+            << "an any with a term on a signal received, false, is never "
+               "judged and not marked";
+        EXPECT_EQ(st[10].since_us, 0u);
+
+        /* One reply of the refused DID judges its condition; once that
+         * sample passes its age bound the condition is STALE in the state
+         * it was judged to, not unavailable: judged once, never marked */
+        ecuio_frame_t f{};
+        f.arbitration_id = 0x7E8;
+        f.flags = ECUIO_FRAME_FLAG_REASSEMBLED;
+        f.timestamp_us = st[7].since_us;
+        const uint8_t reply[] = {0x62, 0xAB, 0xCD, 0x00, 0x05};
+        std::memcpy(f.data, reply, sizeof reply);
+        f.data_length = sizeof reply;
+        ecuio_session_dispatch_callbacks(s.s, &f);
+        const auto kept = [&] {
+            EXPECT_EQ(ecuio_session_get_condition_states(s.s, st, 11, &n),
+                      ECUIO_OK);
+            return st[1].since_us != 0 && st[1].flags == ECUIO_CONDITION_STALE;
+        };
+        EXPECT_TRUE(wait_for(kept, 8000))
+            << "flags " << st[1].flags << ", why " << st[1].why;
+        EXPECT_EQ(st[1].state, ECUIO_CONDITION_ON);
+        EXPECT_EQ(st[1].why, ECUIO_CONDITION_WHY_NONE);
+    }
+    ASSERT_EQ(ecuio_profile_unregister(profile.c_str()), ECUIO_OK);
+    ecuio_signal_file_free(file);
 }
