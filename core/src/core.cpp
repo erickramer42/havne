@@ -1341,12 +1341,12 @@ ecuio_unregister_conditions_callback(ecuio_session_t* session,
 
 namespace {
 
-/* Never judged since the attach: STALE with no event, and not left
- * unavailable by the bind */
-bool never_judged(const ecuio_condition_state_t& s)
+/* Available, with a term whose signal has no sample since the attach */
+bool unsampled(const ecuio_condition_state_t& s,
+               const ecuio_session::condition_read& r)
 {
-    return (s.flags & ECUIO_CONDITION_UNAVAILABLE) == 0 &&
-           (s.flags & ECUIO_CONDITION_STALE) != 0 && s.since_us == 0;
+    return (s.flags & ECUIO_CONDITION_UNAVAILABLE) == 0 && r.count != 0 &&
+           r.sampled != (1u << r.count) - 1u;
 }
 
 /* One byte per def of the session's set: 1 for a def the session reports
@@ -1414,8 +1414,9 @@ void defs_not_received(ecuio_session_t* session, std::vector<uint8_t>& gone)
     }
 }
 
-/* ECUIO_CONDITION_WHY_NOT_RECEIVED for each condition never judged whose
- * terms read a def not received: any term, or every term of an ANY */
+/* ECUIO_CONDITION_WHY_NOT_RECEIVED for each condition whose terms read a
+ * def not received and unsampled since the attach: any term (an all can't
+ * turn ON), or every term of an ANY */
 void mark_not_received(ecuio_session_t* session,
                        const std::vector<ecuio_session::condition_read>& reads,
                        ecuio_condition_state_t* out, uint32_t n)
@@ -1436,12 +1437,13 @@ void mark_not_received(ecuio_session_t* session,
     };
     for (uint32_t i = 0; i < n && i < reads.size(); ++i) {
         const ecuio_session::condition_read& r = reads[i];
-        if (!never_judged(out[i]) || r.count == 0) {
+        if (!unsampled(out[i], r)) {
             continue;
         }
         uint32_t missing = 0;
         for (uint32_t k = 0; k < r.count; ++k) {
-            missing += received(r.ids[k]) ? 0u : 1u;
+            const bool sampled = ((r.sampled >> k) & 1u) != 0;
+            missing += sampled || received(r.ids[k]) ? 0u : 1u;
         }
         if (r.any != 0 ? missing == r.count : missing > 0) {
             out[i].flags = ECUIO_CONDITION_UNAVAILABLE;
@@ -1469,9 +1471,12 @@ ecuio_status_t ecuio_session_get_condition_states(ecuio_session_t* session,
     {
         std::lock_guard<std::mutex> lock(session->condition_states_mutex);
         count = static_cast<uint32_t>(session->condition_states.size());
+        const std::vector<ecuio_session::condition_read>& now =
+            session->condition_reads;
         for (uint32_t i = 0; i < count && i < capacity; ++i) {
             out[i] = session->condition_states[i];
-            unjudged = unjudged || (ran && never_judged(out[i]));
+            unjudged = unjudged ||
+                       (ran && i < now.size() && unsampled(out[i], now[i]));
         }
         try {
             if (unjudged) {
@@ -1606,6 +1611,21 @@ void ecuio_session_dispatch_callbacks(
         }
     }
 
+    /* A signal's first sample since the attach: the terms sampled, for
+     * the states' getter, while the attach is still the newest */
+    if (conditions != nullptr &&
+        conditions->first_samples != conditions->first_samples_published) {
+        conditions->first_samples_published = conditions->first_samples;
+        std::lock_guard<std::mutex> lock(session->condition_states_mutex);
+        if (session->condition_states_generation == conditions->generation) {
+            std::vector<ecuio_session::condition_read>& reads =
+                session->condition_reads;
+            for (uint32_t i = 0;
+                 i < reads.size() && i < conditions->conditions.size(); ++i) {
+                reads[i].sampled = conditions->sampled_terms(i);
+            }
+        }
+    }
     /* Last, what the frame changed among the conditions: the states, for
      * the attach they still belong to, then the callbacks and queues */
     if (changed == 0) {

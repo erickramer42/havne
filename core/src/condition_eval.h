@@ -137,6 +137,10 @@ struct ecuio_condition_eval {
     uint64_t next_check_us = UINT64_MAX;
     uint64_t frame = 0;
     uint64_t newest_us = 0; /* the latest time judge was given */
+    /* Signals sampled since the make, counted at each one's first
+     * sample; the session publishes sampled_terms when it moves */
+    uint32_t first_samples = 0;
+    uint32_t first_samples_published = 0;
     uint32_t generation = 0;
     /* Events that found the buffer full: the bound above broken. Never
      * counts in a correct build; fuzz_condition_file holds it to 0. */
@@ -158,6 +162,10 @@ struct ecuio_condition_eval {
 
     /* Condition index's state as it stands */
     ecuio_condition_state_t state_of(uint32_t index) const;
+
+    /* Condition index's terms whose signal has a sample since the make,
+     * a bit each from term 0; 0 for a condition left unavailable */
+    uint8_t sampled_terms(uint32_t index) const;
 
     /* The bytes the evaluator holds: its own and its vectors' */
     size_t bytes() const;

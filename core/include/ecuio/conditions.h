@@ -428,17 +428,22 @@ typedef struct ecuio_condition_state {
  * last the session held. ECUIO_ERR_NULL_ARGUMENT for a NULL session or
  * out_count, or a NULL out with a capacity.
  *
- * Once the session has started, a condition never judged since the
- * attach (STALE, since_us 0) whose terms read a signal the session
- * reports it doesn't get reads
- * ECUIO_CONDITION_UNAVAILABLE with ECUIO_CONDITION_WHY_NOT_RECEIVED: the
- * signal is unsupported or absent (ecuio/profile.h's lists), its request
- * was dropped (a refusal, the probe, a DID the scan hasn't found, a PID
- * ?poll= doesn't ask), or it is computed from such a signal. Any term
- * does it, or with ECUIO_CONDITION_INFO_ANY every term. Judged at each
- * call from the lists as they stand, so it follows a walk or a rescan;
- * a term's later references are never tried (ADR-0063 section 2: the
- * first the set provides is the one read). */
+ * Once the session has started, a condition reads
+ * ECUIO_CONDITION_UNAVAILABLE with ECUIO_CONDITION_WHY_NOT_RECEIVED while
+ * a term reads a signal the session reports it doesn't get and has had
+ * no sample of since the attach: the signal is unsupported or absent
+ * (ecuio/profile.h's lists), its request was dropped (a refusal, the
+ * probe, a DID the scan hasn't found, a PID ?poll= doesn't ask), or it is
+ * computed from such a signal. Any such term does it, since an all can't
+ * turn ON without it, whatever its other terms read; with
+ * ECUIO_CONDITION_INFO_ANY every term must be such, so an any with a term
+ * on a signal received reads as that term judges it (STALE while it is
+ * false). A term sampled once is judged as any other, and goes STALE if
+ * its signal stops. Judged at each call from the lists as they stand, so
+ * availability can change after the attach (a scanned DID found, a
+ * re-walk): read it again rather than keep it. A term's later references
+ * are never tried (ADR-0063 section 2: the first the set provides is the
+ * one read). */
 ecuio_status_t ecuio_session_get_condition_states(
     ecuio_session_t* session, ecuio_condition_state_t* out, uint32_t capacity,
     uint32_t* out_count);

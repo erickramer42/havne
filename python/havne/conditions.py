@@ -67,8 +67,9 @@ ConditionState = collections.namedtuple(
 ConditionState.__doc__ = """A condition's state in a session: "on" or
 "off", stale, whether the session can judge it and else why not (a
 Binding's words, "no_link" and "no_check" for a term the session
-doesn't judge, and "not_received" for a signal it reports it doesn't get), the time of its last event, its firings since the attach
-and the sample that settled its last event"""
+doesn't judge, and "not_received" for a signal it reports it doesn't
+get), the time of its last event, its firings since the attach and the
+sample that settled its last event"""
 
 _TESTS = {e.ECUIO_TERM_ABOVE: "above", e.ECUIO_TERM_BELOW: "below",
           e.ECUIO_TERM_EQUALS: "equals", e.ECUIO_TERM_DIFFERS: "differs"}

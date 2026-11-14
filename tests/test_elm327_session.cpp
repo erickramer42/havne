@@ -22,6 +22,7 @@
 #include "new_counter.h"
 #include "open_handles.h"
 #include "temp_name.h"
+#include "worker_hold.h"
 
 #include <algorithm>
 #include <atomic>
@@ -4251,14 +4252,14 @@ TEST(Elm327StreamTest, ThePortTakesOnlyTheOpenLinksBytes)
     port.ops->close(port.impl);
 }
 
-/* A condition never judged whose signal the session reports it doesn't
- * get says so once the session runs (ECUIO_CONDITION_WHY_NOT_RECEIVED):
- * a PID the bitmaps leave out (unsupported), a DID the ECU refuses (7F 22
- * 31, its request dropped) and a signal computed from it, a field past
- * its replies (absent); any term of an all, every term of an any (an any
- * with a received term false and the other unjudged is never judged and
- * says nothing). A received signal's conditions are judged, a computed
- * one's too */
+/* A condition with a term on a signal the session reports it doesn't
+ * get, and has had no sample of, says so once the session runs
+ * (ECUIO_CONDITION_WHY_NOT_RECEIVED): a PID the bitmaps leave out
+ * (unsupported), a DID the ECU refuses (7F 22 31, its request dropped)
+ * and a signal computed from it, a field past its replies (absent); any
+ * such term of an all, whatever its other terms read, every term of an
+ * any (an any with a received term reads as that term judges it). A
+ * received signal's conditions are judged, a computed one's too */
 TEST_F(Elm327SessionTest, AConditionOnASignalTheSessionDoesntGetSaysSo)
 {
     Withheld speed({0x0D});
@@ -4287,11 +4288,14 @@ TEST_F(Elm327SessionTest, AConditionOnASignalTheSessionDoesntGetSaysSo)
                                      ecuio_signal_file_set(file), nullptr),
               ECUIO_OK);
     {
+        WorkerHold hold;
         Session s;
+        WorkerHold::Release unhold{hold};
         ASSERT_EQ(
             s.create(uri("?profile=" + profile + "&identify=0&diagnose=0")),
             ECUIO_OK)
             << ecuio_last_error_detail();
+        ASSERT_EQ(hold.attach(s.s), ECUIO_OK);
         const auto term = [](const char* ref, const char* unit) {
             return std::string(R"({"signal":[")") + ref + R"("],"unit":")" +
                    unit + R"(","above":1})";
@@ -4303,6 +4307,9 @@ TEST_F(Elm327SessionTest, AConditionOnASignalTheSessionDoesntGetSaysSo)
          * judged, while its other term can't be judged */
         const std::string fine_low =
             R"({"signal":["key:fine"],"unit":"kPa","below":1})";
+        /* False on every value: an all of it is judged OFF at once */
+        const std::string rpm_low =
+            R"({"signal":["obd2.rpm"],"unit":"RPM","below":1})";
         const std::string whens[] = {
             rpm,                                         /* 0 received */
             bad,                                         /* 1 refused */
@@ -4315,9 +4322,10 @@ TEST_F(Elm327SessionTest, AConditionOnASignalTheSessionDoesntGetSaysSo)
             term("key:fine", "kPa"),                     /* 8 computed */
             term("key:past", "kPa"),                     /* 9 absent */
             R"({"any":[)" + kmh + "," + fine_low + "]}", /* 10 */
+            R"({"all":[)" + rpm_low + "," + bad + "]}",  /* 11 */
         };
         std::string conditions = R"({"havne_conditions":1,"conditions":[)";
-        for (size_t i = 0; i < 11; ++i) {
+        for (size_t i = 0; i < 12; ++i) {
             const std::string k = std::to_string(i);
             conditions += (i == 0 ? "" : ",") + std::string(R"({"key":"c)") +
                           k + R"(","name":"C)" + k + R"(","when":)" + whens[i] +
@@ -4332,11 +4340,11 @@ TEST_F(Elm327SessionTest, AConditionOnASignalTheSessionDoesntGetSaysSo)
         ASSERT_EQ(ecuio_session_set_conditions(s.s, set, file), ECUIO_OK)
             << ecuio_last_error_detail();
         ecuio_condition_set_free(set);
-        ecuio_condition_state_t st[11] = {};
+        ecuio_condition_state_t st[12] = {};
         uint32_t n = 0;
-        ASSERT_EQ(ecuio_session_get_condition_states(s.s, st, 11, &n),
+        ASSERT_EQ(ecuio_session_get_condition_states(s.s, st, 12, &n),
                   ECUIO_OK);
-        for (size_t i = 0; i < 11; ++i) {
+        for (size_t i = 0; i < 12; ++i) {
             EXPECT_EQ(st[i].flags, ECUIO_CONDITION_STALE)
                 << i << ": nothing judged before the session runs";
         }
@@ -4346,28 +4354,33 @@ TEST_F(Elm327SessionTest, AConditionOnASignalTheSessionDoesntGetSaysSo)
                    st[i].why == ECUIO_CONDITION_WHY_NOT_RECEIVED;
         };
         const auto settled = [&] {
-            EXPECT_EQ(ecuio_session_get_condition_states(s.s, st, 11, &n),
+            EXPECT_EQ(ecuio_session_get_condition_states(s.s, st, 12, &n),
                       ECUIO_OK);
             return st[0].since_us != 0 && st[7].since_us != 0 &&
                    st[8].since_us != 0 && not_received(1) && not_received(2) &&
                    not_received(3) && not_received(4) && not_received(6) &&
-                   not_received(9);
+                   not_received(9) && not_received(11);
         };
-        EXPECT_TRUE(wait_for(settled, 5000));
-        for (size_t i = 0; i < 11; ++i) {
+        /* Absent takes three of 1E1C's replies: a loaded machine's
+         * rotation has needed more than 5 s */
+        EXPECT_TRUE(wait_for(settled, 20000));
+        for (size_t i = 0; i < 12; ++i) {
             const bool want = i != 0 && i != 5 && i != 7 && i != 8 && i != 10;
             EXPECT_EQ(not_received(i), want)
                 << i << ": flags " << st[i].flags << ", why " << st[i].why;
         }
         EXPECT_NE(st[5].since_us, 0u) << "an any judged by its engine speed";
         EXPECT_EQ(st[10].flags, ECUIO_CONDITION_STALE)
-            << "an any with a term on a signal received, false, is never "
-               "judged and not marked";
+            << "an any with a term on a signal received, false, is STALE "
+               "and not marked";
         EXPECT_EQ(st[10].since_us, 0u);
+        EXPECT_NE(st[11].since_us, 0u)
+            << "an all judged OFF by its engine speed, and still marked";
 
-        /* One reply of the refused DID judges its condition; once that
-         * sample passes its age bound the condition is STALE in the state
-         * it was judged to, not unavailable: judged once, never marked */
+        /* One reply of the refused DID, dispatched here with the worker
+         * parked, judges its conditions; once that sample passes its age
+         * bound the condition is STALE in the state it was judged to, not
+         * unavailable: sampled once, never marked */
         ecuio_frame_t f{};
         f.arbitration_id = 0x7E8;
         f.flags = ECUIO_FRAME_FLAG_REASSEMBLED;
@@ -4375,9 +4388,16 @@ TEST_F(Elm327SessionTest, AConditionOnASignalTheSessionDoesntGetSaysSo)
         const uint8_t reply[] = {0x62, 0xAB, 0xCD, 0x00, 0x05};
         std::memcpy(f.data, reply, sizeof reply);
         f.data_length = sizeof reply;
+        ASSERT_TRUE(hold.hold(5000)) << "the worker parks at its next frame";
         ecuio_session_dispatch_callbacks(s.s, &f);
+        hold.release();
+        ASSERT_EQ(ecuio_session_get_condition_states(s.s, st, 12, &n),
+                  ECUIO_OK);
+        EXPECT_EQ(st[11].flags & ECUIO_CONDITION_UNAVAILABLE, 0u)
+            << "its refused DID sampled: the all is judged, OFF";
+        EXPECT_EQ(st[11].state, ECUIO_CONDITION_OFF);
         const auto kept = [&] {
-            EXPECT_EQ(ecuio_session_get_condition_states(s.s, st, 11, &n),
+            EXPECT_EQ(ecuio_session_get_condition_states(s.s, st, 12, &n),
                       ECUIO_OK);
             return st[1].since_us != 0 && st[1].flags == ECUIO_CONDITION_STALE;
         };

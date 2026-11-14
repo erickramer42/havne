@@ -72,11 +72,14 @@ struct ecuio_session {
     uint32_t condition_states_generation = 0;
     /* Set with the states: each condition's signal terms' def ids and its
      * join, for the getter's ECUIO_CONDITION_WHY_NOT_RECEIVED (count 0 for
-     * one the bind left unavailable) */
+     * one the bind left unavailable), and its terms sampled since the
+     * attach (a bit each), which the worker sets at a signal's first
+     * sample (ecuio_condition_eval::sampled_terms) */
     struct condition_read {
         uint16_t ids[ECUIO_CONDITION_MAX_TERMS] = {};
         uint8_t count = 0;
         uint8_t any = 0;
+        uint8_t sampled = 0;
     };
     std::vector<condition_read> condition_reads;
     ecuio_transport_t* transport = nullptr;

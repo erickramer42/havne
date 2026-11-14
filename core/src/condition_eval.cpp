@@ -316,6 +316,7 @@ void ecuio_condition_eval::feed(uint64_t now_us, const ecuio_value_t& v)
     s.fresh_until_us = now_us + bound;
     s.value = v.value;
     s.time_us = now_us;
+    first_samples += s.sampled == 0 ? 1u : 0u;
     s.sampled = 1;
     for (uint16_t k = s.first_term; earlier && k != kEmpty; k = terms[k].next) {
         if (terms[k].judged != 0 && terms[k].max_age_us == 0) {
@@ -431,6 +432,18 @@ uint32_t ecuio_condition_eval::judge(uint64_t time_us,
         events[at] = e;
     }
     return event_count;
+}
+
+uint8_t ecuio_condition_eval::sampled_terms(uint32_t index) const
+{
+    const condition& c = conditions[index];
+    uint8_t bits = 0;
+    for (uint32_t k = 0; k < c.term_count && k < 8; ++k) {
+        if (signals[terms[c.first_term + k].signal].sampled != 0) {
+            bits = static_cast<uint8_t>(bits | (1u << k));
+        }
+    }
+    return bits;
 }
 
 ecuio_condition_state_t ecuio_condition_eval::state_of(uint32_t index) const
