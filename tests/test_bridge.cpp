@@ -4079,6 +4079,47 @@ TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
     EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty());
 }
 
+/* ADR-0027 section 3: the vehicle is known once 09 02 has answered, while
+ * the rest of the identification is still out. The fake holds every
+ * Service 0x22 request (7F 22 78, no answer), so the list's DIDs stay out
+ * about 5 s each and no identity line comes within the wait. */
+TEST(BridgeTest, TheVinIsTakenWhileTheRestOfTheIdentificationIsOut)
+{
+    FakeEnvArm hold("ECUIO_FAKE_HELD_SERVICE", "22");
+    SessionBridge bridge;
+    int identified = 0;
+    QObject::connect(&bridge, &SessionBridge::vehicleIdentified,
+                     [&identified]() { ++identified; });
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    // A bare URI runs obd2, which identifies
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("j2534://%1")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH)))
+            .isEmpty());
+    ASSERT_TRUE(spinUntil([&identified]() { return identified > 0; }, 4000))
+        << "vehicleIdentified waited for the whole list:\n"
+        << log.join('\n').toStdString();
+    EXPECT_EQ(
+        bridge.vinKey(QStringLiteral("salt")),
+        QString::fromLatin1(
+            QCryptographicHash::hash(QByteArrayLiteral("saltFAKEJ2534VIN00001"),
+                                     QCryptographicHash::Sha256)
+                .toHex()));
+    EXPECT_EQ(log.filter(QRegularExpression(QStringLiteral("^VIN: "))).size(),
+              1);
+    EXPECT_TRUE(
+        log.filter(QRegularExpression(QStringLiteral("^ECU 0x7E8 identity: ")))
+            .isEmpty())
+        << "the list isn't complete, so no identity line yet";
+    spinLoop(300);
+    EXPECT_EQ(identified, 1) << "once a session";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty());
+}
+
 /* ADR-0043: the "VIN:" line and Settings' lookup, one summary. The VINs
  * are made up around FAKE, their check digits by 49 CFR 565.15 */
 TEST(BridgeTest, AVinSummarySaysItsYearMakeAndCheckDigit)

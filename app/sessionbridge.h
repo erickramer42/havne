@@ -1530,6 +1530,8 @@ private:
     std::vector<uint16_t> m_absentIds;
     // What each channel's ECU said it is (ADR-0021), logged once complete
     void pollChannelIdentity();
+    // Channel 0's VIN into m_vin once core has it in (ECUIO_IDENTITY_VIN)
+    void takeVin(const ecuio_channel_identity_t& s);
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     void pollSleep();       // the tick: "Asleep for N s" after a sleep
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};

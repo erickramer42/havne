@@ -4415,7 +4415,8 @@ QString SessionBridge::sessionReturnedText(const ecuio_channel_support_t& s)
  * once the whole list has an outcome, and again when a recovery re-asks
  * the unanswered items and they settle. One line per ECU, so the VIN
  * and the calibration IDs land in the log and in a recording's
- * events.log together. */
+ * events.log together. The vehicle's VIN is taken as soon as it is in,
+ * whatever else is still out. */
 void SessionBridge::pollChannelIdentity()
 {
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
@@ -4423,34 +4424,39 @@ void SessionBridge::pollChannelIdentity()
     }
     for (uint32_t c = 0; c < m_channelCount; ++c) {
         ecuio_channel_identity_t s{};
-        if (ecuio_session_get_channel_identity(m_session, c, &s) != ECUIO_OK ||
-            (s.flags & ECUIO_IDENTITY_COMPLETE) == 0 ||
+        if (ecuio_session_get_channel_identity(m_session, c, &s) != ECUIO_OK) {
+            continue;
+        }
+        // The vehicle is the first channel's ECU's VIN (ADR-0027 section 3);
+        // a recovery's re-asks settle on the same one and say nothing
+        if (c == 0 && (s.flags & ECUIO_IDENTITY_VIN) != 0) {
+            takeVin(s);
+        }
+        if ((s.flags & ECUIO_IDENTITY_COMPLETE) == 0 ||
             s.generation == m_identityGeneration[c]) {
             continue;
         }
         m_identityGeneration[c] = s.generation;
         emit logMessage(channelIdentityText(s));
-        // The vehicle is the first channel's ECU's VIN (ADR-0027 section 3);
-        // a recovery's re-asks settle on the same one and say nothing
-        if (c == 0) {
-            char text[ECUIO_VIN_TEXT_LEN];
-            const QString vin =
-                ecuio_identity_vin(&s, text, sizeof text) == ECUIO_OK
-                    ? QString::fromLatin1(text)
-                    : QString();
-            if (!vin.isEmpty() && vin != m_vin) {
-                m_vin = vin;
-                // What the VIN says of the car (ADR-0043), beside the
-                // identity line that holds it
-                emit logMessage(
-                    QStringLiteral("VIN: ") +
-                    vinSummary(vin, QDate::currentDate().year() + 1));
-                emit vehicleIdentified();
-                // the inspection's model year (ADR-0045)
-                emit diagnosticsChanged();
-            }
-        }
     }
+}
+
+void SessionBridge::takeVin(const ecuio_channel_identity_t& s)
+{
+    char text[ECUIO_VIN_TEXT_LEN];
+    const QString vin = ecuio_identity_vin(&s, text, sizeof text) == ECUIO_OK
+                            ? QString::fromLatin1(text)
+                            : QString();
+    if (vin.isEmpty() || vin == m_vin) {
+        return;
+    }
+    m_vin = vin;
+    // What the VIN says of the car (ADR-0043)
+    emit logMessage(QStringLiteral("VIN: ") +
+                    vinSummary(vin, QDate::currentDate().year() + 1));
+    emit vehicleIdentified();
+    // the inspection's model year (ADR-0045)
+    emit diagnosticsChanged();
 }
 
 /* Each channel's diagnostics report (ADR-0037), logged once per read
