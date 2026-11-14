@@ -344,6 +344,9 @@ ECUIO_SIM_REPLY_LATE = 2
 ECUIO_SIM_REPLY_PENDING = 1
 ECUIO_SIM_REPLY_STALLED = 8
 ECUIO_SIM_YIELDED = 2
+ECUIO_SOURCE_SHARE_ALIKE = 1
+ECUIO_SOURCE_TEXT_LEN = 0x208
+ECUIO_SOURCE_TEXT_MAX = 0x200
 ECUIO_STRETCH_CRUISES = 2
 ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR = 56.32704
 ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US = 0x989680
@@ -663,6 +666,9 @@ class ecuio_signal_gauge_t(Structure):
     pass
 
 class ecuio_signal_set_t(Structure):
+    pass
+
+class ecuio_signal_source_t(Structure):
     pass
 
 class ecuio_sim_reply_t(Structure):
@@ -1331,6 +1337,16 @@ ecuio_signal_set_t._fields_ = [
     ('computed', POINTER(ecuio_computed_t)),
     ('reserved', (c_uint32 * 4)),
 ]
+ecuio_signal_source_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('reserved', (c_uint32 * 6)),
+    ('name', (c_char * 520)),
+    ('url', (c_char * 520)),
+    ('commit', (c_char * 520)),
+    ('license', (c_char * 520)),
+    ('modified', (c_char * 520)),
+]
 ecuio_sim_reply_t._fields_ = [
     ('reply_id', c_uint32),
     ('flags', c_uint32),
@@ -1554,6 +1570,8 @@ FUNCTIONS = {
     'ecuio_signal_file_name': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_profile': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_signal_file_t)]),  # signals.h
+    'ecuio_signal_file_source': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_source_t)]),  # signals.h
+    'ecuio_signal_file_text': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(c_size_t)]),  # signals.h
     'ecuio_signal_group_name': (c_char_p, [c_uint32]),  # signals.h
     'ecuio_sim_ask': (c_int, [POINTER(ecuio_sim_t), c_uint32, POINTER(c_uint8), c_uint32, c_int64, POINTER(ecuio_sim_reply_t), c_uint32, POINTER(c_uint32)]),  # sim.h
     'ecuio_sim_create': (c_int, [c_char_p, c_char_p, POINTER(POINTER(ecuio_sim_t))]),  # sim.h

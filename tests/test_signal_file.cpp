@@ -7,6 +7,8 @@
 #include <ecuio/signal_sets.h>
 #include "computed.h"
 
+#include <cctype>
+#include <clocale>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -1146,4 +1148,198 @@ TEST(SignalFileTest, AToolsOwnXGaugeStaysIgnored)
         R"("field":{"byte":0},"x-gauge":{"min":9,"max":1,"warn_low":"no"}})"));
     ASSERT_TRUE(f) << ecuio_last_error_detail();
     EXPECT_EQ(gauge_of(f, "a"), nullptr);
+}
+
+namespace {
+
+/* A file with a source block of the given members */
+std::string sourced(const std::string& members)
+{
+    return R"({"havne_signals":1,"name":"Sourced","source":{)" + members +
+           R"(},"ecus":[{"id":"pcm","rx":"7E8"}],"signals":[{"key":"a",)"
+           R"("name":"A",)"
+           R"("read":{"service":"22","number":"D100"},"field":{"byte":0}}]})";
+}
+
+ecuio_signal_source_t source_of(const File& f)
+{
+    ecuio_signal_source_t s{};
+    s.struct_size = sizeof s;
+    EXPECT_EQ(ecuio_signal_file_source(f.get(), &s), ECUIO_OK);
+    return s;
+}
+
+} // namespace
+
+// The source as the file wrote it: every text, "" for one not given,
+// the rest of each field zero, and struct_size core's own (what it filled)
+TEST(SignalFileTest, ItsSourceIsGivenAsTheFileWroteIt)
+{
+    const std::string name(ECUIO_SOURCE_TEXT_MAX, 'n');
+    File all = load(sourced(R"("name":")" + name +
+                            R"(","url":"https://example.com/set",)"
+                            R"("commit":"0123abc","license":"MIT",)"
+                            R"("modified":"converted by hand")"));
+    ASSERT_TRUE(all) << ecuio_last_error_detail();
+    struct Bigger {
+        ecuio_signal_source_t s;
+        uint32_t after;
+    } big;
+    std::memset(&big, 0x5A, sizeof big);
+    big.s.struct_size = sizeof big;
+    ASSERT_EQ(ecuio_signal_file_source(all.get(), &big.s), ECUIO_OK);
+    EXPECT_EQ(big.s.struct_size, sizeof(ecuio_signal_source_t))
+        << "core's own size, what it filled";
+    EXPECT_EQ(big.after, 0x5A5A5A5Au) << "nothing past the struct written";
+    EXPECT_EQ(std::string(big.s.name), name) << "a text at its bound whole";
+    EXPECT_STREQ(big.s.url, "https://example.com/set");
+    EXPECT_STREQ(big.s.commit, "0123abc");
+    EXPECT_STREQ(big.s.license, "MIT");
+    EXPECT_STREQ(big.s.modified, "converted by hand");
+    EXPECT_EQ(big.s.flags, 0u);
+    for (uint32_t r : big.s.reserved) {
+        EXPECT_EQ(r, 0u);
+    }
+    for (size_t i = std::strlen(big.s.url); i < ECUIO_SOURCE_TEXT_LEN; ++i) {
+        ASSERT_EQ(big.s.url[i], '\0') << "zero past the text, at " << i;
+    }
+
+    File one = load(sourced(R"("name":"Only a name")"));
+    ASSERT_TRUE(one) << ecuio_last_error_detail();
+    const ecuio_signal_source_t s = source_of(one);
+    EXPECT_STREQ(s.name, "Only a name");
+    EXPECT_STREQ(s.url, "");
+    EXPECT_STREQ(s.commit, "");
+    EXPECT_STREQ(s.license, "");
+    EXPECT_STREQ(s.modified, "");
+}
+
+TEST(SignalFileTest, ItsSourceRefusesWhatItCantFill)
+{
+    File f = load(sourced(R"("name":"S")"));
+    ASSERT_TRUE(f) << ecuio_last_error_detail();
+    ecuio_signal_source_t s{};
+    s.struct_size = sizeof s;
+    /* Each refusal says why: no earlier call's words are left to read */
+    const auto stale = [] {
+        ecuio_signal_file_t* bad = nullptr;
+        EXPECT_EQ(ecuio_signal_file_load("{", 1, &bad),
+                  ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_STRNE(ecuio_last_error_detail(), "");
+    };
+    stale();
+    EXPECT_EQ(ecuio_signal_file_source(nullptr, &s), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the source needs a file and a struct to fill");
+    stale();
+    EXPECT_EQ(ecuio_signal_file_source(f.get(), nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the source needs a file and a struct to fill");
+    std::memset(&s, 0x5A, sizeof s);
+    s.struct_size = sizeof s - 1;
+    stale();
+    EXPECT_EQ(ecuio_signal_file_source(f.get(), &s),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              "the source's struct_size is " + std::to_string(sizeof s - 1) +
+                  ", under its " + std::to_string(sizeof s) + " bytes");
+    EXPECT_EQ(static_cast<unsigned char>(s.name[0]), 0x5Au) << "untouched";
+    EXPECT_EQ(s.struct_size, sizeof s - 1) << "untouched";
+}
+
+// Creative Commons' share-alike licenses, as SPDX writes them in any
+// case or with spaces; any other license, or a name inside a longer
+// word, isn't
+TEST(SignalFileTest, AShareAlikeLicenseIsKnownInEachSpelling)
+{
+    const struct {
+        const char* license;
+        bool share_alike;
+    } cases[] = {
+        {"CC-BY-SA-4.0", true},
+        {"cc-by-sa-3.0", true},
+        {"CC BY-SA 4.0", true},
+        {"CC-BY-SA", true},
+        {"CC-BY-NC-SA-4.0", true},
+        {"MIT OR CC-BY-SA-4.0", true},
+        {"(CC-BY-SA-2.0-UK)", true},
+        {"CC-BY-SA-4.0+", true},
+        {"CC-BY-4.0", false},
+        {"CC-BY-NC-4.0", false},
+        {"MIT", false},
+        {"XCC-BY-SA-4.0", false},
+        {"1CC-BY-SA", false},
+        {"NOT-CC-BY-SA-4.0", false},
+        {"CC-BY-SAX", false},
+        {"CC-BY-SA4", false},
+    };
+    for (const auto& c : cases) {
+        File f = load(sourced(std::string(R"("name":"S","license":")") +
+                              c.license + "\""));
+        ASSERT_TRUE(f) << ecuio_last_error_detail();
+        EXPECT_EQ(source_of(f).flags,
+                  c.share_alike ? ECUIO_SOURCE_SHARE_ALIKE : 0u)
+            << c.license;
+    }
+    File none = load(sourced(R"("name":"S")"));
+    ASSERT_TRUE(none);
+    EXPECT_EQ(source_of(none).flags, 0u) << "no license, none";
+}
+
+// A byte past ASCII is no letter, whatever the locale: a Qt or Python
+// host sets one, and in Latin-1 the micro sign's 0xB5 is a letter
+TEST(SignalFileTest, AShareAlikeLicenseIsReadAsAsciiInAnyLocale)
+{
+    const auto flags_of = [](const char* license) {
+        File f = load(
+            sourced(std::string(R"("name":"S","license":")") + license + "\""));
+        EXPECT_TRUE(f) << ecuio_last_error_detail();
+        return f ? source_of(f).flags : 0xFFu;
+    };
+    const char* micro_before = "\xC2\xB5"
+                               "CC-BY-SA-4.0";
+    const char* micro_inside = "CC-BY-SA\xC2\xB5";
+    EXPECT_EQ(flags_of(micro_before), ECUIO_SOURCE_SHARE_ALIKE);
+    EXPECT_EQ(flags_of(micro_inside), ECUIO_SOURCE_SHARE_ALIKE);
+
+    const char* before = std::setlocale(LC_CTYPE, nullptr);
+    const std::string saved = before != nullptr ? before : "C";
+    if (std::setlocale(LC_CTYPE, ".1252") != nullptr ||
+        std::setlocale(LC_CTYPE, "en_US.ISO-8859-1") != nullptr ||
+        std::setlocale(LC_CTYPE, "de_DE.ISO-8859-1") != nullptr) {
+        const bool letter = std::isalnum(0xB5) != 0;
+        const uint32_t first = flags_of(micro_before);
+        const uint32_t last = flags_of(micro_inside);
+        std::setlocale(LC_CTYPE, saved.c_str());
+        EXPECT_TRUE(letter) << "the case needs 0xB5 a letter in this locale";
+        EXPECT_EQ(first, ECUIO_SOURCE_SHARE_ALIKE) << "under Latin-1";
+        EXPECT_EQ(last, ECUIO_SOURCE_SHARE_ALIKE) << "under Latin-1";
+    }
+}
+
+// A file's text is the bytes it was read from, spacing and line ends
+// as they were, borrowed for the file's life
+TEST(SignalFileTest, ItsTextIsTheBytesItWasReadFrom)
+{
+    const std::string bytes = "{ \"havne_signals\":1,\r\n  \"name\":\"T\","
+                              "\"source\":{\"name\":\"S\"},\r\n\"ecus\":[{"
+                              "\"id\":\"pcm\",\"rx\":\"7E8\"}],\"signals\":["
+                              "{\"key\":\"a\",\"name\":\"A\",\"read\":{"
+                              "\"service\":\"22\",\"number\":\"D100\"},"
+                              "\"field\":{\"byte\":0}}]  }\n";
+    File f = load(bytes);
+    ASSERT_TRUE(f) << ecuio_last_error_detail();
+    size_t length = 99;
+    const char* text = ecuio_signal_file_text(f.get(), &length);
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(length, bytes.size());
+    EXPECT_EQ(std::string(text, length), bytes);
+    EXPECT_EQ(text[length], '\0');
+    EXPECT_EQ(ecuio_signal_file_text(f.get(), nullptr), text)
+        << "the same text each call, a NULL length skipped";
+
+    length = 99;
+    EXPECT_STREQ(ecuio_signal_file_text(nullptr, &length), "");
+    EXPECT_EQ(length, 0u);
 }

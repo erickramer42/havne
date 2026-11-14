@@ -32,7 +32,7 @@
 
 namespace {
     /* ecuio_last_error_detail's text (error_detail.h), per thread. */
-    thread_local char t_detail[512] = "";
+    thread_local char t_detail[ecuio_detail_max + 1] = "";
 
     enum class ProfileQuery { Absent, Valid, BadValue };
 
