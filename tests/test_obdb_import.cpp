@@ -445,7 +445,7 @@ TEST(ObdbImportTest, ModulesAndRequestsStopAtWhatASessionAsks)
     const auto many = [&](int n) {
         std::string s = "{\"commands\":[";
         for (int i = 0; i < n; ++i) {
-            char did[8];
+            char did[9]; /* room for any int's %X: GCC's format-truncation */
             std::snprintf(did, sizeof did, "%04X", 0x2000 + i);
             s += std::string(i > 0 ? "," : "") +
                  one("", did, sig("D" + std::to_string(i), kByte));
