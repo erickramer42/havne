@@ -735,6 +735,8 @@ ApplicationWindow {
                             value: dashboardView.pickRefs
                         }
                         offlineUri: settingsView.offlineUri
+                        pickedSets: settingsView.pickedSets
+                        profileNames: settingsView.profileNames
                         connectUris: settingsView.connectUris
                         connectVehicleUri: settingsView.vehicleUri
                         connectAdapters: settingsView.connectAdapters

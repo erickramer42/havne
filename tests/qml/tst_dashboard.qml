@@ -334,7 +334,7 @@ TestCase {
             return false
         }, 3000, "the set's rows get values")
         for (const label in gaugeSignals) {
-            compare(all[label].note, "not in this profile: " + label, label)
+            compare(all[label].note, "not in " + profile, label)
             compare(all[label].hasValue, false, label)
         }
     }
@@ -481,7 +481,7 @@ TestCase {
         connect("mock://demo?profile=raw")
         wait(300)   // past a batch or two
         for (const label in gaugeSignals) {
-            compare(all[label].note, "not in this profile: " + label, label)
+            compare(all[label].note, "not in raw", label)
             compare(all[label].hasValue, false, label)
             compare(all[label].valueText, "—", label)
         }
@@ -491,6 +491,47 @@ TestCase {
         connect("mock://demo")
         tryVerify(() => Object.keys(gaugeSignals).every(label => all[label].hasValue),
                   3000, "the same gauges read again")
+    }
+
+    // A gauge without its signal names the vehicle's set that has it while
+    // the session reads another, else the profile the session reads, by
+    // the name the user knows it by
+    function test_aGaugeWithoutItsSignalNamesWhatHasIt() {
+        const file = { havne_signals: 1, name: "Extras", source: { name: "t" },
+                       ecus: [{ id: "pcm", rx: "7E8" }],
+                       signals: [{ key: "a", name: "A", read: { service: "22", number: "D100" },
+                                   field: { byte: 0, bits: 8 } }] }
+        const r = Bridge.importSignalFile(Harness.writeScratchFile("extras.json", JSON.stringify(file)))
+        verify(r.ok, "the file imports")
+        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
+        const cellA = { kind: "digital", w: 2, h: 4, label: "A", refs: ["key:a"], unit: "", options: {} }
+        const cellZ = { kind: "digital", w: 2, h: 4, label: "Z", refs: ["key:z"], unit: "", options: {} }
+        const d = DashboardBook.builtIn("desktop")
+        d.pages = [{ name: "Test", cells: [cellA, cellZ] }]
+        const page = pageOf({}, d, true)
+        page.pickedSets = [{ profile: r.profile, name: "Extras", variant: "" }]
+        page.profileNames = { [r.profile]: "Extras" }
+        const a = findChild(page, "dashCell_0_0")
+        const z = findChild(page, "dashCell_0_1")
+
+        connect("mock://demo")
+        tryVerify(() => a.note === "needs Extras", 3000, "the vehicle's file has it: " + a.note)
+        compare(z.note, "not in mock", "no set has it")
+
+        // A set named as the session's profile is (another variant of the
+        // same plugin) is named by its variant alone
+        page.profileNames = { [r.profile]: "Extras", "mock": "Extras" }
+        page.pickedSets = [{ profile: r.profile, name: "Extras", variant: "v2" }]
+        tryVerify(() => a.note === "needs variant v2", 3000, a.note)
+        page.profileNames = { [r.profile]: "Extras" }
+        page.pickedSets = [{ profile: r.profile, name: "Extras", variant: "v2" }]
+        tryVerify(() => a.note === "needs Extras", 3000, "no variant where the names differ: " + a.note)
+
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        connect("mock://demo?profile=" + r.profile)
+        tryVerify(() => z.note === "not in Extras", 3000, "the file's own name: " + z.note)
+        verify(a.note.indexOf("needs") < 0 && a.note.indexOf("not in") < 0, "read here: " + a.note)
     }
 
     // A phone on its side: the page beside the sidebar is narrow and

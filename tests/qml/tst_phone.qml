@@ -3318,6 +3318,31 @@ TestCase {
         compare(find(main.contentItem, "recordingsPage").baselineFolder, folder)
     }
 
+    // Main hands the Dashboard Settings' picked sets and profile names, so
+    // its offline list and its gauges' notes name the vehicle's plugin
+    function test_theDashboardTakesSettingsPickedSetsAndNames() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const settings = find(main.contentItem, "settingsPage")
+        const dash = find(main.contentItem, "dashboardPage")
+        verify(Bridge.importPlugin(Harness.writeExamplePlugin("main-sets.havne-plugin.json")).ok)
+        try {
+            settings.loadPlugins()
+            settings.vehicles = { salt: "", picked: "v1", list: [{
+                id: "v1", label: "Desk car", vinKey: "", uri: "", plotted: [], unplotted: [],
+                signals: [], own: "", plugin: "plugin.example-sim.my2019", baseline: "" }] }
+            compare(JSON.stringify(dash.pickedSets),
+                    JSON.stringify([{ profile: "plugin.example-sim.my2019",
+                                      name: "Example: the simulated car", variant: "my2019" }]))
+            compare(dash.profileNames["plugin.example-sim.base"], "Example: the simulated car")
+            compare(dash.offlineUri, settings.offlineUri)
+        } finally {
+            for (const p of Bridge.plugins())
+                Bridge.removePlugin(p.sha256)
+            settings.loadPlugins()
+        }
+    }
+
     // Main hands the bridge the Dashboard's cells (ADR-0056's default
     // pick): one list of refs for each cell, its counterparts in the
     // built-in sets among them, a blank cell's none

@@ -51,6 +51,7 @@ TestCase {
         Theme.night = "off"
         Theme.look = "dark"
         Bridge.unitSystem = 0
+        Bridge.useSignalFiles([])
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
     }
@@ -451,6 +452,9 @@ TestCase {
         page.pickKind("ring")
         find(page, "dashSignalPanel")
         verify(find(page, "signalNone").visible, "nothing chosen, nothing to pick")
+        compare(find(page, "signalNone").text,
+                "No signals: connect, or pick a plugin for your vehicle under Settings > Signals.",
+                "names where a vehicle's signals come from")
 
         // While the list is open it follows Settings
         page.offlineUri = "mock://?profile=obd2"
@@ -465,6 +469,101 @@ TestCase {
         compare(page.doc.pages[0].cells[1].kind, "ring")
         compare(page.doc.pages[0].cells[1].unit, "km/h")
         compare(page.doc.pages[0].cells[1].options.to, 260)
+    }
+
+    // Add's every signal of a set: the listed file's own signals the page
+    // doesn't show, in Add's kind, as one undo step; then only what is
+    // left, as many as the page has room for
+    function threeSignalFile() {
+        const sig = (key, did) => ({ key: key, name: key.toUpperCase(), unit: "V",
+                                     read: { service: "22", number: did },
+                                     field: { byte: 0, bits: 8 } })
+        const file = { havne_signals: 1, name: "Three", source: { name: "t" },
+                       ecus: [{ id: "pcm", rx: "7E8" }],
+                       signals: [sig("a", "D100"), sig("b", "D101"), sig("c", "D102")] }
+        const r = Bridge.importSignalFile(Harness.writeScratchFile("three.json", JSON.stringify(file)))
+        verify(r.ok, "the file imports")
+        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
+        return r.profile
+    }
+    function test_addAllAddsTheSetsSignalsThePageLacksAsOneStep() {
+        const profile = threeSignalFile()
+        const b = { kind: "digital", w: 2, h: 4, label: "B", refs: ["key:b"], unit: "V", options: {} }
+        const page = storedPageOf({}, docOf([cellOf("A"), b]))
+        page.offlineUri = "mock://?profile=" + profile
+        page.profileNames = { [profile]: "Three" }
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_bar")
+        const all = find(page, "addAllSignals")
+        tryVerify(() => all.visible, 3000, "offered for a set of its own signals")
+        compare(all.text, "Add 2 more of the 3 signals of Three", "B is on the page already")
+        click(page, "addAllSignals")
+        compare(page.panel, "", "the list closes")
+        compare(labels(page), ["A", "B", "A", "C"], "the set's A and C, at the end")
+        const added = page.doc.pages[0].cells.slice(2)
+        compare(added.map(c => c.kind), ["bar", "bar"], "in Add's kind")
+        compare(added.map(c => JSON.stringify(c.refs)), ['["key:a"]', '["key:c"]'])
+        compare(added[0].unit, "V")
+        compare(find(page, "dashUndo").Accessible.name, "Undo: added 2 signals of Three")
+        click(page, "dashUndo")
+        compare(labels(page), ["A", "B"], "one undo takes both")
+
+        // Every signal on the page: no button
+        click(page, "dashRedo")
+        compare(labels(page), ["A", "B", "A", "C"])
+        click(page, "dashAdd")
+        click(page, "addKind_digital")
+        find(page, "dashSignalPanel")
+        verify(!find(page, "addAllSignals").visible, "every signal is on the page")
+    }
+    function test_addAllStopsAtThePagesRoom() {
+        const profile = threeSignalFile()
+        const cells = []
+        for (let i = 0; i < DashboardBook.maxCells - 2; ++i)
+            cells.push(cellOf("N" + i))
+        const page = pageOf({}, docOf(cells))
+        page.offlineUri = "mock://?profile=" + profile
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_digital")
+        const all = find(page, "addAllSignals")
+        tryVerify(() => all.visible, 3000, "offered")
+        compare(all.text, "Add 2 of the 3 missing signals of " + profile + ": a page holds "
+                + DashboardBook.maxCells + " cells",
+                "two places left, said so; a set with no name known reads as core names it")
+        click(page, "addAllSignals")
+        compare(page.doc.pages[0].cells.length, DashboardBook.maxCells, "the page is full")
+        compare(labels(page).slice(-2), ["A", "B"], "the set's first two")
+    }
+    // One signal left: the words and the undo step say it in the singular
+    function test_addAllNamesOneSignalInTheSingular() {
+        const profile = threeSignalFile()
+        const own = key => ({ kind: "digital", w: 2, h: 4, label: key.toUpperCase(), refs: ["key:" + key],
+                              unit: "V", options: {} })
+        const page = storedPageOf({}, docOf([own("b"), own("c")]))
+        page.offlineUri = "mock://?profile=" + profile
+        page.profileNames = { [profile]: "Three" }
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_digital")
+        const all = find(page, "addAllSignals")
+        tryVerify(() => all.visible, 3000, "offered")
+        compare(all.text, "Add 1 more of the 3 signals of Three")
+        click(page, "addAllSignals")
+        compare(labels(page), ["B", "C", "A"])
+        compare(find(page, "dashUndo").Accessible.name, "Undo: added 1 signal of Three")
+    }
+    // A set of the built-in IDs alone has no signal of its own to add
+    function test_addAllIsNotOfferedForABuiltInSet() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.offlineUri = "mock://?profile=obd2"
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_digital")
+        tryVerify(() => findChild(page, "pickSignal_" + Bridge.gaugeSignals["speed"][1]) !== null,
+                  3000, "obd2's rows are listed")
+        verify(!find(page, "addAllSignals").visible)
     }
 
     // A battery cell made on either built-in set refers to both. The IDs
@@ -3044,7 +3143,7 @@ TestCase {
         const note = find(oilCell, "gaugeNote")
         tryVerify(() => oilCell.width > 0, 3000, "laid out")
         verify(note.visible, "says why")
-        verify(note.text.indexOf("not in this profile") >= 0, note.text)
+        verify(note.text.indexOf("not in mock") >= 0, "names the session's profile: " + note.text)
         const right = note.mapToItem(oilCell, note.width, 0).x
         verify(right <= oilCell.width + 0.5, "inside its cell: " + right + " of " + oilCell.width)
         verify(note.contentWidth <= note.width + 0.5, "whole: " + note.contentWidth + " in " + note.width)

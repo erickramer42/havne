@@ -1071,14 +1071,60 @@ Pane {
                      + "once and the DIDs the ECU answers join the polling") }
     ])
 
+    // The picked vehicle's sets as [{ profile, name, variant }]: its plugin
+    // variant when one is picked and loaded, then its signal files that
+    // load (variant "")
+    readonly property var pickedSets: {
+        if (pickedVehicle === null)
+            return []
+        const sets = []
+        const choice = pluginChoice()
+        if (choice !== null) {
+            const p = pluginList.find(e => e.ok && e.profiles.indexOf(choice.name) >= 0)
+            sets.push({ profile: choice.name, name: p.name,
+                        variant: p.variants[p.profiles.indexOf(choice.name)] })
+        }
+        for (const f of pickedVehicle.signals) {
+            if (signalOk(f.sha256))
+                sets.push({ profile: f.profile, name: f.name, variant: "" })
+        }
+        return sets
+    }
+    // A profile's name as the user knows it: every loaded plugin's variants
+    // by the plugin's name, the picked vehicle's files by theirs
+    readonly property var profileNames: {
+        const names = {}
+        for (const p of pluginList) {
+            for (const profile of (p.ok ? p.profiles : []))
+                names[profile] = p.name
+        }
+        for (const s of pickedSets)
+            names[s.profile] = s.name
+        return names
+    }
+
+    // The first picked set that reads all of obd2, which stands in for
+    // Default on an adapter (ADR-0064): its rows hold obd2's defs by ID,
+    // since a file's own signals always have a key
+    readonly property var obd2PickedSet: pickedSets.find(
+        s => Bridge.profileSignals("mock://?profile=" + s.profile).some(r => r.ref.startsWith("id:")))
+        || null
+
     // What a page that works with no session lists its signals from: the
-    // field's URI, which carries the chosen profile, or with no URI typed
-    // the chosen profile alone
+    // field's URI, which carries the chosen profile, except an adapter's
+    // read under Default, where the vehicle's obd2 stand-in is listed;
+    // with no URI typed the chosen profile alone, or under Default the
+    // picked vehicle's first set, which a restart doesn't forget as it
+    // does the choice
     readonly property string offlineUri: {
         const typed = uriField.text.trim()
-        if (typed !== "")
-            return typed
-        return profileChoice === "default" ? "" : composeUri("mock://", [])
+        if (typed !== "") {
+            return profileChoice === "default" && VehicleBook.isAdapterUri(typed) && obd2PickedSet !== null
+                   ? "mock://?profile=" + obd2PickedSet.profile : typed
+        }
+        if (profileChoice !== "default")
+            return composeUri("mock://", [])
+        return pickedSets.length > 0 ? "mock://?profile=" + pickedSets[0].profile : ""
     }
 
     // True while a typed URI is being read into the choices, so the DID

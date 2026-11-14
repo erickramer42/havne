@@ -71,6 +71,60 @@ Page {
     // Settings' URI and profile, whose signals Add offers with no session
     property string offlineUri: ""
     onOfflineUriChanged: if (panel === "signal") refreshRows()
+    // Settings' picked vehicle's sets ([{ profile, name, variant }], its
+    // plugin first) and the names of the profiles it knows (profile: name)
+    property var pickedSets: []
+    property var profileNames: ({})
+
+    // The profile a session on uri reads: its last profile=, else the
+    // scheme's default as core picks it (core.cpp, ecuio_session_create)
+    function profileOf(uri) {
+        const at = uri.indexOf("?")
+        let profile = ""
+        for (const pair of (at < 0 ? [] : uri.slice(at + 1).split("&"))) {
+            if (pair.startsWith("profile="))
+                profile = pair.slice("profile=".length)
+        }
+        if (profile !== "")
+            return profile
+        const scheme = uri.slice(0, Math.max(0, uri.indexOf("://")))
+        return scheme === "mock" ? "mock"
+             : scheme === "replay" || scheme === "socketcan" ? "raw" : "obd2"
+    }
+    function profileName(profile) {
+        return profileNames[profile] ?? profile
+    }
+    // The session's profile, "" with none
+    readonly property string sessionProfile: Bridge.connected ? profileOf(Bridge.currentUri) : ""
+    // While a session runs, each ref a picked set the session isn't
+    // reading has, to that set's name (the first set's that has it); its
+    // variant alone when the session reads another variant of that plugin
+    readonly property var neededSets: {
+        const needed = {}
+        if (sessionProfile === "")
+            return needed
+        const reading = profileName(sessionProfile)
+        for (const s of pickedSets) {
+            if (s.profile === sessionProfile)
+                continue
+            const name = s.name === reading && s.variant
+                         ? qsTr("variant %1").arg(s.variant) : s.name
+            for (const row of Bridge.profileSignals("mock://?profile=" + s.profile)) {
+                if (row.ref !== "" && needed[row.ref] === undefined)
+                    needed[row.ref] = name
+            }
+        }
+        return needed
+    }
+    // A cell's note without its signal: the picked set that has it, else
+    // the profile the session reads
+    function missingNote(refs) {
+        for (const ref of refs) {
+            if (neededSets[ref] !== undefined)
+                return qsTr("needs %1").arg(neededSets[ref])
+        }
+        return qsTr("not in %1").arg(profileName(sessionProfile))
+    }
 
     // The stored text read: the document, or the built-in layout with
     // the reason when there is none or it can't be used
@@ -736,6 +790,44 @@ Page {
         edit(next, stepOf("", qsTr("changed %1's signal").arg(cellName(selectedCell)), selected, selected))
         panel = "cell"
     }
+
+    // Add's every signal of a set: the listed profile's own rows (a signal
+    // file's or a plugin's, by key) that a gauge of `kind` can show, and of
+    // those the ones this page doesn't show yet, as many as it has room for
+    readonly property string listedName: {
+        const uri = Bridge.connected ? Bridge.currentUri : offlineUri
+        return uri === "" ? "" : profileName(profileOf(uri))
+    }
+    function addAllPlan(kind) {
+        const own = pickable(kind).filter(r => r.ref.startsWith("key:"))
+        let shown = []
+        for (const c of shownCells)
+            shown = shown.concat(Array.isArray(c.refs) ? c.refs : [])
+        const missing = own.filter(r => shown.indexOf(r.ref) < 0)
+        const room = Math.max(0, DashboardBook.maxCells - shownCells.length)
+        return { own: own.length, missing: missing.length, adding: missing.slice(0, room) }
+    }
+    // The button's words: all, the rest, or as many as the page has room for
+    function addAllWords(plan) {
+        if (plan.adding.length < plan.missing)
+            return qsTr("Add %1 of the %2 missing signals of %3: a page holds %4 cells")
+                       .arg(plan.adding.length).arg(plan.missing).arg(listedName).arg(DashboardBook.maxCells)
+        return plan.adding.length === plan.own
+               ? qsTr("Add all %1 signals of %2").arg(plan.own).arg(listedName)
+               : qsTr("Add %1 more of the %2 signals of %3").arg(plan.adding.length).arg(plan.own).arg(listedName)
+    }
+    function addAllSignals() {
+        const plan = addAllPlan(addKind)
+        if (addKind === "" || plan.adding.length === 0)
+            return
+        const cells = plan.adding.map(r => newCell(addKind, r))
+        const words = cells.length === 1 ? qsTr("added 1 signal of %1").arg(listedName)
+                                         : qsTr("added %1 signals of %2").arg(cells.length).arg(listedName)
+        if (edit(DashboardBook.addCells(doc, pageIndex, cells), stepOf("", words, -1, -1))) {
+            addKind = ""
+            panel = ""
+        }
+    }
     Connections {
         target: Bridge
         enabled: root.panel === "signal"
@@ -1060,7 +1152,7 @@ Page {
         readonly property string note: {
             let words = ""
             if (!Bridge.connected) words = qsTr("no session")
-            else if (entry === null) words = qsTr("not in this profile: %1").arg(label)
+            else if (entry === null) words = root.missingNote(root.lookupRefs(cell && cell.refs ? cell.refs : []))
             // Live's rule (hiddenCount): the ECU reported it unsupported, or
             // never answered it
             else if (entry.hidden) words = qsTr("not sent by this ECU")
@@ -2004,6 +2096,17 @@ Page {
                         onClicked: root.panel = root.addKind !== "" ? "add" : "cell"
                     }
                 }
+                // Every signal of the listed set at once, with Add's kind
+                ThemedButton {
+                    objectName: "addAllSignals"
+                    readonly property var plan: root.addKind !== "" ? root.addAllPlan(root.addKind)
+                                                                     : ({ own: 0, missing: 0, adding: [] })
+                    visible: plan.own > 1 && plan.adding.length > 0
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: implicitWidth
+                    text: root.addAllWords(plan)
+                    onClicked: root.addAllSignals()
+                }
                 // The text alone: a Popup doesn't take the page's zoom, and
                 // Plotted only means nothing to a gauge
                 SignalFilterBar {
@@ -2020,7 +2123,7 @@ Page {
                     color: Theme.textDim
                     text: signalCard.offered.length > 0 ? qsTr("No signal matches.")
                         : Bridge.connected ? qsTr("This session's profile has no signal a gauge can show.")
-                        : qsTr("No signals: connect, or choose a profile in Settings.")
+                        : qsTr("No signals: connect, or pick a plugin for your vehicle under Settings > Signals.")
                 }
                 Flow {
                     Layout.fillWidth: true
