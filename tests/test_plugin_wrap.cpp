@@ -998,7 +998,8 @@ TEST(PluginWrapTest, ASignalNamingNoEcuKeepsTheEcuItRead)
     /* The file's first ECU is the manifest's first: nothing to write */
     const std::string plain =
         ok(put(one, "v", file("V", "S", kPcm, sig("egt", "F40E", ""))));
-    const Value& s = parsed(plain)
+    const Value plain_doc = parsed(plain);
+    const Value& s = plain_doc
                          .find("files")
                          ->find("data/v.json")
                          ->find("signals")
@@ -1063,7 +1064,8 @@ TEST(PluginWrapTest, ASignalNamingNoEcuKeepsTheEcuItRead)
             "V", "S", kTcm,
             sig("tft", "1E1C", "") +
                 R"(, {"key": "twice", "name": "Twice", "kind": "computed", "expr": "tft * 2"})")));
-    const Value& c = parsed(computed)
+    const Value computed_doc = parsed(computed);
+    const Value& c = computed_doc
                          .find("files")
                          ->find("data/v.json")
                          ->find("signals")
