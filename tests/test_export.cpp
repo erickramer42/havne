@@ -36,6 +36,7 @@
 #include "isotp.h"
 #include "open_handles.h"
 #include "partial_left.h"
+#include "recording_set.h"
 #include "scrub.h"
 #include "temp_name.h"
 
@@ -3786,6 +3787,37 @@ TEST(ExportCancelTest, AStopFromAnotherThreadEndsALongExport)
     EXPECT_LT(took, std::chrono::seconds(2));
     EXPECT_FALSE(fs::exists(f.path / "stopped"));
     EXPECT_FALSE(partial_left(f.path, "stopped"));
+}
+
+/* The exports' header read puts a focus written on several lines
+ * together, a name holding a quote or a comma whole; and passes a line
+ * past a row (an older core's focus) by whole, so the signal lines
+ * after it still say which signals are text */
+TEST(ExportTest, TheHeaderReadJoinsFocusLinesAndPassesALinePastARow)
+{
+    Folder f;
+    const std::string head = "ecuio session recording, format 3 (ADR-0049)\n"
+                             "profile  test\n";
+    const std::string signals = "signal  RPM,number,rpm,0,1\n"
+                                "signal  Words,text,,0,0\n";
+    f.write("rec/events.log", head +
+                                  "focus  RPM,\"say \"\"hi\"\"\"\n"
+                                  "focus  \"a,b\",Words\n" +
+                                  signals + kColumns + "\n");
+    ecuio_recording_set::header h =
+        ecuio_recording_set::read_header(f.utf8("rec"));
+    EXPECT_EQ(h.focus,
+              (std::vector<std::string>{"RPM", "say \"hi\"", "a,b", "Words"}));
+
+    std::string past = "focus  ";
+    while (past.size() <= 40000) {
+        past += "\"A name of thirty-one bytes, xx\",";
+    }
+    f.write("rec/events.log", head + past + "\n" + signals + kColumns + "\n");
+    h = ecuio_recording_set::read_header(f.utf8("rec"));
+    EXPECT_TRUE(h.focus.empty());
+    EXPECT_EQ(h.signals.size(), 2u);
+    EXPECT_EQ(h.text_names, std::vector<std::string>{"Words"});
 }
 
 } // namespace

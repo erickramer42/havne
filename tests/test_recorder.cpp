@@ -28,6 +28,7 @@
 #include "ecuio/signals.h"
 #include "link_health.h" /* core/src: a worker's link transitions */
 #include "recorder.h"    /* core/src: the signal file's bytes */
+#include "recording_rows.h" /* core/src: a focus line's fields */
 #include "session.h"     /* core/src: the session's record link */
 #include "sha256.h"      /* core/src: the file's hash */
 #include "temp_name.h"
@@ -1352,6 +1353,116 @@ TEST(RecorderTest, TheHeaderHoldsTheFocusAndTheLinkAtTheAttach)
         EXPECT_NE(link, std::string::npos) << events;
         EXPECT_TRUE(focus < link && link < signal) << events;
     }
+}
+
+namespace {
+
+/* The cap's worth of signals with the longest names, some holding a
+ * quote or a comma, so a focus of them all is past a row's bound */
+constexpr uint32_t kWideDefs = ECUIO_PROFILE_MAX_REQUESTS;
+std::vector<ecuio_signal_def_t> g_wide_defs;
+ecuio_signal_set_t g_wide_set;
+
+std::string wide_name(uint32_t k)
+{
+    char head[24];
+    std::snprintf(head, sizeof head, "Wide %04u%s", k,
+                  k % 7 == 0    ? " \"q\""
+                  : k % 11 == 0 ? " a,b"
+                                : "");
+    std::string name = head;
+    name.resize(sizeof(ecuio_signal_def_t{}.name) - 1, 'x');
+    return name;
+}
+
+void register_wide_profile()
+{
+    static bool done = false;
+    if (done) {
+        return;
+    }
+    g_wide_defs.assign(kWideDefs, ecuio_signal_def_t{});
+    for (uint32_t k = 0; k < kWideDefs; ++k) {
+        ecuio_signal_def_t& d = g_wide_defs[k];
+        d.id = static_cast<uint16_t>(1000 + k);
+        d.message_id = 0x300;
+        d.kind = ECUIO_VALUE_UINT;
+        d.bit_length = 8;
+        d.scale = 1;
+        const std::string name = wide_name(k);
+        std::memcpy(d.name, name.data(), name.size());
+    }
+    g_wide_set = ecuio_signal_set_t{};
+    g_wide_set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    g_wide_set.count = kWideDefs;
+    g_wide_set.defs = g_wide_defs.data();
+    ASSERT_EQ(ecuio_profile_register("rec-wide", &g_wide_set, nullptr),
+              ECUIO_OK);
+    done = true;
+}
+
+/* Every id of the wide set, last first, then all of them again */
+std::vector<uint16_t> wide_picks_twice()
+{
+    std::vector<uint16_t> ids;
+    for (int round = 0; round < 2; ++round) {
+        for (uint32_t k = kWideDefs; k-- > 0;) {
+            ids.push_back(static_cast<uint16_t>(1000 + k));
+        }
+    }
+    return ids;
+}
+
+std::vector<std::string> wide_names_last_first()
+{
+    std::vector<std::string> names;
+    for (uint32_t k = kWideDefs; k-- > 0;) {
+        names.push_back(wide_name(k));
+    }
+    return names;
+}
+
+/* A focus line's names as the readers split them */
+void split_names(const std::string& text, std::vector<std::string>* out)
+{
+    const char* p = text.data();
+    const char* end = p + text.size();
+    std::string name;
+    bool last = false;
+    while (!last && ecuio_recording_rows::next_field(p, end, name, &last)) {
+        out->push_back(name);
+    }
+}
+
+} // namespace
+
+/* A focus past a row's room takes as many header lines as its names
+ * need, each well inside a row, and a pick given twice is named once */
+TEST(RecorderTest, AFocusPastALinesRoomTakesSeveralLinesAndEachPickOnce)
+{
+    register_wide_profile();
+    Root root;
+    Recording rec(root, "mock://wide?profile=rec-wide", 0, nullptr, {}, 0,
+                  false);
+    ASSERT_NE(rec.recorder, nullptr);
+    const std::vector<uint16_t> picks = wide_picks_twice();
+    ASSERT_EQ(ecuio_session_set_focus(rec.session, picks.data(),
+                                      static_cast<uint32_t>(picks.size())),
+              ECUIO_OK);
+    rec.attach();
+    ASSERT_EQ(rec.finish(), ECUIO_OK);
+    const std::string events = rec.file("events.log");
+    size_t lines = 0;
+    std::vector<std::string> written;
+    for (const std::string& line : lines_of(events)) {
+        if (line.rfind("focus  ", 0) == 0) {
+            ++lines;
+            EXPECT_LE(line.size(), 7u + 4096u);
+            split_names(line.substr(7), &written);
+        }
+    }
+    EXPECT_GE(lines, 2u);
+    EXPECT_EQ(written, wide_names_last_first());
 }
 
 /* A session takes one recorder at a time: a second is refused while the

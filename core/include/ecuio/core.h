@@ -1079,10 +1079,11 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
  * Takes effect on the worker between two requests, never inside an
  * exchange; before start it applies from the first pass. mock://,
  * replay:// and a listening session ask nothing, so they accept any
- * focus and change nothing. Returns at once. The session's one caller
- * may call it from any thread, while the worker runs (the picks reach it
- * under a lock), but not at the same time as another call on the
- * session, ecuio_session_close among them.
+ * focus and change nothing. An id given twice is picked once, at its
+ * first place. Returns at once. The session's one caller may call it
+ * from any thread, while the worker runs (the picks reach it under a
+ * lock), but not at the same time as another call on the session,
+ * ecuio_session_close among them.
  * The detail (ecuio_last_error_detail) is cleared on entry.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL session, or NULL ids with a count;
  * ECUIO_ERR_INVALID_ARGUMENT, nothing changed and the reason in the

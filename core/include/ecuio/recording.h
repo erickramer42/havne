@@ -116,7 +116,9 @@ ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
  * call. The recording holds the frames from then on; a started
  * session's header says what the link's state was ("link": "healthy"
  * for one that is OK with no episode) and which signals its focus held
- * ("focus", when one is set). Reply timing's counts in latency.csv are
+ * ("focus", or "pick" for a default pick, when one is set: as many lines
+ * as the names take, each under 4 KiB of them, which a reader appends).
+ * Reply timing's counts in latency.csv are
  * the session's, cumulative since it started, so a recording begun
  * mid-session finds them already counted up. A session takes one
  * recorder at a time: once that one is closed, another can attach, and

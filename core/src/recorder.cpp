@@ -180,6 +180,42 @@ std::tm utc_tm(std::time_t t)
     return tm;
 }
 
+/* The most of a focus line's names: 1024 picks of the longest names
+ * take several lines, each far inside a row's bound */
+constexpr size_t kFocusPartBytes = 4096;
+
+/* The picks' names quoted as signals.csv quotes them, in pick order, in
+ * parts of at most kFocusPartBytes (a name never split); named counts
+ * them. A pick the set lacks names nothing. */
+std::vector<std::string> focus_parts(const ecuio_signal_set_t* set,
+                                     const std::vector<uint16_t>& ids,
+                                     size_t* named)
+{
+    std::vector<std::string> parts;
+    *named = 0;
+    for (uint16_t id : ids) {
+        for (uint32_t i = 0;
+             set != nullptr && set->defs != nullptr && i < set->count; ++i) {
+            const ecuio_signal_def_t& d = set->defs[i];
+            if (d.id != id) {
+                continue;
+            }
+            const std::string name =
+                csv_quoted(d.name, strnlen(d.name, sizeof d.name));
+            if (parts.empty() ||
+                parts.back().size() + 1 + name.size() > kFocusPartBytes) {
+                parts.push_back(name);
+            } else {
+                parts.back() += ',';
+                parts.back() += name;
+            }
+            ++*named;
+            break;
+        }
+    }
+    return parts;
+}
+
 /* A line safe for events.log or markers.csv: carriage returns and
  * newlines as spaces, cut at 1 KB on a character's start */
 std::string one_line(const char* text)
@@ -1563,26 +1599,17 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
          * so a reader needn't wait for a transition */
         {
             std::lock_guard<std::mutex> f(session->focus_mutex);
-            std::string focus;
-            for (uint16_t id : session->focus_ids) {
-                for (uint32_t i = 0;
-                     set != nullptr && set->defs != nullptr && i < set->count;
-                     ++i) {
-                    const ecuio_signal_def_t& d = set->defs[i];
-                    if (d.id == id) {
-                        focus += focus.empty() ? "" : ",";
-                        focus +=
-                            csv_quoted(d.name, strnlen(d.name, sizeof d.name));
-                        break;
-                    }
-                }
-            }
-            if (!focus.empty()) {
+            size_t named = 0;
+            /* As many lines as the names take; a reader appends them */
+            for (const std::string& part :
+                 focus_parts(set, session->focus_ids, &named)) {
                 /* A front end's default pick isn't a log's choice */
                 header += (session->focus_flags & ECUIO_FOCUS_DEFAULT_PICK) != 0
                               ? "pick  "
                               : "focus  ";
-                header += focus + "\n";
+                header += part + "\n";
+            }
+            if (named > 0) {
                 /* Only a session that asks has one: the others take the
                  * call and change nothing */
                 if (session->focus_requests &&
