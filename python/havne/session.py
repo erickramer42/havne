@@ -542,9 +542,13 @@ class Session:
         return out
 
     def vin(self, channel=0):
-        """The channel's VIN, "" until identification reads one"""
-        buf = ctypes.create_string_buffer(e.ECUIO_VIN_TEXT_LEN)
+        """The channel's VIN, "" until core has it in (ECUIO_IDENTITY_VIN:
+        09 02 answered with one, or F190 did once 09 02 settled), which
+        may be long before the rest of the identification is complete"""
         ident = self.identity(channel)
+        if not ident.flags & e.ECUIO_IDENTITY_VIN:
+            return ""
+        buf = ctypes.create_string_buffer(e.ECUIO_VIN_TEXT_LEN)
         check(lib.ecuio_identity_vin(ctypes.byref(ident), buf, len(buf)), "ecuio_identity_vin")
         return text(buf.raw)
 

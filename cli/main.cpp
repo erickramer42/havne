@@ -686,14 +686,24 @@ uint32_t latest_model_year()
 }
 
 // A line for each ECU whose identity has settled since the last call
-// (vin_line.h): generations holds each channel's last written
+// (vin_line.h): generations holds each channel's last written. Ahead of
+// them, the vehicle line once the first channel's VIN is in and new
+// (vehicle, the VIN written last)
 void poll_identity(Output& out, ecuio_session_t* session, uint32_t channels,
-                   uint32_t* generations)
+                   uint32_t* generations, char (&vehicle)[ECUIO_VIN_TEXT_LEN])
 {
     for (uint32_t c = 0; c < channels; ++c) {
         ecuio_channel_identity_t id;
-        if (ecuio_session_get_channel_identity(session, c, &id) == ECUIO_OK &&
-            (id.flags & ECUIO_IDENTITY_COMPLETE) &&
+        if (ecuio_session_get_channel_identity(session, c, &id) != ECUIO_OK) {
+            continue;
+        }
+        if (c == 0 && cli::vehicle_due(id, vehicle)) {
+            char buf[512];
+            cli::Line l(buf, sizeof buf);
+            cli::vehicle_line(l, id, latest_model_year());
+            write_line(out, l);
+        }
+        if ((id.flags & ECUIO_IDENTITY_COMPLETE) &&
             id.generation != generations[c]) {
             generations[c] = id.generation;
             char buf[4096];
@@ -2950,7 +2960,8 @@ int run_stream(const StreamArgs& args)
             : ECUIO_SESSION_INFO_MAX_CHANNELS;
     uint32_t diag_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     uint32_t identity_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    poll_identity(out, session, channels, identity_generations);
+    char vehicle_vin[ECUIO_VIN_TEXT_LEN] = "";
+    poll_identity(out, session, channels, identity_generations, vehicle_vin);
     poll_diagnostics(out, session, channels, diag_generations);
     cli::ScanSeen scan_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     cli::SessionSeen session_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
@@ -3040,7 +3051,8 @@ int run_stream(const StreamArgs& args)
             write_line(out, l);
         }
 
-        poll_identity(out, session, channels, identity_generations);
+        poll_identity(out, session, channels, identity_generations,
+                      vehicle_vin);
         poll_diagnostics(out, session, channels, diag_generations);
         poll_scan(out, session, channels, scan_seen, session_seen,
                   scan_reports);

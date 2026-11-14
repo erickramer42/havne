@@ -43,6 +43,22 @@ def test_the_fake_dll_through_the_surrogate():
         assert rpm, "the fake's ECU answered 01 0C"
         assert s.vin(0) == "FAKEJ2534VIN00001"
 
+
+def test_the_vin_comes_while_the_rest_of_the_identification_is_out(monkeypatch):
+    """ADR-0027 section 3: 09 02's answer is the VIN at once. The fake
+    holds every 0x22 request (7F 22 78, no answer), so the list's DIDs stay
+    out about 5 s each while the VIN is read"""
+    monkeypatch.setenv("ECUIO_FAKE_HELD_SERVICE", "22")
+    with havne.Session("j2534://" + FAKE.replace("\\", "/")) as s:
+        s.start()
+        until = time.monotonic() + 4
+        while not s.vin(0) and time.monotonic() < until:
+            time.sleep(0.05)
+        assert s.vin(0) == "FAKEJ2534VIN00001"
+        ident = s.identity(0)
+        assert ident.flags & havne.c.ECUIO_IDENTITY_VIN
+        assert not ident.flags & havne.c.ECUIO_IDENTITY_COMPLETE
+
 def test_a_scan_in_the_extended_session_reports_its_session():
     """ADR-0060: the fake's ECU answers D200 only in its extended session,
     so the range's one find and the report's session say it was entered"""

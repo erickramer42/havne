@@ -602,6 +602,15 @@ ecuio_status_t ecuio_session_get_channel_support(
 /* flags */
 #define ECUIO_IDENTITY_COMPLETE          0x00000001u   /* every item answered,
                                                           refused or timed out */
+#define ECUIO_IDENTITY_VIN               0x00000002u   /* the VIN is in, before
+                                                          the list is complete
+                                                          too: 09 02 answered
+                                                          with one, or F190 did
+                                                          and 09 02 has its
+                                                          outcome; what
+                                                          ecuio_identity_vin
+                                                          gives (ADR-0027
+                                                          section 3) */
 
 /* outcome: what became of an item's request */
 #define ECUIO_IDENTITY_UNASKED           0u   /* not asked yet, or asked again
@@ -673,7 +682,9 @@ const char* ecuio_identity_request_name(
  * answer, else 22 F190's when 09 02 wasn't answered, each kept to its
  * ASCII letters and digits in upper case and taken only at 17 of them;
  * no other item is (a CALID of 17 characters isn't a VIN). Writes the
- * VIN and a NUL into out, or "" when the report holds none. ECUIO_OK;
+ * VIN and a NUL into out, or "" when the report holds none; the report's
+ * ECUIO_IDENTITY_VIN says it is in, which holds until a recovery asks
+ * 09 02 again, and that may answer a different VIN. ECUIO_OK;
  * ECUIO_ERR_NULL_ARGUMENT for a NULL identity or out;
  * ECUIO_ERR_INVALID_ARGUMENT for an out_cap under ECUIO_VIN_TEXT_LEN,
  * out untouched. */
