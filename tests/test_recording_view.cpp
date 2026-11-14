@@ -706,7 +706,8 @@ double askedStep(RecordingView& v, int signal, double t, bool forward)
 // The answer to one column means ask, waited for on the GUI thread: each
 // signal's means, in the ask's order
 std::vector<QList<double>> askedMeans(RecordingView& v, const QVariantList& ids,
-                                      double t0, double t1, int columns)
+                                      double t0, double t1, int columns,
+                                      int waitMs = 10000)
 {
     QVariantList got;
     bool answered = false;
@@ -716,7 +717,7 @@ std::vector<QList<double>> askedMeans(RecordingView& v, const QVariantList& ids,
                                         answered = true;
                                     });
     EXPECT_GT(v.columnMeans(ids, t0, t1, columns), 0);
-    EXPECT_TRUE(waitFor([&] { return answered; }));
+    EXPECT_TRUE(waitFor([&] { return answered; }, waitMs));
     QObject::disconnect(c);
     std::vector<QList<double>> out;
     for (qsizetype k = 0; k < got.size(); ++k) {
@@ -1015,7 +1016,7 @@ TEST(RecordingViewTest, AStopInAPassesSecondCallEndsIt)
     v.open(folder);
     ASSERT_TRUE(waitFor([&] { return settled(v); }, 60000));
     ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
-    ASSERT_EQ(askedStretches(v, true, false).size(), 100)
+    ASSERT_EQ(askedStretches(v, true, false, {}, 120000).size(), 100)
         << "past the first call's 64";
     const int both = v.stretchesAsksForTesting();
     ASSERT_GT(both, 4);
@@ -2445,8 +2446,9 @@ TEST(RecordingViewTest, AStatisticsAskDuringAMeansPassIsAnsweredBeforeItEnds)
     const int columns = 65536;
     QElapsedTimer timer;
     timer.start();
+    // An unoptimized build on CI's macOS runner takes over 10 s
     const std::vector<QList<double>> alone =
-        askedMeans(v, ids, 0, 6.0e6, columns);
+        askedMeans(v, ids, 0, 6.0e6, columns, 120000);
     const qint64 whole = timer.elapsed();
     ASSERT_EQ(v.meansYieldsForTesting(), 0);
 
@@ -2669,7 +2671,7 @@ TEST(RecordingViewTest, AStretchesAskThatCantStartLeavesTheOlderPassAlone)
     v.setFailThreadForTesting(true);
     EXPECT_EQ(v.stretches(true, false), 0);
     v.setFailThreadForTesting(false);
-    ASSERT_TRUE(waitFor([&] { return !requests.isEmpty(); }, 30000))
+    ASSERT_TRUE(waitFor([&] { return !requests.isEmpty(); }, 120000))
         << "the pass under way was ended";
     EXPECT_EQ(v.stretchesStaledForTesting(), 0);
     ASSERT_EQ(requests.size(), 1);
