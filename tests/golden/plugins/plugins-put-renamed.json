@@ -1,0 +1,274 @@
+{
+  "havne_plugin": 1,
+  "id": "desk-extras",
+  "name": "Desk extras",
+  "version": "1.2.0",
+  "requires": {
+    "core": "0.7.3"
+  },
+  "lineage": "8c52c402d1bba2cdab9b0209b616bcd5",
+  "source": {
+    "name": "Written by hand for Havne's tests"
+  },
+  "tiers": [
+    "data"
+  ],
+  "ecus": [
+    {
+      "id": "pcm",
+      "rx": "7E8"
+    },
+    {
+      "id": "tcm",
+      "rx": "7E9"
+    },
+    {
+      "id": "tcm_2",
+      "rx": "7EA"
+    }
+  ],
+  "variants": [
+    {
+      "id": "base",
+      "files": [
+        "data/base.json"
+      ]
+    },
+    {
+      "id": "gauged-extras",
+      "files": [
+        "data/gauged-extras.json"
+      ]
+    },
+    {
+      "id": "modules",
+      "files": [
+        "data/modules.json"
+      ]
+    }
+  ],
+  "files": {
+    "data/base.json": {
+      "havne_signals": 1,
+      "name": "Desk extras",
+      "notes": "Synthetic: written for Havne's tests, read against the replay fixture",
+      "extends": "obd2",
+      "signals": [
+        {
+          "key": "road_speed",
+          "name": "Road Speed",
+          "ecu": "pcm",
+          "read": {
+            "service": "01",
+            "number": "0D"
+          },
+          "field": {
+            "byte": 0,
+            "bits": 8
+          },
+          "unit": "km/h",
+          "decimals": 0,
+          "group": "vehicle",
+          "plot": 1
+        },
+        {
+          "key": "standstill",
+          "name": "Standstill",
+          "ecu": "pcm",
+          "read": {
+            "service": "01",
+            "number": "0D"
+          },
+          "field": {
+            "byte": 0,
+            "bits": 8
+          },
+          "kind": "enum",
+          "values": {
+            "0": "Stopped"
+          },
+          "group": "vehicle"
+        },
+        {
+          "key": "pedal",
+          "name": "Throttle Share",
+          "ecu": "pcm",
+          "read": {
+            "service": "01",
+            "number": "11"
+          },
+          "field": {
+            "byte": 0
+          },
+          "scale": 0.392157,
+          "unit": "%",
+          "decimals": 1,
+          "group": "air"
+        },
+        {
+          "key": "trans_temp",
+          "name": "Trans Temp",
+          "ecu": "tcm",
+          "read": {
+            "service": "22",
+            "number": "1E1C"
+          },
+          "field": {
+            "byte": 0,
+            "bits": 16
+          },
+          "offset": -40,
+          "unit": "°C",
+          "group": "engine"
+        },
+        {
+          "key": "tcm_part",
+          "name": "TCM Part",
+          "ecu": "tcm",
+          "read": {
+            "service": "22",
+            "number": "F187"
+          },
+          "field": {
+            "byte": 0
+          },
+          "kind": "text",
+          "group": "diagnostics"
+        },
+        {
+          "key": "krpm",
+          "name": "RPM in Thousands",
+          "kind": "computed",
+          "expr": "obd2.rpm / 1000",
+          "max_age": {
+            "obd2.rpm": 2
+          },
+          "unit": "krpm",
+          "decimals": 2,
+          "group": "engine"
+        }
+      ]
+    },
+    "data/gauged-extras.json": {
+      "havne_signals": 1,
+      "name": "Gauged extras",
+      "notes": "Synthetic: written for Havne's tests",
+      "source": {
+        "name": "Written by hand for Havne's tests"
+      },
+      "signals": [
+        {
+          "key": "coolant",
+          "name": "Coolant",
+          "read": {
+            "service": "01",
+            "number": "05"
+          },
+          "field": {
+            "byte": 0,
+            "bits": 8
+          },
+          "offset": -40,
+          "unit": "°C",
+          "decimals": 0,
+          "group": "engine",
+          "gauge": {
+            "min": 40,
+            "max": 130,
+            "warn_high": 110
+          }
+        },
+        {
+          "key": "volts",
+          "name": "Module Volts",
+          "read": {
+            "service": "01",
+            "number": "42"
+          },
+          "field": {
+            "byte": 0,
+            "bits": 16
+          },
+          "scale": 0.001,
+          "unit": "V",
+          "decimals": 1,
+          "group": "electrical",
+          "gauge": {
+            "min": 10,
+            "max": 16,
+            "warn_low": 11.5,
+            "warn_high": 15.25
+          }
+        },
+        {
+          "key": "load",
+          "name": "Load Share",
+          "read": {
+            "service": "01",
+            "number": "04"
+          },
+          "field": {
+            "byte": 0,
+            "bits": 8
+          },
+          "scale": 0.392157,
+          "unit": "%",
+          "decimals": 1,
+          "group": "engine"
+        },
+        {
+          "key": "half_volts",
+          "name": "Half Volts",
+          "kind": "computed",
+          "expr": "volts / 2",
+          "unit": "V",
+          "decimals": 2,
+          "group": "electrical",
+          "gauge": {
+            "min": 5,
+            "max": 8
+          }
+        }
+      ]
+    },
+    "data/modules.json": {
+      "havne_signals": 1,
+      "name": "Desk modules",
+      "notes": "Synthetic: its tcm answers at other addresses than Desk extras' tcm, and its license is share-alike, for havne-cli plugins put",
+      "source": {
+        "name": "Written by hand for Havne's tests",
+        "license": "CC-BY-SA-4.0"
+      },
+      "signals": [
+        {
+          "key": "gear_held",
+          "name": "Gear Held",
+          "ecu": "tcm_2",
+          "read": {
+            "service": "22",
+            "number": "D101"
+          },
+          "field": {
+            "byte": 0,
+            "bits": 8
+          }
+        },
+        {
+          "key": "oil_pressure",
+          "name": "Oil Pressure Desk",
+          "ecu": "pcm",
+          "read": {
+            "service": "22",
+            "number": "D102"
+          },
+          "field": {
+            "byte": 0,
+            "bits": 8
+          },
+          "offset": 100,
+          "unit": "kPa"
+        }
+      ]
+    }
+  }
+}

@@ -171,6 +171,20 @@ plugin_view view_of(const std::string& packed)
         tables t = tables_of(ecuio_plugin_variant_set(p, i));
         t.id = id;
         v.variants.push_back(t);
+        /* Each variant's text reads back as a set as large, and names a
+         * source */
+        const ecuio_signal_file_t* f = ecuio_plugin_variant_file(p, i);
+        size_t length = 0;
+        const char* text = ecuio_signal_file_text(f, &length);
+        ecuio_signal_file_t* back = nullptr;
+        check(ecuio_signal_file_load(text, length, &back) == ECUIO_OK);
+        check(ecuio_signal_file_set(back)->count ==
+              ecuio_plugin_variant_set(p, i)->count);
+        ecuio_signal_file_free(back);
+        ecuio_signal_source_t source{};
+        source.struct_size = sizeof source;
+        check(ecuio_signal_file_source(f, &source) == ECUIO_OK &&
+              source.name[0] != '\0');
     }
     check(ecuio_plugin_free(p) == ECUIO_OK);
     return v;

@@ -28,7 +28,8 @@
 // the CSV's classes; events.log line by line; markers.csv, latency.csv
 // and signals.json as they are), each through its own file check, under
 // a name of its own beside <out> (folder_files.h's partial_name) until
-// every one passes.
+// every one passes. A range opens with the last focus change before it,
+// so a copy says which signals were asked.
 //
 // The caller's cancel (ecuio_export_with) is asked as each pass and each
 // file of a copy begins, and every kCancelRows rows; a stop is a failure
@@ -1607,6 +1608,7 @@ private:
                 activity_line(line);
             }
         }
+        put_focus_held();
         return true;
     }
 
@@ -1664,6 +1666,7 @@ private:
         if (kind == "end") {
             uint64_t records = 0;
             uint64_t notes = 0;
+            range_starts();
             if (raw_) {
                 events_body_.push_back(line);
                 return;
@@ -1678,14 +1681,103 @@ private:
             events_body_.push_back(head + "end  <why>" + all.substr(at));
             return;
         }
+        /* A focus change names signals, as the header's focus line does */
+        if (kind == "focus" || kind == "pick") {
+            focus_activity(line, e, text, text_len);
+            return;
+        }
         if (!in_range(e.ms * 1000)) {
             return;
         }
         if (raw_ || kind == "link" || kind == "drop" || kind == "asleep") {
+            range_starts();
             events_body_.push_back(line);
             return;
         }
         ++events_left_; /* a note, the caller's text, or a kind unknown */
+    }
+
+    /* Where the range's lines start in events_body_: the held lines go
+     * there */
+    void range_starts()
+    {
+        if (held_at_ == SIZE_MAX) {
+            held_at_ = events_body_.size();
+        }
+    }
+
+    /* A focus or pick line, in the range by its time. Before the range,
+     * the last change's lines are held for the range's start ("more: "
+     * lines go with the line before them, at its time). */
+    void focus_activity(const std::string& line, const rows::event_line& e,
+                        const char* text, size_t text_len)
+    {
+        if (e.ms * 1000 < o_.from_us) {
+            if (!rows::starts_with(text, text_len, "more: ")) {
+                focus_held_.clear();
+            }
+            focus_held_.emplace_back(e.rest, e.rest_len);
+            focus_held_clock_ = line.substr(0, 12);
+            focus_held_ms_ = e.ms;
+            return;
+        }
+        if (!in_range(e.ms * 1000)) {
+            return;
+        }
+        range_starts();
+        events_body_.push_back(line);
+    }
+
+    /* "HH:mm:ss.zzz" moved on by ms, through midnight; as it was when it
+     * doesn't read */
+    static std::string clock_after(const std::string& clock, uint64_t ms)
+    {
+        uint64_t h = 0, m = 0, s = 0, z = 0;
+        const char* p = clock.data();
+        if (clock.size() != 12 || !rows::parse_count(p, 2, &h) ||
+            !rows::parse_count(p + 3, 2, &m) ||
+            !rows::parse_count(p + 6, 2, &s) ||
+            !rows::parse_count(p + 9, 3, &z)) {
+            return clock;
+        }
+        constexpr uint64_t kDayMs = 86400000;
+        const uint64_t at =
+            ((h * 3600 + m * 60 + s) * 1000 + z + ms % kDayMs) % kDayMs;
+        char buf[16];
+        std::snprintf(buf, sizeof buf, "%02llu:%02llu:%02llu.%03llu",
+                      static_cast<unsigned long long>(at / 3600000),
+                      static_cast<unsigned long long>(at / 60000 % 60),
+                      static_cast<unsigned long long>(at / 1000 % 60),
+                      static_cast<unsigned long long>(at % 1000));
+        return buf;
+    }
+
+    /* A range that starts after a focus change opens with the focus then
+     * in force: the last change's lines again, at the range's start, the
+     * clock carried on from theirs (within a millisecond of the
+     * recorder's) */
+    void put_focus_held()
+    {
+        if (o_.from_us == 0 || focus_held_.empty()) {
+            return;
+        }
+        const uint64_t from = o_.from_us;
+        const uint64_t ms = from / 1000 + (from % 1000 >= 500 ? 1 : 0);
+        char seconds[48];
+        std::snprintf(seconds, sizeof seconds, "  +%llu.%03llu  ",
+                      static_cast<unsigned long long>(ms / 1000),
+                      static_cast<unsigned long long>(ms % 1000));
+        const std::string head =
+            clock_after(focus_held_clock_, from / 1000 - focus_held_ms_) +
+            seconds;
+        std::vector<std::string> lines;
+        lines.reserve(focus_held_.size());
+        for (const std::string& rest : focus_held_) {
+            lines.push_back(head + rest);
+        }
+        const size_t at = held_at_ == SIZE_MAX ? events_body_.size() : held_at_;
+        events_body_.insert(events_body_.begin() + static_cast<ptrdiff_t>(at),
+                            lines.begin(), lines.end());
     }
 
     /* markers.csv or latency.csv: the header and the rows in the range,
@@ -2096,6 +2188,12 @@ private:
     std::vector<std::string> markers_;
     std::vector<std::string> latency_;
     uint64_t events_left_ = 0;
+    /* A range's held lines: the last focus change before it, each line
+     * from its kind word on, and that change's clock and time */
+    std::vector<std::string> focus_held_;
+    std::string focus_held_clock_;
+    uint64_t focus_held_ms_ = 0;
+    size_t held_at_ = SIZE_MAX;
     std::string made_up_;
     std::string made_up_flow_;
     std::vector<joined> joins_;

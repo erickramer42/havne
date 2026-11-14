@@ -4079,6 +4079,47 @@ TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
     EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty());
 }
 
+/* ADR-0027 section 3: the vehicle is known once 09 02 has answered, while
+ * the rest of the identification is still out. The fake holds every
+ * Service 0x22 request (7F 22 78, no answer), so the list's DIDs stay out
+ * about 5 s each and no identity line comes within the wait. */
+TEST(BridgeTest, TheVinIsTakenWhileTheRestOfTheIdentificationIsOut)
+{
+    FakeEnvArm hold("ECUIO_FAKE_HELD_SERVICE", "22");
+    SessionBridge bridge;
+    int identified = 0;
+    QObject::connect(&bridge, &SessionBridge::vehicleIdentified,
+                     [&identified]() { ++identified; });
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    // A bare URI runs obd2, which identifies
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("j2534://%1")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH)))
+            .isEmpty());
+    ASSERT_TRUE(spinUntil([&identified]() { return identified > 0; }, 4000))
+        << "vehicleIdentified waited for the whole list:\n"
+        << log.join('\n').toStdString();
+    EXPECT_EQ(
+        bridge.vinKey(QStringLiteral("salt")),
+        QString::fromLatin1(
+            QCryptographicHash::hash(QByteArrayLiteral("saltFAKEJ2534VIN00001"),
+                                     QCryptographicHash::Sha256)
+                .toHex()));
+    EXPECT_EQ(log.filter(QRegularExpression(QStringLiteral("^VIN: "))).size(),
+              1);
+    EXPECT_TRUE(
+        log.filter(QRegularExpression(QStringLiteral("^ECU 0x7E8 identity: ")))
+            .isEmpty())
+        << "the list isn't complete, so no identity line yet";
+    spinLoop(300);
+    EXPECT_EQ(identified, 1) << "once a session";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty());
+}
+
 /* ADR-0043: the "VIN:" line and Settings' lookup, one summary. The VINs
  * are made up around FAKE, their check digits by 49 CFR 565.15 */
 TEST(BridgeTest, AVinSummarySaysItsYearMakeAndCheckDigit)
@@ -4677,7 +4718,8 @@ TEST(BridgeTest, TheDefaultPickAsksTheRankedRowsTheGaugesAndTheTicks)
 
 /* A Record sessions recording of a session that asks names its default
  * pick on a pick line, and the Recordings list calls it a session, not
- * a log */
+ * a log; a pick changed by a tick is core's pick line in the activity,
+ * and the Log page's "Asking" line is no note beside it */
 TEST(BridgeTest, ASessionRecordingNamesItsPickAndIsNoLog)
 {
     FakeHooks hooks;
@@ -4687,8 +4729,20 @@ TEST(BridgeTest, ASessionRecordingNamesItsPickAndIsNoLog)
     SessionBridge bridge;
     bridge.setRecordingsRootForTesting(root.path());
     bridge.setRecording(true);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
     ASSERT_TRUE(bridge.connectSession(fakeObd2PickUri()).isEmpty());
     spinLoop(500);
+    SignalListModel* model = bridge.signalModel();
+    model->toggleSubscribed(modelRowOf(model, ECUIO_OBD2_SIG_FUEL_LEVEL_ID));
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return lineStarting(log, QStringLiteral("Asking 15 signals: ")) >=
+                   0;
+        },
+        5000))
+        << log.join('\n').toStdString();
     ASSERT_TRUE(disconnectAndWait(bridge));
     const QStringList folders = recordingFolders(root.path());
     ASSERT_EQ(folders.size(), 1);
@@ -4697,6 +4751,10 @@ TEST(BridgeTest, ASessionRecordingNamesItsPickAndIsNoLog)
     EXPECT_TRUE(events.contains("\npick  Engine Load,Coolant Temp,RPM,"))
         << events.toStdString();
     EXPECT_FALSE(events.contains("\nfocus  ")) << events.toStdString();
+    const int change = events.indexOf("  pick  15 signals: Engine Load,");
+    ASSERT_GE(change, 0) << events.toStdString();
+    EXPECT_GT(events.indexOf("Fuel Level", change), change);
+    EXPECT_FALSE(events.contains("note  Asking ")) << events.toStdString();
     EXPECT_FALSE(
         bridge.recordingRow(folder).value(QStringLiteral("log")).toBool());
 }
@@ -4737,12 +4795,18 @@ TEST(BridgeTest, ANewMinimumTimeReachesTheRunningPick)
 }
 
 /* Core paces only a focus, so a set that ranks none, asked whole, says a
- * minimum doesn't apply to it, and says nothing of one while it's Off */
+ * minimum doesn't apply to it, and says nothing of one while it's Off;
+ * the line says why, which core's own focus line doesn't, so a recording
+ * keeps it as a note */
 TEST(BridgeTest, TheWholeSetSaysAMinimumTimeDoesntApply)
 {
     FakeHooks hooks;
     ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
     SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
     QStringList log;
     QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
@@ -4769,6 +4833,14 @@ TEST(BridgeTest, TheWholeSetSaysAMinimumTimeDoesntApply)
     ASSERT_TRUE(spinUntil([&]() { return log.count(ranksNone) == 2; }, 5000))
         << log.join('\n').toStdString();
     ASSERT_TRUE(disconnectAndWait(bridge));
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QByteArray events =
+        readFile(root.path() + QLatin1Char('/') + folders[0] +
+                 QStringLiteral("/events.log"));
+    const QByteArray note = ("  note  " + ranksNone).toUtf8();
+    EXPECT_TRUE(events.contains(note + "\n") || events.contains(note + "\r\n"))
+        << events.toStdString();
 }
 
 /* A pick core refuses (under ?poll=0x2F none of the ranked PIDs is asked)

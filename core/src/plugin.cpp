@@ -1,5 +1,5 @@
 // File/layer: core/src/plugin.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: PluginTest (test_signals); HARNESS: RecorderTest
+// Testing: UNIT: PluginTest, PluginWrapTest (test_signals); HARNESS: RecorderTest
 //          (test_core); FUZZ: fuzz_plugin_manifest
 //
 // The plugin loader's data tier (ADR-0052): a manifest (json.h, the
@@ -685,6 +685,9 @@ private:
         }
         out.file.reset(new ecuio_signal_file());
         ecuio_sf::build(parts, *out.file);
+        if (source != nullptr) {
+            ecuio_sf::take_source(*source, out.file->source);
+        }
         out.file->plugin = p.id + "," + p.version + "," + out.id;
         std::string why;
         out.file->bytes = variant_json(p, out, parts, source, &why);

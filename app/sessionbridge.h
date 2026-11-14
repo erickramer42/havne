@@ -1436,6 +1436,7 @@ private:
     // An activity line core's recording writes in its own form (a link
     // transition, a sleep): shown, never noted
     void logUnnoted(const QString& line);
+    void writePickLine();
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
     void notifyFrameCounts();   // GUI thread: frameCount and guiNotifyCount, if they moved
     void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
@@ -1611,6 +1612,7 @@ private:
     bool m_pickDirty = false;        // the ticks, gauges or minimum moved
     bool m_pickLinePending = false;  // startSession's line, not yet out
     QString m_pickLine;              // the activity line last written
+    bool m_pickLineCore = false;     // core's recorder writes it itself
     uint64_t m_pickDropped = 0;      // the reports' drops at the last set
     std::vector<uint16_t> m_unaskedRead;
     std::vector<uint16_t> m_unaskedIds;
@@ -1618,6 +1620,8 @@ private:
     std::vector<uint16_t> m_absentIds;
     // What each channel's ECU said it is (ADR-0021), logged once complete
     void pollChannelIdentity();
+    // Channel 0's VIN into m_vin once core has it in (ECUIO_IDENTITY_VIN)
+    void takeVin(const ecuio_channel_identity_t& s);
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     void pollSleep();       // the tick: "Asleep for N s" after a sleep
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};

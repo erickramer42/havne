@@ -520,12 +520,23 @@ public:
         }
     }
 
-    /* What the user is told: "" when no ECU of the file took another id */
+    /* What the user is told: "" when no ECU of the file took another id.
+     * Notes join while they fit the detail, then "and N more" ends it. */
     std::string notes() const
     {
+        const auto more = [](const std::string& head, size_t n) {
+            return (head.empty() ? "" : "; ") + std::string("and ") +
+                   std::to_string(n) + " more";
+        };
         std::string all;
-        for (const std::string& n : notes_) {
-            all += (all.empty() ? "" : "; ") + n;
+        for (size_t i = 0; i < notes_.size(); ++i) {
+            std::string next = all + (all.empty() ? "" : "; ") + notes_[i];
+            const size_t left = notes_.size() - i - 1;
+            const size_t tail = left == 0 ? 0 : more(next, left).size();
+            if (next.size() + tail > ecuio_detail_max) {
+                return all + more(all, notes_.size() - i);
+            }
+            all = std::move(next);
         }
         return all;
     }

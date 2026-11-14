@@ -168,9 +168,25 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     check(set->count == ecuio_signal_file_set(b)->count);
     check(strcmp(ecuio_signal_file_profile(a), ecuio_signal_file_profile(b)) == 0);
 
+    /* Its text is the bytes it was read from, and its source has a name,
+     * every text ended within its room, and no flag but share-alike */
+    size_t text_length = 0;
+    const char* written = ecuio_signal_file_text(a, &text_length);
+    check(text_length == size && memcmp(written, bytes, size) == 0 &&
+          written[size] == '\0');
+    ecuio_signal_source_t source{};
+    source.struct_size = sizeof source;
+    check(ecuio_signal_file_source(a, &source) == ECUIO_OK);
+    check(source.name[0] != '\0' &&
+          (source.flags & ~ECUIO_SOURCE_SHARE_ALIKE) == 0);
+    for (const char* t : {source.name, source.url, source.commit,
+                          source.license, source.modified}) {
+        check(memchr(t, '\0', ECUIO_SOURCE_TEXT_LEN) != nullptr);
+    }
+
     /* A format 1 file compiles format 1's steps alone and reads no
-     * computed input (ADR-0062), and each computed def keeps its
-     * expression */
+     * computed input (ADR-0062), and each computed def of the file's
+     * own keeps its expression (a base set's, obd2's Boost, has none) */
     const uint32_t format = ecuio_signal_file_format(a);
     check(format >= ECUIO_SIGNAL_FILE_FORMAT_OLDEST &&
           format <= ECUIO_SIGNAL_FILE_FORMAT);
@@ -180,7 +196,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
             check(ecuio_signal_file_expr(a, &d)[0] == '\0');
             continue;
         }
-        check(ecuio_signal_file_expr(a, &d)[0] != '\0');
+        check((ecuio_signal_file_expr(a, &d)[0] != '\0') ==
+              (ecuio_signal_file_key(a, &d)[0] != '\0'));
         const ecuio_computed_t& p = set->computed[d.table_first];
         for (uint32_t s = 0; format == 1 && s < p.step_count; ++s) {
             check(p.steps[s] <= ECUIO_COMPUTED_DIVIDE);

@@ -233,6 +233,33 @@ def test_the_info_says_the_mock():
         assert s.diagnostics(0).flags & c.ECUIO_DIAG_COMPLETE
 
 
+def test_the_vin_waits_for_core_to_have_it_in(monkeypatch):
+    # The report stood in for (the mock identifies nothing): F190's VIN
+    # beside a 09 02 still out is core's pick but not in yet
+    def report(flags):
+        ident = c.ecuio_channel_identity_t()
+        ident.flags = flags
+        ident.items = 2
+        for i, (request, outcome, text) in enumerate(
+                ((b"\x09\x02", c.ECUIO_IDENTITY_UNASKED, b""),
+                 (b"\x22\xF1\x90", c.ECUIO_IDENTITY_ANSWERED, b"FAKEJ2534VIN00001"))):
+            item = ident.list[i]
+            for k, byte in enumerate(request):
+                item.request[k] = byte
+            item.length = len(request)
+            item.outcome = outcome
+            item.text = text
+            item.text_length = len(text)
+        return ident
+    with havne.Session("mock://py") as s:
+        assert s.vin(0) == ""
+        monkeypatch.setattr(s, "identity", lambda channel=0: report(0))
+        assert s.vin(0) == ""
+        monkeypatch.setattr(s, "identity",
+                            lambda channel=0: report(c.ECUIO_IDENTITY_VIN))
+        assert s.vin(0) == "FAKEJ2534VIN00001"
+
+
 def test_a_clear_needs_the_caller_s_word():
     with havne.Session("mock://py") as s:
         with pytest.raises(ValueError):

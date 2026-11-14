@@ -320,7 +320,8 @@ ecuio_status_t ecuio_plugin_wrap(const char* file, size_t length,
  *   one the profile obd2 asks added to the manifest as "obd2" when
  *   none there has its addresses.
  * On ECUIO_OK, ecuio_last_error_detail() says which of the file's ECUs
- * took another id, in words for the user, or is "". A text the loader
+ * took another id, in words for the user, or is "": one note each, joined
+ * with "; " while they fit the detail, then "and N more". A text the loader
  * refuses (an ECU past what one session reads, two ID widths, more
  * variants than a plugin holds) ends "; the file can be a plugin of
  * its own" when ecuio_plugin_wrap takes the file. */

@@ -240,9 +240,11 @@ ecuio_status_t ecuio_session_get_unsupported_signals(
  * through its chain. A def that shares a reply with a pick is asked, so
  * it isn't listed. Neither is a passive def (no request: a broadcast
  * frame), Service 09's, a def whose request the probe or an NRC dropped
- * (the unsupported and absent lists and the support report say those),
- * nor a DID the scan hasn't found. Empty with no focus, and on a session
- * that asks nothing (ECUIO_SESSION_INFO_REQUESTS clear). Judged by the
+ * (the unsupported list names a dropped PID's signals; the support
+ * report counts every drop but names only its first
+ * ECUIO_SUPPORT_MAX_DROPPED, so a refused DID past those is a count
+ * alone), nor a DID the scan hasn't found. Empty with no focus, and on a
+ * session that asks nothing (ECUIO_SESSION_INFO_REQUESTS clear). Judged by the
  * worker as it takes each focus and whenever its table changes, so it
  * follows a focus call between two requests; a focus set before start is
  * listed once the worker has begun.

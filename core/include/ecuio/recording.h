@@ -116,7 +116,15 @@ ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
  * call. The recording holds the frames from then on; a started
  * session's header says what the link's state was ("link": "healthy"
  * for one that is OK with no episode) and which signals its focus held
- * ("focus", when one is set). Reply timing's counts in latency.csv are
+ * ("focus", or "pick" for a default pick, when one is set: as many lines
+ * as the names take, each under 4 KiB of them, which a reader appends).
+ * A focus set or ended while the recorder takes frames is an activity
+ * line of that kind word: "N signals: " and the names as the header
+ * writes them (", at least M ms between sweeps" after the count when the
+ * session asks requests and has a minimum), "more: " and the rest on
+ * further lines of the same time, or "none: every signal asked"; a call
+ * that changes none of the picks, the kind or the minimum writes no
+ * line. Reply timing's counts in latency.csv are
  * the session's, cumulative since it started, so a recording begun
  * mid-session finds them already counted up. A session takes one
  * recorder at a time: once that one is closed, another can attach, and
@@ -374,8 +382,9 @@ _Static_assert(sizeof(ecuio_recording_stats_t) == 96,
 #define ECUIO_RECORDING_STEP_FORWARD  1u
 #define ECUIO_RECORDING_STEP_BACKWARD 2u
 
-/* Called on the opening thread every few megabytes; a nonzero return
- * cancels the open */
+/* Called on the opening thread every few megabytes: of events.log first,
+ * bytes_read then 0 and bytes_total the data file's, then of the data
+ * file; a nonzero return cancels the open */
 typedef int (*ecuio_open_progress_t)(uint64_t bytes_read,
                                      uint64_t bytes_total, void* user_data);
 
@@ -1062,9 +1071,10 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * folder (the caller names it; the source's name, which may hold the
  * vehicle's label, is never carried): frames.csv's kept rows as
  * recorded, signals.csv by the CSV's classes, events.log's header and
- * its link, drop, asleep and end lines (the URI's authority as
+ * its link, drop, asleep, focus, pick and end lines (the URI's authority as
  * <path>, <address> or <label>, the vehicle's label as <vehicle>, the
- * caller's notes left out), markers.csv with its labels as typed,
+ * caller's notes left out; a range opens with the last focus or pick
+ * change before it, at its start), markers.csv with its labels as typed,
  * latency.csv and signals.json, each file through the check; a file it
  * doesn't know is left out and counted (files_left_out).
  * Deterministic: the same recording and options give the same bytes.

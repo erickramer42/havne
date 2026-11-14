@@ -98,4 +98,17 @@ ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,
                                            const char* bytes, size_t length,
                                            const char* plugin = "");
 
+/* On the caller's thread, after a focus has been stored, and at an
+ * attach: the recorder taking the session's frames, if one is, writes
+ * the focus as activity lines of kind pick or focus, as the header names
+ * it ("N signals: ...", ", at least M ms between sweeps" after the count
+ * when a session that asks has a minimum, "more: ..." past a line's
+ * room, "none: every signal asked" when it ended), only when the picks,
+ * the kind or the minimum differ from what the header or its last line
+ * named. Takes the link's mutex to pin the recorder, then holds the pin
+ * across focus_mutex and then the recorder's note_m (one at a time,
+ * never nested); a detach waits for the pins, so neither of those may
+ * be held around one. */
+void ecuio_record_focus(ecuio_session_t* session);
+
 #endif /* ECUIO_RECORDER_H */

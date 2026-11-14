@@ -900,6 +900,69 @@ TEST_F(Elm327SessionTest, ARecordingNamesTheMinimumTimeOfASessionThatAsks)
     fs::remove_all(root, ec);
 }
 
+/* On a session that asks, a focus line carries its minimum time between
+ * sweeps, and a new minimum on the same picks is a line of its own; the
+ * same focus again writes none */
+TEST_F(Elm327SessionTest, AFocusLineCarriesItsMinimumAndComesOnlyOnAChange)
+{
+    const fs::path root =
+        fs::temp_directory_path() / temp_name("ecuio-elm327-floor-line");
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    Session s;
+    ASSERT_EQ(s.create(uri("?identify=0&diagnose=0&probe=0")), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.s);
+    ASSERT_NE(set, nullptr);
+    uint16_t rpm = 0;
+    std::string name;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        if (d.mux_offset == 0 && d.mux_length == 2 && d.mux_key == 0x410Cu) {
+            rpm = d.id;
+            name.assign(d.name, strnlen(d.name, sizeof d.name));
+        }
+    }
+    ASSERT_FALSE(name.empty());
+    ASSERT_EQ(ecuio_session_set_focus_with(s.s, &rpm, 1, 250, 0), ECUIO_OK);
+    const std::string root8 = root.generic_u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root8.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK)
+        << ecuio_last_error_detail();
+    char buf[1024];
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(rec, buf, sizeof buf, &len), ECUIO_OK);
+    const fs::path folder = fs::u8path(buf);
+    ASSERT_EQ(ecuio_session_record(s.s, rec), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_set_focus_with(s.s, &rpm, 1, 250, 0), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_set_focus_with(s.s, &rpm, 1, 500, 0), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_set_focus_with(s.s, &rpm, 1, 0, 0), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_set_focus(s.s, &rpm, 1), ECUIO_OK);
+    ecuio_session_destroy(s.s);
+    s.s = nullptr;
+    EXPECT_EQ(ecuio_recorder_close(rec, "the test ended"), ECUIO_OK);
+    std::ifstream f(folder / "events.log", std::ios::binary);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(ss, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        const size_t at = line.find("  focus  ");
+        if (at != std::string::npos && at > 0) {
+            lines.push_back(line.substr(at + 9));
+        }
+    }
+    EXPECT_EQ(lines, (std::vector<std::string>{
+                         "1 signal, at least 500 ms between sweeps: " + name,
+                         "1 signal: " + name}))
+        << ss.str();
+    fs::remove_all(root, ec);
+}
+
 /* A focus is judged by what the session can still ask: once the walk
  * has dropped a PID the ECU withholds, a focus on it alone is refused
  * with the reason in the detail, and one that adds an askable pick is

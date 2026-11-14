@@ -18,6 +18,7 @@
 #include "pid_support.h"
 #include "request_timing.h"
 
+#include <cstring>
 #include <stdint.h>
 
 /* The request engine (ADR-0015): what to request, derived from the
@@ -221,6 +222,73 @@ static_assert(ECUIO_IDENT_COUNT <= ECUIO_IDENTITY_MAX_ITEMS,
 /* The reply's data starts here for both services: after 49 <item> and
  * the item count, or after 62 <DID high> <DID low>. */
 constexpr uint16_t ECUIO_IDENT_DATA_OFFSET = 3;
+
+/* A report's VIN (ADR-0027 section 3) and whether it is in: 09 02's
+ * answer, else 22 F190's, each kept to its ASCII letters and digits in
+ * upper case and taken only at 17 of them. F190's is in only once 09 02
+ * has an outcome, since 09 02 still out could answer one of its own. */
+struct ecuio_ident_vin {
+    char text[ECUIO_VIN_TEXT_LEN];
+    bool in;
+};
+
+inline bool ecuio_ident_item_vin(const ecuio_identity_item_t& it,
+                                 char (&out)[ECUIO_VIN_TEXT_LEN])
+{
+    if (it.outcome != ECUIO_IDENTITY_ANSWERED) {
+        return false;
+    }
+    char vin[ECUIO_VIN_TEXT_LEN];
+    uint32_t n = 0;
+    for (uint32_t k = 0; k < it.text_length && k < ECUIO_IDENTITY_TEXT_LEN;
+         ++k) {
+        char c = it.text[k];
+        if (c >= 'a' && c <= 'z') {
+            c = static_cast<char>(c - 'a' + 'A');
+        } else if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) {
+            continue;
+        }
+        if (n == ECUIO_VIN_TEXT_LEN - 1) {
+            return false;
+        }
+        vin[n++] = c;
+    }
+    if (n != ECUIO_VIN_TEXT_LEN - 1) {
+        return false;
+    }
+    vin[n] = '\0';
+    std::memcpy(out, vin, sizeof vin);
+    return true;
+}
+
+inline ecuio_ident_vin ecuio_identity_vin_of(const ecuio_channel_identity_t& id)
+{
+    ecuio_ident_vin v{};
+    char from_service09[ECUIO_VIN_TEXT_LEN] = "";
+    char from_f190[ECUIO_VIN_TEXT_LEN] = "";
+    bool service09_out = false;
+    const uint32_t items = id.items < ECUIO_IDENTITY_MAX_ITEMS
+                               ? id.items
+                               : ECUIO_IDENTITY_MAX_ITEMS;
+    for (uint32_t i = 0; i < items; ++i) {
+        const ecuio_identity_item_t& it = id.list[i];
+        if (it.length == 2 && it.request[0] == 0x09 && it.request[1] == 0x02) {
+            service09_out = it.outcome == ECUIO_IDENTITY_UNASKED;
+            (void)ecuio_ident_item_vin(it, from_service09);
+        } else if (it.length == 3 && it.request[0] == 0x22 &&
+                   it.request[1] == 0xF1 && it.request[2] == 0x90) {
+            (void)ecuio_ident_item_vin(it, from_f190);
+        }
+    }
+    if (from_service09[0] != '\0') {
+        std::memcpy(v.text, from_service09, sizeof v.text);
+        v.in = true;
+    } else if (from_f190[0] != '\0') {
+        std::memcpy(v.text, from_f190, sizeof v.text);
+        v.in = !service09_out;
+    }
+    return v;
+}
 
 /* What diagnostics asks first, in this order (ADR-0037 section 2): PID
  * 41, this drive cycle's monitors, right after PID 01's, unless the
@@ -2583,7 +2651,8 @@ inline void ecuio_engine_diagnostics(const ecuio_request_engine* e, uint32_t c,
 
 /* What channel c's ECU has said it is, for
  * ecuio_session_get_channel_identity; the driver adds the channel's
- * rx_id. Complete once every item has an outcome. */
+ * rx_id. Complete once every item has an outcome; the VIN flagged as
+ * soon as ecuio_identity_vin_of has it in. */
 inline void ecuio_engine_identity(const ecuio_request_engine* e, uint32_t c,
                                   ecuio_channel_identity_t* out)
 {
@@ -2598,6 +2667,9 @@ inline void ecuio_engine_identity(const ecuio_request_engine* e, uint32_t c,
     }
     if (complete) {
         out->flags |= ECUIO_IDENTITY_COMPLETE;
+    }
+    if (ecuio_identity_vin_of(*out).in) {
+        out->flags |= ECUIO_IDENTITY_VIN;
     }
 }
 

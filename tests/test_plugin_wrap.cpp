@@ -939,6 +939,45 @@ TEST(PluginWrapTest, APutsEcusJoinTheManifestsByAddress)
     EXPECT_EQ(ecus_of(ok(cut)).back(), std::string(29, 'e') + "_2@7EB");
 }
 
+// Notes past what the detail holds end "and N more", never cut mid-note
+TEST(PluginWrapTest, PutsNotesPastTheDetailEndWithHowManyMore)
+{
+    const std::string a(31, 'a');
+    const std::string b(31, 'b');
+    const std::string c(31, 'c');
+    const std::string d(31, 'd');
+    const auto ecu = [](const std::string& id, const char* rx) {
+        return "{\"id\": \"" + id + "\", \"rx\": \"" + rx + "\"}";
+    };
+    const std::string plugin =
+        ok(wrap(file("P", "S", ecu(a, "7E8") + ", " + ecu(b, "7E9"),
+                     sig("oil", "F40D", a) + ", " + sig("egt", "F40E", b))));
+
+    /* c and d at the plugin's addresses, a and b at others: four notes */
+    const Answer full =
+        put(plugin, "v",
+            file("V", "S",
+                 ecu(c, "7E8") + ", " + ecu(d, "7E9") + ", " + ecu(a, "7EA") +
+                     ", " + ecu(b, "7EB"),
+                 sig("s1", "F401", c) + ", " + sig("s2", "F402", d) + ", " +
+                     sig("s3", "F403", a) + ", " + sig("s4", "F404", b)));
+    ok(full);
+    const auto q = [](const std::string& id) { return "'" + id + "'"; };
+    const std::string notes[] = {
+        "the file's ecu " + q(c) + " is the plugin's " + q(a),
+        "the file's ecu " + q(d) + " is the plugin's " + q(b),
+        "the file's ecu " + q(a) + " is " + q(std::string(29, 'a') + "_2") +
+            " in the plugin, whose " + q(a) + " has other addresses",
+        "the file's ecu " + q(b) + " is " + q(std::string(29, 'b') + "_2") +
+            " in the plugin, whose " + q(b) + " has other addresses",
+    };
+    const std::string all =
+        notes[0] + "; " + notes[1] + "; " + notes[2] + "; " + notes[3];
+    ASSERT_GT(all.size(), 511u) << "the four notes overflow the detail";
+    EXPECT_EQ(full.detail,
+              notes[0] + "; " + notes[1] + "; " + notes[2] + "; and 1 more");
+}
+
 // A signal that names no ECU reads the file's first; in a plugin it
 // would fall to the manifest's first, so a put names its ECU whenever
 // that is another one
@@ -1370,4 +1409,94 @@ TEST(PluginWrapTest, TheCallsRefuseNullsAndInputsPastTheirBounds)
     huge.append(ECUIO_PLUGIN_PACKAGE_MAX + 1 - huge.size(), ' ');
     EXPECT_TRUE(has(refused(put(huge, "v", a)), "the plugin, "));
     EXPECT_FALSE(refused(drop(huge, "base")).empty());
+}
+
+namespace {
+
+ecuio_signal_source_t variant_source(const ecuio_plugin_t* p, uint32_t index)
+{
+    ecuio_signal_source_t s{};
+    s.struct_size = sizeof s;
+    EXPECT_EQ(ecuio_signal_file_source(ecuio_plugin_variant_file(p, index), &s),
+              ECUIO_OK);
+    return s;
+}
+
+} // namespace
+
+// A variant's source is its written file's: the first of its files that
+// has one, else the manifest's; a share-alike file put into a plugin
+// marks its own variant alone
+TEST(PluginWrapTest, EachVariantGivesItsOwnSourceElseTheManifests)
+{
+    const std::string src1 =
+        R"("source": {"name": "First", "license": "CC-BY-SA-4.0"})";
+    const std::string src2 = R"("source": {"name": "Second", "url": "u"})";
+    auto source_for = [&](const std::string& head1, const std::string& head2) {
+        Plugin h = load(packed(
+            kPcm, R"({"id": "base", "files": ["a.json", "b.json"]})",
+            "\"a.json\": " + data(sig("oil", "F40D", "pcm"), head1) +
+                ", \"b.json\": " + data(sig("egt", "F40E", "pcm"), head2)));
+        return h ? variant_source(h.get(), 0) : ecuio_signal_source_t{};
+    };
+    EXPECT_STREQ(source_for("", "").name, "M");
+    EXPECT_STREQ(source_for(src1, "").name, "First");
+    EXPECT_EQ(source_for(src1, "").flags, ECUIO_SOURCE_SHARE_ALIKE);
+    EXPECT_STREQ(source_for("", src2).name, "Second");
+    EXPECT_STREQ(source_for("", src2).url, "u");
+    EXPECT_EQ(source_for("", src2).flags, 0u);
+    EXPECT_STREQ(source_for(src1, src2).name, "First");
+    EXPECT_STREQ(source_for(src1, src2).url, "") << "one block, never mixed";
+
+    const std::string obdb =
+        file("Converted", "OBDb", kPcm, sig("egt", "F40E", "pcm"), "");
+    const std::string licensed =
+        obdb.substr(0, obdb.find("\"name\": \"OBDb\"")) +
+        R"("name": "OBDb", "license": "CC BY-SA 4.0")" +
+        obdb.substr(obdb.find("\"name\": \"OBDb\"") + 14);
+    const std::string two = ok(put(ok(wrap(file_a())), "obdb", licensed));
+    Plugin p = load(two);
+    ASSERT_TRUE(p);
+    EXPECT_STREQ(variant_source(p.get(), 0).name, "By hand");
+    EXPECT_EQ(variant_source(p.get(), 0).flags, 0u);
+    EXPECT_STREQ(variant_source(p.get(), 1).name, "OBDb");
+    EXPECT_STREQ(variant_source(p.get(), 1).license, "CC BY-SA 4.0");
+    EXPECT_EQ(variant_source(p.get(), 1).flags, ECUIO_SOURCE_SHARE_ALIKE);
+
+    Plugin w = load(ok(wrap(licensed)));
+    ASSERT_TRUE(w);
+    EXPECT_EQ(variant_source(w.get(), 0).flags, ECUIO_SOURCE_SHARE_ALIKE)
+        << "a wrapped file's source, moved to the manifest, still its own";
+}
+
+// A variant's text is its written file, which reads back as its set and
+// goes into another plugin as the same variant (Copy to my plugin)
+TEST(PluginWrapTest, AVariantsTextReadsBackAsItsSetAndMovesAcross)
+{
+    Plugin p = load(ok(put(ok(wrap(file_a())), "track", file_b())));
+    ASSERT_TRUE(p);
+    for (uint32_t v = 0; v < 2; ++v) {
+        const ecuio_signal_file_t* f = ecuio_plugin_variant_file(p.get(), v);
+        size_t length = 0;
+        const char* text = ecuio_signal_file_text(f, &length);
+        ASSERT_NE(text, nullptr);
+        EXPECT_EQ(std::string(text, length), written(p.get(), v));
+        ecuio_signal_file_t* back = nullptr;
+        ASSERT_EQ(ecuio_signal_file_load(text, length, &back), ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_TRUE(same_sets(*ecuio_signal_file_set(back),
+                              *ecuio_plugin_variant_set(p.get(), v)));
+        ecuio_signal_file_free(back);
+    }
+
+    size_t length = 0;
+    const char* track =
+        ecuio_signal_file_text(ecuio_plugin_variant_file(p.get(), 1), &length);
+    Plugin mine = load(ok(put(ok(wrap(file_a(), nullptr)), "copied",
+                              std::string(track, length))));
+    ASSERT_TRUE(mine);
+    EXPECT_TRUE(same_sets(*ecuio_plugin_variant_set(mine.get(), 1),
+                          *ecuio_plugin_variant_set(p.get(), 1)));
+    EXPECT_STREQ(variant_source(mine.get(), 1).name, "From a forum")
+        << "the copy keeps the source";
 }

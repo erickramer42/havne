@@ -1,5 +1,6 @@
 // File/layer: core/include/ecuio/signals.h | C ABI, public
-// Testing: UNIT: validator edge cases, mux range checks, BE vs LE comparison
+// Testing: UNIT: validator edge cases, mux range checks, BE vs LE comparison;
+//          SignalFileTest, PluginWrapTest (test_signals), c_abi
 
 #ifndef ECUIO_SIGNALS_H
 #define ECUIO_SIGNALS_H
@@ -730,6 +731,72 @@ _Static_assert(offsetof(ecuio_signal_gauge_t, reserved) == 36, "gauge reserved o
 const ecuio_signal_gauge_t*
 ecuio_signal_file_gauge(const ecuio_signal_file_t* file,
                         const ecuio_signal_def_t* def);
+
+/* A file's "source" (ADR-0051 section 7): where its signals come from */
+#define ECUIO_SOURCE_TEXT_MAX 512u /* bytes of one of its texts */
+/* A text's room: its bytes, the NUL, the rest zero */
+#define ECUIO_SOURCE_TEXT_LEN 520u
+
+/* ecuio_signal_source_t's flags. Values are append-only. SHARE_ALIKE: the
+ * license is Creative Commons' share-alike, so whoever passes the signals
+ * on keeps the license and this source with them. */
+#define ECUIO_SOURCE_SHARE_ALIKE 0x1u
+
+/* A file's "source" as it wrote it: name always, each other text "" when
+ * not given (none holds a NUL). A plugin variant's file holds its first
+ * data file's own source, else the manifest's (ADR-0064 Q1), so every
+ * variant names where it comes from. SHARE_ALIKE is set when the license,
+ * read as an SPDX expression in any case with a space taken as a hyphen,
+ * names CC-BY-SA or CC-BY-NC-SA as a word ("CC-BY-SA-4.0", OBDb's). */
+typedef struct ecuio_signal_source {
+    uint32_t struct_size; /* in: the caller's sizeof, at least this one's;
+                           * out: core's own, the bytes filled */
+    uint32_t flags;       /* ECUIO_SOURCE_*; any other bit zero */
+    uint32_t reserved[6]; /* zero */
+    char name[ECUIO_SOURCE_TEXT_LEN];
+    char url[ECUIO_SOURCE_TEXT_LEN];
+    char commit[ECUIO_SOURCE_TEXT_LEN];
+    char license[ECUIO_SOURCE_TEXT_LEN];
+    char modified[ECUIO_SOURCE_TEXT_LEN];
+} ecuio_signal_source_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_signal_source_t) == 2632,
+              "ecuio_signal_source_t size is ABI");
+static_assert(offsetof(ecuio_signal_source_t, name) == 32,
+              "source name offset is ABI");
+static_assert(offsetof(ecuio_signal_source_t, license) == 1592,
+              "source license offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_signal_source_t) == 2632,
+               "ecuio_signal_source_t size is ABI");
+_Static_assert(offsetof(ecuio_signal_source_t, name) == 32,
+               "source name offset is ABI");
+_Static_assert(offsetof(ecuio_signal_source_t, license) == 1592,
+               "source license offset is ABI");
+#endif
+
+/* Copies the file's source into out, every byte past each text zero, and
+ * sets struct_size to core's own size, what was filled (a caller's larger
+ * struct keeps the rest untouched). ECUIO_ERR_NULL_ARGUMENT for a NULL
+ * file or out; ECUIO_ERR_INVALID_ARGUMENT for a struct_size smaller than
+ * the struct, out untouched; each with a line in
+ * ecuio_last_error_detail(). Any thread may call it while the file lives:
+ * it only reads. */
+ecuio_status_t ecuio_signal_file_source(const ecuio_signal_file_t* file,
+                                        ecuio_signal_source_t* out);
+
+/* The file as signal-file text, what a recording copies as signals.json:
+ * the bytes ecuio_signal_file_load read, or for a plugin variant's file
+ * (ecuio_plugin_variant_file) its files merged and written as one, which
+ * ecuio_signal_file_load reads back to the variant's set. NUL-terminated,
+ * no NUL inside; *length (NULL skips it) is its length without the NUL.
+ * Borrowed: valid, and unchanged, until the file is freed (a variant's
+ * until its plugin is), never released by the caller. "" with *length 0
+ * for a NULL file. Any thread may call it while the file lives: it only
+ * reads. */
+const char* ecuio_signal_file_text(const ecuio_signal_file_t* file,
+                                   size_t* length);
 
 /* Frees a file; NULL is a no-op. Unregister its profile first: a
  * session using the set must be destroyed before this. */
