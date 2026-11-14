@@ -118,7 +118,10 @@ ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
  * for one that is OK with no episode) and which signals its focus held
  * ("focus", or "pick" for a default pick, when one is set: as many lines
  * as the names take, each under 4 KiB of them, which a reader appends).
- * Reply timing's counts in latency.csv are
+ * A focus set or ended while the recorder takes frames is an activity
+ * line of that kind word: "N signals: " and the names as the header
+ * writes them, "more: " and the rest on further lines of the same time,
+ * or "none: every signal asked". Reply timing's counts in latency.csv are
  * the session's, cumulative since it started, so a recording begun
  * mid-session finds them already counted up. A session takes one
  * recorder at a time: once that one is closed, another can attach, and
@@ -1065,7 +1068,7 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * folder (the caller names it; the source's name, which may hold the
  * vehicle's label, is never carried): frames.csv's kept rows as
  * recorded, signals.csv by the CSV's classes, events.log's header and
- * its link, drop, asleep and end lines (the URI's authority as
+ * its link, drop, asleep, focus, pick and end lines (the URI's authority as
  * <path>, <address> or <label>, the vehicle's label as <vehicle>, the
  * caller's notes left out), markers.csv with its labels as typed,
  * latency.csv and signals.json, each file through the check; a file it

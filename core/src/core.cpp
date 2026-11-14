@@ -585,6 +585,7 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
     }
     /* The picks first: a worker that sees the count moved reads them */
     session->focus_generation.fetch_add(1);
+    ecuio_record_focus(session);
     return ECUIO_OK;
 }
 

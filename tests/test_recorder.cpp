@@ -1434,6 +1434,22 @@ void split_names(const std::string& text, std::vector<std::string>* out)
     }
 }
 
+/* events.log's activity lines of one kind, the text after the kind */
+std::vector<std::string> activity_of(const std::string& events,
+                                     const std::string& kind)
+{
+    std::vector<std::string> out;
+    for (const std::string& line : lines_of(events)) {
+        const size_t at = line.find("  " + kind + "  ");
+        if (line.size() > 14 && line[2] == ':' && line[12] == ' ' &&
+            line[14] == '+' && at != std::string::npos &&
+            line.find("  ", 14) == at) {
+            out.push_back(line.substr(at + kind.size() + 4));
+        }
+    }
+    return out;
+}
+
 } // namespace
 
 /* A focus past a row's room takes as many header lines as its names
@@ -1463,6 +1479,79 @@ TEST(RecorderTest, AFocusPastALinesRoomTakesSeveralLinesAndEachPickOnce)
     }
     EXPECT_GE(lines, 2u);
     EXPECT_EQ(written, wide_names_last_first());
+}
+
+/* A focus changed after the attach is an activity line at its time, of
+ * the header's kind, its names quoted as the header quotes them, "more"
+ * lines past one line's room, "none" for an ended focus; a scrubbed
+ * folder export keeps the lines */
+TEST(RecorderTest, AFocusChangedAfterTheAttachIsAnActivityLine)
+{
+    register_profile();
+    register_wide_profile();
+    Root root;
+    {
+        Recording rec(root, "mock://change?profile=rec-test");
+        ASSERT_NE(rec.recorder, nullptr);
+        const uint16_t half = 1;
+        ASSERT_EQ(ecuio_session_set_focus(rec.session, &half, 1), ECUIO_OK);
+        const uint16_t both[3] = {2, 1, 2};
+        ASSERT_EQ(ecuio_session_set_focus_with(rec.session, both, 3, 0,
+                                               ECUIO_FOCUS_DEFAULT_PICK),
+                  ECUIO_OK);
+        ASSERT_EQ(ecuio_session_set_focus(rec.session, nullptr, 0), ECUIO_OK);
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        const std::string events = rec.file("events.log");
+        EXPECT_EQ(activity_of(events, "focus"),
+                  (std::vector<std::string>{"1 signal: Half",
+                                            "none: every signal asked"}))
+            << events;
+        EXPECT_EQ(activity_of(events, "pick"),
+                  (std::vector<std::string>{"2 signals: Words,Half"}))
+            << events;
+        const size_t one = events.find("  focus  1 signal: Half\n");
+        const size_t two = events.find("  pick  2 signals: Words,Half\n");
+        const size_t none = events.find("  focus  none: every signal asked\n");
+        EXPECT_TRUE(one < two && two < none) << events;
+        EXPECT_EQ(events.find("\nfocus  "), std::string::npos)
+            << "no focus at the attach, no header line: " << events;
+    }
+    {
+        Recording rec(root, "mock://change-wide?profile=rec-wide");
+        ASSERT_NE(rec.recorder, nullptr);
+        const std::vector<uint16_t> picks = wide_picks_twice();
+        ASSERT_EQ(ecuio_session_set_focus(rec.session, picks.data(),
+                                          static_cast<uint32_t>(picks.size())),
+                  ECUIO_OK);
+        const std::string folder = rec.folder;
+        ASSERT_EQ(rec.finish(), ECUIO_OK);
+        const std::string events = read_text(fs::u8path(folder) / "events.log");
+        const std::vector<std::string> lines = activity_of(events, "focus");
+        ASSERT_GE(lines.size(), 2u) << events;
+        const std::string first = std::to_string(kWideDefs) + " signals: ";
+        ASSERT_EQ(lines[0].rfind(first, 0), 0u) << lines[0];
+        std::vector<std::string> names;
+        split_names(lines[0].substr(first.size()), &names);
+        for (size_t k = 1; k < lines.size(); ++k) {
+            ASSERT_EQ(lines[k].rfind("more: ", 0), 0u) << lines[k];
+            EXPECT_LE(lines[k].size(), 6u + 4096u);
+            split_names(lines[k].substr(6), &names);
+        }
+        EXPECT_EQ(names, wide_names_last_first());
+
+        const std::string copy = root.utf8() + "/copy";
+        ecuio_export_options_t o{};
+        o.format = ECUIO_EXPORT_FOLDER;
+        o.folder_utf8 = folder.c_str();
+        o.out_path_utf8 = copy.c_str();
+        ecuio_export_report_t report{};
+        ASSERT_EQ(ecuio_export(&o, &report), ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(
+            activity_of(read_text(fs::u8path(copy) / "events.log"), "focus"),
+            lines)
+            << "a scrubbed copy keeps them";
+    }
 }
 
 /* A session takes one recorder at a time: a second is refused while the

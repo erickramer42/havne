@@ -1685,6 +1685,11 @@ private:
             events_body_.push_back(line);
             return;
         }
+        /* A focus change names signals, as the header's focus line does */
+        if (kind == "focus" || kind == "pick") {
+            events_body_.push_back(line);
+            return;
+        }
         ++events_left_; /* a note, the caller's text, or a kind unknown */
     }
 

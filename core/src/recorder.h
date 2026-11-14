@@ -98,4 +98,12 @@ ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,
                                            const char* bytes, size_t length,
                                            const char* plugin = "");
 
+/* On the caller's thread, after a focus change has been stored and its
+ * generation moved: the recorder taking the session's frames, if one
+ * is, writes the focus as activity lines of kind pick or focus, as the
+ * header names it ("N signals: ...", "more: ..." past a line's room,
+ * "none: every signal asked" when it ended). Takes the link's mutex,
+ * then focus_mutex, never both at once. */
+void ecuio_record_focus(ecuio_session_t* session);
+
 #endif /* ECUIO_RECORDER_H */

@@ -116,12 +116,13 @@ struct def_entry {
 };
 
 /* What the caller's threads hand the writer */
-enum class item_kind { begin, note, mark };
+enum class item_kind { begin, note, mark, focus };
 struct item {
     item_kind kind;
     uint64_t host_us;
-    std::string text;
-    std::string bytes; /* begin's: signals.json, empty for none */
+    std::string text;  /* focus's: its kind */
+    std::string bytes; /* begin's: signals.json, empty for none; focus's:
+                          its lines, a NUL between two */
 };
 
 bool is_text_kind(uint8_t kind)
@@ -1020,6 +1021,17 @@ struct ecuio_recorder {
                  * UTF-8 as UTF-8 (ADR-0017) */
                 value_out += "\xEF\xBB\xBFhost_us,signal,value,unit\n";
                 break;
+            case item_kind::focus: {
+                size_t at = 0;
+                while (at <= it.bytes.size()) {
+                    const size_t end =
+                        (std::min)(it.bytes.find('\0', at), it.bytes.size());
+                    event_line(it.host_us, it.text.c_str(),
+                               it.bytes.substr(at, end - at));
+                    at = end + 1;
+                }
+                break;
+            }
             case item_kind::note:
                 event_line(it.host_us, "note", it.text);
                 break;
@@ -1531,6 +1543,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
     std::string header;
     uint64_t zero_us = 0;
     uint64_t slept_at_attach = 0;
+    uint32_t focus_seen = 0;
     std::chrono::system_clock::time_point start_wall{};
     try {
         const ecuio_signal_set_t* set = session->active_signal_set;
@@ -1599,6 +1612,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
          * so a reader needn't wait for a transition */
         {
             std::lock_guard<std::mutex> f(session->focus_mutex);
+            focus_seen = session->focus_generation.load();
             size_t named = 0;
             /* As many lines as the names take; a reader appends them */
             for (const std::string& part :
@@ -1690,8 +1704,66 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         link->active.store(recorder, std::memory_order_release);
     }
     recorder->attached.store(true, std::memory_order_release);
+    /* A focus changed between the header's read and the attach would be
+     * in neither: the link's mutex orders it against the attach */
+    if (session->focus_generation.load() != focus_seen) {
+        ecuio_record_focus(session);
+    }
     return ECUIO_OK;
 }
+
+} // extern "C"
+
+void ecuio_record_focus(ecuio_session_t* session)
+{
+    ecuio_record_link& link = *session->record_link;
+    ecuio_recorder_t* r = nullptr;
+    {
+        std::lock_guard<std::mutex> g(link.m);
+        r = ecuio_record_pin(link);
+    }
+    if (r == nullptr) {
+        return;
+    }
+    try {
+        std::vector<uint16_t> ids;
+        bool pick = false;
+        {
+            std::lock_guard<std::mutex> f(session->focus_mutex);
+            ids = session->focus_ids;
+            pick = (session->focus_flags & ECUIO_FOCUS_DEFAULT_PICK) != 0;
+        }
+        size_t named = 0;
+        const std::vector<std::string> parts =
+            focus_parts(session->active_signal_set, ids, &named);
+        std::string lines;
+        if (parts.empty()) {
+            pick = false;
+            lines = "none: every signal asked";
+        }
+        for (size_t k = 0; k < parts.size(); ++k) {
+            lines += k == 0 ? std::to_string(named) +
+                                  (named == 1 ? " signal: " : " signals: ")
+                            : std::string(1, '\0') + "more: ";
+            lines += parts[k];
+        }
+        const uint64_t now = ecuio_clock_us();
+        const uint64_t host_us = now > r->zero_us ? now - r->zero_us : 0;
+        std::lock_guard<std::mutex> g(r->note_m);
+        if (r->items.size() >= r->note_cap) {
+            r->notes_dropped.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            r->items.push_back(item{item_kind::focus, host_us,
+                                    pick ? "pick" : "focus", std::move(lines)});
+        }
+    } catch (...) {
+        /* The focus stands; its line is lost, counted as a note */
+        r->notes_dropped.fetch_add(1, std::memory_order_relaxed);
+    }
+    ecuio_record_unpin(link);
+}
+
+extern "C" {
 
 ecuio_status_t ecuio_recorder_note(ecuio_recorder_t* recorder,
                                    const char* utf8_line)

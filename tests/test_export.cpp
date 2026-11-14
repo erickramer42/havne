@@ -2238,6 +2238,33 @@ TEST(FolderExportTest, APickLineIsKept)
         << e.files["events.log"];
 }
 
+/* A focus change's lines, a pick's and an ended focus's, are kept in
+ * the range as the link lines are, scrubbed or raw; the notes beside
+ * them are not */
+TEST(FolderExportTest, AFocusChangesLinesAreKeptInTheRange)
+{
+    Folder f;
+    recording(f, "", polled_rows(1));
+    const std::string pick =
+        "22:13:21.250  +1.000  pick  2 signals: Speed,RPM\n";
+    const std::string more = "22:13:21.250  +1.000  pick  more: \"a,b\"\n";
+    const std::string none =
+        "22:13:22.250  +2.000  focus  none: every signal asked\n";
+    const std::string note = "22:13:22.250  +2.000  note  Asking 2 signals\n";
+    f.write("rec/events.log", events_log() + pick + more + none + note);
+    FolderExported whole(f);
+    ASSERT_EQ(whole.rc, ECUIO_OK) << whole.detail;
+    const std::string copied = whole.files["events.log"];
+    EXPECT_NE(copied.find(pick + more + none), std::string::npos) << copied;
+    EXPECT_EQ(copied.find("note  Asking"), std::string::npos) << copied;
+
+    FolderExported ranged(f, 0, 1500000, 2500000, "ranged");
+    ASSERT_EQ(ranged.rc, ECUIO_OK) << ranged.detail;
+    const std::string in_range = ranged.files["events.log"];
+    EXPECT_NE(in_range.find(none), std::string::npos) << in_range;
+    EXPECT_EQ(in_range.find("  pick  "), std::string::npos) << in_range;
+}
+
 /* A range takes each file's rows and lines in it alone; the end line
  * stays, the header whole */
 TEST(FolderExportTest, ARangeTakesEachFilesRowsInItAlone)
