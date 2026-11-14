@@ -169,8 +169,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     check(strcmp(ecuio_signal_file_profile(a), ecuio_signal_file_profile(b)) == 0);
 
     /* A format 1 file compiles format 1's steps alone and reads no
-     * computed input (ADR-0062), and each computed def keeps its
-     * expression */
+     * computed input (ADR-0062), and each computed def of the file's
+     * own keeps its expression (a base set's, obd2's Boost, has none) */
     const uint32_t format = ecuio_signal_file_format(a);
     check(format >= ECUIO_SIGNAL_FILE_FORMAT_OLDEST &&
           format <= ECUIO_SIGNAL_FILE_FORMAT);
@@ -180,7 +180,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
             check(ecuio_signal_file_expr(a, &d)[0] == '\0');
             continue;
         }
-        check(ecuio_signal_file_expr(a, &d)[0] != '\0');
+        check((ecuio_signal_file_expr(a, &d)[0] != '\0') ==
+              (ecuio_signal_file_key(a, &d)[0] != '\0'));
         const ecuio_computed_t& p = set->computed[d.table_first];
         for (uint32_t s = 0; format == 1 && s < p.step_count; ++s) {
             check(p.steps[s] <= ECUIO_COMPUTED_DIVIDE);
