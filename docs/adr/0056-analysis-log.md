@@ -941,6 +941,15 @@ on the axis and a Stretches panel for the levels and roles. The viewer's
 comparison uses core's defaults, and it shows no column difference: the
 `delta` is `havne-cli view`'s alone.
 
+*Note of 2026-11-12, later the same day.* The viewer's comparison has its
+difference (the appendix "a difference in the viewer"), and a span's
+statistics and a cursor's step are tasks of the global thread pool too, as
+the stretches pass is: a statistics ask over the dense hour with a NaN in
+each second of one signal reads every second's rows, 200 to 270 ms on the
+desktop (measured with a build running beside it, so an upper bound),
+which a close waited out on the GUI thread while the asks had a thread of
+their own that the close joined.
+
 ## Appendix: the Jump row as built (2026-11-12)
 
 Section 6's Jump row and bands. The viewer asks core for the recording's
@@ -1002,3 +1011,90 @@ Python's `Recording.stretches`, `find_threshold` and `find_marker` take no
 cancel yet, so a script's interrupt during one waits for the call to end.
 That is the gap this step leaves; v0.8.0 closes it, the three ending on a
 `KeyboardInterrupt` through the `_with` calls as the other front ends do.
+
+*Note of 2026-11-12, later the same day.* v0.7.4 closes that gap, not
+v0.8.0: each of the three takes `cancel=`, a callable taking no arguments,
+over `ecuio_recording_stretches_with` and `ecuio_recording_find_with`. A
+true answer ends the call with `Error` `ECUIO_ERR_CANCELED`; an exception
+the cancel raises, or a Ctrl+C on the main thread, ends it and is raised
+again, as the imports do.
+
+*Note of 2026-11-13.* `RecordingViewTest.ACloseStopsAStretchesPassUnderWay`
+times nothing: it holds the pass at half a pass's asks until the close and
+wants the pass ended CANCELED at that ask. A whole pass over the dense
+recording takes about 10 s on CI's unoptimized macOS build, so a close
+placed by a measured time could come after the pass.
+
+## Appendix: a difference in the viewer (2026-11-12)
+
+The viewer's Compare has a Difference switch (`compareDifference`), off
+until asked for and only for two recordings lined up. For each plotted
+number that the compared recording holds under the same name in the same
+displayed unit (the unit's case aside, as `havne-cli view`'s `delta`), the
+chart draws the compared recording's mean less this one's, column by
+column, in a pane of the signal's quantity labeled with a delta and the
+unit, in the signal's color. The same name in another unit has no
+difference; the dashed overlay still draws it.
+
+**The own-window rule.** The chart's traces come from the reader's query,
+whose columns of a second or more hold the whole seconds that start in
+them, in each recording's own time: two recordings lined up half a second
+apart fill one column of the axis from two windows, and a difference taken
+from them carries the shift. So the difference never reads those columns.
+`RecordingView::columnMeans(signals, t0, t1, columns)` gives each column's
+mean from the reader's statistics over the column's own microseconds
+(`ecuio_recording_stats`, which reads a part of a second from the rows),
+and the page asks both recordings for the same grid, its ends rounded to
+whole microseconds so each column's two spans lie exactly the offset
+apart. One rule for every column width. A column empty in either recording
+has no difference.
+
+**Off the GUI thread.** A pass is one statistics call for each column, each
+reading up to two partial seconds from the rows, so it runs as the view's
+asks do: a task of the global pool, the newest ask replacing a waiting one
+and ending one under way at its next column, a close ending it too. The
+page asks once the view rests (150 ms after its last move); until the
+answer the last one stays drawn where its own columns lie, which is still
+true, only coarser or short of the view's ends. A view that can't take
+the ask is asked once more at a later paint and then left until the grid
+changes; an ask the task has no memory for is answered empty, so the page
+never waits for an answer that isn't coming.
+
+**Tested by** a recording of ten minutes sampled three to four times a
+second compared with a copy half a second later, lined up on a rise: no
+difference in any column at columns of 1.7 s and at columns under a
+second, while the traces the chart draws there differ; a copy 100 rpm
+higher reads 100 in every column; a copy in another unit has no
+difference; a refused ask and a lost one. `RecordingViewTest.ColumnMeans*`,
+`QmlTest.recordings`'
+`test_aRecordingAgainstItselfHalfASecondLaterShowsNoDifference`,
+`test_aRefusedDifferenceAskIsAskedOnceMoreThenLeft` and
+`test_aLostDifferenceAskIsAnsweredEmptyAndNotAskedAgain`,
+`QmlTest.chartlayout`'s `test_aSeriesOwnPaneWinsAndNamesItsLabel`.
+
+**Left out:** the difference at the cursor in the signal's row, a
+difference of the lowest and highest, and a difference pane kept apart
+past the pane limit (on a phone's three panes the differences fold into
+the mixed pane, which has no axis).
+
+## Note: the viewer's asks give way, and a newer stretches ask ends an older pass (2026-11-13)
+
+A column means pass gives way to a cursor's statistics or step ask: before
+each column after its first it checks whether one is waiting, and if so it
+stops there, the ask is answered, and the pass resumes at that column. Over
+the dense recording (three signals, 1.8 million rows each, 65,536 columns)
+a statistics ask made during a pass is answered within about a millisecond;
+without it, the ask waited for the rest of the pass, up to about 410 ms. A
+newer means ask still replaces a pass, whether it is running or has given
+way, and the replaced pass has no answer.
+
+A newer stretches ask ends an older pass at its next second, as a close
+does. Only a pass that has started does this: the request number the older
+pass compares against is written after the newer pass's start succeeds, so
+an ask that can't start leaves the pass under way to answer.
+`RecordingViewTest.AStatisticsAskDuringAMeansPassIsAnsweredBeforeItEnds`,
+`.ANewerMeansAskReplacesAPassThatGaveWay`,
+`.ANewerMeansAskTakenWithTheAskAPassGaveWayToReplacesIt`,
+`.ACloseEndsAMeansPassThatGaveWay`,
+`.ANewerStretchesAskStalesTheOlderPass`,
+`.AStretchesAskThatCantStartLeavesTheOlderPassAlone`.
