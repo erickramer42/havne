@@ -203,7 +203,7 @@ GaugeBase {
             anchors.horizontalCenter: parent.horizontalCenter
             text: gauge.label
             font.pixelSize: Math.max(9, gauge.rr * 0.13)
-            color: Theme.textDim
+            color: gauge.titleColor
         }
         Text {
             Accessible.ignored: true

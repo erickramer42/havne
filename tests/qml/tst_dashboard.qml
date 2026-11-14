@@ -1764,4 +1764,35 @@ TestCase {
         verify(Qt.colorEqual(green.accent, Theme.success), "success stays: " + green.accent)
         compare(page.doc.pages[0].cells[0].options.accent, "info", "the stored word stays")
     }
+
+    // A dial with no caption names its signal and says the unit once; a typed
+    // caption wins (the hub's label, never the unit, is the default)
+    function test_aCaptionlessDialShowsItsSignalsName() {
+        const cell = (caption) => ({ kind: "analog", w: 4, h: 4, label: "Engine speed",
+                                     refs: refsOf("Engine speed"), unit: "RPM",
+                                     options: caption === null ? { from: 0, to: 8000 }
+                                                               : { from: 0, to: 8000, caption: caption } })
+        const page = pageOf({}, docOf([cell(null), cell("x1000 r/min")]), true)
+        tryVerify(() => allLoaded(page), 5000, "the gauges load")
+        const bare = gaugeOf(findChild(page, "dashCell_0_0"))
+        const typed = gaugeOf(findChild(page, "dashCell_0_1"))
+        compare(findChild(bare, "gaugeCaption").text, "Engine speed", "the name, not the unit")
+        compare(bare.unit, "RPM", "the unit stays under the value")
+        compare(findChild(typed, "gaugeCaption").text, "x1000 r/min", "a typed caption wins")
+    }
+
+    // With no session a picked color tints the title, so a page's grouping
+    // shows while it is built; Night draws no pick
+    function test_aPickedColorTintsTheTitleBeforeASession() {
+        const page = pageOf({}, docOf([{ kind: "digital", w: 2, h: 4, label: "Engine speed",
+                                         refs: refsOf("Engine speed"), unit: "RPM",
+                                         options: { from: 0, to: 8000, color: "stone" } }]), true)
+        tryVerify(() => allLoaded(page), 5000, "the gauge loads")
+        const g = gaugeOf(findChild(page, "dashCell_0_0"))
+        verify(!g.hasValue, "no session")
+        verify(Qt.colorEqual(g.titleColor, Theme.gaugeColor("stone")), "the pick: " + g.titleColor)
+        Theme.night = "on"
+        verify(Qt.colorEqual(g.titleColor, Theme.textDim), "Night: no pick: " + g.titleColor)
+        Theme.night = "off"
+    }
 }
