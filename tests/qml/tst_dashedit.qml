@@ -730,10 +730,10 @@ TestCase {
         compare(page.drawnKinds.indexOf(data.kind) >= 0, true)
         if (data.kind === "sparkline") {
             const spark = find(page, "preview_sparkline").item
-            verify(spark.history.length > 10, "a still trace to look at")
+            verify(spark.samples.length > 20, "a still trace to look at")
             wait(300)
-            compare(spark.history.length, 120, "and it takes no samples of its own")
-            verify(spark.tracePoints(200, 50)[0].x < 2, "the trace spans the preview")
+            compare(spark.samples.length, 240, "and it reads nothing of its own")
+            verify(spark.tracePoints(200, 50)[0][0].x < 2, "the trace spans the preview")
         }
     }
 
@@ -2598,7 +2598,7 @@ TestCase {
         first.peakValue = 1e9
         first.lowValue = -1e9
         if (data.kind === "sparkline" || data.kind === "digital")
-            first.history = [1e9]
+            first.samples = [0, 1e9]
         press(find(page, "dashCell_0_0"))
         compare(page.selected, 0)
         page.moveTo(1)
@@ -2606,8 +2606,8 @@ TestCase {
         const now = gaugeAt(0).item
         verify(now.peakValue !== 1e9, "no peak of A's")
         verify(now.lowValue !== -1e9, "no low of A's")
-        if (now.history !== undefined)
-            verify(now.history.indexOf(1e9) < 0, "no trace of A's")
+        if (now.samples !== undefined)
+            verify(now.samples.indexOf(1e9) < 0, "no trace of A's")
     }
 
     // The Close buttons and Done commit a field still holding the focus
@@ -2792,17 +2792,17 @@ TestCase {
         compare(written.pages[0].cells[1].h, 12, "with the scaled spans")
     }
 
-    // A digital tile samples only while its page is the one shown
-    function test_aDigitalTileOnAnotherPageTakesNoSamples() {
+    // A digital tile reads its trace only while its page is the one shown
+    function test_aDigitalTileOnAnotherPageReadsNothing() {
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         const d = docOf([cellOf("A", "digital")])
         d.pages.push({ name: "P2", cells: [cellOf("B", "digital")] })
         const page = pageOf({}, d)
-        const sampler = p => find(find(find(page, "dashCell_" + p + "_0"), "gauge").item, "sampler")
-        tryVerify(() => sampler(0).running, 3000, "the page shown samples")
-        verify(!sampler(1).running, "the other page's tile does not")
+        const reader = p => find(find(find(page, "dashCell_" + p + "_0"), "gauge").item, "traceReader")
+        tryVerify(() => reader(0).running, 3000, "the page shown reads")
+        verify(!reader(1).running, "the other page's tile does not")
         page.goTo(1)
-        tryVerify(() => sampler(1).running && !sampler(0).running, 3000, "and it follows the page")
+        tryVerify(() => reader(1).running && !reader(0).running, 3000, "and it follows the page")
     }
 
     // Edit mode's Remove sits in a corner the gauge leaves free, so it

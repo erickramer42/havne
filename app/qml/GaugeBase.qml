@@ -110,6 +110,56 @@ Item {
         peaksReset()
     }
 
+    // A trace's [ts, val, ...] (Bridge.signalModel.trace) spans its lowest and
+    // highest number, padded to 4 % of full scale so idle noise doesn't fill it
+    function traceExtent(samples) {
+        let lo = Infinity, hi = -Infinity
+        for (let i = 1; i < samples.length; i += 2) {
+            const v = samples[i]
+            if (!isFinite(v)) continue
+            if (v < lo) lo = v
+            if (v > hi) hi = v
+        }
+        if (lo > hi)
+            return { lo: from, hi: to }
+        const minSpan = (to - from) * 0.04
+        if (hi - lo < minSpan) {
+            const mid = (hi + lo) / 2
+            lo = mid - minSpan / 2
+            hi = mid + minSpan / 2
+        }
+        return { lo: lo, hi: hi }
+    }
+    // Its pieces for a w x h box, by time (the newest at the right edge): only a
+    // break (a point that isn't a number) ends one, and a lone point is a dot
+    function tracePieces(samples, windowMs, w, h, lo, hi) {
+        const n = samples.length
+        if (n < 2 || w <= 0 || windowMs <= 0)
+            return []
+        const newest = samples[n - 2]
+        const range = hi - lo
+        const pieces = []
+        let piece = []
+        const end = () => {
+            if (piece.length === 1)
+                piece.push(Qt.point(piece[0].x + (piece[0].x > w - 1 ? -1 : 1), piece[0].y))
+            if (piece.length > 0)
+                pieces.push(piece)
+            piece = []
+        }
+        for (let i = 0; i < n; i += 2) {
+            const v = samples[i + 1]
+            if (!isFinite(v)) {
+                end()
+                continue
+            }
+            const y = range > 0 && isFinite(range) ? h - 2 - (v - lo) / range * (h - 4) : h / 2
+            piece.push(Qt.point(w - (newest - samples[i]) / windowMs * w, y))
+        }
+        end()
+        return pieces
+    }
+
     property real smoothed: hasValue ? Math.max(from, Math.min(to, value)) : from
     Behavior on smoothed {
         NumberAnimation { duration: base.smoothingMs; easing.type: Easing.OutCubic }
