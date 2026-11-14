@@ -323,13 +323,12 @@ class SignalListModel : public QAbstractListModel
 public:
     explicit SignalListModel(QObject* parent = nullptr);
 
-    // Rolling history depth per signal: room for the strip chart's
-    // longest window, 120 s. A 100 ms window adds one to three samples
-    // (its lowest, highest and newest value, ADR-0005's appendix), and a
-    // signal refreshing at 20 Hz or less adds at most two, so 120 s of it
-    // fits; a faster one keeps a shorter span. Kept constexpr so tests
-    // can assert exact ring behavior without a config surface.
-    static constexpr int HistoryCapacity = 2400;
+    // Rolling history depth per signal: room for the longest window the
+    // strip chart and the Dashboard's traces draw, 120 s. A 100 ms window
+    // adds one to three samples (its lowest, highest and newest value,
+    // ADR-0005's appendix), so 120 s of any signal fits. Kept constexpr so
+    // tests can assert exact ring behavior without a config surface.
+    static constexpr int HistoryCapacity = 3600;
 
     // One signal's coalesce window, as the bridge's staging hands it
     // over: its newest value and its lowest and highest, each at its
@@ -517,6 +516,18 @@ public:
     // role lookups per row.
     Q_INVOKABLE QVariantList chartData(qint64 windowMs = 0, int columns = 0) const;
 
+    // One signal's trace for the Dashboard's sparkline and Number tile:
+    // [ts, val, ...] as chartData's samples, for the row of def `id`
+    // whether or not Live plots it, over the last windowMs before that
+    // row's newest sample, sliced as chartData slices (from time 0, so a
+    // sample keeps its slice as the window moves). A break is a point whose
+    // value is NaN: a stall in the ring past the stale time
+    // (ECUIO_VALUE_STALE_US), or a value that isn't a number, which also
+    // starts a new slice. [] for no such row, a text row or one with no
+    // history. The trace reads the model's ring, so it outlives the page
+    // that shows it.
+    Q_INVOKABLE QList<double> trace(int id, qint64 windowMs, int columns) const;
+
     /* Periodic age refresh: ageMs is computed from the clock at data(), but
      * dataChanged fires only on updateValues, so a stalled row would never
      * dim. Emits dataChanged over every row for AgeMsRole alone (no value
@@ -589,6 +600,12 @@ private:
     // An enum row's label for its newest value, "" when it has none
     static QString labelOf(const Entry& e);
     static void pushWindow(Entry& e, const WindowValue& w);
+    // The ring's samples at or after `from`, oldest first: every one when
+    // sliceMs <= 0, else each slice's lowest and highest and the newest.
+    // breakMs > 0 adds a nullptr for each stall longer than it and gives a
+    // value that isn't a number a point of its own (trace's breaks)
+    static std::vector<const Sample*>
+    sliced(const Entry& e, qint64 from, double sliceMs, qint64 breakMs = 0);
     // A row's value as displayed in the current unit system
     ecuio_display_value_t shown(const Entry& e, double value) const;
     // A row's range as displayed (displayedRange)

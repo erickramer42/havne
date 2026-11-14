@@ -5477,6 +5477,241 @@ TEST(BridgeTest, ChartDataKeepsEachSlicesPointsAsTheWindowSlides)
         << "the same points, slice for slice";
 }
 
+/* The Dashboard's trace (ADR-0057's note "a trace reads the model's
+ * history"): one row's samples sliced as chartData slices them, for any row
+ * whether Live plots it or not, over the window before its own newest sample */
+TEST(BridgeTest, ATraceIsTheChartsSlicingForAnyRow)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    EXPECT_TRUE(model.trace(1001, 5000, 10).isEmpty()) << "no history yet";
+    for (qint64 t = 0; t < 20000; t += 10) {
+        const double wave = static_cast<double>(
+            (t / 10) % 100 < 50 ? (t / 10) % 50 : 50 - (t / 10) % 50);
+        model.updateValues(
+            {{uint16_t(1001), wave}, {uint16_t(2001), double(t)}}, t);
+    }
+    const auto chartOf = [&model](int s, qint64 windowMs, int columns) {
+        QList<double> out;
+        for (const QVariant& v : model.chartData(windowMs, columns)
+                                     .at(s)
+                                     .toMap()
+                                     .value("samples")
+                                     .toList())
+            out << v.toDouble();
+        return out;
+    };
+    const std::pair<qint64, int> shapes[] = {
+        {0, 0}, {5000, 0}, {5000, 10}, {5000, 300}, {120000, 40}};
+    for (const auto& shape : shapes) {
+        EXPECT_EQ(model.trace(1001, shape.first, shape.second),
+                  chartOf(0, shape.first, shape.second))
+            << shape.first << " ms, " << shape.second << " columns";
+        EXPECT_EQ(model.trace(2001, shape.first, shape.second),
+                  chartOf(1, shape.first, shape.second))
+            << shape.first << " ms, " << shape.second << " columns";
+    }
+
+    const QList<double> plotted = model.trace(1001, 5000, 10);
+    model.toggleSubscribed(0);
+    ASSERT_EQ(model.chartData().size(), 1) << "Live no longer plots it";
+    EXPECT_EQ(model.trace(1001, 5000, 10), plotted)
+        << "the Dashboard still traces it";
+
+    model.updateValues({{uint16_t(2001), 1.0}}, 30000);
+    const QList<double> own = model.trace(1001, 5000, 0);
+    ASSERT_FALSE(own.isEmpty());
+    EXPECT_EQ(own.first(), 19990.0 - 5000.0)
+        << "the window ends at the row's own newest";
+
+    EXPECT_TRUE(model.trace(4242, 5000, 10).isEmpty()) << "no such def";
+    EXPECT_TRUE(model.trace(-1, 5000, 10).isEmpty());
+    EXPECT_TRUE(model.trace(1001 + 65536, 5000, 10).isEmpty())
+        << "an id past 16 bits is no def's";
+}
+
+TEST(BridgeTest, ATextRowHasNoTrace)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    defs[1].kind = ECUIO_VALUE_HEX; /* id 2001, a text row */
+    model.setSignalSet(&set);
+    model.updateTexts({{uint16_t(2001), QStringLiteral("62 F1 90")}}, 10);
+    model.updateValues({{uint16_t(1001), 5.0}}, 10);
+    EXPECT_TRUE(model.trace(2001, 0, 0).isEmpty());
+    EXPECT_EQ(model.trace(1001, 0, 0), (QList<double>{10, 5}));
+}
+
+/* A one-window spike (a fuel cut's lambda) keeps its height and its place
+ * in every read while it is in the window, however the window has moved */
+TEST(BridgeTest, ATraceKeepsAOneWindowSpikeInPlaceAsItScrolls)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    const auto window = [](qint64 endMs, double high) {
+        SignalListModel::WindowValue w;
+        w.id = 1001;
+        w.last = 1.0;
+        w.lastMs = endMs;
+        w.min = 0.98;
+        w.minMs = endMs - 70;
+        w.max = high;
+        w.maxMs = endMs - 40;
+        return w;
+    };
+    const qint64 windowMs = 30000;
+    const int columns = 100; /* slices of 300 ms, three windows in each */
+    const qint64 spikeAt = 5100 - 40;
+    int reads = 0;
+    for (qint64 end = 100; end <= windowMs; end += 100) {
+        model.updateWindow({window(end, end == 5100 ? 1.99 : 1.0)});
+        if (end < 5100)
+            continue;
+        const QList<double> t = model.trace(1001, windowMs, columns);
+        bool found = false;
+        for (int i = 0; i + 1 < t.size(); i += 2)
+            found =
+                found || (t.at(i) == double(spikeAt) && t.at(i + 1) == 1.99);
+        ASSERT_TRUE(found) << "the spike at its own time and height, read at "
+                           << end;
+        ++reads;
+    }
+    EXPECT_GT(reads, 200);
+}
+
+TEST(BridgeTest, ATraceIsInTheUnitSystem)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    std::memset(defs[0].unit, 0, sizeof defs[0].unit);
+    std::memcpy(defs[0].unit, "km/h", 4);
+    model.setSignalSet(&set);
+    model.updateValues({{uint16_t(1001), 100.0}}, 0);
+    model.updateValues({{uint16_t(1001), 110.0}}, 100);
+    model.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    const QList<double> mph = model.trace(1001, 0, 0);
+    ASSERT_EQ(mph.size(), 4);
+    EXPECT_NEAR(mph.at(1), 100.0 * 0.621371192237334, 1e-9);
+    EXPECT_NEAR(mph.at(3), 110.0 * 0.621371192237334, 1e-9);
+    model.setUnitSystem(ECUIO_UNITS_METRIC);
+    EXPECT_EQ(model.trace(1001, 0, 0), (QList<double>{0, 100, 100, 110}));
+}
+
+/* Two minutes of windows, each with its lowest, highest and newest apart
+ * (three points for each window), fit the ring: the longest trace is whole */
+TEST(BridgeTest, TheRingHoldsTheLongestTracesWindow)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    const qint64 longestMs = 120000;
+    for (qint64 end = 0; end <= longestMs; end += 100) {
+        SignalListModel::WindowValue w;
+        w.id = 1001;
+        w.last = static_cast<double>(end % 7);
+        w.lastMs = end;
+        w.min = -1.0;
+        w.minMs = end - 60;
+        w.max = 50.0;
+        w.maxMs = end - 30;
+        model.updateWindow({w});
+    }
+    const QList<double> t = model.trace(1001, longestMs, 0);
+    ASSERT_FALSE(t.isEmpty());
+    EXPECT_LE(t.first(), 100.0)
+        << "the trace reaches back to its window's start";
+    EXPECT_EQ(t.at(t.size() - 2), double(longestMs));
+}
+
+/* A trace breaks only where the ring stalls past the stale time, never on
+ * its slices' spacing: a phone tile's 120 s over 40 columns (3 s slices)
+ * draws a signal every 100 ms as one piece, and a lone sample between two
+ * stalls keeps its value */
+TEST(BridgeTest, ATraceBreaksOnlyWhereTheRingStalls)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    const auto breaks = [](const QList<double>& t) {
+        int n = 0;
+        for (int i = 1; i < t.size(); i += 2) {
+            n += std::isnan(t.at(i)) ? 1 : 0;
+        }
+        return n;
+    };
+    qint64 t = 0;
+    for (; t < 120000; t += 100) {
+        model.updateValues({{uint16_t(1001), static_cast<double>(t % 900)}}, t);
+    }
+    const QList<double> narrow = model.trace(1001, 120000, 40);
+    ASSERT_GT(narrow.size(), 40);
+    EXPECT_EQ(breaks(narrow), 0) << "slices 3 s wide are no stall";
+
+    const qint64 stall = SessionBridge::valueStaleMs() + 500;
+    t += stall;
+    model.updateValues({{uint16_t(1001), 1.99}}, t);
+    t += stall;
+    for (const qint64 end = t + 2000; t < end; t += 100) {
+        model.updateValues({{uint16_t(1001), 1.0}}, t);
+    }
+    const QList<double> after = model.trace(1001, 120000, 40);
+    EXPECT_EQ(breaks(after), 2) << "one break for each stall";
+    bool lone = false;
+    for (int i = 3; i + 2 < after.size(); i += 2) {
+        lone = lone || (std::isnan(after.at(i - 2)) && after.at(i) == 1.99 &&
+                        std::isnan(after.at(i + 2)));
+    }
+    EXPECT_TRUE(lone) << "the lone sample between the stalls, at its value";
+    EXPECT_EQ(breaks(model.trace(1001, 120000, 0)), 2) << "unsliced too";
+}
+
+/* A value that isn't a number is a point of its own: the slice it falls in
+ * still shows its lowest and highest number */
+TEST(BridgeTest, AValueThatIsntANumberHidesNoSlicesExtremes)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    model.updateValues(
+        {{uint16_t(1001), std::numeric_limits<double>::quiet_NaN()}}, 1000);
+    model.updateValues({{uint16_t(1001), 1.0}}, 1100);
+    model.updateValues({{uint16_t(1001), 9.0}}, 1200);
+    model.updateValues({{uint16_t(1001), 5.0}}, 1300);
+    model.updateValues({{uint16_t(1001), 4.0}}, 1400);
+    /* one slice of 5 s holds them all */
+    const QList<double> t = model.trace(1001, 5000, 1);
+    QList<double> numbers;
+    int breaks = 0;
+    for (int i = 0; i + 1 < t.size(); i += 2) {
+        if (std::isnan(t.at(i + 1))) {
+            ++breaks;
+            EXPECT_TRUE(numbers.isEmpty())
+                << "the break comes first, at its time";
+        } else {
+            numbers << t.at(i) << t.at(i + 1);
+        }
+    }
+    EXPECT_GE(breaks, 1);
+    EXPECT_EQ(numbers, (QList<double>{1100, 1, 1200, 9, 1400, 4}))
+        << "the slice's low, its high and the newest";
+}
+
 TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
 {
     SessionBridge bridge;

@@ -1167,64 +1167,140 @@ QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
         m["decimals"] = static_cast<int>(now.decimal_places);
         m["value"] = now.value;
 
-        // Flattened [ts, val, ts, val, ...], oldest first.
-        // When full, the oldest surviving sample sits at histHead (the
-        // next eviction slot); while filling, samples are dense from 0.
+        // Flattened [ts, val, ts, val, ...], oldest first
         QVariantList samples;
-        const auto put = [&](const Sample& s) {
-            samples.append(static_cast<double>(s.timestampMs));
-            samples.append(now.converted ? shown(e, s.value).value : s.value);
-        };
-        // A slice's lowest and highest, in time order, once each
-        const Sample* low = nullptr;
-        const Sample* high = nullptr;
-        const auto flush = [&]() {
-            if (low != nullptr) {
-                const Sample* a = low->timestampMs <= high->timestampMs ? low : high;
-                const Sample* b = a == low ? high : low;
-                put(*a);
-                if (b != a) put(*b);
-            }
-            low = high = nullptr;
-        };
-        const uint32_t start = (e.histCount == HistoryCapacity)
-                                ? e.histHead : 0;
-        qint64 slice = -1;
-        const Sample* last = nullptr;
-        for (uint32_t i = 0; i < e.histCount; ++i) {
-            const Sample& s = e.history[(start + i) % HistoryCapacity];
-            if (s.timestampMs < from) continue;
-            last = &s;
-            if (sliceMs <= 0.0) {
-                put(s);
-                continue;
-            }
-            // Slices counted from time 0, not from the window's start:
-            // the window slides with every update, and slices measured
-            // from it would put the same samples in other slices each
-            // time, so a noisy trace's peaks crawl as it scrolls
-            const qint64 k = static_cast<qint64>(
-                std::floor(static_cast<double>(s.timestampMs) / sliceMs));
-            if (k != slice) {
-                flush();
-                slice = k;
-            }
-            if (low == nullptr || s.value < low->value) low = &s;
-            if (high == nullptr || s.value > high->value) high = &s;
+        for (const Sample* s : sliced(e, from, sliceMs)) {
+            samples.append(static_cast<double>(s->timestampMs));
+            samples.append(now.converted ? shown(e, s->value).value : s->value);
         }
-        if (sliceMs > 0.0) {
-            /* the newest sample always: the trace ends, and its label
-             * sits, where the value is now */
-            if (last != nullptr && last != low && last != high) {
-                flush();
-                put(*last);
-            } else {
-                flush();
-            }
+        if (samples.isEmpty()) {
+            continue;
         }
-        if (samples.isEmpty()) continue;
         m["samples"] = samples;
         out.append(m);
+    }
+    return out;
+}
+
+std::vector<const SignalListModel::Sample*>
+SignalListModel::sliced(const Entry& e, qint64 from, double sliceMs,
+                        qint64 breakMs)
+{
+    std::vector<const Sample*> out;
+    // A slice's lowest and highest, in time order, once each
+    const Sample* low = nullptr;
+    const Sample* high = nullptr;
+    const auto flush = [&]() {
+        if (low != nullptr) {
+            const Sample* a =
+                low->timestampMs <= high->timestampMs ? low : high;
+            const Sample* b = a == low ? high : low;
+            out.push_back(a);
+            if (b != a) {
+                out.push_back(b);
+            }
+        }
+        low = high = nullptr;
+    };
+    // When full, the oldest surviving sample sits at histHead (the next
+    // eviction slot); while filling, samples are dense from 0
+    const uint32_t start = (e.histCount == HistoryCapacity) ? e.histHead : 0;
+    qint64 slice = -1;
+    const Sample* last = nullptr;
+    bool lastOut = false;
+    for (uint32_t i = 0; i < e.histCount; ++i) {
+        const Sample& s = e.history[(start + i) % HistoryCapacity];
+        if (s.timestampMs < from) {
+            continue;
+        }
+        if (breakMs > 0) {
+            // A stall in the ring is a break; a value that isn't a number is
+            // its own point, so it hides no slice's extremes
+            const bool stalled =
+                last != nullptr && s.timestampMs - last->timestampMs > breakMs;
+            const bool number = std::isfinite(s.value);
+            if (stalled || !number) {
+                flush();
+                slice = -1;
+            }
+            if (stalled) {
+                out.push_back(nullptr);
+            }
+            last = &s;
+            lastOut = !number;
+            if (!number) {
+                out.push_back(&s);
+                continue;
+            }
+        }
+        last = &s;
+        if (sliceMs <= 0.0) {
+            out.push_back(&s);
+            continue;
+        }
+        // Slices counted from time 0, not from the window's start: slices
+        // measured from a sliding window would move a noisy trace's peaks
+        const qint64 k = static_cast<qint64>(
+            std::floor(static_cast<double>(s.timestampMs) / sliceMs));
+        if (k != slice) {
+            flush();
+            slice = k;
+        }
+        if (low == nullptr || s.value < low->value) {
+            low = &s;
+        }
+        if (high == nullptr || s.value > high->value) {
+            high = &s;
+        }
+    }
+    if (sliceMs > 0.0) {
+        // The newest sample always: the trace ends where the value is now
+        if (last != nullptr && !lastOut && last != low && last != high) {
+            flush();
+            out.push_back(last);
+        } else {
+            flush();
+        }
+    }
+    return out;
+}
+
+QList<double> SignalListModel::trace(int id, qint64 windowMs, int columns) const
+{
+    QList<double> out;
+    if (id < 0 || id > 0xFFFF) {
+        return out;
+    }
+    const int row = m_rowOfId.value(static_cast<uint16_t>(id), -1);
+    if (row < 0) {
+        return out;
+    }
+    const Entry& e = m_entries[static_cast<size_t>(row)];
+    if (e.isText || e.histCount == 0) {
+        return out;
+    }
+    const uint32_t newest =
+        (e.histHead + HistoryCapacity - 1) % HistoryCapacity;
+    const qint64 from = windowMs > 0 ? e.history[newest].timestampMs - windowMs
+                                     : std::numeric_limits<qint64>::min();
+    const double sliceMs = (windowMs > 0 && columns > 0)
+                               ? static_cast<double>(windowMs) / columns
+                               : 0.0;
+    const bool converted = shown(e, e.value).converted;
+    const std::vector<const Sample*> picked =
+        sliced(e, from, sliceMs, SessionBridge::valueStaleMs());
+    out.reserve(static_cast<qsizetype>(picked.size() * 2));
+    double lastTs = 0.0;
+    for (const Sample* s : picked) {
+        // A break: a point that isn't a number, at the stall's start
+        if (s == nullptr) {
+            out.append(lastTs);
+            out.append(std::numeric_limits<double>::quiet_NaN());
+            continue;
+        }
+        lastTs = static_cast<double>(s->timestampMs);
+        out.append(lastTs);
+        out.append(converted ? shown(e, s->value).value : s->value);
     }
     return out;
 }
@@ -2720,6 +2796,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_errorEpisodes = 0;
     emit linkStateChanged();
     setLogPaused(false);       // a new session always logs
+    // Precise: a coarse timer fires up to 5 % early, and the ring's 120 s
+    // counts on ten windows a second
+    m_coalesceTimer->setTimerType(Qt::PreciseTimer);
     m_coalesceTimer->start(100);
     emit connectedChanged(true);
     emit framesReset();
