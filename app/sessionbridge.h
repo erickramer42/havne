@@ -37,6 +37,8 @@
 #include "ecuio/recording.h"
 #include "latencystats.h"
 
+class QSettings;
+
 // ecuio_clock_us as a chrono clock: the bridge stamps a frame's and a
 // value's arrival with it, for the delivery figures
 struct HostClock {
@@ -956,6 +958,11 @@ public:
     // when any was
     Q_INVOKABLE QVariantMap forgetVehicleImports(const QString& vehicle);
     Q_INVOKABLE QVariantMap forgetAllVehicleImports();
+    // The vehicles' signal files moved into the plugin store, once
+    // (ADR-0064 Q6, storemigration.h), with prefs the app's preferences:
+    // the lines for the activity log, none once the move is done. Called
+    // before QML loads, so the caller logs them when the Log page listens
+    QStringList migrateStores(QSettings& prefs);
     // Export plugin: the store's packed copy written to url byte for
     // byte (a local file, or Android's content:// through QFile), so the
     // file loads wherever the copy does and holds nothing of the store's

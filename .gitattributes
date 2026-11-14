@@ -12,3 +12,8 @@
 # checked out as committed, never with a Windows checkout's CRLF
 tests/fixtures/recording/*/conditions.json -text
 tests/fixtures/recording/*/signals.json -text
+
+# The vehicle book in both formats and the signal files it names, read
+# byte for byte: a file is named by the SHA-256 of its bytes
+tests/data/vehiclebook/* -text
+tests/data/vehiclebook/signals/* -text

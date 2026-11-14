@@ -1703,6 +1703,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_recording_import.cpp
         test_recording_export.cpp
         test_one_store.cpp
+        test_store_migration.cpp
         ../app/recordingview.cpp
         ../app/recordingexport.cpp
         ../app/recordingframes.cpp
@@ -1714,6 +1715,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
+        ../app/storemigration.cpp
         ../app/signalfilter.cpp
         ../app/blepicker.cpp
         ../app/btconnect.cpp
@@ -1748,6 +1750,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ECUIO_IMPORT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
         ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
+        ECUIO_VEHICLEBOOK_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/data/vehiclebook"
     )
 
     target_link_libraries(test_bridge PRIVATE
@@ -1790,6 +1793,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
+        ../app/storemigration.cpp
         ../app/signalfilter.cpp
         ../app/carryover.cpp
     )
