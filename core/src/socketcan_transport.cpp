@@ -247,6 +247,109 @@ struct read_frame {
     bool overflow = false;
 };
 
+/* A read at the close, up to left_us: an ECU's frame on a channel's reply
+ * ID goes through ISO-TP (a First Frame answered with Flow Control) and a
+ * whole message to the engine alone, since the session has closed. False
+ * when the link failed, which ends the close at once. */
+bool close_read(ecuio_socketcan_transport* t, int64_t left_us)
+{
+    const int64_t ms = std::min<int64_t>(kWaitMs, (left_us + 999) / 1000);
+    struct pollfd p = {t->fd, POLLIN, 0};
+    const int ready = poll(&p, 1, static_cast<int>(std::max<int64_t>(1, ms)));
+    if (ready <= 0) {
+        return ready == 0 || errno == EINTR;
+    }
+    alignas(struct canfd_frame) uint8_t raw[CANFD_MTU];
+    for (int i = 0; i < kReadBurst; ++i) {
+        struct iovec iov = {raw, sizeof raw};
+        struct msghdr msg;
+        std::memset(&msg, 0, sizeof msg);
+        msg.msg_iov = &iov;
+        msg.msg_iovlen = 1;
+        const ssize_t n = recvmsg(t->fd, &msg, MSG_DONTWAIT);
+        if (n < 0) {
+            return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
+        }
+        if ((msg.msg_flags & MSG_CONFIRM) != 0) {
+            continue; /* this socket's own frame, back */
+        }
+        uint32_t can_id;
+        std::memcpy(&can_id, raw, 4);
+        if (can_id & CAN_ERR_FLAG) {
+            if (socketcan_error_is_hard(can_id)) {
+                return false;
+            }
+            continue;
+        }
+        if (n != static_cast<ssize_t>(CAN_MTU) || raw[4] > 8) {
+            continue;
+        }
+        isotp_can f;
+        f.id = can_id & (can_id & CAN_EFF_FLAG ? CAN_EFF_MASK : CAN_SFF_MASK);
+        f.len = raw[4];
+        std::memcpy(f.data, raw + 8, f.len);
+        for (uint32_t c = 0; c < t->chan_count; ++c) {
+            if (t->rx_ids[c] != f.id ||
+                ((can_id & CAN_EFF_FLAG) != 0) != t->ext29[c]) {
+                continue;
+            }
+            isotp_message m;
+            const isotp_result res = isotp_take(*t->isotp, f, now_us(t), &m);
+            if (res == isotp_result::first) {
+                (void)write_frame(t->fd,
+                                  isotp_flow_control(isotp_flow_control_id(
+                                      t->rx_ids[c], t->tx_ids[c])),
+                                  t->ext29[c]);
+            } else if (res == isotp_result::complete) {
+                (void)ecuio_engine_on_frame(&t->engine, c, m.data, m.len,
+                                            now_us(t), nullptr);
+            }
+            break;
+        }
+    }
+    return true;
+}
+
+/* ADR-0060's close: 10 01 once a leaving channel's request still out ends
+ * (J2534's bound), so its module hears it; its answer unread, as before. */
+void leave_sessions(ecuio_socketcan_transport* t)
+{
+    ecuio_request_engine& e = t->engine;
+    if (t->fd < 0) {
+        return;
+    }
+    ecuio_request q[ECUIO_MAX_CHANNELS];
+    bool leave[ECUIO_MAX_CHANNELS] = {};
+    bool any = false;
+    for (uint32_t c = 0; c < e.chan_count; ++c) {
+        leave[c] = ecuio_engine_session_leave(&e, c, &q[c]);
+        any = any || leave[c];
+    }
+    if (!any) {
+        return;
+    }
+    const int64_t start = now_us(t);
+    for (;;) {
+        const int64_t now = now_us(t);
+        const int64_t until = ecuio_engine_leave_wait_until(&e, leave, start);
+        if (until <= now) {
+            break;
+        }
+        if (!close_read(t, until - now)) {
+            return;
+        }
+    }
+    for (uint32_t c = 0; c < e.chan_count; ++c) {
+        isotp_can f;
+        *t->sender = isotp_tx{};
+        if (leave[c] &&
+            isotp_tx_start(*t->sender, t->tx_ids[c], q[c].bytes,
+                           static_cast<uint16_t>(q[c].len), now_us(t), &f)) {
+            (void)write_frame(t->fd, f, t->ext29[c]);
+        }
+    }
+}
+
 /* A requesting session's worker (ADR-0040 sections 3 and 5): each pass
  * expires the engine's waits, judges a request whose echo is late, sends
  * the next request due (one awaiting its echo at a time), waits on the
@@ -568,18 +671,7 @@ void request_worker(ecuio_socketcan_transport* t)
         }
         ecuio_publish_timing(s, e, &iso, now_us(t), timing_at, false);
     }
-    /* ADR-0060: each channel that entered the extended session goes back
-     * to the default one, a Single Frame; its reply is left unread */
-    for (uint32_t c = 0; t->fd >= 0 && c < e.chan_count; ++c) {
-        ecuio_request q;
-        isotp_can f;
-        *t->sender = isotp_tx{};
-        if (ecuio_engine_session_leave(&e, c, &q) &&
-            isotp_tx_start(*t->sender, t->tx_ids[c], q.bytes,
-                           static_cast<uint16_t>(q.len), now_us(t), &f)) {
-            (void)write_frame(t->fd, f, t->ext29[c]);
-        }
-    }
+    leave_sessions(t);
     ecuio_publish_timing(s, e, &iso, now_us(t), timing_at, true);
 }
 

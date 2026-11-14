@@ -1311,6 +1311,7 @@ FUNCTIONS = {
     'ecuio_recording_close': (None, [POINTER(ecuio_recording_t)]),  # recording.h
     'ecuio_recording_enum_label': (c_char_p, [POINTER(ecuio_recording_t), c_uint32, c_uint32]),  # recording.h
     'ecuio_recording_find': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_find_t), c_uint64, POINTER(c_uint64)]),  # recording.h
+    'ecuio_recording_find_with': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_find_t), c_uint64, ecuio_cancel_t, c_void_p, POINTER(c_uint64)]),  # recording.h
     'ecuio_recording_get_info': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_info_t)]),  # recording.h
     'ecuio_recording_get_labels': (c_int, [POINTER(ecuio_recording_t), c_uint32, POINTER(ecuio_enum_entry_t), c_uint32, POINTER(c_uint32)]),  # recording.h
     'ecuio_recording_get_marker': (c_int, [POINTER(ecuio_recording_t), c_uint32, POINTER(ecuio_recording_marker_t)]),  # recording.h
@@ -1324,6 +1325,7 @@ FUNCTIONS = {
     'ecuio_recording_stats': (c_int, [POINTER(ecuio_recording_t), POINTER(c_uint32), c_uint32, c_uint64, c_uint64, POINTER(ecuio_recording_stats_t)]),  # recording.h
     'ecuio_recording_step': (c_int, [POINTER(ecuio_recording_t), c_uint32, c_uint64, c_uint32, POINTER(c_uint64)]),  # recording.h
     'ecuio_recording_stretches': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_stretch_rules_t), c_uint64, c_uint64, POINTER(ecuio_recording_stretch_t), c_uint32, POINTER(c_uint32)]),  # recording.h
+    'ecuio_recording_stretches_with': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_stretch_rules_t), c_uint64, c_uint64, ecuio_cancel_t, c_void_p, POINTER(ecuio_recording_stretch_t), c_uint32, POINTER(c_uint32)]),  # recording.h
     'ecuio_recording_text_at': (c_int, [POINTER(ecuio_recording_t), c_uint32, c_uint64, c_char_p, c_uint32, POINTER(c_uint64)]),  # recording.h
     'ecuio_register_frame_callback': (c_int, [POINTER(ecuio_session_t), ecuio_frame_callback_t, c_void_p]),  # core.h
     'ecuio_register_values_callback': (c_int, [POINTER(ecuio_session_t), ecuio_values_callback_t, c_void_p]),  # profile.h

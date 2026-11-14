@@ -1,0 +1,25 @@
+{
+ "format": 2,
+ "form": "desktop",
+ "pages": [
+  {
+   "name": "Engine",
+   "cells": [
+    {
+     "kind": "gizmo",
+     "w": 2,
+     "h": 4,
+     "label": "RPM",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "accent": "mauve",
+      "color": "x"
+     }
+    }
+   ]
+  }
+ ]
+}

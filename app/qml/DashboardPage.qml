@@ -6,6 +6,7 @@ import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 pragma ComponentBehavior: Bound
 
@@ -68,6 +69,9 @@ Page {
         property bool phoneDrive: false
         property int driveHints: 0
     }
+    // The vehicles' document (Main binds Settings'): the signal files a
+    // layout file names are the picked vehicle's
+    property var vehicles: VehicleBook.empty()
     // Settings' URI and profile, whose signals Add offers with no session
     property string offlineUri: ""
     onOfflineUriChanged: if (panel === "signal") refreshRows()
@@ -82,8 +86,8 @@ Page {
     readonly property bool builtInShown: doc === parsed.doc && problem !== ""
                                          && problem !== "dropped"
     // What a "dropped" read left out, in words
-    readonly property string droppedWords: {
-        const d = parsed.dropped
+    readonly property string droppedWords: droppedText(parsed.dropped)
+    function droppedText(d) {
         if (!d)
             return ""
         const words = []
@@ -328,6 +332,7 @@ Page {
         moreShown = false
         confirmReset = false
         confirmRemovePage = false
+        noteLayout("")
         clearHistory()
     }
 
@@ -365,6 +370,111 @@ Page {
         store[formKey] = texts.text
         doc = next
         return true
+    }
+
+    // ---- The layout file (ADR-0057's appendix on the layout file)
+
+    // What the last export or load said, in words; layoutNoteBad when it
+    // is a refusal
+    property string layoutNote: ""
+    property bool layoutNoteBad: false
+    function noteLayout(words, bad) {
+        layoutNote = words
+        layoutNoteBad = bad === true
+    }
+    // The picked vehicle's signal files, each with the references its
+    // profile gives: [{ name, sha256, profile, refs }]. A file whose profile
+    // isn't registered (it doesn't load) gives none
+    function vehicleFiles() {
+        const v = VehicleBook.picked(vehicles)
+        if (!v)
+            return []
+        return v.signals.map(f => ({
+            name: f.name, sha256: f.sha256, profile: f.profile,
+            refs: Bridge.profileSignals("mock://?profile=" + f.profile).map(r => r.ref) }))
+    }
+    // The name a layout file is offered under
+    function layoutFileName() {
+        const v = VehicleBook.picked(vehicles)
+        const slug = v ? v.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") : ""
+        return "dashboard-" + (slug !== "" ? slug + "-" : "") + form + ".json"
+    }
+    // Writes this form's layout, and the signal files it needs by name, to
+    // the file at url
+    function exportLayoutTo(url) {
+        commitTyping()
+        const files = vehicleFiles()
+        const needed = DashboardBook.neededFiles(doc, files)
+        const unloaded = files.filter(f => f.refs.length === 0).map(f => f.name)
+        const text = DashboardBook.exportText(doc, form, needed)
+        if (text === "") {
+            noteLayout(qsTr("Not saved: this layout can't be written as a file"), true)
+            return false
+        }
+        const r = Bridge.saveLayoutFile(text, url)
+        if (!r.ok) {
+            noteLayout(qsTr("Not saved: %1").arg(r.words), true)
+            return false
+        }
+        noteLayout((needed.length === 0
+                    ? qsTr("Saved this layout to a file")
+                    : qsTr("Saved this layout to a file. It needs the signal files %1")
+                          .arg(needed.map(f => f.name).join(", ")))
+                   + (unloaded.length === 0 ? ""
+                      : qsTr(". The vehicle's signal files %1 don't load, so a gauge reading them isn't listed as needing them")
+                            .arg(unloaded.join(", "))))
+        return true
+    }
+    // Loads a layout file as this form's layout, one undo step. Refused in
+    // words for a file that can't be read, a newer one and one of the other
+    // form; never while Reset's or Remove's question is open
+    function loadLayoutFrom(url) {
+        if (confirmReset || confirmRemovePage) {
+            noteLayout(qsTr("Answer the question first"), true)
+            return false
+        }
+        const r = Bridge.layoutFileText(url)
+        if (!r.ok) {
+            noteLayout(qsTr("Not loaded: %1").arg(r.words), true)
+            return false
+        }
+        const files = vehicleFiles()
+        const read = DashboardBook.importProblem(r.text, form, files.map(f => f.sha256))
+        if (read.problem === "none") {
+            noteLayout(qsTr("Not loaded: the file is empty"), true)
+        } else if (read.problem === "damaged") {
+            noteLayout(qsTr("Not loaded: the file isn't a dashboard layout this version can read"), true)
+        } else if (read.problem === "newer") {
+            noteLayout(qsTr("Not loaded: the file was made by a newer version of Havne"), true)
+        } else if (read.problem === "otherform") {
+            noteLayout(qsTr("Not loaded: the file is a %1 layout and this is the %2 form. "
+                            + "A layout isn't scaled between forms")
+                       .arg(read.form === "phone" ? qsTr("phone") : qsTr("desktop"))
+                       .arg(form === "phone" ? qsTr("phone") : qsTr("desktop")), true)
+        } else {
+            commitTyping()
+            cancelHold()
+            selected = -1
+            panel = ""
+            const words = [qsTr("Loaded the layout")]
+            if (read.problem === "dropped")
+                words.push(qsTr("%1 left out because they couldn't be read").arg(droppedText(read.dropped)))
+            if (read.notes.indexOf("no-form") >= 0)
+                words.push(qsTr("the file named no form, so it was read as the %1 form")
+                           .arg(form === "phone" ? qsTr("phone") : qsTr("desktop")))
+            if (read.missing.length > 0)
+                words.push(qsTr("it needs signal files this vehicle lacks: %1. Import them under Signals; "
+                                + "until then those gauges read not in profile")
+                           .arg(read.missing.map(f => f.name).join(", ")))
+            const changed = edit(read.doc, stepOf("", qsTr("load a layout"), -1, -1, 0))
+            if (!changed)
+                words[0] = qsTr("The file holds the layout already shown")
+            else
+                goTo(0)
+            noteLayout(words.join(". "))
+            return changed
+        }
+        return false
     }
 
     // Back to the built-in layout: nothing stored, so a later version's
@@ -1031,6 +1141,9 @@ Page {
         readonly property real value: entry ? entry.value : 0
         readonly property real windowHigh: entry ? entry.windowHigh : 0
         readonly property real windowLow: entry ? entry.windowLow : 0
+        // A trace reads the model's history of the def, kept whatever page shows
+        readonly property var traceSource: Bridge.signalModel
+        readonly property int signalId: entry ? entry.id : -1
         readonly property bool stale: hasValue && entry.ageMs > Theme.staleMs
         // An enumeration's label, which only `digital` is offered
         readonly property string valueLabel: entry && entry.isEnum ? entry.label : ""
@@ -1163,8 +1276,8 @@ Page {
             "bar": ["scaleMarks", "vertical", "marks"],
             "segments": ["cells", "rise"],
             "seven-segment": ["digits"],
-            "sparkline": ["windowS", "shown"],
-            "digital": ["description", "valueLabel", "shown"],
+            "sparkline": ["windowS", "shown", "traceSource", "signalId"],
+            "digital": ["description", "valueLabel", "shown", "traceSource", "signalId"],
             "shift-light": ["count", "ledSpacing"]
         })
 
@@ -1351,6 +1464,23 @@ Page {
             }
             text = Qt.binding(() => field.shownText)
         }
+    }
+
+    // One channel of the custom color: a whole number 0 to 255, committed with its two siblings
+    component ChannelField: ThemedTextField {
+        required property int index
+        required property var row
+        Layout.fillWidth: true
+        Layout.minimumWidth: 40
+        Layout.preferredWidth: 64
+        Layout.preferredHeight: Theme.touchTarget
+        inputMethodHints: Qt.ImhDigitsOnly
+        maximumLength: 3
+        text: String(row.channel(index))
+        Accessible.name: [qsTr("Red value of the color, 0 to 255"), qsTr("Green value of the color, 0 to 255"),
+                          qsTr("Blue value of the color, 0 to 255")][index]
+        onTextEdited: row.edited = true
+        onEditingFinished: row.commit()
     }
 
     component Caption: Label {
@@ -1562,10 +1692,12 @@ Page {
                         value: panelCard.cell ? panelCard.cell.w : 1
                         onValueModified: root.resize(value, panelCard.cell.h)
                     }
-                    Caption { text: qsTr("Rows") }
+                    Caption { text: root.phoneForm ? qsTr("Height") : qsTr("Rows") }
                     SpinBox {
                         objectName: "panelH"
-                        Accessible.name: qsTr("Rows")
+                        Accessible.name: root.phoneForm ? qsTr("Height") : qsTr("Rows")
+                        // The phone reads it in columns, the unit Columns uses
+                        textFromValue: v => root.phoneForm ? DashboardBook.heightInColumns(v) : String(v)
                         Layout.preferredHeight: Theme.touchTarget
                         // A stored h under the phone's step stays reachable
                         from: root.phoneForm && panelCard.cell
@@ -1755,13 +1887,26 @@ Page {
                         readonly property string current: panelCard.cell && panelCard.cell.options
                                                           && Theme.gaugeColorNames.indexOf(panelCard.cell.options.color) >= 0
                                                           ? panelCard.cell.options.color : ""
+                        // A custom color: "#rrggbb" as stored, else ""
+                        readonly property string custom: panelCard.cell && panelCard.cell.options
+                                                         && Theme.isGaugeHex(panelCard.cell.options.color)
+                                                         ? panelCard.cell.options.color : ""
+                        // The Custom entry's fields show while it is open or a custom color is set
+                        property bool customOpen: false
+                        readonly property bool customShown: customOpen || custom !== ""
+                        // The panel is one instance for every gauge: another gauge starts closed
+                        Connections {
+                            target: root
+                            function onSelectedChanged() { colorRow.customOpen = false }
+                            function onPageIndexChanged() { colorRow.customOpen = false }
+                        }
                         ThemedButton {
                             objectName: "panelColor_default"
                             text: qsTr("Default")
                             Accessible.name: qsTr("Default color")
                             checkable: true
-                            checked: colorRow.current === ""
-                            onClicked: root.setOptions({ color: null })
+                            checked: colorRow.current === "" && colorRow.custom === ""
+                            onClicked: { colorRow.customOpen = false; root.setOptions({ color: null }) }
                         }
                         Repeater {
                             model: Theme.gaugeColorNames
@@ -1774,7 +1919,7 @@ Page {
                                 checkable: true
                                 checked: colorRow.current === modelData
                                 Accessible.name: qsTr("Color %1").arg(Theme.gaugeColorLabel(modelData))
-                                onToggled: { toggle(); root.setOptions({ color: modelData }) }
+                                onToggled: { toggle(); colorRow.customOpen = false; root.setOptions({ color: modelData }) }
                                 contentItem: Item {}
                                 background: Rectangle {
                                     anchors.centerIn: parent
@@ -1787,6 +1932,110 @@ Page {
                                 }
                             }
                         }
+                        ThemedButton {
+                            objectName: "panelColor_custom"
+                            text: qsTr("Custom...")
+                            Accessible.name: qsTr("Custom color")
+                            // Not checkable: a click would flip the state the row's own rules decide
+                            checked: colorRow.customShown
+                            onClicked: colorRow.customOpen = !colorRow.customShown || colorRow.custom === ""
+                        }
+                    }
+                }
+
+                // Three whole numbers make a color of the user's own, stored as
+                // "#rrggbb"; nothing is refused for being hard to see, it is said
+                RowLayout {
+                    id: customRow
+                    objectName: "panelColorCustom"
+                    Layout.fillWidth: true
+                    visible: panelCard.drawsValue && colorRow.customShown
+                    spacing: 4
+                    // The color the fields start from: the stored custom one, else what the gauge draws now
+                    readonly property color base: colorRow.custom !== "" ? colorRow.custom
+                        : Theme.gaugeColor(panelCard.cell && panelCard.cell.options ? panelCard.cell.options.color : "") || Theme.gaugeValue
+                    function channel(i) { return Math.round([base.r, base.g, base.b][i] * 255) }
+                    // True once a field's text was edited by the user since it was bound: only then is a
+                    // color equal to the drawn one worth storing (a pass-through sends editingFinished too)
+                    property bool edited: false
+                    // "#rrggbb" for three well-formed whole numbers 0 to 255, else ""
+                    function typed() {
+                        let out = "#"
+                        for (const f of [fieldR, fieldG, fieldB]) {
+                            const t = f.text.trim()
+                            if (!/^[0-9]{1,3}$/.test(t) || Number(t) > 255)
+                                return ""
+                            out += (Number(t) < 16 ? "0" : "") + Number(t).toString(16)
+                        }
+                        return out
+                    }
+                    readonly property string previewHex: { void fieldR.text; void fieldG.text; void fieldB.text; return typed() }
+                    // The fields show the color again; what was typed is gone
+                    function rebind() {
+                        edited = false
+                        fieldR.text = Qt.binding(() => String(customRow.channel(0)))
+                        fieldG.text = Qt.binding(() => String(customRow.channel(1)))
+                        fieldB.text = Qt.binding(() => String(customRow.channel(2)))
+                    }
+                    // A value that isn't a whole number 0 to 255 stays typed, with its reason under the fields
+                    function commit() {
+                        const hex = typed()
+                        if (hex === "")
+                            return
+                        // A focus pass-through sends editingFinished with nothing typed: nothing to store
+                        if (edited || !Qt.colorEqual(hex, base))
+                            root.setOptions({ color: hex })
+                        rebind()
+                    }
+                    // Another gauge, or the row hidden: what was left typed doesn't follow
+                    Connections {
+                        target: colorRow
+                        function onCustomShownChanged() { customRow.rebind() }
+                    }
+                    Connections {
+                        target: root
+                        function onSelectedChanged() { customRow.rebind() }
+                        function onPageIndexChanged() { customRow.rebind() }
+                    }
+                    Caption { text: "R" }
+                    ChannelField { id: fieldR; objectName: "panelColorR"; index: 0; row: customRow }
+                    Caption { text: "G" }
+                    ChannelField { id: fieldG; objectName: "panelColorG"; index: 1; row: customRow }
+                    Caption { text: "B" }
+                    ChannelField { id: fieldB; objectName: "panelColorB"; index: 2; row: customRow }
+                }
+                // The preview, and under 3:1 what it means
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: customRow.visible
+                    spacing: 8
+                    Rectangle {
+                        objectName: "panelColorPreview"
+                        Layout.preferredWidth: 32
+                        Layout.preferredHeight: 32
+                        radius: 6
+                        color: customRow.previewHex !== "" ? customRow.previewHex : "transparent"
+                        border.width: 1
+                        border.color: Theme.outline
+                    }
+                    Caption {
+                        objectName: "panelColorWhy"
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        visible: customRow.previewHex === ""
+                        color: Theme.danger
+                        text: qsTr("Each value is a whole number from 0 to 255")
+                    }
+                    Caption {
+                        objectName: "panelColorHard"
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        // The look it is hard to read in (a layout can be opened under the other one); no
+                        // color is hard in both, since the two surfaces sit at the two ends of the lightness
+                        readonly property var hardIn: customRow.previewHex === "" ? []
+                            : Theme.lookNames.filter(l => Theme.gaugeContrast(customRow.previewHex, l) < 3)
+                        visible: hardIn.length > 0
+                        text: hardIn[0] === "dark" ? qsTr("Hard to read in Dark") : qsTr("Hard to read in Light")
                     }
                 }
 
@@ -1918,13 +2167,15 @@ Page {
                                     g.value = 60
                                     g.label = root.kindNames[kindTile.modelData]
                                     // A sparkline's still is a made-up trace, and it
-                                    // takes no samples of its own
+                                    // reads nothing (no source)
                                     if (kindTile.modelData === "sparkline") {
                                         const spark = item as SparkGauge
                                         spark.shown = false
                                         spark.windowS = 12   // 120 points at 10 Hz fill the box
-                                        spark.history = Array.from({ length: 120 },
-                                                                   (_, i) => 55 + 25 * Math.sin(i / 10))
+                                        const still = []
+                                        for (let i = 0; i < 120; ++i)
+                                            still.push(i * 100, 55 + 25 * Math.sin(i / 10))
+                                        spark.samples = still
                                     }
                                 }
                             }
@@ -2612,11 +2863,30 @@ Page {
                 text: qsTr("Remove page")
                 onClicked: root.confirmRemovePage = true
             }
+            ThemedButton {
+                id: moreExport
+                objectName: "moreExport"
+                text: qsTr("Export layout")
+                onClicked: {
+                    root.noteLayout("")
+                    layoutSaveDialog.open()
+                }
+            }
+            ThemedButton {
+                id: moreLoad
+                objectName: "moreLoad"
+                text: qsTr("Load layout")
+                onClicked: {
+                    root.noteLayout("")
+                    layoutOpenDialog.open()
+                }
+            }
             Item {
                 objectName: "moreResetGap"
                 // The bar's width and the controls' own, never the flow's: a
                 // hidden flow sizes itself from its children, and would loop
                 readonly property real used: pageName.width + moreRemovePage.width + moreRow.spacing
+                    + moreExport.width + moreLoad.width + 2 * moreRow.spacing
                     + (moreAddPage.visible ? moreAddPage.width + moreRow.spacing : 0)
                     + (moreLeft.visible ? moreLeft.width + moreRight.width + 2 * moreRow.spacing : 0)
                 readonly property real tail: moreReset.width
@@ -2641,6 +2911,36 @@ Page {
                 text: qsTr("Reset peaks")
                 onClicked: root.resetPeaks()
             }
+        }
+        Label {
+            objectName: "dashLayoutNote"
+            visible: root.editing && root.moreShown && root.layoutNote !== ""
+            Layout.fillWidth: true
+            Layout.preferredWidth: 0
+            wrapMode: Text.WordWrap
+            color: root.layoutNoteBad ? Theme.danger : Theme.textDim
+            font.pixelSize: Theme.fontCaption
+            text: root.layoutNote
+        }
+        FileDialog {
+            id: layoutSaveDialog
+            title: qsTr("Export this layout")
+            fileMode: FileDialog.SaveFile
+            defaultSuffix: "json"
+            nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
+            currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+            currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+                         + "/" + root.layoutFileName()
+            onAccepted: root.exportLayoutTo(layoutSaveDialog.selectedFile)
+        }
+        DocumentOpenDialog {
+            id: layoutOpenDialog
+            objectName: "layoutOpenDialog"
+            title: qsTr("Load a layout")
+            nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
+            currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+            onAccepted: root.loadLayoutFrom(layoutOpenDialog.selectedFile)
+            onFailed: words => root.noteLayout(words, true)
         }
         RowLayout {
             objectName: "dashRemovePageConfirm"

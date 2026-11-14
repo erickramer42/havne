@@ -37,6 +37,9 @@ TestCase {
     // Settings stores a write when the page goes, so the store is put
     // back once the last case's pages are gone, through setValue
     function init() {
+        // Each case starts from no session, whatever an earlier one left
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting && !Bridge.connected, 5000, "no session at the start")
         wait(0)
         const store = createTemporaryObject(storeComponent, testCase)
         for (const key of ["phone", "desktop", "phoneUnread", "desktopUnread"])
@@ -48,9 +51,11 @@ TestCase {
     }
 
     function cleanup() {
+        DocumentPicker.setPickerForTesting(false)
         Theme.night = "off"
         Theme.look = "dark"
         Bridge.unitSystem = 0
+        Bridge.useSignalFiles([])
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
     }
@@ -140,9 +145,10 @@ TestCase {
         if (scrolled)
             scrolled.contentY = was
     }
-    // Text typed into a field and the field left
+    // Text typed into a field and the field left; it emits textEdited, as real typing does
     function type(field, text) {
         field.text = text
+        field.textEdited()
         field.editingFinished()
     }
     function spin(box, value) {
@@ -630,6 +636,25 @@ TestCase {
         compare(rows.to, 16, "a cell of 16 or fewer stops at 16")
     }
 
+    // The phone's row unit is a quarter of a column: the panel reads the
+    // height in columns, as Columns is, and the desktop keeps rows
+    function test_thePhonesHeightReadsInColumns() {
+        const cell = Object.assign(cellOf("A"), { w: 4, h: 18 })
+        const phone = pageOf({ form: "phone", width: 384, height: 832 }, docOf([cell]))
+        phone.startEditing()
+        phone.select(0)
+        const box = find(phone, "panelH")
+        compare(box.Accessible.name, "Height")
+        compare(box.textFromValue(box.value, box.locale), "4.5", "18 rows is 4.5 columns")
+        compare(box.value, 18, "the stored value is rows")
+        const desktop = pageOf({}, docOf([Object.assign(cellOf("B"), { h: 6 })]))
+        desktop.startEditing()
+        desktop.select(0)
+        const rows = find(desktop, "panelH")
+        compare(rows.Accessible.name, "Rows")
+        compare(rows.textFromValue(rows.value, rows.locale), "6")
+    }
+
     // Step 5's kinds offer their own options in the panel, the bar its two
     // switches, and the peak switch shows for the kinds that draw a peak
     function test_theNewKindsOwnOptionsAreEditable() {
@@ -705,10 +730,10 @@ TestCase {
         compare(page.drawnKinds.indexOf(data.kind) >= 0, true)
         if (data.kind === "sparkline") {
             const spark = find(page, "preview_sparkline").item
-            verify(spark.history.length > 10, "a still trace to look at")
+            verify(spark.samples.length > 20, "a still trace to look at")
             wait(300)
-            compare(spark.history.length, 120, "and it takes no samples of its own")
-            verify(spark.tracePoints(200, 50)[0].x < 2, "the trace spans the preview")
+            compare(spark.samples.length, 240, "and it reads nothing of its own")
+            verify(spark.tracePoints(200, 50)[0][0].x < 2, "the trace spans the preview")
         }
     }
 
@@ -1800,7 +1825,12 @@ TestCase {
         return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2])
     }
 
-    function test_everyNamedColorIsReadableAndApartFromTheZones() {
+    // The original seven keep ADR-0057's rule against the zones; the five
+    // standard colors sit near them on purpose (readable only)
+    readonly property var originalColors: ["teal", "green", "lime", "cyan", "pink", "magenta", "stone"]
+    readonly property var standardColors: ["red", "blue", "yellow", "truegreen", "lightblue"]
+
+    function test_everyNamedColorIsReadableAndTheOriginalsAreApartFromTheZones() {
         for (const look of ["dark", "daylight"]) {
             const p = Theme.palettes[look]
             const surface = Qt.color(p.surface)
@@ -1808,11 +1838,288 @@ TestCase {
             for (const name of Theme.gaugeColorNames) {
                 const c = Qt.color(Theme.gaugePalettes[look][name])
                 verify(contrast(c, surface) >= 3, name + " on " + look + ": " + contrast(c, surface))
-                for (const z of zones)
-                    verify(apart(c, z) >= 25, name + " on " + look + " is " + apart(c, z) + " from a zone color")
+                if (originalColors.indexOf(name) >= 0)
+                    for (const z of zones)
+                        verify(apart(c, z) >= 25, name + " on " + look + " is " + apart(c, z) + " from a zone color")
             }
         }
-        verify(Theme.gaugeColorNames.length >= 6 && Theme.gaugeColorNames.length <= 8)
+        compare(Theme.gaugeColorNames.slice(0, 7), originalColors, "the original seven keep their names and order")
+        compare(Theme.gaugeColorNames.slice(7), standardColors)
+        compare(Theme.gaugeColorNames.length, 12)
+        for (const name of Object.keys(Theme.gaugePalettes.dark))
+            verify(Theme.gaugeColorNames.indexOf(name) >= 0, name + " is listed")
+    }
+
+    function test_theStandardColorsResolveInBothLooksAndNightHasNone() {
+        const expected = { red: ["#ff601f", "#fc5d1c"], blue: ["#34cafb", "#1f9ec6"], yellow: ["#e5fd15", "#946c00"],
+                           truegreen: ["#39ff14", "#38a721"], lightblue: ["#60a5fa", "#2458b8"],
+                           green: ["#4ade80", "#1e7d3f"] }
+        const labels = { red: "Red", blue: "Blue", yellow: "Yellow", truegreen: "Green", lightblue: "Light blue",
+                         green: "Light green" }
+        Theme.night = "off"
+        for (const name of Object.keys(expected)) {
+            Theme.look = "dark"
+            compare(Theme.gaugeColor(name), expected[name][0], name + " in Dark")
+            Theme.look = "daylight"
+            compare(Theme.gaugeColor(name), expected[name][1], name + " in Daylight")
+            compare(Theme.gaugeColorLabel(name), labels[name])
+        }
+        Theme.night = "on"
+        for (const name of Object.keys(expected))
+            compare(Theme.gaugeColor(name), "", name + " at Night")
+        Theme.night = "off"
+        Theme.look = "dark"
+    }
+
+    function test_aCustomColorIsOnlyAWellFormedLowercaseHex() {
+        Theme.night = "off"
+        for (const look of ["dark", "daylight"]) {
+            Theme.look = look
+            compare(Theme.gaugeColor("#12ab9f"), "#12ab9f", look)
+            compare(Theme.gaugeSwatch("#12ab9f"), "#12ab9f")
+            for (const bad of ["#12345", "#1234567", "red ", "#ABCDEF", "12ab9f", "#12ab9g", " #12ab9f", "#12ab9f ", 256, null])
+                compare(Theme.gaugeColor(bad), "", String(bad))
+        }
+        Theme.night = "on"
+        compare(Theme.gaugeColor("#12ab9f"), "", "Night has none")
+        compare(Theme.gaugeSwatch("#12ab9f"), "#12ab9f", "the picker still shows it")
+        Theme.night = "off"
+        Theme.look = "dark"
+    }
+
+    function test_thePickerOffersEveryNamedColorAndACustomEntry() {
+        const page = storedPageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        for (const name of Theme.gaugeColorNames)
+            verify(find(page, "panelColor_" + name), name + " is in the picker")
+        verify(find(page, "panelColor_custom"))
+        verify(!find(page, "panelColorCustom").visible, "the fields wait for Custom")
+        click(page, "panelColor_truegreen")
+        compare(page.doc.pages[0].cells[0].options.color, "truegreen")
+    }
+
+    function test_theCustomFieldsMakeAHexAndRefuseWhatIsNotAColor() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        verify(find(page, "panelColorCustom").visible)
+        const r = find(page, "panelColorR"), g = find(page, "panelColorG"), b = find(page, "panelColorB")
+        type(r, "18"); type(g, "171"); type(b, "159")
+        compare(page.doc.pages[0].cells[0].options.color, "#12ab9f")
+        verify(find(page, "panelColor_custom").checked)
+        verify(!find(page, "panelColor_default").checked)
+        compare(find(page, "panelColorPreview").color.toString(), "#12ab9f")
+        const why = find(page, "panelColorWhy")
+        verify(!why.visible)
+        for (const bad of ["256", "", "-1", "1.5", "ab", "1e2"]) {
+            type(g, bad)
+            compare(page.doc.pages[0].cells[0].options.color, "#12ab9f", "[" + bad + "] is refused")
+            compare(g.text, bad, "[" + bad + "] stays typed")
+            verify(why.visible, "[" + bad + "] says why")
+            verify(why.text.indexOf("0 to 255") >= 0, why.text)
+        }
+        type(g, "171")
+        verify(!why.visible, "a value in range takes the words away")
+        compare(g.text, "171")
+        type(r, "0"); type(g, "5"); type(b, "255")
+        compare(page.doc.pages[0].cells[0].options.color, "#0005ff", "a channel under 16 keeps its zero")
+        click(page, "panelColor_pink")
+        compare(page.doc.pages[0].cells[0].options.color, "pink", "a named pick takes the place")
+        verify(!find(page, "panelColorCustom").visible)
+    }
+
+    function test_aCustomColorHardToReadSaysSoAndIsStillStored() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        const note = find(page, "panelColorHard")
+        const rgb = (r, g, b) => { type(find(page, "panelColorR"), r); type(find(page, "panelColorG"), g); type(find(page, "panelColorB"), b) }
+        rgb("128", "128", "128")
+        verify(!note.visible, "a mid gray reads on both looks")
+        // Both looks are judged, whichever one is shown, and the note names the one
+        rgb("255", "255", "255")
+        compare(page.doc.pages[0].cells[0].options.color, "#ffffff", "stored, not refused")
+        verify(note.visible, "white shown on Dark is hard to read on Light")
+        compare(note.text, "Hard to read in Light")
+        rgb("20", "20", "20")
+        compare(page.doc.pages[0].cells[0].options.color, "#141414")
+        verify(note.visible, "near-black is hard to read on Dark")
+        compare(note.text, "Hard to read in Dark")
+        Theme.look = "daylight"
+        verify(note.visible, "and says so under Daylight too")
+        compare(note.text, "Hard to read in Dark")
+        Theme.look = "dark"
+    }
+
+    // Qt sends editingFinished when a field loses focus with its text unchanged
+    // (type() calls it by hand and can't see this): a pass-through stores nothing
+    function test_tabbingThroughTheCustomFieldsStoresNothing() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        const r = find(page, "panelColorR"), g = find(page, "panelColorG"), b = find(page, "panelColorB")
+        r.forceActiveFocus()
+        verify(r.activeFocus)
+        g.forceActiveFocus()
+        verify(g.activeFocus)
+        b.forceActiveFocus()
+        verify(b.activeFocus)
+        find(page, "panelColor_custom").forceActiveFocus()
+        // The window may not be active: the same pass-through by hand, with no textEdited
+        r.editingFinished(); g.editingFinished(); b.editingFinished()
+        compare(page.doc.pages[0].cells[0].options.color, undefined, "nothing stored by passing through")
+        compare(find(page, "dashUndo").Accessible.name.indexOf("changed"), -1, "no undo step either")
+        // A changed value stored, then passed through again, adds no second step
+        type(r, "10"); type(g, "20"); type(b, "30")
+        compare(page.doc.pages[0].cells[0].options.color, "#0a141e")
+        r.forceActiveFocus(); g.forceActiveFocus(); b.forceActiveFocus()
+        compare(page.doc.pages[0].cells[0].options.color, "#0a141e")
+    }
+
+    // Custom on a named pick, its own three numbers typed: the user keeps the color
+    // as a custom one (a named pick's value changes with the look, a custom one doesn't)
+    function test_aNamedColorsOwnNumbersTypedAreStoredAsACustomColor() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const cell = cellOf("A", "analog")
+        cell.options.color = "teal"
+        const page = storedPageOf({}, docOf([cell]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        const r = find(page, "panelColorR"), g = find(page, "panelColorG"), b = find(page, "panelColorB")
+        compare([r.text, g.text, b.text], ["63", "209", "192"], "the fields start at Dark's teal")
+        r.forceActiveFocus(); g.forceActiveFocus(); b.forceActiveFocus()
+        find(page, "panelColor_custom").forceActiveFocus()
+        r.editingFinished(); g.editingFinished(); b.editingFinished()
+        compare(page.doc.pages[0].cells[0].options.color, "teal", "a pass-through stores nothing")
+        type(r, "63"); type(g, "209"); type(b, "192")
+        compare(page.doc.pages[0].cells[0].options.color, "#3fd1c0", "the same numbers, typed, are stored")
+        Theme.look = "daylight"
+        compare(Theme.gaugeColor(page.doc.pages[0].cells[0].options.color), "#3fd1c0", "and stay as they are in Daylight")
+        Theme.look = "dark"
+    }
+
+    function test_aValueLeftTypedIsGoneWhenAnotherGaugeIsShown() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({}, docOf([cellOf("A", "analog"), cellOf("B", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        type(find(page, "panelColorG"), "256")
+        compare(find(page, "panelColorG").text, "256")
+        press(find(page, "dashCell_0_1"))
+        click(page, "panelColor_custom")
+        verify(find(page, "panelColorG").text !== "256", "B's fields show B's color, not A's leftover")
+        verify(!find(page, "panelColorWhy").visible)
+    }
+
+    function test_theCustomRowIsClosedForAnotherGauge() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({}, docOf([cellOf("A", "analog"), cellOf("B", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        verify(find(page, "panelColorCustom").visible)
+        press(find(page, "dashCell_0_1"))
+        verify(!find(page, "panelColorCustom").visible, "B has no custom color and shows none")
+        verify(!find(page, "panelColor_custom").checked)
+        press(find(page, "dashCell_0_0"))
+        verify(!find(page, "panelColorCustom").visible, "A is closed again too")
+    }
+
+    function test_theCustomButtonStaysCheckedWithItsRowShown() {
+        Theme.night = "off"
+        const cell = cellOf("A", "analog")
+        cell.options.color = "#12ab9f"
+        const page = storedPageOf({}, docOf([cell]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        verify(find(page, "panelColorCustom").visible)
+        click(page, "panelColor_custom")
+        verify(find(page, "panelColorCustom").visible, "a stored custom color keeps its row")
+        verify(find(page, "panelColor_custom").checked, "and the button says so")
+    }
+
+    function test_theContrastNoteJudgesAgainstDarkAtNight() {
+        const gray = Qt.color("#5a5a62")
+        Theme.look = "daylight"
+        Theme.night = "on"
+        const against = Qt.color(Theme.palettes.dark.surface)
+        verify(Math.abs(Theme.gaugeContrast("#5a5a62") - contrast(gray, against)) < 0.001,
+               "Night's color isn't drawn, so the note uses Dark's surface: " + Theme.gaugeContrast("#5a5a62"))
+        Theme.night = "off"
+        verify(Math.abs(Theme.gaugeContrast("#5a5a62") - contrast(gray, Qt.color(Theme.palettes.daylight.surface))) < 0.001)
+        Theme.look = "dark"
+    }
+
+    function test_theHardToReadNoteHasARowOfItsOwnOnAPhone() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({ form: "phone", width: 384, height: 832 }, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        type(find(page, "panelColorR"), "20"); type(find(page, "panelColorG"), "20"); type(find(page, "panelColorB"), "20")
+        const note = find(page, "panelColorHard")
+        verify(note.visible)
+        const row = find(page, "panelColorCustom")
+        const panel = find(page, "dashCellPanel")
+        const at = row.mapToItem(panel, 0, 0)
+        verify(at.x >= -0.5 && at.x + row.width <= panel.width + 0.5, "the fields fit the card: " + at.x + " + " + row.width + " of " + panel.width)
+        verify(note.width > 100, "the note is not a sliver: " + note.width)
+        tryVerify(() => note.mapToItem(panel, 0, 0).y >= row.mapToItem(panel, 0, 0).y + row.height - 1, 3000,
+                  "the note sits under the fields")
+    }
+
+    function test_theWhyLineHasARowOfItsOwnOnAPhone() {
+        Theme.night = "off"
+        Theme.look = "dark"
+        const page = storedPageOf({ form: "phone", width: 384, height: 832 }, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        click(page, "panelColor_custom")
+        type(find(page, "panelColorG"), "256")
+        const why = find(page, "panelColorWhy")
+        verify(why.visible)
+        const row = find(page, "panelColorCustom")
+        const panel = find(page, "dashCellPanel")
+        const at = row.mapToItem(panel, 0, 0)
+        verify(at.x >= -0.5 && at.x + row.width <= panel.width + 0.5, "the fields fit the card: " + row.width + " of " + panel.width)
+        tryVerify(() => why.width > 100 && why.mapToItem(panel, 0, 0).y >= row.mapToItem(panel, 0, 0).y + row.height - 1,
+                  3000, "the words are no sliver and sit under the fields: " + why.width)
+        verify(why.mapToItem(panel, 0, 0).x + why.width <= panel.width + 0.5, "inside the card")
+    }
+
+    function test_aCustomColorRoundTripsThroughAFileAndNightDrawsNoneOfIt() {
+        const cell = cellOf("A", "digital")
+        cell.options.color = "#12ab9f"
+        const url = layoutUrl("layout-custom-color.json")
+        let page = storedPageOf({}, docOf([cell]))
+        verify(page.exportLayoutTo(url), page.layoutNote)
+        page.destroy()
+        page = storedPageOf({}, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        compare(page.doc.pages[0].cells[0].options.color, "#12ab9f")
+        page.destroy()
+        const g = colored("digital", "dark", "#12ab9f")
+        verify(Qt.colorEqual(find(g, "readout").color, "#12ab9f"), "drawn")
+        Theme.night = "on"
+        verify(Qt.colorEqual(find(g, "readout").color, Theme.gaugeReadout), "Night draws its own")
+        Theme.night = "off"
     }
 
     function test_aStoredNameIsOnlyAFixedOne() {
@@ -2058,10 +2365,11 @@ TestCase {
     }
     readonly property var anyCell: ["panelClose", "panelCopy", "panelPaste", "panelW", "panelH",
                                     "panelEarlier", "panelLater", "panelStart", "panelEnd", "panelRemove"]
+    // panelSignalName shows while the cell's ref has a row: the demo's RPM
+    // (id:1001) has one with no session once a session has run, which the field
+    // table's case sets up itself
     readonly property var withSignal: ["panelPreview", "panelLabel", "panelSignal", "panelKind", "panelFrom",
-                                       "panelFromCaption", "panelTo", "panelToCaption"]
-    // Shown only while the row has a session's entry, which these cases have none of
-    readonly property var withEntry: ["panelSignalName"]
+                                       "panelFromCaption", "panelTo", "panelToCaption", "panelSignalName"]
     // What the value's text and tone read: every kind that draws a value
     readonly property var valueDrawn: ["panelColdBelow", "panelWarnBelow", "panelDangerBelow",
                                        "panelWarnFrom", "panelDangerFrom", "panelDecimals", "panelColors",
@@ -2143,6 +2451,11 @@ TestCase {
         return Object.keys(fieldsOfKind).map(k => ({ tag: k, kind: k }))
     }
     function test_eachKindsPanelShowsOnlyItsFields(data) {
+        // The demo's rows stay in the model after a session ends: put them there
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting && !Bridge.connected, 5000, "no session again")
+        wait(0)
         const cell = data.kind === "blank" ? { kind: "blank", w: 2, h: 4, refs: [] }
                                            : cellOf("A", data.kind)
         const page = pageOf({}, docOf([cell, cellOf("B")]))
@@ -2150,13 +2463,21 @@ TestCase {
         press(find(page, "dashCell_0_0"))
         compare(page.panel, "cell")
         const found = panelFields(page)
-        // The signal's name shows only while the cell's row exists, which a
-        // session left by an earlier case decides
-        const shown = found.filter(f => f.shown && f.name !== "panelSignalName").map(f => f.name).sort()
+        const shown = found.filter(f => f.shown).map(f => f.name).sort()
         compare(shown, fieldsOfKind[data.kind].slice().sort())
-        const listed = Object.values(fieldsOfKind).reduce((all, l) => all.concat(l), withEntry)
+        const listed = Object.values(fieldsOfKind).reduce((all, l) => all.concat(l), [])
         for (const f of found)
             verify(listed.indexOf(f.name) >= 0, f.name + " is in the table for some kind")
+    }
+
+    function test_theSignalNameIsHiddenWhenTheCellsRowDoesNotExist() {
+        const cell = cellOf("A", "analog")
+        cell.refs = ["id:987654"]
+        const page = pageOf({}, docOf([cell, cellOf("B")]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        verify(!find(page, "panelSignalName").visible, "no row, no name")
+        verify(find(page, "panelSignal").visible, "the signal's own row still shows")
     }
 
     function test_aHiddenFieldKeepsItsStoredValueThroughAKindChange() {
@@ -2277,7 +2598,7 @@ TestCase {
         first.peakValue = 1e9
         first.lowValue = -1e9
         if (data.kind === "sparkline" || data.kind === "digital")
-            first.history = [1e9]
+            first.samples = [0, 1e9]
         press(find(page, "dashCell_0_0"))
         compare(page.selected, 0)
         page.moveTo(1)
@@ -2285,8 +2606,8 @@ TestCase {
         const now = gaugeAt(0).item
         verify(now.peakValue !== 1e9, "no peak of A's")
         verify(now.lowValue !== -1e9, "no low of A's")
-        if (now.history !== undefined)
-            verify(now.history.indexOf(1e9) < 0, "no trace of A's")
+        if (now.samples !== undefined)
+            verify(now.samples.indexOf(1e9) < 0, "no trace of A's")
     }
 
     // The Close buttons and Done commit a field still holding the focus
@@ -2471,17 +2792,17 @@ TestCase {
         compare(written.pages[0].cells[1].h, 12, "with the scaled spans")
     }
 
-    // A digital tile samples only while its page is the one shown
-    function test_aDigitalTileOnAnotherPageTakesNoSamples() {
+    // A digital tile reads its trace only while its page is the one shown
+    function test_aDigitalTileOnAnotherPageReadsNothing() {
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         const d = docOf([cellOf("A", "digital")])
         d.pages.push({ name: "P2", cells: [cellOf("B", "digital")] })
         const page = pageOf({}, d)
-        const sampler = p => find(find(find(page, "dashCell_" + p + "_0"), "gauge").item, "sampler")
-        tryVerify(() => sampler(0).running, 3000, "the page shown samples")
-        verify(!sampler(1).running, "the other page's tile does not")
+        const reader = p => find(find(find(page, "dashCell_" + p + "_0"), "gauge").item, "traceReader")
+        tryVerify(() => reader(0).running, 3000, "the page shown reads")
+        verify(!reader(1).running, "the other page's tile does not")
         page.goTo(1)
-        tryVerify(() => sampler(1).running && !sampler(0).running, 3000, "and it follows the page")
+        tryVerify(() => reader(1).running && !reader(0).running, 3000, "and it follows the page")
     }
 
     // Edit mode's Remove sits in a corner the gauge leaves free, so it
@@ -3166,5 +3487,268 @@ TestCase {
         click(page, "dashPasteCell_0")
         compare(labels(page), ["A", "B", "C", "T", "A"], "appended")
         compare(page.undoWords, "pasted A")
+    }
+
+    // ---- The layout file (ADR-0057's appendix on the layout file)
+
+    // A scratch file a layout is written to and read back from
+    function layoutUrl(name) {
+        return Harness.writeScratchFile(name, "")
+    }
+
+    function test_aLayoutRoundTripsAndLoadsAsOneUndoStep() {
+        const first = docOf([cellOf("A", "analog"), cellOf("B")])
+        const url = layoutUrl("layout-roundtrip.json")
+        let page = storedPageOf({}, first)
+        verify(page.exportLayoutTo(url), page.layoutNote)
+        const raw = JSON.parse(Bridge.layoutFileText(url).text)
+        compare(raw.form, "desktop")
+        compare(raw.files, [])
+        compare(page.layoutNote, "Saved this layout to a file")
+        page.destroy()
+
+        const second = docOf([cellOf("X")])
+        page = storedPageOf({}, second)
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        compare(page.doc, first, "the file's layout, with no form or files key")
+        compare(storedText(page), DashboardBook.serialize(first), "stored as an edit would store it")
+        compare(page.undoWords, "load a layout")
+        page.undo()
+        compare(page.doc, second, "one Undo takes the whole load back")
+        verify(!page.canUndo, "and it was one step")
+    }
+
+    // Load layout through the phone's picker: a pick of
+    // "name (1).json" after a plain one loads the second file, never the
+    // first, and a picker with no document says so
+    function test_thePickersSecondPickLoadsTheSecondFile() {
+        const plainUrl = layoutUrl("layout-picked.json")
+        const parenUrl = layoutUrl("layout-picked (1).json")
+        let src = storedPageOf({}, docOf([cellOf("Plain")]))
+        verify(src.exportLayoutTo(plainUrl), src.layoutNote)
+        src.destroy()
+        src = storedPageOf({}, docOf([cellOf("Paren")]))
+        verify(src.exportLayoutTo(parenUrl), src.layoutNote)
+        src.destroy()
+
+        const page = storedPageOf({}, docOf([cellOf("X")]))
+        const dialog = find(page, "layoutOpenDialog")
+        dialog.usePicker = true
+        DocumentPicker.setPickerForTesting(true)
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, plainUrl.toString(), "layout-picked.json")
+        compare(labels(page), ["Plain"])
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, parenUrl.toString(), "layout-picked (1).json")
+        compare(labels(page), ["Paren"], "the second pick's file")
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, "", "")
+        compare(page.layoutNote, "The picker returned no document")
+        verify(page.layoutNoteBad)
+        compare(labels(page), ["Paren"], "nothing read")
+    }
+
+    function test_twoQuickLoadsAreTwoUndoSteps() {
+        const a = docOf([cellOf("A")])
+        const b = docOf([cellOf("B")])
+        const urlA = layoutUrl("layout-quick-a.json")
+        const urlB = layoutUrl("layout-quick-b.json")
+        let src = storedPageOf({}, a)
+        verify(src.exportLayoutTo(urlA), src.layoutNote)
+        src.destroy()
+        src = storedPageOf({}, b)
+        verify(src.exportLayoutTo(urlB), src.layoutNote)
+        src.destroy()
+        const start = docOf([cellOf("S")])
+        const page = storedPageOf({}, start)
+        page.startEditing()
+        verify(page.loadLayoutFrom(urlA), page.layoutNote)
+        verify(page.loadLayoutFrom(urlB), page.layoutNote)
+        page.undo()
+        compare(page.doc, a, "the first Undo takes back the second load only")
+        page.undo()
+        compare(page.doc, start, "the second takes back the first")
+        verify(!page.canUndo)
+    }
+
+    function test_aPhoneLayoutIsNotLoadedOnTheDesktopForm() {
+        const url = layoutUrl("layout-phone.json")
+        const phone = storedPageOf({ form: "phone" }, docOf([cellOf("P")]))
+        verify(phone.exportLayoutTo(url), phone.layoutNote)
+        compare(JSON.parse(Bridge.layoutFileText(url).text).form, "phone")
+        phone.destroy()
+        const desktop = docOf([cellOf("D")])
+        const page = storedPageOf({}, desktop)
+        page.startEditing()
+        verify(!page.loadLayoutFrom(url))
+        verify(page.layoutNoteBad)
+        verify(page.layoutNote.indexOf("phone layout") >= 0 && page.layoutNote.indexOf("desktop form") >= 0,
+               page.layoutNote)
+        compare(page.doc, desktop, "nothing changed")
+        verify(!page.canUndo)
+        compare(find(page, "dashStore").desktopUnread, "", "the unread text is never touched")
+    }
+
+    function test_aDamagedOrNewerOrEmptyFileIsRefusedInWords_data() {
+        return [
+            { tag: "damaged", text: "{ nope", words: "isn't a dashboard layout" },
+            { tag: "newer", text: JSON.stringify({ format: 9, pages: [] }), words: "newer version" },
+            { tag: "empty", text: "", words: "the file is empty" },
+            { tag: "no pages", text: JSON.stringify({ format: 2, form: "desktop", pages: [] }),
+              words: "isn't a dashboard layout" }
+        ]
+    }
+    function test_aDamagedOrNewerOrEmptyFileIsRefusedInWords(data) {
+        const url = Harness.writeScratchFile("layout-bad-" + data.tag.replace(" ", "-") + ".json", data.text)
+        const own = docOf([cellOf("A")])
+        const page = storedPageOf({}, own)
+        page.startEditing()
+        verify(!page.loadLayoutFrom(url))
+        verify(page.layoutNoteBad)
+        verify(page.layoutNote.indexOf(data.words) >= 0, page.layoutNote)
+        compare(page.doc, own)
+        compare(storedText(page), DashboardBook.serialize(own))
+        verify(!page.canUndo)
+    }
+
+    function test_aMissingFileIsRefusedInWords() {
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        verify(!page.loadLayoutFrom(Qt.resolvedUrl("no-such-layout.json")))
+        verify(page.layoutNote.indexOf("Couldn't read the file") >= 0, page.layoutNote)
+    }
+
+    function test_aFileWithDroppedGaugesSaysSoAndLoadsTheRest() {
+        const text = JSON.stringify({ format: 2, form: "desktop", pages: [
+            { name: "T", cells: [cellOf("Good"), { kind: "digital", w: 0, h: 4, refs: [] }] }] })
+        const url = Harness.writeScratchFile("layout-dropped.json", text)
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        compare(labels(page), ["Good"])
+        verify(page.layoutNote.indexOf("1 gauge left out") >= 0, page.layoutNote)
+        verify(!page.layoutNoteBad)
+    }
+
+    function test_aFileWithNoFormIsReadAsThisFormAndSaysSo() {
+        const url = Harness.writeScratchFile("layout-noform.json",
+                                             JSON.stringify({ format: 2, pages: [{ name: "T", cells: [cellOf("Good")] }] }))
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        verify(page.layoutNote.indexOf("named no form") >= 0 && page.layoutNote.indexOf("desktop form") >= 0,
+               page.layoutNote)
+    }
+
+    function test_theSameLayoutLoadedAgainChangesNothing() {
+        const own = docOf([cellOf("A")])
+        const url = layoutUrl("layout-same.json")
+        const page = storedPageOf({}, own)
+        page.startEditing()
+        verify(page.exportLayoutTo(url))
+        verify(!page.loadLayoutFrom(url))
+        verify(page.layoutNote.indexOf("already shown") >= 0, page.layoutNote)
+        verify(!page.canUndo)
+    }
+
+    function test_noLoadPastAnOpenQuestion() {
+        const url = layoutUrl("layout-question.json")
+        const own = docOf([cellOf("A")])
+        const page = storedPageOf({}, own)
+        page.startEditing()
+        verify(page.exportLayoutTo(url))
+        page.doc = docOf([cellOf("Other")])
+        page.confirmReset = true
+        verify(!page.loadLayoutFrom(url))
+        verify(page.layoutNoteBad)
+        compare(labels(page), ["Other"], "the question stands and nothing loaded")
+        page.confirmReset = false
+        page.confirmRemovePage = true
+        verify(!page.loadLayoutFrom(url))
+        compare(labels(page), ["Other"])
+    }
+
+    function test_theSignalFilesALayoutNeedsAreNamedAndTheLoadSaysWhichAreMissing() {
+        const file = { havne_signals: 1, name: "Boosty", source: { name: "t" },
+                       ecus: [{ id: "pcm", rx: "7E8" }],
+                       signals: [{ key: "boosty", name: "Boosty", read: { service: "22", number: "D100" },
+                                   field: { byte: 0, bits: 8 }, unit: "kPa" }] }
+        const r = Bridge.importSignalFile(Harness.writeScratchFile("boosty.json", JSON.stringify(file)))
+        verify(r.ok, "the file imports")
+        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
+        let vehicles = VehicleBook.add(VehicleBook.empty(), "Test car")
+        vehicles = VehicleBook.addSignals(vehicles, { sha256: r.sha256, name: r.name, profile: r.profile })
+        compare(VehicleBook.picked(vehicles).signals.length, 1, "the vehicle has the file")
+
+        const own = docOf([cellOf("A"), Object.assign(cellOf("Boosty"), { refs: ["key:boosty"] })])
+        const url = layoutUrl("layout-needs.json")
+        let page = storedPageOf({ vehicles: vehicles }, own)
+        verify(page.exportLayoutTo(url), page.layoutNote)
+        const raw = JSON.parse(Bridge.layoutFileText(url).text)
+        compare(raw.files, [{ name: r.name, sha256: r.sha256 }], "the file the layout needs, by name and hash")
+        verify(page.layoutNote.indexOf(r.name) >= 0, page.layoutNote)
+        compare(page.layoutFileName(), "dashboard-test-car-desktop.json")
+        page.destroy()
+
+        // A layout of cells that read no file names none
+        page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("A")]))
+        const noneUrl = layoutUrl("layout-needs-none.json")
+        verify(page.exportLayoutTo(noneUrl))
+        compare(JSON.parse(Bridge.layoutFileText(noneUrl).text).files, [])
+        page.destroy()
+
+        // Loaded where the vehicle lacks the file: the load names it
+        page = storedPageOf({}, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        verify(page.layoutNote.indexOf("signal files this vehicle lacks: " + r.name) >= 0, page.layoutNote)
+        compare(page.doc.pages[0].cells.length, 2, "the layout loads whole")
+        page.destroy()
+
+        // And where it has it, nothing is said
+        page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        verify(page.layoutNote.indexOf("lacks") < 0, page.layoutNote)
+    }
+
+    // A vehicle's signal file that doesn't load gives no references, so a
+    // layout can't say it needs the file: the note names the file instead
+    function test_aSignalFileThatDoesntLoadIsNamedInTheExportsNote() {
+        let vehicles = VehicleBook.add(VehicleBook.empty(), "Test car")
+        vehicles = VehicleBook.addSignals(vehicles, { sha256: "a".repeat(64), name: "Gone file",
+                                                      profile: "profile_user.gone" })
+        const own = docOf([cellOf("A"), Object.assign(cellOf("Gone"), { refs: ["key:gone"] })])
+        const page = storedPageOf({ vehicles: vehicles }, own)
+        verify(page.exportLayoutTo(layoutUrl("layout-unloaded.json")), page.layoutNote)
+        verify(page.layoutNote.indexOf("Gone file") >= 0, page.layoutNote)
+        verify(page.layoutNote.indexOf("don't load") >= 0, page.layoutNote)
+        verify(!page.layoutNoteBad, "a note, not a refusal")
+        // A vehicle whose files all load says nothing of the kind
+        const file = { havne_signals: 1, name: "Loads", source: { name: "t" },
+                       ecus: [{ id: "pcm", rx: "7E8" }],
+                       signals: [{ key: "loads", name: "Loads", read: { service: "22", number: "D101" },
+                                   field: { byte: 0, bits: 8 }, unit: "kPa" }] }
+        const r = Bridge.importSignalFile(Harness.writeScratchFile("loads.json", JSON.stringify(file)))
+        verify(r.ok, "the file imports")
+        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
+        let good = VehicleBook.add(VehicleBook.empty(), "Good car")
+        good = VehicleBook.addSignals(good, { sha256: r.sha256, name: r.name, profile: r.profile })
+        const plain = storedPageOf({ vehicles: good },
+                                   docOf([cellOf("A"), Object.assign(cellOf("Loads"), { refs: ["key:loads"] })]))
+        verify(plain.exportLayoutTo(layoutUrl("layout-plain.json")), plain.layoutNote)
+        verify(plain.layoutNote.indexOf("don't load") < 0, plain.layoutNote)
+    }
+
+    function test_theLayoutButtonsAreInTheMoreRow() {
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        click(page, "dashMore")
+        verify(find(page, "moreExport").visible && find(page, "moreLoad").visible)
+        page.noteLayout("Saved", false)
+        verify(find(page, "dashLayoutNote").visible)
+        page.stopEditing()
+        compare(page.layoutNote, "", "the note goes with edit mode")
     }
 }

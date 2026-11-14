@@ -36,7 +36,8 @@
 # neither the copy's URI nor its name. csv-import: the made-up loggers'
 # CSVs imported by their column maps and viewed (each signal's samples and
 # range, the UTC start or null); a missing map, a map core refuses and a
-# folder already there each exit 3 with words, leaving nothing made.
+# folder already there each exit 3 with words, leaving nothing made; an
+# interval logger-a is slower than says so in the estimate and the export.
 # csv-guess: the same CSVs with no map: --print-map prints each logger's
 # guessed-map.json byte for byte, and the import writes the guess's line
 # (that map) before its own; a time column named so, of whole numbers
@@ -49,11 +50,12 @@
 # in the imported line and said on stderr; a file with no header
 # is refused, exit 3 with words and nothing made. interrupt: an
 # export to pcapng, a folder copy, a CSV's sizing, a wide CSV and its
-# sizing during their named columns' check, an import of a candump log
+# sizing during their named columns' check, a wide CSV at an interval
+# during its sweep's sizing, an import of a candump log
 # and of a CSV, and a recording's health report, each held at its first
 # ask (HAVNE_CLI_EXPORT_HOLD_MS, which names that ask on stderr: the wide
-# CSVs' must be the check's, an import's the import's, the report's the
-# health report's) and stopped by Ctrl+Break or SIGINT once held,
+# CSVs' must be the check's, the interval's the interval check's, an
+# import's the import's, the report's the health report's) and stopped by Ctrl+Break or SIGINT once held,
 # end within a few seconds with an interrupted end line and exit 1,
 # nothing at the file or folder named and no partial beside it; exit 77
 # where there's no console to send the event through.
@@ -608,15 +610,52 @@ def csv_import(cli, fixtures):
                               os.path.join(a, "map.json")], 3), "error")
         if sorted(os.listdir(there)) != ["events.log", "signals.csv"]:
             raise SystemExit(f"FAIL  the folder there changed: {error}")
+        slower_than_its_intervals(cli, there, d)
     print(f"ok    {len(LOGGERS)} loggers' CSVs imported and viewed; a missing "
-          "map, a refused map and a folder already there refused")
+          "map, a refused map and a folder already there refused; an "
+          "interval logger-a is slower than said so")
     return 0
+
+
+def slower_than_its_intervals(cli, rec, d):
+    """logger-a holds about four rows per second: an interval of 100 or
+    250 ms gives no fewer rows than the sweep's, which the estimate and
+    the export say, and one of 1000 ms thins them, which neither says"""
+    sized = one(run(cli, ["export", rec, "--format", "csv", "--estimate"]),
+                "estimate")
+    flagged = [s["row_ms"] for s in sized["sizes"]
+               if s.get("no_fewer_than_sweep")]
+    if flagged != [100, 250]:
+        raise SystemExit(f"FAIL  the estimate flagged {flagged}: {sized}")
+    for rows, says in [("100", True), ("1000", False)]:
+        alone = one(run(cli, ["export", rec, "--format", "csv", "--estimate",
+                              "--rows", rows]), "estimate")
+        if ([s["row_ms"] for s in alone["sizes"]] != [int(rows)] or
+                alone["sizes"][0].get("no_fewer_than_sweep", False) != says):
+            raise SystemExit(f"FAIL  --rows {rows}'s estimate {alone}")
+        out = os.path.join(d, f"logger-a-{rows}.csv")
+        done = subprocess.run([cli, "export", rec, out, "--format", "csv",
+                               "--rows", rows], capture_output=True,
+                              stdin=subprocess.DEVNULL)
+        lines = [json.loads(l) for l in
+                 done.stdout.decode("utf-8").splitlines()]
+        said = done.stderr.decode("utf-8").replace("\r", "")
+        exported = one(lines, "exported")
+        if done.returncode != 0 or exported["rows"] != alone["sizes"][0]["rows"]:
+            raise SystemExit(f"FAIL  --rows {rows} exported {lines} {said}")
+        line = (f"havne-cli: every {rows} ms gives no fewer rows than every "
+                "sweep: the recording is slower than that\n")
+        if exported.get("no_fewer_than_sweep", False) != says or \
+                (said == line) != says or (not says and said):
+            raise SystemExit(f"FAIL  --rows {rows} said {exported} {said!r}")
 
 
 GUESSED = [
     # name, values imported with the guessed map (each column's samples)
     ("logger-a", 25),
     ("logger-b", 27),
+    # a row with no time and a text among the three columns' first rows
+    ("logger-e", 12),
 ]
 
 
@@ -1038,6 +1077,74 @@ def late(cli, args, where, result, made):
     return None
 
 
+def canceled_late(cli, recording, root):
+    """A column check canceled by the first interrupt, then held before the
+    end line (HAVNE_CLI_EXPORT_TAIL_HOLD_MS) and interrupted again: the
+    second interrupt changes nothing, so the run waits out its hold and
+    writes the one interrupted end line, exit 1, nothing made. None, a
+    failure's words, or "skip" with no console"""
+    out_csv = os.path.join(root, "late-check.csv")
+    env = dict(os.environ)
+    env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
+    env["HAVNE_CLI_EXPORT_TAIL_HOLD_MS"] = str(TAIL_MS)
+    kw = {"stdout": subprocess.PIPE, "stderr": subprocess.PIPE,
+          "stdin": subprocess.DEVNULL, "env": env}
+    if os.name == "nt":
+        kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    p = subprocess.Popen([cli, "export", recording, out_csv, "--format",
+                          "csv", "--signal", "Engine RPM"], **kw)
+    interrupt_with = signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT
+
+    def next_line(prefix):
+        got = []
+        reader = threading.Thread(
+            target=lambda: got.append(p.stderr.readline()))
+        reader.start()
+        reader.join(HELD_WAIT_S)
+        if reader.is_alive() or not got or not got[0].startswith(prefix):
+            p.kill()
+            p.communicate()
+            reader.join()
+            return None, (f"no {prefix.decode()!r} within {HELD_WAIT_S} s: "
+                          f"{got[0] if got else b''!r}")
+        return got[0], None
+
+    _, why = next_line(b"havne-cli: holding the column check's first ask")
+    if why:
+        return why
+    try:
+        p.send_signal(interrupt_with)
+    except OSError as e:
+        p.kill()
+        p.communicate()
+        print(f"skip  no console to send the interrupt through: {e}")
+        return "skip"
+    _, why = next_line(b"havne-cli: holding after the column check's call")
+    if why:
+        return why
+    held_at = time.monotonic()
+    p.send_signal(interrupt_with)
+    try:
+        out, err = p.communicate(timeout=TAIL_MS / 1000 + 20)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        return "still running long after its hold"
+    waited = time.monotonic() - held_at
+    lines = [json.loads(l) for l in out.decode("utf-8").splitlines()]
+    if p.returncode != 1 or [l["type"] for l in lines] != ["start", "end"]             or lines[1] != {"type": "end", "reason": "interrupted"}:
+        return (f"exit {p.returncode}, lines {lines}, "
+                f"{err.decode('utf-8', 'replace')}")
+    if waited < TAIL_MS / 1000 - 0.5:
+        return (f"ended {waited:.2f} s into a {TAIL_MS / 1000:.0f} s hold: "
+                f"the second interrupt ended it")
+    if os.path.exists(out_csv) or partial_left(out_csv):
+        return f"something was left beside {os.path.basename(out_csv)}"
+    print("ok    export --signal: a second interrupt after the canceled "
+          "column check changed nothing")
+    return None
+
+
 def interrupt_late(cli, recording):
     with tempfile.TemporaryDirectory(prefix="havne-cli-int3-") as root:
         log = os.path.join(root, "bus.log")
@@ -1063,6 +1170,12 @@ def interrupt_late(cli, recording):
             if why is not None:
                 print(f"FAIL  {case_name(args)}: {why}")
                 failed += 1
+        why = canceled_late(cli, recording, root)
+        if why == "skip":
+            return 77
+        if why is not None:
+            print(f"FAIL  export --signal: {why}")
+            failed += 1
     if failed:
         return 1
     print("ok    interrupts after core's call leave an export, its sizing, "
@@ -1072,7 +1185,8 @@ def interrupt_late(cli, recording):
 
 def interrupted(cli, args, where):
     """args run held at the first ask, which must be where's (b"export",
-    b"column check", b"import" or b"health report"), then interrupted:
+    b"column check", b"interval check", b"import" or b"health report"),
+    then interrupted:
     None, a failure's words, or "skip" with no console"""
     env = dict(os.environ)
     env["HAVNE_CLI_EXPORT_HOLD_MS"] = str(HOLD_MS)
@@ -1164,6 +1278,10 @@ def interrupt(cli, recording):
              os.path.join(root, "out.csv"), b"column check"),
             (["export", recording, "--format", "csv", "--estimate",
               "--signal", "Engine RPM"], None, b"column check"),
+            # an interval: the sweep's sizing before the export holds
+            (["export", recording, os.path.join(root, "grid.csv"),
+              "--format", "csv", "--rows", "100"],
+             os.path.join(root, "grid.csv"), b"interval check"),
             (["health", recording, os.path.join(root, "report.json"),
               "--format", "json"], os.path.join(root, "report.json"),
              b"health report"),

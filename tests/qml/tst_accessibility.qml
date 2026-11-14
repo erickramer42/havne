@@ -68,14 +68,11 @@ TestCase {
         return out
     }
 
-    // What a kind's timers do, done at once: the trace's sample and the
+    // What a kind's timers do, done at once: a trace's new sample and the
     // shift lights' flash
     function tick(g) {
-        if (typeof g.takeSample === "function")
-            g.takeSample()
-        const sampler = findChild(g, "sampler")
-        if (sampler)
-            sampler.triggered()
+        if (g.samples !== undefined)
+            g.samples = g.samples.concat([g.samples.length * 50, g.value])
         if (g.shiftNow)
             g.flashOn = !g.flashOn
     }

@@ -12,6 +12,11 @@ ColumnLayout {
     id: root
     objectName: "adapterSection"
     required property SettingsPage host
+    // The phone's words and list; a test sets it, since Theme.mobile is the platform's
+    property bool mobile: Theme.mobile
+    // The adapters the connect list shows: a paired headset, watch or health
+    // device is folded under "Other paired devices" there and isn't counted
+    readonly property int bluetoothFound: root.host.bluetoothAdapters.filter(a => a.other !== true).length
     Layout.fillWidth: true
     spacing: Theme.spacing * 2
 
@@ -23,22 +28,22 @@ ColumnLayout {
 
         Label {
             objectName: "deviceCount"
-            text: root.host.devices.length === 0
+            text: root.host.devicesShown === 0
                   ? qsTr("None found: install a Pass-Thru driver (Windows), plug in "
                          + "or pair an ELM327 adapter, or pick one below")
-                  : Theme.mobile
+                  : root.mobile
                     ? qsTr("Bluetooth: %1 found; tap one, then Connect")
-                          .arg(root.host.bluetoothAdapters.length)
+                          .arg(root.bluetoothFound)
                   : qsTr("J2534 interfaces: %1, serial ports: %2%3; select one to "
                          + "put its address in the field above, then Connect")
                         .arg(root.host.j2534Devices.length).arg(root.host.serialPorts.length)
                         .arg((root.host.canInterfaces.length > 0
                               ? qsTr(", CAN interfaces: %1").arg(root.host.canInterfaces.length)
                               : "")
-                             + (Bluetooth.available || root.host.bluetoothAdapters.length > 0
-                                ? qsTr(", Bluetooth: %1").arg(root.host.bluetoothAdapters.length)
+                             + (Bluetooth.available || root.bluetoothFound > 0
+                                ? qsTr(", Bluetooth: %1").arg(root.bluetoothFound)
                                 : ""))
-            color: root.host.devices.length === 0 ? Theme.textDim : Theme.text
+            color: root.host.devicesShown === 0 ? Theme.textDim : Theme.text
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
@@ -95,7 +100,7 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.preferredHeight: contentHeight
         // A phone's page alone scrolls: the list takes all its rows
-        Layout.maximumHeight: Theme.mobile ? contentHeight
+        Layout.maximumHeight: root.mobile ? contentHeight
                               : root.host.deviceRowsShown * (root.host.deviceRowHeight + spacing) - spacing
         visible: count > 0
         clip: true
@@ -217,7 +222,10 @@ ColumnLayout {
                     const why = Relay.start(root.host.uriField.text)
                     root.host.errorLabel.text = why
                     root.host.errorLabel.visible = why !== ""
-                    root.host.logExplains = false   // the relay writes no log line
+                    // A refusal goes to the log, so Show log has it to show
+                    if (why !== "")
+                        Bridge.logEvent(qsTr("Relay: %1").arg(why))
+                    root.host.logExplains = why !== ""
                 }
             }
         }

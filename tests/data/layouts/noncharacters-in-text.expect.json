@@ -1,0 +1,48 @@
+[
+ {
+  "as": "desktop",
+  "problem": "",
+  "form": "desktop",
+  "pages": 1,
+  "cells": 2,
+  "files": [
+   {
+    "name": "Boost.json",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  ],
+  "notes": [],
+  "first_cell": {
+   "w": 2,
+   "h": 4
+  },
+  "vehicle": [
+   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  ],
+  "missing": [
+   "Boost.json"
+  ]
+ },
+ {
+  "as": "desktop",
+  "problem": "",
+  "form": "desktop",
+  "pages": 1,
+  "cells": 2,
+  "files": [
+   {
+    "name": "Boost.json",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   }
+  ],
+  "notes": [],
+  "first_cell": {
+   "w": 2,
+   "h": 4
+  },
+  "vehicle": [
+   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "missing": []
+ }
+]

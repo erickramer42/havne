@@ -387,10 +387,13 @@ each one covers are listed in [testing.md](testing.md).
 **QML tests** (`test_qml`, Qt Quick Test) load the app's QML module,
 the `app_ui` library, against a real bridge. Each
 `tests/qml/tst_*.qml` file is one ctest case, `QmlTest.<name>`, in a
-process of its own, except the three slowest (`tst_dashboard.qml`,
-`tst_dashedit.qml`, `tst_phone.qml`), which run as three cases each,
-`QmlTest.<name>-1of3` to `-3of3`, every third case; a new file is picked
-up at the next configure.
+process of its own, except the slowest (`tst_dashboard.qml`,
+`tst_dashedit.qml`, `tst_driveview.qml`, `tst_phone.qml`), which run as
+several cases each, `QmlTest.<name>-1of<n>` to `-<n>of<n>`, every nth
+case (three, five for `tst_phone.qml` and four for `tst_dashedit.qml`);
+each carries its measured seconds as a ctest `COST`, so a tree with no
+cost history starts the long ones first. A new file is picked up at the
+next configure.
 
 ```sh
 ctest --test-dir build -C Release -R '^QmlTest\.' --output-on-failure
@@ -495,9 +498,20 @@ writes `Testing/coverage/html/index.html` and
 `Testing/coverage/cobertura.xml`. Native code only: QML, the x86
 surrogate, the tests and the fake DLLs aren't counted, and `app/main.cpp`
 isn't linked into any test, so it isn't in the report. `--tests-only`
-and `-R` work as in `verify.sh`. CI's `win-coverage` job runs the same
-script on every push and uploads the Cobertura file to Codecov for the
-README badge ([testing.md](testing.md#coverage)).
+and `-R` work as in `verify.sh`. Two cases are left out of its ctest
+part, `CliSessionRunTest.TheStreamNamesEachModulesSession` and
+`CliSignalTest.CtrlBreakEndsTheStreamCleanly`, with the reason in
+`coverage.sh`: they fail under the tool on CI's runners and pass
+natively. CI's `win-coverage` job runs the same script on pushes to
+`main` and on manual runs, as three legs on a runner each (`--part
+gtest`, `1/2` and `2/2`), and each leg uploads its Cobertura file to
+Codecov for the README badge ([testing.md](testing.md#coverage)).
+Codecov waits for all three uploads before it reports
+(`.github/codecov.yml`'s `after_n_builds: 3`), so a partial upload never
+shows a drop in coverage that isn't real. The cost: a leg that fails
+before its upload leaves the commit with no coverage status until the
+whole run is repeated, and a leg run again alone counts as a fourth
+upload.
 
 **The tests' Python.** The Python tests (`PythonTest.*`, `SchemaFixturesTest`,
 the CLI's script tests) run under the Python the configure found, so
@@ -528,7 +542,20 @@ havne-cli clear mock://demo --yes                         # clear each ECU's cod
 havne-cli health mock://demo report.txt --format text     # a car's health as one file
 havne-cli export <recording> run.pcapng --format pcapng   # its frames for Wireshark, scrubbed
 havne-cli import candump <log> <folder>                   # another tool's log as a recording
+havne-cli layout check dashboard-phone.json               # a Dashboard layout file, as the app would load it
 ```
+
+`havne-cli layout check <file> [--form phone|desktop]` reads a dashboard
+layout file as the app's Load layout would and says what it is: one
+`layout` line. `ok` is true when the file reads (a file with pages or
+gauges that cannot be read still reads, with `problem` "dropped" and the
+counts in `dropped`); a refused file has `problem` "damaged", "newer",
+"otherform" or "none" and `words`. `needs_files` lists the signal files
+the layout names (name and sha256). Without `--form` the file's own form
+is used (desktop, with a note, for a file that names none). Exit 0 when it
+reads, 1 when it is refused, 2 for a usage error, 3 when the file cannot
+be read, is over a layout file's size or is not UTF-8 text
+([ADR-0057](adr/0057-dashboards.md)'s appendix on the layout file).
 
 An adapter only the phone reaches: the app relays it to a computer on
 its USB cable ([ADR-0047](adr/0047-adapter-relay.md); Settings, Connection,
@@ -768,39 +795,58 @@ smoke unless asked: `-f ios_smoke=true` adds it to the whole run, and
 `-f macos_repeat='<ctest regex>'` (and
 `-f macos_repeat_count=<n>`, 200 by default) has `macos-build` run the
 matching tests again until one fails, for a failure seen once on macOS
-(its timeout is then 60 minutes). No job waits for another, so a run
-takes as long as its longest job. Every build and every ctest run
+(its timeout is then 60 minutes). No job waits for another but
+`android-build`, which starts when `core-and-tests` ends, whatever its
+result: a manual run has more jobs than the account's concurrent
+runners, and the short job frees its runner first. So a run takes as
+long as its longest job. The long suites are shared between runners,
+each with a build of its own: `win-build`, `macos-build` and
+`linux-build` run alternate halves of ctest (`-I k,,2`, every case once
+across the two), `clang-tidy` three shares of the files, and
+`win-coverage` three legs. The steps that aren't the suite (the caches'
+saves, the load test, the probes) run on the first shard. Every build and every ctest run
 (`coverage.sh`'s too) runs four jobs at once, the hosted runners' core
 count (`CMAKE_BUILD_PARALLEL_LEVEL` and `CTEST_PARALLEL_LEVEL` in the
 workflow's `env`); the cases that share a fixed resource are
-`RUN_SERIAL`. Every job that uses Qt uses 6.12.0; the jobs that
-install it through `install-qt-action` keep it in the Actions cache,
-except the iOS kit (about 3.6 GB, the largest entry): only `main`'s
-runs cache it, so the repository stays under the cache's 10 GB, and
-other branches install it from the mirrors. The other downloads that
-have failed a run with a 504 come from the cache too, saved by
-`main`'s pushes only (one copy each, which every other ref and
-`release.yml`'s tags read): the Windows kit (`win-build` saves it,
-keyed on the version, arch and aqtinstall's commit), Gradle's
-distribution and the Android build's dependencies (keyed on the Qt
-version, whose template pins them), and linuxdeploy's pinned files
-(keyed on `make-appimage.sh`). A miss downloads as before.
+`RUN_SERIAL`. Every job that uses Qt uses 6.12.0, and each kit comes
+from the Actions cache under a key of the workflow's own, which names
+what decides the install's bytes (the version, the arch, any module,
+`--autodesktop`, and aqtinstall's version or, for the Windows kit, its
+commit): one copy of each, saved by `main`'s pushes only and read by
+every other ref and by `release.yml`'s tags, so the repository stays
+under the cache's 10 GB (the iOS kit alone is about 3.6 GB). A miss
+installs from the mirrors. The jobs don't use install-qt-action's own
+cache, whose key holds the runner's kernel version and which saves on
+any ref that misses (the on-request iOS simulator smoke aside, which
+caches only on `main`). The other downloads that have failed a run
+with a 504 come from the cache the same way: Gradle's distribution and
+the Android build's dependencies (keyed on the Qt version, whose
+template pins them) and linuxdeploy's pinned files (keyed on
+`make-appimage.sh`). The compiler caches (sccache in `win-build`,
+`win-coverage`, `macos-build` and `linux-build`; the two Windows jobs
+build with Ninja for it) are keyed by the ISO week and saved on `dev`
+and `main`. A
+week's first run saves its entry, and each later run that week restores
+that entry and saves nothing, so a commit's objects reach the cache the
+next week and the week's later commits compile cold from the week's
+start. That costs build time only, and keeps the entries (one for each
+job and week) inside the 10 GB; GitHub drops an entry unread for 7
+days.
 Every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 
 | Job | Runner | Does |
 |---|---|---|
-| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest (jsonschema and pytest from the hash-pinned `.github/*-requirements.txt` in a venv, the tests' Python, so `SchemaFixturesTest` and `PythonTest.*` run, not skip). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. This enforces "core never links Qt." |
+| `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest (jsonschema and pytest from the hash-pinned `.github/*-requirements.txt` in a venv, the tests' Python, so `SchemaFixturesTest` and `PythonTest.*` run, not skip). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. This enforces "core never links Qt." Then, whatever the tests did, it installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
 | `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` as `linux-build` does and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, the interface's down-and-up case as root. Blocking since its first green run (2026-10-20). |
 | `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s from its folder of `fuzz/seeds.py`'s seeds (built from the committed fixtures for the harnesses that read a structured format: JSON, signal files, plugins, OBDb sets, recordings and exports, candump logs, CSV imports and the ELM327 emulator's hosts; empty for the rest), as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) |
-| `clang-tidy` | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, installs Qt as `win-build` does, and in a Developer shell runs `scripts/tidy.sh --qt` (a Ninja tree with Qt) over core, the J2534 layer, the surrogate, `havne-cli` and the desktop app. Any warning fails it. Only the app's moc output is built. |
-| `win-build` | Windows, MSVC 2022 | Builds the full app, then runs ctest (the bridge, J2534 and QML suites included), then the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
-| `macos-build` | macOS (arm64), AppleClang | Builds the full app, then runs ctest. The QML suites' link-state cases skip without the fake. A manual run's `macos_repeat` then runs the matching tests again until one fails (above). Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
-| `win-coverage` | Windows, MSVC 2022 | On pushes to `main` and manual runs, never pull requests: installs Qt as `win-build` does and OpenCppCoverage from its GitHub release (SHA-256 pinned), registers the fake DLL as a Pass-Thru device with three broken entries beside it, runs `scripts/coverage.sh` and uploads the report to Codecov ([testing.md](testing.md#coverage)). |
-| `linux-build` | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then `SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers` under sudo, then core's USDT probes under bpftrace (`tests/probe_trace.sh`), then the load test as on Windows. `can-utils` gives `CliTransferRunTest.candump` its `candump`. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. Its ctest's Python is a venv with pytest, so `PythonTest.*` run (`vcan0` runs `PythonTest.test_vcan`). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
-| `abi` | Ubuntu, GCC, no Qt | Installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
+| `clang-tidy` (1/3 to 3/3) | Windows, MSVC's headers | Installs the hash-pinned clang-tidy wheel, installs Qt as `win-build` does, and in a Developer shell runs `scripts/tidy.sh --qt` (a Ninja tree with Qt) over core, the J2534 layer, the surrogate, `havne-cli` and the desktop app, each runner a third of the files (`HAVNE_TIDY_SHARD=<k>/3`). Any warning fails it. Only the app's moc output is built. |
+| `win-build` (1/2, 2/2) | Windows, MSVC 2022 | Builds the full app with Ninja and sccache, then runs its half of ctest (the bridge, J2534 and QML suites included). The second shard also builds core, the shared library and the surrogate with the Visual Studio generator, which `release.yml` builds with. The first runs the load test (`bench_bridge --load`): its table goes to the run's summary, and the step fails on a broken invariant, a bound far below the dev machine's figures, or one of two ratios that compare the run with itself (decode at 1,000 defs against 9, looping with decoding against without) ([testing.md](testing.md#load-test-the-replay-fixture-through-the-bridge)) Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
+| `macos-build` (1/2, 2/2) | macOS (arm64), AppleClang | Builds the full app, then runs its half of ctest. The QML suites' link-state cases skip without the fake. A manual run's `macos_repeat` then runs the matching tests again until one fails (above). Its ctest's Python is a venv with pytest, so `PythonTest.*` run. `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
+| `win-coverage` (gtest, ctest-1, ctest-2) | Windows, MSVC 2022 | On pushes to `main` and manual runs, never pull requests: installs Qt as `win-build` does and OpenCppCoverage from its GitHub release (SHA-256 pinned), registers the fake DLL as a Pass-Thru device with three broken entries beside it, runs its leg of `scripts/coverage.sh` (`--part`: the gtest binaries, or one of two slices of ctest's other cases) and uploads the report to Codecov, which merges the three ([testing.md](testing.md#coverage)). |
+| `linux-build` (1/2, 2/2) | Ubuntu, GCC | Builds the full app, brings up `vcan0` (the `vcan` and `can-isotp` modules load as installed on the hosted runners), then runs its half of ctest with `ECUIO_VCAN_REQUIRED=1`, so the simulated-bus suite fails rather than skips without the bus, then `SocketCanBusTest.TheInterfaceGoingDownIsAHardFailureThatRecovers` under sudo, then core's USDT probes under bpftrace (`tests/probe_trace.sh`), then the load test as on Windows. `can-utils` gives `CliTransferRunTest.candump` its `candump`. Installs QtGui's EGL and OpenGL runtime libraries, which `test_qml` loads. Its ctest's Python is a venv with pytest, so `PythonTest.*` run (`vcan0` runs `PythonTest.test_vcan`). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. |
 | `linux-appimage` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner (`ubuntu-24.04-arm`) | Builds the app in Release, dated by the commit, and packs it with `packaging/linux/make-appimage.sh` ([Linux: the AppImage](#linux-the-appimage)), printing its SHA-256, then uploads `havne-linux-x86_64` or `havne-linux-aarch64` (kept 14 days). On 24.04 because an AppImage runs only where glibc is at least its build machine's. |
 | `linux-packages` | Ubuntu 24.04, GCC, on x86_64 and on the ARM runner | Builds the core packages twice under `reprotest` and fails on any difference, then installs and uses them (`tests/package_check.sh`), builds an SBOM from their component lists and validates it and `sbom.py`'s self-test document with `pyspdxtools`, and uploads `havne-core-linux-x86_64` or `havne-core-linux-aarch64` (kept 14 days) ([Linux: the core packages](#linux-the-core-packages)). |
-| `android-build` | Ubuntu to Android arm64-v8a | Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
+| `android-build` | Ubuntu to Android arm64-v8a | Starts when `core-and-tests` ends (`needs`, for a runner slot, not its result). Selects NDK r27 and JDK 21 by version, failing with a clear error if the image lacks either. Then cross-builds and packages the APK. Build only, no tests. |
 | `ios-build` | macOS (arm64) to iOS device (arm64) | Unsigned device build with the Xcode generator. Checks the bundle's Info.plist keys (`app/ios/Info.plist.in`) and that it holds no signature or provisioning profile, then uploads it as an unsigned `.ipa`, `havne-ios-arm64-unsigned` (kept 14 days), for sideloading ([ios.md](ios.md)). Build only, no tests. |
 | `ios-simulator-smoke` | macOS 15 Intel to iOS Simulator (x86_64) | Runs on a manual run with `ios_smoke` or `smoke_only` ticked, or when the pushed commit's message contains `[ios-smoke]`; skipped on pull requests, other pushes and other manual runs (about 20 minutes on the Intel runner). Boots the newest iOS 18+ iPhone while the app builds, then installs and launches the app. Passes if QML loaded and the app is still running 45 s later. Uploads the `ios-simulator-smoke` artifact: a home-screen control shot, app shots at 15 s and 45 s, the app's stdout/stderr (with `QSG_INFO`), plus crash reports on failure. The job log also prints the stderr. |
 

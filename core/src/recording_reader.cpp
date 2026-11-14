@@ -1951,12 +1951,27 @@ ecuio_status_t ecuio_recording_text_at(const ecuio_recording_t* r,
 
 namespace {
 
+/* A query's stop: asked before each second's rows */
+struct query_stop {
+    ecuio_cancel_t cancel = nullptr;
+    void* user = nullptr;
+
+    bool asked() const { return cancel != nullptr && cancel(user) != 0; }
+};
+
+ecuio_status_t canceled()
+{
+    ecuio_detail_set("the search was canceled");
+    return ECUIO_ERR_CANCELED;
+}
+
 /* The first sample of a number signal from from_us on that reaches level
  * (rising: at or above it; falling: at or below) after a sample past
  * hysteresis from it (rising: below level - hysteresis) armed it */
 ecuio_status_t find_crossing(const ecuio_recording_t* r, uint32_t signal,
                              bool rising, double level, double hysteresis,
-                             uint64_t from_us, uint64_t* at_us)
+                             uint64_t from_us, const query_stop& stop,
+                             uint64_t* at_us)
 {
     const signal_entry& s = r->signals[signal];
     const double arm_at = rising ? level - hysteresis : level + hysteresis;
@@ -1981,6 +1996,9 @@ ecuio_status_t find_crossing(const ecuio_recording_t* r, uint32_t signal,
                 if (armed && !fires(rising ? it->highest : it->lowest)) {
                     continue;
                 }
+            }
+            if (stop.asked()) {
+                return canceled();
             }
             const index_entry* e = r->index_of(it->second);
             if (e == nullptr) {
@@ -2115,6 +2133,15 @@ ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
                                     const ecuio_recording_find_t* what,
                                     uint64_t from_us, uint64_t* at_us)
 {
+    return ecuio_recording_find_with(r, what, from_us, nullptr, nullptr, at_us);
+}
+
+ecuio_status_t ecuio_recording_find_with(const ecuio_recording_t* r,
+                                         const ecuio_recording_find_t* what,
+                                         uint64_t from_us,
+                                         ecuio_cancel_t cancel, void* user_data,
+                                         uint64_t* at_us)
+{
     if (r == nullptr || what == nullptr || at_us == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
@@ -2127,9 +2154,13 @@ ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     *at_us = ECUIO_RECORDING_NONE;
+    const query_stop stop{cancel, user_data};
     if (what->kind == ECUIO_RECORDING_FIND_MARKER) {
         if (what->label_utf8 == nullptr) {
             return ECUIO_ERR_NULL_ARGUMENT;
+        }
+        if (stop.asked()) {
+            return canceled();
         }
         for (const marker_entry& m : r->markers) {
             if (m.host_us >= from_us && m.label == what->label_utf8) {
@@ -2145,13 +2176,16 @@ ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
             what->hysteresis != 0.0) {
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
+        if (stop.asked()) {
+            return canceled();
+        }
         const uint32_t rpm = engine_speed_signal(r);
         if (rpm == UINT32_MAX) {
             return ECUIO_OK;
         }
         return find_crossing(r, rpm, true, ECUIO_ENGINE_START_RPM,
                              ECUIO_ENGINE_START_RPM - ECUIO_ENGINE_STOPPED_RPM,
-                             from_us, at_us);
+                             from_us, stop, at_us);
     }
     if (what->kind != ECUIO_RECORDING_FIND_THRESHOLD ||
         what->signal >= r->signals.size() ||
@@ -2163,9 +2197,12 @@ ecuio_status_t ecuio_recording_find(const ecuio_recording_t* r,
     if (r->signals[what->signal].text()) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
+    if (stop.asked()) {
+        return canceled();
+    }
     return find_crossing(r, what->signal,
                          what->direction == ECUIO_RECORDING_FIND_RISING,
-                         what->level, what->hysteresis, from_us, at_us);
+                         what->level, what->hysteresis, from_us, stop, at_us);
 }
 
 ecuio_status_t ecuio_recording_stats(const ecuio_recording_t* r,
@@ -2287,7 +2324,7 @@ bool role_of(const ecuio_recording_t* r, uint32_t given, uint32_t role,
 /* Each role signal's samples in [from_us, to_us] and the one on each side
  * of it, in one pass over the rows */
 ecuio_status_t gather(const ecuio_recording_t* r, const uint32_t* signal,
-                      uint64_t from_us, uint64_t to_us,
+                      uint64_t from_us, uint64_t to_us, const query_stop& stop,
                       ecuio_aids::samples* out)
 {
     uint64_t lo[kRoles];
@@ -2329,6 +2366,9 @@ ecuio_status_t gather(const ecuio_recording_t* r, const uint32_t* signal,
     FILE* f = nullptr;
     file_ptr owner;
     for (; it != r->index.end() && it->second <= last / kSecondUs; ++it) {
+        if (stop.asked()) {
+            return canceled();
+        }
         std::shared_ptr<const std::vector<raw_row>> rows;
         const ecuio_status_t rc = r->rows_of(f, owner, *it, &rows);
         if (rc != ECUIO_OK) {
@@ -2354,6 +2394,15 @@ ecuio_status_t ecuio_recording_stretches(const ecuio_recording_t* r,
                                          uint64_t from_us, uint64_t to_us,
                                          ecuio_recording_stretch_t* out,
                                          uint32_t capacity, uint32_t* count)
+{
+    return ecuio_recording_stretches_with(r, rules, from_us, to_us, nullptr,
+                                          nullptr, out, capacity, count);
+}
+
+ecuio_status_t ecuio_recording_stretches_with(
+    const ecuio_recording_t* r, const ecuio_stretch_rules_t* rules,
+    uint64_t from_us, uint64_t to_us, ecuio_cancel_t cancel, void* user_data,
+    ecuio_recording_stretch_t* out, uint32_t capacity, uint32_t* count)
 {
     if (r == nullptr || rules == nullptr || count == nullptr ||
         (out == nullptr && capacity != 0)) {
@@ -2406,9 +2455,13 @@ ecuio_status_t ecuio_recording_stretches(const ecuio_recording_t* r,
         time_of(rules->pull_hold_us, ECUIO_STRETCH_DEFAULT_PULL_HOLD_US);
     const uint64_t cruise_hold =
         time_of(rules->cruise_hold_us, ECUIO_STRETCH_DEFAULT_CRUISE_HOLD_US);
+    const query_stop stop{cancel, user_data};
+    if (stop.asked()) {
+        return canceled();
+    }
     try {
         ecuio_aids::samples s[kRoles];
-        const ecuio_status_t rc = gather(r, signal, from_us, to_us, s);
+        const ecuio_status_t rc = gather(r, signal, from_us, to_us, stop, s);
         if (rc != ECUIO_OK) {
             return rc;
         }

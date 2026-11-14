@@ -4779,6 +4779,68 @@ TEST(PidSupportTest, TheBitmapsMarkTheirClearPidsUnsupported)
     }
 }
 
+/* A complete walk whose chain ended early (0x40's link to 0x60 clear)
+ * says every later PID unsupported, as J1979 reads the clear link: the
+ * set's PIDs past 0x60 are listed with the clear ones before it */
+TEST(PidSupportTest, AChainEndedEarlyMarksEveryLaterPidUnsupported)
+{
+    ecuio_channel_support_t car = first_vehicle();
+    car.flags = ECUIO_SUPPORT_PROBED | ECUIO_SUPPORT_COMPLETE;
+    car.pid_bitmap[(0x60 - 1) / 8] &= ~(0x80u >> ((0x60 - 1) % 8));
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    std::vector<uint16_t> expected;
+    int pastTheChain = 0;
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if ((set->defs[i].flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+            continue; /* none of obd2's computed inputs is past 0x60 */
+        }
+        const unsigned pid = set->defs[i].mux_key & 0xFFu;
+        if (pid > 0x60 ||
+            (car.pid_bitmap[(pid - 1) / 8] & (0x80u >> ((pid - 1) % 8))) == 0) {
+            expected.push_back(set->defs[i].id);
+        }
+        pastTheChain += pid > 0x60 ? 1 : 0;
+    }
+    ASSERT_GT(pastTheChain, 5);
+    EXPECT_EQ(unsupported(&car, 1), expected);
+    EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0x61));
+    EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0xA6));
+    EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0xFF));
+    EXPECT_TRUE(ecuio_pid_marked_unsupported(car, 0x5C))
+        << "clear in 40's answered bitmap";
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x0C))
+        << "set in 00's answered bitmap";
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x00));
+
+    /* A chain whose last answered link is set judges nothing past it: the
+     * walk ended for another reason than the ECU's word */
+    ecuio_channel_support_t linked = car;
+    linked.pid_bitmap[(0x60 - 1) / 8] |= 0x80u >> ((0x60 - 1) % 8);
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(linked, 0x61));
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(linked, 0xA6));
+    /* A range below an answered one stays as its own bitmap says */
+    ecuio_channel_support_t gap = car;
+    gap.ranges = 0x5; /* 00 and 40 answered, 20 not */
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(gap, 0x21))
+        << "00's link to 20 is set";
+}
+
+/* A walk that never finished (PROBED alone) judges no range it didn't
+ * answer, however its last answered link reads */
+TEST(PidSupportTest, AnUnfinishedWalkJudgesNoRangeItDidntAnswer)
+{
+    ecuio_channel_support_t car = first_vehicle();
+    ASSERT_EQ(car.flags & ECUIO_SUPPORT_COMPLETE, 0u);
+    car.pid_bitmap[(0x60 - 1) / 8] &= ~(0x80u >> ((0x60 - 1) % 8));
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0x61));
+    EXPECT_FALSE(ecuio_pid_marked_unsupported(car, 0xA6));
+    for (uint16_t id : unsupported(&car, 1)) {
+        const ecuio_signal_def_t* d = find_def(ecuio_obd2_signal_set(), id);
+        ASSERT_NE(d, nullptr);
+        EXPECT_LE(d->mux_key & 0xFFu, 0x60u) << id;
+    }
+}
+
 /* The first vehicle's sheet counts 44 data PIDs to 0x60 (0x20 and 0x40,
  * the chain's links, and 0x60 left out); the bitmaps cover what their
  * ranges answered */
@@ -5275,7 +5337,17 @@ TEST(SimEcuTest, DriveValuesAreTheDriveCyclesThroughTheObd2Defs)
     EXPECT_NEAR(drive_value(ask(e, {0x01, 0x5C}), ECUIO_OBD2_SIG_OIL_TEMP_ID),
                 car.oil_c, 0.5);
     EXPECT_NEAR(drive_value(ask(e, {0x01, 0x42}), ECUIO_OBD2_SIG_BATTERY_V_ID),
-                14.1, 0.001);
+                car.battery_v, 0.001);
+    EXPECT_GT(car.battery_v, 13.5f) << "charging";
+    EXPECT_NEAR(
+        drive_value(ask(e, {0x01, 0x0B}), ECUIO_OBD2_PID_SIG_ID(0x0B, 0)),
+        car.map_kpa, 0.5);
+    EXPECT_NEAR(
+        drive_value(ask(e, {0x01, 0x44}), ECUIO_OBD2_PID_SIG_ID(0x44, 0)),
+        car.commanded_lambda, 0.0001);
+    EXPECT_NEAR(
+        drive_value(ask(e, {0x01, 0x33}), ECUIO_OBD2_PID_SIG_ID(0x33, 0)),
+        car.baro_kpa, 0.5);
     // run time since start, lambda and ambient by J1979's scaling
     const std::vector<uint8_t> run = ask(e, {0x01, 0x1F});
     ASSERT_EQ(run.size(), 4u);
@@ -5302,8 +5374,11 @@ TEST(SimEcuTest, TheKeyOnWithTheEngineStopped)
     ecuio_sim_ecu e = sim_of(ecuio_sim_values::drive);
     ecuio_sim_tick(e);
     EXPECT_EQ(ask(e, {0x01, 0x0C}), (std::vector<uint8_t>{0x41, 0x0C, 0, 0}));
+    const uint16_t mv = ecuio_mock::clamp_u16(e.car.battery_v * 1000.0f);
     EXPECT_EQ(ask(e, {0x01, 0x42}),
-              (std::vector<uint8_t>{0x41, 0x42, 0x31, 0x38}));
+              (std::vector<uint8_t>{0x41, 0x42, static_cast<uint8_t>(mv >> 8),
+                                    static_cast<uint8_t>(mv)}));
+    EXPECT_LT(e.car.battery_v, 13.0f) << "the battery's own";
     EXPECT_EQ(ask(e, {0x01, 0x1F}), (std::vector<uint8_t>{0x41, 0x1F, 0, 0}));
 }
 
@@ -5332,7 +5407,7 @@ TEST(SimEcuTest, TheBitmapsListWhatEachModeAnswers)
                 listed += (bit && pid % 0x20 != 0) ? 1 : 0;
             }
         }
-        EXPECT_EQ(listed, values == ecuio_sim_values::drive ? 19 : 95);
+        EXPECT_EQ(listed, values == ecuio_sim_values::drive ? 22 : 95);
     }
 }
 

@@ -34,6 +34,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QStringConverter>
 #include <QStringList>
 #include <QtGlobal>
 
@@ -399,12 +400,41 @@ int FrameListModel::rowOfSeq(quint64 seq) const
     return m_newestFirst ? count() - 1 - age : age;
 }
 
-double FrameListModel::timestampAt(int row) const
+double FrameListModel::seqAt(int row) const
 {
     if (row < 0 || row >= count()) {
         return -1;
     }
-    return static_cast<double>(rowAt(row).timestampUs);
+    return static_cast<double>(rowAt(row).seq);
+}
+
+int FrameListModel::rowAtSeq(double seq) const
+{
+    const int n = count();
+    if (n == 0) {
+        return -1;
+    }
+    const quint64 oldestSeq = m_nextSeq - static_cast<quint64>(m_count);
+    const quint64 want = seq > 0 ? static_cast<quint64>(seq) : 0;
+    // The oldest shown row at or after the arrival, by age (0 = oldest);
+    // n when every shown row arrived before it
+    int age = 0;
+    bool exact = false;
+    if (m_filter.active()) {
+        const auto it = std::lower_bound(m_shown.begin(), m_shown.end(), want);
+        age = static_cast<int>(it - m_shown.begin());
+        exact = it != m_shown.end() && *it == want;
+    } else if (want >= oldestSeq) {
+        age = static_cast<int>(
+            std::min<quint64>(want - oldestSeq, static_cast<quint64>(n)));
+        exact = age < n;
+    }
+    if (!m_newestFirst) {
+        return std::min(age, n - 1);
+    }
+    // Newest first the next row is the one that arrived before it
+    const int next = exact ? age : age - 1;
+    return n - 1 - std::max(next, 0);
 }
 
 void FrameListModel::notifySelected(int first, int last)
@@ -1137,64 +1167,140 @@ QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
         m["decimals"] = static_cast<int>(now.decimal_places);
         m["value"] = now.value;
 
-        // Flattened [ts, val, ts, val, ...], oldest first.
-        // When full, the oldest surviving sample sits at histHead (the
-        // next eviction slot); while filling, samples are dense from 0.
+        // Flattened [ts, val, ts, val, ...], oldest first
         QVariantList samples;
-        const auto put = [&](const Sample& s) {
-            samples.append(static_cast<double>(s.timestampMs));
-            samples.append(now.converted ? shown(e, s.value).value : s.value);
-        };
-        // A slice's lowest and highest, in time order, once each
-        const Sample* low = nullptr;
-        const Sample* high = nullptr;
-        const auto flush = [&]() {
-            if (low != nullptr) {
-                const Sample* a = low->timestampMs <= high->timestampMs ? low : high;
-                const Sample* b = a == low ? high : low;
-                put(*a);
-                if (b != a) put(*b);
-            }
-            low = high = nullptr;
-        };
-        const uint32_t start = (e.histCount == HistoryCapacity)
-                                ? e.histHead : 0;
-        qint64 slice = -1;
-        const Sample* last = nullptr;
-        for (uint32_t i = 0; i < e.histCount; ++i) {
-            const Sample& s = e.history[(start + i) % HistoryCapacity];
-            if (s.timestampMs < from) continue;
-            last = &s;
-            if (sliceMs <= 0.0) {
-                put(s);
-                continue;
-            }
-            // Slices counted from time 0, not from the window's start:
-            // the window slides with every update, and slices measured
-            // from it would put the same samples in other slices each
-            // time, so a noisy trace's peaks crawl as it scrolls
-            const qint64 k = static_cast<qint64>(
-                std::floor(static_cast<double>(s.timestampMs) / sliceMs));
-            if (k != slice) {
-                flush();
-                slice = k;
-            }
-            if (low == nullptr || s.value < low->value) low = &s;
-            if (high == nullptr || s.value > high->value) high = &s;
+        for (const Sample* s : sliced(e, from, sliceMs)) {
+            samples.append(static_cast<double>(s->timestampMs));
+            samples.append(now.converted ? shown(e, s->value).value : s->value);
         }
-        if (sliceMs > 0.0) {
-            /* the newest sample always: the trace ends, and its label
-             * sits, where the value is now */
-            if (last != nullptr && last != low && last != high) {
-                flush();
-                put(*last);
-            } else {
-                flush();
-            }
+        if (samples.isEmpty()) {
+            continue;
         }
-        if (samples.isEmpty()) continue;
         m["samples"] = samples;
         out.append(m);
+    }
+    return out;
+}
+
+std::vector<const SignalListModel::Sample*>
+SignalListModel::sliced(const Entry& e, qint64 from, double sliceMs,
+                        qint64 breakMs)
+{
+    std::vector<const Sample*> out;
+    // A slice's lowest and highest, in time order, once each
+    const Sample* low = nullptr;
+    const Sample* high = nullptr;
+    const auto flush = [&]() {
+        if (low != nullptr) {
+            const Sample* a =
+                low->timestampMs <= high->timestampMs ? low : high;
+            const Sample* b = a == low ? high : low;
+            out.push_back(a);
+            if (b != a) {
+                out.push_back(b);
+            }
+        }
+        low = high = nullptr;
+    };
+    // When full, the oldest surviving sample sits at histHead (the next
+    // eviction slot); while filling, samples are dense from 0
+    const uint32_t start = (e.histCount == HistoryCapacity) ? e.histHead : 0;
+    qint64 slice = -1;
+    const Sample* last = nullptr;
+    bool lastOut = false;
+    for (uint32_t i = 0; i < e.histCount; ++i) {
+        const Sample& s = e.history[(start + i) % HistoryCapacity];
+        if (s.timestampMs < from) {
+            continue;
+        }
+        if (breakMs > 0) {
+            // A stall in the ring is a break; a value that isn't a number is
+            // its own point, so it hides no slice's extremes
+            const bool stalled =
+                last != nullptr && s.timestampMs - last->timestampMs > breakMs;
+            const bool number = std::isfinite(s.value);
+            if (stalled || !number) {
+                flush();
+                slice = -1;
+            }
+            if (stalled) {
+                out.push_back(nullptr);
+            }
+            last = &s;
+            lastOut = !number;
+            if (!number) {
+                out.push_back(&s);
+                continue;
+            }
+        }
+        last = &s;
+        if (sliceMs <= 0.0) {
+            out.push_back(&s);
+            continue;
+        }
+        // Slices counted from time 0, not from the window's start: slices
+        // measured from a sliding window would move a noisy trace's peaks
+        const qint64 k = static_cast<qint64>(
+            std::floor(static_cast<double>(s.timestampMs) / sliceMs));
+        if (k != slice) {
+            flush();
+            slice = k;
+        }
+        if (low == nullptr || s.value < low->value) {
+            low = &s;
+        }
+        if (high == nullptr || s.value > high->value) {
+            high = &s;
+        }
+    }
+    if (sliceMs > 0.0) {
+        // The newest sample always: the trace ends where the value is now
+        if (last != nullptr && !lastOut && last != low && last != high) {
+            flush();
+            out.push_back(last);
+        } else {
+            flush();
+        }
+    }
+    return out;
+}
+
+QList<double> SignalListModel::trace(int id, qint64 windowMs, int columns) const
+{
+    QList<double> out;
+    if (id < 0 || id > 0xFFFF) {
+        return out;
+    }
+    const int row = m_rowOfId.value(static_cast<uint16_t>(id), -1);
+    if (row < 0) {
+        return out;
+    }
+    const Entry& e = m_entries[static_cast<size_t>(row)];
+    if (e.isText || e.histCount == 0) {
+        return out;
+    }
+    const uint32_t newest =
+        (e.histHead + HistoryCapacity - 1) % HistoryCapacity;
+    const qint64 from = windowMs > 0 ? e.history[newest].timestampMs - windowMs
+                                     : std::numeric_limits<qint64>::min();
+    const double sliceMs = (windowMs > 0 && columns > 0)
+                               ? static_cast<double>(windowMs) / columns
+                               : 0.0;
+    const bool converted = shown(e, e.value).converted;
+    const std::vector<const Sample*> picked =
+        sliced(e, from, sliceMs, SessionBridge::valueStaleMs());
+    out.reserve(static_cast<qsizetype>(picked.size() * 2));
+    double lastTs = 0.0;
+    for (const Sample* s : picked) {
+        // A break: a point that isn't a number, at the stall's start
+        if (s == nullptr) {
+            out.append(lastTs);
+            out.append(std::numeric_limits<double>::quiet_NaN());
+            continue;
+        }
+        lastTs = static_cast<double>(s->timestampMs);
+        out.append(lastTs);
+        out.append(converted ? shown(e, s->value).value : s->value);
     }
     return out;
 }
@@ -1558,10 +1664,10 @@ static QString signalCountText(int count)
 
 QVariantMap SessionBridge::importSignalFile(const QUrl& url)
 {
-    // Android's content:// URIs open through QFile as they are
-    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
     QVariantMap result;
-    if (!file.open(QIODevice::ReadOnly)) {
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
         result = {{QStringLiteral("ok"), false},
                   {QStringLiteral("words"),
                    QStringLiteral("Couldn't read the file")}};
@@ -1611,12 +1717,16 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
 {
     QString words;
     const QByteArray bytes = SignalStore::bytes(sha, &words);
+    const bool madeEmpty = pickedDocumentEmpty(url);
     bool written = false;
     if (!bytes.isEmpty()) {
         written = writeToUrl(url, bytes);
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
+    }
+    if (!written) {
+        dropPickedDocument(url, madeEmpty);
     }
     emit logMessage(
         written ? QStringLiteral("Signal file %1 saved to a file (%2 bytes)")
@@ -1630,16 +1740,82 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
     return {{QStringLiteral("ok"), true}, {QStringLiteral("words"), QString()}};
 }
 
+QVariantMap SessionBridge::saveLayoutFile(const QString& text, const QUrl& url)
+{
+    const QByteArray bytes = text.toUtf8();
+    const bool madeEmpty = pickedDocumentEmpty(url);
+    QString words;
+    bool written = false;
+    if (bytes.isEmpty()) {
+        words = QStringLiteral("There is no layout to save");
+    } else if (bytes.size() > layoutFileMaxBytes) {
+        words = QStringLiteral("The layout is over %1 bytes, a layout file's most")
+                    .arg(layoutFileMaxBytes);
+    } else {
+        written = writeToUrl(url, bytes);
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    if (!written) {
+        dropPickedDocument(url, madeEmpty);
+    }
+    emit logMessage(written ? QStringLiteral("Layout saved to a file (%1 bytes)")
+                                  .arg(bytes.size())
+                            : QStringLiteral("Layout not saved: %1").arg(words));
+    return {{QStringLiteral("ok"), written}, {QStringLiteral("words"), words}};
+}
+
+QVariantMap SessionBridge::layoutFileText(const QUrl& url)
+{
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
+    QString words;
+    QString text;
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
+        words = QStringLiteral("Couldn't read the file");
+    } else {
+        QByteArray bytes = file.read(layoutFileMaxBytes + 1);
+        if (bytes.size() > layoutFileMaxBytes) {
+            words = QStringLiteral("The file is over %1 bytes, a layout file's most")
+                        .arg(layoutFileMaxBytes);
+        } else {
+            if (bytes.startsWith("\xEF\xBB\xBF")) {
+                bytes.remove(0, 3);
+            }
+            QStringDecoder utf8(QStringDecoder::Utf8,
+                                QStringConverter::Flag::Stateless |
+                                    QStringConverter::Flag::ConvertInitialBom);
+            text = utf8(bytes);
+            if (utf8.hasError()) {
+                text.clear();
+                words = QStringLiteral("The file isn't UTF-8 text");
+            }
+        }
+    }
+    emit logMessage(words.isEmpty()
+                        ? QStringLiteral("Layout file read (%1 characters)")
+                              .arg(text.size())
+                        : QStringLiteral("Layout file not read: %1").arg(words));
+    return {{QStringLiteral("ok"), words.isEmpty()},
+            {QStringLiteral("words"), words},
+            {QStringLiteral("text"), text}};
+}
+
 QVariantMap SessionBridge::exportFrames(const QUrl& url)
 {
     const FrameListModel::ScrubbedCsv csv = m_frameLog->scrubbedCsv();
     QString words = csv.words;
+    const bool madeEmpty = pickedDocumentEmpty(url);
     bool written = false;
     if (csv.ok) {
         written = writeToUrl(url, csv.bytes);
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
+    }
+    if (!written) {
+        dropPickedDocument(url, madeEmpty);
     }
     const qulonglong leftOut = csv.identification + csv.textValues;
     emit logMessage(
@@ -1709,10 +1885,10 @@ QVariantMap SessionBridge::previewObdb(const QUrl& url, int modelYear,
 {
     m_obdbPending.clear();
     const uint32_t year = modelYear > 0 ? static_cast<uint32_t>(modelYear) : 0u;
-    // Android's content:// URIs open through QFile as they are
-    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
     ObdbImport::Preview p;
-    if (!file.open(QIODevice::ReadOnly)) {
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
         p.words = QStringLiteral("Couldn't read the file");
     } else if (file.size() > static_cast<qint64>(ECUIO_OBDB_MAX_BYTES)) {
         p.words = QStringLiteral("The file is over %1 MiB, an OBDb set's most")
@@ -1827,10 +2003,10 @@ QVariantList SessionBridge::decodeProfiles()
 
 QVariantMap SessionBridge::importPlugin(const QUrl& url)
 {
-    // Android's content:// URIs open through QFile as they are
-    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
     QVariantMap result;
-    if (!file.open(QIODevice::ReadOnly)) {
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
         result = {{QStringLiteral("ok"), false},
                   {QStringLiteral("words"),
                    QStringLiteral("Couldn't read the file")}};
@@ -2388,15 +2564,36 @@ QVariantMap recordingRowOf(const QFileInfo& info)
     qint64 durationMs = -1;
     QFile events(folder + QStringLiteral("/events.log"));
     if (events.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        // A header holds a line a signal; a file with no "columns" line is read no further
-        for (int n = 0; n < 400 && !events.atEnd(); ++n) {
-            const QString line = QString::fromUtf8(events.readLine()).trimmed();
+        // A header holds a line for each signal and each enum label, at most
+        // about 140 bytes each (every name byte a quote); a file with no
+        // "columns" line is read no further than that many lines at 150
+        constexpr qint64 kHeaderBytes =
+            static_cast<qint64>(ECUIO_SET_MAX_TABLE +
+                                ECUIO_SIGNAL_FILE_MAX_SIGNALS) *
+            150;
+        // A line longer than a read (a "focus" line names every pick) comes in
+        // parts, and only the part that starts it is judged
+        constexpr qint64 kLineBytes = 1100;
+        qint64 read = 0;
+        bool startsLine = true;
+        while (read < kHeaderBytes && !events.atEnd()) {
+            const QByteArray raw = events.readLine(kLineBytes);
+            if (raw.isEmpty()) {
+                break; // a read that failed before the end
+            }
+            read += raw.size();
+            const bool judged = startsLine;
+            startsLine = raw.endsWith('\n');
+            if (!judged) {
+                continue;
+            }
+            const QString line = QString::fromUtf8(raw).trimmed();
             if (line.startsWith(QLatin1String("columns"))) {
                 break;
             }
             if (line.startsWith(QLatin1String("uri ")) && recorded.isEmpty()) {
                 recorded = line.mid(4).trimmed();
-            } else if (line.startsWith(QLatin1String("signal "))) {
+            } else if (line.startsWith(QLatin1String("signal  "))) {
                 ++signalCount;
             } else if (line.startsWith(QLatin1String("focus "))) {
                 isLog = true;
@@ -2599,6 +2796,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_errorEpisodes = 0;
     emit linkStateChanged();
     setLogPaused(false);       // a new session always logs
+    // Precise: a coarse timer fires up to 5 % early, and the ring's 120 s
+    // counts on ten windows a second
+    m_coalesceTimer->setTimerType(Qt::PreciseTimer);
     m_coalesceTimer->start(100);
     emit connectedChanged(true);
     emit framesReset();

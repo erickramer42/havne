@@ -6,7 +6,7 @@ import QtQml
 
 // The vehicles (ADR-0027) as rules on one document,
 // { salt, picked, list: [{ id, label, vinKey, uri, plotted, unplotted,
-// signals, own, plugin, baseline }] }:
+// signals, own, plugin, vinMatches, baseline }] }:
 // plotted and unplotted are the rows ticked past Live's default and
 // unticked from it (ADR-0039 section 8); a stored entry without
 // plotted reads as none.
@@ -20,6 +20,11 @@ import QtQml
 // plugin is the profile of the plugin variant picked for the vehicle
 // (plugin.<id>.<variant>, ADR-0052 section 5), "" for none; the
 // plugins themselves are the app's, not a vehicle's.
+// vinMatches are the variants' profiles the car's VIN matched when it was
+// last read, so the vehicle's section marks them with no session. Never
+// the VIN (ADR-0027 section 3), though the list implies what those
+// plugins' match covers: a manufacturer code and a range of model years
+// (ADR-0052's appendix of 2026-11-13). An entry stored before it has none.
 // baseline is the folder of the vehicle's baseline recording (ADR-0049's
 // appendix of 2026-11-06), as the Recordings page names it, "" for none;
 // an entry stored before it has none.
@@ -66,6 +71,8 @@ QtObject {
                         && (!Array.isArray(v.signals) || !v.signals.every(isFile)))
                     || (v.own !== undefined && !isString(v.own))
                     || (v.plugin !== undefined && !isString(v.plugin))
+                    || (v.vinMatches !== undefined
+                        && (!Array.isArray(v.vinMatches) || !v.vinMatches.every(isString)))
                     || (v.baseline !== undefined && !isString(v.baseline)))
                 return empty()
             ids[v.id] = true
@@ -96,6 +103,7 @@ QtObject {
                  plotted: v.plotted === undefined ? [] : v.plotted.slice(),
                  unplotted: v.unplotted.slice(), signals: files, own: own,
                  plugin: v.plugin === undefined ? "" : v.plugin,
+                 vinMatches: v.vinMatches === undefined ? [] : v.vinMatches.slice(),
                  baseline: v.baseline === undefined ? "" : v.baseline }
     }
 
@@ -172,7 +180,7 @@ QtObject {
         const id = nextId(d)
         d.list.push({ id: id, label: String(label).trim(), vinKey: "", uri: "",
                       plotted: [], unplotted: [], signals: [], own: "", plugin: "",
-                      baseline: "" })
+                      vinMatches: [], baseline: "" })
         d.picked = id
         return d
     }
@@ -207,8 +215,12 @@ QtObject {
         return change(doc, v => v.label = String(label).trim())
     }
 
+    // The matches came from the VIN, so they go with its key
     function forgetVin(doc) {
-        return change(doc, v => v.vinKey = "")
+        return change(doc, v => {
+            v.vinKey = ""
+            v.vinMatches = []
+        })
     }
 
     function forget(doc) {
@@ -314,9 +326,25 @@ QtObject {
         return setBaseline(doc, "")
     }
 
-    // Every vehicle's pick of one of profiles undone: a plugin removed
-    function dropPlugin(doc, profiles) {
+    // The variants the car's VIN matched, by their profiles, for the
+    // picked vehicle (what the session read replaces what was kept)
+    function setVinMatches(doc, profiles) {
+        return change(doc, v => v.vinMatches = profiles.map(p => String(p)))
+    }
+
+    // Every vehicle's matches of one of profiles forgotten, its pick kept:
+    // a plugin replaced
+    function dropVinMatches(doc, profiles) {
         const d = copy(doc)
+        for (const v of d.list)
+            v.vinMatches = v.vinMatches.filter(p => profiles.indexOf(p) < 0)
+        return d
+    }
+
+    // Every vehicle's pick and matches of one of profiles undone: a plugin
+    // removed
+    function dropPlugin(doc, profiles) {
+        const d = dropVinMatches(doc, profiles)
         for (const v of d.list) {
             if (profiles.indexOf(v.plugin) >= 0)
                 v.plugin = ""

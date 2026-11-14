@@ -52,8 +52,17 @@ inline uint16_t ecuio_pids_through(uint32_t ranges)
     return top;
 }
 
+/* Whether bit pid of a report's bitmaps is set */
+inline bool ecuio_pid_bit_set(const ecuio_channel_support_t& s, unsigned pid)
+{
+    return (s.pid_bitmap[(pid - 1u) / 8u] & (0x80u >> ((pid - 1u) % 8u))) != 0;
+}
+
 /* The bitmap at PID 0x20 * ((pid - 1) / 0x20) was answered and its bit
- * for pid is clear. PID 0, and a range never answered, judge nothing. */
+ * for pid is clear; or the walk is complete and the chain ended before
+ * pid's range (the last answered bitmap's link to the next one clear),
+ * which J1979 reads as every later PID unsupported. PID 0, and a range a
+ * walk that didn't finish never reached, judge nothing. */
 inline bool ecuio_pid_marked_unsupported(const ecuio_channel_support_t& s,
                                          uint8_t pid)
 {
@@ -61,10 +70,18 @@ inline bool ecuio_pid_marked_unsupported(const ecuio_channel_support_t& s,
         return false;
     }
     const unsigned range = (pid - 1u) / 0x20u;
-    if ((s.ranges & (1u << range)) == 0) {
+    if ((s.ranges & (1u << range)) != 0) {
+        return !ecuio_pid_bit_set(s, pid);
+    }
+    if ((s.flags & ECUIO_SUPPORT_COMPLETE) == 0) {
         return false;
     }
-    return (s.pid_bitmap[(pid - 1u) / 8u] & (0x80u >> ((pid - 1u) % 8u))) == 0;
+    for (unsigned r = range; r-- > 0;) {
+        if ((s.ranges & (1u << r)) != 0) {
+            return !ecuio_pid_bit_set(s, 0x20u * (r + 1u));
+        }
+    }
+    return false;
 }
 
 /* A Service 01 def whose PID its channel's report marks unsupported: the

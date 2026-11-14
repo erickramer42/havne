@@ -1,0 +1,42 @@
+{
+ "format": 2,
+ "form": "desktop",
+ "pages": [
+  {
+   "name": "Engine",
+   "cells": [
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "label": "RPM",
+     "refs": [
+      "id:1001"
+     ],
+     "unit": "RPM",
+     "options": {
+      "to": 100,
+      "coldBelow": -40,
+      "warnFrom": 90,
+      "dangerFrom": 95,
+      "rise": 0.5,
+      "warnBelow": 10,
+      "dangerBelow": 5,
+      "majorStep": 10,
+      "minorStep": 0.5,
+      "labelDivisor": 1,
+      "decimals": 0,
+      "count": 1,
+      "cells": 2,
+      "digits": 1,
+      "window": 10,
+      "peak": false,
+      "progress": true,
+      "vertical": false,
+      "marks": true
+     }
+    }
+   ]
+  }
+ ]
+}

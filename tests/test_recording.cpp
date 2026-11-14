@@ -2533,6 +2533,149 @@ TEST(RecordingStretchesTest, ADrivesPullAndCruiseAreFoundInTimeOrder)
     EXPECT_EQ(stretches_of(r, rules, 0, 60000000).size(), 1u);
 }
 
+namespace {
+
+/* A cancel that stops at its nth ask (0: never), counting its asks */
+struct StopAt {
+    int at = 0;
+    int asked = 0;
+    static int ask(void* user)
+    {
+        auto* s = static_cast<StopAt*>(user);
+        return ++s->asked == s->at ? 1 : 0;
+    }
+};
+
+} // namespace
+
+/* stretches_with asks its cancel once the arguments pass and before each
+ * second's rows: never stopping gives the plain call's stretches, and a
+ * stop at each ask in turn ends the call there, CANCELED with a count of
+ * 0 and the detail's words, asking no more */
+TEST(RecordingStretchesTest, ACancelStopsTheSearchAtItsNextSecond)
+{
+    Folder f;
+    write_drive(f,
+                {{"Throttle Position", "%", 0, drive_throttle},
+                 {"Vehicle Speed", "km/h", 0, drive_speed},
+                 {"RPM", "rpm", 0, drive_rpm}},
+                60000);
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    ecuio_stretch_rules_t rules = both_kinds();
+    const std::vector<ecuio_recording_stretch_t> plain =
+        stretches_of(r, rules, 0, 60000000);
+    ASSERT_EQ(plain.size(), 2u);
+
+    StopAt never;
+    ecuio_recording_stretch_t got[4] = {};
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_recording_stretches_with(r.r, &rules, 0, 60000000,
+                                             StopAt::ask, &never, got, 4, &n),
+              ECUIO_OK);
+    ASSERT_EQ(n, 2u);
+    for (uint32_t k = 0; k < n; ++k) {
+        EXPECT_EQ(got[k].from_us, plain[k].from_us);
+        EXPECT_EQ(got[k].to_us, plain[k].to_us);
+    }
+    EXPECT_EQ(never.asked, 62) << "once, then each of the 61 seconds";
+
+    for (int at = 1; at <= never.asked; ++at) {
+        StopAt stop{at};
+        n = 99;
+        ASSERT_EQ(ecuio_recording_stretches_with(
+                      r.r, &rules, 0, 60000000, StopAt::ask, &stop, got, 4, &n),
+                  ECUIO_ERR_CANCELED)
+            << "at " << at;
+        EXPECT_EQ(n, 0u);
+        EXPECT_EQ(stop.asked, at) << "asked again after its stop";
+        EXPECT_STREQ(ecuio_last_error_detail(), "the search was canceled");
+    }
+
+    /* A refusal comes before any ask; a NULL cancel is the plain call */
+    StopAt refused;
+    ecuio_stretch_rules_t none = rules;
+    none.kinds = 0;
+    EXPECT_EQ(ecuio_recording_stretches_with(r.r, &none, 0, 60000000,
+                                             StopAt::ask, &refused, got, 4, &n),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(refused.asked, 0);
+    ASSERT_EQ(ecuio_recording_stretches_with(r.r, &rules, 0, 60000000, nullptr,
+                                             nullptr, got, 4, &n),
+              ECUIO_OK);
+    EXPECT_EQ(n, 2u);
+}
+
+/* find_with asks its cancel once the arguments pass and before each
+ * second whose rows it reads, never one its summary passes by: a stop at
+ * each ask ends the search CANCELED with nothing found */
+TEST(RecordingStretchesTest, ACancelStopsAFindAtItsNextSecond)
+{
+    Folder f;
+    write_drive(f,
+                {{"Throttle Position", "%", 0, drive_throttle},
+                 {"Vehicle Speed", "km/h", 0, drive_speed},
+                 {"RPM", "rpm", 0, drive_rpm}},
+                60000);
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_recording_find_t rising = threshold(
+        r.index_of("Vehicle Speed"), 100, 0, ECUIO_RECORDING_FIND_RISING);
+    const uint64_t plain = r.find(rising, 0);
+    ASSERT_EQ(plain, 9300000u);
+
+    StopAt never;
+    uint64_t at = 0;
+    ASSERT_EQ(
+        ecuio_recording_find_with(r.r, &rising, 0, StopAt::ask, &never, &at),
+        ECUIO_OK);
+    EXPECT_EQ(at, plain);
+    EXPECT_EQ(never.asked, 3)
+        << "once, then second 0 that arms it and second 9 that fires";
+    for (int k = 1; k <= never.asked; ++k) {
+        StopAt stop{k};
+        at = 0;
+        EXPECT_EQ(
+            ecuio_recording_find_with(r.r, &rising, 0, StopAt::ask, &stop, &at),
+            ECUIO_ERR_CANCELED);
+        EXPECT_EQ(at, ECUIO_RECORDING_NONE);
+        EXPECT_EQ(stop.asked, k);
+        EXPECT_STREQ(ecuio_last_error_detail(), "the search was canceled");
+    }
+
+    /* An engine start and a marker ask once before they look */
+    ecuio_recording_find_t start{};
+    start.kind = ECUIO_RECORDING_FIND_ENGINE_START;
+    ecuio_recording_find_t marker{};
+    marker.kind = ECUIO_RECORDING_FIND_MARKER;
+    marker.label_utf8 = "lap";
+    for (const ecuio_recording_find_t* what : {&start, &marker}) {
+        StopAt once;
+        EXPECT_EQ(
+            ecuio_recording_find_with(r.r, what, 0, StopAt::ask, &once, &at),
+            ECUIO_OK);
+        EXPECT_GE(once.asked, 1);
+        StopAt first{1};
+        EXPECT_EQ(
+            ecuio_recording_find_with(r.r, what, 0, StopAt::ask, &first, &at),
+            ECUIO_ERR_CANCELED);
+        EXPECT_EQ(at, ECUIO_RECORDING_NONE);
+        EXPECT_EQ(first.asked, 1);
+    }
+
+    /* A refusal comes before any ask; a NULL cancel is the plain call */
+    StopAt refused;
+    ecuio_recording_find_t bad = rising;
+    bad.flags = 1;
+    EXPECT_EQ(
+        ecuio_recording_find_with(r.r, &bad, 0, StopAt::ask, &refused, &at),
+        ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(refused.asked, 0);
+    ASSERT_EQ(ecuio_recording_find_with(r.r, &rising, 0, nullptr, nullptr, &at),
+              ECUIO_OK);
+    EXPECT_EQ(at, plain);
+}
+
 TEST(RecordingStretchesTest, TheFallbacksAreFlagged)
 {
     Folder load;

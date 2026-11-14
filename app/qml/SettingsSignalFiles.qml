@@ -271,17 +271,26 @@ ColumnLayout {
         }
     }
 
-    FileDialog {
+    DocumentOpenDialog {
         id: importDialog
+        objectName: "signalImportDialog"
         title: qsTr("Import a signal file")
         nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
         onAccepted: root.host.importSignalFile(importDialog.selectedFile)
+        onFailed: words => root.pickFailed(words)
     }
-    FileDialog {
+    DocumentOpenDialog {
         id: obdbDialog
+        objectName: "obdbDialog"
         title: qsTr("Import an OBDb set")
         nameFilters: [qsTr("OBDb signal sets (*.json)"), qsTr("All files (*)")]
         onAccepted: root.host.previewObdb(obdbDialog.selectedFile)
+        onFailed: words => root.pickFailed(words)
+    }
+    // As an import's refusal: no earlier note left beside the words
+    function pickFailed(words) {
+        root.host.signalNote = ""
+        root.host.signalProblem = words
     }
     FileDialog {
         id: saveDialog

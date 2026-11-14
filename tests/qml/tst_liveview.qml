@@ -102,6 +102,44 @@ TestCase {
         SignalSpy { signalName: "painted" }
     }
 
+    // Live's chart holds its label column, crowded drawing and ranges from
+    // paint to paint, and lets them go at a new window, a resume and the
+    // session's end
+    function test_theChartHoldsItsLayoutWhileASessionRuns() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        const chart = findChild(page, "chart")
+        verify(chart.holds, "Live's chart holds")
+        // A 300 px column shows only under the label cap, 0.4 of the chart
+        verify(chart.shownW * 0.4 > 300 + ChartLayout.swatchW + ChartLayout.labelGap,
+               "a chart " + chart.shownW + " px wide")
+        connectMock(page)
+        tryVerify(() => chart.held !== null, 5000, "a paint keeps what it held")
+        const plant = () => {
+            tryVerify(() => chart.held !== null, 5000, "a paint keeps what it held")
+            chart.held = { key: chart.held.key, labelW: 300, dense: chart.held.dense,
+                           ranges: chart.held.ranges }
+            tryVerify(() => chart.held.labelW === 300 && chart.drawn
+                            && chart.drawn.plotW <= chart.shownW - 300, 5000,
+                      "a paint keeps a held column")
+        }
+        const letGo = what => tryVerify(() => chart.held === null || chart.held.labelW < 300,
+                                        5000, what + " lets it go")
+        plant()
+        const kept = page.chartWindowS
+        findChild(page, "chartWindow_" + (kept === 60 ? 10 : 60)).clicked()
+        letGo("a new window")
+        findChild(page, "chartWindow_" + kept).clicked()
+        compare(page.chartWindowS, kept)
+        plant()
+        page.pause()
+        page.resume()
+        letGo("a resume")
+        plant()
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        letGo("the session's end")
+    }
+
     // F on a desktop's keyboard maximizes the chart and gives the list
     // back; typed into Find a signal it's a letter of the filter and
     // leaves the chart as it was. In the test's window, which the keys go to
@@ -379,6 +417,22 @@ TestCase {
         compare(s.opacity, 1.0)
     }
 
+    // A row is one accessible node named by its value; its Texts are
+    // ignored, so a value changing at the model's rate renames the node and
+    // makes, hides or destroys none (355)
+    function test_aRowIsOneNamedNode() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        compare(Bridge.connectSession("mock://demo"), "", "the mock connects")
+        const list = findChild(page, "signalList")
+        tryVerify(() => list.count > 0 && list.itemAtIndex(0) !== null, 3000, "a row")
+        const row = list.itemAtIndex(0)
+        tryVerify(() => row.hasValue, 3000, "a value")
+        const value = findChild(row, "valueLabel")
+        verify(findChild(row, "nameLabel").Accessible.ignored, "the name's Text is ignored")
+        verify(value.Accessible.ignored, "the value's Text is ignored")
+        compare(row.Accessible.name, row.name + ": " + value.text)
+    }
+
     // A text row (a uds-generic TEXT def, which the mock answers each
     // tick) shows its text where a number would go and can't be plotted;
     // the number row beside it formats as usual
@@ -453,9 +507,11 @@ TestCase {
         compare(Bridge.connectSession(uri), "", uri + " connects")
         const list = findChild(page, "signalList")
         const all = Bridge.signalModel.rowCount()
+        // The walk can answer 0x0A's bitmap range before 0x5C's: the note
+        // reads one signal first
         tryVerify(() => note.visible, 5000, "the note shows")
-        compare(note.text, "2 signals hidden: the ECU doesn't send them")
-        compare(list.count, all - 2, "Live lists the rest")
+        tryCompare(note, "text", "2 signals hidden: the ECU doesn't send them", 5000)
+        tryCompare(list, "count", all - 2, 5000, "Live lists the rest")
         compare(Bridge.signalModel.rowCount(), all, "the model keeps every row")
         for (let r = 0; r < list.count; ++r) {
             list.positionViewAtIndex(r, ListView.Contain)
@@ -662,6 +718,29 @@ TestCase {
             verify(page.paused && page.viewEndMs < panned, "a second drag pans on: " + page.viewEndMs)
             dragAcross(frame, -600)
             verify(!page.paused, "a drag past the right edge follows now again")
+        } finally {
+            findChild(page, "chartWindow_" + kept).clicked()
+        }
+    }
+
+    // A resume leaves no pan behind: the next drag starts from the live edge,
+    // so a leftward one pauses nothing
+    function test_aDragAfterAResumeStartsFromNow() {
+        const page = pageInGrownWindow()
+        compare(Bridge.connectSession("replay://" + Harness.replayFixtures
+                                      + "/2026-10-25-engine-start?profile=obd2&speed=max"), "",
+                "the replay connects")
+        const kept = page.chartWindowS
+        try {
+            findChild(page, "chartWindow_10").clicked()
+            waitForHistory(25000)
+            const frame = findChild(page, "chartFrame")
+            dragAcross(frame, 200)
+            verify(page.paused && page.viewEndMs < -1000, "panned back: " + page.viewEndMs)
+            page.resume()
+            compare(page.viewEndMs, 0, "a resume forgets the pan")
+            dragAcross(frame, -100)
+            verify(!page.paused, "a leftward drag on the following chart pauses nothing")
         } finally {
             findChild(page, "chartWindow_" + kept).clicked()
         }

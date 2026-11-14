@@ -579,6 +579,11 @@ int main(void)
                                 &reading_at) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_find(NULL, &reading_find, 0, &reading_at) !=
             ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_find_with(NULL, &reading_find, 0, NULL, NULL,
+                                  &reading_at) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_stretches_with(NULL, &reading_rules, 0, 1, NULL, NULL,
+                                       &reading_stretch, 1, &reading_count) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_stats(NULL, &reading_pick, 1, 0, 1, &reading_stats) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_step(NULL, 0, 0, ECUIO_RECORDING_STEP_FORWARD,
