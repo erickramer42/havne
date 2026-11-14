@@ -469,9 +469,11 @@ TestCase {
         compare(Bridge.connectSession(uri), "", uri + " connects")
         const list = findChild(page, "signalList")
         const all = Bridge.signalModel.rowCount()
+        // The walk can answer 0x0A's bitmap range before 0x5C's: the note
+        // reads one signal first
         tryVerify(() => note.visible, 5000, "the note shows")
-        compare(note.text, "2 signals hidden: the ECU doesn't send them")
-        compare(list.count, all - 2, "Live lists the rest")
+        tryCompare(note, "text", "2 signals hidden: the ECU doesn't send them", 5000)
+        tryCompare(list, "count", all - 2, 5000, "Live lists the rest")
         compare(Bridge.signalModel.rowCount(), all, "the model keeps every row")
         for (let r = 0; r < list.count; ++r) {
             list.positionViewAtIndex(r, ListView.Contain)
