@@ -31,6 +31,12 @@ QtObject {
     readonly property int lineW: 2
     readonly property real bandEdgeW: 1.5
     readonly property int denseSpacing: 3   // px a point, below which it's dense
+    readonly property int denseLeave: 4     // px per point, past which a dense trace is sparse again
+    // A held range (Live's): round ends, about heldRangeSteps steps; kept while its
+    // fresh rounding is narrowShare of it; flat until a move of flatLeave digits
+    readonly property int heldRangeSteps: 8
+    readonly property real narrowShare: 0.7
+    readonly property real flatLeave: 1.5
     readonly property int bandColumnW: 2    // px of the plot a band column covers
     readonly property real bandSwingShare: 0.1   // of the plot's height, the least swing banded
     readonly property int bandSwingMin: 6        // px, the least on a short plot
@@ -313,15 +319,16 @@ QtObject {
     // A series' value range. decimals is the value's displayed precision:
     // a trace that never moves by half a displayed digit is flat, and a
     // range narrower than minSpanUnits displayed digits is widened around
-    // its midpoint, so a one-digit step doesn't fill the plot.
-    function valueRange(samples, decimals, minSpanUnits) {
+    // its midpoint, so a one-digit step doesn't fill the plot. flatUnits
+    // (0.5 if left out) is the move in displayed digits a flat trace is under.
+    function valueRange(samples, decimals, minSpanUnits, flatUnits) {
         let vMin = samples[1], vMax = samples[1]
         for (let i = 1; i < samples.length; i += 2) {
             if (samples[i] < vMin) vMin = samples[i]
             if (samples[i] > vMax) vMax = samples[i]
         }
         const unit = Math.pow(10, -decimals)
-        const flat = vMax - vMin < 0.5 * unit
+        const flat = vMax - vMin < (flatUnits || 0.5) * unit
         const minSpan = minSpanUnits * unit
         if (!flat && vMax - vMin < minSpan) {
             const mid = (vMin + vMax) / 2
@@ -329,6 +336,22 @@ QtObject {
             vMax = mid + minSpan / 2
         }
         return { vMin: vMin, vMax: vMax, flat: flat }
+    }
+
+    // A range widened to whole steps of about an eighth of it (1, 2, 2.5
+    // or 5 times a power of ten), so a held range's ends are round
+    function roundedRange(r) {
+        const want = (r.vMax - r.vMin) / heldRangeSteps
+        const e = Math.pow(10, Math.floor(Math.log10(want)))
+        let step = 10 * e
+        for (const m of tickMantissas) {
+            if (m * e >= want) {
+                step = m * e
+                break
+            }
+        }
+        return { vMin: Math.floor(r.vMin / step + 1e-9) * step,
+                 vMax: Math.ceil(r.vMax / step - 1e-9) * step, flat: false }
     }
 
     // The sample pairs as polylines, broken wherever two samples are more
@@ -356,9 +379,13 @@ QtObject {
     // of a swing; past swing px the column swings. Calm columns join into
     // a line through their entries and exits; swinging ones into a band,
     // its top and bottom edges joined to the line on either side, so a
-    // lone spike keeps its peak.
+    // lone spike keeps its peak. The columns start at phase px (0 if
+    // left out): the layout passes where time 0 falls, so a column covers
+    // the same stretch of time at every paint as the chart scrolls.
     // [{ band: false, points: [{x, y}] }, { band: true, top, bottom }]
-    function bandPieces(seg, w, swing) {
+    function bandPieces(seg, w, swing, phase) {
+        const off = phase || 0
+        const colOf = x => Math.floor((x - off) / w)
         const cols = {}
         const add = (c, x, y, travel) => {
             let col = cols[c]
@@ -373,12 +400,12 @@ QtObject {
             }
             col.travel += travel
         }
-        add(Math.floor(seg[0].x / w), seg[0].x, seg[0].y, 0)
+        add(colOf(seg[0].x), seg[0].x, seg[0].y, 0)
         for (let i = 1; i < seg.length; ++i) {
             const p = seg[i - 1], q = seg[i]
             let a = p
             const cut = b => {
-                const c = Math.floor((a.x + b.x) / 2 / w)
+                const c = colOf((a.x + b.x) / 2)
                 add(c, a.x, a.y, 0)
                 add(c, b.x, b.y, Math.abs(b.y - a.y))
                 const col = cols[c]
@@ -392,8 +419,8 @@ QtObject {
                 }
                 a = b
             }
-            for (let c = Math.floor(p.x / w) + 1; c * w < q.x; ++c) {
-                const x = c * w
+            for (let c = colOf(p.x) + 1; c * w + off < q.x; ++c) {
+                const x = c * w + off
                 cut({ x: x, y: p.y + (q.y - p.y) * (x - p.x) / (q.x - p.x) })
             }
             cut(q)
@@ -566,7 +593,10 @@ QtObject {
     //         from the newest sample),
     //         panes (optional: { max, minH, shares: { <count>: [share per
     //         pane] }, ranges: { <pane key>: { vMin, vMax } } (a range the
-    //         user set), assign: { <row>: <pane key> }, mixedLabel }) }
+    //         user set), assign: { <row>: <pane key> }, mixedLabel }),
+    //         held (optional: the held of the layout before, so a chart
+    //         that passes it back at each paint keeps its label column
+    //         and each trace's drawing steady as values come and go) }
     // Returns null when there is nothing to draw (no series with a
     // sample, or no time span), else:
     // { left (the plot's x: the y-axes' column), plotW, plotH and top (the
@@ -582,7 +612,10 @@ QtObject {
     //             y, value, caption, captioned }] }] top down (one, with
     //             no axis and no label, without the panes option),
     //   seams: [y] between them, axisH (the time axis's height: opts.axisH
-    //   or the usual) }
+    //   or the usual), held: { key (the series' slots, units and
+    //   decimals), labelW (the widest label column since the key last
+    //   changed), dense: { <slot>: whether its trace was drawn crowded },
+    //   ranges: { <slot>: { vMin, vMax, flat } }, a holding chart's) }
     function layout(series, width, height, opts) {
         if (!series || series.length === 0)
             return null
@@ -633,10 +666,24 @@ QtObject {
             }
             if (!sp || sp.length < 2)
                 continue
-            const range = valueRange(sp, s.decimals, opts.minSpanUnits)
+            // A holding chart's range is worked out below, from what it held
+            const holding = opts.held !== undefined
+            const range = holding ? { vMin: NaN, vMax: NaN, flat: false }
+                                  : valueRange(sp, s.decimals, opts.minSpanUnits)
             const value = isFinite(s.labelValue) ? s.labelValue : last
             const label = opts.format(value, s.decimals, s.unit)
             labelW = Math.max(labelW, opts.measure(label))
+            if (holding) {
+                // Its column fits the window's extremes too, so the plot keeps
+                // its width as the label's value gains a digit or a sign
+                let lo = sp[1], hi = sp[1]
+                for (let i = 3; i < sp.length; i += 2) {
+                    if (sp[i] < lo) lo = sp[i]
+                    if (sp[i] > hi) hi = sp[i]
+                }
+                labelW = Math.max(labelW, opts.measure(opts.format(lo, s.decimals, s.unit)),
+                                  opts.measure(opts.format(hi, s.decimals, s.unit)))
+            }
             traces.push({ sp: sp, cols: cols, row: s.row, slot: s.slot !== undefined ? s.slot : s.row, vMin: range.vMin, vMax: range.vMax,
                           flat: range.flat, label: label, value: value, decimals: s.decimals,
                           unit: s.unit, scaleKey: s.scaleKey, dash: s.dash, labelMs: s.labelMs,
@@ -644,6 +691,36 @@ QtObject {
         }
         if (traces.length === 0)
             return null
+        // What the layout before held, while the series are the same ones:
+        // the label column only widens, so "now" stays put
+        const key = traces.map(tr => tr.slot + " " + tr.unit + " " + tr.decimals).join("|")
+        const held = opts.held && opts.held.key === key ? opts.held : null
+        if (held)
+            labelW = Math.max(labelW, held.labelW)
+        // A holding chart (opts.held given, null at first) keeps each
+        // trace's range until the window's leaves it or shrinks past
+        // narrowShare, so a trace rescales in steps, not at every paint
+        const rangesNow = {}
+        if (opts.held !== undefined) {
+            for (const tr of traces) {
+                const before = held ? held.ranges[tr.slot] : undefined
+                const r = valueRange(tr.sp, tr.decimals, opts.minSpanUnits,
+                                     before && before.flat ? flatLeave : 0.5)
+                let kept = r
+                if (!r.flat) {
+                    // Judged by its fresh rounding, which is up to 1.5 times the
+                    // window's: a range just widened isn't narrowed at once
+                    const fresh = roundedRange(r)
+                    const inside = before && !before.flat && r.vMin >= before.vMin && r.vMax <= before.vMax
+                    kept = inside && fresh.vMax - fresh.vMin >= narrowShare * (before.vMax - before.vMin)
+                           ? before : fresh
+                }
+                tr.vMin = kept.vMin
+                tr.vMax = kept.vMax
+                tr.flat = r.flat
+                rangesNow[tr.slot] = { vMin: kept.vMin, vMax: kept.vMax, flat: r.flat }
+            }
+        }
 
         // The panes, top down: by unit with the panes option, else one
         // holding every trace on its own scale
@@ -810,6 +887,10 @@ QtObject {
             }
         }
 
+        // Band columns counted from time 0, as chartData's slices are, so
+        // a column edge cuts the trace at the same time at every paint
+        const phase = ((xOf(0) % bandColumnW) + bandColumnW) % bandColumnW
+        const denseNow = {}
         const out = []
         for (const tr of traces) {
             const pane = panes[tr.pane]
@@ -851,12 +932,15 @@ QtObject {
             const points = tr.sp.length / 2
             const spread = xOf(tr.sp[tr.sp.length - 2]) - xOf(tr.sp[0])
             const spacing = points > 1 ? spread / (points - 1) : Infinity
+            // A crowded trace stays crowded until denseLeave, so a count
+            // near the threshold doesn't redraw it the other way each paint
+            const dense = spacing < (held && held.dense[tr.slot] ? denseLeave : denseSpacing)
+            denseNow[tr.slot] = dense
             const segs = segments(tr.sp, opts.gapMs, xOf, traceY)
             let pieces = []
             for (const seg of segs) {
-                pieces = pieces.concat(spacing < denseSpacing
-                                       ? bandPieces(seg, bandColumnW, swing)
-                                       : [{ band: false, points: seg }])
+                pieces = pieces.concat(dense ? bandPieces(seg, bandColumnW, swing, phase)
+                                             : [{ band: false, points: seg }])
             }
             out.push({ row: tr.row, slot: tr.slot,
                        dash: tr.dash,
@@ -886,6 +970,7 @@ QtObject {
 
         return { left: left, plotW: plotW, plotH: plotH, top: top, hGrid: hGrid, ticks: ticks,
                  traces: placed, labelX: left + plotW + 6, panes: panes, seams: seams,
-                 axisH: axisRoom }
+                 axisH: axisRoom,
+                 held: { key: key, labelW: labelW, dense: denseNow, ranges: rangesNow } }
     }
 }

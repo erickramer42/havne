@@ -102,6 +102,44 @@ TestCase {
         SignalSpy { signalName: "painted" }
     }
 
+    // Live's chart holds its label column, crowded drawing and ranges from
+    // paint to paint, and lets them go at a new window, a resume and the
+    // session's end
+    function test_theChartHoldsItsLayoutWhileASessionRuns() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        const chart = findChild(page, "chart")
+        verify(chart.holds, "Live's chart holds")
+        // A 300 px column shows only under the label cap, 0.4 of the chart
+        verify(chart.shownW * 0.4 > 300 + ChartLayout.swatchW + ChartLayout.labelGap,
+               "a chart " + chart.shownW + " px wide")
+        connectMock(page)
+        tryVerify(() => chart.held !== null, 5000, "a paint keeps what it held")
+        const plant = () => {
+            tryVerify(() => chart.held !== null, 5000, "a paint keeps what it held")
+            chart.held = { key: chart.held.key, labelW: 300, dense: chart.held.dense,
+                           ranges: chart.held.ranges }
+            tryVerify(() => chart.held.labelW === 300 && chart.drawn
+                            && chart.drawn.plotW <= chart.shownW - 300, 5000,
+                      "a paint keeps a held column")
+        }
+        const letGo = what => tryVerify(() => chart.held === null || chart.held.labelW < 300,
+                                        5000, what + " lets it go")
+        plant()
+        const kept = page.chartWindowS
+        findChild(page, "chartWindow_" + (kept === 60 ? 10 : 60)).clicked()
+        letGo("a new window")
+        findChild(page, "chartWindow_" + kept).clicked()
+        compare(page.chartWindowS, kept)
+        plant()
+        page.pause()
+        page.resume()
+        letGo("a resume")
+        plant()
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        letGo("the session's end")
+    }
+
     // F on a desktop's keyboard maximizes the chart and gives the list
     // back; typed into Find a signal it's a letter of the filter and
     // leaves the chart as it was. In the test's window, which the keys go to

@@ -26,6 +26,7 @@ Page {
     onChartWindowSChanged: {
         if (paused)
             viewEndMs = clampedEnd(viewEndMs)
+        chart.held = null
         chart.requestPaint()
     }
     // One window along: direction > 0 a longer one, < 0 a shorter one,
@@ -130,6 +131,7 @@ Page {
         viewEndMs = 0
         cursorMs = NaN
         hintShown = false
+        chart.held = null
         chart.requestPaint()
     }
     // The view's end, kept so the window stays inside the snapshot (or
@@ -172,7 +174,8 @@ Page {
     function pausedSeries(widthPx) {
         const w = chartWindowS * 1000
         const t1 = viewEndMs, t0 = t1 - w
-        const columns = Math.max(1, widthPx)
+        // Columns counted from time 0, as chartData's slices, so a pan keeps them
+        const colMs = w / Math.max(1, widthPx)
         const out = []
         for (const s of snapshot) {
             const sp = s.samples
@@ -186,7 +189,7 @@ Page {
             for (let i = 0; i + 1 < sp.length; i += 2) {
                 if (sp[i] < t0 || sp[i] > t1)
                     continue
-                const c = Math.min(columns - 1, Math.floor((sp[i] - t0) / w * columns))
+                const c = Math.floor(sp[i] / colMs)
                 if (c !== col) {
                     if (col >= 0)
                         flush()
@@ -722,6 +725,7 @@ Page {
                 shownH: parent.height - 8
                 emptyText: root.chartEmptyText()
                 moving: pan.active
+                holds: true
                 fetch: function(widthPx) {
                     return root.paused ? root.pausedSeries(widthPx)
                                        : Bridge.signalModel.chartData(root.chartWindowS * 1000, widthPx)
@@ -749,7 +753,10 @@ Page {
                 }
                 Connections {
                     target: Bridge
-                    function onConnectedChanged() { chart.requestPaint() }
+                    function onConnectedChanged() {
+                        chart.held = null
+                        chart.requestPaint()
+                    }
                 }
             }
             // A double-click or double-tap maximizes it, or gives the list
