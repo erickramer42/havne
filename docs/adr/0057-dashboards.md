@@ -1562,3 +1562,47 @@ custom, as before. A layout file carries the string as it does a name:
 `havne-cli`'s layout check takes any string for `color`, the app's load
 takes any string, and a build without this note draws the default for a
 "#rrggbb" it doesn't know and loses nothing else.
+
+## Note: a trace reads the model's history (2026-11-13)
+
+This note replaces section 1's "The sparkline samples only while its page
+is on screen, so a page left and returned to starts its trace again" and
+the as-built appendix's "It samples only while its page is the one shown"
+where they differ. The sparkline (`SparkGauge`) and the Number tile's
+trace (`DigitalGauge`, 8 s) keep no history of their own: each reads its
+signal's history from the model's ring (`SignalListModel::trace(id,
+windowMs, columns)`), which every row keeps whether or not a page shows it
+or Live plots it. Each coalesce window puts its lowest, highest and
+newest value in the ring (ADR-0005's appendix), and `trace` slices the
+window as Live's chart does (`chartData`): equal slices counted from time
+0, each slice's lowest and highest in time order and the newest sample,
+with one slice for each 3 px of the trace (about one point for each
+1.5 px). So a peak inside a window is drawn at its height, and a sample
+keeps its slice as the window moves: a spike stays in place as the trace
+scrolls. Sampling `value` every 100 ms and thinning from the newest sample
+lost both: on the demo's limiter, where lambda steps from 0.86 to 1.99
+and back every 150 ms, the cuts in the trace changed height and came and
+went between frames.
+
+A trace breaks only where the ring does: `trace` marks a stall longer than
+the stale time (`ECUIO_VALUE_STALE_US`) between two samples with a point
+whose value is NaN, and gives a value that isn't a number a point of its
+own, which also starts a new slice, so it hides no slice's extremes. The
+gauge ends a piece only at such a point, never on its slices' spacing (a
+120 s window on a narrow phone tile has slices 3 s wide), and draws a lone
+point as a dot.
+
+A trace reads every 100 ms while its page is the one shown and the app is
+active (`shown`), and nothing while it isn't; a tile too short for a trace
+(the Number tile's `brief`) reads nothing. Nothing in the gauge clears it:
+a swipe to another dashboard page, a visit to Settings or Live, and Reset
+peaks leave it as it was, and back on its page it holds what came
+meanwhile. A stalled signal's trace freezes in place, since its window
+ends at its own newest sample. A connect starts every trace again (the
+model's rows are made anew for the session's set), and a disconnect leaves
+the last session's traces on screen. Its x axis is time: the newest sample
+at the right edge, the window across. The ring holds 120 s of any signal
+(`HistoryCapacity` 3600: three points for each window, ten windows a
+second on the bridge's tick, which is a precise timer so that it never
+runs early), the longest window a sparkline takes. The Add tile's
+sparkline still draws a made-up trace and reads nothing.

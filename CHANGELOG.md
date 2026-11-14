@@ -80,6 +80,17 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Fixed
 
+- The Dashboard's sparkline and Number tile keep their trace when you go
+  to another dashboard page, Settings or Live and come back, and a short
+  spike (lambda through a fuel cut) stays at its height and in its place
+  as the trace scrolls instead of flickering.
+- Live's chart no longer shimmers as it scrolls: a signal that swings up
+  and down keeps the same shape from frame to frame instead of its edges
+  twitching, a trace no longer rescales at every update as its highest
+  or lowest value enters or leaves the window (its scale widens at once
+  and narrows only when the trace has shrunk well inside it), and the
+  plot no longer narrows and widens when a value gains or loses a digit
+  or a minus sign.
 - On Android, opening a file whose name holds parentheses (a second
   download, "name (1).json") was refused, and Load layout, Import a log,
   a column map, a signal file, an OBDb set or a plugin then read the file
