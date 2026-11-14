@@ -853,6 +853,51 @@ TEST(CliVinTest, AnIdentityLineCarriesItsItemsAndVin)
     EXPECT_EQ(none.substr(none.size() - 12), ",\"vin\":null}");
 }
 
+/* ADR-0027 section 3: the vehicle line comes once core flags the VIN in,
+ * the rest of the list still out, and once per new VIN */
+TEST(CliVinTest, TheVehicleLineComesOnceTheVinIsIn)
+{
+    ecuio_channel_identity_t id{};
+    id.rx_id = 0x7E8;
+    id.items = 2;
+    auto item = [&id](uint32_t i, uint8_t a, uint8_t b, uint8_t outcome,
+                      const char* text) {
+        ecuio_identity_item_t& it = id.list[i];
+        it.request[0] = a;
+        it.request[1] = b;
+        it.length = 2;
+        it.outcome = outcome;
+        std::snprintf(it.text, sizeof it.text, "%s", text);
+        it.text_length = static_cast<uint8_t>(std::strlen(it.text));
+    };
+    item(0, 0x09, 0x02, ECUIO_IDENTITY_ANSWERED, "1FAFAKE10M0000001");
+    item(1, 0x09, 0x04, ECUIO_IDENTITY_UNASKED, "");
+    char seen[ECUIO_VIN_TEXT_LEN] = "";
+    EXPECT_FALSE(cli::vehicle_due(id, seen)) << "core hasn't flagged it";
+    id.flags = ECUIO_IDENTITY_VIN;
+    EXPECT_TRUE(cli::vehicle_due(id, seen));
+    EXPECT_STREQ(seen, "1FAFAKE10M0000001");
+    EXPECT_FALSE(cli::vehicle_due(id, seen)) << "once per VIN";
+    id.flags |= ECUIO_IDENTITY_COMPLETE;
+    EXPECT_FALSE(cli::vehicle_due(id, seen)) << "nor again once complete";
+
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::vehicle_line(l, id, 2027);
+    const std::string line(l.data(), l.size());
+    EXPECT_EQ(line.substr(0, line.find(",\"source\":")),
+              "{\"type\":\"vehicle\",\"rx\":\"0x7E8\","
+              "\"vin\":{\"vin\":\"1FAFAKE10M0000001\",\"decoded\":true,"
+              "\"model_year\":2021,\"year_earlier\":false,\"make\":\"Ford\","
+              "\"wmi\":\"1FA\",\"check_digit\":\"0\",\"check_matches\":true");
+    EXPECT_EQ(line.substr(line.size() - 2), "}}");
+
+    std::snprintf(id.list[0].text, sizeof id.list[0].text, "%s",
+                  "1FAFAKE13Y0000001");
+    EXPECT_TRUE(cli::vehicle_due(id, seen)) << "another VIN is new";
+    EXPECT_STREQ(seen, "1FAFAKE13Y0000001");
+}
+
 /* ADR-0044: a code's title, null for one the list lacks (a chassis code,
  * a manufacturer's), the freeze frame's beside its code */
 TEST(CliDtcTest, ATitleOrNull)
@@ -2352,7 +2397,157 @@ TEST(CliPluginTest, AVariantLineCountsItsOwnSignals)
     EXPECT_EQ(text_of(l),
               "{\"type\":\"variant\",\"id\":\"base\",\"profile\":"
               "\"plugin.p.base\",\"signals\":1,\"base\":0,\"ecus\":[{\"rx\":"
-              "\"0x7E8\",\"tx\":\"0x7E0\"}]}\n");
+              "\"0x7E8\",\"tx\":\"0x7E0\"}],\"license\":null,"
+              "\"share_alike\":false}\n");
+}
+
+// A variant's license and whether it's share-alike come from its written
+// file's source, the data file's own before the manifest's; the
+// share_alike line names the variant, the license and what passing the
+// plugin on keeps
+TEST(CliPluginTest, AVariantLineNamesItsLicenseAndShareAlike)
+{
+    std::string packed = kPacked;
+    const std::string data = "{\"havne_signals\": 1, \"signals\"";
+    ASSERT_NE(packed.find(data), std::string::npos);
+    packed.replace(packed.find(data), data.size(),
+                   "{\"havne_signals\": 1, \"source\": {\"name\": \"OBDb\", "
+                   "\"license\": \"CC-BY-SA-4.0\"}, \"signals\"");
+    ecuio_plugin_t* p = nullptr;
+    ASSERT_EQ(
+        ecuio_plugin_load(packed.data(), packed.size(), nullptr, nullptr, &p),
+        ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_file_t* file = ecuio_plugin_variant_file(p, 0);
+    const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, 0);
+    std::vector<char> buf(cli::variant_line_bytes(set, file));
+    cli::Line l(buf.data(), buf.size());
+    cli::variant_line(l, "base", "plugin.p.base", file, set);
+    EXPECT_EQ(text_of(l),
+              "{\"type\":\"variant\",\"id\":\"base\",\"profile\":"
+              "\"plugin.p.base\",\"signals\":1,\"base\":0,\"ecus\":[{\"rx\":"
+              "\"0x7E8\",\"tx\":\"0x7E0\"}],\"license\":\"CC-BY-SA-4.0\","
+              "\"share_alike\":true}\n");
+    const ecuio_signal_source_t s = cli::source_of(file);
+    std::vector<char> sbuf(cli::share_alike_line_bytes(s.license));
+    cli::Line sl(sbuf.data(), sbuf.size());
+    cli::share_alike_line(sl, "base", s.license);
+    EXPECT_EQ(text_of(sl),
+              "{\"type\":\"share_alike\",\"variant\":\"base\",\"license\":"
+              "\"CC-BY-SA-4.0\",\"words\":\"variant 'base' holds data under "
+              "CC-BY-SA-4.0, a share-alike license: whoever passes the plugin "
+              "on keeps that license and the variant's source with it\"}\n");
+    ecuio_plugin_free(p);
+
+    /* A license at its bound fits the line it's sized for */
+    const std::string longest(ECUIO_SOURCE_TEXT_MAX, '"');
+    std::vector<char> big(cli::share_alike_line_bytes(longest.c_str()));
+    cli::Line bl(big.data(), big.size());
+    cli::share_alike_line(bl, "base", longest.c_str());
+    EXPECT_TRUE(bl.finish());
+    EXPECT_STREQ(cli::source_of(nullptr).license, "") << "none read, none";
+}
+
+// The written line: the action, the variant, the version, the lineage
+// (null with none), the file's bytes and core's notes (null with none)
+TEST(CliPluginTest, AWrittenLineSaysWhatTheCommandDid)
+{
+    char buf[2048];
+    cli::Line l(buf, sizeof buf);
+    cli::written_line(l, cli::Written::replaced, "base", "1.2.0",
+                      "0123456789abcdef0123456789abcdef", 4290,
+                      "the file's ecu 'tcm' is 'tcm_2' in the plugin");
+    EXPECT_EQ(text_of(l),
+              "{\"type\":\"written\",\"action\":\"replaced\",\"variant\":"
+              "\"base\",\"version\":\"1.2.0\",\"lineage\":"
+              "\"0123456789abcdef0123456789abcdef\",\"bytes\":4290,\"notes\":"
+              "\"the file's ecu 'tcm' is 'tcm_2' in the plugin\"}\n");
+    cli::Line n(buf, sizeof buf);
+    cli::written_line(n, cli::Written::dropped, "late", "1.0.0", "", 10, "");
+    EXPECT_EQ(text_of(n),
+              "{\"type\":\"written\",\"action\":\"dropped\",\"variant\":"
+              "\"late\",\"version\":\"1.0.0\",\"lineage\":null,\"bytes\":10,"
+              "\"notes\":null}\n");
+    EXPECT_STREQ(cli::written_word(cli::Written::wrapped), "wrapped");
+    EXPECT_STREQ(cli::written_word(cli::Written::added), "added");
+}
+
+// An OBDb plugin's variant is my<year> only for a year typed, base (core's
+// default, "") for none
+TEST(CliPluginTest, OnlyATypedYearNamesAVariant)
+{
+    EXPECT_EQ(cli::typed_year_variant(2019), "my2019");
+    EXPECT_EQ(cli::typed_year_variant(0), "");
+}
+
+// --years is two four-digit model years from 1980 to 2039, the first at
+// or before the second; --wmi codes of 3 or 6 of a VIN's letters and
+// digits, lower case taken as upper
+TEST(CliPluginTest, TheMatchOptionsTakeTheirFormsOnly)
+{
+    uint32_t y[2] = {7, 7};
+    EXPECT_TRUE(cli::parse_model_years("2015-2020", y));
+    EXPECT_EQ(y[0], 2015u);
+    EXPECT_EQ(y[1], 2020u);
+    EXPECT_TRUE(cli::parse_model_years("1980-2039", y));
+    EXPECT_TRUE(cli::parse_model_years("2019-2019", y));
+    for (const char* bad :
+         {"2020-2015", "1979-1990", "2015-2040", "2015", "2015-", "-2015",
+          "2015--2020", "15-20", "2015-202x", "2015 2020", "02015-2020", ""}) {
+        y[0] = y[1] = 7;
+        EXPECT_FALSE(cli::parse_model_years(bad, y)) << bad;
+        EXPECT_EQ(y[0], 7u) << "nothing written for " << bad;
+    }
+
+    std::string codes = "kept";
+    EXPECT_TRUE(cli::parse_wmi("zzz", &codes));
+    EXPECT_EQ(codes, "ZZZ");
+    EXPECT_TRUE(cli::parse_wmi("ZZZ,zz9abc,1HG", &codes));
+    EXPECT_EQ(codes, "ZZZ,ZZ9ABC,1HG");
+    for (const char* bad : {"", "ZZ", "ZZZZ", "ZZZZZZZ", "ZZI", "ZOZ", "QZZ",
+                            "ZZZ,", ",ZZZ", "ZZZ,,ZZZ", "ZZ-", "ZZZ ZZZ"}) {
+        codes = "kept";
+        EXPECT_FALSE(cli::parse_wmi(bad, &codes)) << bad;
+        EXPECT_EQ(codes, "kept") << "nothing written for " << bad;
+    }
+}
+
+// With no --variant, put names the variant core gave: the file's profile
+// less "user.", cut to the variant id's bound with no '-' at its end
+TEST(CliPluginTest, APutsUnnamedVariantIsTheOneCoreAdds)
+{
+    EXPECT_EQ(cli::variant_slug("user.gauged-extras"), "gauged-extras");
+    for (const char* name : {"Gauged extras", "A name longer than twenty-four",
+                             "Twenty three characters plus", "x"}) {
+        const std::string file =
+            std::string("{\"havne_signals\": 1, \"name\": \"") + name +
+            "\", \"source\": {\"name\": \"t\"}, \"ecus\": [{\"id\": \"pcm\", "
+            "\"rx\": \"7E8\"}], \"signals\": [{\"key\": \"oil\", \"name\": "
+            "\"Oil\", \"read\": {\"service\": \"22\", \"number\": \"F40E\"}, "
+            "\"field\": {\"byte\": 0}}]}";
+        ecuio_signal_file_t* f = nullptr;
+        ASSERT_EQ(ecuio_signal_file_load(file.data(), file.size(), &f),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        const std::string mine =
+            cli::variant_slug(ecuio_signal_file_profile(f));
+        ecuio_signal_file_free(f);
+        char* out = nullptr;
+        size_t length = 0;
+        ASSERT_EQ(ecuio_plugin_put_variant(kPacked, sizeof kPacked - 1, nullptr,
+                                           file.data(), file.size(), &out,
+                                           &length),
+                  ECUIO_OK)
+            << name << ": " << ecuio_last_error_detail();
+        ecuio_plugin_t* p = nullptr;
+        ASSERT_EQ(ecuio_plugin_load(out, length, nullptr, nullptr, &p),
+                  ECUIO_OK);
+        ecuio_plugin_text_free(out);
+        char id[ECUIO_PLUGIN_VARIANT_ID_MAX + 1] = {};
+        ASSERT_EQ(ecuio_plugin_variant(p, 2, id, sizeof id), ECUIO_OK);
+        ecuio_plugin_free(p);
+        EXPECT_EQ(mine, id) << name;
+    }
 }
 
 // A fixture line: its place, the value and tolerance, the result, what

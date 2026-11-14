@@ -97,6 +97,15 @@ typedef char abi_gauge_size_check[(sizeof(ecuio_signal_gauge_t) == 48) ? 1 : -1]
 typedef char abi_gauge_warn_high_check[(offsetof(ecuio_signal_gauge_t, warn_high) == 24) ? 1 : -1];
 typedef char abi_gauge_flags_check[(offsetof(ecuio_signal_gauge_t, flags) == 32) ? 1 : -1];
 typedef char abi_gauge_reserved_check[(offsetof(ecuio_signal_gauge_t, reserved) == 36) ? 1 : -1];
+typedef char
+    abi_source_size_check[(sizeof(ecuio_signal_source_t) == 2632) ? 1 : -1];
+typedef char abi_source_name_check[(offsetof(ecuio_signal_source_t, name) == 32)
+                                       ? 1
+                                       : -1];
+typedef char abi_source_license_check
+    [(offsetof(ecuio_signal_source_t, license) == 1592) ? 1 : -1];
+typedef char abi_source_modified_check
+    [(offsetof(ecuio_signal_source_t, modified) == 2112) ? 1 : -1];
 typedef char abi_validation_size_check[(sizeof(ecuio_validation_t) == 16) ? 1 : -1];
 typedef char abi_validation_index_check[(offsetof(ecuio_validation_t, index) == 4) ? 1 : -1];
 typedef char abi_validation_reserved_check[(offsetof(ecuio_validation_t, reserved) == 8) ? 1 : -1];
@@ -169,6 +178,24 @@ typedef char abi_plugin_info_count_check[(offsetof(ecuio_plugin_info_t, variant_
 typedef char abi_plugin_value_line_check[(offsetof(ecuio_plugin_value_t, line) == 12) ? 1 : -1];
 typedef char abi_plugin_value_signal_check[(offsetof(ecuio_plugin_value_t, signal) == 16) ? 1 : -1];
 typedef char abi_plugin_value_def_check[(offsetof(ecuio_plugin_value_t, def) == 64) ? 1 : -1];
+typedef char abi_wrap_options_years_check
+    [(offsetof(ecuio_plugin_wrap_options_t, years) == 8) ? 1 : -1];
+typedef char abi_wrap_options_reserved_check
+    [(offsetof(ecuio_plugin_wrap_options_t, reserved) == 16) ? 1 : -1];
+typedef char abi_wrap_options_id_check
+    [(offsetof(ecuio_plugin_wrap_options_t, id) == 40) ? 1 : -1];
+typedef char
+    abi_wrap_options_variant_check[(offsetof(ecuio_plugin_wrap_options_t,
+                                             variant) == 40 + sizeof(char*))
+                                       ? 1
+                                       : -1];
+typedef char
+    abi_wrap_options_wmi_check[(offsetof(ecuio_plugin_wrap_options_t, wmi) ==
+                                40 + 2 * sizeof(char*))
+                                   ? 1
+                                   : -1];
+typedef char abi_wrap_options_size_check
+    [(sizeof(ecuio_plugin_wrap_options_t) == 40 + 3 * sizeof(char*)) ? 1 : -1];
 typedef char abi_can_size_check[(sizeof(ecuio_can_interface_t) == 64) ? 1 : -1];
 typedef char abi_can_flags_check[(offsetof(ecuio_can_interface_t, flags) == 32) ? 1 : -1];
 typedef char abi_can_state_check[(offsetof(ecuio_can_interface_t, state) == 40) ? 1 : -1];
@@ -491,8 +518,9 @@ int main(void)
     }
     {
         /* A gauge read from C: a def with one, a def without, a NULL def,
-         * and the file's format and its signals' expressions;
-         * then a packed plugin's requires.core, its patch past a byte */
+         * and the file's format, its signals' expressions and its source;
+         * then a packed plugin's requires.core, its patch past a byte, and
+         * its variant's source, the data file's own */
         static const char kGauged[] =
             "{\"havne_signals\":1,\"name\":\"C gauges\","
             "\"source\":{\"name\":\"Havne's tests\"},"
@@ -513,7 +541,9 @@ int main(void)
             "\"source\":{\"name\":\"Havne's tests\"},\"tiers\":[\"data\"],"
             "\"ecus\":[{\"id\":\"pcm\",\"rx\":\"7E8\"}],"
             "\"variants\":[{\"id\":\"base\",\"files\":[\"a.json\"]}],"
-            "\"files\":{\"a.json\":{\"havne_signals\":1,\"signals\":["
+            "\"files\":{\"a.json\":{\"havne_signals\":1,"
+            "\"source\":{\"name\":\"OBDb\",\"license\":\"CC-BY-SA-4.0\"},"
+            "\"signals\":["
             "{\"key\":\"rpm\",\"name\":\"Engine Speed\",\"ecu\":\"pcm\","
             "\"read\":{\"service\":\"22\",\"number\":\"F40C\"},"
             "\"field\":{\"byte\":0,\"bits\":16},\"unit\":\"rpm\"}]}}}";
@@ -522,6 +552,12 @@ int main(void)
         const ecuio_signal_gauge_t* gauge = NULL;
         const ecuio_signal_def_t* volts = NULL;
         const ecuio_signal_def_t* load = NULL;
+        /* A caller's struct grown past core's: core fills its own size */
+        struct {
+            ecuio_signal_source_t source;
+            uint32_t after;
+        } grown;
+        ecuio_signal_source_t* const source = &grown.source;
         uint16_t major = 1;
         uint16_t minor = 1;
         uint16_t patch = 1;
@@ -549,6 +585,26 @@ int main(void)
             ecuio_signal_file_free(file);
             return 1;
         }
+        {
+            size_t length = 0;
+            const char* text = ecuio_signal_file_text(file, &length);
+            if (length != sizeof kGauged - 1 || strcmp(text, kGauged) != 0) {
+                ecuio_signal_file_free(file);
+                return 1;
+            }
+        }
+        memset(&grown, 0xAA, sizeof grown);
+        source->struct_size = (uint32_t)sizeof grown;
+        if (ecuio_signal_file_source(file, source) != ECUIO_OK ||
+            source->struct_size != sizeof(ecuio_signal_source_t) ||
+            grown.after != 0xAAAAAAAAu || source->flags != 0u ||
+            source->reserved[5] != 0u ||
+            strcmp(source->name, "Havne's tests") != 0 ||
+            source->license[0] != 0 ||
+            source->modified[ECUIO_SOURCE_TEXT_LEN - 1] != 0) {
+            ecuio_signal_file_free(file);
+            return 1;
+        }
         ecuio_signal_file_free(file);
         if (ecuio_plugin_load(kPacked, sizeof kPacked - 1, NULL, NULL,
                               &plugin) != ECUIO_OK) {
@@ -556,7 +612,73 @@ int main(void)
         }
         if (ecuio_plugin_requires_core(plugin, &major, &minor, &patch) !=
                 ECUIO_OK ||
-            major != 0u || minor != 5u || patch != 258u) {
+            major != 0u || minor != 5u || patch != 258u ||
+            ecuio_signal_file_source(ecuio_plugin_variant_file(plugin, 0),
+                                     source) != ECUIO_OK ||
+            strcmp(source->name, "OBDb") != 0 ||
+            strcmp(source->license, "CC-BY-SA-4.0") != 0 ||
+            source->flags != ECUIO_SOURCE_SHARE_ALIKE) {
+            ecuio_plugin_free(plugin);
+            return 1;
+        }
+        if (ecuio_plugin_free(plugin) != ECUIO_OK) {
+            return 1;
+        }
+    }
+    {
+        /* A signal file wrapped, a variant put in and dropped again,
+         * from C: each text freed, the lineage read back */
+        static const char kWrapped[] =
+            "{\"havne_signals\":1,\"name\":\"C wrap\","
+            "\"source\":{\"name\":\"Havne's tests\"},"
+            "\"ecus\":[{\"id\":\"pcm\",\"rx\":\"7E8\"}],\"signals\":["
+            "{\"key\":\"rpm\",\"name\":\"Engine Speed\",\"ecu\":\"pcm\","
+            "\"read\":{\"service\":\"22\",\"number\":\"F40C\"},"
+            "\"field\":{\"byte\":0,\"bits\":16},\"unit\":\"rpm\"}]}";
+        ecuio_plugin_wrap_options_t options;
+        ecuio_plugin_t* plugin = NULL;
+        ecuio_plugin_info_t made;
+        char lineage[ECUIO_PLUGIN_LINEAGE_LEN + 1];
+        char* one = NULL;
+        char* two = NULL;
+        char* back = NULL;
+        size_t one_length = 0;
+        size_t two_length = 0;
+        size_t back_length = 0;
+        memset(&options, 0, sizeof options);
+        options.struct_size = (uint32_t)sizeof options;
+        options.id = "c-wrap";
+        options.wmi = "ZZZ";
+        options.years[0] = 2015u;
+        options.years[1] = 2030u;
+        if (ecuio_plugin_wrap(kWrapped, sizeof kWrapped - 1, &options, &one,
+                              &one_length) != ECUIO_OK ||
+            one == NULL || strlen(one) != one_length) {
+            return 1;
+        }
+        if (ecuio_plugin_put_variant(one, one_length, "second", kWrapped,
+                                     sizeof kWrapped - 1, &two,
+                                     &two_length) != ECUIO_OK ||
+            ecuio_plugin_drop_variant(two, two_length, "base", &back,
+                                      &back_length) != ECUIO_OK ||
+            ecuio_plugin_load(back, back_length, NULL, NULL, &plugin) !=
+                ECUIO_OK) {
+            ecuio_plugin_text_free(one);
+            ecuio_plugin_text_free(two);
+            ecuio_plugin_text_free(back);
+            return 1;
+        }
+        ecuio_plugin_text_free(one);
+        ecuio_plugin_text_free(two);
+        ecuio_plugin_text_free(back);
+        ecuio_plugin_text_free(NULL);
+        memset(&made, 0, sizeof made);
+        made.struct_size = (uint32_t)sizeof made;
+        if (ecuio_plugin_info(plugin, &made) != ECUIO_OK ||
+            strcmp(made.id, "c-wrap") != 0 ||
+            strcmp(made.version, "1.2.0") != 0 || made.variant_count != 1u ||
+            ecuio_plugin_lineage(plugin, lineage, sizeof lineage) != ECUIO_OK ||
+            strlen(lineage) != ECUIO_PLUGIN_LINEAGE_LEN) {
             ecuio_plugin_free(plugin);
             return 1;
         }
@@ -718,7 +840,12 @@ int main(void)
         ECUIO_RECORDING_STRETCH_CUT_START != 0x8u ||
         ECUIO_RECORDING_STRETCH_CUT_END != 0x10u ||
         ECUIO_VALIDATE_ERR_COMPUTED_INPUT != -22 ||
+        ECUIO_VALIDATE_ERR_COMPUTED_CHAIN != -23 ||
+        ECUIO_VALIDATE_ERR_OUT_OF_MEMORY != -24 ||
         ECUIO_VALIDATE_ERR_DUPLICATE_NAME != -25 ||
+        ECUIO_FOCUS_DEFAULT_PICK != 0x1u ||
+        ECUIO_QUEUE_MAX_CONDITIONS != 65536u ||
+        ECUIO_CONDITION_UNAVAILABLE != 0x4u ||
         ECUIO_OBD2_SIG_BOOST_ID != 7011 ||
         ECUIO_STRETCH_DEFAULT_CRUISE_FLOOR != 56.32704 ||
         sizeof(ecuio_recording_signals_t) != 128 ||
@@ -766,6 +893,13 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recorder_signal_file(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_plugin_variant_file(NULL, 0) != NULL ||
+        ecuio_plugin_lineage(NULL, NULL, 0) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_plugin_wrap(NULL, 0, NULL, NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_plugin_put_variant(NULL, 0, NULL, NULL, 0, NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_plugin_drop_variant(NULL, 0, NULL, NULL, NULL) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_plugin_requires_core(NULL, &core_major, &core_minor,
                                    &core_patch) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_get_signal(NULL, 0, &reading_signal) !=

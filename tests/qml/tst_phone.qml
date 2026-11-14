@@ -2034,6 +2034,19 @@ TestCase {
     // A log from the header (ADR-0056 section 1): Start log while
     // connected, then Stop log and the readout in Mark's and Disconnect's
     // place, fitting a phone; Stop log opens the folder in the viewer
+    // A log records the ticked rows, text rows among them: a session whose
+    // one ticked row is a text offers Start log
+    function test_startLogTakesATickedTextRowAlone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const start = find(main.contentItem, "startLogButton")
+        compare(Bridge.connectSession("mock://demo?profile=uds-generic&did=F190:text"), "")
+        tryVerify(() => start.visible, 5000, "Start log once connected")
+        verify(!start.enabled, "nothing ticked: a text row's default is unticked")
+        Bridge.signalModel.toggleSubscribed(0)
+        tryVerify(() => start.enabled, 2000, "the ticked text row is a log's")
+    }
+
     function test_theHeadersLogStartsStopsAndOpensItsFolder() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
@@ -3303,6 +3316,24 @@ TestCase {
             signals: [], own: "", plugin: "", baseline: folder }] }
         compare(find(main.contentItem, "diagnosticsPage").baselineFolder, folder)
         compare(find(main.contentItem, "recordingsPage").baselineFolder, folder)
+    }
+
+    // Main hands the bridge the Dashboard's cells (ADR-0056's default
+    // pick): one list of refs for each cell, its counterparts in the
+    // built-in sets among them, a blank cell's none
+    function test_theDashboardsGaugesJoinTheDefaultPick() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const dash = find(main.contentItem, "dashboardPage")
+        let cells = 0
+        for (const p of dash.pages)
+            cells += p.cells.length
+        verify(cells > 0, "the built-in layout has cells")
+        compare(Bridge.pickGauges.length, cells)
+        compare(dash.pickRefs.length, cells)
+        const rpm = Bridge.gaugeSignals.rpm
+        verify(Bridge.pickGauges.some(refs => rpm.every(r => refs.indexOf(r) >= 0)),
+               "the tach's cell names the RPM of both built-in sets")
     }
 
     // The relay's line beside its button (ADR-0047): the traffic wraps in

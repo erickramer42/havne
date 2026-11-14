@@ -11,6 +11,7 @@
 # sim or recording left unclosed is released when it's collected (a stream
 # a script keeps keeps its session).
 
+import contextlib
 import gc
 import json
 import logging
@@ -232,6 +233,33 @@ def test_the_info_says_the_mock():
         assert s.diagnostics(0).flags & c.ECUIO_DIAG_COMPLETE
 
 
+def test_the_vin_waits_for_core_to_have_it_in(monkeypatch):
+    # The report stood in for (the mock identifies nothing): F190's VIN
+    # beside a 09 02 still out is core's pick but not in yet
+    def report(flags):
+        ident = c.ecuio_channel_identity_t()
+        ident.flags = flags
+        ident.items = 2
+        for i, (request, outcome, text) in enumerate(
+                ((b"\x09\x02", c.ECUIO_IDENTITY_UNASKED, b""),
+                 (b"\x22\xF1\x90", c.ECUIO_IDENTITY_ANSWERED, b"FAKEJ2534VIN00001"))):
+            item = ident.list[i]
+            for k, byte in enumerate(request):
+                item.request[k] = byte
+            item.length = len(request)
+            item.outcome = outcome
+            item.text = text
+            item.text_length = len(text)
+        return ident
+    with havne.Session("mock://py") as s:
+        assert s.vin(0) == ""
+        monkeypatch.setattr(s, "identity", lambda channel=0: report(0))
+        assert s.vin(0) == ""
+        monkeypatch.setattr(s, "identity",
+                            lambda channel=0: report(c.ECUIO_IDENTITY_VIN))
+        assert s.vin(0) == "FAKEJ2534VIN00001"
+
+
 def test_a_clear_needs_the_caller_s_word():
     with havne.Session("mock://py") as s:
         with pytest.raises(ValueError):
@@ -359,6 +387,76 @@ def test_a_default_pick_is_named_pick_in_a_recording(tmp_path):
     assert "\nfocus  " not in events
 
 
+@contextlib.contextmanager
+def elm327_emulator():
+    """The address of an ELM327 emulator (havne-cli sim --elm327 tcp:0),
+    a session that asks its signals on every platform"""
+    cli = os.environ.get("HAVNE_CLI", "")
+    if not cli:
+        pytest.skip("HAVNE_CLI names no havne-cli")
+    emu = subprocess.Popen([cli, "sim", "mock://emu?values=canned", "--elm327", "tcp:0",
+                            "--seconds", "120"], stdout=subprocess.PIPE, text=True)
+    try:
+        port = None
+        for line in emu.stdout:
+            j = json.loads(line)
+            assert j["type"] != "error", j
+            if j["type"] == "elm327":
+                port = j["listen"].rsplit(":", 1)[1]
+                break
+        assert port, "the emulator said where it listens"
+        yield f"elm327://127.0.0.1:{port}"
+    finally:
+        emu.terminate()
+        emu.communicate(timeout=60)
+
+
+def test_the_ranked_signals_are_the_default_pick_havne_cli_makes():
+    """ranked_signals(): cli/default_pick.h's rule, the app's and --pick
+    ranked's: the set's ranked signals and those added, in the set's
+    order, each once; a set that ranks none gives none, whatever is added,
+    and so does a session that asks nothing"""
+    with elm327_emulator() as address:
+        with havne.Session(address + "?profile=obd2") as s:
+            ranked = s.ranked_signals()
+            assert len(ranked) == 14, "obd2's ranked signals"
+            picked = [s.signals[i][0] for i in s.ranked_signals(["Fuel Level"])]
+            assert picked[:9] == ["Engine Load", "Coolant Temp", "RPM", "Vehicle Speed",
+                                  "Intake Air Temp", "Fuel Level", "Battery Voltage",
+                                  "MAF", "Engine Oil Temp"]
+            assert len(picked) == len(ranked) + 1
+            assert s.ranked_signals(ranked) == ranked, "an added id already ranked is there once"
+            with pytest.raises(KeyError):
+                s.ranked_signals(["no such signal"])
+            s.set_focus(ranked, default_pick=True)
+    with havne.Session("mock://py?profile=obd2") as s:
+        assert s.ranked_signals() == [], "the mock asks nothing, so it takes no pick"
+        assert s.ranked_signals(["Fuel Level"]) == []
+    with havne.Session("mock://py") as s:
+        sid = next(iter(s.signals))
+        assert s.ranked_signals() == []
+        assert s.ranked_signals([sid]) == [], "an unranked set's pick is the whole set"
+
+
+def test_a_ranked_text_signal_is_not_counted_in_the_pick():
+    def file_of(temp_plot):
+        temp = {"key": "temp", "name": "Temp", "read": {"service": "22", "number": "1E1C"},
+                "field": {"byte": 0, "bits": 8}}
+        if temp_plot:
+            temp["plot"] = temp_plot
+        return havne.SignalFile(json.dumps({
+            "havne_signals": 1, "name": "Ranked text", "source": {"name": "a test"},
+            "ecus": [{"id": "pcm", "rx": "7E8"}],
+            "signals": [{"key": "part", "name": "Part", "kind": "text", "plot": 1,
+                         "read": {"service": "22", "number": "F187"},
+                         "field": {"byte": 0}}, temp]}))
+    with elm327_emulator() as address:
+        with havne.Session(address, signals=file_of(0)) as s:
+            assert s.ranked_signals() == [], "a text rank alone ranks nothing"
+        with havne.Session(address, signals=file_of(2)) as s:
+            assert [s.signals[i][0] for i in s.ranked_signals()] == ["Temp"]
+
+
 def test_a_focus_id_outside_a_uint16_or_not_an_int_is_a_value_error():
     with havne.Session("mock://py") as s:
         sid = next(iter(s.signals))
@@ -381,21 +479,8 @@ def test_the_unasked_signals_follow_the_focus_on_a_session_that_asks():
     """Through the ELM327 emulator (havne-cli sim --elm327 tcp:0): a focus
     on engine speed leaves vehicle speed and Boost (whose MAP is parked)
     unasked, never engine speed itself; its end leaves none"""
-    cli = os.environ.get("HAVNE_CLI", "")
-    if not cli:
-        pytest.skip("HAVNE_CLI names no havne-cli")
-    emu = subprocess.Popen([cli, "sim", "mock://emu?values=canned", "--elm327", "tcp:0",
-                            "--seconds", "120"], stdout=subprocess.PIPE, text=True)
-    try:
-        port = None
-        for line in emu.stdout:
-            j = json.loads(line)
-            assert j["type"] != "error", j
-            if j["type"] == "elm327":
-                port = j["listen"].rsplit(":", 1)[1]
-                break
-        assert port, "the emulator said where it listens"
-        with havne.Session(f"elm327://127.0.0.1:{port}?profile=obd2") as s:
+    with elm327_emulator() as address:
+        with havne.Session(address + "?profile=obd2") as s:
             ids = {name: sid for sid, (name, unit) in s.signals.items()}
             s.set_focus(["RPM"])
             s.start()
@@ -416,9 +501,6 @@ def test_the_unasked_signals_follow_the_focus_on_a_session_that_asks():
             assert unasked == sorted(unasked, key=list(s.signals).index), "the set's order"
             s.set_focus([])
             assert wait_for(lambda got: got == []) == []
-    finally:
-        emu.terminate()
-        emu.communicate(timeout=60)
 
 
 def test_a_session_asks_no_extended_session_unless_the_uri_does():

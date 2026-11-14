@@ -3,11 +3,13 @@
 // Testing: UNIT: CliLogTest (test_cli); HARNESS: CliLogRunTest
 //          (tests/cli_log.py), CliUsageTest.Log*
 //
-// `log <uri> <folder> [--signal <name>]... [--min-sweep <ms>]
-// [--label <name>] [--seconds S] [--signals <file> | --plugin <pkg>]`:
-// its arguments, the picked names
+// `log <uri> <folder> [--signal <name>]... [--pick ranked]
+// [--min-sweep <ms>] [--label <name>] [--seconds S]
+// [--signals <file> | --plugin <pkg>]`: its arguments, the picked names
 // resolved against the session's set (in the order given, which is the
-// focus's and the folder's `focus` line's), the `focus` line, a `log`
+// focus's and the folder's `focus` line's; under --pick ranked the
+// default pick's, in the set's order, cli/default_pick.h), the `focus`
+// line, a `log`
 // line each period of session time with the recording's size so far, and
 // the `end` line. No frame or values line: the folder is the output, as
 // a recording the app's Start log makes.
@@ -42,7 +44,20 @@ struct LogArgs {
     std::vector<const char*> names; /* --signal, in order */
     uint32_t min_sweep_ms = 0;      /* --min-sweep; 0 none */
     const char* conditions = nullptr; /* --conditions' file */
+    bool pick_ranked = false;       /* --pick ranked */
 };
+
+// --pick's one word: "ranked", the default pick the CLI can know (the
+// set's ranked signals; stream and log alike)
+inline bool parse_pick(const char* word)
+{
+    return word != nullptr && std::strcmp(word, "ranked") == 0;
+}
+
+inline const char* pick_why()
+{
+    return "--pick takes 'ranked': the profile's ranked signals";
+}
 
 // The longest --seconds any command takes: a year and a day, which no run
 // reaches and which keeps seconds * 1e6 far inside 64 bits
@@ -110,6 +125,12 @@ inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
                 return false;
             }
             a.conditions = argv[++i];
+        } else if (s == "--pick") {
+            if (!has_value || !parse_pick(argv[++i])) {
+                *why = pick_why();
+                return false;
+            }
+            a.pick_ranked = true;
         } else if (s.rfind("--", 0) == 0) {
             *why = "unexpected '" + s + "'";
             return false;
@@ -130,8 +151,9 @@ inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
         *why = "log takes a folder";
         return false;
     }
-    if (a.min_sweep_ms != 0 && a.names.empty()) {
-        *why = "--min-sweep goes with --signal: it paces the picked signals";
+    if (a.min_sweep_ms != 0 && a.names.empty() && !a.pick_ranked) {
+        *why = "--min-sweep goes with --signal or --pick ranked: it paces "
+               "the picked signals";
         return false;
     }
     if (a.signals != nullptr && a.plugin != nullptr) {
@@ -183,10 +205,11 @@ inline size_t focus_line_bytes(size_t picks)
 }
 
 // {"type":"focus","signals":[{id, name}...]}: the picks, in order; empty
-// for none (the whole set is read); min_sweep_ms when one is set
+// for none (the whole set is read); "pick":"ranked" under --pick ranked;
+// min_sweep_ms when one is set
 inline void focus_line(Line& l, const ecuio_signal_set_t* set,
                        const std::vector<uint16_t>& ids,
-                       uint32_t min_sweep_ms = 0)
+                       uint32_t min_sweep_ms = 0, bool pick_ranked = false)
 {
     l.raw("{\"type\":\"focus\"");
     l.key("signals");
@@ -213,6 +236,10 @@ inline void focus_line(Line& l, const ecuio_signal_set_t* set,
         }
     }
     l.ch(']');
+    if (pick_ranked) {
+        l.key("pick");
+        l.raw("\"ranked\"");
+    }
     if (min_sweep_ms != 0) {
         l.key("min_sweep_ms");
         l.u64(min_sweep_ms);

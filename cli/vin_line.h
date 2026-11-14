@@ -2,8 +2,9 @@
 // Testing: UNIT: CliVinTest (test_cli)
 //
 // What the app's activity log says of a car's identity, as JSON: the
-// `vin` command's line for a typed VIN, and `stream`'s identity line,
-// one per ECU once each item has an outcome, with its VIN's decode.
+// `vin` command's line for a typed VIN, `stream`'s vehicle line as soon
+// as the first ECU's VIN is in, and its identity line, one per ECU once
+// each item has an outcome, with its VIN's decode.
 // The decode is core's (vin.h): the model year and check digit by 49
 // CFR 565.15, the make by NHTSA vPIC's manufacturer codes.
 
@@ -124,6 +125,40 @@ inline void identity_line(Line& l, const ecuio_channel_identity_t& id,
     } else {
         l.raw("null");
     }
+    l.ch('}');
+}
+
+// Whether the vehicle's VIN (the first channel's, ADR-0027 section 3) is
+// in and isn't the one written last (seen, "" for none), which it then
+// becomes: once per new VIN a session, ahead of the identity line
+inline bool vehicle_due(const ecuio_channel_identity_t& id,
+                        char (&seen)[ECUIO_VIN_TEXT_LEN])
+{
+    char vin[ECUIO_VIN_TEXT_LEN];
+    if ((id.flags & ECUIO_IDENTITY_VIN) == 0 ||
+        ecuio_identity_vin(&id, vin, sizeof vin) != ECUIO_OK ||
+        vin[0] == '\0' || std::strcmp(vin, seen) == 0) {
+        return false;
+    }
+    std::memcpy(seen, vin, sizeof vin);
+    return true;
+}
+
+// The vehicle's VIN once core has it in, whatever identification items
+// are still out: the ECU's rx and the VIN with its decode, as the
+// identity line's "vin"
+inline void vehicle_line(Line& l, const ecuio_channel_identity_t& id,
+                         uint32_t latest_model_year)
+{
+    char vin[ECUIO_VIN_TEXT_LEN] = "";
+    (void)ecuio_identity_vin(&id, vin, sizeof vin);
+    l.raw("{\"type\":\"vehicle\"");
+    l.key("rx");
+    l.hex_id(id.rx_id);
+    l.key("vin");
+    l.ch('{');
+    vin_fields(l, vin, latest_model_year);
+    l.ch('}');
     l.ch('}');
 }
 

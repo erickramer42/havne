@@ -92,7 +92,7 @@ app_enable_warnings(bench_recording)
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp
     test_computed_grammar.cpp
-    test_plugin.cpp
+    test_plugin.cpp test_plugin_wrap.cpp
     test_condition_file.cpp test_condition_eval.cpp)
 
 # test_signal_tables.cpp and test_computed.cpp check computed.h, the
@@ -503,6 +503,13 @@ if(TARGET havne-cli)
                         session $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
             set_tests_properties(CliSessionRunTest.TheStreamNamesEachModulesSession
                 PROPERTIES TIMEOUT 60)
+            # The vehicle line comes once the VIN is in, the rest of the
+            # identification still out (ADR-0027 section 3)
+            add_test(NAME CliVinRunTest.TheStreamNamesTheVehicleWhileItsIdentificationIsOut
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
+                        vehicle $<TARGET_FILE:havne-cli> $<TARGET_FILE:fake_j2534>)
+            set_tests_properties(CliVinRunTest.TheStreamNamesTheVehicleWhileItsIdentificationIsOut
+                PROPERTIES TIMEOUT 60)
         elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             add_test(NAME CliRefusedRunTest.ADidTheSimulatedEcuRefusesIsNamed
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_refused.py
@@ -622,6 +629,13 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} pace
                 $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliLogRunTest.AMinimumTimeBetweenSweepsLimitsTheRows
+            PROPERTIES TIMEOUT 120)
+        # --pick ranked (ADR-0056's default pick): log and stream ask the
+        # ranked signals and a recording names them on its pick line
+        add_test(NAME CliLogRunTest.PickRankedAsksTheRankedSignals
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} pick
+                $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliLogRunTest.PickRankedAsksTheRankedSignals
             PROPERTIES TIMEOUT 120)
         add_test(NAME CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} fails $<TARGET_FILE:havne-cli>)
@@ -894,6 +908,34 @@ if(TARGET havne-cli)
             --exit 3
             -- $<TARGET_FILE:havne-cli> signals import obdb ${_cli_signals}/extras.json
                --out never-written.json)
+        # A packed plugin made and changed (ADR-0064 Q9): plugins wrap, put
+        # and drop and signals import obdb --plugin, each command's lines
+        # and package against committed ones; each refusal's words, with
+        # nothing left; each variant's license in plugins check, an OBDb
+        # variant's share-alike line among them; on Linux's vcan0 a
+        # wrapped file decodes as the file alone (skipped without vcan0
+        # unless ECUIO_VCAN_REQUIRED, and serial, as test_vcan is)
+        set(_cli_make ${CMAKE_CURRENT_SOURCE_DIR}/cli_plugin_make.py)
+        set(_cli_made ${CMAKE_CURRENT_SOURCE_DIR}/golden/plugins)
+        add_test(NAME CliPluginMakeTest.EachCommandsLinesAndPackageAreCommitted
+            COMMAND ${Python3_EXECUTABLE} ${_cli_make} golden $<TARGET_FILE:havne-cli>
+                    ${_cli_signals} ${_obdb_set} ${CMAKE_CURRENT_SOURCE_DIR}/golden)
+        add_test(NAME CliPluginMakeTest.ARefusalSaysWhyAndLeavesNothing
+            COMMAND ${Python3_EXECUTABLE} ${_cli_make} refused $<TARGET_FILE:havne-cli>
+                    ${_cli_signals})
+        set_tests_properties(CliPluginMakeTest.EachCommandsLinesAndPackageAreCommitted
+            CliPluginMakeTest.ARefusalSaysWhyAndLeavesNothing PROPERTIES TIMEOUT 60)
+        if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+            add_test(NAME CliPluginMakeTest.AWrappedFileDecodesAsTheFileOnVcan
+                COMMAND ${Python3_EXECUTABLE} ${_cli_make} vcan $<TARGET_FILE:havne-cli>
+                        ${_cli_signals})
+            set_tests_properties(CliPluginMakeTest.AWrappedFileDecodesAsTheFileOnVcan
+                PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+        endif()
+        app_cli_golden(PluginsCheckNamesEachVariantsLicense plugins-check-licenses.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_made}/plugins-put-renamed.json)
+        app_cli_golden(PluginsCheckSaysAnObdbVariantIsShareAlike plugins-check-obdb.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_made}/obdb-import-plugin.json)
         # A column map with a typo refused in core's words, naming the key
         # and never a path, before any folder is made
         set(_cli_csv ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import/csv)
@@ -1118,6 +1160,12 @@ if(TARGET havne-cli)
     app_cli_usage(LogMinSweepWithoutASignalIsUsage "log|mock://x|out|--min-sweep|250")
     app_cli_usage(LogMinSweepPastItsMostIsUsage "log|mock://x|out|--signal|RPM|--min-sweep|60001")
     app_cli_usage(LogMinSweepOfZeroIsUsage "log|mock://x|out|--signal|RPM|--min-sweep|0")
+    app_cli_usage_says(LogPickOtherThanRankedIsUsage "log|mock://x|out|--pick|all"
+        "--pick takes 'ranked'")
+    app_cli_usage_says(StreamPickOtherThanRankedIsUsage "stream|mock://x|--pick|all"
+        "--pick takes 'ranked'")
+    app_cli_usage_says(StreamPickWithoutAWordIsUsage "stream|mock://x|--pick"
+        "--pick takes 'ranked'")
     app_cli_usage(LogWithoutAFolderIsUsage "log|mock://x")
     app_cli_usage(LogAThirdWordIsUsage "log|mock://x|a|b")
     app_cli_usage(LogSignalWithoutANameIsUsage "log|mock://x|f|--signal")
@@ -1196,6 +1244,18 @@ if(TARGET havne-cli)
         "signals|import|obdb|a.json|--out|b.json|--year|1979")
     app_cli_usage(SignalsImportAnUnknownOptionIsUsage
         "signals|import|obdb|a.json|--out|b.json|--fast")
+    app_cli_usage(SignalsImportAWmiWithoutAPluginIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--wmi|ZZZ")
+    app_cli_usage(SignalsImportYearsWithoutAPluginIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--wmi|ZZZ|--years|2015-2020")
+    app_cli_usage(SignalsImportYearsWithoutAWmiIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--years|2015-2020")
+    app_cli_usage(SignalsImportAWmiThatIsntOneIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi|ZZI")
+    app_cli_usage(SignalsImportYearsBackwardsIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi|ZZZ|--years|2020-2015")
+    app_cli_usage(SignalsImportAWmiWithoutCodesIsUsage
+        "signals|import|obdb|a.json|--out|b.json|--plugin|--wmi")
     app_cli_usage(SimSignalsWithoutAFileIsUsage "sim|mock://sim|--on|vcan0|--signals")
     set(_usage_example ${CMAKE_SOURCE_DIR}/plugins/example-sim)
     app_cli_usage(PluginsWithoutAWordIsUsage "plugins")
@@ -1211,6 +1271,23 @@ if(TARGET havne-cli)
         "plugins|match|--x|--vin|ZZZFAKE11K0000001")
     app_cli_usage(PluginsMatchWithoutAVinIsUsage "plugins|match|x")
     app_cli_usage(PluginsMatchNotAVinIsUsage "plugins|match|x|--vin|FAKEJ2534VIN00001")
+    app_cli_usage(PluginsWrapWithoutAnOutIsUsage "plugins|wrap|a.json")
+    app_cli_usage(PluginsWrapAnOutWithoutAFileIsUsage "plugins|wrap|a.json|--out")
+    app_cli_usage(PluginsWrapAFlagForTheFileIsUsage "plugins|wrap|--out|b.json")
+    app_cli_usage(PluginsWrapAnUnknownOptionIsUsage
+        "plugins|wrap|a.json|--out|b.json|--fast")
+    app_cli_usage(PluginsWrapTwoOutsIsUsage
+        "plugins|wrap|a.json|--out|b.json|--out|c.json")
+    app_cli_usage(PluginsPutWithoutItsFileIsUsage "plugins|put|a.json|--out|b.json")
+    app_cli_usage(PluginsPutWithoutAnOutIsUsage
+        "plugins|put|a.json|f.json|--variant|v")
+    app_cli_usage(PluginsPutAnIdIsUsage
+        "plugins|put|a.json|f.json|--id|x|--out|b.json")
+    app_cli_usage(PluginsPutTwoVariantsIsUsage
+        "plugins|put|a.json|f.json|--variant|v|--variant|w|--out|b.json")
+    app_cli_usage(PluginsDropWithoutAVariantIsUsage "plugins|drop|a.json|--out|b.json")
+    app_cli_usage(PluginsDropAFileIsUsage
+        "plugins|drop|a.json|f.json|--variant|v|--out|b.json")
     app_cli_usage(PluginWithoutAPackageIsUsage "stream|mock://x|--plugin")
     app_cli_usage(PluginWithoutItsVariantIsUsage
         "stream|mock://x|--plugin|${_usage_example}")

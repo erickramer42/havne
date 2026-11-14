@@ -1,5 +1,6 @@
 // File/layer: core/include/ecuio/plugin.h | C ABI, public interface
-// Testing: UNIT: PluginTest (test_signals); FUZZ: fuzz_plugin_manifest
+// Testing: UNIT: PluginTest, PluginWrapTest (test_signals); FUZZ:
+//          fuzz_plugin_manifest, fuzz_plugin_wrap
 
 #ifndef ECUIO_PLUGIN_H
 #define ECUIO_PLUGIN_H
@@ -44,6 +45,7 @@ extern "C" {
 #define ECUIO_PLUGIN_PATH_MAX     127u /* bytes of a relative path */
 #define ECUIO_PLUGIN_ID_MAX       31u
 #define ECUIO_PLUGIN_VARIANT_ID_MAX 24u /* so the profile name fits */
+#define ECUIO_PLUGIN_LINEAGE_LEN    32u /* a manifest's "lineage", hex digits */
 
 typedef struct ecuio_plugin ecuio_plugin_t; /* opaque */
 
@@ -93,6 +95,17 @@ ecuio_status_t ecuio_plugin_info(const ecuio_plugin_t* plugin,
 ecuio_status_t ecuio_plugin_requires_core(const ecuio_plugin_t* plugin,
                                           uint16_t* major, uint16_t* minor,
                                           uint16_t* patch);
+
+/* The manifest's "lineage" into a buffer of cap bytes, "" when it has
+ * none: ECUIO_PLUGIN_LINEAGE_LEN of 0-9 and a-f, the start of the
+ * SHA-256 of the signal file the plugin was first made from
+ * (ecuio_plugin_wrap). Two packages with one id and one lineage are
+ * versions of one plugin; it names no person, device or vehicle.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL plugin or buffer;
+ * ECUIO_ERR_INVALID_ARGUMENT for a buffer too small for the text and
+ * its NUL. */
+ecuio_status_t ecuio_plugin_lineage(const ecuio_plugin_t* plugin, char* lineage,
+                                    size_t cap);
 
 /* Variant index's id, or fixture index's path, into a buffer of cap
  * bytes; ECUIO_ERR_INVALID_ARGUMENT for an index past the count or a
@@ -187,6 +200,138 @@ ecuio_status_t ecuio_plugin_match(const ecuio_plugin_t* plugin,
  * buffer too small. */
 ecuio_status_t ecuio_plugin_register(ecuio_plugin_t* plugin, uint32_t index,
                                      char* name, size_t cap);
+
+/*
+ * Making and changing a packed plugin (ADR-0064): a signal file wrapped
+ * into a plugin of one variant, and a packed plugin's text with a
+ * variant put in or dropped. Each call reads bytes and gives a new
+ * text; none changes its input, registers a profile or keeps anything.
+ *
+ * What the three share:
+ * - *out is the packed plugin's text, NUL-terminated, the caller's to
+ *   release with ecuio_plugin_text_free; *out_length (NULL skips it) is
+ *   its length without the NUL. On any failure *out is NULL and
+ *   *out_length 0.
+ * - The text is one ecuio_plugin_load has taken (read NULL) before the
+ *   call returns, so it is never a plugin this core refuses.
+ * - The same input gives the same bytes on every run and platform:
+ *   members in a fixed order, two spaces a level, "\n" line ends, no
+ *   time and nothing random. An input's own line ends and spacing leave
+ *   no trace, since the text is written from what was read.
+ * - A refusal is ECUIO_ERR_INVALID_ARGUMENT with the words in
+ *   ecuio_last_error_detail(): for an input a loader refuses, that
+ *   loader's "line L, column C: why" in the input's own lines (a put's
+ *   packed plugin after "the plugin, "); for an option or a rule of
+ *   the call, why alone; for a text ecuio_plugin_load refuses, its why
+ *   without the place, since the caller never saw that text.
+ * - ECUIO_ERR_NULL_ARGUMENT for a NULL out, or NULL bytes with a
+ *   length; ECUIO_ERR_OUT_OF_MEMORY. The inputs' bounds are the
+ *   loaders': ECUIO_SIGNAL_FILE_MAX_BYTES a signal file,
+ *   ECUIO_PLUGIN_PACKAGE_MAX a packed plugin.
+ */
+
+/* The pointers go last, so the numbers' offsets are the same on every
+ * width. */
+typedef struct ecuio_plugin_wrap_options {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t flags;       /* none yet; zero */
+    uint32_t years[2];    /* the match's first and last model year,
+                             1980 to 2039; 0 0 for none, and only with
+                             wmi */
+    uint32_t reserved[6]; /* zero; ABI growth space */
+    const char* id;       /* the plugin's id; NULL: from the file's name */
+    const char* variant;  /* the variant's id; NULL: "base" */
+    const char* wmi;      /* the match's manufacturer codes, separated by
+                             commas ("AAA,BBB"); NULL: no match */
+} ecuio_plugin_wrap_options_t;
+
+#if defined(__cplusplus)
+static_assert(offsetof(ecuio_plugin_wrap_options_t, years) == 8,
+              "wrap options years offset is ABI");
+static_assert(offsetof(ecuio_plugin_wrap_options_t, reserved) == 16,
+              "wrap options reserved offset is ABI");
+static_assert(offsetof(ecuio_plugin_wrap_options_t, id) == 40,
+              "wrap options id offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_plugin_wrap_options_t, years) == 8,
+               "wrap options years offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_wrap_options_t, reserved) == 16,
+               "wrap options reserved offset is ABI");
+_Static_assert(offsetof(ecuio_plugin_wrap_options_t, id) == 40,
+               "wrap options id offset is ABI");
+#endif
+
+/* A signal file (ecuio_signal_file_load's rules) as a packed plugin of
+ * one variant. options NULL is every default.
+ * - "id": options->id, or the file's name as user.<slug>'s slug (lower
+ *   case letters and digits, every other run one '-'), cut to
+ *   ECUIO_PLUGIN_ID_MAX bytes with no '-' left at its end. A caller
+ *   whose store holds that id already asks again with an id of its own.
+ * - "name": the file's. "version": "1.0.0". "requires": this core's
+ *   X.Y.Z, so an older core refuses the plugin in words.
+ * - "lineage": the first ECUIO_PLUGIN_LINEAGE_LEN hex digits of the
+ *   SHA-256 of the length bytes at file.
+ * - "source" and "ecus": the file's, moved to the manifest. "match":
+ *   one entry, options->wmi's codes with options->years, only with wmi.
+ * - One variant (options->variant, or "base") of one data file,
+ *   "data/<variant>.json": the file without its "source" and "ecus",
+ *   every other member as it was read.
+ * The variant's set is the file's own, table by table, and its keys
+ * the file's. ECUIO_ERR_INVALID_ARGUMENT also for a struct_size smaller
+ * than the struct, nonzero flags or reserved words, an id or variant
+ * the manifest's rules refuse, years with no wmi or out of order, and
+ * a code that isn't 3 or 6 of a VIN's letters and digits. */
+ecuio_status_t ecuio_plugin_wrap(const char* file, size_t length,
+                                 const ecuio_plugin_wrap_options_t* options,
+                                 char** out, size_t* out_length);
+
+/* The packed plugin with variant `variant` made from a signal file:
+ * added after the others, or, when the plugin has that id, put in its
+ * place (its "years" kept, its data files left out unless another
+ * variant lists them). variant NULL is the file's name as a slug, cut
+ * to ECUIO_PLUGIN_VARIANT_ID_MAX bytes.
+ * - "version": the minor one higher and the patch 0 ("1.2.3" gives
+ *   "1.3.0"); refused when the minor is 65535. "requires": this core's
+ *   X.Y.Z. "id", "name", "lineage", "source", "match" and every other
+ *   variant: as they were.
+ * - The data file is "data/<variant>.json" ("data/<variant>-2.json"
+ *   and on while a file that stays has the path): the signal file
+ *   without its "ecus", its own "source" kept, which then names where
+ *   that variant comes from in every recording of it.
+ * - The file's ECUs join the manifest's, which all variants share. One
+ *   at the addresses (rx and tx) of an ECU the manifest has is that
+ *   ECU, under the manifest's id; any other is added, under its own id
+ *   or, when the manifest has that id at other addresses, as
+ *   "<id>_2" ("_3" and on). The file's signals name the id the
+ *   manifest has. An ECU that only a replaced variant's files read
+ *   leaves the manifest first.
+ * - A signal that names no ECU keeps the ECU it read: when the first
+ *   ECU it would fall to is another, it is given its ECU by id, the
+ *   one the profile obd2 asks added to the manifest as "obd2" when
+ *   none there has its addresses.
+ * On ECUIO_OK, ecuio_last_error_detail() says which of the file's ECUs
+ * took another id, in words for the user, or is "": one note each, joined
+ * with "; " while they fit the detail, then "and N more". A text the loader
+ * refuses (an ECU past what one session reads, two ID widths, more
+ * variants than a plugin holds) ends "; the file can be a plugin of
+ * its own" when ecuio_plugin_wrap takes the file. */
+ecuio_status_t ecuio_plugin_put_variant(const char* packed, size_t length,
+                                        const char* variant, const char* file,
+                                        size_t file_length, char** out,
+                                        size_t* out_length);
+
+/* The packed plugin without variant `variant`: its data files left out
+ * unless another variant lists them, the ECUs only they read with
+ * them, and the version raised as a put raises it; "requires" and the
+ * rest as they were. ECUIO_ERR_NULL_ARGUMENT for a NULL variant;
+ * ECUIO_ERR_INVALID_ARGUMENT for a variant the plugin lacks, or its
+ * only one. */
+ecuio_status_t ecuio_plugin_drop_variant(const char* packed, size_t length,
+                                         const char* variant, char** out,
+                                         size_t* out_length);
+
+/* Releases a text one of the three calls above gave; NULL is nothing */
+void ecuio_plugin_text_free(char* text);
 
 /* Unregisters the plugin's profiles (each name still registered to its
  * variant's set) and frees it. ECUIO_ERR_IN_USE, with nothing changed,

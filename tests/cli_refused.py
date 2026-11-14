@@ -1,10 +1,11 @@
 # File/layer: tests/cli_refused.py | test-only, Python 3.8+
-# Testing: HARNESS: CliRefusedRunTest, CliSessionRunTest (ctest)
+# Testing: HARNESS: CliRefusedRunTest, CliSessionRunTest, CliVinRunTest (ctest)
 #
 #   python tests/cli_refused.py fake <havne-cli> <fake_j2534.dll>          (Windows)
 #   python tests/cli_refused.py session <havne-cli> <fake_j2534.dll>       (Windows)
 #   python tests/cli_refused.py fake-bitmap <havne-cli> <fake_j2534.dll>   (Windows)
 #   python tests/cli_refused.py fake-more <havne-cli> <fake_j2534.dll>     (Windows)
+#   python tests/cli_refused.py vehicle <havne-cli> <fake_j2534.dll>       (Windows)
 #   python3 tests/cli_refused.py sim <havne-cli>                           (Linux)
 #
 # A DID its ECU refuses is named in a `refused` line, with the code by
@@ -19,6 +20,10 @@
 # session and a second module refuses it, each a `session` line with its
 # state (and the refusal's code, 0x12 by default, ECUIO_FAKE_SESSION_NRC
 # otherwise), and every `scan` line ends with its session (ADR-0060).
+# vehicle: the fake holds every 0x22 request (ECUIO_FAKE_HELD_SERVICE,
+# 7F 22 78 and no answer), so its identification's DIDs stay out about
+# 5 s each; the VIN (09 02) is in at once, so one `vehicle` line names
+# it and no `identity` line comes (ADR-0027 section 3).
 # sim: the simulated ECU (havne-cli sim, no profile) on vcan0 refuses
 # every DID (7F 22 31); skips (77) without the interface unless
 # ECUIO_VCAN_REQUIRED=1, as test_vcan does.
@@ -203,6 +208,27 @@ def sim(cli):
     return check(run, lines, "DID F1FE")
 
 
+def vehicle(cli, dll):
+    env = dict(os.environ, ECUIO_FAKE_HELD_SERVICE="22")
+    run, lines = stream(cli, "j2534://%s" % dll, env=env)
+    why = []
+    if run.returncode != 0:
+        why.append("exit %d: %s" % (run.returncode, run.stderr.strip()))
+    vehicles = [l for l in lines if l.get("type") == "vehicle"]
+    if len(vehicles) != 1:
+        why.append("%d vehicle lines, not 1" % len(vehicles))
+    elif (vehicles[0].get("rx") != "0x7E8" or
+          vehicles[0].get("vin", {}).get("vin") != "FAKEJ2534VIN00001"):
+        why.append("the vehicle line is %s" % json.dumps(vehicles[0]))
+    if any(l.get("type") == "identity" for l in lines):
+        why.append("an identity line, with the list still out")
+    for w in why:
+        print(w)
+    if why:
+        print("\n".join(json.dumps(l) for l in lines[:12]))
+    return 1 if why else 0
+
+
 def main():
     if len(sys.argv) == 4 and sys.argv[1] == "fake":
         return fake(sys.argv[2], sys.argv[3])
@@ -212,6 +238,8 @@ def main():
         return fake_more(sys.argv[2], sys.argv[3])
     if len(sys.argv) == 4 and sys.argv[1] == "session":
         return session(sys.argv[2], sys.argv[3])
+    if len(sys.argv) == 4 and sys.argv[1] == "vehicle":
+        return vehicle(sys.argv[2], sys.argv[3])
     if len(sys.argv) == 3 and sys.argv[1] == "sim":
         return sim(sys.argv[2])
     print(__doc__ or "usage: cli_refused.py fake <cli> <dll> | sim <cli>")

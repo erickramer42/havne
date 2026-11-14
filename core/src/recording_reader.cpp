@@ -430,6 +430,11 @@ struct ecuio_recording {
     mutable std::unordered_map<uint32_t, std::list<block>::iterator> cached;
     mutable size_t cache_bytes = 0;
     size_t cache_limit = kCacheBytes; /* a test's seam lowers it */
+    /* The open's progress, asked by the events pass too: at the data
+     * file's start, every kProgressBytes of events.log */
+    ecuio_open_progress_t open_progress = nullptr;
+    void* open_user = nullptr;
+    bool open_canceled = false;
 
     uint32_t add_signal(const std::string& name);
     bool read_label(const char* text, size_t n, const char** why);
@@ -631,7 +636,20 @@ bool ecuio_recording::read_events(const std::string& folder)
             ++conditions.lines_skipped;
         }
     };
+    uint64_t data_bytes = 0;
+    if (open_progress != nullptr) {
+        file_ptr data = open_file(source_path);
+        data_bytes = data ? file_size(data.get()) : 0;
+    }
+    uint64_t next_progress = kProgressBytes;
     while (lines.next(line, &ended, &too_long)) {
+        if (open_progress != nullptr && lines.offset() >= next_progress) {
+            next_progress = lines.offset() + kProgressBytes;
+            if (open_progress(0, data_bytes, open_user) != 0) {
+                open_canceled = true;
+                return false;
+            }
+        }
         ++line_no;
         if (!ended || too_long) {
             /* A torn last line, or one no writer makes: a cond line's is
@@ -1714,10 +1732,13 @@ ecuio_status_t ecuio_recording_open(const char* folder_utf8,
         }
         r->source_path = folder + "/signals.csv";
         bool canceled = false;
+        r->open_progress = progress;
+        r->open_user = user_data;
         if (!r->read_events(folder) ||
             !r->read_signals(progress, user_data, &canceled) ||
             !r->read_markers(folder)) {
-            return canceled ? ECUIO_ERR_CANCELED : ECUIO_ERR_LOAD_FAILED;
+            return canceled || r->open_canceled ? ECUIO_ERR_CANCELED
+                                                : ECUIO_ERR_LOAD_FAILED;
         }
         r->read_copies(folder);
         r->finish();
@@ -1760,10 +1781,13 @@ ecuio_status_t ecuio_recording_open_frames(const char* folder_utf8,
         r->source_path = folder + "/frames.csv";
         r->take_set(*signal_set);
         bool canceled = false;
+        r->open_progress = progress;
+        r->open_user = user_data;
         if (!r->read_events(folder) ||
             !r->read_frames(progress, user_data, &canceled) ||
             !r->read_markers(folder)) {
-            return canceled ? ECUIO_ERR_CANCELED : ECUIO_ERR_LOAD_FAILED;
+            return canceled || r->open_canceled ? ECUIO_ERR_CANCELED
+                                                : ECUIO_ERR_LOAD_FAILED;
         }
         r->read_copies(folder);
         r->finish();

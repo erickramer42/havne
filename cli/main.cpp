@@ -1,7 +1,8 @@
 // File/layer: cli/main.cpp | havne-cli, a command-line client over the C ABI (ADR-0031)
 // Testing: UNIT: CliGoldenTest, CliUsageTest, CliConnectTest, CliSignalTest,
 //          CliReplayTest, CliRecordTest, CliViewRunTest, CliPathTest,
-//          CliTransferRunTest, CliExitTest, CliObdbImportTest, CliLogRunTest
+//          CliTransferRunTest, CliExitTest, CliObdbImportTest, CliLogRunTest,
+//          CliPluginMakeTest
 //          (ctest);
 //          CliTimingTest, CliVinTest, CliSimTest, CliMarkLinesTest,
 //          CliViewTest, CliInfoTest, CliSignalFileTest, CliHealthTest,
@@ -13,6 +14,7 @@
 #include "can_line.h"
 #include "clear_run.h"
 #include "condition_lines.h"
+#include "default_pick.h"
 #include "diagnostics_line.h"
 #include "elm327_listener.h"
 #include "frames_lines.h"
@@ -705,14 +707,24 @@ uint32_t latest_model_year()
 }
 
 // A line for each ECU whose identity has settled since the last call
-// (vin_line.h): generations holds each channel's last written
+// (vin_line.h): generations holds each channel's last written. Ahead of
+// them, the vehicle line once the first channel's VIN is in and new
+// (vehicle, the VIN written last)
 void poll_identity(Output& out, ecuio_session_t* session, uint32_t channels,
-                   uint32_t* generations)
+                   uint32_t* generations, char (&vehicle)[ECUIO_VIN_TEXT_LEN])
 {
     for (uint32_t c = 0; c < channels; ++c) {
         ecuio_channel_identity_t id;
-        if (ecuio_session_get_channel_identity(session, c, &id) == ECUIO_OK &&
-            (id.flags & ECUIO_IDENTITY_COMPLETE) &&
+        if (ecuio_session_get_channel_identity(session, c, &id) != ECUIO_OK) {
+            continue;
+        }
+        if (c == 0 && cli::vehicle_due(id, vehicle)) {
+            char buf[512];
+            cli::Line l(buf, sizeof buf);
+            cli::vehicle_line(l, id, latest_model_year());
+            write_line(out, l);
+        }
+        if ((id.flags & ECUIO_IDENTITY_COMPLETE) &&
             id.generation != generations[c]) {
             generations[c] = id.generation;
             char buf[4096];
@@ -1067,11 +1079,12 @@ bool is_folder(const char* path);
 // Writes a file whole, or not at all: into a partial of the call's own
 // beside it (cli/partial_file.h), then renamed over path, so a failed
 // write never leaves half a file at the user's path, and never over a
-// folder. false with why, never the path
-bool write_whole(const char* path, const std::string& bytes, std::string* why)
+// folder. false with why (what can't be written), never the path
+bool write_whole(const char* path, const std::string& bytes, std::string* why,
+                 const char* what = "the converted file")
 {
     if (is_folder(path)) {
-        *why = "the converted file can't be written: it's a folder";
+        *why = std::string(what) + " can't be written: it's a folder";
         return false;
     }
     std::string partial;
@@ -1080,7 +1093,7 @@ bool write_whole(const char* path, const std::string& bytes, std::string* why)
     FILE* f = cli::create_partial(path, cli::process_id(), &partial, &e);
     if (f == nullptr) {
         /* nothing made, nothing to remove: a name there is another's */
-        *why = std::string("the converted file can't be written: ") +
+        *why = std::string(what) + " can't be written: " +
                (e == EEXIST   ? std::string("every partial name beside it "
                                             "is taken")
                 : e == ENOENT ? std::string("there's no such folder")
@@ -1113,7 +1126,7 @@ bool write_whole(const char* path, const std::string& bytes, std::string* why)
     }
     if (failed) {
         cli::remove_file(partial);
-        *why = std::string("the converted file can't be written: ") +
+        *why = std::string(what) + " can't be written: " +
                (!words.empty() ? words
                 : e == ENOENT  ? std::string("there's no such folder")
                 : e == EACCES  ? std::string("permission denied")
@@ -2048,7 +2061,8 @@ ecuio_status_t run_variant_fixtures(const std::string& profile, uint32_t index,
 
 // plugins check <pkg> [--on <vcan>] (ADR-0052 section 8): loads the
 // package as a session would, then reads its value fixtures. start,
-// plugin, for each variant a variant line and its own signals'
+// plugin, for each variant a variant line (its source's license), a
+// share_alike line when that license is share-alike, and its own signals'
 // signal_def lines, a fixture_refused line for each fixture file that
 // can't be read or that core refused, a fixture line for each entry (with
 // --on, run through the simulated ECU on that interface, Linux's vcan;
@@ -2082,10 +2096,18 @@ int run_plugins_check(const char* path, const char* on)
                        ecuio_signal_file_format(
                            ecuio_plugin_variant_file(p, v)) >= 2;
         {
-            BigLine b(1024 + size_t{set.channel_count} * 64);
+            BigLine b(
+                cli::variant_line_bytes(set, ecuio_plugin_variant_file(p, v)));
             cli::variant_line(b.line, id.c_str(),
                               cli::plugin_profile(info.id, id.c_str()),
                               ecuio_plugin_variant_file(p, v), set);
+            write_line(out, b.line);
+        }
+        const ecuio_signal_source_t source =
+            cli::source_of(ecuio_plugin_variant_file(p, v));
+        if ((source.flags & ECUIO_SOURCE_SHARE_ALIKE) != 0) {
+            BigLine b(cli::share_alike_line_bytes(source.license));
+            cli::share_alike_line(b.line, id.c_str(), source.license);
             write_line(out, b.line);
         }
         for (uint32_t i = 0; i < set.count; ++i) {
@@ -2206,8 +2228,11 @@ int run_plugins_check(const char* path, const char* on)
 
 struct ImportArgs {
     const char* file = nullptr; // the OBDb set
-    const char* out = nullptr;  // --out: the signal file written
+    const char* out = nullptr;  // --out: the signal file, or plugin, written
     ecuio_obdb_options_t options{};
+    bool plugin = false;        // --plugin: the converted file wrapped
+    std::string wmi;            // --wmi: the match's codes, upper case
+    uint32_t years[2] = {0, 0}; // --years: the match's model years
 };
 
 // What an import's note callback shares: the output and each kind's count
@@ -2226,6 +2251,112 @@ int write_import_note(const ecuio_obdb_note_t* n, void* user)
     cli::import_note_line(b.line, *n);
     write_line(*notes->out, b.line);
     return 0;
+}
+
+// A packed plugin's text one of plugin.h's calls gave (freed here), or
+// its refusal: the status and core's words. An OK's words are its notes,
+// which ECUs took another id: read right after the call
+struct MadeText {
+    ecuio_status_t status = ECUIO_OK;
+    std::string text;
+    std::string words;
+};
+
+MadeText made_text(ecuio_status_t status, char* text, size_t length)
+{
+    MadeText m;
+    m.status = status;
+    m.words = ecuio_last_error_detail();
+    if (text != nullptr) {
+        m.text.assign(text, length);
+    }
+    ecuio_plugin_text_free(text);
+    return m;
+}
+
+// Writes a made plugin to path whole: true, or its error line and false
+bool write_made_file(Output& out, const char* path, const MadeText& m)
+{
+    std::string why;
+    if (!write_whole(path, m.text, &why, "the plugin")) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        return false;
+    }
+    return true;
+}
+
+// The plugin line of the plugin written, then the written line
+void write_made_lines(Output& out, const MadeText& m, cli::Written action,
+                      const std::string& variant)
+{
+    ecuio_plugin_t* p = nullptr;
+    if (ecuio_plugin_load(m.text.data(), m.text.size(), nullptr, nullptr, &p) !=
+        ECUIO_OK) {
+        return; /* never: core loads what it gives before giving it */
+    }
+    const ecuio_plugin_info_t info = plugin_info(p);
+    {
+        BigLine b(4096);
+        cli::plugin_line(b.line, 0, p, info);
+        write_line(out, b.line);
+    }
+    char lineage[ECUIO_PLUGIN_LINEAGE_LEN + 1] = {};
+    ecuio_plugin_lineage(p, lineage, sizeof lineage);
+    BigLine b(cli::written_line_bytes(m.words));
+    cli::written_line(b.line, action, variant.c_str(), info.version, lineage,
+                      m.text.size(), m.words);
+    write_line(out, b.line);
+    ecuio_plugin_free(p);
+}
+
+// signals import obdb ... --plugin (ADR-0064 Q3, Q9): the converted file
+// wrapped as a plugin of one variant, "my<year>" for --year and "base"
+// without one, a match only from --wmi and --years; --out takes the
+// plugin. imported, plugin, written, then signals check's lines for the
+// variant's file. A wrap refused: its error line, exit 3
+int import_as_plugin(Output& out, const ImportArgs& args,
+                     const std::string& converted, const ImportNotes& notes)
+{
+    const std::string variant =
+        cli::typed_year_variant(args.options.model_year);
+    ecuio_plugin_wrap_options_t o{};
+    o.struct_size = sizeof o;
+    o.variant = variant.empty() ? nullptr : variant.c_str();
+    o.wmi = args.wmi.empty() ? nullptr : args.wmi.c_str();
+    o.years[0] = args.years[0];
+    o.years[1] = args.years[1];
+    char* text = nullptr;
+    size_t length = 0;
+    const ecuio_status_t st = ecuio_plugin_wrap(
+        converted.data(), converted.size(), &o, &text, &length);
+    const MadeText m = made_text(st, text, length);
+    if (m.status != ECUIO_OK) {
+        write_error(out, m.status, m.words.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    if (!write_made_file(out, args.out, m)) {
+        out.flush();
+        return kExitFailed;
+    }
+    {
+        char buf[256];
+        cli::Line l(buf, sizeof buf);
+        cli::imported_line(l, notes.counts[ECUIO_OBDB_NOTE_CONVERTED],
+                           notes.counts[ECUIO_OBDB_NOTE_CHANGED],
+                           notes.counts[ECUIO_OBDB_NOTE_SKIPPED]);
+        write_line(out, l);
+    }
+    write_made_lines(out, m, cli::Written::wrapped,
+                     variant.empty() ? std::string("base") : variant);
+    ecuio_plugin_t* p = nullptr;
+    if (ecuio_plugin_load(m.text.data(), m.text.size(), nullptr, nullptr, &p) ==
+        ECUIO_OK) {
+        write_check_lines(out, ecuio_plugin_variant_file(p, 0));
+        ecuio_plugin_free(p);
+    }
+    out.flush();
+    return ended(out, kExitOk);
 }
 
 // signals import obdb <file> --out <file> (ADR-0051 section 7, obdb.h):
@@ -2260,6 +2391,9 @@ int run_signals_import(const ImportArgs& args)
     }
     const std::string text(json, length);
     ecuio_obdb_free(json);
+    if (args.plugin) {
+        return import_as_plugin(out, args, text, notes);
+    }
     if (!write_whole(args.out, text, &why)) {
         write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
         out.flush();
@@ -2280,6 +2414,191 @@ int run_signals_import(const ImportArgs& args)
     }
     out.flush();
     return ended(out, kExitOk);
+}
+
+// plugins wrap, put and drop (ADR-0064 Q9): what each reads and names
+struct PluginMakeArgs {
+    const char* package = nullptr; // put, drop: the packed plugin read
+    const char* file = nullptr;    // wrap, put: the signal file read
+    const char* out = nullptr;     // --out: the packed plugin written
+    const char* id = nullptr;      // wrap's --id
+    const char* variant = nullptr; // --variant
+};
+
+// A packed plugin's bytes for put and drop: true, or its error line (a
+// folder, or a file that can't be read) and false
+bool read_packed(Output& out, const char* path, std::string* bytes)
+{
+    std::string why;
+    if (is_folder(path)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED,
+                    "the plugin is a folder: put and drop take a packed "
+                    "plugin, one file");
+        return false;
+    }
+    if (!read_whole(path, ECUIO_PLUGIN_PACKAGE_MAX, "plugin", bytes, &why)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        return false;
+    }
+    return true;
+}
+
+// A signal file's bytes for wrap and put: true, or its error line and
+// false
+bool read_signal_bytes(Output& out, const char* path, std::string* bytes)
+{
+    std::string why;
+    if (!read_whole(path, ECUIO_SIGNAL_FILE_MAX_BYTES, "signal file", bytes,
+                    &why)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        return false;
+    }
+    return true;
+}
+
+// What a made plugin's command ends with: a refusal's error line (exit
+// 3), an --out that can't be written (exit 1), else the plugin and
+// written lines (exit 0)
+int end_made(Output& out, const char* path, const MadeText& m,
+             cli::Written action, const std::string& variant)
+{
+    if (m.status != ECUIO_OK) {
+        write_error(out, m.status, m.words.c_str());
+        out.flush();
+        return kExitConnect;
+    }
+    if (!write_made_file(out, path, m)) {
+        out.flush();
+        return kExitFailed;
+    }
+    write_made_lines(out, m, action, variant);
+    out.flush();
+    return ended(out, kExitOk);
+}
+
+// plugins wrap <signal-file> --out <pkg> [--id <id>] [--variant <id>]: the
+// file as a packed plugin of one variant (ecuio_plugin_wrap). start, then
+// plugin and written; a file unread or refused, start and an error line,
+// exit 3; an --out that can't be written, exit 1. No end line
+int run_plugins_wrap(const PluginMakeArgs& args)
+{
+    Output out;
+    write_start(out);
+    std::string file;
+    if (!read_signal_bytes(out, args.file, &file)) {
+        out.flush();
+        return kExitConnect;
+    }
+    ecuio_plugin_wrap_options_t o{};
+    o.struct_size = sizeof o;
+    o.id = args.id;
+    o.variant = args.variant;
+    char* text = nullptr;
+    size_t length = 0;
+    const ecuio_status_t st =
+        ecuio_plugin_wrap(file.data(), file.size(), &o, &text, &length);
+    return end_made(out, args.out, made_text(st, text, length),
+                    cli::Written::wrapped,
+                    args.variant != nullptr ? args.variant : "base");
+}
+
+// plugins put <pkg> <signal-file> [--variant <id>] --out <pkg>: the
+// plugin with the file as a variant, added or put in the place of the
+// one of that id (ecuio_plugin_put_variant; with no --variant, the id
+// core gives, the file's name as a slug). As wrap's, the written line
+// saying added or replaced and which of the file's ECUs took another id
+int run_plugins_put(const PluginMakeArgs& args)
+{
+    Output out;
+    write_start(out);
+    std::string packed;
+    std::string file;
+    if (!read_packed(out, args.package, &packed) ||
+        !read_signal_bytes(out, args.file, &file)) {
+        out.flush();
+        return kExitConnect;
+    }
+    char* text = nullptr;
+    size_t length = 0;
+    const ecuio_status_t st =
+        ecuio_plugin_put_variant(packed.data(), packed.size(), args.variant,
+                                 file.data(), file.size(), &text, &length);
+    const MadeText m = made_text(st, text, length);
+    std::string variant = args.variant != nullptr ? args.variant : "";
+    bool replaced = false;
+    if (m.status == ECUIO_OK) {
+        if (variant.empty()) {
+            ecuio_signal_file_t* f = nullptr;
+            if (ecuio_signal_file_load(file.data(), file.size(), &f) ==
+                ECUIO_OK) {
+                variant = cli::variant_slug(ecuio_signal_file_profile(f));
+            }
+            ecuio_signal_file_free(f);
+        }
+        ecuio_plugin_t* before = nullptr;
+        if (ecuio_plugin_load(packed.data(), packed.size(), nullptr, nullptr,
+                              &before) == ECUIO_OK) {
+            const ecuio_plugin_info_t info = plugin_info(before);
+            for (uint32_t v = 0; v < info.variant_count; ++v) {
+                replaced = replaced || variant_of(before, v) == variant;
+            }
+            ecuio_plugin_free(before);
+        }
+    }
+    return end_made(out, args.out, m,
+                    replaced ? cli::Written::replaced : cli::Written::added,
+                    variant);
+}
+
+// plugins drop <pkg> --variant <id> --out <pkg>: the plugin without that
+// variant (ecuio_plugin_drop_variant; never its last). As wrap's
+int run_plugins_drop(const PluginMakeArgs& args)
+{
+    Output out;
+    write_start(out);
+    std::string packed;
+    if (!read_packed(out, args.package, &packed)) {
+        out.flush();
+        return kExitConnect;
+    }
+    char* text = nullptr;
+    size_t length = 0;
+    const ecuio_status_t st = ecuio_plugin_drop_variant(
+        packed.data(), packed.size(), args.variant, &text, &length);
+    return end_made(out, args.out, made_text(st, text, length),
+                    cli::Written::dropped, args.variant);
+}
+
+// The options after plugins wrap's, put's and drop's inputs: --out
+// always, --variant (drop's needed), --id (wrap's alone). false with the
+// usage words
+bool parse_plugin_make(const std::string& word, int first, int argc,
+                       char** argv, PluginMakeArgs* args, std::string* why)
+{
+    for (int i = first; i < argc; ++i) {
+        const std::string a = argv[i];
+        const bool has_value = i + 1 < argc && *argv[i + 1] != '\0';
+        if (a == "--out" && has_value && args->out == nullptr) {
+            args->out = argv[++i];
+        } else if (a == "--variant" && has_value && args->variant == nullptr) {
+            args->variant = argv[++i];
+        } else if (a == "--id" && has_value && word == "wrap" &&
+                   args->id == nullptr) {
+            args->id = argv[++i];
+        } else {
+            *why = "unexpected '" + a + "'";
+            return false;
+        }
+    }
+    if (args->out == nullptr) {
+        *why = "plugins " + word + " needs --out <pkg>";
+        return false;
+    }
+    if (word == "drop" && args->variant == nullptr) {
+        *why = "plugins drop needs --variant <id>";
+        return false;
+    }
+    return true;
 }
 
 // What the callbacks share with the main thread
@@ -2404,10 +2723,11 @@ void usage(FILE* to)
         "                         [--until-scanned] [--record <folder> "
         "[--label <name>]]\n"
         "                         [--signals <file> | --plugin <pkg>]\n"
-        "                         [--conditions <file>]\n"
+        "                         [--conditions <file>] [--pick ranked]\n"
         "       havne-cli log <uri> <folder> [--signal <name>]... "
-        "[--min-sweep <ms>]\n"
-        "                      [--label <name>] [--seconds S]\n"
+        "[--pick ranked]\n"
+        "                      [--min-sweep <ms>] [--label <name>] "
+        "[--seconds S]\n"
         "                      [--signals <file> | --plugin <pkg>] "
         "[--conditions <file>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
@@ -2453,12 +2773,19 @@ void usage(FILE* to)
         "       havne-cli signals check <file>\n"
         "       havne-cli signals import obdb <file> --out <file> [--year Y]\n"
         "                      [--name N] [--url U] [--commit C] [--alone]\n"
+        "                      [--plugin [--wmi <codes> [--years "
+        "<from>-<to>]]]\n"
         "       havne-cli conditions check <file> [--signals <file> |\n"
         "                      --profile <name> | --plugin <pkg> "
         "[--variant <id>]]\n"
         "       havne-cli plugins list <pkg>...\n"
         "       havne-cli plugins check <pkg> [--on <vcan>]\n"
         "       havne-cli plugins match <pkg> --vin <VIN>\n"
+        "       havne-cli plugins wrap <signal-file> --out <pkg> [--id <id>]\n"
+        "                      [--variant <id>]\n"
+        "       havne-cli plugins put <pkg> <signal-file> [--variant <id>]\n"
+        "                      --out <pkg>\n"
+        "       havne-cli plugins drop <pkg> --variant <id> --out <pkg>\n"
         "       havne-cli devices\n"
         "       havne-cli vin <VIN>\n"
         "       havne-cli dtc <code>\n"
@@ -2497,17 +2824,27 @@ void usage(FILE* to)
         "         --plugin loads a plugin (a folder or a packed file) and\n"
         "         registers its variants as plugin.<id>.<variant>; the URI's\n"
         "         profile= names the one to read.\n"
+        "         --pick ranked asks only the profile's ranked signals (the\n"
+        "         ones a UI plots first: the app's default pick without its\n"
+        "         gauges and ticks), and a focus line names them; a profile\n"
+        "         that ranks none, a session that asks nothing (the mock, a\n"
+        "         replay) and a pick core refuses leave the whole set asked,\n"
+        "         said on standard error.\n"
         "log      records the session <uri> names to a folder of its own in\n"
         "         <folder>, as stream --record does, asking only the signals\n"
         "         --signal names (every one with none) so each is read as\n"
         "         often as the bus allows; export then takes those columns\n"
-        "         by itself. Writes a log line every 10 s with the\n"
-        "         recording's size, no frames or values. Runs until Ctrl+C,\n"
-        "         S seconds, a failed recording or a replay's last frame; a\n"
-        "         lost link is logged and waited out. --signals, --plugin and\n"
-        "         --conditions as stream's: the recording holds the\n"
-        "         conditions' copy and each change, and no condition line\n"
-        "         is written; a replay's own copy is stream's alone.\n"
+        "         by itself. --pick ranked adds the profile's ranked signals\n"
+        "         to them, the recording naming them a pick, not a log's\n"
+        "         focus; on a profile that ranks none or a session that asks\n"
+        "         nothing it adds none (no names: the whole set). Writes a\n"
+        "         log line every 10 s with the recording's size, no frames\n"
+        "         or values. Runs until Ctrl+C, S seconds, a failed recording\n"
+        "         or a replay's last frame; a lost link is logged and waited\n"
+        "         out. --signals, --plugin and --conditions as stream's: the\n"
+        "         recording holds the conditions' copy and each change, and\n"
+        "         no condition line is written; a replay's own copy is\n"
+        "         stream's alone.\n"
         "play     (Linux) writes a session's frames to a virtual CAN "
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
@@ -2637,7 +2974,9 @@ void usage(FILE* to)
         "         --out, saying field by field what differs and what's left\n"
         "         out; --year takes the commands for that model year, --name,\n"
         "         --url and --commit go in the file, and --alone leaves\n"
-        "         obd2 out of it.\n"
+        "         obd2 out of it. --plugin writes it as a plugin instead,\n"
+        "         its variant my<year> with --year, else base; --wmi and\n"
+        "         --years give it a match, never taken from a VIN.\n"
         "conditions  check reads a condition file as a session would:\n"
         "         each condition it holds, or why it's refused. With\n"
         "         --signals, --profile or --plugin it also says which\n"
@@ -2650,7 +2989,13 @@ void usage(FILE* to)
         "         fixtures: with --on (Linux), each answered by the\n"
         "         simulated ECU on that interface and decoded back.\n"
         "         match lists the variants a VIN's manufacturer code and\n"
-        "         model year fall in: the choice stays yours.\n"
+        "         model year fall in: the choice stays yours. check also\n"
+        "         names each variant's license, and says when it's\n"
+        "         share-alike. wrap makes a signal file a plugin of one\n"
+        "         variant; put adds a signal file as a variant, or puts it\n"
+        "         in the place of the one of that id; drop takes a variant\n"
+        "         out. Each writes a new packed plugin to --out and raises\n"
+        "         its version; havne-cli keeps no store of plugins.\n"
         "devices  lists the serial ports, J2534 adapters and CAN interfaces a\n"
         "         URI can name.\n"
         "vin      decodes a VIN on this machine: its model year, make and\n"
@@ -2735,6 +3080,7 @@ struct StreamArgs {
     const char* signals = nullptr; // --signals' file
     const char* plugin = nullptr;  // --plugin's package
     const char* conditions = nullptr; // --conditions' file
+    bool pick_ranked = false;         // --pick ranked
 };
 
 // The markers typed into stream --record (ADR-0049 section 4): a thread
@@ -2938,6 +3284,16 @@ void poll_health(Output& out, ecuio_session_t* session, int32_t* last_error,
     write_line(out, l);
 }
 
+// Whether a session asks its signals (an adapter's, a sim's): the mock,
+// a replay and a listening session take no pick, as in the app
+bool session_asks(ecuio_session_t* session)
+{
+    ecuio_session_info_t info;
+    std::memset(&info, 0, sizeof info);
+    return ecuio_session_get_info(session, &info) == ECUIO_OK &&
+           (info.flags & ECUIO_SESSION_INFO_REQUESTS) != 0;
+}
+
 // A replay that doesn't loop has ended when every row is read and every
 // row its faults didn't take (ADR-0041) has been written: frames lost to
 // ?faults= never arrive, so the rows alone would wait forever
@@ -3041,6 +3397,28 @@ int run_stream(const StreamArgs& args)
         ecuio_register_conditions_callback(session, on_conditions,
                                            stream.get());
     }
+    // --pick ranked before a recording attaches, so its header names the
+    // pick; as in the app, a refused pick leaves the whole set asked
+    if (args.pick_ranked) {
+        const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+        const std::vector<uint16_t> ids = cli::default_pick(set, {});
+        if (!session_asks(session)) {
+            std::fprintf(stderr, "havne-cli: the session asks no signal: "
+                                 "--pick ranked picks none\n");
+        } else if (ids.empty()) {
+            std::fprintf(stderr, "havne-cli: the profile ranks no signal: "
+                                 "--pick ranked asks every one\n");
+        } else if (ecuio_session_set_focus_with(
+                       session, ids.data(), static_cast<uint32_t>(ids.size()),
+                       0, ECUIO_FOCUS_DEFAULT_PICK) != ECUIO_OK) {
+            std::fprintf(stderr, "havne-cli: asking every signal: %s\n",
+                         ecuio_last_error_detail());
+        } else {
+            BigLine b(cli::focus_line_bytes(ids.size()));
+            cli::focus_line(b.line, set, ids, 0, true);
+            write_line(out, b.line);
+        }
+    }
     ecuio_recorder_t* recorder = nullptr;
     bool recording_failed = false;
     if (args.record != nullptr &&
@@ -3057,7 +3435,8 @@ int run_stream(const StreamArgs& args)
             : ECUIO_SESSION_INFO_MAX_CHANNELS;
     uint32_t diag_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     uint32_t identity_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    poll_identity(out, session, channels, identity_generations);
+    char vehicle_vin[ECUIO_VIN_TEXT_LEN] = "";
+    poll_identity(out, session, channels, identity_generations, vehicle_vin);
     poll_diagnostics(out, session, channels, diag_generations);
     cli::ScanSeen scan_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
     cli::SessionSeen session_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
@@ -3147,7 +3526,8 @@ int run_stream(const StreamArgs& args)
             write_line(out, l);
         }
 
-        poll_identity(out, session, channels, identity_generations);
+        poll_identity(out, session, channels, identity_generations,
+                      vehicle_vin);
         poll_diagnostics(out, session, channels, diag_generations);
         poll_scan(out, session, channels, scan_seen, session_seen,
                   scan_reports);
@@ -3437,11 +3817,31 @@ int run_log(const cli::LogArgs& args)
         ecuio_session_destroy(session);
         return kExitConnect;
     }
+    // --pick ranked: the names join the set's ranked signals as a default
+    // pick; with no pick to make, the names alone are the focus
+    uint32_t flags = 0;
+    uint32_t min_sweep_ms = args.min_sweep_ms;
+    if (args.pick_ranked) {
+        const std::vector<uint16_t> picked = cli::default_pick(set, ids);
+        if (!session_asks(session)) {
+            std::fprintf(stderr, "havne-cli: the session asks no signal: "
+                                 "--pick ranked adds none\n");
+        } else if (picked.empty()) {
+            std::fprintf(stderr, "havne-cli: the profile ranks no signal: "
+                                 "--pick ranked adds none\n");
+        } else {
+            ids = picked;
+            flags = ECUIO_FOCUS_DEFAULT_PICK;
+        }
+    }
+    if (ids.empty()) {
+        min_sweep_ms = 0; // no focus: the whole set, which takes no minimum
+    }
     // The focus before the recorder attaches: the header's focus line is
     // the focus at the attach
     st = ecuio_session_set_focus_with(
         session, ids.empty() ? nullptr : ids.data(),
-        static_cast<uint32_t>(ids.size()), args.min_sweep_ms, 0);
+        static_cast<uint32_t>(ids.size()), min_sweep_ms, flags);
     if (st != ECUIO_OK) {
         write_error(out, st, ecuio_last_error_detail());
         out.flush();
@@ -3450,7 +3850,8 @@ int run_log(const cli::LogArgs& args)
     }
     {
         BigLine b(cli::focus_line_bytes(ids.size()));
-        cli::focus_line(b.line, set, ids, args.min_sweep_ms);
+        cli::focus_line(b.line, set, ids, min_sweep_ms,
+                        flags == ECUIO_FOCUS_DEFAULT_PICK);
         write_line(out, b.line);
     }
     ecuio_recorder_t* recorder = nullptr;
@@ -5970,9 +6371,34 @@ int run(int argc, char** argv)
             std::string(argv[4]) == "--vin") {
             return run_plugins_match(argv[3], argv[5]);
         }
-        std::fprintf(stderr, "havne-cli: plugins takes list <pkg>..., check "
-                             "<pkg> [--on <vcan>], or match <pkg> --vin "
-                             "<VIN>\n");
+        const bool two =
+            package && argc > 4 && std::string(argv[4]).rfind("--", 0) != 0;
+        if ((word == "wrap" && package) || (word == "put" && two) ||
+            (word == "drop" && package)) {
+            PluginMakeArgs make;
+            if (word == "wrap") {
+                make.file = argv[3];
+            } else {
+                make.package = argv[3];
+                make.file = word == "put" ? argv[4] : nullptr;
+            }
+            std::string why;
+            if (!parse_plugin_make(word, word == "put" ? 5 : 4, argc, argv,
+                                   &make, &why)) {
+                std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+                usage(stderr);
+                return kExitUsage;
+            }
+            return word == "wrap"  ? run_plugins_wrap(make)
+                   : word == "put" ? run_plugins_put(make)
+                                   : run_plugins_drop(make);
+        }
+        std::fprintf(stderr,
+                     "havne-cli: plugins takes list <pkg>..., check <pkg> "
+                     "[--on <vcan>], match <pkg> --vin <VIN>, wrap "
+                     "<signal-file> --out <pkg>, put <pkg> <signal-file> "
+                     "--out <pkg>, or drop <pkg> --variant <id> --out "
+                     "<pkg>\n");
         usage(stderr);
         return kExitUsage;
     }
@@ -6018,6 +6444,23 @@ int run(int argc, char** argv)
                     im.options.commit = argv[++i];
                 } else if (a == "--alone") {
                     im.options.flags |= ECUIO_OBDB_ALONE;
+                } else if (a == "--plugin") {
+                    im.plugin = true;
+                } else if (a == "--wmi" && has_value) {
+                    if (!cli::parse_wmi(argv[++i], &im.wmi)) {
+                        std::fprintf(stderr,
+                                     "havne-cli: --wmi takes manufacturer "
+                                     "codes, each 3 or 6 of a VIN's letters "
+                                     "and digits, separated by commas\n");
+                        return kExitUsage;
+                    }
+                } else if (a == "--years" && has_value) {
+                    if (!cli::parse_model_years(argv[++i], im.years)) {
+                        std::fprintf(stderr,
+                                     "havne-cli: --years takes <from>-<to>, "
+                                     "two model years from 1980 to 2039\n");
+                        return kExitUsage;
+                    }
                 } else {
                     std::fprintf(stderr, "havne-cli: unexpected '%s'\n",
                                  argv[i]);
@@ -6029,6 +6472,18 @@ int run(int argc, char** argv)
                 std::fprintf(
                     stderr,
                     "havne-cli: signals import obdb needs --out <file>\n");
+                usage(stderr);
+                return kExitUsage;
+            }
+            if (!im.plugin && (!im.wmi.empty() || im.years[0] != 0)) {
+                std::fprintf(stderr, "havne-cli: --wmi and --years go with "
+                                     "--plugin: a match is a plugin's\n");
+                usage(stderr);
+                return kExitUsage;
+            }
+            if (im.years[0] != 0 && im.wmi.empty()) {
+                std::fprintf(stderr, "havne-cli: --years goes with --wmi: a "
+                                     "match needs its manufacturer codes\n");
                 usage(stderr);
                 return kExitUsage;
             }
@@ -6097,6 +6552,12 @@ int run(int argc, char** argv)
             std::fprintf(stderr,
                          "havne-cli: --conditions takes one condition file\n");
             return kExitUsage;
+        } else if (a == "--pick") {
+            if (i + 1 >= argc || !cli::parse_pick(argv[++i])) {
+                std::fprintf(stderr, "havne-cli: %s\n", cli::pick_why());
+                return kExitUsage;
+            }
+            args.pick_ranked = true;
         } else if (a.rfind("--", 0) == 0 || args.uri) {
             std::fprintf(stderr, "havne-cli: unexpected '%s'\n", argv[i]);
             usage(stderr);

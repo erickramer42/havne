@@ -2916,6 +2916,34 @@ TestCase {
         Bridge.signalModel.toggleSubscribed(0)
     }
 
+    // A text row's tick is the vehicle's too, though it changes no plotted
+    // count: the ticked count carries it
+    function test_aTextRowsTickIsKeptForTheVehicle() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        find(page, "vehicleLabelField").text = "Weekend car"
+        press(page, "vehicleNew")
+        find(page, "uriField").text = "j2534://" + Harness.fakeDllPath
+            + "?profile=uds-generic&did=F190:text,1E1C:u16&identify=0&diagnose=0"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "the fake connects")
+        tryVerify(() => page.plottedApplied, 5000, "the vehicle's choices applied")
+        const plotted = Bridge.signalModel.subscribedCount
+        const writes = logSpyComponent.createObject(testCase,
+            { target: page, signalName: "vehiclesChanged" })
+        Bridge.signalModel.toggleSubscribed(0)   // DID F190, a text row
+        compare(Bridge.signalModel.subscribedCount, plotted, "it plots nothing")
+        const names = Bridge.signalModel.plottedNames()
+        compare(names.length, 1)
+        compare(page.pickedVehicle.plotted, names, "the tick is kept")
+        compare(writes.count, 1, "one write for the text row's tick")
+        // A number's untick changes both counts, and is still one write
+        Bridge.signalModel.toggleSubscribed(1)   // DID 1E1C
+        compare(writes.count, 2, "one write for the number's untick")
+        writes.destroy()
+    }
+
     // ADR-0027 sections 2-4 through the fake: the connect keeps the URI, the VIN
     // is learned and logged, Live's plotting is kept and comes back
     function test_anAdaptersConnectKeepsItsVehiclesSetup() {
@@ -3068,6 +3096,11 @@ TestCase {
         const choice = find(page, "minSweepChoice")
         verify(choice.visible)
         verify(find(page, "minSweepNote").text.includes("file size"))
+        // Every requesting session's, not a log's alone
+        verify(find(page, "minSweepNote").text.includes("on Live, the Dashboard and in a log"))
+        // Core paces a pick alone, never the whole set
+        verify(find(page, "minSweepNote").text.includes("asking every signal (its profile ranks none) isn't held to it"))
+        compare(choice.Accessible.name, "Minimum time between sweeps")
         compare(choice.count, 5)
         compare(choice.textAt(0), "Off")
         compare(choice.textAt(2), "250 ms")

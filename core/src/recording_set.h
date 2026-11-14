@@ -78,8 +78,16 @@ inline header read_header(const std::string& folder)
     std::vector<char> buf(rows::kRowMax + 2);
     bool too_long = false;
     while (ecuio_frames_csv::read_line(f.get(), buf, &too_long)) {
+        if (too_long) {
+            /* A line past a row (an older core's focus line): passed by
+             * whole, so the signal lines after it are still read */
+            bool more = true;
+            while (more && ecuio_frames_csv::read_line(f.get(), buf, &more)) {
+            }
+            continue;
+        }
         const size_t n = std::strlen(buf.data());
-        if (too_long || n == 0) {
+        if (n == 0) {
             break;
         }
         if (rows::starts_with(buf.data(), n, "utc  ")) {

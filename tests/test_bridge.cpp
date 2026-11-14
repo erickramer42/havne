@@ -2746,9 +2746,21 @@ TEST(BridgeTest, TextRowsShowTheirTextAndNeverPlot)
     EXPECT_TRUE(model.data(row0, SignalListModel::SubscribedRole).toBool());
     EXPECT_FALSE(model.data(row1, SignalListModel::SubscribedRole).toBool());
     EXPECT_EQ(model.subscribedCount(), 1);
-    model.toggleSubscribed(1);   /* nothing to plot: a no-op */
-    EXPECT_FALSE(model.data(row1, SignalListModel::SubscribedRole).toBool());
+    /* A text row's tick asks it (the default pick and a log take it) and
+     * never plots: the count and the chart leave it out */
+    int ticks = 0;
+    QObject::connect(&model, &SignalListModel::ticksChanged,
+                     [&ticks]() { ++ticks; });
+    model.toggleSubscribed(1);
+    EXPECT_EQ(ticks, 1);
+    EXPECT_TRUE(model.data(row1, SignalListModel::SubscribedRole).toBool());
     EXPECT_EQ(model.subscribedCount(), 1);
+    EXPECT_EQ(model.tickedCount(), 2) << "a log counts the ticked text row";
+    const QString textName =
+        model.data(row1, SignalListModel::NameRole).toString();
+    EXPECT_EQ(model.plottedNames(), QStringList{textName});
+    EXPECT_EQ(model.tickedIds(), std::vector<uint16_t>{2001});
+    EXPECT_EQ(model.plottedIds(), (std::vector<uint16_t>{1001, 2001}));
     EXPECT_FALSE(model.data(row1, SignalListModel::HasValueRole).toBool());
     EXPECT_EQ(model.data(row1, SignalListModel::TextRole).toString(), QString());
 
@@ -2770,6 +2782,184 @@ TEST(BridgeTest, TextRowsShowTheirTextAndNeverPlot)
     model.updateTexts({{uint16_t(1001), QStringLiteral("no")}}, 11);
     EXPECT_FALSE(model.data(row0, SignalListModel::HasValueRole).toBool());
     EXPECT_EQ(model.data(row0, SignalListModel::TextRole).toString(), QString());
+
+    /* A vehicle's choices tick it again; an untick is never kept for it,
+     * its default being unticked */
+    model.toggleSubscribed(1);
+    EXPECT_FALSE(model.data(row1, SignalListModel::SubscribedRole).toBool());
+    EXPECT_TRUE(model.tickedIds().empty());
+    model.setPlotChoices({textName}, {});
+    EXPECT_EQ(ticks, 3);
+    EXPECT_TRUE(model.data(row1, SignalListModel::SubscribedRole).toBool());
+    model.setPlotChoices({}, {textName});
+    EXPECT_FALSE(model.data(row1, SignalListModel::SubscribedRole).toBool());
+    EXPECT_TRUE(model.unplottedNames().isEmpty());
+    // A name in both lists is unplotted, a text row's never: it stays ticked
+    model.setPlotChoices({textName}, {textName});
+    EXPECT_TRUE(model.data(row1, SignalListModel::SubscribedRole).toBool());
+    EXPECT_EQ(model.tickedCount(), 2);
+}
+
+/* A set with no rows (raw, or none) ticks nothing: Start log goes by it */
+TEST(BridgeTest, AnEmptySetLeavesNoRowTicked)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    ASSERT_GT(model.tickedCount(), 0);
+    int changes = 0;
+    QObject::connect(&model, &SignalListModel::tickedCountChanged,
+                     [&changes]() { ++changes; });
+    model.setSignalSet(nullptr);
+    EXPECT_EQ(model.tickedCount(), 0);
+    EXPECT_EQ(changes, 1);
+
+    model.setSignalSet(&set);
+    ASSERT_GT(model.tickedCount(), 0);
+    ecuio_signal_set_t none = set;
+    none.count = 0;
+    model.setSignalSet(&none);
+    EXPECT_EQ(model.tickedCount(), 0);
+}
+
+/* The rows the focus leaves unasked (ecuio_session_get_unasked_signals)
+ * say so, and Live counts the ones it shows; a new set asks every row */
+TEST(BridgeTest, AnUnaskedRowSaysSoAndLiveCountsTheOnesItShows)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    int counted = 0;
+    QObject::connect(&model, &SignalListModel::unaskedCountChanged,
+                     [&counted]() { ++counted; });
+    const auto rowOf = [&model](uint16_t id) {
+        for (int r = 0; r < model.rowCount(); ++r) {
+            if (model.data(model.index(r), SignalListModel::IdRole).toUInt() ==
+                id) {
+                return model.index(r);
+            }
+        }
+        return QModelIndex();
+    };
+    const QModelIndex throttle = rowOf(ECUIO_OBD2_SIG_THROTTLE_ID);
+    const QModelIndex fuel = rowOf(ECUIO_OBD2_SIG_FUEL_LEVEL_ID);
+    const QModelIndex rpm = rowOf(ECUIO_OBD2_SIG_RPM_ID);
+    ASSERT_TRUE(throttle.isValid() && fuel.isValid() && rpm.isValid());
+    EXPECT_FALSE(model.data(throttle, SignalListModel::UnaskedRole).toBool());
+
+    model.applyUnasked(
+        {ECUIO_OBD2_SIG_THROTTLE_ID, ECUIO_OBD2_SIG_FUEL_LEVEL_ID});
+    EXPECT_TRUE(model.data(throttle, SignalListModel::UnaskedRole).toBool());
+    EXPECT_TRUE(model.data(fuel, SignalListModel::UnaskedRole).toBool());
+    EXPECT_FALSE(model.data(rpm, SignalListModel::UnaskedRole).toBool());
+    EXPECT_EQ(model.unaskedCount(), 2);
+    EXPECT_EQ(counted, 1);
+
+    /* A hidden row isn't Live's to count */
+    model.applyUnsupported({ECUIO_OBD2_SIG_FUEL_LEVEL_ID});
+    EXPECT_EQ(model.unaskedCount(), 1);
+
+    /* Each call judges afresh */
+    model.applyUnasked({ECUIO_OBD2_SIG_RPM_ID});
+    EXPECT_FALSE(model.data(throttle, SignalListModel::UnaskedRole).toBool());
+    EXPECT_TRUE(model.data(rpm, SignalListModel::UnaskedRole).toBool());
+    EXPECT_EQ(model.unaskedCount(), 1);
+
+    model.setSignalSet(ecuio_obd2_signal_set());
+    EXPECT_EQ(model.unaskedCount(), 0);
+    EXPECT_FALSE(
+        model.data(rowOf(ECUIO_OBD2_SIG_RPM_ID), SignalListModel::UnaskedRole)
+            .toBool());
+}
+
+/* The gauges the default pick adds: each cell's first ref the set has,
+ * found as SignalHub finds it (a key def that took a base def's place
+ * answers to the base's id: too), each once */
+TEST(BridgeTest, AGaugesPickIsItsCellsFirstRefTheSetHas)
+{
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    const auto cells = [](std::initializer_list<QStringList> lists) {
+        QVariantList out;
+        for (const QStringList& refs : lists) {
+            out.append(refs);
+        }
+        return out;
+    };
+    EXPECT_EQ(SessionBridge::gaugeIds(
+                  obd2, nullptr,
+                  cells({{QStringLiteral("key:none"), QStringLiteral("id:7006"),
+                          QStringLiteral("id:7003")},
+                         {},
+                         {QStringLiteral("id:99")},
+                         {QStringLiteral("id:7003")},
+                         {QStringLiteral("id:7006")}})),
+              (std::vector<uint16_t>{7006, 7003}));
+    EXPECT_TRUE(SessionBridge::gaugeIds(nullptr, nullptr,
+                                        cells({{QStringLiteral("id:7003")}}))
+                    .empty());
+
+    /* A file's RPM replaces obd2's and keeps its id; its own signal has
+     * a key alone */
+    const QByteArray text =
+        R"({"havne_signals":1,"name":"Pick","source":{"name":"t"},)"
+        R"("extends":"obd2","ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+        R"({"key":"rpm","name":"RPM","read":{"service":"22","number":"1E1C"},)"
+        R"("field":{"byte":0,"bits":16}},)"
+        R"({"key":"own","name":"Own","read":{"service":"22","number":"1E1D"},)"
+        R"("field":{"byte":0,"bits":8}}]})";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(text.constData(),
+                                     static_cast<size_t>(text.size()), &file),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(file);
+    const ecuio_signal_def_t* own = ecuio_signal_file_find(file, "own");
+    ASSERT_NE(own, nullptr);
+    EXPECT_EQ(SessionBridge::gaugeIds(set, file,
+                                      cells({{QStringLiteral("id:7003")},
+                                             {QStringLiteral("key:own")}})),
+              (std::vector<uint16_t>{ECUIO_OBD2_SIG_RPM_ID, own->id}));
+    EXPECT_EQ(SessionBridge::gaugeIds(set, file,
+                                      cells({{QStringLiteral("key:rpm")}})),
+              std::vector<uint16_t>{ECUIO_OBD2_SIG_RPM_ID});
+    EXPECT_TRUE(SessionBridge::gaugeIds(
+                    set, file, cells({{QStringLiteral("id:%1").arg(own->id)}}))
+                    .empty())
+        << "a file's own signal answers to its key alone";
+    ecuio_signal_file_free(file);
+}
+
+/* A session that asks nothing (the mock, under a profile that ranks its
+ * signals too) takes no default pick: no line, no row unasked, and its
+ * recording names no pick */
+TEST(BridgeTest, ASessionThatAsksNothingTakesNoPick)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    bridge.setPickGauges({QVariant(QStringList{QStringLiteral("id:7006")})});
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://demo?profile=obd2"))
+            .isEmpty());
+    bridge.signalModel()->toggleSubscribed(0);
+    spinLoop(400);
+    EXPECT_TRUE(
+        log.filter(QRegularExpression(QStringLiteral("^Asking "))).isEmpty())
+        << log.join('\n').toStdString();
+    EXPECT_EQ(bridge.signalModel()->unaskedCount(), 0);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QByteArray events =
+        readFile(root.path() + QLatin1Char('/') + folders[0] +
+                 QStringLiteral("/events.log"));
+    EXPECT_FALSE(events.contains("\npick  ")) << events.toStdString();
 }
 
 /* An enum row (ADR-0051) shows its label for the newest raw value, and
@@ -3889,6 +4079,47 @@ TEST(BridgeTest, AConnectsVinReachesQmlOnlyAsASaltedHash)
     EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty());
 }
 
+/* ADR-0027 section 3: the vehicle is known once 09 02 has answered, while
+ * the rest of the identification is still out. The fake holds every
+ * Service 0x22 request (7F 22 78, no answer), so the list's DIDs stay out
+ * about 5 s each and no identity line comes within the wait. */
+TEST(BridgeTest, TheVinIsTakenWhileTheRestOfTheIdentificationIsOut)
+{
+    FakeEnvArm hold("ECUIO_FAKE_HELD_SERVICE", "22");
+    SessionBridge bridge;
+    int identified = 0;
+    QObject::connect(&bridge, &SessionBridge::vehicleIdentified,
+                     [&identified]() { ++identified; });
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    // A bare URI runs obd2, which identifies
+    ASSERT_TRUE(
+        bridge
+            .connectSession(QStringLiteral("j2534://%1")
+                                .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH)))
+            .isEmpty());
+    ASSERT_TRUE(spinUntil([&identified]() { return identified > 0; }, 4000))
+        << "vehicleIdentified waited for the whole list:\n"
+        << log.join('\n').toStdString();
+    EXPECT_EQ(
+        bridge.vinKey(QStringLiteral("salt")),
+        QString::fromLatin1(
+            QCryptographicHash::hash(QByteArrayLiteral("saltFAKEJ2534VIN00001"),
+                                     QCryptographicHash::Sha256)
+                .toHex()));
+    EXPECT_EQ(log.filter(QRegularExpression(QStringLiteral("^VIN: "))).size(),
+              1);
+    EXPECT_TRUE(
+        log.filter(QRegularExpression(QStringLiteral("^ECU 0x7E8 identity: ")))
+            .isEmpty())
+        << "the list isn't complete, so no identity line yet";
+    spinLoop(300);
+    EXPECT_EQ(identified, 1) << "once a session";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_TRUE(bridge.vinKey(QStringLiteral("salt")).isEmpty());
+}
+
 /* ADR-0043: the "VIN:" line and Settings' lookup, one summary. The VINs
  * are made up around FAKE, their check digits by 49 CFR 565.15 */
 TEST(BridgeTest, AVinSummarySaysItsYearMakeAndCheckDigit)
@@ -4241,10 +4472,71 @@ bool onlyThese(const std::vector<uint8_t>& pids,
 
 } // namespace
 
+namespace {
+
+/* obd2's ranked PIDs (kPlotOrder): its default pick with nothing added */
+const std::vector<uint8_t> kRankedPids = {0x0C, 0x05, 0x0F, 0x10, 0x5C,
+                                          0x0D, 0x04, 0x0E, 0x06, 0x07,
+                                          0x0B, 0x42, 0x49, 0x44};
+
+std::vector<uint8_t> rankedAnd(std::initializer_list<uint8_t> more)
+{
+    std::vector<uint8_t> pids = kRankedPids;
+    pids.insert(pids.end(), more.begin(), more.end());
+    return pids;
+}
+
+bool onlyOf(const std::vector<uint8_t>& pids, const std::vector<uint8_t>& picks)
+{
+    return !pids.empty() &&
+           std::all_of(pids.begin(), pids.end(), [&picks](uint8_t pid) {
+               return std::find(picks.begin(), picks.end(), pid) != picks.end();
+           });
+}
+
+int modelRowOf(SignalListModel* model, uint16_t id)
+{
+    for (int r = 0; r < model->rowCount(); ++r) {
+        if (model->data(model->index(r), SignalListModel::IdRole).toUInt() ==
+            id) {
+            return r;
+        }
+    }
+    return -1;
+}
+
+bool unaskedRow(SignalListModel* model, uint16_t id)
+{
+    const int row = modelRowOf(model, id);
+    return row >= 0 &&
+           model->data(model->index(row), SignalListModel::UnaskedRole)
+               .toBool();
+}
+
+/* The first line starting with prefix, or -1 */
+int lineStarting(const QStringList& log, const QString& prefix)
+{
+    for (int i = 0; i < log.size(); ++i) {
+        if (log[i].startsWith(prefix)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+QString fakeObd2PickUri()
+{
+    return QStringLiteral(
+               "j2534://%1?profile=obd2&probe=0&identify=0&diagnose=0")
+        .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+}
+
+} // namespace
+
 /* Start log over the fake ECU (ADR-0056 sections 2 and 3): the session
  * asks the plotted PIDs alone, ticks on Live meanwhile leave that so,
  * the recording's time starts at Start (not at the connect), and Stop
- * asks the whole set again. */
+ * asks the default pick again, saying so. */
 TEST(BridgeTest, ALogAsksThePlottedPidsAlone)
 {
     FakeHooks hooks;
@@ -4290,15 +4582,23 @@ TEST(BridgeTest, ALogAsksThePlottedPidsAlone)
         EXPECT_TRUE(onlyThese(pids, {0x0C, 0x0D})) << "round " << round;
     }
 
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
     bridge.stopLog();
     ASSERT_EQ(stopped, QStringList{folder});
+    // The ticked rows are ranked ones: the pick is obd2's ranked PIDs
+    EXPECT_GT(lineStarting(log, QStringLiteral("Asking 14 signals: ")),
+              lineStarting(log, QStringLiteral("Log stopped: ")))
+        << log.join('\n').toStdString();
     ASSERT_TRUE(spinUntil(
         []() {
             const std::vector<uint8_t> pids = nextPids();
-            return !pids.empty() && !onlyThese(pids, {0x0C, 0x0D, 0x05});
+            return onlyOf(pids, kRankedPids) &&
+                   !onlyThese(pids, {0x0C, 0x0D, 0x05});
         },
         15000, 10))
-        << "the whole set never came back";
+        << "the default pick never came back";
     ASSERT_TRUE(disconnectAndWait(bridge));
 
     const QList<QByteArray> rows =
@@ -4349,6 +4649,273 @@ TEST(BridgeTest, AFocusCoreRefusesStartsNoLog)
     bridge.stopLog();
     ASSERT_TRUE(disconnectAndWait(bridge));
     EXPECT_EQ(recordingFolders(root.path()).size(), 1);
+}
+
+/* The default pick (ADR-0056 section 2's second use): from the start the
+ * session asks obd2's ranked PIDs and the gauges' signals, its line after
+ * the session's; the rest read "not asked"; a tick asks its row within a
+ * tick, and a gauge taken away stops asking its signal */
+TEST(BridgeTest, TheDefaultPickAsksTheRankedRowsTheGaugesAndTheTicks)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    // Set while disconnected: Throttle Position, which obd2 doesn't rank
+    bridge.setPickGauges({QVariant(
+        QStringList{QStringLiteral("id:9"), QStringLiteral("id:7006")})});
+    ASSERT_TRUE(bridge.connectSession(fakeObd2PickUri()).isEmpty());
+    const int session = lineStarting(log, QStringLiteral("Session: "));
+    const int asking = lineStarting(log, QStringLiteral("Asking "));
+    ASSERT_GE(asking, 0) << log.join('\n').toStdString();
+    EXPECT_GT(asking, session);
+    EXPECT_TRUE(log[asking].startsWith(QStringLiteral(
+        "Asking 15 signals: Engine Load, Coolant Temp, RPM, Vehicle Speed, "
+        "Intake Air Temp, Throttle Position, Battery Voltage")))
+        << log[asking].toStdString();
+    EXPECT_TRUE(log[asking].endsWith(QStringLiteral(" and 3 more")))
+        << log[asking].toStdString();
+    ASSERT_TRUE(spinUntil(
+        []() { return onlyOf(nextPids(), rankedAnd({0x11})); }, 15000, 10))
+        << "the rotation never kept to the pick";
+
+    SignalListModel* model = bridge.signalModel();
+    ASSERT_TRUE(spinUntil(
+        [&]() { return unaskedRow(model, ECUIO_OBD2_SIG_FUEL_LEVEL_ID); },
+        5000))
+        << "Fuel Level never read not asked";
+    EXPECT_FALSE(unaskedRow(model, ECUIO_OBD2_SIG_THROTTLE_ID));
+    EXPECT_FALSE(unaskedRow(model, ECUIO_OBD2_SIG_RPM_ID));
+    EXPECT_GT(model->unaskedCount(), 0);
+
+    // A tick asks the row
+    model->toggleSubscribed(modelRowOf(model, ECUIO_OBD2_SIG_FUEL_LEVEL_ID));
+    ASSERT_TRUE(spinUntil(
+        [&]() { return !unaskedRow(model, ECUIO_OBD2_SIG_FUEL_LEVEL_ID); },
+        5000))
+        << "the tick never asked Fuel Level";
+    EXPECT_GE(lineStarting(log, QStringLiteral("Asking 16 signals: ")), 0)
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(spinUntil(
+        []() {
+            const std::vector<uint8_t> pids = nextPids();
+            return onlyOf(pids, rankedAnd({0x11, 0x2F})) &&
+                   std::find(pids.begin(), pids.end(), 0x2F) != pids.end();
+        },
+        15000, 10))
+        << "Fuel Level's PID never went out";
+
+    // A gauge taken away stops asking its signal
+    bridge.setPickGauges({});
+    ASSERT_TRUE(spinUntil(
+        [&]() { return unaskedRow(model, ECUIO_OBD2_SIG_THROTTLE_ID); }, 5000))
+        << "Throttle Position stayed asked";
+    EXPECT_GE(lineStarting(log, QStringLiteral("Asking 15 signals: ")), 0);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A Record sessions recording of a session that asks names its default
+ * pick on a pick line, and the Recordings list calls it a session, not
+ * a log; a pick changed by a tick is core's pick line in the activity,
+ * and the Log page's "Asking" line is no note beside it */
+TEST(BridgeTest, ASessionRecordingNamesItsPickAndIsNoLog)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession(fakeObd2PickUri()).isEmpty());
+    spinLoop(500);
+    SignalListModel* model = bridge.signalModel();
+    model->toggleSubscribed(modelRowOf(model, ECUIO_OBD2_SIG_FUEL_LEVEL_ID));
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return lineStarting(log, QStringLiteral("Asking 15 signals: ")) >=
+                   0;
+        },
+        5000))
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QString folder = root.path() + QLatin1Char('/') + folders[0];
+    const QByteArray events = readFile(folder + QStringLiteral("/events.log"));
+    EXPECT_TRUE(events.contains("\npick  Engine Load,Coolant Temp,RPM,"))
+        << events.toStdString();
+    EXPECT_FALSE(events.contains("\nfocus  ")) << events.toStdString();
+    const int change = events.indexOf("  pick  15 signals: Engine Load,");
+    ASSERT_GE(change, 0) << events.toStdString();
+    EXPECT_GT(events.indexOf("Fuel Level", change), change);
+    EXPECT_FALSE(events.contains("note  Asking ")) << events.toStdString();
+    EXPECT_FALSE(
+        bridge.recordingRow(folder).value(QStringLiteral("log")).toBool());
+}
+
+/* A new minimum time between sweeps reaches the running session's pick
+ * (decided choice 4), though the picked signals stay the same, and Off
+ * takes it away again */
+TEST(BridgeTest, ANewMinimumTimeReachesTheRunningPick)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.connectSession(fakeObd2PickUri()).isEmpty());
+    ASSERT_GE(lineStarting(log, QStringLiteral("Asking 14 signals: ")), 0)
+        << log.join('\n').toStdString();
+    bridge.setMinSweepMs(250);
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return lineStarting(
+                       log, QStringLiteral("Asking 14 signals (at least 250 ms "
+                                           "between sweeps): ")) >= 0;
+        },
+        5000))
+        << log.join('\n').toStdString();
+    bridge.setMinSweepMs(0);
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return log.filter(QRegularExpression(
+                                  QStringLiteral("^Asking 14 signals: ")))
+                       .size() == 2;
+        },
+        5000))
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* Core paces only a focus, so a set that ranks none, asked whole, says a
+ * minimum doesn't apply to it, and says nothing of one while it's Off;
+ * the line says why, which core's own focus line doesn't, so a recording
+ * keeps it as a note */
+TEST(BridgeTest, TheWholeSetSaysAMinimumTimeDoesntApply)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri =
+        QStringLiteral("j2534://"
+                       "%1?profile=uds-generic&did=1E1C:u16&identify=0&"
+                       "diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    const QString ranksNone =
+        QStringLiteral("Asking every signal: the profile ranks none");
+    EXPECT_TRUE(log.contains(ranksNone)) << log.join('\n').toStdString();
+    bridge.setMinSweepMs(250);
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return log.contains(
+                ranksNone +
+                QStringLiteral(
+                    "; no minimum time between sweeps applies to it"));
+        },
+        5000))
+        << log.join('\n').toStdString();
+    bridge.setMinSweepMs(0);
+    ASSERT_TRUE(spinUntil([&]() { return log.count(ranksNone) == 2; }, 5000))
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QByteArray events =
+        readFile(root.path() + QLatin1Char('/') + folders[0] +
+                 QStringLiteral("/events.log"));
+    const QByteArray note = ("  note  " + ranksNone).toUtf8();
+    EXPECT_TRUE(events.contains(note + "\n") || events.contains(note + "\r\n"))
+        << events.toStdString();
+}
+
+/* A pick core refuses (under ?poll=0x2F none of the ranked PIDs is asked)
+ * leaves the session asking its whole set, and says why; a tick that
+ * gives the pick something to ask is taken. The lines say a polled
+ * session asks its polled signals, never the set */
+TEST(BridgeTest, APickCoreRefusesAsksTheWholeSet)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri =
+        QStringLiteral(
+            "j2534://%1?profile=obd2&poll=0x2F&identify=0&diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    EXPECT_TRUE(log.contains(QStringLiteral(
+        "Asking every polled signal: the focus leaves nothing to request: "
+        "none of the picked signals is asked on this session")))
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(
+        spinUntil([]() { return onlyThese(nextPids(), {0x2F}); }, 15000, 10));
+
+    SignalListModel* model = bridge.signalModel();
+    model->toggleSubscribed(modelRowOf(model, ECUIO_OBD2_SIG_FUEL_LEVEL_ID));
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return lineStarting(log, QStringLiteral(
+                                         "Picked 15 signals; ?poll= asks only "
+                                         "the polled ones among them: ")) >= 0;
+        },
+        5000))
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(
+        spinUntil([]() { return onlyThese(nextPids(), {0x2F}); }, 15000, 10));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+/* A pick the walk leaves with nothing to ask (the ECU lacks every ranked
+ * PID) gives way to the whole set, with core's words, and leaves no row
+ * unasked */
+TEST(BridgeTest, APickLeftWithNothingToAskAsksTheWholeSet)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    // Past the page's 31 characters: the environment, which the surrogate
+    // child takes at its spawn
+    EnvRestore restore("ECUIO_FAKE_WITHHELD_PIDS");
+    qputenv("ECUIO_FAKE_WITHHELD_PIDS",
+            "0C,05,0F,10,5C,0D,04,0E,06,07,0B,42,49,44");
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri =
+        QStringLiteral("j2534://%1?profile=obd2&identify=0&diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    EXPECT_GE(lineStarting(log, QStringLiteral("Asking 14 signals: ")), 0)
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return log.contains(QStringLiteral(
+                "Asking every signal: the focus leaves nothing to request: "
+                "none of the picked signals is asked on this session"));
+        },
+        15000))
+        << log.join('\n').toStdString();
+    SignalListModel* model = bridge.signalModel();
+    ASSERT_TRUE(spinUntil([&]() { return model->unaskedCount() == 0; }, 5000));
+    EXPECT_FALSE(unaskedRow(model, ECUIO_OBD2_SIG_FUEL_LEVEL_ID));
+    ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
 /* ADR-0051 section 3: a DID the fake ECU holds no reply for (it answers

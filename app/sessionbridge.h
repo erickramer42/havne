@@ -311,8 +311,12 @@ class SignalListModel : public QAbstractListModel
     Q_OBJECT
     // The plotted rows Live shows: hidden rows aren't counted
     Q_PROPERTY(int subscribedCount READ subscribedCount NOTIFY subscribedCountChanged)
+    // The ticked rows Live shows, text rows among them: what Start log asks
+    Q_PROPERTY(int tickedCount READ tickedCount NOTIFY tickedCountChanged)
     // The rows Live leaves out: unsupported or absent (rejudgeHidden)
     Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY hiddenCountChanged)
+    // The rows Live shows that the focus leaves unasked (applyUnasked)
+    Q_PROPERTY(int unaskedCount READ unaskedCount NOTIFY unaskedCountChanged)
 
 public:
     explicit SignalListModel(QObject* parent = nullptr);
@@ -401,7 +405,11 @@ public:
                          * which reads back as 0), so a layout file never
                          * stores an end as is. Notified with UnitRole. */
         RangeHighRole,
-        IsEnumRole /* the def's kind is ENUM. Fixed per signal set. */
+        IsEnumRole, /* the def's kind is ENUM. Fixed per signal set. */
+        UnaskedRole /* the session's focus leaves it unasked
+                     * (applyUnasked, ecuio_session_get_unasked_signals):
+                     * Live and the Dashboard say "not asked" in place of
+                     * a value */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -442,10 +450,15 @@ public:
     void updateTexts(const std::vector<std::pair<uint16_t, QString>>& texts,
                      qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
+    int tickedCount() const { return m_tickedCount; }
     int hiddenCount() const { return m_hiddenCount; }
-    // The ids of the rows the chart plots and Live shows, in the model's
-    // order: subscribedCount of them, the focus Start log asks
+    // The ids of the ticked rows Live shows, in the model's order: the
+    // rows the chart plots (subscribedCount of them) and the ticked text
+    // rows, the focus Start log asks
     std::vector<uint16_t> plottedIds() const;
+    // The rows the user ticked past their default, text rows among them,
+    // in the model's order: the default pick adds them to the ranked ones
+    std::vector<uint16_t> tickedIds() const;
     // Each number's and enumeration's newest value as core decoded it
     // (the def's unit, an enumeration's raw number; never the display's
     // conversion), aged by the model's clock from the window that brought
@@ -474,6 +487,12 @@ public:
         QString code;  // "7F 22 31"
     };
     void applyRefused(const std::vector<Refusal>& refused);
+    // The signals the session's focus leaves unasked
+    // (ecuio_session_get_unasked_signals): those rows say "not asked".
+    // Each call judges every row afresh; a new set leaves none unasked.
+    void applyUnasked(const std::vector<uint16_t>& ids);
+    // The unasked rows Live shows, for its "N signals not asked" line
+    int unaskedCount() const { return m_unaskedCount; }
 
     // Display units (ADR-0022): rows and history keep the decoded value;
     // value, unit, decimals and chartData() convert on the way out
@@ -488,13 +507,14 @@ public:
     static constexpr int DefaultPlotted = 6;
 
     // A tick or untick on Live. One that matches the row's default
-    // clears the row's choice, so the row follows its default again.
+    // clears the row's choice, so the row follows its default again. A
+    // text row's tick asks it (the default pick takes it) and never plots.
     Q_INVOKABLE void toggleSubscribed(int row);
-    // A vehicle's plotted signals (ADR-0027 section 1): the names of the
-    // numeric rows the user ticked past the default and unticked from
-    // it, and setting both, which leaves every other numeric row to its
-    // default. A name in both lists is unplotted. Text rows are never
-    // plotted or listed.
+    // A vehicle's ticked signals (ADR-0027 section 1): the names of the
+    // rows the user ticked past the default and of the numeric rows
+    // unticked from it, and setting both, which leaves every other row to
+    // its default. A name in both lists is unplotted; a text row is never
+    // unplotted, its default being unticked.
     Q_INVOKABLE QStringList plottedNames() const;
     Q_INVOKABLE QStringList unplottedNames() const;
     Q_INVOKABLE void setPlotChoices(const QStringList& plotted, const QStringList& unplotted);
@@ -520,7 +540,12 @@ public:
 signals:
     void valuesUpdated();
     void subscribedCountChanged();
+    void tickedCountChanged();
     void hiddenCountChanged();
+    void unaskedCountChanged();
+    // A tick or untick, or a vehicle's choices set: the default pick
+    // follows them
+    void ticksChanged();
 
 private:
     struct Sample {
@@ -547,6 +572,7 @@ private:
         bool unsupported = false; // core: its ECU doesn't support it
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
+        bool unasked = false;     // core: the focus leaves it unasked
         QString refused;          // its ECU's refusal in words, or ""
         QString refusedCode;      // its reply's bytes, or ""
         uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
@@ -574,6 +600,8 @@ private:
     // Hidden is unsupported or absent: re-judges every row, and notifies
     // the rows that changed, the hidden count and the plotted count
     void rejudgeHidden();
+    // The unasked rows Live shows; notifies a change
+    void recountUnasked();
     // Each row's default and so its subscribed state, and the plotted
     // count; notifies the rows that changed and the count. Run after
     // anything that moves the defaults: a new set, hidden or refused
@@ -593,7 +621,9 @@ private:
     // A set's ids are unique (the validator refuses a duplicate).
     QHash<uint16_t, int> m_rowOfId;
     int m_subscribedCount = 0;
+    int m_tickedCount = 0;
     int m_hiddenCount = 0;
+    int m_unaskedCount = 0;
     bool m_ranked = false;      // the set ranks a def (plot_rank)
     uint32_t m_units = ECUIO_UNITS_METRIC;
     HostElapsedTimer m_clock;   // fallback stamps; restarted in setSignalSet
@@ -720,11 +750,17 @@ class SessionBridge : public QObject
     // Applies to what the UI shows at once, connected or not; recordings
     // keep the decoded values. Main.qml persists it.
     Q_PROPERTY(int unitSystem READ unitSystem WRITE setUnitSystem NOTIFY unitSystemChanged)
-    // A log's minimum time between sweeps (ADR-0056 section 4), ms, 0 off;
-    // Settings' Advanced page and Main.qml, which keeps it
+    // The minimum time between sweeps (ADR-0056 section 4) of a log and of
+    // the default pick, ms, 0 off; Settings' Advanced page and Main.qml,
+    // which keeps it
     Q_PROPERTY(int minSweepMs READ minSweepMs WRITE setMinSweepMs NOTIFY
                    minSweepMsChanged)
     Q_PROPERTY(QVariantList minSweepChoices READ minSweepChoices CONSTANT)
+    // The Dashboard's cells for the default pick: one list of refs per cell
+    // (DashboardPage's lookupRefs, a blank cell's empty), every page of the
+    // form. Main sets it, connected or not, so a start's pick has them.
+    Q_PROPERTY(QVariantList pickGauges READ pickGauges WRITE setPickGauges
+                   NOTIFY pickGaugesChanged)
     // What each channel's ECU has reported of its diagnostics (ADR-0037),
     // one map per ECU (diagnosticsEntry), for the Diagnostics page:
     // refreshed on the tick as a read settles each item, and when the
@@ -1085,6 +1121,13 @@ public:
     void setUnitSystem(int units);   // anything but 0 or 1 is ignored
     int minSweepMs() const { return m_minSweepMs; }
     void setMinSweepMs(int ms); // anything but a choice is ignored
+    QVariantList pickGauges() const { return m_pickGauges; }
+    void setPickGauges(const QVariantList& cells);
+    // Each cell's first ref the set answers to (a key def's "id:<n>" too),
+    // in the cells' order, each once; file is the set's (fileOfSet)
+    static std::vector<uint16_t> gaugeIds(const ecuio_signal_set_t* set,
+                                          const ecuio_signal_file_t* file,
+                                          const QVariantList& cells);
     QVariantList minSweepChoices() const;
     // A quantity in a decoded unit, as the current unit system shows it:
     // the Dashboard's scale ends and zones are written once, in decoded
@@ -1246,6 +1289,7 @@ signals:
     void logStopped(const QString& folder, bool byUser);
     void unitSystemChanged();
     void minSweepMsChanged();
+    void pickGaugesChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
     void refusedUnnamedChanged();
@@ -1304,6 +1348,7 @@ private:
     // An activity line core's recording writes in its own form (a link
     // transition, a sleep): shown, never noted
     void logUnnoted(const QString& line);
+    void writePickLine();
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
     void notifyFrameCounts();   // GUI thread: frameCount and guiNotifyCount, if they moved
     void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
@@ -1462,10 +1507,33 @@ private:
     // read each tick into m_absentRead (sized at connect), handed to the
     // model when they differ from m_absentIds
     void pollAbsentSignals();
+    // Sets the default pick (cli/default_pick.h), with the ticks once the
+    // model holds the set; false when a log or no asking leaves it alone
+    bool applyDefaultPick(ecuio_session_t* session, bool withTicks, bool again);
+    // Each tick: a pick owed is set, and one whose requests the walk
+    // dropped since is set again, so core judges if it still asks anything
+    void pollDefaultPick();
+    // Live's "not asked" rows, read each tick into m_unaskedRead (sized at
+    // connect), handed to the model when the list changes
+    void pollUnaskedSignals();
+    QVariantList m_pickGauges;
+    std::vector<uint16_t> m_pickIds; // the pick set last, [] none
+    bool m_pickSet = false;          // a pick, or the whole set, applied
+    int m_pickMinSweepMs = 0;        // the minimum it was set with
+    bool m_pickPolled = false;       // the URI names poll=
+    bool m_pickDirty = false;        // the ticks, gauges or minimum moved
+    bool m_pickLinePending = false;  // startSession's line, not yet out
+    QString m_pickLine;              // the activity line last written
+    bool m_pickLineCore = false;     // core's recorder writes it itself
+    uint64_t m_pickDropped = 0;      // the reports' drops at the last set
+    std::vector<uint16_t> m_unaskedRead;
+    std::vector<uint16_t> m_unaskedIds;
     std::vector<uint16_t> m_absentRead;
     std::vector<uint16_t> m_absentIds;
     // What each channel's ECU said it is (ADR-0021), logged once complete
     void pollChannelIdentity();
+    // Channel 0's VIN into m_vin once core has it in (ECUIO_IDENTITY_VIN)
+    void takeVin(const ecuio_channel_identity_t& s);
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     void pollSleep();       // the tick: "Asleep for N s" after a sleep
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
@@ -1507,7 +1575,7 @@ private:
     qint64 m_logElapsedMs = 0;         // the last log's, once it ends
     qint64 m_logBytes = 0;             // countLogBytes' last sum
     QString m_logNotice;               // the header's line about the log
-    int m_minSweepMs = 0;              // read at each Start log
+    int m_minSweepMs = 0;              // a log's and the default pick's
     QTimer* m_logTimer = nullptr;      // the readout's second
     QString m_recordingsRoot;          // empty: Documents/Havne/recordings
     QString m_earlierRecordingsRoot;   // empty: the earlier name's folder

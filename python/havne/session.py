@@ -430,6 +430,30 @@ class Session:
                                                min_sweep_ms, flags),
               "ecuio_session_set_focus_with")
 
+    def ranked_signals(self, added=()):
+        """The session's default pick as the app and havne-cli's --pick
+        ranked make it (cli/default_pick.h): the set's ranked signals
+        (plot_rank nonzero; a text or hex signal's rank isn't counted) and
+        the ids or names added, in the set's order, each once. Empty when
+        the set ranks none (an empty pick sets no focus, and the whole set
+        is asked) and on a session that asks nothing (the mock, a replay, a
+        listening session), where neither front end sets a pick. A name
+        the set lacks is a KeyError, as in set_focus. Pass a list that
+        isn't empty to set_focus(..., default_pick=True)."""
+        extra = {self._signal_id(s, "the session's set") for s in added}
+        if not self.info.flags & e.ECUIO_SESSION_INFO_REQUESTS:
+            return []
+        sset = lib.ecuio_session_signal_set(self._handle())
+        if not sset:
+            return []
+        defs = [sset.contents.defs[i] for i in range(sset.contents.count)]
+
+        def ranked(d):
+            return d.plot_rank != 0 and d.kind not in TEXT_KINDS
+        if not any(ranked(d) for d in defs):
+            return []
+        return [d.id for d in defs if ranked(d) or d.id in extra]
+
     def _listed(self, getter, name):
         """The ids a count-and-buffer getter lists (capacity 0 asks the
         count; a list that grew between the two calls is read again)"""
@@ -518,9 +542,13 @@ class Session:
         return out
 
     def vin(self, channel=0):
-        """The channel's VIN, "" until identification reads one"""
-        buf = ctypes.create_string_buffer(e.ECUIO_VIN_TEXT_LEN)
+        """The channel's VIN, "" until core has it in (ECUIO_IDENTITY_VIN:
+        09 02 answered with one, or F190 did once 09 02 settled), which
+        may be long before the rest of the identification is complete"""
         ident = self.identity(channel)
+        if not ident.flags & e.ECUIO_IDENTITY_VIN:
+            return ""
+        buf = ctypes.create_string_buffer(e.ECUIO_VIN_TEXT_LEN)
         check(lib.ecuio_identity_vin(ctypes.byref(ident), buf, len(buf)), "ecuio_identity_vin")
         return text(buf.raw)
 

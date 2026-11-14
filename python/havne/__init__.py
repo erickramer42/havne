@@ -27,7 +27,7 @@ from .export import (Estimate, EstimatedSize, Exported, LeftOut, estimate_csv, e
 from .health import HealthReport, health_report
 from .lookup import DtcTitle, VinInfo, decode_vin, dtc_title
 from .sim import Reply, Sim
-from .signals import Gauge, Plugin, SignalFile
+from .signals import Gauge, Plugin, PutVariant, SignalFile, Source
 from .conditions import (Alert, Binding, Checks, Condition, ConditionEvent, ConditionSet,
                          ConditionState, Record, Resolved, Term)
 from . import _ecuio as c
@@ -42,7 +42,7 @@ __all__ = [
     "export_pcapng", "export_csv", "export_folder", "Exported", "LeftOut",
     "estimate_csv", "Estimate", "EstimatedSize", "health_report", "HealthReport",
     "decode_vin", "VinInfo", "dtc_title", "DtcTitle",
-    "Sim", "Reply", "SignalFile", "Plugin", "Gauge",
+    "Sim", "Reply", "SignalFile", "Plugin", "Gauge", "Source", "PutVariant",
     "ConditionSet", "Condition", "Term", "Alert", "Record", "Checks", "Binding", "Resolved",
     "ConditionEvent", "ConditionState",
 ]

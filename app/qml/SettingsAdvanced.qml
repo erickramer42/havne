@@ -36,8 +36,8 @@ ColumnLayout {
         }
     }
 
-    // A log's minimum time between sweeps (ADR-0056 section 4), read at
-    // each Start log; Main.qml stores it
+    // The minimum time between sweeps (ADR-0056 section 4): a requesting
+    // session's pick and its logs take it at once; Main.qml stores it
     RowLayout {
         Layout.fillWidth: true
         spacing: Theme.spacing
@@ -54,7 +54,7 @@ ColumnLayout {
             implicitHeight: Math.max(implicitBackgroundHeight + topInset + bottomInset,
                                      implicitContentHeight + topPadding + bottomPadding,
                                      implicitIndicatorHeight + topPadding + bottomPadding, Theme.touchTarget)
-            Accessible.name: qsTr("Minimum time between a log's sweeps")
+            Accessible.name: qsTr("Minimum time between sweeps")
             model: Bridge.minSweepChoices.map(ms => ms === 0 ? qsTr("Off") : qsTr("%1 ms").arg(ms))
             currentIndex: Bridge.minSweepChoices.indexOf(Bridge.minSweepMs)
             onActivated: index => {
@@ -65,7 +65,7 @@ ColumnLayout {
     }
     Label {
         objectName: "minSweepNote"
-        text: qsTr("For a slow adapter or a busy ECU: a log asks its signals no more often than this. It isn't for file size, which the export sets.")
+        text: qsTr("For a slow adapter or a busy ECU: a session asks the signals it picks no more often than this, on Live, the Dashboard and in a log, so values update that slowly too. A session asking every signal (its profile ranks none) isn't held to it. It isn't for file size, which the export sets.")
         color: Theme.textDim
         wrapMode: Text.WordWrap
         Layout.fillWidth: true

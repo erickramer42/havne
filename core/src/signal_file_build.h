@@ -42,6 +42,8 @@ struct ecuio_signal_file {
     /* A plugin variant's "<id>,<version>,<variant>", a recording's plugin
      * line (ADR-0052 section 4); "" for a file loaded alone */
     std::string plugin;
+    /* Its "source", or a variant's own (ecuio_signal_file_source) */
+    ecuio_signal_source_t source{};
 };
 
 namespace ecuio_sf {
@@ -84,6 +86,17 @@ void build(const parts& in, ecuio_signal_file& f);
 
 /* A "source" block's rules */
 void read_source(const ecuio_json::Value& source);
+
+/* A "source" read_source took, as ecuio_signal_file_source gives it */
+void take_source(const ecuio_json::Value& source, ecuio_signal_source_t& out);
+
+/* Whether a license names Creative Commons' share-alike (signals.h's
+ * ECUIO_SOURCE_SHARE_ALIKE rule) */
+bool share_alike(const std::string& license);
+
+/* An "ecus" entry's addresses, the entry one a load took: its rx, and
+ * its tx as given or the standard's for that rx */
+void ecu_addresses(const ecuio_json::Value& ecu, uint32_t* rx, uint32_t* tx);
 
 /* The loader's rules for any JSON it reads, each throwing refused */
 [[noreturn]] void refuse(const ecuio_json::Value& at, std::string words);
