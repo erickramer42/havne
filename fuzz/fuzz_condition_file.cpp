@@ -293,20 +293,50 @@ void check_events(const ecuio_condition_eval& e, uint32_t n, uint64_t now_us)
 /* Section 2's rules once more, written plainly, to hold the evaluator
  * to: every term of every condition is read at every frame and every
  * deadline is looked for from scratch, with no index, no list of what
- * changed and nothing kept between frames but the samples and the
- * states. It is built from the set's public getters alone. */
+ * changed and nothing kept between frames but the samples, their pace
+ * and the states. It is built from the set's public getters alone. */
 struct reference {
     struct term {
         uint32_t test = 0;
         double level = 0.0;
         double clear = 0.0;
         bool has_clear = false;
-        uint64_t max_age_us = 0;
+        uint64_t max_age_us = 0; /* its own; 0: its signal's pace */
         uint32_t signal_id = 0;
-        bool judged = false; /* sampled, and within its age bound */
+        bool sampled = false; /* its signal, since the start */
+        bool judged = false;  /* sampled, and within its age bound */
         bool truth = false;
         double value = 0.0;
         uint64_t time_us = 0;
+        /* Its signal's pace, which every term on the signal follows
+         * alike: the gaps' running average (0 is none yet) and the time
+         * a sample is fresh to */
+        uint64_t mean_us = 0;
+        uint64_t fresh_until_us = 0;
+
+        uint64_t expiry() const
+        {
+            return max_age_us != 0 ? time_us + max_age_us : fresh_until_us;
+        }
+        /* A sample at now_us: three times the larger of its gap (counted
+         * up to the longest max_age) and the gaps' average, each gap
+         * weighted a quarter, from ECUIO_VALUE_STALE_US to three times
+         * that longest */
+        void pace(uint64_t now_us)
+        {
+            uint64_t gap = 0;
+            if (sampled) {
+                gap = std::min<uint64_t>(now_us - time_us,
+                                         ECUIO_COMPUTED_MAX_AGE_US);
+                mean_us = mean_us == 0 ? gap : (3 * mean_us + gap) / 4;
+            }
+            fresh_until_us =
+                now_us + std::max<uint64_t>(
+                             ECUIO_VALUE_STALE_US,
+                             std::min<uint64_t>(3 * ECUIO_COMPUTED_MAX_AGE_US,
+                                                3 * std::max(gap, mean_us)));
+            sampled = true;
+        }
     };
     struct condition {
         bool available = false;
@@ -368,8 +398,7 @@ struct reference {
                 c.terms[k].level = t.level;
                 c.terms[k].clear = t.clear;
                 c.terms[k].has_clear = (t.flags & ECUIO_TERM_HAS_CLEAR) != 0;
-                c.terms[k].max_age_us =
-                    t.max_age_us != 0 ? t.max_age_us : ECUIO_VALUE_STALE_US;
+                c.terms[k].max_age_us = t.max_age_us;
                 c.terms[k].signal_id = bound.signal_id[k];
             }
         }
@@ -477,8 +506,8 @@ struct reference {
                 uint32_t who = 0;
                 for (uint32_t k = 0; k < c.term_count; ++k) {
                     const term& t = c.terms[k];
-                    if (t.judged && t.time_us + t.max_age_us < oldest) {
-                        oldest = t.time_us + t.max_age_us;
+                    if (t.judged && t.expiry() < oldest) {
+                        oldest = t.expiry();
                         who = k;
                     }
                 }
@@ -519,6 +548,7 @@ struct reference {
                     if (truth != t.truth || !t.judged) {
                         changed |= 1u << k;
                     }
+                    t.pace(now_us);
                     t.truth = truth;
                     t.judged = true;
                     t.value = v.value;
@@ -575,6 +605,13 @@ struct reference {
             check(s.flags == (!c.available ? ECUIO_CONDITION_UNAVAILABLE
                               : c.stale    ? ECUIO_CONDITION_STALE
                                            : 0u));
+            /* The terms whose signal has a sample, which a session's why
+             * reads */
+            uint32_t sampled = 0;
+            for (uint32_t k = 0; c.available && k < c.term_count; ++k) {
+                sampled |= c.terms[k].sampled ? 1u << k : 0u;
+            }
+            check(e.sampled_terms(i) == sampled);
         }
     }
 };
@@ -607,9 +644,9 @@ void judge_set(const ecuio_condition_set_t* set,
     if (a->terms.empty()) {
         return;
     }
-    static const uint32_t kSteps[] = {0,       1,       999,     50000,
-                                      250000,  1000000, 2999999, 3000000,
-                                      3000001, 9000000, 61000000};
+    static const uint32_t kSteps[] = {0,       1,       999,      50000,
+                                      250000,  1000000, 2999999,  3000000,
+                                      3000001, 9000000, 61000000, 180000001};
     made_up r{seed | 1};
     uint64_t now = 1000000;
     static canon sparse_events;
