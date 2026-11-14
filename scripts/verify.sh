@@ -5,6 +5,7 @@
 #
 # Usage: scripts/verify.sh [--tests-only | --build-only] [--no-cross]
 #                          [--no-devices] [-R <ctest regex> | --suite <names>]
+#        scripts/verify.sh --cross-only [--no-devices]
 #        scripts/verify.sh --changed [base] [--no-devices]
 #        either with --dry-run: print the plan and run nothing
 #
@@ -42,6 +43,11 @@
 # --build-only runs win32 and build and stops: fresh binaries without the
 # suite, for a machine that only runs them (the laptop at the car).
 #
+# --cross-only runs win32, build and the cross-arch step alone: the half of
+# a branch's verify that CI never runs. It writes no stamp, takes no other
+# scope (-R, --suite, --changed, --tests-only, --build-only, --no-cross) and
+# needs build-win32; --no-devices changes nothing, as no device is read.
+#
 # --suite Bridge,Qml,c_abi runs the named suites: BridgeTest.*, QmlTest.*
 # and c_abi, a single test. A name that matches no test fails.
 #
@@ -76,12 +82,14 @@ suites=""
 changed=0
 base=""
 dry=0
+cross_only=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --tests-only) tests_only=1 ;;
         --build-only) build_only=1 ;;
         --no-cross) cross=0 ;;
         --no-devices) devices=0 ;;
+        --cross-only) cross_only=1 ;;
         -R) regex="${2:-}"; shift ;;
         --suite) have_suite=1; suites="${2:-}"; shift ;;
         --changed)
@@ -105,10 +113,18 @@ if [ "$changed" = 1 ] && { [ "$tests_only" = 1 ] || [ "$build_only" = 1 ] || [ "
     usage_error "--changed picks the steps itself: it takes only a base, --no-devices and --dry-run"
 fi
 
+if [ "$cross_only" = 1 ] && { [ "$tests_only" = 1 ] || [ "$build_only" = 1 ] || [ "$cross" = 0 ] \
+        || [ -n "$regex" ] || [ "$have_suite" = 1 ] || [ "$changed" = 1 ]; }; then
+    usage_error "--cross-only runs win32, build and cross-arch: it takes only --no-devices and --dry-run"
+fi
+
 windows=0
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) windows=1 ;; esac
 have_win32=0
 [ "$windows" = 1 ] && [ -d build-win32 ] && have_win32=1
+if [ "$cross_only" = 1 ] && [ "$have_win32" = 0 ]; then
+    usage_error "--cross-only needs Windows and a configured build-win32"
+fi
 
 python_cmd() {
     local p
@@ -153,6 +169,7 @@ do_win32=1
 do_build=1
 do_tests=1
 do_cross=1
+do_main=1
 scope=""
 plan=""
 plan_reason=""
@@ -186,6 +203,7 @@ fi
 [ "$tests_only" = 1 ] && { do_win32=0; do_build=0; add_scope "--tests-only"; }
 [ "$build_only" = 1 ] && { do_tests=0; do_cross=0; add_scope "--build-only"; }
 [ "$cross" = 0 ] && { do_cross=0; add_scope "--no-cross"; }
+[ "$cross_only" = 1 ] && { do_main=0; add_scope "--cross-only"; }
 if [ "$have_suite" = 1 ]; then
     do_cross=0
     add_scope "--suite $suites"
@@ -193,20 +211,20 @@ elif [ "$changed" = 0 ] && [ -n "$regex" ]; then
     do_cross=0
     add_scope "-R $regex"
 fi
-[ "$windows" = 1 ] && [ "$devices" = 0 ] && add_scope "--no-devices"
+[ "$windows" = 1 ] && [ "$devices" = 0 ] && [ "$cross_only" = 0 ] && add_scope "--no-devices"
 
 # What a scoped run left out, for its last line
 skipped=""
 add_skipped() { skipped="${skipped:+$skipped, }$1"; }
 [ "$have_win32" = 1 ] && [ "$do_win32" = 0 ] && add_skipped win32
 [ "$do_build" = 0 ] && add_skipped build
-if [ "$do_tests" = 0 ]; then
+if [ "$do_tests" = 0 ] || [ "$do_main" = 0 ]; then
     add_skipped "the suite"
 elif [ -n "$regex" ]; then
     add_skipped "the suite outside $regex"
 fi
 [ "$have_win32" = 1 ] && [ "$do_cross" = 0 ] && add_skipped cross-arch
-[ "$windows" = 1 ] && [ "$devices" = 0 ] && add_skipped "the J2534 device check"
+[ "$windows" = 1 ] && [ "$devices" = 0 ] && [ "$cross_only" = 0 ] && add_skipped "the J2534 device check"
 
 note() { printf '%-11s %s\n' "$1" "$2"; }
 
@@ -231,7 +249,7 @@ if [ "$dry" = 1 ]; then
     run_or_skip() { if [ "$2" = 1 ]; then note "$1" "run${3:+: $3}"; else note "$1" skip; fi; }
     [ "$have_win32" = 1 ] && run_or_skip win32 "$do_win32"
     run_or_skip build "$do_build"
-    run_or_skip ctest "$do_tests" "${regex:-the whole suite}"
+    run_or_skip ctest "$do_main" "${regex:-the whole suite}"
     [ "$have_win32" = 1 ] && run_or_skip cross-arch "$do_cross"
     { [ -n "$scope" ] || [ "$changed" = 1 ]; } && tidy_line
     [ -n "$scope" ] && note skipped "${skipped:-nothing}"
@@ -340,23 +358,25 @@ if [ "$do_build" = 1 ]; then
 fi
 [ "$do_tests" = 0 ] && exit 0
 
-if [ "$windows" = 1 ] && [ "$devices" = 1 ]; then
-    export ECUIO_EXPECT_J2534_DEVICES=1
-fi
 jobs=${HAVNE_VERIFY_JOBS:-8}
-if [ -n "$suite_each" ]; then
-    registered=$(ctest --test-dir build -C Release -N | sed -nE 's/^ *Test +#[0-9]+: //p' | tr -d '\r')
-    while IFS=$'\t' read -r name one; do
-        grep -qE "$one" <<< "$registered" || usage_error "--suite: no test in build matches $name"
-    done <<< "$suite_each"
+if [ "$do_main" = 1 ]; then
+    if [ "$windows" = 1 ] && [ "$devices" = 1 ]; then
+        export ECUIO_EXPECT_J2534_DEVICES=1
+    fi
+    if [ -n "$suite_each" ]; then
+        registered=$(ctest --test-dir build -C Release -N | sed -nE 's/^ *Test +#[0-9]+: //p' | tr -d '\r')
+        while IFS=$'\t' read -r name one; do
+            grep -qE "$one" <<< "$registered" || usage_error "--suite: no test in build matches $name"
+        done <<< "$suite_each"
+    fi
+    if [ -n "$regex" ]; then
+        run ctest ctest --test-dir build -C Release -j "$jobs" --output-on-failure --no-tests=error -R "$regex"
+    else
+        run ctest ctest --test-dir build -C Release -j "$jobs" --output-on-failure --no-tests=error
+    fi
+    [ "$rc" = 0 ] || ctest_failed ctest
+    line ctest ok "$dur" "$(ctest_summary "$LOGDIR/ctest.log")"
 fi
-if [ -n "$regex" ]; then
-    run ctest ctest --test-dir build -C Release -j "$jobs" --output-on-failure --no-tests=error -R "$regex"
-else
-    run ctest ctest --test-dir build -C Release -j "$jobs" --output-on-failure --no-tests=error
-fi
-[ "$rc" = 0 ] || ctest_failed ctest
-line ctest ok "$dur" "$(ctest_summary "$LOGDIR/ctest.log")"
 
 if [ "$do_cross" = 1 ] && [ "$have_win32" = 1 ]; then
     ECUIO_SURROGATE_EXE="$(cygpath -m "$PWD")/build-win32/surrogate/Release/ecuio-j2534-surrogate.exe"
