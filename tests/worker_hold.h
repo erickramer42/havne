@@ -9,7 +9,9 @@
 // would race on both. Register it before the hold; it must outlive the
 // session's close (the callback's user data), and the hold must end
 // before the close, which joins the worker: declare a WorkerHold::Release
-// after the session.
+// after the session. The parked worker has taken the set: attach before
+// the hold. An attach while it holds leaves the parked frame to the set
+// before, and a second frees that set under the worker.
 
 #ifndef ECUIO_TESTS_WORKER_HOLD_H
 #define ECUIO_TESTS_WORKER_HOLD_H
@@ -49,13 +51,17 @@ struct WorkerHold {
         return ecuio_register_frame_callback(s, &WorkerHold::on_frame, this);
     }
 
-    /* True once the worker is parked, within ms */
+    /* True once the worker is parked, within ms; false disarmed */
     bool hold(int ms)
     {
         std::unique_lock<std::mutex> lock(m);
         armed = true;
-        return cv.wait_for(lock, std::chrono::milliseconds(ms),
-                           [this] { return parked; });
+        if (!cv.wait_for(lock, std::chrono::milliseconds(ms),
+                         [this] { return parked; })) {
+            armed = false;
+            return false;
+        }
+        return true;
     }
 
     void release()

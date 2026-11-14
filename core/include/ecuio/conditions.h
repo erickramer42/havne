@@ -308,7 +308,8 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
  * The bound is the term's max_age, or else its signal's pace: three
  * times the larger of the last gap between its samples and the gaps'
  * running average (each new gap weighted a quarter, the first its
- * start), from ECUIO_VALUE_STALE_US to ECUIO_COMPUTED_MAX_AGE_US, and
+ * start, each counted up to ECUIO_COMPUTED_MAX_AGE_US), from
+ * ECUIO_VALUE_STALE_US to three times ECUIO_COMPUTED_MAX_AGE_US, and
  * ECUIO_VALUE_STALE_US alone before a second sample. So a slow sweep
  * isn't STALE between its samples, and a signal that stops still is.
  * A value that is no number (a NaN) is no sample; an infinity is one.
@@ -330,8 +331,13 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
                                             the state is the one kept */
 #define ECUIO_CONDITION_FIRED       0x2u /* an event's alone: this change
                                             is OFF to ON */
-#define ECUIO_CONDITION_UNAVAILABLE 0x4u /* a state's alone: never judged
-                                            on this session; why says why */
+#define ECUIO_CONDITION_UNAVAILABLE 0x4u /* a state's alone: the session
+                                            can't judge it to ON, and why
+                                            says why: a bind's reason
+                                            (never judged), or the states'
+                                            getter's NOT_RECEIVED, which
+                                            comes and goes while the
+                                            condition's events still come */
 #define ECUIO_CONDITION_HELD        0x8u /* a recording's event alone: the
                                             state the condition stood in
                                             when the recording began, no

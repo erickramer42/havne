@@ -813,6 +813,60 @@ TEST(ConditionSessionTest,
     EXPECT_EQ(sampled.why, ECUIO_CONDITION_WHY_NONE);
 }
 
+/* ecuio_session_test_after_dispatch_takes for a scope */
+struct AfterTakes {
+    AfterTakes(void (*hook)(void*), void* user)
+    {
+        ecuio_session_test_after_dispatch_takes(hook, user);
+    }
+    ~AfterTakes() { ecuio_session_test_after_dispatch_takes(nullptr, nullptr); }
+    AfterTakes(const AfterTakes&) = delete;
+    AfterTakes& operator=(const AfterTakes&) = delete;
+};
+
+/* Attaches a set whose condition 0 reads fuel pressure, once */
+struct AttachFuel {
+    ecuio_session_t* s = nullptr;
+    ecuio_status_t status = ECUIO_ERR_INVALID_ARGUMENT;
+    bool done = false;
+    static void run(void* user)
+    {
+        auto* a = static_cast<AttachFuel*>(user);
+        if (!a->done) {
+            a->done = true;
+            a->status = attach(a->s, condition(0, fuel_pressure()));
+        }
+    }
+};
+
+/* A frame taken by the set before an attach marks nothing in the newer
+ * attach's states: engine speed is a first sample for that set's
+ * condition 0, and the newer set's condition 0, on fuel pressure, still
+ * reads not received. The test's own dispatch, with the worker held, takes
+ * the set, then the hook attaches the next. */
+TEST(ConditionSessionTest, AFirstSampleUnderTheSetBeforeMarksNothingInTheNext)
+{
+    WorkerHold hold;
+    Session s("mock://x?profile=obd2");
+    WorkerHold::Release unhold{hold};
+    ASSERT_NE(s.s, nullptr);
+    ASSERT_EQ(hold.attach(s.s), ECUIO_OK);
+    ASSERT_EQ(attach(s.s, condition(0, rpm(R"("above":3000)"))), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s.s), ECUIO_OK);
+    ASSERT_TRUE(hold.hold(5000));
+    AttachFuel next;
+    next.s = s.s;
+    {
+        AfterTakes hook(&AttachFuel::run, &next);
+        engine_speed(s.s, 1, 800);
+    }
+    hold.release();
+    ASSERT_TRUE(next.done);
+    ASSERT_EQ(next.status, ECUIO_OK);
+    const ecuio_condition_state_t st = marked(s.s)[0];
+    EXPECT_TRUE(not_received(st)) << "flags " << st.flags << ", why " << st.why;
+}
+
 /* One evaluator, two ways: the mock's worker judging its own frames, and
  * a replay of the recording of them at full speed. The events are equal
  * by condition, state, flags, term, value and time from the first frame;

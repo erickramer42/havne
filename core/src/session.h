@@ -79,8 +79,10 @@ struct ecuio_session {
         uint16_t ids[ECUIO_CONDITION_MAX_TERMS] = {};
         uint8_t count = 0;
         uint8_t any = 0;
-        uint8_t sampled = 0;
+        uint8_t sampled = 0; /* a bit per term */
     };
+    static_assert(ECUIO_CONDITION_MAX_TERMS <= 8,
+                  "condition_read's sampled holds a bit per term");
     std::vector<condition_read> condition_reads;
     ecuio_transport_t* transport = nullptr;
     /* The profile's set: the registry's static one, or, under
