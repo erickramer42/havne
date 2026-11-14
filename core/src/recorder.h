@@ -105,7 +105,10 @@ ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,
  * when a session that asks has a minimum, "more: ..." past a line's
  * room, "none: every signal asked" when it ended), only when the picks,
  * the kind or the minimum differ from what the header or its last line
- * named. Takes the link's mutex, then focus_mutex, never both at once. */
+ * named. Takes the link's mutex to pin the recorder, then holds the pin
+ * across focus_mutex and then the recorder's note_m (one at a time,
+ * never nested); a detach waits for the pins, so neither of those may
+ * be held around one. */
 void ecuio_record_focus(ecuio_session_t* session);
 
 #endif /* ECUIO_RECORDER_H */
