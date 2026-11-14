@@ -1601,6 +1601,34 @@ TEST(RecorderTest, AFocusLineComesOnlyOnAChange)
     }
 }
 
+/* A focus change's line goes through the note queue: with the queue
+ * full it is counted as a dropped note and no line is written, while
+ * the focus is taken */
+TEST(RecorderTest, AFocusLineIntoAFullNoteQueueIsCountedDropped)
+{
+    constexpr uint32_t kNotes = 4;
+    register_profile();
+    Root root;
+    Recording rec(root, "mock://full?profile=rec-test", 0, nullptr, {}, kNotes);
+    ASSERT_NE(rec.recorder, nullptr);
+    ASSERT_NO_FATAL_FAILURE(hold_writer(rec.recorder));
+    ecuio_recorder_state_t st{};
+    for (uint32_t i = 0; i <= kNotes && st.notes_dropped == 0; ++i) {
+        ASSERT_EQ(ecuio_recorder_note(rec.recorder, "a queued note"), ECUIO_OK);
+        ASSERT_EQ(ecuio_recorder_get_state(rec.recorder, &st), ECUIO_OK);
+    }
+    ASSERT_EQ(st.notes_dropped, 1u) << "the queue never filled";
+    const uint16_t half = 1;
+    ASSERT_EQ(ecuio_session_set_focus(rec.session, &half, 1), ECUIO_OK);
+    ASSERT_EQ(ecuio_recorder_get_state(rec.recorder, &st), ECUIO_OK);
+    EXPECT_EQ(st.notes_dropped, 2u);
+    ecuio_recorder_test_hold(rec.recorder, 0);
+    ASSERT_EQ(rec.finish(), ECUIO_OK);
+    const std::string events = rec.file("events.log");
+    EXPECT_TRUE(activity_of(events, "focus").empty()) << events;
+    EXPECT_NE(events.find("a queued note"), std::string::npos) << events;
+}
+
 /* A session takes one recorder at a time: a second is refused while the
  * first is attached and taken once the first has closed, counting from
  * its own attach; the refusal left it as it was, so its recording has

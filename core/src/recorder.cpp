@@ -206,8 +206,8 @@ std::tm utc_tm(std::time_t t)
     return tm;
 }
 
-/* The most of a focus line's names: 1024 picks of the longest names
- * take several lines, each far inside a row's bound */
+/* The most of a focus line's names: a large pick of long names takes
+ * several lines, each far inside a row's bound */
 constexpr size_t kFocusPartBytes = 4096;
 
 /* The picks' names quoted as signals.csv quotes them, in pick order, in

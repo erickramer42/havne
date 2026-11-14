@@ -1,5 +1,6 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: UNIT: CoreTest, DefIndexTest, ConditionSessionTest (test_core);
+// Testing: UNIT: CoreTest, DefIndexTest, ConditionSessionTest,
+//          RecorderTest (test_core);
 //          PidSupportTest,
 //          DiagnosticsTest, InspectionTest (test_obd2); ProbeNotesTest
 //          (ctest); c_abi; HARNESS: Elm327SessionTest (test_elm327)
