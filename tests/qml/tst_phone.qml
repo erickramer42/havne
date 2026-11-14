@@ -2616,6 +2616,27 @@ TestCase {
         compare(main.currentPage, before, "a tap stays put")
     }
 
+    // The sidebar's page that shows the session's activity is called
+    // Activity: "Log" names Start log and a recording
+    function test_theSidebarNamesTheActivityPage() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1400
+        main.height = 800
+        verify(waitForPolish(main), "laid out")
+        tryVerify(() => !find(main.contentItem, "tabBar").visible, 2000, "the sidebar shows")
+        const labels = []
+        function walk(item) {
+            if (item.label !== undefined && item.active !== undefined)
+                labels.push(item.label)
+            for (const c of item.children)
+                walk(c)
+        }
+        walk(main.contentItem)
+        verify(labels.indexOf("Activity") >= 0, "the sidebar lists Activity: " + labels)
+        verify(labels.indexOf("Log") < 0, "no Log entry: " + labels)
+    }
+
     // Dash with no session on the phone: the recent addresses, the newest
     // chosen, and one Connect; the list goes once a session runs
     // Dash's list with these recent addresses, and these Bluetooth adapters

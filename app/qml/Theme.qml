@@ -498,8 +498,8 @@ QtObject {
 
     // Developer mode, Settings' switch, off until switched on; Main.qml
     // stores it with the zoom. Off, the app offers only real devices and
-    // the Log page shows the activity log alone. On, it adds the mock://
-    // preset and the Log page's raw frame table with its bridge counters.
+    // the Activity page shows the activity log alone. On, it adds the mock://
+    // preset and the Activity page's raw frame table with its bridge counters.
     property bool developerMode: false
 
     // Fixed-pitch family, so hex columns and digits keep their width row
