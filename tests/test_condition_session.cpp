@@ -367,24 +367,25 @@ TEST(ConditionSessionTest, AFramesEventsFollowItsValuesInOneCall)
                            "[4000000 g1 c1 on stale t0 v3500] "
                            "[5500000 g1 c0 on t0 v9500] "
                            "[5500000 g1 c1 off t0 v9500]");
-    /* A frame that decodes nothing still settles what is due */
+    /* A frame that decodes nothing still settles what is due: engine
+     * speed's 4.5 s gap bounds its sample at 13.5 s, to 19 s */
     static ecuio_frame_t other;
     std::memset(&other, 0, sizeof other);
     other.arbitration_id = 0x123;
-    other.timestamp_us = 9 * kSecond;
+    other.timestamp_us = 19500000;
     other.data_length = 2;
     ecuio_session_dispatch_callbacks(s.s, &other);
-    EXPECT_EQ(seen.text(), "frame 9000000\n"
-                           "events [8500000 g1 c0 on stale t0 v9500] "
-                           "[8500000 g1 c1 off stale t0 v9500]");
+    EXPECT_EQ(seen.text(), "frame 19500000\n"
+                           "events [19000000 g1 c0 on stale t0 v9500] "
+                           "[19000000 g1 c1 off stale t0 v9500]");
 
     EXPECT_EQ(ecuio_unregister_conditions_callback(s.s, on_conditions, &seen),
               ECUIO_OK);
     EXPECT_EQ(ecuio_unregister_conditions_callback(s.s, on_conditions, &seen),
               ECUIO_OK)
         << "idempotent";
-    engine_speed(s.s, 10, 100);
-    EXPECT_EQ(seen.text(), "frame 10000000\nvalues 10000000");
+    engine_speed(s.s, 20, 100);
+    EXPECT_EQ(seen.text(), "frame 20000000\nvalues 20000000");
     EXPECT_EQ(states_of(s.s)[0].state, ECUIO_CONDITION_OFF)
         << "judged with no callback";
     EXPECT_EQ(ecuio_register_conditions_callback(nullptr, on_conditions, &seen),

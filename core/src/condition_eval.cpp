@@ -69,8 +69,7 @@ ecuio_condition_eval::make(const ecuio_condition_set_t* set,
             out.level = t.level;
             out.clear = t.clear;
             out.has_clear = (t.flags & ECUIO_TERM_HAS_CLEAR) != 0 ? 1 : 0;
-            out.max_age_us =
-                t.max_age_us != 0 ? t.max_age_us : ECUIO_VALUE_STALE_US;
+            out.max_age_us = t.max_age_us;
             out.condition = i;
             out.test = static_cast<uint8_t>(t.test);
             const uint16_t id = static_cast<uint16_t>(b.signal_id[k]);
@@ -142,6 +141,13 @@ ecuio_condition_eval::join(const condition& c) const
         return joined::unjudged;
     }
     return c.any != 0 ? joined::no : joined::yes;
+}
+
+/* The time past which term t's sample can't be judged */
+uint64_t ecuio_condition_eval::expiry(const term& t) const
+{
+    const signal& s = signals[t.signal];
+    return t.max_age_us != 0 ? s.time_us + t.max_age_us : s.fresh_until_us;
 }
 
 /* A deadline of condition index: its check, and the set's, come no later */
@@ -235,7 +241,7 @@ void ecuio_condition_eval::rejoin(uint32_t index, uint64_t at_us,
 
 /* Term index against its signal's newest sample: its truth, and its
  * condition marked when the truth or the judgment changed */
-void ecuio_condition_eval::sample(uint16_t index, uint64_t now_us)
+void ecuio_condition_eval::sample(uint16_t index)
 {
     term& t = terms[index];
     signal& s = signals[t.signal];
@@ -277,7 +283,7 @@ void ecuio_condition_eval::sample(uint16_t index, uint64_t now_us)
     if (!was_judged) {
         t.judged = 1;
         --s.unjudged;
-        watch(t.condition, now_us + t.max_age_us);
+        watch(t.condition, expiry(t));
     }
 }
 
@@ -297,12 +303,28 @@ void ecuio_condition_eval::feed(uint64_t now_us, const ecuio_value_t& v)
     signal& s = signals[hash[at]];
     const double before = s.value;
     const bool every = s.sampled == 0 || s.unjudged != 0;
+    uint64_t gap = 0;
+    if (s.sampled != 0) {
+        gap = std::min(now_us - s.time_us, kPaceCapUs);
+        s.mean_us = static_cast<uint32_t>(
+            s.mean_us == 0 ? gap : (3 * uint64_t{s.mean_us} + gap) / 4);
+    }
+    const uint64_t pace = kPaceTimes * std::max(gap, uint64_t{s.mean_us});
+    const uint64_t bound = std::max(kPaceFloorUs, std::min(kPaceCapUs, pace));
+    /* A shorter pace moves its terms' deadlines earlier: their checks too */
+    const bool earlier = now_us + bound < s.fresh_until_us;
+    s.fresh_until_us = now_us + bound;
     s.value = v.value;
     s.time_us = now_us;
     s.sampled = 1;
+    for (uint16_t k = s.first_term; earlier && k != kEmpty; k = terms[k].next) {
+        if (terms[k].judged != 0 && terms[k].max_age_us == 0) {
+            watch(terms[k].condition, s.fresh_until_us);
+        }
+    }
     if (every) {
         for (uint16_t k = s.first_term; k != kEmpty; k = terms[k].next) {
-            sample(k, now_us);
+            sample(k);
         }
         return;
     }
@@ -313,7 +335,7 @@ void ecuio_condition_eval::feed(uint64_t now_us, const ecuio_value_t& v)
     const point* p = std::lower_bound(
         first, last, lo, [](const point& a, double b) { return a.at < b; });
     for (; p != last && p->at <= hi; ++p) {
-        sample(p->term, now_us);
+        sample(p->term);
     }
 }
 
@@ -330,9 +352,8 @@ void ecuio_condition_eval::settle_one(uint32_t index, uint64_t now_us,
         uint32_t oldest = 0;
         for (uint32_t k = 0; k < c.term_count; ++k) {
             const term& t = terms[c.first_term + k];
-            if (t.judged != 0 &&
-                signals[t.signal].time_us + t.max_age_us < expiry) {
-                expiry = signals[t.signal].time_us + t.max_age_us;
+            if (t.judged != 0 && this->expiry(t) < expiry) {
+                expiry = this->expiry(t);
                 oldest = k;
             }
         }

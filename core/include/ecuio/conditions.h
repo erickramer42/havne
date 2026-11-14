@@ -163,7 +163,7 @@ typedef struct ecuio_condition_term {
     double   clear;           /* with ECUIO_TERM_HAS_CLEAR; 0 otherwise */
     uint32_t max_age_us;      /* a signal term's age bound,
                                  ECUIO_COMPUTED_MIN_AGE_US to _MAX_; 0 for
-                                 ECUIO_VALUE_STALE_US */
+                                 its signal's pace (below) */
     uint32_t flags;           /* ECUIO_TERM_HAS_*; any other bit zero */
     uint32_t reference_count; /* a signal term: 1 to
                                  ECUIO_CONDITION_MAX_REFERENCES; else 0 */
@@ -305,6 +305,12 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
  * on the frames' own time: a term keeps the truth of its newest sample,
  * a sample older than the term's age bound can't be judged, and a
  * condition whose terms can't be judged keeps its state and is STALE.
+ * The bound is the term's max_age, or else its signal's pace: three
+ * times the larger of the last gap between its samples and the gaps'
+ * running average (each new gap weighted a quarter, the first its
+ * start), from ECUIO_VALUE_STALE_US to ECUIO_COMPUTED_MAX_AGE_US, and
+ * ECUIO_VALUE_STALE_US alone before a second sample. So a slow sweep
+ * isn't STALE between its samples, and a signal that stops still is.
  * A value that is no number (a NaN) is no sample; an infinity is one.
  * Time never goes back: a frame stamped earlier than the one before it
  * (two channels' frames can arrive a little out of order) is judged at
