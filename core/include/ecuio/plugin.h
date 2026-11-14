@@ -231,7 +231,11 @@ ecuio_status_t ecuio_plugin_register(ecuio_plugin_t* plugin, uint32_t index,
  */
 
 /* The pointers go last, so the numbers' offsets are the same on every
- * width. */
+ * width. A struct_size past this struct's is taken and what lies past
+ * the struct is never read: a field a later header adds there always
+ * comes with a bit in flags, so a core that doesn't know the field
+ * refuses the call by its nonzero flags and never drops what was
+ * asked. */
 typedef struct ecuio_plugin_wrap_options {
     uint32_t struct_size; /* the caller's sizeof, at least this one's */
     uint32_t flags;       /* none yet; zero */
@@ -277,7 +281,13 @@ _Static_assert(offsetof(ecuio_plugin_wrap_options_t, id) == 40,
  *   "data/<variant>.json": the file without its "source" and "ecus",
  *   every other member as it was read.
  * The variant's set is the file's own, table by table, and its keys
- * the file's. ECUIO_ERR_INVALID_ARGUMENT also for a struct_size smaller
+ * the file's. A file at the edge of the loader's bounds may load and
+ * not wrap: the plugin holds it two levels deeper, and the variant's
+ * signal file, which a recording copies and a replay reads, is written
+ * two spaces a level and must itself be within
+ * ECUIO_SIGNAL_FILE_MAX_BYTES (a file of 600 KB on one line can pass
+ * it written out). The refusal names the bound.
+ * ECUIO_ERR_INVALID_ARGUMENT also for a struct_size smaller
  * than the struct, nonzero flags or reserved words, an id or variant
  * the manifest's rules refuse, years with no wmi or out of order, and
  * a code that isn't 3 or 6 of a VIN's letters and digits. */
