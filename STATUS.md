@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-12, **Version:** v0.7.3,
+**Updated:** 2026-11-13, **Version:** v0.7.3,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,8 +14,9 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.8.0, conditions** (the roadmap's row below), whose
-computed grammar is built. v0.7.3, the analysis viewer, is out (its section
+**Current phase: v0.7.4, follow-ups on the dashboard and the viewer**
+(the roadmap's row below), with v0.8.0's computed grammar built beside
+it. v0.7.3, the analysis viewer, is out (its section
 below): the viewer's chart in panes with two cursors and a span's
 statistics, a Jump row between a recording's pulls and cruises, Live's
 pause, and first-run words that find the way without the guide. v0.7.2,
@@ -102,7 +103,11 @@ background too ([roadmap](#roadmap)).
     ([2026-10-28-android-8](docs/bench-sessions/2026-10-28-android-8.md),
     [2026-10-28-android-11](docs/bench-sessions/2026-10-28-android-11.md),
     [2026-10-29-android](docs/bench-sessions/2026-10-29-android.md)); no
-    BLE adapter has run.
+    BLE adapter has run. The app's six open dialogs ask Android's own
+    document picker, and a save writes through the provider's
+    descriptor; the check for either is the
+    [phone's run sheet](docs/bench-sessions/android-phone-runsheet.md),
+    Phase 10.
   - **J2534 on Windows:** discovery of installed drivers, each driver
     loaded in a single-threaded surrogate process of its own
     architecture, x86 or x64, so a crashing driver ends its process,
@@ -216,7 +221,8 @@ background too ([roadmap](#roadmap)).
     obdb`, saved out with **Save a copy**, and read by `havne-cli
     --signals`. Plugins' data tier
     ([ADR-0052](docs/adr/0052-plugin-framework.md)): a package of signal
-    files whose variants the car's VIN proposes. A recording holds the
+    files, every variant offered for the picked vehicle and the ones the
+    car's VIN matches first (its appendix of 2026-11-13). A recording holds the
     file it decoded with and replays through it; a signal its module
     refuses shows as refused. Verified on the test car through the VX
     and the MX+
@@ -246,7 +252,8 @@ background too ([roadmap](#roadmap)).
     decimals, size and place, saved as made, one set for every vehicle,
     the phone's and the desktop's apart, with peak hold and stale
     dimming, on one panel on both forms (the desktop's pages are tabs on
-    its upper edge) and with undo and redo in edit mode; Night (off, on
+    its upper edge), with undo and redo in edit mode, and written to a
+    file and loaded back (ADR-0057's appendix on the layout file); Night (off, on
     or scheduled, in an amber or a red style) beside the Dark look; on
     the phone, five tabs and a drive view whose gauges fill the screen,
     its controls on a sheet from the bottom
@@ -255,7 +262,8 @@ background too ([roadmap](#roadmap)).
     on the desktop's Home (ADR-0059's appendix); Settings as a list of
     pages; Live's table and strip chart, the Log page's activity log, the
     Recordings page's viewer (pan, zoom, a cursor, the frames check's
-    findings, two runs overlaid and aligned, a vehicle's baseline
+    findings, two runs overlaid and aligned with a Difference trace of
+    the compared one less the open one, a vehicle's baseline
     recording overlaid on a new run aligned on the engine starts, a Mark
     while recording, and Export: the whole recording as a CSV, wide or
     long, pcapng or a folder copy, scrubbed, through the system's
@@ -472,8 +480,8 @@ background too ([roadmap](#roadmap)).
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 2147 ctest cases on Windows (both trees rebuilt,
-  2026-11-12), all passing but six skips (the cross-arch case and
+- **Tests:** 2225 ctest cases on Windows (both trees rebuilt,
+  2026-11-13), all passing but six skips (the cross-arch case and
   the real-car recordings' diff, run locally; three cases that run on
   Linux only, Read once over SocketCAN and the Python package's vcan
   and ISO-TP fuzzing cases; and the Wireshark export's `tshark` run,
@@ -625,7 +633,11 @@ an issue is resolved it is removed, and its number is not reused.
     if the adapter answers `STOPPED`; through J2534 it reads the
     module's answer before the filters stop, so the module isn't left
     repeating it ([ADR-0060](docs/adr/0060-extended-session-reads.md)'s
-    appendix "the close waits for the module"). The car runs of
+    appendix "the close waits for the module"). Through SocketCAN the
+    close waits for a read still out before `10 01`, with J2534's bound
+    (the appendix of 2026-11-12), against the simulated bus only: a
+    SocketCAN session that asks needs an adapter whose driver offers
+    one-shot mode (BENCH prep #32). The car runs of
     2026-11-11 found the earlier closes short
     ([2026-11-11-ext-session-car](docs/bench-sessions/2026-11-11-ext-session-car.md),
     [2026-11-11-quiet-session-car](docs/bench-sessions/2026-11-11-quiet-session-car.md)).
@@ -640,6 +652,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.7.1 | A more modern look, phone first: Night as its own control, the S2 look and shared controls, the phone's five tabs, joined panel and drive view, the viewer's Export, the log's minimum time between sweeps and reads in the extended session | Released |
 | v0.7.2 | Finishing the Dashboard and signals: the desktop's gauges in the new design, undo in edit mode, a Light look, built-in layouts by what people watch, a signal file's dial range and warning levels, Python's exports and health report | Released |
 | v0.7.3 | The analysis viewer: the log's navigation aids, chart panes with two cursors, a recording's statistics, Live's pause, and the phone pass's fixes | Released |
+| v0.7.4 | Follow-ups on v0.7.3's theme: a Dashboard layout exported and loaded, more gauge colors, every plugin variant offered for a vehicle, the viewer's difference trace, the demo car under obd2, and Android's own document picker | In progress |
 | v0.8.0-v0.11.0 | v0.8.0, conditions: triggered logging, alerts and a fuller grammar for computed signals. v0.9.0, the whole car through plugins: a profile sized for every module, sessions a plugin declares, and a plugin's own conversation with a module, security access to unlock reads among it. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
@@ -724,6 +737,54 @@ PATCH may carry"): the C ABI grows, append-only
   Run on the test phone with the mock before the Jump row and the
   Recordings changes landed, not on a car; the extended session's closes are
   tested against the fakes, with a car run owed (Known Issue #44).
+
+### v0.7.4: follow-ups on the dashboard and the viewer
+
+A patch on v0.7.1's theme
+([ADR-0048](docs/adr/0048-semantic-versioning.md)'s appendix "what a
+PATCH may carry"): the C ABI grows, append-only
+(`ecuio_recording_stretches_with`, `ecuio_recording_find_with`).
+- **Built:**
+  - a Dashboard layout exported to a file and loaded back, refused on the
+    other form, naming the signal files it needs, and `havne-cli layout
+    check` reading it by the same rules
+    ([ADR-0057](docs/adr/0057-dashboards.md)'s appendix on the layout
+    file); five more gauge colors and one of the user's own (its note of
+    2026-11-13);
+  - every imported plugin variant offered for the picked vehicle with
+    no VIN needed, the VIN's matches first and kept with the vehicle
+    ([ADR-0052](docs/adr/0052-plugin-framework.md)'s appendix "every
+    variant offered in the app");
+  - the viewer's Compare with a difference trace, each column over its
+    own stretch of time in both recordings, and its chart reading raw
+    rows by the signals plotted
+    ([ADR-0056](docs/adr/0056-analysis-log.md)'s appendix "a difference
+    in the viewer");
+  - the demo car answering OBD-II from its drive cycle under `obd2`, and
+    a supported-PID chain that ends early judged
+    ([ADR-0039](docs/adr/0039-full-service01-coverage.md));
+  - `mock://` giving each ECU its set reads a channel of its own, the
+    others answering no OBD-II PID (ADR-0039's appendix C);
+  - a cancel for the reader's stretches and find searches, which the
+    viewer's close, `havne-cli view`'s interrupt and Python's `cancel=`
+    use (ADR-0056's appendix "a cancel for the reader's searches");
+  - SocketCAN's close waiting for a request still out before `10 01`,
+    with J2534's bound
+    ([ADR-0060](docs/adr/0060-extended-session-reads.md)'s appendix of
+    2026-11-12), against the simulated bus only;
+  - on Android, the open dialogs through the system's document picker,
+    saves through the provider's descriptor, and a save that keeps a
+    replaced document; a frame table's place kept by arrival; and a
+    close that never waits for the viewer's asks;
+  - the phone's display line without sizes, the relay's refusal in the
+    log, the viewer's grips at a touch's size, single accessible rows,
+    a panel's height in columns, and other paired devices folded out of
+    the connect list.
+
+  Run on the test phone with the mock, not on a car: the six open
+  dialogs, the exports through a provider, a layout's export, uninstall
+  and load, and the viewer's grips by finger. The connect list's fold
+  has not been looked at there.
 
 ### Waiting on a tester: an iPhone download
 
