@@ -11,6 +11,126 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+
+- Dashboards: export a layout to a file and load one back from Dash's
+  Page row (the phone's and the desktop's layouts are separate and are
+  not scaled into each other). The file names the signal files its
+  gauges read, and loading says which this vehicle lacks.
+  `havne-cli layout check <file>` checks a layout file with no app.
+- A gauge's color can be one of five more standard colors (red, blue,
+  yellow, green and light blue; the old green is called Light green) or
+  one you make from three numbers, red, green and blue, under
+  "Custom..." in the panel's Color row.
+- The recordings viewer's Compare has a Difference switch. For each plotted
+  signal that both recordings hold under the same name and unit, it draws
+  the compared recording's value less this one's in a pane of its own, each
+  column of the chart over the same stretch of time in both. A recording
+  compared with itself shows no difference, however the two are lined up.
+- The demo car (`mock://demo`) answers OBD-II under the `obd2` profile:
+  engine speed, road speed, load, temperatures, manifold and barometric
+  pressure, airflow, throttle, lambda and battery voltage come from its
+  drive cycle, so the `obd2` Dashboard, Boost included, shows values with
+  no car. `havne-cli sim`'s simulated car answers the same PIDs, MAP,
+  barometric pressure and the commanded lambda among them.
+- Python: a Ctrl+C stops a long `Recording.stretches`, `find_threshold` or
+  `find_marker` at its next second of the recording instead of waiting for
+  the search to finish, and each takes `cancel=` like the imports do. The
+  C API adds `ecuio_recording_stretches_with` and
+  `ecuio_recording_find_with`, which take the cancel.
+
+### Changed
+
+- Settings' Signals page lists every imported plugin's variants for the
+  picked vehicle, whether or not its VIN is known, so a plugin can be
+  picked for a car whose VIN wasn't read. The variants a VIN covers come
+  first, under "For this car, by its VIN:"; a session's matches are kept
+  with the vehicle it identified, so they stay marked after it ends and
+  at the next start. Nothing asks for a VIN, and nothing is picked for
+  you ([ADR-0052](docs/adr/0052-plugin-framework.md)).
+- The recordings viewer's chart keeps its detail further out. Whether it
+  reads a recording's samples or its per-second summaries goes by the
+  signals plotted, not by every signal the recording holds, so two short
+  logs lined up on a pull draw sharp from the start.
+- The Log's frame table and the viewer's keep their place by the order the
+  frames arrived in, not by their time, so an adapter's time stamp that
+  steps back no longer moves a table that was hidden.
+- Import's kind and the viewer's Values, Frames and List, By ID switches
+  have the same edge as the app's other switches.
+- A car whose supported-PID list ends early (the last list says no further
+  one follows) shows the signals past its end as not sent by the ECU, as it
+  does the ones its lists leave out, rather than waiting for them.
+- `mock://` under a signal file or plugin that reads other ECUs gives each
+  its own channel, and an OBD-II PID read on one reads as not sent rather
+  than waiting for a value.
+- On a phone, the viewer's pane seams and the chart's splitter take a touch
+  anywhere within a finger's width; they look as before.
+- On a phone, a gauge's panel gives its size as Columns and Height, both
+  in columns, rather than rows a quarter of a column high.
+- On Android, paired headsets, watches and health devices no longer sit
+  among the adapters in the connect list: they are under Other paired
+  devices, which opens by itself when one of them is picked. Settings'
+  "Bluetooth: N found" counts the adapters alone.
+- A phone in developer mode logs its display as its form and orientation
+  alone, never its size, scale or insets, so a shared log or health report
+  says less about the device.
+- With a screen reader on, Live's rows and the Log's By ID list read as one
+  item each (a row as its signal and value), rather than an item for every
+  value that changes.
+
+### Fixed
+
+- On Android, opening a file whose name holds parentheses (a second
+  download, "name (1).json") was refused, and Load layout, Import a log,
+  a column map, a signal file, an OBDb set or a plugin then read the file
+  picked before it, or nothing. These six ask Android's own document
+  picker and read the file picked. A picker Android refuses to start says
+  so, and a cloud provider slow to name the picked file no longer holds
+  the phone's screen. The import panel names a file from Downloads by its
+  name instead of an id like "msf:1234".
+- On Android, exporting to a name already taken (the picker names the new
+  document "name (1)") failed with "Couldn't write the file" and left an
+  empty document behind, and a folder export through the picker failed
+  every time. A save the app refuses removes the picker's empty document,
+  for a layout, a signal file and a frames CSV too; a provider's refusal
+  sent before the save ends is a failed save, and a failed save tells the
+  provider so.
+- A report or an export that is refused, stopped or fails on Android no
+  longer removes a file you picked to replace: only the empty file the
+  picker made for it is removed.
+- Closing a recording while a span's statistics are still being read no
+  longer waits for the read (up to a quarter of a second on an hour-long
+  recording whose values hold gaps).
+- Closing a recording in the viewer stops its pull and cruise search where
+  it is, and `havne-cli view` ends at Ctrl+C with the interrupted end line.
+- Over SocketCAN, closing a connection that asked for the extended session
+  waits for a read still under way (100 ms at most) before it returns each
+  module to the default session, as the J2534 and ELM327 closes do, so a
+  module still answering isn't left in the extended session.
+- Live's chart: a drag after pressing Live (or Space) starts from the live
+  edge, so a leftward drag no longer jumps the chart back.
+- The Stretches panel keeps the levels in force across a change of units,
+  and reads and writes them in the locale's decimal point (a stored
+  "1.125" no longer becomes 1125 under a comma locale).
+- An import's words no longer stay over the next recording opened from the
+  list.
+- A recording's row in the list no longer counts the signal file line as a
+  signal, and counts all the signals of a recording with a long header.
+- A CSV of three columns or fewer whose first rows hold a row with no
+  time and a word in it (a gear or a mode with the time cell empty, or
+  only spaces) has its column map guessed; the guess refused such a file
+  before, though an import with a map took it.
+- `havne-cli export --rows <ms>` says when the interval thins nothing: on
+  a recording slower than it, the `exported` line adds
+  `no_fewer_than_sweep` and standard error says so, and
+  `export --estimate` marks each such interval the same way. The
+  viewer's Export already said "no fewer rows than every sweep" for each
+  interval, a typed one included.
+- A relay that can't start says why in the log, so Show log beside its
+  words has something to show, and those words no longer name the adapter.
+- Switching an address in Settings between J2534, ELM327 and SocketCAN
+  keeps its `keepalive_ms`.
+
 ## [0.7.3] - 2026-11-12
 
 ### Added
