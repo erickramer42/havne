@@ -305,10 +305,10 @@ TEST(ConditionEvalTest, AnOldInputKeepsTheStateAndIsStale)
     EXPECT_EQ(e.at(61, {{kRpm, 3600.0}}), "61000000 c0 on t0 v3600");
     EXPECT_EQ(e.e->state_of(0).fired, 1u);
     /* Stale again, then back below the level: OFF with the stale gone.
-     * After a 60 s gap the bound is its most, 60 s: stale at 121 s */
-    EXPECT_EQ(e.at(120, {{kSpeed, 1.0}}), "");
-    EXPECT_EQ(e.at(130, {{kRpm, 100.0}}),
-              "121000000 c0 on stale t0 v3600\n130000000 c0 off t0 v100");
+     * After a 60 s gap the bound is its most, 180 s: stale at 241 s */
+    EXPECT_EQ(e.at(240, {{kSpeed, 1.0}}), "");
+    EXPECT_EQ(e.at(250, {{kRpm, 100.0}}),
+              "241000000 c0 on stale t0 v3600\n250000000 c0 off t0 v100");
 }
 
 TEST(ConditionEvalTest, ATermsOwnAgeBoundIsItsLimit)
@@ -320,9 +320,9 @@ TEST(ConditionEvalTest, ATermsOwnAgeBoundIsItsLimit)
 }
 
 /* With no max_age a term's bound is its signal's pace: three times the
- * larger of the last gap and the gaps' running average (each a quarter),
- * from 3 s to 60 s. A sweep every 4 s holds; when it stops, stale 12 s
- * after its last sample. */
+ * larger of the last gap and the gaps' running average (each a quarter,
+ * each gap counted up to 60 s), from 3 s to 180 s. A sweep every 4 s
+ * holds; when it stops, stale 12 s after its last sample. */
 TEST(ConditionEvalTest, ASlowSweepHoldsBetweenItsSamplesAndStopsStale)
 {
     Eval e(condition(0, rpm(R"("above":3000)")));
@@ -349,19 +349,94 @@ TEST(ConditionEvalTest, AFastSignalThatStopsIsStaleAtTheFloor)
         << "3 s after its last sample, not three of its 100 ms gaps";
 }
 
-TEST(ConditionEvalTest, APaceIsBoundedAtSixtySeconds)
+/* A gap of 100 s counts as 60 s: the bound is three times that */
+TEST(ConditionEvalTest, AGapCountsUpToAMinuteAndTheBoundToThreeMinutes)
 {
     Eval e(condition(0, rpm(R"("above":3000)")));
     EXPECT_EQ(e.at(1, {{kRpm, 3500.0}}), "1000000 c0 on fired t0 v3500");
     EXPECT_EQ(e.at(101, {{kRpm, 3500.0}}),
               "4000000 c0 on stale t0 v3500\n101000000 c0 on t0 v3500");
-    EXPECT_EQ(e.at(161, {{kSpeed, 1.0}}), "");
-    EXPECT_EQ(e.at(162, {{kSpeed, 1.0}}), "161000000 c0 on stale t0 v3500");
+    EXPECT_EQ(e.at(281, {{kSpeed, 1.0}}), "");
+    EXPECT_EQ(e.at(282, {{kSpeed, 1.0}}), "281000000 c0 on stale t0 v3500");
+}
+
+/* Sweeps 60.005 s apart, past the longest minimum a focus takes: held
+ * between samples (the bound 180 s), so a hold of 90 s completes, from
+ * the judgment after the first sample's stale stretch */
+TEST(ConditionEvalTest, ASweepOfAMinuteHoldsAndAHoldPastAMinuteCompletes)
+{
+    Eval e(condition(0, rpm(R"("above":3000)"), R"(,"for":90)"));
+    EXPECT_EQ(e.at(1, {{kRpm, 3500.0}}), "1000000 c0 off t0 v3500");
+    EXPECT_EQ(e.at(61.005, {{kRpm, 3500.0}}),
+              "4000000 c0 off stale t0 v3500\n61005000 c0 off t0 v3500");
+    EXPECT_EQ(e.at(121.01, {{kRpm, 3500.0}}), "") << "no flap";
+    EXPECT_EQ(e.at(181.015, {{kRpm, 3500.0}}),
+              "151005000 c0 on fired t0 v3500");
+    EXPECT_EQ(e.at(241.02, {{kRpm, 3500.0}}), "");
+    EXPECT_EQ(e.at(301.025, {{kRpm, 3500.0}}), "");
+    EXPECT_EQ(e.at(481.025, {{kSpeed, 1.0}}), "") << "fresh at its bound";
+    EXPECT_EQ(e.at(481.03, {{kSpeed, 1.0}}), "481025000 c0 on stale t0 v3500");
+}
+
+/* A signal at 100 ms (1 s to 3 s), a 70 s outage, then back. The outage
+ * counts as 60 s: at the first sample back the bound is 180 s; from the
+ * next it is three times the average, which loses about a quarter with
+ * each sample, here 19.25 s after three more (averages 11.33125 s,
+ * 8.523437 s, 6.417577 s) */
+TEST(ConditionEvalTest, AfterAnOutageItsBoundHoldsAndFallsWithEachSample)
+{
+    const auto before_outage = [](Eval& e) {
+        EXPECT_EQ(e.at(1, {{kRpm, 3500.0}}), "1000000 c0 on fired t0 v3500");
+        for (int i = 11; i <= 30; ++i) {
+            EXPECT_EQ(e.at(i / 10.0, {{kRpm, 3500.0}}), "") << i;
+        }
+        EXPECT_EQ(e.at(73, {{kRpm, 3500.0}}),
+                  "6000000 c0 on stale t0 v3500\n73000000 c0 on t0 v3500");
+    };
+    Eval once(condition(0, rpm(R"("above":3000)")));
+    before_outage(once);
+    EXPECT_EQ(once.at(253, {{kSpeed, 1.0}}), "");
+    EXPECT_EQ(once.at(254, {{kSpeed, 1.0}}), "253000000 c0 on stale t0 v3500");
+
+    Eval more(condition(0, rpm(R"("above":3000)")));
+    before_outage(more);
+    for (const double t : {73.1, 73.2, 73.3}) {
+        EXPECT_EQ(more.at(t, {{kRpm, 3500.0}}), "") << t;
+    }
+    EXPECT_EQ(more.at(92.552731, {{kSpeed, 1.0}}), "");
+    EXPECT_EQ(more.at(93, {{kSpeed, 1.0}}), "92552731 c0 on stale t0 v3500");
+}
+
+/* A stated limit: a signal in bursts (three samples 50 ms apart every
+ * 5 s) goes STALE every period, since each short gap takes a quarter off
+ * the average. A term's own max_age holds it. */
+TEST(ConditionEvalTest, ASignalInBurstsIsStaleEachPeriodUnlessItsTermSetsAnAge)
+{
+    Eval e(condition(0, rpm(R"("above":3000)")));
+    Eval aged(condition(0, rpm(R"("above":3000,"max_age":6)")));
+    const char* const stale[] = {"4100000", "9100000", "14159286", "19523444",
+                                 "24677074"};
+    for (int p = 0; p < 6; ++p) {
+        const double start = 1 + 5 * p;
+        const std::string first =
+            p == 0 ? "1000000 c0 on fired t0 v3500"
+                   : std::string(stale[p - 1]) + " c0 on stale t0 v3500\n" +
+                         std::to_string(static_cast<int>(start) * kSecond) +
+                         " c0 on t0 v3500";
+        EXPECT_EQ(e.at(start, {{kRpm, 3500.0}}), first) << p;
+        EXPECT_EQ(aged.at(start, {{kRpm, 3500.0}}),
+                  p == 0 ? "1000000 c0 on fired t0 v3500" : "")
+            << p;
+        for (const double t : {start + 0.05, start + 0.1}) {
+            EXPECT_EQ(e.at(t, {{kRpm, 3500.0}}), "") << t;
+            EXPECT_EQ(aged.at(t, {{kRpm, 3500.0}}), "") << t;
+        }
+    }
 }
 
 /* Gaps of 0.5 s and 5 s in turn: the last gap alone would bound the long
  * one by 3 s after each short one; the average holds it once it has
- * learned the pace (two turns) */
+ * learned the pace (two turns, since the first gap is a short one) */
 TEST(ConditionEvalTest, GapsThatAlternateAreHeldByTheirAverage)
 {
     Eval e(condition(0, rpm(R"("above":3000)")));
@@ -398,18 +473,23 @@ TEST(ConditionEvalTest, ASignalThatSlowsIsStaleOnceThenFollows)
 
 /* A pace that shortens moves the deadline earlier: 4 s sweeps, then three
  * samples 0.5 s apart and none after. The averages 3.125 s, 2.46875 s and
- * 1.976562 s give a bound of 5.929686 s from 10.5 s. */
+ * 1.976562 s give a bound of 5.929686 s from 10.5 s. Each condition
+ * reading the signal moves. */
 TEST(ConditionEvalTest, AShorterPaceMovesTheDeadlineEarlier)
 {
-    Eval e(condition(0, rpm(R"("above":3000)")));
-    EXPECT_EQ(e.at(1, {{kRpm, 3500.0}}), "1000000 c0 on fired t0 v3500");
+    Eval e(condition(0, rpm(R"("above":3000)")) + "," +
+           condition(1, rpm(R"("below":9000)")));
+    EXPECT_EQ(e.at(1, {{kRpm, 3500.0}}),
+              "1000000 c0 on fired t0 v3500\n1000000 c1 on fired t0 v3500");
     EXPECT_EQ(e.at(5, {{kRpm, 3500.0}}),
-              "4000000 c0 on stale t0 v3500\n5000000 c0 on t0 v3500");
+              "4000000 c0 on stale t0 v3500\n4000000 c1 on stale t0 v3500\n"
+              "5000000 c0 on t0 v3500\n5000000 c1 on t0 v3500");
     for (const double t : {9.0, 9.5, 10.0, 10.5}) {
         EXPECT_EQ(e.at(t, {{kRpm, 3500.0}}), "") << t;
     }
     EXPECT_EQ(e.at(16.4, {{kSpeed, 1.0}}), "");
-    EXPECT_EQ(e.at(16.5, {{kSpeed, 1.0}}), "16429686 c0 on stale t0 v3500")
+    EXPECT_EQ(e.at(16.5, {{kSpeed, 1.0}}),
+              "16429686 c0 on stale t0 v3500\n16429686 c1 on stale t0 v3500")
         << "before the 17 s its sweep had set";
 }
 

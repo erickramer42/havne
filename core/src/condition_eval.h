@@ -19,9 +19,10 @@
 // above the level and false at or below clear) and reads its signal's
 // newest sample. A sample older than the term's age bound can't be
 // judged: its own max_age, or else its signal's pace (kPaceTimes its
-// recent gap, from kPaceFloorUs to kPaceCapUs), so a slow sweep holds
-// between its samples and a signal that stops still goes stale. A
-// condition joins its terms three ways (true, false, not judged), turns ON once they have held `for` and OFF once they have
+// recent gap, from kPaceFloorUs to kPaceTimes x kPaceCapUs), so a slow
+// sweep holds between its samples and a signal that stops still goes
+// stale. A condition joins its terms three ways (true, false, not
+// judged), turns ON once they have held `for` and OFF once they have
 // failed `clear_for`, and while it can't be judged keeps its state and is
 // STALE.
 //
@@ -58,8 +59,10 @@ struct ecuio_condition_eval {
     static constexpr uint16_t kEmpty = UINT16_MAX;
     /* The default age bound: kPaceTimes the larger of the signal's last
      * gap and its running average (each gap weighted a quarter, the first
-     * its start), from ECUIO_VALUE_STALE_US to the longest max_age a term
-     * may set; the floor alone before a second sample */
+     * its start, each counted up to the longest max_age a term may set),
+     * from ECUIO_VALUE_STALE_US to kPaceTimes that longest, so a sweep of
+     * the longest minimum a focus takes holds; the floor alone before a
+     * second sample */
     static constexpr uint64_t kPaceTimes = 3;
     static constexpr uint64_t kPaceFloorUs = ECUIO_VALUE_STALE_US;
     static constexpr uint64_t kPaceCapUs = ECUIO_COMPUTED_MAX_AGE_US;

@@ -310,7 +310,9 @@ void ecuio_condition_eval::feed(uint64_t now_us, const ecuio_value_t& v)
             s.mean_us == 0 ? gap : (3 * uint64_t{s.mean_us} + gap) / 4);
     }
     const uint64_t pace = kPaceTimes * std::max(gap, uint64_t{s.mean_us});
-    const uint64_t bound = std::max(kPaceFloorUs, std::min(kPaceCapUs, pace));
+    /* The gap's cap already holds pace to the ceiling; the min states it */
+    const uint64_t bound =
+        std::max(kPaceFloorUs, std::min(kPaceTimes * kPaceCapUs, pace));
     /* A shorter pace moves its terms' deadlines earlier: their checks too */
     const bool earlier = now_us + bound < s.fresh_until_us;
     s.fresh_until_us = now_us + bound;
