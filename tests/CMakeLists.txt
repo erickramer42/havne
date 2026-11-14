@@ -543,6 +543,32 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_torn.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliReplayTest.ATornLastRowIsLeftOut PROPERTIES TIMEOUT 30)
+        # A recording's conditions.json a replay can't take (ADR-0063
+        # section 8): changed, removed, refused by the loader, or the
+        # recording unopened; each said on stderr, the replay judging none
+        add_test(NAME CliReplayTest.ACopyOfConditionsItCantTakeIsSaid
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/cli_replay_conditions.py
+                    $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/conditions)
+        set_tests_properties(CliReplayTest.ACopyOfConditionsItCantTakeIsSaid
+            PROPERTIES TIMEOUT 60)
+        # --conditions on stream and log (ADR-0063): a condition on a PID
+        # the mock never sends said not received on a later conditions
+        # line; a log's recording holding the copy and every event
+        set(_cli_conditions_run ${CMAKE_CURRENT_SOURCE_DIR}/cli_conditions_run.py)
+        add_test(NAME CliConditionsRunTest.ASignalNeverReceivedIsSaidOnALaterLine
+            COMMAND ${Python3_EXECUTABLE} ${_cli_conditions_run} unread
+                    $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/conditions)
+        add_test(NAME CliConditionsRunTest.ALogRecordsItsConditions
+            COMMAND ${Python3_EXECUTABLE} ${_cli_conditions_run} log
+                    $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/recording/conditions)
+        set_tests_properties(
+            CliConditionsRunTest.ASignalNeverReceivedIsSaidOnALaterLine
+            CliConditionsRunTest.ALogRecordsItsConditions
+            PROPERTIES TIMEOUT 60)
         # A replay reads with its recording's own signals.json (ADR-0051
         # section 4): no --signals, the copy's values; its hash broken, raw
         add_test(NAME CliReplayTest.AReplayReadsWithItsOwnSignalFile
@@ -745,6 +771,18 @@ if(TARGET havne-cli)
             --exit 3
             -- $<TARGET_FILE:havne-cli> stream mock://x
                --conditions ${_cli_conditions}/none.json)
+        # A replay of a recording judged by its own copy of the set (ADR-0063
+        # section 8): the events the recording's cond lines hold; another
+        # file named takes its place
+        app_cli_golden(ReplayJudgesItsRecordingsOwnConditions
+            replay-own-conditions.jsonl
+            -- $<TARGET_FILE:havne-cli> stream
+               "replay://${_cli_pulls}/conditions?profile=obd2&speed=max")
+        app_cli_golden(ReplayJudgesTheConditionsItIsGiven
+            replay-named-conditions.jsonl
+            -- $<TARGET_FILE:havne-cli> stream
+               "replay://${_cli_pulls}/conditions?profile=obd2&speed=max"
+               --conditions ${_cli_conditions}/replay.json --count 3)
         app_cli_golden(StreamDecodesThroughASignalFile stream-signals.jsonl
             -- $<TARGET_FILE:havne-cli> stream "${_cli_replay}?speed=max&from=100&to=102"
                --signals ${_cli_signals}/extras.json --values --count 40)
@@ -1020,6 +1058,15 @@ if(TARGET havne-cli)
                ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
         app_cli_golden(InfoRefusesAFolderWithNoFrames info-no-frames.jsonl
             --exit 3 -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/pull-early)
+        # A recording with a set of conditions (ADR-0063 section 8;
+        # tests/fixtures/recording/conditions, its cond lines a replay's of
+        # its own frames): the opened line names the set, and each cond
+        # line is a condition line, in view and in info
+        app_cli_golden(InfoListsARecordingsConditionEvents info-conditions.jsonl
+            -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/conditions)
+        app_cli_golden(ViewListsARecordingsConditionEvents view-conditions.jsonl
+            -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/conditions
+               --columns 3)
         # A stretch of the replay fixture's frames as recorded (ADR-0049's
         # appendix "frames read back"), and a folder that isn't there
         app_cli_golden(FramesReadsAStretchAsRecorded frames-stretch.jsonl
@@ -1129,6 +1176,15 @@ if(TARGET havne-cli)
     app_cli_usage_says(StreamTwoConditionFilesIsUsage
         "stream|mock://x|--conditions|a.json|--conditions|b.json"
         "--conditions takes one condition file")
+    app_cli_usage_says(StreamAnEmptyConditionFileIsUsage
+        "stream|mock://x|--conditions|" "--conditions takes one condition file")
+    app_cli_usage_says(LogConditionsWithoutAFileIsUsage
+        "log|mock://x|f|--conditions" "--conditions takes one condition file")
+    app_cli_usage_says(LogTwoConditionFilesIsUsage
+        "log|mock://x|f|--conditions|a.json|--conditions|b.json"
+        "--conditions takes one condition file")
+    app_cli_usage_says(LogAnEmptyConditionFileIsUsage
+        "log|mock://x|f|--conditions|" "--conditions takes one condition file")
     app_cli_usage(SignalsCheckWithoutAFileIsUsage "signals|check")
     app_cli_usage(SignalsWithoutCheckIsUsage "signals")
     app_cli_usage(SignalsAnUnknownWordIsUsage "signals|lint|x.json")

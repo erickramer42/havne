@@ -417,11 +417,13 @@ inline size_t conditions_line_bytes(const char* name, uint32_t count)
            size_t{count} * (160 + 6 * ECUIO_CONDITION_KEY_MAX);
 }
 
-// {"type":"conditions", name (null with none), generation, conditions
-// [{key, alert (null, warning or danger), record, mark, available, why
-// (null, or condition_why_word's)}]}: the set as the session took it, the
-// session's own reasons among them
-inline void conditions_line(Line& l, const char* name, uint32_t generation,
+// {"type":"conditions", name (null with none), source (file, the
+// --conditions file, or recording, a replay's own copy), generation,
+// conditions [{key, alert (null, warning or danger), record, mark,
+// available, why (null, or condition_why_word's)}]}: the set as the
+// session took it, the session's own reasons among them
+inline void conditions_line(Line& l, const char* name, const char* source,
+                            uint32_t generation,
                             const ecuio_condition_info_t* infos,
                             const ecuio_condition_state_t* states,
                             uint32_t count)
@@ -433,6 +435,8 @@ inline void conditions_line(Line& l, const char* name, uint32_t generation,
     } else {
         l.raw("null");
     }
+    l.key("source");
+    word(l, source);
     l.key("generation");
     l.u64(generation);
     l.key("conditions");
@@ -493,6 +497,52 @@ inline void condition_event_line(Line& l, const ecuio_condition_event_t& e,
     l.key("term");
     l.u64(e.term);
     l.ch('}');
+}
+
+// A recording's end, stream --record's and log's: {"type":"recording",
+// state closed, whole}, and conditions_lost when the recorder had no room
+// for some of the set's events (its drop line says so in events.log)
+inline void recording_closed_line(Line& l, bool whole, uint64_t lost)
+{
+    l.raw("{\"type\":\"recording\"");
+    l.key("state");
+    l.string("closed", SIZE_MAX);
+    l.key("whole");
+    l.raw(whole ? "true" : "false");
+    if (lost != 0) {
+        l.key("conditions_lost");
+        l.u64(lost);
+    }
+    l.ch('}');
+}
+
+// Closes the recorder and writes its closed line; true when its files
+// ended whole. The lost count is read first, since the close frees the
+// recorder: after an interrupt whose session close still runs, a later
+// loss is counted by events.log's drop line alone.
+inline bool close_with_line(Line& l, ecuio_recorder_t* recorder,
+                            const char* why)
+{
+    ecuio_recorder_state_t state{};
+    ecuio_recorder_get_state(recorder, &state);
+    const bool whole = ecuio_recorder_close(recorder, why) == ECUIO_OK;
+    recording_closed_line(l, whole, state.conditions_lost);
+    return whole;
+}
+
+// Whether any condition's availability differs between two reads of the
+// states (count each): the conditions line is written again when it does
+inline bool availability_changed(const ecuio_condition_state_t* was,
+                                 const ecuio_condition_state_t* now,
+                                 uint32_t count)
+{
+    for (uint32_t i = 0; i < count; ++i) {
+        if (((was[i].flags ^ now[i].flags) & ECUIO_CONDITION_UNAVAILABLE) !=
+            0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // A frame's condition events into a stream: a line each through

@@ -474,6 +474,26 @@ void write_signal_line(Output& out, const ecuio_recording_t* r,
     write_line(out, b.line);
 }
 
+// A recording's condition lines (view's and info's), one for each cond
+// line the reader kept, in events.log's order
+void write_condition_lines(Output& out, const ecuio_recording_t* r,
+                           uint32_t recording,
+                           const ecuio_recording_info_t& info)
+{
+    const uint64_t kept = std::min<uint64_t>(
+        info.condition_events, uint64_t{ECUIO_RECORDING_MAX_CONDITION_EVENTS});
+    char buf[cli::kRecordedConditionLineBytes];
+    for (uint64_t k = 0; k < kept; ++k) {
+        ecuio_recording_condition_event_t e{};
+        if (ecuio_recording_get_condition_event(r, k, &e) != ECUIO_OK) {
+            return;
+        }
+        cli::Line l(buf, sizeof buf);
+        cli::recorded_condition_line(l, recording, e);
+        write_line(out, l);
+    }
+}
+
 void write_start(Output& out)
 {
     char buf[256];
@@ -1258,6 +1278,61 @@ int use_recording_signals(const char* uri, std::string* opened)
     return kExitConnect;
 }
 
+// stream replay:// with no --conditions (ADR-0063 section 8): the
+// recording's own conditions.json, when events.log's header names one and
+// the reader finds it matching that hash, loaded to be attached as a
+// --conditions file is; its key: references bind through the replay's
+// signal file, the recording's own when that was taken. Else nullptr, with
+// a stderr line when the header names a copy that can't be taken, and the
+// replay goes on judging none. The match costs the reader's open, a pass
+// over signals.csv, as the signal file's does.
+ecuio_condition_set_t* recording_conditions(const char* uri)
+{
+    std::string folder;
+    if (!cli::replay_folder(uri, &folder)) {
+        return nullptr;
+    }
+    if (recorded_signals(folder).conditions_sha256.empty()) {
+        return nullptr;
+    }
+    const auto unused = [](const std::string& how) -> ecuio_condition_set_t* {
+        std::fprintf(stderr,
+                     "havne-cli: the recording's conditions.json %s; judging "
+                     "no conditions\n",
+                     how.c_str());
+        return nullptr;
+    };
+    ecuio_recording_t* r = nullptr;
+    if (ecuio_recording_open(folder.c_str(), nullptr, nullptr, &r) !=
+        ECUIO_OK) {
+        return unused("can't be checked: the recording doesn't open");
+    }
+    ecuio_recording_conditions_t cs{};
+    const ecuio_status_t got = ecuio_recording_get_conditions(r, &cs);
+    ecuio_recording_close(r);
+    if (got != ECUIO_OK ||
+        (cs.flags & ECUIO_RECORDING_CONDITIONS_PRESENT) == 0) {
+        return unused("is missing");
+    }
+    if ((cs.flags & ECUIO_RECORDING_CONDITIONS_MATCH) == 0) {
+        return unused("doesn't match its hash");
+    }
+    std::string bytes;
+    std::string why;
+    if (!read_whole((folder + "/conditions.json").c_str(),
+                    ECUIO_CONDITION_FILE_MAX_BYTES, "condition file", &bytes,
+                    &why)) {
+        return unused("doesn't read: " + why);
+    }
+    ecuio_condition_set_t* set = nullptr;
+    if (ecuio_condition_set_load(bytes.data(), bytes.size(), &set) !=
+        ECUIO_OK) {
+        return unused(std::string("doesn't load: ") +
+                      ecuio_last_error_detail());
+    }
+    return set;
+}
+
 // signals check's lines for a loaded file: signal_file, a signal_def line
 // for each of the file's own signals, then a unit line for each unit that
 // never converts
@@ -1459,6 +1534,104 @@ const ecuio_signal_file_t* session_signal_file()
            : g_plugin != nullptr
                ? ecuio_plugin_variant_file(g_plugin, g_plugin_variant)
                : nullptr;
+}
+
+// --conditions' file, read and loaded before the connect, so one the
+// loader refuses never opens the adapter: nullptr with the status and the
+// words for an error line
+ecuio_condition_set_t*
+load_conditions_file(const char* path, ecuio_status_t* st, std::string* why)
+{
+    std::string bytes;
+    ecuio_condition_set_t* set = nullptr;
+    *st = ECUIO_ERR_LOAD_FAILED;
+    if (read_whole(path, ECUIO_CONDITION_FILE_MAX_BYTES, "condition file",
+                   &bytes, why)) {
+        *st = ecuio_condition_set_load(bytes.data(), bytes.size(), &set);
+        *why = ecuio_last_error_detail();
+    }
+    return *st == ECUIO_OK ? set : nullptr;
+}
+
+// The set a conditions line shows, kept past the set's free (each info's
+// key points into keys), so poll_conditions can write the line again
+struct ShownConditions {
+    std::string name;
+    const char* source = "file";
+    std::vector<std::string> keys;
+    std::vector<ecuio_condition_info_t> infos;
+    std::vector<ecuio_condition_state_t> states; // as last written
+    std::vector<ecuio_condition_state_t> now;    // poll_conditions' read
+};
+
+void write_conditions_line(Output& out, const ShownConditions& s)
+{
+    const uint32_t count = static_cast<uint32_t>(s.infos.size());
+    BigLine b(cli::conditions_line_bytes(s.name.c_str(), count));
+    cli::conditions_line(b.line, s.name.c_str(), s.source,
+                         count > 0 ? s.states[0].generation : 1, s.infos.data(),
+                         s.states.data(), count);
+    write_line(out, b.line);
+}
+
+// The set attached before a recording begins (a recording holds one set
+// for its whole length; stream's and log's) and the conditions line
+// saying what the session made of each. The set is freed either way;
+// false after an error line.
+bool attach_conditions(Output& out, ecuio_session_t* session,
+                       ecuio_condition_set_t* set, const char* source,
+                       ShownConditions* shown)
+{
+    ecuio_status_t st =
+        ecuio_session_set_conditions(session, set, session_signal_file());
+    const uint32_t count = ecuio_condition_set_count(set);
+    shown->name = ecuio_condition_set_name(set);
+    shown->source = source;
+    shown->keys.resize(count);
+    shown->infos.resize(count);
+    shown->states.resize(count);
+    shown->now.resize(count);
+    uint32_t held = 0;
+    if (st == ECUIO_OK) {
+        st = ecuio_session_get_condition_states(session, shown->states.data(),
+                                                count, &held);
+    }
+    if (st != ECUIO_OK || held != count) {
+        write_error(out, st != ECUIO_OK ? st : ECUIO_ERR_INVALID_ARGUMENT);
+        ecuio_condition_set_free(set);
+        return false;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        ecuio_condition_set_get(set, i, &shown->infos[i]);
+        shown->keys[i] = shown->infos[i].key;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        shown->infos[i].key = shown->keys[i].c_str();
+        shown->infos[i].name = "";
+    }
+    ecuio_condition_set_free(set);
+    write_conditions_line(out, *shown);
+    return true;
+}
+
+// The conditions line again when a condition's availability has changed
+// since the line last written: a signal the session reports, once it
+// runs, it doesn't get (ECUIO_CONDITION_WHY_NOT_RECEIVED), or its first
+// sample after all. The attach's other reasons never change.
+void poll_conditions(Output& out, ecuio_session_t* session, ShownConditions* s)
+{
+    const uint32_t count = static_cast<uint32_t>(s->states.size());
+    uint32_t n = 0;
+    if (count == 0 ||
+        ecuio_session_get_condition_states(session, s->now.data(), count, &n) !=
+            ECUIO_OK ||
+        n != count) {
+        return;
+    }
+    if (cli::availability_changed(s->states.data(), s->now.data(), count)) {
+        s->states.swap(s->now);
+        write_conditions_line(out, *s);
+    }
 }
 
 // Whether path names a folder (a plugin's); otherwise it's read as a file
@@ -2235,7 +2408,8 @@ void usage(FILE* to)
         "       havne-cli log <uri> <folder> [--signal <name>]... "
         "[--min-sweep <ms>]\n"
         "                      [--label <name>] [--seconds S]\n"
-        "                      [--signals <file> | --plugin <pkg>]\n"
+        "                      [--signals <file> | --plugin <pkg>] "
+        "[--conditions <file>]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli clear <uri> --yes [--engine-running [--moving]]\n"
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
@@ -2314,7 +2488,12 @@ void usage(FILE* to)
         "         line says which of its conditions the session can judge,\n"
         "         and a condition line follows each change, at its own time;\n"
         "         the end line's conditions_dropped counts the changes whose\n"
-        "         line was dropped, with its frame or alone.\n"
+        "         line was dropped, with its frame or alone. The conditions\n"
+        "         line comes again when a condition's signal turns out not\n"
+        "         received, or arrives after all. A replay:// with no\n"
+        "         --conditions judges by its recording's own conditions.json\n"
+        "         when its hash still matches (the line's source says\n"
+        "         recording).\n"
         "         --plugin loads a plugin (a folder or a packed file) and\n"
         "         registers its variants as plugin.<id>.<variant>; the URI's\n"
         "         profile= names the one to read.\n"
@@ -2325,8 +2504,10 @@ void usage(FILE* to)
         "         by itself. Writes a log line every 10 s with the\n"
         "         recording's size, no frames or values. Runs until Ctrl+C,\n"
         "         S seconds, a failed recording or a replay's last frame; a\n"
-        "         lost link is logged and waited out. --signals and --plugin\n"
-        "         as stream's.\n"
+        "         lost link is logged and waited out. --signals, --plugin and\n"
+        "         --conditions as stream's: the recording holds the\n"
+        "         conditions' copy and each change, and no condition line\n"
+        "         is written; a replay's own copy is stream's alone.\n"
         "play     (Linux) writes a session's frames to a virtual CAN "
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
@@ -2722,17 +2903,11 @@ void close_recording(Output& out, ecuio_recorder_t** recorder, const char* why,
     if (*recorder == nullptr) {
         return;
     }
-    const bool whole = ecuio_recorder_close(*recorder, why) == ECUIO_OK;
+    char buf[128];
+    cli::Line l(buf, sizeof buf);
+    const bool whole = cli::close_with_line(l, *recorder, why);
     *recorder = nullptr;
     *failed = *failed || !whole;
-    char buf[64];
-    cli::Line l(buf, sizeof buf);
-    l.raw("{\"type\":\"recording\"");
-    l.key("state");
-    l.string("closed", SIZE_MAX);
-    l.key("whole");
-    l.raw(whole ? "true" : "false");
-    l.ch('}');
     write_line(out, l);
 }
 
@@ -2819,25 +2994,23 @@ int run_stream(const StreamArgs& args)
     stream->limit = args.count;
 
     write_start(out);
-    // --conditions: the file is read before the connect, so one the
-    // loader refuses never opens the adapter
+    // --conditions, else a replay's own copy
     ecuio_condition_set_t* conditions = nullptr;
     if (args.conditions != nullptr) {
         std::string why;
-        std::string bytes;
-        ecuio_status_t loaded = ECUIO_ERR_LOAD_FAILED;
-        if (read_whole(args.conditions, ECUIO_CONDITION_FILE_MAX_BYTES,
-                       "condition file", &bytes, &why)) {
-            loaded = ecuio_condition_set_load(bytes.data(), bytes.size(),
-                                              &conditions);
-            why = ecuio_last_error_detail();
-        }
-        if (loaded != ECUIO_OK) {
+        ecuio_status_t loaded = ECUIO_OK;
+        conditions = load_conditions_file(args.conditions, &loaded, &why);
+        if (conditions == nullptr) {
             write_error(out, loaded, why.c_str());
             out.flush();
             return kExitConnect;
         }
+    } else {
+        conditions = recording_conditions(args.uri);
     }
+    const char* conditions_source =
+        args.conditions != nullptr ? "file" : "recording";
+    const bool judging = conditions != nullptr;
     ecuio_session_t* session = nullptr;
     std::string detail;
     ecuio_status_t st = create_within(out, args.uri, &session, &detail);
@@ -2855,38 +3028,16 @@ int run_stream(const StreamArgs& args)
     const bool replay_ends =
         replay && !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
     write_session(out, info);
-    // The conditions go on before a recording begins (a recording holds
-    // one set for its whole length): the conditions line says what the
-    // session made of each
+    ShownConditions shown;
     if (conditions != nullptr) {
-        st = ecuio_session_set_conditions(session, conditions,
-                                          session_signal_file());
-        const uint32_t count = ecuio_condition_set_count(conditions);
-        std::vector<ecuio_condition_info_t> infos(count);
-        std::vector<ecuio_condition_state_t> states(count);
-        uint32_t held = 0;
-        if (st == ECUIO_OK) {
-            st = ecuio_session_get_condition_states(session, states.data(),
-                                                    count, &held);
-        }
-        if (st != ECUIO_OK || held != count) {
-            write_error(out, st != ECUIO_OK ? st : ECUIO_ERR_INVALID_ARGUMENT);
+        if (!attach_conditions(out, session, conditions, conditions_source,
+                               &shown)) {
             out.flush();
-            ecuio_condition_set_free(conditions);
             ecuio_session_destroy(session);
             return kExitConnect;
         }
-        for (uint32_t i = 0; i < count; ++i) {
-            ecuio_condition_set_get(conditions, i, &infos[i]);
-            stream->condition_keys.emplace_back(infos[i].key);
-        }
-        const char* name = ecuio_condition_set_name(conditions);
-        BigLine b(cli::conditions_line_bytes(name, count));
-        cli::conditions_line(b.line, name, count > 0 ? states[0].generation : 1,
-                             infos.data(), states.data(), count);
-        write_line(out, b.line);
-        ecuio_condition_set_free(conditions);
         conditions = nullptr;
+        stream->condition_keys = shown.keys;
         ecuio_register_conditions_callback(session, on_conditions,
                                            stream.get());
     }
@@ -3007,6 +3158,7 @@ int run_stream(const StreamArgs& args)
         }
         poll_timing(out, session, info, timing_snaps, timing_rows, false);
         poll_recording(out, recorder, marks.get(), &recording_failed);
+        poll_conditions(out, session, &shown);
 
         poll_health(out, session, &last_error, &episodes);
         // A replay whose file changed has stopped, short of its last
@@ -3074,7 +3226,7 @@ int run_stream(const StreamArgs& args)
         l.u64(stream->ring.dropped_frames());
         l.key("dropped_values");
         l.u64(stream->ring.dropped_values());
-        if (args.conditions != nullptr) {
+        if (judging) {
             l.key("conditions_dropped");
             l.u64(stream->conditions_dropped.load());
         }
@@ -3159,27 +3311,22 @@ std::vector<ecuio_can_interface_t> can_interfaces()
 // writer thread adds to them meanwhile; a file not yet made counts 0)
 uint64_t folder_bytes(const std::string& folder)
 {
-    static const char* const kFiles[] = {"frames.csv",  "signals.csv",
-                                         "events.log",  "markers.csv",
-                                         "latency.csv", "signals.json"};
-    uint64_t total = 0;
-    for (const char* name : kFiles) {
-        const std::string path = folder + "/" + name;
+    return cli::recording_bytes(folder, [](const std::string& path) {
 #ifdef _WIN32
         WIN32_FILE_ATTRIBUTE_DATA a;
         if (GetFileAttributesExW(wide(path.c_str()).c_str(),
                                  GetFileExInfoStandard, &a)) {
-            total +=
-                (static_cast<uint64_t>(a.nFileSizeHigh) << 32) | a.nFileSizeLow;
+            return (static_cast<uint64_t>(a.nFileSizeHigh) << 32) |
+                   a.nFileSizeLow;
         }
 #else
         struct stat st{};
         if (stat(path.c_str(), &st) == 0 && st.st_size > 0) {
-            total += static_cast<uint64_t>(st.st_size);
+            return static_cast<uint64_t>(st.st_size);
         }
 #endif
-    }
-    return total;
+        return uint64_t{0};
+    });
 }
 
 // log's frame callback: the frames seen, for a replay's end (stream
@@ -3239,11 +3386,24 @@ void wait_for_writer(const ecuio_recorder_t* recorder, uint64_t frames)
 int run_log(const cli::LogArgs& args)
 {
     Output out;
+    ecuio_condition_set_t* conditions = nullptr;
+    if (args.conditions != nullptr) {
+        std::string why;
+        ecuio_status_t loaded = ECUIO_OK;
+        conditions = load_conditions_file(args.conditions, &loaded, &why);
+        if (conditions == nullptr) {
+            write_start(out);
+            write_error(out, loaded, why.c_str());
+            out.flush();
+            return kExitConnect;
+        }
+    }
     ecuio_session_t* session = nullptr;
     std::string detail;
     ecuio_status_t st =
         create_within(out, args.uri, &session, &detail, /*start_first=*/true);
     if (st != ECUIO_OK) {
+        ecuio_condition_set_free(conditions);
         write_start(out);
         write_error(out, st, detail.c_str());
         out.flush();
@@ -3253,6 +3413,7 @@ int run_log(const cli::LogArgs& args)
     std::vector<uint16_t> ids;
     std::string why;
     if (!cli::resolve_focus(set, args.names, ids, &why)) {
+        ecuio_condition_set_free(conditions);
         ecuio_session_destroy(session);
         std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
         return kExitUsage;
@@ -3269,6 +3430,13 @@ int run_log(const cli::LogArgs& args)
             ? info.channel_count
             : ECUIO_SESSION_INFO_MAX_CHANNELS;
     cli::SessionSeen session_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    ShownConditions shown;
+    if (conditions != nullptr &&
+        !attach_conditions(out, session, conditions, "file", &shown)) {
+        out.flush();
+        ecuio_session_destroy(session);
+        return kExitConnect;
+    }
     // The focus before the recorder attaches: the header's focus line is
     // the focus at the attach
     st = ecuio_session_set_focus_with(
@@ -3355,6 +3523,7 @@ int run_log(const cli::LogArgs& args)
         poll_recording(out, recorder, nullptr, &recording_failed);
         poll_health(out, session, &last_error, &episodes);
         poll_sessions(out, session, channels, session_seen);
+        poll_conditions(out, session, &shown);
         reason = cli::log_end_reason(
             g_interrupted.load(), recording_failed,
             replay_ends &&
@@ -4002,6 +4171,7 @@ struct Viewed {
     std::unique_ptr<ecuio_recording_t, RecordingCloser> r;
     ecuio_recording_info_t info{};
     ecuio_recording_signals_t signal_file{};
+    ecuio_recording_conditions_t conditions{};
     std::vector<ecuio_recording_signal_t> signals;
     std::vector<uint32_t> shown;
     bool aligned = true;
@@ -4338,6 +4508,7 @@ int run_view(ViewArgs& args)
         v.decoded = decoded;
         ecuio_recording_get_info(r, &v.info);
         ecuio_recording_get_signals(r, &v.signal_file);
+        ecuio_recording_get_conditions(r, &v.conditions);
         v.signals.resize(v.info.signal_count);
         for (uint32_t k = 0; k < v.info.signal_count; ++k) {
             ecuio_recording_get_signal(r, k, &v.signals[k]);
@@ -4523,7 +4694,7 @@ int run_view(ViewArgs& args)
     for (uint32_t i = 0; i < views.size(); ++i) {
         const Viewed& v = views[i];
         cli::Line l(buf, sizeof buf);
-        cli::opened_line(l, i, v.info, v.signal_file,
+        cli::opened_line(l, i, v.info, v.signal_file, v.conditions,
                          v.decoded.empty() ? nullptr : v.decoded.c_str());
         write_line(out, l);
         for (uint32_t k = 0; k < v.signals.size(); ++k) {
@@ -4536,6 +4707,7 @@ int run_view(ViewArgs& args)
             cli::marker_line(b.line, i, k, m);
             write_line(out, b.line);
         }
+        write_condition_lines(out, v.r.get(), i, v.info);
     }
     if (args.align.kind != cli::AlignOn::none) {
         for (uint32_t i = 0; i < views.size(); ++i) {
@@ -5139,8 +5311,10 @@ int run_info(const InfoArgs& args)
         ecuio_recording_get_info(r.get(), &info);
         ecuio_recording_signals_t signal_file{};
         ecuio_recording_get_signals(r.get(), &signal_file);
+        ecuio_recording_conditions_t conditions{};
+        ecuio_recording_get_conditions(r.get(), &conditions);
         cli::Line l(buf, sizeof buf);
-        cli::opened_line(l, 0, info, signal_file);
+        cli::opened_line(l, 0, info, signal_file, conditions);
         write_line(out, l);
         for (uint32_t k = 0; k < info.signal_count; ++k) {
             ecuio_recording_signal_t s{};
@@ -5154,6 +5328,7 @@ int run_info(const InfoArgs& args)
             cli::marker_line(b.line, 0, k, m);
             write_line(out, b.line);
         }
+        write_condition_lines(out, r.get(), 0, info);
     } else {
         BigLine b(1024 + open_detail.size() * 6);
         cli::open_failed_line(b.line, 0, open_rc, open_detail.c_str());

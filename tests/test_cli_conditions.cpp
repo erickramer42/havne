@@ -2,17 +2,23 @@
 // Testing: UNIT: CliConditionTest (test_cli)
 //
 // cli/condition_lines.h: conditions check's arguments and its lines, over
-// sets core's loader read.
+// sets core's loader read; a recording's closed line from a real recorder
+// (internal.h's writer hold and dispatch).
 
 #include "condition_lines.h"
 #include "line_ring.h"
+#include "temp_name.h"
 
 #include <gtest/gtest.h>
 
+#include <ecuio/internal.h>
 #include <ecuio/profile.h>
+#include <ecuio/recording.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -343,10 +349,11 @@ TEST(CliConditionTest, TheStreamsLinesSayTheSetAndEachEvent)
     states[1].flags = ECUIO_CONDITION_STALE;
     std::vector<char> buf(cli::conditions_line_bytes("Desk", 2));
     cli::Line line(buf.data(), buf.size());
-    cli::conditions_line(line, "Desk", 3, infos, states, 2);
+    cli::conditions_line(line, "Desk", "file", 3, infos, states, 2);
     EXPECT_FALSE(line.full());
     EXPECT_EQ(std::string(line.data(), line.size()),
-              "{\"type\":\"conditions\",\"name\":\"Desk\",\"generation\":3,"
+              "{\"type\":\"conditions\",\"name\":\"Desk\",\"source\":"
+              "\"file\",\"generation\":3,"
               "\"conditions\":[{\"key\":\"hot\",\"alert\":\"danger\","
               "\"record\":false,\"mark\":true,\"available\":false,"
               "\"why\":\"no_link\"},{\"key\":\"revs\",\"alert\":null,"
@@ -354,10 +361,10 @@ TEST(CliConditionTest, TheStreamsLinesSayTheSetAndEachEvent)
               "\"why\":null}]}");
     char small[512];
     cli::Line none(small, sizeof small);
-    cli::conditions_line(none, "", 1, infos, states, 0);
+    cli::conditions_line(none, "", "recording", 1, infos, states, 0);
     EXPECT_EQ(std::string(none.data(), none.size()),
-              "{\"type\":\"conditions\",\"name\":null,\"generation\":1,"
-              "\"conditions\":[]}");
+              "{\"type\":\"conditions\",\"name\":null,\"source\":"
+              "\"recording\",\"generation\":1,\"conditions\":[]}");
 
     ecuio_condition_event_t e{};
     e.timestamp_us = 12431000;
@@ -520,4 +527,104 @@ TEST(CliConditionTest, TheRingLeavesAConditionLinesDropToItsCaller)
     char out[8];
     EXPECT_EQ(ring.drain(out, std::chrono::milliseconds(0)), 0u)
         << "no dropped line is owed for the condition line";
+}
+
+TEST(CliConditionTest, TheClosedLineCountsLostEventsOnlyWhenSome)
+{
+    char buf[128];
+    cli::Line a(buf, sizeof buf);
+    cli::recording_closed_line(a, true, 0);
+    EXPECT_EQ(std::string(a.data(), a.size()),
+              R"({"type":"recording","state":"closed","whole":true})");
+    cli::Line b(buf, sizeof buf);
+    cli::recording_closed_line(b, false, UINT64_MAX);
+    EXPECT_EQ(std::string(b.data(), b.size()),
+              R"({"type":"recording","state":"closed","whole":false,)"
+              R"("conditions_lost":18446744073709551615})");
+}
+
+TEST(CliConditionTest, AConditionMadeAvailableOrNotIsAChange)
+{
+    ecuio_condition_state_t was[3] = {};
+    ecuio_condition_state_t now[3] = {};
+    EXPECT_FALSE(cli::availability_changed(was, now, 3));
+    now[1].flags = ECUIO_CONDITION_STALE;
+    now[1].state = ECUIO_CONDITION_ON;
+    EXPECT_FALSE(cli::availability_changed(was, now, 3))
+        << "a judgment is no change of availability";
+    now[2].flags = ECUIO_CONDITION_UNAVAILABLE;
+    EXPECT_TRUE(cli::availability_changed(was, now, 3)) << "not received";
+    EXPECT_FALSE(cli::availability_changed(was, now, 2)) << "past the count";
+    EXPECT_TRUE(cli::availability_changed(now, was, 3))
+        << "a signal that arrives after all makes it available again";
+}
+
+namespace {
+
+/* Engine speed on 0x7E8 at a session time, dispatched as the worker would */
+void engine_speed(ecuio_session_t* s, uint64_t t_us, unsigned turns)
+{
+    static ecuio_frame_t f;
+    std::memset(&f, 0, sizeof f);
+    const unsigned raw = turns * 4;
+    f.arbitration_id = 0x7E8;
+    f.timestamp_us = t_us;
+    f.data[0] = 0x41;
+    f.data[1] = 0x0C;
+    f.data[2] = static_cast<uint8_t>(raw >> 8);
+    f.data[3] = static_cast<uint8_t>(raw & 0xFF);
+    f.data_length = 4;
+    ecuio_session_dispatch_callbacks(s, &f);
+}
+
+} // namespace
+
+/* close_recording's line from a real recorder that lost events: the
+ * writer held, a 4 KiB ring and 600 flips overrun the carry of 256 */
+TEST(CliConditionTest, TheClosedLineCountsWhatTheRecorderLost)
+{
+    namespace fs = std::filesystem;
+    const char* tmp = std::getenv("TEMP");
+    if (tmp == nullptr) {
+        tmp = std::getenv("TMPDIR");
+    }
+    const fs::path root = fs::path(tmp != nullptr ? tmp : "/tmp") /
+                          temp_name("havne-cli-closed-line");
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://x?profile=obd2", &s), ECUIO_OK);
+    const std::string json =
+        R"({"havne_conditions":1,"conditions":[{"key":"flip","name":"Flip",)"
+        R"("when":{"signal":["obd2.rpm"],"unit":"RPM","above":2000}}]})";
+    ecuio_condition_set_t* set = nullptr;
+    ASSERT_EQ(ecuio_condition_set_load(json.data(), json.size(), &set),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_set_conditions(s, set, nullptr), ECUIO_OK);
+    ecuio_condition_set_free(set);
+
+    const std::string where = root.generic_u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = where.c_str();
+    o.ring_bytes = 4096;
+    ecuio_recorder_t* recorder = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &recorder), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_session_record(s, recorder), ECUIO_OK);
+    ecuio_recorder_test_hold(recorder, 1);
+    for (int i = 0; i < 600; ++i) {
+        engine_speed(s, 1000000 + i * 10000u, i % 2 == 0 ? 3000 : 1000);
+    }
+    ecuio_recorder_state_t st{};
+    ASSERT_EQ(ecuio_recorder_get_state(recorder, &st), ECUIO_OK);
+    ASSERT_GT(st.conditions_lost, 0u);
+    ecuio_session_destroy(s);
+
+    char buf[128];
+    cli::Line l(buf, sizeof buf);
+    EXPECT_TRUE(cli::close_with_line(l, recorder, "done"));
+    EXPECT_EQ(std::string(l.data(), l.size()),
+              R"({"type":"recording","state":"closed","whole":true,)"
+              R"("conditions_lost":)" +
+                  std::to_string(st.conditions_lost) + "}");
+    std::error_code ec;
+    fs::remove_all(root, ec);
 }

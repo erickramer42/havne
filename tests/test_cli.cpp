@@ -1603,6 +1603,85 @@ TEST(CliViewTest, AWindowCoversWhatTheRecordingHoldsOnce)
     EXPECT_EQ(w.t1_us, 3000000u);
 }
 
+/* The opened line's conditions: null with no set and no line; the set's
+ * hash, whether it is there and the same, and the events read, skipped
+ * and cut. A cond line is stream's condition line with the recording's
+ * time and held added. */
+TEST(CliViewTest, ARecordingsConditionsAreNamedAndEachEventIsALine)
+{
+    char buf[1024];
+    ecuio_recording_info_t info{};
+    info.format = ECUIO_RECORDING_FORMAT_ENUMS;
+    const ecuio_recording_signals_t no_file{};
+    ecuio_recording_conditions_t cs{};
+    const auto conditions_of = [&] {
+        cli::Line l(buf, sizeof buf);
+        cli::opened_line(l, 0, info, no_file, cs);
+        const std::string line(l.data(), l.size());
+        const size_t at = line.find(",\"conditions\":");
+        return at == std::string::npos ? line : line.substr(at);
+    };
+    EXPECT_EQ(conditions_of(), ",\"conditions\":null}");
+    info.condition_events = 2;
+    EXPECT_EQ(conditions_of(),
+              ",\"conditions\":{\"sha256\":null,\"present\":false,"
+              "\"matches\":false,\"events\":2,\"lines_skipped\":0,"
+              "\"cut\":false}}")
+        << "lines with no set named or present";
+    info.condition_events = 0;
+    cs.lines_skipped = 1;
+    EXPECT_EQ(conditions_of(),
+              ",\"conditions\":{\"sha256\":null,\"present\":false,"
+              "\"matches\":false,\"events\":0,\"lines_skipped\":1,"
+              "\"cut\":false}}")
+        << "only a line that doesn't parse";
+    cs.flags = ECUIO_RECORDING_CONDITIONS_NAMED |
+               ECUIO_RECORDING_CONDITIONS_PRESENT |
+               ECUIO_RECORDING_CONDITIONS_MATCH;
+    std::memset(cs.sha256, 'b', 64);
+    cs.lines_skipped = 3;
+    info.condition_events = 1048577;
+    info.flags = ECUIO_RECORDING_INFO_CONDITIONS_CUT;
+    EXPECT_EQ(conditions_of(),
+              ",\"conditions\":{\"sha256\":\"" + std::string(64, 'b') +
+                  "\",\"present\":true,\"matches\":true,\"events\":1048577,"
+                  "\"lines_skipped\":3,\"cut\":true}}");
+    cs.flags = ECUIO_RECORDING_CONDITIONS_PRESENT;
+    info.flags = 0;
+    EXPECT_NE(conditions_of().find("\"sha256\":null,\"present\":true,"
+                                   "\"matches\":false"),
+              std::string::npos)
+        << "present, not named";
+
+    ecuio_recording_condition_event_t e{};
+    e.host_us = 7251000;
+    e.timestamp_us = 7250000;
+    e.value = 111;
+    e.state = ECUIO_CONDITION_ON;
+    e.flags = ECUIO_CONDITION_FIRED | ECUIO_CONDITION_HELD;
+    e.term = 1;
+    std::memcpy(e.key, "coolant_high", 13);
+    char line[cli::kRecordedConditionLineBytes];
+    cli::Line c(line, sizeof line);
+    cli::recorded_condition_line(c, 2, e);
+    EXPECT_EQ(std::string(c.data(), c.size()),
+              "{\"type\":\"condition\",\"recording\":2,\"host_us\":7251000,"
+              "\"t_us\":7250000,\"key\":\"coolant_high\",\"state\":\"on\","
+              "\"fired\":true,\"stale\":false,\"held\":true,\"value\":111,"
+              "\"term\":1}");
+    e.state = ECUIO_CONDITION_OFF;
+    e.flags = ECUIO_CONDITION_STALE;
+    std::memset(e.key, 'k', sizeof e.key - 1);
+    cli::Line d(line, sizeof line);
+    cli::recorded_condition_line(d, 0, e);
+    EXPECT_TRUE(d.finish()) << "a key of the most bytes fits";
+    EXPECT_NE(std::string(d.data(), d.size())
+                  .find("\"key\":\"" + std::string(31, 'k') +
+                        "\",\"state\":\"off\",\"fired\":false,\"stale\":true,"
+                        "\"held\":false"),
+              std::string::npos);
+}
+
 TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
 {
     char buf[1024];
@@ -1614,14 +1693,15 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     info.rows_torn = 1;
     info.records_dropped = 4;
     const ecuio_recording_signals_t no_file{};
+    const ecuio_recording_conditions_t no_set{};
     cli::Line o(buf, sizeof buf);
-    cli::opened_line(o, 1, info, no_file);
+    cli::opened_line(o, 1, info, no_file, no_set);
     EXPECT_EQ(std::string(o.data(), o.size()),
               "{\"type\":\"opened\",\"recording\":1,\"format\":\"older\","
               "\"duration_us\":30000000,\"utc_start_us\":null,\"signals\":2,"
               "\"markers\":0,\"summary\":false,\"rows_torn\":1,"
               "\"records_dropped\":4,\"notes_dropped\":0,"
-              "\"signal_file\":null}");
+              "\"signal_file\":null,\"conditions\":null}");
     /* The header's file: its hash, there and the same; or there unnamed */
     ecuio_recording_signals_t named{};
     named.flags = ECUIO_RECORDING_SIGNALS_NAMED |
@@ -1629,20 +1709,21 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
                   ECUIO_RECORDING_SIGNALS_MATCH;
     std::memset(named.sha256, 'a', 64);
     cli::Line f(buf, sizeof buf);
-    cli::opened_line(f, 1, info, named);
+    cli::opened_line(f, 1, info, named, no_set);
     const std::string line(f.data(), f.size());
     EXPECT_NE(line.find(",\"signal_file\":{\"sha256\":\"" +
                         std::string(64, 'a') +
-                        "\",\"present\":true,\"matches\":true}}"),
+                        "\",\"present\":true,\"matches\":true},"
+                        "\"conditions\":null}"),
               std::string::npos)
         << line;
     ecuio_recording_signals_t unnamed{};
     unnamed.flags = ECUIO_RECORDING_SIGNALS_PRESENT;
     cli::Line u(buf, sizeof buf);
-    cli::opened_line(u, 1, info, unnamed);
+    cli::opened_line(u, 1, info, unnamed, no_set);
     const std::string unnamed_line(u.data(), u.size());
     EXPECT_NE(unnamed_line.find(",\"signal_file\":{\"sha256\":null,\"present\":"
-                                "true,\"matches\":false}}"),
+                                "true,\"matches\":false},"),
               std::string::npos)
         << unnamed_line;
     EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_ENUMS), "core")
@@ -2430,6 +2511,37 @@ TEST(CliRecordingSignalsTest, TheHeaderNamesTheProfileAndTheFile)
     cli::RecordedSignals none;
     none.take("profile  obd2");
     EXPECT_FALSE(none.names_file());
+    EXPECT_EQ(none.conditions_sha256, "");
+}
+
+/* The conditions the recording judged: their copy's line and hash, by the
+ * signal file's rule, and only in the header */
+TEST(CliRecordingSignalsTest, TheHeaderNamesTheConditionsCopy)
+{
+    const std::string sha(64, 'c');
+    cli::RecordedSignals r;
+    r.take("ecuio session recording, format 3 (ADR-0049)");
+    r.take("profile  obd2");
+    r.take("conditions  conditions.json," + sha + "\r");
+    EXPECT_EQ(r.conditions_sha256, sha);
+    EXPECT_EQ(r.sha256, "") << "no signal file named";
+    EXPECT_FALSE(r.names_file());
+    r.take("");
+    r.take("conditions  conditions.json," + std::string(64, 'd'));
+    EXPECT_EQ(r.conditions_sha256, sha) << "past the header";
+
+    const std::string bad[] = {
+        "conditions  conditions.json," + std::string(64, 'C'),
+        "conditions  conditions.json," + std::string(63, 'c'),
+        "conditions  conditions.json," + std::string(65, 'c'),
+        "conditions  other.json," + sha,
+        "conditions  conditions.json " + sha,
+    };
+    for (const std::string& line : bad) {
+        cli::RecordedSignals b;
+        b.take(line);
+        EXPECT_EQ(b.conditions_sha256, "") << line;
+    }
 }
 
 /* The folder: the path up to the query, a frames.csv's own folder, any
