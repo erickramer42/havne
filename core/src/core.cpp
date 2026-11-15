@@ -1385,10 +1385,16 @@ void defs_not_received(ecuio_session_t* session, std::vector<uint8_t>& gone)
                     : 0;
         }
     }
-    const auto was_dropped = [&](uint32_t i) { return dropped[i] != 0; };
+    /* A computed def judged over every leaf not received at once, so
+     * inputs gone for different reasons count together */
+    std::vector<uint8_t> leaves(set->count, 0);
     for (uint32_t i = 0; i < set->count; ++i) {
-        if (dropped[i] != 0 ||
-            ecuio_computed_input_gone(*set, set->defs[i], was_dropped)) {
+        leaves[i] = gone[i] != 0 || dropped[i] != 0 ? 1 : 0;
+    }
+    const auto not_got = [&](uint32_t i) { return leaves[i] != 0; };
+    for (uint32_t i = 0; i < set->count; ++i) {
+        if (leaves[i] != 0 ||
+            ecuio_computed_input_gone(*set, set->defs[i], not_got)) {
             gone[i] = 1;
         }
     }

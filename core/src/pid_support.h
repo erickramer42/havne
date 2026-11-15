@@ -1,16 +1,18 @@
 // File/layer: core/src/pid_support.h | C++17, Qt-free; header-only, pure
-// Testing: UNIT: PidSupportTest (test_obd2); BRIDGE: BridgeTest
-//          (test_bridge); HARNESS: J2534AdoptionTest (test_j2534_stream);
-//          Elm327SessionTest (test_elm327)
+// Testing: UNIT: PidSupportTest (test_obd2), CoreTest (test_core);
+//          BRIDGE: BridgeTest (test_bridge); HARNESS: J2534AdoptionTest
+//          (test_j2534_stream); Elm327SessionTest (test_elm327)
 //
 // Which of a set's Service 01 signals their ECU says it doesn't support
 // (ADR-0039 section 6): the supported-PID bitmaps a channel's support
 // report carries (ADR-0015 section 4), judged against each def's PID. A
-// computed def follows its inputs: with one of them gone it is gone too.
+// computed def follows its inputs: it is gone with those whose lack leaves
+// it no value.
 
 #ifndef ECUIO_PID_SUPPORT_H
 #define ECUIO_PID_SUPPORT_H
 
+#include "computed.h" /* ecuio_computed_lacks */
 #include "ecuio/core.h"
 #include "ecuio/signals.h"
 
@@ -110,11 +112,12 @@ inline bool ecuio_def_marked_unsupported(const ecuio_signal_def_t& d,
  * set whose programs name each other in a ring ends */
 constexpr unsigned ECUIO_COMPUTED_FOLLOW_MAX = ECUIO_COMPUTED_MAX_DEPTH;
 
-/* A computed def never has a value while one of its inputs has none:
- * whether gone(index of a def in the set) holds for an input of d, an
- * input that is computed itself judged by its own inputs. False for a
- * def that isn't computed, a program the set doesn't hold and an input
- * the set lacks. */
+/* Whether computed def d can have no value while the defs gone(index of
+ * a def in the set) holds for have none (ecuio_computed_lacks over its
+ * inputs gone, an input that is computed judged by its own), so inputs
+ * an if, all or any can do without are gone only together. False for a
+ * def that isn't computed, a program the set doesn't hold; an input the
+ * set lacks counts as not gone. */
 template <class Gone>
 bool ecuio_computed_input_gone(const ecuio_signal_set_t& set,
                                const ecuio_signal_def_t& d, const Gone& gone,
@@ -126,6 +129,7 @@ bool ecuio_computed_input_gone(const ecuio_signal_set_t& set,
         return false;
     }
     const ecuio_computed_t& program = set.computed[d.table_first];
+    uint8_t inputs_gone = 0;
     for (uint32_t k = 0;
          k < program.input_count && k < ECUIO_COMPUTED_MAX_INPUTS; ++k) {
         for (uint32_t i = 0; i < set.count; ++i) {
@@ -136,12 +140,12 @@ bool ecuio_computed_input_gone(const ecuio_signal_set_t& set,
             if ((in.flags & ECUIO_DEF_FLAG_COMPUTED) != 0
                     ? ecuio_computed_input_gone(set, in, gone, depth + 1)
                     : gone(i)) {
-                return true;
+                inputs_gone = static_cast<uint8_t>(inputs_gone | (1u << k));
             }
             break;
         }
     }
-    return false;
+    return inputs_gone != 0 && ecuio_computed_lacks(program, inputs_gone);
 }
 
 /* The set's defs their ECU says it doesn't support: each Service 01 def

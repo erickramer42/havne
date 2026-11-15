@@ -7725,6 +7725,173 @@ TEST(CoreTest, TheUnaskedSignalsAreWhatTheFocusParks)
     EXPECT_EQ(ecuio_profile_unregister("unasked-passive"), ECUIO_OK);
 }
 
+/* ADR-0062 section 3: a computed signal is absent, unasked or not
+ * received only with an input its program can't give a value without.
+ * With MAF absent, parked by a focus on speed alone, or its request
+ * dropped (a condition on each signal), a MAF read only in a branch an if may
+ * not take, or as one part of an any or an all, lists nothing; MAF in
+ * the predicate, in both branches or in a sum lists the signal, and a
+ * signal reading either follows it */
+TEST(CoreTest, AComputedSignalReadingAnInputOnlyInABranchIsNotListedWithIt)
+{
+    const std::string file = R"json({"havne_signals": 2, "name": "Branches",
+ "source": {"name": "Havne's tests"}, "extends": "obd2", "signals": [
+ {"key": "per_speed", "name": "Per Speed", "kind": "computed", "expr": "if(obd2.speed > 0, obd2.maf / obd2.speed, 0)"},
+ {"key": "gate", "name": "Gate", "kind": "computed", "expr": "if(obd2.maf > 0, obd2.speed, 0)"},
+ {"key": "either", "name": "Either", "kind": "computed", "expr": "if(obd2.speed > 0, obd2.maf, obd2.maf * 2)"},
+ {"key": "moving", "name": "Moving", "kind": "computed", "expr": "if(any(obd2.speed > 0, obd2.maf > 0), 1, 0)"},
+ {"key": "both", "name": "Both", "kind": "computed", "expr": "if(all(obd2.speed > 0, obd2.maf > 0), 1, 0)"},
+ {"key": "sum", "name": "Sum", "kind": "computed", "expr": "obd2.maf + obd2.speed"},
+ {"key": "per_speed_2", "name": "Per Speed 2", "kind": "computed", "expr": "per_speed * 2"},
+ {"key": "gate_2", "name": "Gate 2", "kind": "computed", "expr": "gate * 2"}]})json";
+    ecuio_signal_file_t* sf = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(file.data(), file.size(), &sf), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_profile_register(ecuio_signal_file_profile(sf),
+                                     ecuio_signal_file_set(sf), nullptr),
+              ECUIO_OK);
+    const auto id_of = [&](const char* key) {
+        const ecuio_signal_def_t* d = ecuio_signal_file_find(sf, key);
+        EXPECT_NE(d, nullptr) << key;
+        return d != nullptr ? d->id : uint16_t{0};
+    };
+    /* The file's signals each list holds, in the file's order */
+    const auto listed = [&](const std::vector<uint16_t>& ids) {
+        std::vector<std::string> keys;
+        for (const char* key : {"per_speed", "gate", "either", "moving", "both",
+                                "sum", "per_speed_2", "gate_2"}) {
+            if (std::find(ids.begin(), ids.end(), id_of(key)) != ids.end()) {
+                keys.push_back(key);
+            }
+        }
+        return keys;
+    };
+    const std::vector<std::string> want = {"gate", "either", "sum", "gate_2"};
+    const std::string uri =
+        std::string("mock://branches?profile=") + ecuio_signal_file_profile(sf);
+
+    /* Absent: three replies to 01 10 with no data byte, decoded for a
+     * values callback */
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(s, values_capture_cb, &cap),
+              ECUIO_OK);
+    const ecuio_frame_t none = value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x10});
+    for (uint32_t k = 0; k < ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(s, &none);
+    }
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_session_get_absent_signals(s, nullptr, 0, &n), ECUIO_OK);
+    std::vector<uint16_t> absent(n);
+    ASSERT_EQ(ecuio_session_get_absent_signals(s, absent.data(), n, &n),
+              ECUIO_OK);
+    ASSERT_FALSE(absent.empty());
+    EXPECT_EQ(absent[0], ECUIO_OBD2_SIG_MAF_ID);
+    EXPECT_EQ(listed(absent), want);
+    EXPECT_EQ(absent.size(), 1 + want.size()) << "MAF and its four readers";
+    ecuio_session_destroy(s);
+
+    /* Unasked: a focus on speed parks MAF */
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    request_params params;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ecuio_focus_seen seen;
+    const uint16_t speed = ECUIO_OBD2_SIG_SPEED_ID;
+    ASSERT_EQ(ecuio_session_set_focus(s, &speed, 1), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    n = 0;
+    ASSERT_EQ(ecuio_session_get_unasked_signals(s, nullptr, 0, &n), ECUIO_OK);
+    std::vector<uint16_t> unasked(n);
+    ASSERT_EQ(ecuio_session_get_unasked_signals(s, unasked.data(), n, &n),
+              ECUIO_OK);
+    EXPECT_NE(std::find(unasked.begin(), unasked.end(), ECUIO_OBD2_SIG_MAF_ID),
+              unasked.end());
+    EXPECT_EQ(std::find(unasked.begin(), unasked.end(), speed), unasked.end());
+    EXPECT_EQ(listed(unasked), want);
+    ecuio_session_destroy(s);
+
+    /* Not received: MAF's request dropped, a condition on each signal */
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK);
+    set = ecuio_session_signal_set(s);
+    auto d = std::make_unique<ecuio_request_engine>();
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, d.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    uint32_t maf_row = d->count;
+    for (uint32_t k = 0; k < d->count; ++k) {
+        if (d->requests[k].len == 2 && d->requests[k].bytes[1] == 0x10) {
+            maf_row = k;
+        }
+    }
+    ASSERT_LT(maf_row, d->count);
+    ecuio_engine_drop(d.get(), maf_row, ECUIO_DROP_NOT_SUPPORTED, 0x12);
+    ecuio_focus_seen dropped;
+    ecuio_take_focus(s, d.get(), dropped);
+    const char* keys[] = {"per_speed", "gate", "either",      "moving",
+                          "both",      "sum",  "per_speed_2", "gate_2"};
+    std::string list;
+    for (const char* key : keys) {
+        list += std::string(list.empty() ? "" : ",") + R"({"key":")" + key +
+                R"(","name":")" + key + R"(","when":{"signal":["key:)" + key +
+                R"("],"unit":"","above":1}})";
+    }
+    const std::string json =
+        R"({"havne_conditions":1,"conditions":[)" + list + "]}";
+    ecuio_condition_set_t* conditions = nullptr;
+    ASSERT_EQ(ecuio_condition_set_load(json.data(), json.size(), &conditions),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_session_set_conditions(s, conditions, sf), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_condition_set_free(conditions);
+    s->ran = true; /* as a worker that has run: the states judge the lists */
+    ecuio_condition_state_t states[8] = {};
+    n = 0;
+    ASSERT_EQ(ecuio_session_get_condition_states(s, states, 8, &n), ECUIO_OK);
+    ASSERT_EQ(n, 8u);
+    std::vector<std::string> not_received;
+    for (uint32_t i = 0; i < n; ++i) {
+        if (states[i].why == ECUIO_CONDITION_WHY_NOT_RECEIVED) {
+            not_received.push_back(keys[i]);
+        }
+    }
+    EXPECT_EQ(not_received, want);
+
+    /* Speed absent too: an any or all over a dropped MAF and an absent
+     * speed lacks a value, the two counted together */
+    ValuesCapture fed;
+    ASSERT_EQ(ecuio_register_values_callback(s, values_capture_cb, &fed),
+              ECUIO_OK);
+    const ecuio_frame_t no_speed =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0D});
+    for (uint32_t k = 0; k < ECUIO_ABSENT_AFTER_FRAMES; ++k) {
+        ecuio_session_dispatch_callbacks(s, &no_speed);
+    }
+    ASSERT_EQ(ecuio_session_get_condition_states(s, states, 8, &n), ECUIO_OK);
+    not_received.clear();
+    for (uint32_t i = 0; i < n; ++i) {
+        if (states[i].why == ECUIO_CONDITION_WHY_NOT_RECEIVED) {
+            not_received.push_back(keys[i]);
+        }
+    }
+    EXPECT_EQ(not_received,
+              std::vector<std::string>(std::begin(keys), std::end(keys)));
+    ecuio_session_destroy(s);
+
+    EXPECT_EQ(ecuio_profile_unregister(ecuio_signal_file_profile(sf)),
+              ECUIO_OK);
+    ecuio_signal_file_free(sf);
+}
+
 /* ADR-0056 section 4: the call's refusals, each changing nothing, and
  * the minimum reaching the engine with the focus at the worker's take;
  * the focus's end takes it away. A default pick (ECUIO_FOCUS_DEFAULT_PICK)
