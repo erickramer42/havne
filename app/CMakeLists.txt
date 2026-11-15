@@ -104,6 +104,7 @@ qt_add_qml_module(app_ui
         qml/ConditionsPanel.qml
         qml/RecordingSpanStats.qml
         qml/RecordingFindings.qml
+        qml/RecordingZoomRow.qml
         qml/ViewHead.qml
         qml/PageHeader.qml
         qml/DashboardPage.qml

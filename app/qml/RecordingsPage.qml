@@ -29,8 +29,13 @@ Page {
 
     // The parts' ids the page reads, and the page's ids the parts read
     property alias spanStatsHome: spanStatsHome
-    property alias spanStatsPinned: spanStatsPinned
     property alias recording: recording
+    property alias spanRowDesktop: zoomBlock.spanRowDesktop
+    property alias spanRowPhone: zoomBlock.spanRowPhone
+    property alias spanStatsPinned: zoomBlock.spanStatsPinned
+    property alias zoomSwitchSlot: zoomBlock.zoomSwitchSlot
+    property alias spanStatsBlock: spanStatsBlock
+    property alias zoomHome: zoomHome
 
     // Main puts the URI in Settings' field and shows it
     signal replayRequested(string uri)
@@ -394,12 +399,12 @@ Page {
     // On that form About is a view of the switch
     readonly property bool aboutShown: pinnedViewer && detailView === "about"
     // Each view's list head, noted as its list makes it
-    property Item valuesHead: null
+    property ViewHead valuesHead: null
     property Item valuesFoot: null
-    property Item framesHead: null
-    property Item idsHead: null
-    property Item aboutHead: null
-    readonly property Item currentHead: !pinnedViewer ? null
+    property ViewHead framesHead: null
+    property ViewHead idsHead: null
+    property ViewHead aboutHead: null
+    readonly property ViewHead currentHead: !pinnedViewer ? null
                                       : aboutShown ? aboutHead
                                       : framesShown ? (framesById ? idsHead : framesHead)
                                       : valuesHead
@@ -3311,112 +3316,9 @@ Page {
             Layout.fillWidth: true
             // A layout fills by default: this one keeps its content's height
             Layout.fillHeight: false
-            ColumnLayout {
+            RecordingZoomRow {
                 id: zoomBlock
-                parent: root.currentHead ? root.currentHead.zoomSlot : zoomHome
-                Layout.fillWidth: true
-                spacing: 10
-                // Zoom, and where the cursor is
-                // Compact on a phone: at their desktop widths the buttons, Frame
-                // test among them, outgrow its width
-                RowLayout {
-                    visible: recording.state === RecordingView.Open
-                    Layout.fillWidth: true
-                    spacing: 6
-                    // Maximized, the views' switch leads the row, so either view
-                    // leads back to the other
-                    RowLayout {
-                        id: zoomSwitchSlot
-                        visible: root.chartMaximized && recording.hasFrames && root.switchInZoomRow
-                    }
-                    ThemedButton {
-                        objectName: "zoomAll"
-                        compact: Theme.dense
-                        text: qsTr("All")
-                        Layout.maximumWidth: 72
-                        onClicked: root.showAll()
-                    }
-                    ThemedButton {
-                        objectName: "zoomOut"
-                        compact: Theme.dense
-                        text: "−"
-                        Layout.maximumWidth: 48
-                        Accessible.name: qsTr("Zoom out")
-                        onClicked: root.zoomAt((root.viewT0 + root.viewT1) / 2, 2)
-                    }
-                    ThemedButton {
-                        objectName: "zoomIn"
-                        compact: Theme.dense
-                        text: "+"
-                        Layout.maximumWidth: 48
-                        Accessible.name: qsTr("Zoom in")
-                        onClicked: root.zoomAt((root.viewT0 + root.viewT1) / 2, 0.5)
-                    }
-                    ThemedButton {
-                        objectName: "frameTest"
-                        compact: Theme.dense
-                        visible: Theme.developerMode
-                        enabled: !root.frameTesting
-                        text: qsTr("Frame test")
-                        Layout.maximumWidth: 120
-                        onClicked: root.startFrameTest()
-                    }
-                    // On a phone the hint wraps onto two caption lines where the
-                    // row leaves it little width, instead of eliding to "Tap for …"
-                    Label {
-                        objectName: "cursorTime"
-                        visible: root.phoneShape || !root.spanLineUp
-                        Layout.fillWidth: true
-                        horizontalAlignment: Text.AlignRight
-                        verticalAlignment: Text.AlignVCenter
-                        wrapMode: Theme.compact ? Text.WordWrap : Text.NoWrap
-                        maximumLineCount: Theme.compact ? 2 : 1
-                        elide: Text.ElideRight
-                        font.pixelSize: Theme.compact ? Theme.fontCaption : Theme.fontBody
-                        color: Theme.textDim
-                        text: !root.hasCursor ? (Theme.compact ? qsTr("Tap for values")
-                                                               : qsTr("Click for values · drag to pan · wheel to zoom · double-click a pane to enlarge it"))
-                                              : qsTr("At %1").arg(root.timeText(root.cursorMs, true))
-                    }
-                    RowLayout {
-                        id: spanRowDesktop
-                        visible: !root.phoneShape && root.spanLineUp
-                        Layout.fillWidth: true
-                    }
-                    ThemedButton {
-                        objectName: "maximizeChart"
-                        text: root.chartMaximized ? qsTr("Signals") : qsTr("Chart")
-                        compact: Theme.dense
-                        Layout.minimumWidth: 52
-                        Layout.maximumWidth: 84
-                        Accessible.name: root.chartMaximized ? qsTr("Show the signals again")
-                                                             : qsTr("Give the chart the page")
-                        onClicked: root.toggleMaximized()
-                    }
-                }
-
-                // The span line, under the zoom row on a phone
-                RowLayout {
-                    id: spanRowPhone
-                    visible: root.phoneShape && root.spanLineUp
-                    Layout.fillWidth: true
-                }
-                ColumnLayout {
-                    id: spanStatsPinned
-                    visible: spanStatsBlock.parent === spanStatsPinned && spanStatsBlock.shown
-                    Layout.fillWidth: true
-                    Layout.fillHeight: false
-                }
-
-                Label {
-                    objectName: "frameTestResult"
-                    visible: Theme.developerMode && root.frameTestResult !== "" && !root.chartMaximized
-                             && recording.state === RecordingView.Open
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    color: Theme.textDim
-                    text: root.frameTestResult
-                }
+                host: root
             }
         }
 
