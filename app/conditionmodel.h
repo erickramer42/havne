@@ -80,6 +80,13 @@ public:
     QString firingsText(int row, uint64_t firings) const;
     // For each def an alert ON reads, its highest level (ECUIO_ALERT_*)
     std::map<uint32_t, int> alertLevels() const;
+    // A row's key, "" past the rows; the row of a key, -1 for none
+    QString key(int row) const;
+    int rowOfKey(const QString& key) const;
+    // A row's level when its alert sounds, ECUIO_ALERT_NONE when not
+    uint32_t toneLevel(int row) const;
+    // Whether any row's alert sounds
+    bool sounds() const;
 
     // Core's reason (ECUIO_CONDITION_WHY_*) in the app's words
     static QString whyText(uint32_t why);

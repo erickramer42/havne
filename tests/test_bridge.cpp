@@ -32,11 +32,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <map>
 #include <vector>
@@ -14189,6 +14191,414 @@ TEST(BridgeTest, TheBridgeAllocatesNothingPerConditionEvent)
         5000))
         << log.join(u'\n').toStdString();
     ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+namespace {
+
+// Three alerts on an engine speed the mock never reaches, so only the
+// events a case dispatches fire: two that sound, at each level, and one
+// that doesn't
+QByteArray toneConditions()
+{
+    return QByteArray(
+        R"({"havne_conditions":1,"conditions":[)"
+        R"({"key":"hot","name":"Hot","when":{"signal":["id:1001"],)"
+        R"("unit":"RPM","above":20000},)"
+        R"("alert":{"level":"danger","sound":true}},)"
+        R"({"key":"warm","name":"Warm","when":{"signal":["id:1001"],)"
+        R"("unit":"RPM","above":19000},)"
+        R"("alert":{"level":"warning","sound":true}},)"
+        R"({"key":"quiet","name":"Quiet","when":{"signal":["id:1001"],)"
+        R"("unit":"RPM","above":18000},)"
+        R"("alert":{"level":"danger","banner":true}}]})");
+}
+
+// A session of mock://demo judging toneConditions, its log kept
+struct ToneRun {
+    SettingsDirScope dir;
+    SessionBridge bridge;
+    QStringList log;
+    uint32_t generation = 0;
+
+    bool start()
+    {
+        QObject::connect(&bridge, &SessionBridge::logMessage,
+                         [this](const QString& line) { log << line; });
+        if (!dir.valid() ||
+            !bridge.saveConditions(QString::fromUtf8(toneConditions()))
+                 .value(QStringLiteral("ok"))
+                 .toBool() ||
+            !bridge.connectSession(QStringLiteral("mock://demo")).isEmpty() ||
+            !rowReads(bridge, 0, "off")) {
+            return false;
+        }
+        generation = bridge.conditionsGenerationForTesting();
+        return true;
+    }
+    // Each condition fired in one window, then the tick that writes it
+    bool fire(std::initializer_list<uint32_t> conditions)
+    {
+        std::vector<ecuio_condition_event_t> events;
+        for (uint32_t c : conditions) {
+            events.push_back(
+                conditionEvent(c, generation, ECUIO_CONDITION_FIRED, 20001));
+        }
+        const qsizetype before =
+            linesStarting(log, QStringLiteral("Alert: ")).size();
+        bridge.dispatchConditionsForTesting(
+            events.data(), static_cast<uint32_t>(events.size()));
+        const auto want = before + static_cast<qsizetype>(events.size());
+        return spinUntil(
+            [&]() {
+                return linesStarting(log, QStringLiteral("Alert: ")).size() >=
+                       want;
+            },
+            5000);
+    }
+    uint64_t danger() const
+    {
+        return bridge.alertToneForTesting().playedForTesting(
+            ECUIO_ALERT_DANGER);
+    }
+    uint64_t warning() const
+    {
+        return bridge.alertToneForTesting().playedForTesting(
+            ECUIO_ALERT_WARNING);
+    }
+};
+
+} // namespace
+
+// A firing whose alert sounds plays one tone; another of the same
+// condition within 5 s plays none, and one after it plays again
+TEST(BridgeTest, ASoundingFiringPlaysOnceInFiveSeconds)
+{
+    ToneRun run;
+    ASSERT_TRUE(run.start()) << run.log.join(u'\n').toStdString();
+    EXPECT_EQ(run.danger(), 0u) << "nothing fired yet";
+
+    ASSERT_TRUE(run.fire({0})) << run.log.join(u'\n').toStdString();
+    EXPECT_EQ(run.danger(), 1u);
+    EXPECT_EQ(run.warning(), 0u);
+
+    ASSERT_TRUE(run.fire({0}));
+    EXPECT_EQ(run.danger(), 1u) << "a second firing at once";
+    // 3 s added leaves the ticks' own time 2 s of margin
+    run.bridge.addToneTimeForTesting(3000000);
+    ASSERT_TRUE(run.fire({0}));
+    EXPECT_EQ(run.danger(), 1u) << "within 5 s of the tone";
+
+    run.bridge.addToneTimeForTesting(2000000);
+    ASSERT_TRUE(run.fire({0}));
+    EXPECT_EQ(run.danger(), 2u) << "5 s after the tone";
+    ASSERT_TRUE(disconnectAndWait(run.bridge));
+}
+
+// Each condition keeps its own 5 s, and a level its own tone. Firings in
+// one tick are one tone, the loudest, and each of them waits its 5 s
+TEST(BridgeTest, EachConditionSoundsItsOwnLevel)
+{
+    ToneRun run;
+    ASSERT_TRUE(run.start()) << run.log.join(u'\n').toStdString();
+    ASSERT_TRUE(run.fire({0}));
+    ASSERT_TRUE(run.fire({1}));
+    EXPECT_EQ(run.danger(), 1u);
+    EXPECT_EQ(run.warning(), 1u) << "the second condition's own tone";
+
+    run.bridge.addToneTimeForTesting(5000000);
+    ASSERT_TRUE(run.fire({1, 0}));
+    EXPECT_EQ(run.danger(), 2u) << "one tick: the danger tone";
+    EXPECT_EQ(run.warning(), 1u) << "one tick: one tone";
+    ASSERT_TRUE(run.fire({1}));
+    EXPECT_EQ(run.warning(), 1u) << "the warning sounded with the danger";
+    ASSERT_TRUE(disconnectAndWait(run.bridge));
+}
+
+// An alert without "sound" plays nothing when it fires
+TEST(BridgeTest, AnAlertWithoutSoundPlaysNone)
+{
+    ToneRun run;
+    ASSERT_TRUE(run.start()) << run.log.join(u'\n').toStdString();
+    ASSERT_TRUE(run.fire({2})) << run.log.join(u'\n').toStdString();
+    EXPECT_EQ(run.danger(), 0u);
+    EXPECT_EQ(run.warning(), 0u);
+    ASSERT_TRUE(disconnectAndWait(run.bridge));
+}
+
+// Many firings of a sounding alert in one window are one tone, and the
+// worker's events allocate nothing; the tick's lines are 7a's
+TEST(BridgeTest, AWindowsFiringsAreOneToneAndItsEventsAllocateNothing)
+{
+    ToneRun run;
+    ASSERT_TRUE(run.start()) << run.log.join(u'\n').toStdString();
+    const ecuio_condition_event_t event =
+        conditionEvent(0, run.generation, ECUIO_CONDITION_FIRED, 20001);
+    run.bridge.dispatchConditionsForTesting(&event, 1);
+    const unsigned long before = new_counter::on_this_thread();
+    for (int i = 0; i < 9999; ++i) {
+        run.bridge.dispatchConditionsForTesting(&event, 1);
+    }
+    EXPECT_EQ(new_counter::on_this_thread() - before, 0ul);
+    EXPECT_TRUE(spinUntil(
+        [&run]() {
+            return run.log.contains(
+                QStringLiteral("Alert: Hot fired 10000 times"));
+        },
+        5000))
+        << run.log.join(u'\n').toStdString();
+    EXPECT_EQ(run.danger(), 1u);
+    ASSERT_TRUE(disconnectAndWait(run.bridge));
+}
+
+// An edit saved mid-session keeps the 5 s of each condition whose key it
+// keeps, wherever the condition now sits, and its new ones sound
+TEST(BridgeTest, AnEditKeepsEachConditionsFiveSecondsByItsKey)
+{
+    ToneRun run;
+    ASSERT_TRUE(run.start()) << run.log.join(u'\n').toStdString();
+    ASSERT_TRUE(run.fire({0}));
+    ASSERT_EQ(run.danger(), 1u);
+
+    // A condition before Hot and one past the old set's end, both new
+    QByteArray grown = toneConditions();
+    grown.replace(
+        R"("conditions":[)",
+        R"("conditions":[{"key":"first","name":"First","when":{"signal":)"
+        R"(["id:1001"],"unit":"RPM","above":21000},"alert":)"
+        R"({"level":"warning","sound":true}},)");
+    grown.replace(
+        R"(]})", R"(,{"key":"last","name":"Last","when":{"signal":["id:1001"],)"
+                 R"("unit":"RPM","above":22000},"alert":)"
+                 R"({"level":"danger","sound":true}}]})");
+    const QVariantMap saved =
+        run.bridge.saveConditions(QString::fromUtf8(grown));
+    ASSERT_TRUE(saved.value(QStringLiteral("ok")).toBool())
+        << saved.value(QStringLiteral("words")).toString().toStdString();
+    ASSERT_EQ(run.bridge.conditionModel()->rowCount(), 5);
+    run.generation = run.bridge.conditionsGenerationForTesting();
+
+    ASSERT_TRUE(run.fire({1})) << run.log.join(u'\n').toStdString();
+    EXPECT_EQ(run.danger(), 1u) << "Hot, now second, within its 5 s";
+    ASSERT_TRUE(run.fire({4}));
+    EXPECT_EQ(run.danger(), 2u) << "the new last condition sounds";
+    ASSERT_TRUE(run.fire({0}));
+    EXPECT_EQ(run.warning(), 1u) << "the new first condition sounds";
+    ASSERT_TRUE(disconnectAndWait(run.bridge));
+}
+
+namespace {
+
+// A tone maker standing in for Android's: each call recorded in a state
+// the case keeps after the player is gone
+struct FakeTones : AlertTone::Backend {
+    struct State {
+        std::mutex mutex;
+        std::condition_variable changed;
+        std::vector<std::pair<uint32_t, std::chrono::steady_clock::time_point>>
+            starts;
+        int makes = 0;
+        int releases = 0;
+        std::vector<std::chrono::steady_clock::time_point> makeTimes;
+        std::vector<std::chrono::steady_clock::time_point> releaseTimes;
+        int failMakes = 0;    // the next n makes fail
+        int failStarts = 0;   // the next n starts fail
+        int blockFirstMs = 0; // the first start takes this long
+    };
+    std::shared_ptr<State> s = std::make_shared<State>();
+
+    bool make() override
+    {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        ++s->makes;
+        s->makeTimes.push_back(std::chrono::steady_clock::now());
+        s->changed.notify_all();
+        if (s->failMakes > 0) {
+            --s->failMakes;
+            return false;
+        }
+        return true;
+    }
+    bool start(uint32_t level) override
+    {
+        int block = 0;
+        {
+            std::lock_guard<std::mutex> lock(s->mutex);
+            std::swap(block, s->blockFirstMs);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(block));
+        std::lock_guard<std::mutex> lock(s->mutex);
+        s->changed.notify_all();
+        if (s->failStarts > 0) {
+            --s->failStarts;
+            return false;
+        }
+        s->starts.emplace_back(level, std::chrono::steady_clock::now());
+        return true;
+    }
+    void release() override
+    {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        ++s->releases;
+        s->releaseTimes.push_back(std::chrono::steady_clock::now());
+        s->changed.notify_all();
+    }
+};
+
+// Waits up to ms for pred over the state, under its lock
+template <typename Pred> bool toneState(FakeTones::State& s, int ms, Pred pred)
+{
+    std::unique_lock<std::mutex> lock(s.mutex);
+    return s.changed.wait_for(lock, std::chrono::milliseconds(ms),
+                              [&]() { return pred(s); });
+}
+
+} // namespace
+
+// A tone plays out before the next starts, and the asks meanwhile are one
+// tone, the loudest: a warning then a danger is a beep, then two beeps
+TEST(BridgeTest, ATonePlaysOutAndAsksMeanwhileMergeIntoTheLoudest)
+{
+    auto fake = std::make_unique<FakeTones>();
+    const std::shared_ptr<FakeTones::State> s = fake->s;
+    {
+        AlertTone tone(std::move(fake), {1000, 3000, 5000});
+        tone.play(ECUIO_ALERT_WARNING);
+        ASSERT_TRUE(toneState(*s, 2000, [](FakeTones::State& t) {
+            return t.starts.size() == 1;
+        }));
+        tone.play(ECUIO_ALERT_WARNING);
+        tone.play(ECUIO_ALERT_DANGER);
+        tone.play(ECUIO_ALERT_WARNING);
+        ASSERT_TRUE(toneState(*s, 4000, [](FakeTones::State& t) {
+            return t.starts.size() == 2;
+        }));
+        {
+            std::lock_guard<std::mutex> lock(s->mutex);
+            EXPECT_EQ(s->starts[0].first, ECUIO_ALERT_WARNING);
+            EXPECT_EQ(s->starts[1].first, ECUIO_ALERT_DANGER);
+            EXPECT_GE(s->starts[1].second - s->starts[0].second,
+                      std::chrono::milliseconds(1000))
+                << "the first tone played out";
+            EXPECT_EQ(s->makes, 1);
+        }
+        // Nothing was left waiting: no third tone after the second's room
+        EXPECT_FALSE(toneState(*s, 1300, [](FakeTones::State& t) {
+            return t.starts.size() > 2;
+        })) << "the three asks were one tone";
+    }
+    EXPECT_EQ(s->releases, 1) << "released as the player ends";
+}
+
+// A generator that can't be made, or fails, is made again on a later ask
+// once the retry interval has passed, and not before
+TEST(BridgeTest, AFailedToneGeneratorIsMadeAgainAfterAPause)
+{
+    auto fake = std::make_unique<FakeTones>();
+    const std::shared_ptr<FakeTones::State> s = fake->s;
+    s->failMakes = 1;
+    AlertTone tone(std::move(fake), {50, 5000, 400});
+    // Asks every 50 ms until the backend sees n makes
+    const auto askUntilMade = [&](uint32_t level, int n) {
+        for (int i = 0; i < 100; ++i) {
+            tone.play(level);
+            if (toneState(*s, 50,
+                          [n](FakeTones::State& t) { return t.makes >= n; })) {
+                return true;
+            }
+        }
+        return false;
+    };
+    ASSERT_TRUE(askUntilMade(ECUIO_ALERT_WARNING, 1));
+    ASSERT_TRUE(askUntilMade(ECUIO_ALERT_WARNING, 2));
+    ASSERT_TRUE(toneState(
+        *s, 2000, [](FakeTones::State& t) { return t.starts.size() == 1; }));
+    {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        EXPECT_GE(s->makeTimes[1] - s->makeTimes[0],
+                  std::chrono::milliseconds(400))
+            << "made again within the interval, though asked meanwhile";
+        s->failStarts = 1;
+    }
+
+    // A start that fails releases the generator; a later ask makes another
+    ASSERT_TRUE(askUntilMade(ECUIO_ALERT_DANGER, 3));
+    ASSERT_TRUE(toneState(
+        *s, 2000, [](FakeTones::State& t) { return t.starts.size() == 2; }));
+    std::lock_guard<std::mutex> lock(s->mutex);
+    ASSERT_EQ(s->releaseTimes.size(), 1u);
+    EXPECT_GE(s->makeTimes[2] - s->releaseTimes[0],
+              std::chrono::milliseconds(400))
+        << "made again within the interval after the failed start";
+    EXPECT_EQ(s->starts[1].first, ECUIO_ALERT_DANGER);
+}
+
+// An ask still waiting past the stale bound, behind a start that blocked,
+// plays nothing; a fresh one plays
+TEST(BridgeTest, AToneAskedLongBeforeItsTurnPlaysNone)
+{
+    auto fake = std::make_unique<FakeTones>();
+    const std::shared_ptr<FakeTones::State> s = fake->s;
+    s->blockFirstMs = 700;
+    AlertTone tone(std::move(fake), {50, 300, 5000});
+    tone.play(ECUIO_ALERT_WARNING);
+    ASSERT_TRUE(
+        toneState(*s, 2000, [](FakeTones::State& t) { return t.makes == 1; }));
+    tone.play(ECUIO_ALERT_DANGER); // waits behind the blocked start
+    ASSERT_TRUE(
+        spinUntil([&tone]() { return tone.staleForTesting() == 1; }, 5000))
+        << "the late danger wasn't dropped";
+    {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        ASSERT_EQ(s->starts.size(), 1u) << "the late danger played";
+        EXPECT_EQ(s->starts[0].first, ECUIO_ALERT_WARNING);
+    }
+    tone.play(ECUIO_ALERT_DANGER);
+    ASSERT_TRUE(toneState(
+        *s, 2000, [](FakeTones::State& t) { return t.starts.size() == 2; }));
+}
+
+// An ask of a level already waiting brings its time up to date: behind a
+// start that blocked, the newer danger plays though the older is stale
+TEST(BridgeTest, AFreshAskBehindABlockedStartPlaysThoughOneOfItsLevelWaited)
+{
+    auto fake = std::make_unique<FakeTones>();
+    const std::shared_ptr<FakeTones::State> s = fake->s;
+    s->blockFirstMs = 1500;
+    AlertTone tone(std::move(fake), {50, 1000, 5000});
+    tone.play(ECUIO_ALERT_WARNING);
+    ASSERT_TRUE(
+        toneState(*s, 2000, [](FakeTones::State& t) { return t.makes == 1; }));
+    tone.play(ECUIO_ALERT_DANGER);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    tone.play(ECUIO_ALERT_DANGER); // the older is about to be stale
+    ASSERT_TRUE(toneState(*s, 5000, [](FakeTones::State& t) {
+        return t.starts.size() == 2;
+    })) << "the fresh danger was dropped with the stale one";
+    std::lock_guard<std::mutex> lock(s->mutex);
+    EXPECT_EQ(s->starts[1].first, ECUIO_ALERT_DANGER);
+}
+
+// play hands a tone to a running player with no allocation, and only the
+// two levels are tones
+TEST(BridgeTest, PlayAllocatesNothingAndOnlyTheTwoLevelsAreTones)
+{
+    auto fake = std::make_unique<FakeTones>();
+    const std::shared_ptr<FakeTones::State> s = fake->s;
+    AlertTone tone(std::move(fake), {1, 1000, 5000});
+    tone.play(ECUIO_ALERT_WARNING);
+    ASSERT_TRUE(toneState(
+        *s, 2000, [](FakeTones::State& t) { return t.starts.size() == 1; }));
+    const unsigned long before = new_counter::on_this_thread();
+    for (int i = 0; i < 10000; ++i) {
+        tone.play(i % 2 == 0 ? ECUIO_ALERT_DANGER : ECUIO_ALERT_WARNING);
+    }
+    EXPECT_EQ(new_counter::on_this_thread() - before, 0ul);
+    tone.play(ECUIO_ALERT_NONE);
+    tone.play(7);
+    EXPECT_EQ(tone.playedForTesting(ECUIO_ALERT_DANGER), 5000u)
+        << "a level past danger plays nothing";
+    EXPECT_EQ(tone.playedForTesting(ECUIO_ALERT_WARNING), 5001u);
+    EXPECT_EQ(tone.playedForTesting(ECUIO_ALERT_NONE), 0u);
 }
 
 // An attach core refuses leaves the slots as they were: the set still

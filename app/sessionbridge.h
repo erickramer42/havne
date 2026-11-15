@@ -17,6 +17,7 @@
 #include "framefilter.h"
 #include "recordingimport.h"
 #include "signalfilter.h"
+#include "alerttone.h"
 #include "conditionmodel.h"
 #include "conditionstore.h"
 #include <QTimer>
@@ -1136,6 +1137,9 @@ public:
     }
     // The next n attaches refused where core's call is made
     void failConditionsAttachesForTesting(int n) { m_failAttaches = n; }
+    // The alert tones asked, and a later time for the tone's 5 s
+    const AlertTone& alertToneForTesting() const { return m_tone; }
+    void addToneTimeForTesting(uint64_t us) { m_toneTimeAddedForTesting += us; }
 
     ConditionModel* conditionModel() const { return m_conditionModel; }
     QString conditionsPending() const { return m_conditionsPending; }
@@ -1716,6 +1720,13 @@ private:
     QString m_conditionsProblem;
     bool m_conditionsFromRecording = false;
     QVariantMap m_alertLevels;
+    // The tone (ADR-0063 section 9): each condition's last tone on the
+    // host clock, sized at the attach like the slots and kept by key
+    static constexpr uint64_t ToneGapUs = 5000000;
+    static constexpr uint64_t NoTone = UINT64_MAX;
+    AlertTone m_tone;
+    std::vector<uint64_t> m_toneAtUs;
+    uint64_t m_toneTimeAddedForTesting = 0;
 
     SignalListModel* m_signalModel = nullptr;
     LiveSignalModel* m_liveSignalModel = nullptr;
