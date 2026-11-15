@@ -172,6 +172,17 @@ void one_line(const char* p, size_t n)
     (void)rows::parse_end(p, n, &records, &notes);
     uint64_t frames = 0;
     (void)rows::parse_drop(p, n, &frames);
+    /* A count read from a lost line is the count its text reads back as */
+    uint64_t lost = 0;
+    if (rows::parse_lost(p, n, &lost)) {
+        std::string again;
+        rows::append_lost_text(again, lost);
+        uint64_t back = 0;
+        if (!rows::parse_lost(again.data(), again.size(), &back) ||
+            back != lost) {
+            abort();
+        }
+    }
 
     /* A copy's line: 64 lowercase hex digits */
     std::string hex;

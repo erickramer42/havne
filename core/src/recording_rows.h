@@ -897,6 +897,34 @@ inline bool parse_drop(const char* p, size_t n, uint64_t* frames)
     return parse_count(p + len, i - len, frames) && i < n && p[i] == ' ';
 }
 
+/* The text of the drop line that counts condition events lost past the
+ * recorder's carry, which parse_lost reads back */
+inline void append_lost_text(std::string& out, uint64_t events)
+{
+    out += "the recording lost ";
+    out += std::to_string(events);
+    out += events == 1 ? " condition event" : " condition events";
+    out += ": the disk fell behind";
+}
+
+/* That line's count: "the recording lost N condition event[s]: ..." */
+inline bool parse_lost(const char* p, size_t n, uint64_t* events)
+{
+    const char* const lead = "the recording lost ";
+    const char* const what = " condition event";
+    const size_t len = std::strlen(lead);
+    const size_t what_len = std::strlen(what);
+    if (n <= len || std::memcmp(p, lead, len) != 0) {
+        return false;
+    }
+    size_t i = len;
+    while (i < n && p[i] >= '0' && p[i] <= '9') {
+        ++i;
+    }
+    return n - i >= what_len && std::memcmp(p + i, what, what_len) == 0 &&
+           parse_count(p + len, i - len, events);
+}
+
 } // namespace ecuio_recording_rows
 
 #endif /* ECUIO_RECORDING_ROWS_H */

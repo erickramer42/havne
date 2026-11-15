@@ -238,6 +238,20 @@ std::string lost_line(uint64_t n)
            ": the disk fell behind";
 }
 
+/* The lost condition events the reader counts in a recording */
+uint64_t events_lost_read(const fs::path& folder)
+{
+    ecuio_recording_t* rec = nullptr;
+    EXPECT_EQ(ecuio_recording_open(folder.generic_u8string().c_str(), nullptr,
+                                   nullptr, &rec),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_recording_conditions_t c{};
+    EXPECT_EQ(ecuio_recording_get_conditions(rec, &c), ECUIO_OK);
+    ecuio_recording_close(rec);
+    return c.events_lost;
+}
+
 /* A cond line's seven fields */
 struct Cond {
     std::string key, state, flags, value;
@@ -730,6 +744,8 @@ TEST(ConditionRecordingTest, ChangesPastTheCarryAreCountedLost)
         EXPECT_GE(lines.size(), 256u) << "the carry, and what the ring held";
         EXPECT_EQ(lost_lines(r.folder),
                   std::vector<std::string>{lost_line(lost)});
+        EXPECT_EQ(events_lost_read(r.folder), lost)
+            << "the reader counts what the recorder said";
         size_t at = 0;
         for (const Cond& c : lines) {
             while (at < r.events.all.size() &&
@@ -777,6 +793,7 @@ TEST(ConditionRecordingTest, EachRunOfLostEventsHasADropLineOfItsOwn)
 
     EXPECT_EQ(lost_lines(r.folder),
               (std::vector<std::string>{lost_line(first), lost_line(second)}));
+    EXPECT_EQ(events_lost_read(r.folder), first + second);
     EXPECT_EQ(cond_lines(r.folder).size() + first + second,
               r.events.all.size());
 }

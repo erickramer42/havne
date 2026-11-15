@@ -1182,7 +1182,8 @@ ecuio_recording_conditions_t._fields_ = [
     ('lines_skipped', c_uint32),
     ('length', c_uint64),
     ('sha256', (c_char * 72)),
-    ('reserved', (c_uint64 * 5)),
+    ('events_lost', c_uint64),
+    ('reserved', (c_uint64 * 4)),
 ]
 ecuio_recording_find_t._fields_ = [
     ('kind', c_uint32),

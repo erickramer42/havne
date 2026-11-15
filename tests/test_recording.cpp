@@ -530,6 +530,40 @@ TEST(RecordingRowsTest, ACondLinesTextIsWrittenInOneOrderAndReadsBack)
     }
 }
 
+/* The recorder's line for lost condition events reads back as its count,
+ * and no other drop line reads as one */
+TEST(RecordingRowsTest, ALostEventsLinesTextReadsBackAsItsCount)
+{
+    const std::pair<uint64_t, const char*> cases[] = {
+        {1, "the recording lost 1 condition event: the disk fell behind"},
+        {312, "the recording lost 312 condition events: the disk fell behind"},
+        {UINT64_MAX, "the recording lost 18446744073709551615 condition "
+                     "events: the disk fell behind"},
+    };
+    for (const auto& k : cases) {
+        std::string text;
+        rows::append_lost_text(text, k.first);
+        EXPECT_EQ(text, k.second);
+        uint64_t back = 0;
+        ASSERT_TRUE(rows::parse_lost(text.data(), text.size(), &back)) << text;
+        EXPECT_EQ(back, k.first);
+    }
+    for (const std::string text :
+         {"the recording dropped 3 frames: the disk fell behind",
+          "the recording lost 3 frames: the disk fell behind",
+          "the recording lost  condition events: the disk fell behind",
+          "the recording lost x condition events: the disk fell behind",
+          "the recording lost 3condition events: the disk fell behind",
+          "the recording lost 3 condition", "the recording lost 3",
+          "the recording lost ", "",
+          "the recording lost 18446744073709551616 condition events: x"}) {
+        uint64_t count = 7;
+        EXPECT_FALSE(rows::parse_lost(text.data(), text.size(), &count))
+            << text;
+        EXPECT_EQ(count, 7u) << text;
+    }
+}
+
 // ---- The reader -----------------------------------------------------------
 
 TEST(RecordingTest, AFolderTheRecorderWroteOpensWithItsHeader)
@@ -1974,6 +2008,79 @@ TEST(RecordingTest, CondLinesAreReadInFormat3Alone)
     ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
     EXPECT_EQ(r.info().condition_events, 1u) << "the same lines in format 3";
     EXPECT_EQ(conditions_of(v3.utf8()).lines_skipped, 1u);
+}
+
+/* The condition events a recorder lost are the sum of its drop lines that
+ * count them, in format 3 alone; a frames' drop line is none of them, and
+ * a sum past a uint64 stays at its most */
+TEST(RecordingTest, LostConditionEventsAreTheSumOfTheirDropLines)
+{
+    const std::string head = std::string(rows::kSignalsHeader) + "\n";
+    const auto drop_at = [](unsigned second, const std::string& text) {
+        char stamp[32];
+        std::snprintf(stamp, sizeof stamp, "12:00:%02u.000  +%u.000  ", second,
+                      second);
+        return stamp + std::string("drop  ") + text + "\n";
+    };
+    const std::string lines =
+        cond_at(1, "a,on,fired,1,0,1,1") +
+        drop_at(2, "the recording lost 3 condition events: the disk fell "
+                   "behind") +
+        drop_at(3, "the recording dropped 40 frames: the disk fell behind") +
+        drop_at(4, "the recording lost 1 condition event: the disk fell "
+                   "behind") +
+        drop_at(5, "the recording lost 9 notes: the disk fell behind");
+    Folder v3;
+    v3.write("events.log", events_with({}, lines));
+    v3.write("signals.csv", head);
+    ecuio_recording_conditions_t c = conditions_of(v3.utf8());
+    EXPECT_EQ(c.events_lost, 4u);
+    EXPECT_EQ(c.lines_skipped, 0u) << "a drop line is no cond line";
+    {
+        Reader r(v3.utf8());
+        ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+        EXPECT_EQ(r.info().condition_events, 1u);
+        EXPECT_EQ(r.info().records_dropped, 0u) << "the end line's count";
+    }
+
+    /* With no end line the frames' drop lines are the records dropped, and
+     * the lost events are none of them */
+    std::string cut = events_with({}, lines);
+    cut.erase(cut.find("12:00:10.000"));
+    Folder torn("-no-end");
+    torn.write("events.log", cut);
+    torn.write("signals.csv", head);
+    {
+        Reader r(torn.utf8());
+        ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+        EXPECT_EQ(r.info().flags, ECUIO_RECORDING_INFO_NO_SUMMARY);
+        EXPECT_EQ(r.info().records_dropped, 40u)
+            << "the frames' drop line alone";
+    }
+    EXPECT_EQ(conditions_of(torn.utf8()).events_lost, 4u);
+
+    Folder none("-none");
+    none.write("events.log", events_with({}, cond_at(1, "a,on,,1,0,1,1")));
+    none.write("signals.csv", head);
+    EXPECT_EQ(conditions_of(none.utf8()).events_lost, 0u);
+
+    std::string v2 = events_v2({});
+    v2.insert(v2.find("12:00:10.000"), lines);
+    Folder older("-v2");
+    older.write("events.log", v2);
+    older.write("signals.csv", head);
+    EXPECT_EQ(conditions_of(older.utf8()).events_lost, 0u)
+        << "format 2 holds no conditions";
+
+    Folder most("-most");
+    most.write("events.log",
+               events_with({}, drop_at(1, "the recording lost "
+                                          "18446744073709551615 condition "
+                                          "events: x") +
+                                   drop_at(2, "the recording lost 2 condition "
+                                              "events: x")));
+    most.write("signals.csv", head);
+    EXPECT_EQ(conditions_of(most.utf8()).events_lost, UINT64_MAX);
 }
 
 /* A copy no loader takes (past ECUIO_CONDITION_FILE_MAX_BYTES) is present
