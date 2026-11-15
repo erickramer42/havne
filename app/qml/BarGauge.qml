@@ -37,7 +37,7 @@ GaugeBase {
         text: gauge.label
         font.pixelSize: 12
         font.weight: Font.DemiBold
-        color: Theme.textDim
+        color: gauge.titleColor
         elide: Text.ElideRight
         width: Math.max(0, Math.min(implicitWidth, gauge.width - readout.width - 8))
         visible: !gauge.noteAlone

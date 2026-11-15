@@ -1365,7 +1365,7 @@ Page {
 
         // Each kind's own
         readonly property real labelDivisor: opt("labelDivisor", 1)
-        readonly property string caption: opt("caption", unit)
+        readonly property string caption: opt("caption", label)
         readonly property string peakLabel: opt("peakLabel", qsTr("Peak"))
         readonly property bool showPeak: opt("peak", false)
         // The new kinds' own options (ADR-0057 section 1): the cells' count
@@ -1394,7 +1394,7 @@ Page {
         readonly property var shared: ["value", "windowHigh", "windowLow", "hasValue", "stale",
                                        "from", "to", "label", "unit", "note", "decimals",
                                        "coldBelow", "warnFrom", "dangerFrom", "warnBelow", "dangerBelow", "accent", "readoutColor",
-                                       "showPeak"]
+                                       "showPeak", "picked"]
         readonly property var own: ({
             "analog": ["majorStep", "minorStep", "labelDivisor", "caption", "peakLabel",
                        "showProgress", "needleColor"],
