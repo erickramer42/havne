@@ -355,7 +355,7 @@ Rectangle {
             ThemedButton {
                 objectName: "connectShowLog"
                 flat: true
-                text: qsTr("Show log")
+                text: qsTr("Show activity")
                 Layout.alignment: Qt.AlignTop
                 onClicked: list.showLog()
             }

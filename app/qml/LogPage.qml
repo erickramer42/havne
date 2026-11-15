@@ -135,7 +135,7 @@ Pane {
             }
 
             PageHeader {
-                title: qsTr("Log")
+                title: qsTr("Activity")
 
                 // Beside the title, so it stays put when the buttons on the
                 // right change with the view; on the tab-bar form a row of its own
