@@ -661,7 +661,7 @@ TEST(SignalsTest, EveryImperialConversionIsAffine)
      * from two points (SessionBridge::decodedValue), which holds only while
      * each conversion is a factor and an offset. */
     const char* const kUnits[] = {
-        "km/h", "\xC2\xB0" "C", "kPa", "bar", "g/s", "km", "Pa", "L/h", "N\xC2\xB7m",
+        "km/h", ("\xC2\xB0" "C"), "kPa", "bar", "g/s", "km", "Pa", "L/h", "N\xC2\xB7m",
     };
     const double kValues[] = {-8192.0, -40.0, -1.5, 0.25, 2.0, 101.325, 1000.0, 65535.0};
     for (const char* unit : kUnits) {
