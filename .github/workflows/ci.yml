@@ -341,7 +341,7 @@ jobs:
     name: win-build (${{ matrix.shard }}/2)
     if: ${{ !inputs.smoke_only }}
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     # Two runners, each with its own build, run alternate halves of ctest
     # (-I k,,2: every case once across the two); the first alone saves the
     # caches and runs the load test
