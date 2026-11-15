@@ -5,7 +5,6 @@
 import QtCore
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Shapes
 
@@ -698,12 +697,17 @@ ColumnLayout {
             root.host.signalProblem = words
         }
     }
-    FileDialog {
+    DocumentSaveDialog {
         id: saveDialog
-        fileMode: FileDialog.SaveFile
+        objectName: "signalSaveDialog"
         defaultSuffix: "json"
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         onAccepted: root.host.saveTo(saveDialog.selectedFile)
         onRejected: root.host.saving = null
+        onFailed: words => {
+            root.host.saving = null
+            root.host.signalNote = ""
+            root.host.signalProblem = words
+        }
     }
 }

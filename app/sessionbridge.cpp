@@ -2500,6 +2500,9 @@ QVariantMap SessionBridge::saveUnmigratedFile(const QString& sha,
                                               const QUrl& url)
 {
     QString words;
+    // Judged before the save: a save that fails removes only the document
+    // its own pick made (healthreport.h)
+    const bool removable = pickedDocumentRemovable(url);
     QByteArray bytes = StoreMigration::unmigratedBytes(sha, &words);
     if (bytes.isEmpty()) {
         bytes = StoreMigration::oldCopy(sha, &words);
@@ -2510,6 +2513,9 @@ QVariantMap SessionBridge::saveUnmigratedFile(const QString& sha,
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
+    }
+    if (!written) {
+        dropPickedDocument(url, removable);
     }
     emit logMessage(
         written ? QStringLiteral("Signal file %1 that wasn't moved saved to "
@@ -2532,6 +2538,7 @@ QVariantMap SessionBridge::exportPlugin(const QString& sha, const QUrl& url)
 {
     (void)m_pluginStore.all();
     QString words;
+    const bool removable = pickedDocumentRemovable(url);
     const QByteArray bytes = m_pluginStore.packed(sha, &words);
     bool written = false;
     if (!bytes.isEmpty()) {
@@ -2539,6 +2546,9 @@ QVariantMap SessionBridge::exportPlugin(const QString& sha, const QUrl& url)
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
+    }
+    if (!written) {
+        dropPickedDocument(url, removable);
     }
     emit logMessage(
         written ? QStringLiteral("Plugin %1 exported to a file (%2 bytes)")
@@ -2566,6 +2576,7 @@ QVariantMap SessionBridge::saveVariantFile(const QString& sha,
                                            const QUrl& url)
 {
     QString words;
+    const bool removable = pickedDocumentRemovable(url);
     const QByteArray bytes = m_pluginStore.variantBytes(sha, variant, &words);
     bool written = false;
     if (!bytes.isEmpty()) {
@@ -2573,6 +2584,9 @@ QVariantMap SessionBridge::saveVariantFile(const QString& sha,
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
+    }
+    if (!written) {
+        dropPickedDocument(url, removable);
     }
     emit logMessage(
         written ? QStringLiteral("Variant %1 of plugin %2 saved as a signal "

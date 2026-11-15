@@ -12,6 +12,8 @@
 
 #include <gtest/gtest.h>
 
+#include <functional>
+
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
@@ -31,6 +33,7 @@
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "sessionbridge.h"
+#include "urlwrite.h"
 #include <ecuio/obdb.h>
 #include <ecuio/plugin.h>
 #include <ecuio/profile.h>
@@ -1350,6 +1353,76 @@ TEST(BridgeTest, OneStoreAVehiclesPicksKeepTheirOrderAndTheFirstObd2OneStandsIn)
  * holds the migration's mark, maps a wrapped file to its plugin, is no
  * copy to an older store's listing, and goes with its last fact; a
  * plugin's facts go with the plugin, a copy that no longer loads too */
+// A save out of the store that is refused removes only the document its
+// own pick made, as every save does: one the user chose to replace stays,
+// and so does one with bytes
+TEST(BridgeTest, OneStoreARefusedSaveFollowsItsSavePicksVerdict)
+{
+    SettingsDir settings;
+    ASSERT_TRUE(settings.valid());
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    if (QUrl(dir.path(), QUrl::TolerantMode)
+            .toString(QUrl::FullyEncoded)
+            .compare(dir.path(), Qt::CaseInsensitive) != 0) {
+        GTEST_SKIP() << "the temporary folder's path changes when encoded";
+    }
+    Logged b;
+    const auto provider = [&](const QString& name) {
+        return QUrl(dir.path() + QLatin1Char('/') + name, QUrl::TolerantMode);
+    };
+    const auto make = [&](const QUrl& url, const QByteArray& bytes) {
+        QFile f(url.toString());
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(bytes);
+    };
+    const QString none(64, QLatin1Char('0'));
+    const QByteArray theirs("the user's earlier save");
+    struct Save {
+        const char* name;
+        std::function<QVariantMap(const QUrl&)> run;
+    };
+    const Save saves[] = {
+        {"a variant of a plugin the store lacks",
+         [&](const QUrl& u) {
+             return b.bridge.saveVariantFile(none, QStringLiteral("base"), u);
+         }},
+        {"a plugin the store lacks",
+         [&](const QUrl& u) { return b.bridge.exportPlugin(none, u); }},
+        {"a file that didn't move and isn't kept",
+         [&](const QUrl& u) { return b.bridge.saveUnmigratedFile(none, u); }},
+    };
+    for (const Save& save : saves) {
+        SCOPED_TRACE(save.name);
+        const QUrl made = provider(QStringLiteral("made.json"));
+        make(made, QByteArray());
+        notePick(pathOfUrl(made), PickMade::Made);
+        EXPECT_FALSE(ok(save.run(made)));
+        EXPECT_FALSE(QFile::exists(made.toString()))
+            << "the pick's own empty document goes";
+
+        const QUrl replaced = provider(QStringLiteral("replaced.json"));
+        make(replaced, QByteArray());
+        notePick(pathOfUrl(replaced), PickMade::Replaced);
+        EXPECT_FALSE(ok(save.run(replaced)));
+        EXPECT_TRUE(QFile::exists(replaced.toString()))
+            << "an empty document the user chose to replace stays";
+        EXPECT_EQ(peekPick(pathOfUrl(replaced)), PickMade::Unknown)
+            << "the save took the verdict";
+
+        const QUrl full = provider(QStringLiteral("full.json"));
+        make(full, theirs);
+        notePick(pathOfUrl(full), PickMade::Made);
+        EXPECT_FALSE(ok(save.run(full)));
+        QFile after(full.toString());
+        ASSERT_TRUE(after.open(QIODevice::ReadOnly));
+        EXPECT_EQ(after.readAll(), theirs) << "a document with bytes stays";
+        after.close();
+        QFile::remove(replaced.toString());
+        QFile::remove(full.toString());
+    }
+}
+
 // What a layout file names of a vehicle's picks: each one's written file
 // by its hash, the file it was made from beside it, and no entry for a
 // pick no plugin has

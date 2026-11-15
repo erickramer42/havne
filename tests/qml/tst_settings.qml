@@ -2363,6 +2363,37 @@ TestCase {
         compare(page.replaceTarget, null, "and the next Import is an import")
     }
 
+    // Through the phone's save picker: the Signals page's one save offers
+    // the page's own name each time and hands its pick to the write; a
+    // picker with no document says so, with no earlier note left beside
+    // the words and no save left waiting
+    function test_theSignalsPagesSavePickReachesItsWrite() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(page.importFile(Harness.writeScratchFile("picked.json", signalFileText("Picked")))
+               && page.keepPending("", ""))
+        page.open("signals")
+        DocumentPicker.setPickerForTesting(true)
+        const row = rowData(page, "plugin.picked.base")
+        const save = find(page, "signalSaveDialog")
+        save.usePicker = true
+        page.saveVariantAs(row)
+        compare(DocumentPicker.titleForTesting(), "picked.json")
+        const out = Harness.writeScratchFile("picked out (1).json", "")
+        DocumentPicker.deliver(save.request, -1, out.toString(), "89", -1)
+        compare(find(page, "signalProblem").text, "")
+        compare(find(page, "signalNote").text, "Picked saved to the file you chose")
+        verify(Harness.readScratchFile(out).includes("Picked"), "the picked document holds the file")
+
+        page.exportPluginAs(row.sha256)
+        compare(DocumentPicker.titleForTesting(), "picked.havne-plugin.json",
+                "the page's name for this save, never the last answer's")
+        DocumentPicker.deliver(save.request, -1, "", "")
+        compare(find(page, "signalProblem").text, "The picker returned no document")
+        compare(find(page, "signalNote").text, "", "no earlier note beside the words")
+        compare(page.saving, null, "and no save waits")
+    }
+
     // A file core refuses, or one that is none of the three kinds, keeps
     // nothing and says why, never naming the path
     function test_aFileCoreRefusesOrOfNoKindIsNotKept() {
