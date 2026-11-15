@@ -26,6 +26,27 @@ QtObject {
         return key === "" ? "signal" : key
     }
 
+    // The key a Save gives the form's signal among signals (a file's). A
+    // key is made from the name once: an Edit keeps the signal's own
+    // (editing) through a new name, so a gauge or an alert that names the
+    // signal by key stays bound. A new signal of a saved one's name takes
+    // that one's key, and its place; any other takes its name's key,
+    // numbered while the file has it ("oil_temp_2")
+    function keyFor(signals, name, editing) {
+        if (editing !== undefined && editing !== "")
+            return editing
+        const same = signals.find(s => s.name === String(name).trim())
+        if (same !== undefined)
+            return same.key
+        const base = keyOf(name)
+        let key = base
+        for (let n = 2; signals.some(s => s.key === key); ++n) {
+            const tail = "_" + n
+            key = base.substring(0, 31 - tail.length).replace(/_+$/, "") + tail
+        }
+        return key
+    }
+
     // "0=Park, 1=Drive" as a file's values, { "0": "Park", "1": "Drive" }:
     // pairs split by commas or new lines, each number=label. An entry with
     // no "=" is kept with an empty label, which the loader refuses by name

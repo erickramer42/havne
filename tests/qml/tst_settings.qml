@@ -18,6 +18,8 @@ TestCase {
         // scroll area, which clips what's below it from a click
         SettingsPage { width: 1000; height: 1400 }
     }
+    Component { id: dashComponent; DashboardPage { width: 1280; height: 800 } }
+    Component { id: hubComponent; SignalHub {} }
 
     // The page's stored URI, Record switch and versions (test_qml keeps
     // them in a scratch ini), written straight to the store
@@ -3666,10 +3668,11 @@ TestCase {
         compare(page.confirming, "", "the question goes with the pick")
     }
 
-    // Edit then a new name renames the signal; a new signal whose name
-    // makes a saved one's key is refused, not saved over it; the same name
-    // again replaces it, as designed
-    function test_anEditRenamesAndAKeyIsNeverTakenTwice() {
+    // Edit then a new name renames the signal under the key it has; a new
+    // signal whose name makes a key a saved one keeps gets a key of its
+    // own, never the other's place; the same name again replaces, as
+    // designed; and an Edit can't take another saved signal's name
+    function test_anEditKeepsTheKeyAndAKeyIsNeverTakenTwice() {
         const page = createPage()
         press(page, "vehicleNew")
         typeSignal(page, "Trans Temp", "1E1C", "16")
@@ -3679,6 +3682,16 @@ TestCase {
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
         compare(page.ownSignals.map(s => s.name), ["Trans Fluid Temp"])
+        compare(page.ownSignals.map(s => s.key), ["trans_temp"], "renamed, the key it was saved with")
+        compare(page.editingKey, "", "the Edit is over")
+
+        // The name the first was saved under, typed for a new signal
+        page.clearForm()
+        typeSignal(page, "Trans Temp", "D100")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.map(s => s.key), ["trans_temp", "trans_temp_2"])
+        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D100"], "neither saved over")
 
         page.clearForm()
         typeSignal(page, "Boost (psi)", "D101")
@@ -3686,21 +3699,82 @@ TestCase {
         page.clearForm()
         typeSignal(page, "Boost psi", "D102")
         press(page, "formSave")
-        compare(find(page, "formProblem").text,
-                "Boost (psi), saved already, has the key boost_psi too: edit it, or give this one another name")
-        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D101"])
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.map(s => s.key), ["trans_temp", "trans_temp_2", "boost_psi", "boost_psi_2"])
         page.clearForm()
         typeSignal(page, "Boost (psi)", "D103")
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
-        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D103"], "the same name replaces")
+        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D100", "D103", "D102"],
+                "the same name replaces")
+        compare(page.ownSignals[2].key, "boost_psi")
 
-        // An Edit renamed to another signal's key is refused too
+        // The loaded variant has the keys the form kept
+        compare(Bridge.profileSignals("mock://?profile=" + page.pickedVehicle.own).map(r => r.ref)
+                    .filter(r => r.startsWith("key:")).sort(),
+                ["key:boost_psi", "key:boost_psi_2", "key:trans_temp", "key:trans_temp_2"])
+
+        // An Edit renamed to another saved signal's name is refused
         press(page, "ownEdit_0")
         find(page, "formName").text = "Boost psi"
         press(page, "formSave")
-        verify(find(page, "formProblem").text.startsWith("Boost (psi), saved already"))
-        compare(page.ownSignals.length, 2)
+        compare(find(page, "formProblem").text, "Boost psi is saved already: give this one another name")
+        compare(page.ownSignals.map(s => s.name),
+                ["Trans Fluid Temp", "Trans Temp", "Boost (psi)", "Boost psi"])
+    }
+
+    // A Dashboard gauge names a form signal by its key (ADR-0057), so it
+    // reads on after the signal is renamed
+    function test_aGaugeBoundToAFormSignalReadsOnAfterItsRename() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        const own = page.pickedVehicle.own
+        const uri = "mock://demo?profile=" + own
+
+        const dash = createTemporaryObject(dashComponent, testCase.Window.window.contentItem)
+        const doc = DashboardBook.builtIn("desktop")
+        doc.pages = [{ name: "Own", cells: [
+            { kind: "digital", w: 2, h: 4, label: "Fluid temp", refs: ["key:trans_temp"], unit: "",
+              options: {} }] }]
+        dash.doc = doc
+        const hub = createTemporaryObject(hubComponent, testCase)
+        const gauge = gaugeLabeled(dash, "Fluid temp")
+        verify(gauge, "the cell draws a gauge")
+
+        compare(Bridge.connectSession(uri), "")
+        tryVerify(() => gauge.hasValue, 5000, "the gauge reads the signal")
+        compare(hub.byRef["key:trans_temp"].name, "Trans Temp")
+        Bridge.disconnectSession()
+        tryVerify(() => page.idle, 5000, "the session ends")
+
+        press(page, "ownEdit_0")
+        find(page, "formName").text = "Transmission fluid temperature"
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.pickedVehicle.own, own, "the same variant")
+
+        compare(Bridge.connectSession(uri), "")
+        tryVerify(() => hub.byRef["key:trans_temp"] !== undefined
+                        && hub.byRef["key:trans_temp"].name === "Transmission fluid temperature", 5000,
+                  "the renamed signal under its key")
+        tryVerify(() => gauge.hasValue, 5000, "the gauge reads on")
+        verify(gauge.note !== "not in profile", gauge.note)
+    }
+
+    // The page's gauge (a GaugeBase item) of that label, null for none
+    function gaugeLabeled(within, label) {
+        for (let i = 0; i < within.children.length; ++i) {
+            const child = within.children[i]
+            if (child.label === label && child.note !== undefined && child.valueText !== undefined)
+                return child
+            const found = gaugeLabeled(child, label)
+            if (found !== null)
+                return found
+        }
+        return null
     }
 
     // A Read once's reply shows only on the vehicle it was asked for

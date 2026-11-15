@@ -1031,9 +1031,9 @@ Pane {
     }
 
     // The form's signal into the own variant, made with the first; the
-    // signal Edit filled the form with replaced, or a new one's of the
-    // same name. Another signal whose name makes the same key is not
-    // overwritten: the form says so
+    // signal Edit filled the form with replaced under the key it has
+    // (SignalForm.keyFor), or a new one's of the same name. An Edit can't
+    // take another saved signal's name: the lists tell signals by name
     function saveDraft() {
         formNote = ""
         readResult = null
@@ -1041,13 +1041,12 @@ Pane {
             return false
         const f = readForm()
         const signal = SignalForm.draft(f)
-        const clash = ownSignals.find(s => s.key === signal.key && s.key !== editingKey
-                                           && (editingKey !== "" || s.name !== signal.name))
-        if (clash !== undefined) {
-            formProblem = qsTr("%1, saved already, has the key %2 too: edit it, or give "
-                               + "this one another name").arg(clash.name, signal.key)
+        const named = ownSignals.find(s => s.name === signal.name && s.key !== editingKey)
+        if (editingKey !== "" && named !== undefined) {
+            formProblem = qsTr("%1 is saved already: give this one another name").arg(named.name)
             return false
         }
+        signal.key = SignalForm.keyFor(ownSignals, signal.name, editingKey)
         const base = ownFile !== null ? ownFile
             : SignalForm.emptyFile(pickedVehicle.label, ownName(pickedVehicle.label))
         const module = SignalForm.moduleOf(f)

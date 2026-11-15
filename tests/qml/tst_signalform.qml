@@ -137,6 +137,36 @@ TestCase {
         compare(SignalForm.fieldsOf(efile, efile.signals[0]), e)
     }
 
+    // A key is made from the name once: an Edit keeps it whatever the
+    // new name, a new signal of a saved one's name takes that one's, and a
+    // name whose key the file has gets the next free one
+    function test_aKeyIsMadeOnceAndKeptThroughARename() {
+        compare(SignalForm.keyFor([], "Oil Temp", ""), "oil_temp")
+        const saved = [{ key: "oil_temp", name: "Oil temperature" }]
+        compare(SignalForm.keyFor(saved, "Oil temp, sump", "oil_temp"), "oil_temp", "an Edit keeps it")
+        compare(SignalForm.keyFor(saved, " Oil temperature ", ""), "oil_temp",
+                "a saved one's name, its key")
+        compare(SignalForm.keyFor(saved, "Oil Temp", ""), "oil_temp_2", "the kept key is taken")
+        compare(SignalForm.keyFor(saved.concat([{ key: "oil_temp_2", name: "Oil Temp" }]), "Oil-temp", ""),
+                "oil_temp_3")
+        compare(SignalForm.keyFor([{ key: "by_hand", name: "Typed" }], "Typed again", "by_hand"), "by_hand",
+                "a key written by hand is kept too")
+        // A numbered key stays inside a key's 31 characters
+        const long = "a".repeat(40)
+        const first = SignalForm.keyFor([], long, "")
+        compare(first, "a".repeat(31))
+        compare(SignalForm.keyFor([{ key: first, name: "another" }], long, ""), "a".repeat(29) + "_2",
+                "the name's part is cut, never the number")
+        const nine = [{ key: first, name: "n1" }]
+        for (let n = 2; n <= 9; ++n)
+            nine.push({ key: "a".repeat(29) + "_" + n, name: "n" + n })
+        compare(SignalForm.keyFor(nine, long, ""), "a".repeat(28) + "_10")
+        // One under the limit keeps its whole name beside a one-digit number
+        compare(SignalForm.keyFor([{ key: "b".repeat(29), name: "x" }], "b".repeat(29), ""),
+                "b".repeat(29) + "_2")
+        compare(SignalForm.keyFor([{ key: "a_b_c", name: "x" }], "a b c", ""), "a_b_c_2")
+    }
+
     function test_aDamagedCopyIsNoFile() {
         compare(SignalForm.parseFile("{"), null)
         compare(SignalForm.parseFile("{\"signals\": []}"), null)
