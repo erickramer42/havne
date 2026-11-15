@@ -2729,7 +2729,8 @@ void usage(FILE* to)
         "                      [--min-sweep <ms>] [--label <name>] "
         "[--seconds S]\n"
         "                      [--signals <file> | --plugin <pkg>] "
-        "[--conditions <file>]\n"
+        "[--conditions <file>\n"
+        "                      [--armed]]\n"
         "       havne-cli play <uri> --to <vcan> [--count N] [--seconds S]\n"
         "       havne-cli clear <uri> --yes [--engine-running [--moving]]\n"
         "       havne-cli sim <uri> --on <vcan> [--desk-bus] "
@@ -2844,7 +2845,12 @@ void usage(FILE* to)
         "         out. --signals, --plugin and --conditions as stream's: the\n"
         "         recording holds the conditions' copy and each change, and\n"
         "         no condition line is written; a replay's own copy is\n"
-        "         stream's alone.\n"
+        "         stream's alone. --armed writes only around the conditions\n"
+        "         with record: a folder per window, from the condition's\n"
+        "         before ahead of it to its after past the end, a recording\n"
+        "         line as each opens (its folder) and as the log is armed\n"
+        "         again; a file with no enabled condition that records is\n"
+        "         refused at the start.\n"
         "play     (Linux) writes a session's frames to a virtual CAN "
         "interface\n"
         "         as they arrive: mock://demo drives the simulated car on it.\n"
@@ -3168,7 +3174,8 @@ void write_recording(Output& out, const char* state, const char* key,
 // and attached before the session starts; false (and the recording line
 // says why) when it can't be
 bool open_recording(Output& out, ecuio_session_t* session, const char* root,
-                    const char* label, ecuio_recorder_t** recorder)
+                    const char* label, ecuio_recorder_t** recorder,
+                    bool armed = false)
 {
     const std::string caller =
         std::string("havne-cli ") + ecuio_version_string();
@@ -3179,6 +3186,7 @@ bool open_recording(Output& out, ecuio_session_t* session, const char* root,
     o.label_utf8 = label;
     o.header_lines = lines;
     o.header_line_count = 1;
+    o.flags = armed ? ECUIO_RECORD_ARMED : 0u;
     ecuio_status_t st = ecuio_recorder_open(&o, recorder);
     if (st != ECUIO_OK) {
         const char* detail = ecuio_last_error_detail();
@@ -3191,14 +3199,22 @@ bool open_recording(Output& out, ecuio_session_t* session, const char* root,
     if (file != nullptr) {
         st = ecuio_recorder_signal_file(*recorder, file);
     }
+    std::string why;
     if (st == ECUIO_OK) {
         st = ecuio_session_record(session, *recorder);
+        why = ecuio_last_error_detail();
     }
     if (st != ECUIO_OK) {
         ecuio_recorder_close(*recorder, "the session couldn't be recorded");
         *recorder = nullptr;
-        write_recording(out, "failed", "reason", ecuio_status_string(st));
+        write_recording(out, "failed", "reason",
+                        armed && !why.empty() ? why.c_str()
+                                              : ecuio_status_string(st));
         return false;
+    }
+    if (armed) {
+        /* Armed, no folder yet: the log's loop names each window's */
+        return true;
     }
     char folder[4096];
     uint32_t len = 0;
@@ -3244,14 +3260,14 @@ void poll_recording(Output& out, ecuio_recorder_t* recorder, MarkQueue* marks,
 // an interrupt, while still attached (ADR-0049 section 1): either way the
 // files end whole, with the summary
 void close_recording(Output& out, ecuio_recorder_t** recorder, const char* why,
-                     bool* failed)
+                     bool* failed, bool armed = false)
 {
     if (*recorder == nullptr) {
         return;
     }
-    char buf[128];
+    char buf[192];
     cli::Line l(buf, sizeof buf);
-    const bool whole = cli::close_with_line(l, *recorder, why);
+    const bool whole = cli::close_with_line(l, *recorder, why, armed);
     *recorder = nullptr;
     *failed = *failed || !whole;
     write_line(out, l);
@@ -3724,22 +3740,60 @@ void on_log_frame(const ecuio_frame_t*, void* user)
 // What the log and end lines say: session time since start in whole
 // seconds, the folder's bytes, the rows signals.csv holds
 cli::LogReadout log_readout(uint64_t started, const std::string& folder,
-                            ecuio_recorder_t* recorder)
+                            ecuio_recorder_t* recorder, bool armed = false)
 {
     cli::LogReadout r;
+    r.armed = armed;
     r.seconds = (ecuio_clock_us() - started) / 1000000u;
-    r.bytes = folder_bytes(folder);
+    r.bytes = folder.empty() ? 0 : folder_bytes(folder);
     ecuio_recorder_state_t st;
     if (recorder != nullptr &&
         ecuio_recorder_get_state(recorder, &st) == ECUIO_OK) {
         r.values = st.value_rows;
+        r.windows = st.windows;
     }
     return r;
 }
 
+// An armed log's recording lines (cli::armed_due): a window's with its
+// folder, which becomes the one the log and end lines name, and an armed
+// line once none is open
+void poll_armed(Output& out, ecuio_recorder_t* recorder, cli::ArmedSeen* seen,
+                std::string* folder)
+{
+    ecuio_recorder_state_t st;
+    if (recorder == nullptr ||
+        ecuio_recorder_get_state(recorder, &st) != ECUIO_OK) {
+        return;
+    }
+    const cli::ArmedDue due = cli::armed_due(*seen, st.state, st.windows);
+    if (due.window) {
+        /* A newer window can land between the size and the copy */
+        uint32_t len = 0;
+        std::vector<char> buf(1);
+        while (ecuio_recorder_get_folder(recorder, buf.data(),
+                                         static_cast<uint32_t>(buf.size()),
+                                         &len) == ECUIO_OK &&
+               len >= buf.size()) {
+            buf.resize(size_t{len} + 1);
+        }
+        folder->assign(buf.data(), std::min<size_t>(len, buf.size() - 1));
+        BigLine b(cli::armed_window_line_bytes(folder->c_str()));
+        cli::armed_window_line(b.line, st.windows, folder->c_str());
+        write_line(out, b.line);
+    }
+    if (due.armed) {
+        char buf[96];
+        cli::Line l(buf, sizeof buf);
+        cli::armed_line(l, st.windows);
+        write_line(out, l);
+    }
+}
+
 // The writer drains on a timer of its own (100 ms when idle), so a readout
 // right after the close can count none of a replay's rows: wait, at most
-// kRecordingCloseWait, until each frame put is written or dropped
+// kRecordingCloseWait, until each frame put is written, dropped, or let
+// go outside every window of an armed log
 void wait_for_writer(const ecuio_recorder_t* recorder, uint64_t frames)
 {
     const auto give_up = std::chrono::steady_clock::now() + kRecordingCloseWait;
@@ -3747,7 +3801,7 @@ void wait_for_writer(const ecuio_recorder_t* recorder, uint64_t frames)
     while (recorder != nullptr &&
            ecuio_recorder_get_state(recorder, &st) == ECUIO_OK &&
            st.state != ECUIO_RECORDING_FAILED &&
-           st.frame_rows + st.records_dropped < frames &&
+           st.frame_rows + st.records_dropped + st.frames_passed < frames &&
            std::chrono::steady_clock::now() < give_up) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -3856,15 +3910,18 @@ int run_log(const cli::LogArgs& args)
     }
     ecuio_recorder_t* recorder = nullptr;
     bool recording_failed = false;
-    if (!open_recording(out, session, args.folder, args.label, &recorder)) {
+    if (!open_recording(out, session, args.folder, args.label, &recorder,
+                        args.armed)) {
         out.flush();
         ecuio_session_destroy(session);
         return kExitFailed;
     }
     // The folder, which the log and end lines name: a path core can't give
-    // whole is an error, never an empty or cut folder in the lines
+    // whole is an error, never an empty or cut folder in the lines. An
+    // armed log's is each window's as it opens, none before the first.
     std::string folder;
-    {
+    cli::ArmedSeen armed_seen;
+    if (!args.armed) {
         char buf[4096];
         uint32_t len = 0;
         st = ecuio_recorder_get_folder(recorder, buf, sizeof buf, &len);
@@ -3883,6 +3940,14 @@ int run_log(const cli::LogArgs& args)
             return kExitFailed;
         }
         folder.assign(buf, len);
+    } else {
+        /* Said before the start: a fast replay can fire before the first
+         * read of the state */
+        char buf[96];
+        cli::Line l(buf, sizeof buf);
+        cli::armed_line(l, 0);
+        write_line(out, l);
+        armed_seen.armed_said = true;
     }
     out.flush();
 
@@ -3922,6 +3987,9 @@ int run_log(const cli::LogArgs& args)
             write_line(out, l);
         }
         poll_recording(out, recorder, nullptr, &recording_failed);
+        if (args.armed) {
+            poll_armed(out, recorder, &armed_seen, &folder);
+        }
         poll_health(out, session, &last_error, &episodes);
         poll_sessions(out, session, channels, session_seen);
         poll_conditions(out, session, &shown);
@@ -3934,7 +4002,8 @@ int run_log(const cli::LogArgs& args)
         if (ticker.due(now)) {
             char buf[256];
             cli::Line l(buf, sizeof buf);
-            cli::log_line(l, log_readout(started, folder, recorder));
+            cli::log_line(l,
+                          log_readout(started, folder, recorder, args.armed));
             write_line(out, l);
         }
         out.flush();
@@ -3963,7 +4032,7 @@ int run_log(const cli::LogArgs& args)
             std::chrono::steady_clock::now() - closing >= kRecordingCloseWait) {
             close_recording(out, &recorder,
                             "interrupted: the session's close didn't finish",
-                            &recording_failed);
+                            &recording_failed, args.armed);
         }
     }
     closer.join();
@@ -3972,10 +4041,15 @@ int run_log(const cli::LogArgs& args)
     int code = kExitOk;
     wait_for_writer(recorder, frames.covered.load(std::memory_order_acquire));
     poll_recording(out, recorder, nullptr, &recording_failed);
-    const cli::LogReadout last = log_readout(started, folder, recorder);
+    if (args.armed) {
+        poll_armed(out, recorder, &armed_seen, &folder);
+    }
+    const cli::LogReadout last =
+        log_readout(started, folder, recorder, args.armed);
     BigLine end(cli::log_end_line_bytes(folder.c_str()));
     if (!out.failed) {
-        cli::log_end_line(end.line, reason, folder.c_str(), last);
+        cli::log_end_line(end.line, reason,
+                          folder.empty() ? nullptr : folder.c_str(), last);
     }
     // The recording's last note is the end line, without the folder (its
     // path holds the account name, and a recording gets shared); it closes
@@ -3989,7 +4063,8 @@ int run_log(const cli::LogArgs& args)
     }
     ecuio_session_destroy(session);
     const std::string why_closed = std::string("havne-cli: ") + reason;
-    close_recording(out, &recorder, why_closed.c_str(), &recording_failed);
+    close_recording(out, &recorder, why_closed.c_str(), &recording_failed,
+                    args.armed);
     if (!out.failed) {
         write_line(out, end.line);
         out.flush();

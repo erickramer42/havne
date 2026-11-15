@@ -5,6 +5,7 @@
 #   python tests/cli_log.py demo <havne-cli>
 #   python tests/cli_log.py fails <havne-cli>
 #   python tests/cli_log.py replay <havne-cli> <fixture folder>
+#   python tests/cli_log.py armed <havne-cli> <fixture folder>
 #   python tests/cli_log.py interrupt <havne-cli>
 #   python tests/cli_log.py closed-pipe <havne-cli>
 #   python tests/cli_log.py focus-refused <havne-cli> <fake_j2534.dll>   (Windows)
@@ -22,7 +23,13 @@
 # writes every number signal.
 # fails: a folder that can't be made ends the log before any frame, with
 # the reason (never the path) and exit 1. replay: a replay at max ends at
-# its last frame, reason replay-end, the recording whole. interrupt:
+# its last frame, reason replay-end, the recording whole. armed: --armed
+# over the replay at max with a condition on engine speed: an armed line,
+# window lines whose count climbs to two with each folder there, the
+# closed and end lines saying two windows, the end naming the newest
+# folder, each window ended whole with its trigger line and its frames
+# from the firing's before; a file with no condition that records is
+# refused at the start, exit 1, no folder made. interrupt:
 # Ctrl+Break (Windows, exit 77 without a console) or SIGINT ends the
 # log with reason interrupted, the recording closed whole and read back.
 # closed-pipe: standard output closed under a running log, and under a
@@ -326,6 +333,80 @@ def replay(cli, fixture):
     return 0
 
 
+ARMED = ('{"havne_conditions":1,"conditions":[{"key":"high","name":"High",'
+         '"when":{"signal":["obd2.rpm"],"unit":"RPM","above":1000},'
+         '"record":{"before":2,"after":1}}]}')
+MARKED = ('{"havne_conditions":1,"conditions":[{"key":"high","name":"High",'
+          '"when":{"signal":["obd2.rpm"],"unit":"RPM","above":1000},"mark":true}]}')
+
+
+def armed(cli, fixture):
+    with tempfile.TemporaryDirectory(prefix="havne-cli-log-armed-") as base:
+        uri = f"replay://{Path(fixture).as_posix()}?profile=obd2&speed=max"
+        sets = Path(base) / "armed.json"
+        sets.write_text(ARMED, encoding="utf-8")
+        root = Path(base) / "windows"
+        code, rows, err = run(cli, ["log", uri, str(root), "--conditions", str(sets),
+                                    "--armed", "--seconds", "20"])
+        if code != 0:
+            print(f"FAIL  exit {code}\n{err}")
+            return 1
+        recording = [r for r in rows if r.get("type") == "recording"]
+        if recording[0] != {"type": "recording", "state": "armed", "windows": 0}:
+            print(f"FAIL  the first recording line {json.dumps(recording[0])}")
+            return 1
+        windows = [r for r in recording if r.get("state") == "window"]
+        counts = [r["window"] for r in windows]
+        if not windows or counts != sorted(set(counts)) or counts[-1] != 2:
+            print(f"FAIL  the window lines {counts!r}")
+            return 1
+        for w in windows:
+            if not Path(w["folder"]).is_dir():
+                print(f"FAIL  a window line's folder isn't there: {w['folder']!r}")
+                return 1
+        closed = recording[-1]
+        if closed.get("state") != "closed" or not closed.get("whole") or \
+                closed.get("windows") != 2:
+            print(f"FAIL  the closed line {json.dumps(closed)}")
+            return 1
+        end = rows[-1]
+        folders = sorted(p for p in root.iterdir())
+        if end.get("windows") != 2 or len(folders) != 2 or \
+                Path(end.get("folder", "")) != folders[-1]:
+            print(f"FAIL  the end line {json.dumps(end)}, folders {folders!r}")
+            return 1
+        for folder in folders:
+            if not whole(folder, "the window ended"):
+                return 1
+            text = (folder / "events.log").read_text(encoding="utf-8")
+            if "\ntrigger  high,2000 ms\n" not in text:
+                print(f"FAIL  {folder.name} has no trigger line")
+                return 1
+            fired = [l for l in text.splitlines() if "  cond  high,on,fired," in l]
+            t_fired = int(fired[0].split(",")[-1])
+            with open(folder / "frames.csv", encoding="utf-8") as f:
+                first = int(f.read().splitlines()[1].split(",")[1])
+            if not t_fired - 2000000 <= first < t_fired:
+                print(f"FAIL  {folder.name}'s first frame {first}, fired {t_fired}")
+                return 1
+
+        sets.write_text(MARKED, encoding="utf-8")
+        refused = Path(base) / "refused"
+        code, rows, err = run(cli, ["log", uri, str(refused), "--conditions", str(sets),
+                                    "--armed"])
+        failed = [r for r in rows if r.get("type") == "recording"]
+        line = failed[-1] if failed else {}
+        if code != 1 or line.get("state") != "failed" or \
+                not line.get("reason", "").startswith("no condition records"):
+            print(f"FAIL  a set that records nothing: exit {code}, {json.dumps(line)}")
+            return 1
+        if refused.exists() and any(refused.iterdir()):
+            print("FAIL  a refused armed log made a folder")
+            return 1
+    print("ok    an armed log writes a folder per window and names each")
+    return 0
+
+
 def interrupt(cli):
     env = dict(os.environ)
     env["HAVNE_CLI_LOG_EVERY_MS"] = "500"
@@ -616,6 +697,8 @@ def main(argv):
         return fails(argv[2])
     if len(argv) >= 4 and argv[1] == "replay":
         return replay(argv[2], argv[3])
+    if len(argv) >= 4 and argv[1] == "armed":
+        return armed(argv[2], argv[3])
     if len(argv) >= 3 and argv[1] == "interrupt":
         return interrupt(argv[2])
     if len(argv) >= 3 and argv[1] == "closed-pipe":

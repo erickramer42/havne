@@ -27,7 +27,8 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
     test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
-    test_condition_session.cpp test_condition_recording.cpp)
+    test_condition_session.cpp test_condition_recording.cpp
+    test_armed_recorder.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -642,6 +643,9 @@ if(TARGET havne-cli)
         add_test(NAME CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} replay $<TARGET_FILE:havne-cli>
                     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
+        add_test(NAME CliLogRunTest.AnArmedLogWritesAFolderPerWindow
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} armed $<TARGET_FILE:havne-cli>
+                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay/2026-10-25-engine-start)
         add_test(NAME CliLogRunTest.AnInterruptEndsTheLogWhole
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} interrupt $<TARGET_FILE:havne-cli>)
         add_test(NAME CliLogRunTest.AClosedOutputEndsLogAndStreamQuietly
@@ -649,6 +653,7 @@ if(TARGET havne-cli)
         set_tests_properties(CliLogRunTest.TheLogRecordsThePicksAndTheExportTakesThem
             CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             CliLogRunTest.AReplayEndsTheLogAtItsLastFrame
+            CliLogRunTest.AnArmedLogWritesAFolderPerWindow
             CliLogRunTest.AClosedOutputEndsLogAndStreamQuietly
             PROPERTIES TIMEOUT 60)
         set_tests_properties(CliLogRunTest.AnInterruptEndsTheLogWhole
@@ -1233,6 +1238,8 @@ if(TARGET havne-cli)
         "--conditions takes one condition file")
     app_cli_usage_says(LogAnEmptyConditionFileIsUsage
         "log|mock://x|f|--conditions|" "--conditions takes one condition file")
+    app_cli_usage_says(LogArmedWithoutConditionsIsUsage
+        "log|mock://x|f|--armed" "--armed goes with --conditions")
     app_cli_usage(SignalsCheckWithoutAFileIsUsage "signals|check")
     app_cli_usage(SignalsWithoutCheckIsUsage "signals")
     app_cli_usage(SignalsAnUnknownWordIsUsage "signals|lint|x.json")
