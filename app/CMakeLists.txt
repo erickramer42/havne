@@ -122,6 +122,7 @@ qt_add_qml_module(app_ui
         qml/DashSignalPanel.qml
         qml/DashDriveStatus.qml
         qml/DashDriveSheet.qml
+        qml/DashTopBar.qml
         qml/LogNotice.qml
         qml/ConnectList.qml
         qml/DashPageStrip.qml
