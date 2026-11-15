@@ -81,8 +81,7 @@ int run_plugins_match(const char* path, const char* typed)
     const ecuio_status_t st = load_package(path, &p, &why);
     if (st != ECUIO_OK) {
         write_error(out, st, why.c_str());
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     const ecuio_plugin_info_t info = plugin_info(p);
     uint32_t indices[ECUIO_PLUGIN_MAX_VARIANTS] = {};
@@ -298,8 +297,7 @@ int run_plugins_check(const char* path, const char* on)
     ecuio_status_t st = load_package(path, &p, &why);
     if (st != ECUIO_OK) {
         write_error(out, st, why.c_str());
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     const ecuio_plugin_info_t info = plugin_info(p);
     {
@@ -393,9 +391,8 @@ int run_plugins_check(const char* path, const char* on)
         }
         if (st != ECUIO_OK) {
             write_error(out, st, why.c_str());
-            out.flush();
             ecuio_plugin_free(p);
-            return kExitConnect;
+            return ended(out, kExitConnect);
         }
     }
     for (const FixtureRun& r : runs) {
@@ -534,15 +531,12 @@ int end_made(Output& out, const char* path, const MadeText& m,
 {
     if (m.status != ECUIO_OK) {
         write_error(out, m.status, m.words.c_str());
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     if (!write_made_file(out, path, m)) {
-        out.flush();
-        return kExitFailed;
+        return ended(out, kExitFailed);
     }
     write_made_lines(out, m, action, variant);
-    out.flush();
     return ended(out, kExitOk);
 }
 
@@ -558,8 +552,7 @@ int run_plugins_wrap(const PluginMakeArgs& args)
     write_start(out);
     std::string file;
     if (!read_signal_bytes(out, args.file, &file)) {
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     ecuio_plugin_wrap_options_t o{};
     o.struct_size = sizeof o;
@@ -587,8 +580,7 @@ int run_plugins_put(const PluginMakeArgs& args)
     std::string file;
     if (!read_packed(out, args.package, &packed) ||
         !read_signal_bytes(out, args.file, &file)) {
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     char* text = nullptr;
     size_t length = 0;
@@ -630,8 +622,7 @@ int run_plugins_drop(const PluginMakeArgs& args)
     write_start(out);
     std::string packed;
     if (!read_packed(out, args.package, &packed)) {
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     char* text = nullptr;
     size_t length = 0;

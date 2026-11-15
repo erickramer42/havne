@@ -72,18 +72,16 @@ int run_conditions_check(const cli::ConditionsCheckArgs& args)
     if (!read_whole(args.file, ECUIO_CONDITION_FILE_MAX_BYTES, "condition file",
                     &bytes, &why)) {
         write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
-        out.flush();
         ecuio_plugin_free(plugin);
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     ecuio_condition_set_t* set = nullptr;
     ecuio_status_t st =
         ecuio_condition_set_load(bytes.data(), bytes.size(), &set);
     if (st != ECUIO_OK) {
         write_error(out, st);
-        out.flush();
         ecuio_plugin_free(plugin);
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     ecuio_signal_file_t* own_file = nullptr;
     const ecuio_signal_file_t* file = nullptr;
@@ -112,9 +110,8 @@ int run_conditions_check(const cli::ConditionsCheckArgs& args)
     if (st != ECUIO_OK) {
         write_error(out, st, why.c_str());
         ecuio_condition_set_free(set);
-        out.flush();
         ecuio_plugin_free(plugin);
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     ecuio_check_options_t checks;
     std::memset(&checks, 0, sizeof checks);
