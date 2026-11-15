@@ -42,15 +42,21 @@ Value.__doc__ = ("A decoded value: its frame's time and ID, its def's id, name a
                  "text (a TEXT or HEX value's, an enum's label), else None")
 
 RecorderState = namedtuple("RecorderState", "state frame_rows value_rows records_dropped "
-                                            "notes_dropped reason conditions_lost")
-RecorderState.__doc__ = ("A recorder's state: \"active\", \"detached\" (its session destroyed; "
-                         "notes go on) or \"failed\"; the rows written to frames.csv and "
-                         "signals.csv; records the full ring dropped and notes the full queue "
-                         "dropped; the OS's reason for a failed write, else None; and the "
-                         "condition events the ring and its carry had no room for, which a "
-                         "drop line in events.log names too")
+                                            "notes_dropped reason conditions_lost windows "
+                                            "preroll_short frames_passed",
+                           defaults=(0, 0, 0))
+RecorderState.__doc__ = ("A recorder's state: \"active\", \"armed\" (an armed recorder between "
+                         "windows), \"detached\" (its session destroyed; notes go on) or "
+                         "\"failed\"; the rows written to frames.csv and signals.csv; records "
+                         "the full ring dropped and notes the full queue dropped; the OS's "
+                         "reason for a failed write, else None; the condition events the ring "
+                         "and its carry had no room for, which a drop line in events.log names "
+                         "too; and an armed recorder's windows opened, those of them whose "
+                         "pre-roll a full ring cut, and the frames it let go outside every "
+                         "window (0 for any other recorder)")
 
 _RECORDER_STATES = {e.ECUIO_RECORDING_ACTIVE: "active",
+                    e.ECUIO_RECORDING_ARMED: "armed",
                     e.ECUIO_RECORDING_DETACHED: "detached",
                     e.ECUIO_RECORDING_FAILED: "failed"}
 
@@ -196,9 +202,16 @@ class Recorder:
     """A recording of a session (ADR-0049), opened before or after its
     start (ADR-0056 section 3) and counting from then; it outlives the
     session, so notes and marks go on until close(); state() says what it
-    wrote and lost"""
+    wrote and lost.
 
-    def __init__(self, session, root, label=None):
+    armed=True (ADR-0063 section 7) writes nothing until a condition of the
+    session's set with record turns ON, then a folder per window, from its
+    before ahead of the firing to its after past the last record condition
+    turning OFF or stale; folder is the newest window's, "" before the
+    first. The session needs a set with an enabled condition that records,
+    or Error (ECUIO_ERR_INVALID_ARGUMENT, "no condition records")."""
+
+    def __init__(self, session, root, label=None, armed=False):
         self._closed_state = None
         # Every use of the handle and close() hold it, so no call runs on a freed one;
         # reentrant: the session's finalizer may close it on a thread that holds it
@@ -206,6 +219,7 @@ class Recorder:
         opts = e.ecuio_record_options_t()
         opts.root_utf8 = utf8(str(root))
         opts.label_utf8 = utf8(label) if label else None
+        opts.flags = e.ECUIO_RECORD_ARMED if armed else 0
         self._r = ctypes.POINTER(e.ecuio_recorder_t)()
         check(lib.ecuio_recorder_open(ctypes.byref(opts), ctypes.byref(self._r)),
               "ecuio_recorder_open")
@@ -247,7 +261,23 @@ class Recorder:
         return RecorderState(_RECORDER_STATES.get(s.state, "unknown"), s.frame_rows,
                              s.value_rows, s.records_dropped, s.notes_dropped,
                              text(s.reason) if s.state == e.ECUIO_RECORDING_FAILED else None,
-                             s.conditions_lost)
+                             s.conditions_lost, s.windows, s.preroll_short, s.frames_passed)
+
+    @staticmethod
+    def _settled_state(r):
+        """The state, once a detached session's last records are taken
+        (ECUIO_RECORDER_DRAINED; an armed recorder's windows wait on its
+        writer), 2 s at most: past that, the state as it stands, whose
+        rows and windows may still grow. close() waits here holding the
+        recorder's lock, so a state() on another thread waits too."""
+        give_up = time.monotonic() + 2.0
+        while True:
+            s = e.ecuio_recorder_state_t()
+            check(lib.ecuio_recorder_get_state(r, ctypes.byref(s)), "ecuio_recorder_get_state")
+            if (s.state != e.ECUIO_RECORDING_DETACHED or s.flags & e.ECUIO_RECORDER_DRAINED
+                    or time.monotonic() >= give_up):
+                return Recorder._read_state(r)
+            time.sleep(0.01)
 
     def state(self):
         """Its RecorderState now; after close(), the one the close read
@@ -262,15 +292,16 @@ class Recorder:
 
     def close(self, why=None):
         """Closes the recording (its files end whole, with the summary)
-        and returns the state read just before; None when it was closed
-        already. A write that failed raises Error after the close; so does
+        and returns the state read just before, once a destroyed session's
+        last records are taken (2 s at most, else the state then, not
+        final); None when it was closed already. A write that failed raises Error after the close; so does
         a state that couldn't be read, the recording closed all the same."""
         with self._lock:
             if self._r is None:
                 return None
             r, self._r = self._r, None
             try:
-                self._closed_state = self._read_state(r)
+                self._closed_state = self._settled_state(r)
             finally:
                 check(lib.ecuio_recorder_close(r, utf8(why) if why else None),
                       "ecuio_recorder_close")
@@ -427,14 +458,15 @@ class Session:
                 s.since_us, s.fired, s.value, s.generation))
         return out
 
-    def record(self, root, label=None):
+    def record(self, root, label=None, armed=False):
         """A recording of the session into a new folder under root, from
         now on: before start() it holds the whole session, after it the
         analysis log of a run under way (ADR-0056 section 3), its times
-        counted from this call. One recorder at a time: a second while
-        one is open is core's INVALID_ARGUMENT; after close() another can
-        open."""
-        r = Recorder(self, root, label)
+        counted from this call; armed=True, a folder per window around
+        the set's record conditions (Recorder). One recorder at a time: a
+        second while one is open is core's INVALID_ARGUMENT; after close()
+        another can open."""
+        r = Recorder(self, root, label, armed)
         self._recorders.append(r)
         return r
 
