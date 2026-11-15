@@ -17,3 +17,7 @@ tests/fixtures/recording/*/signals.json -text
 # byte for byte: a file is named by the SHA-256 of its bytes
 tests/data/vehiclebook/* -text
 tests/data/vehiclebook/signals/* -text
+
+# Layout files are read byte for byte, so a checkout never rewrites their line endings
+tests/data/layouts/* -text
+tests/fixtures/layouts/* -text

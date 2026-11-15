@@ -352,3 +352,11 @@ spike seen a moment late is gone from the window before it can be read.
   24 px while a cursor exists, and its chart's floor is 274.
 - The frame test with a span placed, on the laptop and the test phone, is
   owed.
+
+## Note: the asks are a task of the thread pool (2026-11-13)
+
+The statistics and the step run as a task of the global thread pool, not on
+a thread of the viewer's own, so a close never joins them
+([ADR-0056](0056-analysis-log.md)'s note of 2026-11-12 under "the
+navigation aids against road logs"). One ask of each kind still waits and a
+newer one replaces it, and a task that can't start answers 0.

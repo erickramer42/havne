@@ -117,49 +117,12 @@ public:
     // character. Nothing is written if not even "" fits.
     size_t string(const char* s, size_t n, size_t limit = SIZE_MAX)
     {
-        const size_t end = limit < room() ? m_len + limit : m_cap;
-        if (m_full || end - m_len < 2) {
-            m_full = true;
-            return 0;
-        }
-        m_buf[m_len++] = '"';
-        size_t i = 0;
-        while (i < n && s[i] != '\0') {
-            char esc[8];
-            const char* out = esc;
-            size_t out_n = 0;
-            size_t take = 1;
-            const auto c = static_cast<unsigned char>(s[i]);
-            if (c == '"' || c == '\\') {
-                esc[0] = '\\';
-                esc[1] = static_cast<char>(c);
-                out_n = 2;
-            } else if (c < 0x20) {
-                out_n = control_escape(c, esc);
-            } else if (c < 0x80) {
-                out = s + i;
-                out_n = 1;
-            } else {
-                take = utf8_sequence(
-                    reinterpret_cast<const unsigned char*>(s) + i, n - i);
-                if (take) {
-                    out = s + i;
-                    out_n = take;
-                } else {
-                    out = "\xEF\xBF\xBD"; // U+FFFD
-                    out_n = 3;
-                    take = 1;
-                }
-            }
-            if (out_n > end - m_len - 1) {
-                break; // room for the closing quote stays
-            }
-            std::memcpy(m_buf + m_len, out, out_n);
-            m_len += out_n;
-            i += take;
-        }
-        m_buf[m_len++] = '"';
-        return i;
+        return put_string(s, n, limit, true);
+    }
+    // As string(), over exactly n bytes: a NUL among them is \u0000
+    size_t string_exact(const char* s, size_t n, size_t limit = SIZE_MAX)
+    {
+        return put_string(s, n, limit, false);
     }
 
     // The most bytes string() writes for s, its quotes included: six a
@@ -168,7 +131,12 @@ public:
     // one is never cut or dropped
     static size_t string_bytes(const char* s)
     {
-        return s != nullptr ? 2 + 6 * std::strlen(s) : 4;
+        return s != nullptr ? string_bytes(s, std::strlen(s)) : 4;
+    }
+    // The same for string_exact()'s n bytes
+    static size_t string_bytes(const char* s, size_t n)
+    {
+        return s != nullptr ? 2 + 6 * n : 4;
     }
 
     // The line's end. False if anything didn't fit: drop the line.
@@ -217,6 +185,53 @@ public:
     }
 
 private:
+    size_t put_string(const char* s, size_t n, size_t limit, bool at_nul)
+    {
+        const size_t end = limit < room() ? m_len + limit : m_cap;
+        if (m_full || end - m_len < 2) {
+            m_full = true;
+            return 0;
+        }
+        m_buf[m_len++] = '"';
+        size_t i = 0;
+        while (i < n && (!at_nul || s[i] != '\0')) {
+            char esc[8];
+            const char* out = esc;
+            size_t out_n = 0;
+            size_t take = 1;
+            const auto c = static_cast<unsigned char>(s[i]);
+            if (c == '"' || c == '\\') {
+                esc[0] = '\\';
+                esc[1] = static_cast<char>(c);
+                out_n = 2;
+            } else if (c < 0x20) {
+                out_n = control_escape(c, esc);
+            } else if (c < 0x80) {
+                out = s + i;
+                out_n = 1;
+            } else {
+                take = utf8_sequence(
+                    reinterpret_cast<const unsigned char*>(s) + i, n - i);
+                if (take) {
+                    out = s + i;
+                    out_n = take;
+                } else {
+                    out = "\xEF\xBF\xBD"; // U+FFFD
+                    out_n = 3;
+                    take = 1;
+                }
+            }
+            if (out_n > end - m_len - 1) {
+                break; // room for the closing quote stays
+            }
+            std::memcpy(m_buf + m_len, out, out_n);
+            m_len += out_n;
+            i += take;
+        }
+        m_buf[m_len++] = '"';
+        return i;
+    }
+
     static size_t control_escape(unsigned char c, char* esc)
     {
         esc[0] = '\\';

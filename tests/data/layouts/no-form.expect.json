@@ -1,0 +1,32 @@
+[
+ {
+  "as": "desktop",
+  "problem": "",
+  "form": "",
+  "pages": 1,
+  "cells": 2,
+  "files": [],
+  "notes": [
+   "no-form"
+  ],
+  "first_cell": {
+   "w": 2,
+   "h": 4
+  }
+ },
+ {
+  "as": "phone",
+  "problem": "",
+  "form": "",
+  "pages": 1,
+  "cells": 2,
+  "files": [],
+  "notes": [
+   "no-form"
+  ],
+  "first_cell": {
+   "w": 2,
+   "h": 4
+  }
+ }
+]

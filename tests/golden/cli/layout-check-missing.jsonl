@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"code": 7, "detail": "the layout file can't be read: there's no such file", "message": "couldn't open what was named", "type": "error"}

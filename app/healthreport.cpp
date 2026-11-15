@@ -83,16 +83,49 @@ int stopAsked(void* user)
 
 } // namespace
 
+bool isEmptyDocument(const QString& where)
+{
+    // Read, never size(): a provider that gives no size reads 0 for a
+    // document that holds bytes
+    QFile document;
+    if (!openPicked(document, where, QIODevice::ReadOnly)) {
+        return false;
+    }
+    char byte = 0;
+    return document.read(&byte, 1) == 0;
+}
+
+void removeIfEmpty(const QString& where)
+{
+    if (isEmptyDocument(where)) {
+        removePicked(where);
+    }
+}
+
+bool pickedDocumentEmpty(const QUrl& url)
+{
+    return !url.isLocalFile() && isEmptyDocument(pathOfUrl(url));
+}
+
+void dropPickedDocument(const QUrl& url, bool wasEmpty)
+{
+    if (wasEmpty && !url.isLocalFile()) {
+        removePicked(pathOfUrl(url));
+    }
+}
+
 QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url,
                               std::atomic<bool>* stop, bool throughProvider)
 {
-    // A picker has already made the document it names: one that ends up
-    // holding no report goes
+    // A picker has already made the document it names: one that was empty
+    // when this began goes if no report is written, even part written; one
+    // that held bytes stays (a failed write may still have cut it)
     const bool provider = throughProvider || !url.isLocalFile();
+    const QString where = pathOfUrl(url);
+    const bool madeEmpty = provider && isEmptyDocument(where);
     const auto refused = [&](const QString& words) {
-        if (provider) {
-            QFile::remove(url.isLocalFile() ? url.toLocalFile()
-                                            : url.toString());
+        if (madeEmpty) {
+            removePicked(where);
         }
         return failed(words);
     };

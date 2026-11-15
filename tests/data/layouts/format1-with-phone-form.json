@@ -1,0 +1,19 @@
+{
+ "format": 1,
+ "pages": [
+  {
+   "name": "Engine",
+   "cells": [
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 4,
+     "refs": [
+      "id:1001"
+     ]
+    }
+   ]
+  }
+ ],
+ "form": "phone"
+}

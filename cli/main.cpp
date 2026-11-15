@@ -27,6 +27,7 @@
 #include "view_lines.h"
 #include "vin_line.h"
 #include "jsonl.h"
+#include "layout_check.h"
 #include "line_ring.h"
 #include "mark_lines.h"
 #include "partial_file.h"
@@ -397,12 +398,13 @@ int ended(Output& out, int code)
 }
 
 // export's cancel (ecuio_export_with), its column check's, import's
-// (ecuio_import_with) and a recording's health report's
-// (ecuio_health_export_with): Ctrl+C or SIGTERM stops it, and core removes
-// what it had begun. HAVNE_CLI_EXPORT_HOLD_MS (tests only) holds the
-// run's first ask that long, naming whose it is on stderr, so a test's
-// interrupt lands there; with HAVNE_CLI_EXPORT_HOLD_DEAF set the hold
-// ignores the interrupt, so a second one can arrive while the run waits
+// (ecuio_import_with), a recording's health report's
+// (ecuio_health_export_with) and view's searches': Ctrl+C or SIGTERM
+// stops it, and core removes what it had begun. HAVNE_CLI_EXPORT_HOLD_MS
+// (tests only) holds the run's first ask that long, naming whose it is on
+// stderr, so a test's interrupt lands there; with HAVNE_CLI_EXPORT_HOLD_DEAF
+// set the hold ignores the interrupt, so a second one can arrive while the
+// run waits
 int interrupted_at(bool* asked, const char* where)
 {
     if (!*asked) {
@@ -437,18 +439,46 @@ int health_interrupted(void* user)
     return interrupted_at(static_cast<bool*>(user), "health report");
 }
 
+// The sweep's sizing before an export at an interval asks as the export
+// does, its first ask held under its own name
+int interval_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "interval check");
+}
+
 // The column check's open (ecuio_open_progress_t) asks as the export does
 int open_interrupted(uint64_t, uint64_t, void* user)
 {
     return interrupted_at(static_cast<bool*>(user), "column check");
 }
 
+// view's searches (ecuio_recording_find_with, _stretches_with) ask as the
+// export does
+int view_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "view");
+}
+
+// The second call of a search's pair (the stretches a count asked for):
+// its first ask held under its own name, so a test's interrupt lands there
+int view_second_interrupted(void* user)
+{
+    return interrupted_at(static_cast<bool*>(user), "view's second search");
+}
+
+// view's opens stop at an interrupt, with no hold
+int view_open_interrupted(uint64_t, uint64_t, void*)
+{
+    return g_interrupted.load() ? 1 : 0;
+}
+
 // An export, its sizing, an import or a recording's health report stopped
 // by an interrupt: the end line the other commands write on one, and
-// exit 1, as clear's, since nothing was written
-int ended_interrupted(Output& out)
+// exit 1, as clear's, since nothing was written. `where` names the caller
+// for HAVNE_CLI_EXPORT_TAIL_HOLD_MS's hold (the column check)
+int ended_interrupted(Output& out, const char* where = nullptr)
 {
-    second_interrupt_over(); // one end line, whatever interrupt follows
+    second_interrupt_over(where); // one end line, whatever interrupt follows
     char buf[64];
     cli::Line l(buf, sizeof buf);
     l.raw("{\"type\":\"end\"");
@@ -1531,6 +1561,44 @@ int run_conditions_check(const cli::ConditionsCheckArgs& args)
     ecuio_plugin_free(plugin);
     ecuio_condition_set_free(set);
     return ended(out, kExitOk);
+}
+
+// layout check <file> [--form phone|desktop]: whether a dashboard layout
+// file reads, and what loading it would drop (cli/layout_check.h, held
+// equal to the app's DashboardBook by tests/data/layouts). start, then a
+// layout line; exit 0 when it reads (with pages or cells left out too), 1
+// when it is refused, 3 when the file can't be read, passes the bound or
+// isn't UTF-8 text
+int run_layout_check(const char* path, const std::string& form)
+{
+    Output out;
+    write_start(out);
+    std::string bytes;
+    std::string why;
+    if (!read_whole(path, cli::layout::kFileMaxBytes, "layout file", &bytes,
+                    &why)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED, why.c_str());
+        return ended(out, kExitConnect);
+    }
+    // The app's bound counts the whole file, a BOM included, before it reads
+    if (bytes.size() > static_cast<size_t>(cli::layout::kFileMaxBytes)) {
+        const std::string words = "the file is over " +
+                                  std::to_string(cli::layout::kFileMaxBytes) +
+                                  " bytes, a layout file's most";
+        write_error(out, ECUIO_ERR_LOAD_FAILED, words.c_str());
+        return ended(out, kExitConnect);
+    }
+    if (!cli::layout::valid_utf8(bytes)) {
+        write_error(out, ECUIO_ERR_LOAD_FAILED,
+                    "the layout file isn't UTF-8 text");
+        return ended(out, kExitConnect);
+    }
+    cli::layout::strip_bom(&bytes);
+    const cli::layout::Verdict v = cli::layout::check(bytes, form);
+    BigLine b(cli::layout::layout_line_bytes(v));
+    cli::layout::layout_line(b.line, v);
+    write_line(out, b.line);
+    return ended(out, v.read ? kExitOk : kExitFailed);
 }
 
 // A plugin loaded for the process's life (stream --plugin, sim --plugin):
@@ -2770,6 +2838,7 @@ void usage(FILE* to)
         "       havne-cli health <recording> <out> --format json|text\n"
         "                      [--units metric|imperial] [--from S] [--to S]\n"
         "                      [--baseline <recording>]\n"
+        "       havne-cli layout check <file> [--form phone|desktop]\n"
         "       havne-cli signals check <file>\n"
         "       havne-cli signals import obdb <file> --out <file> [--year Y]\n"
         "                      [--name N] [--url U] [--commit C] [--alone]\n"
@@ -2940,7 +3009,11 @@ void usage(FILE* to)
         "         each file checked for the car's identity; a check that\n"
         "         finds any writes nothing. --estimate writes no file: the\n"
         "         wide CSV's rows and bytes, exact, at --rows' interval, or\n"
-        "         for a row a sweep, every 100 ms and every 250 ms.\n"
+        "         for one row per sweep, every 100 ms and every 250 ms. An\n"
+        "         interval that gives no fewer rows than every sweep (the\n"
+        "         recording is slower than it) says so with\n"
+        "         no_fewer_than_sweep, and export on stderr too; export's\n"
+        "         --rows <ms> sizes the sweep first for it, a pass more.\n"
         "health   writes a car's health as one scrubbed file, JSON or a\n"
         "         text for a person: the vehicle from its VIN (model year,\n"
         "         make, check digit; never the VIN), the inspection's\n"
@@ -4604,7 +4677,7 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
 {
     if (!args.frames) {
         const ecuio_status_t st =
-            ecuio_recording_open(folder, nullptr, nullptr, r);
+            ecuio_recording_open(folder, view_open_interrupted, nullptr, r);
         *why = ecuio_last_error_detail();
         return st;
     }
@@ -4652,8 +4725,8 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
         }
         *decoded = source.profile;
     }
-    const ecuio_status_t st =
-        ecuio_recording_open_frames(folder, set, nullptr, nullptr, r);
+    const ecuio_status_t st = ecuio_recording_open_frames(
+        folder, set, view_open_interrupted, nullptr, r);
     *why = ecuio_last_error_detail();
     ecuio_signal_file_free(file); /* the reader keeps its own copy */
     return st;
@@ -4733,22 +4806,26 @@ int use_view_signals(Output& out, ViewArgs& args)
 }
 
 // The start of a recording's nth pull (1 the first) under its rules, over
-// the whole recording: *at_us, left alone with fewer pulls than that
-ecuio_status_t nth_pull(const Viewed& v, uint32_t n, uint64_t* at_us)
+// the whole recording: *at_us, left alone with fewer pulls than that.
+// asked is view_interrupted's
+ecuio_status_t nth_pull(const Viewed& v, uint32_t n, bool* asked,
+                        uint64_t* at_us)
 {
     ecuio_stretch_rules_t rules = v.rules;
     rules.kinds = ECUIO_STRETCH_PULLS;
     const uint64_t end = v.info.duration_us + 1;
     /* The count first: n is the caller's, up to 100,000 */
     uint32_t count = 0;
-    ecuio_status_t rc = ecuio_recording_stretches(v.r.get(), &rules, 0, end,
-                                                  nullptr, 0, &count);
+    ecuio_status_t rc = ecuio_recording_stretches_with(
+        v.r.get(), &rules, 0, end, view_interrupted, asked, nullptr, 0, &count);
     if (rc != ECUIO_OK || count < n) {
         return rc;
     }
     std::vector<ecuio_recording_stretch_t> found(n);
-    rc = ecuio_recording_stretches(v.r.get(), &rules, 0, end, found.data(), n,
-                                   &count);
+    bool second = false;
+    rc = ecuio_recording_stretches_with(v.r.get(), &rules, 0, end,
+                                        view_second_interrupted, &second,
+                                        found.data(), n, &count);
     if (rc == ECUIO_OK && count >= n) {
         *at_us = found[n - 1].from_us;
     }
@@ -4892,6 +4969,10 @@ int run_view(ViewArgs& args)
     if (used >= 0) {
         return used;
     }
+    // An interrupt ends the opens and searches at their next ask, and the
+    // lines between recordings: the interrupted end line, exit 1
+    install_handlers();
+    bool asked = false;
     std::vector<Viewed> views(args.folders.size());
     for (size_t i = 0; i < args.folders.size(); ++i) {
         ecuio_recording_t* r = nullptr;
@@ -4899,6 +4980,10 @@ int run_view(ViewArgs& args)
         std::string why;
         const ecuio_status_t rc =
             open_viewed(args, args.folders[i], &r, &decoded, &why);
+        if (rc == ECUIO_ERR_CANCELED && g_interrupted.load()) {
+            write_start(out);
+            return ended_interrupted(out);
+        }
         if (rc != ECUIO_OK) {
             write_start(out);
             write_error(out, rc, why.c_str());
@@ -5033,8 +5118,14 @@ int run_view(ViewArgs& args)
                               pulls[pulls.size() == 1 ? 0
                                                       : static_cast<size_t>(
                                                             &v - views.data())],
-                              &at)
-                        : ecuio_recording_find(v.r.get(), &what, 0, &at);
+                              &asked, &at)
+                        : ecuio_recording_find_with(v.r.get(), &what, 0,
+                                                    view_interrupted, &asked,
+                                                    &at);
+                if (rc == ECUIO_ERR_CANCELED) {
+                    write_start(out);
+                    return ended_interrupted(out);
+                }
                 if (rc != ECUIO_OK) {
                     write_start(out);
                     write_error(out, rc, cli::read_error_detail(rc));
@@ -5144,15 +5235,21 @@ int run_view(ViewArgs& args)
             continue;
         }
         uint32_t count = 0;
-        ecuio_status_t rc = ecuio_recording_stretches(
+        ecuio_status_t rc = ecuio_recording_stretches_with(
             v.r.get(), &v.rules, static_cast<uint64_t>(t0),
-            static_cast<uint64_t>(t1), nullptr, 0, &count);
+            static_cast<uint64_t>(t1), view_interrupted, &asked, nullptr, 0,
+            &count);
         std::vector<ecuio_recording_stretch_t> found(count);
         if (rc == ECUIO_OK && count != 0) {
-            rc = ecuio_recording_stretches(
+            bool second = false;
+            rc = ecuio_recording_stretches_with(
                 v.r.get(), &v.rules, static_cast<uint64_t>(t0),
-                static_cast<uint64_t>(t1), found.data(), count, &count);
+                static_cast<uint64_t>(t1), view_second_interrupted, &second,
+                found.data(), count, &count);
             found.resize((std::min<size_t>)(found.size(), count));
+        }
+        if (rc == ECUIO_ERR_CANCELED) {
+            return ended_interrupted(out);
         }
         if (rc != ECUIO_OK) {
             write_error(out, rc, cli::read_error_detail(rc));
@@ -5175,6 +5272,9 @@ int run_view(ViewArgs& args)
     std::map<std::string, std::pair<uint32_t, std::vector<double>>> firsts;
     for (uint32_t i = 0; i < views.size(); ++i) {
         const Viewed& v = views[i];
+        if (g_interrupted.load()) {
+            return ended_interrupted(out);
+        }
         if (!v.aligned || v.shown.empty()) {
             continue;
         }
@@ -5300,6 +5400,9 @@ int run_view(ViewArgs& args)
     for (const cli::Span& span : args.spans) {
         for (uint32_t i = 0; i < views.size(); ++i) {
             const Viewed& v = views[i];
+            if (g_interrupted.load()) {
+                return ended_interrupted(out);
+            }
             if (!v.aligned || v.shown.empty()) {
                 continue;
             }
@@ -6061,10 +6164,11 @@ int run(int argc, char** argv)
         if (ex.options.format == ECUIO_EXPORT_CSV &&
             ex.options.layout == ECUIO_CSV_WIDE && !ex.signals.empty() &&
             !missing_columns(ex, &asked, &missing)) {
-            return ended_interrupted(out);
+            return ended_interrupted(out, "column check");
         }
         if (ex.estimate) {
-            const std::vector<uint32_t> rows = cli::estimate_intervals(ex);
+            const std::vector<uint32_t> shown = cli::estimate_intervals(ex);
+            const std::vector<uint32_t> rows = cli::with_sweep(shown);
             std::vector<ecuio_export_estimate_t> sized(rows.size());
             const ecuio_status_t sizing = ecuio_export_estimate_with(
                 &ex.options, rows.data(), static_cast<uint32_t>(rows.size()),
@@ -6078,10 +6182,28 @@ int run(int argc, char** argv)
                 return ended(out, kExitConnect);
             }
             BigLine sizes(1024);
-            cli::estimate_line(sizes.line, rows.data(), sized.data(),
-                               sized.size(), say_missing());
+            cli::estimate_line(
+                sizes.line, rows.data(), sized.data(), shown.size(),
+                say_missing(),
+                cli::sweep_rows_of(rows.data(), sized.data(), sized.size()));
             write_line(out, sizes.line);
             return ended(out, kExitOk);
+        }
+        // An interval is judged against the sweep's rows, sized first so an
+        // interrupt here leaves nothing written: one pass more
+        uint64_t sweep_rows = UINT64_MAX;
+        if (ex.options.format == ECUIO_EXPORT_CSV &&
+            ex.options.layout == ECUIO_CSV_WIDE && ex.options.row_ms > 0) {
+            const uint32_t sweep = 0;
+            ecuio_export_estimate_t sized{};
+            const ecuio_status_t sizing = ecuio_export_estimate_with(
+                &ex.options, &sweep, 1, interval_interrupted, &asked, &sized);
+            if (sizing == ECUIO_ERR_CANCELED) {
+                return ended_interrupted(out);
+            }
+            if (sizing == ECUIO_OK) {
+                sweep_rows = sized.rows;
+            }
         }
         ecuio_export_report_t report{};
         const ecuio_status_t rc =
@@ -6100,8 +6222,16 @@ int run(int argc, char** argv)
             write_error(out, rc);
             return ended(out, kExitConnect);
         }
-        cli::exported_line(l, ex, report, say_missing());
+        const bool no_fewer = cli::no_fewer_than_sweep(ex.options.row_ms,
+                                                       report.rows, sweep_rows);
+        cli::exported_line(l, ex, report, say_missing(), no_fewer);
         write_line(out, l);
+        if (no_fewer) {
+            std::fprintf(stderr,
+                         "havne-cli: every %u ms gives no fewer rows than "
+                         "every sweep: the recording is slower than that\n",
+                         static_cast<unsigned>(ex.options.row_ms));
+        }
         return ended(out, kExitOk);
     }
     if (command == "import") {
@@ -6411,6 +6541,19 @@ int run(int argc, char** argv)
             return run_conditions_check(check);
         }
         std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (command == "layout") {
+        const std::string word = argc > 2 ? argv[2] : "";
+        if (word == "check" && argc == 4) {
+            return run_layout_check(argv[3], "");
+        }
+        if (word == "check" && argc == 6 && std::string(argv[4]) == "--form" &&
+            (std::string(argv[5]) == "phone" ||
+             std::string(argv[5]) == "desktop")) {
+            return run_layout_check(argv[3], argv[5]);
+        }
         usage(stderr);
         return kExitUsage;
     }

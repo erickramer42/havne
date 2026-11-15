@@ -11,7 +11,6 @@
 #include <QVariantMap>
 
 #include <atomic>
-#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -28,12 +27,12 @@
 // (host_us / 1000, a double), values in the display units unitSystem
 // names (ADR-0022), as Live's model shows them. The reader answers the
 // queries on the GUI thread: a column of a second or more comes from
-// its per-second summaries. A span's statistics and a cursor's step are
-// asked of a thread of their own, which lives from the first ask to the
-// close. The recording's stretches are found by a task of the global
-// thread pool per ask that shares the reader, so a close never waits for
-// a pass over a long recording: the pass ends on its own and its answer
-// is dropped. Only the application's own end waits for one.
+// its per-second summaries. A span's statistics, a cursor's step and the
+// recording's stretches are answered by tasks of the global thread pool
+// that share the reader, so a close never waits for a pass over a long
+// recording: it stops a stretches pass at its next second and a call not
+// yet made, a call under way ends on its own, and the answer is dropped.
+// Only the application's own end waits for one.
 class RecordingView : public QObject
 {
     Q_OBJECT
@@ -140,8 +139,8 @@ public:
     // A local target written as a content:// one is, so a test reaches the
     // picked document's removal
     void setThroughProviderForTesting(bool on) { m_throughProvider = on; }
-    // The next report's thread, or the statistics and step asks' thread,
-    // can't be started
+    // The next report's thread, the asks' task or a stretches pass can't be
+    // started
     void setFailThreadForTesting(bool on) { m_failThreadForTesting = on; }
 
     // Opens the recording in folder (the one holding signals.csv), closing
@@ -207,6 +206,21 @@ public:
     // before the start reads from the start. Empty on a failure.
     Q_INVOKABLE int stats(const QVariantList& signalIndexes, double t0Ms,
                           double t1Ms);
+    // Each signal's mean in each of `columns` columns over [t0Ms, t1Ms),
+    // every column over its own span of the recording's time
+    // (ecuio_recording_stats, which reads a part of a second from the
+    // rows), where columns() puts a whole second in the column it starts
+    // in: what the difference of two recordings a part of a second apart
+    // is taken from (ADR-0056's appendix of 2026-11-12). Read off the GUI
+    // thread: the ask's number, or 0 with nothing asked (not open, a bad
+    // index, no signals, no span, a column count columns() refuses).
+    // columnMeansReady answers with that number unless a later ask
+    // replaced it: one map per signal in signalIndexes' order, { index,
+    // means (`columns` numbers in display units; NaN for an empty column,
+    // one before the start and a text signal) }. Empty on a failure, an
+    // ask the task had no memory for included.
+    Q_INVOKABLE int columnMeans(const QVariantList& signalIndexes, double t0Ms,
+                                double t1Ms, int columns);
     // The signal's next sample after tMs, or its previous before it
     // (ecuio_recording_step), off the GUI thread: the ask's number, 0 with
     // nothing asked. stepReady answers with that number unless a later ask
@@ -232,6 +246,55 @@ public:
     // Each stretches pass waits this long before it reads, so a test can
     // close or destroy the view while one is under way
     void setStretchesHoldForTesting(int ms) { m_stretchesHoldMs = ms; }
+    // Each stretches pass answers stop at its nth ask of core's cancel (0
+    // never), as a close landing there would
+    void setStretchesStopAtAskForTesting(int n) { m_stretchesStopAt = n; }
+    // Each stretches pass waits at its nth ask of core's cancel (0 never)
+    // until a close or a newer stretches ask, 60 s at most, then answers it
+    void setStretchesHoldAtAskForTesting(int n) { m_stretchesHoldAt = n; }
+    // The stretches passes of the last open that came to that ask
+    int stretchesHeldForTesting() const
+    {
+        return m_stop ? m_stop->stretchesHeld.load() : 0;
+    }
+    // The last stretches pass's asks of core's cancel, both calls together
+    int stretchesAsksForTesting() const
+    {
+        return m_stop ? m_stop->passAsks.load() : 0;
+    }
+    // The same for the asks' task, in a turn that took a new ask, before its
+    // reads; an ask copies it in, so clearing it reaches the next ask's turn
+    void setAsksHoldForTesting(int ms) { m_asksHoldMs = ms; }
+    // The asks' task waits this long after a means pass gives way, before it
+    // takes the ask it gave way to (counted in meansYieldsForTesting first)
+    void setYieldHoldForTesting(int ms) { m_yieldHoldMs = ms; }
+    // The holds this recording's asks' task has come to with an ask taken:
+    // a close before the first finds no read under way
+    int asksHeldForTesting() const { return m_asks ? m_asks->held.load() : 0; }
+    // The means passes a newer ask or a close ended early
+    int meansStoppedForTesting() const
+    {
+        return m_asks ? m_asks->stopped.load() : 0;
+    }
+    // The means passes that gave way to a waiting statistics or step ask
+    int meansYieldsForTesting() const
+    {
+        return m_asks ? m_asks->yields.load() : 0;
+    }
+    // The stretches passes a newer stretches ask ended
+    int stretchesStaledForTesting() const
+    {
+        return m_stop ? m_stop->stretchesStaled.load() : 0;
+    }
+    // The last open's reads its close stopped: a statistics or step call
+    // not made, a means pass or a stretches pass ended. Kept until the next
+    // open
+    int readsStoppedForTesting() const
+    {
+        return m_stop ? m_stop->readsStopped.load() : 0;
+    }
+    // The asks' task runs out of memory at each means ask while on
+    void setLoseMeansForTesting(bool on) { m_loseMeansForTesting = on; }
 
 signals:
     void stateChanged();
@@ -243,6 +306,7 @@ signals:
     void reportSaved(const QVariantMap& result);
     void statsReady(int request, const QVariantList& stats);
     void stepReady(int request, double atMs);
+    void columnMeansReady(int request, const QVariantList& means);
     void stretchesReady(int request, const QVariantList& stretches, bool ok);
     void stretchesProblemChanged();
 
@@ -260,9 +324,58 @@ private:
         uint64_t t = 0;
         uint32_t direction = 0;
     };
+    struct MeansAsk {
+        int request = 0;
+        std::vector<uint32_t> ids;
+        int64_t t0 = 0; // signed: a window can start before the recording
+        int64_t t1 = 0;
+        uint32_t columns = 0;
+    };
+    // What a view shares with the task answering its statistics, step and
+    // column means asks: one of each kind waits, a newer ask replacing it,
+    // so a dragged cursor never builds a queue. A close empties it and
+    // lets go of it, and the task ends after the read it is in
+    struct Asks {
+        std::mutex m;
+        std::optional<StatsAsk> stats;
+        std::optional<StepAsk> step;
+        std::optional<MeansAsk> means;
+        bool answering = false; // a task is at work
+        // Set by a close and by a newer means ask: a means pass under way
+        // stops at its next column
+        std::atomic<bool> meansStale{false};
+        // Set under `m` by a statistics or step ask put in, cleared under
+        // `m` when the task takes it: a means pass under way yields to it at
+        // its next column and resumes there
+        std::atomic<bool> waiting{false};
+        // A test's: means passes that yielded
+        std::atomic<int> yields{0};
+        // Asks left unanswered because a copy could not be allocated
+        std::atomic<int> lost{0};
+        bool loseMeans = false;      // a test's means asks run out of memory
+        int holdMs = 0;      // a test's wait in a turn that took a new ask
+        int yieldHoldMs = 0; // a test's wait after a means pass gave way
+        std::atomic<int> held{0};    // a test's holds begun
+        std::atomic<int> stopped{0}; // means passes ended before their end
+    };
     struct Signal {
         ecuio_recording_signal_t pub;
         bool plotted = false;
+    };
+    // An open's stop, shared with its asks' task and stretches passes: set
+    // by the close, a new open or the destructor, so a read under way ends
+    // at its next check and none starts
+    struct Stop {
+        std::atomic<bool> stopped{false};
+        std::atomic<int> readsStopped{0};
+        std::atomic<int> passAsks{0}; // a test's: the last pass's asks
+        // The newest stretches ask's number, set by the GUI thread: an
+        // older pass under way stops at its next second
+        std::atomic<int> latestStretches{0};
+        // A test's: passes a newer ask ended
+        std::atomic<int> stretchesStaled{0};
+        // A test's: passes that came to the ask they hold at
+        std::atomic<int> stretchesHeld{0};
     };
 
     struct FrameSet;
@@ -286,21 +399,34 @@ private:
     bool query(const std::vector<uint32_t>& ids, double t0Ms, double t1Ms,
                uint32_t n, std::vector<ecuio_recording_column_t>& cols);
     double found(const ecuio_recording_find_t& what);
-    // False when the asks' thread can't be started (the system is out of them)
+    // False when the asks have no place to wait in (no memory for it)
+    bool haveAsks();
+    // False when the asks' task can't be started (no memory for it)
     bool startAsks();
-    void answerAsks(ecuio_recording_t* reader, quint64 generation);
+    // The asks' task: answers until none waits, each answer posted as a
+    // stretches pass posts its own
+    static void answerAsks(const std::shared_ptr<Asks>& asks,
+                           const std::shared_ptr<ecuio_recording_t>& reader,
+                           const std::shared_ptr<Stop>& stop,
+                           const QPointer<RecordingView>& view,
+                           quint64 generation);
     void statsFinished(const StatsAsk& ask, ecuio_status_t rc,
                        const std::vector<ecuio_recording_stats_t>& got,
                        quint64 generation);
     void stepFinished(int request, ecuio_status_t rc, uint64_t at,
                       quint64 generation);
+    void meansFinished(const MeansAsk& ask, ecuio_status_t rc,
+                       const std::vector<double>& got, quint64 generation);
+    // A means ask the task couldn't answer: answered with no rows
+    void meansLost(int request, quint64 generation);
     // One pass, a task of the global thread pool that holds the reader
     // open; its answer is posted to the application and reaches view only
     // if it still lives
     static void findStretches(const std::shared_ptr<ecuio_recording_t>& reader,
+                              const std::shared_ptr<Stop>& stop,
                               const QPointer<RecordingView>& view, int request,
                               ecuio_stretch_rules_t rules, quint64 generation,
-                              int holdMs);
+                              int holdMs, int stopAt, int holdAt);
     void setStretchesProblem(const QString& words);
     void stretchesFinished(int request, ecuio_status_t rc,
                            const std::vector<ecuio_recording_stretch_t>& got,
@@ -319,10 +445,12 @@ private:
     bool m_hasFrames = false;
 
     // The open reader: m_reader for every call on it, m_readerHold its
-    // owner, shared with a stretches pass so a close mid-pass leaves the
-    // reader open until the pass ends
+    // owner, shared with a stretches pass and the asks' task so a close
+    // mid-pass leaves the reader open until the pass ends
     ecuio_recording_t* m_reader = nullptr;
     std::shared_ptr<ecuio_recording_t> m_readerHold;
+    // The open's stop, made at each open and set when it ends
+    std::shared_ptr<Stop> m_stop;
     ecuio_recording_info_t m_info{};
     std::vector<Signal> m_signals;
     QVariantList m_markers;
@@ -339,21 +467,19 @@ private:
     bool m_reporting = false;
     bool m_throughProvider = false;
     bool m_failThreadForTesting = false;
-    // Asks left unanswered because a copy could not be allocated
-    std::atomic<int> m_asksLost{0};
-    // The asks' thread: one of each kind waits, a newer ask replacing it,
-    // so a dragged cursor never builds a queue
-    std::thread m_askWorker;
-    std::mutex m_askMutex;
-    std::condition_variable m_askWake;
-    bool m_askStop = false;
-    std::optional<StatsAsk> m_statsAsk;
-    std::optional<StepAsk> m_stepAsk;
+    // Made at the first ask after an open or a close that left a task behind
+    std::shared_ptr<Asks> m_asks;
+    int m_asksHoldMs = 0;
+    int m_yieldHoldMs = 0;
+    bool m_loseMeansForTesting = false;
     int m_lastAsk = 0;
     int m_lastStats = 0;
     int m_lastStep = 0;
+    int m_lastMeans = 0;
     int m_lastStretches = 0;
     int m_stretchesHoldMs = 0;
+    int m_stretchesStopAt = 0;
+    int m_stretchesHoldAt = 0;
     QString m_stretchesProblem;
     // Each open's number: a result or progress posted for an earlier one
     // is dropped

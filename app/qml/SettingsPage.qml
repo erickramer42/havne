@@ -60,7 +60,8 @@ Pane {
     property var canInterfaces: []
 
     // The phone's Bluetooth adapters (ADR-0028 section 2): [{ name, address,
-    // kind }], kind "bt" (classic, paired) or "ble". Empty off Android
+    // kind, other }], kind "bt" (classic, paired) or "ble", other true for
+    // audio, wearable and health gear. Empty off Android
     property var bluetoothAdapters: Bluetooth.adapters
 
     // Each device's versions as last seen at a connect, { base: text }
@@ -92,8 +93,13 @@ Pane {
             detail: a.kind === "ble" ? qsTr("Bluetooth LE · %1").arg(a.address)
                                      : qsTr("Bluetooth, paired · %1").arg(a.address),
             kind: a.kind === "ble" ? qsTr("Bluetooth LE") : qsTr("Bluetooth"),
-            base: "elm327://" + a.kind + ":" + a.address
+            base: "elm327://" + a.kind + ":" + a.address,
+            other: a.other === true
         })))
+
+    // The rows the connect list shows: a paired headset, watch or health
+    // device is folded under "Other paired devices" there and isn't counted
+    readonly property int devicesShown: devices.filter(d => d.other !== true).length
 
     // A CAN interface's row: what it is, its state past error-active, and
     // why a connect would be refused before one is tried: listen-only to
@@ -277,9 +283,8 @@ Pane {
                                       && pickedVehicle.id === obdbVehicle
 
     // The connected car's model year once its VIN names the picked
-    // vehicle (its VIN key), kept while the page lives, as the plugins'
-    // matches stay once the session ends; the VIN itself stays in the
-    // bridge, and the year is never stored
+    // vehicle (its VIN key), kept while the page lives; the VIN itself
+    // stays in the bridge, and the year is never stored
     property int obdbCarYear: 0
     property string obdbCarVehicle: ""
 
@@ -399,9 +404,9 @@ Pane {
 
     // ---- The app's plugins (ADR-0052) ----
     // The bridge's list (PluginStore): each loaded plugin with its
-    // variants, or a copy that no longer loads; the variants its VIN
-    // proposes for the car (the session's VIN or the one the lookup holds,
-    // never stored); and what the last import or removal said
+    // variants, or a copy that no longer loads; the variants a VIN
+    // matches (the one the lookup holds, else the session's, which goes
+    // with the session); and what the last import or removal said
     property var pluginList: []
     property var pluginMatches: []
     property string pluginProblem: ""
@@ -416,17 +421,67 @@ Pane {
         pluginMatches = Bridge.pluginMatches(vinLookupField.text)
     }
 
+    // The session's matches kept on the vehicle its VIN identified, so
+    // they are marked with no session (ADR-0052's appendix of 2026-11-13);
+    // only that vehicle's: a replay of another car names none
+    function noteVinMatches() {
+        if (pickedVehicle === null || pickedVehicle.vinKey === ""
+                || Bridge.vinKey(vehicles.salt) !== pickedVehicle.vinKey)
+            return
+        const profiles = Bridge.pluginMatches("").map(m => m.profile)
+        if (JSON.stringify(profiles) !== JSON.stringify(pickedVehicle.vinMatches))
+            saveVehicles(VehicleBook.setVinMatches(vehicles, profiles))
+    }
+
+    // Every loaded plugin's variants, for the picked vehicle to pick one:
+    // those a VIN matched (the lookup's, else the session's and the ones
+    // kept on the vehicle) first, the rest after, then a pick that doesn't
+    // load, so it can be undone; the choice is the user's. A Repeater keeps
+    // its buttons for lists equal in value, so a pick keeps the focus
+    readonly property var pluginVariants: {
+        const shown = { matched: [], others: [] }
+        if (pickedVehicle === null)
+            return shown
+        const marked = pluginMatches.map(m => m.profile)
+            .concat(vinLookupField.text.trim() === "" ? pickedVehicle.vinMatches : [])
+        const loaded = []
+        for (const p of pluginList) {
+            if (!p.ok)
+                continue
+            for (let i = 0; i < p.profiles.length; ++i) {
+                const v = { profile: p.profiles[i], label: qsTr("%1: %2").arg(p.name, p.variants[i]) }
+                loaded.push(v.profile)
+                if (marked.indexOf(v.profile) >= 0)
+                    shown.matched.push(v)
+                else
+                    shown.others.push(v)
+            }
+        }
+        const pick = pickedVehicle.plugin
+        if (pick !== "" && loaded.indexOf(pick) < 0)
+            shown.others.push({ profile: pick, label: qsTr("%1: doesn't load").arg(pick) })
+        return shown
+    }
+
     function pluginText(p) {
         return p.ok ? qsTr("%1 %2: %3").arg(p.name, p.version, p.variants.join(", "))
                     : p.words
     }
 
+    // A plugin replaced takes its VIN matches with it: the new version's
+    // match may not cover the car, and the next identification marks again
     function importPlugin(url) {
         pluginNote = ""
         const r = Bridge.importPlugin(url)
         if (!r.ok) {
             pluginProblem = r.words
             return false
+        }
+        if (r.replaced !== "") {
+            // pluginList is the list before the import until loadPlugins()
+            const old = pluginList.find(p => p.ok && p.id === r.id)
+            if (old !== undefined)
+                saveVehicles(VehicleBook.dropVinMatches(vehicles, old.profiles))
         }
         pluginProblem = ""
         pluginNote = r.replaced !== ""
@@ -842,7 +897,7 @@ Pane {
     readonly property string shownKey: twoPane && pageKey === "" ? "connection" : pageKey
     readonly property var pageList: [
         { key: "connection", title: qsTr("Connection"),
-          summary: (devices.length === 0 ? qsTr("none found") : qsTr("%1 found").arg(devices.length))
+          summary: (devicesShown === 0 ? qsTr("none found") : qsTr("%1 found").arg(devicesShown))
                    + " · " + profileLabel() },
         { key: "vehicle", title: qsTr("Vehicle"),
           summary: (pickedVehicle !== null ? pickedVehicle.label : qsTr("None"))
@@ -1233,11 +1288,11 @@ Pane {
         "mock": ["profile", "did", "diagnose"],
         "replay": ["profile", "did", "speed", "loop"],
         "j2534": ["baud", "flags", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                  "pack", "scan", "session", "profile", "did"],
+                  "pack", "scan", "session", "keepalive_ms", "profile", "did"],
         "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                   "pack", "scan", "session", "profile", "did"],
+                   "pack", "scan", "session", "keepalive_ms", "profile", "did"],
         "socketcan": ["profile", "did", "baud", "filter", "txid", "poll", "probe", "identify",
-                      "diagnose", "pack", "scan", "session"]
+                      "diagnose", "pack", "scan", "session", "keepalive_ms"]
     })
     // What a SocketCAN session that only listens takes: Default is raw
     // there, and core refuses it the keys that ask an ECU
@@ -1351,7 +1406,7 @@ Pane {
     // interfaces, the serial ports, the CAN interfaces and the phone's
     // Bluetooth adapters, as Connection's device list has them
     readonly property var connectAdapters: devices.map(d => ({
-            uri: d.base, title: d.title, kind: d.kind
+            uri: d.base, title: d.title, kind: d.kind, other: d.other === true
         }))
     // Dash's Connect: the field shows it as typed text, before the connect
     function connectFromList(uri) {
@@ -1436,15 +1491,15 @@ Pane {
         function onConnectedChanged() {
             if (!Bridge.connected)
                 page.plottedApplied = false
-            // A new session reads its VIN again; at its end the matches
-            // the VIN proposed stay to be picked (the VIN goes with it)
-            if (Bridge.connected)
-                page.refreshMatches()
+            // The session's VIN, read again at each, goes at its end; the
+            // matches it made stay on the vehicle it identified
+            page.refreshMatches()
         }
 
         function onVehicleIdentified() {
             page.recognizeVehicle()
             page.refreshMatches()
+            page.noteVinMatches()
             page.noteCarYear()
         }
 

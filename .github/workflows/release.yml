@@ -226,21 +226,49 @@ jobs:
           ref: ${{ env.TAG }}
 
       # The same kit, NDK and JDK as ci.yml's android-build; see the notes
-      # there. cache: true restores the kit main's CI saved: the inputs are
-      # android-build's, so the key is the same, and a tag's run may read
-      # the default branch's caches. A miss installs it from the mirrors,
-      # bounded at 10 minutes (a restore takes one or two)
+      # there. The kit main's CI saved, read only (a tag's run reads the
+      # default branch's caches, and one saved here would be a second
+      # copy): the key and path are android-build's. A miss installs it
+      # from the mirrors, bounded at 10 minutes (a restore takes one or two)
+      - name: Restore Qt 6.12.0 from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: qt-android-6.12.0-android_arm64_v8a-qtconnectivity-autodesktop-linux-aqt-3.3
+
       - name: Install Qt 6.12.0 (android_arm64_v8a + linux host)
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         timeout-minutes: 10
         with:
-          cache: true
+          cache: false
+          set-env: false
+          no-qt-binaries: ${{ steps.qt-cache.outputs.cache-hit == 'true' }}
+          dir: ${{ runner.temp }}
           version: '6.12.0'
           host: 'all_os'
           target: 'android'
           arch: 'android_arm64_v8a'
           modules: 'qtconnectivity'
           extra: '--autodesktop'
+
+      # ci.yml android-build's step of the same name
+      - name: Point the build at the kit
+        run: |
+          kit="$RUNNER_TEMP/Qt/6.12.0/android_arm64_v8a"
+          test -x "$kit/bin/qt-cmake" || { echo "::error::no qt-cmake under $kit"; exit 1; }
+          prefix=$(sed -n 's/^HostPrefix=//p' "$kit/bin/target_qt.conf" | tr -d '\r' | head -n 1)
+          host=$(realpath -ms "$kit/bin/$prefix")
+          test -n "$prefix" && test -d "$host/bin" || { echo "::error::no host Qt at '$host'"; exit 1; }
+          {
+            echo "QT_ROOT_DIR=$kit"
+            echo "QT_HOST_PATH=$host"
+            echo "QT_PLUGIN_PATH=$kit/plugins"
+            echo "QML2_IMPORT_PATH=$kit/qml"
+            echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$kit/lib"
+            echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH:+$PKG_CONFIG_PATH:}$kit/lib/pkgconfig"
+          } >> "$GITHUB_ENV"
+          echo "$kit/bin" >> "$GITHUB_PATH"
 
       - name: Select NDK r27 and JDK 21
         run: |
@@ -336,18 +364,44 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      # cache: true as android's above: the inputs are ci.yml's
+      # Read only, as android's above: the key and path are ci.yml
       # linux-appimage's, leg for leg, so each arch restores the kit main's
       # CI saved for it
+      - name: Restore Qt 6.12.0 from the cache
+        id: qt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/Qt
+          key: qt-${{ matrix.qt_host }}-6.12.0-${{ matrix.qt_arch }}-aqt-3.3
+
       - name: Install Qt 6.12.0 desktop (${{ matrix.qt_arch }})
         uses: jurplel/install-qt-action@b344308e4483fc892e0d27b3cd1b173ebdd95f06 # v4.5.0
         timeout-minutes: 10
         with:
-          cache: true
+          cache: false
+          set-env: false
+          no-qt-binaries: ${{ steps.qt-cache.outputs.cache-hit == 'true' }}
+          dir: ${{ runner.temp }}
           version: '6.12.0'
           host: ${{ matrix.qt_host }}
           target: 'desktop'
           arch: ${{ matrix.qt_arch }}
+
+      # ci.yml linux-appimage's step of the same name
+      - name: Point the build at the kit
+        env:
+          QT_ARCH: ${{ matrix.qt_arch }}
+        run: |
+          kit="$RUNNER_TEMP/Qt/6.12.0/${QT_ARCH#linux_}"
+          test -x "$kit/bin/qmake" || { echo "::error::no Qt at $kit"; exit 1; }
+          {
+            echo "QT_ROOT_DIR=$kit"
+            echo "QT_PLUGIN_PATH=$kit/plugins"
+            echo "QML2_IMPORT_PATH=$kit/qml"
+            echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$kit/lib"
+            echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH:+$PKG_CONFIG_PATH:}$kit/lib/pkgconfig"
+          } >> "$GITHUB_ENV"
+          echo "$kit/bin" >> "$GITHUB_PATH"
 
       # The xcb platform plugin's libraries, which linuxdeploy bundles;
       # the probes' header; the packages' tools

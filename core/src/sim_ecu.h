@@ -197,8 +197,9 @@ inline void put16(uint8_t* out, uint16_t v)
 }
 
 /* The PIDs the drive cycle answers, data PIDs only */
-constexpr uint8_t kDrivePids[] = {0x04, 0x05, 0x0C, 0x0D, 0x0F, 0x10,
-                                  0x11, 0x1F, 0x24, 0x42, 0x46, 0x5C};
+constexpr uint8_t kDrivePids[] = {0x04, 0x05, 0x0B, 0x0C, 0x0D,
+                                  0x0F, 0x10, 0x11, 0x1F, 0x24,
+                                  0x33, 0x42, 0x44, 0x46, 0x5C};
 
 /* The diagnostics' PIDs, in both modes: readiness, and what a clear
  * resets (their values before one: the fakes') */
@@ -332,6 +333,9 @@ inline uint32_t pid_data(const ecuio_sim_ecu& e, uint8_t pid, uint8_t* out)
     case 0x05: /* A - 40 */
         out[0] = u8(car.coolant_c + 40.0f);
         return 1;
+    case 0x0B: /* MAP, A kPa: a byte, so boost past 255 kPa absolute reads 255 */
+        out[0] = u8(car.map_kpa);
+        return 1;
     case 0x0C: /* (256A + B) / 4 */
         put16(out, ecuio_mock::clamp_u16(car.rpm * 4.0f));
         return 2;
@@ -356,9 +360,15 @@ inline uint32_t pid_data(const ecuio_sim_ecu& e, uint8_t pid, uint8_t* out)
         out[2] = 0x50;
         out[3] = 0x00;
         return 4;
-    case 0x42: /* module voltage, (256A + B) / 1000: charging while the
-                  engine runs, the battery's own when it doesn't */
-        put16(out, car.running ? 14100 : 12600);
+    case 0x33: /* baro, A kPa */
+        out[0] = u8(car.baro_kpa);
+        return 1;
+    case 0x42: /* module voltage, (256A + B) / 1000: the drive cycle's
+                  battery, charging while the engine runs */
+        put16(out, ecuio_mock::clamp_u16(car.battery_v * 1000.0f));
+        return 2;
+    case 0x44: /* commanded lambda, (256A + B) * 2 / 65536 */
+        put16(out, ecuio_mock::clamp_u16(car.commanded_lambda * 32768.0f));
         return 2;
     case 0x46: /* ambient, A - 40: the cold start's air */
         out[0] = u8(ecuio_mock::kColdStartC + 40.0f);

@@ -855,6 +855,82 @@ TestCase {
         return found
     }
 
+    // A recording of three signals in three units, so the chart has panes
+    // and seams between them
+    function panedRecording(name) {
+        const folder = Harness.writeFramesRecording(name, 1, 100000)
+        verify(folder !== "", "the folder is made")
+        const units = ["rpm", "%", "km/h"]
+        let header = "ecuio session recording, format 2 (ADR-0049)\n"
+                     + "started  2026-11-03 10:00:00.000 (local time)\n"
+                     + "utc  2026-11-03T16:00:00.000Z\ncore  0.3.6\n"
+                     + "uri  socketcan://vcan0?profile=raw\nprofile  raw\n"
+        let rows = "host_us,signal,value,unit\n"
+        for (let s = 0; s < 3; ++s)
+            header += "signal  Signal " + s + ",number," + units[s] + ",0,0\n"
+        for (let t = 1; t <= 3; ++t) {
+            for (let s = 0; s < 3; ++s)
+                rows += (t * 100000) + ",Signal " + s + "," + (t * (s + 1)) + "," + units[s] + "\n"
+        }
+        header += "\n10:00:01.000  +1.000  end  havne-cli: seconds: 1 frames, 9 values, "
+                  + "0 records dropped, 0 notes dropped\n"
+        Harness.writeScratchFile(name + "/events.log", header)
+        Harness.writeScratchFile(name + "/signals.csv", rows)
+        return folder
+    }
+
+    // The viewer's resize grips reach a touch's size on the glass: the
+    // pane seam and the chart splitter draw small and take the press
+    // from a margin around them
+    function test_theViewersGripsReachATouchsSize() {
+        const v = uprightViewer({ title: "Paned", uri: "socketcan://vcan0?profile=raw", source: "",
+                                  folder: panedRecording("pv-grips"), profile: "raw" })
+        const main = v.main
+        const page = v.page
+        verify(page.phoneShape, "the phone's form")
+        const grips = [find(page, "chartSplitter"), find(page, "paneSeam_0")]
+        for (const grip of grips) {
+            tryVerify(() => grip && grip.visible, 5000, "a grip shows")
+        }
+        for (const grip of grips) {
+            const handler = grip.data.filter(c => c.yAxis !== undefined && c.margin !== undefined)[0]
+            verify(handler, grip.objectName + " has its drag handler")
+            const top = grip.mapToItem(main.contentItem, 0, 0).y
+            const foot = grip.mapToItem(main.contentItem, 0, grip.height).y
+            const scale = (foot - top) / grip.height
+            const reach = foot - top + 2 * handler.margin * scale
+            verify(reach >= 48 - 0.5, grip.objectName + " reaches " + reach + " on the glass")
+        }
+    }
+
+    // A press 16 px under the splitter is still its grip's: the Jump row's
+    // buttons below it keep out of the grip's reach (the drag moves the
+    // chart's stored height)
+    function test_theSplittersGripWorksUnderItBesideTheJumpRow() {
+        const v = uprightViewer({ title: "Pulls", uri: "replay://x?profile=obd2", source: "",
+                                  folder: Harness.recordingFixtures + "/pull-twice", profile: "obd2" })
+        const main = v.main
+        const page = v.page
+        const splitter = find(page, "chartSplitter")
+        tryVerify(() => splitter.visible, 5000, "the splitter shows")
+        verify(find(page, "jumpRow").visible, "the Jump row is under the chart")
+        tryVerify(() => find(page, "jumpNext_pull").enabled, 10000, "the pulls are found")
+        compare(page.chartHeight, -1, "the chart's height is its own")
+        const root = main.contentItem
+        const foot = splitter.mapToItem(root, 0, splitter.height).y
+        // Over a Jump button, where a press under the grip would land
+        const button = find(page, "jumpNext_pull")
+        verify(button.visible, "a Jump button")
+        const x = button.mapToItem(root, button.width / 2, 0).x
+        const seq = touchEvent(root)
+        seq.press(0, root, x, foot + 16).commit()
+        verify(!button.pressed, "no Jump button takes the press meant for the grip")
+        for (let d = 4; d <= 48; d += 4)
+            seq.move(0, root, x, foot + 16 - d).commit()
+        seq.release(0, root, x, foot + 16 - 48).commit()
+        verify(page.chartHeight > 0, "the drag from the grip's lower reach set the height: " + page.chartHeight)
+    }
+
     // A phone upright pins the title row, the chart and its splitter, and
     // under them one list scrolls in each view: Values' rows, the Frames
     // table and About's findings, each with its view's controls at its head
@@ -1740,7 +1816,7 @@ TestCase {
         tall(["dashUndo", "dashRedo", "dashAdd", "dashMore", "dashDone", "dashAddCell_0"])
         find(dash, "dashMore").clicked()
         // Move page left and right show only with pages to move among
-        tall(["moreRename", "moreAddPage", "moreRemovePage", "moreReset"])
+        tall(["moreRename", "moreAddPage", "moreRemovePage", "moreExport", "moreLoad", "moreReset"])
         dash.addPage()
         tall(["moreLeft", "moreRight"])
         dash.removePage()
@@ -2430,6 +2506,18 @@ TestCase {
         compare(find(main.contentItem, "disconnectButton").visible, true, "Connect... still on the row")
     }
 
+    // The display line says the form and the orientation and no size, scale
+    // or inset: Copy and a saved report would carry it to others
+    function test_theDisplayLineHoldsNoPixelSize() {
+        const main = phoneMain()
+        const line = main.displayLine
+        verify(line.startsWith("Display: phone form, "), line)
+        verify(!/[0-9]/.test(line), "no digit in: " + line)
+        compare(line.indexOf("screen"), -1)
+        compare(line.indexOf("window"), -1)
+        compare(line.indexOf("safe area"), -1)
+    }
+
     // A Main on a phone's form at 384 x 832, laid out, with Android's text
     function phoneMain() {
         const main = createTemporaryObject(mainComponent, testCase)
@@ -2739,6 +2827,50 @@ TestCase {
         const hint = find(list, "connectPickHint")
         verify(hint.visible, "the hint shows with nothing chosen")
         compare(hint.text, "Pick a row, then connect", "it asks for a row, not an adapter")
+    }
+
+    // Audio, wearable and health gear the phone has paired sits under a
+    // fold, never among the adapters; a pick from it keeps it open
+    function test_otherPairedDevicesSitUnderAFold() {
+        const main = phoneMain()
+        const list = connectListOn(main, [], [
+            { name: "OBD adapter", address: "00:11:22:33:44:55", kind: "bt" },
+            { name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true },
+            { name: "Heart strap", address: "FF:FF:FF:FF:FF:FF", kind: "ble", other: true }])
+        const fold = find(list, "connectOtherDevices")
+        tryVerify(() => fold.visible, 2000, "the fold shows")
+        compare(fold.text, "Other paired devices (2)")
+        verify(findChild(list, "connectRow_0") !== null, "the adapter")
+        compare(find(find(list, "connectRow_0"), "connectRowAddress").text, "OBD adapter")
+        // The demo is the adapters' last row; the others are not drawn closed
+        compare(find(find(list, "connectRow_1"), "connectRowKind").text, "Demo data")
+        compare(findChild(list, "connectRow_2"), null, "the headset is hidden")
+        fold.clicked()
+        tryVerify(() => findChild(list, "connectRow_3") !== null, 2000, "opened")
+        compare(find(find(list, "connectRow_2"), "connectRowAddress").text, "Headset")
+        compare(fold.text, "Hide other paired devices (2)")
+        find(list, "connectRow_2").clicked()
+        tryCompare(list, "chosen", "elm327://bt:AA:BB:CC:DD:EE:FF", 2000, "still pickable")
+        verify(!fold.enabled, "no Hide while the pick is inside")
+        compare(fold.text, "Other paired devices (2)", "and it does not promise one")
+        fold.clicked()
+        tryCompare(list, "otherShown", true, 2000, "open while one of them is chosen")
+        verify(findChild(list, "connectRow_2") !== null, "the picked row stays")
+    }
+
+    // A paired headset is no adapter: with only gear of that kind paired,
+    // the list still says where to pair one
+    function test_onlyOtherPairedDevicesStillAskForAnAdapter() {
+        const main = phoneMain()
+        const list = connectListOn(main, [])
+        list.bluetoothAvailable = true
+        list.bluetoothPermission = "granted"
+        find(main.contentItem, "settingsPage").bluetoothAdapters =
+            [{ name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true }]
+        verify(waitForPolish(main), "laid out")
+        tryVerify(() => find(list, "connectBluetoothNone").visible, 2000, "where to pair, with a headset only")
+        list.bluetoothAvailable = false
+        list.bluetoothPermission = "unavailable"
     }
 
     function test_aRecentAddressOfAListedDeviceTakesItsName() {

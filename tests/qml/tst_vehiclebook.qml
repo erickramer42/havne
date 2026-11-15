@@ -24,9 +24,12 @@ TestCase {
                 { id: "v1", label: "Daily driver", vinKey: "key-a",
                   uri: "elm327://COM6?profile=obd2", plotted: ["Timing Advance"],
                   unplotted: ["Intake Air Temp"], signals: [fileA()], own: "",
-                  plugin: "plugin.example-sim.base", baseline: baselineA },
+                  plugin: "plugin.example-sim.base",
+                  vinMatches: ["plugin.example-sim.base", "plugin.example-sim.my2019"],
+                  baseline: baselineA },
                 { id: "v2", label: "Weekend car", vinKey: "", uri: "", plotted: [],
-                  unplotted: [], signals: [], own: "", plugin: "", baseline: "" }
+                  unplotted: [], signals: [], own: "", plugin: "", vinMatches: [],
+                  baseline: "" }
             ]
         }
     }
@@ -63,6 +66,44 @@ TestCase {
         compare(VehicleBook.picked(VehicleBook.setPlugin(d, "")).plugin, "")
         compare(VehicleBook.picked(VehicleBook.duplicate(book(), "Copy")).plugin,
                 "plugin.example-sim.base")
+    }
+
+    // The variants a VIN matched, kept on its vehicle (ADR-0052's appendix
+    // of 2026-11-13): none in an entry stored before them; anything but a
+    // list of text drops the document; set on the picked vehicle alone;
+    // gone with Forget VIN (they came from it) and from Duplicate (which
+    // leaves the VIN key); a removed plugin's profiles leave every vehicle,
+    // and a replaced one's matches, its pick kept
+    function test_aVehiclesVinMatches() {
+        const old = book()
+        delete old.list[0].vinMatches
+        compare(VehicleBook.parse(JSON.stringify(old)).list[0].vinMatches, [])
+        for (const wrong of [7, "plugin.example-sim.base", [7], null]) {
+            const bad = book()
+            bad.list[1].vinMatches = wrong
+            compare(VehicleBook.parse(JSON.stringify(bad)), VehicleBook.empty(), JSON.stringify(wrong))
+        }
+
+        const d = VehicleBook.setVinMatches(VehicleBook.pick(book(), "v2"), ["plugin.other.a"])
+        compare(VehicleBook.picked(d).vinMatches, ["plugin.other.a"])
+        compare(VehicleBook.find(d, "v1").vinMatches,
+                ["plugin.example-sim.base", "plugin.example-sim.my2019"], "the others unchanged")
+        compare(VehicleBook.picked(VehicleBook.setVinMatches(d, [])).vinMatches, [])
+
+        compare(VehicleBook.picked(VehicleBook.forgetVin(book())).vinMatches, [])
+        compare(VehicleBook.picked(VehicleBook.duplicate(book(), "Copy")).vinMatches, [])
+
+        const dropped = VehicleBook.dropPlugin(d, ["plugin.example-sim.my2019", "plugin.other.a"])
+        compare(VehicleBook.find(dropped, "v1").vinMatches, ["plugin.example-sim.base"])
+        compare(VehicleBook.find(dropped, "v2").vinMatches, [])
+
+        // A replaced plugin's matches leave every vehicle, its pick stays
+        const replaced = VehicleBook.dropVinMatches(d, ["plugin.example-sim.base", "plugin.other.a"])
+        compare(VehicleBook.find(replaced, "v1").vinMatches, ["plugin.example-sim.my2019"])
+        compare(VehicleBook.find(replaced, "v2").vinMatches, [])
+        compare(VehicleBook.find(replaced, "v1").plugin, "plugin.example-sim.base", "the pick kept")
+        compare(VehicleBook.find(d, "v1").vinMatches,
+                ["plugin.example-sim.base", "plugin.example-sim.my2019"], "its argument unchanged")
     }
 
     // A vehicle's baseline recording (ADR-0049's appendix of 2026-11-06):
@@ -186,7 +227,8 @@ TestCase {
         compare(added.picked, "v3")
         compare(VehicleBook.picked(added),
                 { id: "v3", label: "Track day", vinKey: "", uri: "", plotted: [],
-                  unplotted: [], signals: [], own: "", plugin: "", baseline: "" })
+                  unplotted: [], signals: [], own: "", plugin: "", vinMatches: [],
+                  baseline: "" })
 
         const copied = VehicleBook.duplicate(d, "Daily driver (copy)")
         const c = VehicleBook.picked(copied)
@@ -365,7 +407,7 @@ TestCase {
         compare(VehicleBook.picked(r.doc),
                 { id: "v3", label: "Vehicle 1", vinKey: "key-c",
                   uri: "elm327://COM7?profile=raw", plotted: [], unplotted: [],
-                  signals: [], own: "", plugin: "", baseline: "" })
+                  signals: [], own: "", plugin: "", vinMatches: [], baseline: "" })
         compare(VehicleBook.logLine(r), "Vehicle: not Daily driver (its VIN differs); saved as Vehicle 1")
 
         r = VehicleBook.recognize(VehicleBook.pick(book(), ""), "key-c", "elm327://COM7")
