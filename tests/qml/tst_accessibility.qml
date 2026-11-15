@@ -21,6 +21,7 @@ TestCase {
     Component { id: readoutC;  SegmentReadout { width: 260; height: 90 } }
     Component { id: sparkC;    SparkGauge { width: 300; height: 110 } }
     Component { id: shiftC;    ShiftLightBar { width: 400; height: 40 } }
+    Component { id: settingsC; SettingsPage { width: 1000; height: 1400 } }
 
     // Every kind DashboardPage draws but the blank, which has no parts
     readonly property var kinds: [
@@ -117,5 +118,14 @@ TestCase {
         }
         if (data.tag !== "shift-light")
             verify(texts > 0, "the gauge's texts were walked")
+    }
+
+    // Settings > Signals' import fields are named for a screen reader: each
+    // one's caption is a Label of its own
+    function test_theSignalsImportFieldsHaveNames() {
+        const page = createTemporaryObject(settingsC, testCase.parent)
+        verify(page, "Settings loads")
+        compare(findChild(page, "importVariantField").Accessible.name, "Variant name")
+        compare(findChild(page, "obdbYearField").Accessible.name, "OBDb model year")
     }
 }
