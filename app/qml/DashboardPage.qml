@@ -1329,72 +1329,9 @@ Page {
 
     // The drive view's one line of chrome: the link state and the address,
     // and a log's or recording's progress (section 2). It takes no taps
-    Item {
+    DashDriveStatus {
         id: driveStatus
-        objectName: "driveStatusLine"
-        visible: root.driving
-        x: 0
-        y: root.driveInsetTop
-        width: root.width
-        height: 28
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: root.margin
-            anchors.rightMargin: root.margin
-            spacing: 6
-            Rectangle {
-                objectName: "driveStatusDot"
-                implicitWidth: 8; implicitHeight: 8   // layout-managed
-                radius: 4
-                color: Theme.linkColor(Bridge.linkState)
-            }
-            Label {
-                objectName: "driveStatusWord"
-                font.pixelSize: Theme.fontCaption
-                color: Theme.text
-                text: Theme.linkShortLabel(Bridge.linkState)
-            }
-            Label {
-                objectName: "driveStatusAddress"
-                Layout.fillWidth: true
-                Layout.minimumWidth: 0
-                elide: Text.ElideRight
-                font.pixelSize: Theme.fontCaption
-                color: Theme.textDim
-                text: qsTr("· %1").arg(Bridge.uriLabel)
-            }
-            Label {
-                objectName: "driveStatusRun"
-                visible: Bridge.logActive || Bridge.recordingActive || root.driveLogEnded
-                font.pixelSize: Theme.fontCaption
-                color: Theme.text
-                text: Bridge.logActive ? qsTr("Log")
-                    : Bridge.armedRecording ? qsTr("Recording (window %1)").arg(Bridge.armedWindows)
-                    : Bridge.armedActive ? qsTr("Armed")
-                    : root.driveLogEnded ? qsTr("Log ended") : qsTr("Recording")
-            }
-            Label {
-                objectName: "driveStatusTime"
-                visible: Bridge.logActive
-                font.family: Theme.valueFamily
-                font.features: { "tnum": 1 }
-                font.pixelSize: Theme.fontCaption
-                color: Theme.text
-                text: root.driveLogTime
-            }
-            Label {
-                objectName: "driveStatusDetail"
-                readonly property string detail:
-                    Bridge.logActive ? root.driveLogSize
-                  : !Bridge.recordingActive || Bridge.markCount === 0 ? ""
-                  : Bridge.markCount === 1 ? qsTr("1 mark")
-                  : qsTr("%1 marks").arg(Bridge.markCount)
-                visible: detail !== ""
-                font.pixelSize: Theme.fontCaption
-                color: Theme.textDim
-                text: qsTr("· %1").arg(detail)
-            }
-        }
+        host: root
     }
 
     // The alert band in the drive view, where Main's is hidden: under
