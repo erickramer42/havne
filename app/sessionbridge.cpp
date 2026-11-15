@@ -1081,6 +1081,29 @@ std::vector<ecuio_health_value_t> SignalListModel::heldValues() const
     return held;
 }
 
+qint64 SignalListModel::readAtMs(uint32_t id) const
+{
+    if (id > UINT16_MAX) {
+        return -1;
+    }
+    const int row = m_rowOfId.value(static_cast<uint16_t>(id), -1);
+    if (row < 0) {
+        return -1;
+    }
+    return m_entries[static_cast<size_t>(row)].arrivedMs;
+}
+
+qint64 SignalListModel::wallOffsetMs() const
+{
+    return QDateTime::currentMSecsSinceEpoch() - m_clock.elapsed();
+}
+
+qint64 SignalListModel::lastReadMs(uint32_t id) const
+{
+    const qint64 at = readAtMs(id);
+    return at < 0 ? -1 : at + wallOffsetMs();
+}
+
 QString SignalListModel::labelOf(const Entry& e)
 {
     // An enum's value is its raw number: a whole number from 0 up
@@ -4892,6 +4915,9 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
         m_conditionStates[0].generation == m_conditionsGeneration) {
         m_conditionModel->applyStates(m_conditionStates.data(), n);
     }
+    m_conditionModel->judgeStaleSince(
+        [this](uint32_t defId) { return m_signalModel->readAtMs(defId); },
+        m_signalModel->wallOffsetMs());
     judgeAlertLevels();
     for (const QString& line : lines) {
         emit logMessage(line);

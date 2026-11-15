@@ -36,7 +36,8 @@ QHash<int, QByteArray> ConditionModel::roleNames() const
             {UnitRole, "unit"},
             {DecimalsRole, "decimals"},
             {SinceMsRole, "sinceMs"},
-            {DefIdsRole, "defIds"}};
+            {DefIdsRole, "defIds"},
+            {StaleSinceMsRole, "staleSinceMs"}};
 }
 
 QString ConditionModel::whyText(uint32_t why)
@@ -147,6 +148,10 @@ QVariant ConditionModel::data(const QModelIndex& index, int role) const
         }
         return ids;
     }
+    case StaleSinceMsRole:
+        return r.live && (st.flags & ECUIO_CONDITION_STALE) != 0
+                   ? r.staleSinceMs
+                   : qint64{-1};
     default:
         return {};
     }
@@ -243,6 +248,7 @@ void ConditionModel::applyStates(const ecuio_condition_state_t* states,
         }
         r.state = s;
         r.live = true;
+        // StaleSinceMsRole is judgeStaleSince's to notify, once it is set
         const QModelIndex at = index(static_cast<int>(i));
         emit dataChanged(at, at,
                          {LiveRole, StateRole, StaleRole, UnavailableRole,
@@ -264,6 +270,61 @@ void ConditionModel::applyTerm(int row, uint32_t term)
     emit dataChanged(at, at, {ValueRole, UnitRole, DecimalsRole});
 }
 
+void ConditionModel::judgeStaleSince(
+    const std::function<qint64(uint32_t)>& readAtMs, qint64 wallOffsetMs)
+{
+    for (size_t i = 0; i < m_rows.size(); ++i) {
+        Row& r = m_rows[i];
+        const bool stale =
+            r.live && (r.state.flags & ECUIO_CONDITION_STALE) != 0;
+        if (!stale && !r.staleJudged) {
+            continue;
+        }
+        // Judged already, and the input it names has read nothing since
+        if (stale && r.staleJudged &&
+            (r.staleDef == UINT32_MAX ||
+             readAtMs(r.staleDef) == r.staleReadAt)) {
+            continue;
+        }
+        const qint64 before = r.staleSinceMs;
+        const bool first = !r.staleJudged;
+        r.staleJudged = stale;
+        r.staleDef = UINT32_MAX;
+        r.staleReadAt = -1;
+        r.staleSinceMs = -1;
+        if (stale && first && r.valueTerm < r.terms.size() &&
+            r.terms[r.valueTerm].defId != UINT32_MAX) {
+            // A stretch starts at the term core named as aged out (applyTerm):
+            // inputs at other rates can have older reads and still be fresh
+            r.staleDef = r.terms[r.valueTerm].defId;
+            r.staleReadAt = readAtMs(r.staleDef);
+        } else if (stale) {
+            // That input read again: the bound term read longest ago, one
+            // with no value the oldest
+            for (const Term& t : r.terms) {
+                if (t.defId == UINT32_MAX) {
+                    continue;
+                }
+                const qint64 at = readAtMs(t.defId);
+                if (r.staleDef == UINT32_MAX || at < r.staleReadAt) {
+                    r.staleDef = t.defId;
+                    r.staleReadAt = at;
+                }
+                if (at < 0) {
+                    break;
+                }
+            }
+        }
+        if (r.staleDef != UINT32_MAX && r.staleReadAt >= 0) {
+            r.staleSinceMs = r.staleReadAt + wallOffsetMs;
+        }
+        if (r.staleSinceMs != before) {
+            const QModelIndex at = index(static_cast<int>(i));
+            emit dataChanged(at, at, {StaleSinceMsRole});
+        }
+    }
+}
+
 void ConditionModel::clearStates()
 {
     for (size_t i = 0; i < m_rows.size(); ++i) {
@@ -273,10 +334,15 @@ void ConditionModel::clearStates()
         }
         r.live = false;
         r.state = ecuio_condition_state_t{};
+        r.staleJudged = false;
+        r.staleDef = UINT32_MAX;
+        r.staleReadAt = -1;
+        r.staleSinceMs = -1;
         const QModelIndex at = index(static_cast<int>(i));
         emit dataChanged(at, at,
                          {LiveRole, StateRole, StaleRole, UnavailableRole,
-                          WhyRole, FiredRole, ValueRole, SinceMsRole});
+                          WhyRole, FiredRole, ValueRole, SinceMsRole,
+                          StaleSinceMsRole});
     }
 }
 

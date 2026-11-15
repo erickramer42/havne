@@ -15,6 +15,7 @@
 #include <QAbstractListModel>
 #include <QString>
 
+#include <functional>
 #include <map>
 #include <vector>
 
@@ -47,7 +48,10 @@ public:
         UnitRole,        // its display unit
         DecimalsRole,
         SinceMsRole, // session time of its last change, ms; -1 before
-        DefIdsRole   // for each term, the def id it binds, -1 for none
+        DefIdsRole,  // for each term, the def id it binds, -1 for none
+        // While stale: when the input it went stale on last took a value,
+        // in the wall clock's ms since the epoch; -1 otherwise or with none
+        StaleSinceMsRole
     };
     Q_ENUM(Role)
 
@@ -68,6 +72,13 @@ public:
     void applyStates(const ecuio_condition_state_t* states, uint32_t count);
     // The term an event of a row's was settled by: its value's unit
     void applyTerm(int row, uint32_t term);
+    // A stale row's staleSinceMs: readAtMs(def) plus wallOffsetMs, readAtMs
+    // being a steady clock's ms, -1 for no value. As it turns stale, the def
+    // of its value's term (the stale event's, through applyTerm); whenever
+    // the def named has read since (core sends no event while a row stays
+    // stale), its bound term read longest ago. Fresh again reads -1
+    void judgeStaleSince(const std::function<qint64(uint32_t)>& readAtMs,
+                         qint64 wallOffsetMs);
     // Unjudged again: the session ended
     void clearStates();
     // ECUIO_UNITS_*; the value roles of every row are notified
@@ -110,6 +121,12 @@ private:
         uint32_t valueTerm = 0; // the term the value is read in
         bool live = false;
         ecuio_condition_state_t state{};
+        // judgeStaleSince's: whether it judged this stale stretch, the def
+        // it named (UINT32_MAX for none) and that def's read stamp
+        bool staleJudged = false;
+        uint32_t staleDef = UINT32_MAX;
+        qint64 staleReadAt = -1;
+        qint64 staleSinceMs = -1;
     };
     // A value as shown, in the display unit
     ecuio_display_value_t shown(const Row& r, double value,
