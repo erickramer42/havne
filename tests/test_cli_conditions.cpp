@@ -512,6 +512,73 @@ TEST(CliConditionTest, AFramesEventsAreWrittenOrCounted)
               0u);
 }
 
+/* A link change's events have no frame: written whatever the frame
+ * before them, never past --count, and a link term's line names the
+ * link's state */
+TEST(CliConditionTest, ALinkChangesEventsAreWrittenWithNoFrameOfTheirOwn)
+{
+    ecuio_condition_event_t events[2] = {};
+    events[0].timestamp_us = 2000000;
+    events[0].condition = 0;
+    events[0].state = ECUIO_CONDITION_ON;
+    events[0].flags = ECUIO_CONDITION_FIRED | ECUIO_CONDITION_LINK;
+    events[0].term = 1;
+    events[0].code = ECUIO_ERR_VEHICLE_TIMEOUT;
+    events[1] = events[0];
+    events[1].condition = 1;
+    events[1].term = 0;
+    events[1].value = 3500;
+    events[1].code = 0;
+    const std::vector<std::string> keys = {"quiet", "revs"};
+    const std::vector<uint8_t> link_terms = {0x2, 0x0}; /* quiet's term 1 */
+    std::vector<std::string> lines;
+    const auto push = [&lines](const char* line, size_t n) {
+        lines.emplace_back(line, n);
+        return true;
+    };
+    EXPECT_EQ(cli::write_condition_events(events, 2, keys, false, false, push,
+                                          &link_terms),
+              0u);
+    ASSERT_EQ(lines.size(), 2u);
+    EXPECT_EQ(lines[0],
+              "{\"type\":\"condition\",\"t_us\":2000000,\"key\":\"quiet\","
+              "\"state\":\"on\",\"fired\":true,\"stale\":false,\"value\":0,"
+              "\"term\":1,\"link\":\"timeout\"}\n");
+    EXPECT_EQ(lines[1].find("\"link\""), std::string::npos)
+        << "a signal term's event names no link";
+    lines.clear();
+    EXPECT_EQ(cli::write_condition_events(events, 2, keys, false, true, push,
+                                          &link_terms),
+              0u);
+    EXPECT_TRUE(lines.empty()) << "past --count";
+    /* Without the flag, an event of an unwritten frame is lost */
+    events[1].flags = ECUIO_CONDITION_FIRED;
+    EXPECT_EQ(cli::write_condition_events(events, 2, keys, false, false, push,
+                                          &link_terms),
+              1u);
+    EXPECT_EQ(lines.size(), 1u);
+}
+
+TEST(CliConditionTest, TheLinksStateIsWordedAsALinkTermNamesIt)
+{
+    EXPECT_STREQ(cli::link_state_word(ECUIO_OK), "ok");
+    EXPECT_STREQ(cli::link_state_word(ECUIO_ERR_VEHICLE_TIMEOUT), "timeout");
+    EXPECT_STREQ(cli::link_state_word(ECUIO_ERR_REQUEST_FAILED),
+                 "request_failed");
+    EXPECT_STREQ(cli::link_state_word(ECUIO_ERR_TRANSPORT_HARD_FAILURE),
+                 "hard_failure");
+    EXPECT_STREQ(cli::link_state_word(ECUIO_ERR_RECORDING_CHANGED), "not_ok");
+    ecuio_condition_event_t e{};
+    e.code = ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+    char one[cli::kConditionLineBytes];
+    cli::Line line(one, sizeof one);
+    cli::condition_event_line(line, e, "k", true);
+    const std::string text(line.data(), line.size());
+    EXPECT_NE(text.find(",\"term\":0,\"link\":\"hard_failure\"}"),
+              std::string::npos)
+        << text;
+}
+
 /* The ring counts a dropped frame and a dropped values line, and leaves
  * a condition line's drop to its caller */
 TEST(CliConditionTest, TheRingLeavesAConditionLinesDropToItsCaller)

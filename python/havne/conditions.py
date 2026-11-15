@@ -53,14 +53,16 @@ be judged there, else why not ("disabled", "no_signal", "unit",
 signal term that named a signal, None for any other"""
 
 ConditionEvent = collections.namedtuple(
-    "ConditionEvent", "timestamp_us key state fired stale value term generation")
+    "ConditionEvent", "timestamp_us key state fired stale value term generation code")
 ConditionEvent.__doc__ = """One change of a condition in a session: its
 session time (a hold's end or an age bound is stamped with its own time,
 earlier than the frame that settled it), the condition's key, state ("on"
 or "off"), whether this change fired it (OFF to ON) and whether an input is
 too old to judge (the state is then the one kept), the sample of the term
-that settled it, that term's index, and the attach the event belongs to
-(Session.set_conditions counts them from 1)"""
+that settled it (0 for a link term), that term's index, the attach the
+event belongs to (Session.set_conditions counts them from 1), and for a
+link term the link's state then (a status code, as
+ecuio_session_get_error_state gives it; 0 for any other term)"""
 
 ConditionState = collections.namedtuple(
     "ConditionState", "key state stale available why since_us fired value generation")

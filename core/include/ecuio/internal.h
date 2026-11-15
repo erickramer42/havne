@@ -24,6 +24,22 @@ extern "C" {
 void ecuio_session_dispatch_callbacks(ecuio_session_t* session,
                                       const ecuio_frame_t* frame);
 
+/* A change of the session's link state, for its conditions' link terms
+ * (ecuio/conditions.h): on the worker that dispatches the session's
+ * frames, after it published the state and recorded it (link_health.h's
+ * link_set_state), at timestamp_us on the frames' clock. Takes a set
+ * attached since, judges the change and delivers its events as dispatch
+ * delivers a frame's. Allocates nothing. */
+void ecuio_session_dispatch_link(ecuio_session_t* session, int32_t state,
+                                 uint64_t timestamp_us);
+
+/* Nonzero while a set of conditions attached waits for the worker to take
+ * it (ecuio_session_set_conditions), read on that worker without a lock:
+ * a worker that judges the link then hands the set the state through
+ * ecuio_session_dispatch_link, so a set attached during a fault with no
+ * frame is judged at once. */
+int ecuio_session_conditions_waiting(const ecuio_session_t* session);
+
 /*
  * Transport abstraction (internal): sessions own a transport instance
  * polymorphically. ops is a pointer to static, immutable vtable storage

@@ -96,6 +96,7 @@ struct link_body {
     uint64_t host_us;
     int32_t state;
     uint32_t episodes;
+    uint64_t t_us; /* its session time; 0 for none known */
 };
 
 struct timing_body {
@@ -833,8 +834,8 @@ struct ecuio_recorder {
     uint64_t carry_lost = 0;
     uint64_t carry_lost_us = 0;
     std::atomic<uint64_t> conditions_lost{0};
-    /* The worker's: the host_us of the last frame put into the ring, no
-     * event of a later frame placed before it */
+    /* The worker's: the host_us of the last frame or link line put into
+     * the ring, no event put after it placed before it */
     uint64_t put_host_us = 0;
 
     /* The signal file decoding the session to come, set before attach
@@ -938,9 +939,10 @@ struct ecuio_recorder {
     std::deque<window> windows_q;
     /* The scan reads every record ahead of the tail for its events: scan
      * the ring position read to, newest_frame_us the newest session time
-     * of a frame it read. A record's place is that newest time where it
-     * stands (tail_pos the tail's), as the evaluator judges a frame
-     * stamped earlier than the one before at that one's time. */
+     * of a frame or a link change it read. A record's place is that newest
+     * time where it stands (tail_pos the tail's), as the evaluator judges
+     * a frame stamped earlier than the one before at that one's time; a
+     * link change's events, which follow its record, take its place. */
     uint64_t scan = 0;
     uint64_t newest_frame_us = 0;
     bool scanned_frame = false;
@@ -1818,8 +1820,8 @@ struct ecuio_recorder {
         }
     }
 
-    /* A record's place in session time: a frame's own, or the newest
-     * frame's before it, from pos */
+    /* A record's place in session time: a frame's own, a link change's
+     * own, or the newest before it, from pos */
     static uint64_t place_of(const record_head& rh, const uint8_t* body,
                              size_t size, uint64_t pos)
     {
@@ -1827,6 +1829,11 @@ struct ecuio_recorder {
             frame_body fb;
             std::memcpy(&fb, body, sizeof fb);
             return (std::max)(pos, fb.timestamp_us);
+        }
+        if (rh.type == kRecordLink && size >= sizeof(link_body)) {
+            link_body lb;
+            std::memcpy(&lb, body, sizeof lb);
+            return (std::max)(pos, lb.t_us);
         }
         return pos;
     }
@@ -1928,7 +1935,7 @@ struct ecuio_recorder {
             copy_out(scan + sizeof rh, scratch.data(), body);
             const uint64_t pos =
                 place_of(rh, scratch.data(), body, newest_frame_us);
-            if (rh.type == kRecordFrame) {
+            if (rh.type == kRecordFrame || rh.type == kRecordLink) {
                 newest_frame_us = pos;
                 scanned_frame = true;
             }
@@ -2150,6 +2157,8 @@ bool put_pending_link(ecuio_recorder_t* r)
     r->copy_in(h + sizeof rh, &r->pending_link, sizeof r->pending_link);
     r->head.store(h + size, std::memory_order_release);
     r->link_pending = false;
+    /* No event put after the link line is placed before it */
+    r->put_host_us = (std::max)(r->put_host_us, r->pending_link.host_us);
     return true;
 }
 
@@ -2221,7 +2230,7 @@ uint64_t host_us_now(const ecuio_record_link& link)
 } // namespace
 
 void ecuio_record_link_state(ecuio_record_link* link, int32_t state,
-                             uint32_t episodes)
+                             uint32_t episodes, uint64_t t_us)
 {
     if (link == nullptr) {
         return;
@@ -2232,7 +2241,7 @@ void ecuio_record_link_state(ecuio_record_link* link, int32_t state,
     }
     /* A transition still carried gives way to this one: the latest state
      * and count are what a reader needs */
-    r->pending_link = link_body{host_us_now(*link), state, episodes};
+    r->pending_link = link_body{host_us_now(*link), state, episodes, t_us};
     r->link_pending = true;
     if (put_pending_conditions(r)) {
         put_pending_link(r);
@@ -2438,6 +2447,53 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
     }
     r->head.store(h + size, std::memory_order_release);
     r->put_host_us = host_us;
+}
+
+void ecuio_recorder_put_events(ecuio_recorder_t* r, uint64_t host_us,
+                               uint64_t time_us,
+                               const ecuio_condition_event_t* events,
+                               uint32_t event_count, uint32_t generation)
+{
+    const bool own = r->conditions != nullptr &&
+                     generation == r->conditions_generation &&
+                     (events != nullptr || event_count == 0);
+    const uint32_t held = own ? r->held_count : 0;
+    const uint32_t settled = own ? event_count : 0;
+    r->held_count = 0;
+    if (held + settled == 0) {
+        return;
+    }
+    const uint64_t held_us = settled > 0 && events[0].timestamp_us < time_us
+                                 ? events[0].timestamp_us
+                                 : time_us;
+    /* As a frame's: a deadline's event earlier by its distance before
+     * time_us, never before the record put before it */
+    const uint64_t floor_us = (std::min)(r->put_host_us, host_us);
+    /* What was carried, and the link line before these, go in first */
+    const bool behind = !put_pending_conditions(r) || !put_pending_link(r);
+    for (uint32_t k = 0; k < held + settled; ++k) {
+        event_body e{};
+        if (k < held) {
+            e = r->held[k];
+            e.t_us = held_us;
+        } else {
+            const ecuio_condition_event_t& c = events[k - held];
+            e.t_us = c.timestamp_us;
+            e.value = c.value;
+            e.condition = c.condition;
+            e.term = c.term;
+            e.state = static_cast<uint8_t>(c.state);
+            e.flags = static_cast<uint8_t>(c.flags);
+        }
+        const uint64_t back = time_us - (std::min)(e.t_us, time_us);
+        e.host_us = back < host_us - floor_us ? host_us - back : floor_us;
+        carry_event(r, e);
+    }
+    /* In a full ring they wait in the carry, which goes in ahead of a link
+     * state still carried */
+    if (!behind && put_pending_conditions(r)) {
+        r->put_host_us = host_us;
+    }
 }
 
 ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,

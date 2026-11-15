@@ -1159,7 +1159,8 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
     std::vector<uint8_t> watched;
     try {
         if (set != nullptr) {
-            next = ecuio_condition_eval::make(set, signals, file, 0);
+            next = ecuio_condition_eval::make(set, signals, file, 0,
+                                              session->judges_link);
             /* A recorder takes this under the locks by pointer, so the
              * hash and the copies are made here */
             auto made = std::make_shared<ecuio_condition_record>();
@@ -1186,7 +1187,13 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
                                      k < ECUIO_CONDITION_MAX_TERMS;
                      ++k) {
                     const auto& t = next->terms[c.first_term + k];
-                    reads[i].ids[k] = next->signals[t.signal].id;
+                    if (t.link != 0) {
+                        /* The link's state is always received */
+                        reads[i].sampled =
+                            static_cast<uint8_t>(reads[i].sampled | 1u << k);
+                    } else {
+                        reads[i].ids[k] = next->signals[t.signal].id;
+                    }
                     reads[i].count = static_cast<uint8_t>(k + 1);
                 }
             }
@@ -1243,6 +1250,7 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
         untaken = std::move(session->conditions_pending);
         session->conditions_pending = std::move(next);
         session->conditions_swap = true;
+        session->conditions_waiting.store(true);
     }
     {
         /* A focus keeps the conditions' signals asked (ADR-0063 section 7).
@@ -1424,6 +1432,64 @@ void mark_not_received(ecuio_session_t* session,
     }
 }
 
+/* The worker's: a set attached since the last frame or link change, taken
+ * under the lock it takes anyway; true when one was */
+bool take_conditions(ecuio_session_t* session)
+{
+    if (!session->conditions_swap) {
+        return false;
+    }
+    session->conditions_retired.swap(session->conditions);
+    session->conditions.swap(session->conditions_pending);
+    session->conditions_swap = false;
+    session->conditions_waiting.store(false);
+    return true;
+}
+
+/* The worker's, last: what a frame or a link change changed among the
+ * conditions, into the states for the attach they still belong to, then
+ * the callbacks and queues */
+void deliver_condition_events(ecuio_session_t* session,
+                              const ecuio_condition_eval& conditions,
+                              uint32_t changed)
+{
+    if (changed == 0) {
+        return;
+    }
+    const ecuio_condition_event_t* events = conditions.events.data();
+    {
+        std::lock_guard<std::mutex> lock(session->condition_states_mutex);
+        if (session->condition_states_generation == conditions.generation) {
+            for (uint32_t i = 0; i < changed; ++i) {
+                session->condition_states[events[i].condition] =
+                    conditions.state_of(events[i].condition);
+            }
+        }
+    }
+    /* Their list is taken only by a call that changed something, so a
+     * frame with no event pays nothing for it */
+    snapshot_of<ecuio_conditions_callback_t> changes;
+    bool changes_taken = false;
+    {
+        std::lock_guard<std::mutex> lock(session->callback_mutex);
+        changes_taken = changes.take(session->conditions_callbacks);
+    }
+    if (changes_taken) {
+        for (size_t i = 0; i < changes.size(); ++i) {
+            changes[i].first(events, changed, changes[i].second);
+        }
+    }
+    for (uint32_t i = 0; i < session->queue_count; ++i) {
+        ecuio_queue_link& q = *session->queues[i];
+        if (q.kind == ECUIO_QUEUE_CONDITIONS) {
+            if (ecuio_queue_t* queue = ecuio_queue_pin(q)) {
+                ecuio_queue_put_conditions(queue, events, changed);
+                ecuio_queue_unpin(q);
+            }
+        }
+    }
+}
+
 } // namespace
 
 ecuio_status_t ecuio_session_get_condition_states(ecuio_session_t* session,
@@ -1498,16 +1564,17 @@ void ecuio_session_dispatch_callbacks(
     bool frames_taken = false;
     bool values_taken = false;
     ecuio_condition_eval* conditions = nullptr;
+    bool took = false;
     {
         std::lock_guard<std::mutex> lock(session->callback_mutex);
         frames_taken = frames.take(session->callbacks);
         values_taken = values.take(session->values_callbacks);
-        if (session->conditions_swap) {
-            session->conditions_retired.swap(session->conditions);
-            session->conditions.swap(session->conditions_pending);
-            session->conditions_swap = false;
-        }
+        took = take_conditions(session);
         conditions = session->conditions.get();
+    }
+    /* A set taken starts from the link's state: this worker published it */
+    if (took && conditions != nullptr) {
+        conditions->set_link(session->last_error.load());
     }
     if (const auto hook = g_after_dispatch_takes.load()) {
         hook(g_after_dispatch_takes_user.load());
@@ -1598,43 +1665,52 @@ void ecuio_session_dispatch_callbacks(
             }
         }
     }
-    /* Last, what the frame changed among the conditions: the states, for
-     * the attach they still belong to, then the callbacks and queues */
-    if (changed == 0) {
+    /* Last, what the frame changed among the conditions */
+    if (conditions != nullptr) {
+        deliver_condition_events(session, *conditions, changed);
+    }
+}
+
+int ecuio_session_conditions_waiting(const ecuio_session_t* session)
+{
+    return session != nullptr &&
+                   session->conditions_waiting.load(std::memory_order_relaxed)
+               ? 1
+               : 0;
+}
+
+void ecuio_session_dispatch_link(ecuio_session_t* session, int32_t state,
+                                 uint64_t timestamp_us)
+{
+    if (session == nullptr || session->closed.load()) {
         return;
     }
-    const ecuio_condition_event_t* events = conditions->events.data();
-    {
-        std::lock_guard<std::mutex> lock(session->condition_states_mutex);
-        if (session->condition_states_generation == conditions->generation) {
-            for (uint32_t i = 0; i < changed; ++i) {
-                session->condition_states[events[i].condition] =
-                    conditions->state_of(events[i].condition);
-            }
-        }
-    }
-    /* Their list is taken only by a frame that changed something, so a
-     * frame with no event pays nothing for it */
-    snapshot_of<ecuio_conditions_callback_t> changes;
-    bool changes_taken = false;
+    ecuio_condition_eval* conditions = nullptr;
     {
         std::lock_guard<std::mutex> lock(session->callback_mutex);
-        changes_taken = changes.take(session->conditions_callbacks);
+        (void)take_conditions(session);
+        conditions = session->conditions.get();
     }
-    if (changes_taken) {
-        for (size_t i = 0; i < changes.size(); ++i) {
-            changes[i].first(events, changed, changes[i].second);
-        }
+    if (conditions == nullptr || conditions->link_terms.empty()) {
+        return;
     }
-    for (uint32_t i = 0; i < session->queue_count; ++i) {
-        ecuio_queue_link& q = *session->queues[i];
-        if (q.kind == ECUIO_QUEUE_CONDITIONS) {
-            if (ecuio_queue_t* queue = ecuio_queue_pin(q)) {
-                ecuio_queue_put_conditions(queue, events, changed);
-                ecuio_queue_unpin(q);
-            }
-        }
+    /* The link line went in first (link_set_state), then its events: a
+     * recording holds what the conditions did after what the link did */
+    ecuio_record_link* link = session->record_link.get();
+    ecuio_recorder_t* recorder = ecuio_record_pin(*link);
+    if (recorder != nullptr) {
+        ecuio_recorder_hold_states(recorder, *conditions);
     }
+    const uint32_t changed = conditions->judge_link(timestamp_us, state);
+    if (recorder != nullptr) {
+        const uint64_t now = ecuio_record_clock_us();
+        const uint64_t zero = link->zero_us.load(std::memory_order_relaxed);
+        ecuio_recorder_put_events(
+            recorder, now > zero ? now - zero : 0, conditions->newest_us,
+            conditions->events.data(), changed, conditions->generation);
+        ecuio_record_unpin(*link);
+    }
+    deliver_condition_events(session, *conditions, changed);
 }
 
 } // extern "C"

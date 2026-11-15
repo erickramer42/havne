@@ -1901,7 +1901,9 @@ TEST(RecorderTest, ARecordingBegunMidSessionOpensInTheReader)
     ecuio_recording_info_t info{};
     ASSERT_EQ(ecuio_recording_get_info(r, &info), ECUIO_OK);
     EXPECT_EQ(info.flags, 0u) << "the summary is there";
-    EXPECT_LE(info.duration_us, after - before)
+    /* events.log's times are rounded to the nearest millisecond, so the
+     * duration reads up to 500 us past the span the clock saw */
+    EXPECT_LE(info.duration_us, after - before + 500)
         << "the recording's clock starts at the attach";
     ASSERT_GE(info.signal_count, 1u);
     std::vector<uint32_t> ids(info.signal_count);
