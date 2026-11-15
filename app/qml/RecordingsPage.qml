@@ -1626,6 +1626,11 @@ Page {
     function findingColor(kind) {
         return kind === 7 ? Theme.textDim : kind === 1 || kind === 4 || kind === 5 ? Theme.danger : Theme.warning
     }
+    // RecordingView.findings and markers copied once at each change, with
+    // the fields the chart's paint reads: the bridge map rule
+    property var chartFindings: recording.findings.map(f => ({ kind: f.kind, atMs: f.atMs,
+                                                                lengthMs: f.lengthMs }))
+    property var chartMarkers: recording.markers.map(m => ({ timeMs: m.timeMs, label: m.label }))
 
     // The recording's conditions drawn none, warning, then danger, so the
     // louder level is on top where two overlap

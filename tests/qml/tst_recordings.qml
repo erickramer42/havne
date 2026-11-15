@@ -4361,6 +4361,33 @@ profile  raw
         compare(at(95).length, 0, "nothing past the span")
     }
 
+    // The chart's paint draws the findings and markers from the page's
+    // plain copies, never the view's lists (the bridge map rule): what a
+    // test plants in the copies is what a paint draws
+    function test_theChartPaintsThePagesCopiesOfFindingsAndMarkers() {
+        const page = createPage()
+        page.recordings = [conditionsRow]
+        openRow(page, conditionsRow)
+        verify(Array.isArray(page.chartFindings) && Array.isArray(page.chartMarkers), "plain arrays")
+        page.chartFindings = [{ kind: 1, atMs: 1000, lengthMs: 500 }]
+        page.chartMarkers = [{ timeMs: 2000, label: "Planted" }]
+        page.setView(0, 4000)
+        const ctx = {
+            fillStyle: "", strokeStyle: "", lineWidth: 1, textAlign: "", textBaseline: "",
+            rects: [], texts: [],
+            fillRect(x, y, w, h) { this.rects.push({ x: x, y: y, w: w, h: h, style: String(this.fillStyle) }) },
+            fillText(t, x, y) { this.texts.push(t) },
+            setLineDash() {}, beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, arc() {}, fill() {}
+        }
+        // 10 ms to a pixel, the plot's foot at 100
+        find(page, "chart").decorate(ctx, { left: 0, top: 0, plotW: 401, plotH: 100, traces: [] })
+        compare(ctx.texts, ["Planted"], "the planted marker alone")
+        const foot = ctx.rects.filter(r => r.y === 96 && r.h === 4)
+        compare(foot.length, 1, "the planted finding alone, at the plot's foot")
+        verify(foot[0].x === 100 && foot[0].w === 50, JSON.stringify(foot[0]))
+        compare(foot[0].style, String(Theme.danger))
+    }
+
     // The panel says when a span's stretches with no new data past the bound
     // are drawn as one, beside the entries' own cut
     function test_theCutLineNamesEachCut() {

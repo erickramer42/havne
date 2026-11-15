@@ -126,7 +126,7 @@ Rectangle {
             const span = root.host.viewT1 - root.host.viewT0
             const xOf = t => l.left + (t - root.host.viewT0) / span * (l.plotW - 1)
             const plotEnd = l.left + l.plotW
-            for (const f of root.host.recording.findings) {
+            for (const f of root.host.chartFindings) {
                 const x0 = xOf(f.atMs), x1 = xOf(f.atMs + f.lengthMs)
                 if (x1 < l.left || x0 > plotEnd) continue
                 ctx.fillStyle = root.host.findingColor(f.kind)
@@ -140,7 +140,7 @@ Rectangle {
             ctx.setLineDash([4, 3])
             ctx.textAlign = "left"
             ctx.textBaseline = "top"
-            for (const m of root.host.recording.markers) {
+            for (const m of root.host.chartMarkers) {
                 const x = xOf(m.timeMs)
                 if (x < l.left || x > plotEnd) continue
                 ctx.beginPath()

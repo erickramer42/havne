@@ -143,6 +143,7 @@ qt_add_qml_module(app_ui
         qml/SettingsConnect.qml
         qml/SettingsDisplay.qml
         qml/SettingsOwnSignals.qml
+        qml/RemoveQuestion.qml
         qml/SettingsProfile.qml
         qml/SettingsRecording.qml
         qml/SettingsSignals.qml

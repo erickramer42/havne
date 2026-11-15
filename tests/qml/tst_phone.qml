@@ -618,6 +618,20 @@ TestCase {
         verify(second.visible, "the row's second line")
         compare(second.text, "B " + grouped(1982) + " rpm · Δ -19 rpm")
         verify(second.mapToItem(row, 0, second.height).y <= row.height + 0.5, "inside the row")
+        // Last, as it changes RPM's decimals: three values wider than a card
+        // wrap, and the card beside grows with it
+        const wide = Object.assign({}, page.spanStats)
+        wide[rpm.index] = Object.assign({}, wide[rpm.index], { lowest: 1234567.5, highest: 6789012,
+                                                               mean: 4000123.1, decimals: 1 })
+        page.spanStats = wide
+        const statLine = find(card, "statLine")
+        tryVerify(() => statLine.text.indexOf(grouped(1234567) + Qt.locale().decimalPoint + "5") === 0, 2000,
+                  statLine.text)
+        verify(waitForPolish(main), "laid out")
+        verify(!statLine.truncated, "the values are whole: " + statLine.text + " in " + statLine.width)
+        verify(statLine.mapToItem(card, 0, statLine.height).y <= card.height + 0.5, "inside its card")
+        compare(cards[0].y, cards[1].y)
+        compare(cards[0].height, cards[1].height, "one height for the row")
     }
 
     // On a phone upright and on its side, the viewer's page scrolls to all
@@ -960,6 +974,26 @@ TestCase {
                 verify(right <= main.contentItem.width + 0.5, name + " of row " + i + " ends at " + right)
             }
         }
+        // A name as long as a name may be (40 bytes) takes a second line,
+        // the level and the length under it
+        const long = "Coolant over the limit at idle in summer"
+        compare(ConditionBook.nameBytes(long), ConditionBook.maxName)
+        const panel = find(page, "conditionsPanel")
+        panel.spans = page.conditionList.map(s => Object.assign({}, s, { name: long }))
+        tryVerify(() => list.itemAtIndex(0) !== null && find(list.itemAtIndex(0), "conditionName").text
+                  === long, 2000, "the rows take the long name")
+        verify(waitForPolish(main), "laid out")
+        for (let i = 0; i < 3; ++i) {
+            const row = list.itemAtIndex(i)
+            for (const name of ["conditionName", "conditionLength"]) {
+                const label = find(row, name)
+                verify(!label.truncated, name + " of row " + i + " is whole: " + label.text)
+                const right = label.mapToItem(main.contentItem, label.width, 0).x
+                verify(right <= main.contentItem.width + 0.5, name + " of row " + i + " ends at " + right)
+                verify(label.mapToItem(row, 0, label.height).y <= row.height + 0.5, name + " inside its row")
+            }
+        }
+        panel.spans = Qt.binding(() => page.conditionList)
         page.setView(0, 2000)
         mouseClick(find(list.itemAtIndex(0), "conditionRowArea"))
         verify(!page.conditionsOpen, "the panel gives the chart back")

@@ -19,6 +19,7 @@ TestCase {
         id: dashComponent
         DashboardPage { width: 1280; height: 800 }
     }
+    Component { id: mainComponent; Main {} }
 
     readonly property string none: '{"havne_conditions":1,"conditions":[]}\n'
 
@@ -113,6 +114,74 @@ TestCase {
                 "stale", "a stale term says so before its state")
     }
 
+    // A term on a signal the listed profile lacks says so in words, in the
+    // list and the editor; its reference is the description a screen
+    // reader gives, and a signal the profile has keeps its name alone
+    function test_aSignalNotInTheProfileIsSaidInWords() {
+        save([rpm("missing", "Not in the mock", { signal: ["key:not_here"], unit: "kPa", above: 300 }),
+              rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 })])
+        const page = settingsOf()
+        page.uriField.text = "mock://demo"
+        find(page, "settingsAlertsPart").refreshRows()
+        const row = rowOf(page, 0)
+        compare(wordsOf(row, "alertSummary"), "a signal not in this profile above 300 kPa")
+        compare(row.Accessible.description, "key:not_here")
+        compare(wordsOf(rowOf(page, 1), "alertSummary"), "RPM above 6000 RPM")
+        compare(rowOf(page, 1).Accessible.description, "")
+        row.clicked()
+        const term = find(termOf(editorOf(page), 0), "alertTermSignal")
+        compare(term.text, "a signal not in this profile")
+        compare(term.Accessible.description, "key:not_here")
+    }
+
+    // Counts read one or many, never "(s)": Settings' Alerts row counts
+    // conditions, a record-only one too, and Import's question and note
+    // count the alerts they replace and read
+    function test_countsReadOneOrMany() {
+        save([rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 })])
+        const page = settingsOf()
+        const row = () => page.pageList.find(r => r.key === "alerts")
+        compare(row().summary, "1 condition")
+        save([rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 }),
+              { key: "rec", name: "Record only", when: { signal: ["id:1001"], unit: "RPM", above: 5000 },
+                record: { after: 2 } }])
+        compare(row().summary, "2 conditions", "a record-only condition counts")
+        const alerts = find(page, "settingsAlertsPart")
+        alerts.confirming = "import"
+        compare(find(alerts, "alertConfirmText").text, "Import replaces the 2 saved alerts with the file's.")
+        alerts.confirming = ""
+        const file = Harness.writeScratchFile("alerts-two.json", JSON.stringify(
+            { havne_conditions: 1, conditions: [rpm("a", "A", { link: "not_ok" }), rpm("b", "B", { link: "timeout" })] }))
+        verify(alerts.importFrom(file), find(alerts, "alertProblem").text)
+        compare(find(alerts, "alertSaveNote").text, "Imported 2 alerts.")
+    }
+
+    // In imperial the list says a level in its signal's own decimals, and
+    // the editor keeps three, so a metric level left as it showed is saved
+    // back as it was
+    function test_anImperialLevelReadsInItsSignalsDecimals() {
+        save([rpm("fast", "Fast", { signal: ["id:3001"], unit: "km/h", above: 20 })])
+        Bridge.unitSystem = 1
+        const page = settingsOf()
+        page.uriField.text = "mock://demo"
+        const alerts = find(page, "settingsAlertsPart")
+        alerts.refreshRows()
+        const speed = alerts.rows.find(r => r.ref === "id:3001")
+        verify(speed !== undefined, "the mock lists its speed")
+        compare(speed.decimals, 0, "the speed's own decimals")
+        const summary = wordsOf(rowOf(page, 0), "alertSummary")
+        verify(summary.endsWith(" above 12 mph"), summary)
+        rowOf(page, 0).clicked()
+        const term = termOf(editorOf(page), 0)
+        compare(term.levelField.text, "12" + Qt.locale().decimalPoint + "427", "the field keeps three")
+        verify(!editorOf(page).changed(), "untouched, it reads unchanged")
+        find(editorOf(page), "alertLevel_danger").clicked()
+        find(editorOf(page), "alertSave").clicked()
+        const c = stored().conditions[0]
+        verify(c.when.above === 20, String(c.when.above))
+        compare(c.when.unit, "km/h")
+    }
+
     // ---- The editor
 
     // A row opens its alert; a change saved goes into the file through
@@ -156,6 +225,59 @@ TestCase {
         box.toggle()
         box.toggled()
         verify(!("enabled" in stored().conditions[0]), "on is the default: the key goes")
+    }
+
+    // A number of seconds past the three decimals shown keeps its value
+    // while its field reads as it opened: the editor reads unchanged, a
+    // Save of something else leaves it, and a field typed in takes the text
+    function test_anUntouchedSecondsFieldKeepsItsStoredValue() {
+        save([rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 },
+                  { "for": 0.1234, clear_for: 2.00005, record: { before: 1.0001, after: 3.33333 } })])
+        const page = settingsOf()
+        rowOf(page, 0).clicked()
+        const editor = editorOf(page)
+        const point = Qt.locale().decimalPoint
+        compare(editor.forField.text, "0" + point + "123", "three decimals shown")
+        compare(editor.afterField.text, "3" + point + "333")
+        verify(!editor.changed(), "an editor left as it opened reads unchanged")
+        find(editor, "alertLevel_danger").clicked()
+        find(editor, "alertSave").clicked()
+        compare(page.pageKey, "alerts", find(editor, "alertEditorProblem").text)
+        let c = stored().conditions[0]
+        compare(c.alert.level, "danger")
+        verify(c["for"] === 0.1234, String(c["for"]))
+        verify(c.clear_for === 2.00005, String(c.clear_for))
+        verify(c.record.before === 1.0001, String(c.record.before))
+        verify(c.record.after === 3.33333, String(c.record.after))
+
+        rowOf(page, 0).clicked()
+        type(editor.forField, "0" + point + "5")
+        verify(editor.changed(), "a field typed in is a change")
+        find(editor, "alertSave").clicked()
+        c = stored().conditions[0]
+        verify(c["for"] === 0.5, String(c["for"]))
+        verify(c.record.after === 3.33333, String(c.record.after))
+    }
+
+    // A group's own keys beside its terms (notes, x-) stay through an
+    // edit: the editor reads unchanged as it opened, and a Save with
+    // another join keeps each in its place
+    function test_aGroupsOwnKeysStayThroughAnEdit() {
+        save([rpm("both", "Both high", { notes: "why both", all: [
+                  { signal: ["id:1001"], unit: "RPM", above: 6000 },
+                  { signal: ["id:2001"], unit: "°C", above: 110 }], "x-tool": { v: 1 } })])
+        const page = settingsOf()
+        rowOf(page, 0).clicked()
+        const editor = editorOf(page)
+        verify(!editor.changed(), "an editor left as it opened reads unchanged")
+        find(editor, "alertJoin_any").clicked()
+        find(editor, "alertSave").clicked()
+        compare(page.pageKey, "alerts", find(editor, "alertEditorProblem").text)
+        const w = stored().conditions[0].when
+        compare(Object.keys(w), ["notes", "any", "x-tool"], "each key in its place")
+        compare(w.notes, "why both")
+        compare(w["x-tool"].v, 1)
+        compare(w.any.length, 2)
     }
 
     // The sound switch is live and says where it plays
@@ -609,7 +731,7 @@ TestCase {
             { havne_conditions: 1, conditions: [
                 rpm("other", "Other", { signal: ["id:1001"], unit: "RPM", below: 100000 })] }))
         verify(alerts.importFrom(file), find(alerts, "alertProblem").text)
-        compare(find(alerts, "alertSaveNote").text, "Imported 1 alert(s).")
+        compare(find(alerts, "alertSaveNote").text, "Imported 1 alert.")
         tryCompare(find(rowOf(page, 0), "alertState"), "text", "ON", 5000)
         compare(wordsOf(rowOf(page, 0), "alertName"), "Other")
     }
@@ -635,7 +757,7 @@ TestCase {
             { havne_conditions: 1, conditions: [rpm("one", "One", { link: "not_ok" })] }))
         verify(alerts.importFrom(file), find(alerts, "alertProblem").text)
         compare(find(alerts, "alertSaveNote").text,
-                "Imported 1 alert(s): the change applies when this recording ends.")
+                "Imported 1 alert: the change applies when this recording ends.")
         compare(stored().conditions.map(c => c.key), ["one"], "the file is replaced at once")
     }
 
@@ -679,5 +801,27 @@ TestCase {
         verify(find(page, "dashAlertNote").visible)
         page.select(1)
         compare(page.alertNote, "", "another cell clears it")
+    }
+
+    // A refused Alert's note goes once a later Alert from the same cell
+    // opens its draft, so the cell's panel shows no stale refusal
+    function test_aRefusalsNoteGoesWhenALaterAlertOpens() {
+        const full = []
+        for (let i = 0; i < ConditionBook.maxConditions; ++i)
+            full.push(rpm("a" + i, "A" + i, { signal: ["id:1001"], unit: "RPM", above: 6000 }))
+        save(full)
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const dash = find(main.contentItem, "dashboardPage")
+        const gauge = () => ConditionBook.alertFromLevels("Coolant", ["id:2001"], "°C",
+                                                          { dangerFrom: 115 }, 0, 150, [])
+        main.gotoPage(main.dashboardPage)
+        main.openAlertDraft(gauge())
+        verify(dash.alertNote.indexOf("holds 64 alerts") >= 0, dash.alertNote)
+        compare(main.currentPage, main.dashboardPage, "a refusal stays on the Dashboard")
+        save([])
+        main.openAlertDraft(gauge())
+        compare(main.currentPage, main.settingsPage, "the draft opens in Settings")
+        compare(dash.alertNote, "", "the refusal's note is gone")
     }
 }

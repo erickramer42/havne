@@ -2524,6 +2524,7 @@ TestCase {
         const remove = find(rowOf(page, "plugin.extras.track"), "rowRemoveVariant")
         verify(remove.visible)
         remove.clicked()
+        find(rowOf(page, "plugin.extras.track"), "signalsConfirmRemove").clicked()
         compare(page.picks, ["plugin.extras.base"])
         compare(page.variantRows.map(r => page.rowTitle(r)), ["Extras 1.5.0"])
         page.openRow = "plugin.extras.base"
@@ -2810,6 +2811,104 @@ TestCase {
         verify(!rowData(page, "plugin.example-sim.base").forCar)
     }
 
+    // On a phone the removal's question is drawn where Remove was pressed:
+    // the last plugin of a list longer than the page asks inside the
+    // page's view, never at the top of a page whose controls then all read
+    // disabled
+    function test_aRemovalAsksInsideAPhonesView() {
+        const page = createPage()
+        page.width = 384
+        page.height = 832
+        press(page, "vehicleNew")
+        page.open("signals")
+        for (let i = 1; i <= 24; ++i)
+            verify(importFile(page, "p" + i + ".json", "Plugin " + i, "D1" + String(i).padStart(2, "0")))
+        const last = page.variantRows[page.variantRows.length - 1].profile
+        page.openRow = last
+        const flick = find(page, "settingsSignalsPage")
+        const row = rowOf(page, last)
+        const remove = find(row, "rowRemove")
+        verify(waitForPolish(page.Window.window), "laid out")
+        // Scrolled as a thumb would: Remove at the view's foot
+        const bottomOf = item => item.mapToItem(flick.contentItem, 0, item.height).y
+        flick.contentY = Math.max(0, bottomOf(remove) - flick.height)
+        // The page's top, Import and all, is scrolled out of the view
+        const importBottom = bottomOf(find(page, "signalImport"))
+        verify(importBottom < flick.contentY + flick.headerHeight,
+               "Import ends at " + importBottom + ", the view starts at " + (flick.contentY + flick.headerHeight))
+        remove.clicked()
+        const question = find(row, "signalsConfirm")
+        tryVerify(() => question.visible && question.height > 0, 2000, "the row asks")
+        verify(waitForPolish(page.Window.window), "laid out")
+        for (const name of ["signalsConfirmText", "signalsConfirmRemove", "signalsConfirmCancel"]) {
+            const item = find(question, name)
+            const top = item.mapToItem(flick.contentItem, 0, 0).y
+            verify(top >= flick.contentY + flick.headerHeight - 0.5
+                   && bottomOf(item) <= flick.contentY + flick.height + 0.5,
+                   name + " from " + top + " to " + bottomOf(item) + " in a view from "
+                   + (flick.contentY + flick.headerHeight) + " to " + (flick.contentY + flick.height))
+        }
+        find(question, "signalsConfirmCancel").clicked()
+        compare(page.confirming, "")
+    }
+
+    // Remove this variant asks in its row first, as the whole plugin's
+    // Remove does: the list is as it was until the question is answered
+    function test_removeThisVariantAsksFirst() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "trip.json", "Trip extras"))
+        verify(page.importFile(Harness.writeScratchFile("two.json", signalFileText("Two", "D101"))))
+        verify(page.keepPending(page.pluginList[0].sha256, "two"))
+        const two = "plugin.trip-extras.two"
+        const listed = () => page.variantRows.map(r => r.profile).sort()
+        const before = listed()
+        compare(before.length, 2)
+        page.openRow = two
+        const row = rowOf(page, two)
+        find(row, "rowRemoveVariant").clicked()
+        compare(listed(), before, "asked first")
+        const question = find(row, "signalsConfirm")
+        verify(question.visible, "in the variant's row")
+        compare(find(question, "signalsConfirmText").text,
+                "Remove the variant two of Trip extras? It is yours, and no other copy exists")
+        verify(!find(row, "rowActions").visible, "the question in the actions' place")
+        verify(!find(page, "signalImport").enabled, "nothing else past the question")
+        find(question, "signalsConfirmCancel").clicked()
+        compare(listed(), before, "Cancel keeps it")
+        find(row, "rowRemoveVariant").clicked()
+        find(question, "signalsConfirmRemove").clicked()
+        compare(listed(), ["plugin.trip-extras.base"])
+        compare(page.confirming, "")
+    }
+
+    // A signal file waiting on Into keeps no choice of a plugin that goes
+    // or is rewritten (a variant dropped gives it a new sha256): Keep
+    // hides until Into is chosen again, and the file still waits
+    function test_aWaitingIntoChoiceGoesWithItsPlugin() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "trip.json", "Trip extras"))
+        verify(page.importFile(Harness.writeScratchFile("two.json", signalFileText("Two", "D101"))))
+        verify(page.keepPending(page.pluginList[0].sha256, "two"))
+        verify(page.importFile(Harness.writeScratchFile("three.json", signalFileText("Three", "D102"))))
+        press(page, "importInto_0")
+        verify(find(page, "importKeep").visible, "Into chosen: Keep shows")
+
+        verify(page.removeVariant(rowData(page, "plugin.trip-extras.two")))
+        compare(page.importInto, "", "the rewritten plugin's old sha256 is no choice")
+        verify(!find(page, "importKeep").visible, "Keep waits for Into again")
+        press(page, "importInto_0")
+        verify(find(page, "importKeep").visible)
+
+        verify(page.removePlugin(page.pluginList[0].sha256))
+        compare(page.importInto, "")
+        verify(!find(page, "importKeep").visible)
+        verify(page.pendingImport !== null, "the file still waits")
+    }
+
     // Mine marks an imported plugin as the user's: its variants can then
     // be changed here, its removal asks, and a newer export of the same
     // plugin updates it in place, saying from which version to which
@@ -2831,17 +2930,22 @@ TestCase {
         page.saving = page.pluginSave(page.pluginList[0].sha256)
         verify(page.saveTo(second))
 
-        // The user's own has no copy anywhere else: its removal asks
+        // The user's own has no copy anywhere else: its removal asks, in
+        // its row, in the actions' place
         page.openRow = "plugin.trip-extras.base"
-        find(rowOf(page, "plugin.trip-extras.base"), "rowRemove").clicked()
-        verify(find(page, "signalsConfirm").visible)
-        compare(find(page, "signalsConfirmText").text,
+        const asking = rowOf(page, "plugin.trip-extras.base")
+        find(asking, "rowRemove").clicked()
+        verify(find(asking, "signalsConfirm").visible)
+        verify(!find(asking, "rowActions").visible, "the question in the actions' place")
+        compare(find(asking, "signalsConfirmText").text,
                 "Remove Trip extras? It is yours, and no other copy exists")
         verify(!find(page, "signalImport").enabled, "nothing else past the question")
-        press(page, "signalsConfirmCancel")
+        verify(!find(asking, "rowMore").enabled, "the asking row stays open")
+        find(asking, "signalsConfirmCancel").clicked()
         compare(page.pluginList.length, 1, "Cancel keeps it")
-        find(rowOf(page, "plugin.trip-extras.base"), "rowRemove").clicked()
-        press(page, "signalsConfirmRemove")
+        verify(find(asking, "rowActions").visible, "the actions back")
+        find(asking, "rowRemove").clicked()
+        find(asking, "signalsConfirmRemove").clicked()
         compare(page.pluginList.length, 0)
         compare(page.picks, [])
 
@@ -3126,7 +3230,8 @@ TestCase {
 
     // The signal files the move into the plugin store left behind are
     // listed with why, the picked vehicle's then the book's own; Save
-    // writes one out and Remove drops its record
+    // writes one out and Remove drops its record, asking first in the
+    // file's row where the kept copy goes with it
     function test_theFilesThatDidntMoveAreListedAndRemoved() {
         const a = "a".repeat(64)
         const b = "b".repeat(64)
@@ -3151,9 +3256,21 @@ TestCase {
         verify(!page.saveTo(Harness.writeScratchFile("left.json", "")))
         compare(find(page, "signalProblem").text, "Its copy is gone from the earlier version's folder")
 
-        find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
+        const kept = find(page, "unmigrated_0")
+        find(kept, "unmigratedRemove").clicked()
+        compare(page.unmigratedRows.map(r => r.name), ["Old extras", "Loose"], "asked first")
+        const question = find(kept, "unmigratedConfirm")
+        verify(question.visible, "in the file's row")
+        compare(find(question, "signalsConfirmText").text, "Remove Old extras? Its kept copy goes with it")
+        verify(!find(kept, "unmigratedSave").visible, "the question in the buttons' place")
+        verify(!find(page, "signalImport").enabled, "nothing else past the question")
+        find(question, "signalsConfirmCancel").clicked()
+        compare(page.unmigratedRows.length, 2, "Cancel keeps it")
+        find(kept, "unmigratedRemove").clicked()
+        find(question, "signalsConfirmRemove").clicked()
         compare(page.unmigratedRows.map(r => r.name), ["Loose"])
         verify(page.pickedVehicle.unmigrated === undefined, "the vehicle's record is gone")
+        // Its copy is still in the earlier version's folder: nothing to ask
         find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
         compare(page.unmigratedRows, [])
         verify(page.vehicles.unmigrated === undefined)
@@ -3190,11 +3307,13 @@ TestCase {
             compare(find(page, "signalNote").text, "Kept saved to the file you chose")
 
             find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
-            compare(page.unmigratedRows, [])
+            compare(page.unmigratedRows, [], "another vehicle lists it: no question")
             compare(Harness.keptUnmigrated(), [c], "the other vehicle lists it still")
             press(page, "vehicle_" + page.vehicles.list[0].id)
             compare(page.unmigratedRows.map(r => r.name), ["Kept"])
             find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
+            compare(Harness.keptUnmigrated(), [c], "the last listing asks first")
+            find(find(page, "unmigrated_0"), "signalsConfirmRemove").clicked()
             compare(page.unmigratedRows, [])
             compare(Harness.keptUnmigrated(), [], "no vehicle lists it: the bytes go")
         } finally {
@@ -3229,6 +3348,7 @@ TestCase {
             verify(page.saveTo(out))
             compare(Harness.readScratchFile(out), text, "and saved as before")
             find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
+            find(find(page, "unmigrated_0"), "signalsConfirmRemove").clicked()
             compare(page.unmigratedRows, [])
             compare(Harness.keptUnmigrated(), [], "removed, its bytes go")
         } finally {
@@ -3689,6 +3809,28 @@ TestCase {
         compare(page.obdbReport.year, 2000)
         press(page, "obdbKeep")
         compare(page.picks, ["plugin.vehicle-1-obdb.base"], "a VIN's year names no variant")
+    }
+
+    // A model year typed digit by digit refuses nothing until its fourth
+    // digit or the field's end, and meanwhile no report waits to be kept
+    function test_aModelYearTypedIsJudgedWhole() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(obdbRead(page, "2019"))
+        const field = find(page, "obdbYearField")
+        field.text = ""
+        for (const t of ["2", "20", "202"]) {
+            field.text = t
+            compare(find(page, "signalProblem").text, "", t + " is a year on its way")
+            verify(!find(page, "obdbReport").visible, "no report waits beside " + t)
+            verify(!find(page, "obdbKeep").visible, "nor Keep")
+        }
+        field.editingFinished()
+        compare(find(page, "signalProblem").text, "A model year is 1980 to 2039, or empty for none")
+        field.text = "2021"
+        compare(find(page, "signalProblem").text, "")
+        compare(page.obdbReport.year, 2021)
     }
 
     // The year in the field is the waiting set's: it goes with a discard
@@ -4212,9 +4354,11 @@ TestCase {
         compare(find(page, "formNote").text, "Removed from Vehicle 1 signals")
         press(page, "ownRemove_0")
         compare(page.ownSignals.length, 1, "asked first")
-        compare(find(page, "signalsConfirmText").text,
+        const question = find(page, "ownConfirm")
+        verify(question.visible, "asked under the own signals, where it was pressed")
+        compare(find(question, "signalsConfirmText").text,
                 "Remove Vehicle 1 signals? It is yours, and no other copy exists")
-        press(page, "signalsConfirmRemove")
+        find(question, "signalsConfirmRemove").clicked()
         compare(page.picks, [])
         compare(page.pickedVehicle.own, "")
         compare(Harness.storedPlugins(), [])

@@ -152,18 +152,30 @@ ColumnLayout {
     }
 
     // ---- Words
-    // A number as shown: up to three decimals, the locale's point
-    function shownNumber(v) {
+    // A number as shown: up to three decimals (or decimals), the locale's
+    // point. The editor's fields keep three, so a saved level reads back as
+    // it was; the list says a level in its signal's own decimals
+    function shownNumber(v, decimals) {
         return typeof v === "number" && isFinite(v)
-               ? String(Number(v.toFixed(3))).replace(".", Qt.locale().decimalPoint) : ""
+               ? String(Number(v.toFixed(decimals ?? 3))).replace(".", Qt.locale().decimalPoint) : ""
+    }
+    function rowOfRefs(refs) {
+        const all = DashboardBook.lookupRefs(refs ?? [], gaugeSets)
+        return rows.find(r => all.indexOf(r.ref) >= 0) ?? null
     }
     function nameOfRefs(refs) {
-        const all = DashboardBook.lookupRefs(refs ?? [], gaugeSets)
-        for (const r of rows) {
-            if (all.indexOf(r.ref) >= 0)
-                return r.name
-        }
-        return (refs ?? []).length > 0 ? String(refs[0]) : qsTr("no signal")
+        const row = rowOfRefs(refs)
+        return row !== null ? row.name
+                            : (refs ?? []).length > 0 ? qsTr("a signal not in this profile") : qsTr("no signal")
+    }
+    // A signal the rows don't list, by its reference, for a screen
+    // reader's description; "" for one they list
+    function unlistedRef(refs) {
+        return (refs ?? []).length > 0 && rowOfRefs(refs) === null ? String(refs[0]) : ""
+    }
+    function unlistedRefsOf(c) {
+        return ConditionBook.termsOf(c).filter(t => ConditionBook.kindOf(t) === "signal")
+            .map(t => unlistedRef(t.signal)).filter(r => r !== "").join(", ")
     }
     readonly property var linkNames: ({
         not_ok: qsTr("the link isn't OK"), timeout: qsTr("the ECU isn't responding"),
@@ -183,7 +195,9 @@ ColumnLayout {
                        .arg(name).arg(shownNumber(level))
         // Reading the unit system makes a binding follow its change
         const units = Bridge.unitSystem
-        const shown = shownNumber(Bridge.displayValue(t.unit ?? "", level))
+        const row = rowOfRefs(t.signal)
+        const shown = shownNumber(Bridge.displayValue(t.unit ?? "", level),
+                                  row !== null && typeof row.decimals === "number" ? row.decimals : 3)
         const unit = units >= 0 ? Bridge.displayUnit(t.unit ?? "") : ""
         return (comparison === "below" ? qsTr("%1 below %2 %3") : qsTr("%1 above %2 %3"))
                    .arg(name).arg(shown).arg(unit).trim()
@@ -327,7 +341,8 @@ ColumnLayout {
             text: root.confirming !== "import"
                   ? qsTr("Start again with no alerts? The saved file is replaced; one that couldn't be read is kept beside it.")
                   : root.unreadable ? qsTr("Import replaces the saved file, which doesn't load, with the file's. A file that couldn't be read is kept beside it.")
-                  : qsTr("Import replaces the %n saved alert(s) with the file's.", "", root.conditions.length)
+                  : root.conditions.length === 1 ? qsTr("Import replaces the 1 saved alert with the file's.")
+                  : qsTr("Import replaces the %1 saved alerts with the file's.").arg(root.conditions.length)
             color: Theme.text
             wrapMode: Text.Wrap
             Layout.fillWidth: true
@@ -422,6 +437,7 @@ ColumnLayout {
             Layout.preferredHeight: Math.max(Theme.touchTarget, rowContent.implicitHeight + 16)
             Accessible.name: stateText === "" ? qsTr("Edit %1").arg(condition.name ?? "")
                                               : qsTr("Edit %1, %2").arg(condition.name ?? "").arg(stateText)
+            Accessible.description: root.unlistedRefsOf(condition)
             enabled: root.confirming === ""
             onClicked: root.openEditor(index, condition)
             contentItem: RowLayout {
@@ -508,8 +524,8 @@ ColumnLayout {
             return false
         }
         problem = ""
-        note = r.pending !== "" ? qsTr("Imported %n alert(s): the change %1.", "", r.conditions).arg(r.pending)
-                                : qsTr("Imported %n alert(s).", "", r.conditions)
+        const imported = r.conditions === 1 ? qsTr("Imported 1 alert") : qsTr("Imported %1 alerts").arg(r.conditions)
+        note = r.pending !== "" ? qsTr("%1: the change %2.").arg(imported).arg(r.pending) : imported + qsTr(".")
         return true
     }
     function exportTo(url) {

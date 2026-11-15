@@ -750,6 +750,8 @@ TestCase {
         compare(words.text, "Export CSV leaves identification replies out; "
                             + "Copy copies the rows as they are.")
         verify(Qt.colorEqual(words.color, Theme.textDim))
+        verify(page.exportFramesTo(Harness.writeScratchFile("frames.csv", "")))
+        verify(/^[0-9]+ frames? exported; /.test(words.text) && words.text.indexOf("(s)") < 0, words.text)
         const folder = StandardPaths.writableLocation(StandardPaths.TempLocation)
         verify(!page.exportFramesTo(folder), "a folder isn't a file")
         compare(words.text, "Couldn't write the file")

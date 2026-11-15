@@ -170,8 +170,11 @@ Pane {
     readonly property var pickedVehicle: VehicleBook.picked(vehicles)
     // A book a later Havne saved is left as it is: none shown, none saved
     readonly property bool bookLater: VehicleBook.isLater(vehicles)
-    // A removal waiting for its second press: "", "forget", "forgetAll"
-    // or "removePlugin:<sha256>"
+    // A removal waiting for its second press, asked where it was pressed:
+    // "", "forget", "forgetAll", "removePlugin:<sha256>" (in the plugin's
+    // open row), "removeOwn:<sha256>" (under the vehicle's own signals),
+    // "removeVariant:<profile>" (in its row) or "removeUnmigrated:<key>"
+    // (unmigratedKey, in the file's row)
     property string confirming: ""
     // The picked vehicle's plotted signals reach Live once this session's
     // rows exist; a change of rows before that isn't the user's
@@ -378,8 +381,13 @@ Pane {
     // variant } or { kind: "obdb" }
     property var pendingImport: null
     // The user's own plugin a waiting signal file goes into, by its
-    // sha256; "" while none is chosen
+    // sha256; "" while none is chosen. A removal or a rewrite (a variant
+    // dropped gives the plugin a new sha256) ends the choice
     property string importInto: ""
+    onOwnPluginsChanged: {
+        if (importInto !== "" && !ownPlugins.some(p => p.sha256 === importInto))
+            importInto = ""
+    }
     // Replace...'s variant, which the next file read takes the place of:
     // { sha256, variant, name }, null for none
     property var replaceTarget: null
@@ -583,15 +591,17 @@ Pane {
     }
 
     // The held set converted for the field's year: its report shown, or
-    // the bridge's words why not. True when there's a report
-    function previewObdb() {
+    // the bridge's words why not. True when there's a report. While typing,
+    // one to three digits are a year on its way: no report and no refusal
+    function previewObdb(typing) {
         signalNote = ""
         obdbReport = null
         if (pendingImport === null || pendingImport.kind !== "obdb")
             return false
         const year = obdbYear()
         if (year < 0) {
-            signalProblem = qsTr("A model year is 1980 to 2039, or empty for none")
+            signalProblem = typing === true && /^[0-9]{1,3}$/.test(obdbYearField.text.trim())
+                ? "" : qsTr("A model year is 1980 to 2039, or empty for none")
             return false
         }
         const r = Bridge.previewObdbImport(year, obdbName())
@@ -711,6 +721,12 @@ Pane {
         return true
     }
 
+    // A variant of the user's own has no copy anywhere else either: its
+    // Remove asks first, as the whole plugin's does
+    function askRemoveVariant(row) {
+        confirming = "removeVariant:" + row.profile
+    }
+
     // A plugin of the user's own has no copy anywhere else, so its
     // removal asks first
     function askRemovePlugin(sha) {
@@ -722,9 +738,45 @@ Pane {
     }
 
     function confirmingPlugin() {
-        if (!confirming.startsWith("removePlugin:"))
-            return null
-        return pluginBySha[confirming.substring("removePlugin:".length)] || null
+        for (const head of ["removePlugin:", "removeOwn:"]) {
+            if (confirming.startsWith(head))
+                return pluginBySha[confirming.substring(head.length)] || null
+        }
+        return null
+    }
+    function pluginQuestion(p) {
+        return qsTr("Remove %1? It is yours, and no other copy exists").arg(p.name)
+    }
+    // The question a row of the list asks, "" for none: a plugin's in its
+    // open row, where its Remove was pressed, and a variant's in its own
+    function rowQuestion(entry, open) {
+        if (open && confirming === "removePlugin:" + entry.sha256 && confirmingPlugin() !== null)
+            return pluginQuestion(confirmingPlugin())
+        if (confirming === "removeVariant:" + entry.profile)
+            return qsTr("Remove the variant %1 of %2? It is yours, and no other copy exists")
+                       .arg(entry.variant, entry.name)
+        return ""
+    }
+    function ownQuestion() {
+        return confirming.startsWith("removeOwn:") && confirmingPlugin() !== null
+            ? pluginQuestion(confirmingPlugin()) : ""
+    }
+    // The question's Remove: what it asked about goes
+    function confirmRemoval() {
+        const asked = confirming
+        const p = confirmingPlugin()
+        confirming = ""
+        if (asked.startsWith("removeVariant:")) {
+            const row = variantRows.find(r => "removeVariant:" + r.profile === asked)
+            return row !== undefined && removeVariant(row)
+        }
+        if (asked.startsWith("removeUnmigrated:")) {
+            const record = unmigratedRows.find(r => "removeUnmigrated:" + unmigratedKey(r) === asked)
+            if (record !== undefined)
+                removeUnmigrated(record)
+            return record !== undefined
+        }
+        return p !== null && removePlugin(p.sha256)
     }
 
     // A removed plugin's variants are no vehicle's pick or own variant any
@@ -846,6 +898,24 @@ Pane {
     function unmigratedText(r) {
         return qsTr("%1: %2").arg(r.name, r.words)
                + (r.kept ? "" : qsTr(" (its copy is still in the earlier version's folder)"))
+    }
+
+    function unmigratedKey(r) {
+        return (r.loose ? "book:" : "vehicle:") + r.sha256
+    }
+    // A removal that deletes the kept bytes (no other record lists them)
+    // asks first: they are the file's one copy here
+    function askRemoveUnmigrated(record) {
+        const after = record.loose ? VehicleBook.dropLooseUnmigrated(vehicles, record.sha256)
+                                   : VehicleBook.dropUnmigrated(vehicles, record.sha256)
+        if (record.kept && !VehicleBook.hashListed(after, record.sha256))
+            confirming = "removeUnmigrated:" + unmigratedKey(record)
+        else
+            removeUnmigrated(record)
+    }
+    function unmigratedQuestion(record) {
+        return confirming === "removeUnmigrated:" + unmigratedKey(record)
+            ? qsTr("Remove %1? Its kept copy goes with it").arg(record.name) : ""
     }
 
     // The record out of the book; its kept bytes go once nothing lists
@@ -1117,7 +1187,7 @@ Pane {
             removeVariant({ sha256: place.plugin.sha256, variant: place.variant,
                             profile: pickedVehicle.own })
         else
-            confirming = "removePlugin:" + place.plugin.sha256
+            confirming = "removeOwn:" + place.plugin.sha256
     }
 
     // Forget and Forget all: what the store holds as imported for the
@@ -1208,7 +1278,8 @@ Pane {
         { key: "alerts", title: qsTr("Alerts"),
           summary: Bridge.conditionsProblem !== "" ? qsTr("doesn't load")
                    : settingsAlerts.conditions.length === 0 ? qsTr("none")
-                   : qsTr("%n alert(s)", "", settingsAlerts.conditions.length),
+                   : settingsAlerts.conditions.length === 1 ? qsTr("1 condition")
+                   : qsTr("%1 conditions").arg(settingsAlerts.conditions.length),
           warn: Bridge.conditionsProblem !== "" },
         { key: "recording", title: qsTr("Recording"),
           summary: !Bridge.recording ? qsTr("off")

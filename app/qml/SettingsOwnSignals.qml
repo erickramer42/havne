@@ -63,6 +63,15 @@ ColumnLayout {
         }
     }
 
+    // The last signal's Remove asks here, under the list it was pressed in
+    RemoveQuestion {
+        objectName: "ownConfirm"
+        words: root.host.ownQuestion()
+        canRemove: root.host.idle
+        onRemoveChosen: root.host.confirmRemoval()
+        onCancelChosen: root.host.confirming = ""
+    }
+
     Label {
         objectName: "ownSignalsNote"
         visible: text !== ""

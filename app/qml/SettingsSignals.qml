@@ -1,5 +1,5 @@
 // File/layer: app/qml/SettingsSignals.qml | Qt6 Quick + Shapes, UI layer
-// Testing: QML: QmlTest.settings, QmlTest.phone (test_qml)
+// Testing: QML: QmlTest.settings, QmlTest.phone, QmlTest.accessibility (test_qml)
 // The one Import and the one list of plugins, each variant the picked vehicle's to pick (ADR-0064): one part of SettingsPage, which holds the state
 
 import QtCore
@@ -140,6 +140,7 @@ ColumnLayout {
             ThemedTextField {
                 id: importVariantField
                 objectName: "importVariantField"
+                Accessible.name: qsTr("Variant name")
                 width: Math.min(200, parent.width)
                 maximumLength: 24
                 inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
@@ -166,15 +167,21 @@ ColumnLayout {
             ThemedTextField {
                 id: obdbYearField
                 objectName: "obdbYearField"
+                Accessible.name: qsTr("OBDb model year")
                 width: Math.min(120, parent.width)
                 maximumLength: 4
                 placeholderText: qsTr("none")
                 inputMethodHints: Qt.ImhDigitsOnly
                 // A year typed is the user's; the page marks one it fills
-                // from a VIN after setting it
+                // from a VIN after setting it. A year part typed is judged
+                // at its fourth digit or the field's end
                 onTextChanged: {
                     root.host.obdbYearFromVin = false
                     if (importPanel.isObdb)
+                        root.host.previewObdb(true)
+                }
+                onEditingFinished: {
+                    if (importPanel.isObdb && root.host.obdbReport === null)
                         root.host.previewObdb()
                 }
             }
@@ -278,36 +285,6 @@ ColumnLayout {
                 text: qsTr("Discard")
                 onClicked: root.host.discardImport()
             }
-        }
-    }
-
-    // The removal of a plugin of the user's own asks once, in place
-    Flow {
-        objectName: "signalsConfirm"
-        visible: root.host.confirmingPlugin() !== null
-        Layout.fillWidth: true
-        spacing: Theme.spacing
-        Label {
-            objectName: "signalsConfirmText"
-            text: root.host.confirmingPlugin() !== null
-                ? qsTr("Remove %1? It is yours, and no other copy exists")
-                      .arg(root.host.confirmingPlugin().name)
-                : ""
-            color: Theme.text
-            wrapMode: Text.Wrap
-            width: Math.min(implicitWidth, parent.width)
-        }
-        ThemedButton {
-            objectName: "signalsConfirmRemove"
-            text: qsTr("Remove")
-            highlighted: true
-            enabled: root.host.idle
-            onClicked: root.host.removePlugin(root.host.confirmingPlugin().sha256)
-        }
-        ThemedButton {
-            objectName: "signalsConfirmCancel"
-            text: qsTr("Cancel")
-            onClicked: root.host.confirming = ""
         }
     }
 
@@ -482,14 +459,26 @@ ColumnLayout {
                     text: qsTr("More")
                     checkable: true
                     checked: row.open
+                    // A question asked in the open row is answered there
+                    enabled: root.host.confirming === ""
                     Accessible.name: qsTr("More for %1").arg(row.title)
                     onClicked: root.host.openRow = row.open ? "" : row.entry.profile
                 }
             }
 
+            // A removal of the user's own asks in the actions' place, by the
+            // press that asked, so a phone's page never asks off screen
+            RemoveQuestion {
+                id: rowQuestion
+                objectName: "signalsConfirm"
+                words: root.host.rowQuestion(row.entry, row.open)
+                canRemove: root.host.idle
+                onRemoveChosen: root.host.confirmRemoval()
+                onCancelChosen: root.host.confirming = ""
+            }
             Flow {
                 objectName: "rowActions"
-                visible: row.open
+                visible: row.open && !rowQuestion.visible
                 Layout.fillWidth: true
                 spacing: Theme.spacing
                 ThemedButton {
@@ -540,7 +529,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Remove this variant")
                     enabled: root.canChange
-                    onClicked: root.host.removeVariant(row.entry)
+                    onClicked: root.host.askRemoveVariant(row.entry)
                 }
                 ThemedButton {
                     objectName: "rowRemove"
@@ -659,7 +648,16 @@ ColumnLayout {
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
+            RemoveQuestion {
+                id: leftQuestion
+                objectName: "unmigratedConfirm"
+                words: root.host.unmigratedQuestion(leftRow.modelData)
+                canRemove: root.host.idle
+                onRemoveChosen: root.host.confirmRemoval()
+                onCancelChosen: root.host.confirming = ""
+            }
             Flow {
+                visible: !leftQuestion.visible
                 Layout.fillWidth: true
                 spacing: Theme.spacing
                 ThemedButton {
@@ -675,7 +673,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Remove")
                     enabled: root.canChange
-                    onClicked: root.host.removeUnmigrated(leftRow.modelData)
+                    onClicked: root.host.askRemoveUnmigrated(leftRow.modelData)
                 }
             }
         }
