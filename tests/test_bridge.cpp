@@ -14676,9 +14676,10 @@ TEST(BridgeTest, AFileCoreRefusedAtTheStartKeepsItsText)
 
 // ---------------------------------------------------------------------------
 // Armed (ADR-0063 section 7, step 7e): the app's armed recorder, opened
-// through the log's openRecorder with ECUIO_RECORD_ARMED. The mock's first
-// 15 s read 0 rpm, so a record condition below 300 rpm is ON from the first
-// frame (a window opens at once) and one above 90000 never fires.
+// through the log's openRecorder with ECUIO_RECORD_ARMED. The mock's speed
+// reads 0 until its first pull, well past a slow runner's first seconds, so a
+// record condition on speed below 1 km/h is ON from the first frame (a window
+// opens at once) and one above 90000 never fires.
 // ---------------------------------------------------------------------------
 
 namespace {

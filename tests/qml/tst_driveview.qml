@@ -822,7 +822,7 @@ TestCase {
         const armed = find(s.dash, "driveArmed")
         const mark = find(s.dash, "driveMark")
         verify(armed.visible && armed.enabled, "Armed offers itself")
-        compare(armed.text, "Armed")
+        compare(armed.text, "Arm", "off, it says what a press does")
         verify(!mark.visible, "no Mark before a recorder")
         // Waiting: armed, between windows, no Mark
         mouseClick(armed)

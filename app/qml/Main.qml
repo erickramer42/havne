@@ -637,12 +637,14 @@ ApplicationWindow {
                                      && (Bridge.armedActive || Bridge.armedWhy === "")
                             checkable: true
                             checked: Bridge.armedActive
-                            // Under 340 px of header row "Recording (window N)" leaves
-                            // Mark and Disconnect no room: the words shorten, the name doesn't
+                            // "Recording (window N)" leaves Mark and Disconnect no room
+                            // under 420 px of header row, and "Armed" beside Start log leaves
+                            // the status its address: the words shorten ("Window N", "Arm"
+                            // until it is on), the name doesn't
                             text: Bridge.armedRecording
-                                  ? (headerRow.width < 340 ? qsTr("Window %1")
+                                  ? (headerRow.width < 420 ? qsTr("Window %1")
                                                            : qsTr("Recording (window %1)")).arg(Bridge.armedWindows)
-                                  : qsTr("Armed")
+                                  : Bridge.armedActive ? qsTr("Armed") : qsTr("Arm")
                             Accessible.name: Bridge.armedRecording
                                              ? qsTr("Stop the armed recorder, recording window %1").arg(Bridge.armedWindows)
                                              : Bridge.armedActive ? qsTr("Stop the armed recorder")

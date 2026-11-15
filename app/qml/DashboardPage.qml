@@ -2739,7 +2739,7 @@ Page {
                     checked: Bridge.armedActive
                     text: Bridge.armedRecording
                           ? qsTr("Recording (window %1)").arg(Bridge.armedWindows)
-                          : qsTr("Armed")
+                          : Bridge.armedActive ? qsTr("Armed") : qsTr("Arm")
                     Accessible.name: Bridge.armedActive ? qsTr("Stop the armed recorder")
                                                         : qsTr("Arm a recorder for the conditions that record")
                     Accessible.description: Bridge.armedActive ? "" : Bridge.armedWhy

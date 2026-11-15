@@ -2152,6 +2152,7 @@ TestCase {
         compare(Bridge.connectSession("mock://armed"), "", "mock://armed connects")
         tryVerify(() => armed.visible, 5000, "Armed once connected")
         verify(!armed.enabled, "no condition records")
+        compare(armed.text, "Arm", "off, it says what a press does")
         compare(Bridge.armedWhy, "no condition records")
         compare(armed.Accessible.description, "no condition records")
         // A tap on the disabled button says why, as a refused press does
@@ -2195,15 +2196,20 @@ TestCase {
         tryVerify(() => armed.enabled, 3000)
         armed.clicked()
         tryVerify(() => Bridge.armedRecording, 10000, "a window opens")
-        compare(armed.text, "Recording (window 1)")
+        compare(armed.text, "Window 1", "a phone's header has no room for more")
         verify(mark.visible, "Mark inside a window")
         for (const width of widths) {
             main.width = width
             waitForRendering(main.contentItem)
-            compare(armed.text, width < 340 ? "Window 1" : "Recording (window 1)")
+            compare(armed.text, "Window 1")
             const out = pastTheEdge(row, main.contentItem, [])
             compare(out.length, 0, "in a window at " + width + " px: " + out.join(", "))
         }
+        // With room (420 px of header row and up) it says the whole of it
+        main.width = 600
+        waitForRendering(main.contentItem)
+        compare(armed.text, "Recording (window 1)")
+        compare(pastTheEdge(row, main.contentItem, []).length, 0, "in a window at 600 px")
         main.width = 384
         armed.clicked()
         verify(!Bridge.armedActive)
