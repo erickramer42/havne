@@ -1804,7 +1804,7 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
 {
     QString words;
     const QByteArray bytes = SignalStore::bytes(sha, &words);
-    const bool madeEmpty = pickedDocumentEmpty(url);
+    const bool removable = pickedDocumentRemovable(url);
     bool written = false;
     if (!bytes.isEmpty()) {
         written = writeToUrl(url, bytes);
@@ -1813,7 +1813,7 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
         }
     }
     if (!written) {
-        dropPickedDocument(url, madeEmpty);
+        dropPickedDocument(url, removable);
     }
     emit logMessage(
         written ? QStringLiteral("Signal file %1 saved to a file (%2 bytes)")
@@ -1830,7 +1830,7 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
 QVariantMap SessionBridge::saveLayoutFile(const QString& text, const QUrl& url)
 {
     const QByteArray bytes = text.toUtf8();
-    const bool madeEmpty = pickedDocumentEmpty(url);
+    const bool removable = pickedDocumentRemovable(url);
     QString words;
     bool written = false;
     if (bytes.isEmpty()) {
@@ -1845,12 +1845,17 @@ QVariantMap SessionBridge::saveLayoutFile(const QString& text, const QUrl& url)
         }
     }
     if (!written) {
-        dropPickedDocument(url, madeEmpty);
+        dropPickedDocument(url, removable);
     }
     emit logMessage(written ? QStringLiteral("Layout saved to a file (%1 bytes)")
                                   .arg(bytes.size())
                             : QStringLiteral("Layout not saved: %1").arg(words));
     return {{QStringLiteral("ok"), written}, {QStringLiteral("words"), words}};
+}
+
+void SessionBridge::dropPicked(const QUrl& url)
+{
+    dropPickedDocument(url, pickedDocumentRemovable(url));
 }
 
 QVariantMap SessionBridge::layoutFileText(const QUrl& url)
@@ -1893,7 +1898,7 @@ QVariantMap SessionBridge::exportFrames(const QUrl& url)
 {
     const FrameListModel::ScrubbedCsv csv = m_frameLog->scrubbedCsv();
     QString words = csv.words;
-    const bool madeEmpty = pickedDocumentEmpty(url);
+    const bool removable = pickedDocumentRemovable(url);
     bool written = false;
     if (csv.ok) {
         written = writeToUrl(url, csv.bytes);
@@ -1902,7 +1907,7 @@ QVariantMap SessionBridge::exportFrames(const QUrl& url)
         }
     }
     if (!written) {
-        dropPickedDocument(url, madeEmpty);
+        dropPickedDocument(url, removable);
     }
     const qulonglong leftOut = csv.identification + csv.textValues;
     emit logMessage(
@@ -1925,6 +1930,7 @@ QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex,
 {
     if (m_session == nullptr || !connected()) {
         const QString words = QStringLiteral("No session");
+        dropPickedDocument(url, pickedDocumentRemovable(url));
         emit logMessage(
             QStringLiteral("Health report not saved: %1").arg(words));
         return {{QStringLiteral("ok"), false},

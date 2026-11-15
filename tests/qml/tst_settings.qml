@@ -2255,7 +2255,7 @@ TestCase {
             Harness.writeScratchFile("picked (1).json", signalFileText("Picked")).toString(),
             "picked (1).json")
         compare(find(page, "signalNote").text, "Picked added: 1 signal, profile user.picked")
-        for (const name of ["signalImportDialog", "obdbDialog"]) {
+        for (const name of ["signalImportDialog", "obdbDialog", "signalSaveDialog"]) {
             const d = find(page, name)
             d.usePicker = true
             d.open()

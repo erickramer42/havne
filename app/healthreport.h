@@ -38,20 +38,25 @@ QByteArray healthBaselineArgument(const QString& folder);
 // Whether the document at where (a path or a provider's URI) exists and
 // holds no byte, read rather than sized: a provider that gives no size
 // reads 0 for a document with bytes, so an unreadable one counts as not
-// empty. A save asks this before it writes anything and removes the
-// document on failure only if it was empty then: the picker's own, even part
-// written, never one the user chose to replace
+// empty
 bool isEmptyDocument(const QString& where);
 
-// Removes the document at where when isEmptyDocument says it is empty:
-// for a refusal before anything is written
-void removeIfEmpty(const QString& where);
+// Whether a save that then refuses or fails may remove the document at
+// where, judged once at the save's entry, before anything is written, from
+// the save pick's verdict (urlwrite.h's takePick): never a document the user
+// chose to replace; one the pick made when it reads empty or can't be read
+// (a provider that won't open a document still uploading); with no verdict,
+// one that reads empty. A document that held bytes always stays
+bool pickedDocumentRemovable(const QString& where);
 
-// A picker through a provider has made the document url names before the
-// app writes: whether it is empty now (judged once, at entry), and its
-// removal when the save then refuses or fails
-bool pickedDocumentEmpty(const QUrl& url);
-void dropPickedDocument(const QUrl& url, bool wasEmpty);
+// Removes the document at where when pickedDocumentRemovable says so: for a
+// refusal before anything is written
+void removeIfRemovable(const QString& where);
+
+// The same through a provider's URL (a local file is never removed): the
+// judgment at entry, and the removal when the save then refuses or fails
+bool pickedDocumentRemovable(const QUrl& url);
+void dropPickedDocument(const QUrl& url, bool removable);
 
 // A written report's counts in words, each noun as its count wants it:
 // "1 ECU, 3 trouble codes, 0 key values"; and the log's line, "Health
@@ -69,7 +74,8 @@ QString healthSavedLine(const ecuio_health_report_t& report);
 // from a recording's folder at core's next ask (ecuio_health_export_with),
 // with nothing written. A report that isn't written removes the document a
 // picker made at url when it is a provider's (not a local file, or
-// throughProvider, which a test sets) and was empty when the call began
+// throughProvider, which a test sets) and pickedDocumentRemovable said so
+// when the call began
 QVariantMap writeHealthReport(ecuio_health_options_t options, const QUrl& url,
                               std::atomic<bool>* stop = nullptr,
                               bool throughProvider = false);

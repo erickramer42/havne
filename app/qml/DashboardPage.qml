@@ -6,7 +6,6 @@ import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs
 
 pragma ComponentBehavior: Bound
 
@@ -472,6 +471,7 @@ Page {
         const unloaded = files.filter(f => f.refs.length === 0).map(f => f.name)
         const text = DashboardBook.exportText(doc, form, needed)
         if (text === "") {
+            Bridge.dropPicked(url)
             noteLayout(qsTr("Not saved: this layout can't be written as a file"), true)
             return false
         }
@@ -3047,16 +3047,17 @@ Page {
             font.pixelSize: Theme.fontCaption
             text: root.layoutNote
         }
-        FileDialog {
+        DocumentSaveDialog {
             id: layoutSaveDialog
+            objectName: "layoutSaveDialog"
             title: qsTr("Export this layout")
-            fileMode: FileDialog.SaveFile
             defaultSuffix: "json"
             nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
             currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
             currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
                          + "/" + root.layoutFileName()
             onAccepted: root.exportLayoutTo(layoutSaveDialog.selectedFile)
+            onFailed: words => root.noteLayout(qsTr("Not saved: %1").arg(words), true)
         }
         DocumentOpenDialog {
             id: layoutOpenDialog

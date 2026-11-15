@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "recordingview.h"
+#include "urlwrite.h"
 
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
@@ -2327,6 +2328,65 @@ TEST(RecordingViewTest, AFailedReportLeavesAPickedDocumentGone)
     ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
     EXPECT_FALSE(saved[0].value(QStringLiteral("ok")).toBool());
     EXPECT_TRUE(QFile::exists(picked));
+}
+
+// A save pick's verdict reaches the viewer's report: an empty document the
+// user chose to replace stays when core refuses the report
+TEST(RecordingViewTest, ARefusedReportFollowsTheSavePicksVerdict)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.setThroughProviderForTesting(true);
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    {
+        QFile frames(folder + QStringLiteral("/frames.csv"));
+        ASSERT_TRUE(frames.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        frames.write("not a frames file\n");
+    }
+    const QString picked = root.path() + QStringLiteral("/picked.txt");
+    {
+        QFile f(picked);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+    }
+    const QUrl url = QUrl::fromLocalFile(picked);
+    notePick(pathOfUrl(url), PickMade::Replaced);
+    QList<QVariantMap> saved;
+    QObject::connect(&v, &RecordingView::reportSaved,
+                     [&](const QVariantMap& r) { saved << r; });
+    ASSERT_TRUE(v.saveHealthReport(url, 0));
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_FALSE(saved[0].value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(QFile::exists(picked)) << "a replaced empty document stays";
+}
+
+// A report the viewer refuses before its thread (nothing open) drops the
+// pick's own empty document and leaves one the user chose to replace
+TEST(RecordingViewTest, AReportRefusedWithNothingOpenFollowsTheSavePicksVerdict)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    RecordingView v;
+    v.setThroughProviderForTesting(true);
+    const auto empty = [&](const char* name) {
+        const QString path =
+            root.path() + QLatin1Char('/') + QString::fromLatin1(name);
+        QFile f(path);
+        EXPECT_TRUE(f.open(QIODevice::WriteOnly));
+        return path;
+    };
+    const QString made = empty("made.txt");
+    notePick(pathOfUrl(QUrl::fromLocalFile(made)), PickMade::Made);
+    EXPECT_FALSE(v.saveHealthReport(QUrl::fromLocalFile(made), 0));
+    EXPECT_FALSE(QFile::exists(made)) << "the pick's own empty document goes";
+    const QString replaced = empty("replaced.txt");
+    notePick(pathOfUrl(QUrl::fromLocalFile(replaced)), PickMade::Replaced);
+    EXPECT_FALSE(v.saveHealthReport(QUrl::fromLocalFile(replaced), 0));
+    EXPECT_TRUE(QFile::exists(replaced)) << "a replaced document stays";
 }
 
 TEST(RecordingViewTest, ARefusedReportLeavesAReplacedDocumentAlone)

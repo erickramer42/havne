@@ -887,9 +887,12 @@ public:
     // refused unread, and a leading UTF-8 BOM is skipped. A local file is
     // written whole or not at all and is never removed; a provider's document
     // is written in place (it can't be atomic) and a refused or failed save
-    // removes it only if it was empty when the save began.
+    // removes it only when healthreport.h's pickedDocumentRemovable says so.
     // Each logs one line
     Q_INVOKABLE QVariantMap saveLayoutFile(const QString& text, const QUrl& url);
+    // A save a page refuses before it calls the bridge: the document its pick
+    // made goes by the same rule
+    Q_INVOKABLE void dropPicked(const QUrl& url);
     Q_INVOKABLE QVariantMap layoutFileText(const QUrl& url);
     static constexpr qint64 layoutFileMaxBytes = 66016 + 16384;
     static int layoutFileBound()
