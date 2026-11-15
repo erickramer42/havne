@@ -407,7 +407,7 @@ def test_a_recordings_set_and_events_are_read():
         with open(os.path.join(RECORDED, "conditions.json"), "rb") as f:
             copy = f.read()
         assert r.conditions == havne.RecordedConditions(
-            hashlib.sha256(copy).hexdigest(), True, True, 7, 0, False)
+            hashlib.sha256(copy).hexdigest(), True, True, 7, 0, False, 0)
         events = r.condition_events()
         assert [tuple(ev) for ev in events] == cond_lines(RECORDED)
         assert events[2] == havne.RecordedConditionEvent(
@@ -466,6 +466,28 @@ def test_a_cond_line_that_doesnt_parse_is_counted_and_left_out(tmp_path):
             ev for ev in cond_lines(RECORDED) if ev[0] != 13376000]
 
 
+def test_the_events_a_recorder_lost_are_counted(tmp_path):
+    """The recorder's drop line for events it had no room for, summed"""
+    with havne.Recording(RECORDED) as r:
+        assert r.conditions.events_lost == 0
+        assert r.conditions._fields[-1] == "events_lost"
+    lost = tmp_path / "lost"
+    shutil.copytree(RECORDED, lost)
+    log = lost / "events.log"
+    data = log.read_bytes().decode("utf-8")
+    fired = "09:00:12.876  +12.876  cond  rpm_high,on,fired,5400,0,12876000,12875000"
+    assert data.count(fired) == 1
+    drop = "09:00:12.876  +12.876  drop  the recording lost %s: the disk fell behind"
+    log.write_bytes(data.replace(fired, drop % "3 condition events").encode("utf-8"))
+    with havne.Recording(lost) as r:
+        assert (r.conditions.events, r.conditions.events_lost) == (6, 3)
+        assert r.conditions.lines_skipped == 0
+    again = data.replace(fired, drop % "3 condition events" + "\n" + drop % "1 condition event")
+    log.write_bytes(again.encode("utf-8"))
+    with havne.Recording(lost) as r:
+        assert r.conditions.events_lost == 4
+
+
 def test_a_range_opens_with_the_states_held(tmp_path):
     """A folder export from 10 s holds coolant_high ON then as a held line"""
     out = tmp_path / "from-10s"
@@ -494,7 +516,7 @@ def test_a_copy_that_changed_or_went_is_refused_and_none_is_none(tmp_path):
             r.condition_set()
 
     with havne.Recording(FINDINGS) as r:
-        assert r.conditions == havne.RecordedConditions(None, False, False, 0, 0, False)
+        assert r.conditions == havne.RecordedConditions(None, False, False, 0, 0, False, 0)
         assert r.condition_events() == []
         assert r.condition_set() is None
 
