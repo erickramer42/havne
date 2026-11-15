@@ -108,6 +108,7 @@ qt_add_qml_module(app_ui
         qml/RecordingSignalRows.qml
         qml/RecordingFramesView.qml
         qml/RecordingAbout.qml
+        qml/RecordingList.qml
         qml/ViewHead.qml
         qml/PageHeader.qml
         qml/DashboardPage.qml
