@@ -9,11 +9,14 @@ the reference for writing a file by hand.
 
 > **Status:** core reads and checks a file (`ecuio_condition_set_load`,
 > `havne-cli conditions check`, the JSON Schema, the Python package's
-> `ConditionSet`), and a session judges its signal terms
-> (`ecuio_session_set_conditions`, `havne-cli stream --conditions`,
-> `Session.set_conditions`). Link and check terms load and aren't judged
-> yet, and the alert, the recording and the marker a file asks for are
-> reported, not acted on.
+> `ConditionSet`), and a session judges its signal terms and its link
+> terms (`ecuio_session_set_conditions`, `havne-cli stream
+> --conditions`, `Session.set_conditions`). A check term loads and isn't
+> judged yet. A recording keeps its session's conditions, an armed
+> recording writes a window for each `record`, and the app shows an
+> alert's banner, tone and colors (the app's Settings, Alerts page
+> reads and writes this file). A `mark` is written to the recording as a
+> marker.
 
 ## A first file
 
@@ -98,7 +101,7 @@ A term tests one input, and is exactly one of three kinds.
 | `above`, `below`, `equals`, `differs` | one of them | The comparison and its level, a number in the signal's own unit. |
 | `unit` | with `above` and `below` | The unit the level is in, 0 to 15 bytes. |
 | `clear` | optional, with `above` and `below` | Hysteresis: once true, the term turns false only at or past this level. |
-| `max_age` | optional | A sample older than this many seconds can't be judged: 0.1 to 60, 3 when left out. |
+| `max_age` | optional | A sample older than this many seconds can't be judged: 0.1 to 60. Left out, the bound is three times the signal's pace: from 3 s up to 180 s. |
 
 **A reference** names a signal in one of three forms:
 
@@ -232,8 +235,8 @@ havne-cli stream <uri> --conditions <file>
 
 A session judges the file's conditions on the frames it reads. After
 its `session` line, `stream` writes a `conditions` line: each condition
-with whether this session can judge it and why not (a link or a check
-term is `no_link` or `no_check`). Then a `condition` line follows each
+with whether this session can judge it and why not (a link term is `no_link` on a session whose transport doesn't
+publish link health, a check term is `no_check`). Then a `condition` line follows each
 change:
 
 ```json
@@ -275,6 +278,30 @@ with havne.Session("replay://...?profile=obd2&speed=max") as session:
     for event in events:
         print(event.timestamp_us, event.key, event.state, event.fired)
 ```
+
+## Recording on a condition
+
+`record` makes a condition start a recording. A recorder that is armed
+writes nothing until a condition with `record` turns ON, then writes a
+folder of its own for each window, from the condition's `before` ahead
+of its firing to its `after` past the last such condition turning OFF:
+
+```
+havne-cli log <uri> --conditions <file> --armed
+```
+
+Python's `Recorder(armed=True)` does the same, and the app's **Armed**
+button. An armed recording needs a file with at least one enabled
+condition that has `record`. The recording keeps its session's
+conditions (`conditions.json` and a `cond` line for each change), and
+`havne-cli view` and `info` and Python's `Recording.conditions` read them
+back, with `events_lost`, the changes a full ring had no room for: above
+0, a firing or a turn OFF may be missing.
+
+A recording's focus line, and so the default wide export's columns, hold
+the signals the caller picked alone: the signals a condition adds to a
+focus are swept and written to `signals.csv`, but they are columns of the
+export only when picked.
 
 ## Checking one with no car
 

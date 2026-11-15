@@ -348,6 +348,15 @@ and a 3 s bound on it would blank boost between its reads. Live still
 dims a stale input as it does any signal; the computed value goes quiet
 only when an input passes its own bound.
 
+The bound also has to cover the time between two inputs' reads. Asked
+once a sweep, two inputs arrive about a sweep apart at worst; with the
+whole of a large set asked, a sweep can take longer than 3 s, and a
+signal computed from two of its inputs then never has a value ("waiting
+for data", in none of the unsupported, absent or unasked lists). A
+`max_age` near the sweep's length on the input read least often (Live's
+Delivery line and the support report give the sweep, and a `max_age` is
+at most 60 s), or asking fewer signals, fixes it.
+
 ### Units
 
 A unit is shown exactly as written. These convert when the imperial

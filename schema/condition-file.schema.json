@@ -207,7 +207,7 @@
         },
         "max_age": {
           "title": "Max age",
-          "description": "A sample older than this many seconds can't be judged, 0.1 to 60. The default is 3.",
+          "description": "A sample older than this many seconds can't be judged, 0.1 to 60. Left out, the bound is three times the signal's pace, from 3 s up to 180 s.",
           "type": "number",
           "minimum": 0.1,
           "maximum": 60

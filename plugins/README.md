@@ -20,22 +20,10 @@ stays with its author, never here.
 
 ## In the app
 
-The app takes a plugin in its packed form, one file named
-`<id>.havne-plugin.json`: the manifest with each data file inlined
-under `files` by its relative name, and no fixtures (ADR-0052 section
-2). On Settings' Signals page, **Import a plugin** reads it (a
-phone's `content://` file too) and keeps a copy named by its SHA-256
-in the app's own folder, beside the signal files' copies, which is
-loaded at each start. Plugins are the app's, not one vehicle's: every
-variant of every plugin is a profile, so a URI naming one connects.
-With a vehicle picked, every variant of every plugin shows as a button,
-and the one picked is kept with the vehicle and offered under **What
-to read**. The variants a plugin's `match` covers for the car's VIN
-come first (the VIN typed in the lookup, else the connected car's and
-the matches kept from the last time this vehicle's VIN was read; the
-VIN itself is never stored, only which variants it matched, and a
-newer version of a plugin starts that over). A pick whose plugin no
-longer loads shows as "doesn't load", to be undone. The VIN only
-proposes: nothing is chosen for you. Importing an id already there
-replaces it, and **Remove** deletes the copy; neither goes ahead
-while a session decodes with the plugin.
+The app takes a plugin in its packed form, one file named `<id>.havne-plugin.json`: the manifest with each data file inlined under `files` by its relative name, and no fixtures (ADR-0052 section 2). On Settings' Signals page, **Import...** reads it (a phone's `content://` file too) and keeps a copy named by its SHA-256 in the app's own folder, which is loaded at each start. Plugins are the app's, not one vehicle's: every variant of every plugin is a row of the Signals page and a profile, so an address naming one connects. With a vehicle picked, a press on a row picks that variant for the vehicle; the variants a plugin's `match` covers for the car's VIN (the connected car's, or one typed in the VIN lookup; the VIN itself is never stored) are listed first under "For this car:". The VIN only proposes: nothing is chosen for you. Importing an id already there replaces it (a plugin marked **Mine** is updated in place), and **Remove** deletes the copy; neither goes ahead while a session decodes with the plugin.
+
+## Making a plugin with havne-cli
+
+`havne-cli plugins wrap <signal-file> --out <pkg>` turns a signal file into a packed plugin of one variant (`--id` and `--variant` name them), `plugins put <pkg> <signal-file> --out <pkg>` adds the file as a variant or replaces one, and `plugins drop <pkg> --variant <id> --out <pkg>` removes one. Each writes a new file and raises the plugin's minor version; `put` says when an ECU of the file took another id. `signals import obdb --plugin` writes an OBDb conversion as a plugin, its variant named for the model year you type, with `--wmi` and `--years` for the VINs it matches. `plugins check` names each variant's license and says when it is share-alike.
+
+A plugin Havne makes carries `lineage`: 32 hex digits, the start of the SHA-256 of the signal file it was first made from. Leave it out of a plugin you write; keep it when you edit one Havne made, so a later version still updates the earlier one.
