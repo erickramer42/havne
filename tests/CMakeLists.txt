@@ -1774,6 +1774,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_bluetooth.cpp
         test_bridge_frames.cpp
         test_bridge_readonce.cpp
+        test_bridge_obdb.cpp
         test_recording_view.cpp
         test_viewer_frames.cpp
         test_recording_import.cpp
