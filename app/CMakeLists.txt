@@ -104,6 +104,16 @@ qt_add_qml_module(app_ui
         qml/RecordingJumpRow.qml
         qml/StretchesPanel.qml
         qml/ConditionsPanel.qml
+        qml/RecordingSpanStats.qml
+        qml/RecordingFindings.qml
+        qml/RecordingZoomRow.qml
+        qml/RecordingSignalRows.qml
+        qml/RecordingFramesView.qml
+        qml/RecordingAbout.qml
+        qml/RecordingList.qml
+        qml/RecordingImportPanel.qml
+        qml/RecordingChart.qml
+        qml/ViewHead.qml
         qml/PageHeader.qml
         qml/DashboardPage.qml
         qml/ConnectList.qml
