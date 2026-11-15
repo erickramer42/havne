@@ -1,5 +1,5 @@
 // File/layer: app/qml/Main.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.phone, QmlTest.linkhealth, QmlTest.driveview (test_qml);
+// Testing: QML: QmlTest.phone, QmlTest.linkhealth, QmlTest.driveview, QmlTest.alerts (test_qml);
 //          BENCH, Manual smoke
 
 import QtCore
@@ -204,13 +204,13 @@ ApplicationWindow {
         if (logBackTab.page !== cameFrom || !goBack())
             gotoPage(dashboardPage)
     }
-    // A gauge's Alert: Settings' alert editor on the new condition
+    // A gauge's Alert: Settings' alert editor on the new condition, or the
+    // cell's note says why not; a draft opened takes an earlier refusal away
     function openAlertDraft(condition) {
         const why = settingsView.openAlertDraft(condition)
+        dashboardView.alertNote = why
         if (why === "")
             gotoPage(settingsPage)
-        else
-            dashboardView.alertNote = why
     }
     // A connect list's "Other address..." (Dash's, Home's): Back returns to
     // that page, not to Settings' list

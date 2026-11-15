@@ -19,6 +19,7 @@ TestCase {
         id: dashComponent
         DashboardPage { width: 1280; height: 800 }
     }
+    Component { id: mainComponent; Main {} }
 
     readonly property string none: '{"havne_conditions":1,"conditions":[]}\n'
 
@@ -752,5 +753,27 @@ TestCase {
         verify(find(page, "dashAlertNote").visible)
         page.select(1)
         compare(page.alertNote, "", "another cell clears it")
+    }
+
+    // A refused Alert's note goes once a later Alert from the same cell
+    // opens its draft, so the cell's panel shows no stale refusal
+    function test_aRefusalsNoteGoesWhenALaterAlertOpens() {
+        const full = []
+        for (let i = 0; i < ConditionBook.maxConditions; ++i)
+            full.push(rpm("a" + i, "A" + i, { signal: ["id:1001"], unit: "RPM", above: 6000 }))
+        save(full)
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const dash = find(main.contentItem, "dashboardPage")
+        const gauge = () => ConditionBook.alertFromLevels("Coolant", ["id:2001"], "°C",
+                                                          { dangerFrom: 115 }, 0, 150, [])
+        main.gotoPage(main.dashboardPage)
+        main.openAlertDraft(gauge())
+        verify(dash.alertNote.indexOf("holds 64 alerts") >= 0, dash.alertNote)
+        compare(main.currentPage, main.dashboardPage, "a refusal stays on the Dashboard")
+        save([])
+        main.openAlertDraft(gauge())
+        compare(main.currentPage, main.settingsPage, "the draft opens in Settings")
+        compare(dash.alertNote, "", "the refusal's note is gone")
     }
 }
