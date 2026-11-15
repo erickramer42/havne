@@ -8,16 +8,22 @@
 # cruise fixture with core's rules, a level of the caller's, a range cut
 # at its edge and a role named; a road log's two pulls, the same ones
 # havne-cli view --stretches lists, with a rise and a gap of the
-# caller's; then the refusals.
+# caller's; then the refusals. A cancel over the three searches
+# (stretches, find_threshold, find_marker): stretches is asked once for
+# each second of a recording about thirty seconds long, the two finds once
+# (core's summaries pass a second by, so a find reads none here); a cancel
+# never stopping them, stopping at an ask, raising, or a Ctrl+C.
 
 import csv
 import math
 import os
+import signal
+import threading
 
 import pytest
 
 import havne
-from conftest import ROOT, cli
+from conftest import ROOT, Asks, cli
 
 RECORDINGS = os.path.join(ROOT, "tests", "fixtures", "recording")
 PULL = os.path.join(RECORDINGS, "pull-early")
@@ -210,3 +216,98 @@ def test_what_core_cant_answer_is_refused():
             r.stretches(roles={"brake": "RPM"})
         with pytest.raises(TypeError):
             r.stretches(pull_speed=1.0)
+
+
+def stretches(r, cancel):
+    return r.stretches(cancel=cancel)
+
+
+def threshold(r, cancel):
+    return r.find_threshold("RPM", 1e9, cancel=cancel)
+
+
+def marker(r, cancel):
+    return r.find_marker("no such marker", cancel=cancel)
+
+
+def r_seconds(folder):
+    with havne.Recording(folder) as r:
+        return -(-r.info.duration_us // 1_000_000)
+
+
+# (search, the ask the cases stop at, the asks a whole search makes at least)
+SEARCHES = [(stretches, 3, 0), (threshold, 1, 1), (marker, 1, 1)]
+IDS = ["stretches", "threshold", "marker"]
+
+
+@pytest.mark.parametrize("search,at,whole", SEARCHES, ids=IDS)
+def test_a_cancel_that_never_stops_a_search_gives_the_same_answer(search, at, whole):
+    asks = Asks()
+    with havne.Recording(PULL) as r:
+        assert search(r, asks) == search(r, None)
+    if search is stretches:
+        # Two passes (the count, then the fill), each asking once at its
+        # start and once before each second it reads
+        assert asks.asked == 2 * (1 + r_seconds(PULL)), "once a second a pass"
+    else:
+        assert asks.asked >= whole
+
+
+@pytest.mark.parametrize("search,at,whole", SEARCHES, ids=IDS)
+def test_a_stop_ends_a_search_at_its_ask(search, at, whole):
+    with havne.Recording(PULL) as r:
+        asks = Asks(at)
+        with pytest.raises(havne.Error) as e:
+            search(r, asks)
+        assert e.value.status == havne.c.ECUIO_ERR_CANCELED
+        assert "canceled" in e.value.detail
+        assert asks.asked == at, "it asked no further"
+        search(r, None)  # the reader still answers
+
+
+@pytest.mark.parametrize("search,at,whole", SEARCHES, ids=IDS)
+def test_an_exception_in_a_searchs_cancel_reaches_the_caller(search, at, whole):
+    with havne.Recording(PULL) as r:
+        asks = Asks(at, RuntimeError("the caller's own"))
+        with pytest.raises(RuntimeError, match="the caller's own"):
+            search(r, asks)
+        assert asks.asked == at
+        asks = Asks(at, KeyboardInterrupt())
+        with pytest.raises(KeyboardInterrupt):
+            search(r, asks)
+        assert asks.asked == at
+        with pytest.raises(TypeError):
+            search(r, 3)
+
+
+@pytest.mark.parametrize("search,at,whole", SEARCHES, ids=IDS)
+def test_a_ctrl_c_ends_a_search_at_its_next_ask(search, at, whole):
+    # The search's handler stands in for Python's while core runs, and the
+    # default is back after
+    during = []
+
+    def ctrl_c():
+        during.append(signal.getsignal(signal.SIGINT))
+        signal.raise_signal(signal.SIGINT)
+        return False
+
+    with havne.Recording(PULL) as r:
+        asks = Asks(at, ctrl_c)
+        with pytest.raises(KeyboardInterrupt):
+            search(r, asks)
+    assert asks.asked == at, "the flag ends it at the next ask without asking the cancel"
+    assert during[0] is not signal.default_int_handler
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+
+
+def test_a_search_off_the_main_thread_leaves_the_handler_alone():
+    # Only the main thread may set a handler, and only it is interrupted
+    asks = Asks()
+    got = []
+    with havne.Recording(PULL) as r:
+        thread = threading.Thread(target=lambda: got.append(stretches(r, asks)))
+        thread.start()
+        thread.join()
+        assert got == [stretches(r, None)]
+    assert asks.asked > 2
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler

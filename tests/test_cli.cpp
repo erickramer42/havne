@@ -89,6 +89,18 @@ TEST(CliLineTest, StringsStopAtTheirLengthOrANul)
     EXPECT_EQ(str("ab\0cd", 5), "\"ab\"");
 }
 
+TEST(CliLineTest, AnExactStringWritesANulAsAnEscape)
+{
+    char buf[64];
+    cli::Line l(buf, sizeof buf);
+    EXPECT_EQ(l.string_exact("ab\0cd", 5), 5u);
+    EXPECT_EQ(std::string(l.data(), l.size()), "\"ab\\u0000cd\"");
+    cli::Line cut(buf, sizeof buf);
+    cut.string_exact("ab\0cd", 5, 6);
+    EXPECT_EQ(std::string(cut.data(), cut.size()), "\"ab\"")
+        << "an escape whole";
+}
+
 TEST(CliLineTest, WellFormedUtf8PassesAndAnythingElseIsReplaced)
 {
     EXPECT_EQ(str("\xC2\xB0"

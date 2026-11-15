@@ -331,3 +331,25 @@ appendix. `Elm327SessionTest.TheCloseWaitsForTheReplyUnderWayBefore1001`,
 `.ACloseWithNoAnswerEndsWithinItsWaits`, `.ACloseOnADeadLinkEndsPromptly`.
 A parked car run with a listener on the bus, expecting one `50 01`, is still
 to come.
+
+## Appendix: SocketCAN's close waits for a request still out (2026-11-12)
+
+The appendix of 2026-11-11 left SocketCAN writing `10 01` at once. A module
+still answering a read when the close comes may miss the `10 01` and wait
+out S3 in the extended session: inferred from the other two transports, not
+seen on a car. SocketCAN's close waits as J2534's does for a request still
+out on a leaving channel: until it is answered or 100 ms pass from the
+close's start, whichever is first, whatever a `78` does to its own wait.
+Both transports take that time from `ecuio_engine_leave_wait_until`
+(`core/src/request_engine.h`), so the bound is one rule. Meanwhile the
+socket is read as the worker reads it: a First Frame gets its Flow Control,
+so a segmented answer completes, and a whole answer goes to the engine,
+never to a callback. A hard failure (a bus-off error frame, the interface
+gone) ends the close at once, with no `10 01`. Then `10 01` goes out as a
+Single Frame on each leaving channel, its answer still unread for the reason
+the appendix of 2026-11-11 gives.
+`SocketCanRequestTest.TheCloseWaitsForTheReplyStillOutBefore1001`,
+`.AnAnswerThatNeverComesHoldsTheCloseToItsBound`,
+`SessionControlTest.TheClosesWaitIsTheRequestsDeadlineWithinItsBound`.
+It has run against the simulated bus only: a SocketCAN session that asks
+needs an adapter whose driver offers one-shot mode (BENCH prep #32).

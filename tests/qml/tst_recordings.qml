@@ -46,6 +46,7 @@ TestCase {
     }
 
     function cleanup() {
+        DocumentPicker.setPickerForTesting(false)
         Relay.stop()   // a failed case must not leave Replay off for the next
         Bridge.unitSystem = 0
         Theme.developerMode = false
@@ -200,6 +201,44 @@ TestCase {
         verify(!find(page, "replayView").visible, "no Replay of the view")
         verify(!find(page, "decodeChoice").visible, "no frames to decode")
         compare(page.series(400).length, 3, "its numbers are plotted")
+    }
+
+    // Through the phone's picker: the panel names the file and the map as the
+    // picker does (a provider's URL ends in an id), and a picker with no
+    // document says so
+    function test_aPickedLogAndMapAreNamedAsThePickerNamesThem() {
+        const page = createPage()
+        const csv = Harness.writeScratchFile("picked-log.csv", "time,rpm\n0,800\n0.5,900\n")
+        const map = Harness.writeScratchFile("picked-map.json",
+            '{"havne_column_map": 1, "time": {"column": "time", "unit": "s"}, '
+            + '"signals": [{"column": "rpm", "name": "RPM", "unit": "rpm"}]}')
+        DocumentPicker.setPickerForTesting(true)
+        const files = find(page, "importDialog")
+        files.usePicker = true
+        files.open()
+        DocumentPicker.deliver(files.request, -1, csv.toString(), "logger (1).csv")
+        verify(find(page, "importPanel").visible)
+        compare(page.importFile, csv, "the picked URL as it came")
+        compare(find(page, "importFileName").text, "Import logger (1).csv")
+        tryVerify(() => !page.importGuessing, 10000, "the guess ends")
+
+        const maps = find(page, "mapDialog")
+        maps.usePicker = true
+        maps.open()
+        DocumentPicker.deliver(maps.request, -1, map.toString(), "map (1).json")
+        compare(page.importMap, map)
+        compare(find(page, "importMapName").text, "map (1).json")
+        maps.open()
+        DocumentPicker.deliver(maps.request, -1, "", "")
+        compare(find(page, "importNote").text, "The picker returned no document")
+        compare(page.importMap, map, "nothing read")
+
+        page.importNote = ""
+        files.open()
+        DocumentPicker.deliver(files.request, -1, "", "")
+        compare(find(page, "importNote").text, "The picker returned no document",
+                "the log's own picker says so too")
+        compare(page.importFile, csv, "the log picked before stays")
     }
 
     // Import: a picked file's kind guessed from its first line; a CSV
@@ -645,6 +684,29 @@ TestCase {
         verify(!Bridge.recordingImport.busy)
     }
 
+    // A refused import's words stay with the import: opening a recording
+    // from the list afterwards shows none of them
+    function test_aRefusedImportsWordsDoNotSitOverTheNextRecording() {
+        const page = createPage()
+        page.chooseImportFile(Harness.writeScratchFile("note-refused.csv",
+            "time (s),rpm
+0,800
+1,900
+2,950
+"))
+        const preview = guessed(page)
+        find(guessRow(preview, 0), "name").text = "n".repeat(40)
+        find(page, "importStart").clicked()
+        tryVerify(() => !Bridge.recordingImport.busy && page.importNote !== "", 10000,
+                  "the import ends")
+        verify(page.importFailed)
+        verify(find(page, "importNote").visible, "the refusal is said")
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        compare(page.importNote, "", "opening a recording clears it")
+        verify(!find(page, "importNote").visible, "nothing over the recording")
+    }
+
     function test_aRefusedGuessImportKeepsItsEdits() {
         const page = createPage()
         page.chooseImportFile(Harness.writeScratchFile("guess-refused.csv",
@@ -911,10 +973,18 @@ profile  raw
         verify(find(panel, "exportRows_100").enabled && find(panel, "exportRows_250").enabled,
                "still choosable")
         find(panel, "exportRows_custom").clicked()
+        const sizedAt = ms => panel.sizes.some(s => s.rowMs === ms)
+        panel.customText = "50"
+        tryVerify(() => sizedAt(50), 10000, "the custom interval sized")
+        compare(textOf("exportRows_custom"), "no fewer rows than every sweep",
+                "a typed interval finer than the recording says so too")
         panel.customText = "1000"
-        tryVerify(() => panel.sizes.length === 4, 10000, "the custom interval sized")
+        tryVerify(() => sizedAt(1000), 10000, "the custom interval sized again")
         verify(/ rows?, /.test(textOf("exportRows_custom")), "a slower interval still saves: "
                + textOf("exportRows_custom"))
+        // No row at all (a range holding no sample) has no rate to be slower than
+        panel.sizes = [{ rowMs: 0, rows: 0, bytes: 80 }, { rowMs: 100, rows: 0, bytes: 80 }]
+        compare(panel.sizeOf(100), "0 rows, 80 B", "no rows is a size, not the note")
         restoreExportChoices(panel)
     }
 
@@ -1542,11 +1612,12 @@ profile  raw
     }
 
     // The chart's height until the splitter sets one: 45 % of the page on
-    // the desktop, 40 % on a phone, never under what three panes, their
-    // seams and the time axis need there
+    // the desktop, 40 % less the 8 px of the Jump row's top margin on a
+    // phone, never under what three panes, their seams and the time axis
+    // need there
     function test_theChartTakesAShareOfThePage_data() {
         return [{ tag: "desktop", w: 1280, h: 720, phone: false, want: 0.45 * 720 },
-                { tag: "phone", w: 384, h: 832, phone: true, want: 0.4 * 832 },
+                { tag: "phone", w: 384, h: 832, phone: true, want: 0.4 * 832 - 8 },
                 { tag: "short phone", w: 384, h: 500, phone: true, want: -1 }]
     }
     function test_theChartTakesAShareOfThePage(data) {
@@ -1560,10 +1631,11 @@ profile  raw
             const chart = find(page, "chartFrame")
             const want = data.want > 0 ? data.want : page.phoneChartFloor
             if (data.want < 0) {
-                // The Jump row stands above the chart: a page short enough
-                // to pin the viewer still has the floor for the chart
+                // The Jump row stands above the chart, with its top margin of
+                // 8: a page short enough to pin the viewer still has the floor
+                // for the chart
                 verify(waitForPolish(page.Window.window), "laid out")
-                page.height = data.h + find(page, "jumpRow").height + Theme.spacing
+                page.height = data.h + find(page, "jumpRow").height + Theme.spacing + 8
             }
             if (data.want < 0) {
                 const room = want - 8 - ChartLayout.top - ChartLayout.axisHCursor - ChartLayout.bottomPad
@@ -1803,7 +1875,7 @@ profile  raw
             page.width = data.w
             verify(waitForPolish(page.Window.window), "laid out")
             find(page, "detailView_about").clicked()   // the pinned form's About holds the rows
-            find(page, "compareChoice").activated(1)
+            find(page, "compareChoice").activated(1)   // which opens Compare's controls
             tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
             const seen = []
             const problems = []
@@ -2538,7 +2610,11 @@ profile  raw
         const page = openEarly()
         page.forceActiveFocus()
         page.setCursor(1000)
+        // The box sits in Compare's controls, shown while Compare is open
+        find(page, "compareButton").clicked()
         const choice = find(page, "compareChoice")
+        verify(waitForPolish(page.Window.window), "the controls are laid out")
+        verify(choice.visible, "the box is shown")
         choice.forceActiveFocus()
         verify(choice.activeFocus, "the box has the focus")
         // Left and Right it doesn't use: the cursor still steps
@@ -2546,7 +2622,7 @@ profile  raw
         tryVerify(() => page.cursorMs > 1000, 2000, "Right steps the cursor beside a focused box")
         page.setCursor(1000)
         keyClick(Qt.Key_End)
-        verify(page.compareOpen, "End went to the box: it picked the last recording")
+        verify(page.comparing, "End went to the box: it picked the last recording")
         keyClick(Qt.Key_Home)
         keyClick("b")
         compare(page.cursorMs, 1000, "the cursor stayed")
@@ -3323,6 +3399,53 @@ profile  raw
         tryVerify(() => page.stretchUnits === 0, 5000, "and back")
     }
 
+    // A change of units remakes no cell: the fields keep the levels in
+    // force, so the next Apply sends them with the one typed
+    function test_aChangeOfUnitsKeepsTheStretchesFieldsFilled() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        find(page, "rule_pullRise").text = "5000"
+        find(page, "rule_cruiseFloor").text = "40"
+        find(page, "stretchesApply").clicked()
+        tryVerify(() => page.stretchList !== null, 10000, "the answer")
+        try {
+            Bridge.unitSystem = 1
+            tryVerify(() => page.stretchUnits === 1, 5000, "asked again in the other unit")
+            compare(find(page, "rule_pullRise").text, "5000", "the field keeps its level")
+            compare(find(page, "rule_cruiseFloor").text, "40", "a speed field too")
+            find(page, "rule_pullLevel").text = "50"
+            find(page, "stretchesApply").clicked()
+            compare(page.stretchRules.pullRise, 5000, "Apply sends the kept level with the typed one")
+            compare(page.stretchRules.pullLevel, 50)
+        } finally {
+            Bridge.unitSystem = 0
+        }
+    }
+
+    // A level is written and read in one locale: a comma-decimal one reads
+    // back what it wrote, never 1.125 as 1125
+    function test_theStretchesFieldsRoundTripInACommaLocale() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        const panel = find(page, "stretchesPanel")
+        panel.numberLocale = Qt.locale("de_DE")
+        compare(panel.shown(1.125), "1,125")
+        compare(panel.shown(750), "750")
+        panel.rules = ({ pullHoldS: 1.125, pullRise: 5000 })
+        compare(find(page, "rule_pullHoldS").text, "1,125", "written in the locale")
+        compare(panel.typedRules().pullHoldS, 1.125, "and read back whole")
+        compare(panel.typedRules().pullRise, 5000)
+        panel.numberLocale = Qt.locale("C")
+    }
+
     // A phone's panel stands in the chart's place, and Apply returns to it
     function test_aPhonesStretchesPanelTakesTheChartsPlaceUntilApplied() {
         const page = createPage()
@@ -3383,6 +3506,325 @@ profile  raw
         openRow(page, earlyRow)
         tryVerify(() => page.stretchList !== null, 10000, "the next recording's arrive")
         compare(page.stretchesOf("pull").length, 1)
+    }
+
+    // A values recording of `count` number signals, each sampled ten times
+    // a second for a minute (600 rows a signal), and its row
+    function denseRecording(name, count) {
+        const folder = Harness.writeFramesRecording(name, 1, 10000)
+        verify(folder !== "", "the folder is made")
+        let header = "ecuio session recording, format 2 (ADR-0049)\n"
+                     + "started  2026-11-03 09:00:00.000 (local time)\n"
+                     + "profile  test\n"
+        for (let s = 1; s <= count; ++s)
+            header += "signal  Signal " + s + ",number,V,0,0\n"
+        header += "\n00:01:00.000  +60.000  end  test: 0 frames, " + (600 * count)
+                  + " values, 0 records dropped, 0 notes dropped\n"
+        const rows = ["host_us,signal,value,unit"]
+        for (let t = 1; t <= 600; ++t) {
+            for (let s = 1; s <= count; ++s)
+                rows.push((t * 100000) + ",Signal " + s + "," + ((t + s) % 50) + ",V")
+        }
+        verify(Harness.writeScratchFile(name + "/events.log", header).toString() !== "")
+        verify(Harness.writeScratchFile(name + "/signals.csv", rows.join("\n") + "\n").toString() !== "")
+        return { title: name, uri: "replay://x?profile=test", source: "", folder: folder,
+                 profile: "test" }
+    }
+
+    // Columns stay narrower than a second while the rows a frame draws (the
+    // plotted signals', both recordings' together) fit rawRowsPerFrame,
+    // whatever the signals not plotted add, and go a second wide past it or
+    // once either recording's rows in view outgrow the reader's cache
+    function test_columnsGoASecondWideByTheRowsAFrameDraws() {
+        const one = denseRecording("dense-one", 40)
+        const two = denseRecording("dense-two", 40)
+        const page = createPage()
+        page.recordings = [two, one]
+        openRow(page, one)
+        const first = n => {
+            const picks = {}
+            for (let i = 0; i < n; ++i)
+                picks[i] = true
+            return picks
+        }
+        const columnMs = () => {
+            const c = page.series(400)[0].columns
+            return (c.t1 - c.t0) / c.lows.length
+        }
+        const spanS = (page.viewT1 - page.viewT0) / 1000
+        verify(spanS * page.rowsPerSecond > page.rawRowsPerFrame,
+               "every signal's rows in view pass the bound: " + spanS * page.rowsPerSecond)
+        page.plotted = first(2)
+        verify(columnMs() < 1000, "two of forty plotted, 1,200 rows: " + columnMs() + " ms a column")
+        page.plotted = first(40)
+        verify(columnMs() >= 1000, "all forty, 24,000 rows: " + columnMs() + " ms a column")
+
+        // The cache's bound counts every signal's rows, plotted or not
+        page.plotted = first(2)
+        page.rawRowsCached = 20000
+        verify(columnMs() >= 1000, "24,000 rows held against 20,000: " + columnMs() + " ms a column")
+        page.rawRowsCached = 30000
+        verify(columnMs() < 1000, "and against 30,000: " + columnMs() + " ms a column")
+
+        // Compared, the rows drawn are both recordings'; the rows held are
+        // each reader's own
+        page.compareWith(two)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        compare(page.series(400).filter(s => s.dash !== undefined).length, 2, "both are drawn dashed")
+        verify(columnMs() < 1000, "24,000 rows in each reader, 2,400 drawn: " + columnMs() + " ms a column")
+        page.plotted = first(20)
+        verify(columnMs() >= 1000, "twenty of each, 24,000 rows drawn: " + columnMs() + " ms a column")
+        page.stopComparing()
+        verify(columnMs() < 1000, "twenty alone, 12,000: " + columnMs() + " ms a column")
+    }
+
+    // A values recording of one RPM signal sampled three to four times a
+    // second for ten minutes, swinging through a few thousand rpm: every
+    // sample shiftMs later and plus higher, in the unit given; and its row
+    function swingRecording(name, shiftMs, plus, unit) {
+        const folder = Harness.writeFramesRecording(name, 1, 10000)
+        verify(folder !== "", "the folder is made")
+        const header = "ecuio session recording, format 2 (ADR-0049)\n"
+                       + "started  2026-11-03 09:00:00.000 (local time)\n"
+                       + "profile  test\n"
+                       + "signal  RPM,number," + unit + ",0,1\n"
+                       + "\n00:10:01.000  +601.000  end  test: 0 frames, 0 values, 0 records "
+                       + "dropped, 0 notes dropped\n"
+        const rows = ["host_us,signal,value,unit"]
+        let t = 1000
+        for (let k = 0; t < 600000; ++k) {
+            const v = Math.round(2500 + 1500 * Math.sin(t / 7000) + 300 * Math.sin(t / 900)) + plus
+            rows.push(((t + shiftMs) * 1000) + ",RPM," + v + "," + unit)
+            t += k % 3 === 0 ? 333 : 250
+        }
+        verify(Harness.writeScratchFile(name + "/events.log", header).toString() !== "")
+        verify(Harness.writeScratchFile(name + "/signals.csv", rows.join("\n") + "\n").toString() !== "")
+        return { title: name, uri: "replay://x?profile=test", source: "", folder: folder,
+                 profile: "test" }
+    }
+
+    // A comparison's difference is the compared recording's mean less this
+    // one's over one stretch of the axis in both. A recording against
+    // itself half a second later, aligned, shows none, in columns of a
+    // second or more (where the traces drawn hold each recording's own
+    // whole seconds, half a second apart) and in narrower ones
+    function test_aRecordingAgainstItselfHalfASecondLaterShowsNoDifference() {
+        const here = swingRecording("swing", 0, 0, "rpm")
+        const later = swingRecording("swing-later", 500, 0, "rpm")
+        const higher = swingRecording("swing-higher", 0, 100, "rpm")
+        const other = swingRecording("swing-other-unit", 500, 0, "1/min")
+        const page = createPage()
+        page.recordings = [other, higher, later, here]
+        openRow(page, here)
+        const rpm = page.shownSignals.find(s => s.name === "RPM").index
+        const picks = {}
+        picks[rpm] = true
+        page.plotted = picks
+        const box = find(page, "compareDifference")
+        // The difference of the grid the chart draws, once it is read
+        const differenceTrace = () => {
+            let trace
+            tryVerify(() => {
+                trace = page.series(400).find(s => s.pane !== undefined)
+                return trace !== undefined && page.difference !== null
+                       && page.difference.key === page.differenceWanted.key
+            }, 10000, "the view's difference is read")
+            return trace
+        }
+        const columnMs = trace => (trace.columns.t1 - trace.columns.t0) / trace.columns.lows.length
+        // The columns holding a difference, and how far the farthest is from `from`
+        const judged = (trace, from) => {
+            let count = 0, most = 0
+            for (let c = 0; c < trace.columns.lows.length; ++c) {
+                const d = trace.columns.lows[c]
+                if (!isFinite(d))
+                    continue
+                ++count
+                most = Math.max(most, Math.abs(d - from))
+            }
+            return { count: count, most: most }
+        }
+
+        page.compareWith(later)
+        verify(!box.enabled, "nothing to subtract until the two are lined up")
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        page.setAlignOn("rise")
+        page.alignHysteresis = 200
+        page.alignLevel = 3500
+        verify(page.compareAligned, page.compareStatus)
+        compare(page.compareOffsetMs, -500, "the copy lies over the recording")
+        verify(box.enabled && !box.checked && !page.differenceShown, "off until asked for")
+        compare(page.series(400).filter(s => s.pane !== undefined).length, 0)
+        box.toggled()
+        verify(page.differenceShown && box.checked)
+
+        // The whole ten minutes: columns of more than a second
+        page.showAll()
+        let trace = differenceTrace()
+        verify(columnMs(trace) >= 1000, columnMs(trace) + " ms a column")
+        compare(trace.paneLabel, "\u0394 rpm")
+        compare(trace.row, rpm)
+        let found = judged(trace, 0)
+        verify(found.count > 100, "columns holding both: " + found.count)
+        verify(found.most < 1e-6, "a difference of " + found.most + " between the same samples")
+        // What the chart draws there can't give it: the dashed trace holds
+        // the copy's own whole seconds, half a second from this one's
+        const all = page.series(400)
+        const mine = all.find(s => s.dash === undefined && s.pane === undefined).columns
+        const dashed = all.find(s => s.dash !== undefined).columns
+        let apart = 0
+        for (let c = 0; c < mine.lows.length; ++c) {
+            const d = (dashed.lows[c] + dashed.highs[c]) / 2 - (mine.lows[c] + mine.highs[c]) / 2
+            if (isFinite(d))
+                apart = Math.max(apart, Math.abs(d))
+        }
+        verify(apart > 1, "the drawn columns differ by " + apart)
+
+        // Zoomed in: columns under a second
+        page.setView(100000, 120000)
+        trace = differenceTrace()
+        verify(columnMs(trace) < 1000, columnMs(trace) + " ms a column")
+        found = judged(trace, 0)
+        verify(found.count > 20, "columns holding both: " + found.count)
+        verify(found.most < 1e-6, "a difference of " + found.most + " between the same samples")
+
+        // Switched off, the answer isn't drawn; on again, the one it held is
+        const panes = () => page.series(400).filter(s => s.pane !== undefined).length
+        box.toggled()
+        verify(!page.differenceShown && !box.checked)
+        compare(panes(), 0, "switched off")
+        box.toggled()
+        verify(page.differenceShown && box.checked)
+        compare(panes(), 1, "switched on again")
+        // Lined up another way, the answer for the offset before isn't drawn
+        page.setAlignOn("start")
+        compare(page.compareOffsetMs, 0)
+        compare(panes(), 0, "an answer for another offset")
+
+        // A recording 100 rpm higher is 100 higher in every column: the
+        // compared one less this one
+        page.compareWith(higher)
+        compare(page.difference, null, "the recording before's difference goes with it")
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        page.setAlignOn("start")
+        compare(page.compareOffsetMs, 0)
+        verify(page.differenceShown, "another recording keeps the choice")
+        page.showAll()
+        trace = differenceTrace()
+        found = judged(trace, 100)
+        verify(found.count > 100, "columns holding both: " + found.count)
+        verify(found.most < 1e-6, found.most + " from 100")
+
+        // This recording opened again drops the answer too: its values can
+        // be another decode's
+        verify(page.difference !== null)
+        page.open(here)
+        compare(page.difference, null, "this recording's answer goes with it")
+        tryVerify(() => find(page, "recordingInfo").visible, 10000, "it opens again")
+        page.plotted = picks
+
+        // The same name in another unit is nothing to subtract
+        page.compareWith(other)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        compare(page.differencePairs().length, 0)
+        compare(page.series(400).filter(s => s.pane !== undefined).length, 0)
+        compare(page.series(400).filter(s => s.dash !== undefined).length, 1, "still drawn dashed")
+
+        find(page, "stopCompare").clicked()
+        verify(!page.differenceShown && !box.checked, "Stop ends it")
+        compare(page.difference, null)
+    }
+
+    // A page comparing a swing recording with a copy 100 rpm higher, lined
+    // up on their starts, RPM plotted, Difference still off
+    function swingCompared(name) {
+        const here = swingRecording(name, 0, 0, "rpm")
+        const higher = swingRecording(name + "-higher", 0, 100, "rpm")
+        const page = createPage()
+        page.recordings = [higher, here]
+        openRow(page, here)
+        const picks = {}
+        picks[page.shownSignals.find(s => s.name === "RPM").index] = true
+        page.plotted = picks
+        page.compareWith(higher)
+        tryVerify(() => page.compareAligned, 10000, "the compared recording opens")
+        compare(page.compareOffsetMs, 0)
+        page.showAll()
+        return page
+    }
+    function differencePanes(page) {
+        return page.series(400).filter(s => s.pane !== undefined).length
+    }
+    // Draws until the drawn grid's difference has its answer
+    function differenceRead(page) {
+        tryVerify(() => {
+            page.series(400)
+            return page.difference !== null && page.difference.key === page.differenceWanted.key
+        }, 10000, "the view's difference is read")
+    }
+
+    // A view that refuses a difference's ask answers nothing, so nothing is
+    // waited for: the grid is asked once more at a later paint and then
+    // left. Another grid, with the view able again, is asked and answered
+    function test_aRefusedDifferenceAskIsAskedOnceMoreThenLeft_data() {
+        return [ { tag: "this recording", view: "recordingView" },
+                 { tag: "the compared one", view: "compareView" } ]
+    }
+    function test_aRefusedDifferenceAskIsAskedOnceMoreThenLeft(data) {
+        const page = swingCompared("refused-" + data.view)
+        const view = find(page, data.view)
+        verify(Harness.refuseViewAsks(view, true), "a RecordingView")
+        find(page, "compareDifference").toggled()
+        tryVerify(() => {
+            page.series(400)
+            return page.differenceRefused !== null && page.differenceRefused.count === 2
+        }, 10000, "asked, and once more")
+        const key = page.differenceRefused.key
+        for (let k = 0; k < 10; ++k) {
+            page.series(400)
+            wait(20)
+        }
+        compare(page.differenceRefused.count, 2, "left after the second")
+        compare(page.differenceRefused.key, key)
+        compare(page.differenceAsk, null, "no answer is waited for")
+        compare(page.difference, null)
+        compare(differencePanes(page), 0)
+
+        verify(Harness.refuseViewAsks(view, false))
+        page.setView(100000, 160000)
+        differenceRead(page)
+        compare(page.differenceRefused, null)
+        compare(differencePanes(page), 1)
+    }
+
+    // An ask a view's task has no memory for is answered empty: the page
+    // stops waiting, draws no difference for that grid and doesn't ask for
+    // it again. Another grid, with memory again, is answered
+    function test_aLostDifferenceAskIsAnsweredEmptyAndNotAskedAgain_data() {
+        return [ { tag: "this recording", view: "recordingView" },
+                 { tag: "the compared one", view: "compareView" } ]
+    }
+    function test_aLostDifferenceAskIsAnsweredEmptyAndNotAskedAgain(data) {
+        const page = swingCompared("lost-" + data.view)
+        const view = find(page, data.view)
+        verify(Harness.loseViewMeans(view, true), "a RecordingView")
+        find(page, "compareDifference").toggled()
+        differenceRead(page)
+        compare(Object.keys(page.difference.rows).length, 0, "no rows from a lost answer")
+        compare(page.differenceAsk, null, "nothing is waited for")
+        compare(differencePanes(page), 0)
+        for (let k = 0; k < 5; ++k) {
+            page.series(400)
+            wait(20)
+        }
+        compare(page.differenceAsk, null, "the grid isn't asked again")
+        compare(page.differenceRefused, null)
+
+        verify(Harness.loseViewMeans(view, false))
+        page.setView(100000, 160000)
+        differenceRead(page)
+        compare(Object.keys(page.difference.rows).length, 1)
+        compare(differencePanes(page), 1)
     }
 
     function test_aComparedRecordingIsDrawnDashed() {

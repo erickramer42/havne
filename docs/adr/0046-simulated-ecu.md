@@ -379,3 +379,17 @@ Alternatives considered:
 - **Values from a range (the field's midpoint):** no call to make, but a
   test could check no value it chose, and a plugin's value fixtures
   name theirs.
+
+## Appendix: 2026-11-12, the mock's ECU
+
+`values=drive` gains intake manifold pressure (PID 0B, a byte of kPa, so
+boost past 255 kPa absolute reads 255), barometric pressure (33) and the
+commanded lambda (44, the drive cycle's command, which the wideband
+lambda of 24 follows), and the module voltage (42) reads the drive
+cycle's battery model in place of a fixed 14.1 or 12.6 V. With those,
+`obd2`'s Boost computes from the sim. `mock://` answers Service 01
+through the same ECU under a profile that reads PIDs
+([ADR-0039](0039-full-service01-coverage.md)'s appendix C, its note of
+this date), so the demo car and the sim give one car's values.
+`SimEcuTest.DriveValuesAreTheDriveCyclesThroughTheObd2Defs`,
+`.TheKeyOnWithTheEngineStopped`, `.TheBitmapsListWhatEachModeAnswers`.

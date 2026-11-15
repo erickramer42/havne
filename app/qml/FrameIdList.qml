@@ -112,6 +112,9 @@ Rectangle {
             }
         }
         model: idTable.ids
+        // The rows' Texts are ignored (the list refreshes twice a second and
+        // a new ID adds a row): the list is the one node, as the frame table
+        Accessible.name: qsTr("Frames by ID")
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         delegate: Rectangle {
@@ -139,6 +142,7 @@ Rectangle {
                 anchors.rightMargin: 8
                 spacing: 8
                 Label {
+                    Accessible.ignored: true
                     text: "0x" + idRow.model.arbId.toString(16).toUpperCase()
                           + (idRow.model.extended ? " E" : "")
                     color: Theme.text
@@ -147,12 +151,14 @@ Rectangle {
                     elide: Text.ElideRight
                 }
                 Label {
+                    Accessible.ignored: true
                     text: idRow.model.frames
                     color: Theme.textDim
                     font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
                     Layout.preferredWidth: 52
                 }
                 Label {
+                    Accessible.ignored: true
                     text: idTable.rateText(idRow.model.rate)
                     color: Theme.textDim
                     font.family: Theme.monoFamily; font.pixelSize: Theme.fontCaption
@@ -161,6 +167,7 @@ Rectangle {
                 // The bytes that changed from the ID's frame
                 // before, in the warning color and bold
                 Label {
+                    Accessible.ignored: true
                     id: idPayload
                     objectName: "idPayload"
                     text: idTable.markedPayload(idRow.model.payloadHex,

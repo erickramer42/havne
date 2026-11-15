@@ -261,11 +261,18 @@ endif()
 if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
-        test_cli_log.cpp test_cli_conditions.cpp)
+        test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
+    # The layout corpus havne-cli's check and the app's DashboardBook both read
+    target_compile_definitions(test_cli PRIVATE
+        ECUIO_LAYOUT_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/data/layouts")
     find_package(Threads REQUIRED)
     target_link_libraries(test_cli PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
     app_enable_warnings(test_cli)
+    # The layout corpus nests 1024 levels: havne-cli's stack (cli/CMakeLists.txt)
+    if(MSVC)
+        target_link_options(test_cli PRIVATE /STACK:8388608)
+    endif()
     gtest_discover_tests(test_cli DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
 
     if(Python3_Interpreter_FOUND)
@@ -356,6 +363,7 @@ if(TARGET havne-cli)
         app_cli_elm327(ASecondModulesDidAnswers modules)
         app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
         app_cli_elm327(PythonObdReadsIt python-obd)
+        set_tests_properties(CliElm327RunTest.PythonObdReadsIt PROPERTIES COST 13)
         # A clear (ADR-0038's appendix of 2026-11-06): the mock's report
         # first, its clear at the key-on's 0 rpm, the report read again;
         # and with the word on the engine, its 0 km/h read too
@@ -438,7 +446,7 @@ if(TARGET havne-cli)
         add_test(NAME CliHealthRunTest.session
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
                     session $<TARGET_FILE:havne-cli>)
-        set_tests_properties(CliHealthRunTest.session PROPERTIES TIMEOUT 180)
+        set_tests_properties(CliHealthRunTest.session PROPERTIES TIMEOUT 180 COST 39)
         add_test(NAME CliHealthRunTest.recording
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_health.py
                     recording $<TARGET_FILE:havne-cli>
@@ -693,6 +701,38 @@ if(TARGET havne-cli)
         # its own numbers, an enum's label and a computed value among
         # obd2's, and a refused file ending stream as a connect would
         set(_cli_signals ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals)
+        # A dashboard layout file's check (ADR-0057's appendix on the layout
+        # file): one that reads and names its signal files, one of the other
+        # form (refused, exit 1), a file with no form named and no --form
+        # (read as desktop, saying so) and a file that isn't there
+        set(_cli_layouts ${CMAKE_CURRENT_SOURCE_DIR}/data/layouts)
+        app_cli_golden(LayoutCheckReadsAFileAndNamesItsSignalFiles layout-check.jsonl
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/desktop-ok-with-files.json
+               --form desktop)
+        app_cli_golden(LayoutCheckRefusesTheOtherForm layout-check-other-form.jsonl --exit 1
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/phone-file-on-desktop.json
+               --form desktop)
+        app_cli_golden(LayoutCheckTakesTheFilesFormOrAssumesDesktop layout-check-no-form.jsonl
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/format1-no-form.json)
+        app_cli_golden(LayoutCheckCountsWhatLoadingDrops layout-check-dropped.jsonl
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/page-dropped.json)
+        app_cli_golden(LayoutCheckNamesAMissingFile layout-check-missing.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/none.json)
+        # The app's read before any rule: a file of exactly the bound, its BOM
+        # counted as the app counts it, reads; one byte more is refused, and
+        # so is a file in Latin-1
+        set(_cli_layout_files ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/layouts)
+        app_cli_golden(LayoutCheckReadsAFileOfTheBoundWithABom layout-check-at-the-bound.jsonl
+            -- $<TARGET_FILE:havne-cli> layout check
+               ${_cli_layout_files}/bom-at-the-bound.json)
+        # The deepest nesting the app reads, on havne-cli's own main thread
+        app_cli_golden(LayoutCheckReadsTheDeepestNesting layout-check-nesting.jsonl
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/nesting-1024.json)
+        app_cli_golden(LayoutCheckCountsABomInTheBound layout-check-over.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> layout check
+               ${_cli_layout_files}/bom-over-the-bound.json)
+        app_cli_golden(LayoutCheckRefusesAFileThatIsntUtf8 layout-check-latin1.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> layout check ${_cli_layout_files}/latin1.json)
         app_cli_golden(SignalsCheckReadsAFile signals-check.jsonl
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/extras.json)
         app_cli_golden(SignalsCheckSaysEachGauge signals-check-gauges.jsonl
@@ -1078,6 +1118,12 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py end
                     $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
                     ${_cli_pulls}/pull-early)
+        add_test(NAME CliViewRunTest.AnInterruptEndsEachSearch
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cli_view.py interrupt
+                    $<TARGET_FILE:havne-cli> ${_cli_pulls}/pull-twice
+                    ${_cli_pulls}/pull-early)
+        set_tests_properties(CliViewRunTest.AnInterruptEndsEachSearch
+            PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77)
         set_tests_properties(CliViewRunTest.ColumnsCountEverySampleOnce
             CliViewRunTest.ASampleAtTheAxisEndIsInTheLastColumn
             CliViewRunTest.AlignedPullsAgree
@@ -1307,6 +1353,11 @@ if(TARGET havne-cli)
     app_cli_usage(RecordWithoutAFolderIsUsage "stream|mock://x|--record")
     app_cli_usage(VinWithoutOneIsUsage "vin")
     app_cli_usage(NotAVinIsUsage "vin|FAKEJ2534VIN00001")
+    app_cli_usage(LayoutWithoutACheckIsUsage "layout")
+    app_cli_usage(LayoutCheckWithoutAFileIsUsage "layout|check")
+    app_cli_usage(LayoutCheckAFormThatIsntOneIsUsage "layout|check|x.json|--form|tablet")
+    app_cli_usage(LayoutCheckAFormWithoutItsWordIsUsage "layout|check|x.json|--form")
+    app_cli_usage(LayoutCheckAnUnknownOptionIsUsage "layout|check|x.json|--fast")
     app_cli_usage(TwoVinsIsUsage "vin|1FAFAKE10M0000001|1FAFAKE10M0000001")
     app_cli_usage(DtcWithoutOneIsUsage "dtc")
     app_cli_usage(NotADtcIsUsage "dtc|P5301")
@@ -1618,12 +1669,13 @@ if(_app_python_pointer EQUAL CMAKE_SIZEOF_VOID_P)
     endforeach()
 
     # python/examples/ecu_states.ipynb run top to bottom (tests/example_notebook.py);
-    # skips without scikit-learn, nbconvert or ipykernel, as in CI
+    # skips without scikit-learn, nbconvert or ipykernel, as in CI. TIMEOUT
+    # covers a cold import of SciPy and scikit-learn from a busy disk
     add_test(NAME ExampleTest.notebook
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/example_notebook.py)
     set_tests_properties(ExampleTest.notebook PROPERTIES
         ENVIRONMENT "HAVNE_LIBRARY=$<TARGET_FILE:ecuio>;PYTHONDONTWRITEBYTECODE=1"
-        SKIP_RETURN_CODE 77 TIMEOUT 300 LABELS "python")
+        SKIP_RETURN_CODE 77 TIMEOUT 900 COST 38 LABELS "python")
 
     # The wheel itself (tests/wheel_installed.py): made from this tree's
     # shared core, installed in a fresh venv and used from outside the
@@ -1850,7 +1902,16 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ECUIO_IMPORT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
         ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
+        ECUIO_LAYOUT_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/data/layouts"
     )
+    # Settings keeps only a real adapter's connect, so its cases connect to
+    # havne-cli's ELM327 emulator on every platform
+    # (Harness.startElm327Emulator)
+    if(TARGET havne-cli)
+        target_compile_definitions(test_qml PRIVATE
+            HAVNE_CLI_PATH="$<TARGET_FILE:havne-cli>")
+        add_dependencies(test_qml havne-cli)
+    endif()
 
     # Windows: deployed like the app, into a directory of its own (the
     # other tests' copied Qt DLLs would otherwise point Qt at plugins
@@ -1881,6 +1942,18 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     endif()
     # Files whose cases together run near ctest's bound on a slow runner
     set(_qml_split_files dashboard dashedit driveview phone)
+    # The shares a file runs as, where not three: tst_phone's longest share
+    # otherwise outlasts the rest of the suite
+    set(_qml_shares_phone 5)
+    set(_qml_shares_dashedit 4)
+    # Seconds a file's entry (or one share of it) took in a full run's
+    # CTestCostData.txt, so a tree with no history starts the long ones first
+    set(_qml_cost_dashboard 40)
+    set(_qml_cost_dashedit 52)
+    set(_qml_cost_driveview 37)
+    set(_qml_cost_phone 33)
+    set(_qml_cost_recordings 25)
+    set(_qml_cost_diagnostics 7)
     file(GLOB _qml_tests CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/qml/tst_*.qml)
     foreach(_qml_test IN LISTS _qml_tests)
         get_filename_component(_qml_name ${_qml_test} NAME_WE)
@@ -1890,12 +1963,15 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         # alone opens a 10,200-frame recording, which a machine building
         # beside the suite took past 60 s in all
         # A file near the bound runs as _qml_parts ctest entries, each
-        # a disjoint share of its cases (every third one, so the slow
+        # a disjoint share of its cases (every nth one, so the slow
         # ones spread), named as the TestCase names them; QmlTest.<name>
         # then reads QmlTest.<name>-<k>of<n>
         set(_qml_parts 1)
         if(_qml_name IN_LIST _qml_split_files)
             set(_qml_parts 3)
+            if(DEFINED _qml_shares_${_qml_name})
+                set(_qml_parts ${_qml_shares_${_qml_name}})
+            endif()
         endif()
         if(_qml_parts EQUAL 1)
             add_test(NAME QmlTest.${_qml_name} COMMAND test_qml -input ${_qml_test})
@@ -1903,6 +1979,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
                 ENVIRONMENT "${_qml_test_env}"
                 TIMEOUT 180
             )
+            if(DEFINED _qml_cost_${_qml_name})
+                set_tests_properties(QmlTest.${_qml_name} PROPERTIES
+                    COST ${_qml_cost_${_qml_name}})
+            endif()
         else()
             # The shares are read from the file: an edit configures again,
             # or a case added to it would be in no share and never run
@@ -1935,6 +2015,11 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
             endforeach()
             math(EXPR _qml_last "${_qml_parts} - 1")
             foreach(_qml_share RANGE 0 ${_qml_last})
+                # An empty share would run the whole file
+                if(NOT _qml_share_${_qml_share})
+                    message(FATAL_ERROR "${_qml_test}: ${_qml_parts} shares of "
+                            "${_qml_found} cases leave share ${_qml_share} empty")
+                endif()
                 math(EXPR _qml_k "${_qml_share} + 1")
                 set(_qml_part QmlTest.${_qml_name}-${_qml_k}of${_qml_parts})
                 add_test(NAME ${_qml_part}
@@ -1942,6 +2027,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
                 set_tests_properties(${_qml_part} PROPERTIES
                     ENVIRONMENT "${_qml_test_env}"
                     TIMEOUT 180
+                    COST ${_qml_cost_${_qml_name}}
                 )
                 unset(_qml_share_${_qml_share})
             endforeach()

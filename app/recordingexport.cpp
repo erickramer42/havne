@@ -1,8 +1,11 @@
 // File/layer: app/recordingexport.cpp | Qt6 Core, app layer, C++17
 // Testing: BRIDGE: RecordingExportTest (test_bridge); QML: QmlTest.recordings,
-//          QmlTest.phone
+//          QmlTest.phone; MANUAL SMOKE: the test phone (a provider's folder)
 
 #include "recordingexport.h"
+#include "urlwrite.h"
+
+#include "healthreport.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -84,6 +87,7 @@ struct Job {
     QUrl target;
     bool throughProvider = false;
     bool failCopy = false; // setFailCopyForTesting
+    bool failCopyAfterBytes = false; // setFailCopyAfterBytesForTesting
 };
 
 std::vector<const char*> pointers(const QList<QByteArray>& names)
@@ -248,39 +252,54 @@ bool copyChunks(QFile& in, QIODevice& out, const Stop& stop)
     }
 }
 
+// Where a copy goes. InTree is a new file in a provider's folder, which Qt's
+// content engine makes: the content resolver opens existing documents only
+enum class CopyTo { Local, Picked, InTree };
+
 // A local file is written whole or not at all; a provider's can't be renamed
 // into place
-bool copyFile(const QString& from, const QString& to, bool provider,
+bool copyFile(const QString& from, const QString& to, CopyTo where,
               const Stop& stop)
 {
     QFile in(from);
     if (!in.open(QIODevice::ReadOnly)) {
         return false;
     }
-    if (!provider) {
+    if (where == CopyTo::Local) {
         QSaveFile out(to);
         return out.open(QIODevice::WriteOnly) && copyChunks(in, out, stop) &&
                out.commit();
     }
-    QFile out(to);
-    return out.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
-           copyChunks(in, out, stop) && out.flush();
+    if (where == CopyTo::InTree) {
+        QFile out(to);
+        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+            !copyChunks(in, out, stop) || !out.flush()) {
+            return false;
+        }
+        out.close();
+        return out.error() == QFileDevice::NoError;
+    }
+    PickedFile out;
+    return openPicked(out, to, QIODevice::WriteOnly | QIODevice::Truncate) &&
+           copyChunks(in, out, stop) && out.flush() && closePicked(out);
 }
 
 QString whereOf(const QUrl& url)
 {
-    return url.isLocalFile() ? url.toLocalFile() : url.toString();
+    return pathOfUrl(url);
 }
 
 QVariantMap runFile(const Job& job, Stop& stop)
 {
     const bool provider = job.throughProvider || !job.target.isLocalFile();
     const QString target = whereOf(job.target);
-    // A picker has already made the document it names: one that ends up
-    // holding nothing goes
+    // A picker has already made the document it names: one that was empty
+    // when this began goes if nothing is written, even part written; one
+    // the user chose to replace stays
+    const bool madeEmpty = provider && isEmptyDocument(target);
     const auto dropPicked = [&] {
-        if (provider) {
-            QFile::remove(target);
+        if (madeEmpty) {
+            removePicked(target);
         }
     };
     // removeStaleCopies finds this folder by its name
@@ -299,7 +318,15 @@ QVariantMap runFile(const Job& job, Stop& stop)
         return failed(job, words);
     }
     stop.holdAt(Hold::BeforeCopy);
-    if (job.failCopy || !copyFile(made, target, provider, stop)) {
+    if (job.failCopyAfterBytes) {
+        QFile half(target);
+        if (half.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            half.write("half a document");
+        }
+    }
+    if (job.failCopy || job.failCopyAfterBytes ||
+        !copyFile(made, target, provider ? CopyTo::Picked : CopyTo::Local,
+                  stop)) {
         dropPicked();
         return failed(job, QStringLiteral("Couldn't write the file"));
     }
@@ -353,7 +380,7 @@ QVariantMap runFolder(const Job& job, Stop& stop)
     for (const QString& file : files) {
         if (job.failCopy ||
             !copyFile(made + QLatin1Char('/') + file,
-                      copy + QLatin1Char('/') + file, true, stop)) {
+                      copy + QLatin1Char('/') + file, CopyTo::InTree, stop)) {
             QDir(copy).removeRecursively();
             return failed(job, QStringLiteral("Couldn't write the folder"));
         }
@@ -571,11 +598,12 @@ bool RecordingExport::start(const QVariantMap& options, const QUrl& target)
     const int format = options.value(QStringLiteral("format")).toInt();
     const QString folder = options.value(QStringLiteral("folder")).toString();
     // A picker has already made the document a file export would fill: a
-    // start that refuses, or can't run, leaves none (never a folder target)
+    // start that refuses, or can't run, leaves it only when it holds bytes
+    // (never a folder target)
     const auto dropPicked = [&] {
         if (format != Folder && !target.isEmpty() &&
             (m_throughProvider || !target.isLocalFile())) {
-            QFile::remove(whereOf(target));
+            removeIfEmpty(whereOf(target));
         }
     };
     if (m_busy || folder.isEmpty() || target.isEmpty() ||
@@ -599,6 +627,7 @@ bool RecordingExport::start(const QVariantMap& options, const QUrl& target)
     job.target = target;
     job.throughProvider = m_throughProvider;
     job.failCopy = m_failCopyForTesting;
+    job.failCopyAfterBytes = m_failCopyAfterBytesForTesting;
     m_cancelExport.store(false);
     try {
         if (m_failThreadForTesting) {
