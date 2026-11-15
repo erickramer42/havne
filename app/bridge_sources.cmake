@@ -6,9 +6,11 @@
 # models. Absolute paths, since tests/ compiles them from its own directory.
 # A new bridge source joins this list alone.
 set(APP_BRIDGE_SOURCES
+    ${CMAKE_CURRENT_LIST_DIR}/bridge_conditions.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_diagnostics.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_files.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_profiles.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/bridge_recorder.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_recordings.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_sessioninfo.cpp
     ${CMAKE_CURRENT_LIST_DIR}/bridge_store.cpp
