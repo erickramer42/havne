@@ -904,8 +904,10 @@ public:
     // held too, for previewObdbImport, whose report comes first: it
     // converts the held bytes as previewObdb converts a file's, as often
     // as the year or the name is changed. Words never name the path.
-    // Each logs one line
-    Q_INVOKABLE QVariantMap readImport(const QUrl& url);
+    // Each logs one line. only, when given ("signals", Replace's read),
+    // refuses a file of any other kind with nothing kept or held
+    Q_INVOKABLE QVariantMap readImport(const QUrl& url,
+                                       const QString& only = QString());
     Q_INVOKABLE QVariantMap previewObdbImport(int modelYear,
                                               const QString& name);
     // The pending signal file kept: as a new plugin of the user's own
@@ -963,6 +965,15 @@ public:
     // the lines for the activity log, none once the move is done. Called
     // before QML loads, so the caller logs them when the Log page listens
     QStringList migrateStores(QSettings& prefs);
+    // A signal file the move left behind (the vehicle book's unmigrated
+    // record, by its hash) saved where the user chose, as saveVariantFile
+    // writes: its bytes as the move kept them, else the copy still in the
+    // earlier version's folder. { ok, words }, words never naming a path.
+    // Logs one line. Remove deletes the kept bytes alone, never the
+    // earlier folder's copy: true when none is left
+    Q_INVOKABLE QVariantMap saveUnmigratedFile(const QString& sha,
+                                               const QUrl& url);
+    Q_INVOKABLE bool removeUnmigratedFile(const QString& sha);
     // Export plugin: the store's packed copy written to url byte for
     // byte (a local file, or Android's content:// through QFile), so the
     // file loads wherever the copy does and holds nothing of the store's

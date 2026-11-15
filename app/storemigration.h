@@ -84,6 +84,12 @@ public:
     static QByteArray unmigratedBytes(const QString& sha, QString* words);
     static bool removeUnmigrated(const QString& sha);
 
+    // The old folder's copy of a file whose bytes weren't kept (a record
+    // with kept false), as it is there now: empty with words why not,
+    // for no copy and for one over OldCopyMaxBytes. Never removed
+    static constexpr qint64 OldCopyMaxBytes = 64 * 1024 * 1024;
+    static QByteArray oldCopy(const QString& sha, QString* words);
+
     // Test seam: the next run returns, as a killed app would, after the
     // nth file is wrapped (File), after every file is (Wrapped), after
     // the unmigrated bytes are copied (Copied), after the book is

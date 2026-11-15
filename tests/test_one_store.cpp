@@ -398,6 +398,41 @@ TEST(BridgeTest, OneStoreTheSameFileIsKeptOnceAndATakenIdIsNumbered)
     EXPECT_EQ(str(r, "id").toStdString(), "abcdefghij-abcdefghij-abcdef-2");
 }
 
+/* A read that asks for a signal file (Replace's) keeps and holds nothing
+ * of another kind: a package doesn't go in, an OBDb set isn't held */
+TEST(BridgeTest, OneStoreAReadForASignalFileTakesNothingElse)
+{
+    SettingsDir dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    Logged b;
+    const QString only = QStringLiteral("signals");
+    const auto read = [&](const char* name, const QByteArray& bytes) {
+        return b.bridge.readImport(
+            writeScratch(from.path(), QString::fromLatin1(name), bytes), only);
+    };
+
+    QVariantMap r = read("a.json", packed_plugin::example());
+    EXPECT_FALSE(ok(r));
+    EXPECT_EQ(words(r), "Not a signal file: only one takes a variant's place");
+    EXPECT_EQ(str(r, "kind").toStdString(), "plugin");
+    EXPECT_TRUE(copies().isEmpty()) << "the package didn't go in";
+    EXPECT_EQ(b.log.constLast().toStdString(),
+              "Import refused: Not a signal file: only one takes a variant's "
+              "place");
+
+    r = read("set.json", readBytes(QStringLiteral(ECUIO_OBDB_FIXTURE)));
+    EXPECT_FALSE(ok(r));
+    r = b.bridge.previewObdbImport(2019, QStringLiteral("Held"));
+    EXPECT_FALSE(ok(r)) << "the set isn't held";
+
+    r = read("file.json", signalFile(QStringLiteral("Extras")));
+    ASSERT_TRUE(ok(r)) << words(r);
+    EXPECT_EQ(str(r, "kind").toStdString(), "signals");
+    r = b.bridge.keepSignals(QString(), QString(), QString());
+    EXPECT_TRUE(ok(r)) << words(r) << " (a signal file waits as ever)";
+}
+
 /* One Import tells the three kinds apart by the file's first key: a
  * package goes in, a signal file waits, an OBDb set is left to its
  * report; anything else, and a file a loader refuses, is refused in
