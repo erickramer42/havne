@@ -1326,6 +1326,8 @@ Page {
         }
     }
     Component { id: toolNight; NightSwitch {} }
+    // The Night switch, for the page's parts
+    readonly property Component nightSwitch: toolNight
 
     // The drive view's one line of chrome: the link state and the address,
     // and a log's or recording's progress (section 2). It takes no taps
@@ -1505,7 +1507,7 @@ Page {
                 Loader {
                     objectName: "driveNight"
                     active: root.driving
-                    sourceComponent: toolNight
+                    sourceComponent: root.nightSwitch
                 }
                 Item { Layout.fillWidth: true; visible: driveSheet.wide }
             }
@@ -1631,7 +1633,7 @@ Page {
                 objectName: "toolRowNight"
                 active: root.phoneForm
                 visible: active
-                sourceComponent: toolNight
+                sourceComponent: root.nightSwitch
             }
         }
 
