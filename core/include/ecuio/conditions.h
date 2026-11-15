@@ -488,8 +488,8 @@ typedef struct ecuio_condition_state {
  * are never tried (ADR-0063 section 2: the first the set provides is the
  * one read). */
 ecuio_status_t ecuio_session_get_condition_states(
-    ecuio_session_t* session, ecuio_condition_state_t* out, uint32_t capacity,
-    uint32_t* out_count);
+    const ecuio_session_t* session, ecuio_condition_state_t* out,
+    uint32_t capacity, uint32_t* out_count);
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_condition_event_t) == 56, "ecuio_condition_event_t size is ABI");

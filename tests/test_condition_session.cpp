@@ -183,7 +183,8 @@ void on_frame(const ecuio_frame_t* frame, void* user)
                                   std::to_string(frame->timestamp_us));
 }
 
-std::vector<ecuio_condition_state_t> states_of(ecuio_session_t* s)
+/* const: reading the states needs no session it may change */
+std::vector<ecuio_condition_state_t> states_of(const ecuio_session_t* s)
 {
     uint32_t count = 99;
     EXPECT_EQ(ecuio_session_get_condition_states(s, nullptr, 0, &count),

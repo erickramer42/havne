@@ -1332,7 +1332,8 @@ bool unsampled(const ecuio_condition_state_t& s,
 /* One byte per def of the session's set: 1 for a def the session reports
  * it doesn't get (unsupported, absent, its request dropped), or computed
  * from one. On the caller's thread, from the lists as they stand. */
-void defs_not_received(ecuio_session_t* session, std::vector<uint8_t>& gone)
+void defs_not_received(const ecuio_session_t* session,
+                       std::vector<uint8_t>& gone)
 {
     const ecuio_signal_set_t* set = session->active_signal_set;
     gone.clear();
@@ -1397,7 +1398,7 @@ void defs_not_received(ecuio_session_t* session, std::vector<uint8_t>& gone)
 /* ECUIO_CONDITION_WHY_NOT_RECEIVED for each condition whose terms read a
  * def not received and unsampled since the attach: any term (an all can't
  * turn ON), or every term of an ANY */
-void mark_not_received(ecuio_session_t* session,
+void mark_not_received(const ecuio_session_t* session,
                        const std::vector<ecuio_session::condition_read>& reads,
                        ecuio_condition_state_t* out, uint32_t n)
 {
@@ -1492,10 +1493,9 @@ void deliver_condition_events(ecuio_session_t* session,
 
 } // namespace
 
-ecuio_status_t ecuio_session_get_condition_states(ecuio_session_t* session,
-                                                  ecuio_condition_state_t* out,
-                                                  uint32_t capacity,
-                                                  uint32_t* out_count)
+ecuio_status_t ecuio_session_get_condition_states(
+    const ecuio_session_t* session, ecuio_condition_state_t* out,
+    uint32_t capacity, uint32_t* out_count)
 {
     if (session == nullptr || out_count == nullptr ||
         (out == nullptr && capacity > 0)) {
