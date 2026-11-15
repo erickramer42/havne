@@ -1782,6 +1782,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_live.cpp
         test_bridge_fake.cpp
         test_bridge_signals.cpp
+        test_bridge_recorder.cpp
         test_recording_view.cpp
         test_viewer_frames.cpp
         test_recording_import.cpp
