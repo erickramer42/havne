@@ -55,7 +55,7 @@
 #include <unistd.h>
 #endif
 
-namespace {
+namespace ecuio_rec {
 
 constexpr uint32_t kDefaultRingBytes = 4u * 1024u * 1024u;
 constexpr uint32_t kDefaultNoteLines = 256;
@@ -202,7 +202,7 @@ focus_named focus_now(const ecuio_session_t* session)
     return f;
 }
 
-bool is_text_kind(uint8_t kind)
+inline bool is_text_kind(uint8_t kind)
 {
     return kind == ECUIO_VALUE_TEXT || kind == ECUIO_VALUE_HEX;
 }
@@ -793,7 +793,10 @@ bool sync_file(FILE* f)
 #endif
 }
 
-} // namespace
+} // namespace ecuio_rec
+
+/* The recorder and its members read these by their plain names */
+using namespace ecuio_rec;
 
 /* One per recording, its members grouped by who uses them: the padding
  * the analyzer would save is some 40 bytes */
