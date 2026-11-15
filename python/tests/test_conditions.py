@@ -657,3 +657,65 @@ def test_a_close_waits_for_a_state_read_under_way(tmp_path, monkeypatch):
         freed.clear()
         assert (met_freed, failed) == ([], [])
         assert reads[-1] == closed
+
+
+ARMED = ('{"havne_conditions":1,"conditions":[{"key":"high","name":"High",'
+         '"when":{"signal":["obd2.rpm"],"unit":"RPM","above":1000},'
+         '"record":{"before":2,"after":1}}]}')
+
+
+def _windows(root):
+    """Each window folder under root, by name, with its frames' session times"""
+    out = []
+    for name in sorted(os.listdir(root)):
+        with open(os.path.join(root, name, "frames.csv"), encoding="utf-8") as f:
+            rows = f.read().splitlines()[1:]
+        out.append([int(r.split(",")[1]) for r in rows])
+    return out
+
+
+def test_an_armed_recorder_writes_havne_clis_windows(tmp_path):
+    root = tmp_path / "py"
+    with havne.Session(replay_uri("?profile=obd2&speed=max")) as s:
+        events = s.conditions(capacity=havne.c.ECUIO_QUEUE_MAX_CONDITIONS)
+        s.set_conditions(havne.ConditionSet(ARMED))
+        r = s.record(str(root), armed=True)
+        assert r.state().state == "armed" and r.folder == ""
+        s.start()
+        got = [e for e in events if e.key == "high"]
+    state = r.state()   # the session's close closed it
+    fired = [e for e in got if e.fired]
+    assert state.windows == len(fired) == 2
+    assert state.preroll_short == 0 and state.records_dropped == 0
+    assert state.frame_rows + state.frames_passed == 7074
+    windows = _windows(root)
+    assert [len(w) for w in windows] == [151, 99]
+    # Each window from its firing's before, in session time
+    for w, e in zip(windows, fired):
+        assert e.timestamp_us - 2000000 <= w[0] < e.timestamp_us
+
+    cli = os.environ.get("HAVNE_CLI")
+    if not cli:
+        pytest.skip("no havne-cli in this tree (HAVNE_CLI)")
+    sets = tmp_path / "armed.json"
+    sets.write_text(ARMED, encoding="utf-8")
+    out = subprocess.run([cli, "log", replay_uri("?profile=obd2&speed=max"),
+                          str(tmp_path / "cli"), "--conditions", str(sets), "--armed"],
+                         capture_output=True, check=True, timeout=120).stdout
+    lines = [json.loads(line) for line in out.decode("utf-8").splitlines()]
+    assert lines[-1]["windows"] == 2
+    assert _windows(tmp_path / "cli") == windows
+
+
+def test_an_armed_recorder_needs_a_condition_that_records(tmp_path):
+    with havne.Session("mock://armed") as s:
+        with pytest.raises(havne.Error) as e:
+            s.record(str(tmp_path), armed=True)
+        assert e.value.name == "INVALID_ARGUMENT"
+        assert e.value.detail.startswith("no condition records")
+        s.set_conditions(havne.ConditionSet(ONE % "plain"))
+        with pytest.raises(havne.Error) as e:
+            s.record(str(tmp_path), armed=True)
+        assert e.value.detail.startswith("no condition records")
+        s.record(str(tmp_path)).close()
+    assert len(os.listdir(tmp_path)) == 1, "only the plain recording made a folder"

@@ -2240,6 +2240,18 @@ TEST(FolderExportTest, APickLineIsKept)
         << e.files["events.log"];
 }
 
+/* An armed recorder's window names its trigger in the header */
+TEST(FolderExportTest, AWindowsTriggerLineIsKept)
+{
+    Folder f;
+    recording(f, "", polled_rows(1), "profile  raw\ntrigger  high,2000 ms\n");
+    FolderExported e(f);
+    ASSERT_EQ(e.rc, ECUIO_OK) << e.detail;
+    EXPECT_NE(e.files["events.log"].find("\ntrigger  high,2000 ms\n"),
+              std::string::npos)
+        << e.files["events.log"];
+}
+
 const char* const kConditionsJson =
     "{\"havne_conditions\":1,\"conditions\":[]}\n";
 

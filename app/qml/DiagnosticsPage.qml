@@ -101,7 +101,7 @@ Page {
         if (clearing)
             return qsTr("Clearing: reading the engine and vehicle speeds, then clearing")
         if (clearFailed)
-            return qsTr("Nothing was cleared: the report couldn't be saved first (the Log page says why)")
+            return qsTr("Nothing was cleared: the report couldn't be saved first (the Activity page says why)")
         if (savedTo !== "")
             return qsTr("The report was saved before the clear: %1").arg(savedTo)
         return qsTr("Read at connect · Clear codes… asks first and saves the report")

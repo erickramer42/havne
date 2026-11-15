@@ -20,6 +20,7 @@
 #include <thread>
 #include <vector>
 
+#include "ecuio/conditions.h"
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "ecuio/plugin.h"
@@ -318,7 +319,7 @@ TEST(RecorderTest, OpenAndAttachRefuseWhatTheyMust)
     ecuio_record_options_t o{};
     EXPECT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_ERR_NULL_ARGUMENT);
     o.root_utf8 = r.c_str();
-    o.flags = 1;
+    o.flags = ECUIO_RECORD_ARMED << 1;
     EXPECT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_ERR_INVALID_ARGUMENT);
     o.flags = 0;
     o.reserved[2] = 1;
@@ -382,6 +383,57 @@ TEST(RecorderTest, OpenAndAttachRefuseWhatTheyMust)
     EXPECT_EQ(ecuio_recorder_close(second, nullptr), ECUIO_OK);
     EXPECT_EQ(ecuio_recorder_close(fresh, nullptr), ECUIO_OK);
     EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
+
+    /* An armed recorder (ADR-0063 section 7) needs a condition that
+     * records: none attached, or a set whose only record is switched off,
+     * is refused with the words, the recorder left for a later try */
+    ecuio_record_options_t armed{};
+    armed.root_utf8 = r.c_str();
+    armed.flags = ECUIO_RECORD_ARMED;
+    ecuio_recorder_t* waiting = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&armed, &waiting), ECUIO_OK);
+    ecuio_session_t* bare = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://armed", &bare), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_record(bare, waiting), ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(
+        std::string(ecuio_last_error_detail()).rfind("no condition records", 0),
+        0u)
+        << ecuio_last_error_detail();
+    const auto attach = [bare](const std::string& conditions) {
+        const std::string json =
+            R"({"havne_conditions":1,"conditions":[)" + conditions + "]}";
+        ecuio_condition_set_t* set = nullptr;
+        EXPECT_EQ(ecuio_condition_set_load(json.data(), json.size(), &set),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        EXPECT_EQ(ecuio_session_set_conditions(bare, set, nullptr), ECUIO_OK);
+        ecuio_condition_set_free(set);
+    };
+    const std::string when =
+        R"("when":{"signal":["obd2.rpm"],"unit":"RPM","above":2000})";
+    attach(R"({"key":"marked","name":"M",)" + when + R"(,"mark":true})");
+    EXPECT_EQ(ecuio_session_record(bare, waiting), ECUIO_ERR_INVALID_ARGUMENT);
+    attach(R"({"key":"off","name":"O","enabled":false,)" + when +
+           R"(,"record":{"before":5}})");
+    EXPECT_EQ(ecuio_session_record(bare, waiting), ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_NE(std::string(ecuio_last_error_detail()).find("enabled"),
+              std::string::npos)
+        << ecuio_last_error_detail();
+    attach(R"({"key":"on","name":"N",)" + when + R"(,"record":{"before":5}})");
+    EXPECT_EQ(ecuio_session_record(bare, waiting), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_recorder_state_t st{};
+    ASSERT_EQ(ecuio_recorder_get_state(waiting, &st), ECUIO_OK);
+    EXPECT_EQ(st.state, ECUIO_RECORDING_ARMED);
+    EXPECT_EQ(st.windows, 0u);
+    uint32_t len = 1;
+    char folder[8] = "x";
+    ASSERT_EQ(ecuio_recorder_get_folder(waiting, folder, sizeof folder, &len),
+              ECUIO_OK);
+    EXPECT_EQ(len, 0u) << "no folder before the first window";
+    EXPECT_STREQ(folder, "");
+    ecuio_session_destroy(bare);
+    EXPECT_EQ(ecuio_recorder_close(waiting, nullptr), ECUIO_OK);
 }
 
 /* Every frame and every value, ADR-0017's rows; values are decoded for

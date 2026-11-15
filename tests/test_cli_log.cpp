@@ -424,3 +424,77 @@ TEST(CliLogTest, TheRecordingsBytesCountEachOfItsFiles)
         << "each of a recording's files, conditions.json among them, and "
            "nothing else";
 }
+
+TEST(CliLogTest, ArmedGoesWithAConditionFile)
+{
+    Args a({"havne-cli", "log", "mock://x", "out", "--armed", "--conditions",
+            "c.json"});
+    cli::LogArgs la;
+    std::string why;
+    ASSERT_TRUE(cli::parse_log(a.argc(), a.argv.data(), la, &why)) << why;
+    EXPECT_TRUE(la.armed);
+    Args b({"havne-cli", "log", "mock://x", "out", "--conditions", "c.json"});
+    cli::LogArgs lb;
+    ASSERT_TRUE(cli::parse_log(b.argc(), b.argv.data(), lb, &why)) << why;
+    EXPECT_FALSE(lb.armed);
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "out", "--armed"}),
+              "--armed goes with --conditions: a condition with record opens "
+              "each window");
+}
+
+TEST(CliLogTest, AnArmedLogSaysEachRiseInWindowsAndEachReturnToArmed)
+{
+    cli::ArmedSeen seen;
+    cli::ArmedDue d = cli::armed_due(seen, ECUIO_RECORDING_ARMED, 0);
+    EXPECT_TRUE(d.armed) << "armed at the start";
+    EXPECT_FALSE(d.window);
+    d = cli::armed_due(seen, ECUIO_RECORDING_ARMED, 0);
+    EXPECT_FALSE(d.armed) << "said once";
+    EXPECT_FALSE(d.window);
+    d = cli::armed_due(seen, ECUIO_RECORDING_ACTIVE, 1);
+    EXPECT_TRUE(d.window) << "a window opened";
+    EXPECT_FALSE(d.armed);
+    d = cli::armed_due(seen, ECUIO_RECORDING_ACTIVE, 1);
+    EXPECT_FALSE(d.window);
+    EXPECT_FALSE(d.armed);
+    d = cli::armed_due(seen, ECUIO_RECORDING_ARMED, 1);
+    EXPECT_TRUE(d.armed) << "the window closed";
+    EXPECT_FALSE(d.window);
+    d = cli::armed_due(seen, ECUIO_RECORDING_ARMED, 3);
+    EXPECT_TRUE(d.window) << "two windows between reads: a jump";
+    EXPECT_TRUE(d.armed) << "and armed again after them";
+    EXPECT_EQ(seen.windows, 3u);
+    d = cli::armed_due(seen, ECUIO_RECORDING_DETACHED, 3);
+    EXPECT_FALSE(d.window);
+    EXPECT_FALSE(d.armed);
+}
+
+TEST(CliLogTest, AnArmedLogsLinesCountItsWindows)
+{
+    const std::string folder(1000, 'w');
+    const std::string window = text(
+        [&](cli::Line& l) { cli::armed_window_line(l, 2, folder.c_str()); });
+    EXPECT_EQ(window,
+              "{\"type\":\"recording\",\"state\":\"window\",\"window\":2,"
+              "\"folder\":\"" +
+                  folder + "\"}");
+    EXPECT_LE(window.size(), cli::armed_window_line_bytes(folder.c_str()));
+    EXPECT_EQ(text([&](cli::Line& l) { cli::armed_line(l, 4); }),
+              "{\"type\":\"recording\",\"state\":\"armed\",\"windows\":4}");
+
+    cli::LogReadout r;
+    r.seconds = 5;
+    r.bytes = 10;
+    r.values = 3;
+    r.armed = true;
+    r.windows = 2;
+    EXPECT_EQ(text([&](cli::Line& l) { cli::log_line(l, r); }),
+              "{\"type\":\"log\",\"seconds\":5,\"bytes\":10,\"values\":3,"
+              "\"windows\":2}");
+    EXPECT_EQ(text([&](cli::Line& l) {
+                  cli::log_end_line(l, "seconds", nullptr, r);
+              }),
+              "{\"type\":\"end\",\"reason\":\"seconds\",\"seconds\":5,"
+              "\"bytes\":10,\"values\":3,\"windows\":2}")
+        << "an armed log that names no window names no folder";
+}

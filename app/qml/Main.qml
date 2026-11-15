@@ -501,7 +501,7 @@ ApplicationWindow {
                             // What the pill shows, the recording note included
                             readonly property string spoken: recordingNote.visible
                                                              ? text + " " + recordingNote.text : text
-                            Accessible.name: enabled ? qsTr("%1: show the log").arg(spoken) : spoken
+                            Accessible.name: enabled ? qsTr("%1: show the activity").arg(spoken) : spoken
                             onClicked: root.gotoPage(root.logPage)
                             // A dot and a word at rest, no capsule
                             background: Rectangle {
@@ -692,7 +692,7 @@ ApplicationWindow {
                                 { label: qsTr("Dashboard"), icon: "" },
                                 { label: qsTr("Live"),   icon: "" },
                                 { label: qsTr("Diagnostics"), icon: "" },
-                                { label: qsTr("Log"),       icon: "" },
+                                { label: qsTr("Activity"),  icon: "" },
                                 { label: qsTr("Recordings"), icon: "" },
                                 { label: qsTr("Settings"),  icon: "" }
                             ]

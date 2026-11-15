@@ -377,6 +377,12 @@ uint64_t ecuio_recorder_test_syncs(const ecuio_recorder_t* recorder);
 void ecuio_recorder_test_add_slept(ecuio_recorder_t* recorder, uint64_t us);
 uint64_t ecuio_recorder_test_wakes(const ecuio_recorder_t* recorder);
 
+/* Test-only: the recordings' clock for the whole process (each record's
+ * host time, an attach's zero, a note's or a mark's time). on nonzero
+ * makes it read now_us, as set by each call, so a case puts every frame
+ * at a time of its choosing; 0 gives it back to ecuio_clock_us. */
+void ecuio_recorder_test_set_clock(int on, uint64_t now_us);
+
 /* Test-only, never in queue.h: the reads waiting on a queue for an
  * entry, so a test closes it only once a read on another thread waits
  * (a read begun after ecuio_queue_close is undefined) */
