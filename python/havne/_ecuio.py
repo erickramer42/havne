@@ -267,7 +267,9 @@ ECUIO_QUEUE_MAX_VALUES = 0x10000
 ECUIO_QUEUE_TEXT_MAX = 128
 ECUIO_QUEUE_VALUES = 2
 ECUIO_QUEUE_VALUE_TEXT_CUT = 1
+ECUIO_RECORDER_DRAINED = 1
 ECUIO_RECORDING_ACTIVE = 1
+ECUIO_RECORDING_ARMED = 4
 ECUIO_RECORDING_CONDITIONS_MATCH = 4
 ECUIO_RECORDING_CONDITIONS_NAMED = 1
 ECUIO_RECORDING_CONDITIONS_PRESENT = 2
@@ -306,6 +308,7 @@ ECUIO_RECORDING_STRETCH_CUT_END = 16
 ECUIO_RECORDING_STRETCH_CUT_START = 8
 ECUIO_RECORDING_STRETCH_NO_THROTTLE = 4
 ECUIO_RECORDING_STRETCH_PULL = 1
+ECUIO_RECORD_ARMED = 1
 ECUIO_REFERENCE_ID = 0
 ECUIO_REFERENCE_KEY = 1
 ECUIO_SERIAL_DEVICE_LEN = 128
@@ -1151,7 +1154,10 @@ ecuio_recorder_state_t._fields_ = [
     ('notes_dropped', c_uint64),
     ('reason', (c_char * 128)),
     ('conditions_lost', c_uint64),
-    ('reserved', (c_uint64 * 3)),
+    ('windows', c_uint32),
+    ('preroll_short', c_uint32),
+    ('frames_passed', c_uint64),
+    ('reserved', (c_uint64 * 1)),
 ]
 ecuio_recording_column_t._fields_ = [
     ('lowest', c_double),

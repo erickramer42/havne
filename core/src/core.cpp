@@ -1167,9 +1167,13 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
             made->sha256 =
                 ecuio_sha256::hex_of(set->bytes.data(), set->bytes.size());
             for (const ecuio_condition_set::condition& c : set->conditions) {
+                const bool records =
+                    (c.info.uses & ECUIO_CONDITION_USE_RECORD) != 0 &&
+                    (c.info.flags & ECUIO_CONDITION_INFO_DISABLED) == 0;
                 made->conditions.push_back(
                     {c.key, c.name,
-                     (c.info.uses & ECUIO_CONDITION_USE_MARK) != 0});
+                     (c.info.uses & ECUIO_CONDITION_USE_MARK) != 0, records,
+                     c.info.before_us, c.info.after_us});
             }
             record = std::move(made);
             states.reserve(next->conditions.size());
@@ -1484,7 +1488,7 @@ void ecuio_session_dispatch_callbacks(
      * its zero to no other's frame */
     ecuio_record_link* link = session->record_link.get();
     uint64_t now = link->active.load(std::memory_order_relaxed) != nullptr
-                       ? ecuio_clock_us()
+                       ? ecuio_record_clock_us()
                        : 0;
 
     /* The lists as they stand when the frame arrives, and the set to
@@ -1547,7 +1551,7 @@ void ecuio_session_dispatch_callbacks(
             : 0;
     if (recorder != nullptr) {
         if (now == 0) {
-            now = ecuio_clock_us(); /* attached since the first look */
+            now = ecuio_record_clock_us(); /* attached since the first look */
         }
         const uint64_t zero = link->zero_us.load(std::memory_order_relaxed);
         const uint64_t host_us = now > zero ? now - zero : 0;
