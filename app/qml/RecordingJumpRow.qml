@@ -9,8 +9,9 @@ import App
 pragma ComponentBehavior: Bound
 
 // The viewer's Jump row (ADR-0056 section 6): previous and next for the
-// recording's pulls and its cruises, a line saying where the view is, and
-// the switch for the stretch bands on the chart. The page owns the list,
+// recording's pulls and its cruises, a line saying where the view is, the
+// switch for the stretch bands on the chart, and the switches for the
+// Stretches and Conditions panels. The page owns the list,
 // the view and the cursor; this row only asks for a jump.
 Flow {
     id: row
@@ -25,9 +26,13 @@ Flow {
     property bool canNextCruise: false
     property bool bandsShown: true
     property bool stretchesOpen: false
+    // The Conditions panel's switch, shown for a recording with entries
+    property bool conditionsShown: false
+    property bool conditionsOpen: false
     signal jumpRequested(string kind, int direction)
     signal bandsToggled()
     signal stretchesToggled()
+    signal conditionsToggled()
 
     component Group: RowLayout {
         id: group
@@ -95,6 +100,17 @@ Flow {
         height: Theme.touchTarget
         text: qsTr("Stretches…")
         onClicked: row.stretchesToggled()
+    }
+    // Selected while the list of the recording's conditions is open
+    ThemedButton {
+        objectName: "jumpConditions"
+        visible: row.conditionsShown
+        compact: Theme.compact
+        checkable: true
+        checked: row.conditionsOpen
+        height: Theme.touchTarget
+        text: qsTr("Conditions…")
+        onClicked: row.conditionsToggled()
     }
     Label {
         objectName: "jumpStatus"
