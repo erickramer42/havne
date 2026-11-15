@@ -21,6 +21,9 @@ ColumnLayout {
     // Each term's level and clear as typed, with what they showed and
     // stored at the start: a field left as it was keeps its stored value
     property var texts: []
+    // Each seconds field's text as the load showed it, by key: a field
+    // left so keeps its stored value, past the three decimals shown
+    property var secondsShown: ({})
     property string join: "all"
     property string level: "warning"
     property string problem: ""
@@ -108,6 +111,8 @@ ColumnLayout {
         beforeInput.text = shownSeconds(c.record?.before)
         afterInput.text = shownSeconds(c.record?.after)
         markCheck.checked = c.mark === true
+        secondsShown = { "for": forInput.text, clear_for: clearForInput.text,
+                         before: beforeInput.text, after: afterInput.text }
         problem = ""
         confirmRemove = false
         picking = -1
@@ -247,6 +252,8 @@ ColumnLayout {
                 delete into[key]
                 continue
             }
+            if (field.text === secondsShown[key] && typeof into[key] === "number")
+                continue
             const v = numberOf(text)
             if (!isFinite(v)) {
                 problem = qsTr("%1 isn't a number of seconds.").arg(text)

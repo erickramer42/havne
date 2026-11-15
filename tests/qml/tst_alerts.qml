@@ -158,6 +158,38 @@ TestCase {
         verify(!("enabled" in stored().conditions[0]), "on is the default: the key goes")
     }
 
+    // A number of seconds past the three decimals shown keeps its value
+    // while its field reads as it opened: the editor reads unchanged, a
+    // Save of something else leaves it, and a field typed in takes the text
+    function test_anUntouchedSecondsFieldKeepsItsStoredValue() {
+        save([rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 },
+                  { "for": 0.1234, clear_for: 2.00005, record: { before: 1.0001, after: 3.33333 } })])
+        const page = settingsOf()
+        rowOf(page, 0).clicked()
+        const editor = editorOf(page)
+        const point = Qt.locale().decimalPoint
+        compare(editor.forField.text, "0" + point + "123", "three decimals shown")
+        compare(editor.afterField.text, "3" + point + "333")
+        verify(!editor.changed(), "an editor left as it opened reads unchanged")
+        find(editor, "alertLevel_danger").clicked()
+        find(editor, "alertSave").clicked()
+        compare(page.pageKey, "alerts", find(editor, "alertEditorProblem").text)
+        let c = stored().conditions[0]
+        compare(c.alert.level, "danger")
+        verify(c["for"] === 0.1234, String(c["for"]))
+        verify(c.clear_for === 2.00005, String(c.clear_for))
+        verify(c.record.before === 1.0001, String(c.record.before))
+        verify(c.record.after === 3.33333, String(c.record.after))
+
+        rowOf(page, 0).clicked()
+        type(editor.forField, "0" + point + "5")
+        verify(editor.changed(), "a field typed in is a change")
+        find(editor, "alertSave").clicked()
+        c = stored().conditions[0]
+        verify(c["for"] === 0.5, String(c["for"]))
+        verify(c.record.after === 3.33333, String(c.record.after))
+    }
+
     // The sound switch is live and says where it plays
     function test_theSoundSaysItPlaysOnAndroid() {
         save([rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 })])
