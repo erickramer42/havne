@@ -132,8 +132,7 @@ int run_play(const PlayArgs& args)
     }
     if (why[0] != '\0') {
         write_error(out, ECUIO_ERR_LOAD_FAILED, why);
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
 
     Player player;
@@ -152,11 +151,10 @@ int run_play(const PlayArgs& args)
         const std::string reason = std::generic_category().message(errno);
         std::snprintf(why, sizeof why, "%s: %s", args.to, reason.c_str());
         write_error(out, ECUIO_ERR_LOAD_FAILED, why);
-        out.flush();
         if (player.fd >= 0) {
             close(player.fd);
         }
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     if (!player.fd_frames) {
         std::fprintf(stderr,
@@ -171,9 +169,8 @@ int run_play(const PlayArgs& args)
     ecuio_status_t st = create_within(out, args.uri, &session, &detail);
     if (st != ECUIO_OK) {
         write_error(out, st, detail.c_str());
-        out.flush();
         close(player.fd);
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     ecuio_session_info_t info;
     std::memset(&info, 0, sizeof info);
@@ -204,7 +201,7 @@ int run_play(const PlayArgs& args)
         ecuio_session_close(session);
         ecuio_session_destroy(session);
         close(player.fd);
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
 
     const uint64_t started = ecuio_clock_us();

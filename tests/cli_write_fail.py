@@ -8,8 +8,8 @@
 # standard output a file opened for reading, so stdio takes the lines
 # into its buffer and the failure comes when the buffer goes out. Each
 # command first runs once into a file it can write, which must end with
-# its own exit (0, or 3 for a refused file's error line) and output, so
-# a refusal never stands in for the failure.
+# its own exit (0; 3 for a refusal's error line; 1 for a recording that
+# can't be made) and output, so a refusal never stands in for the failure.
 
 import os
 import subprocess
@@ -44,6 +44,9 @@ def main():
         latin1 = os.path.join(tmp, "latin1.json")
         with open(latin1, "wb") as f:
             f.write(LAYOUT.replace(b'"E"', b'"Mot\xe9ur"'))
+        # A recording's folder under a file can't be made
+        unmade = os.path.join(log, "under")
+        bad_uri = "mock://write-fail?speed=2"
         locked = os.path.join(tmp, "locked.jsonl")
         open(locked, "wb").close()
         missing = os.path.join(tmp, "missing.json")
@@ -83,12 +86,33 @@ def main():
             "match-unread": lambda n: ["plugins", "match", missing, "--vin",
                                        "1FAFAKE10M0000001"],
             "check-unread": lambda n: ["plugins", "check", missing],
+            "log-unread": lambda n: ["log", "mock://write-fail",
+                                     os.path.join(tmp, n), "--conditions",
+                                     missing],
+            "log-bad-uri": lambda n: ["log", bad_uri, os.path.join(tmp, n)],
+            "log-unrecorded": lambda n: ["log", "mock://write-fail", unmade],
+            "health-bad-uri": lambda n: ["health", bad_uri,
+                                         os.path.join(tmp, n + ".json"),
+                                         "--format", "json"],
+            "stream-unread": lambda n: ["stream", "mock://write-fail",
+                                        "--conditions", missing],
+            "stream-bad-uri": lambda n: ["stream", bad_uri],
+            "stream-unrecorded": lambda n: ["stream", "mock://write-fail",
+                                            "--count", "5", "--record", unmade],
         }
         # A run into a writable file ends with this exit
         exits = {"layout-refused": 3, "conditions-refused": 3,
                  "conditions-unread": 3, "conditions-no-profile": 3,
                  "wrap-refused": 3, "wrap-unread": 3, "put-unread": 3,
-                 "drop-unread": 3, "match-unread": 3, "check-unread": 3}
+                 "drop-unread": 3, "match-unread": 3, "check-unread": 3,
+                 "log-unread": 3, "log-bad-uri": 3, "log-unrecorded": 1,
+                 "health-bad-uri": 3, "stream-unread": 3, "stream-bad-uri": 3,
+                 "stream-unrecorded": 1}
+        if sys.platform.startswith("linux"):
+            # play is Linux's alone; elsewhere it is usage, before any line
+            commands["play-no-interface"] = lambda n: [
+                "play", "mock://write-fail", "--to", "havne-none"]
+            exits["play-no-interface"] = 3
         for name, args in commands.items():
             good = os.path.join(tmp, name + "-good.jsonl")
             with open(good, "wb") as out:
