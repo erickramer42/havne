@@ -2149,6 +2149,7 @@ Page {
     property var connectUris: []
     property string connectVehicleUri: ""
     property var connectAdapters: []
+    property var connectProfileWords: ({})
     // A tapped row outlives the list, which the Loader makes again each show
     property string connectTapped: ""
     readonly property bool connectShown: form === "phone" && !Bridge.connected && !editing
@@ -2165,6 +2166,7 @@ Page {
             recents: root.connectUris
             vehicleUri: root.connectVehicleUri
             adapters: root.connectAdapters
+            profileWords: root.connectProfileWords
             tapped: root.connectTapped
             onPicked: uri => root.connectTapped = uri
             onConnectTo: uri => root.connectToUri(uri)

@@ -19,6 +19,9 @@ Rectangle {
     property var recents: []
     property string vehicleUri: ""
     property var adapters: []
+    // Settings' connectProfileWords and profileNames
+    property var profileWords: ({})
+    property var profileNames: ({})
     // The tapped row, until the recent list changes
     property string tapped: ""
     // False holds the logo still; tests set its rpm
@@ -40,10 +43,14 @@ Rectangle {
     }
     Component.onCompleted: if (Bridge.connected) connectedAt = new Date()
 
-    // The address's profile in words: profile= or the default
+    // The address's profile in words: profile=, a plugin's by its name,
+    // or the default
     function profileOf(uri) {
         const found = /[?&]profile=([^&]+)/.exec(uri)
-        return found ? decodeURIComponent(found[1]) : qsTr("default")
+        if (!found)
+            return qsTr("default")
+        const name = decodeURIComponent(found[1])
+        return profileNames[name] !== undefined ? profileNames[name] : name
     }
 
     // Scrolls when the page is shorter than the column: a window on its
@@ -310,6 +317,7 @@ Rectangle {
                 recents: home.recents
                 vehicleUri: home.vehicleUri
                 adapters: home.adapters
+                profileWords: home.profileWords
                 tapped: home.tapped
                 onPicked: uri => home.tapped = uri
                 onConnectTo: uri => home.connectToUri(uri)
@@ -398,8 +406,9 @@ Rectangle {
                 wrapMode: Text.WordWrap
                 font.pixelSize: Theme.fontCaption
                 color: Theme.textDim
-                text: qsTr("Connect from here, or from Settings > Connection to choose a profile. "
-                           + "To play a recording back, open Recordings.")
+                text: qsTr("Connect from here. An adapter reads the vehicle's picked plugin; choose "
+                           + "anything else under Settings > Connection. To play a recording back, "
+                           + "open Recordings.")
             }
         }
     }

@@ -2636,6 +2636,42 @@ TestCase {
         return list
     }
 
+    // Main hands both lists Settings' words: with a picked vehicle whose
+    // pick reads obd2, an adapter's row says the plugin a connect reads,
+    // and the connect puts the address in Settings' field with its profile
+    function test_theListsSayThePluginAConnectReads() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        verify(settings.importFile(Harness.writeExamplePlugin("list-words.havne-plugin.json")))
+        try {
+            settings.vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Desk car"),
+                                                     ["plugin.example-sim.my2019"])
+            const address = "elm327://bt:00:11:22:33:44:55"
+            const list = connectListOn(main, [], [
+                { name: "OBD adapter", address: "00:11:22:33:44:55", kind: "bt" }])
+            tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "the adapter and the demo")
+            const word = "obd2 + Example: the simulated car: my2019"
+            const row = find(list, "connectRow_0")
+            compare(find(row, "connectRowAddress").text, "OBD adapter")
+            const kind = find(row, "connectRowKind")
+            compare(kind.text, word, "in the kind's place on a phone")
+            verify(kind.mapToItem(row, kind.width, 0).x <= row.width + 0.5, "inside its row")
+            compare(row.Accessible.name, "OBD adapter, Bluetooth, " + word)
+            compare(find(find(list, "connectRow_1"), "connectRowKind").text, "Demo data",
+                    "the demo reads no plugin")
+            compare(find(main.contentItem, "homePage").profileWords[address], word, "Home's list too")
+
+            tryCompare(list, "chosen", address, 2000, "the sole adapter")
+            find(list, "connectGo").clicked()
+            compare(find(settings, "uriField").text, address + "?profile=plugin.example-sim.my2019",
+                    "the address Settings connects")
+            tryVerify(() => !Bridge.connecting, 5000, "the desktop refuses a Bluetooth link")
+        } finally {
+            for (const p of settings.pluginList)
+                settings.removePlugin(p.sha256)
+        }
+    }
+
     // The desktop's Home connects the chosen row through Settings, as
     // Dash's list does: the address in its field, then the session
     function test_homeConnectsThroughSettings() {

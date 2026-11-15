@@ -2959,6 +2959,264 @@ TestCase {
         compare(storedVehicles.value("book"), later, "the stored book is as it was")
     }
 
+    // ---- A connect from a list reads the vehicle's plugin (ADR-0064 Q5) ----
+
+    // The rule: an address that names no profile takes the picked
+    // vehicle's first pick that loads and reads all of obd2, where obd2
+    // is asked: a J2534 or ELM327 adapter, or a CAN interface that sends.
+    // Any other address passes as it is, and each row has its word
+    function test_aListsAddressTakesTheStandInOnlyWhereObd2IsAsked() {
+        const page = createPage()
+        page.j2534Devices = []
+        page.serialPorts = [{ name: "COM5", device: "" }]
+        page.bluetoothAdapters = []
+        page.canInterfaces = [{ name: "vcan0", kind: "vcan", up: true },
+                              { name: "can0", kind: "can", up: true, modes: ["one-shot"] },
+                              { name: "can1", kind: "can", up: true, modes: ["listen-only"] },
+                              { name: "can2", kind: "can", up: false, modes: ["one-shot"] }]
+        press(page, "vehicleNew")
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "no pick, nothing composed")
+        verify(importFile(page, "plain.json", "Plain"))
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "a pick that doesn't read obd2")
+        compare(page.connectProfileWords["elm327://COM5"], undefined)
+        verify(importFile(page, "plus.json", "Plus", "D101", true))
+        verify(importFile(page, "more.json", "More", "D102", true))
+        const plus = "plugin.plus.base"
+        compare(page.picks, ["plugin.plain.base", plus, "plugin.more.base"])
+
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5?profile=" + plus,
+                "the first pick that reads obd2, not the last")
+        compare(page.listConnectUri("j2534://Vendor X"), "j2534://Vendor X?profile=" + plus)
+        compare(page.listConnectUri("elm327://192.168.0.10:35000?poll=0C"),
+                "elm327://192.168.0.10:35000?poll=0C&profile=" + plus,
+                "appended last, the other keys where they were")
+        compare(page.listConnectUri("elm327://COM5?profile=obd2"), "elm327://COM5?profile=obd2",
+                "an address that names a profile wins")
+        compare(page.listConnectUri("elm327://COM5?profile=raw&poll=0C"),
+                "elm327://COM5?profile=raw&poll=0C")
+        compare(page.listConnectUri("mock://demo"), "mock://demo", "the demo's Default isn't obd2")
+        compare(page.listConnectUri("replay://C:/recordings/one"), "replay://C:/recordings/one")
+
+        compare(page.listConnectUri("socketcan://vcan0"), "socketcan://vcan0?profile=" + plus,
+                "a virtual bus sends")
+        compare(page.listConnectUri("socketcan://can0"), "socketcan://can0?profile=" + plus,
+                "a controller up in one-shot mode sends")
+        compare(page.listConnectUri("socketcan://can1"), "socketcan://can1", "a listener keeps listening")
+        compare(page.listConnectUri("socketcan://can2"), "socketcan://can2", "down")
+        compare(page.listConnectUri("socketcan://can9"), "socketcan://can9", "not listed")
+
+        compare(page.connectProfileWords["elm327://COM5"], "obd2 + Plus")
+        compare(page.connectProfileWords["socketcan://vcan0"], "obd2 + Plus")
+        compare(page.connectProfileWords["socketcan://can1"], undefined,
+                "no word on a row that isn't composed")
+        compare(page.listProfileWord("elm327://COM5?profile=plugin.more.base"), "More",
+                "a plugin's profile by its name")
+        compare(page.listConnectUri("elm327://COM5?profile=plugin.more.base"),
+                "elm327://COM5?profile=plugin.more.base", "a pick's profile, named, is read")
+        compare(page.listProfileWord("elm327://COM5?profile=raw"), "")
+        compare(page.listProfileWord("mock://demo"), "")
+
+        // A pick the store lacks stands in for nothing: the next does
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base", "plugin.more.base"]))
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5?profile=plugin.more.base")
+        compare(page.listProfileWord("elm327://COM5?profile=plugin.gone.base"), "a plugin not in the store")
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base"]))
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5")
+
+        // A plugin's or a signal file's profile the vehicle doesn't pick is
+        // dropped, as the field drops it; a built-in profile stays
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, [plus]))
+        compare(page.listConnectUri("elm327://COM5?profile=plugin.more.base&poll=0C"),
+                "elm327://COM5?poll=0C&profile=" + plus, "the vehicle's own pick is read in its place")
+        compare(page.listProfileWord("elm327://COM5?profile=plugin.more.base"), "obd2 + Plus")
+        compare(page.listConnectUri("mock://demo?profile=plugin.more.base"), "mock://demo")
+        compare(page.listConnectUri("elm327://COM5?profile=user.old"), "elm327://COM5?profile=" + plus)
+        press(page, "vehicle_none")
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "no vehicle, no pick")
+        compare(page.listConnectUri("elm327://COM5?profile=" + plus), "elm327://COM5",
+                "nor a plugin's profile")
+        compare(page.listConnectUri("elm327://COM5?profile=raw"), "elm327://COM5?profile=raw")
+        compare(page.connectProfileWords["elm327://COM5"], undefined)
+    }
+
+    // A list's connect puts the composed address in the field, as typed
+    // text, before the connect; one that fails is kept nowhere. The
+    // address here is a closed TCP port, an adapter's on every platform
+    function test_aListConnectFillsTheFieldWithTheProfileItReads() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "D100", true))
+        const field = find(page, "uriField")
+        field.text = "mock://other"
+        const closed = "elm327://127.0.0.1:1"
+        page.connectFromList(closed)
+        compare(field.text, closed + "?profile=plugin.plus.base", "before the connect answers")
+        compare(page.profileChoice, "plugin.plus.base", "the row follows the field")
+        verify(find(page, "profile_plugin.plus.base").checked)
+        tryVerify(() => !Bridge.connecting, 10000, "the connect ends")
+        verify(!Bridge.connected, "nothing listens there")
+        verify(find(page, "errorLabel").text !== "")
+        compare(page.recentUris, [], "a failed connect is no recent address")
+        compare(page.pickedVehicle.uri, "")
+
+        // The demo is left as it is
+        page.connectFromList("mock://demo")
+        compare(field.text, "mock://demo")
+        tryVerify(() => Bridge.connected, 5000, "connects")
+        compare(Bridge.currentUri, "mock://demo")
+    }
+
+    // A session on the fake adapter, ended
+    function endSession() {
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+    }
+
+    // On an adapter the connect runs under the pick's profile, and what
+    // is kept is the row's address without it: the vehicle's address and
+    // the recent list name no profile, so each connect adds the pick of
+    // the vehicle picked then, and another vehicle reads its own
+    function test_aListConnectOnAnAdapterReadsThePluginAndKeepsTheRowsAddress() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "1E1C", true))
+        const uri = "j2534://" + Harness.fakeDllPath
+        const composed = uri + "?profile=plugin.plus.base"
+        const field = find(page, "uriField")
+        field.text = ""
+        page.connectFromList(uri)
+        compare(field.text, composed)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, composed)
+        compare(find(page, "errorLabel").text, "")
+        tryVerify(() => Bridge.signalModel.rowCount() > 0, 5000)
+        verify(Bridge.profileSignals(Bridge.currentUri).some(r => r.ref === "key:a"),
+               "the session reads the plugin's signal with obd2's")
+        tryVerify(() => page.pickedVehicle.uri === uri, 10000, "the vehicle keeps the row's address")
+        endSession()
+        sameList(page.connectUris, [uri])
+        compare(page.connectProfileWords[uri], "obd2 + Plus", "the row says what it reads")
+
+        // Another vehicle, which picks nothing, reads the row as it is
+        press(page, "vehicleNew")
+        compare(page.picks, [])
+        compare(page.connectProfileWords[uri], undefined)
+        page.connectFromList(uri)
+        compare(field.text, uri)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, uri, "not the first vehicle's plugin")
+        tryVerify(() => page.pickedVehicle.uri === uri, 10000)
+        endSession()
+
+        // The first again: the field reads its address as its row connects
+        press(page, "vehicle_" + page.vehicles.list[0].id)
+        compare(field.text, composed)
+    }
+
+    // The recent list keeps the row's address too; an address typed
+    // after it is kept as typed
+    function test_aListConnectKeepsTheRowsAddressInTheRecentList() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "1E1C", true))
+        const uri = "j2534://" + Harness.fakeDllPath
+        find(page, "uriField").text = ""
+        page.connectFromList(uri)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, uri + "?profile=plugin.plus.base")
+        sameList(page.recentUris, [uri])
+        endSession()
+        const raw = uri + "?profile=raw"
+        find(page, "uriField").text = raw
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        sameList(page.recentUris, [raw, uri])
+        endSession()
+    }
+
+    // An address typed with a plugin's profile is kept as typed. A list
+    // reads it for a vehicle that picks the plugin; for another it drops
+    // the profile, so the plugin is never remembered as that vehicle's
+    function test_aRowNamingAPluginReadsItOnlyForAVehicleThatPicksIt() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "1E1C", true))
+        const uri = "j2534://" + Harness.fakeDllPath
+        const composed = uri + "?profile=plugin.plus.base"
+        const field = find(page, "uriField")
+        field.text = composed
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        tryVerify(() => page.pickedVehicle.uri === composed, 10000, "kept as typed")
+        sameList(page.recentUris, [composed])
+        endSession()
+        compare(page.listConnectUri(composed), composed, "its vehicle picks the plugin")
+        compare(page.connectProfileWords[composed], "Plus")
+
+        press(page, "vehicleNew")
+        compare(page.listConnectUri(composed), uri)
+        compare(page.connectProfileWords[composed], undefined, "no word: it reads Default")
+        page.connectFromList(composed)
+        compare(field.text, uri)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, uri, "not the first vehicle's plugin")
+        tryVerify(() => page.pickedVehicle.uri === uri, 10000, "nor is it remembered as this vehicle's")
+        sameList(page.recentUris, [uri, composed])
+        compare(page.vehicles.list[0].uri, composed, "the first vehicle's stays")
+        endSession()
+    }
+
+    // A kept row follows the vehicle's picks: with the first undone the
+    // next that reads obd2 is read, at a start as at a connect, and with
+    // the plugin removed the row connects as it is
+    function test_aKeptRowFollowsTheVehiclesPicks() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        let page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "1E1C", true))
+        verify(importFile(page, "more.json", "More", "D102", true))
+        const uri = "j2534://" + Harness.fakeDllPath
+        const plus = uri + "?profile=plugin.plus.base"
+        const more = uri + "?profile=plugin.more.base"
+        find(page, "uriField").text = ""
+        page.connectFromList(uri)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, plus)
+        tryVerify(() => page.pickedVehicle.uri === uri, 10000)
+        endSession()
+
+        page.open("signals")
+        pressRow(page, "plugin.plus.base")
+        compare(page.picks, ["plugin.more.base"])
+        sameList(page.connectUris, [uri])
+        compare(page.connectProfileWords[uri], "obd2 + More")
+        compare(page.listConnectUri(plus), more, "a row that names the pick undone reads the pick of now")
+        page.connectFromList(uri)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, more)
+        endSession()
+
+        // As at a quit and a start
+        page.destroy()
+        wait(10)
+        stored.sync()
+        compare(stored.value("uri"), uri, "the last address is the row's")
+        page = createPage()
+        compare(find(page, "uriField").text, more, "and the field reads the pick of now")
+
+        verify(page.removePlugin(page.pluginList.find(p => p.id === "more").sha256))
+        compare(page.picks, [])
+        compare(page.listConnectUri(uri), uri)
+        compare(page.connectProfileWords[uri], undefined)
+    }
+
     // ---- An OBDb set imported (ADR-0051's appendix of 2026-11-06, ADR-0064 Q3) ----
 
     // The OBDb fixture read through Import under the year typed

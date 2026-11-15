@@ -1125,14 +1125,15 @@ Pane {
         ++storeRev
     }
 
-    // Picking fills the field with the vehicle's connection, read back
-    // like typed text so the profile row and the DID field follow
+    // Picking fills the field with the vehicle's connection as a list
+    // would connect it, read back like typed text so the profile row and
+    // the DID field follow
     function pickVehicle(id) {
         confirming = ""
         vinPickNote = ""
         saveVehicles(VehicleBook.pick(vehicles, id))
         if (pickedVehicle !== null && pickedVehicle.uri !== "")
-            uriField.text = pickedVehicle.uri
+            uriField.text = listConnectUri(pickedVehicle.uri)
     }
 
     // A change of the list from the page's buttons: the field empties
@@ -1625,14 +1626,19 @@ Pane {
         syncing = false
     }
 
-    function requestConnect(uri) {
+    // kept: the address to keep once uri connects, where it isn't uri
+    // itself (a list's row, whose profile the page added)
+    property string connectKeeps: ""
+    function requestConnect(uri, kept) {
         if (uri === "")
             return
+        connectKeeps = kept === undefined ? "" : kept
         Bridge.connectSessionAsync(uri)
         // Connecting/Connected/failed lines arrive via logMessage.
     }
 
-    // The addresses that connected, newest first, for Dash's connect list
+    // The addresses kept from the connects that succeeded, newest first,
+    // for Dash's connect list
     readonly property int maxRecentUris: 5
     property var recentUris: []
     // A replay or the mock is never kept: Recordings is a replay's way back
@@ -1660,7 +1666,7 @@ Pane {
         return [uri].concat(list.filter(u => u !== uri)).slice(0, maxRecentUris)
     }
     // What Dash lists: the recent addresses, the picked vehicle's saved one
-    // first when absent. Display only: recentUris holds what connected
+    // first when absent. Display only: recentUris holds what was kept
     readonly property string vehicleUri: pickedVehicle !== null ? pickedVehicle.uri : ""
     function connectRows(recents, vehicle) {
         return vehicle === "" || recents.includes(vehicle) ? recents : [vehicle].concat(recents)
@@ -1672,10 +1678,72 @@ Pane {
     readonly property var connectAdapters: devices.map(d => ({
             uri: d.base, title: d.title, kind: d.kind
         }))
-    // Dash's Connect: the field shows it as typed text, before the connect
+    // ---- A connect from a list (Home's, Dash's): an address that names
+    // no profile reads the picked vehicle's plugin where obd2 is asked
+    // (ADR-0064 Q5) ----
+    // The first pick that loads and reads all of obd2, null for none
+    readonly property var listStandIn:
+        (storeRev >= 0 ? Bridge.pickRow(picks, true) : []).find(r => r.standIn) || null
+
+    // Whether a pick that reads obd2 is read at the address: a J2534 or
+    // ELM327 adapter's, or a CAN interface that sends requests (a virtual
+    // bus, or a controller up in one-shot mode). A listening interface
+    // is left to listen: a pick there would start sending
+    function takesStandIn(uri) {
+        if (VehicleBook.isAdapterUri(uri))
+            return true
+        const found = /^socketcan:\/\/([^?]+)/.exec(uri)
+        const c = found === null ? undefined : canInterfaces.find(i => i.name === found[1])
+        return c !== undefined && c.up === true
+               && (c.kind === "vcan" || (c.modes || []).indexOf("one-shot") >= 0)
+    }
+
+    // A row's address as the picked vehicle reads it: a plugin's or a
+    // signal file's profile the vehicle doesn't pick is dropped, as the
+    // field drops it, so no connect reads another vehicle's signals
+    function listAddress(uri) {
+        const named = queryValue(splitUri(uri).pairs, "profile")
+        return typeof named === "string" && (named.startsWith("plugin.") || named.startsWith("user."))
+               && picksNow().indexOf(named) < 0 ? VehicleBook.withoutFileProfile(uri) : uri
+    }
+
+    // The address a list's row connects: with the stand-in's profile
+    // where the rule applies, else as the vehicle reads it (one that
+    // names a profile, the demo, a recording, no vehicle, no such pick)
+    function listConnectUri(uri) {
+        const plain = listAddress(uri)
+        return listStandIn !== null && takesStandIn(plain)
+            ? VehicleBook.withProfile(plain, listStandIn.profile) : plain
+    }
+
+    // What a list's row reads, where its kind doesn't say: "obd2 + <name>"
+    // for a row the rule composes, a plugin's name for an address that
+    // names its profile; "" otherwise
+    function listProfileWord(uri) {
+        const plain = listAddress(uri)
+        const named = queryValue(splitUri(plain).pairs, "profile")
+        if (typeof named === "string" && named.startsWith("plugin."))
+            return placeOf(named) !== null ? profileName(named) : qsTr("a plugin not in the store")
+        return listConnectUri(uri) !== plain ? qsTr("obd2 + %1").arg(profileName(listStandIn.profile)) : ""
+    }
+    // The lists' rows by address, for those with a word
+    readonly property var connectProfileWords: {
+        const words = {}
+        for (const uri of connectUris.concat(connectAdapters.map(a => a.uri))) {
+            const word = listProfileWord(uri)
+            if (word !== "")
+                words[uri] = word
+        }
+        return words
+    }
+
+    // A list's Connect: the field shows the address as typed text, with
+    // the profile it reads, before the connect. The row's address is what
+    // is kept: the profile added is the vehicle's pick of this moment
     function connectFromList(uri) {
-        uriField.text = uri
-        requestConnect(uri)
+        const composed = listConnectUri(uri)
+        uriField.text = composed
+        requestConnect(composed, listAddress(uri))
     }
 
     // ---- The last URI that connected, the recent ones, the Record switch
@@ -1712,9 +1780,9 @@ Pane {
         if (!keptUri(sessionSettings.uri))
             sessionSettings.uri = ""
         // Set like typed text, so the profile row and the DID field read
-        // it back
+        // it back; as a list would connect it, like a picked vehicle's
         if (uriField.text === "")
-            uriField.text = sessionSettings.uri
+            uriField.text = listConnectUri(sessionSettings.uri)
         recentUris = parseRecentUris(sessionSettings.recentUris, sessionSettings.uri)
         if (JSON.stringify(recentUris) !== sessionSettings.recentUris)
             sessionSettings.recentUris = JSON.stringify(recentUris)
@@ -1729,20 +1797,21 @@ Pane {
                 page.readResult = result
         }
         function onConnectResult(uri, error) {
+            const keeps = page.connectKeeps !== "" ? page.connectKeeps : uri
             page.errorLabel.text = error
             page.errorLabel.visible = (error !== "")
             page.logExplains = (error !== "")
             if (error === "") {
-                if (page.keptUri(uri)) {
-                    sessionSettings.uri = uri
-                    page.recentUris = page.withRecentUri(page.recentUris, uri)
+                if (page.keptUri(keeps)) {
+                    sessionSettings.uri = keeps
+                    page.recentUris = page.withRecentUri(page.recentUris, keeps)
                     sessionSettings.recentUris = JSON.stringify(page.recentUris)
                 }
                 page.rememberVersions(uri, Bridge.adapterVersions)
                 // The picked vehicle's connection and plotted signals,
                 // for an adapter's session only (ADR-0027 section 1, section 2)
                 if (VehicleBook.isAdapterUri(uri) && page.pickedVehicle !== null) {
-                    page.saveVehicles(VehicleBook.rememberUri(page.vehicles, uri))
+                    page.saveVehicles(VehicleBook.rememberUri(page.vehicles, keeps))
                     Bridge.signalModel.setPlotChoices(page.pickedVehicle.plotted,
                                                       page.pickedVehicle.unplotted)
                 }
