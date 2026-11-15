@@ -312,7 +312,7 @@ Page {
         if (Bridge.disconnecting) return qsTr("Disconnecting…")
         if (!Bridge.connected) return qsTr("Connect a session to read live values")
         if (Bridge.liveSignalModel.shownCount === 0)
-            return qsTr("This profile decodes no signals; its frames are on the Log page")
+            return qsTr("This profile decodes no signals; its frames are on the Activity page")
         // Refusals past an ECU's report list leave their rows blank: say
         // how many, since the rows can't
         const unnamed = Bridge.refusedUnnamed !== "" ? " · " + Bridge.refusedUnnamed : ""
