@@ -127,6 +127,14 @@ struct SignalListModelForeign
     QML_ANONYMOUS
 };
 
+// Bridge.conditionModel: the conditions' rows (ADR-0063 section 9)
+struct ConditionModelForeign
+{
+    Q_GADGET
+    QML_FOREIGN(ConditionModel)
+    QML_ANONYMOUS
+};
+
 struct LiveSignalModelForeign
 {
     Q_GADGET

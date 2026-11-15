@@ -1641,6 +1641,13 @@ SessionBridge::SessionBridge(QObject* parent)
     (void)ecuio_init();   // optional and always ECUIO_OK (core.h), paired below
     m_pluginStore.setLog(
         [this](const QString& line) { emit logMessage(line); });
+    m_conditionModel = new ConditionModel(this);
+    if (!m_conditionStore.load(&m_conditionsProblem)) {
+        m_conditionsProblem =
+            QStringLiteral("The saved conditions weren't read: %1")
+                .arg(m_conditionsProblem);
+    }
+    showSavedConditions();
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         notifyFrameCounts();
@@ -1661,6 +1668,8 @@ SessionBridge::SessionBridge(QObject* parent)
         // queues a report as it drops (at most one pending).
         notifyDropped();
         flushValues();
+        flushConditions(
+            m_session); // after the values: a firing's value is shown
         pollRecording();
     });
     // A tick asks its row: the default pick follows on the next tick
@@ -2960,6 +2969,32 @@ QString SessionBridge::replayUriFor(const QString& folder,
     return uri;
 }
 
+namespace {
+
+// A recording's events.log header, as cli::RecordedSignals reads it;
+// false when there's no events.log to read
+bool readRecordedHeader(const QString& folder, cli::RecordedSignals* recorded)
+{
+    QFile events(folder + QStringLiteral("/events.log"));
+    if (!events.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    // The header alone: its lines up to the blank one (the enum labels'
+    // lines make it longer than a few)
+    while (!events.atEnd()) {
+        QByteArray line = events.readLine(64 * 1024);
+        if (line.endsWith('\n')) {
+            line.chop(1);
+        }
+        if (!recorded->take(line.toStdString())) {
+            break;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
 {
     const std::string uri8 = uri.toStdString();
@@ -2969,20 +3004,8 @@ QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
     }
     const QString folder = QString::fromStdString(folder8);
     cli::RecordedSignals recorded;
-    QFile events(folder + QStringLiteral("/events.log"));
-    if (!events.open(QIODevice::ReadOnly)) {
+    if (!readRecordedHeader(folder, &recorded)) {
         return uri;
-    }
-    // The header alone: its lines up to the blank one (the enum labels'
-    // lines make it longer than a few)
-    while (!events.atEnd()) {
-        QByteArray line = events.readLine(64 * 1024);
-        if (line.endsWith('\n')) {
-            line.chop(1);
-        }
-        if (!recorded.take(line.toStdString())) {
-            break;
-        }
     }
     if (!recorded.names_file()) {
         return uri;
@@ -3240,6 +3263,11 @@ QString SessionBridge::connectCoreOnly(const QString& uri,
         // values to onValues, after onFrame
         rc = ecuio_register_values_callback(session, &SessionBridge::onValues, this);
     }
+    if (rc == ECUIO_OK) {
+        // ADR-0063: a frame's condition events, after its values
+        rc = ecuio_register_conditions_callback(
+            session, &SessionBridge::onConditions, this);
+    }
     if (rc != ECUIO_OK) {
         ecuio_session_destroy(session);
         return QString::fromUtf8(ecuio_status_string(rc));
@@ -3299,6 +3327,10 @@ QString SessionBridge::startSession(ecuio_session_t* session,
     m_pickLine.clear();
     m_pickLinePending = false;
     applyDefaultPick(session, false, true);
+    // Before the recorder, which holds the set the session judges then
+    // (ECUIO_ERR_IN_USE after), and before the start, so the first frame
+    // is judged
+    attachSessionConditions(session, uri);
     // Attached before the worker starts, so the recording holds every frame
     startRecording(session, uri);
     m_accepting.store(true, std::memory_order_release);
@@ -3310,7 +3342,10 @@ QString SessionBridge::startSession(ecuio_session_t* session,
         stopRecording(QStringLiteral("the session didn't start: %1").arg(err));
         ecuio_unregister_frame_callback(session, &SessionBridge::onFrame, this);
         ecuio_unregister_values_callback(session, &SessionBridge::onValues, this);
+        ecuio_unregister_conditions_callback(
+            session, &SessionBridge::onConditions, this);
         ecuio_session_destroy(session);
+        endSessionConditions();
         return err;
     }
     return {};
@@ -3361,6 +3396,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     if (m_pickLinePending) {
         m_pickLinePending = false;
         writePickLine();
+    }
+    for (const QString& line : std::exchange(m_conditionsLines, {})) {
+        emit logMessage(line);
     }
     m_replayFrames = info.replay_frames;
     m_sleptUs = sleptUs();
@@ -3539,6 +3577,8 @@ void SessionBridge::disconnectSession()
     m_coalesceTimer->stop();
     notifyFrameCounts();   // the last tick's worth
     flushValues();         // and its values
+    flushConditions(session); // and its condition events
+    endSessionConditions();
     emit logMessage(deliveryText(deliveryStats()));
     m_valueSet = nullptr;  // the drain's; onValues stops at m_accepting
     m_stagingBuffer.clear();
@@ -3651,6 +3691,7 @@ void SessionBridge::setUnitSystem(int units)
     }
     if (units == unitSystem()) return;
     m_signalModel->setUnitSystem(static_cast<uint32_t>(units));
+    m_conditionModel->setUnitSystem(static_cast<uint32_t>(units));
     emit unitSystemChanged();
     emit clearMovingChanged();
     if (m_diagnosticsShownCount > 0) {
@@ -4008,6 +4049,12 @@ void SessionBridge::stopRecording(const QString& why, bool byUser,
     m_recorder = nullptr;
     (void)ecuio_recorder_close(recorder, why.toUtf8().constData());
     emit recordingStateChanged();
+    // The recording held its set: an edit saved meanwhile is judged now
+    if (!m_conditionsPending.isEmpty() && conditionsWait().isEmpty()) {
+        m_conditionsPending.clear();
+        applySavedConditions();
+        emit conditionsChanged();
+    }
     if (!m_logActive) {
         return;
     }
@@ -4236,6 +4283,12 @@ void SessionBridge::dispatchValuesForTesting(const ecuio_value_batch_t& batch)
     onValues(&batch, this);
 }
 
+void SessionBridge::dispatchConditionsForTesting(
+    const ecuio_condition_event_t* events, uint32_t count)
+{
+    onConditions(events, count, this);
+}
+
 // ---- Decoded values from core's worker (ADR-0024) ----
 
 void SessionBridge::ValueStaging::prepare(size_t defs, size_t samplesMax,
@@ -4408,6 +4461,346 @@ void SessionBridge::flushValues()
     }
     ++m_signalBatchCount;
     emit signalBatchChanged();
+}
+
+// ---- Conditions (ADR-0063 sections 6 and 9) ----
+
+namespace {
+
+// "1 condition", "2 conditions"
+QString conditionCountText(uint32_t count)
+{
+    return count == 1 ? QStringLiteral("1 condition")
+                      : QStringLiteral("%1 conditions").arg(count);
+}
+
+// Core's words for a refused call, else its status
+QString detailOr(ecuio_status_t rc)
+{
+    const char* detail = ecuio_last_error_detail();
+    return detail != nullptr && detail[0] != '\0'
+               ? QString::fromUtf8(detail)
+               : QString::fromUtf8(ecuio_status_string(rc));
+}
+
+} // namespace
+
+void SessionBridge::onConditions(const ecuio_condition_event_t* events,
+                                 uint32_t count, void* user_data)
+{
+    SessionBridge* self = static_cast<SessionBridge*>(user_data);
+    if (events == nullptr || self == nullptr) {
+        return;
+    }
+    if (!self->m_accepting.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(self->m_conditionsMutex);
+    std::vector<ConditionSlot>& window =
+        self->m_conditionStaging[self->m_activeConditions];
+    for (uint32_t i = 0; i < count; ++i) {
+        const ecuio_condition_event_t& e = events[i];
+        // A set since replaced: its index means another condition now
+        if (e.generation != self->m_stagingGeneration ||
+            e.condition >= window.size()) {
+            continue;
+        }
+        ConditionSlot& slot = window[e.condition];
+        if ((e.flags & ECUIO_CONDITION_FIRED) != 0 && slot.firings++ == 0) {
+            slot.first = e;
+        }
+        slot.newest = e;
+        slot.has = true;
+    }
+}
+
+void SessionBridge::prepareConditionStaging(uint32_t count, uint32_t generation)
+{
+    std::lock_guard<std::mutex> lock(m_conditionsMutex);
+    for (std::vector<ConditionSlot>& window : m_conditionStaging) {
+        window.assign(count, ConditionSlot{});
+    }
+    m_activeConditions = 0;
+    m_stagingGeneration = generation;
+}
+
+bool SessionBridge::attachConditions(ecuio_session_t* session,
+                                     const ecuio_condition_set_t* set,
+                                     QString* why)
+{
+    if (m_conditionsGeneration != 0) {
+        flushConditions(session);
+    }
+    size_t staged = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_conditionsMutex);
+        staged = m_conditionStaging[0].size();
+    }
+    // The slots first, under the generation core is about to begin: a
+    // first judgment can come before the call returns
+    const uint32_t count = ecuio_condition_set_count(set);
+    const uint32_t next = m_conditionsGeneration + 1;
+    prepareConditionStaging(count, next);
+    const ecuio_signal_set_t* signalSet = ecuio_session_signal_set(session);
+    const ecuio_signal_file_t* file = fileOfSet(signalSet);
+    const ecuio_status_t rc =
+        m_failAttaches > 0 ? (--m_failAttaches, ECUIO_ERR_OUT_OF_MEMORY)
+                           : ecuio_session_set_conditions(session, set, file);
+    if (rc != ECUIO_OK) {
+        *why = detailOr(rc);
+        prepareConditionStaging(static_cast<uint32_t>(staged),
+                                m_conditionsGeneration);
+        return false;
+    }
+    m_conditionsGeneration = next;
+    m_conditionStates.assign(count, ecuio_condition_state_t{});
+    m_conditionModel->setConditions(set, signalSet, file);
+    judgeAlertLevels();
+    return true;
+}
+
+ConditionSetPtr SessionBridge::recordingConditions(const QString& uri,
+                                                   QString* unused)
+{
+    std::string folder8;
+    if (!uri.startsWith(QLatin1String("replay://"), Qt::CaseInsensitive) ||
+        !cli::replay_folder(uri.toStdString(), &folder8)) {
+        return nullptr;
+    }
+    const QString folder = QString::fromStdString(folder8);
+    cli::RecordedSignals recorded;
+    if (!readRecordedHeader(folder, &recorded) ||
+        recorded.conditions_sha256.empty()) {
+        return nullptr;
+    }
+    QFile copy(folder + QStringLiteral("/conditions.json"));
+    if (!copy.open(QIODevice::ReadOnly)) {
+        *unused = QStringLiteral("is missing");
+        return nullptr;
+    }
+    const QByteArray bytes = copy.read(ECUIO_CONDITION_FILE_MAX_BYTES + 1);
+    const std::string sha =
+        QCryptographicHash::hash(bytes, QCryptographicHash::Sha256)
+            .toHex()
+            .toStdString();
+    if (sha != recorded.conditions_sha256) {
+        *unused = QStringLiteral("doesn't match its hash");
+        return nullptr;
+    }
+    QString words;
+    ConditionSetPtr set = loadConditionSet(bytes, &words);
+    if (!set) {
+        *unused = QStringLiteral("doesn't load (%1)").arg(words);
+    }
+    return set;
+}
+
+void SessionBridge::attachSessionConditions(ecuio_session_t* session,
+                                            const QString& uri)
+{
+    m_conditionsGeneration = 0;
+    m_conditionsPending.clear();
+    m_conditionsFromRecording = false;
+    m_conditionsLines.clear();
+    prepareConditionStaging(0, 0);
+    // ADR-0063 decision 12: a replay is judged by its recording's own copy
+    QString unused;
+    const ConditionSetPtr own = recordingConditions(uri, &unused);
+    QString why;
+    if (own != nullptr) {
+        if (attachConditions(session, own.get(), &why)) {
+            m_conditionsFromRecording = true;
+            m_conditionsLines
+                << QStringLiteral("Alerts: judging the recording's own %1")
+                       .arg(conditionCountText(
+                           ecuio_condition_set_count(own.get())));
+            emit conditionsChanged();
+            return;
+        }
+        unused = QStringLiteral("isn't judged (%1)").arg(why);
+    }
+    const ecuio_condition_set_t* saved = m_conditionStore.set();
+    if (!unused.isEmpty()) {
+        const QString judged = saved != nullptr
+                                   ? QStringLiteral("the saved conditions")
+                                   : QStringLiteral("none");
+        m_conditionsLines << QStringLiteral(
+                                 "Replay: the recording's conditions.json %1; "
+                                 "judging %2")
+                                 .arg(unused, judged);
+    }
+    if (saved == nullptr) {
+        emit conditionsChanged();
+        return;
+    }
+    if (attachConditions(session, saved, &why)) {
+        m_conditionsLines << QStringLiteral("Alerts: judging %1")
+                                 .arg(conditionCountText(
+                                     ecuio_condition_set_count(saved)));
+    } else {
+        m_conditionsLines << QStringLiteral("Alerts not judged: %1").arg(why);
+        showSavedConditions();
+    }
+    emit conditionsChanged();
+}
+
+QString SessionBridge::conditionsWait() const
+{
+    if (m_session == nullptr || !connected()) {
+        return {};
+    }
+    if (m_conditionsFromRecording) {
+        return QStringLiteral("applies when this replay is disconnected");
+    }
+    if (m_recorder != nullptr) {
+        return QStringLiteral("applies when this recording ends");
+    }
+    return {};
+}
+
+void SessionBridge::showSavedConditions()
+{
+    m_conditionModel->setConditions(m_conditionStore.set(), nullptr, nullptr);
+    judgeAlertLevels();
+}
+
+void SessionBridge::applySavedConditions()
+{
+    if (m_session == nullptr || !connected()) {
+        showSavedConditions();
+        return;
+    }
+    QString why;
+    const ecuio_condition_set_t* set = m_conditionStore.set();
+    const uint32_t count = ecuio_condition_set_count(set);
+    if (attachConditions(m_session, set, &why)) {
+        emit logMessage(QStringLiteral("Alerts: judging %1")
+                            .arg(conditionCountText(count)));
+    } else {
+        emit logMessage(QStringLiteral("Alerts not judged: %1").arg(why));
+    }
+}
+
+void SessionBridge::endSessionConditions()
+{
+    m_conditionsGeneration = 0;
+    prepareConditionStaging(0, 0);
+    m_conditionStates.clear();
+    m_conditionsPending.clear();
+    m_conditionsFromRecording = false;
+    m_conditionsLines.clear();
+    showSavedConditions();
+    emit conditionsChanged();
+}
+
+QString SessionBridge::conditionsText() const
+{
+    return QString::fromUtf8(m_conditionStore.bytes().isEmpty()
+                                 ? m_conditionStore.refused()
+                                 : m_conditionStore.bytes());
+}
+
+QVariantMap SessionBridge::saveConditions(const QString& text)
+{
+    QVariantMap result = m_conditionStore.save(text.toUtf8());
+    if (!result.value(QStringLiteral("ok")).toBool()) {
+        result.insert(QStringLiteral("pending"), QString());
+        return result;
+    }
+    m_conditionsProblem.clear();
+    const QString wait = conditionsWait();
+    const QString saved =
+        QStringLiteral("Alerts saved: %1")
+            .arg(conditionCountText(static_cast<uint32_t>(
+                result.value(QStringLiteral("conditions")).toInt())));
+    emit logMessage(wait.isEmpty()
+                        ? saved
+                        : QStringLiteral("%1; the change %2").arg(saved, wait));
+    m_conditionsPending = wait;
+    if (wait.isEmpty()) {
+        applySavedConditions();
+    }
+    result.insert(QStringLiteral("pending"), wait);
+    emit conditionsChanged();
+    return result;
+}
+
+int SessionBridge::alertLevelOf(int defId) const
+{
+    return m_alertLevels.value(QString::number(defId)).toInt();
+}
+
+void SessionBridge::judgeAlertLevels()
+{
+    QVariantMap levels;
+    for (const auto& [id, level] : m_conditionModel->alertLevels()) {
+        levels.insert(QString::number(id), level);
+    }
+    if (levels != m_alertLevels) {
+        m_alertLevels = levels;
+        emit alertLevelsChanged();
+    }
+}
+
+void SessionBridge::flushConditions(ecuio_session_t* session)
+{
+    if (session == nullptr || m_conditionsGeneration == 0) {
+        return;
+    }
+    std::vector<ConditionSlot>* full = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_conditionsMutex);
+        full = &m_conditionStaging[m_activeConditions];
+        m_activeConditions ^= 1;
+    }
+    // The worker writes the other one now. Each firing is a line, in the
+    // order they fired; several of one condition's in a window, one line
+    struct Fired {
+        uint64_t at;
+        int row;
+    };
+    std::vector<Fired> fired;
+    for (size_t i = 0; i < full->size(); ++i) {
+        ConditionSlot& slot = (*full)[i];
+        if (!slot.has) {
+            continue;
+        }
+        m_conditionModel->applyTerm(static_cast<int>(i), slot.newest.term);
+        if (slot.firings > 0) {
+            fired.push_back({slot.first.timestamp_us, static_cast<int>(i)});
+        }
+    }
+    std::stable_sort(
+        fired.begin(), fired.end(),
+        [](const Fired& a, const Fired& b) { return a.at < b.at; });
+    // A handler of the lines may attach again: they go out once the slots
+    // and the model are done with
+    QStringList lines;
+    for (const Fired& f : fired) {
+        const ConditionSlot& slot = (*full)[static_cast<size_t>(f.row)];
+        lines << (slot.firings == 1
+                      ? m_conditionModel->firingText(f.row, slot.first.value,
+                                                     slot.first.term)
+                      : m_conditionModel->firingsText(f.row, slot.firings));
+    }
+    for (ConditionSlot& slot : *full) {
+        slot = ConditionSlot{};
+    }
+    // The states core keeps: UNAVAILABLE and NOT_RECEIVED are the getter's
+    // alone, and can change after the attach
+    uint32_t n = 0;
+    const auto size = static_cast<uint32_t>(m_conditionStates.size());
+    if (size > 0 &&
+        ecuio_session_get_condition_states(session, m_conditionStates.data(),
+                                           size, &n) == ECUIO_OK &&
+        n == size &&
+        m_conditionStates[0].generation == m_conditionsGeneration) {
+        m_conditionModel->applyStates(m_conditionStates.data(), n);
+    }
+    judgeAlertLevels();
+    for (const QString& line : lines) {
+        emit logMessage(line);
+    }
 }
 
 SessionBridge::DeliveryStats SessionBridge::deliveryStats() const

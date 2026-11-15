@@ -263,6 +263,8 @@ QtObject {
             gaugeReadout: "#ebebee", gaugeNeedle: "#ff5a5f", gaugeTick: "#ebebee",
             gaugeWarn: "#ffd166", gaugeDanger: "#f87171",
             stretchPull: "#e0b050", stretchCruise: "#7aa2d6",
+            alertWarnFill: "#ffd166", alertDangerFill: "#f87171",
+            textOnAlertWarn: "#141416", textOnAlertDanger: "#141416",
             // One per hue family, so traces stay distinct on the dark surface
             series: ["#4aa3ff",   // blue
                      "#31d08c",   // green
@@ -283,6 +285,8 @@ QtObject {
             gaugeReadout: "#f3c895", gaugeNeedle: "#ff7a2e", gaugeTick: "#e9bf8a",
             gaugeWarn: "#ff8a3a", gaugeDanger: "#ff4a38",
             stretchPull: "#e09a3a", stretchCruise: "#a8825a",
+            alertWarnFill: "#d9782e", alertDangerFill: "#e8463a",
+            textOnAlertWarn: "#0d0a07", textOnAlertDanger: "#0d0a07",
             // Warm, told apart by lightness and saturation as much as hue
             series: ["#f0b45a", "#ff4000", "#e6c200", "#9e5d47", "#d17d00",
                      "#9e9147", "#ffb299", "#d9c27a", "#ff794d", "#b89c00"]
@@ -297,6 +301,8 @@ QtObject {
             gaugeReadout: "#ff9484", gaugeNeedle: "#ff4a3a", gaugeTick: "#f08a7a",
             gaugeWarn: "#ff8a4a", gaugeDanger: "#ff3030",
             stretchPull: "#ff8a6a", stretchCruise: "#b8695a",
+            alertWarnFill: "#d9703f", alertDangerFill: "#f03030",
+            textOnAlertWarn: "#080404", textOnAlertDanger: "#080404",
             series: ["#ee9a7c", "#ff0000", "#9e5b18", "#ff7373", "#9e7777",
                      "#ff8000", "#e08a4a", "#d1431f", "#b86253", "#d9a3a3"]
         },
@@ -312,6 +318,8 @@ QtObject {
             gaugeReadout: "#141416", gaugeNeedle: "#d2232a", gaugeTick: "#141416",
             gaugeWarn: "#8c5a00", gaugeDanger: "#b9262b",
             stretchPull: "#8a5a00", stretchCruise: "#2458b8",
+            alertWarnFill: "#8c5a00", alertDangerFill: "#b9262b",
+            textOnAlertWarn: "#f3f3f1", textOnAlertDanger: "#f3f3f1",
             // Dark's hue families, row for row, deepened to read on white
             series: ["#1f5fc8",   // blue
                      "#1e7d3f",   // green
@@ -434,6 +442,15 @@ QtObject {
     // fill over the plot and a solid edge along its top
     readonly property color stretchPull:    colors.stretchPull
     readonly property color stretchCruise:  colors.stretchCruise
+    // An alert's band and its words (ADR-0063 section 9): a warning's and a
+    // danger's fill, each at 3:1 on the page and the panel, and the text on
+    // it at 4.5:1. At night both levels are warm, an orange and a red told
+    // apart by their word and DangerMark too, and dimmer than the text, as
+    // nothing outshines it
+    readonly property color alertWarnFill:     colors.alertWarnFill
+    readonly property color alertDangerFill:   colors.alertDangerFill
+    readonly property color textOnAlertWarn:   colors.textOnAlertWarn
+    readonly property color textOnAlertDanger: colors.textOnAlertDanger
 
     // A phone's density: Main.qml sets dense when the layout (after the
     // zoom) is narrower than 720 px or shorter than 480 px, a phone

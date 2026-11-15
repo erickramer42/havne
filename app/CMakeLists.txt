@@ -46,6 +46,10 @@ qt_add_library(app_ui STATIC
     pluginstore.h
     signalstore.cpp
     signalstore.h
+    conditionmodel.cpp
+    conditionmodel.h
+    conditionstore.cpp
+    conditionstore.h
     storemigration.cpp
     storemigration.h
     recordingimport.cpp
