@@ -2366,7 +2366,7 @@ TestCase {
     // Through the phone's save picker: the Signals page's one save offers
     // the page's own name each time and hands its pick to the write; a
     // picker with no document says so, with no earlier note left beside
-    // the words and no save left waiting
+    // the words and no save left waiting, and a cancel leaves none either
     function test_theSignalsPagesSavePickReachesItsWrite() {
         const page = createPage()
         press(page, "vehicleNew")
@@ -2385,13 +2385,20 @@ TestCase {
         compare(find(page, "signalNote").text, "Picked saved to the file you chose")
         verify(Harness.readScratchFile(out).includes("Picked"), "the picked document holds the file")
 
-        page.exportPluginAs(row.sha256)
-        compare(DocumentPicker.titleForTesting(), "picked.havne-plugin.json",
-                "the page's name for this save, never the last answer's")
+        page.saveVariantAs(row)
+        compare(DocumentPicker.titleForTesting(), "picked.json",
+                "the page's name again, never the last answer's")
         DocumentPicker.deliver(save.request, -1, "", "")
         compare(find(page, "signalProblem").text, "The picker returned no document")
         compare(find(page, "signalNote").text, "", "no earlier note beside the words")
         compare(page.saving, null, "and no save waits")
+
+        page.exportPluginAs(row.sha256)
+        compare(DocumentPicker.titleForTesting(), "picked.havne-plugin.json",
+                "an export's own name")
+        DocumentPicker.deliver(save.request, 0, "", "")
+        compare(page.saving, null, "a cancel leaves no save waiting")
+        compare(find(page, "signalProblem").text, "", "and says nothing")
     }
 
     // A file core refuses, or one that is none of the three kinds, keeps

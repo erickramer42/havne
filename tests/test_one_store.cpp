@@ -1414,9 +1414,11 @@ TEST(BridgeTest, OneStoreARefusedSaveFollowsItsSavePicksVerdict)
         make(full, theirs);
         notePick(pathOfUrl(full), PickMade::Made);
         EXPECT_FALSE(ok(save.run(full)));
+        // Not an ASSERT: the next save is judged whatever this one did
         QFile after(full.toString());
-        ASSERT_TRUE(after.open(QIODevice::ReadOnly));
-        EXPECT_EQ(after.readAll(), theirs) << "a document with bytes stays";
+        EXPECT_TRUE(after.open(QIODevice::ReadOnly) &&
+                    after.readAll() == theirs)
+            << "a document with bytes stays";
         after.close();
         QFile::remove(replaced.toString());
         QFile::remove(full.toString());
