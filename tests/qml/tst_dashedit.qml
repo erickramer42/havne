@@ -56,6 +56,8 @@ TestCase {
         Theme.look = "dark"
         Bridge.unitSystem = 0
         Bridge.useSignalFiles([])
+        for (const p of Bridge.plugins())     // the store starts empty
+            Bridge.removePlugin(p.sha256)
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
     }
@@ -3767,76 +3769,91 @@ TestCase {
         compare(labels(page), ["Other"])
     }
 
-    function test_theSignalFilesALayoutNeedsAreNamedAndTheLoadSaysWhichAreMissing() {
-        const file = { havne_signals: 1, name: "Boosty", source: { name: "t" },
+    // A signal file kept as a plugin of the user's own: its keepSignalText answer
+    function keptPlugin(name, key, did) {
+        const file = { havne_signals: 1, name: name, source: { name: "t" },
                        ecus: [{ id: "pcm", rx: "7E8" }],
-                       signals: [{ key: "boosty", name: "Boosty", read: { service: "22", number: "D100" },
+                       signals: [{ key: key, name: name, read: { service: "22", number: did },
                                    field: { byte: 0, bits: 8 }, unit: "kPa" }] }
-        const r = Bridge.importSignalFile(Harness.writeScratchFile("boosty.json", JSON.stringify(file)))
-        verify(r.ok, "the file imports")
-        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
-        let vehicles = VehicleBook.add(VehicleBook.empty(), "Test car")
-        vehicles = VehicleBook.addSignals(vehicles, { sha256: r.sha256, name: r.name, profile: r.profile })
-        compare(VehicleBook.picked(vehicles).signals.length, 1, "the vehicle has the file")
+        const r = Bridge.keepSignalText(JSON.stringify(file), "", "", "")
+        verify(r.ok, r.words)
+        return r
+    }
+
+    // A layout file names the picks it needs, each by its name and its
+    // written file's hash. Loaded for a vehicle that doesn't pick one, the
+    // load names it; a file an earlier version saved names the signal file
+    // the plugin was made from, and that is found under the pick too
+    function test_thePluginsALayoutNeedsAreNamedAndTheLoadSaysWhichAreMissing() {
+        const profile = keptPlugin("Boosty", "boosty", "D100").profiles[0]
+        const vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Test car"), [profile])
+        const picked = Bridge.pickFiles([profile])
+        compare(picked.length, 1)
+        compare(picked[0].name, "Boosty")
 
         const own = docOf([cellOf("A"), Object.assign(cellOf("Boosty"), { refs: ["key:boosty"] })])
         const url = layoutUrl("layout-needs.json")
         let page = storedPageOf({ vehicles: vehicles }, own)
         verify(page.exportLayoutTo(url), page.layoutNote)
         const raw = JSON.parse(Bridge.layoutFileText(url).text)
-        compare(raw.files, [{ name: r.name, sha256: r.sha256 }], "the file the layout needs, by name and hash")
-        verify(page.layoutNote.indexOf(r.name) >= 0, page.layoutNote)
+        compare(raw.files, [{ name: "Boosty", sha256: picked[0].sha256 }],
+                "the pick the layout needs, by name and its written file's hash")
+        compare(page.layoutNote, "Saved this layout to a file. It needs the plugins Boosty")
         compare(page.layoutFileName(), "dashboard-test-car-desktop.json")
         page.destroy()
 
-        // A layout of cells that read no file names none
+        // A layout of cells that read no pick names none
         page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("A")]))
         const noneUrl = layoutUrl("layout-needs-none.json")
         verify(page.exportLayoutTo(noneUrl))
         compare(JSON.parse(Bridge.layoutFileText(noneUrl).text).files, [])
         page.destroy()
 
-        // Loaded where the vehicle lacks the file: the load names it
+        // Loaded where the vehicle doesn't pick it: the load names it
         page = storedPageOf({}, docOf([cellOf("X")]))
         page.startEditing()
         verify(page.loadLayoutFrom(url), page.layoutNote)
-        verify(page.layoutNote.indexOf("signal files this vehicle lacks: " + r.name) >= 0, page.layoutNote)
+        verify(page.layoutNote.indexOf("plugins this vehicle doesn't pick: Boosty") >= 0, page.layoutNote)
         compare(page.doc.pages[0].cells.length, 2, "the layout loads whole")
         page.destroy()
 
-        // And where it has it, nothing is said
+        // And where it picks it, nothing is said
         page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
         page.startEditing()
         verify(page.loadLayoutFrom(url), page.layoutNote)
-        verify(page.layoutNote.indexOf("lacks") < 0, page.layoutNote)
+        verify(page.layoutNote.indexOf("doesn't pick") < 0, page.layoutNote)
+        page.destroy()
+
+        // A file an earlier version saved names the signal file itself
+        compare(picked[0].from.length, 1, "the plugin was made from one file")
+        verify(picked[0].from[0] !== picked[0].sha256, "whose hash isn't the written file's")
+        const text = DashboardBook.exportText(own, "desktop", [{ name: "Boosty", sha256: picked[0].from[0] }])
+        verify(text !== "")
+        const oldUrl = Harness.writeScratchFile("layout-earlier.json", text)
+        page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(oldUrl), page.layoutNote)
+        verify(page.layoutNote.indexOf("doesn't pick") < 0, page.layoutNote)
     }
 
-    // A vehicle's signal file that doesn't load gives no references, so a
-    // layout can't say it needs the file: the note names the file instead
-    function test_aSignalFileThatDoesntLoadIsNamedInTheExportsNote() {
-        let vehicles = VehicleBook.add(VehicleBook.empty(), "Test car")
-        vehicles = VehicleBook.addSignals(vehicles, { sha256: "a".repeat(64), name: "Gone file",
-                                                      profile: "profile_user.gone" })
+    // A pick no plugin here has gives no references, so a layout can't
+    // say it needs it: the export's note names the pick instead
+    function test_aPickTheStoreLacksIsNamedInTheExportsNote() {
+        const vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Test car"),
+                                              ["plugin.gone.base"])
         const own = docOf([cellOf("A"), Object.assign(cellOf("Gone"), { refs: ["key:gone"] })])
         const page = storedPageOf({ vehicles: vehicles }, own)
         verify(page.exportLayoutTo(layoutUrl("layout-unloaded.json")), page.layoutNote)
-        verify(page.layoutNote.indexOf("Gone file") >= 0, page.layoutNote)
-        verify(page.layoutNote.indexOf("don't load") >= 0, page.layoutNote)
+        verify(page.layoutNote.indexOf("plugin.gone.base") >= 0, page.layoutNote)
+        verify(page.layoutNote.indexOf("aren't in the store") >= 0, page.layoutNote)
         verify(!page.layoutNoteBad, "a note, not a refusal")
-        // A vehicle whose files all load says nothing of the kind
-        const file = { havne_signals: 1, name: "Loads", source: { name: "t" },
-                       ecus: [{ id: "pcm", rx: "7E8" }],
-                       signals: [{ key: "loads", name: "Loads", read: { service: "22", number: "D101" },
-                                   field: { byte: 0, bits: 8 }, unit: "kPa" }] }
-        const r = Bridge.importSignalFile(Harness.writeScratchFile("loads.json", JSON.stringify(file)))
-        verify(r.ok, "the file imports")
-        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
-        let good = VehicleBook.add(VehicleBook.empty(), "Good car")
-        good = VehicleBook.addSignals(good, { sha256: r.sha256, name: r.name, profile: r.profile })
+        // A vehicle whose picks are all here says nothing of the kind
+        const good = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Good car"),
+                                          [keptPlugin("Loads", "loads", "D101").profiles[0]])
         const plain = storedPageOf({ vehicles: good },
                                    docOf([cellOf("A"), Object.assign(cellOf("Loads"), { refs: ["key:loads"] })]))
         verify(plain.exportLayoutTo(layoutUrl("layout-plain.json")), plain.layoutNote)
-        verify(plain.layoutNote.indexOf("don't load") < 0, plain.layoutNote)
+        verify(plain.layoutNote.indexOf("aren't in the store") < 0, plain.layoutNote)
     }
 
     function test_theLayoutButtonsAreInTheMoreRow() {

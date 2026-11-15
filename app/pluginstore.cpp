@@ -1321,6 +1321,42 @@ QStringList PluginStore::unpick(const QStringList& picks,
     return out;
 }
 
+QVariantList PluginStore::pickFiles(const QStringList& picks)
+{
+    (void)all();
+    QVariantList out;
+    for (const QString& profile : picks) {
+        int at = 0;
+        const auto it = heldWithProfile(profile, &at);
+        if (it == m_held.end()) {
+            continue;
+        }
+        const Held& h = it->second;
+        const QString variant = h.variants.at(at);
+        QString words;
+        const QByteArray written = variantBytes(it->first, variant, &words);
+        QStringList from;
+        const QJsonObject wrapped = facts(h.id).value(kWrappedFrom).toObject();
+        for (auto w = wrapped.begin(); w != wrapped.end(); ++w) {
+            if (w.value().toString() == variant) {
+                from << w.key();
+            }
+        }
+        out << QVariantMap{
+            {QStringLiteral("profile"), profile},
+            {QStringLiteral("name"),
+             h.variants.size() > 1
+                 ? QStringLiteral("%1: %2").arg(h.name, variant)
+                 : h.name},
+            {QStringLiteral("sha256"),
+             QString::fromLatin1(
+                 QCryptographicHash::hash(written, QCryptographicHash::Sha256)
+                     .toHex())},
+            {QStringLiteral("from"), from}};
+    }
+    return out;
+}
+
 QVariantList PluginStore::wrappedFrom(const QString& fileSha)
 {
     (void)all();

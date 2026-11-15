@@ -205,6 +205,15 @@ public:
     QVariantMap pick(const QStringList& picks, const QString& profile);
     static QStringList unpick(const QStringList& picks, const QString& profile);
 
+    // A vehicle's picks the store has, as a layout file names what it
+    // needs (ADR-0064, "Dashboards"), in the picks' order: { profile,
+    // name, sha256, from }. sha256 is the variant's written file's (the
+    // hash a recording names); from is the SHA-256 of each signal file
+    // the variant was made from (wrappedFrom), which a layout saved
+    // before the move names. name is the plugin's, with ": <variant>"
+    // where it has several. A pick no plugin loaded has gives no entry
+    QVariantList pickFiles(const QStringList& picks);
+
     // The variants made from the signal file with this SHA-256
     // (wrappedFrom), among the plugins loaded: { id, variant, profile,
     // wrapped }, what a layout saved before the merge and an address

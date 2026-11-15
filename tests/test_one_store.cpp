@@ -1350,6 +1350,54 @@ TEST(BridgeTest, OneStoreAVehiclesPicksKeepTheirOrderAndTheFirstObd2OneStandsIn)
  * holds the migration's mark, maps a wrapped file to its plugin, is no
  * copy to an older store's listing, and goes with its last fact; a
  * plugin's facts go with the plugin, a copy that no longer loads too */
+// What a layout file names of a vehicle's picks: each one's written file
+// by its hash, the file it was made from beside it, and no entry for a
+// pick no plugin has
+TEST(BridgeTest, OneStoreAPicksFileIsItsWrittenTextAndTheFileThatMadeIt)
+{
+    SettingsDir dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    Logged b;
+    const QByteArray file = signalFile(QStringLiteral("Daily extras"));
+    QVariantMap r = b.bridge.keepSignalText(QString::fromUtf8(file), QString(),
+                                            QString(), QString());
+    ASSERT_TRUE(ok(r)) << words(r);
+    const QString extrasSha = str(r, "sha256");
+    const QString extras = list(r, "profiles").value(0);
+    r = b.bridge.readImport(writeScratch(from.path(), QStringLiteral("a.json"),
+                                         packed_plugin::example()),
+                            QString());
+    ASSERT_TRUE(ok(r)) << words(r);
+    const QString simSha = str(r, "sha256");
+    const QString my2019 = QStringLiteral("plugin.example-sim.my2019");
+
+    const QVariantList files = b.bridge.pickFiles(
+        {my2019, QStringLiteral("plugin.gone.base"), extras});
+    ASSERT_EQ(files.size(), 2) << "a pick no plugin has names no file";
+    const QVariantMap sim = files.at(0).toMap();
+    const QVariantMap own = files.at(1).toMap();
+    EXPECT_EQ(str(sim, "profile"), my2019) << "in the picks' order";
+    EXPECT_EQ(str(own, "profile"), extras);
+    EXPECT_EQ(str(sim, "name"), "Example: the simulated car: my2019")
+        << "one variant of several is named";
+    EXPECT_EQ(str(own, "name"), "Daily extras");
+
+    const auto written = [&](const QString& sha, const char* variant) {
+        const QVariantMap t =
+            b.bridge.pluginVariantText(sha, QString::fromLatin1(variant));
+        EXPECT_TRUE(ok(t)) << words(t);
+        return sha256Of(str(t, "text").toUtf8());
+    };
+    EXPECT_EQ(str(own, "sha256"), written(extrasSha, "base"));
+    EXPECT_EQ(str(sim, "sha256"), written(simSha, "my2019"));
+    EXPECT_NE(str(sim, "sha256"), written(simSha, "base"));
+    EXPECT_EQ(list(own, "from"), QStringList{sha256Of(file)})
+        << "the signal file the plugin was made from";
+    EXPECT_TRUE(list(sim, "from").isEmpty()) << "a package came from no file";
+    EXPECT_TRUE(b.bridge.pickFiles({}).isEmpty());
+}
+
 TEST(BridgeTest, OneStoreTheIndexKeepsWhatItDoesntKnowAndGoesWithItsLastFact)
 {
     SettingsDir dir;

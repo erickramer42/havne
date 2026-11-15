@@ -2607,6 +2607,11 @@ QStringList SessionBridge::unpickVariant(const QStringList& picks,
     return PluginStore::unpick(picks, profile);
 }
 
+QVariantList SessionBridge::pickFiles(const QStringList& picks)
+{
+    return m_pluginStore.pickFiles(picks);
+}
+
 QString SessionBridge::readOnce(const QString& adapterUri,
                                 const QVariantMap& signal,
                                 const QVariantMap& module)

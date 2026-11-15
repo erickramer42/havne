@@ -106,6 +106,35 @@ TestCase {
         verify(all["Shared load"].note !== "not in profile", all["Shared load"].note)
     }
 
+    // A layout file the earlier version saved names a signal file by its
+    // hash: the plugin the move made of that file answers for it, so a
+    // vehicle that picks it is told of nothing missing, and one that
+    // doesn't is told which
+    function test_aLayoutSavedBeforeTheMoveFindsItsFileUnderThePick() {
+        const earlier = JSON.parse(Harness.vehicleBookText("two-vehicles", "json"))
+        const file = earlier.list[0].signals.find(f => f.name === "Shared PIDs")
+        verify(file !== undefined, "the earlier book names the file")
+        const layout = DashboardBook.builtIn("desktop")
+        layout.pages = [{ name: "Earlier", cells: [
+            { kind: "digital", w: 2, h: 4, label: "Shared load", refs: ["key:shared_load"],
+              unit: "%", options: {} }] }]
+        const text = DashboardBook.exportText(layout, "desktop", [{ name: file.name, sha256: file.sha256 }])
+        verify(text !== "")
+        const url = Harness.writeScratchFile("layout-earlier.json", text)
+        const book = VehicleBook.parse(Harness.vehicleBookText("two-vehicles", "expect.json"))
+
+        const page = createTemporaryObject(dashComponent, testCase.Window.window.contentItem)
+        page.vehicles = VehicleBook.pick(book, "v1")
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        verify(page.layoutNote.indexOf("doesn't pick") < 0, page.layoutNote)
+
+        page.vehicles = VehicleBook.setPicks(VehicleBook.pick(book, "v1"), [own])
+        page.loadLayoutFrom(url)   // the layout already shown: only the note is new
+        verify(page.layoutNote.indexOf("plugins this vehicle doesn't pick: Shared PIDs") >= 0,
+               page.layoutNote)
+    }
+
     // The Signals page shows what the move made: every moved file a
     // plugin of the user's own, each vehicle's picks in its files' order
     // with the plugin it had picked last, the form's file as its own
