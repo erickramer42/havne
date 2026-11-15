@@ -6,9 +6,10 @@
 // Serves cli/elm327_emulator.h on a TCP port, as a WiFi ELM327 adapter
 // does, at the address cli/elm327_lines.h parsed. One host at a time, as
 // an adapter takes one: another connection is closed at once (a `client`
-// line says so). Each connection is a power on: the settings start from
-// their defaults. Kept out of the pure headers: the socket headers bring
-// the platform's macros.
+// line says so), after the held host's queued bytes are read, so a host
+// that closed just before it has gone first. Each connection is a power
+// on: the settings start from their defaults. Kept out of the pure
+// headers: the socket headers bring the platform's macros.
 
 #ifndef HAVNE_CLI_ELM327_LISTENER_H
 #define HAVNE_CLI_ELM327_LISTENER_H
@@ -171,17 +172,17 @@ public:
             if (!wait(wait_ms, &listener_ready, &client_ready)) {
                 return;
             }
-            if (listener_ready) {
-                take_connection(emu, emit);
+            if (client_ready) {
+                read_host(emu, clock, emit, buf, sizeof buf);
             }
-            if (client_ready && client_ != kNone) {
-                const long got = receive(client_, buf, sizeof buf);
-                if (got <= 0) {
-                    emit("closed", peer_);
-                    drop(client_);
-                } else {
-                    emu.from_host(buf, static_cast<size_t>(got), clock());
+            if (listener_ready) {
+                /* a close queued behind the host's bytes ends it first */
+                for (int reads = 0; reads < kReadsBeforeJudging &&
+                                    client_ != kNone && readable_now(client_);
+                     ++reads) {
+                    read_host(emu, clock, emit, buf, sizeof buf);
                 }
+                take_connection(emu, emit);
             }
         }
     }
@@ -195,6 +196,39 @@ private:
 #ifdef _WIN32
     bool started_ = false;
 #endif
+    /* reads of the held host at most before another host is judged: a
+     * host that keeps sending is still held, never read forever */
+    static constexpr int kReadsBeforeJudging = 16;
+
+    /* One read of the held host: its bytes to emu, or its close */
+    void
+    read_host(Elm327Emulator& emu, const std::function<int64_t()>& clock,
+              const std::function<void(const char*, const std::string&)>& emit,
+              uint8_t* buf, size_t cap)
+    {
+        const long got = receive(client_, buf, cap);
+        if (got <= 0) {
+            emit("closed", peer_);
+            drop(client_);
+        } else {
+            emu.from_host(buf, static_cast<size_t>(got), clock());
+        }
+    }
+
+    /* True when a read of s wouldn't wait: bytes, its close or an error */
+    static bool readable_now(Socket s)
+    {
+#ifdef _WIN32
+        fd_set r;
+        FD_ZERO(&r);
+        FD_SET(s, &r);
+        timeval none{0, 0};
+        return select(0, &r, nullptr, nullptr, &none) > 0;
+#else
+        pollfd p{s, POLLIN, 0};
+        return poll(&p, 1, 0) > 0;
+#endif
+    }
 
     static void drop(Socket& s)
     {

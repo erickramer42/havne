@@ -6,20 +6,27 @@
 #
 # A live stream whose reader stops reading drops lines, and a condition
 # event whose line is dropped is counted on the end line. mock://demo
-# idles from about 16 s, its engine speed hunting a few rpm on each tick;
-# 64 conditions on it, levels 0.75 rpm apart across the idle's band, give
-# many events a second. The line ring is at its floor (HAVNE_CLI_RING_BYTES)
-# and the stream records: the recorder's ring is its own, so the
-# recording's cond lines are every event the session gave. Read to 17 s
-# of session time, stop reading for STALL_S, read to the end; then the
-# lines received plus conditions_dropped are the cond lines, above 0, and
-# each line received is one of them. The stall outlasts the ring's 32 KiB
-# and the pipe's room at about 16 KB/s; Linux's pipe is cut to a page, as
-# Windows' is (on Windows the 7 s drop about 200 of some 500 events).
-# macOS's pipe grows to 64 KiB and can't be cut, so there the child writes
-# to a Unix socket pair of 4 KiB buffers instead.
+# idles fast from about 17 s to 34 s, its engine speed hunting a few rpm
+# on each tick; 64 conditions on it, levels 0.75 rpm apart across the
+# idle's band, give many events a second. The line ring is at its floor
+# (HAVNE_CLI_RING_BYTES) and the stream records: the recorder's ring is
+# its own, so the recording's cond lines are every event the session
+# gave. Read to 17 s of session time, then stop reading until the stream
+# must be dropping, whatever the system's buffers hold:
+# - the bytes the kernel holds for the reader stop growing, so the
+#   child's writes wait;
+# - the ring (and the batch the writer took from it) fills at the rate
+#   the stream ran at before the stall;
+# - the recording, written live, holds PAST_FULL events timed after
+#   that, and each of them is a dropped line.
+# Read to the end; then the lines received plus conditions_dropped are
+# the cond lines, at least PAST_FULL dropped, and each line received is
+# one of them. Linux's pipe is cut to a page, and on macOS (whose pipe
+# can't be cut) the child writes to a Unix socket pair that asks for
+# 4 KiB buffers: both shorten the stall where the system keeps to them.
 
 import collections
+import ctypes
 import json
 import os
 import shutil
@@ -31,12 +38,18 @@ import time
 
 try:
     import fcntl
+    import termios
 except ImportError:
-    fcntl = None
+    fcntl = termios = None
 
 SECONDS = 27
 STALL_FROM_US = 17 * 1000 * 1000
-STALL_S = 7.0
+STALL_MAX_S = 25.0
+STILL_S = 0.5
+POLL_S = 0.05
+FILL_BYTES = 2 * (32 * 1024 + 256)
+MARGIN_US = 1000 * 1000
+PAST_FULL = 3
 LEVELS = 64
 
 
@@ -57,17 +70,65 @@ def condition_file(folder):
 
 
 def cond_events(events_log):
-    """(key, state, fired, stale, t_us) for each cond line"""
+    """(key, state, fired, stale, t_us) for each whole cond line"""
     out = []
     with open(events_log, encoding="utf-8") as f:
         for line in f:
-            if "  cond  " not in line:
+            if "  cond  " not in line or not line.endswith("\n"):
                 continue
             fields = line.rstrip("\n").split("  cond  ", 1)[1].split(",")
             words = fields[2].split()
             out.append((fields[0], fields[1], "fired" in words,
                         "stale" in words, int(fields[6])))
     return out
+
+
+def held_bytes(fd):
+    """The bytes the kernel holds for the reader on fd"""
+    if os.name == "nt":
+        import msvcrt
+        avail = ctypes.c_ulong(0)
+        if not ctypes.windll.kernel32.PeekNamedPipe(
+                ctypes.c_void_p(msvcrt.get_osfhandle(fd)), None, 0, None,
+                ctypes.byref(avail), None):
+            raise OSError("PeekNamedPipe failed")
+        return avail.value
+    n = ctypes.c_int(0)
+    fcntl.ioctl(fd, termios.FIONREAD, n)
+    return n.value
+
+
+def stall(fd, root, stall_us, rate):
+    """Holds the reading until the recording has PAST_FULL events timed
+    after the ring must be full: (full_us, held bytes, words why not)"""
+    begun = time.monotonic()
+    deadline = begun + STALL_MAX_S
+    held = held_bytes(fd)
+    still_since = time.monotonic()
+    while time.monotonic() - still_since < STILL_S:
+        if time.monotonic() > deadline:
+            return 0, held, "the kernel's buffer never stopped growing"
+        time.sleep(POLL_S)
+        now = held_bytes(fd)
+        if now != held:
+            held, still_since = now, time.monotonic()
+    # The session's clock runs no faster than this one, so the ring is
+    # full by then on its clock
+    full_us = int(stall_us + (still_since - begun) * 1e6 +
+                  FILL_BYTES / rate * 1e6 + MARGIN_US)
+    while True:
+        folders = os.listdir(root)
+        past = []
+        if len(folders) == 1:
+            log = os.path.join(root, folders[0], "events.log")
+            if os.path.exists(log):
+                past = [e for e in cond_events(log) if e[4] > full_us]
+        if len(past) >= PAST_FULL:
+            return full_us, held, ""
+        if time.monotonic() > deadline:
+            return full_us, held, (f"{len(past)} events recorded after "
+                                   f"{full_us / 1e6:.1f} s")
+        time.sleep(POLL_S)
 
 
 def main():
@@ -98,23 +159,39 @@ def main():
             reader = proc.stdout
             if pipe_cut:
                 fcntl.fcntl(reader.fileno(), fcntl.F_SETPIPE_SZ, 4096)
+        held_fd = ours.fileno() if ours else reader.fileno()
         lines = []
-        stalled = False
+        stalled = None
+        received = 0
+        first_us = None
         for raw in reader:
+            received += len(raw)
             line = json.loads(raw)
             lines.append(line)
-            if not stalled and line.get("t_us", 0) >= STALL_FROM_US:
-                stalled = True
-                time.sleep(STALL_S)
+            t = line.get("t_us")
+            if t is None:
+                continue
+            if first_us is None:
+                first_us = t
+            if stalled is None and t >= STALL_FROM_US:
+                rate = received / max((t - first_us) / 1e6, 1.0)
+                stalled = stall(held_fd, root, t, rate)
+                print(f"      the stall: {rate:.0f} B/s, the kernel held "
+                      f"{stalled[1]} B, the ring full by "
+                      f"{stalled[0] / 1e6:.1f} s")
         err = proc.stderr.read().decode(errors="replace")
         proc.wait(timeout=60)
         end = [l for l in lines if l.get("type") == "end"]
         recording = [l for l in lines if l.get("type") == "recording"
                      and l.get("state") == "closed"]
         if proc.returncode != 0 or len(end) != 1 or len(recording) != 1 \
-                or not stalled:
-            print(f"FAIL  the run: exit {proc.returncode}, stalled {stalled},"
-                  f" {len(end)} end and {len(recording)} recording lines: {err}")
+                or stalled is None:
+            print(f"FAIL  the run: exit {proc.returncode}, stalled "
+                  f"{stalled is not None}, {len(end)} end and "
+                  f"{len(recording)} recording lines: {err}")
+            return 1
+        if stalled[2]:
+            print(f"FAIL  the stall never made the stream drop: {stalled[2]}")
             return 1
         end, recording = end[0], recording[0]
         ok = True
@@ -140,9 +217,10 @@ def main():
             print(f"FAIL  {len(got)} received + {dropped} dropped is not "
                   f"the {len(truth)} recorded")
             ok = False
-        elif dropped == 0:
-            print("FAIL  no condition event was dropped: the stall filled "
-                  "no ring")
+        elif dropped < PAST_FULL:
+            print(f"FAIL  {dropped} condition events dropped: the "
+                  f"{PAST_FULL} recorded after the ring was full are all "
+                  f"dropped")
             ok = False
         missing = collections.Counter(got) - collections.Counter(truth)
         if missing:
