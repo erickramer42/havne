@@ -34,6 +34,9 @@ TestCase {
     }
 
     function cleanup() {
+        // The armed cases save a set that records: none outlives them
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[{"key":"c","name":"C",'
+                              + '"when":{"signal":["id:1001"],"unit":"RPM","above":90000},"mark":true}]}')
         Relay.stop()
         Theme.developerMode = false
         Theme.night = "off"
@@ -2121,6 +2124,92 @@ TestCase {
         verify(!start.enabled, "nothing ticked: a text row's default is unticked")
         Bridge.signalModel.toggleSubscribed(0)
         tryVerify(() => start.enabled, 2000, "the ticked text row is a log's")
+    }
+
+    // The armed recorder's button (ADR-0063 section 7): off with its reason
+    // while no condition records, "Armed" while it waits, "Recording
+    // (window N)" in a window, Mark only in a window; it fits at 384 and 320 px
+    function armedConditions(bound) {
+        return '{"havne_conditions":1,"conditions":[{"key":"rec","name":"Engine stopped",'
+               + '"when":{"signal":["id:3001"],"unit":"km/h",' + bound + '},'
+               + '"record":{"before":0.2,"after":0.2}}]}'
+    }
+    function test_theHeadersArmedHasItsStatesAndFitsAPhone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        main.font.pixelSize = 16
+        const armed = find(main.contentItem, "armedButton")
+        const mark = find(main.contentItem, "markButton")
+        const start = find(main.contentItem, "startLogButton")
+        const row = find(main.contentItem, "headerRow")
+        verify(!armed.visible, "nothing to arm before a connect")
+        verify(Bridge.saveConditions(armedConditions('"above":90000')).ok, "a set that records")
+        // With no record condition: shown, off, and says why
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[{"key":"c","name":"C",'
+                              + '"when":{"signal":["id:1001"],"unit":"RPM","above":90000},"mark":true}]}')
+        compare(Bridge.connectSession("mock://armed"), "", "mock://armed connects")
+        tryVerify(() => armed.visible, 5000, "Armed once connected")
+        verify(!armed.enabled, "no condition records")
+        compare(Bridge.armedWhy, "no condition records")
+        compare(armed.Accessible.description, "no condition records")
+        // A tap on the disabled button says why, as a refused press does
+        const host = find(main.contentItem, "armedHost")
+        Bridge.clearLogNotice()
+        waitForRendering(main.contentItem)
+        mouseClick(host)
+        tryCompare(Bridge, "logNotice", "Armed not started: no condition records", 3000)
+        verify(!Bridge.armedActive, "a tap on the explanation arms nothing")
+        const widths = [384, 320]
+        for (const width of widths) {
+            main.width = width
+            waitForRendering(main.contentItem)
+            const out = pastTheEdge(row, main.contentItem, [])
+            compare(out.length, 0, "idle at " + width + " px: " + out.join(", "))
+        }
+        main.width = 384
+        // A set that records, never firing: armed and waiting
+        verify(Bridge.saveConditions(armedConditions('"above":90000')).ok)
+        tryVerify(() => armed.enabled, 3000, "a condition records")
+        Bridge.clearLogNotice()
+        mouseClick(host)
+        tryVerify(() => Bridge.armedActive, 3000, "a press arms; the explanation stays out of it")
+        compare(Bridge.logNotice, "", "no refusal while it can start")
+        verify(armed.checked, "shown as on")
+        compare(armed.text, "Armed")
+        verify(!start.visible, "Start log steps aside: one recorder")
+        verify(!mark.visible, "Mark only inside a window")
+        for (const width of widths) {
+            main.width = width
+            waitForRendering(main.contentItem)
+            const out = pastTheEdge(row, main.contentItem, [])
+            compare(out.length, 0, "waiting at " + width + " px: " + out.join(", "))
+        }
+        main.width = 384
+        armed.clicked()
+        verify(!Bridge.armedActive, "a second press disarms")
+        tryVerify(() => start.visible, 2000, "Start log is back")
+        // A set that fires at once: a window, with Mark
+        verify(Bridge.saveConditions(armedConditions('"below":1')).ok)
+        tryVerify(() => armed.enabled, 3000)
+        armed.clicked()
+        tryVerify(() => Bridge.armedRecording, 10000, "a window opens")
+        compare(armed.text, "Recording (window 1)")
+        verify(mark.visible, "Mark inside a window")
+        for (const width of widths) {
+            main.width = width
+            waitForRendering(main.contentItem)
+            compare(armed.text, width < 340 ? "Window 1" : "Recording (window 1)")
+            const out = pastTheEdge(row, main.contentItem, [])
+            compare(out.length, 0, "in a window at " + width + " px: " + out.join(", "))
+        }
+        main.width = 384
+        armed.clicked()
+        verify(!Bridge.armedActive)
+        verify(!mark.visible, "Mark goes with the recorder")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
     }
 
     function test_theHeadersLogStartsStopsAndOpensItsFolder() {

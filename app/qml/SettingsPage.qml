@@ -909,6 +909,7 @@ Pane {
           warn: pickedVehicle !== null && unloadedCount() > 0 },
         { key: "recording", title: qsTr("Recording"),
           summary: !Bridge.recording ? qsTr("off")
+                   : Bridge.armedActive ? qsTr("on · armed")
                    : Bridge.recordingActive && !Bridge.logActive ? qsTr("on · recording") : qsTr("on") },
         { key: "display", title: qsTr("Display"),
           summary: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
