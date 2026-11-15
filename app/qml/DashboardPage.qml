@@ -50,6 +50,8 @@ Page {
     property string form: Theme.mobile ? "phone" : "desktop"
 
     SignalHub { id: hub }
+    // The hub, for the page's parts
+    readonly property SignalHub signalHub: hub
 
     // One document per form, and the page last shown on each
     Settings {
@@ -1266,7 +1268,7 @@ Page {
         readonly property var options: cell && cell.options ? cell.options : ({})
         readonly property string cellUnit: cell && typeof cell.unit === "string" ? cell.unit : ""
         readonly property string label: cell && typeof cell.label === "string" ? cell.label : ""
-        readonly property SignalHub.Entry entry: hub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
+        readonly property SignalHub.Entry entry: root.signalHub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
 
         // A signal the session isn't asking has no value to show: its
         // last one would read as no new data (the note says not asked)
@@ -1581,7 +1583,7 @@ Page {
         }
         // A converted end shows to the signal's decimals plus one (161.5565
         // mph at 1 decimal reads 161.56), 1 place with no row to take them from
-        readonly property var entry: cell ? hub.lookup(root.lookupRefs(cell.refs ?? [])) : null
+        readonly property var entry: cell ? root.signalHub.lookup(root.lookupRefs(cell.refs ?? [])) : null
         readonly property int places: (cell && cell.options && cell.options.decimals !== undefined
                                        ? cell.options.decimals : entry ? entry.decimals : 0) + 1
         readonly property string shownText: cell === null ? ""
@@ -1637,7 +1639,7 @@ Page {
             readonly property string unitShown: cell ? root.shownUnit(cell.unit ?? "") : ""
             readonly property var range: DashboardBook.defaultRange(cell ? cell.unit ?? "" : "")
             // The row the cell shows, whose decimals it uses until it has its own
-            readonly property SignalHub.Entry entry: hub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
+            readonly property SignalHub.Entry entry: root.signalHub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
             readonly property bool phone: root.form === "phone"
             readonly property bool hasSignal: kind !== "blank"
             // Every kind but the shift lights draws the value's text and tone, which
