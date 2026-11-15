@@ -30,6 +30,7 @@ Page {
     // The parts' ids the page reads, and the page's ids the parts read
     property alias spanStatsHome: spanStatsHome
     property alias spanStatsPinned: spanStatsPinned
+    property alias recording: recording
 
     // Main puts the URI in Settings' field and shows it
     signal replayRequested(string uri)
@@ -4064,74 +4065,9 @@ Page {
                 }
             }
         }
-        ListView {
+        RecordingFindings {
             id: findingList
-            objectName: "findingList"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized
-                     && (root.pinnedViewer ? root.aboutShown : count > 0)
-            Layout.fillWidth: true
-            Layout.preferredHeight: root.pinnedViewer ? 0 : Math.min(count, 3) * Math.max(32, root.touchMin)
-            Layout.minimumHeight: root.pinnedViewer ? root.pinnedListMin : 0
-            Layout.fillHeight: root.pinnedViewer
-            clip: true
-            currentIndex: -1
-            highlightFollowsCurrentItem: false
-            boundsBehavior: Flickable.StopAtBounds
-            model: recording.findings
-            header: Component {
-                ViewHead {
-                    host: root
-                    role: "about"
-                    width: findingList.width
-                    list: findingList
-                }
-            }
-            ScrollBar.vertical: ScrollBar {
-                policy: root.pinnedViewer && findingList.contentHeight > findingList.height
-                        ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
-            }
-
-            delegate: Rectangle {
-                id: findingRow
-                required property var modelData
-                width: findingList.width
-                height: Math.max(32, root.touchMin)
-                color: findingArea.hovered ? Theme.elevatedLight : "transparent"
-                AbstractButton {
-                    id: findingArea
-                    objectName: "findingRowArea"
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    Accessible.name: qsTr("Show %1").arg(root.findingText(findingRow.modelData))
-                    HoverHandler { cursorShape: Qt.PointingHandCursor }
-                    onClicked: {
-                        const f = findingRow.modelData
-                        root.centerOn(f.atMs + f.lengthMs / 2)
-                        root.setCursor(f.atMs)
-                    }
-                }
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 8
-                    anchors.rightMargin: 8
-                    Rectangle {
-                        implicitWidth: 10; implicitHeight: 4
-                        color: root.findingColor(findingRow.modelData.kind)
-                    }
-                    Label {
-                        text: root.timeText(findingRow.modelData.atMs, true)
-                        color: Theme.textDim
-                        font.family: Theme.monoFamily
-                    }
-                    Label {
-                        objectName: "findingText"
-                        text: root.findingText(findingRow.modelData)
-                        color: Theme.text
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-                }
-            }
+            host: root
         }
 
         // The rest stays at the top
