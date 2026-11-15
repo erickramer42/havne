@@ -601,20 +601,49 @@ TestCase {
         compare(peak.text, "MAX  \u2014", "after Reset peaks")
     }
 
-    // The Number's trace keeps no value that isn't a number, as the
-    // sparkline's doesn't, so one never blanks the whole trace
+    // The Number's trace is the model's last 8 s of its def, read while its
+    // page shows and kept when it doesn't, as the sparkline's
+    Component {
+        id: sourceC
+        QtObject {
+            property var samples: [0, 40, 100, 45]
+            property int calls: 0
+            property int askedWindowMs: 0
+            function trace(id, windowMs, columns) {
+                ++calls
+                askedWindowMs = windowMs
+                return samples
+            }
+        }
+    }
+    function test_theNumbersTraceReadsTheModelsHistory() {
+        const s = createTemporaryObject(sourceC, testCase)
+        const g = createTemporaryObject(digitalC, testCase.parent, { traceSource: s, signalId: 1 })
+        tryVerify(() => g.samples.length === 4, 2000, "read at once")
+        compare(s.askedWindowMs, 8000)
+        g.resetPeaks()
+        compare(g.samples.length, 4, "Reset peaks keeps the trace")
+        g.shown = false
+        const calls = s.calls
+        wait(350)
+        compare(s.calls, calls, "no read while its page isn't shown")
+        compare(g.samples.length, 4, "and the trace is kept")
+        const brief = createTemporaryObject(digitalC, testCase.parent,
+                                            { height: 60, traceSource: s, signalId: 2 })
+        verify(brief.brief, "a tile too short for a trace")
+        const before = s.calls
+        wait(350)
+        compare(s.calls, before, "reads nothing")
+    }
+
+    // A value that isn't a number never blanks the trace: it ends a piece
     function test_theNumbersTraceKeepsOnlyNumbers() {
         const g = createTemporaryObject(digitalC, testCase.parent)
-        const sampler = find(g, "sampler")
-        g.hasValue = true
-        g.value = 40
-        sampler.triggered()
-        compare(g.history.length, 1)
-        g.value = Infinity
-        sampler.triggered()
-        g.value = NaN
-        sampler.triggered()
-        compare(g.history.length, 1, "neither kept")
-        compare(g.history[0], 40)
+        g.samples = [0, 40, 100, 45, 200, Infinity, 300, NaN, 400, 42, 500, 44]
+        const pieces = g.tracePoints(300, 40)
+        compare(pieces.length, 2)
+        for (const piece of pieces)
+            for (const pt of piece)
+                verify(isFinite(pt.x) && isFinite(pt.y), "a point that is a number")
     }
 }

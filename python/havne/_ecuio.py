@@ -267,7 +267,9 @@ ECUIO_QUEUE_MAX_VALUES = 0x10000
 ECUIO_QUEUE_TEXT_MAX = 128
 ECUIO_QUEUE_VALUES = 2
 ECUIO_QUEUE_VALUE_TEXT_CUT = 1
+ECUIO_RECORDER_DRAINED = 1
 ECUIO_RECORDING_ACTIVE = 1
+ECUIO_RECORDING_ARMED = 4
 ECUIO_RECORDING_CONDITIONS_MATCH = 4
 ECUIO_RECORDING_CONDITIONS_NAMED = 1
 ECUIO_RECORDING_CONDITIONS_PRESENT = 2
@@ -306,6 +308,7 @@ ECUIO_RECORDING_STRETCH_CUT_END = 16
 ECUIO_RECORDING_STRETCH_CUT_START = 8
 ECUIO_RECORDING_STRETCH_NO_THROTTLE = 4
 ECUIO_RECORDING_STRETCH_PULL = 1
+ECUIO_RECORD_ARMED = 1
 ECUIO_REFERENCE_ID = 0
 ECUIO_REFERENCE_KEY = 1
 ECUIO_SERIAL_DEVICE_LEN = 128
@@ -1151,7 +1154,10 @@ ecuio_recorder_state_t._fields_ = [
     ('notes_dropped', c_uint64),
     ('reason', (c_char * 128)),
     ('conditions_lost', c_uint64),
-    ('reserved', (c_uint64 * 3)),
+    ('windows', c_uint32),
+    ('preroll_short', c_uint32),
+    ('frames_passed', c_uint64),
+    ('reserved', (c_uint64 * 1)),
 ]
 ecuio_recording_column_t._fields_ = [
     ('lowest', c_double),
@@ -1547,6 +1553,7 @@ FUNCTIONS = {
     'ecuio_recording_close': (None, [POINTER(ecuio_recording_t)]),  # recording.h
     'ecuio_recording_enum_label': (c_char_p, [POINTER(ecuio_recording_t), c_uint32, c_uint32]),  # recording.h
     'ecuio_recording_find': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_find_t), c_uint64, POINTER(c_uint64)]),  # recording.h
+    'ecuio_recording_find_with': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_find_t), c_uint64, ecuio_cancel_t, c_void_p, POINTER(c_uint64)]),  # recording.h
     'ecuio_recording_get_condition_event': (c_int, [POINTER(ecuio_recording_t), c_uint64, POINTER(ecuio_recording_condition_event_t)]),  # recording.h
     'ecuio_recording_get_conditions': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_conditions_t)]),  # recording.h
     'ecuio_recording_get_info': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_info_t)]),  # recording.h
@@ -1562,6 +1569,7 @@ FUNCTIONS = {
     'ecuio_recording_stats': (c_int, [POINTER(ecuio_recording_t), POINTER(c_uint32), c_uint32, c_uint64, c_uint64, POINTER(ecuio_recording_stats_t)]),  # recording.h
     'ecuio_recording_step': (c_int, [POINTER(ecuio_recording_t), c_uint32, c_uint64, c_uint32, POINTER(c_uint64)]),  # recording.h
     'ecuio_recording_stretches': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_stretch_rules_t), c_uint64, c_uint64, POINTER(ecuio_recording_stretch_t), c_uint32, POINTER(c_uint32)]),  # recording.h
+    'ecuio_recording_stretches_with': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_stretch_rules_t), c_uint64, c_uint64, ecuio_cancel_t, c_void_p, POINTER(ecuio_recording_stretch_t), c_uint32, POINTER(c_uint32)]),  # recording.h
     'ecuio_recording_text_at': (c_int, [POINTER(ecuio_recording_t), c_uint32, c_uint64, c_char_p, c_uint32, POINTER(c_uint64)]),  # recording.h
     'ecuio_register_conditions_callback': (c_int, [POINTER(ecuio_session_t), ecuio_conditions_callback_t, c_void_p]),  # conditions.h
     'ecuio_register_frame_callback': (c_int, [POINTER(ecuio_session_t), ecuio_frame_callback_t, c_void_p]),  # core.h

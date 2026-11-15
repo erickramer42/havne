@@ -494,111 +494,155 @@ TestCase {
 
     // ---- SparkGauge
 
-    function test_theWindowIsClampedAndSizesTheHistory() {
-        compare(make(sparkC, { windowS: 5 }).span, 10)
-        compare(make(sparkC, { windowS: 30 }).historyLength, 300)
-        const g = make(sparkC, { windowS: 500 })
-        compare(g.span, 120)
-        compare(g.historyLength, 1200, "at 10 Hz 1,200 points at most")
+    // A stand-in for Bridge.signalModel: the trace it hands back, and what
+    // it was asked
+    Component {
+        id: sourceC
+        QtObject {
+            property var samples: []
+            property int calls: 0
+            property int askedId: -1
+            property int askedWindowMs: 0
+            property int askedColumns: 0
+            function trace(id, windowMs, columns) {
+                ++calls
+                askedId = id
+                askedWindowMs = windowMs
+                askedColumns = columns
+                return samples
+            }
+        }
+    }
+    function source(samples) {
+        const s = createTemporaryObject(sourceC, testCase)
+        s.samples = samples
+        return s
+    }
+    // [ts, val, ...] of a value v(i) every 100 ms for n samples
+    function every100(n, v) {
+        const out = []
+        for (let i = 0; i < n; ++i)
+            out.push(i * 100, v(i))
+        return out
     }
 
-    function test_theHistoryKeepsOneWindow() {
-        const g = make(sparkC, { windowS: 10 })
-        g.hasValue = true
-        for (let i = 0; i < 130; ++i) {
-            g.value = i % 50
-            g.takeSample()
-        }
-        compare(g.history.length, 100, "10 s at 10 Hz")
-        compare(g.history[99], 129 % 50, "the newest value is at the end")
-        compare(g.tracePoints(300, 80).length, 100, "one point a sample")
+    function test_theWindowIsClamped() {
+        compare(make(sparkC, { windowS: 5 }).span, 10)
+        compare(make(sparkC, { windowS: 30 }).windowMs, 30000)
+        const g = make(sparkC, { windowS: 500 })
+        compare(g.span, 120)
+        compare(g.windowMs, 120000, "two minutes at most")
+    }
+
+    // The trace is the model's history of its def, over its window, at a
+    // column per 3 px (a slice's low and high: about one point per 1.5 px)
+    function test_theTraceReadsTheModelsHistory() {
+        const s = source(every100(50, i => i))
+        const g = make(sparkC, { windowS: 10, traceSource: s })
+        wait(250)
+        compare(s.calls, 0, "no def, no read")
+        g.signalId = 7
+        tryVerify(() => g.samples.length === 100, 2000, "read at once")
+        compare(s.askedId, 7)
+        compare(s.askedWindowMs, 10000)
+        compare(s.askedColumns, Math.floor(find(g, "trace").width / 3))
+        const before = s.calls
+        tryVerify(() => s.calls > before + 2, 2000, "and every 100 ms")
+        g.signalId = 8
+        compare(g.samples.length, 0, "another def's trace starts empty")
+        tryVerify(() => g.samples.length === 100, 2000, "and reads its own")
     }
 
     // The window's own low and high, padded to 4 % of full scale at least
     function test_theScaleIsTheWindowsLowAndHigh() {
         const g = make(sparkC, { windowS: 10, decimals: 0 })
         g.hasValue = true
-        for (const v of [20, 35, 50, 30])
-            { g.value = v; g.takeSample() }
+        g.samples = [0, 20, 100, 35, 200, 50, 300, 30]
         compare(g.extent.lo, 20)
         compare(g.extent.hi, 50)
         compare(find(g, "scaleHigh").text, "50")
         compare(find(g, "scaleLow").text, "20")
         const flat = make(sparkC, { windowS: 10, decimals: 1 })
-        flat.hasValue = true
-        flat.value = 40
-        flat.takeSample()
+        flat.samples = [0, 40, 100, 40]
         fuzzyCompare(flat.extent.hi - flat.extent.lo, 4, 0.001, "padded to 4 % of 0 to 100")
+        const odd = make(sparkC, { windowS: 10 })
+        odd.samples = [0, NaN, 100, Infinity, 200, 30]
+        compare(odd.extent.lo, 28, "a value that isn't a number is no extreme")
+        verify(isFinite(odd.extent.lo) && isFinite(odd.extent.hi), "the scale stays finite")
     }
 
-    // A reset empties the trace (a connect, a change of units), a page
-    // that stops being shown starts again, and a value that is not a number
-    // is never kept
-    function test_theTraceStartsAgain() {
+    // x is time: the newest sample at the right edge, the window across, so
+    // a point keeps its place as the trace scrolls and moves only with time
+    function test_theTraceIsTime() {
         const g = make(sparkC, { windowS: 10 })
-        g.hasValue = true
-        g.value = 5
-        for (let i = 0; i < 5; ++i) g.takeSample()
-        compare(g.history.length, 5)
-        g.resetPeaks()
-        compare(g.history.length, 0, "Reset peaks empties it")
-        for (let i = 0; i < 5; ++i) g.takeSample()
-        g.shown = false
-        compare(g.history.length, 0, "a page that is no longer shown")
-        g.shown = true
-        compare(g.history.length, 0, "and back again, still empty")
-        g.value = NaN
-        g.takeSample()
-        g.value = Infinity
-        g.takeSample()
-        compare(g.history.length, 0, "no sample of a value that is not a number")
-        verify(isFinite(g.extent.lo) && isFinite(g.extent.hi), "the scale stays finite")
-    }
-
-    function test_theTraceSamplesOnlyWhenItsPageIsShown() {
-        const g = make(sparkC, {})
-        g.hasValue = true
-        g.value = 10
-        g.shown = false
-        wait(350)
-        compare(g.history.length, 0, "a page that is not the one shown takes none")
-        g.shown = true
-        tryVerify(() => g.history.length > 2, 2000, "and takes them once shown")
-    }
-
-    // About one point per 1.5 px, the newest kept, a flat range a midline
-    function test_theTraceHasAboutOnePointPer1_5Px() {
-        const g = make(sparkC, { windowS: 120 })
-        g.hasValue = true
-        for (let i = 0; i < 1200; ++i) {
-            g.value = 50 + 30 * Math.sin(i / 20)
-            g.takeSample()
-        }
-        const points = g.tracePoints(300, 80)
-        verify(points.length <= 300 / 1.5 + 2, points.length + " points for 300 px")
-        verify(points.length > 100, "still a trace: " + points.length)
-        fuzzyCompare(points[points.length - 1].x, 300, 0.01, "the newest at the right edge")
-        for (const pt of points)
+        g.samples = every100(101, i => i === 40 ? 90 : 20)
+        let pieces = g.tracePoints(300, 80)
+        compare(pieces.length, 1)
+        let pts = pieces[0]
+        compare(pts.length, 101)
+        fuzzyCompare(pts[100].x, 300, 0.01, "the newest at the right edge")
+        fuzzyCompare(pts[0].x, 0, 0.01, "the window's start at the left")
+        fuzzyCompare(pts[40].x, 300 - 6000 / 10000 * 300, 0.01, "the spike at its time")
+        fuzzyCompare(pts[40].y, 2, 0.01, "at the top")
+        // The window moved by a sample: the spike moves by 100 ms of width
+        g.samples = every100(102, i => i === 40 ? 90 : 20).slice(2)
+        pts = g.tracePoints(300, 80)[0]
+        fuzzyCompare(pts[39].x, 300 - 6100 / 10000 * 300, 0.01, "one sample later")
+        fuzzyCompare(pts[39].y, 2, 0.01, "still at the top")
+        for (const pt of pts)
             verify(pt.y >= 0 && pt.y <= 80 && isFinite(pt.y), "a point inside the box")
+        // Half a window of history fills the right half of the box
+        g.samples = every100(51, i => 20)
+        fuzzyCompare(g.tracePoints(300, 80)[0][0].x, 150, 0.01, "the oldest at its time")
         const flat = make(sparkC, { windowS: 10, from: 50, to: 50 })
-        flat.hasValue = true
-        flat.value = 50
-        flat.takeSample()
-        flat.takeSample()
-        for (const pt of flat.tracePoints(300, 80))
+        flat.samples = [0, 50, 100, 50]
+        for (const pt of flat.tracePoints(300, 80)[0])
             compare(pt.y, 40, "a flat range draws a midline")
     }
 
-    // It samples only while shown
-    function test_theTraceSamplesOnlyWhileShown() {
-        const g = make(sparkC, {})
+    // Only a break (the model's NaN point: a stall or a value that isn't a
+    // number) ends a piece, never the slices' spacing; a lone point is a dot
+    function test_onlyABreakEndsAPiece() {
+        const g = make(sparkC, { windowS: 120 })
+        g.samples = [0, 10, 3000, 20, 9000, 30, 9500, NaN, 12000, 90, 12500, NaN,
+                     15000, 50, 18000, 60]
+        const pieces = g.tracePoints(300, 80)
+        compare(pieces.length, 3, "slices 3 and 6 s apart are no break")
+        compare(pieces[0].length, 3)
+        compare(pieces[1].length, 2, "the lone point drawn as a dot")
+        fuzzyCompare(Math.abs(pieces[1][1].x - pieces[1][0].x), 1, 0.01, "1 px long")
+        compare(pieces[1][1].y, pieces[1][0].y)
+        fuzzyCompare(pieces[1][0].y, 2, 0.01, "at its value: the top")
+        compare(pieces[2].length, 2)
+        g.samples = [0, 10, 100, NaN, 200, 20]
+        const dot = g.tracePoints(300, 80)[1]
+        verify(dot[0].x <= 300 && dot[1].x <= 300, "a dot at the right edge stays in the box")
+        compare(make(sparkC, {}).tracePoints(300, 80).length, 0, "no samples, no trace")
+    }
+
+    // The trace is the model's, so a page left and a reset keep it; nothing
+    // is read while the page isn't shown, and it reads again as it shows
+    function test_theTraceOutlivesItsPage() {
+        const s = source(every100(30, i => i))
+        const g = make(sparkC, { windowS: 10, traceSource: s, signalId: 3 })
         g.hasValue = true
-        g.value = 10
-        tryVerify(() => g.history.length > 2, 2000, "samples while shown")
+        tryVerify(() => g.samples.length === 60, 2000)
+        g.resetPeaks()
+        compare(g.samples.length, 60, "Reset peaks keeps it")
+        g.shown = false
+        const calls = s.calls
+        wait(350)
+        compare(s.calls, calls, "no read while the page isn't shown")
+        compare(g.samples.length, 60, "a page left keeps it")
+        s.samples = every100(40, i => i)
+        g.shown = true
+        wait(1)
+        compare(g.samples.length, 80, "read again at once as it shows, not 100 ms later")
         g.visible = false
-        const n = g.history.length
-        wait(250)
-        compare(g.history.length, n, "none while hidden")
+        const hidden = s.calls
+        wait(350)
+        compare(s.calls, hidden, "none while hidden")
+        compare(g.samples.length, 80, "and kept")
     }
 
     // ---- The danger mark's slot and the readout, on the new kinds
@@ -798,9 +842,9 @@ TestCase {
         const g = make(sparkC, { windowS: 10 })
         const box = find(g, "scaleBox")
         const empty = box.width
-        g.history = [9, 9.5]
+        g.samples = [0, 9, 100, 9.5]
         compare(box.width, empty, "two short labels")
-        g.history = [9, 100]
+        g.samples = [0, 9, 100, 100]
         compare(box.width, empty, "a three-digit label")
     }
 }

@@ -784,7 +784,13 @@ int main(void)
         sizeof(ecuio_recorder_state_t) != 200 ||
         offsetof(ecuio_recorder_state_t, reason) != 40 ||
         offsetof(ecuio_recorder_state_t, conditions_lost) != 168 ||
-        ECUIO_CONDITION_HELD != 8 || ECUIO_ERR_RECORDING_FAILED != 18 ||
+        offsetof(ecuio_recorder_state_t, windows) != 176 ||
+        offsetof(ecuio_recorder_state_t, preroll_short) != 180 ||
+        offsetof(ecuio_recorder_state_t, frames_passed) != 184 ||
+        offsetof(ecuio_recorder_state_t, reserved) != 192 ||
+        ECUIO_RECORD_ARMED != 1 || ECUIO_RECORDING_ARMED != 4 ||
+        ECUIO_RECORDER_DRAINED != 1 || ECUIO_CONDITION_HELD != 8 ||
+        ECUIO_ERR_RECORDING_FAILED != 18 ||
         ECUIO_CONDITION_WHY_NOT_RECEIVED != 8 ||
         ECUIO_VALIDATE_ERR_FORMULA != 18 ||
         ecuio_recorder_open(&record_options, &recorder) !=
@@ -911,6 +917,11 @@ int main(void)
         ecuio_recording_text_at(NULL, 0, 0, reading_text, sizeof reading_text,
                                 &reading_at) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_find(NULL, &reading_find, 0, &reading_at) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_find_with(NULL, &reading_find, 0, NULL, NULL,
+                                  &reading_at) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_stretches_with(NULL, &reading_rules, 0, 1, NULL, NULL,
+                                       &reading_stretch, 1, &reading_count) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_stats(NULL, &reading_pick, 1, 0, 1, &reading_stats) !=
             ECUIO_ERR_NULL_ARGUMENT ||

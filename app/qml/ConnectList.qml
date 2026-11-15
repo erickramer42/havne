@@ -103,13 +103,25 @@ Rectangle {
     // An adapter that is also a recent address shows once, under Recent
     readonly property var adapterRows: {
         const taken = recents.map(baseOf)
-        const rows = adapters.filter(a => taken.indexOf(a.uri) < 0).slice(0, maxAdapterRows)
+        const rows = adapters.filter(a => taken.indexOf(a.uri) < 0 && a.other !== true)
+            .slice(0, maxAdapterRows)
             .map(a => ({ uri: a.uri, title: a.title, kind: a.kind, adapter: true }))
         rows.push({ uri: "mock://demo", title: Bridge.uriLabelFor("mock://demo"),
                    kind: qsTr("Demo data"), adapter: true, demo: true })
         return rows
     }
-    readonly property var rows: recentRows.concat(adapterRows)
+    // Paired devices the phone files as audio, wearable or health gear: no
+    // OBD adapter reports those classes, so they sit under a fold
+    readonly property var otherRows: adapters.filter(a => notRecent(a) && a.other === true)
+        .map(a => ({ uri: a.uri, title: a.title, kind: a.kind, adapter: true, other: true }))
+    function notRecent(a) {
+        return recents.map(baseOf).indexOf(a.uri) < 0
+    }
+    property bool otherOpen: false
+    // The fold opens by itself over a row picked from it
+    readonly property bool otherHeld: otherRows.some(r => r.uri === chosen)
+    readonly property bool otherShown: otherOpen || otherHeld
+    readonly property var rows: recentRows.concat(adapterRows).concat(otherRows)
     // A tapped row; else the vehicle's saved address; else the newest
     // recent; else the one adapter when there is exactly one; else none
     readonly property string chosen: {
@@ -128,7 +140,8 @@ Rectangle {
     // a tap; then, with none paired or found, where to pair one
     readonly property bool bluetoothAsk: bluetoothAvailable && bluetoothPermission !== "granted"
     readonly property bool bluetoothNone: bluetoothAvailable && bluetoothPermission === "granted"
-        && !adapters.some(a => a.uri.startsWith("elm327://bt:") || a.uri.startsWith("elm327://ble:"))
+        && !adapters.some(a => a.other !== true
+                               && (a.uri.startsWith("elm327://bt:") || a.uri.startsWith("elm327://ble:")))
     function askBluetooth() {
         ++bluetoothAsks
         if (bluetoothNeedsSettings)
@@ -151,7 +164,8 @@ Rectangle {
             required property var modelData
             required property int index
             readonly property bool isChosen: list.chosen === modelData.uri
-            objectName: "connectRow_" + (modelData.adapter ? list.recentRows.length + index : index)
+            objectName: "connectRow_" + (modelData.other ? list.recentRows.length + list.adapterRows.length + index
+                                         : modelData.adapter ? list.recentRows.length + index : index)
             Layout.fillWidth: true
             Layout.minimumWidth: 0
             Layout.preferredHeight: list.rowHeight
@@ -271,6 +285,23 @@ Rectangle {
             }
             Repeater {
                 model: list.adapterRows
+                delegate: rowDelegate
+            }
+            ThemedButton {
+                objectName: "connectOtherDevices"
+                visible: list.otherRows.length > 0
+                flat: true
+                Layout.fillWidth: true
+                Layout.preferredHeight: list.rowHeight
+                // Nothing to hide while the pick is inside the fold
+                enabled: !list.otherHeld
+                text: (list.otherShown && !list.otherHeld ? qsTr("Hide other paired devices (%1)")
+                                       : qsTr("Other paired devices (%1)")).arg(list.otherRows.length)
+                Accessible.name: text
+                onClicked: list.otherOpen = !list.otherShown
+            }
+            Repeater {
+                model: list.otherShown ? list.otherRows : []
                 delegate: rowDelegate
             }
             // Never asked at launch: a tap on Allow asks

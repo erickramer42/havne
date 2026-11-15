@@ -1,8 +1,8 @@
 // File/layer: core/src/recorder.h | internal, C++17, Qt-free; what the
 //             session and its recorder share (ADR-0049 section 1)
 // Testing: HARNESS: RecorderTest (test_core), CoreTest's no-allocation
-//          case with a recorder attached; UNIT: ConditionRecordingTest
-//          (test_core)
+//          case with a recorder attached; UNIT: ConditionRecordingTest,
+//          ArmedRecorderTest (test_core)
 //
 // A session and its recorder each outlive the other in some teardowns,
 // so neither reaches into the other's memory: both hold a link, and the
@@ -53,11 +53,20 @@ struct ecuio_condition_record {
         std::string key;
         std::string name;
         bool mark = false;
+        /* An armed recorder's windows (ADR-0063 section 7): record is an
+         * enabled condition with record, before_us and after_us its own */
+        bool record = false;
+        uint32_t before_us = 0;
+        uint32_t after_us = 0;
     };
     std::string bytes;             /* conditions.json */
     std::string sha256;            /* the bytes', lowercase hex */
     std::vector<entry> conditions; /* the set's order */
 };
+
+/* The recordings' clock: ecuio_clock_us, or the test clock
+ * (ecuio_recorder_test_set_clock, internal.h) */
+uint64_t ecuio_record_clock_us();
 
 /* The recorder taking frames, pinned; NULL (and unpinned) when none */
 inline ecuio_recorder_t* ecuio_record_pin(ecuio_record_link& link)
