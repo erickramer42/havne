@@ -1170,6 +1170,12 @@ if(TARGET havne-cli)
         app_cli_golden(ViewListsARecordingsConditionEvents view-conditions.jsonl
             -- $<TARGET_FILE:havne-cli> view ${_cli_pulls}/conditions
                --columns 3)
+        # That recording as a recorder that lost three events wrote it
+        # (conditions-lost: their cond lines and the firing's marker gone,
+        # a drop line counting them): the opened line's events_lost
+        app_cli_golden(InfoCountsTheConditionEventsARecordingLost
+            info-conditions-lost.jsonl
+            -- $<TARGET_FILE:havne-cli> info ${_cli_pulls}/conditions-lost)
         # A stretch of the replay fixture's frames as recorded (ADR-0049's
         # appendix "frames read back"), and a folder that isn't there
         app_cli_golden(FramesReadsAStretchAsRecorded frames-stretch.jsonl

@@ -1661,9 +1661,9 @@ TEST(CliViewTest, AWindowCoversWhatTheRecordingHoldsOnce)
 }
 
 /* The opened line's conditions: null with no set and no line; the set's
- * hash, whether it is there and the same, and the events read, skipped
- * and cut. A cond line is stream's condition line with the recording's
- * time and held added. */
+ * hash, whether it is there and the same, and the events read, skipped,
+ * cut and, last, lost by the recorder. A cond line is stream's condition
+ * line with the recording's time and held added. */
 TEST(CliViewTest, ARecordingsConditionsAreNamedAndEachEventIsALine)
 {
     char buf[1024];
@@ -1683,26 +1683,35 @@ TEST(CliViewTest, ARecordingsConditionsAreNamedAndEachEventIsALine)
     EXPECT_EQ(conditions_of(),
               ",\"conditions\":{\"sha256\":null,\"present\":false,"
               "\"matches\":false,\"events\":2,\"lines_skipped\":0,"
-              "\"cut\":false}}")
+              "\"cut\":false,\"events_lost\":0}}")
         << "lines with no set named or present";
     info.condition_events = 0;
     cs.lines_skipped = 1;
     EXPECT_EQ(conditions_of(),
               ",\"conditions\":{\"sha256\":null,\"present\":false,"
               "\"matches\":false,\"events\":0,\"lines_skipped\":1,"
-              "\"cut\":false}}")
+              "\"cut\":false,\"events_lost\":0}}")
         << "only a line that doesn't parse";
+    cs.lines_skipped = 0;
+    cs.events_lost = 3;
+    EXPECT_EQ(conditions_of(),
+              ",\"conditions\":{\"sha256\":null,\"present\":false,"
+              "\"matches\":false,\"events\":0,\"lines_skipped\":0,"
+              "\"cut\":false,\"events_lost\":3}}")
+        << "only a drop line of lost events";
     cs.flags = ECUIO_RECORDING_CONDITIONS_NAMED |
                ECUIO_RECORDING_CONDITIONS_PRESENT |
                ECUIO_RECORDING_CONDITIONS_MATCH;
     std::memset(cs.sha256, 'b', 64);
     cs.lines_skipped = 3;
+    cs.events_lost = UINT64_MAX;
     info.condition_events = 1048577;
     info.flags = ECUIO_RECORDING_INFO_CONDITIONS_CUT;
     EXPECT_EQ(conditions_of(),
               ",\"conditions\":{\"sha256\":\"" + std::string(64, 'b') +
                   "\",\"present\":true,\"matches\":true,\"events\":1048577,"
-                  "\"lines_skipped\":3,\"cut\":true}}");
+                  "\"lines_skipped\":3,\"cut\":true,"
+                  "\"events_lost\":18446744073709551615}}");
     cs.flags = ECUIO_RECORDING_CONDITIONS_PRESENT;
     info.flags = 0;
     EXPECT_NE(conditions_of().find("\"sha256\":null,\"present\":true,"

@@ -1,0 +1,19 @@
+ecuio session recording, format 3 (ADR-0049)
+started  2026-11-13 09:00:00.000 (local time)
+utc  2026-11-13T15:00:00.000Z
+core  0.7.3
+uri  replay://<path>?profile=obd2
+profile  obd2
+conditions  conditions.json,b994212f73c749d232dbf190c81fa5b183a6a67c400009eb0239db4b0b882a5e
+frame flags  complete
+signal  Coolant Temp,number,°C,0,2,1
+signal  RPM,number,RPM,0,1,1
+caller  havne-cli 0.7.3
+columns  local time, seconds since the recording started (host_us / 1e6 in the CSV files), kind, text
+
+09:00:00.001  +0.001  cond  coolant_high,off,,100,0,1000,0
+09:00:00.126  +0.126  cond  rpm_high,off,,800,0,126000,125000
+09:00:07.251  +7.251  cond  coolant_high,on,fired,111,0,7251000,7250000
+09:00:12.876  +12.876  drop  the recording lost 3 condition events: the disk fell behind
+09:00:26.876  +26.876  cond  rpm_high,off,stale,900,0,26876000,26875000
+09:00:30.001  +30.001  end  havne-cli: replay-end: 217 frames, 217 values, 0 records dropped, 0 notes dropped
