@@ -781,6 +781,9 @@ TEST(ConditionRecordingTest, EachRunOfLostEventsHasADropLineOfItsOwn)
     r.drained();
     flood(1);
     ecuio_recorder_test_hold(r.recorder, 1);
+    /* A pass under way when the hold was set drains the ring once more:
+     * the flood waits it out, or its room splits the run in two */
+    r.drained();
     flood(600);
     const uint64_t second = r.state().conditions_lost - first;
     ASSERT_GT(second, 0u);
