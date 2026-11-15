@@ -1076,7 +1076,7 @@ Page {
         if (swipe.count > pageIndex && swipe.currentIndex !== pageIndex)
             swipe.setCurrentIndex(pageIndex)
         // A tab with the focus hands it on, so the ring is on the page shown
-        const strip = stripHost.item as DashPageStrip
+        const strip = topBar.stripLoader.item as DashPageStrip
         if (strip && strip.holdsFocus())
             strip.focusTab(pageIndex)
         if (!restored) return
@@ -1367,6 +1367,8 @@ Page {
 
     ColumnLayout {
         id: topBar
+        // The page strip's Loader, for the page
+        readonly property Loader stripLoader: stripHost
         visible: !root.driving
         // Over the pages, so the shown tab covers the panel's top line
         z: 1
