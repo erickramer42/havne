@@ -403,6 +403,21 @@ QtObject {
         return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
     }
 
+    // Whether a pick can set small text (a cell's title) in the shown look: the
+    // text ratio, 4.5:1, on the card's surface and on the page behind a plain
+    // cell. Night has no pick, so its look passes nothing
+    function gaugeTextReadable(hex) {
+        if (nightActive || palettes[active] === undefined)
+            return false
+        const lin = v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+        const lum = c => 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+        const a = lum(Qt.color(hex))
+        return ["surface", "bg"].every(k => {
+            const b = lum(Qt.color(palettes[active][k]))
+            return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) >= 4.5
+        })
+    }
+
     readonly property color bg:             colors.bg
     readonly property color surface:        colors.surface
     readonly property color elevated:       colors.elevated
