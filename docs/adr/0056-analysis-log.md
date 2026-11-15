@@ -1220,3 +1220,61 @@ an ask that can't start leaves the pass under way to answer.
 `.ACloseEndsAMeansPassThatGaveWay`,
 `.ANewerStretchesAskStalesTheOlderPass`,
 `.AStretchesAskThatCantStartLeavesTheOlderPassAlone`.
+
+## Appendix: a pick's lines in a recording (2026-11-13)
+
+**The header.** The focus a recording begins under (a log's `focus`, a
+default pick's `pick`) is written on as many header lines as its names
+take, each holding at most 4 KiB of them, so a pick of the cap's 1024
+signals with the longest names stays far inside a row (32 KiB). The
+readers append the lines in order (the export's and the health
+report's header read did already). A pick given twice is picked once,
+at its first place, so a recording never names a signal twice. A line
+past a row, which an older core wrote for a large pick, is passed by
+whole: the signal lines after it are still read, though its names are
+lost to the wide CSV's default columns. The folder export still refuses
+such a line rather than drop a header line without a word.
+
+**A change after the attach.** A focus set or ended while a recorder
+takes the session's frames is an activity line, stamped at the call,
+of the header's kind word:
+
+    12:00:31.250  +31.250  pick  15 signals: "Engine Load","Coolant Temp",...
+    12:00:31.250  +31.250  pick  more: "Fuel Level"
+    12:00:48.100  +48.100  pick  15 signals, at least 250 ms between sweeps: "Engine Load",...
+    12:01:02.900  +62.900  focus  none: every signal asked
+
+The names are quoted as the header quotes them (signals.csv's rule), so
+a name holding a quote or a comma reads back whole; past 4 KiB of names
+the rest follow on `more: ` lines of the same time and kind. On a
+session that asks requests, a minimum time between sweeps follows the
+count (the words of the app's "Log started" line), so a new minimum on
+the same picks is a change of its own; a session that asks nothing
+takes a minimum and changes nothing, and its line never names one. An
+ended focus is `focus  none: every signal asked`. A line is written
+only when the picks, their kind word or the minimum differ from what
+the header or the last line named: the app's pick applied again as a
+walk drops requests, or a whole set asked again, writes nothing. Core
+writes the line for every front end, so havne-cli's and Python's
+recordings have it too, and the folder export keeps both kinds in its
+range, as it keeps `link` and `asleep`: a scrubbed copy says why a
+signal's samples begin or end mid-file, where the front end's note was
+left out. A range that starts after a change opens with that change's
+lines again, at its start (the clock and session time carried on, as
+ADR-0063 section 8's held cond lines are), so a copy from 120 s says
+what was asked then. A line that finds the recorder's queue full is
+dropped and counted with the notes.
+
+A change made while the recorder attaches is not lost between the two:
+the recorder keeps the focus its header named, and the attach compares
+the session's focus with it once attached, writing a line when they
+differ; a call that pinned the recorder first wrote it already, and the
+compare keeps it from being written twice. Older cores pass both kinds
+by (the reader skips a kind it doesn't know, the folder export counts
+one as left out); the format stays 3.
+
+**The app.** The bridge's "Asking N signals: ..." line is shown on the
+Log page and no longer noted in the recording, since core's line says
+the same; the lines that say why the whole set is asked ("Asking every
+signal: the profile ranks none", or core's refusal) are still notes,
+since core's `focus  none` line doesn't say why.

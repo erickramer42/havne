@@ -117,6 +117,14 @@ one as the latest model year. The identity line is new to the CLI as
 well: the app has logged each ECU's identity since ADR-0021, and the
 CLI had no line for it.
 
+> **Amended 2026-11-13:** the connected car's VIN comes as soon as
+> core has it in ([ADR-0027](0027-vehicle-profiles.md)'s appendix "the
+> VIN before the identity is complete"). The app's `VIN:` line comes
+> ahead of the first ECU's identity line, or alone when a session ends
+> before that ECU's identity is complete. `havne-cli stream` also
+> writes a `vehicle` line, the first ECU's `rx` and the same `vin`
+> decode, once per new VIN and ahead of the identity lines.
+
 ## Alternatives considered
 
 - **vPIC's online API:** decodes more (model, trim, engine), but every
@@ -154,3 +162,6 @@ CLI had no line for it.
   - The CLI's identity line puts the VIN and the calibration IDs on
     stdout, as the app's log does: output shared in a bug report needs
     the same care as an `events.log`.
+    > **Amended 2026-11-13:** the `vehicle` line puts the VIN on
+    > stdout too, as soon as it is in, and the app's `VIN:` line can
+    > come with no identity line beside it.

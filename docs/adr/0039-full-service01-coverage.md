@@ -499,6 +499,8 @@ is `ecuio_computed_input_gone` in `core/src/pid_support.h`. A refused
 input (a negative reply, section 6's refused rows) is not followed: its
 row says so itself, and what reads it still waits.
 
+> **Amended 2026-11-15:** a format 2 computed signal is listed by the inputs its program lacks, not by any one input: [ADR-0062](0062-computed-grammar.md)'s appendix "the lists judge what a program lacks" (`if`, `all` and `any` can give a value without an input).
+
 **The mock answers the probe.** `mock://` sends its own frame and
 answers each `62 <DID>` def of the session's set; it sends no Service
 01 value. Under `obd2`, or a signal file or plugin that extends it,

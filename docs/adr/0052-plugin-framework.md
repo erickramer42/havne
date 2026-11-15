@@ -627,3 +627,18 @@ whether or not a VIN is known:
 
 `havne-cli plugins match` is unchanged: it lists the variants a VIN
 covers, and `stream` reads the variant its URI names.
+
+> **Note of 2026-11-13, `lineage`** ([ADR-0064](0064-one-store.md)). A
+> manifest may carry `lineage`: 32 of `0-9` and `a-f`, the start of the
+> SHA-256 of the signal file the plugin was first made from. Core writes
+> it when it wraps a signal file and keeps it through every change;
+> `ecuio_plugin_lineage` reads it. Two packages with one `id` and one
+> `lineage` are versions of one plugin. A plugin written by hand has
+> none.
+
+> **Note of 2026-11-13, a data file's own `source`**
+> ([ADR-0064](0064-one-store.md) Q1). A variant's text takes the
+> `source` of the first of its files that has one, and the manifest's
+> only when none has. So a variant made from a file with its own
+> attribution keeps it in every recording, whatever else the plugin
+> holds.

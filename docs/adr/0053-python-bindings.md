@@ -776,7 +776,7 @@ and the session's words" wraps both as `havne.decode_vin` and
 
 Section 5's signal files and the appendix "the havne package as built"
 gain what format 2 ([ADR-0062](0062-computed-grammar.md)) adds.
-`SignalFile.format` is the file's `"havne_signals"`
+`SignalFile.format` and `Plugin.format(variant=None)` are the file's `"havne_signals"`
 (`ecuio_signal_file_format`). `SignalFile.expr(key)` and
 `Plugin.expr(key, variant=None)` give a computed signal's expression as
 the file writes it (`ecuio_signal_file_expr`; a plugin's first variant

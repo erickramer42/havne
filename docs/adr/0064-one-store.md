@@ -1,6 +1,8 @@
 # ADR-0064: One store: every import becomes a plugin
 
-- **Status:** Accepted. Not built: "Build steps" is the plan.
+- **Status:** Accepted. Built: "Build steps" 1 to 5 and the phone run
+  (the appendices of 2026-11-13 to 2026-11-15). Not built: step 6,
+  `SignalStore` out of the app (v0.9.0).
 - **Date:** 2026-11-13.
 - **Builds on:** [ADR-0013](0013-protocol-profiles.md) (profiles chosen
   by the URI, never inferred, section 3);
@@ -246,6 +248,10 @@ SHA-256s of the signal files it was made from, Q6). A key in the
 manifest would travel with a shared copy and make someone else's
 plugin look like the receiver's; the index stays on the device.
 
+*Note (2026-11-14): as built, `wrappedFrom` is an object, each signal
+file's SHA-256 to the id of the variant made from it, one file for each
+variant ("the store as built" below).*
+
 A plugin that came in as a package can be marked **Mine** (one button):
 a phone receiving the user's own plugin from the desktop (Q7's export)
 is the case. Its line says what a later import of the same id then
@@ -454,8 +460,8 @@ written signal file goes through `put_variant` into a plugin of the
 user's own (new or picked), its `source` kept (Q1), with a line saying
 the copy won't follow the original's updates. The user then edits the
 copy with the form. The gap (an extension that follows its base) is
-named in the Consequences and goes to v0.9.0 with signal-file format
-2.
+named in the Consequences and goes to v0.9.0 with a later signal-file
+format.
 
 ### Q9. The CLI
 
@@ -555,7 +561,7 @@ update's `lineage` and version tests).
 - An older Havne sees its pre-migration state; work done in v0.8.0 is
   not visible to it, and its later work doesn't come forward.
 - **Gaps, each with its release:** a plugin extending another's
-  variant (v0.9.0, with signal-file format 2); an OBDb plugin with a
+  variant (v0.9.0, with a later signal-file format); an OBDb plugin with a
   variant for each of its year ranges (v0.9.0); the old store's
   removal (v0.9.0); the CLI has no store by design and stays without
   one.
@@ -628,3 +634,371 @@ Each a branch, in order; the first two can run beside the app's.
   and bench sheets would still connect, but one profile name would mean
   a signal file in the CLI and a plugin variant in the app, and a
   plugin's profile would no longer say which plugin decodes.
+
+## Appendix: the store as built (2026-11-13)
+
+`app/pluginstore.{h,cpp}` and the bridge's calls over it build step 3,
+and settle what Q2, Q3, Q4, Q5 and Q7 left to the build:
+
+- **The index** is `plugins/store.json`: `{"format": 1, "plugins":
+  {"<id>": {"mine", "importedFor", "wrappedFrom"}}}` and, once the
+  migration has run, `"migrated": 1`. `wrappedFrom` is an object, each
+  signal file's SHA-256 to the id of the variant made from it, so a
+  saved address or layout maps to a variant and not only to a plugin. A
+  key this version doesn't know, at the top or in a plugin's entry, is
+  kept as it is. An index with nothing to say is deleted, so removing
+  the last plugin still removes the folder. A plugin's entry goes when
+  the plugin is removed, and when a copy that no longer loads is
+  removed and its text still names its id.
+- **The index is never written over when it can't be trusted.** A file
+  that is there and isn't an index (unreadable, over 4 MiB, not a JSON
+  object, `plugins` not an object) is moved aside whole as
+  `store.json.bad-N`, the first free N from 1 to 99, and a new index is
+  started; the log says so. When it can't be moved, it is left as it
+  is: what is marked holds while the app runs, the answer to the user
+  says the index couldn't be written, and the next change tries again.
+  An index whose `format` is above 1 is read for the keys this version
+  knows and never written. Each change is made to the file as it is at
+  that moment (read, changed, written whole), so two running apps
+  don't undo each other's facts; a change the file never got stays in
+  memory and is written with the next one that succeeds.
+- **The migration's mark can be lost** with an index moved aside, so
+  step 4 also looks for what it wrote (the vehicle book's new key)
+  before it runs again.
+- **Kinds** are told apart by the file's first key, read from its text
+  after any byte-order mark: `havne_plugin` is a package and
+  `havne_signals` a signal file. A file starting with neither is an
+  OBDb set when its object has `commands`; one past an OBDb set's
+  bound is told by the word alone and refused as an OBDb set. Anything
+  else is refused as none of the three. A file whose format key isn't
+  first is refused here rather than by a loader.
+- **A file is read once and held, then kept.** A signal file's read
+  says what it would be (its name, the plugin id a wrap gives it and
+  the id a variant made from it takes). An OBDb set's read holds its
+  bytes for the report, which converts them as often as the year or
+  the name changes. Nothing is kept until the user chooses. A refused
+  keep leaves the file held, so a changed variant id or a disconnect
+  can be followed by Keep again.
+- **A taken id (Q2):** the wrap is asked again with `-2` to `-99` after
+  the id, cut so it stays within 31 bytes with no `-` left before the
+  number.
+- **The same file again** finds the plugin it made: by `wrappedFrom`
+  (the file's hash naming the variant the wrap would make), however
+  the plugin has changed since, with words saying the plugin's version
+  when it has; and by its bytes, when the index holds no such fact and
+  the store holds the file's wrap, whose facts are written then. No
+second plugin is made. A file
+  that was only given to a plugin as a variant still makes a plugin of
+  its own, and a file whose variant another file has since taken the
+  place of is no longer in that plugin and makes one again.
+- **`wrappedFrom` names what the plugin holds:** one file for each
+  variant. A file put in a variant's place takes the earlier file's
+  entry, and an entry goes with its variant (a drop, an update whose
+  version lacks it, an OBDb set that replaced the conversion).
+- **`importedFor` (Q3)** is the first vehicle a wrap was kept for. The
+  same file kept again for another vehicle finds its plugin and moves
+  nothing.
+- **An OBDb set imported again (Q2)** goes to the plugin that is the
+  user's own, was imported for that vehicle, is a conversion (the
+  manifest's `source` is the importer's) and has that name. While that
+  plugin has one variant, the new conversion takes its place under its
+  id, and the answer carries the profiles it replaced so a pick of the
+  earlier year can follow. Once the user has added variants, the new
+  conversion joins them through the put (the lineage kept, the minor
+  raised), so nothing of the user's goes. The conversion the plugin
+  already holds changes nothing. Another vehicle's set of that name,
+  and a file the user wrote under it, are plugins of their own. A set
+  kept for no vehicle goes to no earlier conversion, one kept for no
+  vehicle included: it is a plugin of its own, unless the same bytes
+  were kept before, when it finds the plugin they made.
+- **The variant of an OBDb plugin (Q2, Q3)** is `my<year>` only when
+  the caller says the year was typed, and `base` otherwise, year 0
+  included.
+- **A package with the id of a plugin of the user's own (Q4):** the
+  same lineage and a higher version updates in place and the answer
+  names the version it updated from; a lower version is refused as
+  older, naming both; the same version with other bytes is refused as
+  changed apart, naming both; no lineage, or another, is refused naming
+  the user's plugin. Versions compare as three numbers. Where the
+  plugin isn't the user's own, a package of its id replaces it whatever
+  its version, as before.
+- **Facts belong to the plugin they were written for.** A plugin that
+  comes in under an id with facts and no plugin loaded (the copy they
+  were of is gone or no longer loads) starts with none: a package is
+  someone else's until marked, and a wrap writes its own. The words on
+  a copy that no longer loads say to import the plugin again, so the
+  import isn't refused.
+- **Put and drop (Q4)** read the kept copy, call core, and install the
+  new text in the old one's place. Both are refused for a plugin that
+  isn't the user's own. Core's words for the user (an ECU of the file's
+  that took another id) come back as `notes`.
+- **Mine, and a release, that the index can't take** hold while the
+  app runs, and the next change that is written carries them. The
+  answer says so: if no later change writes the index before the app
+  closes, after a restart the plugin isn't marked as the user's own, or
+  each import may be its vehicle's again. A forget with nothing to
+  release writes nothing.
+- **A vehicle forgotten** (one, or every vehicle): `importedFor` naming
+  it goes from each plugin, so a vehicle the book later gives that id
+  (the book numbers a new vehicle past the highest id it holds, and a
+  forget frees that id) inherits no import. The plugins stay, and stay
+  the user's own.
+- **Picks (Q5)** are an ordered list of profiles the vehicle book
+  keeps; the store answers from it. A pick is added last, a profile
+  picked already changes nothing, a variant no plugin here has and a
+  17th pick are refused. The row marks a pick whose variant is gone as
+  missing and, on an adapter, the first pick that extends `obd2` as the
+  stand-in. The list for a vehicle has the VIN's matches and the
+  plugins imported for it first, each group by plugin name, then id,
+  then the manifest's order.
+- **Export (Q7)** writes the kept copy after checking it still hashes
+  to its name. A copy changed since is refused.
+- **Export's note (Q7)** names each variant whose source's license is
+  Creative Commons' share-alike (core's `ecuio_signal_file_source` on
+  the variant's written file), one line each, in the words
+  `havne-cli plugins check` gives, so the page and the CLI say the same.
+  A variant under an attribution-only license, or none, is not named.
+- **A variant's signal file (Q7)** is core's text for the variant
+  (`ecuio_signal_file_text`): its files merged, a notes line naming the
+  plugin, its version and the variant, its source kept. Save as a
+  signal file writes it byte for byte, and the form reads it.
+- **Copy to my plugin (Q8)** puts a variant's signal file into a plugin
+  of the user's own, a new one (the wrap, for no vehicle) or one picked
+  (the put, refused for one that isn't the user's own), its source
+  kept, and the answer's notes end with "The copy won't follow <name>'s
+  updates to <variant>". A copy never takes a variant's place: one into
+  the plugin it is in, or under a variant id the plugin already has, is
+  refused, and the user names it again. The original is left as it
+  was.
+- **While a session decodes with a plugin,** an import, an update, a
+  put, a drop and an OBDb re-import that would replace it are refused
+  with nothing changed, and the answer says so (`inUse`).
+- **For step 4:** `PluginStore::wrap` is the migration's wrap (run
+  again, it finds each plugin); `wrappedFrom(fileSha)` gives every
+  variant made from a stored file, `{ id, variant, profile, wrapped }`,
+  the plugin the file made before one it was given to; `migrated()` and
+  `setMigrated()` are the mark.
+- **For step 5:** an answer's `replacedProfiles` beside `profiles` is
+  what a vehicle's pick and a dashboard's profile name are moved by
+  when an OBDb set is imported again at another year.
+
+## Appendix: the migration as built (2026-11-14)
+
+`app/storemigration.{h,cpp}` builds step 4. `main()` calls
+`SessionBridge::migrateStores` after the earlier name's preferences are
+carried over and before QML loads, and logs its lines once the Log page
+listens. It settles what Q6 left to the build:
+
+- **Two facts decide what a start does.** `vehicles/book` holding
+  anything: the files are moved and the book is the user's to edit, so
+  neither is done again; only the addresses and the mark are left. The
+  index's `migrated`: nothing is left, and a start reads the index and
+  nothing else. The book is the first commit point because an index
+  moved aside (`store.json.bad-N`) loses the mark, and a second move
+  would write an old book over one the user has edited since.
+- **A lost index doesn't bring the `mine` facts back.** With the book
+  there and the mark gone, a start rewrites the addresses (which changes
+  nothing a second time) and sets the mark. Wrapping every old file
+  again would bring back plugins the user has removed since.
+- **A file is moved when the store names a variant made from it**
+  (`wrappedFrom`), whatever this run's own wrap said, and judged once
+  every file has been through the wrap. That one rule gives a vehicle's
+  picks and the addresses' new profiles, so a start that only finishes
+  the addresses agrees with the start that wrote the book. The profile
+  is never assumed to be `plugin.<slug>.base`: an id another plugin
+  holds is numbered, and the file's own plugin comes before a plugin it
+  was given to as a variant. Two OBDb conversions of one name for one
+  vehicle share a plugin, and the later takes the earlier one's place in
+  it as a second import does: the earlier is then unmigrated, with the
+  words "The plugin store holds no plugin made from it: import the file
+  again" and its bytes kept. A file whose copy is gone but whose plugin
+  the store holds (a stop after its wrap, the copy deleted since) is
+  moved.
+- **The book is carried, not judged.** Each entry keeps every key it
+  has (`vinMatches`, `baseline`, one a later version adds) but `signals`
+  and `plugin`, which become `picks`; `own` becomes the own file's
+  profile, "" when there is none or it didn't move; a file that didn't
+  move is listed under `unmigrated`, a key the entry has only then. The
+  top level keeps `salt`, `picked` and any other key and gains
+  `"format": 2`. What format 1's reader let through and a stricter
+  reader of format 2 would refuse is settled here, so no book is lost
+  whole to one odd field: an element of `signals` that names no copy by
+  a SHA-256 is passed by, an element of the list that isn't an object is
+  left out, and `uri` is always text, "" when it was missing or wasn't
+  text. More picks than a vehicle may make are all kept.
+  `tests/data/vehiclebook` holds the book in both formats for the two
+  readers.
+- **`importedFor`** is given for an OBDb conversion (the first vehicle
+  that lists it) and for a vehicle's own file (the first vehicle whose
+  form wrote it), so both sit under "For this car:". A plain file two
+  vehicles share is no one vehicle's. The wrap's variant is always
+  `base`: the old store never recorded that a year was typed.
+- **An old book that can't be read** (text that isn't an object with a
+  `list`), which an older Havne shows as no vehicles: the new book is
+  empty, the old key stays, and every copy in `signals/` that loads is
+  wrapped as a plugin of the user's own that no vehicle picks. A copy
+  that doesn't wrap stays in `signals/` and is listed, as an entry's
+  are, under the new book's own `unmigrated`, a key the book has only
+  then. A saved address is renamed by the profile each copy itself
+  makes, since no book says which profile a copy had. With a readable
+  book only the files it names move; a copy no vehicle names is one
+  whose delete never finished, and stays where it is.
+- **Unmigrated bytes have their own home**, `plugins/unmigrated/<sha256>.json`,
+  named by the hash the book has (a copy changed since it was kept no
+  longer hashes to it), so they outlive the old folder's removal. An
+  `unmigrated` record is `{ sha256, name, words }`. A copy larger than
+  core reads of anything (`ECUIO_PLUGIN_PACKAGE_MAX`), or one the folder
+  wouldn't take, isn't kept: its record carries `"kept": false`, the log
+  counts such files, and the rest still move. A record of the book's
+  own list is always `"kept": false`. The old folder's removal spares
+  every copy a `"kept": false` names. `StoreMigration::unmigrated`,
+  `unmigratedBytes` and `removeUnmigrated` serve the page's Save and
+  Remove. An older Havne's plugin store lists only
+  `*.havne-plugin.json` in `plugins/` itself, so it passes the folder
+  by.
+- **The addresses** (`session/uri`, each of `session/recentUris`, a
+  vehicle's `uri`) change only when the profile core would read from
+  them, the last `profile=`, is a moved file's. The new profile goes
+  last and the other keys keep their order. An address naming an
+  unmigrated file's profile, or a `user.` name no moved file has, is
+  left as typed, and core's refusal says why at the connect. A recent
+  list that isn't an array of text is left byte for byte. The two
+  session keys are shared with an older Havne, which then shows an
+  address naming `plugin.<id>.base` that it can't connect until a
+  profile is picked.
+- **Preferences that can't be written** leave no mark: the run says
+  "The vehicle list couldn't be saved" and the next start moves the
+  files again, finding each plugin it made. Addresses that can't be
+  written (the book saved, the preferences refusing the next write) say
+  so and leave no mark either, so a later start renames them. An index
+  that can't be
+  written (a later Havne's, a read-only folder) leaves the mark unset:
+  each start checks again, changes nothing and says so once.
+- **Two apps starting at once** both move the files. The wrap is
+  deterministic and every write is whole (a package and the index by
+  `QSaveFile`, one preference), so both write the same bytes.
+- **The cost** is one bounded read, one wrap and one index write for
+  each stored file, on the GUI thread before the first frame: 17 files
+  in 120 ms on the development machine (a Release build), 10 ms under
+  GCC in WSL. The phone's figure is in the phone run's sheet.
+
+The old data, `vehicles/document` and `signals/`, is never written,
+renamed or deleted by v0.8.x. Its removal (the gap named above) deletes
+it only when the mark is set and `vehicles/book` holds text, and leaves
+every copy the book's `"kept": false` records name.
+
+## Appendix: the wrap in core as built (2026-11-13)
+
+`core/src/plugin_wrap.cpp` and `ecuio/plugin.h` build step 1, and settle
+what Q1, Q2 and Q4 left to the build:
+
+- **Four calls and the free:** `ecuio_plugin_wrap`,
+  `ecuio_plugin_put_variant`, `ecuio_plugin_drop_variant` and one
+  accessor Q1 doesn't list, `ecuio_plugin_lineage` (the store compares
+  lineages and a test reads one), with `ecuio_plugin_text_free` for the
+  text the first three give. `ecuio_plugin_wrap_options_t` is as Q1
+  gives it, its pointers last, so the numbers' offsets are one on every
+  width (`years` at 8, `id` at 40).
+- **A longer options struct:** a `struct_size` past the struct's is
+  taken and what lies past the struct is never read. A field a later
+  header adds there comes with a bit in `flags`, which a core that
+  doesn't know the field refuses, so nothing asked is dropped unseen.
+- **The detail on success:** after `ECUIO_OK` from a put,
+  `ecuio_last_error_detail()` holds what the user is told (below) or
+  "". A caller reads it right after the call, before another core call
+  on that thread.
+- **Each input goes through its own loader first,** so a refused signal
+  file is refused in the signal-file loader's words and the file's own
+  lines, and a refused packed plugin in the plugin loader's (a put's,
+  which has two inputs, after "the plugin, "). The text written is then
+  loaded before it is given; a refusal there keeps the loader's reason
+  and drops the place, which is in a text the caller never saw.
+- **The bytes:** the manifest's members in a fixed order
+  (`havne_plugin`, `id`, `name`, `version`, `requires`, `lineage`,
+  `source`, `tiers`, `match`, `ecus`, `variants`, `files`), written by
+  `ecuio_json::write`. The text is written from what was read, so an
+  input's line ends and spacing leave no trace in it; the lineage is the
+  hash of the bytes as given, so the same file saved with other line
+  ends is another lineage. One test pins a whole text, which MSVC (x64
+  and x86), GCC and Clang each write.
+- **The id** is the name's slug cut to 31 bytes with no `-` at its end.
+  Q2's "signals" for a name with nothing left can't occur: the
+  signal-file loader refuses a name with no letter or digit. A store
+  that holds the id already asks again with an id of its own
+  (`options.id`): the first wrap's id read back, cut and numbered.
+- **A lineage** is 32 of `0-9` and `a-f`, lower case only, so two are
+  compared as text. A put and a drop keep it and add none.
+- **A put** raises the minor and sets `requires.core` to this core's
+  version, since the file put in may use what an older core doesn't
+  read; a drop raises the minor and leaves `requires.core`, since it
+  adds nothing to read. A minor at 65535 refuses both. A put of a
+  variant the plugin has keeps its place and its `years`. With no
+  variant named, the id is the file's name as a slug cut to 24 bytes.
+  The data file is `data/<variant>.json`, or `data/<variant>-2.json`
+  and on while a file that stays has that path.
+- **A data file's own `source`:** the wrap moves the file's to the
+  manifest; a put keeps the file's in its data file, and the loader
+  writes a variant's signal file with the source of the first of its
+  files that has one, the manifest's when none has. A plugin written by
+  hand with a variant of several files follows the same rule.
+- **A plugin's ECUs (Q4), by address:** an ECU of the file's at the rx
+  and tx of one the manifest has is that ECU, under the manifest's id
+  (so a file that calls the engine ECU `ecm` joins a plugin that calls
+  it `pcm`); any other is added, renamed `<id>_2` (`_3` and on) when the
+  manifest has its id at other addresses. The file's signals take the
+  manifest's ids. An ECU that only a replaced or dropped variant's files
+  read leaves the manifest; one that nothing read before the call
+  stays.
+- **A signal that names no ECU** reads its file's first, or with none
+  the first the extended set asks. In a plugin it would fall to the
+  manifest's first, so a put gives such a signal its ECU by id wherever
+  that would be another one: the file's own signals, and the plugin's
+  when the file brings a manifest with no ECUs its first. The extended
+  set's ECU is added as `obd2` (rx 7E8, tx 7E0) when the manifest has
+  none at its addresses.
+- **What the user is told:** on success `ecuio_last_error_detail()`
+  holds "the file's ecu 'ecm' is the plugin's 'pcm'" or "the file's ecu
+  'pcm' is 'pcm_2' in the plugin, whose 'pcm' has other addresses" for
+  each ECU that took another id, and is empty otherwise.
+- **A put the plugin can't hold** (an ECU past what one session reads,
+  two ID widths, a 33rd variant) is refused in the loader's words, and
+  ends "; the file can be a plugin of its own" only when a wrap of the
+  file alone loads.
+- **Not built here:** a put of the same content again raises the
+  version again (the caller skips a put that changes nothing).
+- **A file that loads and doesn't wrap:** one at the edge of the
+  signal-file loader's bounds. A packed plugin holds a data file two
+  levels deeper than the file stands alone, inside the same nesting
+  bound of 32, so a file nested 31 or 32 deep is refused ("nested
+  deeper than"). And a variant's signal file, the text a recording
+  copies and a replay reads back through the loader, is written two
+  spaces a level and must itself be within the loader's 1 MiB: a file
+  of 600 to 900 KB on one line can pass that written out ("past the
+  limit of"). The bound stays, since a larger written file is one no
+  replay or `--signals` would load. Q6's migration keeps such a file
+  as unmigrated, with those words. The largest signal file measured,
+  an OBDb conversion, is about 200 KB and 8 deep.
+
+## Appendix: the one-store UI as built (2026-11-15)
+
+Build step 5: the page's choices the questions above left to the build.
+
+- **A pick is read at once under Default.** A pick made while the address names no profile and the Profile row reads Default puts its profile in the address; one made under a chosen profile leaves the address alone. An import that gives one variant is such a pick. A second pick that reads obd2 is read the same way; the stand-in stays the first.
+- **A list keeps its row's address.** What a connect from a list keeps (the recent list, the vehicle's address, the last address) is the row's address, without the profile the page added: that profile is the pick of the vehicle picked at that moment, and kept, it would be read for the next vehicle picked and after the pick is undone. Each connect adds it again. A row that names a plugin's profile itself (typed in Settings and kept as typed) is read as it is for a vehicle that picks the plugin; for any other the profile is dropped, as the field drops it, so a connect never reads one vehicle's signals for another and remembers them as its own.
+- **The stand-in on a list connect.** Home's and the Dashboard's lists compose the stand-in's profile onto an adapter's address that names none. On SocketCAN the rule applies only to an interface listed up and able to send (a virtual bus, or a controller in one-shot mode): core refuses a requesting profile on a listen-only interface, and a session that was listening would otherwise start sending requests. A listening or unlisted interface connects as it is, under its own default (raw).
+- **Settings' own Connect** connects the address as the field reads: Default stays Default when chosen, with the stand-in offered beside it (Q5 unchanged).
+- **A later format's book** is never written over: the page shows no vehicle from it and says why. The store works without the book.
+- **An OBDb set with no vehicle picked** is imported for none, named "OBDb set".
+- **Replace** reads only a signal file: the bridge's read takes the kind it may be, so a package picked by mistake is not imported.
+- **A vehicle's VIN matches** (`vinMatches`, ADR-0052's appendix of 2026-11-13) are a field of format 2, kept on the vehicle its VIN identified and dropped with a plugin's replaced profiles.
+- **Counts on a row** are the store's: a variant that extends obd2 reads "obd2 + N", N the signals it adds (a signal that takes the place of one of obd2's adds none).
+- **A form signal's key** is made from its name at the first save and kept by every Edit, so a gauge, a layout and a condition that name the signal by key stay bound through a rename. A new signal whose name makes a key the variant has takes the next free one ("oil_temp_2"); typed with a saved one's exact name it takes that one's place, as before.
+- **A signal with no `ecu`** in a file written by hand reads the file's first ECU (the loader's rule), which the form makes explicit when it reads the variant, so an Edit keeps that ECU.
+- **"For this car:" is a plugin's, whole.** A plugin is the picked vehicle's when it was imported for the vehicle, when the car's VIN matches one of its variants (the lookup's VIN, the session's, or the matches kept from the vehicle's last session) or when the vehicle picks one of its variants. All of that plugin's rows then list under "For this car:", in the plugin's own order, so its variants never split across the two groups: the first pick lifts the plugin's rows once, and a second pick or a VIN that covers one variant moves nothing. The store's `forThisCar` covers the import and the VIN for one variant; the page adds the picks, since a pick is the user's own statement that the plugin is this car's, and marks the plugin's other rows with it. "Other plugins:" holds the plugins the vehicle has nothing of.
+- **C3's line says how to pick.** A plugin no vehicle picks says "Not in use: press it to pick it for <vehicle>." while a vehicle is picked, with "press a variant" where the plugin has several, and "Not in use: add or pick a vehicle, then pick it here." while none is.
+- **A forgotten vehicle's files that didn't move** become the book's own: Forget and Forget all move each record to the book's list, so the kept bytes stay reachable and a file leaves only through Save or Remove (Q6).
+- **A book this version can't judge** is left as it is: a `format` that isn't a number is treated as a later one. A format-2 book whose `list` is missing or isn't a list reads as no vehicles and keeps its own not-moved records and the keys a later version added.
+- **Into with the Variant field emptied** takes the id core makes from the file's name, and the page says, names and picks the variant of that id. **Replace...** changes a variant and picks nothing.
+- **A layout file's `files`** are the picks its `key:` references need, each by the plugin's name (with its variant where the plugin has several) and the SHA-256 of the variant's written file. A load finds a pick by that hash or by the hash of a signal file the variant was made from (`wrappedFrom`), so a layout saved before the move, which names the signal file itself, is told of nothing missing once the plugin made from that file is picked. The key and its shape are unchanged, so `havne-cli layout check` reads both. A name past the file's 80 code points is cut before its variant, which stays whole. A layout names a pick's file by its content, so a variant replaced or edited since the save is another file: the load says the layout was saved with another version of that plugin, and only a plugin the vehicle doesn't pick is called missing.
+- **The one list's saves go through the save picker** (as every save in the app does): Save as a signal file..., Export plugin... and a not-moved file's Save... offer the page's own name, and a save that is refused or fails removes only the empty document its own pick made.
+- **A press keeps its focus** in the one list, as it did in the earlier Signals page: the rows are not remade by a pick, and the focus follows the row a first pick moves.

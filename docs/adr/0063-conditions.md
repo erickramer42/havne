@@ -1,13 +1,14 @@
 # ADR-0063: Conditions: one model in core, stored as data and judged on the worker, for triggered logging, alerts and markers
 
-- **Status:** Accepted. Built: section 12's steps 1 to 4 (the
-  computed grammar of ADR-0062, the condition loader, the evaluator,
-  and what a recording holds, with `havne-cli` and the Python package
-  reading it; the appendices of 2026-11-12 to 2026-11-14) and step 5's
-  focus half (the appendix "the focus keeping a condition's signals").
-  Not built: the armed recorder, link terms and the live checks, the
-  app, and `ecuio_recording_evaluate`. "Decided" at the end records each
-  choice.
+- **Status:** Accepted. Built: section 12's steps 1 to 5 and step 6's
+  link terms (the computed grammar of ADR-0062, the condition loader,
+  the evaluator, what a recording holds, with `havne-cli` and the
+  Python package reading it, the armed recorder with the focus keeping
+  a condition's signals, and link terms; the appendices of 2026-11-12
+  to 2026-11-15), and step 7, the app (the appendix "the Alerts
+  page as built"). Not built: the live checks (v0.8.1) and
+  `ecuio_recording_evaluate` (v0.8.1). "Decided" at the end records
+  each choice.
 - **Date:** 2026-11-10.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (requests as data,
   read-only by construction); [ADR-0024](0024-decode-on-the-worker.md)
@@ -157,7 +158,7 @@ computed signal's ages do.
   that long before it turns OFF.
 - **Old inputs.** A term whose sample is older than its age bound can't
   be judged. The bound is `ECUIO_VALUE_STALE_US` unless the term's
-  `max_age` (0.1 to 60 s, ADR-0051's bounds) sets it, so an alert never
+  `max_age` (0.1 to 60 s, ADR-0051's bounds) sets it, or, with none, three times its signal's pace (the pace appendix), so an alert never
   claims more than a dimmed gauge shows, and a slow signal sets its
   own. The join is three-valued: `all` is false when any term is false
   and unjudged when none is false and one can't be judged; `any` is
@@ -450,7 +451,7 @@ typedef struct ecuio_condition_state {
 /* Every condition's state, in the set's order (the serial ports'
  * contract for sizes). Any thread; readable after close. */
 ecuio_status_t ecuio_session_get_condition_states(
-    ecuio_session_t* session, ecuio_condition_state_t* out,
+    const ecuio_session_t* session, ecuio_condition_state_t* out,
     uint32_t capacity, uint32_t* out_count);
 ```
 
@@ -550,7 +551,9 @@ condition with `record` turns ON.
   of five fast signals runs. A computed input counts as the signals it
   reads, through its chain to the ones a reply carries (ADR-0062
   section 4). The cost is those requests in every sweep, and the log's
-  `focus` line still lists only what was picked.
+  `focus` lines, and a focus change's activity line (ADR-0056's
+  appendix "a pick's lines in a recording"), still list only what was
+  picked.
 
 ### 8. What a recording holds, and a replay
 
@@ -563,8 +566,10 @@ log or an armed window) holds:
   built"). The format number doesn't move: readers pass a header key
   they don't know.
 - **`cond` lines** in `events.log`, a new kind word (readers pass an
-  unknown kind too): `cond  <key>,<on|off>,<flags>,<value>`, the flags
-  `fired` and `stale` as words. Each is written at the recording's time
+  unknown kind too): `cond  <key>,<on|off>,<flags>,<value>,<term>,<host_us>,<t_us>` (seven
+  fields; the term is the index of the term that settled it, `host_us` the
+  host clock of the settling and `t_us` the recording's time of its
+  deadline), the flags `fired` and `stale` as words. Each is written at the recording's time
   of the frame that settled it, less the distance back to its deadline,
   so the line's time is the event's. These are what fired, kept as
   evidence whether or not anything judges the recording again.
@@ -935,6 +940,7 @@ all as recommended: a term holds no expression (section 11).
 18. **A set run over a recording:** in this release, as the last step.
 19. **A starter set from a signal file's levels:** left to the app's
     Add and Alert.
+20. **A recording's set:** one for its whole length. Core refuses a change while a recorder is attached (`ECUIO_ERR_IN_USE`); the app keeps an edit saved meanwhile and judges it once the recording ends (Stop log, a failed write; with Record sessions, the disconnect), saying "applies when this recording ends" until then. A change at a point within a recording, or between an armed recorder's windows, is left for later.
 
 ## Appendix: the loader as built (2026-11-12)
 
@@ -1037,8 +1043,9 @@ usage cases for `conditions check`, `SchemaKeysTest`,
 Section 12's step 3: signal terms judged in a session with section 2's
 timing, the callback, the states, the pull queue's third kind,
 `havne-cli stream --conditions`, the Python package's side, and the
-desk check against a plugin's variant. Link and check terms (step 6)
-aren't judged, and nothing is recorded yet (step 4).
+desk check against a plugin's variant. Link terms (step 6) are
+judged in the appendix "link terms as built", and a check term still
+isn't; the recording is step 4's appendix.
 
 **Where it runs.** `core/src/condition_eval.{h,cpp}` holds a set bound
 to a signal set and its state, with one entry, `judge(time, values)`.
@@ -1239,7 +1246,7 @@ bound that follows each signal's pace"): a slow sweep went STALE and
 back between each pair of samples. A term with no `max_age` is bounded
 by its signal's pace: three times the larger of the last gap between its
 samples and their running average, at least `ECUIO_VALUE_STALE_US` and
-at most 60 s (the longest `max_age` a term may set), and
+at most 180 s (each gap counted to 60 s, the bound three times that), and
 `ECUIO_VALUE_STALE_US` before a second sample. Both measures are
 needed: the last gap alone fails gaps that alternate short and long,
 and the average alone lags a slowdown. A pace that shortens moves the
@@ -1278,10 +1285,9 @@ and a recording's `focus` line, stay the caller's.
 Section 12's step 4: what a recording holds of a session's conditions,
 its reader, a replay's own copy, and `havne-cli` and the Python package
 over both. Core's files are `core/src/recorder.cpp`,
-`core/src/recording_rows.h`, `core/src/recording_reader.cpp` and
+`core/src/recorder_writer.cpp`, `core/src/recording_rows.h`, `core/src/recording_reader.cpp` and
 `core/src/export.cpp`; the ABI is in `ecuio/recording.h`. The armed
-recorder (section 7), and with it a window's own folder, is not built:
-every recording here is a log or a Record session.
+recorder (section 7) is the appendix after this one.
 
 **The numbering.** The branch that built this step called its front
 ends "step 5" and "step 6". They are this step's: the ADR's step 5 is
@@ -1384,3 +1390,380 @@ folder export and a range, the set swap against an attach through a
 hook), `RecordingTest` and `RecordingRowsTest` (the reader's cases and
 the line's text both ways), `FolderExportTest`, `CliConditionTest`,
 `CliConditionsRunTest`, `CliReplayTest` and `PythonTest.test_conditions`.
+
+## Appendix: the armed recorder as built (2026-11-14)
+
+Section 12's step 5, its second half: section 7's armed recorder,
+`havne-cli log --armed` and Python's `Recorder(armed=True)`. Core's
+file is `core/src/recorder.cpp`; the ABI is in `ecuio/recording.h`.
+
+**The ABI.** `ECUIO_RECORD_ARMED` (0x1) is the options' one flag; any
+other bit is `INVALID_ARGUMENT` at the open. An armed open makes the
+root and nothing in it. `ecuio_recorder_state_t` gains `windows` (at
+176, the windows opened), `preroll_short` (180, the windows a full
+ring started late) and `frames_passed` (184, the frames the writer let
+go with no window open), `reserved[1]` at 192, size 200. The state is
+`ECUIO_RECORDING_ARMED` (4) while armed with no window open, ACTIVE
+while one is. `ECUIO_RECORDER_DRAINED` (0x1 in the state's `flags`)
+says the session was destroyed and the writer has taken every record
+it put in, so the counts are final; a front end waits for it before it
+reads them (the CLI's last state read, Python's `close()`).
+
+**An armed attach needs a condition that records.** The attach refuses
+`INVALID_ARGUMENT` when the session has no set of conditions ("no
+condition records: the session has no set of conditions attached") or
+no enabled condition in it has `record` ("no condition records: no
+enabled condition in the set has record"), so a front end learns at
+once that nothing would ever be written.
+
+**Windows are judged in session time.** The writer reads the ring
+ahead of what it writes: a scan cursor that reads every record as it
+arrives and a tail that writes or lets go. The scan reads each frame's
+events (they ride in its record, appendix "the recording as built")
+and keeps a running place, the newest frame's `timestamp_us`. A record
+condition's rise (ON and not stale) at the event's `t_us` makes a
+window from `t_us - before`; a fall ends it at the later of
+`t_us + after` and that record's place, once no record condition is
+ON. A rise inside a window, or at a place up to its end, carries it
+on, and only a window not yet opened is moved earlier. The tail lets a
+record go only when its place plus the longest `before` among the
+set's record conditions is behind the newest frame scanned, so a
+firing can still reach back to it, and closes a window only once the
+scan is past its end by more than that (a firing at the newest frame
+with the longest `before` can reach the end exactly). Session time, not the host clock, makes
+a replay at any speed give the same windows as the session it
+recorded; a window around a gap starts `before` ahead of the gap's
+start, since the frames before the gap stay held until a frame after
+it is scanned.
+
+**A full ring.** When the ring is over three quarters full the tail
+lets the oldest record go whatever its place, and a window whose start
+falls at or before the newest place let go that way counts once in
+`preroll_short` (the closed line's and `state()`'s), as would a window
+it let go whole, with no folder made. By the scan's order that can't
+happen: a window's firing record is scanned before the tail reaches
+it, and lies inside the window, so the window opens there; the count
+is a guard.
+
+**A window's folder.** At the window's first record the writer makes
+the folder by ADR-0049 section 2's rule (the window start's local
+time, `-n`, the label), except that the later windows of one second
+take a six-digit number (`-000002`, `-000003` and on), counted on
+from the last window's, so the names sort as the windows opened and a
+replay at `speed=max`, which can open a thousand windows in one
+second, never runs out of names (999,999 a second); writes the copies (`signals.json` when the
+session has a signal file, `conditions.json`), then the header, and
+flushes it before `ecuio_recorder_get_folder` gives the folder. The
+folder is made at its own name, not a partial one renamed: Windows
+renames no folder holding an open file, and the files stay open for
+the window. A front end that reads the folder from the getter finds
+the header written. Each window is a whole recording: its zero is its
+first record, its `started` and `utc` are that record's, and its
+header is the attach's (`core` to `frame flags`, `conditions`
+included), then `trigger  <key>,<before> ms` (the opening condition's
+`before` to the ms), the focus, pick and min sweep lines as they stood
+at the window's start, the `link` line of the last transition the tail
+passed, the signal and label lines, the caller's lines and `columns`.
+Each record condition ON at the window's start gets a held `cond` line
+at its first record (flags `held`), not section 7's planned
+`condition  <key>,on` header line: the readers already take a held
+line as the state at a recording's start.
+
+**What a window holds.** The records whose place falls in it: frames,
+values, link transitions, reply timing, each with its events. A
+frame's events ride in its record, so an event carried by a window's
+first frame can predate the window's start. Notes, marks, focus
+changes and sleeps are placed by host time against the records the
+tail passes and written only inside a window. A window whose end is
+known when its session goes takes nothing after its last record: a
+note after it, such as a front end's own note at its end, is in no
+window. Each window ends with
+its own end line, "the window ended: N frames, M values, R records
+dropped, K notes dropped", and a window still open at the close ends
+with the close's why, its carried events and drops written first; one
+whose end is known takes the carried events up to its end, and its
+end line comes at the latest of its last record and those events.
+A window whose folder can't be made fails the recording and counts
+none of its frames as written.
+Closing an armed recorder that never fired leaves the root and nothing
+in it.
+
+**havne-cli.** `log <uri> <folder> --conditions <file> --armed`:
+`--armed` without `--conditions` is usage; a refused attach is the
+recording's failed line with core's words, exit 1. No started line:
+an armed line (`{"type":"recording","state":"armed","windows":N}`)
+before the session starts and each time the recorder is armed again
+after a window, a window line
+(`"state":"window","window":N,"folder":...`) each time the count rises
+between two reads of the state (two windows between reads show as a
+jump), the log line's and the end line's `windows`, the end line's
+folder the newest window's (none when none fired), the closed line's
+`windows` and `preroll_short` when nonzero. After an interrupt whose
+session close is still running, the closed line counts the windows
+opened before the recorder's close, whose own last pass can open one
+more that only the folders show.
+
+**Python.** `Recorder(session, root, label=None, armed=False)` and
+`Session.record(..., armed=False)`; `RecorderState` gains `windows`,
+`preroll_short` and `frames_passed` (each 0 by default, so a state
+built by position still reads), and its `state` is "armed" while
+armed. `close()` after the session's destroy waits up to 2 s for
+`ECUIO_RECORDER_DRAINED` before it reads the state, holding the
+recorder's lock; past 2 s the state is as it stands, not final.
+
+**Tests:** `ArmedRecorderTest` (test_core: nothing written before a
+firing, a window from `before` ahead to `after` past its end with its
+header, held line and notes, two firings joined and a later one apart,
+a window past its end held open across a writer's wake until a firing
+within the longest `before` carries it on, and one whose firing
+reaches back to its end exactly, a close that writes the carried
+events up to a known end and none past it, a note past a cleared
+window's end in no window, a longer `before` moving an unopened
+window's start back, a close mid-window with the session attached, a
+window whose folder can't be made, more than nine windows in one
+second named in order,
+a stale input ending a window and its return opening another, a
+window around a gap, a full ring counted and one that holds the
+pre-roll counting none, a window measured in session time whatever
+the host clock, every case's frames accounted for once:
+`frame_rows + frames_passed + records_dropped`), the refusals in
+`RecorderTest.OpenAndAttachRefuseWhatTheyMust`, `FolderExportTest`
+(the trigger line kept), `CliLogTest`, `CliConditionTest`,
+`CliLogRunTest.AnArmedLogWritesAFolderPerWindow`,
+`CliUsageTest.LogArmedWithoutConditionsIsUsage` and
+`PythonTest.test_conditions` (the package's windows equal to
+`havne-cli`'s over the same replay). The internal.h seam
+`ecuio_recorder_test_set_clock` stands in for the recorder's host
+clock.
+
+## Appendix: link terms as built (2026-11-14)
+
+Section 12's step 6, its first half: section 2's link terms, judged
+live. The live checks are the second half; a check term binds
+`ECUIO_CONDITION_WHY_NO_CHECK` until they are built.
+
+**Which sessions judge them.** A session judges its link where its
+transport's worker publishes link health through `link_health.h`:
+`j2534://`, `elm327://` and `socketcan://`. Each of those attaches
+sets `judges_link` (`core/src/session.h`), and the bind reads it: a
+link term binds there and is `ECUIO_CONDITION_WHY_NO_LINK` on
+`mock://` and `replay://` (decision 13: a replay's link is the
+recording's `link` lines, which `ecuio_recording_evaluate` will read).
+`ecuio_condition_set_resolve` has no session, so a link term binds to
+any set there, as before.
+
+**Where a change is judged.** `link_set_state` publishes the state,
+records it, then calls `ecuio_session_dispatch_link` (internal.h) with
+the state and its session time. Every caller is a worker's own: each
+`link_health` is a local of its worker function (`j2534_worker`,
+`elm327_worker` and its `listen`, SocketCAN's `request_worker` and
+`socketcan_worker`), and that worker dispatches the session's frames.
+So the evaluator is only ever judged on the dispatching worker, and
+`ecuio_session_dispatch_link` takes the set exactly as dispatch does,
+under `callback_mutex`. Replay's `stop_early` publishes
+`ECUIO_ERR_RECORDING_CHANGED` without `link_health`, and a replay binds
+no link term. A change after the close is dropped (`closed`), as a
+frame is.
+
+**Its session time.** `link_session_us`: the frames' clock where the
+transport keeps one of its own (J2534's vendor stamps through
+`j2534_clock`, SocketCAN's kernel stamps through `socketcan_clock`), as
+the last frame's session time plus the host's time since that frame
+came; the host's time since the attach for ELM327, whose frames take
+the host's. A change stamped from the host alone would run ahead of
+later frames by the adapter clock's drift. While the link isn't OK, a
+change is stamped no earlier than the change before it plus the host's
+time since (`changed_us`, `changed_host_us`): an adapter that held
+replies through a fault hands them over with stamps from its start, and
+J2534's recovery comes with the first of them, so without the floor a
+fault's end would be clamped to its start, a `for` hold on it would
+never fire and an armed window would end at its start plus `after`. A
+healthy link's changes take the frames' clock alone, so the floor
+carries the host's drift only across a fault's length. The evaluator's
+clock never goes back, so a frame stamped earlier than a change judged
+before it is judged at the change's time.
+
+**How it is judged.** `judge_link(time, state)` is a frame's judgment
+with the link's state in place of values: every deadline before the
+change first, on the state before it (a hold that ended during a
+silence fires at its own time, with the state it ended in), then each
+link term's truth from the new state (`not_ok` any state but OK; the
+other three their own code), its conditions joined again, then the
+holds ending at that time. A link term has no age bound: it is judged
+from the first state the set is given and stays judged. A set the
+worker takes at a frame starts from the state the worker last
+published (`set_link`, with no event; the frame judges it). A set
+attached with no frame to come, during a fault, is taken at the
+worker's next pass: `ecuio_session_set_conditions` sets
+`conditions_waiting` (an atomic beside `conditions_swap`, cleared by
+the take), and each pass of each worker loop calls
+`link_judge_waiting`, which on a waiting set calls
+`ecuio_session_dispatch_link` with the state as it stands, so a "link
+lost" condition attached on a dead bus turns on within a pass (the
+link's backoff and the adapter's waits at most) instead of staying off
+until the link returns.
+
+**The event.** A link term's event has `value` 0 and `code` the link's
+state at the change (`ecuio_session_get_error_state`'s code); any
+other term's has `code` 0. Every event a link change's call delivers
+is flagged `ECUIO_CONDITION_LINK` (0x10), a hold's end or an age bound
+it settled included: it came with no frame of its own. The call is the
+frame callback's contract, a call of its own after no values call.
+The states, the conditions callbacks and the pull queues take it as a
+frame's events.
+
+**The order.** A change's link line goes into the recording first,
+then its events, as a record of events alone
+(`ecuio_recorder_put_events`: a recorder's held states first, then the
+events; the `cond` line's form is unchanged, writing no word for
+`ECUIO_CONDITION_LINK`, and a link term's code is the `link` line
+before it).
+Delivery is the worker's own order, and no event's time goes before
+one delivered: a J2534 reply read and dispatched before the link
+health it ends is judged first. A link line moves the recorder's floor
+(`put_host_us`), so a deadline a change settles, whose own time is
+before the change, is placed no earlier than the link line it follows.
+In a full ring the carried events go in ahead of a link state still
+carried, as a frame's do.
+
+**An armed recording.** A link record holds its session time; the
+armed writer places it there and counts it in the newest time it has
+scanned, as a frame's, and the change's events follow it at that
+place. So a
+window around a link fault opens at the change, on a bus with no
+frame since, and the change's own line falls inside a window that
+starts after the bus's last frame.
+
+**What a quiet link leaves to the next frame.** A change settles a
+hold's end as a frame does, but nothing settles one during a silence
+with no change: a link term with `for` fires at the next frame or
+change of the link, stamped with the hold's own time. On a bus gone
+quiet that is the link's return. The link's own debounce (about a
+second of quiet before `timeout`) already holds a link alert back,
+so a link term rarely wants a `for`; a tick from the same worker pass
+that takes a waiting set (`link_judge_waiting`) could settle a link
+term's holds, a later step's to weigh.
+
+**Front ends.** `havne-cli stream --conditions` writes a link change's
+`condition` lines with no frame line before them, and a link term's
+line adds `link`, the state in the file's words (`ok`, `timeout`,
+`request_failed`, `hard_failure`, `not_ok` for any other code).
+Python's `ConditionEvent` gains `code`.
+
+**Tested.** `ConditionEvalTest` (a link term on each change, its
+three-valued join with a signal term, the deadlines before a change
+on the state before, a set given the state at the next call, the bind
+with and without link health); `ConditionSessionTest` (a change judged
+in a call of its own, the take at a change or a frame, `link_health`'s
+transitions after the link line in a recording, a recording begun
+while a link condition is ON, the frames' clock, a fault's end stamped
+its length after its start while a healthy change isn't floored, a set
+attached during a fault judged at the worker's pass, a deadline a
+change settles after the link line, no allocation over the largest
+set's link and frame calls); `ArmedRecorderTest` (a window around a
+link timeout, and one whose timeout comes long after the last frame);
+`J2534ConditionTest` (the fake DLL's replies held back: the timeout
+fires the term and an armed window holds it, the bus still quiet when
+it opens; a set attached on the quiet bus fires, and with the replies
+queued through the quiet its end keeps the quiet's length);
+`Elm327SessionTest` (a silent adapter's hard failure, a set attached
+while it is silent or while a monitor hears nothing, and no allocation on the worker across the changes
+it judges); `SocketCanRequestTest.AQuietEcuFiresALinkTermAndItsReturnEndsIt`
+(vcan0, a set attached during the quiet too); `CliConditionTest` (the line's `link`, a change's lines with
+no frame). `fuzz_condition_file` feeds no link change yet.
+
+## Appendix: the Alerts page as built (2026-11-15)
+
+Section 12's step 7's Settings page and section 9's Alert from a gauge.
+The files are `app/qml/ConditionBook.qml`, `SettingsAlerts.qml`,
+`SettingsAlertEditor.qml`, `AlertSignalPicker.qml` and the Alert button in
+`DashboardPage.qml`; the bridge's part is three calls in
+`app/sessionbridge.cpp`. Core is unchanged.
+
+**Core judges every file.** The page builds a condition file's document
+and saves it whole through `Bridge.saveConditions`, which is core's
+loader: an add, an edit, a removal and the on/off box are each a save of
+the whole text. Nothing the page decides is kept without core taking it,
+and a refusal leaves the saved file as it was. A key the page doesn't
+know (`notes`, an `x-` key, `checks`) is kept where it was, in the file
+and in each condition.
+
+**Names as core counts them.** A name is at most 40 UTF-8 bytes and
+names one condition: the page cuts a gauge's label to the whole letters
+that fit, numbers a name already taken (" 2", " 3"), and Add takes the
+first "Alert N" no condition has; a name typed past the bytes is the
+editor's to refuse, in its own words.
+
+**The list** is the saved file's conditions in file order, each with its
+name, its terms in the display unit and its level. Its state comes from
+`Bridge.conditionModel` by the condition's key, since the set a session
+judges can be another while an edit waits for a recording's end: "off"
+for one switched off, then "not available: <why>", "stale", "ON" in the
+level's color, and nothing while it watches or no session judges it. A
+saved file core refused at the start reads as none, JSON or not: no row,
+no Add, no gauge's Alert, since each save of it would be refused. Start
+again (which asks) and Import replace it, and Export writes it as it is,
+to be mended elsewhere.
+
+**The editor** holds one condition: its name, one to four terms joined
+by all or any, its hold before it turns on and before it clears, and its
+uses (an alert's level, banner and sound; a recording's before and
+after; a mark). A signal term picks its signal as a Dashboard cell does,
+the row's references with their counterparts in the built-in sets and
+the row's decoded unit; a link term is one of core's four words; a check
+term is shown and kept as the file has it. The key is made once, from
+the name, and kept on a rename, so the tone's 5 s and a recording's
+lines follow it. Sound is a live switch; the tone plays on Android.
+
+**Levels in the display unit.** A level and its clear are typed in the
+unit system's unit and stored in the def's: `Bridge.decodedValue(unit,
+shown)` is `displayValue`'s inverse, from the conversion's values at 0
+and 1, which holds while every conversion is a factor and an offset
+(`SignalsTest.EveryImperialConversionIsAffine`). A converted level is
+kept to six decimals, as the Dashboard's zones are (`DashboardBook.roundStored`),
+so 30 psi is stored as 206.842719 kPa; a field left as it was keeps its
+stored value, never one read back from its rounded text.
+
+**Alert from a gauge, and Add from a signal.** A cell's panel shows
+Alert while the cell is of a kind that draws a value, has a level, and
+its row's unit is the one its levels are in (a shift light draws no
+zone, so a level it keeps from another kind would give an alert nobody
+sees on it): `dangerFrom` gives `above` at danger, else `warnFrom`
+`above` at warning, else `dangerBelow` `below` at danger, else
+`warnBelow` `below` at warning (the below zones a battery's gauge has);
+the clear lies 2 % of the cell's range inside the level (its own ends,
+else its unit's default range, as it draws), and nothing is held.
+Settings' Add from a signal's levels reads a signal file's gauge levels,
+else the zone table's for a built-in signal. Either opens the editor on
+a new condition, a copy named and keyed among the saved ones, which only
+Save keeps. A gauge's Alert never replaces an edit waiting in the
+editor, and says under the button why it didn't open: an edit waiting,
+a file at its 64 conditions, a saved file that doesn't load.
+
+**Import and Export.** Import replaces the saved file whole, after
+asking while alerts are saved or the saved file doesn't load; the file
+goes through `saveConditions`, so one core refuses leaves the saved
+file as it was. Export writes the saved file's bytes, or a refused
+file's. Neither names a path.
+
+## Appendix: the app's conditions as built (2026-11-15)
+
+Section 12's step 7 in the app (the bridge's judging, the tone, the banner, Armed and the viewer), as notes on the sections they build; the Alerts page has its own appendix.
+
+**The bridge's load run, as measured (2026-11-14).** Step 7 attaches the largest set through the bridge (`bench_bridge --load --conditions largest`, saved by `saveConditions` and attached at the connect, each run's settings folder a scratch one) and compares it with no set (`scripts/bench_ab.py -n 7 build build load --b-args "--conditions largest"`, seven runs of each, alternated, Windows, Release). The worker gave 0.38 million frames a second with no set (0.31 to 0.45 million) and 0.33 million with the largest (0.27 to 0.44 million): medians 0.87 apart. The machine was at 85 % CPU with other trees' builds and tests. Each pair of runs, taken in turn, put B at 0.66 to 1.29 of A, so the run neither shows section 3's 5 % nor refutes it. The 100x run's frame-to-GUI p99 was 0.51 ms and 0.48 ms (medians; single runs of either reached 50 to 120 ms under the load). By arithmetic the largest set's 17 ns is under 1 % of the bridge's 2.5 us a frame. The figure that settles it is the same A/B on a quiet machine, before the release.
+
+**A live stream's dropped events are counted on its end line** (`CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine`, `tests/cli_conditions_drop.py`). `havne-cli stream mock://demo --values` with the line ring at its floor, 64 conditions 0.75 rpm apart across the demo's idle and the session recorded; the reader stops reading for 7 s at 17 s of session time. Every event the recording's `cond` lines hold is a `condition` line received or counted in `conditions_dropped`, and each line received is one of them. On Windows (2026-11-14) one run received 301 lines and counted 188 dropped, of 489 recorded (75 frames dropped); another received 323 and counted 223, of 546. The mock's first 15 s change nothing a condition reads, so the stall is in the idle, and a 2 s stall drops nothing: the ring's 32 KiB and the pipe hold it at about 16 KB/s.
+
+**The set on a replay (2026-11-14).** The app judges a replay of a recording that holds no `conditions.json`, or one whose copy no longer matches its hash, by its saved set (the user's own, which the app always has), and says so for a copy that's there but can't be taken; havne-cli judges none without `--conditions`. Decision 12's "unless the user names another" covers an explicit choice only: a saved set that differs isn't one, so the recording's copy judges while its hash matches, and the saved set stands in when there's no copy, the copy has changed or it can't be attached, with the line saying so ("judging none" with no saved set).
+
+**The tone as built (2026-11-14).** Android plays it, through `android.media.ToneGenerator` over JNI (no Qt module): one beep (`TONE_PROP_BEEP`) for a warning, two (`TONE_PROP_BEEP2`) for a danger, so the levels differ by count and not by pitch alone. It plays on the alarm stream (`STREAM_ALARM`), which sounds with the phone on silent and has its own volume: the user asked for this sound in the condition's file, and a phone on silent in a car mount is the common case. The bridge asks at most one tone a tick, the loudest of the firings, and each condition sounds at most once in 5 s of the host's time; an edit that keeps a condition's key keeps its 5 s. A player on a thread of its own plays them (`startTone` waits for the audio track's first callback): a tone plays out (400 ms) before the next starts, the asks meanwhile merged into the loudest, so a warning then a danger is heard as a beep, then two, never a cut beep; an ask that waited more than a second plays nothing; a generator Android refuses or that fails is made again on a later ask, at most once in 5 s. No switch silences it but a condition's own `"sound"` until the Alerts page; the desktop's sound and Android's background notification are v0.8.1's (D7). Decision 15's "one small call per platform" is this, for Android.
+
+**The banner (2026-11-15).** The banner's 3 s is timed from the firing on the app's wall clock (the band's own, since a condition's state carries session time); a stale alert's band names the wall time its stale input last took a value (`staleSinceMs`), or no time when it has none; on a phone in the drive view the band overlays the top of the gauges and raises no bars.
+
+**The viewer, as built (2026-11-15).** The app's viewer pairs a recording's `cond` lines into spans on its open's thread: OFF to ON to OFF per key, a `held` first line from the recording's start, a span still ON at the end to the end (or, when the reader kept only the first lines, to the last one kept), and each stretch judged stale as a dashed part of its span or, while OFF, an entry of its own, since a stale OFF stretch is where an alert couldn't have fired. Names and levels come from `conditions.json` through the loader only while it hashes to the header's line; otherwise a span shows its key and no level. The viewer keeps the first 4096 entries, the earliest, and as many stale parts, a span's later parts drawn as one to its end, and says when either is cut. An alert's spans draw on a row of their own under the rest. Section 10's "set run over the open recording" waits for `ecuio_recording_evaluate` (v0.8.1).
+
+**Armed (2026-11-15).** Armed in the app is refused on a replay, as a log is: a replay is judged by its recording's own conditions, and a window of it would copy part of the recording it plays. A replay's firings are shown by the Alerts page and the activity log instead.
+
+**The events a recording lost (2026-11-15).** A `drop` line that counts lost condition events is summed into `events_lost` in `ecuio_recording_conditions_t` (format 3 alone; the sum stops at `UINT64_MAX`). Above zero, the recording's `cond` lines may miss a firing or a turn OFF: a condition can read ON to the end that fell during the loss. `havne-cli view` and `info` give it in the conditions' `events_lost`, Python's `Recording.conditions.events_lost` is that count, and the viewer's Conditions panel says how many events the recorder lost, since an entry may then be missing or run on past its end.
+
+**What the focus line holds (2026-11-15).** The signals a condition adds to a focus are swept and written to `signals.csv`, but a recording's `focus` line holds the caller's picks alone, and the default wide export's columns follow it: the export stays the caller's picks, and a condition's signal is a column only when the caller picked it.

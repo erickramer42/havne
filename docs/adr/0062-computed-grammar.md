@@ -295,6 +295,15 @@ state in the decoder that the reader's marks would have to save.
 bytes, 4 inputs, 16 constants, 33 steps. `ECUIO_SIGNAL_SET_LAYOUT` stays
 4.
 
+- **Inputs that never meet within a bound give no value.** A computed
+  signal is worked out on a frame that feeds one input, from the
+  others' newest values, each within its bound. Two inputs asked once a
+  sweep in a sweep longer than twice the bound (about 6 s at the 3 s
+  default: a large set asked whole at the cap of 1024 requests) never
+  arrive within 3 s of each other, so the signal never has a value and
+  reads "waiting for data", in none of the unsupported, absent or
+  unasked lists. A `max_age` on the slower input (up to 60 s), a focus
+  that asks fewer, or a default pick fixes it.
 - **New step values, appended:**
 
   | Step | Value | Takes | Gives |
@@ -449,7 +458,7 @@ the file's path never. Beyond the limits and sections 2, 4, 5 and 7:
   or more`, `gives if() 2 parts where it takes 3`;
 - a name before `(` that is no function: `calls pow(), which isn't a
   function: min, max, abs, clamp, sqrt, round, floor, ceil, if, all, any
-  or not`;
+  or not`; in a format 1 file, `calls pow(), which isn't a function, and a format 1 file calls none (functions need "havne_signals": 2)`;
 - `clamp` with constant bounds crossed: `gives clamp() a low of 9 above
   its high of 1`;
 - `=` alone: `has '=' where '==' should be`; a comparison beside a
@@ -483,8 +492,8 @@ that loads in one loads in all, and a value is worked out in core.
   0.8.0). A refused file is one `error` line with the loader's words and
   exit 3, as before. `stream`, `log`, `sim` and `view` change nothing: a
   chain's values are values.
-- **Python:** `SignalFile.format`, `SignalFile.expr(key)` and
-  `Plugin.expr(key, variant=None)`, each expression as written (None for
+- **Python:** `SignalFile.format`, `SignalFile.expr(key)`,
+  `Plugin.expr(key, variant=None)` and `Plugin.format(variant=None)`, each expression as written (None for
   a signal that isn't computed, or no such signal). A refusal raises
   with the loader's words, as before.
 - **The app:** a format 2 file imports as any, and a refusal shows the
@@ -711,6 +720,42 @@ Taken while building:
     chained set, with its own code when it can't be had (section 6).
 22. **A computed replacement in a chain:** read in format 2, judged by
     the reader's file, guarded by the chain check (section 4).
+23. **The lists a computed signal is on:** those whose inputs the
+    session doesn't get leave its program no value, judged together
+    (the appendix of 2026-11-15).
+
+## Appendix: the lists judge what a program lacks (2026-11-15)
+
+Section 4 listed a computed signal unsupported, absent or unasked when
+any input under it was, which section 3's `if`, `all` and `any` don't
+bear out: `if(obd2.speed > 0, obd2.maf / obd2.speed, 0)` reads 0 at a
+standstill on a car without MAF, and was listed, so Live said "Not
+asked" over a value that was arriving. A list now holds a computed
+signal when its program lacks a value with the inputs the session
+doesn't get, all of them at once, judged by a walk of its steps
+(`ecuio_computed_lacks`, `core/src/computed.h`):
+
+- a pushed input lacks one when it is gone; a constant never does;
+- `if(p, a, b)` lacks one when p does, or when a and b both do;
+- `all` and `any` lack one when both parts do;
+- any other step lacks one when a part does.
+
+So `any(obd2.maf > 10, obd2.map > 50)` is listed on a car with neither
+PID and not on one with either. An input that is computed is judged by
+its own walk, through the chain. A format 1 program has no `if`, `all`
+or `any`, so it is listed when any input under it is, as before. A
+condition on such a signal is NOT_RECEIVED by the same walk over every
+input not received, whatever keeps each away (unsupported, absent, its
+request dropped). The focus is unchanged: it keeps every leaf under a
+picked signal asked, since the branch taken next may need its input.
+
+The walk judges each part apart and never the value it has, so a
+listed signal never has a value, but an unlisted one may have none: a
+constant predicate (`if(1 > 0, a, b)` with a gone), a constant part of
+an `all` (`all(a > 0, 1 > 0)`), a step over constants with no value
+(`1 / 0`, which the loader doesn't fold), or a predicate that picks a
+gone branch whenever it has a value. Such a signal dims as stale, like
+any signal that stopped arriving.
 
 ## Appendix: the cost, measured (2026-11-11)
 
