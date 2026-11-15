@@ -2,8 +2,9 @@
 // Testing: UNIT: ConditionEvalTest (test_signals)
 //
 // core/src/condition_eval.h, fed by hand: a condition file bound to
-// obd2's set, then frames as a time and the values they carry. No
-// session and no clock, so every time is the test's own.
+// obd2's set, then frames as a time and the values they carry, and
+// changes of the link's state. No session and no clock, so every time is
+// the test's own.
 
 #include <gtest/gtest.h>
 #include <ecuio/conditions.h>
@@ -50,8 +51,10 @@ std::string condition(int n, const std::string& when,
 struct Eval {
     std::unique_ptr<ecuio_condition_eval> e;
 
-    /* One condition, or several separated by commas */
-    explicit Eval(const std::string& conditions, uint32_t generation = 1)
+    /* One condition, or several separated by commas; link: bound as for a
+     * session that judges its link */
+    explicit Eval(const std::string& conditions, uint32_t generation = 1,
+                  bool link = false)
     {
         const std::string json =
             R"({"havne_conditions":1,"conditions":[)" + conditions + "]}";
@@ -61,15 +64,16 @@ struct Eval {
             << ecuio_last_error_detail();
         if (set != nullptr) {
             e = ecuio_condition_eval::make(set, ecuio_obd2_signal_set(),
-                                           nullptr, generation);
+                                           nullptr, generation, link);
         }
         /* The evaluator keeps nothing of the set */
         ecuio_condition_set_free(set);
     }
 
     /* One frame at seconds, carrying these values: its events as text,
-     * "<time us> c<condition> on|off [stale] [fired] t<term> v<value>",
-     * one per line */
+     * "<time us> c<condition> on|off [stale] [fired] [link] t<term>
+     * v<value> [k<code>]", one per line; link for ECUIO_CONDITION_LINK,
+     * the code where it isn't 0 */
     std::string
     at(double seconds,
        std::initializer_list<std::pair<uint16_t, double>> values = {})
@@ -84,31 +88,68 @@ struct Eval {
         }
         const uint64_t t =
             static_cast<uint64_t>(seconds * 1e6 + (seconds < 0 ? -0.5 : 0.5));
-        const uint32_t n =
-            e->judge(t, batch.data(), static_cast<uint32_t>(batch.size()));
+        return text(
+            e->judge(t, batch.data(), static_cast<uint32_t>(batch.size())));
+    }
+
+    /* A change of the link's state at seconds: its events, as at's */
+    std::string link(double seconds, int32_t state)
+    {
+        return text(
+            e->judge_link(static_cast<uint64_t>(seconds * 1e6 + 0.5), state));
+    }
+
+    std::string text(uint32_t n) const
+    {
         EXPECT_EQ(e->dropped, 0u);
         std::string out;
         for (uint32_t i = 0; i < n; ++i) {
             const ecuio_condition_event_t& ev = e->events[i];
             EXPECT_EQ(ev.generation, e->generation);
             EXPECT_EQ(ev.arbitration_id, 0u);
-            EXPECT_EQ(ev.code, 0);
             EXPECT_EQ(ev.reserved0, 0u);
             EXPECT_EQ(ev.reserved, 0u);
-            char line[128];
+            char line[160];
             std::snprintf(
-                line, sizeof line, "%s%llu c%u %s%s%s t%u v%g",
+                line, sizeof line, "%s%llu c%u %s%s%s%s t%u v%g%s",
                 i == 0 ? "" : "\n",
                 static_cast<unsigned long long>(ev.timestamp_us), ev.condition,
                 ev.state == ECUIO_CONDITION_ON ? "on" : "off",
                 (ev.flags & ECUIO_CONDITION_STALE) != 0 ? " stale" : "",
                 (ev.flags & ECUIO_CONDITION_FIRED) != 0 ? " fired" : "",
-                ev.term, ev.value);
+                (ev.flags & ECUIO_CONDITION_LINK) != 0 ? " link" : "", ev.term,
+                ev.value, code_text(ev.code).c_str());
             out += line;
         }
         return out;
     }
+
+    static std::string code_text(int32_t code)
+    {
+        switch (code) {
+        case ECUIO_OK:
+            return "";
+        case ECUIO_ERR_VEHICLE_TIMEOUT:
+            return " k_timeout";
+        case ECUIO_ERR_REQUEST_FAILED:
+            return " k_request";
+        case ECUIO_ERR_TRANSPORT_HARD_FAILURE:
+            return " k_hard";
+        default:
+            return " k" + std::to_string(code);
+        }
+    }
 };
+
+constexpr int32_t kOk = ECUIO_OK;
+constexpr int32_t kTimeout = ECUIO_ERR_VEHICLE_TIMEOUT;
+constexpr int32_t kRequest = ECUIO_ERR_REQUEST_FAILED;
+constexpr int32_t kHard = ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+
+std::string link_term(const char* state)
+{
+    return std::string(R"({"link":")") + state + R"("})";
+}
 
 } // namespace
 
@@ -740,4 +781,109 @@ TEST(ConditionEvalTest, AFrameStampedEarlierIsJudgedAtTheNewestTime)
     EXPECT_EQ(e.at(1, {{kThrottle, 90.0}}), "3100000 c1 off t0 v90");
     EXPECT_EQ(e.at(4, {{kThrottle, 90.0}}), "");
     EXPECT_EQ(e.at(4.2, {{kThrottle, 90.0}}), "4100000 c1 on fired t0 v90");
+}
+
+TEST(ConditionEvalTest, ALinkTermIsJudgedOnEachChangeOfTheLinksState)
+{
+    Eval e(condition(0, link_term("timeout")) + "," +
+               condition(1, link_term("not_ok")),
+           1, true);
+    EXPECT_EQ(e.e->state_of(0).flags, ECUIO_CONDITION_STALE)
+        << "available, and not judged before the link's state comes";
+    EXPECT_EQ(e.at(1, {{kRpm, 900.0}}), "") << "a frame alone judges no link";
+    EXPECT_EQ(e.link(2, kOk), "2000000 c0 off link t0 v0\n"
+                              "2000000 c1 off link t0 v0");
+    EXPECT_EQ(e.link(3, kTimeout), "3000000 c0 on fired link t0 v0 k_timeout\n"
+                                   "3000000 c1 on fired link t0 v0 k_timeout");
+    /* Another failure: timeout's term is false, not_ok's still true */
+    EXPECT_EQ(e.link(4, kHard), "4000000 c0 off link t0 v0 k_hard");
+    EXPECT_EQ(e.link(5, kRequest), "");
+    EXPECT_EQ(e.at(60, {{kRpm, 900.0}}), "") << "a link term has no age bound";
+    EXPECT_EQ(e.link(61, kOk), "61000000 c1 off link t0 v0");
+    const ecuio_condition_state_t s = e.e->state_of(1);
+    EXPECT_EQ(s.state, ECUIO_CONDITION_OFF);
+    EXPECT_EQ(s.flags, 0u);
+    EXPECT_EQ(s.since_us, 61 * kSecond);
+    EXPECT_EQ(s.fired, 1u);
+    EXPECT_EQ(s.value, 0.0);
+    EXPECT_EQ(e.e->sampled_terms(0), 1u) << "the link's state is received";
+}
+
+TEST(ConditionEvalTest, ALinkTermJoinsASignalTermThreeWays)
+{
+    const std::string two = rpm(R"("above":3000)") + "," + link_term("not_ok");
+    Eval all(condition(0, R"({"all":[)" + two + "]}"), 1, true);
+    EXPECT_EQ(all.at(1, {{kRpm, 3500.0}}), "") << "true and unjudged";
+    EXPECT_EQ(all.link(2, kTimeout),
+              "2000000 c0 on fired link t1 v0 k_timeout");
+    EXPECT_EQ(all.link(2.5, kOk), "2500000 c0 off link t1 v0");
+    EXPECT_EQ(all.at(3, {{kRpm, 1000.0}}), "") << "both false: still OFF";
+    Eval all_false(condition(0, R"({"all":[)" + two + "]}"), 1, true);
+    EXPECT_EQ(all_false.link(1, kOk), "1000000 c0 off link t1 v0")
+        << "the link's false settles all";
+
+    Eval any(condition(0, R"({"any":[)" + two + "]}"), 1, true);
+    EXPECT_EQ(any.link(1, kOk), "") << "false and unjudged";
+    EXPECT_EQ(any.at(2, {{kRpm, 3500.0}}), "2000000 c0 on fired t0 v3500");
+    EXPECT_EQ(any.link(3, kTimeout), "") << "still ON";
+    EXPECT_EQ(any.at(4, {{kRpm, 1000.0}}), "") << "the link holds any ON";
+    EXPECT_EQ(any.link(5, kOk), "5000000 c0 off link t1 v0");
+    Eval any_true(condition(0, R"({"any":[)" + two + "]}"), 1, true);
+    EXPECT_EQ(any_true.link(1, kHard), "1000000 c0 on fired link t1 v0 k_hard")
+        << "the link's true settles any";
+
+    /* The signal's age bound passes while the link holds: stale at its
+     * own time, settled by the link's next change on the state before */
+    Eval stale(condition(0, R"({"all":[)" + two + "]}"), 1, true);
+    EXPECT_EQ(stale.at(1, {{kRpm, 3500.0}}), "");
+    EXPECT_EQ(stale.link(2, kTimeout),
+              "2000000 c0 on fired link t1 v0 k_timeout");
+    EXPECT_EQ(stale.link(10, kHard), "4000000 c0 on stale link t0 v3500");
+}
+
+TEST(ConditionEvalTest, ALinkChangeSettlesTheDeadlinesBeforeItOnTheStateBefore)
+{
+    Eval e(condition(0, link_term("not_ok"), R"(,"for":2)"), 1, true);
+    EXPECT_EQ(e.link(1, kOk), "1000000 c0 off link t0 v0");
+    EXPECT_EQ(e.link(2, kTimeout), "") << "a hold toward ON";
+    /* Nothing comes until the link recovers: the hold's end first, with
+     * the state it ended in, then the change */
+    EXPECT_EQ(e.link(5, kOk), "4000000 c0 on fired link t0 v0 k_timeout\n"
+                              "5000000 c0 off link t0 v0");
+    /* A frame settles a hold on a link term too, as any deadline */
+    EXPECT_EQ(e.link(6, kRequest), "");
+    EXPECT_EQ(e.at(8.5, {{kSpeed, 1.0}}),
+              "8000000 c0 on fired t0 v0 k_request");
+    /* A change stamped before the time reached is judged at that time */
+    EXPECT_EQ(e.link(7, kOk), "8500000 c0 off link t0 v0");
+}
+
+TEST(ConditionEvalTest, ASetGivenTheLinksStateJudgesItAtTheNextCall)
+{
+    Eval e(condition(0, link_term("hard_failure")) + "," +
+               condition(1, link_term("request_failed")),
+           1, true);
+    e.e->set_link(kHard);
+    EXPECT_EQ(e.e->event_count, 0u) << "no event until a call";
+    EXPECT_EQ(e.at(1), "1000000 c0 on fired t0 v0 k_hard\n"
+                       "1000000 c1 off t0 v0 k_hard");
+    EXPECT_EQ(e.link(2, kHard), "") << "the same state changes nothing";
+}
+
+TEST(ConditionEvalTest, ALinkTermBindsOnlyForASessionThatJudgesItsLink)
+{
+    const std::string c = condition(0, R"({"any":[)" + rpm(R"("above":1)") +
+                                           "," + link_term("not_ok") + "]}");
+    Eval no(c, 1, false);
+    EXPECT_EQ(no.e->state_of(0).flags, ECUIO_CONDITION_UNAVAILABLE);
+    EXPECT_EQ(no.e->state_of(0).why, ECUIO_CONDITION_WHY_NO_LINK);
+    EXPECT_TRUE(no.e->link_terms.empty());
+    EXPECT_EQ(no.link(1, kHard), "") << "unavailable: never judged";
+    Eval yes(c, 1, true);
+    EXPECT_EQ(yes.e->state_of(0).flags, ECUIO_CONDITION_STALE);
+    EXPECT_EQ(yes.e->link_terms.size(), size_t{1});
+    EXPECT_EQ(yes.e->events.size(), size_t{3});
+    /* A check term stays unavailable either way */
+    Eval check(condition(0, R"({"check":"gap"})"), 1, true);
+    EXPECT_EQ(check.e->state_of(0).why, ECUIO_CONDITION_WHY_NO_CHECK);
 }

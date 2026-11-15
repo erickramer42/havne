@@ -193,7 +193,7 @@ ecuio_status_t ecuio_condition_set_get_term(const ecuio_condition_set_t* set,
                                                enumeration */
 #define ECUIO_CONDITION_WHY_NO_LINK      6u /* a link term, and the session
                                                gives it no link state to
-                                               read */
+                                               read (mock://, replay://) */
 #define ECUIO_CONDITION_WHY_NO_CHECK     7u /* a check term, and the session
                                                doesn't run that check on its
                                                frames */
@@ -319,7 +319,19 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
  * A hold's end and an age bound are settled by the next frame, at their
  * own time, so the same frames give the same events however fast they
  * are played. A bus that goes wholly quiet settles nothing until its
- * next frame. */
+ * next frame.
+ * A link term reads the session's link state, the code
+ * ecuio_session_get_error_state gives, on a session that judges its
+ * link (j2534://, elm327://, socketcan://). Each change of that state is
+ * judged where the session's worker publishes it, at the session's time
+ * of the change, as a frame is: every deadline before it first, on the
+ * state before. A change that ends a fault is stamped no earlier than the
+ * fault's start plus the host's time since, whatever the stamps of frames
+ * an adapter held through it. A link term has no age bound, and a set
+ * attached starts from the state as it stands. A change of the link
+ * settles a hold's end and an age bound as a frame does, so on a link that
+ * has gone quiet a hold on a link term ends at the next frame or change of
+ * the link. */
 
 /* A condition's state (an event's and a state's). Values are
  * append-only. */
@@ -342,18 +354,29 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
                                             state the condition stood in
                                             when the recording began, no
                                             change (ecuio/recording.h) */
+#define ECUIO_CONDITION_LINK        0x10u /* a session's event alone: a
+                                            change of the link's state,
+                                            or a set's first judgment on
+                                            it, settled it, with no frame
+                                            of its own (a recording's
+                                            event never carries it) */
 
 /* Binds the set to the session's signals, as ecuio_condition_set_resolve
- * does, and judges it from the next frame; a NULL set takes the
- * conditions away. file is the signal file whose set the session
+ * does, and judges it from the next frame; on a session that judges its
+ * link, a set with a link term is judged on the link's state at the
+ * worker's next pass when no frame comes first (a pass waits out the
+ * link's backoff and the adapter's own waits), so one attached during a
+ * fault reports it. A NULL set takes the conditions away. file is the signal file whose set the session
  * decodes with, for key: references, or NULL. The session copies what it
  * needs: the set may be freed once this returns. Before or after
  * ecuio_session_start. Every state starts OFF and STALE, and each call
  * that succeeds begins a new generation: 1 for a session's first, one
  * more for each after it, a removal included.
  *
- * A link or a check term is not judged: its condition is unavailable
- * (ECUIO_CONDITION_WHY_NO_LINK, _NO_CHECK).
+ * A check term is not judged: its condition is unavailable
+ * (ECUIO_CONDITION_WHY_NO_CHECK). A link term is judged on a session
+ * that judges its link and unavailable on any other
+ * (ECUIO_CONDITION_WHY_NO_LINK: mock://, replay://).
  *
  * Under a focus (ecuio_session_set_focus) the session keeps asking the
  * signals the conditions it judges read, a computed one's inputs among
@@ -392,11 +415,15 @@ typedef struct ecuio_condition_event {
     uint32_t state;          /* ECUIO_CONDITION_OFF, _ON */
     uint32_t flags;          /* ECUIO_CONDITION_STALE, _FIRED */
     uint32_t term;           /* the term that settled it: the one whose
-                                sample changed the join, started the hold
-                                that ended, or passed its age bound */
-    double   value;          /* that term's newest sample */
+                                sample or link state changed the join,
+                                started the hold that ended, or passed
+                                its age bound */
+    double   value;          /* that term's newest sample; 0 for a link
+                                term */
     uint32_t arbitration_id; /* 0 */
-    int32_t  code;           /* 0 */
+    int32_t  code;           /* a link term's: the link's state then
+                                (ecuio_session_get_error_state's code);
+                                0 for any other */
     uint32_t generation;     /* the attach it belongs to: an event of a
                                 set since replaced carries the old one */
     uint32_t reserved0;      /* zero */
@@ -405,7 +432,9 @@ typedef struct ecuio_condition_event {
 
 /* A frame's events, on the session's worker, under the frame callback's
  * whole contract (core.h): after that frame's values callbacks, in one
- * call, ordered by time and then by index. events is valid during the
+ * call, ordered by time and then by index. A change of the link's state
+ * gives its own call, on the same worker under the same contract, each
+ * of its events flagged ECUIO_CONDITION_LINK. events is valid during the
  * call. */
 typedef void (*ecuio_conditions_callback_t)(
     const ecuio_condition_event_t* events, uint32_t count, void* user_data);
@@ -422,7 +451,8 @@ typedef struct ecuio_condition_state {
     uint32_t flags;        /* ECUIO_CONDITION_STALE, _UNAVAILABLE */
     uint64_t since_us;     /* session time of its last event; 0 before one */
     uint64_t fired;        /* firings since the attach */
-    double   value;        /* the settling term's sample at its last event */
+    double   value;        /* the settling term's sample at its last
+                              event; 0 for a link term */
     uint32_t why;          /* with _UNAVAILABLE: ECUIO_CONDITION_WHY_* */
     uint32_t generation;   /* the attach these states belong to */
     uint64_t reserved[2];  /* zero */

@@ -5,8 +5,9 @@
 // firing, a window from before ahead of it to after past the last record
 // condition turning OFF or stale, windows joined, a window around a gap
 // starting before the gap, a full ring cutting the pre-roll and counting
-// it, the held lines and the notes a window takes. Sessions are never
-// started, and the recordings' clock is the test's
+// it, the held lines and the notes a window takes, a window around a link
+// fault. Sessions are never started, and the recordings' clock is the
+// test's
 // (ecuio_recorder_test_set_clock), each frame's host time its session
 // time, so a case's windows fall at exact times.
 
@@ -16,6 +17,7 @@
 #include <ecuio/internal.h>
 #include <ecuio/recording.h>
 #include <ecuio/signal_sets.h>
+#include "session.h" /* core/src: judges_link, the link's state */
 #include "temp_name.h"
 
 #include <algorithm>
@@ -207,17 +209,22 @@ std::string rpm_above(const std::string& key, unsigned level,
 }
 
 /* An armed recording of a never-started obd2 mock session, on the
- * test's clock */
+ * test's clock; with link, a session that judges its link, as a
+ * transport's attach makes it */
 struct Armed {
     TestClock clock;
     Root root;
     ecuio_session_t* s = nullptr;
     ecuio_recorder_t* rec = nullptr;
 
-    explicit Armed(const std::string& json, uint32_t ring_bytes = 0)
+    explicit Armed(const std::string& json, uint32_t ring_bytes = 0,
+                   bool link = false)
     {
         EXPECT_EQ(ecuio_session_create("mock://armed?profile=obd2", &s),
                   ECUIO_OK);
+        if (s != nullptr) {
+            s->judges_link = link;
+        }
         ecuio_condition_set_t* set = nullptr;
         EXPECT_EQ(ecuio_condition_set_load(json.data(), json.size(), &set),
                   ECUIO_OK)
@@ -250,6 +257,18 @@ struct Armed {
     {
         clock.at(t_us);
         pid_frame(s, t_us, 0x11, percent * 255 / 100, 1);
+    }
+    /* A change of the link as link_set_state makes it: published (a
+     * failure counts an episode), recorded, then judged */
+    void link(uint64_t t_us, int32_t state)
+    {
+        clock.at(t_us);
+        const uint32_t episodes = state == ECUIO_OK
+                                      ? s->error_count.load()
+                                      : s->error_count.fetch_add(1) + 1;
+        s->last_error.store(state);
+        ecuio_record_link_state(s->record_link.get(), state, episodes, t_us);
+        ecuio_session_dispatch_link(s, state, t_us);
     }
     void note(uint64_t t_us, const char* text)
     {
@@ -833,4 +852,101 @@ TEST(ArmedRecorderTest, AWindowIsMeasuredInSessionTimeWhateverTheClock)
     EXPECT_EQ(rows.front(), std::make_pair(uint64_t{0}, 2 * kS));
     EXPECT_EQ(rows.back(), std::make_pair(uint64_t{0}, 4 * kS))
         << "the recording's clock stood still";
+}
+
+/* A window around a link fault: a record condition on the link fires at
+ * the timeout with no frame of its own, its window starts before ahead
+ * of it, holds the link's lines each ahead of the events it gave, and
+ * ends after past the link's return */
+TEST(ArmedRecorderTest, AWindowAroundALinkTimeoutHoldsTheLinksLines)
+{
+    Armed a(set_of(R"({"key":"quiet","name":"Quiet","when":{"link":"timeout"},)"
+                   R"("record":{"before":1,"after":1}})"),
+            0, true);
+    uint64_t frames = 0;
+    for (uint64_t k = 0; k <= 30; ++k) {
+        a.rpm(k * 100 * kMs, 1000);
+        ++frames;
+    }
+    a.link(3200 * kMs, ECUIO_ERR_VEHICLE_TIMEOUT);
+    ASSERT_NO_FATAL_FAILURE(a.settle());
+    EXPECT_EQ(a.state().windows, 1u) << "the change alone opens the window";
+    a.link(5 * kS, ECUIO_OK);
+    for (uint64_t k = 51; k <= 80; ++k) {
+        a.rpm(k * 100 * kMs, 1000);
+        ++frames;
+    }
+    const ecuio_recorder_state_t st = a.finish(frames);
+    EXPECT_EQ(st.windows, 1u);
+    EXPECT_EQ(st.records_dropped, 0u);
+    const std::vector<fs::path> folders = a.root.folders();
+    ASSERT_EQ(folders.size(), 1u);
+    const fs::path& w = folders[0];
+    EXPECT_EQ(header_line(w, "trigger"), "quiet,1000 ms");
+    /* ON at 3.2 s, OFF at 5 s: 2.2 s to 6 s */
+    const auto rows = frame_rows(w);
+    ASSERT_EQ(rows.size(), 19u);
+    EXPECT_EQ(rows.front(), std::make_pair(uint64_t{0}, 2200 * kMs));
+    EXPECT_EQ(rows.back().second, 6 * kS);
+    const std::vector<Cond> conds = cond_lines(w);
+    ASSERT_EQ(conds.size(), 2u);
+    EXPECT_EQ(conds[0].state, "on");
+    EXPECT_EQ(conds[0].flags, "fired");
+    EXPECT_EQ(conds[0].host_us, 1 * kS);
+    EXPECT_EQ(conds[1].state, "off");
+    EXPECT_EQ(conds[1].host_us, 2800 * kMs);
+    std::vector<std::string> order;
+    bool body = false;
+    for (const std::string& l : lines_of(w / "events.log")) {
+        body = body || l.empty();
+        if (body && l.find("  link  ") != std::string::npos) {
+            order.push_back(l.substr(l.find("  link  ") + 8));
+        } else if (body && l.find("  cond  ") != std::string::npos) {
+            order.emplace_back("cond");
+        }
+    }
+    const std::vector<std::string> want = {
+        "vehicle not responding (state 8, 1 episode)", "cond",
+        "recovered (state 0, 1 episode)", "cond"};
+    EXPECT_EQ(order, want);
+}
+
+/* A timeout comes a while after the bus's last frame: its window, which
+ * starts after that frame, opens at the link's own line, placed at the
+ * link change's session time */
+TEST(ArmedRecorderTest, ALinkLineLongAfterTheLastFrameOpensItsWindow)
+{
+    Armed a(set_of(R"({"key":"quiet","name":"Quiet","when":{"link":"timeout"},)"
+                   R"("record":{"before":1,"after":1}})"),
+            0, true);
+    uint64_t frames = 0;
+    for (uint64_t k = 0; k <= 20; ++k) {
+        a.rpm(k * 100 * kMs, 1000);
+        ++frames;
+    }
+    a.link(3500 * kMs, ECUIO_ERR_VEHICLE_TIMEOUT);
+    ASSERT_NO_FATAL_FAILURE(a.settle());
+    EXPECT_EQ(a.state().windows, 1u);
+    a.link(5 * kS, ECUIO_OK);
+    for (uint64_t k = 51; k <= 80; ++k) {
+        a.rpm(k * 100 * kMs, 1000);
+        ++frames;
+    }
+    const ecuio_recorder_state_t st = a.finish(frames);
+    EXPECT_EQ(st.windows, 1u);
+    const std::vector<fs::path> folders = a.root.folders();
+    ASSERT_EQ(folders.size(), 1u);
+    const fs::path& w = folders[0];
+    /* 2.5 s to 6 s: no frame before the timeout, ten after the return */
+    const auto rows = frame_rows(w);
+    ASSERT_EQ(rows.size(), 10u);
+    EXPECT_EQ(rows.front(), std::make_pair(1600 * kMs, 5100 * kMs))
+        << "counted from the link's line, the window's first";
+    const std::vector<Cond> conds = cond_lines(w);
+    ASSERT_EQ(conds.size(), 2u);
+    EXPECT_EQ(conds[0].state, "on");
+    EXPECT_EQ(conds[0].host_us, 0u);
+    const std::vector<std::string> links = kind_lines(w, "link");
+    ASSERT_EQ(links.size(), 2u);
+    EXPECT_EQ(links[0], "vehicle not responding (state 8, 1 episode)");
 }

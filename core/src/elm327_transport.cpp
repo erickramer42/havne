@@ -1076,6 +1076,7 @@ monitor_end listen(transport* t, link_health& h)
     auto last_line = t->sent_at;
     auto window = t->sent_at;
     for (;;) {
+        link_judge_waiting(h);
         bool line = false;
         const bool prompt = take_bytes(t, "ATMA", on_line, &line);
         if (reset) {
@@ -1358,7 +1359,7 @@ void elm327_worker(transport* t)
 {
     ecuio_request_engine& e = t->engine;
     link_health h(t->session->last_error, t->session->error_count,
-                  t->session->record_link.get());
+                  t->session->record_link.get(), t->session, t->epoch);
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
@@ -1379,6 +1380,7 @@ void elm327_worker(transport* t)
     ecuio_take_focus(t->session, &e, focus_seen);
 
     while (!t->stop_requested.load()) {
+        link_judge_waiting(h);
         const int64_t now = now_us(t);
         for (uint32_t c = 0; c < e.chan_count; ++c) {
             if (ecuio_engine_expire(&e, c, now)) {
@@ -1727,6 +1729,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     describe_session(t.get(), version, &session->info);
     ecuio_seed_reports(session, t->engine, t->rx_ids, t->chan_count);
     t->epoch = host_clock::now(); /* as mock: end of attach */
+    session->judges_link = true;
     wrap->impl = t.release();
     session->transport = wrap;
     return ECUIO_OK;

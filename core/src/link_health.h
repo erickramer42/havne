@@ -1,14 +1,18 @@
 // File/layer: core/src/link_health.h | internal, not ABI-exported;
 //             included by the transports whose workers judge a link
-//             (j2534_transport.cpp; the ELM327 transport, ADR-0026)
+//             (j2534_transport.cpp; the ELM327 transport, ADR-0026; the
+//             SocketCAN transport, ADR-0040)
 // C++17, Qt-free, no platform headers.
-// Testing: UNIT: CoreTest, RecorderTest (test_core); HARNESS: J2534HealthTest
-//          (test_j2534_health)
+// Testing: UNIT: CoreTest, RecorderTest, ConditionSessionTest (test_core);
+//          HARNESS: J2534HealthTest (test_j2534_health), J2534ConditionTest
+//          (test_j2534_stream), Elm327SessionTest (test_elm327)
 
 #ifndef ECUIO_LINK_HEALTH_H
 #define ECUIO_LINK_HEALTH_H
 
 #include "ecuio/core.h"
+#include "ecuio/internal.h"
+#include "host_clock.h"
 #include "recorder.h"
 
 #include <atomic>
@@ -39,18 +43,35 @@ constexpr uint32_t LINK_HEALTH_QUIET_RUN = 10;
 /* A worker's view of its link (the full table is in docs/j2534.md). It
  * publishes through the session's two atomics, which
  * ecuio_session_get_error_state reads, and only on transitions, each
- * also a link record for the session's recording (ADR-0049 section 1);
- * the rest is the worker's alone. */
+ * also a link record for the session's recording (ADR-0049 section 1)
+ * and then a change for its conditions' link terms, both at the
+ * session's time (link_session_us); the rest is the worker's alone. The
+ * worker also hands a set of conditions attached meanwhile the state
+ * (link_judge_waiting). */
 struct link_health {
     link_health(std::atomic<int32_t>& published_state,
                 std::atomic<uint32_t>& published_episodes,
-                ecuio_record_link* recording = nullptr)
+                ecuio_record_link* recording = nullptr,
+                ecuio_session_t* judged_for = nullptr,
+                host_clock::time_point session_epoch = {},
+                const uint64_t* last_frame_us = nullptr,
+                const uint64_t* last_frame_host_us = nullptr)
         : published(published_state), episodes(published_episodes),
-          record(recording) {}
+          record(recording), session(judged_for), epoch(session_epoch),
+          frame_us(last_frame_us), frame_host_us(last_frame_host_us)
+    {}
 
     std::atomic<int32_t>& published;    /* the session's last_error */
     std::atomic<uint32_t>& episodes;    /* the session's error_count */
     ecuio_record_link* record;          /* the session's, or NULL */
+    ecuio_session_t* session;           /* its conditions', or NULL */
+    host_clock::time_point epoch;       /* the transport's attach */
+    /* A clock that counts frames on the adapter's or the kernel's time
+     * (j2534_clock, socketcan_clock): its last frame's session time and
+     * host time, both 0 before one, read on this worker; NULL where
+     * frames take the host's time */
+    const uint64_t* frame_us;
+    const uint64_t* frame_host_us;
     int32_t state = ECUIO_OK;
     bool write_failed = false;   /* latched by a failed write, cleared
                                   * only by a sent one */
@@ -58,15 +79,73 @@ struct link_health {
     uint32_t quiet_runs = 0;
     bool recovered = false;      /* back to OK since the worker last
                                   * looked: the probe resumes */
+    /* The last change's session time and host time since epoch, with a
+     * session: link_session_us's floor while the link isn't OK */
+    uint64_t changed_us = 0;
+    uint64_t changed_host_us = 0;
 };
+
+inline uint64_t link_host_us(const link_health& h)
+{
+    const auto since = std::chrono::duration_cast<std::chrono::microseconds>(
+                           host_clock::now() - h.epoch)
+                           .count();
+    return since > 0 ? static_cast<uint64_t>(since) : 0;
+}
+
+/* The session's time at host (link_host_us) on its frames' clock: the last
+ * frame's plus the host's time since, or the host's. While the link isn't
+ * OK, never before the last change plus the host's time since, since frames
+ * an adapter held through a fault carry stamps from its start. */
+inline uint64_t link_session_us(const link_health& h, uint64_t host)
+{
+    uint64_t at = host;
+    if (h.frame_us != nullptr && h.frame_host_us != nullptr) {
+        at = *h.frame_us +
+             (host > *h.frame_host_us ? host - *h.frame_host_us : 0);
+    }
+    if (h.state != ECUIO_OK) {
+        const uint64_t floor =
+            h.changed_us +
+            (host > h.changed_host_us ? host - h.changed_host_us : 0);
+        at = at > floor ? at : floor;
+    }
+    return at;
+}
+
+inline uint64_t link_session_us(const link_health& h)
+{
+    return link_session_us(h, link_host_us(h));
+}
 
 inline void link_set_state(link_health& h, int32_t state)
 {
     if (h.state != state) {
         h.published.store(state);
         h.recovered = h.recovered || state == ECUIO_OK;
+        uint64_t at = 0;
+        if (h.session != nullptr) {
+            const uint64_t host = link_host_us(h);
+            at = link_session_us(h, host); /* the state before: its floor */
+            h.changed_us = at;
+            h.changed_host_us = host;
+        }
         h.state = state;
-        ecuio_record_link_state(h.record, state, h.episodes.load());
+        ecuio_record_link_state(h.record, state, h.episodes.load(), at);
+        if (h.session != nullptr) {
+            ecuio_session_dispatch_link(h.session, state, at);
+        }
+    }
+}
+
+/* Once a worker pass: a set of conditions attached since the last frame or
+ * change is judged by the state now, so one attached during a fault, with
+ * no frame to take it, reports the fault */
+inline void link_judge_waiting(const link_health& h)
+{
+    if (h.session != nullptr &&
+        ecuio_session_conditions_waiting(h.session) != 0) {
+        ecuio_session_dispatch_link(h.session, h.state, link_session_us(h));
     }
 }
 

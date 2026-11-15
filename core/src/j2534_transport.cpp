@@ -519,7 +519,8 @@ void j2534_worker(ecuio_j2534_transport* t)
      * step (precise_wait.h): the floor between requests is the engine's */
     ecuio_precise_wait precise(requests);
     link_health h(t->session->last_error, t->session->error_count,
-                  t->session->record_link.get());
+                  t->session->record_link.get(), t->session, t->epoch,
+                  &t->clock.last_us, &t->clock.last_host_us);
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
@@ -536,6 +537,7 @@ void j2534_worker(ecuio_j2534_transport* t)
     }
 
     while (!t->stop_requested.load()) {
+        link_judge_waiting(h);
         if (requests) {
             const int64_t now = engine_now_us(t);
             for (uint32_t c = 0; c < e.chan_count; ++c) {
@@ -1021,6 +1023,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     describe_session(t.get(), params.baud, connect_flags, &session->info);
     ecuio_seed_reports(session, t->engine, rx_ids, t->chan_count);
     t->epoch = host_clock::now();   /* as mock: end of attach */
+    session->judges_link = true;
 
     wrap->impl = t.release();
     session->transport = wrap;   /* session.h member: direct install */

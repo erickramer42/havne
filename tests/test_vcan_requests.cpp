@@ -2,6 +2,7 @@
 // Testing: HARNESS: SocketCanRequestTest, SocketCanFaultTest, SimBusTest
 //          (test_vcan)
 
+#include "ecuio/conditions.h"
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
 #include "ecuio/profile.h"
@@ -26,6 +27,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <utility>
 #include <set>
@@ -1811,4 +1813,76 @@ TEST_F(SimBusTest, ASimOnABusRefusesAnAsk)
     EXPECT_NE(std::string(ecuio_last_error_detail()).find("bus"),
               std::string::npos);
     EXPECT_EQ(sim.stats().requests, 0u);
+}
+
+/* An ECU gone quiet is VEHICLE_TIMEOUT, on which the worker judges a
+ * link term at once, on the kernel's clock its frames count on, and a set
+ * attached meanwhile at its next pass; the ECU's return ends it (ADR-0063
+ * step 6) */
+TEST_F(SocketCanRequestTest, AQuietEcuFiresALinkTermAndItsReturnEndsIt)
+{
+    struct Events {
+        std::mutex m;
+        std::vector<ecuio_condition_event_t> all;
+        static void cb(const ecuio_condition_event_t* e, uint32_t n, void* u)
+        {
+            auto* self = static_cast<Events*>(u);
+            std::lock_guard<std::mutex> lock(self->m);
+            self->all.insert(self->all.end(), e, e + n);
+        }
+        /* An event into state with code, flagged LINK; of that attach's
+         * set when generation isn't 0 */
+        bool has(uint32_t state, int32_t code, uint32_t generation = 0)
+        {
+            std::lock_guard<std::mutex> lock(m);
+            for (const ecuio_condition_event_t& e : all) {
+                if (e.state == state && e.code == code &&
+                    (generation == 0 || e.generation == generation) &&
+                    (e.flags & ECUIO_CONDITION_LINK) != 0) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    } ev;
+    auto ecu = std::make_unique<vcan_bus::Ecu>();
+    Delivered d;
+    Session s("?profile=obd2&identify=0&diagnose=0", on_reply, &d);
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    const auto attach_quiet = [&] {
+        const std::string json =
+            R"({"havne_conditions":1,"conditions":[{"key":"quiet",)"
+            R"("name":"Quiet","when":{"link":"timeout"}}]})";
+        ecuio_condition_set_t* set = nullptr;
+        ASSERT_EQ(ecuio_condition_set_load(json.data(), json.size(), &set),
+                  ECUIO_OK);
+        ASSERT_EQ(ecuio_session_set_conditions(s.get(), set, nullptr), ECUIO_OK)
+            << ecuio_last_error_detail();
+        ecuio_condition_set_free(set);
+    };
+    ASSERT_NO_FATAL_FAILURE(attach_quiet());
+    ASSERT_EQ(ecuio_register_conditions_callback(s.get(), Events::cb, &ev),
+              ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] { return d.size() >= 20; }, 5000ms));
+    ecu.reset();
+    ASSERT_TRUE(wait_for(
+        [&] { return ev.has(ECUIO_CONDITION_ON, ECUIO_ERR_VEHICLE_TIMEOUT); },
+        5000ms))
+        << "no link event for the quiet ECU";
+    /* A set attached during the quiet, with no frame to take it */
+    ASSERT_NO_FATAL_FAILURE(attach_quiet());
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ev.has(ECUIO_CONDITION_ON, ECUIO_ERR_VEHICLE_TIMEOUT, 2);
+        },
+        2000ms))
+        << "the set attached during the quiet waited for a frame";
+    ecu = std::make_unique<vcan_bus::Ecu>();
+    ASSERT_TRUE(
+        wait_for([&] { return ev.has(ECUIO_CONDITION_OFF, ECUIO_OK); }, 5000ms))
+        << "the ECU's return ends it";
+    std::lock_guard<std::mutex> lock(ev.m);
+    for (size_t i = 1; i < ev.all.size(); ++i) {
+        EXPECT_GE(ev.all[i].timestamp_us, ev.all[i - 1].timestamp_us) << i;
+    }
 }
