@@ -573,6 +573,11 @@ public:
         if (!qEnvironmentVariableIsSet("QT_FORCE_STDERR_LOGGING")) {
             qputenv("QT_FORCE_STDERR_LOGGING", "1");
         }
+        // Whole collections, as main() sets them: Qt 6.12's incremental
+        // collector can crash sweeping a QVariantMap's JS wrapper
+        if (!qEnvironmentVariableIsSet("QV4_GC_TIMELIMIT")) {
+            qputenv("QV4_GC_TIMELIMIT", "0");
+        }
     }
 
 public slots:
