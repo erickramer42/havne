@@ -1665,12 +1665,7 @@ SessionBridge::SessionBridge(QObject* parent)
     m_pluginStore.setLog(
         [this](const QString& line) { emit logMessage(line); });
     m_conditionModel = new ConditionModel(this);
-    if (!m_conditionStore.load(&m_conditionsProblem)) {
-        m_conditionsProblem =
-            QStringLiteral("The saved conditions weren't read: %1")
-                .arg(m_conditionsProblem);
-    }
-    showSavedConditions();
+    loadSavedConditions();
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         notifyFrameCounts();
@@ -3807,6 +3802,20 @@ double SessionBridge::displayValue(const QString& unit, double value) const
     return out.value;
 }
 
+double SessionBridge::decodedValue(const QString& unit, double shown) const
+{
+    ecuio_display_value_t at0;
+    ecuio_display_value_t at1;
+    const QByteArray u = unit.toUtf8();
+    const uint32_t units = m_signalModel->unitSystem();
+    if (ecuio_display_convert(u.constData(), 0, 0.0, units, &at0) != ECUIO_DISPLAY_OK ||
+        ecuio_display_convert(u.constData(), 0, 1.0, units, &at1) != ECUIO_DISPLAY_OK ||
+        at0.converted == 0 || at1.value == at0.value) {
+        return shown;
+    }
+    return (shown - at0.value) / (at1.value - at0.value);
+}
+
 QString SessionBridge::displayUnit(const QString& unit) const
 {
     ecuio_display_value_t out;
@@ -4958,6 +4967,23 @@ QString SessionBridge::conditionsWait() const
     return {};
 }
 
+void SessionBridge::loadSavedConditions()
+{
+    m_conditionsProblem.clear();
+    if (!m_conditionStore.load(&m_conditionsProblem)) {
+        m_conditionsProblem =
+            QStringLiteral("The saved conditions weren't read: %1")
+                .arg(m_conditionsProblem);
+    }
+    showSavedConditions();
+}
+
+void SessionBridge::reloadSavedConditionsForTesting()
+{
+    loadSavedConditions();
+    emit conditionsChanged();
+}
+
 void SessionBridge::showSavedConditions()
 {
     m_conditionModel->setConditions(m_conditionStore.set(), nullptr, nullptr);
@@ -5024,6 +5050,67 @@ QVariantMap SessionBridge::saveConditions(const QString& text)
     result.insert(QStringLiteral("pending"), wait);
     emit conditionsChanged();
     return result;
+}
+
+QVariantMap SessionBridge::importConditions(const QUrl& url)
+{
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
+    QString words;
+    QString text;
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
+        words = QStringLiteral("Couldn't read the file");
+    } else {
+        const QByteArray bytes = file.read(static_cast<qint64>(ECUIO_CONDITION_FILE_MAX_BYTES) + 1);
+        if (bytes.size() > static_cast<qint64>(ECUIO_CONDITION_FILE_MAX_BYTES)) {
+            words = QStringLiteral("The file is over %1 KiB, a condition file's most")
+                        .arg(ECUIO_CONDITION_FILE_MAX_BYTES / 1024);
+        } else {
+            // Without ConvertInitialBom the decoder skips a leading BOM
+            QStringDecoder utf8(QStringDecoder::Utf8, QStringConverter::Flag::Stateless);
+            text = utf8(bytes);
+            if (utf8.hasError()) {
+                words = QStringLiteral("The file isn't UTF-8 text");
+            }
+        }
+    }
+    if (words.isEmpty()) {
+        QVariantMap result = saveConditions(text);
+        if (!result.value(QStringLiteral("ok")).toBool()) {
+            emit logMessage(QStringLiteral("Alerts not imported: %1")
+                                .arg(result.value(QStringLiteral("words")).toString()));
+        }
+        return result;
+    }
+    emit logMessage(QStringLiteral("Alerts not imported: %1").arg(words));
+    return {{QStringLiteral("ok"), false},
+            {QStringLiteral("words"), words},
+            {QStringLiteral("pending"), QString()}};
+}
+
+QVariantMap SessionBridge::exportConditions(const QUrl& url)
+{
+    // A file core refused is exported as it is, to be mended elsewhere
+    const QByteArray bytes = m_conditionStore.bytes().isEmpty() ? m_conditionStore.refused()
+                                                                : m_conditionStore.bytes();
+    const bool removable = pickedDocumentRemovable(url);
+    QString words;
+    bool written = false;
+    if (bytes.isEmpty()) {
+        words = QStringLiteral("There are no saved alerts to export");
+    } else {
+        written = writeToUrl(url, bytes);
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    if (!written) {
+        dropPickedDocument(url, removable);
+    }
+    emit logMessage(written ? QStringLiteral("Alerts exported to a file (%1 bytes)")
+                                  .arg(bytes.size())
+                            : QStringLiteral("Alerts not exported: %1").arg(words));
+    return {{QStringLiteral("ok"), written}, {QStringLiteral("words"), words}};
 }
 
 int SessionBridge::alertLevelOf(int defId) const

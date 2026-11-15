@@ -1191,6 +1191,17 @@ public:
     // (ADR-0063 section 6), so with one the edit waits for its end, and
     // a replay judging its recording's copy keeps it to the end
     Q_INVOKABLE QVariantMap saveConditions(const QString& text);
+    // A condition file the user picked, in place of the saved one (the
+    // Alerts page's Import): read as layoutFileText reads, within
+    // ECUIO_CONDITION_FILE_MAX_BYTES, then saveConditions; its map, words
+    // naming no path. A file core refuses leaves the saved one as it was
+    Q_INVOKABLE QVariantMap importConditions(const QUrl& url);
+    // The saved file written where the user chose, by saveLayoutFile's
+    // rules: { ok, words }; a file core refused, as it is. Logs one line
+    Q_INVOKABLE QVariantMap exportConditions(const QUrl& url);
+    // The saved file read again as at the start, for a test that writes it
+    // with no session
+    void reloadSavedConditionsForTesting();
     // alertLevels' level for one def, 0 for none
     Q_INVOKABLE int alertLevelOf(int defId) const;
     // The samples one window can hold, from the next connect
@@ -1396,6 +1407,10 @@ public:
     // units, and converted here rather than in QML (rule 2).
     Q_INVOKABLE double displayValue(const QString& unit, double value) const;
     Q_INVOKABLE QString displayUnit(const QString& unit) const;
+    // displayValue's inverse, for a level typed in the display unit: every
+    // conversion is affine (SignalsTest.EveryImperialConversionIsAffine),
+    // so two points give it; a unit left as it is passes through
+    Q_INVOKABLE double decodedValue(const QString& unit, double shown) const;
     QVariantList diagnostics() const { return m_diagnostics; }
     QStringList clearTargets() const;
     // A report a clear goes to: its read complete, no clear under way
@@ -1602,6 +1617,8 @@ private:
     void endSessionConditions();
     // The activity lines of the connect's attach, written after "Session:"
     QStringList m_conditionsLines;
+    // The saved file read again: conditionsProblem and the offline rows
+    void loadSavedConditions();
     // The model's rows of the saved set with no session
     void showSavedConditions();
     // The tick's half: the window's events into the model and the
