@@ -36,6 +36,8 @@ Page {
     property alias zoomSwitchSlot: zoomBlock.zoomSwitchSlot
     property alias spanStatsBlock: spanStatsBlock
     property alias zoomHome: zoomHome
+    property alias column: column
+    property alias filterCount: filterCount
 
     // Main puts the URI in Settings' field and shows it
     signal replayRequested(string uri)
@@ -3502,155 +3504,9 @@ Page {
             }
         }
 
-        // The recording's signals: a tick plots one, and beside each its
-        // value at the cursor
-        ListView {
+        RecordingSignalRows {
             id: signalRows
-            objectName: "signalRows"
-            visible: recording.state === RecordingView.Open && !root.chartMaximized && !root.framesShown
-                     && !root.aboutShown
-            Layout.fillWidth: true
-            // On the pinned form the rest of the page, its head included
-            Layout.preferredHeight: root.pinnedViewer ? 0 : count * root.rowHeight
-            Layout.minimumHeight: root.pinnedViewer ? root.pinnedListMin : 0
-            Layout.maximumHeight: root.pinnedViewer ? Number.POSITIVE_INFINITY
-                                                    : Math.max(root.rowHeight, column.height * 0.3)
-            Layout.fillHeight: root.pinnedViewer
-            clip: true
-            currentIndex: -1
-            highlightFollowsCurrentItem: false
-            boundsBehavior: Flickable.StopAtBounds
-            model: root.shownSignals
-            header: Component {
-                ViewHead {
-                    host: root
-                    role: "values"
-                    // The pinned list's scrollbar lies over its right edge: the head keeps clear
-                    width: signalRows.width - (root.pinnedViewer ? 12 : 0)
-                    list: signalRows
-                }
-            }
-            footer: Component {
-                ColumnLayout {
-                    id: valuesFootItem
-                    width: signalRows.width
-                    Item { implicitHeight: 6; visible: filterCount.parent === valuesFootItem && filterCount.shown }
-                    Component.onCompleted: root.valuesFoot = valuesFootItem
-                }
-            }
-            ScrollBar.vertical: ScrollBar {
-                policy: root.pinnedViewer && signalRows.contentHeight > signalRows.height
-                        ? ScrollBar.AlwaysOn : ScrollBar.AsNeeded
-            }
-
-            delegate: Rectangle {
-                id: signalRow
-                required property var modelData
-                required property int index
-                readonly property int signalIndex: modelData.index
-                readonly property var at: root.readoutFrom[signalIndex]
-                width: signalRows.width
-                height: root.rowHeight
-                color: index % 2 === 0 ? Theme.surface : Theme.bg
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 8
-                    anchors.rightMargin: 12
-                    ThemedCheckBox {
-                        objectName: "plotCheck"
-                        checked: root.plotted[signalRow.signalIndex] === true
-                        enabled: !signalRow.modelData.isText
-                        onToggled: root.togglePlotted(signalRow.signalIndex)
-                        Accessible.name: qsTr("Plot %1").arg(signalRow.modelData.name)
-                    }
-                    Rectangle {
-                        objectName: "swatch"
-                        readonly property bool shown: root.plotted[signalRow.signalIndex] === true
-                        implicitWidth: 10; implicitHeight: 10
-                        radius: 2
-                        color: shown ? Theme.seriesColor(root.slotOf(signalRow.signalIndex)) : "transparent"
-                        border.width: 1
-                        border.color: shown ? Theme.seriesColor(root.slotOf(signalRow.signalIndex))
-                                            : Theme.textDim
-                        opacity: shown ? 1.0 : 0.5
-                    }
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 0
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Label {
-                                text: signalRow.modelData.name
-                                color: Theme.text
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
-                            }
-                            Label {
-                                objectName: "cursorValue"
-                                text: root.atText(signalRow.at, signalRow.modelData)
-                                Layout.maximumWidth: Math.round(signalRow.width * (root.compareAligned ? 0.3 : 0.5))
-                                elide: Text.ElideRight
-                                color: Theme.text
-                                font.family: Theme.valueFamily
-                                font.features: Theme.valueFeatures
-                            }
-                        }
-                        // On a phone B and the change have a line of their own
-                        Label {
-                            objectName: "cursorSpanLine"
-                            visible: root.phoneShape && root.hasSpan
-                            text: visible ? root.spanCaption(signalRow.modelData) : ""
-                            Layout.fillWidth: true
-                            horizontalAlignment: Text.AlignRight
-                            elide: Text.ElideLeft
-                            color: Theme.textDim
-                            font.pixelSize: Theme.fontCaption
-                            font.family: Theme.valueFamily
-                            font.features: Theme.valueFeatures
-                        }
-                    }
-                    // On the desktop, two more columns
-                    Label {
-                        objectName: "cursorBValue"
-                        visible: !root.phoneShape && root.hasSpan
-                        text: visible ? root.atText(root.readoutTo[signalRow.signalIndex], signalRow.modelData) : ""
-                        Layout.preferredWidth: Math.round(signalRow.width * 0.18)
-                        horizontalAlignment: Text.AlignRight
-                        elide: Text.ElideRight
-                        color: Theme.text
-                        font.family: Theme.valueFamily
-                        font.features: Theme.valueFeatures
-                    }
-                    Label {
-                        objectName: "cursorDelta"
-                        visible: !root.phoneShape && root.hasSpan
-                        text: visible && !signalRow.modelData.isText
-                              ? root.statChange(root.spanStats[signalRow.signalIndex]) : ""
-                        Layout.preferredWidth: Math.round(signalRow.width * 0.18)
-                        horizontalAlignment: Text.AlignRight
-                        elide: Text.ElideRight
-                        color: Theme.textDim
-                        font.family: Theme.valueFamily
-                        font.features: Theme.valueFeatures
-                    }
-                    // The compared recording's, at the cursor
-                    Label {
-                        objectName: "compareValue"
-                        readonly property var at: root.compareReadout[signalRow.signalIndex]
-                        visible: root.compareAligned
-                        text: !at || at.atMs < 0 ? qsTr("—")
-                              : signalRow.modelData.isText ? at.text
-                              : at.label ? at.label
-                              : root.valueText(Number(at.text), signalRow.modelData.decimals, at.unit)
-                        Layout.maximumWidth: Math.round(signalRow.width * 0.3)
-                        elide: Text.ElideRight
-                        color: Theme.textDim
-                        font.family: Theme.valueFamily
-                        font.features: Theme.valueFeatures
-                    }
-                }
-            }
+            host: root
         }
 
         // While the filter narrows the rows, how many it shows and how many
