@@ -9,7 +9,7 @@ Dashboard is one panel with its pages as tabs, which these shots don't
 show. The README shows a few of these.
 
 - **Desktop:** the Windows app at 1280x800.
-- **Phone:** Live, Codes, the Log and Settings are from the test phone
+- **Phone:** Live, Codes, Activity and Settings are from the test phone
   (Android 16). The Dashboard and the drive view are the phone layout
   with its built-in default page, the same page drawn by the desktop
   build in the phone's form at the phone's width.
@@ -50,7 +50,7 @@ readiness monitors, each done this drive and complete since the clear.*
 
 | Activity | Frames |
 |---|---|
-| [![The Log's activity view: two connects and, between them, the disconnect's Delivery line](images/desktop-log-activity.png)](images/desktop-log-activity.png) | [![The Log's frame table, newest first](images/desktop-log-frames.png)](images/desktop-log-frames.png) |
+| [![Activity's view: two connects and, between them, the disconnect's Delivery line](images/desktop-log-activity.png)](images/desktop-log-activity.png) | [![Activity's frame table, newest first](images/desktop-log-frames.png)](images/desktop-log-frames.png) |
 | Each session's lines; a disconnect adds its Delivery line (none dropped, and the GUI thread's wait) | The raw frames: time, length, standard or extended ID, payload |
 
 ### Recordings
@@ -115,9 +115,9 @@ the screen; a tap raises the controls from the bottom with the tab bar.*
 *On its side, the chart takes the page: a 2nd-gear pull, then the
 3rd-gear pull onto the limiter.*
 
-### Codes, Log and Settings
+### Codes, Activity and Settings
 
-| Codes | Log | Settings |
+| Codes | Activity | Settings |
 |---|---|---|
-| [![Codes on the test phone: the inspection verdict and ECU 0x7E8's codes with their titles](images/phone-codes.png)](images/phone-codes.png) | [![The Log's frame table on the test phone](images/phone-log.png)](images/phone-log.png) | [![Settings, Display on the test phone: size, Night, units, and the drive view's options](images/phone-settings-display.png)](images/phone-settings-display.png) |
-| The verdict, then each ECU's codes | The status opens the Log; here its frames | Display, with the drive view's bars and orientation |
+| [![Codes on the test phone: the inspection verdict and ECU 0x7E8's codes with their titles](images/phone-codes.png)](images/phone-codes.png) | [![Activity's frame table on the test phone](images/phone-log.png)](images/phone-log.png) | [![Settings, Display on the test phone: size, Night, units, and the drive view's options](images/phone-settings-display.png)](images/phone-settings-display.png) |
+| The verdict, then each ECU's codes | The status opens Activity; here its frames | Display, with the drive view's bars and orientation |

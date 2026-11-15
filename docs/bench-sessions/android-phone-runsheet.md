@@ -38,7 +38,7 @@ Goals, in order:
    provider while offline is recorded as the app words it and as the
    provider delivers it (Phase 10)
 
-The evidence is the activity log (the Log page; copy it whole after
+The evidence is the activity log (the Activity page; copy it whole after
 each phase) and screenshots. The ELM327 wire log stays in the app's
 private storage: Phase 5 copies it off with `adb`, if a computer with
 `adb` is at hand.
@@ -71,7 +71,7 @@ unknown developer ("Install anyway").
 - [ ] It launches: the Home page, the tab bar at the bottom (the
       sidebar shows only from 720 px wide). Copy the time from the tap
       to the first page drawn, roughly
-- [ ] Each page opens from the tab bar: Home, Dashboard, Live, Log,
+- [ ] Each page opens from the tab bar: Home, Dashboard, Live, Activity,
       Settings. Screenshot each. Note text that is cut off or controls
       too small to press
 - [ ] Turn the phone to landscape and back: the page lays out again,
@@ -86,9 +86,9 @@ unknown developer ("Install anyway").
 **Connect**.
 
 - [ ] Turn the phone to landscape and back once more, then on the
-      Log page copy the "Display:" lines (developer mode logs the
+      Activity page copy the "Display:" lines (developer mode logs the
       screen, the window and the safe area after each change)
-- [ ] Connected within a second; the Log page's "Session:" line reads
+- [ ] Connected within a second; the Activity page's "Session:" line reads
       "mock transport"
 - [ ] Live's values move and the chart draws; the Dashboard's gauges
       move. Screenshot both

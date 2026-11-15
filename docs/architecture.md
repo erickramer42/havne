@@ -68,11 +68,11 @@ threads onto the GUI thread.
 | Step | Where | Thread |
 |---|---|---|
 | 1. The transport produces a frame (the mock's 50 ms tick, a recording's row when its time comes, a J2534 read, an ELM327 reply's lines reassembled, or a SocketCAN read) | `mock_transport.cpp`, `replay_transport.cpp`, `j2534_transport.cpp`, `elm327_transport.cpp`, `socketcan_transport.cpp` | transport worker |
-| 2. The session hands it to every registered callback, from a snapshot of the callback list; then it decodes the frame against the profile's set and hands one batch of values, stamped with the frame's time, to each values callback ([ADR-0024](adr/0024-decode-on-the-worker.md)); a recording session also puts the frame and its values into its recorder's ring, which the recorder's thread writes to the folder ([ADR-0049](adr/0049-recordings-in-core.md)); each pull queue a caller opened gets a copy of the frame, or of its values, which the caller reads on its own thread ([ADR-0053](adr/0053-python-bindings.md)) | `ecuio_session_dispatch_callbacks` | transport worker |
+| 2. The session hands it to every registered callback, from a snapshot of the callback list; then it decodes the frame against the profile's set and hands one batch of values, stamped with the frame's time, to each values callback ([ADR-0024](adr/0024-decode-on-the-worker.md)); a recording session also puts the frame and its values into its recorder's ring, which the recorder's thread writes to the folder ([ADR-0049](adr/0049-recordings-in-core.md)); each pull queue a caller opened gets a copy of the frame, or of its values, which the caller reads on its own thread ([ADR-0053](adr/0053-python-bindings.md)); a session with a set of conditions attached judges each batch of values against it, on the frame's own time, and an armed recorder opens its window from the events ([ADR-0063](adr/0063-conditions.md)) | `ecuio_session_dispatch_callbacks` | transport worker |
 | 3. The bridge copies the frame (4120 bytes; its payload is inline) and posts it, unless 1000 frames are already in flight; the batch's values go straight into the bridge's staging, under a lock, so a frame dropped at the cap keeps its values | `SessionBridge::onFrame`, `onValues` | transport worker |
 | 4. The frame log gets a row (a ring of the newest 10k plain rows, the hex formatted only when shown) | `handleFrameInternal` | GUI |
 | 5. Every 100 ms the staging is swapped out: each signal's window (newest, lowest and highest, at their frames' times) goes into the signal model; link health and the recording's state are polled | coalesce timer | GUI |
-| 6. Pages bind to the models: Log to frames, Live and Dashboard to signals | QML | GUI |
+| 6. Pages bind to the models: Activity to frames, Live and Dashboard to signals | QML | GUI |
 
 **Why each step is shaped this way:**
 - **Snapshot dispatch:** a callback can register or unregister
@@ -434,8 +434,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   worker thread. The frame callback touches only atomics and posts a
   copy of the frame; the values callback stages each value under one
   short lock, which the 100 ms tick swaps out. Everything else runs on
-  the GUI thread. It links only QtCore, so `test_bridge` can exercise
-  it headless. So do the stores beside it (`app/signalstore.h`,
+  the GUI thread. It links QtCore, Gui and Network (no QML), so `test_bridge` can
+  exercise it headless. So do the stores beside it (`app/signalstore.h`,
   `app/pluginstore.h`), which `test_bridge` compiles too.
 - **The QML module is a library:** the `App` module (the pages,
   `Theme`, the bridge and its `Bridge` registration) builds as the
@@ -446,7 +446,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   registration lives in `app/bridgesingleton.h`, so the bridge itself
   stays QtCore-only, and qmllint checks every binding against it.
 - **Bridge outputs:** it exposes a frame model (a ring of the newest
-  10k frames, newest or oldest first, with a pause for the Log page), a
+  10k frames, newest or oldest first, with a pause for the Activity page), a
   signal model (value, `hasValue`, `ageMs`, `decimals`, and a
   360-point history per signal: each window's lowest, highest and
   newest, at their frames' times), the unit
@@ -461,7 +461,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   read, each decoded value and the activity lines. The worker queues
   each frame and its values into a ring and the recorder's thread
   writes the files, so a slow disk never holds the worker up and the
-  frames the Log page drops are recorded too. The bridge opens the
+  frames the Activity page drops are recorded too. The bridge opens the
   recorder, attaches it before the session starts (Record sessions) or
   to the running session (Start log, `ecuio_session_record`), notes its
   activity lines and closes it after the teardown or at Stop log;
@@ -529,7 +529,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   log write an analysis log, [ADR-0056](adr/0056-analysis-log.md)),
   **Live** (value table and strip chart), **Diagnostics**
   (trouble codes, readiness, the freeze frame, clearing the codes, a
-  health report), **Log** (the activity log, and the raw
+  health report), **Activity** (the activity log, and the raw
   frames, filtered by ID, mask, length and time, by ID, and exported as
   CSV with the car's identity left out), **Recordings** (the recordings
   list with its Import, and the viewer, with a vehicle's baseline, a
@@ -554,8 +554,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   its words.
   Navigation is a sidebar of all seven pages at 720 px and wider, and
   below that a tab bar of five (Dash, Live, Codes, Recs, Settings): the
-  Log opens from the status in the top bar, from the Log row at the end
-  of Settings' list on a phone, and from a failed connect's Show log. On a phone, Android's Back
+  Activity opens from the status in the top bar, from the Activity row at the end
+  of Settings' list on a phone, and from a failed connect's Show activity. On a phone, Android's Back
   takes one route across the pages ([ADR-0059](adr/0059-drive-view.md)).
 - **`Theme`** resolves one of four palettes (the looks `dark` and
   `daylight`, and `nightAmber` and `nightRed`) from three kept controls: the look, Night (off, on or
@@ -651,6 +651,7 @@ Detail and gaps: [testing.md](testing.md).
 | How to build, run tests, read CI, troubleshoot | [development.md](development.md) |
 | How to run Havne on Linux: the downloads, adapters and permissions, SocketCAN, tracing | [linux.md](linux.md) |
 | How to write a file of your own signals: DIDs and PIDs, enumerations, computed signals | [signal-files.md](signal-files.md) |
+| How to write conditions: alerts, armed recording, markers | [condition-files.md](condition-files.md) |
 | How to install Havne on an iPhone for testing, and what works there | [ios.md](ios.md) |
 | What each page looks like, on the desktop and the phone, in Dark and in Night's amber and red | [screenshots.md](screenshots.md) |
 | What is verified, by which test, and the known gaps | [testing.md](testing.md) |
