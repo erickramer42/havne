@@ -285,8 +285,7 @@ int run_stream(const StreamArgs& args)
         conditions = load_conditions_file(args.conditions, &loaded, &why);
         if (conditions == nullptr) {
             write_error(out, loaded, why.c_str());
-            out.flush();
-            return kExitConnect;
+            return ended(out, kExitConnect);
         }
     } else {
         conditions = recording_conditions(args.uri);
@@ -299,9 +298,8 @@ int run_stream(const StreamArgs& args)
     ecuio_status_t st = create_within(out, args.uri, &session, &detail);
     if (st != ECUIO_OK) {
         write_error(out, st, detail.c_str());
-        out.flush();
         ecuio_condition_set_free(conditions);
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     ecuio_session_info_t info;
     std::memset(&info, 0, sizeof info);
@@ -317,7 +315,7 @@ int run_stream(const StreamArgs& args)
                                &shown)) {
             out.flush();
             ecuio_session_destroy(session);
-            return kExitConnect;
+            return ended(out, kExitConnect);
         }
         conditions = nullptr;
         stream->condition_keys = shown.keys;
@@ -353,7 +351,7 @@ int run_stream(const StreamArgs& args)
         !open_recording(out, session, args.record, args.label, &recorder)) {
         out.flush();
         ecuio_session_destroy(session);
-        return kExitFailed;
+        return ended(out, kExitFailed);
     }
     // A read that completed at create (the mock's) comes first; the rest
     // as they complete
@@ -402,8 +400,7 @@ int run_stream(const StreamArgs& args)
         ecuio_session_destroy(session);
         close_recording(out, &recorder, "the session didn't start",
                         &recording_failed);
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     std::shared_ptr<MarkQueue> marks;
     if (recorder != nullptr) {

@@ -160,8 +160,7 @@ int run_log(const cli::LogArgs& args)
         if (conditions == nullptr) {
             write_start(out);
             write_error(out, loaded, why.c_str());
-            out.flush();
-            return kExitConnect;
+            return ended(out, kExitConnect);
         }
     }
     ecuio_session_t* session = nullptr;
@@ -172,8 +171,7 @@ int run_log(const cli::LogArgs& args)
         ecuio_condition_set_free(conditions);
         write_start(out);
         write_error(out, st, detail.c_str());
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     std::vector<uint16_t> ids;
@@ -201,7 +199,7 @@ int run_log(const cli::LogArgs& args)
         !attach_conditions(out, session, conditions, "file", &shown)) {
         out.flush();
         ecuio_session_destroy(session);
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     // --pick ranked: the names join the set's ranked signals as a default
     // pick; with no pick to make, the names alone are the focus
@@ -232,7 +230,7 @@ int run_log(const cli::LogArgs& args)
         write_error(out, st, ecuio_last_error_detail());
         out.flush();
         ecuio_session_destroy(session);
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     {
         BigLine b(cli::focus_line_bytes(ids.size()));
@@ -246,7 +244,7 @@ int run_log(const cli::LogArgs& args)
                         args.armed)) {
         out.flush();
         ecuio_session_destroy(session);
-        return kExitFailed;
+        return ended(out, kExitFailed);
     }
     // The folder, which the log and end lines name: a path core can't give
     // whole is an error, never an empty or cut folder in the lines. An
@@ -268,8 +266,7 @@ int run_log(const cli::LogArgs& args)
             close_recording(out, &recorder,
                             "havne-cli: the folder couldn't be read",
                             &recording_failed);
-            out.flush();
-            return kExitFailed;
+            return ended(out, kExitFailed);
         }
         folder.assign(buf, len);
     } else {
@@ -294,8 +291,7 @@ int run_log(const cli::LogArgs& args)
         ecuio_session_destroy(session);
         close_recording(out, &recorder, "the session didn't start",
                         &recording_failed);
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
 
     // Session time's clock (ADR-0033): --seconds and the log line's

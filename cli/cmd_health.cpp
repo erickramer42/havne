@@ -119,15 +119,14 @@ int run_health_session(cli::HealthArgs& a, const char* uri)
         values->at_us.assign(65536, 0);
     } catch (const std::bad_alloc&) {
         std::fprintf(stderr, "havne-cli: out of memory for the values\n");
-        return kExitFailed;
+        return ended(out, kExitFailed);
     }
     ecuio_session_t* session = nullptr;
     std::string detail;
     ecuio_status_t st = create_within(out, uri, &session, &detail);
     if (st != ECUIO_OK) {
         write_error(out, st, detail.c_str());
-        out.flush();
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     ecuio_session_info_t info;
     std::memset(&info, 0, sizeof info);
@@ -141,7 +140,7 @@ int run_health_session(cli::HealthArgs& a, const char* uri)
         write_error(out, st);
         out.flush();
         ecuio_session_destroy(session);
-        return kExitConnect;
+        return ended(out, kExitConnect);
     }
     const uint32_t channels =
         info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
