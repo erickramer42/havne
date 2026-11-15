@@ -1243,7 +1243,7 @@ if(TARGET havne-cli)
     app_cli_usage(StreamSecondsPastTheCapIsUsage "stream|mock://x|--seconds|31622401")
     app_cli_usage(StreamSecondsThatWrapAreUsage "stream|mock://x|--seconds|18446744073710")
     app_cli_usage(SimSecondsPastTheCapIsUsage "sim|mock://x|--elm327|tcp:0|--seconds|31622401")
-    # play exists only on Linux (cli/main.cpp's HAVNE_CLI_PLAY); elsewhere
+    # play exists only on Linux (cli/common.h's HAVNE_CLI_PLAY); elsewhere
     # its every form is the one refusal
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         app_cli_usage_says(PlaySecondsPastTheCapIsUsage
