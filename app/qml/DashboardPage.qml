@@ -2566,6 +2566,8 @@ Page {
                 font.pixelSize: Theme.fontCaption
                 color: Theme.text
                 text: Bridge.logActive ? qsTr("Log")
+                    : Bridge.armedRecording ? qsTr("Recording (window %1)").arg(Bridge.armedWindows)
+                    : Bridge.armedActive ? qsTr("Armed")
                     : root.driveLogEnded ? qsTr("Log ended") : qsTr("Recording")
             }
             Label {
@@ -2711,9 +2713,43 @@ Page {
                     text: qsTr("Stop log")
                     onClicked: Bridge.stopLog()
                 }
+                // The armed recorder, where Start log stands (Main's armedButton):
+                // an enabled item around it, so a tap on the disabled button says why
+                Item {
+                    id: driveArmedHost
+                    objectName: "driveArmedHost"
+                    visible: Bridge.connected && !Bridge.logActive
+                             && (Bridge.armedActive || !Bridge.recordingActive)
+                             && !root.isReplay(Bridge.currentUri)
+                    implicitWidth: driveArmedButton.implicitWidth
+                    implicitHeight: driveArmedButton.implicitHeight
+                    Layout.minimumWidth: Theme.touchTarget
+                    TapHandler {
+                        objectName: "driveArmedExplain"
+                        enabled: !driveArmedButton.enabled && Bridge.armedWhy !== ""
+                        onTapped: Bridge.startArmed()
+                    }
+                SheetButton {
+                    id: driveArmedButton
+                    objectName: "driveArmed"
+                    anchors.fill: parent
+                    enabled: !Bridge.disconnecting
+                             && (Bridge.armedActive || Bridge.armedWhy === "")
+                    checkable: true
+                    checked: Bridge.armedActive
+                    text: Bridge.armedRecording
+                          ? qsTr("Recording (window %1)").arg(Bridge.armedWindows)
+                          : Bridge.armedActive ? qsTr("Armed") : qsTr("Arm")
+                    Accessible.name: Bridge.armedActive ? qsTr("Stop the armed recorder")
+                                                        : qsTr("Arm a recorder for the conditions that record")
+                    Accessible.description: Bridge.armedActive ? "" : Bridge.armedWhy
+                    onToggled: toggle()
+                    onClicked: Bridge.armedActive ? Bridge.stopArmed() : Bridge.startArmed()
+                }
+                }
                 SheetButton {
                     objectName: "driveMark"
-                    visible: Bridge.recordingActive
+                    visible: Bridge.recordingActive && (!Bridge.armedActive || Bridge.armedRecording)
                     text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount) : qsTr("Mark")
                     Accessible.name: qsTr("Mark the recording")
                     onClicked: Bridge.mark()

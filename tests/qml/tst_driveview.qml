@@ -49,6 +49,9 @@ TestCase {
     }
 
     function cleanup() {
+        // The armed case saves a set that records: none outlives it
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[{"key":"c","name":"C",'
+                              + '"when":{"signal":["id:1001"],"unit":"RPM","above":90000},"mark":true}]}')
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.recording = false
@@ -802,6 +805,70 @@ TestCase {
         mouseClick(mark)
         tryCompare(Bridge, "markCount", 1, 3000)
         compare(mark.text, "Mark (1)")
+    }
+
+    // The armed recorder in the sheet (Main's armedButton is the header's): where
+    // Start log stands, its states in words, Mark only inside a window
+    function test_theSheetArmsTheRecorderAndMarksInAWindow() {
+        neverHide()
+        const s = phoneMain()
+        const records = bound => '{"havne_conditions":1,"conditions":[{"key":"rec","name":"Engine stopped",'
+                                + '"when":{"signal":["id:3001"],"unit":"km/h",' + bound + '},'
+                                + '"record":{"before":0.2,"after":0.2}}]}'
+        Bridge.saveConditions(records('"above":90000'))
+        connect("mock://demo")
+        enterOn(s)
+        revealedOn(s)
+        const armed = find(s.dash, "driveArmed")
+        const mark = find(s.dash, "driveMark")
+        verify(armed.visible && armed.enabled, "Armed offers itself")
+        compare(armed.text, "Arm", "off, it says what a press does")
+        verify(!mark.visible, "no Mark before a recorder")
+        // Waiting: armed, between windows, no Mark
+        mouseClick(armed)
+        tryCompare(Bridge, "armedActive", true, 3000)
+        compare(armed.text, "Armed")
+        compare(find(s.dash, "driveStatusRun").text, "Armed")
+        verify(!mark.visible, "no Mark between windows")
+        mouseClick(armed)
+        tryCompare(Bridge, "armedActive", false, 3000)
+        Bridge.saveConditions(records('"below":1'))
+        tryVerify(() => armed.enabled, 3000)
+        mouseClick(armed)
+        tryCompare(Bridge, "armedActive", true, 3000)
+        tryVerify(() => Bridge.armedRecording, 10000, "a window opens")
+        compare(armed.text, "Recording (window 1)")
+        verify(mark.visible, "Mark inside the window")
+        verify(!find(s.dash, "driveStartLog").visible, "Start log steps aside")
+        compare(find(s.dash, "driveStatusRun").text, "Recording (window 1)")
+        verify(waitForPolish(s.main), "laid out")
+        for (const c of find(s.dash, "driveSessionRow").children) {
+            if (!c.visible || c.objectName === "")
+                continue
+            const at = c.mapToItem(s.main.contentItem, 0, 0)
+            verify(at.x >= -0.5 && at.x + c.width <= s.main.contentItem.width + 0.5,
+                   c.objectName + " inside the window: " + at.x + " + " + c.width)
+        }
+        mouseClick(armed)
+        tryCompare(Bridge, "armedActive", false, 3000)
+        verify(!mark.visible, "Mark goes with the recorder")
+    }
+
+    // A tap on the disabled Armed says why in the notice, as a refused press does
+    function test_aDisabledArmedExplainsItselfWhenTapped() {
+        neverHide()
+        const s = phoneMain()
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[{"key":"c","name":"C",'
+                              + '"when":{"signal":["id:1001"],"unit":"RPM","above":90000},"mark":true}]}')
+        connect("mock://demo")
+        enterOn(s)
+        revealedOn(s)
+        const armed = find(s.dash, "driveArmed")
+        verify(armed.visible && !armed.enabled, "no condition records")
+        Bridge.clearLogNotice()
+        mouseClick(find(s.dash, "driveArmedHost"))
+        tryCompare(Bridge, "logNotice", "Armed not started: no condition records", 3000)
+        verify(!Bridge.armedActive)
     }
 
     // Each control a touch's size on the glass, 8 from its neighbor, inside the window

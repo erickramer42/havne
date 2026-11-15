@@ -14673,3 +14673,295 @@ TEST(BridgeTest, AFileCoreRefusedAtTheStartKeepsItsText)
     EXPECT_EQ(readFile(ConditionStore::path()), mockConditions());
     EXPECT_EQ(bridge.conditionModel()->rowCount(), 3);
 }
+
+// ---------------------------------------------------------------------------
+// Armed (ADR-0063 section 7, step 7e): the app's armed recorder, opened
+// through the log's openRecorder with ECUIO_RECORD_ARMED. The mock's speed
+// reads 0 until its first pull, well past a slow runner's first seconds, so a
+// record condition on speed below 1 km/h is ON from the first frame (a window
+// opens at once) and one above 90000 never fires.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+QByteArray armedConditions(bool fires)
+{
+    // Speed below 1 km/h holds until the mock's first pull, well past a
+    // slow runner's first seconds (rpm would hold for the key-on's 15 s)
+    const QByteArray bound = fires ? R"("below":1)" : R"("above":90000)";
+    return QByteArray(
+               R"({"havne_conditions":1,"name":"Armed test","conditions":[)"
+               R"({"key":"rec","name":"Vehicle stopped","when":{"signal":)"
+               R"(["id:3001"],"unit":"km/h",)") +
+           bound + R"(},"record":{"before":0.2,"after":0.2}}]})";
+}
+
+QStringList windowFolders(const QString& root)
+{
+    return QDir(root).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+}
+
+// A bridge on the mock with an armed-test set saved and its log kept
+struct ArmedRig {
+    SettingsDirScope dir;
+    QTemporaryDir root;
+    SessionBridge bridge;
+    QStringList log;
+
+    explicit ArmedRig(const QByteArray& conditions)
+    {
+        bridge.setRecordingsRootForTesting(root.path());
+        QObject::connect(&bridge, &SessionBridge::logMessage,
+                         [this](const QString& line) { log << line; });
+        if (!conditions.isEmpty()) {
+            bridge.saveConditions(QString::fromUtf8(conditions));
+        }
+    }
+    bool connectMock()
+    {
+        return bridge.connectSession("mock://armed").isEmpty() &&
+               spinUntil([this]() { return bridge.frameCount() > 2; }, 5000);
+    }
+    bool logHas(const QString& prefix) const
+    {
+        for (const QString& l : log) {
+            if (l.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+} // namespace
+
+TEST(BridgeTest, ArmedWritesNothingUntilAFiring)
+{
+    ArmedRig rig(armedConditions(false));
+    ASSERT_TRUE(rig.dir.valid() && rig.root.isValid());
+    ASSERT_TRUE(rig.connectMock());
+    EXPECT_EQ(rig.bridge.armedWhy(), QString());
+    ASSERT_TRUE(rig.bridge.startArmed()) << rig.log.join('\n').toStdString();
+    EXPECT_TRUE(rig.bridge.armedActive());
+    EXPECT_TRUE(rig.bridge.recordingActive()) << "the one recorder slot";
+    EXPECT_FALSE(rig.bridge.logActive());
+    spinLoop(600);
+    EXPECT_EQ(rig.bridge.armedWindows(), 0);
+    EXPECT_FALSE(rig.bridge.armedRecording());
+    EXPECT_TRUE(windowFolders(rig.root.path()).isEmpty());
+    EXPECT_FALSE(rig.bridge.mark(QStringLiteral("x")))
+        << "between windows a mark goes nowhere";
+    EXPECT_EQ(rig.bridge.markCount(), 0);
+
+    rig.bridge.stopArmed();
+    EXPECT_FALSE(rig.bridge.armedActive());
+    EXPECT_FALSE(rig.bridge.recordingActive());
+    EXPECT_TRUE(rig.logHas(QStringLiteral("Armed ended: no window opened")))
+        << rig.log.join('\n').toStdString();
+    EXPECT_TRUE(windowFolders(rig.root.path()).isEmpty());
+}
+
+TEST(BridgeTest, ArmedIsRefusedBesideALogOrRecordSessions)
+{
+    {
+        ArmedRig rig(armedConditions(false));
+        rig.bridge.setRecording(true);
+        ASSERT_TRUE(rig.connectMock());
+        ASSERT_TRUE(rig.bridge.recordingActive());
+        EXPECT_EQ(rig.bridge.armedWhy(),
+                  QStringLiteral("Recording this session already"));
+        EXPECT_FALSE(rig.bridge.startArmed());
+        EXPECT_TRUE(rig.logHas(QStringLiteral(
+            "Armed not started: Recording this session already")))
+            << rig.log.join('\n').toStdString();
+        EXPECT_FALSE(rig.bridge.armedActive());
+    }
+    {
+        ArmedRig rig(armedConditions(false));
+        ASSERT_TRUE(rig.connectMock());
+        SignalListModel* model = rig.bridge.signalModel();
+        std::vector<uint16_t> picks;
+        for (int r = 0; r < model->rowCount() && picks.size() < 2; ++r) {
+            const QModelIndex i = model->index(r);
+            if (!model->data(i, SignalListModel::IsTextRole).toBool()) {
+                picks.push_back(static_cast<uint16_t>(
+                    model->data(i, SignalListModel::IdRole).toUInt()));
+            }
+        }
+        plotOnly(model, picks);
+        ASSERT_TRUE(rig.bridge.startLog());
+        EXPECT_EQ(rig.bridge.armedWhy(), QStringLiteral("a log is running"));
+        EXPECT_FALSE(rig.bridge.startArmed());
+        EXPECT_TRUE(
+            rig.logHas(QStringLiteral("Armed not started: a log is running")));
+        EXPECT_TRUE(rig.bridge.logActive());
+        rig.bridge.stopLog();
+    }
+}
+
+TEST(BridgeTest, ALogIsRefusedWhileArmed)
+{
+    ArmedRig rig(armedConditions(false));
+    ASSERT_TRUE(rig.connectMock());
+    ASSERT_TRUE(rig.bridge.startArmed());
+    EXPECT_FALSE(rig.bridge.startLog());
+    EXPECT_TRUE(rig.logHas(
+        QStringLiteral("Log not started: Armed is recording this session")))
+        << rig.log.join('\n').toStdString();
+    EXPECT_FALSE(rig.bridge.logActive());
+    EXPECT_TRUE(rig.bridge.armedActive()) << "the refusal leaves Armed be";
+    rig.bridge.stopArmed();
+}
+
+TEST(BridgeTest, ArmedIsRefusedWithNoConditionThatRecords)
+{
+    // A set with no record use, then none at all
+    for (const QByteArray& set : {mockConditions(), QByteArray()}) {
+        ArmedRig rig(set);
+        ASSERT_TRUE(rig.connectMock());
+        EXPECT_EQ(rig.bridge.armedWhy(),
+                  QStringLiteral("no condition records"));
+        EXPECT_FALSE(rig.bridge.startArmed());
+        EXPECT_TRUE(rig.logHas(
+            QStringLiteral("Armed not started: no condition records")))
+            << rig.log.join('\n').toStdString();
+        EXPECT_EQ(rig.bridge.logNotice(),
+                  QStringLiteral("Armed not started: no condition records"));
+        EXPECT_FALSE(rig.bridge.armedActive());
+        EXPECT_FALSE(rig.bridge.recordingActive());
+        EXPECT_TRUE(windowFolders(rig.root.path()).isEmpty());
+    }
+    // Offline, nothing to start
+    ArmedRig offline(armedConditions(true));
+    EXPECT_EQ(offline.bridge.armedWhy(), QStringLiteral("not connected"));
+    EXPECT_FALSE(offline.bridge.startArmed());
+}
+
+TEST(BridgeTest, AFiringOpensAWindowAndLogsIt)
+{
+    ArmedRig rig(armedConditions(true));
+    ASSERT_TRUE(rig.connectMock());
+    ASSERT_TRUE(rig.bridge.startArmed()) << rig.log.join('\n').toStdString();
+    ASSERT_TRUE(spinUntil(
+        [&rig]() {
+            return rig.bridge.armedWindows() == 1 &&
+                   rig.bridge.armedRecording();
+        },
+        10000))
+        << rig.log.join('\n').toStdString();
+    const QStringList folders = windowFolders(rig.root.path());
+    ASSERT_EQ(folders.size(), 1);
+    EXPECT_EQ(rig.bridge.armedFolder(), folders.first());
+    EXPECT_TRUE(rig.logHas(
+        QStringLiteral("Armed window opened: %1").arg(folders.first())))
+        << rig.log.join('\n').toStdString();
+    EXPECT_FALSE(rig.log.join(u'\n').contains(rig.root.path()))
+        << "a folder name, never a path";
+    EXPECT_TRUE(rig.bridge.mark(QStringLiteral("in the window")))
+        << "a mark inside a window goes into it";
+    EXPECT_EQ(rig.bridge.markCount(), 1);
+
+    rig.bridge.stopArmed();
+    EXPECT_FALSE(rig.bridge.armedActive());
+    EXPECT_FALSE(rig.bridge.armedRecording());
+    EXPECT_TRUE(rig.logHas(
+        QStringLiteral("Armed window closed: %1").arg(folders.first())));
+    EXPECT_TRUE(rig.logHas(QStringLiteral("Armed ended: 1 window")));
+    EXPECT_TRUE(QFileInfo::exists(
+        QDir(rig.root.path()).filePath(folders.first() + "/frames.csv")));
+}
+
+TEST(BridgeTest, ADisconnectClosesTheArmedRecorder)
+{
+    ArmedRig rig(armedConditions(true));
+    ASSERT_TRUE(rig.connectMock());
+    ASSERT_TRUE(rig.bridge.startArmed());
+    ASSERT_TRUE(
+        spinUntil([&rig]() { return rig.bridge.armedRecording(); }, 10000));
+    const QString folder = rig.bridge.armedFolder();
+    ASSERT_TRUE(disconnectAndWait(rig.bridge));
+    EXPECT_FALSE(rig.bridge.armedActive());
+    EXPECT_FALSE(rig.bridge.armedRecording());
+    EXPECT_FALSE(rig.bridge.recordingActive());
+    EXPECT_TRUE(
+        rig.logHas(QStringLiteral("Armed window closed: %1").arg(folder)))
+        << rig.log.join('\n').toStdString();
+    EXPECT_TRUE(rig.logHas(QStringLiteral("Armed ended: 1 window")));
+    EXPECT_EQ(rig.bridge.armedWhy(), QStringLiteral("not connected"));
+}
+
+TEST(BridgeTest, AnArmedRecorderThatNeverFiredLeavesNoFolder)
+{
+    ArmedRig rig(armedConditions(false));
+    ASSERT_TRUE(rig.connectMock());
+    ASSERT_TRUE(rig.bridge.startArmed());
+    spinLoop(500);
+    ASSERT_TRUE(disconnectAndWait(rig.bridge));
+    EXPECT_FALSE(rig.bridge.armedActive());
+    EXPECT_TRUE(windowFolders(rig.root.path()).isEmpty())
+        << "nothing on disk but the root";
+    EXPECT_TRUE(rig.logHas(QStringLiteral("Armed ended: no window opened")))
+        << rig.log.join('\n').toStdString();
+}
+
+// The app judged "no condition records" itself; with that judgment off,
+// core's own refusal at the attach reaches the user in core's words, not
+// the status string the close after a failed attach leaves
+TEST(BridgeTest, ArmedShowsCoresWordsWhenCoreRefusesTheAttach)
+{
+    ArmedRig rig(mockConditions());
+    ASSERT_TRUE(rig.connectMock());
+    rig.bridge.skipArmedJudgmentForTesting(true);
+    EXPECT_FALSE(rig.bridge.startArmed());
+    EXPECT_TRUE(rig.bridge.logNotice().startsWith(
+        QStringLiteral("Armed not started: no condition records")))
+        << rig.bridge.logNotice().toStdString();
+    EXPECT_TRUE(
+        rig.logHas(QStringLiteral("Armed not started: no condition records")))
+        << rig.log.join('\n').toStdString();
+    EXPECT_FALSE(rig.bridge.armedActive());
+    EXPECT_FALSE(rig.bridge.recordingActive());
+    EXPECT_TRUE(windowFolders(rig.root.path()).isEmpty());
+}
+
+TEST(BridgeTest, ArmedIsRefusedOnAReplay)
+{
+    ArmedRig rig(armedConditions(true));
+    ASSERT_TRUE(
+        rig.bridge
+            .connectSession(QStringLiteral("replay://%1/2026-10-25-engine-start"
+                                           "?profile=obd2&speed=100")
+                                .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES)))
+            .isEmpty());
+    EXPECT_EQ(rig.bridge.armedWhy(),
+              QStringLiteral("a replay plays a recording already"));
+    EXPECT_FALSE(rig.bridge.startArmed());
+    EXPECT_TRUE(rig.logHas(QStringLiteral(
+        "Armed not started: a replay plays a recording already")))
+        << rig.log.join('\n').toStdString();
+    EXPECT_FALSE(rig.bridge.armedActive());
+    EXPECT_TRUE(windowFolders(rig.root.path()).isEmpty());
+}
+
+// A failed write ends Armed with the recorder's own words in the log and
+// the Dashboard's notice, as a log's does
+TEST(BridgeTest, AFailedWriteWhileArmedEndsItWithTheReason)
+{
+    ArmedRig rig(armedConditions(true));
+    ASSERT_TRUE(rig.connectMock());
+    ASSERT_TRUE(rig.bridge.startArmed());
+    ASSERT_TRUE(
+        spinUntil([&rig]() { return rig.bridge.armedRecording(); }, 10000))
+        << rig.log.join('\n').toStdString();
+    ASSERT_NE(rig.bridge.recorderForTesting(), nullptr);
+    ecuio_recorder_test_fail_writes(rig.bridge.recorderForTesting());
+    ASSERT_TRUE(
+        spinUntil([&rig]() { return !rig.bridge.armedActive(); }, 5000));
+    EXPECT_EQ(rig.bridge.logNotice(),
+              QStringLiteral("Armed ended: the disk is full"));
+    EXPECT_TRUE(rig.logHas(QStringLiteral("Armed ended: the disk is full")))
+        << rig.log.join('\n').toStdString();
+    EXPECT_FALSE(rig.logHas(QStringLiteral("Armed ended: no window")));
+    EXPECT_TRUE(rig.bridge.connected()) << "the session runs on";
+    ASSERT_TRUE(disconnectAndWait(rig.bridge));
+}

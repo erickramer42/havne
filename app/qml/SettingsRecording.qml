@@ -53,7 +53,10 @@ ColumnLayout {
             Layout.fillWidth: true
             elide: Text.ElideMiddle
             color: Bridge.recordingActive ? Theme.success : Theme.textDim
-            text: Bridge.recordingActive
+            text: Bridge.armedActive
+                  ? (Bridge.armedRecording ? qsTr("Armed: recording a window")
+                                           : qsTr("Armed: waiting for a condition that records"))
+                  : Bridge.recordingActive
                   ? qsTr("Recording to %1").arg(Bridge.recordingFolder)
                   : Bridge.recording && root.host.replayInField
                     ? qsTr("Replays aren't recorded")
