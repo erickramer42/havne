@@ -5156,6 +5156,55 @@ TEST(CoreTest, AComputedInputAtItsBoundStillCounts)
     EXPECT_EQ(ecuio_profile_unregister("test-computed-age"), ECUIO_OK);
 }
 
+/* A signal file's computed signal reads each input no older than
+ * ECUIO_VALUE_STALE_US (3 s) unless its max_age gives that input more:
+ * inputs 4 s apart give no value, and the same expression with max_age
+ * 10 on the older input gives one */
+TEST(CoreTest, AComputedSignalsInputsFourSecondsApartNeedItsMaxAge)
+{
+    const std::string file = R"({"havne_signals": 1, "name": "Inputs apart",
+ "source": {"name": "Havne's tests"}, "extends": "obd2", "signals": [
+ {"key": "plain", "name": "Plain", "kind": "computed", "expr": "obd2.rpm - obd2.speed"},
+ {"key": "aged", "name": "Aged", "kind": "computed", "expr": "obd2.rpm - obd2.speed",
+  "max_age": {"obd2.speed": 10}}]})";
+    ecuio_signal_file_t* sf = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(file.data(), file.size(), &sf), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_profile_register(ecuio_signal_file_profile(sf),
+                                     ecuio_signal_file_set(sf), nullptr),
+              ECUIO_OK);
+    const std::string uri =
+        std::string("mock://apart?profile=") + ecuio_signal_file_profile(sf);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &session), ECUIO_OK);
+    ValuesCapture cap;
+    ASSERT_EQ(ecuio_register_values_callback(session, values_capture_cb, &cap),
+              ECUIO_OK);
+    /* Speed 50 km/h at 10 s; 1000 rpm (4000 quarter turns) at 13 s and 14 s */
+    const ecuio_frame_t speed =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0D, 50}, 10000000);
+    const ecuio_frame_t at3 =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0C, 0x0F, 0xA0}, 13000000);
+    const ecuio_frame_t at4 =
+        value_frame(ECUIO_OBD2_ECU_ARB_ID, {0x41, 0x0C, 0x0F, 0xA0}, 14000000);
+    for (const ecuio_frame_t* f : {&speed, &at3, &at4}) {
+        ecuio_session_dispatch_callbacks(session, f);
+    }
+    const uint16_t plain = ecuio_signal_file_find(sf, "plain")->id;
+    const uint16_t aged = ecuio_signal_file_find(sf, "aged")->id;
+    ASSERT_EQ(cap.batches.size(), 3u);
+    ASSERT_NE(value_of(cap.batches[1], plain), nullptr) << "3 s apart";
+    EXPECT_EQ(value_of(cap.batches[1], plain)->value, 950.0);
+    EXPECT_EQ(value_of(cap.batches[2], plain), nullptr)
+        << "4 s apart: past the 3 s bound";
+    ASSERT_NE(value_of(cap.batches[2], aged), nullptr) << "max_age 10";
+    EXPECT_EQ(value_of(cap.batches[2], aged)->value, 950.0);
+    ecuio_session_destroy(session);
+    EXPECT_EQ(ecuio_profile_unregister(ecuio_signal_file_profile(sf)),
+              ECUIO_OK);
+    ecuio_signal_file_free(sf);
+}
+
 /* Each input past its bound or never seen reaches the program as no
  * value, so an if's branch not taken can hold one (ADR-0051 section 5's
  * format 2 rule), and a format 1 program over a stale input still gives
