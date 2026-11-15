@@ -3317,23 +3317,26 @@ TestCase {
         compare(Bridge.currentUri, "mock://demo")
     }
 
-    // A session on the fake adapter, ended
+    // A session on the emulator, ended. It serves one host at a time,
+    // so this waits until it has seen the host go
     function endSession() {
+        const closed = Harness.emulatorClients("closed")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        tryVerify(() => Harness.emulatorClients("closed") > closed, 5000,
+                  "the emulator sees the host go")
     }
 
-    // On an adapter the connect runs under the pick's profile, and what
-    // is kept is the row's address without it: the vehicle's address and
+    // On an adapter (havne-cli's ELM327 emulator, on every platform) the
+    // connect runs under the pick's profile, and what is kept is the
+    // row's address without it: the vehicle's address and
     // the recent list name no profile, so each connect adds the pick of
     // the vehicle picked then, and another vehicle reads its own
     function test_aListConnectOnAnAdapterReadsThePluginAndKeepsTheRowsAddress() {
-        if (Harness.fakeDllPath === "")
-            skip("needs the fake J2534 DLL (Windows)")
         const page = createPage()
         press(page, "vehicleNew")
         verify(importFile(page, "plus.json", "Plus", "1E1C", true))
-        const uri = "j2534://" + Harness.fakeDllPath
+        const uri = emulatorUri()
         const composed = uri + "?profile=plugin.plus.base"
         const field = find(page, "uriField")
         field.text = ""
@@ -3369,12 +3372,10 @@ TestCase {
     // The recent list keeps the row's address too; an address typed
     // after it is kept as typed
     function test_aListConnectKeepsTheRowsAddressInTheRecentList() {
-        if (Harness.fakeDllPath === "")
-            skip("needs the fake J2534 DLL (Windows)")
         const page = createPage()
         press(page, "vehicleNew")
         verify(importFile(page, "plus.json", "Plus", "1E1C", true))
-        const uri = "j2534://" + Harness.fakeDllPath
+        const uri = emulatorUri()
         find(page, "uriField").text = ""
         page.connectFromList(uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
@@ -3393,12 +3394,10 @@ TestCase {
     // reads it for a vehicle that picks the plugin; for another it drops
     // the profile, so the plugin is never remembered as that vehicle's
     function test_aRowNamingAPluginReadsItOnlyForAVehicleThatPicksIt() {
-        if (Harness.fakeDllPath === "")
-            skip("needs the fake J2534 DLL (Windows)")
         const page = createPage()
         press(page, "vehicleNew")
         verify(importFile(page, "plus.json", "Plus", "1E1C", true))
-        const uri = "j2534://" + Harness.fakeDllPath
+        const uri = emulatorUri()
         const composed = uri + "?profile=plugin.plus.base"
         const field = find(page, "uriField")
         field.text = composed
@@ -3427,13 +3426,11 @@ TestCase {
     // next that reads obd2 is read, at a start as at a connect, and with
     // the plugin removed the row connects as it is
     function test_aKeptRowFollowsTheVehiclesPicks() {
-        if (Harness.fakeDllPath === "")
-            skip("needs the fake J2534 DLL (Windows)")
         let page = createPage()
         press(page, "vehicleNew")
         verify(importFile(page, "plus.json", "Plus", "1E1C", true))
         verify(importFile(page, "more.json", "More", "D102", true))
-        const uri = "j2534://" + Harness.fakeDllPath
+        const uri = emulatorUri()
         const plus = uri + "?profile=plugin.plus.base"
         const more = uri + "?profile=plugin.more.base"
         find(page, "uriField").text = ""
