@@ -113,6 +113,26 @@ TestCase {
                 "stale", "a stale term says so before its state")
     }
 
+    // A term on a signal the listed profile lacks says so in words, in the
+    // list and the editor; its reference is the description a screen
+    // reader gives, and a signal the profile has keeps its name alone
+    function test_aSignalNotInTheProfileIsSaidInWords() {
+        save([rpm("missing", "Not in the mock", { signal: ["key:not_here"], unit: "kPa", above: 300 }),
+              rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 })])
+        const page = settingsOf()
+        page.uriField.text = "mock://demo"
+        find(page, "settingsAlertsPart").refreshRows()
+        const row = rowOf(page, 0)
+        compare(wordsOf(row, "alertSummary"), "a signal not in this profile above 300 kPa")
+        compare(row.Accessible.description, "key:not_here")
+        compare(wordsOf(rowOf(page, 1), "alertSummary"), "RPM above 6000 RPM")
+        compare(rowOf(page, 1).Accessible.description, "")
+        row.clicked()
+        const term = find(termOf(editorOf(page), 0), "alertTermSignal")
+        compare(term.text, "a signal not in this profile")
+        compare(term.Accessible.description, "key:not_here")
+    }
+
     // ---- The editor
 
     // A row opens its alert; a change saved goes into the file through

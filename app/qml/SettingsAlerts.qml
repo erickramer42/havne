@@ -157,13 +157,23 @@ ColumnLayout {
         return typeof v === "number" && isFinite(v)
                ? String(Number(v.toFixed(3))).replace(".", Qt.locale().decimalPoint) : ""
     }
-    function nameOfRefs(refs) {
+    function rowOfRefs(refs) {
         const all = DashboardBook.lookupRefs(refs ?? [], gaugeSets)
-        for (const r of rows) {
-            if (all.indexOf(r.ref) >= 0)
-                return r.name
-        }
-        return (refs ?? []).length > 0 ? String(refs[0]) : qsTr("no signal")
+        return rows.find(r => all.indexOf(r.ref) >= 0) ?? null
+    }
+    function nameOfRefs(refs) {
+        const row = rowOfRefs(refs)
+        return row !== null ? row.name
+                            : (refs ?? []).length > 0 ? qsTr("a signal not in this profile") : qsTr("no signal")
+    }
+    // A signal the rows don't list, by its reference, for a screen
+    // reader's description; "" for one they list
+    function unlistedRef(refs) {
+        return (refs ?? []).length > 0 && rowOfRefs(refs) === null ? String(refs[0]) : ""
+    }
+    function unlistedRefsOf(c) {
+        return ConditionBook.termsOf(c).filter(t => ConditionBook.kindOf(t) === "signal")
+            .map(t => unlistedRef(t.signal)).filter(r => r !== "").join(", ")
     }
     readonly property var linkNames: ({
         not_ok: qsTr("the link isn't OK"), timeout: qsTr("the ECU isn't responding"),
@@ -422,6 +432,7 @@ ColumnLayout {
             Layout.preferredHeight: Math.max(Theme.touchTarget, rowContent.implicitHeight + 16)
             Accessible.name: stateText === "" ? qsTr("Edit %1").arg(condition.name ?? "")
                                               : qsTr("Edit %1, %2").arg(condition.name ?? "").arg(stateText)
+            Accessible.description: root.unlistedRefsOf(condition)
             enabled: root.confirming === ""
             onClicked: root.openEditor(index, condition)
             contentItem: RowLayout {

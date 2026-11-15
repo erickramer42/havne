@@ -415,6 +415,7 @@ ColumnLayout {
                     Layout.maximumWidth: implicitWidth
                     text: (termCard.term.signal ?? []).length > 0
                           ? root.alerts.nameOfRefs(termCard.term.signal) : qsTr("Pick a signal...")
+                    Accessible.description: root.alerts.unlistedRef(termCard.term.signal)
                     checkable: true
                     checked: root.picking === termCard.index
                     onClicked: {
