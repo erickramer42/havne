@@ -16,11 +16,14 @@
 # each line received is one of them. The stall outlasts the ring's 32 KiB
 # and the pipe's room at about 16 KB/s; Linux's pipe is cut to a page, as
 # Windows' is (on Windows the 7 s drop about 200 of some 500 events).
+# macOS's pipe grows to 64 KiB and can't be cut, so there the child writes
+# to a Unix socket pair of 4 KiB buffers instead.
 
 import collections
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -75,16 +78,29 @@ def main():
         root = os.path.join(scratch, "recordings")
         os.mkdir(root)
         env = dict(os.environ, HAVNE_CLI_RING_BYTES="1")
+        pipe_cut = fcntl is not None and hasattr(fcntl, "F_SETPIPE_SZ")
+        ours = theirs = None
+        if os.name == "posix" and not pipe_cut:
+            ours, theirs = socket.socketpair()
+            for side in (ours, theirs):
+                side.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+                side.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
         proc = subprocess.Popen(
             [cli, "stream", "mock://demo", "--values", "--conditions", named,
              "--record", root, "--seconds", str(SECONDS)],
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            stdout=theirs.fileno() if theirs else subprocess.PIPE,
             stderr=subprocess.PIPE, env=env)
-        if fcntl is not None and hasattr(fcntl, "F_SETPIPE_SZ"):
-            fcntl.fcntl(proc.stdout.fileno(), fcntl.F_SETPIPE_SZ, 4096)
+        if theirs:
+            theirs.close()
+            reader = ours.makefile("rb")
+        else:
+            reader = proc.stdout
+            if pipe_cut:
+                fcntl.fcntl(reader.fileno(), fcntl.F_SETPIPE_SZ, 4096)
         lines = []
         stalled = False
-        for raw in proc.stdout:
+        for raw in reader:
             line = json.loads(raw)
             lines.append(line)
             if not stalled and line.get("t_us", 0) >= STALL_FROM_US:
