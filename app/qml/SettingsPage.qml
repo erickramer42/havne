@@ -1288,11 +1288,11 @@ Pane {
         "mock": ["profile", "did", "diagnose"],
         "replay": ["profile", "did", "speed", "loop"],
         "j2534": ["baud", "flags", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                  "pack", "scan", "session", "keepalive_ms", "profile", "did"],
+                  "pack", "scan", "gap", "session", "keepalive_ms", "profile", "did"],
         "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                   "pack", "scan", "session", "keepalive_ms", "profile", "did"],
+                   "pack", "scan", "gap", "session", "keepalive_ms", "profile", "did"],
         "socketcan": ["profile", "did", "baud", "filter", "txid", "poll", "probe", "identify",
-                      "diagnose", "pack", "scan", "session", "keepalive_ms"]
+                      "diagnose", "pack", "scan", "gap", "session", "keepalive_ms"]
     })
     // What a SocketCAN session that only listens takes: Default is raw
     // there, and core refuses it the keys that ask an ECU

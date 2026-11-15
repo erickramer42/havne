@@ -523,9 +523,9 @@ class Session:
         says it doesn't support (ecuio_session_get_unsupported_signals):
         the PID's bitmap leaves it out, and a computed signal with such an
         input is listed with it. Empty until a bitmap has been answered
-        and on a profile with no Service 01 signals. mock:// answers its
-        bitmaps at create, listing no PID, so under profile=obd2 it lists
-        every signal."""
+        and on a profile with no Service 01 signals. mock:// walks its demo
+        car's bitmaps at create, so under profile=obd2 it lists the set's
+        signals the car doesn't answer."""
         return self._listed(lib.ecuio_session_get_unsupported_signals,
                             "ecuio_session_get_unsupported_signals")
 

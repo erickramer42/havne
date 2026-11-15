@@ -1030,17 +1030,17 @@ TestCase {
 
     // keepalive_ms is a key all three adapter schemes take, so a switch
     // between them keeps it
-    function test_anotherSchemeKeepsKeepaliveMs() {
+    function test_anotherSchemeKeepsKeepaliveMsAndGap() {
         const page = createPage()
         const uri = find(page, "uriField")
 
-        type(uri, "elm327://COM5?profile=uds-generic&keepalive_ms=2000")
+        type(uri, "elm327://COM5?profile=uds-generic&keepalive_ms=2000&gap=10")
         press(page, "preset_j2534")
-        compare(uri.text, "j2534://?profile=uds-generic&keepalive_ms=2000",
-                "J2534 takes keepalive_ms")
+        compare(uri.text, "j2534://?profile=uds-generic&keepalive_ms=2000&gap=10",
+                "J2534 takes keepalive_ms and gap")
         press(page, "preset_wifi_obdx")
-        compare(uri.text, "elm327://192.168.4.1:23?profile=uds-generic&keepalive_ms=2000",
-                "ELM327 takes keepalive_ms")
+        compare(uri.text, "elm327://192.168.4.1:23?profile=uds-generic&keepalive_ms=2000&gap=10",
+                "ELM327 takes keepalive_ms and gap")
     }
 
     // The Units row sets the bridge's unit system, connected or not, and
