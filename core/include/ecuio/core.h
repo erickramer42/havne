@@ -155,9 +155,12 @@ typedef enum {
                                          long call (a recording's open,
                                          ADR-0049; an export, an import
                                          or a health report, ADR-0054) */
-    ECUIO_ERR_IN_USE = 20,            /* a session or a simulated ECU still
-                                         decodes with what was to be freed
-                                         (a plugin, ADR-0052) */
+    ECUIO_ERR_IN_USE = 20,            /* still in use: a session or a
+                                         simulated ECU decodes with what
+                                         was to be freed (a plugin,
+                                         ADR-0052), or a recording holds
+                                         what was to be changed (a
+                                         session's conditions, conditions.h) */
     ECUIO_ERR_STREAM_ENDED = 21,      /* a pull queue's session has nothing
                                          more to give: a replay played its
                                          last frame (queue.h) */

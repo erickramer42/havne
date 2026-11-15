@@ -564,6 +564,9 @@ TEST(CoreTest, StatusStringValidValues) {
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_RECORDING_FAILED),
                  "the recording couldn't be made or written");
     EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_CANCELED), "canceled");
+    /* Both uses: a plugin a session decodes with, and the conditions a
+     * recording holds */
+    EXPECT_STREQ(ecuio_status_string(ECUIO_ERR_IN_USE), "still in use");
 
     /* Explicit cast required by MSVC for enum conversion */
     EXPECT_STRNE(ecuio_status_string(static_cast<ecuio_status_t>(999)), nullptr);
