@@ -6,7 +6,6 @@ import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs
 
 pragma ComponentBehavior: Bound
 
@@ -476,6 +475,7 @@ Page {
         const unloaded = (v ? v.picks : []).filter(p => !files.some(f => f.profile === p))
         const text = DashboardBook.exportText(doc, form, needed)
         if (text === "") {
+            Bridge.dropPicked(url)
             noteLayout(qsTr("Not saved: this layout can't be written as a file"), true)
             return false
         }
@@ -820,9 +820,17 @@ Page {
         refreshRows()
         panel = "signal"
     }
+    // Bridge.gaugeSignals as plain arrays, read once (it is CONSTANT): each read
+    // of a bridge map makes a new JS wrapper, and every cell's lookup reads it
+    readonly property var gaugeSets: {
+        const sets = Bridge.gaugeSignals, copy = {}
+        for (const key in sets)
+            copy[key] = Array.from(sets[key])
+        return copy
+    }
     // The picked ref and its counterparts in the other built-in set
     function counterparts(ref) {
-        const sets = Bridge.gaugeSignals
+        const sets = gaugeSets
         for (const key in sets) {
             const refs = sets[key]
             if (refs.indexOf(ref) >= 0)
@@ -843,7 +851,7 @@ Page {
     }
     // The Bridge.gaugeSignals key whose refs hold this ref ("" for none)
     function keyOfRef(ref) {
-        const sets = Bridge.gaugeSignals
+        const sets = gaugeSets
         for (const key in sets) {
             if (sets[key].indexOf(ref) >= 0)
                 return key
@@ -3052,16 +3060,17 @@ Page {
             font.pixelSize: Theme.fontCaption
             text: root.layoutNote
         }
-        FileDialog {
+        DocumentSaveDialog {
             id: layoutSaveDialog
+            objectName: "layoutSaveDialog"
             title: qsTr("Export this layout")
-            fileMode: FileDialog.SaveFile
             defaultSuffix: "json"
             nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
             currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
             currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
                          + "/" + root.layoutFileName()
             onAccepted: root.exportLayoutTo(layoutSaveDialog.selectedFile)
+            onFailed: words => root.noteLayout(qsTr("Not saved: %1").arg(words), true)
         }
         DocumentOpenDialog {
             id: layoutOpenDialog

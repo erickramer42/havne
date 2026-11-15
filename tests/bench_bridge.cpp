@@ -48,9 +48,18 @@
 // is checked against every def. Plain defs derive no requests, so the
 // registry's request cap doesn't bound N.
 //
+// With --conditions typical|largest the load test's runs judge that set,
+// saved and attached through the bridge as the app's own (ADR-0063
+// section 3), so the worker's callback and the tick's are measured too:
+// scripts/bench_ab.py's load kind runs one tree with and without it.
+// Every run's settings folder is a scratch one, so a saved set of the
+// user's is never attached. It holds the plugin and signal stores too, so
+// an A/B against a tree built before it reads other stores.
+//
 // Run: build/tests/Release/bench_bridge.exe [frames per run, default 20000]
-//      build/tests/Release/bench_bridge.exe --load   (the load test alone,
-//      as CI runs it; a markdown table)
+//      build/tests/Release/bench_bridge.exe --load [--conditions
+//      typical|largest]   (the load test alone, as CI runs it; a
+//      markdown table)
 //      build/tests/Release/bench_bridge.exe --record (the recording test
 //      alone, about 90 s; a markdown table)
 //      build/tests/Release/bench_bridge.exe --decode (core's decode with
@@ -326,6 +335,9 @@ constexpr double kMinRecordedLoopShare = 0.7;
 #endif
 constexpr int kDecodeFrames = 100000;
 
+std::string typicalConditions();
+std::string largestConditions();
+
 struct LoadRun {
     const char* label = "";
     const char* query = "";
@@ -340,6 +352,8 @@ struct LoadRun {
     SessionBridge::DeliveryStats stats;
     ecuio_recorder_state_t rec{}; // recorded: one pass once every frame is
                                   // written, looping at the run's end
+    std::string conditions;       // a condition file the bridge saves and
+                                  // judges; "" for none
 };
 
 void spin(double seconds)
@@ -351,6 +365,33 @@ void spin(double seconds)
         QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
 }
 
+// HAVNE_SETTINGS_DIR at a scratch folder for a run, as it was after
+struct ScratchSettings {
+    QTemporaryDir dir;
+    bool had = qEnvironmentVariableIsSet("HAVNE_SETTINGS_DIR");
+    QByteArray before = qgetenv("HAVNE_SETTINGS_DIR");
+    ScratchSettings() { qputenv("HAVNE_SETTINGS_DIR", dir.path().toUtf8()); }
+    ~ScratchSettings() { restore(); }
+    ScratchSettings(const ScratchSettings&) = delete;
+    ScratchSettings& operator=(const ScratchSettings&) = delete;
+    void restore()
+    {
+        if (had) {
+            qputenv("HAVNE_SETTINGS_DIR", before);
+        } else {
+            qunsetenv("HAVNE_SETTINGS_DIR");
+        }
+    }
+};
+
+// A run that can't go on: std::exit runs no destructor
+[[noreturn]] void failRun(ScratchSettings& settings)
+{
+    settings.restore();
+    settings.dir.remove();
+    std::exit(1);
+}
+
 void replayFixture(LoadRun& run)
 {
     const QString uri =
@@ -358,7 +399,19 @@ void replayFixture(LoadRun& run)
             .arg(QStringLiteral(ECUIO_REPLAY_FIXTURES),
                  QString::fromLatin1(run.profile),
                  QString::fromLatin1(run.query));
+    // The bridge's saved set (ConditionStore) in a scratch folder
+    ScratchSettings settings;
     SessionBridge bridge;
+    if (!run.conditions.empty()) {
+        const QVariantMap saved =
+            bridge.saveConditions(QString::fromStdString(run.conditions));
+        if (!saved.value(QStringLiteral("ok")).toBool()) {
+            std::fprintf(
+                stderr, "the bench's conditions weren't saved: %s\n",
+                qPrintable(saved.value(QStringLiteral("words")).toString()));
+            failRun(settings);
+        }
+    }
     QTemporaryDir recordings;
     if (run.recorded) {
         bridge.setRecordingsRootForTesting(recordings.path());
@@ -380,7 +433,13 @@ void replayFixture(LoadRun& run)
     const QString err = bridge.connectSession(uri);
     if (!err.isEmpty()) {
         std::fprintf(stderr, "connect %s failed: %s\n", qPrintable(uri), qPrintable(err));
-        std::exit(1);
+        failRun(settings);
+    }
+    if (!run.conditions.empty() &&
+        (bridge.conditionsGenerationForTesting() != 1 ||
+         bridge.conditionModel()->rowCount() == 0)) {
+        std::fprintf(stderr, "the bench's conditions weren't attached\n");
+        failRun(settings);
     }
     if (run.sustained) {
         spin(0.5);
@@ -806,8 +865,10 @@ std::string quantiles(const LatencyStats& l)
     return buf;
 }
 
-// The load test: a markdown table, then each failed check; false if any
-bool loadTest(bool withSlowRun)
+// The load test: a markdown table, then each failed check; false if any.
+// conditions ("" for none) is judged in every run, named as named
+bool loadTest(bool withSlowRun, const std::string& conditions = std::string(),
+              const char* named = "none")
 {
     std::vector<LoadRun> runs(3);
     runs[0].label = "full speed, one pass";
@@ -841,13 +902,16 @@ bool loadTest(bool withSlowRun)
         slow.query = "speed=10";
         runs.push_back(slow);
     }
-    for (LoadRun& run : runs)
+    for (LoadRun& run : runs) {
+        run.conditions = conditions;
         replayFixture(run);
+    }
 
     std::printf("\n### Load test: the engine-start fixture under obd2\n\n"
                 "7,074 frames over 297 s recorded, RPM peaking at 1,261.25. "
                 "Latencies in ms (median / p99 / max), each at most 12.5 %% "
-                "above the true value.\n\n");
+                "above the true value.\n\nConditions: %s.\n\n",
+                named);
     std::printf("| Run | Seconds | Worker frames/s | Handled | Dropped | Values | "
                 "Frame to GUI thread | Value to model | Peak rpm |\n"
                 "|---|---|---|---|---|---|---|---|---|\n");
@@ -1302,7 +1366,26 @@ int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
     if (argc > 1 && std::strcmp(argv[1], "--load") == 0) {
-        return loadTest(false) ? 0 : 1;
+        if (argc == 2) {
+            return loadTest(false) ? 0 : 1;
+        }
+        if (argc == 4 && std::strcmp(argv[2], "--conditions") == 0 &&
+            (std::strcmp(argv[3], "typical") == 0 ||
+             std::strcmp(argv[3], "largest") == 0)) {
+            const bool largest = std::strcmp(argv[3], "largest") == 0;
+            return loadTest(false,
+                            largest ? largestConditions() : typicalConditions(),
+                            largest
+                                ? "the largest set, 64 conditions of 4 terms, "
+                                  "attached through the bridge"
+                                : "the typical set, 8 conditions, attached "
+                                  "through the bridge")
+                       ? 0
+                       : 1;
+        }
+        std::fprintf(stderr,
+                     "bench_bridge: --load [--conditions typical|largest]\n");
+        return 2;
     }
     if (argc > 1 && std::strcmp(argv[1], "--record") == 0) {
         return recordTest() ? 0 : 1;

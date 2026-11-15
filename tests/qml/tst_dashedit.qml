@@ -3649,6 +3649,52 @@ TestCase {
         compare(labels(page), ["Paren"], "nothing read")
     }
 
+    // Export layout through the save picker: the pick's document holds the
+    // layout, each save offers the page's own name (Downloads names its
+    // document by an id, which a later save must never offer), and a picker
+    // with no document says so
+    function test_theSavePickerWritesTheLayoutAndOffersItsNameEachTime() {
+        const page = storedPageOf({}, docOf([cellOf("Saved")]))
+        const dialog = find(page, "layoutSaveDialog")
+        dialog.usePicker = true
+        DocumentPicker.setPickerForTesting(true)
+        const url = layoutUrl("layout-save-picked.json")
+        dialog.open()
+        compare(DocumentPicker.titleForTesting(), page.layoutFileName())
+        compare(DocumentPicker.mimeTypeForTesting(), "application/json")
+        DocumentPicker.deliver(dialog.request, -1, url.toString(), "89", -1)
+        verify(!page.layoutNoteBad, page.layoutNote)
+        const reader = storedPageOf({}, docOf([cellOf("X")]))
+        reader.loadLayoutFrom(url)
+        compare(labels(reader), ["Saved"], "the picked document holds the layout")
+
+        dialog.open()
+        compare(DocumentPicker.titleForTesting(), page.layoutFileName(),
+                "the page's name again, never the last answer's")
+        DocumentPicker.deliver(dialog.request, -1, "", "")
+        compare(page.layoutNote, "Not saved: The picker returned no document")
+        verify(page.layoutNoteBad)
+    }
+
+    // A layout the page can't write as a file is refused before the bridge's
+    // save: the pick's own document goes all the same (its verdict taken)
+    function test_aLayoutThatCantBeWrittenDropsThePicksDocument() {
+        const page = storedPageOf({}, docOf([cellOf("Saved")]))
+        const bad = JSON.parse(JSON.stringify(page.doc))
+        bad.format = 99
+        page.doc = bad
+        const uri = "content://com.android.externalstorage.documents/document/"
+                    + "primary%3ADownload%2Fbad-layout.json"
+        const dialog = find(page, "layoutSaveDialog")
+        dialog.usePicker = true
+        DocumentPicker.setPickerForTesting(true)
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, uri, "bad-layout.json",
+                               DocumentPicker.launchedMsForTesting() + 50)
+        compare(page.layoutNote, "Not saved: this layout can't be written as a file")
+        compare(DocumentPicker.verdictOfForTesting(uri), 0, "the refusal took the verdict")
+    }
+
     function test_twoQuickLoadsAreTwoUndoSteps() {
         const a = docOf([cellOf("A")])
         const b = docOf([cellOf("B")])

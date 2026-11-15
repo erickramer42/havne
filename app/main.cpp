@@ -68,6 +68,11 @@ protected:
 
 int main(int argc, char *argv[])
 {
+    // Qt 6.12's incremental collector can crash sweeping a QVariantMap's JS
+    // wrapper whose map is gone; whole collections (a time limit of 0) don't
+    if (!qEnvironmentVariableIsSet("QV4_GC_TIMELIMIT")) {
+        qputenv("QV4_GC_TIMELIMIT", "0");
+    }
 #ifdef Q_OS_ANDROID
     // Qt Quick's basic render loop: every draw on the GUI thread, started
     // by an event NoDrawWhileInactive sees. A frame the threaded loop's

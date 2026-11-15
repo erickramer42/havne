@@ -876,6 +876,29 @@ TestCase {
         return url.substring(0, url.lastIndexOf("/"))
     }
 
+    // The viewer's two saves through the save picker: a picker with no
+    // document says so in Save report's note and in the export's
+    function test_theViewersSavePickersSayWhyNothingWasSaved() {
+        const page = openEarlyViewer()
+        DocumentPicker.setPickerForTesting(true)
+        const report = find(page, "reportDialog")
+        report.usePicker = true
+        report.open()
+        compare(DocumentPicker.titleForTesting(), "health-report.txt")
+        DocumentPicker.deliver(report.request, -1, "", "")
+        compare(page.reportNote, "Report not saved: The picker returned no document")
+        verify(page.reportFailed)
+
+        const panel = openExport(page)
+        const save = find(panel, "exportSaveDialog")
+        save.usePicker = true
+        save.open()
+        compare(DocumentPicker.mimeTypeForTesting(), "text/csv")
+        DocumentPicker.deliver(save.request, -1, "", "")
+        compare(panel.note, "Not exported: The picker returned no document")
+        verify(panel.failed)
+    }
+
     function test_theExportPanelTakesTheChartsPlaceAndClosesAgain() {
         const page = openEarlyViewer()
         const chart = find(page, "chartFrame")
