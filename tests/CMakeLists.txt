@@ -1843,6 +1843,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ECUIO_IMPORT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
         ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
+        ECUIO_VEHICLEBOOK_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/data/vehiclebook"
     )
 
     # Windows: deployed like the app, into a directory of its own (the
