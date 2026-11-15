@@ -173,10 +173,15 @@ ColumnLayout {
                 placeholderText: qsTr("none")
                 inputMethodHints: Qt.ImhDigitsOnly
                 // A year typed is the user's; the page marks one it fills
-                // from a VIN after setting it
+                // from a VIN after setting it. A year part typed is judged
+                // at its fourth digit or the field's end
                 onTextChanged: {
                     root.host.obdbYearFromVin = false
                     if (importPanel.isObdb)
+                        root.host.previewObdb(true)
+                }
+                onEditingFinished: {
+                    if (importPanel.isObdb && root.host.obdbReport === null)
                         root.host.previewObdb()
                 }
             }

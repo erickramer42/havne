@@ -3717,6 +3717,28 @@ TestCase {
         compare(page.picks, ["plugin.vehicle-1-obdb.base"], "a VIN's year names no variant")
     }
 
+    // A model year typed digit by digit refuses nothing until its fourth
+    // digit or the field's end, and meanwhile no report waits to be kept
+    function test_aModelYearTypedIsJudgedWhole() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(obdbRead(page, "2019"))
+        const field = find(page, "obdbYearField")
+        field.text = ""
+        for (const t of ["2", "20", "202"]) {
+            field.text = t
+            compare(find(page, "signalProblem").text, "", t + " is a year on its way")
+            verify(!find(page, "obdbReport").visible, "no report waits beside " + t)
+            verify(!find(page, "obdbKeep").visible, "nor Keep")
+        }
+        field.editingFinished()
+        compare(find(page, "signalProblem").text, "A model year is 1980 to 2039, or empty for none")
+        field.text = "2021"
+        compare(find(page, "signalProblem").text, "")
+        compare(page.obdbReport.year, 2021)
+    }
+
     // The year in the field is the waiting set's: it goes with a discard
     // and with the vehicle, so one vehicle's year never converts another's
     function test_theObdbYearGoesWithItsSet() {

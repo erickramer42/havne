@@ -588,15 +588,17 @@ Pane {
     }
 
     // The held set converted for the field's year: its report shown, or
-    // the bridge's words why not. True when there's a report
-    function previewObdb() {
+    // the bridge's words why not. True when there's a report. While typing,
+    // one to three digits are a year on its way: no report and no refusal
+    function previewObdb(typing) {
         signalNote = ""
         obdbReport = null
         if (pendingImport === null || pendingImport.kind !== "obdb")
             return false
         const year = obdbYear()
         if (year < 0) {
-            signalProblem = qsTr("A model year is 1980 to 2039, or empty for none")
+            signalProblem = typing === true && /^[0-9]{1,3}$/.test(obdbYearField.text.trim())
+                ? "" : qsTr("A model year is 1980 to 2039, or empty for none")
             return false
         }
         const r = Bridge.previewObdbImport(year, obdbName())
