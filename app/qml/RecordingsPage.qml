@@ -408,70 +408,13 @@ Page {
         else if (role === "ids") idsHead = head
         else aboutHead = head
     }
-    // A view's list head on the pinned form: the zoom row, the switch and
-    // the view's own controls move into its slots, so they scroll away
-    // with the list; elsewhere it is empty and takes no height
-    component ViewHead: ColumnLayout {
-        id: head
-        // values, frames, ids or about
-        required property string role
-        readonly property alias zoomSlot: zoomSlotItem
-        readonly property alias switchSlot: switchSlotItem
-        readonly property alias toolsSlot: toolsSlotItem
-        // The list it heads. A ListView keeps its contentY when its header's
-        // height changes, so a head that grows at the list's start would
-        // slide under the list's top: the list goes back to its start then,
-        // unless it was scrolled on. While a change waits for that, a contentY
-        // within the head's height of the origin is the change's, not a scroll
-        property ListView list: null
-        property bool listAtStart: true
-        property bool settling: false
-        visible: root.pinnedViewer
-        height: visible ? implicitHeight + 10 : 0
-        spacing: 10
-        function settle() {
-            head.settling = true
-            Qt.callLater(head.toStart)
-        }
-        function toStart() {
-            head.settling = false
-            if (head.visible && head.list !== null && head.list.visible && head.listAtStart)
-                head.list.positionViewAtBeginning()
-        }
-        onHeightChanged: head.settle()
-        Connections {
-            target: head.list
-            function onContentYChanged() {
-                head.listAtStart = head.list.contentY
-                                   <= head.list.originY + 1 + (head.settling ? head.height : 0)
-            }
-            function onHeightChanged() { head.settle() }
-            function onOriginYChanged() { head.settle() }
-            function onVisibleChanged() { head.settle() }
-        }
-        ColumnLayout {
-            id: zoomSlotItem
-            Layout.fillWidth: true
-            spacing: 0
-        }
-        RowLayout {
-            id: switchSlotItem
-            Layout.fillWidth: true
-        }
-        ColumnLayout {
-            id: toolsSlotItem
-            Layout.fillWidth: true
-            spacing: 0
-        }
-        Component.onCompleted: root.noteHead(role, head)
-    }
     Component {
         id: framesHeadComponent
-        ViewHead { role: "frames"; list: viewerFrameTable.list }
+        ViewHead { role: "frames"; list: viewerFrameTable.list; host: root }
     }
     Component {
         id: idsHeadComponent
-        ViewHead { role: "ids"; list: viewerFrameIds.list }
+        ViewHead { role: "ids"; list: viewerFrameIds.list; host: root }
     }
     // A column narrower than a second reads the recording's raw rows
     // (ADR-0049 section 5); a second or wider, the reader's per-second
@@ -3677,6 +3620,7 @@ Page {
             model: root.shownSignals
             header: Component {
                 ViewHead {
+                    host: root
                     role: "values"
                     // The pinned list's scrollbar lies over its right edge: the head keeps clear
                     width: signalRows.width - (root.pinnedViewer ? 12 : 0)
@@ -4136,6 +4080,7 @@ Page {
             model: recording.findings
             header: Component {
                 ViewHead {
+                    host: root
                     role: "about"
                     width: findingList.width
                     list: findingList
