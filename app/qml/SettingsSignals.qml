@@ -31,6 +31,24 @@ ColumnLayout {
         importDialog.open()
     }
 
+    // A row's press: the pick made or undone, and the focus, when the
+    // button had it, kept on that variant's row, which a first pick
+    // moves up with its plugin
+    function pressRow(profile, focused) {
+        root.host.togglePick(profile)
+        if (!focused)
+            return
+        const at = root.host.variantRows.findIndex(r => r.profile === profile)
+        const item = at >= 0 ? rows.itemAt(at) : null
+        if (item !== null)
+            item.pickButton.forceActiveFocus()
+    }
+    // What a row shows while the list is shorter than its items
+    readonly property var noRow: ({ sha256: "", id: "", name: "", version: "", variant: "",
+                                    profile: "", mine: false, obd2: false, count: 0, own: 0,
+                                    several: false, forCar: false, picked: false, caption: "",
+                                    unused: false })
+
     Label {
         objectName: "signalLockedNote"
         visible: !root.host.idle
@@ -365,15 +383,19 @@ ColumnLayout {
     // ---- The list: a row for each variant of each plugin. A press picks
     // it for the picked vehicle or undoes the pick; More opens the row's
     // actions in place ----
+    // The model is the rows' count: a pick changes a row's data and not
+    // their number, so the items stay and a press keeps its focus
     Repeater {
-        model: root.host.variantRows
+        id: rows
+        model: root.host.variantRows.length
         ColumnLayout {
             id: row
-            required property var modelData
             required property int index
-            readonly property bool open: root.host.openRow === modelData.profile
-            readonly property string title: root.host.rowTitle(modelData)
-            readonly property string reads: root.host.rowReads(modelData)
+            readonly property var entry: root.host.variantRows[index] ?? root.noRow
+            readonly property Item pickButton: pick
+            readonly property bool open: root.host.openRow === entry.profile
+            readonly property string title: root.host.rowTitle(entry)
+            readonly property string reads: root.host.rowReads(entry)
             objectName: "signalRow_" + index
             Layout.fillWidth: true
             spacing: Theme.spacing / 2
@@ -381,7 +403,7 @@ ColumnLayout {
             Label {
                 objectName: "rowCaption"
                 visible: text !== ""
-                text: row.modelData.caption
+                text: row.entry.caption
                 color: Theme.textDim
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
@@ -395,14 +417,14 @@ ColumnLayout {
                     Layout.fillWidth: true
                     Layout.minimumWidth: 0
                     checkable: true
-                    checked: row.modelData.picked
+                    checked: row.entry.picked
                     enabled: root.vehicle && root.canChange
                     leftPadding: 12
                     rightPadding: 12
-                    Accessible.name: row.modelData.picked
+                    Accessible.name: row.entry.picked
                         ? qsTr("%1, %2, picked").arg(row.title).arg(row.reads)
                         : qsTr("%1, %2").arg(row.title).arg(row.reads)
-                    onClicked: root.host.togglePick(row.modelData.profile)
+                    onClicked: root.pressRow(row.entry.profile, activeFocus)
                     contentItem: RowLayout {
                         spacing: 10
                         // A mark, so the pick doesn't rest on the fill alone
@@ -410,7 +432,7 @@ ColumnLayout {
                             implicitWidth: 18; implicitHeight: 18   // layout-managed
                             Shape {
                                 objectName: "rowPickMark"
-                                visible: row.modelData.picked
+                                visible: row.entry.picked
                                 anchors.centerIn: parent
                                 width: 24; height: 24
                                 scale: 0.75
@@ -459,7 +481,7 @@ ColumnLayout {
                     checkable: true
                     checked: row.open
                     Accessible.name: qsTr("More for %1").arg(row.title)
-                    onClicked: root.host.openRow = row.open ? "" : row.modelData.profile
+                    onClicked: root.host.openRow = row.open ? "" : row.entry.profile
                 }
             }
 
@@ -474,26 +496,26 @@ ColumnLayout {
                     text: qsTr("Save as a signal file...")
                     // Reads the copy alone, so a session may run
                     enabled: root.host.confirming === ""
-                    onClicked: root.host.saveVariantAs(row.modelData)
+                    onClicked: root.host.saveVariantAs(row.entry)
                 }
                 ThemedButton {
                     objectName: "rowExport"
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Export plugin...")
                     enabled: root.host.confirming === ""
-                    onClicked: root.host.exportPluginAs(row.modelData.sha256)
+                    onClicked: root.host.exportPluginAs(row.entry.sha256)
                 }
                 ThemedButton {
                     objectName: "rowReplace"
-                    visible: row.modelData.mine
+                    visible: row.entry.mine
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Replace...")
                     enabled: root.canChange
-                    onClicked: root.replaceFrom(row.modelData)
+                    onClicked: root.replaceFrom(row.entry)
                 }
                 ThemedButton {
                     objectName: "rowCopy"
-                    visible: !row.modelData.mine
+                    visible: !row.entry.mine
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Copy to my plugin")
                     checkable: true
@@ -503,34 +525,34 @@ ColumnLayout {
                 }
                 ThemedButton {
                     objectName: "rowMine"
-                    visible: !row.modelData.mine
+                    visible: !row.entry.mine
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Mine")
                     enabled: root.canChange
-                    onClicked: root.host.markMine(row.modelData.sha256)
+                    onClicked: root.host.markMine(row.entry.sha256)
                 }
                 ThemedButton {
                     objectName: "rowRemoveVariant"
-                    visible: row.modelData.mine && row.modelData.several
+                    visible: row.entry.mine && row.entry.several
                     flat: true
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Remove this variant")
                     enabled: root.canChange
-                    onClicked: root.host.removeVariant(row.modelData)
+                    onClicked: root.host.removeVariant(row.entry)
                 }
                 ThemedButton {
                     objectName: "rowRemove"
                     flat: true
                     width: Math.min(implicitWidth, parent.width)
-                    text: row.modelData.several ? qsTr("Remove the plugin") : qsTr("Remove")
+                    text: row.entry.several ? qsTr("Remove the plugin") : qsTr("Remove")
                     enabled: root.canChange
-                    onClicked: root.host.askRemovePlugin(row.modelData.sha256)
+                    onClicked: root.host.askRemovePlugin(row.entry.sha256)
                 }
             }
             // What Mine does, said before the press
             Label {
                 objectName: "rowMineLine"
-                visible: row.open && !row.modelData.mine
+                visible: row.open && !row.entry.mine
                 text: qsTr("Mine marks it as yours, so its variants can be changed here; a newer "
                            + "export of the same plugin then updates it in place.")
                 color: Theme.textDim
@@ -549,7 +571,7 @@ ColumnLayout {
                     text: qsTr("Into a new plugin")
                     highlighted: true
                     enabled: root.canChange
-                    onClicked: root.host.copyVariantTo(row.modelData, "")
+                    onClicked: root.host.copyVariantTo(row.entry, "")
                 }
                 Repeater {
                     model: row.open && root.host.copyShown ? root.host.ownPlugins : []
@@ -560,7 +582,7 @@ ColumnLayout {
                         width: Math.min(implicitWidth, parent.width)
                         text: qsTr("Into %1").arg(modelData.name)
                         enabled: root.canChange
-                        onClicked: root.host.copyVariantTo(row.modelData, modelData.sha256)
+                        onClicked: root.host.copyVariantTo(row.entry, modelData.sha256)
                     }
                 }
             }
@@ -584,7 +606,7 @@ ColumnLayout {
                         objectName: "exportSave"
                         text: qsTr("Save...")
                         highlighted: true
-                        onClicked: root.host.openExport(row.modelData.sha256)
+                        onClicked: root.host.openExport(row.entry.sha256)
                     }
                     ThemedButton {
                         objectName: "exportCancel"
@@ -595,10 +617,10 @@ ColumnLayout {
             }
             Label {
                 objectName: "rowUnused"
-                visible: row.modelData.unused
+                visible: row.entry.unused
                 text: root.host.pickedVehicle === null
                       ? qsTr("Not in use: add or pick a vehicle, then pick it here.")
-                      : row.modelData.several
+                      : row.entry.several
                         ? qsTr("Not in use: press a variant to pick it for %1.")
                               .arg(root.host.pickedVehicle.label)
                         : qsTr("Not in use: press it to pick it for %1.")
@@ -657,7 +679,7 @@ ColumnLayout {
         }
     }
 
-    FileDialog {
+    DocumentOpenDialog {
         id: importDialog
         objectName: "signalImportDialog"
         title: root.host.replaceTarget !== null
@@ -666,6 +688,12 @@ ColumnLayout {
         nameFilters: [qsTr("Plugins, signal files and OBDb sets (*.json)"), qsTr("All files (*)")]
         onAccepted: root.host.importFile(importDialog.selectedFile)
         onRejected: root.host.replaceTarget = null
+        // As an import's refusal: no earlier note left beside the words
+        onFailed: words => {
+            root.host.replaceTarget = null
+            root.host.signalNote = ""
+            root.host.signalProblem = words
+        }
     }
     FileDialog {
         id: saveDialog

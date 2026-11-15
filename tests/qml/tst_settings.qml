@@ -2331,6 +2331,38 @@ TestCase {
         compare(signalsRow(page).summary, "2 plugins: Extras and 1 more")
     }
 
+    // Through the phone's picker: the Signals page's one open hands its
+    // pick to the import, and a picker with no document says so, with no
+    // earlier note left beside the words and Replace's target dropped
+    function test_theSignalsPagesPickReachesItsImport() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        DocumentPicker.setPickerForTesting(true)
+        const dialog = find(page, "signalImportDialog")
+        dialog.usePicker = true
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1,
+            Harness.writeScratchFile("picked (1).json", signalFileText("Picked")).toString(),
+            "picked (1).json")
+        verify(find(page, "importPanel").visible, "the pick reached the import: the file waits")
+        compare(find(page, "importText").text, "Picked: a signal file")
+        verify(page.keepPending("", ""))
+        compare(find(page, "signalNote").text, "Picked 1.0.0 added: picked for Vehicle 1")
+
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, "", "")
+        compare(find(page, "signalProblem").text, "The picker returned no document")
+        compare(find(page, "signalNote").text, "", "no earlier note beside the words")
+
+        page.signalProblem = ""
+        page.startReplace(rowData(page, "plugin.picked.base"))
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, "", "")
+        compare(find(page, "signalProblem").text, "The picker returned no document")
+        compare(page.replaceTarget, null, "and the next Import is an import")
+    }
+
     // A file core refuses, or one that is none of the three kinds, keeps
     // nothing and says why, never naming the path
     function test_aFileCoreRefusesOrOfNoKindIsNotKept() {
@@ -2563,6 +2595,127 @@ TestCase {
         find(page, "vinLookupField").text = "ZZZFAKE11G0000001"   // 2016: base's, before my2019
         compare(page.variantRows.map(r => r.caption), ["For this car:", "", ""], "a VIN's match lifts it too")
         verify(rowData(page, my2019).forCar, "the variant the VIN doesn't cover, beside the one it does")
+    }
+
+    // A press keeps the focus on its variant's row: the rows stay as they
+    // are through a pick and its undoing, and a first pick, which lifts
+    // the plugin past another, takes the focus with the row
+    function test_aPickKeepsTheFocusOnItsRow() {
+        const page = createPage()
+        page.open("signals")
+        verify(importExample(page))
+        verify(importFile(page, "zed.json", "Zed"))   // with no vehicle: nobody's, after the example
+        press(page, "vehicleNew")
+        const my2019 = "plugin.example-sim.my2019"
+        const zed = "plugin.zed.base"
+        compare(page.variantRows.map(r => r.profile), ["plugin.example-sim.base", my2019, zed])
+
+        const button = find(rowOf(page, my2019), "rowPick")
+        button.forceActiveFocus()
+        verify(button.activeFocus)
+        button.clicked()
+        compare(page.picks, [my2019])
+        verify(find(rowOf(page, my2019), "rowPick") === button, "the same button after the pick")
+        verify(button.checked)
+        verify(button.activeFocus, "the pick keeps the focus")
+        button.clicked()
+        compare(page.picks, [], "pressed again, undone")
+        verify(find(rowOf(page, my2019), "rowPick") === button && button.activeFocus, "and once undone")
+
+        // Zed's pick lifts it past the example: the focus goes with the row
+        const last = find(rowOf(page, zed), "rowPick")
+        last.forceActiveFocus()
+        last.clicked()
+        compare(page.variantRows.map(r => r.profile), [zed, "plugin.example-sim.base", my2019])
+        const moved = find(rowOf(page, zed), "rowPick")
+        verify(moved !== last, "the row is in another place")
+        verify(moved.activeFocus, "the focus is on the variant pressed")
+        verify(moved.checked)
+        moved.clicked()
+        compare(page.variantRows.map(r => r.profile), ["plugin.example-sim.base", my2019, zed])
+        verify(find(rowOf(page, zed), "rowPick").activeFocus, "and back with it")
+    }
+
+    // A session's matches are kept on the vehicle its VIN identified, by
+    // their profiles alone and never another car's, and stay once the VIN
+    // goes with the session: through a page made again, a VIN typed in the
+    // lookup, which is asked about in their place, and another vehicle's
+    // turn, which has none of them. A replaced plugin takes its own, and a
+    // session whose VIN is no vehicle's marks only while it runs
+    function test_aSessionsVinMatchesStayWithItsVehicle() {
+        let page = createPage()
+        press(page, "vehicleNew")
+        const car = page.pickedVehicle.id
+        page.open("signals")
+        verify(importExample(page))
+        const base = "plugin.example-sim.base"
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+        Bridge.identifyForTesting("ZZZFAKE11G0000001")   // a 2016: base alone
+        tryVerify(() => rowData(page, base).forCar, 1000, "marked while it runs")
+        compare(page.pickedVehicle.vinMatches, [], "the VIN is no vehicle's: nothing kept")
+
+        // The VIN names the picked vehicle (an adapter's recognize does
+        // it; the mock's URI is no adapter's, so the key is set here)
+        const salt = page.vehicles.salt !== "" ? page.vehicles.salt : Bridge.newSalt()
+        const doc = VehicleBook.copy(page.vehicles)
+        doc.salt = salt
+        page.saveVehicles(VehicleBook.change(doc, v => v.vinKey = Bridge.vinKey(salt)))
+        Bridge.identifyForTesting("ZZZFAKE11G0000001")
+        compare(page.pickedVehicle.vinMatches, [base])
+        verify(!VehicleBook.serialize(page.vehicles).includes("ZZZFAKE"), "never the VIN")
+
+        // Another car's VIN with this vehicle picked (a replay of it, which
+        // recognizes no vehicle) keeps nothing
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // 2021: both variants
+        compare(page.pickedVehicle.vinMatches, [base], "not another car's")
+
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+        compare(Bridge.pluginMatches(""), [], "the VIN went with the session")
+        verify(rowData(page, base).forCar, "the vehicle's matches stay")
+
+        // The page made again (the app's next start) reads them from the book
+        page.destroy()
+        wait(10)
+        page = createPage()
+        page.open("signals")
+        compare(page.pickedVehicle.id, car)
+        verify(rowData(page, base).forCar)
+
+        // A VIN typed in the lookup is the one asked about, in their place
+        find(page, "vinLookupField").text = "1FAFAKE13Y0000001"   // another manufacturer
+        verify(!rowData(page, base).forCar, "the typed VIN's: none")
+        find(page, "vinLookupField").text = ""
+        verify(rowData(page, base).forCar)
+
+        // Another vehicle has none of them; its own turn back has them
+        press(page, "vehicleNew")
+        verify(!rowData(page, base).forCar, "not this one's")
+        page.pickVehicle(car)
+        verify(rowData(page, base).forCar)
+
+        // A replacement takes the replaced plugin's matches (its new
+        // version's match may not cover the car) and keeps the pick
+        pressRow(page, base)
+        verify(importExample(page, "1.1.0"))
+        compare(page.pickedVehicle.vinMatches, [])
+        compare(page.picks, [base], "the pick kept")
+        pressRow(page, base)
+        verify(!rowData(page, base).forCar, "no match left, and no pick")
+
+        // A session whose VIN is no vehicle's: marked while it runs alone
+        press(page, "vehicleNew")
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected again")
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")
+        tryVerify(() => rowData(page, base).forCar, 1000, "marked")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+        tryVerify(() => !rowData(page, base).forCar, 1000, "gone with the VIN")
+        compare(page.pickedVehicle.vinMatches, [], "nothing kept on this one")
     }
 
     // A session's VIN puts the variants it covers first (ADR-0052 section
