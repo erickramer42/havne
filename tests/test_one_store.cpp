@@ -620,6 +620,34 @@ TEST(BridgeTest, OneStoreAnImportTellsItsKindByItsFirstKey)
     }
 }
 
+/* The import's one read opens a picked file as every other does, by the
+ * URL's encoded text (pathOfUrl): a provider's document named with an
+ * escape in it (Android's "signals (1).json" arrives as one) is read by
+ * that name, not by the decoded one ("a b.json") toString() gives. A URL with no
+ * scheme stands in for a provider's, which a desktop can't have */
+TEST(BridgeTest, OneStoreAPickedFileIsOpenedByItsEncodedName)
+{
+    SettingsDir dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    Logged b;
+    const QUrl made = writeScratch(from.path(), QStringLiteral("a%20b.json"),
+                                   packed_plugin::example());
+    ASSERT_FALSE(made.isEmpty());
+    const QUrl picked =
+        QUrl::fromEncoded(made.toLocalFile().toUtf8(), QUrl::TolerantMode);
+    ASSERT_FALSE(picked.isLocalFile());
+    if (picked.toString(QUrl::FullyEncoded)
+            .compare(made.toLocalFile(), Qt::CaseInsensitive) != 0) {
+        GTEST_SKIP() << "a temporary path a URL spells differently (a space "
+                        "or a non-ASCII character in it)";
+    }
+
+    const QVariantMap r = b.bridge.readImport(picked);
+    EXPECT_TRUE(ok(r)) << words(r);
+    EXPECT_FALSE(str(r, "name").isEmpty()) << "the package was read";
+}
+
 /* An OBDb set converted and kept is a plugin of the user's own, imported
  * for its vehicle; its variant is my<year> only for a year the user
  * typed, base for one decoded from a VIN or for none */

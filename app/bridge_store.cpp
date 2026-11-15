@@ -165,8 +165,8 @@ QVariantMap SessionBridge::readImport(const QUrl& url, const QString& only)
         return QVariantMap{{QStringLiteral("ok"), false},
                            {QStringLiteral("words"), words}};
     };
-    // Android's content:// URIs open through QFile as they are
-    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
     QVariantMap result;
     QString kind;
     QString line;
@@ -174,7 +174,7 @@ QVariantMap SessionBridge::readImport(const QUrl& url, const QString& only)
         QStringLiteral("The file is over %1 MiB, a plugin's most")
             .arg(ECUIO_PLUGIN_PACKAGE_MAX / (1024 * 1024));
     QByteArray bytes;
-    if (file.open(QIODevice::ReadOnly)) {
+    if (openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
         // The read's own bound: a provider may give no size to judge by
         bytes = file.read(ECUIO_PLUGIN_PACKAGE_MAX + 1);
     }
