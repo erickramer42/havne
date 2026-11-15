@@ -185,7 +185,9 @@ void check_binding(const ecuio_condition_set_t* set, uint32_t i,
  * stand still, creep and jump past every hold and age bound, and
  * samples on and around each term's level and clear, now and then one
  * that is no number or an infinity, and now and then a frame stamped a
- * little before the time reached. Three evaluators take them: two the
+ * little before the time reached. On a run that judges the link (the
+ * input picks), some steps are a change of the link's state instead of
+ * a frame, given as the worker gives it. Three evaluators take them: two the
  * same frames, which must agree event for event; the third also a frame
  * with no values halfway to each one, which must change nothing, since
  * a deadline is settled at its own time by whichever frame comes next.
@@ -217,8 +219,10 @@ struct canon {
         uint64_t v = 0;
         memcpy(&v, &ev.value, sizeof v);
         uint64_t h = ev.timestamp_us * 1099511628211ull;
+        /* LINK names the call that settled it, which the grouping moves */
+        const uint32_t flags = ev.flags & ~ECUIO_CONDITION_LINK;
         h ^= (uint64_t{ev.condition} << 48) ^ (uint64_t{ev.state} << 40) ^
-             (uint64_t{ev.flags} << 44) ^ (uint64_t{ev.term} << 36) ^ v;
+             (uint64_t{flags} << 44) ^ (uint64_t{ev.term} << 36) ^ v;
         sum += h * 1099511628211ull + (h >> 29);
         ++count;
     }
@@ -247,7 +251,9 @@ struct canon {
     }
 };
 
-void check_events(const ecuio_condition_eval& e, uint32_t n, uint64_t now_us)
+/* at_link: the call was judge_link, whose every event carries LINK */
+void check_events(const ecuio_condition_eval& e, uint32_t n, uint64_t now_us,
+                  bool at_link = false)
 {
     check(e.dropped == 0 && n <= e.events.size());
     uint32_t per[ECUIO_CONDITION_MAX_CONDITIONS] = {};
@@ -259,13 +265,16 @@ void check_events(const ecuio_condition_eval& e, uint32_t n, uint64_t now_us)
         check(++per[ev.condition] <= ecuio_condition_eval::kEventsPerCondition);
         check(ev.state == ECUIO_CONDITION_OFF ||
               ev.state == ECUIO_CONDITION_ON);
-        check((ev.flags & ~(ECUIO_CONDITION_STALE | ECUIO_CONDITION_FIRED)) ==
-              0);
+        check((ev.flags & ~(ECUIO_CONDITION_STALE | ECUIO_CONDITION_FIRED |
+                            ECUIO_CONDITION_LINK)) == 0);
+        check(((ev.flags & ECUIO_CONDITION_LINK) != 0) == at_link);
         check((ev.flags & ECUIO_CONDITION_FIRED) == 0 ||
               ev.state == ECUIO_CONDITION_ON);
         check(ev.timestamp_us <= now_us && !std::isnan(ev.value));
         check(ev.generation == e.generation && ev.arbitration_id == 0 &&
-              ev.code == 0 && ev.reserved0 == 0 && ev.reserved == 0);
+              ev.reserved0 == 0 && ev.reserved == 0);
+        /* A code only when a link term settled it */
+        check(ev.code == 0 || e.terms[c.first_term + ev.term].link != 0);
         /* By time, then by index, each (condition, time) once */
         if (i > 0) {
             const ecuio_condition_event_t& b = e.events[i - 1];
@@ -313,9 +322,15 @@ struct reference {
          * a sample is fresh to */
         uint64_t mean_us = 0;
         uint64_t fresh_until_us = 0;
+        /* A link term: no signal and no age bound, judged from the first
+         * state given */
+        bool link = false;
 
         uint64_t expiry() const
         {
+            if (link) {
+                return UINT64_MAX;
+            }
             return max_age_us != 0 ? time_us + max_age_us : fresh_until_us;
         }
         /* A sample at now_us: three times the larger of its gap (counted
@@ -367,14 +382,27 @@ struct reference {
          * caller sees tells them apart */
         uint32_t terms = 0;
         double value = 0.0;
+        int32_t code = 0; /* the link's state, when a link term settled it */
     };
     std::vector<condition> conditions;
     std::vector<event> events; /* the last frame's */
     uint64_t reached_us = 0;   /* time never goes back */
+    int32_t link_state = ECUIO_OK;
 
+    static bool link_holds(uint32_t test, int32_t state)
+    {
+        return test == ECUIO_TERM_LINK_NOT_OK ? state != ECUIO_OK
+               : test == ECUIO_TERM_LINK_TIMEOUT
+                   ? state == ECUIO_ERR_VEHICLE_TIMEOUT
+               : test == ECUIO_TERM_LINK_REQUEST_FAILED
+                   ? state == ECUIO_ERR_REQUEST_FAILED
+                   : state == ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+    }
+
+    /* link: the session judges its link, so a link term is judged */
     reference(const ecuio_condition_set_t* set,
               const ecuio_signal_set_t* signals,
-              const ecuio_signal_file_t* file)
+              const ecuio_signal_file_t* file, bool link)
     {
         conditions.resize(ecuio_condition_set_count(set));
         for (uint32_t i = 0; i < conditions.size(); ++i) {
@@ -392,8 +420,14 @@ struct reference {
             for (uint32_t k = 0; k < info.term_count; ++k) {
                 ecuio_condition_term_t t;
                 check(ecuio_condition_set_get_term(set, i, k, &t) == ECUIO_OK);
-                /* A link or a check term is not judged in a session */
-                c.available = c.available && t.kind == ECUIO_TERM_SIGNAL;
+                /* A check term is not judged in a session, a link term
+                 * only where the session judges its link */
+                c.available = c.available &&
+                              (t.kind == ECUIO_TERM_SIGNAL ||
+                               (t.kind == ECUIO_TERM_LINK && link));
+                c.terms[k].link = t.kind == ECUIO_TERM_LINK;
+                /* sampled_terms counts a link term */
+                c.terms[k].sampled = c.terms[k].link;
                 c.terms[k].test = t.test;
                 c.terms[k].level = t.level;
                 c.terms[k].clear = t.clear;
@@ -425,6 +459,7 @@ struct reference {
         e.fired = e.fired || fired;
         e.terms = terms;
         e.value = c.value;
+        e.code = c.terms[first].link ? link_state : 0;
     }
 
     /* The condition's terms taken together at at_us, after `terms`
@@ -482,6 +517,58 @@ struct reference {
         tell(index, at_us, c.toward_terms, c.on);
     }
 
+    /* What came due before now_us, earliest first, a hold's end before an
+     * age bound at the same time */
+    void due(uint32_t index, uint64_t now_us)
+    {
+        condition& c = conditions[index];
+        for (;;) {
+            const uint64_t end =
+                c.toward == 0
+                    ? UINT64_MAX
+                    : c.toward_since_us +
+                          (c.toward == 1 ? c.for_us : c.clear_for_us);
+            uint64_t oldest = UINT64_MAX;
+            uint32_t who = 0;
+            for (uint32_t k = 0; k < c.term_count; ++k) {
+                const term& t = c.terms[k];
+                if (t.judged && t.expiry() < oldest) {
+                    oldest = t.expiry();
+                    who = k;
+                }
+            }
+            if (end < now_us && end <= oldest) {
+                turn(index, end);
+            } else if (oldest < now_us) {
+                c.terms[who].judged = false;
+                weigh(index, oldest, 1u << who);
+            } else {
+                break;
+            }
+        }
+    }
+
+    /* A hold that ends exactly at now_us, if what came at now_us didn't
+     * break it */
+    void hold_at(uint32_t index, uint64_t now_us)
+    {
+        const condition& c = conditions[index];
+        if (c.toward != 0 &&
+            c.toward_since_us + (c.toward == 1 ? c.for_us : c.clear_for_us) ==
+                now_us) {
+            turn(index, now_us);
+        }
+    }
+
+    void sort_events()
+    {
+        std::stable_sort(
+            events.begin(), events.end(), [](const event& a, const event& b) {
+                return a.time_us != b.time_us ? a.time_us < b.time_us
+                                              : a.condition < b.condition;
+            });
+    }
+
     void judge(uint64_t now_us, const ecuio_value_t* values, uint32_t count)
     {
         events.clear();
@@ -494,32 +581,7 @@ struct reference {
             if (!c.available) {
                 continue;
             }
-            /* What came due before this frame, earliest first, a hold's
-             * end before an age bound at the same time */
-            for (;;) {
-                const uint64_t end =
-                    c.toward == 0
-                        ? UINT64_MAX
-                        : c.toward_since_us +
-                              (c.toward == 1 ? c.for_us : c.clear_for_us);
-                uint64_t oldest = UINT64_MAX;
-                uint32_t who = 0;
-                for (uint32_t k = 0; k < c.term_count; ++k) {
-                    const term& t = c.terms[k];
-                    if (t.judged && t.expiry() < oldest) {
-                        oldest = t.expiry();
-                        who = k;
-                    }
-                }
-                if (end < now_us && end <= oldest) {
-                    turn(index, end);
-                } else if (oldest < now_us) {
-                    c.terms[who].judged = false;
-                    weigh(index, oldest, 1u << who);
-                } else {
-                    break;
-                }
-            }
+            due(index, now_us);
             /* The frame's values, each read by every term on its signal */
             uint32_t settled = 0;
             for (uint32_t i = 0; i < count; ++i) {
@@ -531,7 +593,7 @@ struct reference {
                 uint32_t changed = 0;
                 for (uint32_t k = 0; k < c.term_count; ++k) {
                     term& t = c.terms[k];
-                    if (t.signal_id != v.signal_id) {
+                    if (t.link || t.signal_id != v.signal_id) {
                         continue;
                     }
                     bool truth = t.truth;
@@ -561,20 +623,50 @@ struct reference {
             if (settled != 0) {
                 weigh(index, now_us, settled);
             }
-            /* A hold that ends exactly at this frame, if its values
-             * didn't break it */
-            if (c.toward != 0 &&
-                c.toward_since_us +
-                        (c.toward == 1 ? c.for_us : c.clear_for_us) ==
-                    now_us) {
-                turn(index, now_us);
+            hold_at(index, now_us);
+        }
+        sort_events();
+    }
+
+    /* A change of the link's state at now_us: every deadline before it
+     * on the state before, then each link term on the new state */
+    void judge_link(uint64_t now_us, int32_t state)
+    {
+        events.clear();
+        if (now_us < reached_us) {
+            now_us = reached_us;
+        }
+        reached_us = now_us;
+        for (uint32_t index = 0; index < conditions.size(); ++index) {
+            if (conditions[index].available) {
+                due(index, now_us);
             }
         }
-        std::stable_sort(
-            events.begin(), events.end(), [](const event& a, const event& b) {
-                return a.time_us != b.time_us ? a.time_us < b.time_us
-                                              : a.condition < b.condition;
-            });
+        link_state = state;
+        for (uint32_t index = 0; index < conditions.size(); ++index) {
+            condition& c = conditions[index];
+            if (!c.available) {
+                continue;
+            }
+            uint32_t changed = 0;
+            for (uint32_t k = 0; k < c.term_count; ++k) {
+                term& t = c.terms[k];
+                if (!t.link) {
+                    continue;
+                }
+                const bool truth = link_holds(t.test, state);
+                if (truth != t.truth || !t.judged) {
+                    changed |= 1u << k;
+                }
+                t.truth = truth;
+                t.judged = true;
+            }
+            if (changed != 0) {
+                weigh(index, now_us, changed);
+            }
+            hold_at(index, now_us);
+        }
+        sort_events();
     }
 
     /* The evaluator's last frame gave these events and stands in these
@@ -593,6 +685,7 @@ struct reference {
             check(got.term < ECUIO_CONDITION_MAX_TERMS &&
                   (want.terms >> got.term & 1u) != 0);
             check(memcmp(&got.value, &want.value, sizeof got.value) == 0);
+            check(got.code == want.code);
         }
         check(e.conditions.size() == conditions.size());
         for (uint32_t i = 0; i < conditions.size(); ++i) {
@@ -618,16 +711,16 @@ struct reference {
 
 void judge_set(const ecuio_condition_set_t* set,
                const ecuio_signal_set_t* signals,
-               const ecuio_signal_file_t* file, uint64_t seed)
+               const ecuio_signal_file_t* file, uint64_t seed, bool link)
 {
-    reference plain(set, signals, file);
-    reference plain_dense(set, signals, file);
+    reference plain(set, signals, file, link);
+    reference plain_dense(set, signals, file, link);
     std::unique_ptr<ecuio_condition_eval> a =
-        ecuio_condition_eval::make(set, signals, file, 1);
+        ecuio_condition_eval::make(set, signals, file, 1, link);
     std::unique_ptr<ecuio_condition_eval> b =
-        ecuio_condition_eval::make(set, signals, file, 1);
+        ecuio_condition_eval::make(set, signals, file, 1, link);
     std::unique_ptr<ecuio_condition_eval> dense =
-        ecuio_condition_eval::make(set, signals, file, 1);
+        ecuio_condition_eval::make(set, signals, file, 1, link);
     check(a->conditions.size() == ecuio_condition_set_count(set));
     for (uint32_t i = 0; i < a->conditions.size(); ++i) {
         ecuio_condition_binding_t bound;
@@ -644,6 +737,16 @@ void judge_set(const ecuio_condition_set_t* set,
     if (a->terms.empty()) {
         return;
     }
+    /* The terms a frame's sample can be for */
+    std::vector<uint32_t> sampled;
+    for (uint32_t k = 0; k < a->terms.size(); ++k) {
+        if (a->terms[k].link == 0) {
+            sampled.push_back(k);
+        }
+    }
+    static const int32_t kStates[] = {
+        ECUIO_OK, ECUIO_ERR_VEHICLE_TIMEOUT, ECUIO_ERR_REQUEST_FAILED,
+        ECUIO_ERR_TRANSPORT_HARD_FAILURE, ECUIO_ERR_LOAD_FAILED};
     static const uint32_t kSteps[] = {0,       1,       999,      50000,
                                       250000,  1000000, 2999999,  3000000,
                                       3000001, 9000000, 61000000, 180000001};
@@ -656,11 +759,13 @@ void judge_set(const ecuio_condition_set_t* set,
     for (int step = 0; step < 300; ++step) {
         const uint32_t dt =
             kSteps[r.next() % (sizeof kSteps / sizeof kSteps[0])];
+        /* A link step: a change of the link's state, judged alone */
+        const bool at_link = link && r.next() % 6 == 0;
         ecuio_value_t values[4] = {};
-        const uint32_t count = r.next() % 4;
+        const uint32_t count = at_link || sampled.empty() ? 0 : r.next() % 4;
         for (uint32_t k = 0; k < count; ++k) {
             const ecuio_condition_eval::term& t =
-                a->terms[r.next() % a->terms.size()];
+                a->terms[sampled[r.next() % sampled.size()]];
             const double around = (r.next() & 1) != 0 ? t.level : t.clear;
             static const double kOff[] = {-1e6, -1.0, -1e-9, 0.0,
                                           1e-9, 1.0,  1e6};
@@ -699,16 +804,30 @@ void judge_set(const ecuio_condition_set_t* set,
             dense_events.take(dense->events[i]);
         }
         now = std::max(now, at);
-        const uint32_t n = a->judge(at, values, count);
-        check(b->judge(at, values, count) == n);
+        const int32_t state =
+            at_link ? kStates[r.next() % (sizeof kStates / sizeof kStates[0])]
+                    : ECUIO_OK;
+        const auto judged = [&](ecuio_condition_eval& e) {
+            return at_link ? e.judge_link(at, state)
+                           : e.judge(at, values, count);
+        };
+        const auto weighed = [&](reference& ref) {
+            if (at_link) {
+                ref.judge_link(at, state);
+            } else {
+                ref.judge(at, values, count);
+            }
+        };
+        const uint32_t n = judged(*a);
+        check(judged(*b) == n);
         check(n == 0 || memcmp(a->events.data(), b->events.data(),
                                n * sizeof(ecuio_condition_event_t)) == 0);
-        check_events(*a, n, now);
-        plain.judge(at, values, count);
+        check_events(*a, n, now, at_link);
+        weighed(plain);
         plain.agrees(*a, n);
-        const uint32_t m = dense->judge(at, values, count);
-        check_events(*dense, m, now);
-        plain_dense.judge(at, values, count);
+        const uint32_t m = judged(*dense);
+        check_events(*dense, m, now, at_link);
+        weighed(plain_dense);
         plain_dense.agrees(*dense, m);
         for (uint32_t i = 0; i < n; ++i) {
             sparse_events.take(a->events[i]);
@@ -856,9 +975,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     for (size_t i = 0; i < size; ++i) {
         seed = (seed ^ data[i]) * 1099511628211ull;
     }
-    judge_set(a, ecuio_obd2_signal_set(), nullptr, seed);
+    /* The input's hash picks a session that judges its link */
+    const bool link = (seed >> 32 & 1u) != 0;
+    judge_set(a, ecuio_obd2_signal_set(), nullptr, seed, link);
     if (file != nullptr) {
-        judge_set(a, ecuio_signal_file_set(file), file, seed);
+        judge_set(a, ecuio_signal_file_set(file), file, seed, link);
     }
 
     ecuio_signal_file_free(file);

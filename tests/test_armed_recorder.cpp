@@ -554,6 +554,37 @@ TEST(ArmedRecorderTest, TheCloseWritesTheCarriedEventsUpToAWindowsEnd)
         << "the end at the carried event's time: " << lines.back();
 }
 
+/* A focus set after the last record the tail let go and before a
+ * window's first record is the window's: its header names it, once, and
+ * no focus line follows */
+TEST(ArmedRecorderTest, AFocusSetJustBeforeAWindowsFirstRecordIsInItsHeader)
+{
+    Armed a(set_of(
+        rpm_above("high", 2000, R"(,"record":{"before":1,"after":0.5})")));
+    uint64_t frames = 0;
+    for (uint64_t k = 0; k <= 40; ++k) {
+        if (k == 20) {
+            /* Between the frame at 1.9 s, before the window, and its
+             * first at 2.0 s */
+            a.clock.at(1950 * kMs);
+            const uint16_t rpm = ECUIO_OBD2_SIG_RPM_ID;
+            ASSERT_EQ(ecuio_session_set_focus(a.s, &rpm, 1), ECUIO_OK)
+                << ecuio_last_error_detail();
+        }
+        a.rpm(k * 100 * kMs, k >= 30 && k <= 32 ? 3000 : 1000);
+        ++frames;
+    }
+    const ecuio_recorder_state_t st = a.finish(frames);
+    EXPECT_EQ(st.windows, 1u);
+    const std::vector<fs::path> folders = a.root.folders();
+    ASSERT_EQ(folders.size(), 1u);
+    EXPECT_EQ(frame_rows(folders[0]).front().second, 2 * kS)
+        << "the window's first record is the frame at 2.0 s";
+    EXPECT_EQ(header_line(folders[0], "focus"), "RPM");
+    EXPECT_TRUE(kind_lines(folders[0], "focus").empty())
+        << "the focus is the header's alone";
+}
+
 /* A note after a window's known end, with no record past it before the
  * session goes, is in no window: the window ends at its last record */
 TEST(ArmedRecorderTest, ANoteAfterAClearedWindowsEndIsInNoWindow)

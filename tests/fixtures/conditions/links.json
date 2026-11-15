@@ -1,0 +1,35 @@
+{
+  "havne_conditions": 1,
+  "name": "Link and signals",
+  "notes": "Synthetic, written for Havne's tests: link terms joined with signal terms, so a change of the link meets an age bound running out and a hold under way",
+  "conditions": [
+    {
+      "key": "stalled_turning",
+      "name": "Timed out while turning",
+      "when": { "all": [
+        { "link": "timeout" },
+        { "signal": ["obd2.rpm"], "unit": "RPM", "above": 1000, "max_age": 0.5 }
+      ] }
+    },
+    {
+      "key": "fault_or_fast",
+      "name": "A fault or fast",
+      "when": { "any": [
+        { "link": "not_ok" },
+        { "signal": ["obd2.speed"], "unit": "km/h", "above": 100, "clear": 90 }
+      ] },
+      "for": 1,
+      "clear_for": 2
+    },
+    {
+      "key": "failed_idle",
+      "name": "Failed at idle",
+      "when": { "all": [
+        { "link": "hard_failure" },
+        { "link": "not_ok" },
+        { "signal": ["obd2.rpm"], "unit": "RPM", "below": 500, "clear": 600 }
+      ] },
+      "for": 0.25
+    }
+  ]
+}

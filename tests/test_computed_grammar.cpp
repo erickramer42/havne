@@ -334,6 +334,15 @@ TEST(SignalFileTest, AFormat1FileRefusesEachFormat2Form)
         words_of(1, "pow(a, 2)").find("calls pow(), which isn't a function"),
         std::string::npos)
         << "a name that is no function says so in either format";
+    EXPECT_NE(words_of(1, "pow(a, 2)")
+                  .find("and a format 1 file calls none (functions need "
+                        "\"havne_signals\": 2) (at character 1)"),
+              std::string::npos)
+        << "format 1 names the format, not format 2's list: "
+        << words_of(1, "pow(a, 2)");
+    EXPECT_EQ(words_of(1, "pow(a, 2)").find("min, max"), std::string::npos);
+    EXPECT_EQ(words_of(2, "pow(a, 2)").find("format 1"), std::string::npos)
+        << "format 2 lists its functions: " << words_of(2, "pow(a, 2)");
     EXPECT_NE(words_of(1, "a = b")
                   .find("has '=' where an operator or the end should be"),
               std::string::npos)

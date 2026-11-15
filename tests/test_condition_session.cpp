@@ -183,7 +183,8 @@ void on_frame(const ecuio_frame_t* frame, void* user)
                                   std::to_string(frame->timestamp_us));
 }
 
-std::vector<ecuio_condition_state_t> states_of(ecuio_session_t* s)
+/* const: reading the states needs no session it may change */
+std::vector<ecuio_condition_state_t> states_of(const ecuio_session_t* s)
 {
     uint32_t count = 99;
     EXPECT_EQ(ecuio_session_get_condition_states(s, nullptr, 0, &count),
@@ -346,6 +347,12 @@ TEST(ConditionSessionTest, AnAttachBindsTheSetAndPublishesItsStates)
     EXPECT_EQ(attach(s.s, condition(0, rpm(R"("above":1)"))),
               ECUIO_ERR_SESSION_CLOSED);
     EXPECT_EQ(states_of(s.s).size(), size_t{1});
+    /* A callback isn't taken after the close; taking one away still is */
+    Seen seen;
+    EXPECT_EQ(ecuio_register_conditions_callback(s.s, on_conditions, &seen),
+              ECUIO_ERR_SESSION_CLOSED);
+    EXPECT_EQ(ecuio_unregister_conditions_callback(s.s, on_conditions, &seen),
+              ECUIO_OK);
 }
 
 TEST(ConditionSessionTest, AFramesEventsFollowItsValuesInOneCall)
