@@ -17,6 +17,8 @@
 #include "framefilter.h"
 #include "recordingimport.h"
 #include "signalfilter.h"
+#include "conditionmodel.h"
+#include "conditionstore.h"
 #include <QTimer>
 #include <QHash>
 #include <QUrl>
@@ -36,7 +38,10 @@
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
 #include "ecuio/recording.h"
+#include "ecuio/conditions.h"
 #include "latencystats.h"
+
+class QSettings;
 
 // ecuio_clock_us as a chrono clock: the bridge stamps a frame's and a
 // value's arrival with it, for the delivery figures
@@ -317,8 +322,12 @@ class SignalListModel : public QAbstractListModel
     Q_OBJECT
     // The plotted rows Live shows: hidden rows aren't counted
     Q_PROPERTY(int subscribedCount READ subscribedCount NOTIFY subscribedCountChanged)
+    // The ticked rows Live shows, text rows among them: what Start log asks
+    Q_PROPERTY(int tickedCount READ tickedCount NOTIFY tickedCountChanged)
     // The rows Live leaves out: unsupported or absent (rejudgeHidden)
     Q_PROPERTY(int hiddenCount READ hiddenCount NOTIFY hiddenCountChanged)
+    // The rows Live shows that the focus leaves unasked (applyUnasked)
+    Q_PROPERTY(int unaskedCount READ unaskedCount NOTIFY unaskedCountChanged)
 
 public:
     explicit SignalListModel(QObject* parent = nullptr);
@@ -406,7 +415,11 @@ public:
                          * which reads back as 0), so a layout file never
                          * stores an end as is. Notified with UnitRole. */
         RangeHighRole,
-        IsEnumRole /* the def's kind is ENUM. Fixed per signal set. */
+        IsEnumRole, /* the def's kind is ENUM. Fixed per signal set. */
+        UnaskedRole /* the session's focus leaves it unasked
+                     * (applyUnasked, ecuio_session_get_unasked_signals):
+                     * Live and the Dashboard say "not asked" in place of
+                     * a value */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -447,10 +460,15 @@ public:
     void updateTexts(const std::vector<std::pair<uint16_t, QString>>& texts,
                      qint64 timestampMs = -1);
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
+    int tickedCount() const { return m_tickedCount; }
     int hiddenCount() const { return m_hiddenCount; }
-    // The ids of the rows the chart plots and Live shows, in the model's
-    // order: subscribedCount of them, the focus Start log asks
+    // The ids of the ticked rows Live shows, in the model's order: the
+    // rows the chart plots (subscribedCount of them) and the ticked text
+    // rows, the focus Start log asks
     std::vector<uint16_t> plottedIds() const;
+    // The rows the user ticked past their default, text rows among them,
+    // in the model's order: the default pick adds them to the ranked ones
+    std::vector<uint16_t> tickedIds() const;
     // Each number's and enumeration's newest value as core decoded it
     // (the def's unit, an enumeration's raw number; never the display's
     // conversion), aged by the model's clock from the window that brought
@@ -479,6 +497,12 @@ public:
         QString code;  // "7F 22 31"
     };
     void applyRefused(const std::vector<Refusal>& refused);
+    // The signals the session's focus leaves unasked
+    // (ecuio_session_get_unasked_signals): those rows say "not asked".
+    // Each call judges every row afresh; a new set leaves none unasked.
+    void applyUnasked(const std::vector<uint16_t>& ids);
+    // The unasked rows Live shows, for its "N signals not asked" line
+    int unaskedCount() const { return m_unaskedCount; }
 
     // Display units (ADR-0022): rows and history keep the decoded value;
     // value, unit, decimals and chartData() convert on the way out
@@ -493,13 +517,14 @@ public:
     static constexpr int DefaultPlotted = 6;
 
     // A tick or untick on Live. One that matches the row's default
-    // clears the row's choice, so the row follows its default again.
+    // clears the row's choice, so the row follows its default again. A
+    // text row's tick asks it (the default pick takes it) and never plots.
     Q_INVOKABLE void toggleSubscribed(int row);
-    // A vehicle's plotted signals (ADR-0027 section 1): the names of the
-    // numeric rows the user ticked past the default and unticked from
-    // it, and setting both, which leaves every other numeric row to its
-    // default. A name in both lists is unplotted. Text rows are never
-    // plotted or listed.
+    // A vehicle's ticked signals (ADR-0027 section 1): the names of the
+    // rows the user ticked past the default and of the numeric rows
+    // unticked from it, and setting both, which leaves every other row to
+    // its default. A name in both lists is unplotted; a text row is never
+    // unplotted, its default being unticked.
     Q_INVOKABLE QStringList plottedNames() const;
     Q_INVOKABLE QStringList unplottedNames() const;
     Q_INVOKABLE void setPlotChoices(const QStringList& plotted, const QStringList& unplotted);
@@ -537,7 +562,12 @@ public:
 signals:
     void valuesUpdated();
     void subscribedCountChanged();
+    void tickedCountChanged();
     void hiddenCountChanged();
+    void unaskedCountChanged();
+    // A tick or untick, or a vehicle's choices set: the default pick
+    // follows them
+    void ticksChanged();
 
 private:
     struct Sample {
@@ -564,6 +594,7 @@ private:
         bool unsupported = false; // core: its ECU doesn't support it
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
+        bool unasked = false;     // core: the focus leaves it unasked
         QString refused;          // its ECU's refusal in words, or ""
         QString refusedCode;      // its reply's bytes, or ""
         uint8_t plotRank = 0;     // the def's plot_rank; 0 unranked
@@ -591,6 +622,8 @@ private:
     // Hidden is unsupported or absent: re-judges every row, and notifies
     // the rows that changed, the hidden count and the plotted count
     void rejudgeHidden();
+    // The unasked rows Live shows; notifies a change
+    void recountUnasked();
     // Each row's default and so its subscribed state, and the plotted
     // count; notifies the rows that changed and the count. Run after
     // anything that moves the defaults: a new set, hidden or refused
@@ -616,7 +649,9 @@ private:
     // A set's ids are unique (the validator refuses a duplicate).
     QHash<uint16_t, int> m_rowOfId;
     int m_subscribedCount = 0;
+    int m_tickedCount = 0;
     int m_hiddenCount = 0;
+    int m_unaskedCount = 0;
     bool m_ranked = false;      // the set ranks a def (plot_rank)
     uint32_t m_units = ECUIO_UNITS_METRIC;
     HostElapsedTimer m_clock;   // fallback stamps; restarted in setSignalSet
@@ -746,11 +781,17 @@ class SessionBridge : public QObject
     // Applies to what the UI shows at once, connected or not; recordings
     // keep the decoded values. Main.qml persists it.
     Q_PROPERTY(int unitSystem READ unitSystem WRITE setUnitSystem NOTIFY unitSystemChanged)
-    // A log's minimum time between sweeps (ADR-0056 section 4), ms, 0 off;
-    // Settings' Advanced page and Main.qml, which keeps it
+    // The minimum time between sweeps (ADR-0056 section 4) of a log and of
+    // the default pick, ms, 0 off; Settings' Advanced page and Main.qml,
+    // which keeps it
     Q_PROPERTY(int minSweepMs READ minSweepMs WRITE setMinSweepMs NOTIFY
                    minSweepMsChanged)
     Q_PROPERTY(QVariantList minSweepChoices READ minSweepChoices CONSTANT)
+    // The Dashboard's cells for the default pick: one list of refs per cell
+    // (DashboardPage's lookupRefs, a blank cell's empty), every page of the
+    // form. Main sets it, connected or not, so a start's pick has them.
+    Q_PROPERTY(QVariantList pickGauges READ pickGauges WRITE setPickGauges
+                   NOTIFY pickGaugesChanged)
     // What each channel's ECU has reported of its diagnostics (ADR-0037),
     // one map per ECU (diagnosticsEntry), for the Diagnostics page:
     // refreshed on the tick as a read settles each item, and when the
@@ -780,6 +821,24 @@ class SessionBridge : public QObject
     // "ECU 0x7E8 refused 3 more requests", "" when every refusal is named
     Q_PROPERTY(
         QString refusedUnnamed READ refusedUnnamed NOTIFY refusedUnnamedChanged)
+    // The conditions (ADR-0063 section 9): the set the app keeps
+    // (ConditionStore) or, on a replay, the recording's own copy, one row
+    // per condition, judged while a session runs
+    Q_PROPERTY(ConditionModel* conditionModel READ conditionModel CONSTANT)
+    // Why a saved edit isn't judged yet ("applies when this recording
+    // ends"), "" when the set judged is the one saved
+    Q_PROPERTY(QString conditionsPending READ conditionsPending NOTIFY
+                   conditionsChanged)
+    // Why the saved file wasn't read at startup, "" when it was or there's none
+    Q_PROPERTY(QString conditionsProblem READ conditionsProblem NOTIFY
+                   conditionsChanged)
+    // A replay judging its recording's own conditions.json, not the saved set
+    Q_PROPERTY(bool conditionsFromRecording READ conditionsFromRecording NOTIFY
+                   conditionsChanged)
+    // For each def id (as text) an alert ON reads, the highest level
+    // (ECUIO_ALERT_WARNING 1, _DANGER 2); a def with none is absent
+    Q_PROPERTY(
+        QVariantMap alertLevels READ alertLevels NOTIFY alertLevelsChanged)
 
 public:
     explicit SessionBridge(QObject* parent = nullptr);
@@ -896,6 +955,118 @@ public:
     // section 3); { sha256, id, name, variant, profile } each, none
     // without a VIN. A proposal only: the user picks
     Q_INVOKABLE QVariantList pluginMatches(const QString& typedVin) const;
+    // One store (ADR-0064): every import ends in the plugin store.
+    // readImport reads the file at url as importPlugin does, once, and
+    // tells its kind by its first key: { ok, words, kind }; a byte-order
+    // mark before the text is passed by. A package ("plugin") goes in at
+    // once, importPlugin's result with it (updated: the version of the
+    // user's own plugin it updated in place; replacedProfiles: the
+    // profiles of the version it took the place of). A signal file
+    // ("signals") is held as the one pending import, nothing kept: name,
+    // id (the plugin id a wrap gives it) and variant (the id a variant
+    // made from it takes) say what it would be. An OBDb set ("obdb") is
+    // held too, for previewObdbImport, whose report comes first: it
+    // converts the held bytes as previewObdb converts a file's, as often
+    // as the year or the name is changed. Words never name the path.
+    // Each logs one line
+    Q_INVOKABLE QVariantMap readImport(const QUrl& url);
+    Q_INVOKABLE QVariantMap previewObdbImport(int modelYear,
+                                              const QString& name);
+    // The pending signal file kept: as a new plugin of the user's own
+    // (into ""), imported for vehicle (the vehicle's id, "" for none),
+    // or as the variant named of the user's own plugin with the hash
+    // into, added or put in that variant's place. The plugin's entry
+    // (plugins()), plus kept, replaced and, for a variant, notes (core's
+    // words when an ECU of the file's took another id). A file that made
+    // a plugin here already answers with that plugin (kept), and with
+    // words when the plugin has changed since; words on a kept result
+    // are for the user, and reach the log. A refusal leaves the file
+    // pending, so a changed variant id or a disconnect can be followed
+    // by Keep again. keepSignalText is the same for a file given as text
+    // (the form's), with nothing pending. Each logs one line
+    Q_INVOKABLE QVariantMap keepSignals(const QString& into,
+                                        const QString& variant,
+                                        const QString& vehicle);
+    Q_INVOKABLE QVariantMap keepSignalText(const QString& text,
+                                           const QString& into,
+                                           const QString& variant,
+                                           const QString& vehicle);
+    // Everything an import holds forgotten: the file read and an OBDb
+    // set converted from it
+    Q_INVOKABLE void dropImport()
+    {
+        m_importPending.clear();
+        m_importKind.clear();
+        m_obdbPending.clear();
+    }
+    // The pending converted set (previewObdbImport's or previewObdb's)
+    // kept as a plugin of the user's own, imported for vehicle: its
+    // variant is my<year> when the model year was typed (yearTyped) and
+    // base when it was decoded from a VIN or there is none, so no
+    // variant id carries a VIN's year. It goes to that vehicle's earlier
+    // conversion of the same name: in its place (replaced, with
+    // replacedProfiles for a pick to follow) while that plugin has one
+    // variant, as a variant of it (merged) once it has more. A refusal
+    // leaves the set pending. Logs one line
+    Q_INVOKABLE QVariantMap keepObdbPlugin(const QString& vehicle,
+                                           bool yearTyped);
+    // A variant removed from a plugin of the user's own (never its last),
+    // and a plugin marked as the user's own; each logs one line
+    Q_INVOKABLE QVariantMap dropPluginVariant(const QString& sha,
+                                              const QString& variant);
+    Q_INVOKABLE QVariantMap markPluginMine(const QString& sha);
+    // A vehicle forgotten (its id), or every vehicle: what the store
+    // holds as imported for it is released, so a vehicle later given
+    // that id starts with no imports of its own. The plugins stay.
+    // { ok, words, count }: count the plugins released. Logs one line
+    // when any was
+    Q_INVOKABLE QVariantMap forgetVehicleImports(const QString& vehicle);
+    Q_INVOKABLE QVariantMap forgetAllVehicleImports();
+    // The vehicles' signal files moved into the plugin store, once
+    // (ADR-0064 Q6, storemigration.h), with prefs the app's preferences:
+    // the lines for the activity log, none once the move is done. Called
+    // before QML loads, so the caller logs them when the Log page listens
+    QStringList migrateStores(QSettings& prefs);
+    // Export plugin: the store's packed copy written to url byte for
+    // byte (a local file, or Android's content:// through QFile), so the
+    // file loads wherever the copy does and holds nothing of the store's
+    // index. { ok, words }, words never naming a path. Logs one line
+    Q_INVOKABLE QVariantMap exportPlugin(const QString& sha, const QUrl& url);
+    // The note Export plugin shows before its save dialog: the store's
+    // exportNote, { ok, words, note, shareAlike }
+    Q_INVOKABLE QVariantMap pluginExportNote(const QString& sha);
+    // A variant's signal-file text, which the form edits: { ok, words,
+    // text }
+    Q_INVOKABLE QVariantMap pluginVariantText(const QString& sha,
+                                              const QString& variant);
+    // Save as a signal file: the variant's signal file written to url as
+    // exportPlugin writes. { ok, words }, words never naming a path. Logs
+    // one line
+    Q_INVOKABLE QVariantMap saveVariantFile(const QString& sha,
+                                            const QString& variant,
+                                            const QUrl& url);
+    // Copy to my plugin: the store's copyVariant, into "" a new plugin.
+    // Logs one line, as a keep does
+    Q_INVOKABLE QVariantMap copyVariant(const QString& sha,
+                                        const QString& variant,
+                                        const QString& into,
+                                        const QString& newVariant);
+    // A vehicle's picks (ADR-0064 Q5), kept by the vehicle book as an
+    // ordered list of profiles. offeredVariants lists every variant of
+    // every plugin for the vehicle (PluginStore::offered: forThisCar
+    // first, picked marked), the VIN typed or with "" the session's;
+    // pickRow gives the picks as the profile row shows them (missing,
+    // and on an adapter the one that stands in for Default); pickVariant
+    // adds a profile last ({ ok, words, picks }) and unpickVariant
+    // takes one out
+    Q_INVOKABLE QVariantList offeredVariants(const QString& vehicle,
+                                             const QString& typedVin,
+                                             const QStringList& picks);
+    Q_INVOKABLE QVariantList pickRow(const QStringList& picks, bool adapter);
+    Q_INVOKABLE QVariantMap pickVariant(const QStringList& picks,
+                                        const QString& profile);
+    Q_INVOKABLE QStringList unpickVariant(const QStringList& picks,
+                                          const QString& profile);
     // The profiles a recording's frames can decode through in the viewer
     // (RecordingView::openFrames; ADR-0049's appendix of 2026-11-06): the
     // built-in obd2 and mock, each signal file the vehicles' book has
@@ -952,6 +1123,34 @@ public:
     void dispatchFrameForTesting(const ecuio_frame_t& frame);
     // onValues on the calling thread, as core's worker calls it
     void dispatchValuesForTesting(const ecuio_value_batch_t& batch);
+    // onConditions on the calling thread, as core's worker calls it
+    void dispatchConditionsForTesting(const ecuio_condition_event_t* events,
+                                      uint32_t count);
+    // The generation of the session's last attach, as core counts them
+    uint32_t conditionsGenerationForTesting() const
+    {
+        return m_conditionsGeneration;
+    }
+    // The next n attaches refused where core's call is made
+    void failConditionsAttachesForTesting(int n) { m_failAttaches = n; }
+
+    ConditionModel* conditionModel() const { return m_conditionModel; }
+    QString conditionsPending() const { return m_conditionsPending; }
+    QString conditionsProblem() const { return m_conditionsProblem; }
+    bool conditionsFromRecording() const { return m_conditionsFromRecording; }
+    QVariantMap alertLevels() const { return m_alertLevels; }
+    // The saved condition file's text, "" with none: what the Alerts page
+    // edits and saves again; while conditionsProblem says core refused the
+    // file, the refused file's text
+    Q_INVOKABLE QString conditionsText() const;
+    // A condition file in place of the saved one: ConditionStore::save's
+    // map plus "pending" (conditionsPending's words). Kept, it is judged at
+    // once by a session with no recorder; a recording holds its set
+    // (ADR-0063 section 6), so with one the edit waits for its end, and
+    // a replay judging its recording's copy keeps it to the end
+    Q_INVOKABLE QVariantMap saveConditions(const QString& text);
+    // alertLevels' level for one def, 0 for none
+    Q_INVOKABLE int alertLevelOf(int defId) const;
     // The samples one window can hold, from the next connect
     void setValueSampleLimitForTesting(int samples) { m_valueSampleLimit = samples; }
     static constexpr int defaultValueSampleLimit() { return DefaultValueSampleLimit; }
@@ -1128,6 +1327,13 @@ public:
     void setUnitSystem(int units);   // anything but 0 or 1 is ignored
     int minSweepMs() const { return m_minSweepMs; }
     void setMinSweepMs(int ms); // anything but a choice is ignored
+    QVariantList pickGauges() const { return m_pickGauges; }
+    void setPickGauges(const QVariantList& cells);
+    // Each cell's first ref the set answers to (a key def's "id:<n>" too),
+    // in the cells' order, each once; file is the set's (fileOfSet)
+    static std::vector<uint16_t> gaugeIds(const ecuio_signal_set_t* set,
+                                          const ecuio_signal_file_t* file,
+                                          const QVariantList& cells);
     QVariantList minSweepChoices() const;
     // A quantity in a decoded unit, as the current unit system shows it:
     // the Dashboard's scale ends and zones are written once, in decoded
@@ -1288,7 +1494,10 @@ signals:
     // The folder is absolute, as recordingRow takes it
     void logStopped(const QString& folder, bool byUser);
     void unitSystemChanged();
+    void conditionsChanged();
+    void alertLevelsChanged();
     void minSweepMsChanged();
+    void pickGaugesChanged();
     void diagnosticsChanged();
     void clearMovingChanged();
     void refusedUnnamedChanged();
@@ -1304,6 +1513,42 @@ private:
     static void onValues(const ecuio_value_batch_t* batch, void* user_data);
     // GUI thread, before the session starts: sizes the staging for set
     void prepareValueStaging(const ecuio_signal_set_t* set);
+    // Core's conditions callback (ADR-0063 section 6): WORKER thread, each
+    // event into its condition's slot under m_conditionsMutex
+    static void onConditions(const ecuio_condition_event_t* events,
+                             uint32_t count, void* user_data);
+    // GUI thread: count slots for the attach of this generation, the
+    // events of any other passed by
+    void prepareConditionStaging(uint32_t count, uint32_t generation);
+    // GUI thread: set (nullptr: none) attached to session, judged with its
+    // signal file, and the model's rows; false with *why core's words,
+    // nothing changed. Core copies the set. The window's events of the set
+    // before are flushed first.
+    bool attachConditions(ecuio_session_t* session,
+                          const ecuio_condition_set_t* set, QString* why);
+    // GUI thread, before the start: the replay's own copy, else the saved set
+    void attachSessionConditions(ecuio_session_t* session, const QString& uri);
+    // Why an edit saved now waits ("applies when this recording ends"),
+    // "" when it can be judged at once
+    QString conditionsWait() const;
+    // The saved set judged now: attached to the session, or shown offline
+    void applySavedConditions();
+    // A session's end (or a start that failed): nothing judged, no edit
+    // waiting, the saved set's rows shown offline
+    void endSessionConditions();
+    // The activity lines of the connect's attach, written after "Session:"
+    QStringList m_conditionsLines;
+    // The model's rows of the saved set with no session
+    void showSavedConditions();
+    // The tick's half: the window's events into the model and the
+    // activity log, then the states core keeps
+    void flushConditions(ecuio_session_t* session);
+    // alertLevels from the model; emits on a change
+    void judgeAlertLevels();
+    // A replay's recording's conditions.json when its hash is the
+    // header's; nullptr otherwise, with *unused why when the header names
+    // one ("doesn't match its hash")
+    ConditionSetPtr recordingConditions(const QString& uri, QString* unused);
     // GUI thread: swaps the staging out and drains it, each sample's wait
     // into the delivery figures and each signal's window into the model's
     // batch
@@ -1347,6 +1592,7 @@ private:
     // An activity line core's recording writes in its own form (a link
     // transition, a sleep): shown, never noted
     void logUnnoted(const QString& line);
+    void writePickLine();
     void notifyDropped();   // GUI thread: emit droppedFramesChanged if the count moved
     void notifyFrameCounts();   // GUI thread: frameCount and guiNotifyCount, if they moved
     void destroySessionLocked();  // the destructor's teardown; disconnectSession tears down on its own thread
@@ -1443,6 +1689,31 @@ private:
     int m_valueSampleLimit = DefaultValueSampleLimit;
     quint64 m_valuesDropped = 0;        // this session's, past the limits
 
+    // The conditions. A slot is one condition's window of events: the
+    // newest, and the firings with the first of them, so the worker writes
+    // a fixed slot per condition whatever the bus rate (sized at attach,
+    // never grown on the worker)
+    struct ConditionSlot {
+        bool has = false;
+        uint64_t firings = 0;
+        ecuio_condition_event_t newest{};
+        ecuio_condition_event_t first{}; // the window's first firing
+    };
+    std::mutex m_conditionsMutex; // guards the staging and its generation
+    std::vector<ConditionSlot> m_conditionStaging[2];
+    int m_activeConditions = 0;       // the one onConditions writes
+    uint32_t m_stagingGeneration = 0; // the attach whose events are kept
+    ConditionStore m_conditionStore;
+    ConditionModel* m_conditionModel = nullptr;
+    int m_failAttaches = 0; // failConditionsAttachesForTesting
+    uint32_t m_conditionsGeneration =
+        0; // this session's attaches, core's count
+    std::vector<ecuio_condition_state_t> m_conditionStates; // the tick's read
+    QString m_conditionsPending;
+    QString m_conditionsProblem;
+    bool m_conditionsFromRecording = false;
+    QVariantMap m_alertLevels;
+
     SignalListModel* m_signalModel = nullptr;
     LiveSignalModel* m_liveSignalModel = nullptr;
     int m_guiNotifyCount = 0;
@@ -1505,10 +1776,33 @@ private:
     // read each tick into m_absentRead (sized at connect), handed to the
     // model when they differ from m_absentIds
     void pollAbsentSignals();
+    // Sets the default pick (cli/default_pick.h), with the ticks once the
+    // model holds the set; false when a log or no asking leaves it alone
+    bool applyDefaultPick(ecuio_session_t* session, bool withTicks, bool again);
+    // Each tick: a pick owed is set, and one whose requests the walk
+    // dropped since is set again, so core judges if it still asks anything
+    void pollDefaultPick();
+    // Live's "not asked" rows, read each tick into m_unaskedRead (sized at
+    // connect), handed to the model when the list changes
+    void pollUnaskedSignals();
+    QVariantList m_pickGauges;
+    std::vector<uint16_t> m_pickIds; // the pick set last, [] none
+    bool m_pickSet = false;          // a pick, or the whole set, applied
+    int m_pickMinSweepMs = 0;        // the minimum it was set with
+    bool m_pickPolled = false;       // the URI names poll=
+    bool m_pickDirty = false;        // the ticks, gauges or minimum moved
+    bool m_pickLinePending = false;  // startSession's line, not yet out
+    QString m_pickLine;              // the activity line last written
+    bool m_pickLineCore = false;     // core's recorder writes it itself
+    uint64_t m_pickDropped = 0;      // the reports' drops at the last set
+    std::vector<uint16_t> m_unaskedRead;
+    std::vector<uint16_t> m_unaskedIds;
     std::vector<uint16_t> m_absentRead;
     std::vector<uint16_t> m_absentIds;
     // What each channel's ECU said it is (ADR-0021), logged once complete
     void pollChannelIdentity();
+    // Channel 0's VIN into m_vin once core has it in (ECUIO_IDENTITY_VIN)
+    void takeVin(const ecuio_channel_identity_t& s);
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     void pollSleep();       // the tick: "Asleep for N s" after a sleep
     uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
@@ -1550,7 +1844,7 @@ private:
     qint64 m_logElapsedMs = 0;         // the last log's, once it ends
     qint64 m_logBytes = 0;             // countLogBytes' last sum
     QString m_logNotice;               // the header's line about the log
-    int m_minSweepMs = 0;              // read at each Start log
+    int m_minSweepMs = 0;              // a log's and the default pick's
     QTimer* m_logTimer = nullptr;      // the readout's second
     QString m_recordingsRoot;          // empty: Documents/Havne/recordings
     QString m_earlierRecordingsRoot;   // empty: the earlier name's folder
@@ -1561,6 +1855,15 @@ private:
     ReadOnce m_readOnce;
     SignalStore m_signalStore;
     QByteArray m_obdbPending; // previewObdb's converted file, until kept
+    int m_obdbPendingYear = 0;  // the model year it was converted for
+    QByteArray m_importPending; // readImport's file, until kept or dropped
+    QString m_importKind;       // what it is: "signals" or "obdb"
+    QVariantMap previewObdbBytes(const QByteArray& bytes,
+                                 const QString& refusal, int modelYear,
+                                 const QString& name);
+    // A signal file into the plugin store, as a new plugin or a variant
+    QVariantMap keepFile(const QByteArray& file, const QString& into,
+                         const QString& variant, const QString& vehicle);
     PluginStore m_pluginStore;
     // Recordings' own signal files by their hash, each registered under
     // its rec.<16 hex> profile until the bridge closes, as the store keeps

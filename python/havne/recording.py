@@ -1,6 +1,7 @@
 # File/layer: python/havne/recording.py | Python 3.11+, the havne package
 # Testing: PythonTest.test_recording, PythonTest.test_import,
-#          PythonTest.test_frames_read, PythonTest.test_recording_aids
+#          PythonTest.test_frames_read, PythonTest.test_recording_aids,
+#          PythonTest.test_conditions
 #
 # A recording read offline (ADR-0049 section 5, recording.h): its
 # signals with their ranges, its markers, range queries, the value in
@@ -13,16 +14,21 @@
 # read_frames reads its frames.csv back as recorded (ADR-0049's appendix
 # "frames read back"). stats, step, role_signal and stretches are the
 # chart's span statistics and cursor step and ADR-0056's navigation aids.
+# conditions, condition_events and condition_set are the set of
+# conditions its session judged and their events (ADR-0063 section 8).
 # stretches, find_threshold and find_marker take cancel=, as the imports do.
 
 import ctypes
+import hashlib
 import json
+import os
 import weakref
 from collections import namedtuple
 
 from . import _ecuio as e
 from ._core import check, lib, text, utf8
 from ._asks import _Asks
+from .conditions import ConditionSet
 from .errors import Error
 
 Signal = namedtuple("Signal", "index name unit kind samples lowest highest first_us last_us "
@@ -49,6 +55,24 @@ Stats = namedtuple("Stats", "samples first last lowest highest lowest_us highest
 Stats.__doc__ = ("A signal's statistics over a span: first and last the values in force at "
                  "its ends; lowest, highest and mean leaving a NaN out, each NaN with no "
                  "sample; lowest_us and highest_us the first sample at each, or None")
+RecordedConditions = namedtuple("RecordedConditions",
+                                "sha256 present matches events lines_skipped cut")
+RecordedConditions.__doc__ = ("The set of conditions a recording's session judged (ADR-0063 "
+                              "section 8): sha256 the hash events.log's header names for "
+                              "conditions.json (None when it names none), whether the copy is "
+                              "in the folder and matches it, the cond lines read (events), "
+                              "those that didn't parse, and cut when there were more than "
+                              "ECUIO_RECORDING_MAX_CONDITION_EVENTS, of which the first that "
+                              "many are kept")
+RecordedConditionEvent = namedtuple(
+    "RecordedConditionEvent", "host_us timestamp_us key state fired stale held value term")
+RecordedConditionEvent.__doc__ = ("A cond line: the recording's time and the session's, the "
+                                  "condition's key, its state (\"on\" or \"off\"), whether "
+                                  "this change fired it, whether an input was too old to "
+                                  "judge, whether it is a state held when the recording "
+                                  "began (no change), and the settling term's sample and "
+                                  "index")
+
 Stretch = namedtuple("Stretch", "kind signal from_us to_us start end flags")
 Stretch.__doc__ = ("A pull or a cruise: kind 'pull' or 'cruise', signal the measured one's "
                    "name, start and end a pull's two ends (a cruise's mean in both), flags "
@@ -111,6 +135,15 @@ class Recording:
               "ecuio_recording_get_info")
         self.signals = [self._signal(i) for i in range(self.info.signal_count)]
         self.markers = [self._marker(i) for i in range(self.info.marker_count)]
+        c = e.ecuio_recording_conditions_t()
+        check(lib.ecuio_recording_get_conditions(self._r, ctypes.byref(c)),
+              "ecuio_recording_get_conditions")
+        self.conditions = RecordedConditions(
+            text(c.sha256) if c.flags & e.ECUIO_RECORDING_CONDITIONS_NAMED else None,
+            bool(c.flags & e.ECUIO_RECORDING_CONDITIONS_PRESENT),
+            bool(c.flags & e.ECUIO_RECORDING_CONDITIONS_MATCH),
+            self.info.condition_events, c.lines_skipped,
+            bool(self.info.flags & e.ECUIO_RECORDING_INFO_CONDITIONS_CUT))
 
     def __enter__(self):
         return self
@@ -140,6 +173,48 @@ class Recording:
               "ecuio_recording_get_marker")
         return Marker(m.host_us, ctypes.string_at(m.label_utf8, m.label_length).decode(
             "utf-8", "replace"))
+
+    def condition_events(self):
+        """events.log's cond lines in its order (the recorder writes them
+        in time order), each a RecordedConditionEvent; the first
+        ECUIO_RECORDING_MAX_CONDITION_EVENTS when conditions.cut"""
+        kept = min(self.info.condition_events, e.ECUIO_RECORDING_MAX_CONDITION_EVENTS)
+        out = []
+        ev = e.ecuio_recording_condition_event_t()
+        for k in range(kept):
+            check(lib.ecuio_recording_get_condition_event(self._r, k, ctypes.byref(ev)),
+                  "ecuio_recording_get_condition_event")
+            out.append(RecordedConditionEvent(
+                ev.host_us, ev.timestamp_us, text(ev.key),
+                "on" if ev.state == e.ECUIO_CONDITION_ON else "off",
+                bool(ev.flags & e.ECUIO_CONDITION_FIRED),
+                bool(ev.flags & e.ECUIO_CONDITION_STALE),
+                bool(ev.flags & e.ECUIO_CONDITION_HELD), ev.value, ev.term))
+        return out
+
+    def condition_set(self):
+        """The set the session judged, loaded from the folder's
+        conditions.json (a ConditionSet); None when events.log's header
+        names none. A copy that's missing, past the loader's bound
+        (ECUIO_CONDITION_FILE_MAX_BYTES), or whose bytes don't match the
+        header's hash raises ValueError: its conditions aren't the ones the
+        recording's events came from. A copy that matches but the loader
+        refuses raises Error, with the loader's words, as ConditionSet
+        does."""
+        if self.conditions.sha256 is None:
+            return None
+        path = os.path.join(self.folder, "conditions.json")
+        try:
+            with open(path, "rb") as f:
+                data = f.read(e.ECUIO_CONDITION_FILE_MAX_BYTES + 1)
+        except FileNotFoundError:
+            raise ValueError("the recording's conditions.json is missing") from None
+        if len(data) > e.ECUIO_CONDITION_FILE_MAX_BYTES:
+            raise ValueError(f"the recording's conditions.json is longer than a set of "
+                             f"conditions can be ({e.ECUIO_CONDITION_FILE_MAX_BYTES} bytes)")
+        if hashlib.sha256(data).hexdigest() != self.conditions.sha256:
+            raise ValueError("the recording's conditions.json doesn't match its hash")
+        return ConditionSet(data)
 
     def signal(self, name_or_index):
         """A signal by its name or index"""

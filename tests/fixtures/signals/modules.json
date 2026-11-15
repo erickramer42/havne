@@ -1,0 +1,31 @@
+{
+  "havne_signals": 1,
+  "name": "Desk modules",
+  "notes": "Synthetic: its tcm answers at other addresses than Desk extras' tcm, and its license is share-alike, for havne-cli plugins put",
+  "source": {
+    "name": "Written by hand for Havne's tests",
+    "license": "CC-BY-SA-4.0"
+  },
+  "ecus": [
+    { "id": "pcm", "rx": "7E8" },
+    { "id": "tcm", "rx": "7EA" }
+  ],
+  "signals": [
+    {
+      "key": "gear_held",
+      "name": "Gear Held",
+      "ecu": "tcm",
+      "read": { "service": "22", "number": "D101" },
+      "field": { "byte": 0, "bits": 8 }
+    },
+    {
+      "key": "oil_pressure",
+      "name": "Oil Pressure Desk",
+      "ecu": "pcm",
+      "read": { "service": "22", "number": "D102" },
+      "field": { "byte": 0, "bits": 8 },
+      "offset": 100,
+      "unit": "kPa"
+    }
+  ]
+}

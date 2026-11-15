@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@
 #include "ecuio/signals.h"
 #include "json.h"        /* core/src */
 #include "obdb_import.h" /* core/src: year_takes, field_of */
+#include "request_engine.h" /* core/src: obd2's request count */
 
 namespace {
 
@@ -440,25 +442,44 @@ TEST(ObdbImportTest, ModulesAndRequestsStopAtWhatASessionAsks)
     EXPECT_EQ(own.set().count, 4u);
     EXPECT_EQ(own.json.find("\"extends\""), std::string::npos);
 
-    std::string many = "{\"commands\":[";
-    for (int i = 0; i < 300; ++i) {
-        char did[8];
-        std::snprintf(did, sizeof did, "%04X", 0x2000 + i);
-        many += std::string(i > 0 ? "," : "") +
-                one("", did, sig("D" + std::to_string(i), kByte));
-    }
-    many += "]}";
+    const auto many = [&](int n) {
+        std::string s = "{\"commands\":[";
+        for (int i = 0; i < n; ++i) {
+            char did[9]; /* room for any int's %X: GCC's format-truncation */
+            std::snprintf(did, sizeof did, "%04X", 0x2000 + i);
+            s += std::string(i > 0 ? "," : "") +
+                 one("", did, sig("D" + std::to_string(i), kByte));
+        }
+        return s + "]}";
+    };
+    /* A set of a few hundred requests keeps every signal */
+    Imported kept;
+    import(kept, many(300));
+    ASSERT_EQ(kept.status, ECUIO_OK) << kept.detail;
+    EXPECT_EQ(kept.count(ECUIO_OBDB_NOTE_CONVERTED), 300u);
+    EXPECT_EQ(kept.count(ECUIO_OBDB_NOTE_SKIPPED), 0u);
+
+    /* Past the cap: one DID for each request the table has room for
+     * beside obd2's, counted by the engine a session derives with */
+    const ecuio_signal_set_t* obd2 = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("obd2", &obd2), ECUIO_OK);
+    auto engine = std::make_unique<ecuio_request_engine>();
+    ecuio_engine_init(engine.get(), 1);
+    const uint32_t rx = ECUIO_OBD2_ECU_ARB_ID;
+    ASSERT_TRUE(ecuio_engine_derive(engine.get(), obd2, &rx, 1, nullptr));
+    const int n = static_cast<int>(ECUIO_PROFILE_MAX_REQUESTS) + 100;
     Imported full;
-    import(full, many);
+    import(full, many(n));
     ASSERT_EQ(full.status, ECUIO_OK) << full.detail;
     const size_t converted = full.count(ECUIO_OBDB_NOTE_CONVERTED);
-    EXPECT_LT(converted, 256u);
-    EXPECT_GT(converted, 100u);
-    EXPECT_EQ(converted + full.count(ECUIO_OBDB_NOTE_SKIPPED), 300u);
-    const Note* past = full.note("D299", ECUIO_OBDB_NOTE_SKIPPED);
+    EXPECT_EQ(converted, size_t{ECUIO_PROFILE_MAX_REQUESTS} - engine->count);
+    EXPECT_EQ(converted + full.count(ECUIO_OBDB_NOTE_SKIPPED), size_t(n));
+    const Note* past =
+        full.note("D" + std::to_string(n - 1), ECUIO_OBDB_NOTE_SKIPPED);
     ASSERT_NE(past, nullptr);
-    EXPECT_EQ(past->text,
-              "past the 256 requests a session asks, obd2's counted");
+    EXPECT_EQ(past->text, "past the " +
+                              std::to_string(ECUIO_PROFILE_MAX_REQUESTS) +
+                              " requests a session asks, obd2's counted");
 }
 
 // Input that isn't an OBDb set, or holds nothing Havne reads, is refused

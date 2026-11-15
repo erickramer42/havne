@@ -46,7 +46,7 @@
  *                 GET_CONFIG's re-flattened pairs).
  *   WRITE         u.write. One PassThruWriteMsgs message.
  *                 Reply: aux = messages the vendor reports written.
- *   READ          u.read. PassThruReadMsgs for up to 16 messages on
+ *   READ          u.read. PassThruReadMsgs, one message a call, on
  *                 the child's open channel (no channel field). Reply:
  *                 num_frames, then that many ecuio_pt_rx_t after the
  *                 response (see below): the messages the vendor returned

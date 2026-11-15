@@ -319,9 +319,11 @@ TEST(PluginTest, ARefusalNamesTheFileAndThePlace)
 
     /* Packed: one file, so the line and column alone */
     const std::string got =
-        packed_refusal(packed(kHead, R"({"havne_signals": 2})"));
+        packed_refusal(packed(kHead, R"({"havne_signals": 3})"));
     EXPECT_EQ(got.rfind("line 1, column ", 0), 0u) << got;
-    EXPECT_NE(got.find("format 2"), std::string::npos) << got;
+    EXPECT_NE(got.find("format 3, and this Havne reads formats 1 and 2"),
+              std::string::npos)
+        << got;
 }
 
 TEST(PluginTest, EveryManifestRefusalSaysWhy)
@@ -983,4 +985,177 @@ TEST(PluginTest, AVariantsGaugeFollowsItsSignalsLastFileAndItsCopy)
     EXPECT_EQ(g->warn_high, 90.0);
     EXPECT_EQ(g->flags, ECUIO_GAUGE_WARN_HIGH);
     ecuio_signal_file_free(back);
+}
+
+/* A variant's files may be of either format (ADR-0062): each signal
+ * compiles at its own file's, the variant's file takes the newest, and a
+ * format 1 file is held to format 1 in a format 2 variant */
+TEST(PluginTest, AVariantTakesTheNewestFormatOfItsFiles)
+{
+    const std::string read =
+        R"("field":{"byte":0},"read":{"service":"22","number":)";
+    Folder f;
+    f.files["manifest.json"] =
+        R"json({"havne_plugin":1,"id":"formats","name":"Formats",
+      "version":"1.0.0","requires":{"core":"0.1.0"},"source":{"name":"Havne's tests"},
+      "tiers":["data"],"ecus":[{"id":"pcm","rx":"7E8"}],
+      "variants":[{"id":"first","files":["a.json"]},
+                  {"id":"both","files":["a.json","b.json"]}]})json";
+    f.files["a.json"] =
+        R"({"havne_signals":1,"signals":[{"key":"p","name":"P",)" + read +
+        R"("D100"}},{"key":"q","name":"Q",)" + read +
+        R"("D101"}},{"key":"r","name":"R","kind":"computed","expr":"p - q"},)"
+        R"({"key":"d","name":"D","kind":"computed","expr":"p * q"}]})";
+    f.files["b.json"] =
+        R"j({"havne_signals":2,"signals":[{"key":"r","name":"R","kind":"computed",)j"
+        R"j("expr":"max(p, q)"},{"key":"s","name":"S","kind":"computed",)j"
+        R"j("expr":"if(p > q, p, q)"}]})j";
+    Plugin p = load_folder(f);
+    ASSERT_TRUE(p) << ecuio_last_error_detail();
+
+    const ecuio_signal_file_t* first = ecuio_plugin_variant_file(p.get(), 0);
+    const ecuio_signal_file_t* both = ecuio_plugin_variant_file(p.get(), 1);
+    EXPECT_EQ(ecuio_signal_file_format(first), 1u);
+    EXPECT_EQ(ecuio_signal_file_format(both), 2u) << "the newest of its files";
+    EXPECT_NE(ecuio_sf::bytes_of(*first).find("\"havne_signals\": 1"),
+              std::string::npos);
+    EXPECT_NE(ecuio_sf::bytes_of(*both).find("\"havne_signals\": 2"),
+              std::string::npos)
+        << "the recording's copy says the format its signals need";
+    EXPECT_STREQ(ecuio_signal_file_expr(
+                     both, ecuio_plugin_variant_find(p.get(), 1, "r")),
+                 "max(p, q)")
+        << "the later file's expression in the earlier's place";
+    EXPECT_STREQ(ecuio_signal_file_expr(
+                     first, ecuio_plugin_variant_find(p.get(), 0, "r")),
+                 "p - q");
+
+    /* a.json's program of format 1 is the same in either variant */
+    const auto program = [&](uint32_t v, const char* key) {
+        const ecuio_signal_def_t* d =
+            ecuio_plugin_variant_find(p.get(), v, key);
+        return ecuio_plugin_variant_set(p.get(), v)->computed[d->table_first];
+    };
+    const ecuio_computed_t a = program(0, "d");
+    const ecuio_computed_t b = program(1, "d");
+    EXPECT_EQ(std::memcmp(&a, &b, sizeof a), 0);
+    EXPECT_EQ(program(1, "r").steps[2], ECUIO_COMPUTED_MAX);
+    EXPECT_EQ(program(1, "s").steps[5], ECUIO_COMPUTED_IF);
+
+    /* A format 1 file's call is refused, its file named, whatever the
+     * variant's other files say */
+    f.files["c.json"] =
+        R"j({"havne_signals":1,"signals":[{"key":"t","name":"T","kind":"computed",)j"
+        R"j("expr":"min(p, q)"}]})j";
+    std::string& m = f.files["manifest.json"];
+    m.replace(m.find(R"("a.json","b.json"])"),
+              std::strlen(R"("a.json","b.json"])"),
+              R"("a.json","b.json","c.json"])");
+    const std::string got = folder_refusal(f);
+    EXPECT_EQ(got.rfind("c.json, line 1, column ", 0), 0u) << got;
+    EXPECT_NE(
+        got.find(
+            "expr 'min(p, q)' uses min(), which needs \"havne_signals\": 2 "
+            "(at character 1)"),
+        std::string::npos)
+        << got;
+}
+
+/* A later file's signal that closes a circle through the earlier file's
+ * chain is refused in the later file's place (ADR-0062) */
+TEST(PluginTest, AReplacementThatClosesACircleIsRefusedInItsFile)
+{
+    Folder f;
+    f.files["manifest.json"] =
+        R"json({"havne_plugin":1,"id":"circle","name":"Circle",
+      "version":"1.0.0","requires":{"core":"0.1.0"},"source":{"name":"Havne's tests"},
+      "tiers":["data"],"ecus":[{"id":"pcm","rx":"7E8"}],
+      "variants":[{"id":"chain","files":["a.json"]},
+                  {"id":"closed","files":["a.json","b.json"]}]})json";
+    f.files["a.json"] =
+        R"j({"havne_signals":2,"signals":[{"key":"p","name":"P","field":{"byte":0},)j"
+        R"j("read":{"service":"22","number":"D100"}},)j"
+        R"j({"key":"x","name":"X","kind":"computed","expr":"p + 1"},)j"
+        R"j({"key":"y","name":"Y","kind":"computed","expr":"x * 2"}]})j";
+    f.files["b.json"] =
+        R"j({"havne_signals":2,"signals":[{"key":"x","name":"X","kind":"computed",)j"
+        R"j("expr":"y - 1"}]})j";
+    const std::string got = folder_refusal(f);
+    EXPECT_EQ(got.rfind("b.json, line 1, column ", 0), 0u) << got;
+    EXPECT_NE(
+        got.find("signal 'x' reads 'y', which reads 'x': computed signals "
+                 "can't read in a circle"),
+        std::string::npos)
+        << got;
+    f.files["manifest.json"].replace(
+        f.files["manifest.json"].find(R"(,"b.json"])"),
+        std::strlen(R"(,"b.json"])"), "]");
+    Plugin p = load_folder(f);
+    EXPECT_TRUE(p) << "the chain alone loads: " << ecuio_last_error_detail();
+}
+
+/* A computed replacement in one file read through obd2.<key> in another:
+ * the reader's file's format decides, not the replacement's */
+TEST(PluginTest, AComputedReplacementIsJudgedByItsReadersFormat)
+{
+    const auto folder = [](int reader, int replacement) {
+        Folder f;
+        f.files["manifest.json"] =
+            R"json({"havne_plugin":1,"id":"formats","name":"Formats",
+          "version":"1.0.0","requires":{"core":"0.1.0"},"source":{"name":"Havne's tests"},
+          "tiers":["data"],"ecus":[{"id":"pcm","rx":"7E8"}],
+          "variants":[{"id":"both","files":["a.json","b.json"]}]})json";
+        f.files["a.json"] =
+            R"j({"havne_signals":)j" + std::to_string(reader) +
+            R"j(,"extends":"obd2","signals":[{"key":"c","name":"C","kind":"computed",)j"
+            R"j("expr":"obd2.speed + 1"}]})j";
+        f.files["b.json"] =
+            R"j({"havne_signals":)j" + std::to_string(replacement) +
+            R"j(,"signals":[{"key":"s","name":"Vehicle Speed","kind":"computed",)j"
+            R"j("expr":"obd2.rpm * 0"}]})j";
+        return f;
+    };
+    Folder taken = folder(2, 1);
+    EXPECT_TRUE(load_folder(taken)) << ecuio_last_error_detail();
+    Folder refused = folder(1, 2);
+    const std::string got = folder_refusal(refused);
+    EXPECT_EQ(got.rfind("b.json, line 1, column ", 0), 0u) << got;
+    EXPECT_NE(got.find("signal 's' replaces 'Vehicle Speed', which 'C' reads: "
+                       "a computed signal read by another needs "
+                       "\"havne_signals\": 2"),
+              std::string::npos)
+        << got;
+}
+
+/* obd2's Boost reading a computed replacement has no file of its own: the
+ * replacement's file's format decides, whatever the variant's other files
+ * say */
+TEST(PluginTest, AComputedReplacementObd2sBoostReadsIsJudgedByItsOwnFile)
+{
+    const auto folder = [](int replacement) {
+        Folder f;
+        f.files["manifest.json"] =
+            R"json({"havne_plugin":1,"id":"formats","name":"Formats",
+          "version":"1.0.0","requires":{"core":"0.1.0"},"source":{"name":"Havne's tests"},
+          "tiers":["data"],"ecus":[{"id":"pcm","rx":"7E8"}],
+          "variants":[{"id":"both","files":["a.json","b.json"]}]})json";
+        f.files["a.json"] =
+            R"j({"havne_signals":2,"extends":"obd2","signals":[{"key":"c","name":"C",)j"
+            R"j("kind":"computed","expr":"min(obd2.rpm, 1)"}]})j";
+        f.files["b.json"] =
+            R"j({"havne_signals":)j" + std::to_string(replacement) +
+            R"j(,"signals":[{"key":"map","name":"Intake Manifold Pressure",)j"
+            R"j("kind":"computed","expr":"obd2.baro * 1","unit":"kPa"}]})j";
+        return f;
+    };
+    Folder taken = folder(2);
+    EXPECT_TRUE(load_folder(taken)) << ecuio_last_error_detail();
+    Folder refused = folder(1);
+    const std::string got = folder_refusal(refused);
+    EXPECT_EQ(got.rfind("b.json, line 1, column ", 0), 0u) << got;
+    EXPECT_NE(got.find("signal 'map' replaces 'Intake Manifold Pressure', "
+                       "which 'Boost' reads: a computed signal read by "
+                       "another needs \"havne_signals\": 2"),
+              std::string::npos)
+        << got;
 }

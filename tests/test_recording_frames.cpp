@@ -351,6 +351,47 @@ TEST(RecordingFramesTest, TheMocksFramesDecodeToItsOwnValuesBoostToo)
     EXPECT_NE(frames.find("Boost"), UINT32_MAX) << "the computed def";
 }
 
+/* A chain of computed signals (ADR-0062) recorded by its session reads
+ * back alike through the frames, each second from its mark: the marks
+ * hold the number defs under the chain, and the chain is worked out from
+ * them as the session worked it out */
+TEST(RecordingFramesTest, AChainsRecordingDecodesFromItsFramesAlike)
+{
+    const std::string file = R"j({"havne_signals": 2, "name": "Frames chain",
+ "source": {"name": "Havne's tests"}, "extends": "obd2", "signals": [
+ {"key": "warm", "name": "Warm Flow", "kind": "computed",
+  "expr": "if(obd2.coolant > 20, scaled, 0)"},
+ {"key": "scaled", "name": "Scaled Flow", "kind": "computed",
+  "expr": "per_rev + obd2.load"},
+ {"key": "per_rev", "name": "Flow Per Rev", "kind": "computed",
+  "expr": "if(obd2.rpm > 0, obd2.maf / obd2.rpm * 1000, 0)"}]})j";
+    ecuio_signal_file_t* sf = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(file.data(), file.size(), &sf), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const std::string profile_name = ecuio_signal_file_profile(sf);
+    ASSERT_EQ(ecuio_profile_register(profile_name.c_str(),
+                                     ecuio_signal_file_set(sf), nullptr),
+              ECUIO_OK);
+    {
+        Folder root;
+        const std::string uri =
+            "replay://" + std::string(ECUIO_REPLAY_FIXTURES) +
+            "/2026-10-25-engine-start?speed=max&profile=" + profile_name;
+        const std::string folder = record(root, uri, 0);
+        ASSERT_FALSE(folder.empty());
+        expect_same(folder, ecuio_signal_file_set(sf));
+        Opened frames(folder, ecuio_signal_file_set(sf));
+        ASSERT_EQ(frames.rc, ECUIO_OK);
+        for (const char* name : {"Warm Flow", "Scaled Flow", "Flow Per Rev"}) {
+            const uint32_t k = frames.find(name);
+            ASSERT_NE(k, UINT32_MAX) << name;
+            EXPECT_GT(frames.signal(k).samples, 100u) << name;
+        }
+    }
+    EXPECT_EQ(ecuio_profile_unregister(profile_name.c_str()), ECUIO_OK);
+    ecuio_signal_file_free(sf);
+}
+
 TEST(RecordingFramesTest, ARawRecordingHasValuesThroughAProfile)
 {
     /* A listener's frames.csv, as they crossed the bus: a single frame, a

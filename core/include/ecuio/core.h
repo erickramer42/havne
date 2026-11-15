@@ -602,6 +602,15 @@ ecuio_status_t ecuio_session_get_channel_support(
 /* flags */
 #define ECUIO_IDENTITY_COMPLETE          0x00000001u   /* every item answered,
                                                           refused or timed out */
+#define ECUIO_IDENTITY_VIN               0x00000002u   /* the VIN is in, before
+                                                          the list is complete
+                                                          too: 09 02 answered
+                                                          with one, or F190 did
+                                                          and 09 02 has its
+                                                          outcome; what
+                                                          ecuio_identity_vin
+                                                          gives (ADR-0027
+                                                          section 3) */
 
 /* outcome: what became of an item's request */
 #define ECUIO_IDENTITY_UNASKED           0u   /* not asked yet, or asked again
@@ -673,7 +682,9 @@ const char* ecuio_identity_request_name(
  * answer, else 22 F190's when 09 02 wasn't answered, each kept to its
  * ASCII letters and digits in upper case and taken only at 17 of them;
  * no other item is (a CALID of 17 characters isn't a VIN). Writes the
- * VIN and a NUL into out, or "" when the report holds none. ECUIO_OK;
+ * VIN and a NUL into out, or "" when the report holds none; the report's
+ * ECUIO_IDENTITY_VIN says it is in, which holds until a recovery asks
+ * 09 02 again, and that may answer a different VIN. ECUIO_OK;
  * ECUIO_ERR_NULL_ARGUMENT for a NULL identity or out;
  * ECUIO_ERR_INVALID_ARGUMENT for an out_cap under ECUIO_VIN_TEXT_LEN,
  * out untouched. */
@@ -1054,7 +1065,10 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
  * table, not refused, asked again on a count of 0. The probe, the DID
  * scan, identification and diagnostics are untouched, and a request the
  * probe dropped stays dropped. A DID the scan finds while a focus is on
- * is asked when the focus picks it, parked otherwise. A session that asks
+ * is asked when the focus picks it, parked otherwise. The signals an
+ * attached condition reads stay asked under any focus (ADR-0063 section
+ * 7; ecuio_session_set_conditions). Whether a focus leaves something to
+ * request is judged by its picks alone. A session that asks
  * requests refuses a focus none of whose signals it can ask (passive
  * signals, broadcast frames a listener hears; Service 09's; a request
  * the probe dropped; a DID the scan hasn't found; under ?poll=, any but
@@ -1065,10 +1079,12 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
  * Takes effect on the worker between two requests, never inside an
  * exchange; before start it applies from the first pass. mock://,
  * replay:// and a listening session ask nothing, so they accept any
- * focus and change nothing. Returns at once. The session's one caller
- * may call it from any thread, while the worker runs (the picks reach it
- * under a lock), but not at the same time as another call on the
- * session, ecuio_session_close among them.
+ * focus and change nothing. An id given twice is picked once, at its
+ * first place. A recorder taking the session's frames gets each focus
+ * set or ended as an activity line (ecuio_session_record). Returns at
+ * once. The session's one caller may call it from any thread, while the
+ * worker runs (the picks reach it under a lock), but not at the same
+ * time as another call on the session, ecuio_session_close among them.
  * The detail (ecuio_last_error_detail) is cleared on entry.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL session, or NULL ids with a count;
  * ECUIO_ERR_INVALID_ARGUMENT, nothing changed and the reason in the
@@ -1084,6 +1100,16 @@ ecuio_status_t ecuio_session_set_focus(
 /* The longest minimum time between sweeps, in ms */
 #define ECUIO_FOCUS_MIN_SWEEP_MAX_MS 60000u
 
+/* ecuio_session_set_focus_with's flag: the signal ids given are a front
+ * end's default pick (the set's ranked signals, the gauges, the user's
+ * ticks), not an analysis log's choice. The ids are the pick, asked as any
+ * focus is; the flag changes only a recording's word for it, "pick" in
+ * place of "focus", on the header's lines and on a change's activity
+ * line, so a reader tells a session's default from a log. Each call sets
+ * the flag afresh: a call without it (ecuio_session_set_focus among
+ * them) clears it */
+#define ECUIO_FOCUS_DEFAULT_PICK 0x1u
+
 /*
  * ecuio_session_set_focus, with a minimum time between sweeps (ADR-0056
  * section 4), for a slow adapter or a busy ECU; min_sweep_ms 0 is none,
@@ -1098,10 +1124,12 @@ ecuio_status_t ecuio_session_set_focus(
  * "Not responding" is ten unanswered requests in a row whatever the
  * minimum, so with one request a sweep an ECU that stops answering is
  * reported after ten times min_sweep_ms.
- * flags: none yet, must be 0.
+ * flags: 0, or ECUIO_FOCUS_DEFAULT_PICK.
  * ECUIO_ERR_INVALID_ARGUMENT, nothing changed and the reason in the
- * detail, for a flag, a time past ECUIO_FOCUS_MIN_SWEEP_MAX_MS, a time
- * with no signals picked, and whatever ecuio_session_set_focus refuses.
+ * detail, for any other flag, a time past ECUIO_FOCUS_MIN_SWEEP_MAX_MS, a
+ * time with no signals picked, ECUIO_FOCUS_DEFAULT_PICK with no signals
+ * picked (a front end whose pick is empty sets no focus, and the whole set
+ * is asked), and whatever ecuio_session_set_focus refuses.
  */
 ecuio_status_t ecuio_session_set_focus_with(
     ecuio_session_t* session,

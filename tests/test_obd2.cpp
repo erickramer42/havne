@@ -733,6 +733,98 @@ TEST(RequestEngineTest, UnsentRequestLeavesNothingOutstanding) {
     EXPECT_EQ(ecuio_engine_due(&e, 0, ECUIO_ENGINE_GAP_US), 1);
 }
 
+/* The floor runs from the write's start, which the driver gives: a
+ * write that took 3 ms doesn't add them to the floor. The wait still
+ * runs from the write's return. */
+TEST(RequestEngineTest, TheFloorRunsFromTheWritesStart)
+{
+    ecuio_request_engine e;
+    ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D}));
+    ecuio_engine_sent(&e, 0, ecuio_engine_due(&e, 0, 1 * kMs), true, 4 * kMs,
+                      1 * kMs);
+    EXPECT_FALSE(ecuio_engine_expire(&e, 0, 4 * kMs + ECUIO_ENGINE_WAIT_US - 1))
+        << "the wait runs from the return";
+    const uint8_t reply[4] = {0x41, 0x0C, 0x1F, 0x40};
+    ASSERT_EQ(ecuio_engine_on_frame(&e, 0, reply, 4, 8 * kMs, nullptr),
+              ecuio_reply::positive);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 1 * kMs + ECUIO_ENGINE_GAP_US - 1), -1);
+    EXPECT_EQ(ecuio_engine_due(&e, 0, 1 * kMs + ECUIO_ENGINE_GAP_US), 1)
+        << "the floor ran from the return";
+}
+
+/* With no start given, or one after the return, the floor runs from the
+ * return. */
+TEST(RequestEngineTest, WithoutAStartTheFloorRunsFromTheReturn)
+{
+    for (const int64_t start : {int64_t{-1}, int64_t{9 * kMs}}) {
+        SCOPED_TRACE(start);
+        ecuio_request_engine e;
+        ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D}));
+        ecuio_engine_sent(&e, 0, ecuio_engine_due(&e, 0, 0), false, 4 * kMs,
+                          start);
+        EXPECT_EQ(ecuio_engine_due(&e, 0, 4 * kMs + ECUIO_ENGINE_GAP_US - 1),
+                  -1);
+        EXPECT_EQ(ecuio_engine_due(&e, 0, 4 * kMs + ECUIO_ENGINE_GAP_US), 1);
+    }
+}
+
+/* The driver's floor (?gap=) replaces the default: 5 ms, and 0, where
+ * the next request is due as soon as the reply is in. */
+TEST(RequestEngineTest, TheDriversGapIsTheFloor)
+{
+    for (const int64_t gap : {int64_t{5 * kMs}, int64_t{0}}) {
+        SCOPED_TRACE(gap);
+        ecuio_request_engine e;
+        ASSERT_NO_FATAL_FAILURE(one_channel_of(&e, {0x0C, 0x0D}));
+        e.gap_us = gap;
+        ecuio_engine_sent(&e, 0, ecuio_engine_due(&e, 0, 0), true, 0, 0);
+        EXPECT_EQ(ecuio_engine_due(&e, 0, gap), -1) << "one outstanding";
+        const uint8_t reply[4] = {0x41, 0x0C, 0x1F, 0x40};
+        ASSERT_EQ(ecuio_engine_on_frame(&e, 0, reply, 4, 0, nullptr),
+                  ecuio_reply::positive);
+        if (gap > 0) {
+            EXPECT_EQ(ecuio_engine_due(&e, 0, gap - 1), -1);
+            EXPECT_EQ(ecuio_engine_next_event_us(&e, gap - 1 * kMs), 1 * kMs);
+        }
+        EXPECT_EQ(ecuio_engine_due(&e, 0, gap), 1);
+    }
+}
+
+/* A reply may come while a request is out, or after its wait ended until
+ * a positive reply puts the channel back in step; otherwise none can, on
+ * any channel. */
+TEST(RequestEngineTest, AReplyIsAwaitedWhileOutAndOutOfStep)
+{
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 2);
+    const uint8_t a[2] = {0x01, 0x0C}, b[2] = {0x01, 0x0D};
+    ASSERT_EQ(ecuio_engine_add(&e, 0, a, 2), ecuio_engine_add_result::added);
+    ASSERT_EQ(ecuio_engine_add(&e, 1, b, 2), ecuio_engine_add_result::added);
+    EXPECT_FALSE(ecuio_engine_awaiting(&e)) << "nothing asked yet";
+
+    ecuio_engine_sent(&e, 1, ecuio_engine_due(&e, 1, 0), true, 0, 0);
+    EXPECT_TRUE(ecuio_engine_awaiting(&e)) << "channel 1's request is out";
+    const uint8_t reply_b[3] = {0x41, 0x0D, 0x32};
+    ASSERT_EQ(ecuio_engine_on_frame(&e, 1, reply_b, 3, 4 * kMs, nullptr),
+              ecuio_reply::positive);
+    EXPECT_FALSE(ecuio_engine_awaiting(&e)) << "every reply in";
+
+    ecuio_engine_sent(&e, 0, ecuio_engine_due(&e, 0, 5 * kMs), true, 5 * kMs,
+                      5 * kMs);
+    ASSERT_TRUE(ecuio_engine_expire(&e, 0, 5 * kMs + ECUIO_ENGINE_WAIT_US));
+    EXPECT_EQ(e.chans[0].outstanding, -1);
+    EXPECT_TRUE(ecuio_engine_awaiting(&e)) << "its reply may come late";
+    const uint8_t reply_a[4] = {0x41, 0x0C, 0x1F, 0x40};
+    ASSERT_EQ(ecuio_engine_on_frame(&e, 0, reply_a, 4, 200 * kMs, nullptr),
+              ecuio_reply::none)
+        << "a late reply answers nothing";
+    ecuio_engine_sent(&e, 0, ecuio_engine_due(&e, 0, 200 * kMs), true,
+                      200 * kMs, 200 * kMs);
+    ASSERT_EQ(ecuio_engine_on_frame(&e, 0, reply_a, 4, 204 * kMs, nullptr),
+              ecuio_reply::positive);
+    EXPECT_FALSE(ecuio_engine_awaiting(&e)) << "back in step";
+}
+
 /* The next event is the nearest of every channel's: a wait ending, or
  * an idle channel's floor; a channel with no requests has none. */
 TEST(RequestEngineTest, NextEventIsTheNearestAcrossChannels) {
@@ -1665,16 +1757,18 @@ TEST(RequestEngineTest, ALateReplyStillAnswersItsScannedDid) {
 TEST(RequestEngineTest, ScanFoundWithAFullTableIsCountedButNotPolled) {
     ecuio_request_engine e;
     ecuio_engine_init(&e, 1);
+    /* DIDs 0x2000 on, one apart, so the table fills whatever its size */
     for (uint32_t i = 0; i < ECUIO_PROFILE_MAX_REQUESTS; ++i) {
-        const uint8_t req[2] = {0x01, static_cast<uint8_t>(i)};
-        ASSERT_EQ(ecuio_engine_add(&e, 0, req, 2), ecuio_engine_add_result::added);
+        const uint16_t did = static_cast<uint16_t>(0x2000 + i);
+        const uint8_t req[3] = {0x22, static_cast<uint8_t>(did >> 8),
+                                static_cast<uint8_t>(did)};
+        ASSERT_EQ(ecuio_engine_add(&e, 0, req, 3),
+                  ecuio_engine_add_result::added);
     }
     ASSERT_TRUE(ecuio_engine_scan_add(&e, 0, 0x1E1C));
     int64_t now = 0;
     ASSERT_NO_FATAL_FAILURE(send_rotation(&e, 0, 0, now));
-    const uint8_t reply[3] = {0x41, 0x00, 0x00};
-    EXPECT_EQ(ecuio_engine_on_frame(&e, 0, reply, 3, now + kMs, nullptr),
-              ecuio_reply::positive);
+    EXPECT_EQ(answer_did(&e, 0, 0x2000, now + kMs), ecuio_reply::positive);
     now += ECUIO_ENGINE_GAP_US;
     ASSERT_NO_FATAL_FAILURE(send_scan_request(&e, 0, 0x1E1C, now));
     EXPECT_EQ(answer_did(&e, 0, 0x1E1C, now + kMs), ecuio_reply::positive);
@@ -1878,7 +1972,7 @@ TEST(RequestEngineTest, IdentificationTakesTurnsAndKeepsWhatTheEcuSaid) {
 
     ecuio_channel_identity_t id;
     ecuio_engine_identity(&e, 0, &id);
-    EXPECT_EQ(id.flags, ECUIO_IDENTITY_COMPLETE);
+    EXPECT_EQ(id.flags, ECUIO_IDENTITY_COMPLETE | ECUIO_IDENTITY_VIN);
     EXPECT_EQ(id.items, ECUIO_IDENT_COUNT);
     EXPECT_EQ(id.generation, ECUIO_IDENT_COUNT);
     EXPECT_STREQ(id.list[0].text, vin);
@@ -1899,7 +1993,8 @@ TEST(RequestEngineTest, IdentificationTakesTurnsAndKeepsWhatTheEcuSaid) {
     EXPECT_EQ(e.chans[0].ident_pending, 1u);
     EXPECT_EQ(e.chans[0].ident[4].outcome, ECUIO_IDENTITY_UNASKED);
     ecuio_engine_identity(&e, 0, &id);
-    EXPECT_EQ(id.flags, 0u) << "an unasked item isn't complete";
+    EXPECT_EQ(id.flags, ECUIO_IDENTITY_VIN)
+        << "an unasked item isn't complete; the VIN stays in";
     now += ECUIO_ENGINE_GAP_US;
     ASSERT_NO_FATAL_FAILURE(send_rotation(&e, 0, 0, now));
     EXPECT_EQ(ecuio_engine_on_frame(&e, 0, rpm, sizeof(rpm), now + 4 * kMs, nullptr),
@@ -1911,7 +2006,7 @@ TEST(RequestEngineTest, IdentificationTakesTurnsAndKeepsWhatTheEcuSaid) {
                            now + 4 * kMs),
               ecuio_reply::positive);
     ecuio_engine_identity(&e, 0, &id);
-    EXPECT_EQ(id.flags, ECUIO_IDENTITY_COMPLETE);
+    EXPECT_EQ(id.flags, ECUIO_IDENTITY_COMPLETE | ECUIO_IDENTITY_VIN);
     EXPECT_EQ(id.generation, ECUIO_IDENT_COUNT + 1);
     EXPECT_STREQ(id.list[4].text, part);
     EXPECT_EQ(e.count, 1u);
@@ -1955,6 +2050,159 @@ TEST(RequestEngineTest, IdentificationAloneRunsEveryTurnAndThenRests) {
     /* Channel 1 still has its whole list to ask. */
     EXPECT_EQ(ecuio_engine_next_event_us(&e, now), 0);
     ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 1, 0, now));
+}
+
+/* ADR-0027 section 3: the report flags the VIN as soon as it is in,
+ * long before the list is complete: 09 02's answer at once; F190's only
+ * once 09 02 has an outcome, since an unasked 09 02 could still answer a
+ * VIN of its own. A rescan that asks 09 02 again takes the flag back
+ * until it settles. */
+TEST(RequestEngineTest, TheVinIsFlaggedOnceItIsInWhateverIsStillOut)
+{
+    const char vin[] = "FAKEJ2534VIN00001";
+    const char other[] = "1FAFAKE10M0000001";
+    ecuio_channel_identity_t id;
+    {
+        ecuio_request_engine e;
+        ecuio_engine_init(&e, 1);
+        ecuio_engine_identify(&e);
+        ecuio_engine_identity(&e, 0, &id);
+        EXPECT_EQ(id.flags, 0u);
+        int64_t now = 0;
+        ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 0, 0, now)); /* 09 02 */
+        EXPECT_EQ(answer_ident(&e, 0, 0, reinterpret_cast<const uint8_t*>(vin),
+                               17, now + 4 * kMs),
+                  ecuio_reply::positive);
+        now += ECUIO_ENGINE_GAP_US;
+        ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 0, 1, now)); /* out */
+        ecuio_engine_identity(&e, 0, &id);
+        EXPECT_EQ(id.flags, ECUIO_IDENTITY_VIN) << "in, the list not complete";
+        char text[ECUIO_VIN_TEXT_LEN];
+        ASSERT_EQ(ecuio_identity_vin(&id, text, sizeof text), ECUIO_OK);
+        EXPECT_STREQ(text, vin);
+    }
+    {
+        ecuio_request_engine e;
+        ecuio_engine_init(&e, 1);
+        ecuio_engine_identify(&e);
+        int64_t now = 0;
+        ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 0, 0, now)); /* 09 02 */
+        now += ECUIO_ENGINE_WAIT_US;
+        ASSERT_TRUE(ecuio_engine_expire(&e, 0, now)); /* unanswered */
+        for (uint32_t i = 1; i < 9; ++i) {
+            ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 0, i, now));
+            EXPECT_EQ(answer_negative(&e, 0, ECUIO_IDENT_REQUESTS[i].bytes[0],
+                                      0x31, now + 4 * kMs),
+                      ecuio_reply::negative);
+            now += ECUIO_ENGINE_GAP_US;
+        }
+        ecuio_engine_identity(&e, 0, &id);
+        EXPECT_EQ(id.flags, 0u) << "no VIN answered yet";
+        ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 0, 9, now)); /* F190 */
+        EXPECT_EQ(answer_ident(&e, 0, 9, reinterpret_cast<const uint8_t*>(vin),
+                               17, now + 4 * kMs),
+                  ecuio_reply::positive);
+        now += ECUIO_ENGINE_GAP_US;
+        ecuio_engine_identity(&e, 0, &id);
+        EXPECT_EQ(id.flags, ECUIO_IDENTITY_VIN) << "09 02 has its outcome";
+        for (uint32_t i = 10; i < ECUIO_IDENT_COUNT; ++i) {
+            ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 0, i, now));
+            EXPECT_EQ(answer_negative(&e, 0, 0x22, 0x31, now + 4 * kMs),
+                      ecuio_reply::negative);
+            now += ECUIO_ENGINE_GAP_US;
+        }
+        ecuio_engine_identity(&e, 0, &id);
+        EXPECT_EQ(id.flags, ECUIO_IDENTITY_COMPLETE | ECUIO_IDENTITY_VIN);
+
+        ecuio_engine_rescan(&e); /* 09 02 asked again, and only it */
+        ecuio_engine_identity(&e, 0, &id);
+        EXPECT_EQ(id.list[0].outcome, ECUIO_IDENTITY_UNASKED);
+        EXPECT_EQ(id.flags & ECUIO_IDENTITY_VIN, 0u)
+            << "09 02 could still answer one of its own";
+        ASSERT_NO_FATAL_FAILURE(send_ident_request(&e, 0, 0, now));
+        EXPECT_EQ(answer_ident(&e, 0, 0,
+                               reinterpret_cast<const uint8_t*>(other), 17,
+                               now + 4 * kMs),
+                  ecuio_reply::positive);
+        ecuio_engine_identity(&e, 0, &id);
+        EXPECT_NE(id.flags & ECUIO_IDENTITY_VIN, 0u);
+        char text[ECUIO_VIN_TEXT_LEN];
+        ASSERT_EQ(ecuio_identity_vin(&id, text, sizeof text), ECUIO_OK);
+        EXPECT_STREQ(text, other) << "09 02's comes first";
+    }
+}
+
+namespace {
+
+ecuio_identity_item_t vin_item(uint8_t service, uint8_t key_hi, uint8_t key_lo,
+                               uint8_t outcome, const char* text)
+{
+    ecuio_identity_item_t it{};
+    it.request[0] = service;
+    it.request[1] = key_hi;
+    it.request[2] = key_lo;
+    it.length = service == 0x09 ? 2 : 3;
+    it.outcome = outcome;
+    const size_t n = strlen(text);
+    memcpy(it.text, text, n);
+    it.text_length = static_cast<uint8_t>(n);
+    return it;
+}
+
+} // namespace
+
+/* The pick behind the flag and ecuio_identity_vin: an item's text kept to
+ * its letters and digits, upper-cased, a VIN only at exactly 17; 09 02's
+ * before F190's; F190's in only beside a 09 02 with an outcome, or none
+ * in the list. */
+TEST(RequestEngineTest, AReportsVinIsNineOhTwosThenF190sOnceItIsIn)
+{
+    const auto pick = [](std::initializer_list<ecuio_identity_item_t> items) {
+        ecuio_channel_identity_t id{};
+        for (const ecuio_identity_item_t& it : items) {
+            id.list[id.items++] = it;
+        }
+        return ecuio_identity_vin_of(id);
+    };
+    const uint8_t A = ECUIO_IDENTITY_ANSWERED;
+    const char vin[] = "1FAFAKE10M0000001";
+    const char f190[] = "FAKEJ2534VIN00001";
+
+    ecuio_ident_vin v =
+        pick({vin_item(0x09, 0x02, 0, A, "1fa fake10m-0000001")});
+    EXPECT_TRUE(v.in);
+    EXPECT_STREQ(v.text, vin) << "letters and digits, upper case";
+
+    v = pick({vin_item(0x09, 0x02, 0, A, "1FAFAKE10M00000012"),
+              vin_item(0x22, 0xF1, 0x90, A, f190)});
+    EXPECT_TRUE(v.in) << "eighteen is no VIN; 09 02 has its outcome";
+    EXPECT_STREQ(v.text, f190);
+
+    v = pick({vin_item(0x09, 0x02, 0, A, "1FAFAKE10M000000"),
+              vin_item(0x22, 0xF1, 0x90, A, f190)});
+    EXPECT_STREQ(v.text, f190) << "sixteen is no VIN either";
+
+    v = pick({vin_item(0x09, 0x02, 0, ECUIO_IDENTITY_UNASKED, ""),
+              vin_item(0x22, 0xF1, 0x90, A, f190)});
+    EXPECT_FALSE(v.in);
+    EXPECT_STREQ(v.text, f190) << "ecuio_identity_vin still gives it";
+
+    v = pick({vin_item(0x09, 0x02, 0, ECUIO_IDENTITY_REFUSED, vin),
+              vin_item(0x22, 0xF1, 0x90, A, f190)});
+    EXPECT_TRUE(v.in);
+    EXPECT_STREQ(v.text, f190) << "a refusal's text isn't an answer";
+
+    v = pick({vin_item(0x22, 0xF1, 0x90, A, f190)});
+    EXPECT_TRUE(v.in) << "no 09 02 in the list";
+
+    v = pick(
+        {vin_item(0x09, 0x04, 0, A, vin), vin_item(0x22, 0xF1, 0x91, A, vin)});
+    EXPECT_FALSE(v.in) << "only 09 02 and F190 carry a VIN";
+    EXPECT_STREQ(v.text, "");
+
+    v = pick({vin_item(0x09, 0x02, 0, A, vin),
+              vin_item(0x22, 0xF1, 0x90, ECUIO_IDENTITY_UNASKED, "")});
+    EXPECT_TRUE(v.in) << "09 02's needs nothing of F190";
 }
 
 namespace {
@@ -5045,6 +5293,25 @@ TEST(PidSupportTest, AComputedSignalFollowsItsInputs)
     uint16_t ids[8] = {};
     EXPECT_EQ(ecuio_unsupported_signals(bare, &car, 1, ids, 8), 1u);
     EXPECT_EQ(ids[0], 11);
+}
+
+/* A chain as deep as the validator takes is followed to its end: 100
+ * reads the PID the car lacks, each next def reads the one before */
+TEST(PidSupportTest, AChainAsDeepAsTheValidatorTakesIsFollowedToItsEnd)
+{
+    const ecuio_channel_support_t car = first_vehicle();
+    ASSERT_TRUE(ecuio_pid_marked_unsupported(car, 0x5C));
+    std::vector<ecuio_signal_def_t> defs = {pid_def(11, 0x5C)};
+    std::vector<ecuio_computed_t> programs;
+    std::vector<uint16_t> want = {11};
+    for (uint16_t k = 0; k < ECUIO_COMPUTED_MAX_DEPTH; ++k) {
+        const uint16_t id = static_cast<uint16_t>(100 + k);
+        defs.push_back(computed_over(id, k));
+        programs.push_back(program_of(
+            {k == 0 ? uint16_t{11} : static_cast<uint16_t>(id - 1)}));
+        want.push_back(id);
+    }
+    EXPECT_EQ(unsupported_of(defs, programs, car), want);
 }
 
 // ---- Trouble-code titles (ADR-0044): Wal33D's generic list, SAE J2012's

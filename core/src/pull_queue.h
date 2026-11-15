@@ -51,6 +51,10 @@ void ecuio_queue_put_frame(ecuio_queue_t* queue, const ecuio_frame_t* frame);
 void ecuio_queue_put_values(ecuio_queue_t* queue,
                             const ecuio_value_batch_t* batch);
 
+void ecuio_queue_put_conditions(ecuio_queue_t* queue,
+                                const ecuio_condition_event_t* events,
+                                uint32_t count);
+
 /* The session's close, after the worker has stopped: the queue takes no
  * more entries, and its readers are woken to read what's left */
 void ecuio_queue_detach(ecuio_queue_link& link);

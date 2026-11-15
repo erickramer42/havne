@@ -1,5 +1,6 @@
 // File/layer: app/obdbimport.cpp | Qt6 Core, app layer, C++17
-// Testing: BRIDGE: ObdbImportTest, BridgeTest.Obdb* (test_bridge)
+// Testing: BRIDGE: ObdbImportTest, BridgeTest.Obdb*, BridgeTest.OneStore*
+//          (test_bridge)
 
 #include "obdbimport.h"
 
@@ -106,6 +107,10 @@ QVariantMap ObdbImport::report(const Preview& p, const QString& name,
 
 bool ObdbImport::isConversion(const QByteArray& bytes)
 {
+    // The importer writes its name as plain text: without it, no parse
+    if (!bytes.contains(kSourceName)) {
+        return false;
+    }
     const QJsonObject source =
         QJsonDocument::fromJson(bytes).object().value(QStringLiteral("source"))
             .toObject();

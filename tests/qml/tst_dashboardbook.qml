@@ -811,6 +811,31 @@ TestCase {
         compare(labels(DashboardBook.removeCell(book(), 0, 1), 0), ["IAT"])
     }
 
+    // Several cells in one write, at the page's end; a list that would
+    // pass the page's room, or holds a cell that isn't plain, is refused
+    // whole, an empty one changes nothing, and the input is never changed
+    function test_cellsAreAddedSeveralAtOnceOrNotAtAll() {
+        const d = book()
+        const before = DashboardBook.serialize(d)
+        const added = DashboardBook.addCells(d, 0, [cell("Boost"), cell("MAP")])
+        compare(labels(added, 0), ["IAT", "Oil", "Boost", "MAP"])
+        compare(DashboardBook.serialize(DashboardBook.parse(DashboardBook.serialize(added), "desktop").doc),
+                DashboardBook.serialize(added), "reads back as written")
+        compare(DashboardBook.serialize(d), before, "the input is unchanged")
+        for (const refused of [[], null, [cell("A"), { kind: "digital", w: 1, h: 1, refs: [],
+                                                       options: { from: Date } }]])
+            compare(DashboardBook.serialize(DashboardBook.addCells(d, 0, refused)), before)
+        compare(DashboardBook.serialize(DashboardBook.addCells(d, 5, [cell("A")])), before, "no such page")
+
+        const full = pageOf(DashboardBook.maxCells - 1)
+        const fullBefore = DashboardBook.serialize(full)
+        compare(labels(DashboardBook.addCells(full, 0, [cell("last")]), 0).length, DashboardBook.maxCells,
+                "up to the page's room")
+        compare(DashboardBook.serialize(DashboardBook.addCells(full, 0, [cell("A"), cell("B")])),
+                fullBefore, "one past it refuses both")
+        compare(DashboardBook.serialize(full), fullBefore)
+    }
+
     function test_setOptionsMergesAndNullRemoves() {
         const d = DashboardBook.setOptions(book(), 0, 0, { warnFrom: 55, from: -40, flash: true })
         compare(d.pages[0].cells[0].options, { from: -40, to: 120, warnFrom: 55, flash: true })

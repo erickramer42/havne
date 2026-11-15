@@ -771,3 +771,16 @@ The appendix "what Python doesn't wrap" lists the VIN decode
 calls a script reaches through `havne.c`; the appendix "the offline lookups
 and the session's words" wraps both as `havne.decode_vin` and
 `havne.dtc_title`. The rest of the first list stands.
+
+## Note: a signal file's format and expressions (2026-11-13)
+
+Section 5's signal files and the appendix "the havne package as built"
+gain what format 2 ([ADR-0062](0062-computed-grammar.md)) adds.
+`SignalFile.format` is the file's `"havne_signals"`
+(`ecuio_signal_file_format`). `SignalFile.expr(key)` and
+`Plugin.expr(key, variant=None)` give a computed signal's expression as
+the file writes it (`ecuio_signal_file_expr`; a plugin's first variant
+when `variant` is None), and None for a signal that isn't computed or no
+such signal. A chain's values reach a script as any values do; Python
+builds no program and reads none. `PythonTest.test_signal_file` and
+`test_plugin`.

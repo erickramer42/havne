@@ -1,5 +1,5 @@
 {"schema": 1, "type": "start"}
-{"duration_us": 297640718, "format": "unknown", "frames": "obd2", "markers": 0, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signal_file": null, "signals": 9, "summary": false, "type": "opened", "utc_start_us": null}
+{"conditions": null, "duration_us": 297640718, "format": "unknown", "frames": "obd2", "markers": 0, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signal_file": null, "signals": 9, "summary": false, "type": "opened", "utc_start_us": null}
 {"decimals": 1, "first_us": 206118, "group": "Engine", "highest": 100, "index": 0, "last_us": 297055865, "lowest": 0, "name": "Engine Load", "rank": 7, "rate_hz": 2.6410667616300847, "recording": 0, "samples": 785, "text": false, "type": "signal", "unit": "%"}
 {"decimals": 0, "first_us": 293002, "group": "Engine", "highest": 86, "index": 1, "last_us": 297433153, "lowest": 60, "name": "Coolant Temp", "rank": 2, "rate_hz": 2.6384855677077446, "recording": 0, "samples": 785, "text": false, "type": "signal", "unit": "\u00b0C"}
 {"decimals": 0, "first_us": 391455, "group": "Engine", "highest": 1261.25, "index": 2, "last_us": 297640718, "lowest": 0, "name": "RPM", "rank": 1, "rate_hz": 2.637517052481304, "recording": 0, "samples": 785, "text": false, "type": "signal", "unit": "RPM"}

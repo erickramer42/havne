@@ -2,7 +2,8 @@
 //             C declarations, Qt-free; included by core sources,
 //             test_core, test_elm327, test_j2534_load and
 //             test_j2534_routing
-// Testing: UNIT: CoreTest, RecorderTest, ImportTest (test_core);
+// Testing: UNIT: CoreTest, RecorderTest, ImportTest,
+//          ConditionSessionTest, ConditionRecordingTest (test_core);
 //          test_elm327; HARNESS: test_j2534_load; test_j2534_routing
 
 #ifndef ECUIO_INTERNAL_H
@@ -376,6 +377,12 @@ uint64_t ecuio_recorder_test_syncs(const ecuio_recorder_t* recorder);
 void ecuio_recorder_test_add_slept(ecuio_recorder_t* recorder, uint64_t us);
 uint64_t ecuio_recorder_test_wakes(const ecuio_recorder_t* recorder);
 
+/* Test-only: the recordings' clock for the whole process (each record's
+ * host time, an attach's zero, a note's or a mark's time). on nonzero
+ * makes it read now_us, as set by each call, so a case puts every frame
+ * at a time of its choosing; 0 gives it back to ecuio_clock_us. */
+void ecuio_recorder_test_set_clock(int on, uint64_t now_us);
+
 /* Test-only, never in queue.h: the reads waiting on a queue for an
  * entry, so a test closes it only once a read on another thread waits
  * (a read begun after ecuio_queue_close is undefined) */
@@ -394,6 +401,27 @@ void ecuio_recording_test_set_cache_limit(ecuio_recording_t* r, uint64_t bytes);
  * before its second, so a test changes the file between them; NULL takes
  * it away. One for the process. */
 void ecuio_import_test_between_passes(void (*hook)(void* user), void* user);
+
+/* Test-only (ADR-0063 section 3), never in conditions.h:
+ * ecuio_session_set_conditions calls hook(user) on its caller's thread
+ * once the worker can take the new set, before it returns, so a test
+ * dispatches a frame there; NULL takes it away. One for the process. */
+void ecuio_session_test_after_conditions_handover(void (*hook)(void* user),
+                                                  void* user);
+
+/* Test-only (ADR-0063 section 8): ecuio_session_record calls hook(user)
+ * on its caller's thread under the link's mutex, just before the recorder
+ * takes frames, so a test can try a new set of conditions there; NULL
+ * takes it away. One for the process. */
+void ecuio_session_test_before_record_attach(void (*hook)(void* user),
+                                             void* user);
+
+/* Test-only (ADR-0063 section 8): dispatch calls hook(user) on the worker
+ * once it has taken the set it judges the frame by, before it looks for a
+ * recorder, so a test can attach another set and a recorder there; NULL
+ * takes it away. One for the process. */
+void ecuio_session_test_after_dispatch_takes(void (*hook)(void* user),
+                                             void* user);
 
 #ifdef __cplusplus
 }

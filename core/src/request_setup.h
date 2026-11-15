@@ -21,6 +21,7 @@
 #include "error_detail.h"
 #include "isotp.h"
 #include "obd2_rates.h"
+#include "pid_support.h"
 #include "request_engine.h"
 #include "session.h"
 #include "uri_query.h"
@@ -36,7 +37,7 @@ constexpr uint32_t ECUIO_CAN_ID_MAX = 0x1FFFFFFFu; /* 29-bit */
 constexpr uint32_t ECUIO_CAN_ID_11BIT_MAX = 0x7FFu;
 
 /* The request keys' values: filter, txid, poll, probe, identify,
- * diagnose, pack, scan, session and keepalive_ms. */
+ * diagnose, pack, scan, gap, session and keepalive_ms. */
 struct request_params {
     uint32_t rx_id = 0; /* 0 = no ?filter= override */
     uint32_t tx_id = 0; /* 0 = unset: profile's tx, else 0x7E0 */
@@ -50,7 +51,12 @@ struct request_params {
     bool scan_first = false; /* ?scan=first: the DID scan before the rotation */
     uint8_t session = ECUIO_SESSION_DEFAULT; /* ?session=03 (ADR-0060) */
     uint32_t keepalive_ms = 0; /* ?keepalive_ms=; 0 = the engine's default */
+    /* ?gap=: the floor between requests on a channel; -1 the transport's */
+    int64_t gap_us = -1;
 };
+
+/* The most ?gap= takes, in ms */
+constexpr unsigned long ECUIO_REQUEST_GAP_MAX_MS = 1000;
 
 /* Strict unsigned parse: decimal by default, '0x'/'0X' prefix enables
  * hex digits. Rejects empty digits, '+', '-', whitespace, and overflow.
@@ -118,6 +124,8 @@ inline bool ecuio_parse_number(const char* s, size_t len,
  *   scan     turns or first: uds-generic's DID scan taking turns with
  *            the rotation (the default), or asked back to back with the
  *            rotation waiting until it ends (ADR-0020)
+ *   gap      0..1000, decimal ms: the least time between the starts of
+ *            two requests on a channel (the engine's floor)
  *   session  01 or 03: uds-generic reads in the default session (01, the
  *            default: no session request at all) or enters the extended
  *            one first (ADR-0060); never 02
@@ -161,6 +169,18 @@ inline bool ecuio_request_param(const ecuio_uri::param& q, request_params* p,
             p->pack = q.val[0] == '1';
         } else {
             p->diagnose = q.val[0] == '1';
+        }
+        return true;
+    }
+    if (q.is("gap")) {
+        /* decimal only: a time, not an ID */
+        const bool hex = q.val_len >= 2 && q.val[0] == '0' &&
+                         (q.val[1] == 'x' || q.val[1] == 'X');
+        if (hex || !ecuio_parse_number(q.val, q.val_len, &v) ||
+            v > ECUIO_REQUEST_GAP_MAX_MS) {
+            *wanted = "a time in ms from 0 to 1000";
+        } else {
+            p->gap_us = static_cast<int64_t>(v) * 1000;
         }
         return true;
     }
@@ -320,6 +340,48 @@ inline void ecuio_focus_askable(const ecuio_signal_set_t* set,
     }
 }
 
+/* Each def's byte in unasked (n of them, in place): 1 when a focus
+ * parks its request (a row of e's table, parked and not dropped), or
+ * when it is computed and an input is so, followed through its chain;
+ * 0 for every def with no focus on (nothing is parked), and for a def
+ * asked nowhere (a passive def, Service 09's, a dropped request, a DID
+ * the scan hasn't found). A def that shares a picked def's reply shares
+ * its row, so it is asked. What ecuio_session_get_unasked_signals
+ * lists. */
+inline void ecuio_focus_unasked(const ecuio_signal_set_t* set,
+                                const ecuio_request_engine& e,
+                                const uint32_t* rx_ids, uint32_t chan_count,
+                                uint8_t* unasked, size_t n)
+{
+    for (size_t i = 0; i < n; ++i) {
+        unasked[i] = 0;
+        uint8_t req[3] = {};
+        uint8_t len = 0;
+        if (set == nullptr || set->defs == nullptr || i >= set->count ||
+            !ecuio_engine_request_for_def(&set->defs[i], req, &len)) {
+            continue;
+        }
+        const uint32_t c =
+            ecuio_engine_channel_for(&set->defs[i], rx_ids, chan_count);
+        for (uint32_t k = 0; k < e.count; ++k) {
+            const ecuio_request& r = e.requests[k];
+            if (ecuio_focus_row_is(r, c, req, len)) {
+                unasked[i] = r.parked != 0 && r.dropped == 0 ? 1 : 0;
+                break;
+            }
+        }
+    }
+    for (size_t i = 0;
+         set != nullptr && set->defs != nullptr && i < n && i < set->count;
+         ++i) {
+        if (ecuio_computed_input_gone(*set, set->defs[i], [&](uint32_t k) {
+                return k < n && unasked[k] != 0;
+            })) {
+            unasked[i] = 1;
+        }
+    }
+}
+
 /* The requests, into e (initialized here for chan_count channels):
  *   ?poll=        -> that one Service 01 request; the set's rotation
  *                    isn't built, so the PID in the URI is the only one
@@ -350,6 +412,9 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                      bool* identify)
 {
     ecuio_engine_init(e, chan_count);
+    if (params.gap_us >= 0) {
+        e->gap_us = params.gap_us;
+    }
     if (params.scan_first && session->uds == nullptr) {
         ecuio_detail_set("?scan=first belongs to profile=uds-generic, the "
                          "profile that scans DIDs");
@@ -437,6 +502,7 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
         session->focus_askable.assign(n, 0);
         ecuio_focus_askable(set, *e, rx_ids, chan_count,
                             session->focus_askable.data(), n);
+        session->focus_unasked.assign(n, 0);
     } catch (const std::bad_alloc&) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -619,13 +685,21 @@ inline uint64_t ecuio_focus_table_stamp(const ecuio_request_engine& e)
  * worker hasn't taken, or resolves the stored picks again when a request
  * joined parked under it (focus_joined: a scanned DID found): under the
  * session's lock, each picked def's request on the channel of its
- * message_id (ecuio_focus_row_is) marks a table row kept; then the engine
+ * message_id (ecuio_focus_row_is) marks a table row kept, and so does
+ * each attached condition's signal's (condition_defs); then the engine
  * parks the rest, or ends the focus on a count of 0. First, when the
- * table changed, the askable map is worked out again in place. A fixed
- * table, no allocation on the worker. */
+ * table changed, the askable map is worked out again in place, and,
+ * while a focus is on, the unasked map after it and after each focus
+ * taken. A fixed table, no allocation on the worker. */
 inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
                              ecuio_focus_seen& seen)
 {
+    const auto unasked = [&] {
+        ecuio_focus_unasked(session->active_signal_set, *e,
+                            session->info.rx_ids, session->info.channel_count,
+                            session->focus_unasked.data(),
+                            session->focus_unasked.size());
+    };
     const uint64_t table = ecuio_focus_table_stamp(*e);
     if (table != seen.table) {
         seen.table = table;
@@ -634,6 +708,9 @@ inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
                             session->info.rx_ids, session->info.channel_count,
                             session->focus_askable.data(),
                             session->focus_askable.size());
+        if (e->focused) {
+            unasked();
+        }
     }
     const uint32_t asked = session->focus_generation.load();
     if (asked == seen.generation && !e->focus_joined) {
@@ -650,10 +727,12 @@ inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
         focused = !session->focus_ids.empty();
         min_sweep_us = int64_t{session->focus_min_sweep_ms} * 1000;
         const size_t defs = session->focus_defs.size();
+        const size_t watched = session->condition_defs.size();
         for (uint32_t i = 0; focused && set != nullptr &&
                              set->defs != nullptr && i < set->count && i < defs;
              ++i) {
-            if (session->focus_defs[i] == 0) {
+            if (session->focus_defs[i] == 0 &&
+                (i >= watched || session->condition_defs[i] == 0)) {
                 continue;
             }
             uint8_t req[3] = {};
@@ -671,12 +750,18 @@ inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
             }
         }
     }
+    const bool was_focused = e->focused;
     if (focused && asked_again) {
         ecuio_engine_focus(e, keep, min_sweep_us);
     } else if (focused) {
         ecuio_engine_focus_keep(e, keep); /* only a request joined */
     } else {
         ecuio_engine_unfocus(e);
+    }
+    /* With no focus the map stays zeroed: once more as a focus ends */
+    if (e->focused || was_focused) {
+        std::lock_guard<std::mutex> lock(session->focus_mutex);
+        unasked();
     }
 }
 

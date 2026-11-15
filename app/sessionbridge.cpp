@@ -5,10 +5,12 @@
 #include "carryover.h"
 #include "healthreport.h"
 #include "obdbimport.h"
+#include "storemigration.h"
 #include "diagnostics_line.h" /* cli/: havne-cli's diagnostics line */
 #include "recording_signals.h" /* cli/: a replay's own signal file */
 #include "signal_file_lines.h" /* cli/: the profile a URI selects */
 #include "refused_signals.h" /* cli/: the signals an ECU refuses, as havne-cli says them */
+#include "default_pick.h" /* cli/: the default pick, as havne-cli's --pick ranked */
 #include "scan_line.h"       /* cli/: when a module's session earns a line */
 #include "urlwrite.h"
 #include "ecuio/version.h"
@@ -30,6 +32,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -831,6 +835,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
             return shownRange(e).second;
         case IsEnumRole:
             return e.facts.isEnum;
+        case UnaskedRole:
+            return e.unasked;
         default: return QVariant();
     }
 }
@@ -858,7 +864,8 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {RefRole, "ref"},
             {RangeLowRole, "rangeLow"},
             {RangeHighRole, "rangeHigh"},
-            {IsEnumRole, "isEnum"}};
+            {IsEnumRole, "isEnum"},
+            {UnaskedRole, "unasked"}};
 }
 
 bool SignalListModel::isBuiltIn(const ecuio_signal_set_t* set)
@@ -907,6 +914,11 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
     const bool hadHidden = m_hiddenCount != 0;
     m_hiddenCount = 0;
     m_ranked = false;
+    // A new set's rows start asked: the bridge applies the session's list
+    if (m_unaskedCount != 0) {
+        m_unaskedCount = 0;
+        emit unaskedCountChanged();
+    }
     if (set == nullptr || set->defs == nullptr || set->count == 0) {
         beginResetModel();
         m_entries.clear();
@@ -914,6 +926,10 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
         m_subscribedCount = 0;
         endResetModel();
         emit subscribedCountChanged();
+        if (m_tickedCount != 0) {
+            m_tickedCount = 0;
+            emit tickedCountChanged();
+        }
         if (hadHidden) emit hiddenCountChanged();
         m_clock.restart();
         return;
@@ -1138,7 +1154,7 @@ void SignalListModel::pushWindow(Entry& e, const WindowValue& w)
 QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
 {
     const auto plotted = [](const Entry& e) {
-        return e.subscribed && !e.hidden && e.histCount != 0;
+        return e.subscribed && !e.isText && !e.hidden && e.histCount != 0;
     };
     // The window ends at the newest plotted sample, the chart's "now"
     qint64 newest = std::numeric_limits<qint64>::min();
@@ -1309,23 +1325,35 @@ void SignalListModel::toggleSubscribed(int row)
 {
     if (row < 0 || row >= static_cast<int>(m_entries.size())) return;
     Entry& e = m_entries[static_cast<size_t>(row)];
-    if (e.isText) return;   // nothing to plot
+    // A text row's default is unticked, so its tick is Plotted or Default
     const bool plot = !e.subscribed;
     e.choice = plot == e.plotDefault ? PlotChoice::Default
              : plot                  ? PlotChoice::Plotted
                                      : PlotChoice::Unplotted;
     judgePlotted();
+    emit ticksChanged();
 }
 
 QStringList SignalListModel::plottedNames() const
 {
     QStringList names;
     for (const Entry& e : m_entries) {
-        if (!e.isText && e.choice == PlotChoice::Plotted) {
+        if (e.choice == PlotChoice::Plotted) {
             names << QString::fromUtf8(e.name);
         }
     }
     return names;
+}
+
+std::vector<uint16_t> SignalListModel::tickedIds() const
+{
+    std::vector<uint16_t> ids;
+    for (const Entry& e : m_entries) {
+        if (e.choice == PlotChoice::Plotted) {
+            ids.push_back(e.id);
+        }
+    }
+    return ids;
 }
 
 std::vector<uint16_t> SignalListModel::plottedIds() const
@@ -1354,12 +1382,13 @@ void SignalListModel::setPlotChoices(const QStringList& plotted, const QStringLi
 {
     for (Entry& e : m_entries) {
         const QString name = QString::fromUtf8(e.name);
-        e.choice = e.isText                   ? PlotChoice::Default
-                 : unplotted.contains(name)   ? PlotChoice::Unplotted
-                 : plotted.contains(name)     ? PlotChoice::Plotted
-                                              : PlotChoice::Default;
+        e.choice = (!e.isText && unplotted.contains(name))
+                       ? PlotChoice::Unplotted
+                   : plotted.contains(name) ? PlotChoice::Plotted
+                                            : PlotChoice::Default;
     }
     judgePlotted();
+    emit ticksChanged();
 }
 
 void SignalListModel::judgePlotted()
@@ -1393,17 +1422,20 @@ void SignalListModel::judgePlotted()
     int first = -1;
     int last = -1;
     int subscribed = 0;
+    int ticked = 0;
     for (size_t row = 0; row < m_entries.size(); ++row) {
         Entry& e = m_entries[row];
-        const bool plot = !e.isText
-                       && (e.choice == PlotChoice::Plotted
-                           || (e.choice == PlotChoice::Default && e.plotDefault));
+        // A text row's tick asks it and never plots: subscribed shows the
+        // tick, and the count and chartData leave the row out
+        const bool plot = e.choice == PlotChoice::Plotted ||
+                          (e.choice == PlotChoice::Default && e.plotDefault);
         if (plot != e.subscribed) {
             e.subscribed = plot;
             if (first < 0) first = static_cast<int>(row);
             last = static_cast<int>(row);
         }
-        subscribed += (e.subscribed && !e.hidden) ? 1 : 0;
+        subscribed += (e.subscribed && !e.isText && !e.hidden) ? 1 : 0;
+        ticked += (e.subscribed && !e.hidden) ? 1 : 0;
     }
     if (first >= 0) {
         emit dataChanged(index(first), index(last), {SubscribedRole});
@@ -1411,6 +1443,10 @@ void SignalListModel::judgePlotted()
     if (subscribed != m_subscribedCount) {
         m_subscribedCount = subscribed;
         emit subscribedCountChanged();
+    }
+    if (ticked != m_tickedCount) {
+        m_tickedCount = ticked;
+        emit tickedCountChanged();
     }
 }
 
@@ -1440,6 +1476,38 @@ void SignalListModel::applyAbsent(const std::vector<uint16_t>& ids)
         }
     }
     rejudgeHidden();
+}
+
+void SignalListModel::applyUnasked(const std::vector<uint16_t>& ids)
+{
+    std::vector<uint8_t> unasked(m_entries.size(), 0);
+    for (uint16_t id : ids) {
+        const int row = m_rowOfId.value(id, -1);
+        if (row >= 0) {
+            unasked[static_cast<size_t>(row)] = 1;
+        }
+    }
+    for (size_t row = 0; row < m_entries.size(); ++row) {
+        Entry& e = m_entries[row];
+        if (e.unasked != (unasked[row] != 0)) {
+            e.unasked = unasked[row] != 0;
+            const QModelIndex i = index(static_cast<int>(row));
+            emit dataChanged(i, i, {UnaskedRole});
+        }
+    }
+    recountUnasked();
+}
+
+void SignalListModel::recountUnasked()
+{
+    int count = 0;
+    for (const Entry& e : m_entries) {
+        count += (e.unasked && !e.hidden) ? 1 : 0;
+    }
+    if (count != m_unaskedCount) {
+        m_unaskedCount = count;
+        emit unaskedCountChanged();
+    }
 }
 
 void SignalListModel::applyRefused(const std::vector<Refusal>& refused)
@@ -1490,6 +1558,7 @@ void SignalListModel::rejudgeHidden()
     emit dataChanged(index(first), index(last), {HiddenRole});
     m_hiddenCount = hidden;
     emit hiddenCountChanged();
+    recountUnasked();
     // A hidden row's default place goes to the next ranked row
     judgePlotted();
 }
@@ -1523,7 +1592,9 @@ bool LiveSignalModel::filterAcceptsRow(int sourceRow, const QModelIndex& sourceP
         m->data(i, SignalListModel::NameRole).toString(),
         m->data(i, SignalListModel::UnitRole).toString(),
         m->data(i, SignalListModel::GroupRole).toInt(),
-        m->data(i, SignalListModel::SubscribedRole).toBool());
+        m->data(i, SignalListModel::SubscribedRole).toBool() &&
+            !m->data(i, SignalListModel::IsTextRole).toBool(),
+        !m->data(i, SignalListModel::UnaskedRole).toBool());
 }
 
 void LiveSignalModel::refilter()
@@ -1568,12 +1639,23 @@ SessionBridge::SessionBridge(QObject* parent)
     , m_liveSignalModel(new LiveSignalModel(m_signalModel, this))
 {
     (void)ecuio_init();   // optional and always ECUIO_OK (core.h), paired below
+    m_pluginStore.setLog(
+        [this](const QString& line) { emit logMessage(line); });
+    m_conditionModel = new ConditionModel(this);
+    if (!m_conditionStore.load(&m_conditionsProblem)) {
+        m_conditionsProblem =
+            QStringLiteral("The saved conditions weren't read: %1")
+                .arg(m_conditionsProblem);
+    }
+    showSavedConditions();
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         notifyFrameCounts();
         pollLinkHealth();   // every tick while connected: transitions only
         pollChannelSupport();
         pollAbsentSignals();
+        pollDefaultPick(); // after the reports: their drops judge it
+        pollUnaskedSignals();
         pollChannelIdentity();
         pollChannelDiagnostics();
         pollReplayEnd();
@@ -1586,8 +1668,13 @@ SessionBridge::SessionBridge(QObject* parent)
         // queues a report as it drops (at most one pending).
         notifyDropped();
         flushValues();
+        flushConditions(
+            m_session); // after the values: a firing's value is shown
         pollRecording();
     });
+    // A tick asks its row: the default pick follows on the next tick
+    connect(m_signalModel, &SignalListModel::ticksChanged, this,
+            [this]() { m_pickDirty = true; });
 
     // The log's readout: its time and its folder's size, once a second
     m_logTimer = new QTimer(this);
@@ -1883,21 +1970,48 @@ int SessionBridge::deleteUnusedSignalFiles(const QStringList& keep)
 QVariantMap SessionBridge::previewObdb(const QUrl& url, int modelYear,
                                        const QString& name)
 {
-    m_obdbPending.clear();
-    const uint32_t year = modelYear > 0 ? static_cast<uint32_t>(modelYear) : 0u;
     // A picked file opens through openPicked: Android's content:// by the content resolver
     QFile file;
-    ObdbImport::Preview p;
     if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
-        p.words = QStringLiteral("Couldn't read the file");
-    } else if (file.size() > static_cast<qint64>(ECUIO_OBDB_MAX_BYTES)) {
-        p.words = QStringLiteral("The file is over %1 MiB, an OBDb set's most")
-                      .arg(ECUIO_OBDB_MAX_BYTES / (1024 * 1024));
+        return previewObdbBytes({}, QStringLiteral("Couldn't read the file"),
+                                modelYear, name);
+    }
+    if (file.size() > static_cast<qint64>(ECUIO_OBDB_MAX_BYTES)) {
+        return previewObdbBytes(
+            {},
+            QStringLiteral("The file is over %1 MiB, an OBDb set's most")
+                .arg(ECUIO_OBDB_MAX_BYTES / (1024 * 1024)),
+            modelYear, name);
+    }
+    return previewObdbBytes(file.read(ECUIO_OBDB_MAX_BYTES + 1), QString(),
+                            modelYear, name);
+}
+
+QVariantMap SessionBridge::previewObdbImport(int modelYear, const QString& name)
+{
+    const bool waiting = m_importKind == QLatin1String("obdb");
+    return previewObdbBytes(
+        waiting ? m_importPending : QByteArray(),
+        waiting ? QString()
+                : QStringLiteral("No OBDb set is waiting: import it again"),
+        modelYear, name);
+}
+
+QVariantMap SessionBridge::previewObdbBytes(const QByteArray& bytes,
+                                            const QString& refusal,
+                                            int modelYear, const QString& name)
+{
+    m_obdbPending.clear();
+    const uint32_t year = modelYear > 0 ? static_cast<uint32_t>(modelYear) : 0u;
+    ObdbImport::Preview p;
+    if (refusal.isEmpty()) {
+        p = ObdbImport::read(bytes, year, name);
     } else {
-        p = ObdbImport::read(file.read(ECUIO_OBDB_MAX_BYTES + 1), year, name);
+        p.words = refusal;
     }
     if (p.ok) {
         m_obdbPending = p.json;
+        m_obdbPendingYear = static_cast<int>(year);
     }
     emit logMessage(
         p.ok ? QStringLiteral("OBDb set read for %1: %2 converted, %3 fields "
@@ -2001,6 +2115,26 @@ QVariantList SessionBridge::decodeProfiles()
     return out;
 }
 
+// The activity log's line for a package's import
+static QString pluginImportLine(const QVariantMap& result)
+{
+    if (!result.value(QStringLiteral("ok")).toBool()) {
+        return QStringLiteral("Plugin refused: %1")
+            .arg(result.value(QStringLiteral("words")).toString());
+    }
+    const QString name = result.value(QStringLiteral("name")).toString();
+    const QString version = result.value(QStringLiteral("version")).toString();
+    const QString profiles = result.value(QStringLiteral("profiles"))
+                                 .toStringList()
+                                 .join(QStringLiteral(", "));
+    const QString updated = result.value(QStringLiteral("updated")).toString();
+    return updated.isEmpty()
+               ? QStringLiteral("Plugin: %1 %2 (%3)")
+                     .arg(name, version, profiles)
+               : QStringLiteral("Plugin updated: %1 from %2 to %3 (%4)")
+                     .arg(name, updated, version, profiles);
+}
+
 QVariantMap SessionBridge::importPlugin(const QUrl& url)
 {
     // A picked file opens through openPicked: Android's content:// by the content resolver
@@ -2018,16 +2152,7 @@ QVariantMap SessionBridge::importPlugin(const QUrl& url)
     } else {
         result = m_pluginStore.import(file.read(ECUIO_PLUGIN_PACKAGE_MAX + 1));
     }
-    emit logMessage(
-        result.value(QStringLiteral("ok")).toBool()
-            ? QStringLiteral("Plugin: %1 %2 (%3)")
-                  .arg(result.value(QStringLiteral("name")).toString(),
-                       result.value(QStringLiteral("version")).toString(),
-                       result.value(QStringLiteral("profiles"))
-                           .toStringList()
-                           .join(QStringLiteral(", ")))
-            : QStringLiteral("Plugin refused: %1")
-                  .arg(result.value(QStringLiteral("words")).toString()));
+    emit logMessage(pluginImportLine(result));
     return result;
 }
 
@@ -2047,6 +2172,412 @@ QVariantList SessionBridge::pluginMatches(const QString& typedVin) const
     return m_pluginStore.matches(typedVin.trimmed().isEmpty() ? m_vin
                                                               : typedVin,
                                  QDate::currentDate().year() + 1);
+}
+
+// The first key of a JSON object's text, "" when it doesn't start as one
+static QByteArray firstKeyOf(const QByteArray& bytes)
+{
+    qsizetype at = 0;
+    const auto skipSpace = [&]() {
+        while (at < bytes.size() &&
+               (bytes.at(at) == ' ' || bytes.at(at) == '\t' ||
+                bytes.at(at) == '\r' || bytes.at(at) == '\n')) {
+            ++at;
+        }
+    };
+    skipSpace();
+    if (at >= bytes.size() || bytes.at(at) != '{') {
+        return {};
+    }
+    ++at;
+    skipSpace();
+    if (at >= bytes.size() || bytes.at(at) != '"') {
+        return {};
+    }
+    const qsizetype end = bytes.indexOf('"', at + 1);
+    return end < 0 ? QByteArray() : bytes.mid(at + 1, end - at - 1);
+}
+
+// What an import is (ADR-0064): a package or a signal file by its first
+// key, an OBDb set by its commands; "" for anything else
+static QString importKindOf(const QByteArray& bytes)
+{
+    const QByteArray first = firstKeyOf(bytes);
+    if (first == "havne_plugin") {
+        return QStringLiteral("plugin");
+    }
+    if (first == "havne_signals") {
+        return QStringLiteral("signals");
+    }
+    // A file past an OBDb set's bound isn't parsed: the word alone says
+    // which bound it is refused by
+    const bool commands =
+        bytes.size() > static_cast<qsizetype>(ECUIO_OBDB_MAX_BYTES)
+            ? bytes.contains("\"commands\"")
+            : QJsonDocument::fromJson(bytes).object().contains(
+                  QStringLiteral("commands"));
+    return commands ? QStringLiteral("obdb") : QString();
+}
+
+QVariantMap SessionBridge::readImport(const QUrl& url)
+{
+    dropImport();
+    const auto refused = [](const QString& words) {
+        return QVariantMap{{QStringLiteral("ok"), false},
+                           {QStringLiteral("words"), words}};
+    };
+    // Android's content:// URIs open through QFile as they are
+    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    QVariantMap result;
+    QString kind;
+    QString line;
+    const QString tooLarge =
+        QStringLiteral("The file is over %1 MiB, a plugin's most")
+            .arg(ECUIO_PLUGIN_PACKAGE_MAX / (1024 * 1024));
+    QByteArray bytes;
+    if (file.open(QIODevice::ReadOnly)) {
+        // The read's own bound: a provider may give no size to judge by
+        bytes = file.read(ECUIO_PLUGIN_PACKAGE_MAX + 1);
+    }
+    if (!file.isOpen()) {
+        result = refused(QStringLiteral("Couldn't read the file"));
+    } else if (bytes.size() >
+               static_cast<qsizetype>(ECUIO_PLUGIN_PACKAGE_MAX)) {
+        result = refused(tooLarge);
+    } else {
+        // An editor's byte-order mark is no part of the text the loaders
+        // read
+        if (bytes.startsWith("\xEF\xBB\xBF")) {
+            bytes.remove(0, 3);
+        }
+        kind = importKindOf(bytes);
+        if (kind == QLatin1String("plugin")) {
+            result = m_pluginStore.import(bytes);
+            line = pluginImportLine(result);
+        } else if (kind == QLatin1String("signals")) {
+            result = bytes.size() >
+                             static_cast<qsizetype>(ECUIO_SIGNAL_FILE_MAX_BYTES)
+                         ? refused(QStringLiteral("The file is over %1 KiB, a "
+                                                  "signal file's most")
+                                       .arg(ECUIO_SIGNAL_FILE_MAX_BYTES / 1024))
+                         : PluginStore::describe(bytes);
+            if (result.value(QStringLiteral("ok")).toBool()) {
+                m_importPending = bytes;
+                m_importKind = kind;
+                line = QStringLiteral("Signal file read: %1 (as a plugin, %2)")
+                           .arg(result.value(QStringLiteral("name")).toString(),
+                                result.value(QStringLiteral("id")).toString());
+            } else {
+                line =
+                    QStringLiteral("Signal file refused: %1")
+                        .arg(result.value(QStringLiteral("words")).toString());
+            }
+        } else if (kind == QLatin1String("obdb") &&
+                   bytes.size() >
+                       static_cast<qsizetype>(ECUIO_OBDB_MAX_BYTES)) {
+            result = refused(
+                QStringLiteral("The file is over %1 MiB, an OBDb set's most")
+                    .arg(ECUIO_OBDB_MAX_BYTES / (1024 * 1024)));
+            line = QStringLiteral("OBDb set refused: %1")
+                       .arg(result.value(QStringLiteral("words")).toString());
+        } else if (kind == QLatin1String("obdb")) {
+            // Held, so the report converts these bytes: the file is read
+            // once
+            m_importPending = bytes;
+            m_importKind = kind;
+            result = {{QStringLiteral("ok"), true},
+                      {QStringLiteral("words"), QString()}};
+            line = QStringLiteral("OBDb set found: its report comes first");
+        } else {
+            result = refused(QStringLiteral(
+                "The file is neither a plugin, a signal file nor an OBDb "
+                "signal set"));
+        }
+    }
+    result.insert(QStringLiteral("kind"), kind);
+    emit logMessage(
+        line.isEmpty()
+            ? QStringLiteral("Import refused: %1")
+                  .arg(result.value(QStringLiteral("words")).toString())
+            : line);
+    return result;
+}
+
+// The activity log's line for a wrap (into "") or a put: what the user
+// is told beside the plugin is core's notes, then the store's words (an
+// index it couldn't write, a file here already)
+static QString keptLine(const QVariantMap& result, const QString& into)
+{
+    QString said;
+    for (const char* key : {"notes", "words"}) {
+        const QString text = result.value(QLatin1String(key)).toString();
+        if (!text.isEmpty()) {
+            said += QStringLiteral("; ") + text;
+        }
+    }
+    const bool here = result.value(QStringLiteral("kept")).toBool();
+    return result.value(QStringLiteral("ok")).toBool()
+               ? QStringLiteral("%1: %2 %3 (%4)%5")
+                     .arg(!into.isEmpty() ? QStringLiteral("Plugin changed")
+                          : here ? QStringLiteral("Plugin already here")
+                                 : QStringLiteral("Plugin made"),
+                          result.value(QStringLiteral("name")).toString(),
+                          result.value(QStringLiteral("version")).toString(),
+                          result.value(QStringLiteral("profiles"))
+                              .toStringList()
+                              .join(QStringLiteral(", ")),
+                          said)
+               : QStringLiteral("%1: %2").arg(
+                     into.isEmpty() ? QStringLiteral("Plugin not made")
+                                    : QStringLiteral("Plugin not changed"),
+                     result.value(QStringLiteral("words")).toString());
+}
+
+QVariantMap SessionBridge::keepFile(const QByteArray& file, const QString& into,
+                                    const QString& variant,
+                                    const QString& vehicle)
+{
+    const QVariantMap result =
+        into.isEmpty() ? m_pluginStore.wrap(file, {vehicle, variant})
+                       : m_pluginStore.put(into, variant, file);
+    emit logMessage(keptLine(result, into));
+    return result;
+}
+
+QVariantMap SessionBridge::keepSignals(const QString& into,
+                                       const QString& variant,
+                                       const QString& vehicle)
+{
+    if (m_importKind != QLatin1String("signals")) {
+        const QString words =
+            QStringLiteral("No signal file is waiting: import it again");
+        emit logMessage(QStringLiteral("Plugin not made: %1").arg(words));
+        return {{QStringLiteral("ok"), false},
+                {QStringLiteral("words"), words}};
+    }
+    const QVariantMap result =
+        keepFile(m_importPending, into, variant, vehicle);
+    if (result.value(QStringLiteral("ok")).toBool()) {
+        dropImport();
+    }
+    return result;
+}
+
+QVariantMap SessionBridge::keepSignalText(const QString& text,
+                                          const QString& into,
+                                          const QString& variant,
+                                          const QString& vehicle)
+{
+    return keepFile(text.toUtf8(), into, variant, vehicle);
+}
+
+QVariantMap SessionBridge::keepObdbPlugin(const QString& vehicle,
+                                          bool yearTyped)
+{
+    QVariantMap result;
+    if (m_obdbPending.isEmpty()) {
+        result = {{QStringLiteral("ok"), false},
+                  {QStringLiteral("words"),
+                   QStringLiteral("No OBDb set is waiting: import it again")}};
+    } else {
+        // Only a year the user typed names the variant: one decoded from
+        // a VIN stays out of anything a plugin carries
+        const QString variant =
+            yearTyped && m_obdbPendingYear > 0
+                ? QStringLiteral("my%1").arg(m_obdbPendingYear)
+                : QString();
+        result = m_pluginStore.wrap(m_obdbPending, {vehicle, variant});
+        if (result.value(QStringLiteral("ok")).toBool()) {
+            dropImport();
+        }
+    }
+    const QString said = result.value(QStringLiteral("words")).toString();
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Plugin from OBDb: %1 %2 (%3)%4%5")
+                  .arg(result.value(QStringLiteral("name")).toString(),
+                       result.value(QStringLiteral("version")).toString(),
+                       result.value(QStringLiteral("profiles"))
+                           .toStringList()
+                           .join(QStringLiteral(", ")),
+                       result.value(QStringLiteral("merged")).toBool()
+                           ? QStringLiteral(
+                                 ", as a variant of the earlier import")
+                       : result.value(QStringLiteral("replaced"))
+                               .toString()
+                               .isEmpty()
+                           ? QString()
+                           : QStringLiteral(", in the earlier import's place"),
+                       said.isEmpty() ? QString() : QStringLiteral("; ") + said)
+            : QStringLiteral("OBDb set not kept: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+QVariantMap SessionBridge::dropPluginVariant(const QString& sha,
+                                             const QString& variant)
+{
+    const QVariantMap result = m_pluginStore.drop(sha, variant);
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Plugin changed: %1 %2 (%3)")
+                  .arg(result.value(QStringLiteral("name")).toString(),
+                       result.value(QStringLiteral("version")).toString(),
+                       result.value(QStringLiteral("profiles"))
+                           .toStringList()
+                           .join(QStringLiteral(", ")))
+            : QStringLiteral("Variant not removed: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+QVariantMap SessionBridge::markPluginMine(const QString& sha)
+{
+    const QVariantMap result = m_pluginStore.markMine(sha);
+    const QString said = result.value(QStringLiteral("words")).toString();
+    emit logMessage(
+        result.value(QStringLiteral("ok")).toBool()
+            ? QStringLiteral("Plugin %1 marked as yours%2")
+                  .arg(sha.left(12),
+                       said.isEmpty() ? QString() : QStringLiteral("; ") + said)
+            : QStringLiteral("Plugin not marked as yours: %1")
+                  .arg(result.value(QStringLiteral("words")).toString()));
+    return result;
+}
+
+// The activity log's line for forgotten vehicles' imports, "" for none
+static QString forgottenLine(const QVariantMap& result, bool every)
+{
+    const int count = result.value(QStringLiteral("count")).toInt();
+    const QString said = result.value(QStringLiteral("words")).toString();
+    return count == 0
+               ? QString()
+               : (every ? QStringLiteral("Plugins no longer imported for the "
+                                         "forgotten vehicles: %1%2")
+                        : QStringLiteral("Plugins no longer imported for a "
+                                         "forgotten vehicle: %1%2"))
+                     .arg(count)
+                     .arg(said.isEmpty() ? QString()
+                                         : QStringLiteral("; ") + said);
+}
+
+QVariantMap SessionBridge::forgetVehicleImports(const QString& vehicle)
+{
+    const QVariantMap result = m_pluginStore.forgetVehicle(vehicle);
+    const QString line = forgottenLine(result, false);
+    if (!line.isEmpty()) {
+        emit logMessage(line);
+    }
+    return result;
+}
+
+QVariantMap SessionBridge::forgetAllVehicleImports()
+{
+    const QVariantMap result = m_pluginStore.forgetVehicles();
+    const QString line = forgottenLine(result, true);
+    if (!line.isEmpty()) {
+        emit logMessage(line);
+    }
+    return result;
+}
+
+QStringList SessionBridge::migrateStores(QSettings& prefs)
+{
+    return StoreMigration::run(prefs, m_pluginStore).lines;
+}
+
+QVariantMap SessionBridge::exportPlugin(const QString& sha, const QUrl& url)
+{
+    (void)m_pluginStore.all();
+    QString words;
+    const QByteArray bytes = m_pluginStore.packed(sha, &words);
+    bool written = false;
+    if (!bytes.isEmpty()) {
+        written = writeToUrl(url, bytes);
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    emit logMessage(
+        written ? QStringLiteral("Plugin %1 exported to a file (%2 bytes)")
+                      .arg(sha.left(12))
+                      .arg(bytes.size())
+                : QStringLiteral("Plugin %1 not exported: %2")
+                      .arg(sha.left(12), words));
+    return {{QStringLiteral("ok"), written},
+            {QStringLiteral("words"), written ? QString() : words}};
+}
+
+QVariantMap SessionBridge::pluginExportNote(const QString& sha)
+{
+    return m_pluginStore.exportNote(sha);
+}
+
+QVariantMap SessionBridge::pluginVariantText(const QString& sha,
+                                             const QString& variant)
+{
+    return m_pluginStore.variantText(sha, variant);
+}
+
+QVariantMap SessionBridge::saveVariantFile(const QString& sha,
+                                           const QString& variant,
+                                           const QUrl& url)
+{
+    QString words;
+    const QByteArray bytes = m_pluginStore.variantBytes(sha, variant, &words);
+    bool written = false;
+    if (!bytes.isEmpty()) {
+        written = writeToUrl(url, bytes);
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    emit logMessage(
+        written ? QStringLiteral("Variant %1 of plugin %2 saved as a signal "
+                                 "file (%3 bytes)")
+                      .arg(variant, sha.left(12))
+                      .arg(bytes.size())
+                : QStringLiteral("Variant %1 of plugin %2 not saved: %3")
+                      .arg(variant, sha.left(12), words));
+    return {{QStringLiteral("ok"), written},
+            {QStringLiteral("words"), written ? QString() : words}};
+}
+
+QVariantMap SessionBridge::copyVariant(const QString& sha,
+                                       const QString& variant,
+                                       const QString& into,
+                                       const QString& newVariant)
+{
+    const QVariantMap result =
+        m_pluginStore.copyVariant(sha, variant, into, newVariant);
+    emit logMessage(keptLine(result, into));
+    return result;
+}
+
+QVariantList SessionBridge::offeredVariants(const QString& vehicle,
+                                            const QString& typedVin,
+                                            const QStringList& picks)
+{
+    return m_pluginStore.offered(
+        vehicle, typedVin.trimmed().isEmpty() ? m_vin : typedVin,
+        QDate::currentDate().year() + 1, picks);
+}
+
+QVariantList SessionBridge::pickRow(const QStringList& picks, bool adapter)
+{
+    return m_pluginStore.pickRow(picks, adapter);
+}
+
+QVariantMap SessionBridge::pickVariant(const QStringList& picks,
+                                       const QString& profile)
+{
+    return m_pluginStore.pick(picks, profile);
+}
+
+QStringList SessionBridge::unpickVariant(const QStringList& picks,
+                                         const QString& profile)
+{
+    return PluginStore::unpick(picks, profile);
 }
 
 QString SessionBridge::readOnce(const QString& adapterUri,
@@ -2438,6 +2969,32 @@ QString SessionBridge::replayUriFor(const QString& folder,
     return uri;
 }
 
+namespace {
+
+// A recording's events.log header, as cli::RecordedSignals reads it;
+// false when there's no events.log to read
+bool readRecordedHeader(const QString& folder, cli::RecordedSignals* recorded)
+{
+    QFile events(folder + QStringLiteral("/events.log"));
+    if (!events.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    // The header alone: its lines up to the blank one (the enum labels'
+    // lines make it longer than a few)
+    while (!events.atEnd()) {
+        QByteArray line = events.readLine(64 * 1024);
+        if (line.endsWith('\n')) {
+            line.chop(1);
+        }
+        if (!recorded->take(line.toStdString())) {
+            break;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
 {
     const std::string uri8 = uri.toStdString();
@@ -2447,20 +3004,8 @@ QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
     }
     const QString folder = QString::fromStdString(folder8);
     cli::RecordedSignals recorded;
-    QFile events(folder + QStringLiteral("/events.log"));
-    if (!events.open(QIODevice::ReadOnly)) {
+    if (!readRecordedHeader(folder, &recorded)) {
         return uri;
-    }
-    // The header alone: its lines up to the blank one (the enum labels'
-    // lines make it longer than a few)
-    while (!events.atEnd()) {
-        QByteArray line = events.readLine(64 * 1024);
-        if (line.endsWith('\n')) {
-            line.chop(1);
-        }
-        if (!recorded.take(line.toStdString())) {
-            break;
-        }
     }
     if (!recorded.names_file()) {
         return uri;
@@ -2718,6 +3263,11 @@ QString SessionBridge::connectCoreOnly(const QString& uri,
         // values to onValues, after onFrame
         rc = ecuio_register_values_callback(session, &SessionBridge::onValues, this);
     }
+    if (rc == ECUIO_OK) {
+        // ADR-0063: a frame's condition events, after its values
+        rc = ecuio_register_conditions_callback(
+            session, &SessionBridge::onConditions, this);
+    }
     if (rc != ECUIO_OK) {
         ecuio_session_destroy(session);
         return QString::fromUtf8(ecuio_status_string(rc));
@@ -2733,6 +3283,24 @@ QString SessionBridge::connectCoreOnly(const QString& uri,
 // handleFrameInternal after applyConnectedState, and its values wait in
 // the staging, sized here, for the first tick. On failure the session
 // is destroyed.
+namespace {
+
+// Whether a URI's query names poll=: such a session asks the polled
+// signals alone, whatever its pick
+bool namesPoll(const QString& uri)
+{
+    const qsizetype q = uri.indexOf(QLatin1Char('?'));
+    if (q < 0) {
+        return false;
+    }
+    const QStringList segments = uri.mid(q + 1).split(QLatin1Char('&'));
+    return std::any_of(segments.begin(), segments.end(), [](const QString& s) {
+        return s.startsWith(QLatin1String("poll="));
+    });
+}
+
+} // namespace
+
 QString SessionBridge::startSession(ecuio_session_t* session,
                                     const QString& uri)
 {
@@ -2751,6 +3319,18 @@ QString SessionBridge::startSession(ecuio_session_t* session,
     m_valuesStaged = 0;
     prepareValueStaging(ecuio_session_signal_set(session));
     m_frameLog->noteTextDefs(ecuio_session_signal_set(session));
+    // Before the start (no whole sweep first) and the recorder (its header
+    // names the pick); the vehicle's ticks come after the connect
+    m_pickSet = false;
+    m_pickIds.clear();
+    m_pickPolled = namesPoll(uri);
+    m_pickLine.clear();
+    m_pickLinePending = false;
+    applyDefaultPick(session, false, true);
+    // Before the recorder, which holds the set the session judges then
+    // (ECUIO_ERR_IN_USE after), and before the start, so the first frame
+    // is judged
+    attachSessionConditions(session, uri);
     // Attached before the worker starts, so the recording holds every frame
     startRecording(session, uri);
     m_accepting.store(true, std::memory_order_release);
@@ -2762,7 +3342,10 @@ QString SessionBridge::startSession(ecuio_session_t* session,
         stopRecording(QStringLiteral("the session didn't start: %1").arg(err));
         ecuio_unregister_frame_callback(session, &SessionBridge::onFrame, this);
         ecuio_unregister_values_callback(session, &SessionBridge::onValues, this);
+        ecuio_unregister_conditions_callback(
+            session, &SessionBridge::onConditions, this);
         ecuio_session_destroy(session);
+        endSessionConditions();
         return err;
     }
     return {};
@@ -2810,6 +3393,13 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
         m_channelCount = std::min<uint32_t>(info.channel_count,
                                             ECUIO_SESSION_INFO_MAX_CHANNELS);
     }
+    if (m_pickLinePending) {
+        m_pickLinePending = false;
+        writePickLine();
+    }
+    for (const QString& line : std::exchange(m_conditionsLines, {})) {
+        emit logMessage(line);
+    }
     m_replayFrames = info.replay_frames;
     m_sleptUs = sleptUs();
     m_replayEndLogged = info.backend != ECUIO_BACKEND_REPLAY ||
@@ -2831,6 +3421,8 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_absentRead.assign((set != nullptr && set->defs != nullptr) ? set->count : 0u, 0);
     m_unsupportedRead.assign(m_absentRead.size(), 0);
     m_absentIds.clear();
+    m_unaskedRead.assign(m_absentRead.size(), 0);
+    m_unaskedIds.clear();
     for (uint32_t& g : m_identityGeneration) {
         g = 0;
     }
@@ -2985,6 +3577,8 @@ void SessionBridge::disconnectSession()
     m_coalesceTimer->stop();
     notifyFrameCounts();   // the last tick's worth
     flushValues();         // and its values
+    flushConditions(session); // and its condition events
+    endSessionConditions();
     emit logMessage(deliveryText(deliveryStats()));
     m_valueSet = nullptr;  // the drain's; onValues stops at m_accepting
     m_stagingBuffer.clear();
@@ -3085,6 +3679,7 @@ void SessionBridge::setMinSweepMs(int ms)
         return;
     }
     m_minSweepMs = ms;
+    m_pickDirty = true; // the default pick takes it too
     emit minSweepMsChanged();
 }
 
@@ -3096,6 +3691,7 @@ void SessionBridge::setUnitSystem(int units)
     }
     if (units == unitSystem()) return;
     m_signalModel->setUnitSystem(static_cast<uint32_t>(units));
+    m_conditionModel->setUnitSystem(static_cast<uint32_t>(units));
     emit unitSystemChanged();
     emit clearMovingChanged();
     if (m_diagnosticsShownCount > 0) {
@@ -3368,13 +3964,17 @@ bool SessionBridge::startLog()
     ecuio_recorder_t* recorder = openRecorder(
         m_session, m_currentUri, QStringLiteral("Log not started"), &why);
     if (recorder == nullptr) {
-        (void)ecuio_session_set_focus(m_session, nullptr, 0);
+        if (!applyDefaultPick(m_session, true, true)) {
+            (void)ecuio_session_set_focus(m_session, nullptr, 0);
+        }
         // openRecorder wrote the activity log's line
         setLogNotice(QStringLiteral("Log not started: %1").arg(why));
         return false;
     }
     setLogNotice(QString());
     m_logActive = true;
+    // The log owns the focus; its end sets the pick again, with its line
+    m_pickLine.clear();
     m_logClock.restart();
     m_logElapsedMs = 0;
     m_logBytes = 0;
@@ -3449,17 +4049,23 @@ void SessionBridge::stopRecording(const QString& why, bool byUser,
     m_recorder = nullptr;
     (void)ecuio_recorder_close(recorder, why.toUtf8().constData());
     emit recordingStateChanged();
+    // The recording held its set: an edit saved meanwhile is judged now
+    if (!m_conditionsPending.isEmpty() && conditionsWait().isEmpty()) {
+        m_conditionsPending.clear();
+        applySavedConditions();
+        emit conditionsChanged();
+    }
     if (!m_logActive) {
         return;
-    }
-    // A session still running asks its whole set again; one torn down
-    // took its focus with it
-    if (m_session != nullptr) {
-        (void)ecuio_session_set_focus(m_session, nullptr, 0);
     }
     m_logTimer->stop();
     m_logElapsedMs = m_logClock.elapsed();
     m_logActive = false;
+    // A session still running asks its default pick again (the whole set
+    // on one that ranks none); one torn down took its focus with it
+    if (m_session != nullptr && !applyDefaultPick(m_session, true, true)) {
+        (void)ecuio_session_set_focus(m_session, nullptr, 0);
+    }
     countLogBytes(); // closed: the folder's final size
     // An end the user didn't ask for is told on the Dashboard; Stop
     // log's isn't, the viewer opens on it
@@ -3524,6 +4130,17 @@ void SessionBridge::logUnnoted(const QString& line)
     m_noting = false;
     emit logMessage(line);
     m_noting = true;
+}
+
+void SessionBridge::writePickLine()
+{
+    // A pick core took is in the recording as core's own pick line; a
+    // whole set's line says why, which core's line doesn't
+    if (m_pickLineCore) {
+        logUnnoted(m_pickLine);
+    } else {
+        emit logMessage(m_pickLine);
+    }
 }
 
 void SessionBridge::setLogPaused(bool paused)
@@ -3664,6 +4281,12 @@ void SessionBridge::dispatchFrameForTesting(const ecuio_frame_t& frame)
 void SessionBridge::dispatchValuesForTesting(const ecuio_value_batch_t& batch)
 {
     onValues(&batch, this);
+}
+
+void SessionBridge::dispatchConditionsForTesting(
+    const ecuio_condition_event_t* events, uint32_t count)
+{
+    onConditions(events, count, this);
 }
 
 // ---- Decoded values from core's worker (ADR-0024) ----
@@ -3838,6 +4461,346 @@ void SessionBridge::flushValues()
     }
     ++m_signalBatchCount;
     emit signalBatchChanged();
+}
+
+// ---- Conditions (ADR-0063 sections 6 and 9) ----
+
+namespace {
+
+// "1 condition", "2 conditions"
+QString conditionCountText(uint32_t count)
+{
+    return count == 1 ? QStringLiteral("1 condition")
+                      : QStringLiteral("%1 conditions").arg(count);
+}
+
+// Core's words for a refused call, else its status
+QString detailOr(ecuio_status_t rc)
+{
+    const char* detail = ecuio_last_error_detail();
+    return detail != nullptr && detail[0] != '\0'
+               ? QString::fromUtf8(detail)
+               : QString::fromUtf8(ecuio_status_string(rc));
+}
+
+} // namespace
+
+void SessionBridge::onConditions(const ecuio_condition_event_t* events,
+                                 uint32_t count, void* user_data)
+{
+    SessionBridge* self = static_cast<SessionBridge*>(user_data);
+    if (events == nullptr || self == nullptr) {
+        return;
+    }
+    if (!self->m_accepting.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(self->m_conditionsMutex);
+    std::vector<ConditionSlot>& window =
+        self->m_conditionStaging[self->m_activeConditions];
+    for (uint32_t i = 0; i < count; ++i) {
+        const ecuio_condition_event_t& e = events[i];
+        // A set since replaced: its index means another condition now
+        if (e.generation != self->m_stagingGeneration ||
+            e.condition >= window.size()) {
+            continue;
+        }
+        ConditionSlot& slot = window[e.condition];
+        if ((e.flags & ECUIO_CONDITION_FIRED) != 0 && slot.firings++ == 0) {
+            slot.first = e;
+        }
+        slot.newest = e;
+        slot.has = true;
+    }
+}
+
+void SessionBridge::prepareConditionStaging(uint32_t count, uint32_t generation)
+{
+    std::lock_guard<std::mutex> lock(m_conditionsMutex);
+    for (std::vector<ConditionSlot>& window : m_conditionStaging) {
+        window.assign(count, ConditionSlot{});
+    }
+    m_activeConditions = 0;
+    m_stagingGeneration = generation;
+}
+
+bool SessionBridge::attachConditions(ecuio_session_t* session,
+                                     const ecuio_condition_set_t* set,
+                                     QString* why)
+{
+    if (m_conditionsGeneration != 0) {
+        flushConditions(session);
+    }
+    size_t staged = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_conditionsMutex);
+        staged = m_conditionStaging[0].size();
+    }
+    // The slots first, under the generation core is about to begin: a
+    // first judgment can come before the call returns
+    const uint32_t count = ecuio_condition_set_count(set);
+    const uint32_t next = m_conditionsGeneration + 1;
+    prepareConditionStaging(count, next);
+    const ecuio_signal_set_t* signalSet = ecuio_session_signal_set(session);
+    const ecuio_signal_file_t* file = fileOfSet(signalSet);
+    const ecuio_status_t rc =
+        m_failAttaches > 0 ? (--m_failAttaches, ECUIO_ERR_OUT_OF_MEMORY)
+                           : ecuio_session_set_conditions(session, set, file);
+    if (rc != ECUIO_OK) {
+        *why = detailOr(rc);
+        prepareConditionStaging(static_cast<uint32_t>(staged),
+                                m_conditionsGeneration);
+        return false;
+    }
+    m_conditionsGeneration = next;
+    m_conditionStates.assign(count, ecuio_condition_state_t{});
+    m_conditionModel->setConditions(set, signalSet, file);
+    judgeAlertLevels();
+    return true;
+}
+
+ConditionSetPtr SessionBridge::recordingConditions(const QString& uri,
+                                                   QString* unused)
+{
+    std::string folder8;
+    if (!uri.startsWith(QLatin1String("replay://"), Qt::CaseInsensitive) ||
+        !cli::replay_folder(uri.toStdString(), &folder8)) {
+        return nullptr;
+    }
+    const QString folder = QString::fromStdString(folder8);
+    cli::RecordedSignals recorded;
+    if (!readRecordedHeader(folder, &recorded) ||
+        recorded.conditions_sha256.empty()) {
+        return nullptr;
+    }
+    QFile copy(folder + QStringLiteral("/conditions.json"));
+    if (!copy.open(QIODevice::ReadOnly)) {
+        *unused = QStringLiteral("is missing");
+        return nullptr;
+    }
+    const QByteArray bytes = copy.read(ECUIO_CONDITION_FILE_MAX_BYTES + 1);
+    const std::string sha =
+        QCryptographicHash::hash(bytes, QCryptographicHash::Sha256)
+            .toHex()
+            .toStdString();
+    if (sha != recorded.conditions_sha256) {
+        *unused = QStringLiteral("doesn't match its hash");
+        return nullptr;
+    }
+    QString words;
+    ConditionSetPtr set = loadConditionSet(bytes, &words);
+    if (!set) {
+        *unused = QStringLiteral("doesn't load (%1)").arg(words);
+    }
+    return set;
+}
+
+void SessionBridge::attachSessionConditions(ecuio_session_t* session,
+                                            const QString& uri)
+{
+    m_conditionsGeneration = 0;
+    m_conditionsPending.clear();
+    m_conditionsFromRecording = false;
+    m_conditionsLines.clear();
+    prepareConditionStaging(0, 0);
+    // ADR-0063 decision 12: a replay is judged by its recording's own copy
+    QString unused;
+    const ConditionSetPtr own = recordingConditions(uri, &unused);
+    QString why;
+    if (own != nullptr) {
+        if (attachConditions(session, own.get(), &why)) {
+            m_conditionsFromRecording = true;
+            m_conditionsLines
+                << QStringLiteral("Alerts: judging the recording's own %1")
+                       .arg(conditionCountText(
+                           ecuio_condition_set_count(own.get())));
+            emit conditionsChanged();
+            return;
+        }
+        unused = QStringLiteral("isn't judged (%1)").arg(why);
+    }
+    const ecuio_condition_set_t* saved = m_conditionStore.set();
+    if (!unused.isEmpty()) {
+        const QString judged = saved != nullptr
+                                   ? QStringLiteral("the saved conditions")
+                                   : QStringLiteral("none");
+        m_conditionsLines << QStringLiteral(
+                                 "Replay: the recording's conditions.json %1; "
+                                 "judging %2")
+                                 .arg(unused, judged);
+    }
+    if (saved == nullptr) {
+        emit conditionsChanged();
+        return;
+    }
+    if (attachConditions(session, saved, &why)) {
+        m_conditionsLines << QStringLiteral("Alerts: judging %1")
+                                 .arg(conditionCountText(
+                                     ecuio_condition_set_count(saved)));
+    } else {
+        m_conditionsLines << QStringLiteral("Alerts not judged: %1").arg(why);
+        showSavedConditions();
+    }
+    emit conditionsChanged();
+}
+
+QString SessionBridge::conditionsWait() const
+{
+    if (m_session == nullptr || !connected()) {
+        return {};
+    }
+    if (m_conditionsFromRecording) {
+        return QStringLiteral("applies when this replay is disconnected");
+    }
+    if (m_recorder != nullptr) {
+        return QStringLiteral("applies when this recording ends");
+    }
+    return {};
+}
+
+void SessionBridge::showSavedConditions()
+{
+    m_conditionModel->setConditions(m_conditionStore.set(), nullptr, nullptr);
+    judgeAlertLevels();
+}
+
+void SessionBridge::applySavedConditions()
+{
+    if (m_session == nullptr || !connected()) {
+        showSavedConditions();
+        return;
+    }
+    QString why;
+    const ecuio_condition_set_t* set = m_conditionStore.set();
+    const uint32_t count = ecuio_condition_set_count(set);
+    if (attachConditions(m_session, set, &why)) {
+        emit logMessage(QStringLiteral("Alerts: judging %1")
+                            .arg(conditionCountText(count)));
+    } else {
+        emit logMessage(QStringLiteral("Alerts not judged: %1").arg(why));
+    }
+}
+
+void SessionBridge::endSessionConditions()
+{
+    m_conditionsGeneration = 0;
+    prepareConditionStaging(0, 0);
+    m_conditionStates.clear();
+    m_conditionsPending.clear();
+    m_conditionsFromRecording = false;
+    m_conditionsLines.clear();
+    showSavedConditions();
+    emit conditionsChanged();
+}
+
+QString SessionBridge::conditionsText() const
+{
+    return QString::fromUtf8(m_conditionStore.bytes().isEmpty()
+                                 ? m_conditionStore.refused()
+                                 : m_conditionStore.bytes());
+}
+
+QVariantMap SessionBridge::saveConditions(const QString& text)
+{
+    QVariantMap result = m_conditionStore.save(text.toUtf8());
+    if (!result.value(QStringLiteral("ok")).toBool()) {
+        result.insert(QStringLiteral("pending"), QString());
+        return result;
+    }
+    m_conditionsProblem.clear();
+    const QString wait = conditionsWait();
+    const QString saved =
+        QStringLiteral("Alerts saved: %1")
+            .arg(conditionCountText(static_cast<uint32_t>(
+                result.value(QStringLiteral("conditions")).toInt())));
+    emit logMessage(wait.isEmpty()
+                        ? saved
+                        : QStringLiteral("%1; the change %2").arg(saved, wait));
+    m_conditionsPending = wait;
+    if (wait.isEmpty()) {
+        applySavedConditions();
+    }
+    result.insert(QStringLiteral("pending"), wait);
+    emit conditionsChanged();
+    return result;
+}
+
+int SessionBridge::alertLevelOf(int defId) const
+{
+    return m_alertLevels.value(QString::number(defId)).toInt();
+}
+
+void SessionBridge::judgeAlertLevels()
+{
+    QVariantMap levels;
+    for (const auto& [id, level] : m_conditionModel->alertLevels()) {
+        levels.insert(QString::number(id), level);
+    }
+    if (levels != m_alertLevels) {
+        m_alertLevels = levels;
+        emit alertLevelsChanged();
+    }
+}
+
+void SessionBridge::flushConditions(ecuio_session_t* session)
+{
+    if (session == nullptr || m_conditionsGeneration == 0) {
+        return;
+    }
+    std::vector<ConditionSlot>* full = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_conditionsMutex);
+        full = &m_conditionStaging[m_activeConditions];
+        m_activeConditions ^= 1;
+    }
+    // The worker writes the other one now. Each firing is a line, in the
+    // order they fired; several of one condition's in a window, one line
+    struct Fired {
+        uint64_t at;
+        int row;
+    };
+    std::vector<Fired> fired;
+    for (size_t i = 0; i < full->size(); ++i) {
+        ConditionSlot& slot = (*full)[i];
+        if (!slot.has) {
+            continue;
+        }
+        m_conditionModel->applyTerm(static_cast<int>(i), slot.newest.term);
+        if (slot.firings > 0) {
+            fired.push_back({slot.first.timestamp_us, static_cast<int>(i)});
+        }
+    }
+    std::stable_sort(
+        fired.begin(), fired.end(),
+        [](const Fired& a, const Fired& b) { return a.at < b.at; });
+    // A handler of the lines may attach again: they go out once the slots
+    // and the model are done with
+    QStringList lines;
+    for (const Fired& f : fired) {
+        const ConditionSlot& slot = (*full)[static_cast<size_t>(f.row)];
+        lines << (slot.firings == 1
+                      ? m_conditionModel->firingText(f.row, slot.first.value,
+                                                     slot.first.term)
+                      : m_conditionModel->firingsText(f.row, slot.firings));
+    }
+    for (ConditionSlot& slot : *full) {
+        slot = ConditionSlot{};
+    }
+    // The states core keeps: UNAVAILABLE and NOT_RECEIVED are the getter's
+    // alone, and can change after the attach
+    uint32_t n = 0;
+    const auto size = static_cast<uint32_t>(m_conditionStates.size());
+    if (size > 0 &&
+        ecuio_session_get_condition_states(session, m_conditionStates.data(),
+                                           size, &n) == ECUIO_OK &&
+        n == size &&
+        m_conditionStates[0].generation == m_conditionsGeneration) {
+        m_conditionModel->applyStates(m_conditionStates.data(), n);
+    }
+    judgeAlertLevels();
+    for (const QString& line : lines) {
+        emit logMessage(line);
+    }
 }
 
 SessionBridge::DeliveryStats SessionBridge::deliveryStats() const
@@ -4114,6 +5077,210 @@ void SessionBridge::pollAbsentSignals()
     m_signalModel->applyAbsent(m_absentIds);
 }
 
+void SessionBridge::pollUnaskedSignals()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr ||
+        m_unaskedRead.empty()) {
+        return;
+    }
+    uint32_t count = 0;
+    if (ecuio_session_get_unasked_signals(
+            m_session, m_unaskedRead.data(),
+            static_cast<uint32_t>(m_unaskedRead.size()), &count) != ECUIO_OK) {
+        return;
+    }
+    count =
+        std::min<uint32_t>(count, static_cast<uint32_t>(m_unaskedRead.size()));
+    if (count == m_unaskedIds.size() &&
+        std::equal(m_unaskedIds.begin(), m_unaskedIds.end(),
+                   m_unaskedRead.begin())) {
+        return;
+    }
+    m_unaskedIds.assign(m_unaskedRead.begin(), m_unaskedRead.begin() + count);
+    m_signalModel->applyUnasked(m_unaskedIds);
+}
+
+void SessionBridge::setPickGauges(const QVariantList& cells)
+{
+    if (cells == m_pickGauges) {
+        return;
+    }
+    m_pickGauges = cells;
+    m_pickDirty = true;
+    emit pickGaugesChanged();
+}
+
+std::vector<uint16_t> SessionBridge::gaugeIds(const ecuio_signal_set_t* set,
+                                              const ecuio_signal_file_t* file,
+                                              const QVariantList& cells)
+{
+    std::vector<uint16_t> ids;
+    if (set == nullptr || set->defs == nullptr) {
+        return ids;
+    }
+    // Each def's refs as SignalHub keys them
+    QHash<QString, uint16_t> byRef;
+    const bool builtIn = SignalListModel::isBuiltIn(set);
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        const QString ref = SignalListModel::factsOf(file, builtIn, d).ref;
+        if (ref.isEmpty()) {
+            continue;
+        }
+        byRef.insert(ref, d.id);
+        if (ref.startsWith(QLatin1String("key:")) &&
+            d.id < ECUIO_USER_SIG_ID_BASE) {
+            byRef.insert(QStringLiteral("id:%1").arg(d.id), d.id);
+        }
+    }
+    for (const QVariant& cell : cells) {
+        for (const QString& ref : cell.toStringList()) {
+            const auto it = byRef.constFind(ref);
+            if (it != byRef.constEnd()) {
+                if (std::find(ids.begin(), ids.end(), *it) == ids.end()) {
+                    ids.push_back(*it);
+                }
+                break;
+            }
+        }
+    }
+    return ids;
+}
+
+namespace {
+
+// The default pick's activity line: its names, at most a dozen
+QString pickText(const ecuio_signal_set_t* set,
+                 const std::vector<uint16_t>& ids, int minSweepMs, bool polled)
+{
+    constexpr size_t kNamed = 12;
+    QStringList names;
+    for (uint16_t id : ids) {
+        if (static_cast<size_t>(names.size()) == kNamed) {
+            break;
+        }
+        for (uint32_t i = 0; i < set->count; ++i) {
+            if (set->defs[i].id == id) {
+                names << QString::fromUtf8(
+                    set->defs[i].name,
+                    static_cast<qsizetype>(
+                        strnlen(set->defs[i].name, sizeof set->defs[i].name)));
+                break;
+            }
+        }
+    }
+    QString list = names.join(QStringLiteral(", "));
+    if (ids.size() > static_cast<size_t>(names.size())) {
+        list += QStringLiteral(" and %1 more").arg(ids.size() - names.size());
+    }
+    const QString pace =
+        minSweepMs > 0
+            ? QStringLiteral(" (at least %1 ms between sweeps)").arg(minSweepMs)
+            : QString();
+    const QString count = signalCountText(static_cast<int>(ids.size()));
+    return polled ? QStringLiteral("Picked %1%2; ?poll= asks only the polled "
+                                   "ones among them: %3")
+                        .arg(count, pace, list)
+                  : QStringLiteral("Asking %1%2: %3").arg(count, pace, list);
+}
+
+} // namespace
+
+bool SessionBridge::applyDefaultPick(ecuio_session_t* session, bool withTicks,
+                                     bool again)
+{
+    m_pickDirty = false;
+    if (session == nullptr || m_logActive) {
+        return false;
+    }
+    ecuio_session_info_t info{};
+    if (ecuio_session_get_info(session, &info) != ECUIO_OK ||
+        (info.flags & ECUIO_SESSION_INFO_REQUESTS) == 0) {
+        return false;
+    }
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
+    std::vector<uint16_t> added = gaugeIds(set, fileOfSet(set), m_pickGauges);
+    if (withTicks) {
+        const std::vector<uint16_t> ticked = m_signalModel->tickedIds();
+        added.insert(added.end(), ticked.begin(), ticked.end());
+    }
+    const std::vector<uint16_t> ids = cli::default_pick(set, added);
+    if (m_pickSet && !again && ids == m_pickIds &&
+        m_minSweepMs == m_pickMinSweepMs) {
+        return true;
+    }
+    m_pickIds = ids;
+    m_pickMinSweepMs = m_minSweepMs;
+    m_pickSet = true;
+    m_pickDropped = 0;
+    if (session == m_session) {
+        for (uint32_t c = 0; c < m_channelCount; ++c) {
+            m_pickDropped += m_supportReports[c].dropped;
+        }
+    }
+    QString line;
+    bool picked = false;
+    const QString whole = m_pickPolled
+                              ? QStringLiteral("Asking every polled signal: ")
+                              : QStringLiteral("Asking every signal: ");
+    // Core takes a minimum only with a focus, so the whole set is unpaced
+    const QString unpaced =
+        m_minSweepMs > 0
+            ? QStringLiteral("; no minimum time between sweeps applies to it")
+            : QString();
+    if (ids.empty()) {
+        (void)ecuio_session_set_focus(session, nullptr, 0);
+        line = whole + QStringLiteral("the profile ranks none") + unpaced;
+    } else {
+        const ecuio_status_t rc = ecuio_session_set_focus_with(
+            session, ids.data(), static_cast<uint32_t>(ids.size()),
+            static_cast<uint32_t>(m_minSweepMs), ECUIO_FOCUS_DEFAULT_PICK);
+        if (rc == ECUIO_OK) {
+            line = pickText(set, ids, m_minSweepMs, m_pickPolled);
+            picked = true;
+        } else {
+            const QString detail = QString::fromUtf8(ecuio_last_error_detail());
+            (void)ecuio_session_set_focus(session, nullptr, 0);
+            line =
+                whole + (detail.isEmpty() ? failureText(rc) : detail) + unpaced;
+        }
+    }
+    if (line == m_pickLine) {
+        return true;
+    }
+    m_pickLine = line;
+    m_pickLineCore = picked;
+    // Before the apply, the line waits for the session's own lines
+    if (session == m_session) {
+        writePickLine();
+    } else {
+        m_pickLinePending = true;
+    }
+    return true;
+}
+
+void SessionBridge::pollDefaultPick()
+{
+    if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr ||
+        m_logActive) {
+        return;
+    }
+    if (m_pickDirty) {
+        applyDefaultPick(m_session, true, false);
+        return;
+    }
+    if (!m_pickSet || m_pickIds.empty()) {
+        return;
+    }
+    uint64_t dropped = 0;
+    for (uint32_t c = 0; c < m_channelCount; ++c) {
+        dropped += m_supportReports[c].dropped;
+    }
+    if (dropped > m_pickDropped) {
+        applyDefaultPick(m_session, true, true);
+    }
+}
+
 /* One channel's "ECU 0x…:" line: what its supported-PID bitmaps list,
  * which requests left the rotation, and why, and whether its Service 01
  * requests carry several PIDs (ADR-0039 Appendix A): packing starting or
@@ -4304,7 +5471,8 @@ QString SessionBridge::sessionReturnedText(const ecuio_channel_support_t& s)
  * once the whole list has an outcome, and again when a recovery re-asks
  * the unanswered items and they settle. One line per ECU, so the VIN
  * and the calibration IDs land in the log and in a recording's
- * events.log together. */
+ * events.log together. The vehicle's VIN is taken as soon as it is in,
+ * whatever else is still out. */
 void SessionBridge::pollChannelIdentity()
 {
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
@@ -4312,34 +5480,39 @@ void SessionBridge::pollChannelIdentity()
     }
     for (uint32_t c = 0; c < m_channelCount; ++c) {
         ecuio_channel_identity_t s{};
-        if (ecuio_session_get_channel_identity(m_session, c, &s) != ECUIO_OK ||
-            (s.flags & ECUIO_IDENTITY_COMPLETE) == 0 ||
+        if (ecuio_session_get_channel_identity(m_session, c, &s) != ECUIO_OK) {
+            continue;
+        }
+        // The vehicle is the first channel's ECU's VIN (ADR-0027 section 3);
+        // a recovery's re-asks settle on the same one and say nothing
+        if (c == 0 && (s.flags & ECUIO_IDENTITY_VIN) != 0) {
+            takeVin(s);
+        }
+        if ((s.flags & ECUIO_IDENTITY_COMPLETE) == 0 ||
             s.generation == m_identityGeneration[c]) {
             continue;
         }
         m_identityGeneration[c] = s.generation;
         emit logMessage(channelIdentityText(s));
-        // The vehicle is the first channel's ECU's VIN (ADR-0027 section 3);
-        // a recovery's re-asks settle on the same one and say nothing
-        if (c == 0) {
-            char text[ECUIO_VIN_TEXT_LEN];
-            const QString vin =
-                ecuio_identity_vin(&s, text, sizeof text) == ECUIO_OK
-                    ? QString::fromLatin1(text)
-                    : QString();
-            if (!vin.isEmpty() && vin != m_vin) {
-                m_vin = vin;
-                // What the VIN says of the car (ADR-0043), beside the
-                // identity line that holds it
-                emit logMessage(
-                    QStringLiteral("VIN: ") +
-                    vinSummary(vin, QDate::currentDate().year() + 1));
-                emit vehicleIdentified();
-                // the inspection's model year (ADR-0045)
-                emit diagnosticsChanged();
-            }
-        }
     }
+}
+
+void SessionBridge::takeVin(const ecuio_channel_identity_t& s)
+{
+    char text[ECUIO_VIN_TEXT_LEN];
+    const QString vin = ecuio_identity_vin(&s, text, sizeof text) == ECUIO_OK
+                            ? QString::fromLatin1(text)
+                            : QString();
+    if (vin.isEmpty() || vin == m_vin) {
+        return;
+    }
+    m_vin = vin;
+    // What the VIN says of the car (ADR-0043)
+    emit logMessage(QStringLiteral("VIN: ") +
+                    vinSummary(vin, QDate::currentDate().year() + 1));
+    emit vehicleIdentified();
+    // the inspection's model year (ADR-0045)
+    emit diagnosticsChanged();
 }
 
 /* Each channel's diagnostics report (ADR-0037), logged once per read

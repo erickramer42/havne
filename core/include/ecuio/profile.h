@@ -1,6 +1,7 @@
 // File/layer: core/include/ecuio/profile.h | C ABI, public
-// Testing: UNIT: CoreTest (test_core); RequestTimingTest (test_obd2); BRIDGE:
-//          BridgeTest (test_bridge)
+// Testing: UNIT: CoreTest, ObdbImportTest (test_core); RequestEngineTest,
+//          RequestTimingTest (test_obd2); SignalFileTest (test_signals);
+//          BRIDGE: BridgeTest (test_bridge)
 
 #ifndef ECUIO_PROFILE_H
 #define ECUIO_PROFILE_H
@@ -46,7 +47,7 @@ extern "C" {
 /* The most requests a set's defs may derive (ADR-0015 section 2): one per
  * distinct request and channel, so defs read from one reply count
  * once. */
-#define ECUIO_PROFILE_MAX_REQUESTS 256
+#define ECUIO_PROFILE_MAX_REQUESTS 1024
 
 /* Register a name for a signal set, replacing a non-built-in profile of
  * the same name (last wins). The name is 1..ECUIO_PROFILE_NAME_MAX
@@ -56,7 +57,8 @@ extern "C" {
  * profile, like "raw". Returns ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for
  * a NULL name; ECUIO_ERR_INVALID_ARGUMENT for a malformed or built-in
  * name, an invalid set or one with too many requests, leaving the
- * registry unchanged.
+ * registry unchanged; ECUIO_ERR_OUT_OF_MEMORY when the validator had
+ * no room to check the set's chains (ECUIO_VALIDATE_ERR_OUT_OF_MEMORY).
  *
  * out may be NULL. Otherwise it receives the validator's result when
  * the set was checked: which check failed, and on which def or
@@ -229,6 +231,34 @@ ecuio_status_t ecuio_session_get_absent_signals(
  * count, or NULL ids with a capacity. Readable after close.
  */
 ecuio_status_t ecuio_session_get_unsupported_signals(
+    const ecuio_session_t* session,
+    uint16_t* ids,
+    uint32_t capacity,
+    uint32_t* count
+);
+
+/*
+ * The signals the session's focus leaves unasked (ADR-0056 section 2;
+ * ecuio_session_set_focus): a def whose request the focus parks, and a
+ * computed signal (ECUIO_DEF_FLAG_COMPUTED) with such an input, followed
+ * through its chain. A def that shares a reply with a pick is asked, so
+ * it isn't listed. Neither is a passive def (no request: a broadcast
+ * frame), Service 09's, a def whose request the probe or an NRC dropped
+ * (the unsupported list names a dropped PID's signals; the support
+ * report counts every drop but names only its first
+ * ECUIO_SUPPORT_MAX_DROPPED, so a refused DID past those is a count
+ * alone), nor a DID the scan hasn't found. Empty with no focus, and on a
+ * session that asks nothing (ECUIO_SESSION_INFO_REQUESTS clear). Judged by the
+ * worker as it takes each focus and whenever its table changes, so it
+ * follows a focus call between two requests; a focus set before start is
+ * listed once the worker has begun.
+ *
+ * Fills ids with up to capacity signal ids, in the set's order, and
+ * *count with how many there are; capacity 0 (ids may be NULL) asks
+ * the count. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session or
+ * count, or NULL ids with a capacity. Readable after close.
+ */
+ecuio_status_t ecuio_session_get_unasked_signals(
     const ecuio_session_t* session,
     uint16_t* ids,
     uint32_t capacity,

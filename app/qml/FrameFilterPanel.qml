@@ -8,7 +8,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 // The filter's fields over a FrameListModel (framefilter.h): the columns a
-// bus is read by. The Log page and the recording viewer share it.
+// bus is read by. The Activity page and the recording viewer share it.
 GridLayout {
     id: panel
     objectName: "filterPanel"
@@ -22,7 +22,7 @@ GridLayout {
     // FrameFilter::Direction's order: All, Received, Sent
     property int direction: 0
     // The nearest ancestor's touchMin (the recordings page asks for a phone's
-    // touch size; the Log page has none), as ThemedButton takes it
+    // touch size; the Activity page has none), as ThemedButton takes it
     // qmllint disable missing-property
     readonly property real touchMin: {
         for (let p = panel.parent; p; p = p.parent) {

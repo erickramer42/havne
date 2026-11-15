@@ -1,0 +1,55 @@
+{
+  "havne_conditions": 1,
+  "name": "Holds",
+  "notes": "Synthetic: written for Havne's tests. Each condition joins two terms and holds before it changes, so one term can change while a hold runs without changing what the terms say together.",
+  "conditions": [
+    {
+      "key": "either_briefly",
+      "name": "Revs or throttle for a moment",
+      "when": {
+        "any": [
+          { "signal": ["obd2.rpm"], "unit": "RPM", "above": 3000, "clear": 2500, "max_age": 60 },
+          { "signal": ["obd2.throttle"], "unit": "%", "above": 80, "max_age": 60 }
+        ]
+      },
+      "for": 0.3,
+      "clear_for": 0.3
+    },
+    {
+      "key": "both_briefly",
+      "name": "Fast under load for a moment",
+      "when": {
+        "all": [
+          { "signal": ["obd2.speed"], "unit": "km/h", "above": 100, "max_age": 60 },
+          { "signal": ["obd2.load"], "unit": "%", "above": 70, "clear": 60, "max_age": 60 }
+        ]
+      },
+      "for": 0.3,
+      "clear_for": 0.3
+    },
+    {
+      "key": "either",
+      "name": "Revs or throttle for two seconds",
+      "when": {
+        "any": [
+          { "signal": ["obd2.rpm"], "unit": "RPM", "above": 3000 },
+          { "signal": ["obd2.throttle"], "unit": "%", "above": 80 }
+        ]
+      },
+      "for": 2,
+      "clear_for": 1
+    },
+    {
+      "key": "both",
+      "name": "Fast under load for a second",
+      "when": {
+        "all": [
+          { "signal": ["obd2.speed"], "unit": "km/h", "above": 100 },
+          { "signal": ["obd2.load"], "unit": "%", "above": 70 }
+        ]
+      },
+      "for": 1,
+      "clear_for": 2
+    }
+  ]
+}

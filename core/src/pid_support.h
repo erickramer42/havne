@@ -106,9 +106,9 @@ inline bool ecuio_def_marked_unsupported(const ecuio_signal_def_t& d,
 }
 
 /* How far a computed def's inputs are followed through computed inputs:
- * past it nothing is judged, so a set whose programs name each other in
- * a ring ends */
-constexpr unsigned ECUIO_COMPUTED_FOLLOW_MAX = 8;
+ * the deepest chain the validator takes; past it nothing is judged, so a
+ * set whose programs name each other in a ring ends */
+constexpr unsigned ECUIO_COMPUTED_FOLLOW_MAX = ECUIO_COMPUTED_MAX_DEPTH;
 
 /* A computed def never has a value while one of its inputs has none:
  * whether gone(index of a def in the set) holds for an input of d, an

@@ -1,5 +1,5 @@
 // File/layer: core/src/plugin.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: PluginTest (test_signals); HARNESS: RecorderTest
+// Testing: UNIT: PluginTest, PluginWrapTest (test_signals); HARNESS: RecorderTest
 //          (test_core); FUZZ: fuzz_plugin_manifest
 //
 // The plugin loader's data tier (ADR-0052): a manifest (json.h, the
@@ -12,9 +12,11 @@
 #include "ecuio/profile.h"
 #include "error_detail.h"
 #include "json.h"
+#include "plugin_rules.h"
 #include "profile_hold.h"
 #include "signal_file_build.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -30,6 +32,11 @@ namespace {
 using ecuio_json::Member;
 using ecuio_json::Type;
 using ecuio_json::Value;
+using ecuio_plugin_rules::core_version;
+using ecuio_plugin_rules::id_ok;
+using ecuio_plugin_rules::older;
+using ecuio_plugin_rules::parse_version;
+using ecuio_plugin_rules::wmi_ok;
 using ecuio_sf::expect;
 using ecuio_sf::only_keys;
 using ecuio_sf::q;
@@ -67,6 +74,7 @@ struct data_file {
     std::string path;
     const Value* root = nullptr;  /* into the manifest when packed */
     std::unique_ptr<Value> owned; /* a folder's file */
+    uint32_t format = 0;          /* its "havne_signals", once checked */
 };
 
 } // namespace
@@ -76,6 +84,7 @@ struct ecuio_plugin {
     std::string name;
     std::string version;
     uint16_t requires_core[3] = {};
+    std::string lineage; /* "" for none */
     uint32_t tiers = 0;
     std::vector<match_rule> match;
     std::vector<variant> variants;
@@ -83,79 +92,6 @@ struct ecuio_plugin {
 };
 
 namespace {
-
-/* [a-z0-9-], lo to hi bytes, a letter or digit at each end */
-bool id_ok(const std::string& s, size_t hi)
-{
-    if (s.empty() || s.size() > hi || s.front() == '-' || s.back() == '-') {
-        return false;
-    }
-    for (char c : s) {
-        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) {
-            return false;
-        }
-    }
-    return true;
-}
-
-/* X.Y.Z, each 0 to 65535 with no leading zero; false otherwise */
-bool parse_version(const std::string& s, uint32_t out[3])
-{
-    size_t i = 0;
-    for (int part = 0; part < 3; ++part) {
-        if (i >= s.size() || s[i] < '0' || s[i] > '9') {
-            return false;
-        }
-        if (s[i] == '0' && i + 1 < s.size() && s[i + 1] >= '0' &&
-            s[i + 1] <= '9') {
-            return false;
-        }
-        uint32_t n = 0;
-        while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
-            n = n * 10 + static_cast<uint32_t>(s[i] - '0');
-            if (n > 65535) {
-                return false;
-            }
-            ++i;
-        }
-        out[part] = n;
-        if (part < 2) {
-            if (i >= s.size() || s[i] != '.') {
-                return false;
-            }
-            ++i;
-        }
-    }
-    return i == s.size();
-}
-
-/* The leading X.Y.Z of core's own version (a suffix after it ignored) */
-void core_version(uint32_t out[3])
-{
-    const std::string v = ecuio_version_string();
-    size_t end = 0;
-    int dots = 0;
-    while (end < v.size() &&
-           ((v[end] >= '0' && v[end] <= '9') || v[end] == '.')) {
-        if (v[end] == '.' && ++dots == 3) {
-            break;
-        }
-        ++end;
-    }
-    if (!parse_version(v.substr(0, end), out)) {
-        out[0] = out[1] = out[2] = 0;
-    }
-}
-
-bool older(const uint32_t a[3], const uint32_t b[3])
-{
-    for (int i = 0; i < 3; ++i) {
-        if (a[i] != b[i]) {
-            return a[i] < b[i];
-        }
-    }
-    return false;
-}
 
 /* Relative, forward slashes, no "." or ".." part, no empty part, 1 to
  * ECUIO_PLUGIN_PATH_MAX printable ASCII bytes but backslash and colon */
@@ -192,23 +128,6 @@ const std::string& path_of(const Value& v, const std::string& what)
                    "no \".\" or \"..\" part");
     }
     return p;
-}
-
-/* 3 or 6 of the VIN alphabet (no I, O or Q), as ecuio_vin_info_t.wmi */
-bool wmi_ok(const std::string& s)
-{
-    if (s.size() != 3 && s.size() != 6) {
-        return false;
-    }
-    for (char c : s) {
-        const bool digit = c >= '0' && c <= '9';
-        const bool letter =
-            c >= 'A' && c <= 'Z' && c != 'I' && c != 'O' && c != 'Q';
-        if (!digit && !letter) {
-            return false;
-        }
-    }
-    return true;
 }
 
 year_range years_of(const Value& v, const std::string& what)
@@ -334,8 +253,8 @@ private:
         }
         only_keys(root,
                   {"havne_plugin", "id", "name", "version", "requires",
-                   "source", "tiers", "match", "ecus", "variants", "fixtures",
-                   "files"},
+                   "lineage", "source", "tiers", "match", "ecus", "variants",
+                   "fixtures", "files"},
                   "the manifest");
 
         const Value* id = root.find("id");
@@ -407,6 +326,16 @@ private:
                                " or later, and this "
                                "is " +
                                ecuio_version_string());
+        }
+
+        if (const Value* lineage = root.find("lineage")) {
+            expect(*lineage, Type::string, "\"lineage\"");
+            if (!ecuio_plugin_rules::lineage_ok(lineage->text,
+                                                ECUIO_PLUGIN_LINEAGE_LEN)) {
+                refuse(*lineage, "\"lineage\" " + q(lineage->text) +
+                                     " takes 32 of 0-9 and a-f");
+            }
+            p.lineage = lineage->text;
         }
 
         const Value* source = root.find("source");
@@ -551,7 +480,7 @@ private:
             }
         }
 
-        for (const data_file& f : files_) {
+        for (data_file& f : files_) {
             check_data_file(f);
         }
         for (size_t i = 0; i < p.variants.size(); ++i) {
@@ -667,22 +596,11 @@ private:
     }
 
     /* A data file is a signal file that names the manifest's ECUs */
-    static void check_data_file(const data_file& f)
+    static void check_data_file(data_file& f)
     {
         const Value& root = *f.root;
         expect(root, Type::object, "a data file");
-        if (root.members.empty() ||
-            root.members.front().key != "havne_signals") {
-            refuse(root, "a data file starts with \"havne_signals\"");
-        }
-        const Value& version = root.members.front().value;
-        expect(version, Type::number, "\"havne_signals\"");
-        if (!version.integer || version.whole != ECUIO_SIGNAL_FILE_FORMAT) {
-            refuse(version, "\"havne_signals\" is format " +
-                                (version.integer ? std::to_string(version.whole)
-                                                 : std::string("?")) +
-                                ", and this Havne reads format 1");
-        }
+        f.format = ecuio_sf::format_of(root, "a data file");
         if (const Value* ecus = root.find("ecus")) {
             refuse(*ecus,
                    "a plugin's data file declares no \"ecus\": it names the "
@@ -715,9 +633,20 @@ private:
         parts.profile = out.profile;
         parts.ecus = manifest_.find("ecus");
         parts.signals_at = &at;
+        /* The first of the variant's files that has a source of its own
+         * names where the variant comes from, else the manifest's does */
+        const Value* source = manifest_.find("source");
+        bool own_source = false;
         std::unordered_map<std::string, size_t> slot_of;
         for (size_t n = 0; n < list.size(); ++n) {
             const Value& root = *list[n]->root;
+            parts.format = std::max(parts.format, list[n]->format);
+            if (const Value* own = root.find("source")) {
+                if (!own_source) {
+                    source = own;
+                    own_source = true;
+                }
+            }
             if (const Value* extends = root.find("extends")) {
                 if (n != 0) {
                     refuse(*extends,
@@ -734,6 +663,7 @@ private:
                     s.type == Type::object ? s.find("key") : nullptr;
                 if (key == nullptr || key->type != Type::string) {
                     parts.signals.push_back(&s); /* build says why */
+                    parts.formats.push_back(list[n]->format);
                     continue;
                 }
                 for (const std::string& k : mine) {
@@ -745,17 +675,22 @@ private:
                 auto it = slot_of.find(key->text);
                 if (it != slot_of.end()) {
                     parts.signals[it->second] = &s;
+                    parts.formats[it->second] = list[n]->format;
                 } else {
                     slot_of.emplace(key->text, parts.signals.size());
                     parts.signals.push_back(&s);
+                    parts.formats.push_back(list[n]->format);
                 }
             }
         }
         out.file.reset(new ecuio_signal_file());
         ecuio_sf::build(parts, *out.file);
+        if (source != nullptr) {
+            ecuio_sf::take_source(*source, out.file->source);
+        }
         out.file->plugin = p.id + "," + p.version + "," + out.id;
         std::string why;
-        out.file->bytes = variant_json(p, out, parts, &why);
+        out.file->bytes = variant_json(p, out, parts, source, &why);
         if (out.file->bytes.empty()) {
             refuse(at, "variant " + q(out.id) +
                            "'s files don't make one signal file, which a "
@@ -765,12 +700,13 @@ private:
     }
 
     /* The variant as one signal file, what a recording copies as
-     * signals.json: the plugin's name, the manifest's source and ECUs,
-     * the first file's extends, the merged signals in their order. Empty,
-     * with why, when the text doesn't read back to the set just built, so
-     * a recording never holds a copy that decodes otherwise. */
+     * signals.json: the plugin's name, the variant's source, the
+     * manifest's ECUs, the first file's extends, the merged signals in
+     * their order. Empty, with why, when the text doesn't read back to
+     * the set just built, so a recording never holds a copy that decodes
+     * otherwise. */
     std::string variant_json(const ecuio_plugin& p, const variant& v,
-                             const ecuio_sf::parts& parts,
+                             const ecuio_sf::parts& parts, const Value* source,
                              std::string* why) const
     {
         Value doc;
@@ -785,8 +721,10 @@ private:
         format.type = Type::number;
         format.integer = true;
         format.in_int64 = true;
-        format.whole = ECUIO_SIGNAL_FILE_FORMAT;
-        format.number = ECUIO_SIGNAL_FILE_FORMAT;
+        /* The newest of the variant's files: each signal reads alike in
+         * it, since no format 1 expression changes its meaning in 2 */
+        format.whole = parts.format;
+        format.number = parts.format;
         add("havne_signals", format);
         Value text;
         text.type = Type::string;
@@ -795,7 +733,7 @@ private:
         text.text = "Plugin " + p.id + " " + p.version + ", variant " + v.id +
                     ": its files' signals merged";
         add("notes", text);
-        if (const Value* source = manifest_.find("source")) {
+        if (source != nullptr) {
             add("source", *source);
         }
         if (parts.extends != nullptr) {
@@ -1036,6 +974,18 @@ ecuio_status_t ecuio_plugin_requires_core(const ecuio_plugin_t* plugin,
     *major = plugin->requires_core[0];
     *minor = plugin->requires_core[1];
     *patch = plugin->requires_core[2];
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_plugin_lineage(const ecuio_plugin_t* plugin, char* lineage,
+                                    size_t cap)
+{
+    if (plugin == nullptr || lineage == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (!copy_out(plugin->lineage, lineage, cap)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
     return ECUIO_OK;
 }
 
