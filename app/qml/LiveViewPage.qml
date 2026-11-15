@@ -292,6 +292,15 @@ Page {
     // across the gap instead of drawing a ramp
     readonly property int staleMs: Theme.staleMs
 
+    // Bridge.alertLevels copied once per change, by def id: a bridge map read
+    // in each row's binding makes a JS wrapper per read (the Qt 6.12 sweep)
+    property var alertLevels: {
+        const levels = Bridge.alertLevels, copy = {}
+        for (const id in levels)
+            copy[id] = levels[id]
+        return copy
+    }
+
     // A trace's range is at least this many displayed digits, so a step
     // of one or two (fuel level between 71 % and 73 %, the charging
     // voltage within 0.4 V) doesn't fill the plot's height
@@ -513,6 +522,12 @@ Page {
                 // clock stamped in onValueChanged would dim steady values
                 // that are still arriving.
                 required property double ageMs          // AgeMsRole; -1 = never arrived
+                // The row's roles as one object, for its def id (a role
+                // named id can't be a property beside this item's id)
+                required property var model
+                // The highest alert ON that reads it: 1 warning, 2 danger
+                readonly property int alertLevel: Bridge.connected && hasValue
+                                                  ? (root.alertLevels[String(model.id)] ?? 0) : 0
 
                 // Clear of the pinned scroll bar, so values stay readable
                 width: signalList.width - (signalList.overflows ? listBar.width : 0)
@@ -523,6 +538,8 @@ Page {
                 // change and never a node made, hidden or destroyed
                 Accessible.role: Accessible.ListItem
                 Accessible.name: signalDelegate.name + ": " + valueLabel.text
+                                 + (alertLevel === 2 ? qsTr(", danger alert")
+                                    : alertLevel === 1 ? qsTr(", warning alert") : "")
 
                 RowLayout {
                     id: rowLayout
@@ -618,9 +635,32 @@ Page {
                             signalDelegate.width - 24 - plotBox.width - swatch.width
                             - nameLabel.Layout.minimumWidth - 3 * rowLayout.spacing))
                         elide: Text.ElideRight
-                        color: signalDelegate.refused !== ""
-                               || (signalDelegate.unasked && Bridge.connected)
+                        color: signalDelegate.alertLevel === 2 ? Theme.textOnAlertDanger
+                               : signalDelegate.alertLevel === 1 ? Theme.textOnAlertWarn
+                               : signalDelegate.refused !== ""
+                                 || (signalDelegate.unasked && Bridge.connected)
                                ? Theme.textDim : Theme.text
+                        // An alert ON fills the value's cell in its level's
+                        // role, the mark beside a danger; the name keeps its color
+                        leftPadding: signalDelegate.alertLevel === 2 ? 26
+                                     : signalDelegate.alertLevel === 1 ? 6 : 0
+                        rightPadding: signalDelegate.alertLevel > 0 ? 6 : 0
+                        background: Rectangle {
+                            objectName: "valueAlert"
+                            visible: signalDelegate.alertLevel > 0
+                            color: signalDelegate.alertLevel === 2 ? Theme.alertDangerFill
+                                                                   : Theme.alertWarnFill
+                            radius: Theme.radius
+                            DangerMark {
+                                objectName: "valueAlertMark"
+                                visible: signalDelegate.alertLevel === 2
+                                x: 6
+                                anchors.verticalCenter: parent.verticalCenter
+                                size: 14
+                                color: Theme.textOnAlertDanger
+                                cutout: Theme.alertDangerFill
+                            }
+                        }
                         font.pixelSize: Theme.fontEmphasis
                         // The value face, its digits tabular, so a reading
                         // doesn't jitter as its digits change

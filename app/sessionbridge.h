@@ -476,6 +476,13 @@ public:
     // it, for the health report: core keeps none. Rows with no value yet
     // and text rows are left out
     std::vector<ecuio_health_value_t> heldValues() const;
+    // When def id's row last took a value, on the model's steady clock in
+    // ms; -1 for no row or no value yet
+    qint64 readAtMs(uint32_t id) const;
+    // What turns readAtMs into the wall clock's ms since the epoch, now
+    qint64 wallOffsetMs() const;
+    // readAtMs on the wall clock; -1 for no row or no value yet
+    qint64 lastReadMs(uint32_t id) const;
 
     // The signals core reports their ECU doesn't support
     // (ecuio_session_get_unsupported_signals, ADR-0039 section 6): those

@@ -76,6 +76,14 @@ Item {
     // gains a DangerMark and the zone's stroke is heavier, so danger is more
     // than a hue
     readonly property bool inDanger: hasValue && inDangerAt(value)
+    // The highest alert ON that reads this signal (1 warning, 2 danger): the
+    // value's text takes its role over the zone's, the zones' drawing kept
+    property int alertLevel: 0
+    readonly property bool showsDanger: inDanger || (hasValue && alertLevel === 2)
+    // The mark's slot: kept by a danger zone, opened by a danger alert on a
+    // gauge with none, so danger is never a hue alone
+    readonly property bool dangerSlot: hasDangerZone || alertLevel === 2
+    readonly property color valueColor: valueColorWith(readoutColor)
     // An enumeration's label, shown in place of the number
     property string valueLabel: ""
     readonly property string valueText: hasValue ? (valueLabel !== "" ? valueLabel : format(value))
@@ -100,6 +108,13 @@ Item {
     }
     function inDangerAt(v) {
         return (!isNaN(dangerFrom) && v >= dangerFrom) || (!isNaN(dangerBelow) && v < dangerBelow)
+    }
+    // The value's own color, its normal one given: an alert's, else its zone's
+    function valueColorWith(normal) {
+        if (!hasValue) return Theme.textDim
+        if (alertLevel === 2) return Theme.alertDangerFill
+        if (alertLevel === 1) return Theme.alertWarnFill
+        return zoneColor(value, normal)
     }
     function zoneColor(v, normal) {
         if (inDangerAt(v)) return Theme.gaugeDanger
@@ -198,6 +213,8 @@ Item {
     // (Accessible.ignored) and changes them by opacity, never visibility
     Accessible.role: Accessible.Indicator
     Accessible.name: hasValue ? qsTr("%1: %2 %3").arg(label).arg(valueText).arg(unit).trim()
-                                + (inDanger ? qsTr(", danger") : "") + (stale ? qsTr(", no new data") : "")
+                                + (inDanger ? qsTr(", danger") : "")
+                                + (alertLevel === 2 ? qsTr(", danger alert") : alertLevel === 1 ? qsTr(", warning alert") : "")
+                                + (stale ? qsTr(", no new data") : "")
                               : note !== "" ? qsTr("%1: %2").arg(label).arg(note) : label
 }

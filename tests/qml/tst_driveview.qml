@@ -1318,4 +1318,37 @@ TestCase {
         other.destroy()
         tryVerify(() => field.activeFocus, 2000, "the field has it again")
     }
+
+    // ---- The alert band
+
+    // In the view the band takes the page's top slot under the status line
+    // and overlays the gauges' top: the pages stay where they were, the bars
+    // stay down, Main's band is hidden; it goes with the view
+    Component { id: alertRowsC; ListModel {} }
+    function test_theDriveBandOverlaysTheGaugesTop() {
+        const s = driven()
+        enterOn(s)
+        const pages = find(s.dash, "dashPages")
+        const before = pages.mapToItem(s.main.contentItem, 0, 0).y
+        const rows = createTemporaryObject(alertRowsC, testCase)
+        const mainBand = find(s.main.contentItem, "alertBand")
+        const band = find(s.dash, "driveAlertBand")
+        mainBand.conditions = rows
+        band.conditions = rows
+        rows.append({ key: "a", name: "Coolant hot", enabled: true, level: "danger", banner: true,
+                      live: true, state: "on", stale: false, unavailable: false, fired: 1,
+                      value: 112, unit: "°C", decimals: 0, staleSinceMs: -1 })
+        tryVerify(() => band.visible, 2000, "the drive view's band shows")
+        verify(waitForPolish(s.main), "laid out")
+        verify(!mainBand.visible, "Main's band is hidden in the view")
+        const status = find(s.dash, "driveStatusLine")
+        compare(band.mapToItem(s.dash, 0, 0).y, status.y + status.height, "under the status line")
+        verify(band.z > pages.z, "over the gauges")
+        compare(pages.mapToItem(s.main.contentItem, 0, 0).y, before, "the gauges didn't move")
+        verify(!s.dash.barsUp && !s.dash.barsHeld, "an alert raises no bars")
+        s.dash.leaveDrive(true)
+        verify(waitForPolish(s.main), "laid out")
+        verify(!band.visible, "the view's band goes with it")
+        verify(mainBand.visible, "and Main's shows")
+    }
 }

@@ -84,12 +84,13 @@ GaugeBase {
             font.weight: Font.Bold
             font.family: Theme.valueFamily
             font.features: Theme.valueFeatures
-            color: gauge.hasValue ? gauge.zoneColor(gauge.value, gauge.readoutColor) : Theme.textDim
+            color: gauge.valueColor
         }
-        // Past dangerFrom, beside the value; its slot stays
+        // Past dangerFrom or at a danger alert, beside the value; a danger zone
+        // keeps its slot
         DangerMark {
-            visible: gauge.hasDangerZone
-            opacity: gauge.inDanger ? 1 : 0
+            visible: gauge.dangerSlot
+            opacity: gauge.showsDanger ? 1 : 0
             size: 18
             anchors.verticalCenter: valueLabel.verticalCenter
         }
