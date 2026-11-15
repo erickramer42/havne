@@ -152,10 +152,12 @@ ColumnLayout {
     }
 
     // ---- Words
-    // A number as shown: up to three decimals, the locale's point
-    function shownNumber(v) {
+    // A number as shown: up to three decimals (or decimals), the locale's
+    // point. The editor's fields keep three, so a saved level reads back as
+    // it was; the list says a level in its signal's own decimals
+    function shownNumber(v, decimals) {
         return typeof v === "number" && isFinite(v)
-               ? String(Number(v.toFixed(3))).replace(".", Qt.locale().decimalPoint) : ""
+               ? String(Number(v.toFixed(decimals ?? 3))).replace(".", Qt.locale().decimalPoint) : ""
     }
     function rowOfRefs(refs) {
         const all = DashboardBook.lookupRefs(refs ?? [], gaugeSets)
@@ -193,7 +195,9 @@ ColumnLayout {
                        .arg(name).arg(shownNumber(level))
         // Reading the unit system makes a binding follow its change
         const units = Bridge.unitSystem
-        const shown = shownNumber(Bridge.displayValue(t.unit ?? "", level))
+        const row = rowOfRefs(t.signal)
+        const shown = shownNumber(Bridge.displayValue(t.unit ?? "", level),
+                                  row !== null && typeof row.decimals === "number" ? row.decimals : 3)
         const unit = units >= 0 ? Bridge.displayUnit(t.unit ?? "") : ""
         return (comparison === "below" ? qsTr("%1 below %2 %3") : qsTr("%1 above %2 %3"))
                    .arg(name).arg(shown).arg(unit).trim()

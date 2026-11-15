@@ -156,6 +156,32 @@ TestCase {
         compare(find(alerts, "alertSaveNote").text, "Imported 2 alerts.")
     }
 
+    // In imperial the list says a level in its signal's own decimals, and
+    // the editor keeps three, so a metric level left as it showed is saved
+    // back as it was
+    function test_anImperialLevelReadsInItsSignalsDecimals() {
+        save([rpm("fast", "Fast", { signal: ["id:3001"], unit: "km/h", above: 20 })])
+        Bridge.unitSystem = 1
+        const page = settingsOf()
+        page.uriField.text = "mock://demo"
+        const alerts = find(page, "settingsAlertsPart")
+        alerts.refreshRows()
+        const speed = alerts.rows.find(r => r.ref === "id:3001")
+        verify(speed !== undefined, "the mock lists its speed")
+        compare(speed.decimals, 0, "the speed's own decimals")
+        const summary = wordsOf(rowOf(page, 0), "alertSummary")
+        verify(summary.endsWith(" above 12 mph"), summary)
+        rowOf(page, 0).clicked()
+        const term = termOf(editorOf(page), 0)
+        compare(term.levelField.text, "12" + Qt.locale().decimalPoint + "427", "the field keeps three")
+        verify(!editorOf(page).changed(), "untouched, it reads unchanged")
+        find(editorOf(page), "alertLevel_danger").clicked()
+        find(editorOf(page), "alertSave").clicked()
+        const c = stored().conditions[0]
+        verify(c.when.above === 20, String(c.when.above))
+        compare(c.when.unit, "km/h")
+    }
+
     // ---- The editor
 
     // A row opens its alert; a change saved goes into the file through
