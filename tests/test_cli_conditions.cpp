@@ -282,6 +282,54 @@ TEST(CliConditionTest, AgainstASetEachTermSaysWhatItTookAndTheConditionWhyNot)
         << raw;
 }
 
+/* conditions check's read of a condition: each term, the slots past them
+ * zero, and the binding; a read core refuses is its status, for the
+ * command's error line, never a line of what wasn't read */
+TEST(CliConditionTest, ATermOrBindingCoreRefusesIsItsStatus)
+{
+    Loaded l(
+        file_of(R"({"key":"revs","name":"Revs","when":{"signal":["obd2.rpm"],)"
+                R"("unit":"RPM","below":500}})"));
+    ASSERT_NE(l.set, nullptr);
+    ecuio_condition_info_t info{};
+    ASSERT_EQ(ecuio_condition_set_get(l.set, 0, &info), ECUIO_OK);
+    ASSERT_EQ(info.term_count, 1u);
+    ecuio_condition_term_t terms[ECUIO_CONDITION_MAX_TERMS];
+    std::memset(terms, 0xAB, sizeof terms);
+    ecuio_condition_binding_t binding;
+    std::memset(&binding, 0xAB, sizeof binding);
+    ASSERT_EQ(cli::read_terms(l.set, 0, info, terms, obd2(), nullptr, &binding),
+              ECUIO_OK);
+    EXPECT_STREQ(terms[0].unit, "RPM");
+    EXPECT_EQ(binding.why, ECUIO_CONDITION_WHY_NONE);
+    const ecuio_condition_term_t zero{};
+    for (uint32_t k = 1; k < ECUIO_CONDITION_MAX_TERMS; ++k) {
+        EXPECT_EQ(std::memcmp(&terms[k], &zero, sizeof zero), 0)
+            << "slot " << k << " is left as it was";
+    }
+    /* A term past the condition's */
+    ecuio_condition_info_t more = info;
+    more.term_count = 2;
+    EXPECT_EQ(cli::read_terms(l.set, 0, more, terms, obd2(), nullptr, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    /* A file whose set isn't the one given */
+    const std::string json =
+        R"({"havne_signals":1,"name":"Desk","source":{"name":"A test"},)"
+        R"("extends":"obd2",)"
+        R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[{"key":"boost",)"
+        R"("name":"Boost","ecu":"pcm","read":{"service":"01","number":"0B"},)"
+        R"("field":{"byte":0,"bits":8},"unit":"kPa"}]})";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(cli::read_terms(l.set, 0, info, terms, obd2(), file, &binding),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(cli::read_terms(l.set, 0, info, terms, obd2(), file, nullptr),
+              ECUIO_OK)
+        << "with no binding asked the file isn't read";
+    ecuio_signal_file_free(file);
+}
+
 TEST(CliConditionTest, EachWordIsTheFilesOwn)
 {
     EXPECT_STREQ(cli::term_test_word(ECUIO_TERM_ABOVE), "above");
