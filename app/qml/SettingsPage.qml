@@ -378,8 +378,13 @@ Pane {
     // variant } or { kind: "obdb" }
     property var pendingImport: null
     // The user's own plugin a waiting signal file goes into, by its
-    // sha256; "" while none is chosen
+    // sha256; "" while none is chosen. A removal or a rewrite (a variant
+    // dropped gives the plugin a new sha256) ends the choice
     property string importInto: ""
+    onOwnPluginsChanged: {
+        if (importInto !== "" && !ownPlugins.some(p => p.sha256 === importInto))
+            importInto = ""
+    }
     // Replace...'s variant, which the next file read takes the place of:
     // { sha256, variant, name }, null for none
     property var replaceTarget: null

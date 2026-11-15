@@ -2810,6 +2810,32 @@ TestCase {
         verify(!rowData(page, "plugin.example-sim.base").forCar)
     }
 
+    // A signal file waiting on Into keeps no choice of a plugin that goes
+    // or is rewritten (a variant dropped gives it a new sha256): Keep
+    // hides until Into is chosen again, and the file still waits
+    function test_aWaitingIntoChoiceGoesWithItsPlugin() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "trip.json", "Trip extras"))
+        verify(page.importFile(Harness.writeScratchFile("two.json", signalFileText("Two", "D101"))))
+        verify(page.keepPending(page.pluginList[0].sha256, "two"))
+        verify(page.importFile(Harness.writeScratchFile("three.json", signalFileText("Three", "D102"))))
+        press(page, "importInto_0")
+        verify(find(page, "importKeep").visible, "Into chosen: Keep shows")
+
+        verify(page.removeVariant(rowData(page, "plugin.trip-extras.two")))
+        compare(page.importInto, "", "the rewritten plugin's old sha256 is no choice")
+        verify(!find(page, "importKeep").visible, "Keep waits for Into again")
+        press(page, "importInto_0")
+        verify(find(page, "importKeep").visible)
+
+        verify(page.removePlugin(page.pluginList[0].sha256))
+        compare(page.importInto, "")
+        verify(!find(page, "importKeep").visible)
+        verify(page.pendingImport !== null, "the file still waits")
+    }
+
     // Mine marks an imported plugin as the user's: its variants can then
     // be changed here, its removal asks, and a newer export of the same
     // plugin updates it in place, saying from which version to which
