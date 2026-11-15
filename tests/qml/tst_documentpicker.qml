@@ -51,6 +51,7 @@ TestCase {
     }
     function cleanup() {
         DocumentPicker.setPickerForTesting(false)
+        DocumentPicker.setPlatformTypesForTesting({})
     }
 
     // A picker's dialog and a tally of its answers
@@ -340,6 +341,27 @@ TestCase {
         compare(DocumentPicker.mimeTypeOf("txt"), "text/plain")
         compare(DocumentPicker.mimeTypeOf("pcapng"), "application/octet-stream")
         compare(DocumentPicker.mimeTypeOf(""), "application/octet-stream")
+    }
+
+    // A save asks the platform's own type for its suffix, so the picker
+    // offers the documents of that suffix to replace; with none named, the
+    // app's own
+    function test_aSaveAsksThePlatformsTypeForItsSuffix() {
+        DocumentPicker.setPlatformTypesForTesting({ csv: "text/comma-separated-values" })
+        compare(DocumentPicker.saveTypeOf("csv"), "text/comma-separated-values")
+        compare(DocumentPicker.saveTypeOf("CSV"), "text/comma-separated-values")
+        compare(DocumentPicker.saveTypeOf("json"), "application/json")
+        compare(DocumentPicker.saveTypeOf(""), "application/octet-stream")
+
+        const d = createTemporaryObject(saveComponent, testCase,
+                                        { defaultSuffix: "csv", nameFilters: ["CSV (*.csv)"] })
+        verify(d)
+        d.open()
+        compare(DocumentPicker.mimeTypeForTesting(), "text/comma-separated-values",
+                "the pick asks the platform's type")
+
+        DocumentPicker.setPlatformTypesForTesting({})
+        compare(DocumentPicker.saveTypeOf("csv"), "text/csv", "no platform type off a phone")
     }
 
     // A save's answer notes whether the pick made its document, by its

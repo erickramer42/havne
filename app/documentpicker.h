@@ -18,6 +18,7 @@
 #include <QObject>
 #include <QString>
 #include <QUrl>
+#include <QVariantMap>
 #include <QtQmlIntegration>
 
 #include <memory>
@@ -46,12 +47,25 @@ public:
     Q_INVOKABLE int pick();
 
     // Shows the save picker, offering title as the name and asking for the
-    // MIME type of suffix (mimeTypeOf); answered as pick() is
+    // MIME type of suffix (saveTypeOf); answered as pick() is
     Q_INVOKABLE int pickSave(const QString& title, const QString& suffix);
 
     // A save's MIME type by its suffix, for the picker and a provider that
     // names the document by it: json, csv, txt, else application/octet-stream
     Q_INVOKABLE QString mimeTypeOf(const QString& suffix) const;
+
+    // The type a save asks for: the platform's own for suffix (Android's
+    // MimeTypeMap) where it names one, else mimeTypeOf. The picker grays out
+    // a document of another type, and Android lists a .csv as
+    // text/comma-separated-values, so text/csv could replace none
+    Q_INVOKABLE QString saveTypeOf(const QString& suffix) const;
+
+    // Stands in for the platform's types (suffix to type) on any platform;
+    // an empty map asks the platform again
+    Q_INVOKABLE void setPlatformTypesForTesting(const QVariantMap& types)
+    {
+        m_platformTypesForTesting = types;
+    }
 
     // The activity's request code for a pick: a result is matched to the pick
     // under way by its code, so two picks in a row never share one. 256 in
@@ -106,6 +120,7 @@ signals:
 private:
     void start(int request);
     void failLater(int request, const QString& words);
+    QString platformTypeOf(const QString& suffix) const;
 
     // Android's activity results for the picker's codes (empty elsewhere)
     struct ResultListener;
@@ -119,4 +134,5 @@ private:
     QString m_mimeType;
     qint64 m_launchedMs = 0;
     bool m_pickerForTesting = false;
+    QVariantMap m_platformTypesForTesting;
 };

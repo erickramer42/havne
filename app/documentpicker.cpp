@@ -80,7 +80,7 @@ int DocumentPicker::pickSave(const QString& title, const QString& suffix)
     m_pending = request;
     m_save = true;
     m_title = title;
-    m_mimeType = mimeTypeOf(suffix);
+    m_mimeType = saveTypeOf(suffix);
     m_launchedMs = QDateTime::currentMSecsSinceEpoch();
     start(request);
     return request;
@@ -99,6 +99,37 @@ QString DocumentPicker::mimeTypeOf(const QString& suffix) const
         return QStringLiteral("text/plain");
     }
     return QStringLiteral("application/octet-stream");
+}
+
+QString DocumentPicker::saveTypeOf(const QString& suffix) const
+{
+    const QString own = platformTypeOf(suffix.toLower());
+    return own.isEmpty() ? mimeTypeOf(suffix) : own;
+}
+
+QString DocumentPicker::platformTypeOf(const QString& suffix) const
+{
+    if (suffix.isEmpty()) {
+        return {};
+    }
+    if (!m_platformTypesForTesting.isEmpty()) {
+        return m_platformTypesForTesting.value(suffix).toString();
+    }
+#ifdef Q_OS_ANDROID
+    const QJniObject map = QJniObject::callStaticObjectMethod(
+        "android/webkit/MimeTypeMap", "getSingleton",
+        "()Landroid/webkit/MimeTypeMap;");
+    if (!map.isValid()) {
+        return {};
+    }
+    return map
+        .callObjectMethod("getMimeTypeFromExtension",
+                          "(Ljava/lang/String;)Ljava/lang/String;",
+                          QJniObject::fromString(suffix).object<jstring>())
+        .toString();
+#else
+    return {};
+#endif
 }
 
 void DocumentPicker::deliver(int request, int resultCode, const QString& uri,
