@@ -17,6 +17,17 @@ int ConditionModel::rowCount(const QModelIndex& parent) const
     return parent.isValid() ? 0 : static_cast<int>(m_rows.size());
 }
 
+bool ConditionModel::anyRecords() const
+{
+    for (const Row& r : m_rows) {
+        if ((r.flags & ECUIO_CONDITION_INFO_DISABLED) == 0 &&
+            (r.uses & ECUIO_CONDITION_USE_RECORD) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 QHash<int, QByteArray> ConditionModel::roleNames() const
 {
     return {{KeyRole, "key"},

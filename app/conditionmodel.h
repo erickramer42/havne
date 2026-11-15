@@ -57,6 +57,8 @@ public:
     QVariant data(const QModelIndex& index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
     int count() const { return static_cast<int>(m_rows.size()); }
+    // Some enabled condition has record: what an armed recorder needs
+    bool anyRecords() const;
 
     // The rows of set (nullptr: none), each term bound to signal_set and
     // file as a session binds them; a NULL signal_set binds nothing and
