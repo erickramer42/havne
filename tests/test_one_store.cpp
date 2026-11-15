@@ -12,6 +12,8 @@
 
 #include <gtest/gtest.h>
 
+#include <functional>
+
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
@@ -31,6 +33,7 @@
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "sessionbridge.h"
+#include "urlwrite.h"
 #include <ecuio/obdb.h>
 #include <ecuio/plugin.h>
 #include <ecuio/profile.h>
@@ -396,6 +399,41 @@ TEST(BridgeTest, OneStoreTheSameFileIsKeptOnceAndATakenIdIsNumbered)
     r = keep(signalFile(dashed, QStringLiteral("D101")));
     ASSERT_TRUE(ok(r)) << words(r);
     EXPECT_EQ(str(r, "id").toStdString(), "abcdefghij-abcdefghij-abcdef-2");
+}
+
+/* A read that asks for a signal file (Replace's) keeps and holds nothing
+ * of another kind: a package doesn't go in, an OBDb set isn't held */
+TEST(BridgeTest, OneStoreAReadForASignalFileTakesNothingElse)
+{
+    SettingsDir dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    Logged b;
+    const QString only = QStringLiteral("signals");
+    const auto read = [&](const char* name, const QByteArray& bytes) {
+        return b.bridge.readImport(
+            writeScratch(from.path(), QString::fromLatin1(name), bytes), only);
+    };
+
+    QVariantMap r = read("a.json", packed_plugin::example());
+    EXPECT_FALSE(ok(r));
+    EXPECT_EQ(words(r), "Not a signal file: only one takes a variant's place");
+    EXPECT_EQ(str(r, "kind").toStdString(), "plugin");
+    EXPECT_TRUE(copies().isEmpty()) << "the package didn't go in";
+    EXPECT_EQ(b.log.constLast().toStdString(),
+              "Import refused: Not a signal file: only one takes a variant's "
+              "place");
+
+    r = read("set.json", readBytes(QStringLiteral(ECUIO_OBDB_FIXTURE)));
+    EXPECT_FALSE(ok(r));
+    r = b.bridge.previewObdbImport(2019, QStringLiteral("Held"));
+    EXPECT_FALSE(ok(r)) << "the set isn't held";
+
+    r = read("file.json", signalFile(QStringLiteral("Extras")));
+    ASSERT_TRUE(ok(r)) << words(r);
+    EXPECT_EQ(str(r, "kind").toStdString(), "signals");
+    r = b.bridge.keepSignals(QString(), QString(), QString());
+    EXPECT_TRUE(ok(r)) << words(r) << " (a signal file waits as ever)";
 }
 
 /* One Import tells the three kinds apart by the file's first key: a
@@ -1309,6 +1347,126 @@ TEST(BridgeTest, OneStoreAVehiclesPicksKeepTheirOrderAndTheFirstObd2OneStandsIn)
     EXPECT_EQ(column(offered, "profile"), byName);
     EXPECT_FALSE(
         column(offered, "forThisCar").contains(QStringLiteral("true")));
+}
+
+// A save out of the store that is refused removes only the document its
+// own pick made, as every save does: one the user chose to replace stays,
+// and so does one with bytes
+TEST(BridgeTest, OneStoreARefusedSaveFollowsItsSavePicksVerdict)
+{
+    SettingsDir settings;
+    ASSERT_TRUE(settings.valid());
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    if (QUrl(dir.path(), QUrl::TolerantMode)
+            .toString(QUrl::FullyEncoded)
+            .compare(dir.path(), Qt::CaseInsensitive) != 0) {
+        GTEST_SKIP() << "the temporary folder's path changes when encoded";
+    }
+    Logged b;
+    const auto provider = [&](const QString& name) {
+        return QUrl(dir.path() + QLatin1Char('/') + name, QUrl::TolerantMode);
+    };
+    const auto make = [&](const QUrl& url, const QByteArray& bytes) {
+        QFile f(url.toString());
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(bytes);
+    };
+    const QString none(64, QLatin1Char('0'));
+    const QByteArray theirs("the user's earlier save");
+    struct Save {
+        const char* name;
+        std::function<QVariantMap(const QUrl&)> run;
+    };
+    const Save saves[] = {
+        {"a variant of a plugin the store lacks",
+         [&](const QUrl& u) {
+             return b.bridge.saveVariantFile(none, QStringLiteral("base"), u);
+         }},
+        {"a plugin the store lacks",
+         [&](const QUrl& u) { return b.bridge.exportPlugin(none, u); }},
+        {"a file that didn't move and isn't kept",
+         [&](const QUrl& u) { return b.bridge.saveUnmigratedFile(none, u); }},
+    };
+    for (const Save& save : saves) {
+        SCOPED_TRACE(save.name);
+        const QUrl made = provider(QStringLiteral("made.json"));
+        make(made, QByteArray());
+        notePick(pathOfUrl(made), PickMade::Made);
+        EXPECT_FALSE(ok(save.run(made)));
+        EXPECT_FALSE(QFile::exists(made.toString()))
+            << "the pick's own empty document goes";
+
+        const QUrl replaced = provider(QStringLiteral("replaced.json"));
+        make(replaced, QByteArray());
+        notePick(pathOfUrl(replaced), PickMade::Replaced);
+        EXPECT_FALSE(ok(save.run(replaced)));
+        EXPECT_TRUE(QFile::exists(replaced.toString()))
+            << "an empty document the user chose to replace stays";
+        EXPECT_EQ(peekPick(pathOfUrl(replaced)), PickMade::Unknown)
+            << "the save took the verdict";
+
+        const QUrl full = provider(QStringLiteral("full.json"));
+        make(full, theirs);
+        notePick(pathOfUrl(full), PickMade::Made);
+        EXPECT_FALSE(ok(save.run(full)));
+        // Not an ASSERT: the next save is judged whatever this one did
+        QFile after(full.toString());
+        EXPECT_TRUE(after.open(QIODevice::ReadOnly) &&
+                    after.readAll() == theirs)
+            << "a document with bytes stays";
+        after.close();
+        QFile::remove(replaced.toString());
+        QFile::remove(full.toString());
+    }
+}
+
+// What a layout file names of a vehicle's picks: each one's written file
+// by its hash, the file it was made from beside it, and no entry for a
+// pick no plugin has
+TEST(BridgeTest, OneStoreAPicksFileIsItsWrittenTextAndTheFileThatMadeIt)
+{
+    SettingsDir dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir from;
+    Logged b;
+    const QByteArray file = signalFile(QStringLiteral("Daily extras"));
+    QVariantMap r = b.bridge.keepSignalText(QString::fromUtf8(file), QString(),
+                                            QString(), QString());
+    ASSERT_TRUE(ok(r)) << words(r);
+    const QString extrasSha = str(r, "sha256");
+    const QString extras = list(r, "profiles").value(0);
+    r = b.bridge.readImport(writeScratch(from.path(), QStringLiteral("a.json"),
+                                         packed_plugin::example()),
+                            QString());
+    ASSERT_TRUE(ok(r)) << words(r);
+    const QString simSha = str(r, "sha256");
+    const QString my2019 = QStringLiteral("plugin.example-sim.my2019");
+
+    const QVariantList files = b.bridge.pickFiles(
+        {my2019, QStringLiteral("plugin.gone.base"), extras});
+    ASSERT_EQ(files.size(), 2) << "a pick no plugin has names no file";
+    const QVariantMap sim = files.at(0).toMap();
+    const QVariantMap own = files.at(1).toMap();
+    EXPECT_EQ(str(sim, "profile"), my2019) << "in the picks' order";
+    EXPECT_EQ(str(own, "profile"), extras);
+    EXPECT_EQ(str(sim, "name"), "Example: the simulated car: my2019")
+        << "one variant of several is named";
+    EXPECT_EQ(str(own, "name"), "Daily extras");
+
+    const auto written = [&](const QString& sha, const char* variant) {
+        const QVariantMap t =
+            b.bridge.pluginVariantText(sha, QString::fromLatin1(variant));
+        EXPECT_TRUE(ok(t)) << words(t);
+        return sha256Of(str(t, "text").toUtf8());
+    };
+    EXPECT_EQ(str(own, "sha256"), written(extrasSha, "base"));
+    EXPECT_EQ(str(sim, "sha256"), written(simSha, "my2019"));
+    EXPECT_NE(str(sim, "sha256"), written(simSha, "base"));
+    EXPECT_EQ(list(own, "from"), QStringList{sha256Of(file)})
+        << "the signal file the plugin was made from";
+    EXPECT_TRUE(list(sim, "from").isEmpty()) << "a package came from no file";
+    EXPECT_TRUE(b.bridge.pickFiles({}).isEmpty());
 }
 
 /* The index is the store's own file: it keeps keys it doesn't know,

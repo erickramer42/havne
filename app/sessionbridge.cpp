@@ -2225,7 +2225,7 @@ static QString importKindOf(const QByteArray& bytes)
     return commands ? QStringLiteral("obdb") : QString();
 }
 
-QVariantMap SessionBridge::readImport(const QUrl& url)
+QVariantMap SessionBridge::readImport(const QUrl& url, const QString& only)
 {
     dropImport();
     const auto refused = [](const QString& words) {
@@ -2257,7 +2257,11 @@ QVariantMap SessionBridge::readImport(const QUrl& url)
             bytes.remove(0, 3);
         }
         kind = importKindOf(bytes);
-        if (kind == QLatin1String("plugin")) {
+        if (!only.isEmpty() && kind != only) {
+            // Before anything is kept: a package would go in at once
+            result = refused(QStringLiteral(
+                "Not a signal file: only one takes a variant's place"));
+        } else if (kind == QLatin1String("plugin")) {
             result = m_pluginStore.import(bytes);
             line = pluginImportLine(result);
         } else if (kind == QLatin1String("signals")) {
@@ -2492,10 +2496,49 @@ QStringList SessionBridge::migrateStores(QSettings& prefs)
     return StoreMigration::run(prefs, m_pluginStore).lines;
 }
 
+QVariantMap SessionBridge::saveUnmigratedFile(const QString& sha,
+                                              const QUrl& url)
+{
+    QString words;
+    // Judged before the save: a save that fails removes only the document
+    // its own pick made (healthreport.h)
+    const bool removable = pickedDocumentRemovable(url);
+    QByteArray bytes = StoreMigration::unmigratedBytes(sha, &words);
+    if (bytes.isEmpty()) {
+        bytes = StoreMigration::oldCopy(sha, &words);
+    }
+    bool written = false;
+    if (!bytes.isEmpty()) {
+        written = writeToUrl(url, bytes);
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    if (!written) {
+        dropPickedDocument(url, removable);
+    }
+    emit logMessage(
+        written ? QStringLiteral("Signal file %1 that wasn't moved saved to "
+                                 "a file (%2 bytes)")
+                      .arg(sha.left(12))
+                      .arg(bytes.size())
+                : QStringLiteral("Signal file %1 that wasn't moved not "
+                                 "saved: %2")
+                      .arg(sha.left(12), words));
+    return {{QStringLiteral("ok"), written},
+            {QStringLiteral("words"), written ? QString() : words}};
+}
+
+bool SessionBridge::removeUnmigratedFile(const QString& sha)
+{
+    return StoreMigration::removeUnmigrated(sha);
+}
+
 QVariantMap SessionBridge::exportPlugin(const QString& sha, const QUrl& url)
 {
     (void)m_pluginStore.all();
     QString words;
+    const bool removable = pickedDocumentRemovable(url);
     const QByteArray bytes = m_pluginStore.packed(sha, &words);
     bool written = false;
     if (!bytes.isEmpty()) {
@@ -2503,6 +2546,9 @@ QVariantMap SessionBridge::exportPlugin(const QString& sha, const QUrl& url)
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
+    }
+    if (!written) {
+        dropPickedDocument(url, removable);
     }
     emit logMessage(
         written ? QStringLiteral("Plugin %1 exported to a file (%2 bytes)")
@@ -2530,6 +2576,7 @@ QVariantMap SessionBridge::saveVariantFile(const QString& sha,
                                            const QUrl& url)
 {
     QString words;
+    const bool removable = pickedDocumentRemovable(url);
     const QByteArray bytes = m_pluginStore.variantBytes(sha, variant, &words);
     bool written = false;
     if (!bytes.isEmpty()) {
@@ -2537,6 +2584,9 @@ QVariantMap SessionBridge::saveVariantFile(const QString& sha,
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
+    }
+    if (!written) {
+        dropPickedDocument(url, removable);
     }
     emit logMessage(
         written ? QStringLiteral("Variant %1 of plugin %2 saved as a signal "
@@ -2584,6 +2634,11 @@ QStringList SessionBridge::unpickVariant(const QStringList& picks,
                                          const QString& profile)
 {
     return PluginStore::unpick(picks, profile);
+}
+
+QVariantList SessionBridge::pickFiles(const QStringList& picks)
+{
+    return m_pluginStore.pickFiles(picks);
 }
 
 QString SessionBridge::readOnce(const QString& adapterUri,

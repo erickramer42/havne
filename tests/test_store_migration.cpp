@@ -27,9 +27,11 @@
 #include <QSettings>
 #include <QStringList>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QVariantMap>
 
 #include <iostream>
+#include <utility>
 
 #include "obdbimport.h"
 #include "packed_plugin.h"
@@ -930,6 +932,141 @@ TEST(BridgeTest, OneStoreMigrationAnUnmigratedCopyThatCantBeKeptIsSaid)
     EXPECT_EQ(kept(held.at(0)), QJsonValue(false));
     EXPECT_EQ(held.at(0).toObject().value(QStringLiteral("words")).toString(),
               kChanged);
+}
+
+/* The page's Save and Remove of a file that didn't move, through the
+ * bridge: the bytes the move kept, else the earlier folder's copy as it
+ * is, written where the user chose; Remove takes the kept bytes alone.
+ * The log names the file by its hash's start, never a path */
+TEST(BridgeTest, OneStoreMigrationAFileThatDidntMoveIsSavedAndRemoved)
+{
+    const auto told = [](const QVariantMap& r) {
+        return r.value(QStringLiteral("words")).toString();
+    };
+    const auto ok = [](const QVariantMap& r) {
+        return r.value(QStringLiteral("ok")).toBool();
+    };
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    const auto target = [&](const char* name) {
+        return out.path() + QLatin1Char('/') + QString::fromLatin1(name);
+    };
+    const QString gone = sha256Of("never kept");
+    const QString changed = sha256Of("as it was kept");
+    {
+        OldState old;
+        ASSERT_TRUE(old.valid());
+        writeBytes(old.copyOf(changed), "changed since");
+        old.set(kOldBook,
+                bookOf({vehicle(QStringLiteral("v1"), QString(),
+                                {named(gone, QStringLiteral("Gone"),
+                                       QStringLiteral("user.gone")),
+                                 named(changed, QStringLiteral("Changed"),
+                                       QStringLiteral("user.changed"))})}));
+        SessionBridge bridge;
+        QStringList log;
+        QObject::connect(&bridge, &SessionBridge::logMessage, &bridge,
+                         [&log](const QString& line) { log << line; });
+        {
+            QSettings prefs(old.prefsPath(), QSettings::IniFormat);
+            (void)bridge.migrateStores(prefs);
+        }
+        ASSERT_EQ(StoreMigration::unmigrated(), QStringList{changed});
+        // The kept bytes win over the earlier folder's copy
+        writeBytes(old.copyOf(changed), "changed again");
+        log.clear();
+
+        QVariantMap r = bridge.saveUnmigratedFile(
+            changed, QUrl::fromLocalFile(target("changed.json")));
+        EXPECT_TRUE(ok(r)) << told(r).toStdString();
+        EXPECT_EQ(told(r), QString());
+        EXPECT_EQ(readBytes(target("changed.json")),
+                  QByteArray("changed since"));
+        ASSERT_EQ(log.size(), 1);
+        EXPECT_EQ(log.constFirst(),
+                  QStringLiteral("Signal file %1 that wasn't moved saved to "
+                                 "a file (13 bytes)")
+                      .arg(changed.left(12)));
+
+        r = bridge.saveUnmigratedFile(gone,
+                                      QUrl::fromLocalFile(target("gone.json")));
+        EXPECT_FALSE(ok(r));
+        EXPECT_EQ(told(r), QStringLiteral("Its copy is gone from the earlier "
+                                          "version's folder"));
+        EXPECT_FALSE(QFile::exists(target("gone.json")));
+        ASSERT_EQ(log.size(), 2);
+        EXPECT_EQ(log.constLast(),
+                  QStringLiteral("Signal file %1 that wasn't moved not "
+                                 "saved: %2")
+                      .arg(gone.left(12), told(r)));
+        for (const QString& line : std::as_const(log)) {
+            EXPECT_FALSE(line.contains(out.path())) << line.toStdString();
+            EXPECT_FALSE(line.contains(QStringLiteral("signals")))
+                << line.toStdString();
+        }
+
+        r = bridge.saveUnmigratedFile(
+            QStringLiteral("../store"),
+            QUrl::fromLocalFile(target("escape.json")));
+        EXPECT_FALSE(ok(r)) << "only a hash names a file";
+        EXPECT_FALSE(QFile::exists(target("escape.json")));
+
+        r = bridge.saveUnmigratedFile(
+            changed, QUrl::fromLocalFile(out.path() +
+                                         QStringLiteral("/none/such.json")));
+        EXPECT_FALSE(ok(r));
+        EXPECT_EQ(told(r), QStringLiteral("Couldn't write the file"));
+
+        EXPECT_FALSE(bridge.removeUnmigratedFile(QStringLiteral("../store")));
+        EXPECT_TRUE(bridge.removeUnmigratedFile(changed));
+        EXPECT_TRUE(StoreMigration::unmigrated().isEmpty());
+        EXPECT_EQ(readBytes(old.copyOf(changed)), QByteArray("changed again"))
+            << "the earlier folder's copy is never removed";
+    }
+
+    // Bytes the move couldn't keep (kept false): the earlier folder's copy
+    OldState blocked;
+    ASSERT_TRUE(blocked.valid());
+    const QString big = sha256Of("big");
+    writeBytes(blocked.copyOf(changed), "changed since");
+    writeBytes(blocked.copyOf(big), "x");
+    ASSERT_TRUE(QFile::resize(blocked.copyOf(big),
+                              StoreMigration::OldCopyMaxBytes + 1));
+    writeBytes(StoreMigration::unmigratedRoot(), "in the way");
+    blocked.set(kOldBook,
+                bookOf({vehicle(QStringLiteral("v1"), QString(),
+                                {named(changed, QStringLiteral("Changed"),
+                                       QStringLiteral("user.changed")),
+                                 named(big, QStringLiteral("Big"),
+                                       QStringLiteral("user.big"))})}));
+    SessionBridge bridge;
+    {
+        QSettings prefs(blocked.prefsPath(), QSettings::IniFormat);
+        (void)bridge.migrateStores(prefs);
+    }
+    ASSERT_EQ(blocked.entry(0)
+                  .value(QStringLiteral("unmigrated"))
+                  .toArray()
+                  .at(0)
+                  .toObject()
+                  .value(QStringLiteral("kept")),
+              QJsonValue(false));
+    QVariantMap r = bridge.saveUnmigratedFile(
+        changed, QUrl::fromLocalFile(target("unkept.json")));
+    EXPECT_TRUE(ok(r)) << told(r).toStdString();
+    EXPECT_EQ(readBytes(target("unkept.json")), QByteArray("changed since"));
+    r = bridge.saveUnmigratedFile(big, QUrl::fromLocalFile(target("big.json")));
+    EXPECT_FALSE(ok(r));
+    EXPECT_EQ(told(r), QStringLiteral("Its copy is over 64 MiB"));
+    EXPECT_FALSE(QFile::exists(target("big.json")));
+    ASSERT_TRUE(
+        QFile::resize(blocked.copyOf(big), StoreMigration::OldCopyMaxBytes));
+    r = bridge.saveUnmigratedFile(big, QUrl::fromLocalFile(target("big.json")));
+    EXPECT_TRUE(ok(r)) << "a copy at the bound is saved";
+    EXPECT_EQ(QFileInfo(target("big.json")).size(),
+              StoreMigration::OldCopyMaxBytes);
+    EXPECT_TRUE(bridge.removeUnmigratedFile(changed)) << "none kept to remove";
+    EXPECT_TRUE(QFile::exists(blocked.copyOf(changed)));
 }
 
 /* Two names whose ids are cut to the same text, and a file whose id a

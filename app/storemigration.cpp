@@ -594,6 +594,26 @@ bool StoreMigration::removeUnmigrated(const QString& sha)
     return gone;
 }
 
+QByteArray StoreMigration::oldCopy(const QString& sha, QString* words)
+{
+    QFile f(oldPath(sha));
+    if (!isSha(sha) || !f.open(QIODevice::ReadOnly)) {
+        *words = QStringLiteral("Its copy is gone from the earlier version's "
+                                "folder");
+        return {};
+    }
+    QByteArray bytes = f.read(OldCopyMaxBytes + 1);
+    if (bytes.size() > OldCopyMaxBytes) {
+        *words = QStringLiteral("Its copy is over %1 MiB")
+                     .arg(OldCopyMaxBytes / (1024 * 1024));
+        return {};
+    }
+    if (bytes.isEmpty()) {
+        *words = QStringLiteral("Its copy is empty");
+    }
+    return bytes;
+}
+
 void StoreMigration::stopAfterForTesting(Step step, int file)
 {
     g_stopStep = step;
