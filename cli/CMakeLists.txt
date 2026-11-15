@@ -1,7 +1,24 @@
 # cli/CMakeLists.txt
 # havne-cli (ADR-0031): core's public headers and nothing else, so it
 # builds in the core-only tree and the Qt-free CI jobs test it.
-add_executable(havne-cli main.cpp)
+add_executable(havne-cli
+    main.cpp
+    usage.cpp
+    common.cpp
+    session_lines.cpp
+    profile_source.cpp
+    cmd_stream.cpp
+    cmd_log.cpp
+    cmd_view.cpp
+    cmd_info.cpp
+    cmd_plugins.cpp
+    cmd_signals.cpp
+    cmd_check.cpp
+    cmd_transfer.cpp
+    cmd_health.cpp
+    cmd_sim.cpp
+    cmd_play.cpp
+    cmd_small.cpp)
 
 find_package(Threads REQUIRED)
 target_link_libraries(havne-cli PRIVATE ecuio-core Threads::Threads)
