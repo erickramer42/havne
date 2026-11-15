@@ -865,6 +865,51 @@ TEST(CliVinTest, AnIdentityLineCarriesItsItemsAndVin)
     EXPECT_EQ(none.substr(none.size() - 12), ",\"vin\":null}");
 }
 
+/* ADR-0027 section 3: the vehicle line comes once core flags the VIN in,
+ * the rest of the list still out, and once per new VIN */
+TEST(CliVinTest, TheVehicleLineComesOnceTheVinIsIn)
+{
+    ecuio_channel_identity_t id{};
+    id.rx_id = 0x7E8;
+    id.items = 2;
+    auto item = [&id](uint32_t i, uint8_t a, uint8_t b, uint8_t outcome,
+                      const char* text) {
+        ecuio_identity_item_t& it = id.list[i];
+        it.request[0] = a;
+        it.request[1] = b;
+        it.length = 2;
+        it.outcome = outcome;
+        std::snprintf(it.text, sizeof it.text, "%s", text);
+        it.text_length = static_cast<uint8_t>(std::strlen(it.text));
+    };
+    item(0, 0x09, 0x02, ECUIO_IDENTITY_ANSWERED, "1FAFAKE10M0000001");
+    item(1, 0x09, 0x04, ECUIO_IDENTITY_UNASKED, "");
+    char seen[ECUIO_VIN_TEXT_LEN] = "";
+    EXPECT_FALSE(cli::vehicle_due(id, seen)) << "core hasn't flagged it";
+    id.flags = ECUIO_IDENTITY_VIN;
+    EXPECT_TRUE(cli::vehicle_due(id, seen));
+    EXPECT_STREQ(seen, "1FAFAKE10M0000001");
+    EXPECT_FALSE(cli::vehicle_due(id, seen)) << "once per VIN";
+    id.flags |= ECUIO_IDENTITY_COMPLETE;
+    EXPECT_FALSE(cli::vehicle_due(id, seen)) << "nor again once complete";
+
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    cli::vehicle_line(l, id, 2027);
+    const std::string line(l.data(), l.size());
+    EXPECT_EQ(line.substr(0, line.find(",\"source\":")),
+              "{\"type\":\"vehicle\",\"rx\":\"0x7E8\","
+              "\"vin\":{\"vin\":\"1FAFAKE10M0000001\",\"decoded\":true,"
+              "\"model_year\":2021,\"year_earlier\":false,\"make\":\"Ford\","
+              "\"wmi\":\"1FA\",\"check_digit\":\"0\",\"check_matches\":true");
+    EXPECT_EQ(line.substr(line.size() - 2), "}}");
+
+    std::snprintf(id.list[0].text, sizeof id.list[0].text, "%s",
+                  "1FAFAKE13Y0000001");
+    EXPECT_TRUE(cli::vehicle_due(id, seen)) << "another VIN is new";
+    EXPECT_STREQ(seen, "1FAFAKE13Y0000001");
+}
+
 /* ADR-0044: a code's title, null for one the list lacks (a chassis code,
  * a manufacturer's), the freeze frame's beside its code */
 TEST(CliDtcTest, ATitleOrNull)
@@ -1615,6 +1660,85 @@ TEST(CliViewTest, AWindowCoversWhatTheRecordingHoldsOnce)
     EXPECT_EQ(w.t1_us, 3000000u);
 }
 
+/* The opened line's conditions: null with no set and no line; the set's
+ * hash, whether it is there and the same, and the events read, skipped
+ * and cut. A cond line is stream's condition line with the recording's
+ * time and held added. */
+TEST(CliViewTest, ARecordingsConditionsAreNamedAndEachEventIsALine)
+{
+    char buf[1024];
+    ecuio_recording_info_t info{};
+    info.format = ECUIO_RECORDING_FORMAT_ENUMS;
+    const ecuio_recording_signals_t no_file{};
+    ecuio_recording_conditions_t cs{};
+    const auto conditions_of = [&] {
+        cli::Line l(buf, sizeof buf);
+        cli::opened_line(l, 0, info, no_file, cs);
+        const std::string line(l.data(), l.size());
+        const size_t at = line.find(",\"conditions\":");
+        return at == std::string::npos ? line : line.substr(at);
+    };
+    EXPECT_EQ(conditions_of(), ",\"conditions\":null}");
+    info.condition_events = 2;
+    EXPECT_EQ(conditions_of(),
+              ",\"conditions\":{\"sha256\":null,\"present\":false,"
+              "\"matches\":false,\"events\":2,\"lines_skipped\":0,"
+              "\"cut\":false}}")
+        << "lines with no set named or present";
+    info.condition_events = 0;
+    cs.lines_skipped = 1;
+    EXPECT_EQ(conditions_of(),
+              ",\"conditions\":{\"sha256\":null,\"present\":false,"
+              "\"matches\":false,\"events\":0,\"lines_skipped\":1,"
+              "\"cut\":false}}")
+        << "only a line that doesn't parse";
+    cs.flags = ECUIO_RECORDING_CONDITIONS_NAMED |
+               ECUIO_RECORDING_CONDITIONS_PRESENT |
+               ECUIO_RECORDING_CONDITIONS_MATCH;
+    std::memset(cs.sha256, 'b', 64);
+    cs.lines_skipped = 3;
+    info.condition_events = 1048577;
+    info.flags = ECUIO_RECORDING_INFO_CONDITIONS_CUT;
+    EXPECT_EQ(conditions_of(),
+              ",\"conditions\":{\"sha256\":\"" + std::string(64, 'b') +
+                  "\",\"present\":true,\"matches\":true,\"events\":1048577,"
+                  "\"lines_skipped\":3,\"cut\":true}}");
+    cs.flags = ECUIO_RECORDING_CONDITIONS_PRESENT;
+    info.flags = 0;
+    EXPECT_NE(conditions_of().find("\"sha256\":null,\"present\":true,"
+                                   "\"matches\":false"),
+              std::string::npos)
+        << "present, not named";
+
+    ecuio_recording_condition_event_t e{};
+    e.host_us = 7251000;
+    e.timestamp_us = 7250000;
+    e.value = 111;
+    e.state = ECUIO_CONDITION_ON;
+    e.flags = ECUIO_CONDITION_FIRED | ECUIO_CONDITION_HELD;
+    e.term = 1;
+    std::memcpy(e.key, "coolant_high", 13);
+    char line[cli::kRecordedConditionLineBytes];
+    cli::Line c(line, sizeof line);
+    cli::recorded_condition_line(c, 2, e);
+    EXPECT_EQ(std::string(c.data(), c.size()),
+              "{\"type\":\"condition\",\"recording\":2,\"host_us\":7251000,"
+              "\"t_us\":7250000,\"key\":\"coolant_high\",\"state\":\"on\","
+              "\"fired\":true,\"stale\":false,\"held\":true,\"value\":111,"
+              "\"term\":1}");
+    e.state = ECUIO_CONDITION_OFF;
+    e.flags = ECUIO_CONDITION_STALE;
+    std::memset(e.key, 'k', sizeof e.key - 1);
+    cli::Line d(line, sizeof line);
+    cli::recorded_condition_line(d, 0, e);
+    EXPECT_TRUE(d.finish()) << "a key of the most bytes fits";
+    EXPECT_NE(std::string(d.data(), d.size())
+                  .find("\"key\":\"" + std::string(31, 'k') +
+                        "\",\"state\":\"off\",\"fired\":false,\"stale\":true,"
+                        "\"held\":false"),
+              std::string::npos);
+}
+
 TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
 {
     char buf[1024];
@@ -1626,14 +1750,15 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     info.rows_torn = 1;
     info.records_dropped = 4;
     const ecuio_recording_signals_t no_file{};
+    const ecuio_recording_conditions_t no_set{};
     cli::Line o(buf, sizeof buf);
-    cli::opened_line(o, 1, info, no_file);
+    cli::opened_line(o, 1, info, no_file, no_set);
     EXPECT_EQ(std::string(o.data(), o.size()),
               "{\"type\":\"opened\",\"recording\":1,\"format\":\"older\","
               "\"duration_us\":30000000,\"utc_start_us\":null,\"signals\":2,"
               "\"markers\":0,\"summary\":false,\"rows_torn\":1,"
               "\"records_dropped\":4,\"notes_dropped\":0,"
-              "\"signal_file\":null}");
+              "\"signal_file\":null,\"conditions\":null}");
     /* The header's file: its hash, there and the same; or there unnamed */
     ecuio_recording_signals_t named{};
     named.flags = ECUIO_RECORDING_SIGNALS_NAMED |
@@ -1641,20 +1766,21 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
                   ECUIO_RECORDING_SIGNALS_MATCH;
     std::memset(named.sha256, 'a', 64);
     cli::Line f(buf, sizeof buf);
-    cli::opened_line(f, 1, info, named);
+    cli::opened_line(f, 1, info, named, no_set);
     const std::string line(f.data(), f.size());
     EXPECT_NE(line.find(",\"signal_file\":{\"sha256\":\"" +
                         std::string(64, 'a') +
-                        "\",\"present\":true,\"matches\":true}}"),
+                        "\",\"present\":true,\"matches\":true},"
+                        "\"conditions\":null}"),
               std::string::npos)
         << line;
     ecuio_recording_signals_t unnamed{};
     unnamed.flags = ECUIO_RECORDING_SIGNALS_PRESENT;
     cli::Line u(buf, sizeof buf);
-    cli::opened_line(u, 1, info, unnamed);
+    cli::opened_line(u, 1, info, unnamed, no_set);
     const std::string unnamed_line(u.data(), u.size());
     EXPECT_NE(unnamed_line.find(",\"signal_file\":{\"sha256\":null,\"present\":"
-                                "true,\"matches\":false}}"),
+                                "true,\"matches\":false},"),
               std::string::npos)
         << unnamed_line;
     EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_ENUMS), "core")
@@ -2026,7 +2152,8 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
                   cli::signal_file_line(l, file, set);
               }),
               "{\"type\":\"signal_file\",\"name\":\"Unit test\","
-              "\"profile\":\"user.unit-test\",\"signals\":4,\"base\":0,"
+              "\"profile\":\"user.unit-test\",\"format\":1,"
+              "\"signals\":4,\"base\":0,"
               "\"ecus\":[{\"rx\":\"0x7E9\",\"tx\":\"0x7E1\"}]}");
     const std::string other = ecuio_signal_group_name(ECUIO_SIGNAL_GROUP_OTHER);
     const std::string expected[] = {
@@ -2051,14 +2178,16 @@ TEST(CliSignalFileTest, TheLinesSayWhatTheLoaderRead)
         "{\"type\":\"signal_def\",\"id\":30003,\"name\":\"Half\","
         "\"kind\":\"computed\",\"unit\":\"kph\",\"decimals\":0,\"group\":\"" +
             other +
-            "\",\"rank\":0,\"inputs\":[{\"id\":30000,\"max_age_us\":3000000}]}",
+            "\",\"rank\":0,\"expr\":\"temp / 2\","
+            "\"inputs\":[{\"id\":30000,\"max_age_us\":3000000}]}",
     };
     for (uint32_t i = 0; i < 4; ++i) {
         SCOPED_TRACE(i);
         EXPECT_TRUE(cli::own_signal(file, set.defs[i]));
         EXPECT_LE(expected[i].size(), cli::def_line_bytes(set, set.defs[i]));
         EXPECT_EQ(text([&](cli::Line& l) {
-                      cli::def_line(l, set, set.defs[i], nullptr);
+                      cli::def_line(l, set, set.defs[i], nullptr,
+                                    ecuio_signal_file_expr(file, &set.defs[i]));
                   }),
                   expected[i]);
     }
@@ -2280,7 +2409,157 @@ TEST(CliPluginTest, AVariantLineCountsItsOwnSignals)
     EXPECT_EQ(text_of(l),
               "{\"type\":\"variant\",\"id\":\"base\",\"profile\":"
               "\"plugin.p.base\",\"signals\":1,\"base\":0,\"ecus\":[{\"rx\":"
-              "\"0x7E8\",\"tx\":\"0x7E0\"}]}\n");
+              "\"0x7E8\",\"tx\":\"0x7E0\"}],\"license\":null,"
+              "\"share_alike\":false}\n");
+}
+
+// A variant's license and whether it's share-alike come from its written
+// file's source, the data file's own before the manifest's; the
+// share_alike line names the variant, the license and what passing the
+// plugin on keeps
+TEST(CliPluginTest, AVariantLineNamesItsLicenseAndShareAlike)
+{
+    std::string packed = kPacked;
+    const std::string data = "{\"havne_signals\": 1, \"signals\"";
+    ASSERT_NE(packed.find(data), std::string::npos);
+    packed.replace(packed.find(data), data.size(),
+                   "{\"havne_signals\": 1, \"source\": {\"name\": \"OBDb\", "
+                   "\"license\": \"CC-BY-SA-4.0\"}, \"signals\"");
+    ecuio_plugin_t* p = nullptr;
+    ASSERT_EQ(
+        ecuio_plugin_load(packed.data(), packed.size(), nullptr, nullptr, &p),
+        ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_file_t* file = ecuio_plugin_variant_file(p, 0);
+    const ecuio_signal_set_t& set = *ecuio_plugin_variant_set(p, 0);
+    std::vector<char> buf(cli::variant_line_bytes(set, file));
+    cli::Line l(buf.data(), buf.size());
+    cli::variant_line(l, "base", "plugin.p.base", file, set);
+    EXPECT_EQ(text_of(l),
+              "{\"type\":\"variant\",\"id\":\"base\",\"profile\":"
+              "\"plugin.p.base\",\"signals\":1,\"base\":0,\"ecus\":[{\"rx\":"
+              "\"0x7E8\",\"tx\":\"0x7E0\"}],\"license\":\"CC-BY-SA-4.0\","
+              "\"share_alike\":true}\n");
+    const ecuio_signal_source_t s = cli::source_of(file);
+    std::vector<char> sbuf(cli::share_alike_line_bytes(s.license));
+    cli::Line sl(sbuf.data(), sbuf.size());
+    cli::share_alike_line(sl, "base", s.license);
+    EXPECT_EQ(text_of(sl),
+              "{\"type\":\"share_alike\",\"variant\":\"base\",\"license\":"
+              "\"CC-BY-SA-4.0\",\"words\":\"variant 'base' holds data under "
+              "CC-BY-SA-4.0, a share-alike license: whoever passes the plugin "
+              "on keeps that license and the variant's source with it\"}\n");
+    ecuio_plugin_free(p);
+
+    /* A license at its bound fits the line it's sized for */
+    const std::string longest(ECUIO_SOURCE_TEXT_MAX, '"');
+    std::vector<char> big(cli::share_alike_line_bytes(longest.c_str()));
+    cli::Line bl(big.data(), big.size());
+    cli::share_alike_line(bl, "base", longest.c_str());
+    EXPECT_TRUE(bl.finish());
+    EXPECT_STREQ(cli::source_of(nullptr).license, "") << "none read, none";
+}
+
+// The written line: the action, the variant, the version, the lineage
+// (null with none), the file's bytes and core's notes (null with none)
+TEST(CliPluginTest, AWrittenLineSaysWhatTheCommandDid)
+{
+    char buf[2048];
+    cli::Line l(buf, sizeof buf);
+    cli::written_line(l, cli::Written::replaced, "base", "1.2.0",
+                      "0123456789abcdef0123456789abcdef", 4290,
+                      "the file's ecu 'tcm' is 'tcm_2' in the plugin");
+    EXPECT_EQ(text_of(l),
+              "{\"type\":\"written\",\"action\":\"replaced\",\"variant\":"
+              "\"base\",\"version\":\"1.2.0\",\"lineage\":"
+              "\"0123456789abcdef0123456789abcdef\",\"bytes\":4290,\"notes\":"
+              "\"the file's ecu 'tcm' is 'tcm_2' in the plugin\"}\n");
+    cli::Line n(buf, sizeof buf);
+    cli::written_line(n, cli::Written::dropped, "late", "1.0.0", "", 10, "");
+    EXPECT_EQ(text_of(n),
+              "{\"type\":\"written\",\"action\":\"dropped\",\"variant\":"
+              "\"late\",\"version\":\"1.0.0\",\"lineage\":null,\"bytes\":10,"
+              "\"notes\":null}\n");
+    EXPECT_STREQ(cli::written_word(cli::Written::wrapped), "wrapped");
+    EXPECT_STREQ(cli::written_word(cli::Written::added), "added");
+}
+
+// An OBDb plugin's variant is my<year> only for a year typed, base (core's
+// default, "") for none
+TEST(CliPluginTest, OnlyATypedYearNamesAVariant)
+{
+    EXPECT_EQ(cli::typed_year_variant(2019), "my2019");
+    EXPECT_EQ(cli::typed_year_variant(0), "");
+}
+
+// --years is two four-digit model years from 1980 to 2039, the first at
+// or before the second; --wmi codes of 3 or 6 of a VIN's letters and
+// digits, lower case taken as upper
+TEST(CliPluginTest, TheMatchOptionsTakeTheirFormsOnly)
+{
+    uint32_t y[2] = {7, 7};
+    EXPECT_TRUE(cli::parse_model_years("2015-2020", y));
+    EXPECT_EQ(y[0], 2015u);
+    EXPECT_EQ(y[1], 2020u);
+    EXPECT_TRUE(cli::parse_model_years("1980-2039", y));
+    EXPECT_TRUE(cli::parse_model_years("2019-2019", y));
+    for (const char* bad :
+         {"2020-2015", "1979-1990", "2015-2040", "2015", "2015-", "-2015",
+          "2015--2020", "15-20", "2015-202x", "2015 2020", "02015-2020", ""}) {
+        y[0] = y[1] = 7;
+        EXPECT_FALSE(cli::parse_model_years(bad, y)) << bad;
+        EXPECT_EQ(y[0], 7u) << "nothing written for " << bad;
+    }
+
+    std::string codes = "kept";
+    EXPECT_TRUE(cli::parse_wmi("zzz", &codes));
+    EXPECT_EQ(codes, "ZZZ");
+    EXPECT_TRUE(cli::parse_wmi("ZZZ,zz9abc,1HG", &codes));
+    EXPECT_EQ(codes, "ZZZ,ZZ9ABC,1HG");
+    for (const char* bad : {"", "ZZ", "ZZZZ", "ZZZZZZZ", "ZZI", "ZOZ", "QZZ",
+                            "ZZZ,", ",ZZZ", "ZZZ,,ZZZ", "ZZ-", "ZZZ ZZZ"}) {
+        codes = "kept";
+        EXPECT_FALSE(cli::parse_wmi(bad, &codes)) << bad;
+        EXPECT_EQ(codes, "kept") << "nothing written for " << bad;
+    }
+}
+
+// With no --variant, put names the variant core gave: the file's profile
+// less "user.", cut to the variant id's bound with no '-' at its end
+TEST(CliPluginTest, APutsUnnamedVariantIsTheOneCoreAdds)
+{
+    EXPECT_EQ(cli::variant_slug("user.gauged-extras"), "gauged-extras");
+    for (const char* name : {"Gauged extras", "A name longer than twenty-four",
+                             "Twenty three characters plus", "x"}) {
+        const std::string file =
+            std::string("{\"havne_signals\": 1, \"name\": \"") + name +
+            "\", \"source\": {\"name\": \"t\"}, \"ecus\": [{\"id\": \"pcm\", "
+            "\"rx\": \"7E8\"}], \"signals\": [{\"key\": \"oil\", \"name\": "
+            "\"Oil\", \"read\": {\"service\": \"22\", \"number\": \"F40E\"}, "
+            "\"field\": {\"byte\": 0}}]}";
+        ecuio_signal_file_t* f = nullptr;
+        ASSERT_EQ(ecuio_signal_file_load(file.data(), file.size(), &f),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        const std::string mine =
+            cli::variant_slug(ecuio_signal_file_profile(f));
+        ecuio_signal_file_free(f);
+        char* out = nullptr;
+        size_t length = 0;
+        ASSERT_EQ(ecuio_plugin_put_variant(kPacked, sizeof kPacked - 1, nullptr,
+                                           file.data(), file.size(), &out,
+                                           &length),
+                  ECUIO_OK)
+            << name << ": " << ecuio_last_error_detail();
+        ecuio_plugin_t* p = nullptr;
+        ASSERT_EQ(ecuio_plugin_load(out, length, nullptr, nullptr, &p),
+                  ECUIO_OK);
+        ecuio_plugin_text_free(out);
+        char id[ECUIO_PLUGIN_VARIANT_ID_MAX + 1] = {};
+        ASSERT_EQ(ecuio_plugin_variant(p, 2, id, sizeof id), ECUIO_OK);
+        ecuio_plugin_free(p);
+        EXPECT_EQ(mine, id) << name;
+    }
 }
 
 // A fixture line: its place, the value and tolerance, the result, what
@@ -2378,6 +2657,37 @@ TEST(CliPluginTest, AGaugeWantsTheCoreThatReadsIt)
               "refusing a signal file\"}\n");
 }
 
+// A plugin whose data files include one of format 2 is warned of a
+// requires.core below 0.8.0 and of no other; the gauge's warning is its own
+TEST(CliPluginTest, AFormat2FileWantsTheCoreThatReadsIt)
+{
+    struct Version {
+        uint16_t part[3];
+    };
+    const auto older = [](Version v, bool uses_format2) {
+        return cli::format2_needs_newer_core(v.part, uses_format2);
+    };
+    EXPECT_FALSE(older({{0, 8, 0}}, true));
+    EXPECT_FALSE(older({{0, 8, 1}}, true));
+    EXPECT_FALSE(older({{1, 0, 0}}, true));
+    EXPECT_TRUE(older({{0, 7, 9}}, true));
+    EXPECT_TRUE(older({{0, 1, 0}}, true));
+    EXPECT_FALSE(older({{0, 1, 0}}, false));
+
+    char buf[1024];
+    cli::Line l(buf, sizeof buf);
+    const uint16_t declared[3] = {0, 7, 3};
+    cli::requires_core_line(l, declared, cli::kFormat2Core,
+                            "\"havne_signals\": 2");
+    EXPECT_EQ(text_of(l),
+              "{\"type\":\"requires_core\",\"declared\":\"0.7.3\",\"needs\":"
+              "\"0.8.0\",\"warning\":\"the data files use "
+              "\\\"havne_signals\\\": 2, which core reads from 0.8.0 on: "
+              "raise the manifest's \\\"requires\\\" core to 0.8.0, so an "
+              "older Havne names that version instead of refusing a signal "
+              "file\"}\n");
+}
+
 // ---- A replay's own signal file (cli/recording_signals.h, ADR-0051
 // section 4) ----
 
@@ -2408,6 +2718,37 @@ TEST(CliRecordingSignalsTest, TheHeaderNamesTheProfileAndTheFile)
     cli::RecordedSignals none;
     none.take("profile  obd2");
     EXPECT_FALSE(none.names_file());
+    EXPECT_EQ(none.conditions_sha256, "");
+}
+
+/* The conditions the recording judged: their copy's line and hash, by the
+ * signal file's rule, and only in the header */
+TEST(CliRecordingSignalsTest, TheHeaderNamesTheConditionsCopy)
+{
+    const std::string sha(64, 'c');
+    cli::RecordedSignals r;
+    r.take("ecuio session recording, format 3 (ADR-0049)");
+    r.take("profile  obd2");
+    r.take("conditions  conditions.json," + sha + "\r");
+    EXPECT_EQ(r.conditions_sha256, sha);
+    EXPECT_EQ(r.sha256, "") << "no signal file named";
+    EXPECT_FALSE(r.names_file());
+    r.take("");
+    r.take("conditions  conditions.json," + std::string(64, 'd'));
+    EXPECT_EQ(r.conditions_sha256, sha) << "past the header";
+
+    const std::string bad[] = {
+        "conditions  conditions.json," + std::string(64, 'C'),
+        "conditions  conditions.json," + std::string(63, 'c'),
+        "conditions  conditions.json," + std::string(65, 'c'),
+        "conditions  other.json," + sha,
+        "conditions  conditions.json " + sha,
+    };
+    for (const std::string& line : bad) {
+        cli::RecordedSignals b;
+        b.take(line);
+        EXPECT_EQ(b.conditions_sha256, "") << line;
+    }
 }
 
 /* The folder: the path up to the query, a frames.csv's own folder, any
@@ -3271,4 +3612,49 @@ TEST(CliElm327Test, AddressesAndLines)
     EXPECT_EQ(std::string(c.data(), c.size()),
               "{\"type\":\"client\",\"event\":\"refused\","
               "\"peer\":\"127.0.0.1:50123\"}");
+}
+
+// A computed input has no age bound of its own (ADR-0062): its ages are the
+// number signals' under it, so its line says so instead of the stale age
+TEST(CliSignalFileTest, AComputedInputIsNamedComputedWithNoAge)
+{
+    const std::string json =
+        "{\"havne_signals\":2,\"name\":\"Chain\","
+        "\"source\":{\"name\":\"test\"},"
+        "\"ecus\":[{\"id\":\"tcm\",\"rx\":\"7E9\"}],\"signals\":["
+        "{\"key\":\"temp\",\"name\":\"Temp\",\"ecu\":\"tcm\","
+        "\"read\":{\"service\":\"22\",\"number\":\"1E1C\"},"
+        "\"field\":{\"byte\":0}},"
+        "{\"key\":\"half\",\"name\":\"Half\",\"kind\":\"computed\","
+        "\"expr\":\"temp / 2\",\"max_age\":{\"temp\":1.5}},"
+        "{\"key\":\"sum\",\"name\":\"Sum\",\"kind\":\"computed\","
+        "\"expr\":\"half + temp\"}]}";
+    ecuio_signal_file_t* file = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(json.data(), json.size(), &file), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
+    ASSERT_EQ(set.count, 3u);
+    char buf[4096];
+    const auto line = [&](uint32_t i) {
+        cli::Line l(buf, sizeof buf);
+        cli::def_line(l, set, set.defs[i], nullptr,
+                      ecuio_signal_file_expr(file, &set.defs[i]));
+        return std::string(l.data(), l.size());
+    };
+    EXPECT_EQ(ecuio_signal_file_format(file), 2u);
+    const std::string half = line(1);
+    EXPECT_NE(half.find("\"expr\":\"temp / 2\",\"inputs\""),
+              std::string::npos)
+        << half;
+    EXPECT_NE(half.find("\"inputs\":[{\"id\":30000,\"max_age_us\":1500000}]"),
+              std::string::npos)
+        << half;
+    const std::string sum = line(2);
+    EXPECT_NE(sum.find("\"expr\":\"half + temp\",\"inputs\":[{\"id\":30001,\"max_age_us\":null,"
+                       "\"computed\":true},{\"id\":30000,"
+                       "\"max_age_us\":3000000}]"),
+              std::string::npos)
+        << sum;
+    EXPECT_LE(sum.size(), cli::def_line_bytes(set, set.defs[2]));
+    ecuio_signal_file_free(file);
 }

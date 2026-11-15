@@ -1,0 +1,24 @@
+{
+  "havne_signals": 1,
+  "name": "A call in format 1",
+  "notes": "Synthetic: written for Havne's tests. A format 1 file may not use a call: it needs format 2",
+  "source": { "name": "Written by hand for Havne's tests" },
+  "ecus": [ { "id": "pcm", "rx": "7E8" } ],
+  "signals": [
+    {
+      "key": "coolant",
+      "name": "Coolant",
+      "read": { "service": "01", "number": "05" },
+      "field": { "byte": 0, "bits": 8 },
+      "offset": -40,
+      "unit": "°C", "decimals": 0
+    },
+    {
+      "key": "warm",
+      "name": "Warm",
+      "kind": "computed",
+      "expr": "max(coolant, 0)",
+      "unit": "°C", "decimals": 0
+    }
+  ]
+}

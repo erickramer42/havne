@@ -31,6 +31,12 @@
       "description": "The plugin's own version, X.Y.Z: each 0 to 65535 with no leading zero, 15 characters at most.",
       "$ref": "#/$defs/version"
     },
+    "lineage": {
+      "title": "Lineage",
+      "description": "The first 32 hex digits, in lower case, of the SHA-256 of the signal file the plugin was first made from. Havne writes it when it wraps a signal file and keeps it through every change; a package with the same id and the same lineage is a version of the same plugin. Leave it out of a plugin written by hand.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
     "requires": {
       "title": "Requires",
       "description": "What the plugin needs to load.",
@@ -183,8 +189,8 @@
       "properties": {
         "havne_signals": {
           "title": "Format",
-          "description": "The signal-file format's version, and the file's first key. This Havne reads format 1.",
-          "const": 1
+          "description": "The signal-file format's version, and the file's first key. This Havne reads formats 1 and 2: a variant takes the newest of its files, and a plugin with a format 2 file names a core that reads it in requires.core.",
+          "enum": [1, 2]
         },
         "name": {
           "title": "Name",

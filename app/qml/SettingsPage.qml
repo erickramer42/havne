@@ -20,8 +20,9 @@ Pane {
     property alias errorLabel: settingsConnect.errorLabel
     property alias logExplains: settingsConnect.logExplains
     property alias vehicleLabelField: settingsVehiclePicker.vehicleLabelField
-    property alias obdbYearField: settingsSignalFiles.obdbYearField
-    property alias saveDialog: settingsSignalFiles.saveDialog
+    property alias obdbYearField: settingsSignals.obdbYearField
+    property alias importVariantField: settingsSignals.importVariantField
+    property alias saveDialog: settingsSignals.saveDialog
     property alias formName: settingsOwnForm.formName
     property alias formRx: settingsOwnForm.formRx
     property alias formTx: settingsOwnForm.formTx
@@ -160,12 +161,17 @@ Pane {
         sessionSettings.adapterVersions = JSON.stringify(next)
     }
 
-    // ---- Vehicles (ADR-0027): VehicleBook's document, stored as JSON in
-    // the "vehicles" category. A stored text that doesn't parse leaves no
-    // vehicles, and is overwritten only by the next change
+    // ---- Vehicles (ADR-0027): VehicleBook's document, stored as JSON
+    // under vehicles/book (format 2, ADR-0064). A stored text that doesn't
+    // parse leaves no vehicles, and is overwritten only by the next
+    // change. The earlier format's key, vehicles/document, is an older
+    // Havne's to read and is never written
     property var vehicles: VehicleBook.empty()
     readonly property var pickedVehicle: VehicleBook.picked(vehicles)
-    // A removal waiting for its second press: "", "forget" or "forgetAll"
+    // A book a later Havne saved is left as it is: none shown, none saved
+    readonly property bool bookLater: VehicleBook.isLater(vehicles)
+    // A removal waiting for its second press: "", "forget", "forgetAll"
+    // or "removePlugin:<sha256>"
     property string confirming: ""
     // The picked vehicle's plotted signals reach Live once this session's
     // rows exist; a change of rows before that isn't the user's
@@ -178,109 +184,372 @@ Pane {
                                         : VehicleBook.defaultCopyLabel(vehicles, pickedVehicle.label)
 
     function saveVehicles(doc) {
+        if (bookLater)
+            return
         vehicles = doc
-        vehicleStore.document = VehicleBook.serialize(doc)
+        vehicleStore.book = VehicleBook.serialize(doc)
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
-        useSignalFiles()
     }
 
-    // ---- The vehicles' signal files (ADR-0051) ----
-    // The store's word on each file the book references, by its sha256:
-    // { ok, words, name, profile, count }. Every referenced file is
-    // registered (VehicleBook.profileProblem keeps one file to a
-    // profile), so a URI typed with any vehicle's profile connects.
-    property var signalInfo: ({})
+    // ---- The plugin store (ADR-0064): every import is a plugin, and a
+    // vehicle picks variants of them ----
+    // Raised after each change of the store and when the session's VIN
+    // comes or goes, so what the bridge answered is asked again
+    property int storeRev: 0
+    property int vinRev: 0
+    // The bridge's list: each loaded plugin with its variants, or a copy
+    // that no longer loads
+    readonly property var pluginList: storeRev >= 0 ? Bridge.plugins() : []
+    readonly property var pluginBySha: {
+        const map = {}
+        for (const p of pluginList) {
+            if (p.ok)
+                map[p.sha256] = p
+        }
+        return map
+    }
+    // The user's own plugins, which take a variant
+    readonly property var ownPlugins: pluginList.filter(p => p.ok && p.mine)
+    // The copies that no longer load, each with the loader's words
+    readonly property var refusedPlugins: pluginList.filter(p => !p.ok)
+    readonly property var picks: picksNow()
+    // The picked vehicle's picks read from the vehicle itself: a handler
+    // of the pick's change runs before the bindings on it are evaluated
+    function picksNow() {
+        return pickedVehicle !== null && pickedVehicle.picks !== undefined ? pickedVehicle.picks : []
+    }
+    // The picks as the bridge reads them: each one's plugin, whether the
+    // store still has it and, on an adapter, the one standing in for Default
+    readonly property var pickRows: storeRev >= 0 ? Bridge.pickRow(picks, adapterUri) : []
+    // What the last import, pick, save or removal said
     property string signalProblem: ""
     property string signalNote: ""
 
-    function useSignalFiles() {
-        const info = {}
-        for (const e of Bridge.useSignalFiles(VehicleBook.referencedFiles(vehicles)))
-            info[e.sha256] = e
-        signalInfo = info
+    // The loaded plugin and variant a profile names: { plugin, variant },
+    // null for none
+    function placeOf(profile) {
+        for (const p of pluginList) {
+            const at = p.ok ? p.profiles.indexOf(profile) : -1
+            if (at >= 0)
+                return { plugin: p, variant: p.variants[at] }
+        }
+        return null
     }
 
-    function signalOk(sha) {
-        const e = signalInfo[sha]
-        return e !== undefined && e.ok
+    // A variant as the user knows it: its plugin's name, with the variant
+    // only where the plugin has several
+    function variantName(plugin, variant) {
+        return plugin.variants.length > 1 ? qsTr("%1: %2").arg(plugin.name, variant) : plugin.name
+    }
+    function profileName(profile) {
+        const place = placeOf(profile)
+        return place === null ? profile : variantName(place.plugin, place.variant)
     }
 
-    function signalFileText(f) {
-        const e = signalInfo[f.sha256]
-        if (e === undefined)
-            return f.name
-        if (!e.ok)
-            return qsTr("%1: %2").arg(f.name, e.words)
-        return e.extends === "obd2"
-            ? qsTr("%1: obd2 and %2 of your own, profile %3").arg(f.name).arg(e.own).arg(f.profile)
-            : e.count === 1 ? qsTr("%1: 1 signal, profile %2").arg(f.name).arg(f.profile)
-            : qsTr("%1: %2 signals, profile %3").arg(f.name).arg(e.count).arg(f.profile)
+    // The list's rows, one for each variant of each plugin. First, whole,
+    // the plugins with a variant of this car's: one a VIN matches (the
+    // lookup's, else the session's and those kept on the vehicle), one the
+    // vehicle picks, or any of a plugin imported for the vehicle.
+    // caption heads a group; unused marks a plugin's last row when no
+    // vehicle picks any of its variants
+    readonly property var variantRows: {
+        const offered = storeRev >= 0 && vinRev >= 0
+            ? Bridge.offeredVariants(pickedId, vinLookupField.text, picks) : []
+        const kept = pickedVehicle !== null && pickedVehicle.vinMatches !== undefined
+                     && vinLookupField.text.trim() === "" ? pickedVehicle.vinMatches : []
+        const rows = []
+        for (const o of offered) {
+            const p = pluginBySha[o.sha256]
+            if (p === undefined)
+                continue
+            const at = p.profiles.indexOf(o.profile)
+            rows.push({ sha256: o.sha256, id: o.id, name: o.name, version: o.version,
+                        variant: o.variant, profile: o.profile, mine: o.mine === true,
+                        obd2: o.extends === "obd2", count: at >= 0 ? p.counts[at] : 0,
+                        own: at >= 0 ? p.owns[at] : 0, several: p.variants.length > 1,
+                        forCar: pickedVehicle !== null
+                                && (o.forThisCar === true || kept.indexOf(o.profile) >= 0
+                                    || picks.indexOf(o.profile) >= 0),
+                        picked: picks.indexOf(o.profile) >= 0, caption: "", unused: false })
+        }
+        // Whole: a plugin's variants never split across the two groups
+        const carPlugins = rows.filter(r => r.forCar).map(r => r.sha256)
+        rows.forEach(r => r.forCar = carPlugins.indexOf(r.sha256) >= 0)
+        const forCar = rows.filter(r => r.forCar)
+        const all = forCar.concat(rows.filter(r => !r.forCar))
+        const last = {}
+        all.forEach((r, i) => last[r.sha256] = i)
+        all.forEach((r, i) => {
+            if (forCar.length > 0 && i === 0)
+                r.caption = qsTr("For this car:")
+            else if (forCar.length > 0 && i === forCar.length)
+                r.caption = qsTr("Other plugins:")
+            r.unused = last[r.sha256] === i
+                       && !VehicleBook.pickedBy(vehicles, pluginBySha[r.sha256].profiles)
+        })
+        return all
     }
 
-    // A file the user picked, into the picked vehicle: refused with the
-    // loader's words, or the book's when another file makes its profile
-    // (its copy then goes, unless a vehicle keeps it). True when added
-    function importSignalFile(url) {
-        signalNote = ""
+    function rowTitle(r) {
+        return r.several ? qsTr("%1 %2: %3").arg(r.name, r.version, r.variant)
+                         : qsTr("%1 %2").arg(r.name, r.version)
+    }
+    // A profile by its row's title; the profile itself when no plugin has it
+    function profileTitle(profile) {
+        const place = placeOf(profile)
+        return place === null ? profile
+             : rowTitle({ name: place.plugin.name, version: place.plugin.version,
+                          variant: place.variant, several: place.plugin.variants.length > 1 })
+    }
+    // What a row reads, and whose it is
+    function rowReads(r) {
+        const n = r.obd2 ? r.own : r.count
+        const signals = n === 1 ? qsTr("1 signal") : qsTr("%1 signals").arg(n)
+        return (r.obd2 ? qsTr("obd2 + %1").arg(signals) : signals)
+               + (r.mine ? qsTr(" · yours") : "")
+    }
+
+    // The picks no plugin here has (a version that dropped the variant, a
+    // plugin removed elsewhere), so each can be seen and undone
+    readonly property var missingPicks: pickRows.filter(r => r.missing).map(r => {
+        const m = /^plugin\.([^.]+)\.(.+)$/.exec(r.profile)
+        const p = m === null ? undefined : pluginList.find(e => e.ok && e.id === m[1])
+        return { profile: r.profile,
+                 text: p !== undefined ? qsTr("%1 is no longer in %2").arg(m[2], p.name)
+                                       : qsTr("%1: not in the store").arg(r.profile) }
+    })
+
+    // The Signals row's summary: the plugins counted, then the picked
+    // vehicle's first pick by name (no translation is loaded to pick a
+    // plural form)
+    function signalsSummary() {
+        const n = pluginList.filter(p => p.ok).length
+        const plugins = n === 1 ? qsTr("1 plugin") : qsTr("%1 plugins").arg(n)
         if (pickedVehicle === null)
-            return false
-        const r = Bridge.importSignalFile(url)
+            return n === 0 ? qsTr("none yet") : plugins
+        const named = pickRows.filter(r => !r.missing)
+        const missing = pickRows.length - named.length
+        const first = named.length > 0 ? profileName(named[0].profile) : ""
+        const said = named.length === 0 ? (n === 0 ? qsTr("none yet") : qsTr("%1, none picked").arg(plugins))
+                   : named.length === 1 ? qsTr("%1: %2").arg(plugins, first)
+                   : qsTr("%1: %2 and %3 more").arg(plugins, first).arg(named.length - 1)
+        return said + (missing === 0 ? "" : missing === 1 ? qsTr(", 1 pick missing")
+                                                           : qsTr(", %1 picks missing").arg(missing))
+    }
+
+    // A press on a row: the variant picked for the vehicle, or its pick
+    // undone. A pick made while the field reads Default is read at once
+    function togglePick(profile) {
+        if (pickedVehicle === null || !idle)
+            return
+        signalProblem = ""
+        signalNote = ""
+        if (picks.indexOf(profile) >= 0) {
+            saveVehicles(VehicleBook.setPicks(vehicles, Bridge.unpickVariant(picks, profile)))
+            if (profileChoice === profile)
+                chooseProfile("default")
+            return
+        }
+        pickProfile(profile)
+    }
+
+    // profile into the picked vehicle's picks, last: "" when refused (the
+    // words in signalProblem), "read" when the field, reading Default,
+    // now reads it, else "picked"
+    function pickProfile(profile) {
+        const r = Bridge.pickVariant(picks, profile)
+        if (!r.ok) {
+            signalProblem = r.words
+            return ""
+        }
+        const readsDefault = profileChoice === "default"
+            && queryValue(splitUri(uriField.text).pairs, "profile") === undefined
+        saveVehicles(VehicleBook.setPicks(vehicles, r.picks))
+        if (!readsDefault)
+            return "picked"
+        chooseProfile(profile)
+        return "read"
+    }
+
+    // ---- One Import (ADR-0064 Q4): a package goes in as it is, a signal
+    // file waits for As a new plugin or Into one of the user's own, an
+    // OBDb set shows its report first ----
+    // The file read and not yet kept: null, { kind: "signals", name, id,
+    // variant } or { kind: "obdb" }
+    property var pendingImport: null
+    // The user's own plugin a waiting signal file goes into, by its
+    // sha256; "" while none is chosen
+    property string importInto: ""
+    // Replace...'s variant, which the next file read takes the place of:
+    // { sha256, variant, name }, null for none
+    property var replaceTarget: null
+
+    // The plugin's own words for a kept import, after the page's
+    function saidToo(r) {
+        const parts = [r.notes, r.words].filter(t => t !== undefined && t !== "")
+        return parts.length === 0 ? "" : qsTr(" (%1)").arg(parts.join("; "))
+    }
+
+    // An import that gave one variant is picked for the picked vehicle at
+    // once; the note ends with what happened to it
+    function pickKept(profile, note) {
+        if (pickedVehicle === null || !idle || picks.indexOf(profile) >= 0) {
+            signalNote = note
+            return
+        }
+        const how = pickProfile(profile)
+        // The row's word where it says more than the name: obd2 + <name>
+        const shown = profiles.find(p => p.name === profile)
+        const label = shown !== undefined ? shown.label : ""
+        signalNote = how === "" ? note
+                   : how === "read" && label !== "" && label !== profileName(profile)
+                     ? qsTr("%1: picked for %2, now reading %3").arg(note, pickedVehicle.label, label)
+                   : qsTr("%1: picked for %2").arg(note, pickedVehicle.label)
+    }
+
+    // The file the user chose. True when it was kept or is waiting
+    function importFile(url) {
+        signalProblem = ""
+        signalNote = ""
+        const target = replaceTarget
+        discardImport()
+        const r = Bridge.readImport(url, target !== null ? "signals" : "")
         if (!r.ok) {
             signalProblem = r.words
             return false
         }
-        return addKeptFile(r)
+        if (r.kind === "plugin") {
+            notePackage(r)
+            return true
+        }
+        if (r.kind === "signals") {
+            pendingImport = { kind: "signals", name: r.name, id: r.id, variant: r.variant }
+            if (target !== null)
+                return keepPending(target.sha256, target.variant, true)
+            importInto = ""
+            importVariantField.text = r.variant
+            return true
+        }
+        // The field first: its change converts a set that is waiting
+        const y = obdbVinYear()
+        obdbYearField.text = y > 0 ? String(y) : ""
+        obdbYearFromVin = y > 0
+        pendingImport = { kind: "obdb" }
+        obdbVehicle = pickedId
+        return previewObdb()
     }
 
-    // What a kept file's import said, as the notes put it
-    function keptText(r) {
-        return r.extends === "obd2"
-            ? qsTr("obd2 and %1 of your own, profile %2").arg(r.own).arg(r.profile)
-            : r.count === 1 ? qsTr("1 signal, profile %1").arg(r.profile)
-            : qsTr("%1 signals, profile %2").arg(r.count).arg(r.profile)
+    // A package that went in: added, updated in place, or in an earlier
+    // version's place, whose VIN matches go with it (the new version's
+    // match may not cover the car)
+    function notePackage(r) {
+        const before = r.replacedProfiles !== undefined ? r.replacedProfiles : []
+        if (before.length > 0)
+            saveVehicles(VehicleBook.dropVinMatches(vehicles, before))
+        ++storeRev
+        const note = r.updated !== "" ? qsTr("%1 updated from %2 to %3").arg(r.name, r.updated, r.version)
+                   : r.replaced !== "" ? qsTr("%1 %2 replaces %3").arg(r.name, r.version, r.replaced)
+                   : r.kept ? qsTr("%1 %2 is here already").arg(r.name, r.version)
+                   : qsTr("%1 %2 added").arg(r.name, r.version)
+        if (r.profiles.length === 1 && !r.kept)
+            pickKept(r.profiles[0], note)
+        else
+            signalNote = r.kept || r.updated !== "" || r.replaced !== "" || pickedVehicle === null
+                       ? note : qsTr("%1: pick a variant below").arg(note)
     }
 
-    // A file the store kept (importSignalFile's map, or an OBDb import's)
-    // into the picked vehicle; true when added
-    function addKeptFile(r) {
-        const file = { sha256: r.sha256, name: r.name, profile: r.profile }
-        const problem = VehicleBook.profileProblem(vehicles, file, "")
-        if (problem !== "") {
-            signalProblem = problem
-            Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+    // The variant id Into's field names: the typed one, else the id core
+    // makes from the waiting file's name
+    function importVariantId(typed) {
+        const id = String(typed).trim()
+        return id !== "" || pendingImport === null || pendingImport.kind !== "signals"
+            ? id : pendingImport.variant
+    }
+
+    // The waiting signal file kept: as a new plugin (into ""), imported
+    // for the picked vehicle, or as the variant named of one of the
+    // user's own, picked unless it is Replace's (replacing). A refusal
+    // leaves it waiting. True when kept
+    function keepPending(into, variant, replacing) {
+        signalNote = ""
+        if (pendingImport === null || pendingImport.kind !== "signals")
+            return false
+        const before = pluginBySha[into]
+        const id = importVariantId(variant)
+        const had = before !== undefined && before.variants.indexOf(id) >= 0
+        const r = Bridge.keepSignals(into, variant, into === "" ? pickedId : "")
+        if (!r.ok) {
+            signalProblem = r.words
             return false
         }
         signalProblem = ""
-        if (pickedVehicle.signals.some(e => e.sha256 === r.sha256)) {
-            signalNote = qsTr("%1 is this vehicle's already").arg(r.name)
-            return false
-        }
-        saveVehicles(VehicleBook.addSignals(vehicles, file))
-        signalNote = qsTr("%1 added: %2").arg(r.name).arg(keptText(r))
-        // The field on an adapter reading Default, obd2, with no profile=
-        // of its own: the file that now stands in for obd2 is read
-        // instead, and the note says so. A profile the user picked stays
-        if (standIn !== null && standIn.sha256 === r.sha256 && profileChoice === "default"
-                && queryValue(splitUri(uriField.text).pairs, "profile") === undefined) {
-            chooseProfile(r.profile)
-            signalNote = qsTr("%1 added: now reading obd2 + %1, profile %2")
-                             .arg(r.name).arg(r.profile)
-        }
+        pendingImport = null
+        importInto = ""
+        ++storeRev
+        const at = into === "" ? 0 : r.variants.indexOf(id)
+        const profile = at >= 0 && at < r.profiles.length ? r.profiles[at] : ""
+        const made = at >= 0 && at < r.variants.length ? r.variants[at] : id
+        const note = (had ? qsTr("%1 %2: variant %3 replaced").arg(r.name, r.version, made)
+                      : into !== "" ? qsTr("%1 %2 now has the variant %3").arg(r.name, r.version, made)
+                      : r.kept ? qsTr("%1 %2 is here already").arg(r.name, r.version)
+                      : qsTr("%1 %2 added").arg(r.name, r.version)) + saidToo(r)
+        if (profile !== "" && replacing !== true)
+            pickKept(profile, note)
+        else
+            signalNote = note
         return true
     }
 
-    // ---- An OBDb set imported (ADR-0051's appendix of 2026-11-06) ----
-    // The report of the set read and not yet kept (the bridge's
-    // previewObdb map, null for none), and the vehicle's earlier import
-    // it replaces ("" for none)
+    function discardImport() {
+        Bridge.dropImport()
+        pendingImport = null
+        importInto = ""
+        replaceTarget = null
+        obdbReport = null
+        obdbYearField.text = ""   // the set's year, and with it the VIN's mark
+        signalProblem = ""
+        signalNote = ""
+    }
+
+    // Replace... on a variant of the user's own: the next file read
+    // takes its place
+    function startReplace(row) {
+        replaceTarget = { sha256: row.sha256, variant: row.variant, name: profileName(row.profile) }
+    }
+
+    // What Into's field would do in the chosen plugin: "" for a new
+    // variant, else the words for one it takes the place of
+    function importReplaces(variant) {
+        const p = pluginBySha[importInto]
+        const id = importVariantId(variant)
+        return p !== undefined && p.variants.indexOf(id) >= 0 ? qsTr("replaces %1").arg(id) : ""
+    }
+
+    // ---- An OBDb set imported (ADR-0051's appendix "the OBDb import in
+    // the app", ADR-0064 Q3) ----
+    // The report of the set read and not yet kept (the bridge's map, null
+    // for none) and the vehicle it was read for ("" for none)
     property var obdbReport: null
-    property string obdbReplaces: ""
-    property string obdbVehicle: "" // the id of the vehicle it was read for
+    property string obdbVehicle: ""
+    // The year in the field came from a VIN, not the user: such a year
+    // never names the variant (ADR-0064 Q2)
+    property bool obdbYearFromVin: false
     // A list's rows shown at most, the rest counted: a set of thousands
     // of signals would otherwise lay out thousands of labels on a phone
     readonly property int obdbRowsShown: 50
-    readonly property bool obdbShown: obdbReport !== null && pickedVehicle !== null
-                                      && pickedVehicle.id === obdbVehicle
+    readonly property bool obdbShown: obdbReport !== null && pickedId === obdbVehicle
+
+    // The name an OBDb import takes: the picked vehicle's, so its next
+    // import finds this one
+    function obdbName() {
+        return pickedVehicle !== null ? qsTr("%1 OBDb").arg(pickedVehicle.label) : qsTr("OBDb set")
+    }
+    // The picked vehicle's earlier conversion of that name, which Keep
+    // takes the place of while it has one variant: its entry, null for none
+    readonly property var obdbEarlier: pickedVehicle === null ? null
+        : pluginList.find(p => p.ok && p.obdb === true && p.importedFor === pickedVehicle.id
+                               && p.name === obdbName()) || null
+    readonly property bool obdbReplaces: obdbEarlier !== null && obdbEarlier.variants.length === 1
 
     // The connected car's model year once its VIN names the picked
     // vehicle (its VIN key), kept while the page lives; the VIN itself
@@ -313,28 +582,24 @@ Pane {
         return /^[0-9]{4}$/.test(t) && y >= 1980 && y <= 2039 ? y : -1
     }
 
-    // The picked file read for the picked vehicle: its report shown, or
+    // The held set converted for the field's year: its report shown, or
     // the bridge's words why not. True when there's a report
-    function previewObdb(url) {
+    function previewObdb() {
         signalNote = ""
         obdbReport = null
-        if (pickedVehicle === null)
+        if (pendingImport === null || pendingImport.kind !== "obdb")
             return false
         const year = obdbYear()
         if (year < 0) {
             signalProblem = qsTr("A model year is 1980 to 2039, or empty for none")
             return false
         }
-        const n = VehicleBook.obdbName(vehicles, pickedVehicle.label,
-                                       sha => Bridge.isObdbImport(sha))
-        const r = Bridge.previewObdb(url, year, n.name)
+        const r = Bridge.previewObdbImport(year, obdbName())
         if (!r.ok) {
             signalProblem = r.words
             return false
         }
         signalProblem = ""
-        obdbReplaces = n.replaces
-        obdbVehicle = pickedVehicle.id
         obdbReport = r
         return true
     }
@@ -351,76 +616,250 @@ Pane {
                        r.year > 0 ? qsTr("model year %1").arg(r.year)
                                   : qsTr("no model year, so the commands OBDb gives for some years only are left out")]
         let s = qsTr("%1 from OBDb: %2").arg(r.name).arg(parts.join(", "))
-        if (obdbReplaces !== "")
+        if (obdbReplaces)
             s += qsTr("; replaces the vehicle's earlier OBDb import")
         return s
     }
 
-    // The report kept: the file into the picked vehicle, in its earlier
-    // import's place when it replaces one. True when the vehicle has it
+    // The report kept as a plugin of the user's own, imported for the
+    // vehicle it was read for; picks of the import it took the place of
+    // follow it. A refusal (a session reading the earlier import) keeps
+    // the report up. True when kept
     function keepObdb() {
         signalNote = ""
         if (!obdbShown)
             return false
-        const replaces = obdbReplaces
-        const r = Bridge.keepObdb(replaces)
+        const typed = obdbYearField.text.trim() !== "" && !obdbYearFromVin
+        const r = Bridge.keepObdbPlugin(obdbVehicle, typed)
         if (!r.ok) {
-            // A session reading the earlier import keeps the report up,
-            // so Keep works once it has disconnected
             signalProblem = r.words
             return false
         }
-        obdbReport = null
-        obdbReplaces = ""
-        if (replaces === "" || !pickedVehicle.signals.some(f => f.sha256 === replaces))
-            return addKeptFile(r)
-        if (r.sha256 === replaces) {
-            signalProblem = ""
-            signalNote = qsTr("%1 is this vehicle's already").arg(r.name)
-            return true
-        }
-        const file = { sha256: r.sha256, name: r.name, profile: r.profile }
-        const problem = VehicleBook.profileProblem(vehicles, file, replaces)
-        if (problem !== "") {
-            signalProblem = problem
-            Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
-            return false
-        }
         signalProblem = ""
-        saveVehicles(VehicleBook.replaceSignals(vehicles, replaces, file))
-        Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
-        signalNote = qsTr("%1 replaced the vehicle's earlier OBDb import: %2")
-                         .arg(r.name).arg(keptText(r))
+        pendingImport = null
+        obdbReport = null
+        const gone = (r.replacedProfiles !== undefined ? r.replacedProfiles : [])
+            .filter(p => r.profiles.indexOf(p) < 0)
+        if (gone.length > 0 && r.profiles.length === 1) {
+            if (gone.indexOf(profileChoice) >= 0)
+                chooseProfile(r.profiles[0])
+            saveVehicles(VehicleBook.movePicks(vehicles, gone, r.profiles[0]))
+        }
+        ++storeRev
+        const made = r.merged === true ? r.profiles[r.profiles.length - 1] : r.profiles[0]
+        const note = (r.merged === true ? qsTr("%1 %2: kept as a variant of the earlier OBDb import").arg(r.name, r.version)
+                      : r.replaced !== undefined && r.replaced !== ""
+                        ? qsTr("%1 replaced the vehicle's earlier OBDb import").arg(r.name)
+                      : r.kept ? qsTr("%1 is here already").arg(r.name)
+                      : qsTr("%1 %2 added").arg(r.name, r.version)) + saidToo(r)
+        pickKept(made, note)
         return true
     }
 
-    function discardObdb() {
-        Bridge.dropObdb()
-        obdbReport = null
-        obdbReplaces = ""
+    // ---- A row's actions ----
+    // The row whose actions show (its profile, "" for none), and within
+    // it Copy's choice of where and Export's share-alike note
+    property string openRow: ""
+    property bool copyShown: false
+    property string exportNote: ""
+    onOpenRowChanged: {
+        copyShown = false
+        exportNote = ""
+    }
+
+    function markMine(sha) {
+        signalNote = ""
+        const p = pluginBySha[sha]
+        const r = Bridge.markPluginMine(sha)
+        signalProblem = r.ok ? "" : r.words
+        if (r.ok) {
+            copyShown = false   // Copy is for someone else's
+            signalNote = qsTr("%1 is yours now").arg(p !== undefined ? p.name : qsTr("The plugin"))
+                         + saidToo(r)
+        }
+        ++storeRev
+    }
+
+    // Copy to my plugin (ADR-0064 Q8): the variant into a new plugin of
+    // the user's own (into "") or one of theirs
+    function copyVariantTo(row, into) {
+        signalNote = ""
+        const r = Bridge.copyVariant(row.sha256, row.variant, into, "")
+        signalProblem = r.ok ? "" : r.words
+        if (!r.ok)
+            return false
+        copyShown = false
+        ++storeRev
+        signalNote = qsTr("%1 copied into %2 %3").arg(profileName(row.profile), r.name, r.version)
+                     + saidToo(r)
+        return true
+    }
+
+    // A variant out of a plugin of the user's own, every vehicle's pick
+    // of it undone
+    function removeVariant(row) {
+        signalNote = ""
+        const r = Bridge.dropPluginVariant(row.sha256, row.variant)
+        signalProblem = r.ok ? "" : r.words
+        if (!r.ok)
+            return false
+        saveVehicles(VehicleBook.dropProfiles(vehicles, [row.profile]))
+        if (profileChoice === row.profile)
+            chooseProfile("default")
+        openRow = ""
+        ++storeRev
+        return true
+    }
+
+    // A plugin of the user's own has no copy anywhere else, so its
+    // removal asks first
+    function askRemovePlugin(sha) {
+        const p = pluginBySha[sha]
+        if (p !== undefined && p.mine)
+            confirming = "removePlugin:" + sha
+        else
+            removePlugin(sha)
+    }
+
+    function confirmingPlugin() {
+        if (!confirming.startsWith("removePlugin:"))
+            return null
+        return pluginBySha[confirming.substring("removePlugin:".length)] || null
+    }
+
+    // A removed plugin's variants are no vehicle's pick or own variant any
+    // more, and the field reads Default when it named one
+    function removePlugin(sha) {
+        confirming = ""
+        signalNote = ""
+        const p = pluginBySha[sha]
+        const profiles = p !== undefined ? p.profiles : []
+        const r = Bridge.removePlugin(sha)
+        signalProblem = r.ok ? "" : r.words
+        if (r.ok && profiles.length > 0) {
+            saveVehicles(VehicleBook.dropProfiles(vehicles, profiles))
+            if (profiles.indexOf(profileChoice) >= 0)
+                chooseProfile("default")
+        }
+        if (r.ok)
+            openRow = ""
+        ++storeRev
+        return r.ok
+    }
+
+    // ---- Saves out of the app, through the one save dialog: a variant
+    // as a signal file, a plugin's packed copy, a file that didn't move.
+    // { kind: "variant" | "plugin" | "unmigrated", sha256, variant, name,
+    // file }, null for none
+    property var saving: null
+
+    function openSave(what) {
+        saving = what
+        saveDialog.title = what.kind === "plugin" ? qsTr("Export the plugin")
+                                                  : qsTr("Save as a signal file")
+        saveDialog.nameFilters = what.kind === "plugin"
+            ? [qsTr("Plugins (*.havne-plugin.json)"), qsTr("All files (*)")]
+            : [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
+        saveDialog.selectedFile = saveDialog.currentFolder.toString().replace(/\/$/, "")
+                                  + "/" + what.file
+        saveDialog.open()
+    }
+
+    // What each save writes and the name it starts from: a variant's
+    // signal file by its plugin's id, with the variant where the plugin
+    // has several; a plugin's packed copy; a file that didn't move
+    function variantSave(row) {
+        return { kind: "variant", sha256: row.sha256, variant: row.variant,
+                 name: profileName(row.profile),
+                 file: (row.several ? row.id + "-" + row.variant : row.id) + ".json" }
+    }
+    function pluginSave(sha) {
+        const p = pluginBySha[sha]
+        return p === undefined ? null
+             : { kind: "plugin", sha256: sha, variant: "", name: p.name,
+                 file: p.id + ".havne-plugin.json" }
+    }
+    function unmigratedSave(record) {
+        return { kind: "unmigrated", sha256: record.sha256, variant: "", name: record.name,
+                 file: "signals.json" }
+    }
+
+    function saveVariantAs(row) {
+        openSave(variantSave(row))
+    }
+
+    // Export plugin...: its share-alike note first, when it has one
+    function exportPluginAs(sha) {
+        if (!exportWaits(sha))
+            openExport(sha)
+    }
+
+    // True when the export waits: on its note's Save..., or refused
+    function exportWaits(sha) {
+        signalNote = ""
+        const r = Bridge.pluginExportNote(sha)
+        signalProblem = r.ok ? "" : r.words
+        exportNote = r.ok ? r.note : ""
+        return !r.ok || r.note !== ""
+    }
+
+    function openExport(sha) {
+        const what = pluginSave(sha)
+        exportNote = ""
+        if (what !== null)
+            openSave(what)
+    }
+
+    function saveUnmigratedAs(record) {
+        openSave(unmigratedSave(record))
+    }
+
+    // The save the dialog was opened for, to the file chosen
+    function saveTo(url) {
+        const what = saving
+        saving = null
+        if (what === null) {
+            Bridge.dropPicked(url)
+            return false
+        }
+        const r = what.kind === "variant" ? Bridge.saveVariantFile(what.sha256, what.variant, url)
+                : what.kind === "plugin" ? Bridge.exportPlugin(what.sha256, url)
+                : Bridge.saveUnmigratedFile(what.sha256, url)
+        signalProblem = r.ok ? "" : r.words
+        signalNote = !r.ok ? ""
+                   : what.kind === "plugin" ? qsTr("%1 exported to the file you chose").arg(what.name)
+                   : qsTr("%1 saved to the file you chose").arg(what.name)
+        return r.ok
+    }
+
+    // ---- The signal files the move into the plugin store left behind
+    // (ADR-0064 Q6): the picked vehicle's, then the book's own, each
+    // { sha256, name, words, kept, loose } ----
+    readonly property var unmigratedRows:
+        (pickedVehicle !== null && pickedVehicle.unmigrated !== undefined
+         ? pickedVehicle.unmigrated.map(r => ({ sha256: r.sha256, name: r.name, words: r.words,
+                                                kept: r.kept !== false, loose: false })) : [])
+        .concat(vehicles.unmigrated !== undefined
+                ? vehicles.unmigrated.map(r => ({ sha256: r.sha256, name: r.name, words: r.words,
+                                                  kept: r.kept !== false, loose: true })) : [])
+
+    function unmigratedText(r) {
+        return qsTr("%1: %2").arg(r.name, r.words)
+               + (r.kept ? "" : qsTr(" (its copy is still in the earlier version's folder)"))
+    }
+
+    // The record out of the book; its kept bytes go once nothing lists
+    // them. The earlier version's folder is never touched
+    function removeUnmigrated(record) {
         signalProblem = ""
         signalNote = ""
+        saveVehicles(record.loose ? VehicleBook.dropLooseUnmigrated(vehicles, record.sha256)
+                                  : VehicleBook.dropUnmigrated(vehicles, record.sha256))
+        if (!VehicleBook.hashListed(vehicles, record.sha256))
+            Bridge.removeUnmigratedFile(record.sha256)
     }
 
-    // ---- The app's plugins (ADR-0052) ----
-    // The bridge's list (PluginStore): each loaded plugin with its
-    // variants, or a copy that no longer loads; the variants a VIN
-    // matches (the one the lookup holds, else the session's, which goes
-    // with the session); and what the last import or removal said
-    property var pluginList: []
-    property var pluginMatches: []
-    property string pluginProblem: ""
-    property string pluginNote: ""
-
-    function loadPlugins() {
-        pluginList = Bridge.plugins()
-        refreshMatches()
-    }
-
-    function refreshMatches() {
-        pluginMatches = Bridge.pluginMatches(vinLookupField.text)
-    }
-
+    // ---- The VIN's matches ----
     // The session's matches kept on the vehicle its VIN identified, so
     // they are marked with no session (ADR-0052's appendix of 2026-11-13);
     // only that vehicle's: a replay of another car names none
@@ -433,187 +872,19 @@ Pane {
             saveVehicles(VehicleBook.setVinMatches(vehicles, profiles))
     }
 
-    // Every loaded plugin's variants, for the picked vehicle to pick one:
-    // those a VIN matched (the lookup's, else the session's and the ones
-    // kept on the vehicle) first, the rest after, then a pick that doesn't
-    // load, so it can be undone; the choice is the user's. A Repeater keeps
-    // its buttons for lists equal in value, so a pick keeps the focus
-    readonly property var pluginVariants: {
-        const shown = { matched: [], others: [] }
-        if (pickedVehicle === null)
-            return shown
-        const marked = pluginMatches.map(m => m.profile)
-            .concat(vinLookupField.text.trim() === "" ? pickedVehicle.vinMatches : [])
-        const loaded = []
-        for (const p of pluginList) {
-            if (!p.ok)
-                continue
-            for (let i = 0; i < p.profiles.length; ++i) {
-                const v = { profile: p.profiles[i], label: qsTr("%1: %2").arg(p.name, p.variants[i]) }
-                loaded.push(v.profile)
-                if (marked.indexOf(v.profile) >= 0)
-                    shown.matched.push(v)
-                else
-                    shown.others.push(v)
-            }
-        }
-        const pick = pickedVehicle.plugin
-        if (pick !== "" && loaded.indexOf(pick) < 0)
-            shown.others.push({ profile: pick, label: qsTr("%1: doesn't load").arg(pick) })
-        return shown
-    }
-
-    function pluginText(p) {
-        return p.ok ? qsTr("%1 %2: %3").arg(p.name, p.version, p.variants.join(", "))
-                    : p.words
-    }
-
-    // A plugin replaced takes its VIN matches with it: the new version's
-    // match may not cover the car, and the next identification marks again
-    function importPlugin(url) {
-        pluginNote = ""
-        const r = Bridge.importPlugin(url)
-        if (!r.ok) {
-            pluginProblem = r.words
-            return false
-        }
-        if (r.replaced !== "") {
-            // pluginList is the list before the import until loadPlugins()
-            const old = pluginList.find(p => p.ok && p.id === r.id)
-            if (old !== undefined)
-                saveVehicles(VehicleBook.dropVinMatches(vehicles, old.profiles))
-        }
-        pluginProblem = ""
-        pluginNote = r.replaced !== ""
-            ? qsTr("%1 %2 replaces %3").arg(r.name, r.version, r.replaced)
-            : qsTr("%1 %2 added: %3").arg(r.name, r.version, r.profiles.join(", "))
-        loadPlugins()
-        return true
-    }
-
-    // A removed plugin's variants are no vehicle's pick any more, and the
-    // field reads Default when it named one
-    function removePlugin(sha) {
-        pluginNote = ""
-        const entry = pluginList.find(p => p.sha256 === sha)
-        const profiles = entry !== undefined && entry.ok ? entry.profiles : []
-        const r = Bridge.removePlugin(sha)
-        pluginProblem = r.ok ? "" : r.words
-        if (r.ok && profiles.length > 0) {
-            saveVehicles(VehicleBook.dropPlugin(vehicles, profiles))
-            if (profiles.indexOf(profileChoice) >= 0)
-                chooseProfile("default")
-        }
-        loadPlugins()
-    }
-
-    // The user's pick for this vehicle (ADR-0052 section 5: the VIN only
-    // proposes): kept in its entry, and read through the URI's profile=.
-    // The pick pressed again is undone
-    function pickPluginVariant(profile) {
-        if (pickedVehicle !== null && pickedVehicle.plugin === profile) {
-            saveVehicles(VehicleBook.setPlugin(vehicles, ""))
-            if (profileChoice === profile)
-                chooseProfile("default")
-            return
-        }
-        saveVehicles(VehicleBook.setPlugin(vehicles, profile))
-        chooseProfile(profile)
-    }
-
-    // The picked vehicle's files that no longer load
-    function unloadedCount() {
-        return pickedVehicle === null ? 0
-             : pickedVehicle.signals.filter(f => !signalOk(f.sha256)).length
-    }
-    // Of `total` files: ", doesn't load" says it of the only one; with more,
-    // the count of those that don't
-    function unloadedSummary(total) {
-        const n = unloadedCount()
-        return n === 0 ? ""
-             : n === 1 ? (total === 1 ? qsTr(", doesn't load") : qsTr(", 1 doesn't load"))
-             : qsTr(", %1 don't load").arg(n)
-    }
-
-    // The Signals row's summary: a count of files, one or many (no
-    // translation is loaded to pick a plural form)
-    function filesSummary(n) {
-        return n === 1 ? qsTr("1 file") : qsTr("%1 files").arg(n)
-    }
-
-    // The picked vehicle's variant as the Profile buttons offer it: null for
-    // none, or one no plugin loaded registers
-    function pluginChoice() {
-        if (pickedVehicle === null || pickedVehicle.plugin === "")
+    // ---- The vehicle's own signals (ADR-0051's form, ADR-0064 Q7): the
+    // variant the form writes, in a plugin of the user's own ----
+    // Where the own variant is, null for none or one the store lost
+    readonly property var ownPlace: pickedVehicle === null || pickedVehicle.own === "" ? null
+        : placeOf(pickedVehicle.own)
+    // Its signal file as a document (SignalForm), null for none; the
+    // form's choices that aren't text; what Read once last said
+    readonly property var ownFile: {
+        if (ownPlace === null)
             return null
-        for (const p of pluginList) {
-            const at = p.ok ? p.profiles.indexOf(pickedVehicle.plugin) : -1
-            if (at >= 0)
-                return { name: p.profiles[at], label: qsTr("%1: %2").arg(p.name, p.variants[at]),
-                         hint: qsTr("The plugin %1 %2, its variant %3, picked for this vehicle")
-                                   .arg(p.name, p.version, p.variants[at]) }
-        }
-        return null
+        const r = Bridge.pluginVariantText(ownPlace.plugin.sha256, ownPlace.variant)
+        return r.ok ? SignalForm.parseFile(r.text) : null
     }
-
-    // The vehicle's own file was written here and has no copy anywhere
-    // else, so its removal asks first
-    function removeSignalFile(sha) {
-        if (pickedVehicle !== null && pickedVehicle.own === sha)
-            confirming = "removeSignals:" + sha
-        else
-            dropSignalFile(sha)
-    }
-
-    function dropSignalFile(sha) {
-        confirming = ""
-        signalProblem = ""
-        signalNote = ""
-        saveVehicles(VehicleBook.removeSignals(vehicles, sha))
-        Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
-    }
-
-    // A Save out of the app: the copy the vehicle has, byte for byte, where
-    // the user chooses (the desktop's dialog, Android's document picker),
-    // so it can be shared or given to havne-cli --signals. Its name to
-    // start from is the profile's slug
-    property string savingSha: ""
-
-    function saveFileName(f) {
-        const slug = String(f.profile).replace(/^user\./, "")
-        return (slug !== "" ? slug : "signals") + ".json"
-    }
-
-    function saveSignalFileAs(f) {
-        savingSha = f.sha256
-        saveDialog.selectedFile = saveDialog.currentFolder.toString().replace(/\/$/, "")
-                                  + "/" + saveFileName(f)
-        saveDialog.open()
-    }
-
-    function saveSignalFileTo(sha, url) {
-        const f = pickedVehicle !== null ? pickedVehicle.signals.find(e => e.sha256 === sha)
-                                         : undefined
-        const r = Bridge.saveSignalFile(sha, url)
-        signalProblem = r.ok ? "" : r.words
-        signalNote = r.ok ? qsTr("%1 saved to the file you chose")
-                                .arg(f !== undefined ? f.name : qsTr("The signal file"))
-                          : ""
-        return r.ok
-    }
-
-    function confirmingFile() {
-        if (!confirming.startsWith("removeSignals:") || pickedVehicle === null)
-            return null
-        const sha = confirming.substring("removeSignals:".length)
-        return pickedVehicle.signals.find(f => f.sha256 === sha) || null
-    }
-
-    // ---- The vehicle's own signals (ADR-0051's form) ----
-    // The own file as a document (SignalForm), null for none; the form's
-    // choices that aren't text; what Read once last said
-    readonly property var ownFile: pickedVehicle === null || pickedVehicle.own === "" ? null
-        : SignalForm.parseFile(Bridge.signalFileText(pickedVehicle.own))
     readonly property var ownSignals: ownFile === null ? [] : ownFile.signals
     property string formService: "22"
     property string formOrder: "be"
@@ -634,14 +905,14 @@ Pane {
     readonly property string pickedId: pickedVehicle !== null ? pickedVehicle.id : ""
     onPickedIdChanged: {
         confirming = ""
-        signalProblem = ""
-        signalNote = ""
+        discardImport()   // a file waiting was read for the last vehicle
+        openRow = ""
         clearForm()
         dropAnotherVehiclesProfile()
     }
 
-    // A file's or a plugin's profile in the field is one vehicle's: once
-    // another is picked (or none), the field reads Default, so a connect
+    // A plugin's profile in the field is one vehicle's pick: once another
+    // vehicle is picked (or none), the field reads Default, so a connect
     // never decodes with the last vehicle's signals and remembers them as
     // this one's. A vehicle with a connection of its own then sets the
     // field (pickVehicle); a session's URI is left as it is until the
@@ -657,10 +928,7 @@ Pane {
         const p = profileChoice
         if (!p.startsWith("user.") && !p.startsWith("plugin."))
             return
-        const mine = pickedVehicle === null ? []
-            : pickedVehicle.signals.map(f => f.profile)
-                  .concat(pickedVehicle.plugin !== "" ? [pickedVehicle.plugin] : [])
-        if (mine.indexOf(p) < 0)
+        if (picksNow().indexOf(p) < 0)
             chooseProfile("default")
     }
 
@@ -731,34 +999,49 @@ Pane {
                               : qsTr("Asked %1: %2").arg(r.request, r.words)
     }
 
-    // doc as the vehicle's own file, in place of the one before. The
-    // loader's words when it refuses it, without a line and column of a
-    // file the user never sees; the book's when another file makes its
-    // profile. True when saved
+    // The loader's words without a line and column of a file the user
+    // never sees
+    function formWords(words) {
+        return String(words).replace(/^line \d+, column \d+: /, "")
+    }
+
+    // doc as the vehicle's own variant: put in its place, or with none
+    // yet made a plugin of the user's own, picked for the vehicle. The
+    // loader's words when it refuses it. True when saved
     function saveOwn(doc, note) {
-        const r = Bridge.importSignalText(JSON.stringify(doc, null, 2))
+        const file = Object.assign({}, doc)
+        delete file.notes   // the variant's written header line, not the file's
+        const place = ownPlace
+        const r = Bridge.keepSignalText(JSON.stringify(file, null, 2),
+                                        place !== null ? place.plugin.sha256 : "",
+                                        place !== null ? place.variant : "", pickedId)
         if (!r.ok) {
-            formProblem = String(r.words).replace(/^line \d+, column \d+: /, "")
+            formProblem = formWords(r.words)
             return false
         }
-        const file = { sha256: r.sha256, name: r.name, profile: r.profile }
-        const problem = VehicleBook.profileProblem(vehicles, file, pickedVehicle.own)
-        if (problem !== "") {
-            formProblem = problem
-            Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
-            return false
+        ++storeRev
+        if (place === null) {
+            const profile = r.profiles[0]
+            let next = VehicleBook.setOwn(vehicles, profile)
+            const picked = Bridge.pickVariant(VehicleBook.picked(next).picks, profile)
+            if (picked.ok)
+                next = VehicleBook.setPicks(next, picked.picks)
+            saveVehicles(next)
         }
-        saveVehicles(VehicleBook.setOwn(vehicles, file))
-        Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
         formProblem = ""
         formNote = note
         return true
     }
 
-    // The form's signal into the own file, made with the first under a
-    // name no other file's profile has; the signal Edit filled the form
-    // with replaced, or a new one's of the same name. Another signal whose
-    // name makes the same key is not overwritten: the form says so
+    // The name the own plugin is made under: "<label> signals"
+    function ownName(label) {
+        return qsTr("%1 signals").arg(String(label).trim())
+    }
+
+    // The form's signal into the own variant, made with the first; the
+    // signal Edit filled the form with replaced under the key it has
+    // (SignalForm.keyFor), or a new one's of the same name. An Edit can't
+    // take another saved signal's name: the lists tell signals by name
     function saveDraft() {
         formNote = ""
         readResult = null
@@ -766,16 +1049,14 @@ Pane {
             return false
         const f = readForm()
         const signal = SignalForm.draft(f)
-        const clash = ownSignals.find(s => s.key === signal.key && s.key !== editingKey
-                                           && (editingKey !== "" || s.name !== signal.name))
-        if (clash !== undefined) {
-            formProblem = qsTr("%1, saved already, has the key %2 too: edit it, or give "
-                               + "this one another name").arg(clash.name, signal.key)
+        const named = ownSignals.find(s => s.name === signal.name && s.key !== editingKey)
+        if (editingKey !== "" && named !== undefined) {
+            formProblem = qsTr("%1 is saved already: give this one another name").arg(named.name)
             return false
         }
+        signal.key = SignalForm.keyFor(ownSignals, signal.name, editingKey)
         const base = ownFile !== null ? ownFile
-            : SignalForm.emptyFile(pickedVehicle.label,
-                                   VehicleBook.ownName(vehicles, pickedVehicle.label))
+            : SignalForm.emptyFile(pickedVehicle.label, ownName(pickedVehicle.label))
         const module = SignalForm.moduleOf(f)
         // One request ID to a module: a typed one that differs moves the
         // module's other signals too, and the note names them
@@ -797,50 +1078,69 @@ Pane {
         }
     }
 
-    // A copy of the picked vehicle; its own file is copied under a name of
-    // its own, so each vehicle's own signals change apart (one file to a
-    // profile). Its copy unreadable, the new vehicle starts with none
+    // A copy of the picked vehicle. Its own signals are copied into a
+    // plugin of its own, picked in the place of the original's, so each
+    // vehicle's own signals change apart; that plugin not made, the copy
+    // starts with none
     function duplicateVehicle() {
         const from = pickedVehicle
+        const text = ownFile === null ? "" : (() => {
+            const file = Object.assign({}, ownFile)
+            delete file.notes
+            file.name = ownName(copyLabel)
+            return JSON.stringify(file, null, 2)
+        })()
         let doc = VehicleBook.duplicate(vehicles, copyLabel)
         if (from !== null && from.own !== "") {
-            const own = SignalForm.parseFile(Bridge.signalFileText(from.own))
-            const r = own === null ? { ok: false } : (() => {
-                own.name = VehicleBook.ownName(doc, VehicleBook.picked(doc).label)
-                return Bridge.importSignalText(JSON.stringify(own, null, 2))
-            })()
-            doc = r.ok ? VehicleBook.setOwn(doc, { sha256: r.sha256, name: r.name,
-                                                   profile: r.profile })
-                       : VehicleBook.removeSignals(doc, from.own)
+            const id = VehicleBook.picked(doc).id
+            const r = text === "" ? { ok: false } : Bridge.keepSignalText(text, "", "", id)
+            doc = VehicleBook.setPicks(doc, VehicleBook.picked(doc).picks.map(
+                      p => p === from.own ? (r.ok ? r.profiles[0] : "") : p).filter(p => p !== ""))
+            if (r.ok)
+                doc = VehicleBook.setOwn(doc, r.profiles[0])
+            ++storeRev
         }
         changeVehicles(doc)
     }
 
-    // The last signal's removal takes the file with it, once asked: it
-    // was written here and has no copy elsewhere
+    // The last signal's removal takes the variant with it, once asked
+    // when it is the plugin's last: it was written here and has no copy
+    // elsewhere
     function removeOwnSignal(key) {
         const doc = SignalForm.withoutSignal(ownFile, key)
-        if (doc.signals.length === 0) {
-            removeSignalFile(pickedVehicle.own)
+        if (doc.signals.length > 0) {
+            saveOwn(doc, qsTr("Removed from %1").arg(doc.name))
             return
         }
-        saveOwn(doc, qsTr("Removed from %1").arg(doc.name))
+        const place = ownPlace
+        if (place.plugin.variants.length > 1)
+            removeVariant({ sha256: place.plugin.sha256, variant: place.variant,
+                            profile: pickedVehicle.own })
+        else
+            confirming = "removePlugin:" + place.plugin.sha256
     }
 
-    // Forget and Forget all: the copies no vehicle keeps go with them
+    // Forget and Forget all: what the store holds as imported for the
+    // vehicles goes with them; the plugins stay
     function forgetVehicles(all) {
+        const id = pickedId
         changeVehicles(all ? VehicleBook.forgetAll(vehicles) : VehicleBook.forget(vehicles))
-        Bridge.deleteUnusedSignalFiles(VehicleBook.referencedFiles(vehicles))
+        if (all)
+            Bridge.forgetAllVehicleImports()
+        else if (id !== "")
+            Bridge.forgetVehicleImports(id)
+        ++storeRev
     }
 
-    // Picking fills the field with the vehicle's connection, read back
-    // like typed text so the profile row and the DID field follow
+    // Picking fills the field with the vehicle's connection as a list
+    // would connect it, read back like typed text so the profile row and
+    // the DID field follow
     function pickVehicle(id) {
         confirming = ""
         vinPickNote = ""
         saveVehicles(VehicleBook.pick(vehicles, id))
         if (pickedVehicle !== null && pickedVehicle.uri !== "")
-            uriField.text = pickedVehicle.uri
+            uriField.text = listConnectUri(pickedVehicle.uri)
     }
 
     // A change of the list from the page's buttons: the field empties
@@ -903,12 +1203,16 @@ Pane {
           summary: (pickedVehicle !== null ? pickedVehicle.label : qsTr("None"))
                    + (vehicles.list.length > 0 ? qsTr(" · %1 saved").arg(vehicles.list.length) : "") },
         { key: "signals", title: qsTr("Signals"),
-          summary: pickedVehicle === null ? qsTr("pick a vehicle")
-                   : filesSummary(pickedVehicle.signals.length + (pickedVehicle.own !== "" ? 1 : 0))
-                     + unloadedSummary(pickedVehicle.signals.length + (pickedVehicle.own !== "" ? 1 : 0)),
-          warn: pickedVehicle !== null && unloadedCount() > 0 },
+          summary: signalsSummary(),
+          warn: missingPicks.length > 0 || refusedPlugins.length > 0 },
+        { key: "alerts", title: qsTr("Alerts"),
+          summary: Bridge.conditionsProblem !== "" ? qsTr("doesn't load")
+                   : settingsAlerts.conditions.length === 0 ? qsTr("none")
+                   : qsTr("%n alert(s)", "", settingsAlerts.conditions.length),
+          warn: Bridge.conditionsProblem !== "" },
         { key: "recording", title: qsTr("Recording"),
           summary: !Bridge.recording ? qsTr("off")
+                   : Bridge.armedActive ? qsTr("on · armed")
                    : Bridge.recordingActive && !Bridge.logActive ? qsTr("on · recording") : qsTr("on") },
         { key: "display", title: qsTr("Display"),
           summary: qsTr("%1 %").arg(Math.round(Theme.zoom * 100))
@@ -917,7 +1221,7 @@ Pane {
                    + " · " + Theme.nightSummary() },
         { key: "advanced", title: qsTr("Advanced"),
           summary: Theme.developerMode ? qsTr("developer mode") : qsTr("off") }
-    ].concat(Theme.compact ? [{ key: "log", title: qsTr("Log"), summary: "" }] : [])
+    ].concat(Theme.compact ? [{ key: "log", title: qsTr("Activity"), summary: "" }] : [])
 
     // The tab-bar form has no sidebar to list the Log: its row, last, opens
     // the Log page itself, as does Show log beside a failed connect
@@ -944,13 +1248,22 @@ Pane {
         }
         pageKey = key
     }
-    // Back from a page: the form returns to Signals, the rest to the list
+    // Back from a page: the form returns to Signals, an alert's editor to
+    // Alerts, the rest to the list
     function back() {
         if (backLeaves && pageKey === "connection") {
             leaveRequested()
             return
         }
-        pageKey = pageKey === "ownform" ? "signals" : ""
+        pageKey = pageKey === "ownform" ? "signals" : pageKey === "alertedit" ? "alerts" : ""
+    }
+    // A gauge's Alert (ADR-0063 section 9): the editor on a new condition,
+    // a copy of the gauge's levels; "" when it opened, else why not (an
+    // edit waiting in the editor, no room, a file that doesn't load)
+    function openAlertDraft(c) {
+        if (pageKey === "alertedit" && settingsAlertEditor.changed())
+            return qsTr("An alert's edit waits in Settings > Alerts: save or cancel it first.")
+        return settingsAlerts.openDraft(c)
     }
     // The form for a new signal (Add a signal), as a page of its own
     function openOwnForm() {
@@ -1072,53 +1385,43 @@ Pane {
     property bool extSession: false
 
     // The profiles the row offers (ADR-0013, ADR-0020), then the picked
-    // vehicle's signal files that loaded (ADR-0051). "default" is the
+    // vehicle's picks the store has (ADR-0064 Q5). "default" is the
     // scheme's own profile, so it adds no profile= key. A typed name
     // outside the list highlights no button; core judges it at connect.
-    readonly property var profiles: builtInProfiles.concat(vehicleProfiles, pluginProfiles)
-    // The vehicle's plugin variant, when one is picked and loaded
-    readonly property var pluginProfiles: {
-        const choice = pluginChoice()
-        return choice === null ? [] : [choice]
-    }
-    readonly property var vehicleProfiles: pickedVehicle === null ? []
-        : pickedVehicle.signals.filter(f => signalOk(f.sha256)
-                                            && (standIn === null || f.sha256 !== standIn.sha256))
-              .map(f => ({
-              name: f.profile, label: f.name,
-              hint: signalInfo[f.sha256].extends === "obd2"
-                    ? qsTr("Your signal file %1: obd2 and %2 of your own").arg(f.name)
-                          .arg(signalInfo[f.sha256].own)
-                    : signalInfo[f.sha256].count === 1
-                    ? qsTr("Your signal file %1: 1 signal").arg(f.name)
-                    : qsTr("Your signal file %1: %2 signals").arg(f.name)
-                          .arg(signalInfo[f.sha256].count) }))
+    readonly property var profiles: builtInProfiles.concat(pickProfiles)
 
-    // On an adapter, Default is obd2, and a file that extends obd2 reads
-    // all of obd2 and more, so it takes obd2's place there (ADR-0052):
-    // the first such file the picked vehicle has, null for none or on
-    // another scheme, where Default isn't obd2. Default's button stays
-    // only while the field reads it, so the row always shows the URI's
+    // On an adapter, Default is obd2, and a variant that extends obd2
+    // reads all of obd2 and more, so the first such pick takes obd2's
+    // place there (ADR-0064 Q5): null for none or on another scheme,
+    // where Default isn't obd2. Default's button stays only while the
+    // field reads it, so the row always shows the URI's
     readonly property bool adapterUri: VehicleBook.isAdapterUri(uriField.text)
-    readonly property var standIn: !adapterUri || pickedVehicle === null ? null
-        : pickedVehicle.signals.find(f => signalOk(f.sha256)
-                                          && signalInfo[f.sha256].extends === "obd2") || null
+    readonly property var standIn: pickRows.find(r => r.standIn) || null
     readonly property var defaultProfile: ({
         name: "default", label: qsTr("Default"),
         hint: qsTr("Default reads OBD-II values on an adapter; a recording or a "
                    + "CAN interface shows its frames") })
-    // The stand-in's entry, built in the same binding as the list, so the
-    // two never disagree mid-update
-    function standInProfile(f) {
-        return { name: f.profile, label: qsTr("obd2 + %1").arg(f.name),
-                 hint: qsTr("obd2's signals and %1 of your own, from your signal file %2")
-                           .arg(signalInfo[f.sha256].own).arg(f.name) }
+
+    // A pick as the row's entry: one that extends obd2 says so on an
+    // adapter, where obd2 is what Default reads
+    function pickEntry(r) {
+        const name = profileName(r.profile)
+        const obd2 = r.extends === "obd2"
+        return { name: r.profile,
+                 label: obd2 && adapterUri ? qsTr("obd2 + %1").arg(name) : name,
+                 hint: obd2 ? qsTr("obd2's signals and those of %1, picked for this vehicle")
+                                  .arg(profileTitle(r.profile))
+                            : qsTr("The signals of %1, picked for this vehicle")
+                                  .arg(profileTitle(r.profile)) }
     }
+    // The picks but the stand-in, which sits where Default does
+    readonly property var pickProfiles: pickRows.filter(r => !r.missing && !r.standIn)
+                                                .map(r => pickEntry(r))
     readonly property var builtInProfiles: (standIn === null ? [defaultProfile]
-        : profileChoice === "default" ? [defaultProfile, standInProfile(standIn)]
-        : [standInProfile(standIn)]).concat([
+        : profileChoice === "default" ? [defaultProfile, pickEntry(standIn)]
+        : [pickEntry(standIn)]).concat([
         { name: "raw", label: qsTr("raw (log only)"),
-          hint: qsTr("Raw (log only): no decode, frames reach the Log page only. On an adapter it listens "
+          hint: qsTr("Raw (log only): no decode, frames reach the Activity page only. On an adapter it listens "
                      + "to the engine ECU (0x7E8); add ?filter= for another ID. An ELM327 "
                      + "hears only replies to its requests, so add ?poll= there") },
         { name: "uds-generic", label: qsTr("uds-generic (DIDs)"),
@@ -1126,14 +1429,44 @@ Pane {
                      + "once and the DIDs the ECU answers join the polling") }
     ])
 
+    // The picked vehicle's sets as [{ profile, name, variant }]: its picks
+    // the store has, in their order
+    readonly property var pickedSets: pickRows.filter(r => !r.missing)
+        .map(r => ({ profile: r.profile, name: r.name, variant: r.variant }))
+    // A profile's name as the user knows it: every loaded plugin's
+    // variants by the plugin's name
+    readonly property var profileNames: {
+        const names = {}
+        for (const p of pluginList) {
+            for (const profile of (p.ok ? p.profiles : []))
+                names[profile] = p.name
+        }
+        return names
+    }
+
+    // The first picked set that reads all of obd2, which stands in for
+    // Default on an adapter (ADR-0064)
+    readonly property var obd2PickedSet: {
+        const first = pickRows.find(r => !r.missing && r.extends === "obd2")
+        return first === undefined ? null
+             : { profile: first.profile, name: first.name, variant: first.variant }
+    }
+
     // What a page that works with no session lists its signals from: the
-    // field's URI, which carries the chosen profile, or with no URI typed
-    // the chosen profile alone
+    // field's URI, which carries the chosen profile, except an adapter's
+    // read under Default, where the vehicle's obd2 stand-in is listed;
+    // with no URI typed the chosen profile alone, or under Default the
+    // picked vehicle's first set, which a restart doesn't forget as it
+    // does the choice
     readonly property string offlineUri: {
         const typed = uriField.text.trim()
-        if (typed !== "")
-            return typed
-        return profileChoice === "default" ? "" : composeUri("mock://", [])
+        if (typed !== "") {
+            return profileChoice === "default" && VehicleBook.isAdapterUri(typed) && obd2PickedSet !== null
+                   ? "mock://?profile=" + obd2PickedSet.profile : typed
+        }
+        if (profileChoice !== "default")
+            return composeUri("mock://", [])
+        return pickedSets.length > 0 ? "mock://?profile=" + pickedSets[0].profile : ""
     }
 
     // True while a typed URI is being read into the choices, so the DID
@@ -1242,11 +1575,11 @@ Pane {
         "mock": ["profile", "did", "diagnose"],
         "replay": ["profile", "did", "speed", "loop"],
         "j2534": ["baud", "flags", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                  "pack", "scan", "session", "keepalive_ms", "profile", "did"],
+                  "pack", "scan", "gap", "session", "keepalive_ms", "profile", "did"],
         "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                   "pack", "scan", "session", "keepalive_ms", "profile", "did"],
+                   "pack", "scan", "gap", "session", "keepalive_ms", "profile", "did"],
         "socketcan": ["profile", "did", "baud", "filter", "txid", "poll", "probe", "identify",
-                      "diagnose", "pack", "scan", "session", "keepalive_ms"]
+                      "diagnose", "pack", "scan", "gap", "session", "keepalive_ms"]
     })
     // What a SocketCAN session that only listens takes: Default is raw
     // there, and core refuses it the keys that ask an ECU
@@ -1315,14 +1648,19 @@ Pane {
         syncing = false
     }
 
-    function requestConnect(uri) {
+    // kept: the address to keep once uri connects, where it isn't uri
+    // itself (a list's row, whose profile the page added)
+    property string connectKeeps: ""
+    function requestConnect(uri, kept) {
         if (uri === "")
             return
+        connectKeeps = kept === undefined ? "" : kept
         Bridge.connectSessionAsync(uri)
         // Connecting/Connected/failed lines arrive via logMessage.
     }
 
-    // The addresses that connected, newest first, for Dash's connect list
+    // The addresses kept from the connects that succeeded, newest first,
+    // for Dash's connect list
     readonly property int maxRecentUris: 5
     property var recentUris: []
     // A replay or the mock is never kept: Recordings is a replay's way back
@@ -1350,7 +1688,7 @@ Pane {
         return [uri].concat(list.filter(u => u !== uri)).slice(0, maxRecentUris)
     }
     // What Dash lists: the recent addresses, the picked vehicle's saved one
-    // first when absent. Display only: recentUris holds what connected
+    // first when absent. Display only: recentUris holds what was kept
     readonly property string vehicleUri: pickedVehicle !== null ? pickedVehicle.uri : ""
     function connectRows(recents, vehicle) {
         return vehicle === "" || recents.includes(vehicle) ? recents : [vehicle].concat(recents)
@@ -1362,10 +1700,72 @@ Pane {
     readonly property var connectAdapters: devices.map(d => ({
             uri: d.base, title: d.title, kind: d.kind, other: d.other === true
         }))
-    // Dash's Connect: the field shows it as typed text, before the connect
+    // ---- A connect from a list (Home's, Dash's): an address that names
+    // no profile reads the picked vehicle's plugin where obd2 is asked
+    // (ADR-0064 Q5) ----
+    // The first pick that loads and reads all of obd2, null for none
+    readonly property var listStandIn:
+        (storeRev >= 0 ? Bridge.pickRow(picks, true) : []).find(r => r.standIn) || null
+
+    // Whether a pick that reads obd2 is read at the address: a J2534 or
+    // ELM327 adapter's, or a CAN interface that sends requests (a virtual
+    // bus, or a controller up in one-shot mode). A listening interface
+    // is left to listen: a pick there would start sending
+    function takesStandIn(uri) {
+        if (VehicleBook.isAdapterUri(uri))
+            return true
+        const found = /^socketcan:\/\/([^?]+)/.exec(uri)
+        const c = found === null ? undefined : canInterfaces.find(i => i.name === found[1])
+        return c !== undefined && c.up === true
+               && (c.kind === "vcan" || (c.modes || []).indexOf("one-shot") >= 0)
+    }
+
+    // A row's address as the picked vehicle reads it: a plugin's or a
+    // signal file's profile the vehicle doesn't pick is dropped, as the
+    // field drops it, so no connect reads another vehicle's signals
+    function listAddress(uri) {
+        const named = queryValue(splitUri(uri).pairs, "profile")
+        return typeof named === "string" && (named.startsWith("plugin.") || named.startsWith("user."))
+               && picksNow().indexOf(named) < 0 ? VehicleBook.withoutFileProfile(uri) : uri
+    }
+
+    // The address a list's row connects: with the stand-in's profile
+    // where the rule applies, else as the vehicle reads it (one that
+    // names a profile, the demo, a recording, no vehicle, no such pick)
+    function listConnectUri(uri) {
+        const plain = listAddress(uri)
+        return listStandIn !== null && takesStandIn(plain)
+            ? VehicleBook.withProfile(plain, listStandIn.profile) : plain
+    }
+
+    // What a list's row reads, where its kind doesn't say: "obd2 + <name>"
+    // for a row the rule composes, a plugin's name for an address that
+    // names its profile; "" otherwise
+    function listProfileWord(uri) {
+        const plain = listAddress(uri)
+        const named = queryValue(splitUri(plain).pairs, "profile")
+        if (typeof named === "string" && named.startsWith("plugin."))
+            return placeOf(named) !== null ? profileName(named) : qsTr("a plugin not in the store")
+        return listConnectUri(uri) !== plain ? qsTr("obd2 + %1").arg(profileName(listStandIn.profile)) : ""
+    }
+    // The lists' rows by address, for those with a word
+    readonly property var connectProfileWords: {
+        const words = {}
+        for (const uri of connectUris.concat(connectAdapters.map(a => a.uri))) {
+            const word = listProfileWord(uri)
+            if (word !== "")
+                words[uri] = word
+        }
+        return words
+    }
+
+    // A list's Connect: the field shows the address as typed text, with
+    // the profile it reads, before the connect. The row's address is what
+    // is kept: the profile added is the vehicle's pick of this moment
     function connectFromList(uri) {
-        uriField.text = uri
-        requestConnect(uri)
+        const composed = listConnectUri(uri)
+        uriField.text = composed
+        requestConnect(composed, listAddress(uri))
     }
 
     // ---- The last URI that connected, the recent ones, the Record switch
@@ -1383,7 +1783,7 @@ Pane {
     Settings {
         id: vehicleStore
         category: "vehicles"
-        property string document: ""
+        property string book: ""
     }
 
     Component.onCompleted: {
@@ -1394,19 +1794,17 @@ Pane {
         } catch (e) {
             // a damaged store shows no versions until the next connect
         }
-        vehicles = VehicleBook.parse(vehicleStore.document)
+        vehicles = VehicleBook.parse(vehicleStore.book)
         Bridge.vehicleLabel = pickedVehicle !== null ? pickedVehicle.label : ""
-        useSignalFiles()
-        loadPlugins()
         refreshDevices()
         Bluetooth.refresh(false)   // asked for when Connection first opens
         // A replay or mock address an earlier version stored is dropped
         if (!keptUri(sessionSettings.uri))
             sessionSettings.uri = ""
         // Set like typed text, so the profile row and the DID field read
-        // it back
+        // it back; as a list would connect it, like a picked vehicle's
         if (uriField.text === "")
-            uriField.text = sessionSettings.uri
+            uriField.text = listConnectUri(sessionSettings.uri)
         recentUris = parseRecentUris(sessionSettings.recentUris, sessionSettings.uri)
         if (JSON.stringify(recentUris) !== sessionSettings.recentUris)
             sessionSettings.recentUris = JSON.stringify(recentUris)
@@ -1421,20 +1819,21 @@ Pane {
                 page.readResult = result
         }
         function onConnectResult(uri, error) {
+            const keeps = page.connectKeeps !== "" ? page.connectKeeps : uri
             page.errorLabel.text = error
             page.errorLabel.visible = (error !== "")
             page.logExplains = (error !== "")
             if (error === "") {
-                if (page.keptUri(uri)) {
-                    sessionSettings.uri = uri
-                    page.recentUris = page.withRecentUri(page.recentUris, uri)
+                if (page.keptUri(keeps)) {
+                    sessionSettings.uri = keeps
+                    page.recentUris = page.withRecentUri(page.recentUris, keeps)
                     sessionSettings.recentUris = JSON.stringify(page.recentUris)
                 }
                 page.rememberVersions(uri, Bridge.adapterVersions)
                 // The picked vehicle's connection and plotted signals,
                 // for an adapter's session only (ADR-0027 section 1, section 2)
                 if (VehicleBook.isAdapterUri(uri) && page.pickedVehicle !== null) {
-                    page.saveVehicles(VehicleBook.rememberUri(page.vehicles, uri))
+                    page.saveVehicles(VehicleBook.rememberUri(page.vehicles, keeps))
                     Bridge.signalModel.setPlotChoices(page.pickedVehicle.plotted,
                                                       page.pickedVehicle.unplotted)
                 }
@@ -1447,12 +1846,12 @@ Pane {
                 page.plottedApplied = false
             // The session's VIN, read again at each, goes at its end; the
             // matches it made stay on the vehicle it identified
-            page.refreshMatches()
+            ++page.vinRev
         }
 
         function onVehicleIdentified() {
             page.recognizeVehicle()
-            page.refreshMatches()
+            ++page.vinRev
             page.noteVinMatches()
             page.noteCarYear()
         }
@@ -1467,7 +1866,8 @@ Pane {
     Connections {
         target: Bridge.signalModel
 
-        function onSubscribedCountChanged() {
+        // Once for each change of choices, a text row's tick included
+        function onTicksChanged() {
             if (page.plottedApplied && page.pickedVehicle !== null
                     && VehicleBook.isAdapterUri(Bridge.currentUri))
                 page.rememberPlotting()
@@ -1576,13 +1976,8 @@ Pane {
                 backShown: !page.twoPane
                 onBackRequested: page.back()
 
-                SettingsSignalFiles {
-                    id: settingsSignalFiles
-                    host: page
-                }
-
-                SettingsPlugins {
-                    id: settingsPlugins
+                SettingsSignals {
+                    id: settingsSignals
                     host: page
                 }
 
@@ -1604,6 +1999,36 @@ Pane {
                 SettingsOwnForm {
                     id: settingsOwnForm
                     host: page
+                }
+            }
+
+            SettingsSubpage {
+                objectName: "settingsAlertsPage"
+                anchors.fill: parent
+                visible: page.shownKey === "alerts"
+                title: qsTr("Alerts")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
+
+                SettingsAlerts {
+                    id: settingsAlerts
+                    host: page
+                }
+            }
+
+            SettingsSubpage {
+                objectName: "settingsAlertEditPage"
+                anchors.fill: parent
+                visible: page.shownKey === "alertedit"
+                title: settingsAlertEditor.isNew ? qsTr("New alert") : qsTr("Edit alert")
+                backName: qsTr("Back to Alerts")
+                backShown: true
+                onBackRequested: page.back()
+
+                SettingsAlertEditor {
+                    id: settingsAlertEditor
+                    host: page
+                    alerts: settingsAlerts
                 }
             }
 

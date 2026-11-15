@@ -1,0 +1,25 @@
+{
+  "havne_signals": 2,
+  "name": "Boost ratio",
+  "notes": "Boost is manifold pressure over barometric: the first computed signal. Pressure ratio reads it, so one computed signal feeds another (format 2). Works on any car that reports PIDs 0B and 33. With no car: havne-cli stream replay://<this repository>/tests/fixtures/replay/boost-ratio?speed=max --signals examples/boost-ratio.json --values replays MAP and baro replies and prints Boost 0, 50 and 100 kPa and Pressure Ratio 1, 1.5 and 2",
+  "source": { "name": "Written by hand for Havne's examples", "license": "MIT" },
+  "extends": "obd2",
+  "signals": [
+    {
+      "key": "boost",
+      "name": "Boost",
+      "kind": "computed",
+      "expr": "obd2.map - obd2.baro",
+      "max_age": { "obd2.baro": 30 },
+      "unit": "kPa", "decimals": 0, "group": "air", "plot": 1
+    },
+    {
+      "key": "pressure_ratio",
+      "name": "Pressure Ratio",
+      "kind": "computed",
+      "expr": "(boost + obd2.baro) / obd2.baro",
+      "max_age": { "obd2.baro": 30 },
+      "decimals": 2, "group": "air"
+    }
+  ]
+}

@@ -24,6 +24,9 @@ Rectangle {
     property bool replayHint: true
     // [{ uri, title, kind }]: Settings' connectAdapters
     property var adapters: []
+    // What a row reads, by its address, where Settings has a word for it
+    // (connectProfileWords): the vehicle's plugin a connect would read
+    property var profileWords: ({})
     // The phone's Bluetooth, read from the singleton; a test sets them
     property bool bluetoothAvailable: Bluetooth.available
     property string bluetoothPermission: Bluetooth.permission
@@ -88,6 +91,7 @@ Rectangle {
         return name === "" ? qsTr("Default")
              : name === "raw" ? qsTr("Raw")
              : name === "uds-generic" ? qsTr("UDS DIDs")
+             : name.startsWith("plugin.") ? qsTr("Plugin")
              : name
     }
     // Two recents on one adapter read the same but for their profile, which
@@ -174,7 +178,12 @@ Rectangle {
             checked: isChosen
             leftPadding: 12
             rightPadding: 12
-            readonly property string profileWord: modelData.profileWord !== undefined ? modelData.profileWord : ""
+            // Settings' word for the row, else the profile's among recents
+            // that share an adapter
+            readonly property string ownWord: list.profileWords[modelData.uri] !== undefined
+                                              ? list.profileWords[modelData.uri] : ""
+            readonly property string profileWord: ownWord !== "" ? ownWord
+                : modelData.profileWord !== undefined ? modelData.profileWord : ""
             Accessible.name: (modelData.kind !== "" ? qsTr("%1, %2").arg(modelData.title).arg(modelData.kind)
                                                     : modelData.title)
                              + (profileWord !== "" ? ", " + profileWord : "")
@@ -205,7 +214,8 @@ Rectangle {
                 Label {
                     objectName: "connectRowAddress"
                     Layout.fillWidth: true
-                    Layout.minimumWidth: 0
+                    // Whole up to half the row: a plugin's long name beside it is cut first
+                    Layout.minimumWidth: Math.min(implicitWidth, row.width * 0.5)
                     elide: Text.ElideRight
                     font.pixelSize: Theme.fontEmphasis
                     color: Theme.text
@@ -223,9 +233,18 @@ Rectangle {
                 Label {
                     objectName: "connectRowKind"
                     visible: text !== ""
+                    // A plugin's name can be long: it takes what the address
+                    // leaves and is cut there (an item that doesn't fill keeps its width)
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    horizontalAlignment: Text.AlignRight
+                    elide: Text.ElideRight
                     font.pixelSize: Theme.fontCaption
                     color: Theme.textDim
-                    text: Theme.compact && row.profileWord !== "" ? row.profileWord : row.modelData.kind
+                    text: Theme.compact && row.profileWord !== "" ? row.profileWord
+                        : row.ownWord === "" ? row.modelData.kind
+                        : row.modelData.kind === "" ? row.ownWord
+                        : qsTr("%1 · %2").arg(row.modelData.kind).arg(row.ownWord)
                 }
             }
         }
@@ -386,7 +405,7 @@ Rectangle {
             ThemedButton {
                 objectName: "connectShowLog"
                 flat: true
-                text: qsTr("Show log")
+                text: qsTr("Show activity")
                 Layout.alignment: Qt.AlignTop
                 onClicked: list.showLog()
             }

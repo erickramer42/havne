@@ -34,6 +34,9 @@ TestCase {
     }
 
     function cleanup() {
+        // The armed cases save a set that records: none outlives them
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[{"key":"c","name":"C",'
+                              + '"when":{"signal":["id:1001"],"unit":"RPM","above":90000},"mark":true}]}')
         Relay.stop()
         Theme.developerMode = false
         Theme.night = "off"
@@ -334,6 +337,125 @@ TestCase {
         settings.pageKey = ""
         compare(walked.length, 13, "every page was walked")
         compare(over, [], "nothing past the edge")
+    }
+
+    // Main's alert band ON, its longest words (a long name, three alerts,
+    // the stale line), on every page at the two narrowest phone widths: under
+    // the header, above the page, nothing past the edge; Live's alert cell too
+    Component { id: alertRowsC; ListModel {} }
+    function test_theAlertBandFitsEveryPageOnAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theAlertBandFitsEveryPageOnAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const rows = createTemporaryObject(alertRowsC, testCase)
+        const row = (key, level, name) => ({
+            key: key, name: name, enabled: true, level: level, banner: true, live: true,
+            state: "on", stale: true, unavailable: false, fired: 1, value: 112.5,
+            unit: "°C", decimals: 1, staleSinceMs: new Date(2026, 10, 15, 8, 30, 5).getTime() })
+        rows.append(row("a", "danger", "Coolant far past its limit while the engine still runs hard"))
+        rows.append(row("b", "warning", "Oil warm"))
+        rows.append(row("c", "warning", "Boost high"))
+        const band = find(main.contentItem, "alertBand")
+        band.conditions = rows
+        tryVerify(() => band.shown && band.visible, 2000, "the band is ON")
+        find(main.contentItem, "livePage").alertLevels = { "1001": 2 }
+        const header = find(main.contentItem, "headerBar")
+        const over = []
+        const pages = ["homePage", "dashboardPage", "livePage", "diagnosticsPage", "logPage",
+                       "recordingsPage", "settingsPage"]
+        for (const name of pages) {
+            const page = find(main.contentItem, name)
+            main.gotoPage(Array.from(page.parent.children).indexOf(page))
+            verify(waitForPolish(main), name + " laid out")
+            verify(band.visible, "the band on " + name)
+            const top = band.mapToItem(main.contentItem, 0, 0).y
+            const bottom = top + band.height
+            verify(top >= header.mapToItem(main.contentItem, 0, header.height).y - 0.5,
+                   "under the header on " + name)
+            verify(page.mapToItem(main.contentItem, 0, 0).y >= bottom - 0.5,
+                   name + " starts under the band")
+            const out = pastTheEdge(page, main.contentItem, pastTheEdge(band, main.contentItem, []))
+            if (out.length > 0)
+                over.push(name + ": " + out.slice(0, 4).join(", "))
+        }
+        compare(over, [], "nothing past the edge")
+        verify(find(band, "alertBandStale").visible, "the stale line shows")
+    }
+
+    // The Alerts page and an alert's editor at both phone widths, opened
+    // from a gauge's Alert as on the phone: the list with a long name, the
+    // editor with a signal term's picker open and a link term beside it
+    function test_theAlertsPagesFitAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theAlertsPagesFitAPhone(data) {
+        const none = '{"havne_conditions":1,"conditions":[]}\n'
+        verify(Bridge.saveConditions(JSON.stringify({ havne_conditions: 1, conditions: [
+            { key: "long", name: "W".repeat(40), when: { signal: ["id:2001"], unit: "°C", above: 115 },
+              alert: { level: "danger", banner: true } },
+            { key: "link", name: "Link lost", when: { link: "hard_failure" }, alert: { level: "warning" } }] }))
+            .ok, "two alerts saved")
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const settings = find(main.contentItem, "settingsPage")
+        const walk = (what) => {
+            verify(settings.visible, what + " is on screen")
+            verify(waitForPolish(main), what + " laid out")
+            compare(pastTheEdge(settings, main.contentItem, []), [], what + " stays inside")
+        }
+        main.gotoPage(Array.from(settings.parent.children).indexOf(settings))
+        settings.open("alerts")
+        walk("the list")
+
+        // A gauge's Alert opens the editor in Settings
+        const dash = find(main.contentItem, "dashboardPage")
+        dash.form = "phone"
+        const doc = DashboardBook.builtIn("phone")
+        doc.pages = [{ name: "Test", cells: [{ kind: "digital", w: 6, h: 12, label: "Coolant",
+                                               refs: ["id:2001"], unit: "°C",
+                                               options: { from: 0, to: 150, dangerFrom: 115 } }] }]
+        dash.doc = doc
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.select(0)
+        find(dash, "panelAlert").clicked()
+        verify(settings.visible, "Settings comes forward")
+        compare(settings.pageKey, "alertedit", "on the alert's editor")
+        const editor = find(settings, "settingsAlertEditor")
+        compare(editor.nameField.text, "Coolant")
+        find(editor, "alertTermSignal").clicked()
+        find(editor, "alertTermAdd").clicked()
+        find(find(editor, "alertTerm_1"), "alertTermKind_link").clicked()
+        // A term with no signal in the profile offers all four comparisons
+        find(editor, "alertTermAdd").clicked()
+        const loose = find(editor, "alertTerm_2")
+        for (const word of ["above", "below", "equals", "differs"])
+            verify(find(loose, "alertComparison_" + word).visible, word + " is offered")
+        verify(find(editor, "alertJoin").visible, "the join row shows")
+        editor.recordBox.checked = true
+        walk("the editor")
+
+        // A second Alert leaves the edit waiting and says why on Dash
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.select(0)
+        find(dash, "panelAlert").clicked()
+        verify(dash.visible, "Dash stays")
+        verify(find(dash, "dashAlertNote").text.indexOf("save or cancel it first") >= 0,
+               find(dash, "dashAlertNote").text)
+        verify(editor.recordBox.checked, "the edit waits")
+        main.gotoPage(Array.from(settings.parent.children).indexOf(settings))
+        find(editor, "alertCancel").clicked()
+        compare(settings.pageKey, "alerts")
+        Bridge.saveConditions(none)
     }
 
     // A value too long for its row (a refusal's words, a text) is bounded by
@@ -793,6 +915,58 @@ TestCase {
         const panel = find(page, "stretchesPanel")
         const bottom = panel.mapToItem(main.contentItem, 0, panel.height).y
         verify(bottom <= main.contentItem.height + 0.5, "the panel ends at " + bottom)
+    }
+
+    // The Conditions panel in the chart's place on a phone: its rows and
+    // buttons a touch's size inside the width at 384 and 320 px, and a row's
+    // press gives the chart back centered on its entry
+    function test_theConditionsPanelFitsAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theConditionsPanelFitsAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Conditions", uri: "replay://x?profile=obd2", source: "",
+                    folder: Harness.recordingFixtures + "/conditions", profile: "obd2" })
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const fits = (item, name) => {
+            const top = item.mapToItem(main.contentItem, 0, 0).y
+            const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+            verify(bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+            const right = item.mapToItem(main.contentItem, item.width, 0).x
+            verify(right <= main.contentItem.width + 0.5, name + " ends at " + right)
+        }
+        fits(find(page, "jumpConditions"), "jumpConditions")
+        find(page, "jumpConditions").clicked()
+        verify(waitForPolish(main), "laid out")
+        verify(find(page, "conditionsPanel").visible, "the panel is up")
+        verify(!find(page, "chartFrame").visible, "in the chart's place")
+        fits(find(page, "conditionsClose"), "conditionsClose")
+        const list = find(page, "conditionList")
+        tryVerify(() => list.itemAtIndex(2) !== null && list.itemAtIndex(2).width > 0, 2000,
+                  "the rows are laid out")
+        for (let i = 0; i < 3; ++i) {
+            const row = list.itemAtIndex(i)
+            fits(find(row, "conditionRowArea"), "row " + i)
+            for (const name of ["conditionTime", "conditionName", "conditionLength"]) {
+                const label = find(row, name)
+                const right = label.mapToItem(main.contentItem, label.width, 0).x
+                verify(right <= main.contentItem.width + 0.5, name + " of row " + i + " ends at " + right)
+            }
+        }
+        page.setView(0, 2000)
+        mouseClick(find(list.itemAtIndex(0), "conditionRowArea"))
+        verify(!page.conditionsOpen, "the panel gives the chart back")
+        verify(waitForPolish(main), "laid out")
+        verify(find(page, "chartFrame").visible)
+        compare(page.viewT0, 11376)
+        compare(page.cursorMs, 7251)
     }
 
     // A recording folder of number signals (twelve unless given), three
@@ -2110,6 +2284,111 @@ TestCase {
     // A log from the header (ADR-0056 section 1): Start log while
     // connected, then Stop log and the readout in Mark's and Disconnect's
     // place, fitting a phone; Stop log opens the folder in the viewer
+    // A log records the ticked rows, text rows among them: a session whose
+    // one ticked row is a text offers Start log
+    function test_startLogTakesATickedTextRowAlone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const start = find(main.contentItem, "startLogButton")
+        compare(Bridge.connectSession("mock://demo?profile=uds-generic&did=F190:text"), "")
+        tryVerify(() => start.visible, 5000, "Start log once connected")
+        verify(!start.enabled, "nothing ticked: a text row's default is unticked")
+        Bridge.signalModel.toggleSubscribed(0)
+        tryVerify(() => start.enabled, 2000, "the ticked text row is a log's")
+    }
+
+    // The armed recorder's button (ADR-0063 section 7): off with its reason
+    // while no condition records, "Armed" while it waits, "Recording
+    // (window N)" in a window, Mark only in a window; it fits at 384 and 320 px
+    function armedConditions(bound) {
+        return '{"havne_conditions":1,"conditions":[{"key":"rec","name":"Engine stopped",'
+               + '"when":{"signal":["id:3001"],"unit":"km/h",' + bound + '},'
+               + '"record":{"before":0.2,"after":0.2}}]}'
+    }
+    function test_theHeadersArmedHasItsStatesAndFitsAPhone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        main.font.pixelSize = 16
+        const armed = find(main.contentItem, "armedButton")
+        const mark = find(main.contentItem, "markButton")
+        const start = find(main.contentItem, "startLogButton")
+        const row = find(main.contentItem, "headerRow")
+        verify(!armed.visible, "nothing to arm before a connect")
+        verify(Bridge.saveConditions(armedConditions('"above":90000')).ok, "a set that records")
+        // With no record condition: shown, off, and says why
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[{"key":"c","name":"C",'
+                              + '"when":{"signal":["id:1001"],"unit":"RPM","above":90000},"mark":true}]}')
+        compare(Bridge.connectSession("mock://armed"), "", "mock://armed connects")
+        tryVerify(() => armed.visible, 5000, "Armed once connected")
+        verify(!armed.enabled, "no condition records")
+        compare(armed.text, "Arm", "off, it says what a press does")
+        compare(Bridge.armedWhy, "no condition records")
+        compare(armed.Accessible.description, "no condition records")
+        // A tap on the disabled button says why, as a refused press does
+        const host = find(main.contentItem, "armedHost")
+        Bridge.clearLogNotice()
+        waitForRendering(main.contentItem)
+        mouseClick(host)
+        tryCompare(Bridge, "logNotice", "Armed not started: no condition records", 3000)
+        verify(!Bridge.armedActive, "a tap on the explanation arms nothing")
+        const widths = [384, 320]
+        for (const width of widths) {
+            main.width = width
+            waitForRendering(main.contentItem)
+            const out = pastTheEdge(row, main.contentItem, [])
+            compare(out.length, 0, "idle at " + width + " px: " + out.join(", "))
+        }
+        main.width = 384
+        // A set that records, never firing: armed and waiting
+        verify(Bridge.saveConditions(armedConditions('"above":90000')).ok)
+        tryVerify(() => armed.enabled, 3000, "a condition records")
+        Bridge.clearLogNotice()
+        mouseClick(host)
+        tryVerify(() => Bridge.armedActive, 3000, "a press arms; the explanation stays out of it")
+        compare(Bridge.logNotice, "", "no refusal while it can start")
+        verify(armed.checked, "shown as on")
+        compare(armed.text, "Armed")
+        verify(!start.visible, "Start log steps aside: one recorder")
+        verify(!mark.visible, "Mark only inside a window")
+        for (const width of widths) {
+            main.width = width
+            waitForRendering(main.contentItem)
+            const out = pastTheEdge(row, main.contentItem, [])
+            compare(out.length, 0, "waiting at " + width + " px: " + out.join(", "))
+        }
+        main.width = 384
+        armed.clicked()
+        verify(!Bridge.armedActive, "a second press disarms")
+        tryVerify(() => start.visible, 2000, "Start log is back")
+        // A set that fires at once: a window, with Mark
+        verify(Bridge.saveConditions(armedConditions('"below":1')).ok)
+        tryVerify(() => armed.enabled, 3000)
+        armed.clicked()
+        tryVerify(() => Bridge.armedRecording, 10000, "a window opens")
+        compare(armed.text, "Window 1", "a phone's header has no room for more")
+        verify(mark.visible, "Mark inside a window")
+        for (const width of widths) {
+            main.width = width
+            waitForRendering(main.contentItem)
+            compare(armed.text, "Window 1")
+            const out = pastTheEdge(row, main.contentItem, [])
+            compare(out.length, 0, "in a window at " + width + " px: " + out.join(", "))
+        }
+        // With room (420 px of header row and up) it says the whole of it
+        main.width = 600
+        waitForRendering(main.contentItem)
+        compare(armed.text, "Recording (window 1)")
+        compare(pastTheEdge(row, main.contentItem, []).length, 0, "in a window at 600 px")
+        main.width = 384
+        armed.clicked()
+        verify(!Bridge.armedActive)
+        verify(!mark.visible, "Mark goes with the recorder")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+    }
+
     function test_theHeadersLogStartsStopsAndOpensItsFolder() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
@@ -2691,6 +2970,27 @@ TestCase {
         compare(main.currentPage, before, "a tap stays put")
     }
 
+    // The sidebar's page that shows the session's activity is called
+    // Activity: "Log" names Start log and a recording
+    function test_theSidebarNamesTheActivityPage() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1400
+        main.height = 800
+        verify(waitForPolish(main), "laid out")
+        tryVerify(() => !find(main.contentItem, "tabBar").visible, 2000, "the sidebar shows")
+        const labels = []
+        function walk(item) {
+            if (item.label !== undefined && item.active !== undefined)
+                labels.push(item.label)
+            for (const c of item.children)
+                walk(c)
+        }
+        walk(main.contentItem)
+        verify(labels.indexOf("Activity") >= 0, "the sidebar lists Activity: " + labels)
+        verify(labels.indexOf("Log") < 0, "no Log entry: " + labels)
+    }
+
     // Dash with no session on the phone: the recent addresses, the newest
     // chosen, and one Connect; the list goes once a session runs
     // Dash's list with these recent addresses, and these Bluetooth adapters
@@ -2709,6 +3009,42 @@ TestCase {
         settings.bluetoothAdapters = bluetooth || []
         verify(waitForPolish(main), "laid out")
         return list
+    }
+
+    // Main hands both lists Settings' words: with a picked vehicle whose
+    // pick reads obd2, an adapter's row says the plugin a connect reads,
+    // and the connect puts the address in Settings' field with its profile
+    function test_theListsSayThePluginAConnectReads() {
+        const main = phoneMain()
+        const settings = find(main.contentItem, "settingsPage")
+        verify(settings.importFile(Harness.writeExamplePlugin("list-words.havne-plugin.json")))
+        try {
+            settings.vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Desk car"),
+                                                     ["plugin.example-sim.my2019"])
+            const address = "elm327://bt:00:11:22:33:44:55"
+            const list = connectListOn(main, [], [
+                { name: "OBD adapter", address: "00:11:22:33:44:55", kind: "bt" }])
+            tryVerify(() => findChild(list, "connectRow_1") !== null, 2000, "the adapter and the demo")
+            const word = "obd2 + Example: the simulated car: my2019"
+            const row = find(list, "connectRow_0")
+            compare(find(row, "connectRowAddress").text, "OBD adapter")
+            const kind = find(row, "connectRowKind")
+            compare(kind.text, word, "in the kind's place on a phone")
+            verify(kind.mapToItem(row, kind.width, 0).x <= row.width + 0.5, "inside its row")
+            compare(row.Accessible.name, "OBD adapter, Bluetooth, " + word)
+            compare(find(find(list, "connectRow_1"), "connectRowKind").text, "Demo data",
+                    "the demo reads no plugin")
+            compare(find(main.contentItem, "homePage").profileWords[address], word, "Home's list too")
+
+            tryCompare(list, "chosen", address, 2000, "the sole adapter")
+            find(list, "connectGo").clicked()
+            compare(find(settings, "uriField").text, address + "?profile=plugin.example-sim.my2019",
+                    "the address Settings connects")
+            tryVerify(() => !Bridge.connecting, 5000, "the desktop refuses a Bluetooth link")
+        } finally {
+            for (const p of settings.pluginList)
+                settings.removePlugin(p.sha256)
+        }
     }
 
     // The desktop's Home connects the chosen row through Settings, as
@@ -3432,9 +3768,49 @@ TestCase {
         const folder = Harness.recordingFixtures + "/findings"
         find(main.contentItem, "settingsPage").vehicles = { salt: "", picked: "v1", list: [{
             id: "v1", label: "Daily driver", vinKey: "", uri: "", plotted: [], unplotted: [],
-            signals: [], own: "", plugin: "", baseline: folder }] }
+            picks: [], own: "", baseline: folder }] }
         compare(find(main.contentItem, "diagnosticsPage").baselineFolder, folder)
         compare(find(main.contentItem, "recordingsPage").baselineFolder, folder)
+    }
+
+    // Main hands the Dashboard Settings' picked sets and profile names, so
+    // its offline list and its gauges' notes name the vehicle's plugin
+    function test_theDashboardTakesSettingsPickedSetsAndNames() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const settings = find(main.contentItem, "settingsPage")
+        const dash = find(main.contentItem, "dashboardPage")
+        verify(settings.importFile(Harness.writeExamplePlugin("main-sets.havne-plugin.json")))
+        try {
+            settings.vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Desk car"),
+                                                     ["plugin.example-sim.my2019"])
+            compare(JSON.stringify(dash.pickedSets),
+                    JSON.stringify([{ profile: "plugin.example-sim.my2019",
+                                      name: "Example: the simulated car", variant: "my2019" }]))
+            compare(dash.profileNames["plugin.example-sim.base"], "Example: the simulated car")
+            compare(dash.offlineUri, settings.offlineUri)
+        } finally {
+            for (const p of settings.pluginList)
+                settings.removePlugin(p.sha256)
+        }
+    }
+
+    // Main hands the bridge the Dashboard's cells (ADR-0056's default
+    // pick): one list of refs for each cell, its counterparts in the
+    // built-in sets among them, a blank cell's none
+    function test_theDashboardsGaugesJoinTheDefaultPick() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const dash = find(main.contentItem, "dashboardPage")
+        let cells = 0
+        for (const p of dash.pages)
+            cells += p.cells.length
+        verify(cells > 0, "the built-in layout has cells")
+        compare(Bridge.pickGauges.length, cells)
+        compare(dash.pickRefs.length, cells)
+        const rpm = Bridge.gaugeSignals.rpm
+        verify(Bridge.pickGauges.some(refs => rpm.every(r => refs.indexOf(r) >= 0)),
+               "the tach's cell names the RPM of both built-in sets")
     }
 
     // The relay's line beside its button (ADR-0047): the traffic wraps in

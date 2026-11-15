@@ -1,0 +1,10 @@
+{
+  "havne_signals": 1,
+  "name": "Daily driver own",
+  "source": {"name": "Written for the vehicle book corpus", "license": "MIT"},
+  "extends": "obd2",
+  "ecus": [{"id": "pcm", "rx": "7E8"}],
+  "signals": [
+    {"key": "own_pressure", "name": "Own pressure", "read": {"service": "22", "number": "D110"}, "field": {"byte": 0, "bits": 16}, "scale": 0.1, "unit": "kPa", "decimals": 1}
+  ]
+}

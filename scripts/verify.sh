@@ -30,15 +30,17 @@
 #               routing case skips, since that means the paths were wrong;
 #               any other skip is reported, not failed (the surrogate's
 #               session-log case skips while another checkout's run holds
-#               its fixed log name). Then, where build-win32 has the
-#               shared core (HAVNE_SHARED_CORE), its own c_abi_shared and
+#               its fixed log name). Then build-win32's ComputedTest: the
+#               computed machine's results bit for bit under the x86
+#               compiler, which CI never builds. Then, where build-win32
+#               has the shared core (HAVNE_SHARED_CORE), its own c_abi_shared and
 #               ExportsTest.TheLibraryExportsTheDeclarations: the x86 DLL's
 #               export table, undecorated names included, which CI never
 #               builds; and PythonTest.*, the havne package against the
 #               x86 core, where build-win32 was configured with a 32-bit
 #               Python (the main checkout's build-py32-venv) and so
-#               registers them; the line adds "x86 core N/M", M being 2
-#               plus those.
+#               registers them; the line adds "x86 core N/M", M being
+#               ComputedTest's cases, plus 2 and those with the shared core.
 #
 # --build-only runs win32 and build and stops: fresh binaries without the
 # suite, for a machine that only runs them (the laptop at the car).
@@ -330,11 +332,12 @@ ctest_failed() {
 
 if [ "$do_build" = 1 ]; then
     if [ "$do_win32" = 1 ] && [ "$have_win32" = 1 ]; then
+        # test_signals builds here for the cross-arch ComputedTest step.
         # The x86 shared core and havne-cli (whose ELM327 emulator
         # PythonTest.test_read_pids runs) join the one build call when the
         # cache has the option; an older tree's cache gets it from the
         # first call's configure, so those targets follow in a second
-        win32_targets="ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy"
+        win32_targets="ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy test_signals"
         shared_listed=0
         if grep -q '^HAVNE_SHARED_CORE:BOOL=ON' build-win32/CMakeCache.txt; then
             win32_targets="$win32_targets ecuio test_c_abi_shared havne-cli"
@@ -392,24 +395,32 @@ if [ "$do_cross" = 1 ] && [ "$have_win32" = 1 ]; then
         line cross-arch FAIL "$dur" "$summary ($skips): the routing case skipped, so the x86 paths are wrong"
         exit 1
     fi
-    # The x86 shared core's two checks, and the Python package's tests
-    # where a 32-bit Python registered them, in build-win32's own ctest
-    x86=""
+    # The x86 computed machine (test_signals' ComputedTest), then the
+    # shared core's two checks and the Python package's tests where a
+    # 32-bit Python registered them, in build-win32's own ctest
+    cross_dur=$dur
+    want=$(ctest --test-dir build-win32 -C Release -N -R '^ComputedTest\.' 2>/dev/null \
+        | sed -n 's/^Total Tests: //p' | tr -d '\r')
+    [ "${want:-0}" -gt 0 ] || {
+        line cross-arch FAIL "$dur" "$summary: build-win32 lists no ComputedTest case (is test_signals built there?)"
+        exit 1
+    }
+    pattern='ComputedTest\..*'
     if grep -q '^HAVNE_SHARED_CORE:BOOL=ON' build-win32/CMakeCache.txt; then
-        cross_dur=$dur
         py32=$(ctest --test-dir build-win32 -C Release -N -R '^PythonTest\.' 2>/dev/null \
             | sed -n 's/^Total Tests: //p' | tr -d '\r')
-        want=$((2 + ${py32:-0}))
-        run cross-arch-core ctest --test-dir build-win32 -C Release --output-on-failure \
-            --no-tests=error -R '^(c_abi_shared|ExportsTest\.TheLibraryExportsTheDeclarations|PythonTest\..*)$'
-        dur=$((cross_dur + dur))
-        [ "$rc" = 0 ] || ctest_failed cross-arch-core
-        x86="; x86 core $(ctest_summary "$LOGDIR/cross-arch-core.log" | cut -d' ' -f1)"
-        [ "$x86" = "; x86 core $want/$want" ] || {
-            line cross-arch FAIL "$dur" "$summary$x86: the x86 shared core's $want checks didn't all run"
-            exit 1
-        }
+        want=$((want + 2 + ${py32:-0}))
+        pattern="$pattern|c_abi_shared|ExportsTest\.TheLibraryExportsTheDeclarations|PythonTest\..*"
     fi
+    run cross-arch-core ctest --test-dir build-win32 -C Release --output-on-failure \
+        --no-tests=error -R "^($pattern)\$"
+    dur=$((cross_dur + dur))
+    [ "$rc" = 0 ] || ctest_failed cross-arch-core
+    x86="; x86 core $(ctest_summary "$LOGDIR/cross-arch-core.log" | cut -d' ' -f1)"
+    [ "$x86" = "; x86 core $want/$want" ] || {
+        line cross-arch FAIL "$dur" "$summary$x86: the x86 core's $want checks didn't all run"
+        exit 1
+    }
     line cross-arch ok "$dur" "$summary$x86${skips:+: $skips}"
 fi
 

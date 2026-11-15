@@ -4,15 +4,19 @@
 import QtQuick
 import QtQuick.Shapes
 
-// The mark beside a readout once its value is past dangerFrom: a filled
-// triangle with an exclamation point, so danger is told from warning by
-// more than hue (the night palettes draw both in warm colors).
-// The gauge shows it only while it applies.
+// The mark beside a readout once its value is past dangerFrom or a danger
+// alert reads its signal: a filled triangle with an exclamation point, so
+// danger is told from warning by more than hue (the night palettes draw
+// both in warm colors). The gauge shows it only while it applies; on an
+// alert's danger fill it takes the fill's text color, the point cut in
+// the fill.
 Item {
     id: mark
     objectName: "dangerMark"
 
     property real size: 16
+    property color color: Theme.gaugeDanger
+    property color cutout: Theme.surface
 
     implicitWidth: size
     implicitHeight: size
@@ -27,10 +31,10 @@ Item {
         anchors.fill: parent
         preferredRendererType: Shape.CurveRenderer
         ShapePath {
-            strokeColor: Theme.gaugeDanger
+            strokeColor: mark.color
             strokeWidth: Math.max(1, mark.size * 0.08)
             joinStyle: ShapePath.RoundJoin
-            fillColor: Theme.gaugeDanger
+            fillColor: mark.color
             startX: mark.width / 2; startY: mark.size * 0.06
             PathLine { x: mark.width - mark.size * 0.04; y: mark.height - mark.size * 0.08 }
             PathLine { x: mark.size * 0.04; y: mark.height - mark.size * 0.08 }
@@ -44,6 +48,6 @@ Item {
         Accessible.ignored: true
         font.pixelSize: mark.size * 0.62
         font.weight: Font.Bold
-        color: Theme.surface
+        color: mark.cutout
     }
 }

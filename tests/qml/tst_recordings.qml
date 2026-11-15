@@ -876,6 +876,29 @@ TestCase {
         return url.substring(0, url.lastIndexOf("/"))
     }
 
+    // The viewer's two saves through the save picker: a picker with no
+    // document says so in Save report's note and in the export's
+    function test_theViewersSavePickersSayWhyNothingWasSaved() {
+        const page = openEarlyViewer()
+        DocumentPicker.setPickerForTesting(true)
+        const report = find(page, "reportDialog")
+        report.usePicker = true
+        report.open()
+        compare(DocumentPicker.titleForTesting(), "health-report.txt")
+        DocumentPicker.deliver(report.request, -1, "", "")
+        compare(page.reportNote, "Report not saved: The picker returned no document")
+        verify(page.reportFailed)
+
+        const panel = openExport(page)
+        const save = find(panel, "exportSaveDialog")
+        save.usePicker = true
+        save.open()
+        compare(DocumentPicker.mimeTypeForTesting(), "text/csv")
+        DocumentPicker.deliver(save.request, -1, "", "")
+        compare(panel.note, "Not exported: The picker returned no document")
+        verify(panel.failed)
+    }
+
     function test_theExportPanelTakesTheChartsPlaceAndClosesAgain() {
         const page = openEarlyViewer()
         const chart = find(page, "chartFrame")
@@ -4034,7 +4057,7 @@ profile  raw
     function vehicleBook(baseline) {
         const entry = (id, label, folder) => ({
             id: id, label: label, vinKey: "", uri: "", plotted: [], unplotted: [],
-            signals: [], own: "", plugin: "", baseline: folder })
+            picks: [], own: "", baseline: folder })
         return { salt: "", picked: "v1",
                  list: [entry("v1", "Daily driver", baseline), entry("v2", "Weekend car", "")] }
     }
@@ -4206,6 +4229,158 @@ profile  raw
         compare(page.viewT0, 7620)
         compare(page.viewT1, 9620)
         compare(page.cursorMs, 7920)
+    }
+
+    readonly property var conditionsRow: ({
+        title: "2026-11-13 09:00:00 · Conditions", uri: "replay://x?profile=obd2",
+        folder: Harness.recordingFixtures + "/conditions", source: "", profile: "obd2" })
+
+    // Opens the conditions fixture and its Conditions panel
+    function openConditions() {
+        const page = createPage()
+        page.recordings = [conditionsRow]
+        openRow(page, conditionsRow)
+        const button = find(page, "jumpConditions")
+        verify(button.visible, "a recording with conditions offers the panel")
+        button.clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        return page
+    }
+
+    // The panel lists each entry by its start, in the viewer's words, and is
+    // one of two with Stretches
+    function test_theConditionsPanelListsTheRecordingsConditions() {
+        const page = openConditions()
+        verify(page.conditionsOpen)
+        verify(find(page, "conditionsPanel").visible, "the panel is up")
+        verify(find(page, "jumpConditions").checked, "its switch shows it open")
+        verify(find(page, "chartFrame").visible, "the desktop keeps its chart")
+        verify(!find(page, "conditionsCut").visible, "every entry is listed")
+        const list = find(page, "conditionList")
+        compare(list.count, 3)
+        tryVerify(() => list.itemAtIndex(2) !== null, 2000, "the rows have delegates")
+        const row = i => list.itemAtIndex(i)
+        compare(find(row(0), "conditionTime").text, "7.3 s")
+        compare(find(row(0), "conditionName").text, "Coolant high")
+        compare(find(row(0), "conditionLevel").text, "warning")
+        compare(find(row(0), "conditionLength").text, "ON for 10 s")
+        compare(find(row(1), "conditionName").text, "Engine speed high")
+        verify(!find(row(1), "conditionLevel").visible, "no alert, no level")
+        compare(find(row(1), "conditionLength").text, "ON for 0.5 s")
+        compare(find(row(2), "conditionName").text, "Engine speed high")
+        compare(find(row(2), "conditionLength").text, "no new data for 3.1 s, to the end")
+
+        // Drawn none, then warning, so the alert's level lies on top
+        compare(page.conditionsByLevel.map(s => s.key + (s.on ? ":on" : ":off")),
+                ["rpm_high:off", "rpm_high:on", "coolant_high:on"])
+
+        // Export takes the chart's room, the panel's with it, and gives it back
+        page.openExport()
+        verify(!find(page, "conditionsPanel").visible, "hidden under Export")
+        page.closeExport()
+        verify(find(page, "conditionsPanel").visible, "back once Export closes")
+
+        find(page, "jumpStretches").clicked()
+        verify(page.stretchesOpen)
+        verify(!page.conditionsOpen, "Stretches takes the panel's place")
+        find(page, "jumpConditions").clicked()
+        verify(page.conditionsOpen)
+        verify(!page.stretchesOpen, "and Conditions takes it back")
+        find(page, "conditionsClose").clicked()
+        verify(!page.conditionsOpen)
+    }
+
+    // A row centers the view on its entry and puts the cursor at its start;
+    // the desktop's panel stays up
+    function test_aConditionsRowCentersTheView() {
+        const page = openConditions()
+        page.setView(0, 2000)
+        const list = find(page, "conditionList")
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the row has a delegate")
+        mouseClick(find(list.itemAtIndex(0), "conditionRowArea"))
+        // Coolant high: 7.251 s to 17.501 s
+        compare(page.viewT0, 11376)
+        compare(page.viewT1, 13376)
+        compare(page.cursorMs, 7251)
+        compare(page.conditionPick, 0)
+        verify(page.conditionsOpen, "the desktop's panel stays up")
+        // A new recording drops the pick and the panel
+        page.backToList()
+        compare(page.conditionPick, -1)
+        verify(!page.conditionsOpen)
+    }
+
+    // An alert's ON spans draw on the lower row in their level's role, the
+    // rest 6 px above: a span with no alert inside an alert's keeps pixels of
+    // its own. A context that records each rectangle stands in for the chart's
+    function test_aSpanWithNoAlertKeepsItsOwnRow() {
+        const page = createPage()
+        page.recordings = [conditionsRow]
+        openRow(page, conditionsRow)
+        const ctx = {
+            fillStyle: "", rects: [],
+            fillRect(x, y, w, h) { this.rects.push({ x: x, y: y, w: w, h: h, style: String(this.fillStyle) }) }
+        }
+        // 100 ms to a pixel, the lower row's top at 100
+        page.drawConditions(ctx, 100, 0, 400, t => t / 100, page.conditionsByLevel)
+        const at = (x, y) => ctx.rects.filter(r => r.y === y && r.x <= x && x < r.x + r.w)
+        // Engine speed high (no alert) ON from 12.876 s to 13.376 s, wholly
+        // inside Coolant high's warning (7.251 s to 17.501 s)
+        compare(at(130, 94).length, 1, "the span with no alert on the upper row")
+        compare(at(130, 94)[0].style, String(Theme.textDim))
+        compare(at(130, 100).length, 1, "the warning on the lower row")
+        compare(at(130, 100)[0].style, String(Theme.alertWarnFill))
+        compare(at(100, 94).length, 0, "the upper row empty outside its span")
+        // The stretch with no new data, dashed on the upper row from 26.876 s
+        verify(at(270, 94).length === 1 && at(273, 94).length === 0, "dashed 3 on, 3 off")
+        verify(ctx.rects.every(r => r.h === 4 && (r.y === 94 || r.y === 100)), "two 4 px rows")
+    }
+
+    // An ON span's stale parts are dashed and the rest of it solid, all on
+    // its row in its level's role
+    function test_anOnSpansStalePartsAreDashed() {
+        const page = createPage()
+        page.recordings = [conditionsRow]
+        openRow(page, conditionsRow)
+        const ctx = {
+            fillStyle: "", rects: [],
+            fillRect(x, y, w, h) { this.rects.push({ x: x, y: y, w: w, h: h, style: String(this.fillStyle) }) }
+        }
+        page.drawConditions(ctx, 100, 0, 400, t => t / 100, [{
+            key: "boost", name: "Boost", level: 2, on: true, fromMs: 1000, toMs: 9000,
+            heldStart: false, openEnd: false, stale: [{ fromMs: 3000, toMs: 5000 }] }])
+        const at = x => ctx.rects.filter(r => r.x <= x && x < r.x + r.w)
+        verify(ctx.rects.every(r => r.y === 100 && r.style === String(Theme.alertDangerFill)),
+               "the danger row, in danger's role")
+        compare(at(20).length, 1, "solid before the part")
+        compare(at(29.9).length, 1)
+        compare(at(31).length, 1, "a dash")
+        compare(at(34).length, 0, "a gap")
+        compare(at(37).length, 1, "the next dash")
+        compare(at(60).length, 1, "solid after the part")
+        compare(at(95).length, 0, "nothing past the span")
+    }
+
+    // The panel says when a span's stretches with no new data past the bound
+    // are drawn as one, beside the entries' own cut
+    function test_theCutLineNamesEachCut() {
+        const page = openConditions()
+        const panel = find(page, "conditionsPanel")
+        const line = find(page, "conditionsCut")
+        panel.info = { conditionPartsCut: true, conditionBound: 4096 }
+        compare(line.text, "Past 4096 stretches with no new data, a span's later ones are drawn as one to its end")
+        panel.info = { conditionSpansCut: true, conditionSpanCount: 5000, conditionPartsCut: true, conditionBound: 4096 }
+        compare(line.text, "Showing the first 3 of 5000. Past 4096 stretches with no new data, "
+                + "a span's later ones are drawn as one to its end")
+        panel.info = { conditionsCut: true }
+        compare(line.text, "Showing the first 3: the recording holds more condition events than the viewer reads")
+    }
+
+    // A recording with no conditions offers no panel
+    function test_aRecordingWithoutConditionsHasNoConditionsButton() {
+        const page = openFindings()
+        verify(!find(page, "jumpConditions").visible)
+        compare(page.conditionsByLevel.length, 0)
     }
 
     // The frame test (developer mode only): it moves the view for its

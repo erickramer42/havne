@@ -49,6 +49,9 @@ TestCase {
     }
 
     function cleanup() {
+        // The armed case saves a set that records: none outlives it
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[{"key":"c","name":"C",'
+                              + '"when":{"signal":["id:1001"],"unit":"RPM","above":90000},"mark":true}]}')
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.recording = false
@@ -804,6 +807,70 @@ TestCase {
         compare(mark.text, "Mark (1)")
     }
 
+    // The armed recorder in the sheet (Main's armedButton is the header's): where
+    // Start log stands, its states in words, Mark only inside a window
+    function test_theSheetArmsTheRecorderAndMarksInAWindow() {
+        neverHide()
+        const s = phoneMain()
+        const records = bound => '{"havne_conditions":1,"conditions":[{"key":"rec","name":"Engine stopped",'
+                                + '"when":{"signal":["id:3001"],"unit":"km/h",' + bound + '},'
+                                + '"record":{"before":0.2,"after":0.2}}]}'
+        Bridge.saveConditions(records('"above":90000'))
+        connect("mock://demo")
+        enterOn(s)
+        revealedOn(s)
+        const armed = find(s.dash, "driveArmed")
+        const mark = find(s.dash, "driveMark")
+        verify(armed.visible && armed.enabled, "Armed offers itself")
+        compare(armed.text, "Arm", "off, it says what a press does")
+        verify(!mark.visible, "no Mark before a recorder")
+        // Waiting: armed, between windows, no Mark
+        mouseClick(armed)
+        tryCompare(Bridge, "armedActive", true, 3000)
+        compare(armed.text, "Armed")
+        compare(find(s.dash, "driveStatusRun").text, "Armed")
+        verify(!mark.visible, "no Mark between windows")
+        mouseClick(armed)
+        tryCompare(Bridge, "armedActive", false, 3000)
+        Bridge.saveConditions(records('"below":1'))
+        tryVerify(() => armed.enabled, 3000)
+        mouseClick(armed)
+        tryCompare(Bridge, "armedActive", true, 3000)
+        tryVerify(() => Bridge.armedRecording, 10000, "a window opens")
+        compare(armed.text, "Recording (window 1)")
+        verify(mark.visible, "Mark inside the window")
+        verify(!find(s.dash, "driveStartLog").visible, "Start log steps aside")
+        compare(find(s.dash, "driveStatusRun").text, "Recording (window 1)")
+        verify(waitForPolish(s.main), "laid out")
+        for (const c of find(s.dash, "driveSessionRow").children) {
+            if (!c.visible || c.objectName === "")
+                continue
+            const at = c.mapToItem(s.main.contentItem, 0, 0)
+            verify(at.x >= -0.5 && at.x + c.width <= s.main.contentItem.width + 0.5,
+                   c.objectName + " inside the window: " + at.x + " + " + c.width)
+        }
+        mouseClick(armed)
+        tryCompare(Bridge, "armedActive", false, 3000)
+        verify(!mark.visible, "Mark goes with the recorder")
+    }
+
+    // A tap on the disabled Armed says why in the notice, as a refused press does
+    function test_aDisabledArmedExplainsItselfWhenTapped() {
+        neverHide()
+        const s = phoneMain()
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[{"key":"c","name":"C",'
+                              + '"when":{"signal":["id:1001"],"unit":"RPM","above":90000},"mark":true}]}')
+        connect("mock://demo")
+        enterOn(s)
+        revealedOn(s)
+        const armed = find(s.dash, "driveArmed")
+        verify(armed.visible && !armed.enabled, "no condition records")
+        Bridge.clearLogNotice()
+        mouseClick(find(s.dash, "driveArmedHost"))
+        tryCompare(Bridge, "logNotice", "Armed not started: no condition records", 3000)
+        verify(!Bridge.armedActive)
+    }
+
     // Each control a touch's size on the glass, 8 from its neighbor, inside the window
     function test_theSheetsTargetsAreATouchsSize_data() {
         return [{ tag: "upright", w: 384, h: 832 }, { tag: "on its side", w: 832, h: 384 }]
@@ -1250,5 +1317,38 @@ TestCase {
         fronted(s)
         other.destroy()
         tryVerify(() => field.activeFocus, 2000, "the field has it again")
+    }
+
+    // ---- The alert band
+
+    // In the view the band takes the page's top slot under the status line
+    // and overlays the gauges' top: the pages stay where they were, the bars
+    // stay down, Main's band is hidden; it goes with the view
+    Component { id: alertRowsC; ListModel {} }
+    function test_theDriveBandOverlaysTheGaugesTop() {
+        const s = driven()
+        enterOn(s)
+        const pages = find(s.dash, "dashPages")
+        const before = pages.mapToItem(s.main.contentItem, 0, 0).y
+        const rows = createTemporaryObject(alertRowsC, testCase)
+        const mainBand = find(s.main.contentItem, "alertBand")
+        const band = find(s.dash, "driveAlertBand")
+        mainBand.conditions = rows
+        band.conditions = rows
+        rows.append({ key: "a", name: "Coolant hot", enabled: true, level: "danger", banner: true,
+                      live: true, state: "on", stale: false, unavailable: false, fired: 1,
+                      value: 112, unit: "°C", decimals: 0, staleSinceMs: -1 })
+        tryVerify(() => band.visible, 2000, "the drive view's band shows")
+        verify(waitForPolish(s.main), "laid out")
+        verify(!mainBand.visible, "Main's band is hidden in the view")
+        const status = find(s.dash, "driveStatusLine")
+        compare(band.mapToItem(s.dash, 0, 0).y, status.y + status.height, "under the status line")
+        verify(band.z > pages.z, "over the gauges")
+        compare(pages.mapToItem(s.main.contentItem, 0, 0).y, before, "the gauges didn't move")
+        verify(!s.dash.barsUp && !s.dash.barsHeld, "an alert raises no bars")
+        s.dash.leaveDrive(true)
+        verify(waitForPolish(s.main), "laid out")
+        verify(!band.visible, "the view's band goes with it")
+        verify(mainBand.visible, "and Main's shows")
     }
 }

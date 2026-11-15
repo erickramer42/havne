@@ -137,9 +137,58 @@ TestCase {
         compare(SignalForm.fieldsOf(efile, efile.signals[0]), e)
     }
 
+    // A key is made from the name once: an Edit keeps it whatever the
+    // new name, a new signal of a saved one's name takes that one's, and a
+    // name whose key the file has gets the next free one
+    function test_aKeyIsMadeOnceAndKeptThroughARename() {
+        compare(SignalForm.keyFor([], "Oil Temp", ""), "oil_temp")
+        const saved = [{ key: "oil_temp", name: "Oil temperature" }]
+        compare(SignalForm.keyFor(saved, "Oil temp, sump", "oil_temp"), "oil_temp", "an Edit keeps it")
+        compare(SignalForm.keyFor(saved, " Oil temperature ", ""), "oil_temp",
+                "a saved one's name, its key")
+        compare(SignalForm.keyFor(saved, "Oil Temp", ""), "oil_temp_2", "the kept key is taken")
+        compare(SignalForm.keyFor(saved.concat([{ key: "oil_temp_2", name: "Oil Temp" }]), "Oil-temp", ""),
+                "oil_temp_3")
+        compare(SignalForm.keyFor([{ key: "by_hand", name: "Typed" }], "Typed again", "by_hand"), "by_hand",
+                "a key written by hand is kept too")
+        // A numbered key stays inside a key's 31 characters
+        const long = "a".repeat(40)
+        const first = SignalForm.keyFor([], long, "")
+        compare(first, "a".repeat(31))
+        compare(SignalForm.keyFor([{ key: first, name: "another" }], long, ""), "a".repeat(29) + "_2",
+                "the name's part is cut, never the number")
+        const nine = [{ key: first, name: "n1" }]
+        for (let n = 2; n <= 9; ++n)
+            nine.push({ key: "a".repeat(29) + "_" + n, name: "n" + n })
+        compare(SignalForm.keyFor(nine, long, ""), "a".repeat(28) + "_10")
+        // One under the limit keeps its whole name beside a one-digit number
+        compare(SignalForm.keyFor([{ key: "b".repeat(29), name: "x" }], "b".repeat(29), ""),
+                "b".repeat(29) + "_2")
+        compare(SignalForm.keyFor([{ key: "a_b_c", name: "x" }], "a b c", ""), "a_b_c_2")
+    }
+
     function test_aDamagedCopyIsNoFile() {
         compare(SignalForm.parseFile("{"), null)
         compare(SignalForm.parseFile("{\"signals\": []}"), null)
         verify(SignalForm.parseFile(JSON.stringify(SignalForm.emptyFile("V"))) !== null)
+    }
+
+    // A file written by hand may leave a signal's ECU out, which the
+    // loader reads as the file's first: read so, an edit keeps that ECU
+    // and the list names it
+    function test_aSignalWithNoEcuReadsTheFilesFirst() {
+        const file = SignalForm.parseFile(JSON.stringify({
+            havne_signals: 1, name: "By hand", source: { name: "t" },
+            ecus: [{ id: "pcm", rx: "7E8" }, { id: "tcm", rx: "7E9" }],
+            signals: [
+                { key: "a", name: "A", read: { service: "22", number: "D100" }, field: { byte: 0, bits: 8 } },
+                { key: "b", name: "B", ecu: "tcm", read: { service: "22", number: "D101" },
+                  field: { byte: 0, bits: 8 } },
+                { key: "c", name: "C", kind: "computed", expr: "a + b" }] }))
+        compare(file.signals.map(s => s.ecu), ["pcm", "tcm", undefined], "a computed signal reads none")
+        compare(SignalForm.describe(file, file.signals[0]), "22 D100 on 7E8")
+        compare(SignalForm.fieldsOf(file, file.signals[0]).rx, "7E8")
+        compare(SignalForm.trimEcus(SignalForm.copy(file)).ecus.map(e => e.id), ["pcm", "tcm"],
+                "its ECU is one the file uses")
     }
 }

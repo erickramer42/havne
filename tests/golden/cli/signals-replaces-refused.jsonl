@@ -1,2 +1,2 @@
 {"schema": 1, "type": "start"}
-{"code": 11, "detail": "line 11, column 5: signal 'baro' replaces 'Barometric Pressure', which 'Boost' reads: a signal a computed one reads is a number or an enum", "message": "invalid argument", "type": "error"}
+{"code": 11, "detail": "line 11, column 5: signal 'baro' replaces 'Barometric Pressure', which 'Boost' reads: a computed signal reads a number, an enum or another computed signal", "message": "invalid argument", "type": "error"}

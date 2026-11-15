@@ -10,7 +10,10 @@
 # file core can't read; a file is read no further than core's bound. A
 # packed plugin (one file, no read callback) loads too. A folder plugin's
 # variants each give their own signal's gauge. A plugin names the core it
-# requires.
+# requires. A signal file wraps to a packed plugin, a variant goes in and
+# comes out (ADR-0064), each as havne-cli writes it, the lineage kept and
+# an ECU's rename said; each variant names its source, and its text reads
+# back as its set.
 
 import json
 import os
@@ -24,7 +27,7 @@ import havne
 import havne.signals
 from havne._core import lib
 
-from conftest import PLUGINS, ROOT
+from conftest import PLUGINS, ROOT, SIGNALS, cli, havne_cli, line_of
 
 
 def test_the_example_plugin_loads_and_a_session_decodes_through_a_variant():
@@ -194,3 +197,135 @@ def test_a_plugin_says_a_variant_s_gauge(tmp_path):
     assert plugin.gauge("oil") is None, "the first variant's, when none is named"
     assert plugin.gauge("oil", "gauged") == havne.Gauge(40.0, 150.0, None, 130.0)
     assert plugin.gauge("no_such_signal", "gauged") is None
+
+
+def test_a_plugin_says_a_variant_s_expression(tmp_path):
+    (tmp_path / "manifest.json").write_text(
+        '{"havne_plugin": 1, "id": "chained", "name": "Chained", "version": "1.0.0", '
+        '"requires": {"core": "0.1.0"}, "source": {"name": "Havne\'s tests"}, '
+        '"tiers": ["data"], "ecus": [{"id": "pcm", "rx": "7E8"}], '
+        '"variants": [{"id": "plain", "files": ["a.json"]}, '
+        '{"id": "chain", "files": ["a.json", "b.json"]}]}')
+    (tmp_path / "a.json").write_text(
+        '{"havne_signals": 1, "signals": [{"key": "oil", "name": "Oil", '
+        '"read": {"service": "22", "number": "F40D"}, "field": {"byte": 0}, '
+        '"offset": -40, "unit": "degC"}]}')
+    (tmp_path / "b.json").write_text(
+        '{"havne_signals": 2, "signals": ['
+        '{"key": "hot", "name": "Hot", "kind": "computed", "expr": "if(oil > 100, 1, 0)"}, '
+        '{"key": "hot_twice", "name": "Hot Twice", "kind": "computed", "expr": "hot * 2"}]}')
+    plugin = havne.Plugin(str(tmp_path))
+    assert plugin.expr("hot") is None, "the first variant has no such signal"
+    assert plugin.expr("oil", "chain") is None, "a number signal has none"
+    assert plugin.expr("hot", "chain") == "if(oil > 100, 1, 0)"
+    assert plugin.expr("hot_twice", "chain") == "hot * 2"
+    assert plugin.expr("no_such_signal", "chain") is None
+
+
+def fixture_text(name):
+    """A signal-file fixture's text, its line ends LF (the lineage hashes
+    the bytes, and a Windows checkout gives CRLF)"""
+    with open(os.path.join(SIGNALS, name), "rb") as f:
+        return f.read().replace(b"\r\n", b"\n").decode("utf-8")
+
+
+def loaded(tmp_path, text, name="p.json"):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return havne.Plugin(str(path))
+
+
+def test_a_signal_file_wraps_and_a_variant_goes_in_and_out(tmp_path):
+    wrapped = havne.Plugin.wrap(fixture_text("extras.json"))
+    p = loaded(tmp_path, wrapped, "a.json")
+    assert (p.id, p.version, p.variants) == ("desk-extras", "1.0.0", ["base"])
+    assert len(p.lineage) == 32 and int(p.lineage, 16) >= 0
+
+    put = havne.Plugin.put_variant(wrapped, fixture_text("gauges.json").encode("utf-8"))
+    assert isinstance(put, havne.PutVariant) and put.notes == ""
+    two = loaded(tmp_path, put.text, "b.json")
+    assert two.variants == ["base", "gauged-extras"] and two.version == "1.1.0"
+
+    renamed = havne.Plugin.put_variant(put.text, fixture_text("modules.json"), "modules")
+    assert "'tcm' is 'tcm_2'" in renamed.notes, renamed.notes
+    dropped = havne.Plugin.drop_variant(renamed.text, "gauged-extras")
+    three = loaded(tmp_path, dropped, "c.json")
+    assert three.variants == ["base", "modules"] and three.version == "1.3.0"
+    assert two.lineage == three.lineage == p.lineage, "kept by put and drop"
+
+
+def test_the_calls_give_the_bytes_havne_cli_writes(tmp_path):
+    havne_cli()
+    (tmp_path / "extras.json").write_text(fixture_text("extras.json"), encoding="utf-8",
+                                          newline="\n")
+    (tmp_path / "modules.json").write_text(fixture_text("modules.json"), encoding="utf-8",
+                                           newline="\n")
+    line_of(cli("plugins", "wrap", tmp_path / "extras.json", "--id", "mine",
+                "--variant", "desk", "--out", tmp_path / "a.json"), "written")
+    written = line_of(cli("plugins", "put", tmp_path / "a.json", tmp_path / "modules.json",
+                          "--out", tmp_path / "b.json"), "written")
+    wrapped = havne.Plugin.wrap(fixture_text("extras.json"), id="mine", variant="desk")
+    put = havne.Plugin.put_variant(wrapped, fixture_text("modules.json"))
+    assert (tmp_path / "a.json").read_bytes() == wrapped.encode("utf-8")
+    assert (tmp_path / "b.json").read_bytes() == put.text.encode("utf-8")
+    assert written["notes"] == put.notes and written["variant"] == "desk-modules"
+
+
+def test_a_match_takes_its_codes_as_text_or_a_list(tmp_path):
+    for wmi in ("ZZZ,ZZ9ABC", ["ZZZ", "ZZ9ABC"]):
+        doc = json.loads(havne.Plugin.wrap(fixture_text("extras.json"), wmi=wmi,
+                                           years=(2015, 2020)))
+        assert doc["match"] == [{"wmi": ["ZZZ", "ZZ9ABC"], "years": [2015, 2020]}]
+    doc = json.loads(havne.Plugin.wrap(fixture_text("extras.json"), wmi="ZZZ"))
+    assert doc["match"] == [{"wmi": ["ZZZ"]}], "no years, every year"
+    assert "match" not in json.loads(havne.Plugin.wrap(fixture_text("extras.json")))
+    for lower in ("zzz", b"zzz", ["zzz", "zz9abc"]):
+        doc = json.loads(havne.Plugin.wrap(fixture_text("extras.json"), wmi=lower))
+        assert doc["match"][0]["wmi"] == (["ZZZ", "ZZ9ABC"] if isinstance(lower, list)
+                                          else ["ZZZ"]), "upper case, as havne-cli"
+
+
+def test_what_core_refuses_raises_its_words():
+    with pytest.raises(havne.Error) as refused:
+        havne.Plugin.wrap(fixture_text("refused.json"))
+    assert refused.value.call == "ecuio_plugin_wrap" and "line " in refused.value.detail
+    with pytest.raises(havne.Error) as no_wmi:
+        havne.Plugin.wrap(fixture_text("extras.json"), years=(2015, 2020))
+    assert "wmi" in no_wmi.value.detail
+    wrapped = havne.Plugin.wrap(fixture_text("extras.json"))
+    with pytest.raises(havne.Error) as last:
+        havne.Plugin.drop_variant(wrapped, "base")
+    assert last.value.call == "ecuio_plugin_drop_variant" and last.value.detail
+    with pytest.raises(havne.Error) as bad:
+        havne.Plugin.put_variant("{}", fixture_text("gauges.json"))
+    assert bad.value.call == "ecuio_plugin_put_variant"
+
+
+def test_each_variant_names_its_source(tmp_path):
+    f = havne.SignalFile(path=os.path.join(SIGNALS, "modules.json"))
+    assert f.source == havne.Source("Written by hand for Havne's tests", "", "",
+                                    "CC-BY-SA-4.0", "", True)
+    put = havne.Plugin.put_variant(havne.Plugin.wrap(fixture_text("gauges.json")),
+                                   fixture_text("modules.json"), "modules")
+    p = loaded(tmp_path, put.text)
+    assert p.source() == havne.Source("Written by hand for Havne's tests", "", "", "", "",
+                                      False)
+    assert p.source("modules").license == "CC-BY-SA-4.0"
+    assert p.source("modules").share_alike is True
+    assert havne.Plugin(os.path.join(PLUGINS, "example-sim")).lineage is None, \
+        "a manifest written by hand has none"
+
+
+def test_a_variants_text_reads_back_and_moves_into_another_plugin(tmp_path):
+    put = havne.Plugin.put_variant(havne.Plugin.wrap(fixture_text("extras.json")),
+                                   fixture_text("gauges.json"))
+    p = loaded(tmp_path, put.text)
+    text = p.variant_text("gauged-extras")
+    assert json.loads(text)["havne_signals"] in (1, 2)
+    again = havne.SignalFile(text)
+    assert again.name == "Desk extras" and again.gauge("coolant") is not None
+    mine = loaded(tmp_path, havne.Plugin.put_variant(
+        havne.Plugin.wrap(fixture_text("modules.json")), text, "copied").text, "m.json")
+    assert mine.variants == ["base", "copied"]
+    assert mine.gauge("coolant", "copied") == p.gauge("coolant", "gauged-extras")
+    assert p.variant_text() == p.variant_text("base")

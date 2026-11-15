@@ -847,4 +847,108 @@ TestCase {
         g.samples = [0, 9, 100, 100]
         compare(box.width, empty, "a three-digit label")
     }
+
+    // Every kind with a title draws it in the pick while there is no value,
+    // at 3:1 on the look's surface; a value, or no pick, leaves it dim
+    function test_aPickedColorTintsEachTitleWithNoValue_data() {
+        return [ { tag: "digital", comp: digitalC, name: "gaugeTitle" },
+                 { tag: "bar", comp: barC, name: "gaugeTitle" },
+                 { tag: "spark", comp: sparkC, name: "gaugeTitle" },
+                 { tag: "analog", comp: analogC, name: "gaugeCaption" } ]
+    }
+    function test_aPickedColorTintsEachTitleWithNoValue(data) {
+        for (const look of ["dark", "daylight"]) {
+            usePalette(look)
+            const pick = Theme.gaugeColor("stone")
+            const g = make(data.comp, { label: "Boost", caption: "Boost", picked: pick })
+            const title = find(g, data.name)
+            same(title.color, pick, data.tag + " in " + look)
+            verify(Theme.gaugeContrast(String(pick), look) >= 4.5, "the pick reads as text in " + look)
+            g.hasValue = true
+            same(title.color, Theme.textDim, data.tag + " with a value")
+            g.hasValue = false
+            g.picked = ""
+            same(title.color, Theme.textDim, data.tag + " with no pick")
+        }
+    }
+
+    // The title is small text: a pick sets it only at the text ratio (4.5:1)
+    // on the card's surface and on the page behind a plain cell; any other
+    // stays dim. Daylight's red, blue and green fail it
+    function test_aTitleTakesAPickOnlyWhereItReadsAsText() {
+        const ratio = (hex, bg) => {
+            const lin = v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+            const lum = c => 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+            const a = lum(Qt.color(hex)), b = lum(Qt.color(bg))
+            return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+        }
+        let dimmed = 0
+        for (const look of ["dark", "daylight"]) {
+            usePalette(look)
+            const g = make(digitalC, { label: "Boost" })
+            const title = find(g, "gaugeTitle")
+            for (const name of Theme.gaugeColorNames) {
+                const pick = Theme.gaugeColor(name)
+                g.picked = pick
+                const p = Theme.palettes[look]
+                const reads = ratio(pick, p.surface) >= 4.5 && ratio(pick, p.bg) >= 4.5
+                same(title.color, reads ? pick : Theme.textDim, name + " in " + look)
+                if (!reads) ++dimmed
+            }
+        }
+        verify(dimmed > 0, "some pick is too faint for text in some look")
+        usePalette("daylight")
+        const c = make(digitalC, { label: "Boost", picked: "#ffff00" })
+        same(find(c, "gaugeTitle").color, Theme.textDim, "a custom pick too faint for text")
+    }
+
+    // ---- An alert ON on the signal
+
+    // The value's text in the level's role over its zone's, the mark for a
+    // danger only, the zones' drawing the value's own; in each palette
+    function test_anAlertColorsTheValueAndMarksDanger_data() {
+        const kinds = [{ k: "dial", c: analogC }, { k: "ring", c: ringC },
+                       { k: "number", c: digitalC }, { k: "bar", c: barC },
+                       { k: "cells", c: segmentsC, value: 1000 }, { k: "sparkline", c: sparkC },
+                       { k: "digits", c: readoutC, digits: true }]
+        const rows = []
+        for (const p of Theme.paletteNames)
+            for (const k of kinds)
+                for (const zones of [true, false])
+                    rows.push(Object.assign({ tag: k.k + ", " + p + (zones ? "" : ", no zones"),
+                                              palette: p, zones: zones }, k))
+        return rows
+    }
+    function test_anAlertColorsTheValueAndMarksDanger(data) {
+        usePalette(data.palette)
+        const props = { label: "Coolant", value: data.value ?? 10, hasValue: true }
+        if (!data.zones)
+            Object.assign(props, { warnFrom: NaN, dangerFrom: NaN })
+        const g = make(data.c, props)
+        const drawn = () => data.digits ? g.digitColor : find(g, "readout").color
+        const mark = find(g, "dangerMark")
+        const normal = drawn()
+        compare(mark.opacity, 0, "no alert, no mark")
+        compare(mark.visible, data.zones, "a danger zone keeps the mark's slot")
+
+        g.alertLevel = 1
+        same(drawn(), Theme.alertWarnFill, "a warning's role")
+        compare(mark.opacity, 0, "a warning has no mark")
+        compare(mark.visible, data.zones, "a warning opens no slot")
+        verify(g.Accessible.name.indexOf(", warning alert") > 0, g.Accessible.name)
+
+        g.alertLevel = 2
+        same(drawn(), Theme.alertDangerFill, "a danger's role")
+        verify(mark.visible, "a danger shows the mark, with or without a zone")
+        compare(mark.opacity, 1, "a danger has the mark")
+        verify(g.Accessible.name.indexOf(", danger alert") > 0, g.Accessible.name)
+        same(g.zoneColor(g.value, "#123456"), "#123456", "the zones stay the value's")
+
+        g.hasValue = false
+        same(drawn(), Theme.textDim, "no value: no alert's color")
+        compare(mark.opacity, 0, "and no mark")
+        g.hasValue = true
+        g.alertLevel = 0
+        same(drawn(), normal, "back to its own color")
+    }
 }

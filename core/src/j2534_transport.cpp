@@ -11,6 +11,8 @@
 //          ECUIO_FRAME_FLAG_REASSEMBLED on every message:
 //          J2534StreamTest.DirectLoadUriDeliversInjectedFramesExactly,
 //          J2534HealthTest.LongRepliesArriveWhole
+//          The floor and the timer's wait: J2534HealthTest.TheFloor*,
+//          .VxTheFloorsWaitReadsNothing; ?gap=: J2534QueryParamTest
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -35,9 +37,9 @@
 /* The query keys parse_query reads, for create's check (internal.h);
  * every platform's, so create links where the transport is a stub. */
 extern "C" const char* const ecuio_j2534_query_keys[] = {
-    "baud",    "flags",    "filter",   "txid",         "poll",
-    "probe",   "identify", "diagnose", "pack",         "scan",
-    "profile", "did",      "session",  "keepalive_ms", nullptr};
+    "baud",     "flags",    "filter",       "txid", "poll", "probe",
+    "identify", "diagnose", "pack",         "scan", "gap",  "profile",
+    "did",      "session",  "keepalive_ms", nullptr};
 
 #ifdef _WIN32
 
@@ -53,13 +55,18 @@ namespace {
  * time on every adapter. */
 constexpr uint32_t J2534_IDLE_READ_TIMEOUT_MS = 100;
 
-/* With requests to serve, no read holds longer than this. The VX holds
- * every read for its whole timeout unless the batch fills, and the
- * surrogate asks for 16 messages, so a longer read would sit on a reply
- * that came back in 4 ms until its timeout ended
- * (docs/bench-sessions/2026-10-22.md). A reply is seen within one slice
- * of arriving. */
+/* With requests to serve, no read holds longer than this. The child asks
+ * the vendor for one message a call, so a reply ends its read; a read that
+ * brings nothing the VX holds to its timeout, and this keeps it short
+ * enough for another channel's request
+ * (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md). */
 constexpr uint32_t J2534_READ_SLICE_MS = 10;
+
+/* The floor between requests on a channel without ?gap=: through the VX
+ * a Single Frame reply took 4.6 ms and a six-PID pack 16.4 ms
+ * (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md), so the replies
+ * set the pace and the floor only keeps an instant answer from spinning. */
+constexpr int64_t J2534_GAP_US = 5000;
 
 /* The request engine's timing is in request_engine.h; the link-health
  * rules, their quiet run and the failure backoff in link_health.h. */
@@ -477,7 +484,9 @@ void leave_sessions(ecuio_j2534_transport* t, link_health& h)
  * rotation, or ?poll='s one), each pass ends the waits that ran out,
  * sends each idle channel's next request once its floor has passed,
  * then reads once, for at most the slice, and gives a matched frame to
- * the engine, so the next request goes out when the reply is in.
+ * the engine, so the next request goes out when the reply is in. While
+ * no reply may come (ecuio_engine_awaiting) it waits on its own timer
+ * instead of reading.
  * Passive (no requests) only reads, and so does a session with nothing
  * left to ask. A read that brought a frame is followed by the next at
  * once, so every mode drains what has arrived; an empty one waits out
@@ -500,7 +509,8 @@ void j2534_worker(ecuio_j2534_transport* t)
      * step (precise_wait.h): the floor between requests is the engine's */
     ecuio_precise_wait precise(requests);
     link_health h(t->session->last_error, t->session->error_count,
-                  t->session->record_link.get());
+                  t->session->record_link.get(), t->session, t->epoch,
+                  &t->clock.last_us, &t->clock.last_host_us);
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
@@ -517,6 +527,7 @@ void j2534_worker(ecuio_j2534_transport* t)
     }
 
     while (!t->stop_requested.load()) {
+        link_judge_waiting(h);
         if (requests) {
             const int64_t now = engine_now_us(t);
             for (uint32_t c = 0; c < e.chan_count; ++c) {
@@ -525,9 +536,10 @@ void j2534_worker(ecuio_j2534_transport* t)
                 }
                 const int32_t r = ecuio_engine_due(&e, c, now);
                 if (r != ECUIO_ENGINE_NONE) {
+                    const int64_t start = engine_now_us(t);
                     const bool sent = send_request(
                         t, ecuio_engine_request_of(&e, c, r), h);
-                    ecuio_engine_sent(&e, c, r, sent, engine_now_us(t));
+                    ecuio_engine_sent(&e, c, r, sent, engine_now_us(t), start);
                 }
             }
         }
@@ -541,18 +553,36 @@ void j2534_worker(ecuio_j2534_transport* t)
             ? ecuio_engine_next_event_us(&e, engine_now_us(t))
             : INT64_MAX;
         const bool asking = next_us != INT64_MAX;
+        /* Every reply in and only a floor (or a focus's sweep) to wait
+         * for: the worker's own timer, no vendor read, which the VX holds
+         * about 10 ms past a short timeout
+         * (docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md). Frames
+         * that come meanwhile wait in the adapter for the next read. */
+        const bool timer_only = requests && asking && next_us > 0 &&
+                                h.backoff_ms == 0 && !ecuio_engine_awaiting(&e);
         const uint32_t timeout_ms = read_timeout_ms(next_us);
         const auto read_start = std::chrono::steady_clock::now();
-        const read_outcome o = pump_one(t, timeout_ms);
-        if (requests && o.matched) {
-            /* the refresh interval on the adapter's clock (ADR-0042) */
-            e.stamp_set = true;
-            e.stamp_us = static_cast<int64_t>(t->rx_frame.timestamp_us);
-            e.stamp_breaks = t->clock.host_steps;
-            (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
-                                        engine_now_us(t), nullptr);
+        read_outcome o;
+        if (timer_only) {
+            const int64_t slice_us = int64_t{J2534_READ_SLICE_MS} * 1000;
+            if (precise.sleep_until(
+                    read_start + std::chrono::microseconds(
+                                     next_us < slice_us ? next_us : slice_us),
+                    t->stop_requested)) {
+                break;
+            }
+        } else {
+            o = pump_one(t, timeout_ms);
+            if (requests && o.matched) {
+                /* the refresh interval on the adapter's clock (ADR-0042) */
+                e.stamp_set = true;
+                e.stamp_us = static_cast<int64_t>(t->rx_frame.timestamp_us);
+                e.stamp_breaks = t->clock.host_steps;
+                (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
+                                            engine_now_us(t), nullptr);
+            }
+            update_health(h, o, !asking);
         }
-        update_health(h, o, !asking);
         if (h.recovered) {
             h.recovered = false;
             if (requests && t->probe) {
@@ -584,7 +614,7 @@ void j2534_worker(ecuio_j2534_transport* t)
                 break;
             }
             h.backoff_ms = link_backoff_next(h.backoff_ms);
-        } else if (!o.got) {
+        } else if (!o.got && !timer_only) {
             /* An empty read waits out its timeout, even from a vendor
              * that returns at once, so the loop never spins: on time
              * (precise_wait.h), since that timeout is the way to the
@@ -612,7 +642,8 @@ void j2534_worker(ecuio_j2534_transport* t)
  *       baud   decimal, nonzero
  *       flags  0x-hex or decimal; 0 legal
  *       the request keys (ecuio_request_param lists them); ?filter='s
- *              channel registers a FLOW_CONTROL filter
+ *              channel registers a FLOW_CONTROL filter; without ?gap=
+ *              the floor is J2534_GAP_US
  *       profile core's key, read by ecuio_session_create
  *   - every occurrence is judged, and of good ones the last wins
  *   - create has split the query by the shared grammar and refused
@@ -894,6 +925,9 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     if (st != ECUIO_OK) {
         return st;
     }
+    if (params.req.gap_us < 0) {
+        params.req.gap_us = J2534_GAP_US;
+    }
     ecuio_j2534_device_t dev = {};
     st = resolve_uri(uri, &dev);
     if (st != ECUIO_OK) {
@@ -979,6 +1013,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     describe_session(t.get(), params.baud, connect_flags, &session->info);
     ecuio_seed_reports(session, t->engine, rx_ids, t->chan_count);
     t->epoch = host_clock::now();   /* as mock: end of attach */
+    session->judges_link = true;
 
     wrap->impl = t.release();
     session->transport = wrap;   /* session.h member: direct install */

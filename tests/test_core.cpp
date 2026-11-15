@@ -35,6 +35,7 @@ extern "C" {
 #include "ecuio/signals.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/profile.h"
+#include "ecuio/conditions.h"
 #include "ecuio/vin.h"
 #include "fake_diagnostics.h" /* tests: the fake ECU's report, the mock's too */
 }
@@ -5152,6 +5153,101 @@ TEST(CoreTest, AComputedInputAtItsBoundStillCounts)
     EXPECT_EQ(ecuio_profile_unregister("test-computed-age"), ECUIO_OK);
 }
 
+/* Each input past its bound or never seen reaches the program as no
+ * value, so an if's branch not taken can hold one (ADR-0051 section 5's
+ * format 2 rule), and a format 1 program over a stale input still gives
+ * none, as it did when any stale input blanked it. A registered set: no
+ * file writes these steps yet. */
+TEST(CoreTest, AStaleInputIsNoValueOnlyWhereTheProgramReadsIt)
+{
+    static ecuio_signal_def_t defs[4];
+    static ecuio_computed_t computed[2];
+    static ecuio_signal_set_t set{};
+    defs[0] = value_def(1, ECUIO_VALUE_UINT, 0x123); /* a gear */
+    defs[0].bit_length = 8;
+    defs[1] = value_def(3, ECUIO_VALUE_UINT, 0x124); /* a speed */
+    defs[1].bit_length = 8;
+    for (uint16_t i = 2; i < 4; ++i) {
+        defs[i] = value_def(static_cast<uint16_t>(i + 2), ECUIO_VALUE_UINT, 0);
+        defs[i].flags = ECUIO_DEF_FLAG_COMPUTED;
+        defs[i].table_first = static_cast<uint16_t>(i - 2);
+    }
+    for (ecuio_computed_t& c : computed) {
+        c = ecuio_computed_t{};
+        c.input_ids[0] = 1;
+        c.input_ids[1] = 3;
+        c.input_count = 2;
+    }
+    /* if(gear == 0, 0, speed) */
+    const uint8_t pick[] = {
+        ECUIO_COMPUTED_PUSH_INPUT | 0u, ECUIO_COMPUTED_PUSH_CONSTANT | 0u,
+        ECUIO_COMPUTED_EQUAL,           ECUIO_COMPUTED_PUSH_CONSTANT | 0u,
+        ECUIO_COMPUTED_PUSH_INPUT | 1u, ECUIO_COMPUTED_IF};
+    std::memcpy(computed[0].steps, pick, sizeof pick);
+    computed[0].step_count = sizeof pick;
+    computed[0].constant_count = 1;
+    /* gear - speed, format 1 */
+    computed[1].steps[0] = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+    computed[1].steps[1] = ECUIO_COMPUTED_PUSH_INPUT | 1u;
+    computed[1].steps[2] = ECUIO_COMPUTED_SUBTRACT;
+    computed[1].step_count = 3;
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 4;
+    set.defs = defs;
+    set.computed_count = 2;
+    set.computed = computed;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("test-computed-stale", &set, &why),
+              ECUIO_OK)
+        << "code " << why.code << " at " << why.index;
+
+    const auto run = [](bool speed_seen) {
+        ecuio_session_t* session = nullptr;
+        EXPECT_EQ(ecuio_session_create("mock://t?profile=test-computed-stale",
+                                       &session),
+                  ECUIO_OK);
+        ValuesCapture cap;
+        EXPECT_EQ(
+            ecuio_register_values_callback(session, values_capture_cb, &cap),
+            ECUIO_OK);
+        const auto send = [&](uint32_t id, uint8_t byte, double seconds) {
+            const ecuio_frame_t f =
+                value_frame(id, {byte}, static_cast<uint64_t>(seconds * 1e6));
+            ecuio_session_dispatch_callbacks(session, &f);
+        };
+        if (speed_seen) {
+            send(0x124, 50, 0.0);
+        }
+        send(0x123, 1, 1.0); /* the speed 1 s old */
+        send(0x123, 1, 5.0); /* 5 s old: past the stale age */
+        send(0x123, 0, 6.0); /* in neutral, the speed not read */
+        ecuio_session_destroy(session);
+        return cap.batches;
+    };
+
+    const std::vector<SeenBatch> seen = run(true);
+    ASSERT_EQ(seen.size(), 4u);
+    ASSERT_NE(value_of(seen[1], 4), nullptr);
+    EXPECT_EQ(value_of(seen[1], 4)->value, 50.0) << "in gear, the speed";
+    ASSERT_NE(value_of(seen[1], 5), nullptr);
+    EXPECT_EQ(value_of(seen[1], 5)->value, -49.0);
+    EXPECT_EQ(value_of(seen[2], 4), nullptr) << "the branch taken is stale";
+    EXPECT_EQ(value_of(seen[2], 5), nullptr) << "format 1, as before";
+    ASSERT_NE(value_of(seen[3], 4), nullptr) << "the stale branch not taken";
+    EXPECT_EQ(value_of(seen[3], 4)->value, 0.0);
+    EXPECT_EQ(value_of(seen[3], 5), nullptr) << "format 1, as before";
+    EXPECT_EQ(seen[3].values.size(), 2u) << "the gear and the pick";
+
+    const std::vector<SeenBatch> never = run(false);
+    ASSERT_EQ(never.size(), 3u);
+    EXPECT_EQ(value_of(never[0], 4), nullptr) << "never seen, taken";
+    EXPECT_EQ(value_of(never[0], 5), nullptr);
+    ASSERT_NE(value_of(never[2], 4), nullptr) << "never seen, not taken";
+    EXPECT_EQ(value_of(never[2], 4)->value, 0.0);
+    EXPECT_EQ(value_of(never[2], 5), nullptr);
+    EXPECT_EQ(ecuio_profile_unregister("test-computed-stale"), ECUIO_OK);
+}
+
 /* Computing allocates nothing on the worker, as decoding doesn't
  * (CoreTest.WorkersAllocateNothingPerFrame's rule) */
 TEST(CoreTest, ComputingValuesAllocatesNothing)
@@ -5176,6 +5272,342 @@ TEST(CoreTest, ComputingValuesAllocatesNothing)
     EXPECT_EQ(batches, 3);
     ecuio_session_destroy(session);
     EXPECT_EQ(ecuio_profile_unregister("test-computed-new"), ECUIO_OK);
+}
+
+namespace {
+
+/* ADR-0062's chain: numbers L1 (id 1, 0x123), L2 (id 2, 0x124), L3 (id
+ * 3, 0x125), then computed defs listed top first: C3 (id 13) = C2 + L3,
+ * C2 (id 12) = C1 * 2, C1 (id 11) = L1 - L2, L2 bound to 1 s there */
+struct ChainSet {
+    ecuio_signal_def_t defs[6];
+    ecuio_computed_t computed[3];
+    ecuio_signal_set_t set{};
+
+    ChainSet()
+    {
+        for (uint16_t i = 0; i < 3; ++i) {
+            defs[i] = value_def(static_cast<uint16_t>(i + 1), ECUIO_VALUE_UINT,
+                                0x123u + i);
+            defs[i].bit_length = 8;
+        }
+        const uint16_t ids[3] = {13, 12, 11};
+        for (uint16_t k = 0; k < 3; ++k) {
+            defs[3 + k] = value_def(ids[k], ECUIO_VALUE_UINT, 0);
+            defs[3 + k].flags = ECUIO_DEF_FLAG_COMPUTED;
+            defs[3 + k].table_first = k;
+            computed[k] = ecuio_computed_t{};
+        }
+        const auto two = [](ecuio_computed_t& c, uint16_t a, uint16_t b,
+                            uint8_t op) {
+            c.input_ids[0] = a;
+            c.input_ids[1] = b;
+            c.input_count = 2;
+            c.steps[0] = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+            c.steps[1] = ECUIO_COMPUTED_PUSH_INPUT | 1u;
+            c.steps[2] = op;
+            c.step_count = 3;
+        };
+        two(computed[0], 12, 3, ECUIO_COMPUTED_ADD);
+        computed[1].input_ids[0] = 11;
+        computed[1].input_count = 1;
+        computed[1].constants[0] = 2.0;
+        computed[1].constant_count = 1;
+        computed[1].steps[0] = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+        computed[1].steps[1] = ECUIO_COMPUTED_PUSH_CONSTANT | 0u;
+        computed[1].steps[2] = ECUIO_COMPUTED_MULTIPLY;
+        computed[1].step_count = 3;
+        two(computed[2], 1, 2, ECUIO_COMPUTED_SUBTRACT);
+        computed[2].max_age_us[1] = 1000000;
+        set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        set.count = 6;
+        set.defs = defs;
+        set.computed_count = 3;
+        set.computed = computed;
+    }
+};
+
+/* A session under a ChainSet registered as name, its values captured */
+struct ChainRun {
+    ecuio_session_t* session = nullptr;
+    ValuesCapture cap;
+
+    explicit ChainRun(const char* name)
+    {
+        const std::string uri = std::string("mock://t?profile=") + name;
+        EXPECT_EQ(ecuio_session_create(uri.c_str(), &session), ECUIO_OK);
+        EXPECT_EQ(
+            ecuio_register_values_callback(session, values_capture_cb, &cap),
+            ECUIO_OK);
+    }
+    ~ChainRun() { ecuio_session_destroy(session); }
+    ChainRun(const ChainRun&) = delete;
+    ChainRun& operator=(const ChainRun&) = delete;
+
+    /* One frame of byte on L(n)'s ID at seconds; its batch's ids */
+    std::vector<uint16_t> send(uint32_t n, uint8_t byte, double seconds)
+    {
+        const ecuio_frame_t f =
+            value_frame(0x122u + n, {byte},
+                        static_cast<uint64_t>(std::llround(seconds * 1e6)));
+        const size_t before = cap.batches.size();
+        ecuio_session_dispatch_callbacks(session, &f);
+        std::vector<uint16_t> ids;
+        if (cap.batches.size() > before) {
+            for (const SeenValue& v : cap.batches.back().values) {
+                ids.push_back(v.id);
+            }
+        }
+        return ids;
+    }
+    double value(uint16_t id) const
+    {
+        const SeenValue* v = value_of(cap.batches.back(), id);
+        return v != nullptr ? v->value : -1.0;
+    }
+};
+
+} // namespace
+
+/* Fed through a leaf, a chain works out from its leaves and joins the
+ * batch after the frame's values in the set's order (C3, C2, C1), each
+ * def once, though worked out C1 first */
+TEST(CoreTest, AChainJoinsTheBatchInTheSetsOrder)
+{
+    static ChainSet s;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("test-chain-order", &s.set, &why),
+              ECUIO_OK)
+        << "code " << why.code << " at " << why.index;
+    {
+        ChainRun r("test-chain-order");
+        EXPECT_EQ(r.send(2, 100, 0.0), std::vector<uint16_t>{2})
+            << "L1 never seen: C1 and all above it have no value";
+        EXPECT_EQ(r.send(3, 5, 0.0), std::vector<uint16_t>{3});
+        EXPECT_EQ(r.send(1, 120, 0.1), (std::vector<uint16_t>{1, 13, 12, 11}));
+        EXPECT_EQ(r.value(11), 20.0);
+        EXPECT_EQ(r.value(12), 40.0);
+        EXPECT_EQ(r.value(13), 45.0);
+    }
+    EXPECT_EQ(ecuio_profile_unregister("test-chain-order"), ECUIO_OK);
+}
+
+/* C3 fed by L3 alone works C2 and C1 out from the leaves at its frame:
+ * C3 joins the batch, the two it read don't, since nothing fed them */
+TEST(CoreTest, AChainFedThroughOneInputWorksOutTheOtherAtItsFrame)
+{
+    static ChainSet s;
+    ASSERT_EQ(ecuio_profile_register("test-chain-fed", &s.set, nullptr),
+              ECUIO_OK);
+    {
+        ChainRun r("test-chain-fed");
+        r.send(2, 100, 0.0);
+        r.send(1, 120, 0.1);
+        EXPECT_EQ(r.send(3, 7, 0.5), (std::vector<uint16_t>{3, 13}));
+        EXPECT_EQ(r.value(13), 47.0);
+        r.send(1, 130, 0.6);
+        EXPECT_EQ(r.send(3, 9, 0.7), (std::vector<uint16_t>{3, 13}));
+        EXPECT_EQ(r.value(13), 69.0) << "(130 - 100) * 2 + 9, worked out at this frame";
+    }
+    EXPECT_EQ(ecuio_profile_unregister("test-chain-fed"), ECUIO_OK);
+}
+
+/* A leaf past the bound written beside it (C1's 1 s on L2) leaves C1 and
+ * all above it without a value from that frame on, not later; a fresh
+ * L2 brings them back */
+TEST(CoreTest, AChainsLeafPastItsBoundLeavesNoValueAndNoLater)
+{
+    static ChainSet s;
+    ASSERT_EQ(ecuio_profile_register("test-chain-age", &s.set, nullptr),
+              ECUIO_OK);
+    {
+        ChainRun r("test-chain-age");
+        r.send(2, 100, 0.0);
+        r.send(1, 120, 0.0);
+        EXPECT_EQ(r.send(3, 5, 1.0), (std::vector<uint16_t>{3, 13}))
+            << "L2 exactly 1 s old: within its bound";
+        EXPECT_EQ(r.value(13), 45.0);
+        EXPECT_EQ(r.send(3, 5, 1.000001), std::vector<uint16_t>{3})
+            << "L2 1 us past its bound";
+        EXPECT_EQ(r.send(1, 120, 1.5), std::vector<uint16_t>{1});
+        EXPECT_EQ(r.send(2, 90, 2.0), (std::vector<uint16_t>{2, 13, 12, 11}));
+        EXPECT_EQ(r.value(11), 30.0);
+        EXPECT_EQ(r.value(13), 65.0);
+    }
+    EXPECT_EQ(ecuio_profile_unregister("test-chain-age"), ECUIO_OK);
+}
+
+namespace {
+
+/* A chain ECUIO_COMPUTED_MAX_DEPTH deep over one number (id 1, 0x123):
+ * level k (id 100 + k) is the level below plus 1, listed top first */
+struct DeepChain {
+    ecuio_signal_def_t defs[1 + ECUIO_COMPUTED_MAX_DEPTH];
+    ecuio_computed_t computed[ECUIO_COMPUTED_MAX_DEPTH];
+    ecuio_signal_set_t set{};
+
+    DeepChain()
+    {
+        defs[0] = value_def(1, ECUIO_VALUE_UINT, 0x123);
+        defs[0].bit_length = 8;
+        const uint32_t depth = ECUIO_COMPUTED_MAX_DEPTH;
+        for (uint32_t k = 1; k <= depth; ++k) {
+            const uint32_t at = depth - k; /* top first */
+            ecuio_signal_def_t& d = defs[1 + at];
+            d = value_def(static_cast<uint16_t>(100 + k), ECUIO_VALUE_UINT, 0);
+            d.flags = ECUIO_DEF_FLAG_COMPUTED;
+            d.table_first = static_cast<uint16_t>(at);
+            ecuio_computed_t& c = computed[at];
+            c = ecuio_computed_t{};
+            c.input_ids[0] = k == 1 ? 1 : static_cast<uint16_t>(100 + k - 1);
+            c.input_count = 1;
+            c.constants[0] = 1.0;
+            c.constant_count = 1;
+            c.steps[0] = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+            c.steps[1] = ECUIO_COMPUTED_PUSH_CONSTANT | 0u;
+            c.steps[2] = ECUIO_COMPUTED_ADD;
+            c.step_count = 3;
+        }
+        set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+        set.count = 1 + depth;
+        set.defs = defs;
+        set.computed_count = depth;
+        set.computed = computed;
+    }
+};
+
+} // namespace
+
+/* The deepest chain: every level once, the top the leaf plus 8, and the
+ * worker allocating nothing for it */
+TEST(CoreTest, TheDeepestChainComputesAndAllocatesNothing)
+{
+    static DeepChain s;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("test-chain-deep", &s.set, &why), ECUIO_OK)
+        << "code " << why.code << " at " << why.index;
+    {
+        ecuio_session_t* session = nullptr;
+        ASSERT_EQ(
+            ecuio_session_create("mock://t?profile=test-chain-deep", &session),
+            ECUIO_OK);
+        int batches = 0;
+        ASSERT_EQ(ecuio_register_values_callback(session, values_counting_cb,
+                                                 &batches),
+                  ECUIO_OK);
+        const ecuio_frame_t first = value_frame(0x123, {10}, 0);
+        ecuio_session_dispatch_callbacks(session, &first);
+        const unsigned long before = new_counter::on_this_thread();
+        for (uint8_t k = 1; k <= 20; ++k) {
+            const ecuio_frame_t f = value_frame(0x123, {k}, 50000u * k);
+            ecuio_session_dispatch_callbacks(session, &f);
+        }
+        EXPECT_EQ(new_counter::on_this_thread() - before, 0u);
+        EXPECT_EQ(batches, 21);
+        ecuio_session_destroy(session);
+    }
+    {
+        ChainRun r("test-chain-deep");
+        r.send(1, 10, 0.0);
+        const std::vector<uint16_t> ids = r.send(1, 50, 1.1);
+        const std::vector<uint16_t> top_first = {1,   108, 107, 106, 105,
+                                                 104, 103, 102, 101};
+        EXPECT_EQ(ids, top_first);
+        EXPECT_EQ(r.value(108), 58.0);
+        EXPECT_EQ(r.value(101), 51.0);
+    }
+    EXPECT_EQ(ecuio_profile_unregister("test-chain-deep"), ECUIO_OK);
+}
+
+/* The validator's depths are a heap byte per program, taken only for a
+ * set with a chain; no room is a code of its own, which registration
+ * gives as out of memory, the registry unchanged */
+TEST(CoreTest, NoRoomToCheckAChainIsOutOfMemory)
+{
+    static ChainSet chain;
+    static ComputedSet flat;
+    unsigned long before = new_counter::on_this_thread();
+    EXPECT_EQ(ecuio_validate_signal_set(&flat.set, nullptr), ECUIO_VALIDATE_OK);
+    EXPECT_EQ(new_counter::on_this_thread() - before, 0u)
+        << "a set with no chain allocates nothing";
+    before = new_counter::on_this_thread();
+    EXPECT_EQ(ecuio_validate_signal_set(&chain.set, nullptr),
+              ECUIO_VALIDATE_OK);
+    EXPECT_EQ(new_counter::on_this_thread() - before, 1u) << "the depths";
+
+    fail_new_on_this_thread(1);
+    ecuio_validation_t v{};
+    v.index = 7;
+    EXPECT_EQ(ecuio_validate_signal_set(&chain.set, &v),
+              ECUIO_VALIDATE_ERR_OUT_OF_MEMORY);
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_OUT_OF_MEMORY);
+    EXPECT_EQ(v.index, UINT32_MAX);
+    fail_new_on_this_thread(1);
+    EXPECT_EQ(ecuio_profile_register("test-chain-oom", &chain.set, &v),
+              ECUIO_ERR_OUT_OF_MEMORY);
+    EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_OUT_OF_MEMORY);
+    const ecuio_signal_set_t* found = nullptr;
+    EXPECT_EQ(ecuio_profile_lookup("test-chain-oom", &found),
+              ECUIO_ERR_UNKNOWN_PROFILE);
+}
+
+/* A computed signal carries no request: a focus on one keeps the number
+ * defs under it asked, down its chain (ADR-0062), and parks every other
+ * request */
+TEST(CoreTest, AFocusOnAComputedSignalKeepsItsLeavesAsked)
+{
+    const std::string file = R"({"havne_signals": 2, "name": "Focus chain",
+ "source": {"name": "Havne's tests"}, "extends": "obd2", "signals": [
+ {"key": "per_rev", "name": "Per Rev", "kind": "computed", "expr": "obd2.maf / obd2.rpm"},
+ {"key": "scaled", "name": "Scaled", "kind": "computed", "expr": "per_rev * 1000"}]})";
+    ecuio_signal_file_t* sf = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load(file.data(), file.size(), &sf), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_profile_register(ecuio_signal_file_profile(sf),
+                                     ecuio_signal_file_set(sf), nullptr),
+              ECUIO_OK);
+    const std::string uri =
+        std::string("mock://focus?profile=") + ecuio_signal_file_profile(sf);
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    request_params params;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ASSERT_GT(e->count, 2u);
+    ecuio_focus_seen seen;
+    ecuio_take_focus(s, e.get(), seen);
+
+    const uint16_t scaled = ecuio_signal_file_find(sf, "scaled")->id;
+    ASSERT_EQ(ecuio_session_set_focus(s, &scaled, 1), ECUIO_OK)
+        << ecuio_last_error_detail();
+    {
+        std::lock_guard<std::mutex> lock(s->focus_mutex);
+        EXPECT_EQ(s->focus_ids, std::vector<uint16_t>{scaled})
+            << "the picks as given";
+    }
+    ecuio_take_focus(s, e.get(), seen);
+    uint32_t kept = 0;
+    for (uint32_t k = 0; k < e->count; ++k) {
+        const ecuio_request& r = e->requests[k];
+        if (r.len != 2 || r.bytes[0] != 0x01 || r.bytes[1] % 0x20 == 0) {
+            continue; /* a data PID's, not a bitmap's */
+        }
+        const bool leaf = r.bytes[1] == 0x0C || r.bytes[1] == 0x10;
+        EXPECT_EQ(r.parked, leaf ? 0u : 1u)
+            << "PID " << static_cast<unsigned>(r.bytes[1]);
+        kept += leaf ? 1u : 0u;
+    }
+    EXPECT_EQ(kept, 2u) << "RPM and MAF";
+    ecuio_session_destroy(s);
+    EXPECT_EQ(ecuio_profile_unregister(ecuio_signal_file_profile(sf)),
+              ECUIO_OK);
+    ecuio_signal_file_free(sf);
 }
 
 /* A packed Service 01 reply (ADR-0039 Appendix A) decodes record by
@@ -6824,6 +7256,26 @@ TEST(CoreTest, SetFocusTakesTheSetsIdsAndRefusesTheRest)
     ecuio_session_destroy(raw);
 }
 
+/* A pick given twice is picked once, at its first place, so a
+ * recording's focus names each signal once */
+TEST(CoreTest, APickGivenTwiceIsPickedOnceAtItsFirstPlace)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://focus-twice", &s), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    ASSERT_GE(set->count, 2u);
+    const uint16_t a = set->defs[0].id;
+    const uint16_t b = set->defs[1].id;
+    const uint16_t ids[5] = {b, a, b, b, a};
+    ASSERT_EQ(ecuio_session_set_focus(s, ids, 5), ECUIO_OK);
+    {
+        std::lock_guard<std::mutex> lock(s->focus_mutex);
+        EXPECT_EQ(s->focus_ids, (std::vector<uint16_t>{b, a}));
+    }
+    ecuio_session_destroy(s);
+}
+
 /* The focus call clears the thread's detail on entry, so a refusal that
  * sets none (a NULL, a closed session) or a success leaves no stale
  * words from an earlier call */
@@ -6986,9 +7438,297 @@ TEST(CoreTest, AComputedPickKeepsItsInputsRequested)
     ecuio_session_destroy(s);
 }
 
+/* ADR-0063 section 7: a focus keeps the requests of an attached
+ * condition's signals asked, a computed signal's inputs for it, while the
+ * focus's own picks stay the caller's. A disabled condition keeps
+ * nothing; taking the conditions away parks what only they kept; with no
+ * focus nothing is parked. The picks alone decide whether a focus is
+ * askable: under ?poll=0x0C a condition on engine speed doesn't make a
+ * focus on vehicle speed one. */
+TEST(CoreTest, AFocusKeepsAnAttachedConditionsSignalsAsked)
+{
+    const auto attach = [](ecuio_session_t* s, const std::string& list) {
+        const std::string json =
+            R"({"havne_conditions":1,"conditions":[)" + list + "]}";
+        ecuio_condition_set_t* set = nullptr;
+        EXPECT_EQ(ecuio_condition_set_load(json.data(), json.size(), &set),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+        const ecuio_status_t st = ecuio_session_set_conditions(s, set, nullptr);
+        ecuio_condition_set_free(set);
+        return st;
+    };
+    const auto on = [](const char* key, const char* signal, const char* unit,
+                       const char* rest) {
+        return std::string(R"({"key":")") + key + R"(","name":")" + key +
+               R"(","when":{"signal":[")" + signal + R"("],"unit":")" + unit +
+               R"(","above":1})" + rest + "}";
+    };
+    /* The PIDs kept in rotation, in PID order */
+    const auto kept = [](const ecuio_request_engine& e) {
+        std::vector<int> pids;
+        for (uint32_t k = 0; k < e.count; ++k) {
+            const ecuio_request& r = e.requests[k];
+            if (r.parked == 0 && r.len == 2 && r.bytes[0] == 0x01) {
+                pids.push_back(r.bytes[1]);
+            }
+        }
+        std::sort(pids.begin(), pids.end());
+        return pids;
+    };
+
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://focus?profile=obd2", &s), ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    const uint16_t rpm = focus_id_of(set, {0x01, 0x0C});
+    request_params params;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ecuio_focus_seen seen;
+    ecuio_take_focus(s, e.get(), seen);
+
+    /* No focus: a condition parks nothing and moves no focus generation */
+    const uint32_t before = s->focus_generation.load();
+    ASSERT_EQ(attach(s, on("t", "obd2.throttle", "%", "")), ECUIO_OK);
+    EXPECT_EQ(s->focus_generation.load(), before);
+    ecuio_take_focus(s, e.get(), seen);
+    for (uint32_t k = 0; k < e->count; ++k) {
+        EXPECT_EQ(e->requests[k].parked, 0) << "row " << k;
+    }
+
+    ASSERT_EQ(ecuio_session_set_focus(s, &rpm, 1), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(kept(*e), (std::vector<int>{0x0C, 0x11})) << "throttle kept";
+    {
+        std::lock_guard<std::mutex> lock(s->focus_mutex);
+        EXPECT_EQ(s->focus_ids, std::vector<uint16_t>{rpm});
+    }
+
+    /* The same conditions again move no generation, so no sweep restarts */
+    const uint32_t focused = s->focus_generation.load();
+    ASSERT_EQ(attach(s, on("t", "obd2.throttle", "%", "")), ECUIO_OK);
+    EXPECT_EQ(s->focus_generation.load(), focused);
+
+    /* Boost carries no request: its condition keeps MAP and baro, its
+     * inputs; a disabled condition keeps nothing */
+    ASSERT_EQ(
+        attach(s, on("b", "id:7011", "kPa", "") + "," +
+                      on("off", "obd2.speed", "km/h", R"(,"enabled":false)")),
+        ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(kept(*e), (std::vector<int>{0x0B, 0x0C, 0x33}));
+
+    /* Taking the conditions away parks what only they kept */
+    ASSERT_EQ(ecuio_session_set_conditions(s, nullptr, nullptr), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(kept(*e), std::vector<int>{0x0C});
+    EXPECT_EQ(ecuio_session_set_focus(s, nullptr, 0), ECUIO_OK);
+    ecuio_session_destroy(s);
+
+    /* The picks alone decide: one request, 01 0C, under ?poll= */
+    ASSERT_EQ(ecuio_session_create("mock://focus?profile=obd2", &s), ECUIO_OK);
+    set = ecuio_session_signal_set(s);
+    const uint16_t speed = focus_id_of(set, {0x01, 0x0D});
+    request_params poll;
+    poll.has_poll = true;
+    poll.poll_pid = 0x0C;
+    auto p = std::make_unique<ecuio_request_engine>();
+    ASSERT_EQ(ecuio_build_requests(s, set, poll, s->info.rx_ids,
+                                   s->info.channel_count, p.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ASSERT_EQ(attach(s, on("r", "obd2.rpm", "RPM", "")), ECUIO_OK);
+    EXPECT_EQ(ecuio_session_set_focus(s, &speed, 1),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    ecuio_session_destroy(s);
+}
+
+/* ecuio_session_get_unasked_signals: the defs a focus parks, a computed
+ * one with a parked input, in the set's order; a def that shares a pick's
+ * reply, a dropped request's and a passive def are never listed; no
+ * focus lists nothing, and the list stays readable after close. The
+ * requests are built on mock sessions and the worker's take is driven by
+ * hand, as in the cases above. */
+TEST(CoreTest, TheUnaskedSignalsAreWhatTheFocusParks)
+{
+    const auto unasked = [](const ecuio_session_t* s) {
+        uint32_t n = 0;
+        EXPECT_EQ(ecuio_session_get_unasked_signals(s, nullptr, 0, &n),
+                  ECUIO_OK);
+        std::vector<uint16_t> ids(n);
+        uint32_t again = 0;
+        EXPECT_EQ(ecuio_session_get_unasked_signals(s, ids.data(), n, &again),
+                  ECUIO_OK);
+        EXPECT_EQ(again, n);
+        return ids;
+    };
+    const auto pid_of = [](const ecuio_signal_def_t& d) {
+        return d.mux_length == 2 && d.mux_offset == 0 &&
+                       (d.mux_key >> 8) == 0x41
+                   ? static_cast<int>(d.mux_key & 0xFF)
+                   : -1;
+    };
+    const auto ids_of = [](const ecuio_signal_set_t* set, auto keep) {
+        std::vector<uint16_t> ids;
+        for (uint32_t i = 0; i < set->count; ++i) {
+            if (keep(set->defs[i])) {
+                ids.push_back(set->defs[i].id);
+            }
+        }
+        return ids;
+    };
+
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create("mock://unasked?profile=obd2", &s),
+              ECUIO_OK);
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s);
+    ASSERT_NE(set, nullptr);
+    request_params params;
+    auto e = std::make_unique<ecuio_request_engine>();
+    bool probe = false;
+    bool identify = false;
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, e.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ecuio_focus_seen seen;
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_TRUE(unasked(s).empty()) << "no focus";
+
+    /* A focus on O2 S1's first field (PID 24): its second shares the reply */
+    uint16_t lambda = 0;
+    for (uint32_t i = 0; i < set->count && lambda == 0; ++i) {
+        if (pid_of(set->defs[i]) == 0x24) {
+            lambda = set->defs[i].id;
+        }
+    }
+    ASSERT_NE(lambda, 0);
+    ASSERT_EQ(ecuio_session_set_focus(s, &lambda, 1), ECUIO_OK);
+    EXPECT_TRUE(unasked(s).empty()) << "the worker hasn't taken it yet";
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(unasked(s),
+              ids_of(set,
+                     [&](const ecuio_signal_def_t& d) {
+                         const bool computed =
+                             (d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0;
+                         return computed ||
+                                (pid_of(d) >= 0 && pid_of(d) != 0x24);
+                     }))
+        << "every other Service 01 def, and Boost, whose MAP is parked";
+
+    /* A focus on Boost asks MAP and baro, so Boost isn't listed */
+    const uint16_t boost = ECUIO_OBD2_SIG_BOOST_ID;
+    ASSERT_EQ(ecuio_session_set_focus(s, &boost, 1), ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(unasked(s), ids_of(set, [&](const ecuio_signal_def_t& d) {
+                  const int pid = pid_of(d);
+                  return pid >= 0 && pid != 0x0B && pid != 0x33;
+              }));
+
+    /* A dropped request leaves the list as the table changes */
+    uint32_t rpm_row = e->count;
+    for (uint32_t k = 0; k < e->count; ++k) {
+        if (e->requests[k].len == 2 && e->requests[k].bytes[1] == 0x0C) {
+            rpm_row = k;
+        }
+    }
+    ASSERT_LT(rpm_row, e->count);
+    ecuio_engine_drop(e.get(), rpm_row, ECUIO_DROP_NOT_SUPPORTED, 0x12);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_EQ(unasked(s), ids_of(set, [&](const ecuio_signal_def_t& d) {
+                  const int pid = pid_of(d);
+                  return pid >= 0 && pid != 0x0B && pid != 0x33 && pid != 0x0C;
+              }));
+
+    /* The capacity takes the first, the count is all of them */
+    const std::vector<uint16_t> all = unasked(s);
+    ASSERT_GE(all.size(), 2u);
+    uint16_t two[2] = {};
+    uint32_t n = 0;
+    EXPECT_EQ(ecuio_session_get_unasked_signals(s, two, 2, &n), ECUIO_OK);
+    EXPECT_EQ(n, all.size());
+    EXPECT_EQ(two[0], all[0]);
+    EXPECT_EQ(two[1], all[1]);
+    EXPECT_EQ(ecuio_session_get_unasked_signals(nullptr, two, 2, &n),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_unasked_signals(s, nullptr, 2, &n),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_unasked_signals(s, two, 2, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+
+    /* Readable after close */
+    ecuio_session_close(s);
+    EXPECT_EQ(unasked(s), all);
+    ecuio_session_destroy(s);
+
+    /* The focus's end lists nothing */
+    ASSERT_EQ(ecuio_session_create("mock://unasked?profile=obd2", &s),
+              ECUIO_OK);
+    set = ecuio_session_signal_set(s);
+    auto f = std::make_unique<ecuio_request_engine>();
+    ASSERT_EQ(ecuio_build_requests(s, set, params, s->info.rx_ids,
+                                   s->info.channel_count, f.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ecuio_focus_seen fresh;
+    ASSERT_EQ(ecuio_session_set_focus(s, &boost, 1), ECUIO_OK);
+    ecuio_take_focus(s, f.get(), fresh);
+    EXPECT_FALSE(unasked(s).empty());
+    ASSERT_EQ(ecuio_session_set_focus(s, nullptr, 0), ECUIO_OK);
+    ecuio_take_focus(s, f.get(), fresh);
+    EXPECT_TRUE(unasked(s).empty()) << "the focus ended";
+    ecuio_session_destroy(s);
+
+    /* A passive def has no request, so it is never unasked */
+    static ecuio_signal_def_t defs[3];
+    defs[0] = value_def(61001, ECUIO_VALUE_UINT, ECUIO_OBD2_ECU_ARB_ID);
+    defs[1] = value_def(61002, ECUIO_VALUE_UINT, 0x3E8);
+    defs[2] = value_def(61003, ECUIO_VALUE_UINT, ECUIO_OBD2_ECU_ARB_ID);
+    for (ecuio_signal_def_t& d : defs) {
+        d.bit_length = 8;
+    }
+    for (uint32_t i : {0u, 2u}) {
+        defs[i].mux_length = 2;
+        defs[i].start_byte = 2;
+    }
+    defs[0].mux_key = 0x410C;
+    defs[2].mux_key = 0x410D;
+    static ecuio_channel_decl_t channel[1] = {{ECUIO_OBD2_ECU_ARB_ID, 0x7E0}};
+    static ecuio_signal_set_t passive{};
+    passive.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    passive.defs = defs;
+    passive.count = 3;
+    passive.channels = channel;
+    passive.channel_count = 1;
+    ASSERT_EQ(ecuio_profile_register("unasked-passive", &passive, nullptr),
+              ECUIO_OK);
+    ASSERT_EQ(
+        ecuio_session_create("mock://unasked?profile=unasked-passive", &s),
+        ECUIO_OK);
+    auto g = std::make_unique<ecuio_request_engine>();
+    ASSERT_EQ(ecuio_build_requests(s, &passive, params, s->info.rx_ids,
+                                   s->info.channel_count, g.get(), &probe,
+                                   &identify),
+              ECUIO_OK);
+    ecuio_focus_seen third;
+    const uint16_t first = 61001;
+    ASSERT_EQ(ecuio_session_set_focus(s, &first, 1), ECUIO_OK);
+    ecuio_take_focus(s, g.get(), third);
+    EXPECT_EQ(unasked(s), std::vector<uint16_t>{61003});
+    ecuio_session_destroy(s);
+    EXPECT_EQ(ecuio_profile_unregister("unasked-passive"), ECUIO_OK);
+}
+
 /* ADR-0056 section 4: the call's refusals, each changing nothing, and
  * the minimum reaching the engine with the focus at the worker's take;
- * the focus's end takes it away */
+ * the focus's end takes it away. A default pick (ECUIO_FOCUS_DEFAULT_PICK)
+ * is taken as any focus and needs picks; another flag is refused. */
 TEST(CoreTest, SetFocusWithChecksItsMinimumAndTheWorkerTakesIt)
 {
     ecuio_session_t* s = nullptr;
@@ -7016,9 +7756,16 @@ TEST(CoreTest, SetFocusWithChecksItsMinimumAndTheWorkerTakesIt)
     EXPECT_EQ(info.flags & ECUIO_SESSION_INFO_REQUESTS, 0u)
         << "the mock asks nothing";
     const uint32_t generation = s->focus_generation.load();
-    EXPECT_EQ(ecuio_session_set_focus_with(s, &rpm, 1, 100, 1),
+    EXPECT_EQ(ecuio_session_set_focus_with(s, &rpm, 1, 100,
+                                           ECUIO_FOCUS_DEFAULT_PICK | 0x2u),
               ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_STREQ(ecuio_last_error_detail(), "the focus takes no flags yet");
+    EXPECT_STREQ(ecuio_last_error_detail(), "the focus takes no flag 0x2");
+    EXPECT_EQ(ecuio_session_set_focus_with(s, nullptr, 0, 0,
+                                           ECUIO_FOCUS_DEFAULT_PICK),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "a default pick goes with signals picked: with none, set no "
+                 "focus and the whole set is asked");
     EXPECT_EQ(ecuio_session_set_focus_with(s, &rpm, 1,
                                            ECUIO_FOCUS_MIN_SWEEP_MAX_MS + 1, 0),
               ECUIO_ERR_INVALID_ARGUMENT);
@@ -7039,11 +7786,29 @@ TEST(CoreTest, SetFocusWithChecksItsMinimumAndTheWorkerTakesIt)
     ecuio_take_focus(s, e.get(), seen);
     EXPECT_EQ(e->min_sweep_us, 250000);
 
-    /* The plain call is the same focus with none */
+    /* A default pick is taken as any focus, its flag the session's */
+    const auto in_rotation = [&] {
+        uint32_t n = 0;
+        for (uint32_t k = 0; k < e->count; ++k) {
+            n += e->requests[k].parked == 0 ? 1 : 0;
+        }
+        return n;
+    };
+    ASSERT_EQ(
+        ecuio_session_set_focus_with(s, &rpm, 1, 0, ECUIO_FOCUS_DEFAULT_PICK),
+        ECUIO_OK);
+    ecuio_take_focus(s, e.get(), seen);
+    EXPECT_TRUE(e->focused);
+    EXPECT_EQ(in_rotation(), 1u);
+    EXPECT_EQ(s->focus_flags, ECUIO_FOCUS_DEFAULT_PICK);
+
+    /* The plain call is the same focus with none, and no flag */
     ASSERT_EQ(ecuio_session_set_focus(s, &rpm, 1), ECUIO_OK);
     ecuio_take_focus(s, e.get(), seen);
     EXPECT_TRUE(e->focused);
     EXPECT_EQ(e->min_sweep_us, 0);
+    EXPECT_EQ(in_rotation(), 1u);
+    EXPECT_EQ(s->focus_flags, 0u);
 
     ASSERT_EQ(ecuio_session_set_focus_with(s, &rpm, 1, 250, 0), ECUIO_OK);
     ecuio_take_focus(s, e.get(), seen);

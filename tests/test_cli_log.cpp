@@ -1,14 +1,19 @@
 // File/layer: tests/test_cli_log.cpp | test_cli, Qt-free, C++17
-// Testing: UNIT: CliLogTest (test_cli)
+// Testing: UNIT: CliLogTest, CliPickTest (test_cli)
 //
 // cli/log_lines.h: the log command's arguments, the picks resolved
-// against a set, its lines and the log line's ticker.
+// against a set, its lines and the log line's ticker; cli/default_pick.h
+// (CliPickTest), the default pick --pick ranked and the app share.
 
+#include "default_pick.h"
 #include "log_lines.h"
+
+#include "ecuio/profile.h"
 
 #include <gtest/gtest.h>
 
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -101,7 +106,97 @@ TEST(CliLogTest, AMinimumTimeBetweenSweepsIsTakenWithPicks)
     }
     EXPECT_EQ(
         why_of({"havne-cli", "log", "mock://x", "out", "--min-sweep", "250"}),
-        "--min-sweep goes with --signal: it paces the picked signals");
+        "--min-sweep goes with --signal or --pick ranked: it paces the "
+        "picked signals");
+    {
+        Args a({"havne-cli", "log", "mock://x", "out", "--pick", "ranked",
+                "--min-sweep", "250"});
+        cli::LogArgs la;
+        std::string why;
+        ASSERT_TRUE(cli::parse_log(a.argc(), a.argv.data(), la, &why)) << why;
+        EXPECT_EQ(la.min_sweep_ms, 250U);
+    }
+}
+
+/* --pick takes "ranked" alone, with or without --signal */
+TEST(CliLogTest, PickTakesRankedAlone)
+{
+    Args a({"havne-cli", "log", "mock://x", "out", "--pick", "ranked",
+            "--signal", "RPM"});
+    cli::LogArgs la;
+    std::string why;
+    ASSERT_TRUE(cli::parse_log(a.argc(), a.argv.data(), la, &why)) << why;
+    EXPECT_TRUE(la.pick_ranked);
+    ASSERT_EQ(la.names.size(), 1U);
+    cli::LogArgs plain;
+    Args b({"havne-cli", "log", "mock://x", "out"});
+    ASSERT_TRUE(cli::parse_log(b.argc(), b.argv.data(), plain, &why)) << why;
+    EXPECT_FALSE(plain.pick_ranked);
+    const std::string words =
+        "--pick takes 'ranked': the profile's ranked signals";
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "out", "--pick", "all"}),
+              words);
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "out", "--pick"}), words);
+    EXPECT_TRUE(cli::parse_pick("ranked"));
+    EXPECT_FALSE(cli::parse_pick("Ranked"));
+    EXPECT_FALSE(cli::parse_pick(nullptr));
+}
+
+/* The focus line says a default pick after the signals, before any
+ * minimum */
+TEST(CliLogTest, TheFocusLineNamesAPick)
+{
+    Set s;
+    const std::vector<uint16_t> ids = {10, 11};
+    EXPECT_EQ(
+        text([&](cli::Line& l) { cli::focus_line(l, &s.set, ids, 250, true); }),
+        "{\"type\":\"focus\",\"signals\":[{\"id\":10,\"name\":\"RPM\"},"
+        "{\"id\":11,\"name\":\"Vehicle Speed\"}],\"pick\":\"ranked\","
+        "\"min_sweep_ms\":250}");
+    EXPECT_EQ(
+        text([&](cli::Line& l) { cli::focus_line(l, &s.set, {}, 0, true); }),
+        "{\"type\":\"focus\",\"signals\":[],\"pick\":\"ranked\"}");
+}
+
+/* The default pick (cli/default_pick.h): a set's ranked number defs and
+ * the ids added, in the set's order, each once; a text's rank doesn't
+ * count, an id the set lacks is passed by, and a set that ranks none is
+ * asked whole (an empty pick) */
+TEST(CliPickTest, ThePickIsTheRankedDefsAndTheAddedInTheSetsOrder)
+{
+    Set s;
+    EXPECT_FALSE(cli::set_ranks(&s.set));
+    EXPECT_FALSE(cli::set_ranks(nullptr));
+    EXPECT_TRUE(cli::default_pick(&s.set, {11, 13}).empty())
+        << "a set that ranks none is asked whole";
+
+    s.defs[3].plot_rank = 1; /* the text: no rank of the pick's */
+    EXPECT_FALSE(cli::set_ranks(&s.set));
+    EXPECT_FALSE(cli::ranked_def(s.defs[3]));
+
+    s.defs[2].plot_rank = 2; /* Coolant Temp */
+    EXPECT_TRUE(cli::set_ranks(&s.set));
+    EXPECT_EQ(cli::default_pick(&s.set, {}), std::vector<uint16_t>{12});
+    EXPECT_EQ(cli::default_pick(&s.set, {13, 99, 10, 12, 10}),
+              (std::vector<uint16_t>{10, 12, 13}));
+    EXPECT_TRUE(cli::default_pick(nullptr, {10}).empty());
+}
+
+/* obd2's pick with nothing added is obd2's ranked signals */
+TEST(CliPickTest, Obd2sPickIsItsRankedSignals)
+{
+    const ecuio_signal_set_t* obd2 = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("obd2", &obd2), ECUIO_OK);
+    const std::vector<uint16_t> pick = cli::default_pick(obd2, {});
+    EXPECT_EQ(pick.size(), 14U);
+    for (uint16_t id : pick) {
+        bool ranked = false;
+        for (uint32_t i = 0; i < obd2->count; ++i) {
+            ranked = ranked ||
+                     (obd2->defs[i].id == id && obd2->defs[i].plot_rank != 0);
+        }
+        EXPECT_TRUE(ranked) << id;
+    }
 }
 
 /* The focus line says the minimum only when one is set, after the picks,
@@ -191,6 +286,33 @@ TEST(CliLogTest, BadArgumentsSayWhy)
     EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--signals", "s",
                       "--plugin", "p"}),
               "--signals and --plugin each give the profile: one at a time");
+    const std::string conditions_why = "--conditions takes one condition file";
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--conditions"}),
+              conditions_why);
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--conditions", ""}),
+              conditions_why);
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "a", "--conditions",
+                      "c.json", "--conditions", "d.json"}),
+              conditions_why);
+}
+
+TEST(CliLogTest, AConditionFileIsTakenBeforeOrAfterTheWords)
+{
+    Args a({"havne-cli", "log", "--conditions", "c.json", "mock://x", "out"});
+    cli::LogArgs la;
+    std::string why;
+    ASSERT_TRUE(cli::parse_log(a.argc(), a.argv.data(), la, &why)) << why;
+    EXPECT_STREQ(la.conditions, "c.json");
+    EXPECT_STREQ(la.uri, "mock://x");
+    EXPECT_STREQ(la.folder, "out");
+    Args b({"havne-cli", "log", "mock://x", "out", "--conditions", "c.json"});
+    cli::LogArgs lb;
+    ASSERT_TRUE(cli::parse_log(b.argc(), b.argv.data(), lb, &why)) << why;
+    EXPECT_STREQ(lb.conditions, "c.json");
+    Args c({"havne-cli", "log", "mock://x", "out"});
+    cli::LogArgs lc;
+    ASSERT_TRUE(cli::parse_log(c.argc(), c.argv.data(), lc, &why)) << why;
+    EXPECT_EQ(lc.conditions, nullptr);
 }
 
 TEST(CliLogTest, ThePicksResolveInOrderAndATypoOrARepeatIsRefused)
@@ -283,4 +405,96 @@ TEST(CliLogTest, ALogLineIsDueEachPeriodAndOnceAfterAStall)
     cli::LogTicker u(1000, 10);
     EXPECT_FALSE(u.due(500));
     EXPECT_TRUE(u.due(1010));
+}
+
+TEST(CliLogTest, TheRecordingsBytesCountEachOfItsFiles)
+{
+    const std::map<std::string, uint64_t> sizes = {
+        {"f/frames.csv", 1},       {"f/signals.csv", 2},
+        {"f/events.log", 4},       {"f/markers.csv", 8},
+        {"f/latency.csv", 16},     {"f/signals.json", 32},
+        {"f/conditions.json", 64}, {"f/notes.txt", 128}};
+    EXPECT_EQ(cli::recording_bytes("f",
+                                   [&](const std::string& path) {
+                                       const auto it = sizes.find(path);
+                                       return it == sizes.end() ? uint64_t{0}
+                                                                : it->second;
+                                   }),
+              127u)
+        << "each of a recording's files, conditions.json among them, and "
+           "nothing else";
+}
+
+TEST(CliLogTest, ArmedGoesWithAConditionFile)
+{
+    Args a({"havne-cli", "log", "mock://x", "out", "--armed", "--conditions",
+            "c.json"});
+    cli::LogArgs la;
+    std::string why;
+    ASSERT_TRUE(cli::parse_log(a.argc(), a.argv.data(), la, &why)) << why;
+    EXPECT_TRUE(la.armed);
+    Args b({"havne-cli", "log", "mock://x", "out", "--conditions", "c.json"});
+    cli::LogArgs lb;
+    ASSERT_TRUE(cli::parse_log(b.argc(), b.argv.data(), lb, &why)) << why;
+    EXPECT_FALSE(lb.armed);
+    EXPECT_EQ(why_of({"havne-cli", "log", "mock://x", "out", "--armed"}),
+              "--armed goes with --conditions: a condition with record opens "
+              "each window");
+}
+
+TEST(CliLogTest, AnArmedLogSaysEachRiseInWindowsAndEachReturnToArmed)
+{
+    cli::ArmedSeen seen;
+    cli::ArmedDue d = cli::armed_due(seen, ECUIO_RECORDING_ARMED, 0);
+    EXPECT_TRUE(d.armed) << "armed at the start";
+    EXPECT_FALSE(d.window);
+    d = cli::armed_due(seen, ECUIO_RECORDING_ARMED, 0);
+    EXPECT_FALSE(d.armed) << "said once";
+    EXPECT_FALSE(d.window);
+    d = cli::armed_due(seen, ECUIO_RECORDING_ACTIVE, 1);
+    EXPECT_TRUE(d.window) << "a window opened";
+    EXPECT_FALSE(d.armed);
+    d = cli::armed_due(seen, ECUIO_RECORDING_ACTIVE, 1);
+    EXPECT_FALSE(d.window);
+    EXPECT_FALSE(d.armed);
+    d = cli::armed_due(seen, ECUIO_RECORDING_ARMED, 1);
+    EXPECT_TRUE(d.armed) << "the window closed";
+    EXPECT_FALSE(d.window);
+    d = cli::armed_due(seen, ECUIO_RECORDING_ARMED, 3);
+    EXPECT_TRUE(d.window) << "two windows between reads: a jump";
+    EXPECT_TRUE(d.armed) << "and armed again after them";
+    EXPECT_EQ(seen.windows, 3u);
+    d = cli::armed_due(seen, ECUIO_RECORDING_DETACHED, 3);
+    EXPECT_FALSE(d.window);
+    EXPECT_FALSE(d.armed);
+}
+
+TEST(CliLogTest, AnArmedLogsLinesCountItsWindows)
+{
+    const std::string folder(1000, 'w');
+    const std::string window = text(
+        [&](cli::Line& l) { cli::armed_window_line(l, 2, folder.c_str()); });
+    EXPECT_EQ(window,
+              "{\"type\":\"recording\",\"state\":\"window\",\"window\":2,"
+              "\"folder\":\"" +
+                  folder + "\"}");
+    EXPECT_LE(window.size(), cli::armed_window_line_bytes(folder.c_str()));
+    EXPECT_EQ(text([&](cli::Line& l) { cli::armed_line(l, 4); }),
+              "{\"type\":\"recording\",\"state\":\"armed\",\"windows\":4}");
+
+    cli::LogReadout r;
+    r.seconds = 5;
+    r.bytes = 10;
+    r.values = 3;
+    r.armed = true;
+    r.windows = 2;
+    EXPECT_EQ(text([&](cli::Line& l) { cli::log_line(l, r); }),
+              "{\"type\":\"log\",\"seconds\":5,\"bytes\":10,\"values\":3,"
+              "\"windows\":2}");
+    EXPECT_EQ(text([&](cli::Line& l) {
+                  cli::log_end_line(l, "seconds", nullptr, r);
+              }),
+              "{\"type\":\"end\",\"reason\":\"seconds\",\"seconds\":5,"
+              "\"bytes\":10,\"values\":3,\"windows\":2}")
+        << "an armed log that names no window names no folder";
 }

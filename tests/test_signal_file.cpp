@@ -7,6 +7,8 @@
 #include <ecuio/signal_sets.h>
 #include "computed.h"
 
+#include <cctype>
+#include <clocale>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -479,7 +481,8 @@ TEST(SignalFileTest, WhatReadsAReplacedIdReadsTheFilesDef)
     EXPECT_TRUE(
         has(text_baro,
             "signal 'b' replaces 'Barometric Pressure', which 'Boost' "
-            "reads: a signal a computed one reads is a number or an enum"))
+            "reads: a computed signal reads a number, an enum or another "
+            "computed signal"))
         << text_baro;
     const std::string text_speed = refusal(
         head +
@@ -489,6 +492,135 @@ TEST(SignalFileTest, WhatReadsAReplacedIdReadsTheFilesDef)
     EXPECT_TRUE(
         has(text_speed, "signal 's' replaces 'Vehicle Speed', which 'C' reads"))
         << text_speed;
+}
+
+/* ADR-0062: in format 2 a computed replacement is read as any computed
+ * signal is, by the file's own (the boost-ratio example's shape) and by
+ * obd2's Boost; format 1 refuses it, naming the reader */
+TEST(SignalFileTest, AComputedReplacementIsReadInFormat2)
+{
+    const auto head = [](int format) {
+        return R"({"havne_signals":)" + std::to_string(format) +
+               R"(,"name":"T","source":{"name":"t"},"extends":"obd2","signals":[)";
+    };
+    File f = load(
+        head(2) +
+        R"({"key":"boost","name":"Boost","kind":"computed","expr":"obd2.map - obd2.baro"},)"
+        R"({"key":"pr","name":"Pressure Ratio","kind":"computed",)"
+        R"("expr":"(boost + obd2.baro) / obd2.baro"}]})");
+    ASSERT_NE(f, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(f.get());
+    EXPECT_EQ(set->computed_count, 2u)
+        << "obd2's Boost left out, two of the file's";
+    EXPECT_EQ(ecuio_signal_file_find(f.get(), "boost")->id,
+              ECUIO_OBD2_SIG_BOOST_ID);
+    const ecuio_signal_def_t* pr = ecuio_signal_file_find(f.get(), "pr");
+    EXPECT_EQ(set->computed[pr->table_first].input_ids[0],
+              ECUIO_OBD2_SIG_BOOST_ID)
+        << "Pressure Ratio reads the file's Boost";
+
+    const std::string map =
+        R"({"key":"map","name":"Intake Manifold Pressure","kind":"computed",)"
+        R"("expr":"obd2.baro * 1","unit":"kPa"}]})";
+    File g = load(head(2) + map);
+    ASSERT_NE(g, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* gs = ecuio_signal_file_set(g.get());
+    const ecuio_signal_def_t* boost = nullptr;
+    for (uint32_t i = 0; i < gs->count; ++i) {
+        if (gs->defs[i].id == ECUIO_OBD2_SIG_BOOST_ID) {
+            boost = &gs->defs[i];
+        }
+    }
+    ASSERT_NE(boost, nullptr);
+    const ecuio_signal_def_t* own = ecuio_signal_file_find(g.get(), "map");
+    EXPECT_EQ(gs->computed[boost->table_first].input_ids[0], own->id)
+        << "obd2's Boost reads the computed MAP";
+    EXPECT_NE(own->flags & ECUIO_DEF_FLAG_COMPUTED, 0u);
+
+    const std::string one = refusal(head(1) + map);
+    EXPECT_TRUE(has(one, "signal 'map' replaces 'Intake Manifold Pressure', "
+                         "which 'Boost' reads: a computed signal read by "
+                         "another needs \"havne_signals\": 2"))
+        << one;
+    /* obd2's Boost keeps an age bound on baro, which a computed input can't
+     * carry */
+    const std::string aged = refusal(
+        head(2) +
+        R"({"key":"baro","name":"Barometric Pressure","kind":"computed",)"
+        R"("expr":"obd2.load * 0 + 101","unit":"kPa"}]})");
+    EXPECT_TRUE(has(aged, "signal 'baro' replaces 'Barometric Pressure', which "
+                          "'Boost' reads with an age bound: a computed input's "
+                          "ages are its own inputs'"))
+        << aged;
+    const std::string aged_by_key = refusal(
+        head(2) +
+        R"({"key":"s","name":"Vehicle Speed","kind":"computed","expr":"obd2.rpm * 0"},)"
+        R"({"key":"c","name":"C","kind":"computed","expr":"obd2.speed + 1",)"
+        R"("max_age":{"obd2.speed":5}}]})");
+    EXPECT_TRUE(has(aged_by_key, "signal 's' replaces 'Vehicle Speed', which "
+                                 "'C' reads with an age bound"))
+        << aged_by_key;
+    /* A file's obd2.<key> reads a replacement by its ID: the reader's
+     * format decides */
+    const std::string speed =
+        R"({"key":"s","name":"Vehicle Speed","kind":"computed","expr":"obd2.rpm * 0"},)"
+        R"({"key":"c","name":"C","kind":"computed","expr":"obd2.speed + 1"}]})";
+    EXPECT_TRUE(load(head(2) + speed)) << ecuio_last_error_detail();
+    const std::string by_key = refusal(head(1) + speed);
+    EXPECT_TRUE(has(by_key, "signal 's' replaces 'Vehicle Speed', which 'C' "
+                            "reads: a computed signal read by another needs "
+                            "\"havne_signals\": 2"))
+        << by_key;
+}
+
+/* A chain through a replacement is the file's chain: a circle and a depth
+ * past 8 are refused in the file's words, and a replacement that puts
+ * obd2's Boost past 8 deep is refused at it; exactly 8 deep loads */
+TEST(SignalFileTest, AChainThroughAReplacementIsChecked)
+{
+    const std::string head =
+        R"({"havne_signals":2,"name":"T","source":{"name":"t"},"extends":"obd2","signals":[)";
+    const std::string circle = refusal(
+        head +
+        R"({"key":"boost","name":"Boost","kind":"computed","expr":"pr - 1"},)"
+        R"({"key":"pr","name":"Pressure Ratio","kind":"computed","expr":"boost + 1"}]})");
+    EXPECT_TRUE(has(circle, "signal 'boost' reads 'pr', which reads 'boost': "
+                            "computed signals can't read in a circle"))
+        << circle;
+
+    /* e1 up a chain from engine speed, then a last level named as a base
+     * def, levels deep in all */
+    const auto chain = [&](const std::string& last, const std::string& more,
+                           int levels = 8) {
+        std::string text =
+            head +
+            R"({"key":"e1","name":"E1","kind":"computed","expr":"obd2.rpm + 1"},)";
+        for (int k = 2; k < levels; ++k) {
+            text += R"({"key":"e)" + std::to_string(k) + R"(","name":"E)" +
+                    std::to_string(k) + R"(","kind":"computed","expr":"e)" +
+                    std::to_string(k - 1) + R"( + 1"},)";
+        }
+        return text + R"({"key":"top","name":")" + last +
+               R"(","kind":"computed","expr":"e)" + std::to_string(levels - 1) +
+               R"( + 1","unit":"kPa"})" + more + "]}";
+    };
+    EXPECT_TRUE(load(chain("Boost", ""))) << ecuio_last_error_detail();
+    const std::string nine = refusal(
+        chain("Boost",
+              R"(,{"key":"n","name":"N","kind":"computed","expr":"top + 1"})"));
+    EXPECT_TRUE(has(nine, "signal 'n' sits 9 computed signals deep: a chain "
+                          "goes 8 deep at most"))
+        << nine;
+    EXPECT_TRUE(load(chain("Intake Manifold Pressure", "", 7)))
+        << "obd2's Boost 8 deep: " << ecuio_last_error_detail();
+    const std::string under_boost =
+        refusal(chain("Intake Manifold Pressure", ""));
+    EXPECT_TRUE(
+        has(under_boost,
+            "signal 'top' replaces 'Intake Manifold Pressure', which 'Boost' "
+            "reads: that puts 'Boost' 9 computed signals deep: a chain "
+            "goes 8 deep at most"))
+        << under_boost;
 }
 
 /* Two signals of a file with one name are refused, naming both: a recording
@@ -515,7 +647,12 @@ TEST(SignalFileTest, EveryRefusalSaysWhereAndWhy)
         {"", "line"},
         {"[]", "the file is a list, not an object"},
         {R"({"name":"T"})", "starts with \"havne_signals\""},
-        {R"({"havne_signals":2,"name":"T"})", "format 2, and this Havne reads format 1"},
+        {R"({"havne_signals":3,"name":"T"})",
+         "format 3, and this Havne reads formats 1 and 2"},
+        {R"({"havne_signals":0,"name":"T"})",
+         "format 0, and this Havne reads formats 1 and 2"},
+        {R"({"havne_signals":1.5,"name":"T"})",
+         "format ?, and this Havne reads formats 1 and 2"},
         {base + R"("signals":[]})", "lists none"},
         {base + R"("signalz":[]})", "unknown key 'signalz' in the file"},
         {R"({"havne_signals":1,"name":"T","signals":[]})", "needs a \"source\""},
@@ -604,8 +741,11 @@ TEST(SignalFileTest, EveryRefusalSaysWhereAndWhy)
 
 TEST(SignalFileTest, TheRequestsMustFitTheEngine)
 {
-    /* One DID a signal: 256 fit, 257 don't */
-    const auto file = [](unsigned n) {
+    /* One DID a signal: a file alone fits the cap with every signal it
+     * may hold; on obd2, whose requests count, it passes the cap */
+    static_assert(ECUIO_SIGNAL_FILE_MAX_SIGNALS >= ECUIO_PROFILE_MAX_REQUESTS,
+                  "one file can hold a full request table");
+    const auto file = [](unsigned n, bool on_obd2) {
         std::string s;
         for (unsigned i = 0; i < n; ++i) {
             char sig[160];
@@ -614,12 +754,22 @@ TEST(SignalFileTest, TheRequestsMustFitTheEngine)
                           i ? "," : "", i, i, 0x1000 + i);
             s += sig;
         }
-        return one(s);
+        std::string json = one(s);
+        if (on_obd2) {
+            json.insert(json.find(',') + 1, R"("extends":"obd2",)");
+        }
+        return json;
     };
-    File fits = load(file(ECUIO_PROFILE_MAX_REQUESTS));
-    EXPECT_NE(fits, nullptr) << ecuio_last_error_detail();
-    EXPECT_NE(refusal(file(ECUIO_PROFILE_MAX_REQUESTS + 1)).find("more than 256 requests"),
-              std::string::npos);
+    File fits = load(file(ECUIO_PROFILE_MAX_REQUESTS, false));
+    ASSERT_NE(fits, nullptr) << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_signal_file_set(fits.get())->count,
+              ECUIO_PROFILE_MAX_REQUESTS);
+    const std::string past = refusal(file(ECUIO_PROFILE_MAX_REQUESTS, true));
+    EXPECT_NE(past.find("the signals ask more than " +
+                        std::to_string(ECUIO_PROFILE_MAX_REQUESTS) +
+                        " requests, the base's counted"),
+              std::string::npos)
+        << past;
 }
 
 TEST(SignalFileTest, NullsAndTheLoadersBounds)
@@ -998,4 +1148,198 @@ TEST(SignalFileTest, AToolsOwnXGaugeStaysIgnored)
         R"("field":{"byte":0},"x-gauge":{"min":9,"max":1,"warn_low":"no"}})"));
     ASSERT_TRUE(f) << ecuio_last_error_detail();
     EXPECT_EQ(gauge_of(f, "a"), nullptr);
+}
+
+namespace {
+
+/* A file with a source block of the given members */
+std::string sourced(const std::string& members)
+{
+    return R"({"havne_signals":1,"name":"Sourced","source":{)" + members +
+           R"(},"ecus":[{"id":"pcm","rx":"7E8"}],"signals":[{"key":"a",)"
+           R"("name":"A",)"
+           R"("read":{"service":"22","number":"D100"},"field":{"byte":0}}]})";
+}
+
+ecuio_signal_source_t source_of(const File& f)
+{
+    ecuio_signal_source_t s{};
+    s.struct_size = sizeof s;
+    EXPECT_EQ(ecuio_signal_file_source(f.get(), &s), ECUIO_OK);
+    return s;
+}
+
+} // namespace
+
+// The source as the file wrote it: every text, "" for one not given,
+// the rest of each field zero, and struct_size core's own (what it filled)
+TEST(SignalFileTest, ItsSourceIsGivenAsTheFileWroteIt)
+{
+    const std::string name(ECUIO_SOURCE_TEXT_MAX, 'n');
+    File all = load(sourced(R"("name":")" + name +
+                            R"(","url":"https://example.com/set",)"
+                            R"("commit":"0123abc","license":"MIT",)"
+                            R"("modified":"converted by hand")"));
+    ASSERT_TRUE(all) << ecuio_last_error_detail();
+    struct Bigger {
+        ecuio_signal_source_t s;
+        uint32_t after;
+    } big;
+    std::memset(&big, 0x5A, sizeof big);
+    big.s.struct_size = sizeof big;
+    ASSERT_EQ(ecuio_signal_file_source(all.get(), &big.s), ECUIO_OK);
+    EXPECT_EQ(big.s.struct_size, sizeof(ecuio_signal_source_t))
+        << "core's own size, what it filled";
+    EXPECT_EQ(big.after, 0x5A5A5A5Au) << "nothing past the struct written";
+    EXPECT_EQ(std::string(big.s.name), name) << "a text at its bound whole";
+    EXPECT_STREQ(big.s.url, "https://example.com/set");
+    EXPECT_STREQ(big.s.commit, "0123abc");
+    EXPECT_STREQ(big.s.license, "MIT");
+    EXPECT_STREQ(big.s.modified, "converted by hand");
+    EXPECT_EQ(big.s.flags, 0u);
+    for (uint32_t r : big.s.reserved) {
+        EXPECT_EQ(r, 0u);
+    }
+    for (size_t i = std::strlen(big.s.url); i < ECUIO_SOURCE_TEXT_LEN; ++i) {
+        ASSERT_EQ(big.s.url[i], '\0') << "zero past the text, at " << i;
+    }
+
+    File one = load(sourced(R"("name":"Only a name")"));
+    ASSERT_TRUE(one) << ecuio_last_error_detail();
+    const ecuio_signal_source_t s = source_of(one);
+    EXPECT_STREQ(s.name, "Only a name");
+    EXPECT_STREQ(s.url, "");
+    EXPECT_STREQ(s.commit, "");
+    EXPECT_STREQ(s.license, "");
+    EXPECT_STREQ(s.modified, "");
+}
+
+TEST(SignalFileTest, ItsSourceRefusesWhatItCantFill)
+{
+    File f = load(sourced(R"("name":"S")"));
+    ASSERT_TRUE(f) << ecuio_last_error_detail();
+    ecuio_signal_source_t s{};
+    s.struct_size = sizeof s;
+    /* Each refusal says why: no earlier call's words are left to read */
+    const auto stale = [] {
+        ecuio_signal_file_t* bad = nullptr;
+        EXPECT_EQ(ecuio_signal_file_load("{", 1, &bad),
+                  ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_STRNE(ecuio_last_error_detail(), "");
+    };
+    stale();
+    EXPECT_EQ(ecuio_signal_file_source(nullptr, &s), ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the source needs a file and a struct to fill");
+    stale();
+    EXPECT_EQ(ecuio_signal_file_source(f.get(), nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "the source needs a file and a struct to fill");
+    std::memset(&s, 0x5A, sizeof s);
+    s.struct_size = sizeof s - 1;
+    stale();
+    EXPECT_EQ(ecuio_signal_file_source(f.get(), &s),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              "the source's struct_size is " + std::to_string(sizeof s - 1) +
+                  ", under its " + std::to_string(sizeof s) + " bytes");
+    EXPECT_EQ(static_cast<unsigned char>(s.name[0]), 0x5Au) << "untouched";
+    EXPECT_EQ(s.struct_size, sizeof s - 1) << "untouched";
+}
+
+// Creative Commons' share-alike licenses, as SPDX writes them in any
+// case or with spaces; any other license, or a name inside a longer
+// word, isn't
+TEST(SignalFileTest, AShareAlikeLicenseIsKnownInEachSpelling)
+{
+    const struct {
+        const char* license;
+        bool share_alike;
+    } cases[] = {
+        {"CC-BY-SA-4.0", true},
+        {"cc-by-sa-3.0", true},
+        {"CC BY-SA 4.0", true},
+        {"CC-BY-SA", true},
+        {"CC-BY-NC-SA-4.0", true},
+        {"MIT OR CC-BY-SA-4.0", true},
+        {"(CC-BY-SA-2.0-UK)", true},
+        {"CC-BY-SA-4.0+", true},
+        {"CC-BY-4.0", false},
+        {"CC-BY-NC-4.0", false},
+        {"MIT", false},
+        {"XCC-BY-SA-4.0", false},
+        {"1CC-BY-SA", false},
+        {"NOT-CC-BY-SA-4.0", false},
+        {"CC-BY-SAX", false},
+        {"CC-BY-SA4", false},
+    };
+    for (const auto& c : cases) {
+        File f = load(sourced(std::string(R"("name":"S","license":")") +
+                              c.license + "\""));
+        ASSERT_TRUE(f) << ecuio_last_error_detail();
+        EXPECT_EQ(source_of(f).flags,
+                  c.share_alike ? ECUIO_SOURCE_SHARE_ALIKE : 0u)
+            << c.license;
+    }
+    File none = load(sourced(R"("name":"S")"));
+    ASSERT_TRUE(none);
+    EXPECT_EQ(source_of(none).flags, 0u) << "no license, none";
+}
+
+// A byte past ASCII is no letter, whatever the locale: a Qt or Python
+// host sets one, and in Latin-1 the micro sign's 0xB5 is a letter
+TEST(SignalFileTest, AShareAlikeLicenseIsReadAsAsciiInAnyLocale)
+{
+    const auto flags_of = [](const char* license) {
+        File f = load(
+            sourced(std::string(R"("name":"S","license":")") + license + "\""));
+        EXPECT_TRUE(f) << ecuio_last_error_detail();
+        return f ? source_of(f).flags : 0xFFu;
+    };
+    const char* micro_before = "\xC2\xB5"
+                               "CC-BY-SA-4.0";
+    const char* micro_inside = "CC-BY-SA\xC2\xB5";
+    EXPECT_EQ(flags_of(micro_before), ECUIO_SOURCE_SHARE_ALIKE);
+    EXPECT_EQ(flags_of(micro_inside), ECUIO_SOURCE_SHARE_ALIKE);
+
+    const char* before = std::setlocale(LC_CTYPE, nullptr);
+    const std::string saved = before != nullptr ? before : "C";
+    if (std::setlocale(LC_CTYPE, ".1252") != nullptr ||
+        std::setlocale(LC_CTYPE, "en_US.ISO-8859-1") != nullptr ||
+        std::setlocale(LC_CTYPE, "de_DE.ISO-8859-1") != nullptr) {
+        const bool letter = std::isalnum(0xB5) != 0;
+        const uint32_t first = flags_of(micro_before);
+        const uint32_t last = flags_of(micro_inside);
+        std::setlocale(LC_CTYPE, saved.c_str());
+        EXPECT_TRUE(letter) << "the case needs 0xB5 a letter in this locale";
+        EXPECT_EQ(first, ECUIO_SOURCE_SHARE_ALIKE) << "under Latin-1";
+        EXPECT_EQ(last, ECUIO_SOURCE_SHARE_ALIKE) << "under Latin-1";
+    }
+}
+
+// A file's text is the bytes it was read from, spacing and line ends
+// as they were, borrowed for the file's life
+TEST(SignalFileTest, ItsTextIsTheBytesItWasReadFrom)
+{
+    const std::string bytes = "{ \"havne_signals\":1,\r\n  \"name\":\"T\","
+                              "\"source\":{\"name\":\"S\"},\r\n\"ecus\":[{"
+                              "\"id\":\"pcm\",\"rx\":\"7E8\"}],\"signals\":["
+                              "{\"key\":\"a\",\"name\":\"A\",\"read\":{"
+                              "\"service\":\"22\",\"number\":\"D100\"},"
+                              "\"field\":{\"byte\":0}}]  }\n";
+    File f = load(bytes);
+    ASSERT_TRUE(f) << ecuio_last_error_detail();
+    size_t length = 99;
+    const char* text = ecuio_signal_file_text(f.get(), &length);
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(length, bytes.size());
+    EXPECT_EQ(std::string(text, length), bytes);
+    EXPECT_EQ(text[length], '\0');
+    EXPECT_EQ(ecuio_signal_file_text(f.get(), nullptr), text)
+        << "the same text each call, a NULL length skipped";
+
+    length = 99;
+    EXPECT_STREQ(ecuio_signal_file_text(nullptr, &length), "");
+    EXPECT_EQ(length, 0u);
 }

@@ -148,7 +148,7 @@ fills the block as above, and a file you share keeps it
 it, so one session shows both. Without it the file is a set of its own,
 and a session on it reads only your signals. A signal of yours named as one
 of `obd2`'s (`Boost`, say) replaces it: the session shows yours, in its
-place, and a gauge or layout that named `obd2`'s signal reads yours. So does a computed signal of `obd2`'s: name yours `Intake Manifold Pressure` or `Barometric Pressure` and Boost is worked out from it, in its unit, so keep it kPa. A signal a computed one reads is a number or an enum; the loader refuses a text in its place, naming the computed signal.
+place, and a gauge or layout that named `obd2`'s signal reads yours. So does a computed signal of `obd2`'s: name yours `Intake Manifold Pressure` or `Barometric Pressure` and Boost is worked out from it, in its unit, so keep it kPa. A signal a computed one reads is a number or an enum, or in a format 2 file a computed signal: the loader refuses a text in its place, a computed one in a format 1 file, and a computed one that `obd2`'s Boost reads with its 30 s bound (baro: a computed input's ages are its own inputs'), each naming the computed signal that reads it. A computed replacement joins the file's chains, so a circle through it, or a chain past 8 deep (`obd2`'s Boost counted), is refused too.
 
 ### `ecus`
 

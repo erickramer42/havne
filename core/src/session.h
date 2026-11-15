@@ -1,6 +1,7 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
-// Testing: UNIT: CoreTest, RecorderTest (test_core)
+// Testing: UNIT: CoreTest, RecorderTest, ConditionSessionTest,
+//          ConditionRecordingTest (test_core)
 
 #ifndef ECUIO_SESSION_H
 #define ECUIO_SESSION_H
@@ -23,6 +24,8 @@
 #include <utility>
 #include <vector>
 
+#include "condition_eval.h"
+
 struct ecuio_session {
     /* The registry's set, held from create (profile_hold.h); first, so
      * it's released after every member that reads the set */
@@ -32,10 +35,58 @@ struct ecuio_session {
      * and the session_start probe marks the first only (ADR-0034 section 4).
      * The session's one caller alone reads and writes it. */
     bool started = false;
+    /* started's copy for any thread: the conditions' states judge what the
+     * session gets only once it runs */
+    std::atomic<bool> ran{false};
     std::mutex callback_mutex;
     std::vector<std::pair<ecuio_frame_callback_t, void*>> callbacks;
     /* Under the same mutex: the values callbacks (ADR-0024) */
     std::vector<std::pair<ecuio_values_callback_t, void*>> values_callbacks;
+    /* Under the same mutex: the conditions callbacks, and the conditions
+     * attached (ADR-0063 section 3, condition_eval.h) in three slots.
+     * `conditions` is the worker's: only dispatch replaces it, inside the
+     * lock it takes for each frame, and reads it outside. The caller
+     * (ecuio_session_set_conditions) puts the next set in
+     * conditions_pending and sets conditions_swap; dispatch then moves
+     * its own into conditions_retired and takes the pending one. The
+     * caller frees a retired set and a pending one the worker never took
+     * at its next call, so the worker frees nothing and the caller never
+     * frees one the worker holds. */
+    std::vector<std::pair<ecuio_conditions_callback_t, void*>>
+        conditions_callbacks;
+    std::unique_ptr<ecuio_condition_eval> conditions;
+    std::unique_ptr<ecuio_condition_eval> conditions_pending;
+    std::unique_ptr<ecuio_condition_eval> conditions_retired;
+    bool conditions_swap = false;
+    /* conditions_swap's copy for a worker's look outside the lock (set
+     * with it, cleared by the take): ecuio_session_conditions_waiting */
+    std::atomic<bool> conditions_waiting{false};
+    /* Under the same mutex: the attaches so far, and what a recording
+     * keeps of the newest attach's set (recorder.h; NULL with none) */
+    uint32_t conditions_generation = 0;
+    std::shared_ptr<const ecuio_condition_record> conditions_record;
+    /* The states of the newest attach (ecuio_session_get_condition_states),
+     * under their mutex: set whole by the attach before the worker can
+     * take its set (their mutex inside callback_mutex, never the other
+     * way), then each one by the worker when it changes, which a set
+     * since replaced no longer does */
+    mutable std::mutex condition_states_mutex;
+    std::vector<ecuio_condition_state_t> condition_states;
+    uint32_t condition_states_generation = 0;
+    /* Set with the states: each condition's signal terms' def ids and its
+     * join, for the getter's ECUIO_CONDITION_WHY_NOT_RECEIVED (count 0 for
+     * one the bind left unavailable), and its terms sampled since the
+     * attach (a bit each), which the worker sets at a signal's first
+     * sample (ecuio_condition_eval::sampled_terms) */
+    struct condition_read {
+        uint16_t ids[ECUIO_CONDITION_MAX_TERMS] = {};
+        uint8_t count = 0;
+        uint8_t any = 0;
+        uint8_t sampled = 0; /* a bit per term */
+    };
+    static_assert(ECUIO_CONDITION_MAX_TERMS <= 8,
+                  "condition_read's sampled holds a bit per term");
+    std::vector<condition_read> condition_reads;
     ecuio_transport_t* transport = nullptr;
     /* The profile's set: the registry's static one, or, under
      * uds-generic, the session's own below (ADR-0020). */
@@ -65,6 +116,10 @@ struct ecuio_session {
     ecuio_request_timing_t timing_rows[ECUIO_PROFILE_MAX_REQUESTS]{};
     std::atomic<int32_t> last_error{ECUIO_OK};
     std::atomic<uint32_t> error_count{0};
+    /* Set by the attach of a transport whose worker judges its link
+     * (link_health.h: J2534, ELM327, SocketCAN), before create returns:
+     * the conditions' link terms bind only then */
+    bool judges_link = false;
     /* Written once by the transport's attach, then the profile by
      * create, before create returns; read-only afterwards, so
      * ecuio_session_get_info needs no lock. */
@@ -97,14 +152,23 @@ struct ecuio_session {
      * focus_askable (one byte per def: its request is in the table, not
      * dropped), which refuse a focus with no askable pick;
      * focus_min_sweep_ms is the minimum time between sweeps (section 4), 0
-     * for none. */
-    std::mutex focus_mutex;
+     * for none; condition_defs (one byte per def, empty with no conditions)
+     * the attached conditions' signals, a computed one's inputs among them,
+     * which any focus keeps asked (ADR-0063 section 7). */
+    mutable std::mutex focus_mutex;
     std::vector<uint16_t> focus_ids;
     std::vector<uint8_t> focus_defs;
+    std::vector<uint8_t> condition_defs;
     uint32_t focus_min_sweep_ms = 0;
+    /* ecuio_session_set_focus_with's flags (ECUIO_FOCUS_DEFAULT_PICK), for
+     * a recording's header word */
+    uint32_t focus_flags = 0;
     std::atomic<uint32_t> focus_generation{0};
     bool focus_requests = false;
     std::vector<uint8_t> focus_askable;
+    /* One byte per def, sized with focus_askable: 1 for a def the focus the
+     * worker took leaves unasked (ecuio_focus_unasked), under the mutex */
+    std::vector<uint8_t> focus_unasked;
     /* The URI create was given, for a recording's header */
     std::string uri;
     /* A replay's: its source's frame flags line (ADR-0049 section 2),
@@ -113,7 +177,9 @@ struct ecuio_session {
     /* The recorder's link (ADR-0049, recorder.h): made at create and kept
      * until the session is freed, so the worker reads it without a lock;
      * ecuio_session_record puts its recorder in it, before or after start
-     * (ADR-0056 section 3) */
+     * (ADR-0056 section 3). Its mutex comes before callback_mutex:
+     * ecuio_session_set_conditions takes both, so a set never changes
+     * under an attaching recorder */
     std::shared_ptr<ecuio_record_link> record_link;
     /* The pull queues' links (queue.h, pull_queue.h), set before start and
      * kept until the session is freed (lock-free reads); value_queues

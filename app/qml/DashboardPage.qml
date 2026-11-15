@@ -6,7 +6,6 @@ import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs
 
 pragma ComponentBehavior: Bound
 
@@ -51,6 +50,8 @@ Page {
     property string form: Theme.mobile ? "phone" : "desktop"
 
     SignalHub { id: hub }
+    // The hub, for the page's parts
+    readonly property SignalHub signalHub: hub
 
     // One document per form, and the page last shown on each
     Settings {
@@ -69,12 +70,66 @@ Page {
         property bool phoneDrive: false
         property int driveHints: 0
     }
-    // The vehicles' document (Main binds Settings'): the signal files a
-    // layout file names are the picked vehicle's
+    // The vehicles' document (Main binds Settings'): the files a layout
+    // file names are the picked vehicle's picks'
     property var vehicles: VehicleBook.empty()
     // Settings' URI and profile, whose signals Add offers with no session
     property string offlineUri: ""
     onOfflineUriChanged: if (panel === "signal") refreshRows()
+    // Settings' picked vehicle's sets ([{ profile, name, variant }], its
+    // plugin first) and the names of the profiles it knows (profile: name)
+    property var pickedSets: []
+    property var profileNames: ({})
+
+    // The profile a session on uri reads: its last profile=, else the
+    // scheme's default as core picks it (core.cpp, ecuio_session_create)
+    function profileOf(uri) {
+        const at = uri.indexOf("?")
+        let profile = ""
+        for (const pair of (at < 0 ? [] : uri.slice(at + 1).split("&"))) {
+            if (pair.startsWith("profile="))
+                profile = pair.slice("profile=".length)
+        }
+        if (profile !== "")
+            return profile
+        const scheme = uri.slice(0, Math.max(0, uri.indexOf("://")))
+        return scheme === "mock" ? "mock"
+             : scheme === "replay" || scheme === "socketcan" ? "raw" : "obd2"
+    }
+    function profileName(profile) {
+        return profileNames[profile] ?? profile
+    }
+    // The session's profile, "" with none
+    readonly property string sessionProfile: Bridge.connected ? profileOf(Bridge.currentUri) : ""
+    // While a session runs, each ref a picked set the session isn't
+    // reading has, to that set's name (the first set's that has it); its
+    // variant alone when the session reads another variant of that plugin
+    readonly property var neededSets: {
+        const needed = {}
+        if (sessionProfile === "")
+            return needed
+        const reading = profileName(sessionProfile)
+        for (const s of pickedSets) {
+            if (s.profile === sessionProfile)
+                continue
+            const name = s.name === reading && s.variant
+                         ? qsTr("variant %1").arg(s.variant) : s.name
+            for (const row of Bridge.profileSignals("mock://?profile=" + s.profile)) {
+                if (row.ref !== "" && needed[row.ref] === undefined)
+                    needed[row.ref] = name
+            }
+        }
+        return needed
+    }
+    // A cell's note without its signal: the picked set that has it, else
+    // the profile the session reads
+    function missingNote(refs) {
+        for (const ref of refs) {
+            if (neededSets[ref] !== undefined)
+                return qsTr("needs %1").arg(neededSets[ref])
+        }
+        return qsTr("not in %1").arg(profileName(sessionProfile))
+    }
 
     // The stored text read: the document, or the built-in layout with
     // the reason when there is none or it can't be used
@@ -98,6 +153,16 @@ Page {
         return words.join(qsTr(" and "))
     }
     readonly property var pages: doc && Array.isArray(doc.pages) ? doc.pages : []
+    // Every page's cells' refs (lookupRefs): Main hands them to
+    // Bridge.pickGauges, so the default pick asks what the gauges show
+    readonly property var pickRefs: {
+        const all = []
+        for (const p of pages) {
+            for (const c of (Array.isArray(p.cells) ? p.cells : []))
+                all.push(lookupRefs(c && Array.isArray(c.refs) ? c.refs : []))
+        }
+        return all
+    }
     property bool problemDismissed: false
     // A different stored text is a different problem, so its line shows again
     readonly property string storedText: form === "phone" ? store.phone : store.desktop
@@ -382,15 +447,21 @@ Page {
         layoutNote = words
         layoutNoteBad = bad === true
     }
-    // The picked vehicle's signal files, each with the references its
-    // profile gives: [{ name, sha256, profile, refs }]. A file whose profile
-    // isn't registered (it doesn't load) gives none
+    // A form's name in the export's note and the load's words, so the two agree
+    function formWord(f) {
+        return f === "phone" ? qsTr("phone") : qsTr("desktop")
+    }
+    // The picked vehicle's picks the store has, each as the file a layout
+    // names (ADR-0064, "Dashboards") with the references its profile
+    // gives: [{ name, sha256, from, profile, refs }]. sha256 is the
+    // variant's written file's; from the hashes of the signal files it was
+    // made from, which a layout saved by an earlier version names
     function vehicleFiles() {
         const v = VehicleBook.picked(vehicles)
         if (!v)
             return []
-        return v.signals.map(f => ({
-            name: f.name, sha256: f.sha256, profile: f.profile,
+        return Bridge.pickFiles(v.picks).map(f => ({
+            name: f.name, sha256: f.sha256, from: f.from, profile: f.profile,
             refs: Bridge.profileSignals("mock://?profile=" + f.profile).map(r => r.ref) }))
     }
     // The name a layout file is offered under
@@ -399,15 +470,18 @@ Page {
         const slug = v ? v.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") : ""
         return "dashboard-" + (slug !== "" ? slug + "-" : "") + form + ".json"
     }
-    // Writes this form's layout, and the signal files it needs by name, to
-    // the file at url
+    // Writes this form's layout, and the picks' files it needs by name,
+    // to the file at url. A pick no plugin here has gives no references,
+    // so the layout can't say it needs it: the note names the pick
     function exportLayoutTo(url) {
         commitTyping()
         const files = vehicleFiles()
         const needed = DashboardBook.neededFiles(doc, files)
-        const unloaded = files.filter(f => f.refs.length === 0).map(f => f.name)
+        const v = VehicleBook.picked(vehicles)
+        const unloaded = (v ? v.picks : []).filter(p => !files.some(f => f.profile === p))
         const text = DashboardBook.exportText(doc, form, needed)
         if (text === "") {
+            Bridge.dropPicked(url)
             noteLayout(qsTr("Not saved: this layout can't be written as a file"), true)
             return false
         }
@@ -416,12 +490,13 @@ Page {
             noteLayout(qsTr("Not saved: %1").arg(r.words), true)
             return false
         }
-        noteLayout((needed.length === 0
-                    ? qsTr("Saved this layout to a file")
-                    : qsTr("Saved this layout to a file. It needs the signal files %1")
-                          .arg(needed.map(f => f.name).join(", ")))
+        noteLayout(qsTr("Saved this layout to a file. It's a %1 layout: it loads on a %1, not on a %2. "
+                        + "A layout isn't scaled between forms")
+                       .arg(formWord(form)).arg(formWord(form === "phone" ? "desktop" : "phone"))
+                   + (needed.length === 0 ? ""
+                      : qsTr(". It needs the plugins %1").arg(needed.map(f => f.name).join(", ")))
                    + (unloaded.length === 0 ? ""
-                      : qsTr(". The vehicle's signal files %1 don't load, so a gauge reading them isn't listed as needing them")
+                      : qsTr(". The vehicle's picks %1 aren't in the store, so a gauge reading them isn't listed as needing them")
                             .arg(unloaded.join(", "))))
         return true
     }
@@ -438,8 +513,16 @@ Page {
             noteLayout(qsTr("Not loaded: %1").arg(r.words), true)
             return false
         }
+        // A pick is found by its written file's hash, or by the hash of a
+        // signal file it was made from
         const files = vehicleFiles()
-        const read = DashboardBook.importProblem(r.text, form, files.map(f => f.sha256))
+        const have = []
+        for (const f of files) {
+            have.push(f.sha256)
+            for (let i = 0; i < f.from.length; ++i)
+                have.push(f.from[i])
+        }
+        const read = DashboardBook.importProblem(r.text, form, have)
         if (read.problem === "none") {
             noteLayout(qsTr("Not loaded: the file is empty"), true)
         } else if (read.problem === "damaged") {
@@ -449,8 +532,7 @@ Page {
         } else if (read.problem === "otherform") {
             noteLayout(qsTr("Not loaded: the file is a %1 layout and this is the %2 form. "
                             + "A layout isn't scaled between forms")
-                       .arg(read.form === "phone" ? qsTr("phone") : qsTr("desktop"))
-                       .arg(form === "phone" ? qsTr("phone") : qsTr("desktop")), true)
+                       .arg(formWord(read.form)).arg(formWord(form)), true)
         } else {
             commitTyping()
             cancelHold()
@@ -460,12 +542,19 @@ Page {
             if (read.problem === "dropped")
                 words.push(qsTr("%1 left out because they couldn't be read").arg(droppedText(read.dropped)))
             if (read.notes.indexOf("no-form") >= 0)
-                words.push(qsTr("the file named no form, so it was read as the %1 form")
-                           .arg(form === "phone" ? qsTr("phone") : qsTr("desktop")))
-            if (read.missing.length > 0)
-                words.push(qsTr("it needs signal files this vehicle lacks: %1. Import them under Signals; "
-                                + "until then those gauges read not in profile")
-                           .arg(read.missing.map(f => f.name).join(", ")))
+                words.push(qsTr("the file named no form, so it was read as the %1 form").arg(formWord(form)))
+            // A pick changed since the save (Replace, an edit in the form)
+            // is picked still: only its file is another
+            const changedPicks = DashboardBook.changedFiles(read.missing, files)
+            const absent = read.missing.filter(m => changedPicks.indexOf(m) < 0)
+            if (changedPicks.length > 0)
+                words.push(qsTr("it was saved with another version of %1: a gauge reading a signal the "
+                                + "picked version lacks reads not in profile")
+                           .arg(changedPicks.map(f => f.name).join(", ")))
+            if (absent.length > 0)
+                words.push(qsTr("it needs plugins this vehicle doesn't pick: %1. Import or pick them under "
+                                + "Signals; until then those gauges read not in profile")
+                           .arg(absent.map(f => f.name).join(", ")))
             const changed = edit(read.doc, stepOf("", qsTr("load a layout"), -1, -1, 0))
             if (!changed)
                 words[0] = qsTr("The file holds the layout already shown")
@@ -520,6 +609,25 @@ Page {
     }
     // The shown page scrolls to a cell, so what a panel edited is seen again
     signal revealRequested(int cell)
+
+    // A gauge's Alert (ADR-0063 section 9): a new condition from the cell's
+    // own levels, refs and unit, which Main opens in Settings' editor as a
+    // copy bound to nothing; null for a cell with no level
+    signal alertRequested(var condition)
+    function alertOf(cell, name) {
+        if (cell === null || cell.kind === "blank" || !Array.isArray(cell.refs) || cell.refs.length === 0)
+            return null
+        const o = cell.options ?? ({})
+        // The range the cell draws: its own ends, else its unit's default
+        const range = DashboardBook.defaultRange(cell.unit ?? "")
+        return ConditionBook.alertFromLevels(name, cell.refs, cell.unit ?? "", o,
+                                             typeof o.from === "number" ? o.from : range.from,
+                                             typeof o.to === "number" ? o.to : range.to, [])
+    }
+    // Why a gauge's Alert didn't open the editor, under the button until
+    // another cell is picked
+    property string alertNote: ""
+    onSelectedChanged: alertNote = ""
 
     // ---- The drive view (ADR-0059): this page with every bar hidden
 
@@ -745,35 +853,28 @@ Page {
         refreshRows()
         panel = "signal"
     }
-    // The picked ref and its counterparts in the other built-in set
-    function counterparts(ref) {
-        const sets = Bridge.gaugeSignals
-        for (const key in sets) {
-            const refs = sets[key]
-            if (refs.indexOf(ref) >= 0)
-                return [ref].concat(refs.filter(r => r !== ref))
-        }
-        return [ref]
+    // Bridge.alertLevels copied once per change, by def id: a bridge map read
+    // in each cell's binding makes a JS wrapper per read (the Qt 6.12 sweep)
+    property var alertLevels: {
+        const levels = Bridge.alertLevels, copy = {}
+        for (const id in levels)
+            copy[id] = levels[id]
+        return copy
     }
-    // A cell's refs with the counterparts of each in the built-in sets, its
-    // own first: a cell made under one profile reads under another
+    // Bridge.gaugeSignals as plain arrays, read once (it is CONSTANT): each read
+    // of a bridge map makes a new JS wrapper, and every cell's lookup reads it
+    readonly property var gaugeSets: DashboardBook.copySets(Bridge.gaugeSignals)
+    function counterparts(ref) {
+        return DashboardBook.counterparts(ref, gaugeSets)
+    }
     function lookupRefs(refs) {
-        let all = refs ?? []
-        for (const ref of refs ?? [])
-            all = all.concat(counterparts(ref).filter(r => all.indexOf(r) < 0))
-        return all
+        return DashboardBook.lookupRefs(refs, gaugeSets)
     }
     function labelFor(row) {
         return Array.from(String(row.name)).slice(0, DashboardBook.maxLabel).join("")
     }
-    // The Bridge.gaugeSignals key whose refs hold this ref ("" for none)
     function keyOfRef(ref) {
-        const sets = Bridge.gaugeSignals
-        for (const key in sets) {
-            if (sets[key].indexOf(ref) >= 0)
-                return key
-        }
-        return ""
+        return DashboardBook.keyOfRef(ref, gaugeSets)
     }
     // What a gauge on this row starts with, in the unit the cell stores: the
     // signal file's own gauge (its range and levels), else the row's range
@@ -835,6 +936,44 @@ Page {
                                         Object.assign(cleared, startOptions(selectedCell.kind, row)))
         edit(next, stepOf("", qsTr("changed %1's signal").arg(cellName(selectedCell)), selected, selected))
         panel = "cell"
+    }
+
+    // Add's every signal of a set: the listed profile's own rows (a signal
+    // file's or a plugin's, by key) that a gauge of `kind` can show, and of
+    // those the ones this page doesn't show yet, as many as it has room for
+    readonly property string listedName: {
+        const uri = Bridge.connected ? Bridge.currentUri : offlineUri
+        return uri === "" ? "" : profileName(profileOf(uri))
+    }
+    function addAllPlan(kind) {
+        const own = pickable(kind).filter(r => r.ref.startsWith("key:"))
+        let shown = []
+        for (const c of shownCells)
+            shown = shown.concat(Array.isArray(c.refs) ? c.refs : [])
+        const missing = own.filter(r => shown.indexOf(r.ref) < 0)
+        const room = Math.max(0, DashboardBook.maxCells - shownCells.length)
+        return { own: own.length, missing: missing.length, adding: missing.slice(0, room) }
+    }
+    // The button's words: all, the rest, or as many as the page has room for
+    function addAllWords(plan) {
+        if (plan.adding.length < plan.missing)
+            return qsTr("Add %1 of the %2 missing signals of %3: a page holds %4 cells")
+                       .arg(plan.adding.length).arg(plan.missing).arg(listedName).arg(DashboardBook.maxCells)
+        return plan.adding.length === plan.own
+               ? qsTr("Add all %1 signals of %2").arg(plan.own).arg(listedName)
+               : qsTr("Add %1 more of the %2 signals of %3").arg(plan.adding.length).arg(plan.own).arg(listedName)
+    }
+    function addAllSignals() {
+        const plan = addAllPlan(addKind)
+        if (addKind === "" || plan.adding.length === 0)
+            return
+        const cells = plan.adding.map(r => newCell(addKind, r))
+        const words = cells.length === 1 ? qsTr("added 1 signal of %1").arg(listedName)
+                                         : qsTr("added %1 signals of %2").arg(cells.length).arg(listedName)
+        if (edit(DashboardBook.addCells(doc, pageIndex, cells), stepOf("", words, -1, -1))) {
+            addKind = ""
+            panel = ""
+        }
     }
     Connections {
         target: Bridge
@@ -937,7 +1076,7 @@ Page {
         if (swipe.count > pageIndex && swipe.currentIndex !== pageIndex)
             swipe.setCurrentIndex(pageIndex)
         // A tab with the focus hands it on, so the ring is on the page shown
-        const strip = stripHost.item as DashPageStrip
+        const strip = topBar.stripLoader.item as DashPageStrip
         if (strip && strip.holdsFocus())
             strip.focusTab(pageIndex)
         if (!restored) return
@@ -1053,15 +1192,9 @@ Page {
     function shownUnit(unit) {
         return Bridge.unitSystem === 0 ? unit : Bridge.displayUnit(unit)
     }
-    // A number typed in the unit shown, in the unit stored. Each of
-    // core's conversions is linear, so two points give it back; six
-    // decimals drop the arithmetic's noise (212 deg F is 100 deg C)
+    // A number typed in the unit shown, in the unit stored
     function stored(unit, v) {
-        if (Bridge.unitSystem === 0)
-            return v
-        const a = Bridge.displayValue(unit, 0), b = Bridge.displayValue(unit, 1)
-        const x = b !== a ? (v - a) / (b - a) : v
-        return Math.round(x * 1e6) / 1e6
+        return Bridge.unitSystem === 0 ? v : DashboardBook.roundStored(Bridge.decodedValue(unit, v))
     }
     // A number for a field: at most four decimals, none trailing
     function fieldText(v, places) {
@@ -1075,1206 +1208,24 @@ Page {
         return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p
     }
 
-    // ---- A cell: its gauge's inputs, from the cell and its entry
-
-    component Cell: GaugeCard {
-        id: card
-        required property var cell
-        // On a page two or more away from the one shown, the gauge loads
-        // between frames, so a full document doesn't hold back the first
-        // one; on the page shown and its neighbors (a swipe drags one in)
-        // it finishes at once
-        property bool later: false
-        // Whether this card's page is the one on screen and the app is
-        // active: the sparkline samples only then (a SwipeView keeps its
-        // neighbors visible)
-        property bool shown: true
-        property int pageNo: -1
-        property int cellIndex: -1
-        readonly property bool editable: root.editing && pageNo === root.pageIndex
-        readonly property bool lifted: root.held === cellIndex && pageNo === root.pageIndex
-        // The panel names this cell, in edit mode or out of it
-        readonly property bool chosen: pageNo === root.pageIndex && root.selected === cellIndex
-                                       && (root.editing || root.panel !== "")
-
-        // What the panel's Digits and Lights show with the option unset: what
-        // the cell draws, in or out of edit mode
-        Binding {
-            when: card.chosen
-            target: root
-            property: "selectedDigits"
-            value: card.digits
-        }
-        Binding {
-            when: card.chosen
-            target: root
-            property: "selectedCount"
-            value: card.count
-        }
-
-        // A press held still lifts the cell; these go to its page's grid
-        signal holdStarted(point scene)
-        signal holdMoved(point scene)
-        signal holdEnded(bool canceled)
-
-        // A blank cell draws its own outline in edit mode and nothing else.
-        // On a joined panel no cell paints, except the one held up: a card
-        // again, which covers what it passes over
-        plain: (root.joined && !lifted) || kind === "blank"
-        scale: lifted ? 1.03 : 1
-        z: lifted ? 5 : 0
-
-        // The sweep plays on the dials, the cells and the shift lights only
-        function sweep() {
-            if (gauge.item && kind !== "bar" && kind !== "digital"
-                    && kind !== "seven-segment" && kind !== "sparkline")
-                (gauge.item as GaugeBase).sweep()
-        }
-
-        readonly property string kind: cell && typeof cell.kind === "string" ? cell.kind : ""
-        readonly property var options: cell && cell.options ? cell.options : ({})
-        readonly property string cellUnit: cell && typeof cell.unit === "string" ? cell.unit : ""
-        readonly property string label: cell && typeof cell.label === "string" ? cell.label : ""
-        readonly property SignalHub.Entry entry: hub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
-
-        readonly property bool hasValue: Bridge.connected && entry !== null && entry.hasValue
-        readonly property real value: entry ? entry.value : 0
-        readonly property real windowHigh: entry ? entry.windowHigh : 0
-        readonly property real windowLow: entry ? entry.windowLow : 0
-        // A trace reads the model's history of the def, kept whatever page shows
-        readonly property var traceSource: Bridge.signalModel
-        readonly property int signalId: entry ? entry.id : -1
-        readonly property bool stale: hasValue && entry.ageMs > Theme.staleMs
-        // An enumeration's label, which only `digital` is offered
-        readonly property string valueLabel: entry && entry.isEnum ? entry.label : ""
-
-        // The row's unit against the one the cell was made for (section 6)
-        readonly property string expectedUnit: root.shownUnit(cellUnit)
-        readonly property bool mismatch: entry !== null && entry.unit !== ""
-                                         && expectedUnit !== "" && entry.unit !== expectedUnit
-        readonly property string unit: entry && entry.unit !== "" ? entry.unit : expectedUnit
-        readonly property int decimals: options.decimals !== undefined ? options.decimals
-                                        : entry ? entry.decimals : 0
-
-        // Section 3: the first state that applies
-        readonly property string note: {
-            let words = ""
-            if (!Bridge.connected) words = qsTr("no session")
-            else if (entry === null) words = qsTr("not in this profile: %1").arg(label)
-            // Live's rule (hiddenCount): the ECU reported it unsupported, or
-            // never answered it
-            else if (entry.hidden) words = qsTr("not sent by this ECU")
-            else if (entry.refusedCode !== "") words = qsTr("refused (%1)").arg(entry.refusedCode)
-            else if (!entry.hasValue) words = qsTr("waiting for data")
-            return words !== "" && mismatch ? qsTr("%1 (expected %2)").arg(words).arg(expectedUnit)
-                                            : words
-        }
-
-        function opt(name, fallback) {
-            return options[name] !== undefined ? options[name] : fallback
-        }
-        // A zone in the unit shown; none under another unit's row
-        function zone(name) {
-            return mismatch || options[name] === undefined ? NaN
-                                                           : root.shown(cellUnit, options[name])
-        }
-
-        // The scale: the stored ends shown in the current units (a
-        // dial's converted end snapped to its major step), or the row's
-        // own range under another unit. A step that would draw more
-        // ticks than a face holds gives a round one instead.
-        readonly property var axis: {
-            let a = 0, b = 100
-            let snap = false
-            const d = DashboardBook.defaultRange(cellUnit)
-            const f = opt("from", d.from), t = opt("to", d.to)
-            if (mismatch) {
-                const lo = entry.rangeLow, hi = entry.rangeHigh
-                if (isFinite(lo) && isFinite(hi) && lo < hi) {
-                    a = lo
-                    b = hi
-                }
-            } else {
-                a = root.shown(cellUnit, f)
-                b = root.shown(cellUnit, t)
-                snap = kind === "analog" && Bridge.unitSystem !== 0
-            }
-            if (!(a < b)) b = a + 1
-            let major = opt("majorStep", NaN)
-            if (!(major > 0) || (b - a) / major > 40)
-                major = root.niceStep((b - a) / 8)
-            if (snap) {
-                const sa = a !== f ? Math.round(a / major) * major : a
-                const sb = b !== t ? Math.round(b / major) * major : b
-                if (sa < sb) {
-                    a = sa
-                    b = sb
-                }
-            }
-            let minor = opt("minorStep", major / 2)
-            if (!(minor > 0) || (b - a) / minor > 200)
-                minor = major / 2
-            return { from: a, to: b, major: major, minor: minor }
-        }
-        readonly property real from: axis.from
-        readonly property real to: axis.to
-        readonly property real majorStep: axis.major
-        readonly property real minorStep: axis.minor
-        readonly property real coldBelow: zone("coldBelow")
-        readonly property real warnFrom: zone("warnFrom")
-        readonly property real dangerFrom: zone("dangerFrom")
-        readonly property real warnBelow: zone("warnBelow")
-        readonly property real dangerBelow: zone("dangerBelow")
-        // A picked color (options.color) takes the normal zone's place; the
-        // zones, and Night, still win
-        readonly property string picked: Theme.gaugeColor(opt("color", ""))
-        // A stored "info" draws as the value's own color: blue means cold alone
-        readonly property color accent: {
-            if (picked !== "")
-                return picked
-            const a = opt("accent", "accent")
-            return a === "success" ? Theme.success : Theme.gaugeValue
-        }
-        readonly property color readoutColor: picked !== "" ? picked : Theme.gaugeReadout
-        readonly property color needleColor: picked !== "" ? picked : Theme.gaugeNeedle
-
-        // Each kind's own
-        readonly property real labelDivisor: opt("labelDivisor", 1)
-        readonly property string caption: opt("caption", unit)
-        readonly property string peakLabel: opt("peakLabel", qsTr("Peak"))
-        readonly property bool showPeak: opt("peak", false)
-        // The new kinds' own options (ADR-0057 section 1): the cells' count
-        // and curve, the digits, the sparkline's window, the bar standing up
-        // and its ticks
-        readonly property int cells: opt("cells", 24)
-        readonly property real rise: opt("rise", 1.6)
-        readonly property int digits: opt("digits", DashboardBook.digitsFor(from, to, decimals))
-        readonly property int windowS: opt("window", 30)
-        readonly property bool vertical: opt("vertical", false)
-        readonly property bool marks: opt("marks", true)
-        readonly property bool showProgress: opt("progress", false)
-        readonly property string description: opt("description", "")
-        readonly property var scaleMarks: {
-            const marks = []
-            for (let i = 0; i <= 4; ++i)
-                marks.push(from + (to - from) * i / 4)
-            return marks
-        }
-        readonly property int count: opt("count", root.compact ? 11 : 15)
-        readonly property real ledSpacing: root.compact ? 6 : 10
-
-        readonly property bool drawn: gauge.sourceComponent !== null
-        padding: kind === "shift-light" ? 8 : kind === "bar" ? 14 : 12
-
-        readonly property var shared: ["value", "windowHigh", "windowLow", "hasValue", "stale",
-                                       "from", "to", "label", "unit", "note", "decimals",
-                                       "coldBelow", "warnFrom", "dangerFrom", "warnBelow", "dangerBelow", "accent", "readoutColor",
-                                       "showPeak"]
-        readonly property var own: ({
-            "analog": ["majorStep", "minorStep", "labelDivisor", "caption", "peakLabel",
-                       "showProgress", "needleColor"],
-            "bar": ["scaleMarks", "vertical", "marks"],
-            "segments": ["cells", "rise"],
-            "seven-segment": ["digits"],
-            "sparkline": ["windowS", "shown", "traceSource", "signalId"],
-            "digital": ["description", "valueLabel", "shown", "traceSource", "signalId"],
-            "shift-light": ["count", "ledSpacing"]
-        })
-
-        // A held peak, low and trace belong to the signal that made them:
-        // a cell that shows another signal starts them again
-        onEntryChanged: if (gauge.item) (gauge.item as GaugeBase).resetPeaks()
-
-        Loader {
-            id: gauge
-            objectName: "gauge"
-            anchors.fill: parent
-            // Editable, the gauge leaves Remove's corner free, so the
-            // button covers no title
-            anchors.rightMargin: card.editable ? Theme.touchTarget - card.padding + 2 : 0
-            asynchronous: card.later
-            sourceComponent: root.kindComponent(card.kind)
-            onLoaded: {
-                const g = item
-                for (const name of card.shared.concat(card.own[card.kind] ?? []))
-                    g[name] = Qt.binding(() => card[name])
-                if (root.sweepIsOn()) card.sweep()
-            }
-            Connections {
-                target: root
-                function onSweepRequested() { card.sweep() }
-                function onPeaksResetRequested() {
-                    if (gauge.item) (gauge.item as GaugeBase).resetPeaks()
-                }
-            }
-        }
-
-        // A tap on a dial that shows its peak resets the peak, and in edit
-        // mode a tap opens the cell's panel. A hold, in or out of edit mode,
-        // lifts the cell. A blank cell has nothing to hold outside edit mode
-        MouseArea {
-            objectName: "cellTap"
-            z: 1
-            anchors.fill: parent
-            anchors.margins: -card.padding
-            enabled: card.pageNo === root.pageIndex && (card.kind !== "blank" || root.editing)
-            // Moved past the drag distance before the hold completed: a
-            // swipe or a scroll, even where nothing has taken the finger
-            property bool strayed: false
-            property point pressedAt: Qt.point(0, 0)
-            onPressed: (mouse) => {
-                strayed = false
-                pressedAt = Qt.point(mouse.x, mouse.y)
-            }
-            onClicked: {
-                if (strayed)
-                    return
-                if (root.driving) {
-                    root.driveTap()
-                    return
-                }
-                if (card.kind === "analog" && card.showPeak && gauge.item)
-                    (gauge.item as GaugeBase).resetPeaks()
-                if (card.editable)
-                    root.select(card.cellIndex)
-            }
-            onPressAndHold: (mouse) => {
-                if (root.driving)
-                    return
-                if (strayed)
-                    mouse.accepted = false
-                else
-                    card.holdStarted(mapToItem(null, mouse.x, mouse.y))
-            }
-            onPositionChanged: (mouse) => {
-                if (card.lifted)
-                    card.holdMoved(mapToItem(null, mouse.x, mouse.y))
-                else if (Math.hypot(mouse.x - pressedAt.x, mouse.y - pressedAt.y)
-                         > Application.styleHints.startDragDistance)
-                    strayed = true
-            }
-            onReleased: if (card.lifted) card.holdEnded(false)
-            onCanceled: if (card.lifted) card.holdEnded(true)
-        }
-        // The outline and Remove exist only while the cell is editable
-        Loader {
-            z: 2
-            active: card.chosen || card.lifted
-            anchors.fill: parent
-            anchors.margins: -card.padding + 2
-            sourceComponent: Rectangle {
-                objectName: "cellSelected"
-                color: "transparent"
-                border.color: Theme.primary
-                border.width: 2
-                radius: Theme.radius
-            }
-        }
-        Loader {
-            z: 3
-            active: card.editable
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: -card.padding + 2
-            width: Theme.touchTarget
-            height: Theme.touchTarget
-            sourceComponent: ThemedButton {
-                id: removeBox
-                objectName: "cellRemove"
-                compact: true
-                text: "\u00D7"
-                Accessible.name: qsTr("Remove %1").arg(card.label)
-                onClicked: root.removeCell(card.cellIndex)
-                // A touch's size drawn as a smaller raised square with an edge:
-                // a button, not an empty tile, and inside a short cell
-                background: Item {
-                    Rectangle {
-                        objectName: "cellRemoveFace"
-                        anchors.centerIn: parent
-                        width: 32
-                        height: 32
-                        radius: Theme.radius
-                        color: removeBox.down ? removeBox.pressedColor
-                             : removeBox.hovered ? removeBox.hoverColor
-                             : removeBox.baseColor
-                        border.width: removeBox.visualFocus ? 2 : 1
-                        border.color: removeBox.visualFocus ? Theme.text : Theme.outline
-                    }
-                }
-                contentItem: Text {
-                    text: removeBox.text
-                    font.pixelSize: Theme.fontBody + 6
-                    font.weight: Font.DemiBold
-                    color: Theme.text
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-        }
-
-        // A kind this version doesn't draw, kept so it can be removed
-        Label {
-            objectName: "unknownKind"
-            visible: !card.drawn
-            anchors.centerIn: parent
-            width: parent.width
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
-            text: qsTr("a gauge this version of Havne doesn't have")
-            color: Theme.textDim
-            font.pixelSize: Theme.fontCaption
-        }
-    }
-
     // ---- Edit mode's panels
-
-    // A number option, typed in the unit shown when `converted`; empty
-    // removes it when `clearable`, else puts the shown value back
-    component OptionField: ThemedTextField {
-        id: field
-        required property string option
-        property bool converted: true
-        property bool clearable: true
-        property real fallback: NaN
-        readonly property var cell: root.selectedCell
-        readonly property var value: {
-            const o = cell && cell.options ? cell.options[field.option] : undefined
-            return o !== undefined ? o : field.fallback
-        }
-        // A converted end shows to the signal's decimals plus one (161.5565
-        // mph at 1 decimal reads 161.56), 1 place with no row to take them from
-        readonly property var entry: cell ? hub.lookup(root.lookupRefs(cell.refs ?? [])) : null
-        readonly property int places: (cell && cell.options && cell.options.decimals !== undefined
-                                       ? cell.options.decimals : entry ? entry.decimals : 0) + 1
-        readonly property string shownText: cell === null ? ""
-            : converted ? root.fieldText(root.shown(cell.unit ?? "", value), places)
-                        : root.fieldText(value)
-        Layout.fillWidth: true
-        Layout.preferredHeight: Theme.touchTarget
-        text: shownText
-        inputMethodHints: Qt.ImhFormattedNumbersOnly
-        onEditingFinished: {
-            const t = text.trim()
-            if (t === "" && clearable) {
-                root.setOptions({ [option]: null })
-            } else {
-                const v = Number(t)
-                if (t !== "" && isFinite(v))
-                    root.setOptions({ [option]: converted ? root.stored(cell.unit ?? "", v) : v })
-            }
-            text = Qt.binding(() => field.shownText)
-        }
-    }
-
-    // One channel of the custom color: a whole number 0 to 255, committed with its two siblings
-    component ChannelField: ThemedTextField {
-        required property int index
-        required property var row
-        Layout.fillWidth: true
-        Layout.minimumWidth: 40
-        Layout.preferredWidth: 64
-        Layout.preferredHeight: Theme.touchTarget
-        inputMethodHints: Qt.ImhDigitsOnly
-        maximumLength: 3
-        text: String(row.channel(index))
-        Accessible.name: [qsTr("Red value of the color, 0 to 255"), qsTr("Green value of the color, 0 to 255"),
-                          qsTr("Blue value of the color, 0 to 255")][index]
-        onTextEdited: row.edited = true
-        onEditingFinished: row.commit()
-    }
-
-    component Caption: Label {
-        color: Theme.textDim
-        font.pixelSize: Theme.fontCaption
-    }
 
     Component {
         id: cellPanel
-        GaugeCard {
-            id: panelCard
-            objectName: "dashCellPanel"
-            readonly property real touchMin: Theme.touchTarget
-            readonly property var cell: root.selectedCell
-            readonly property string kind: cell ? cell.kind : ""
-            readonly property string unitShown: cell ? root.shownUnit(cell.unit ?? "") : ""
-            readonly property var range: DashboardBook.defaultRange(cell ? cell.unit ?? "" : "")
-            // The row the cell shows, whose decimals it uses until it has its own
-            readonly property SignalHub.Entry entry: hub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
-            readonly property bool phone: root.form === "phone"
-            readonly property bool hasSignal: kind !== "blank"
-            // Every kind but the shift lights draws the value's text and tone, which
-            // the zones, the decimals and the color shape; the lights read only the range
-            readonly property bool drawsValue: hasSignal && kind !== "shift-light"
-            // The cell's label, or its kind's name when it has none
-            readonly property string name: cell && cell.label ? cell.label
-                                           : (root.kindNames[kind] ?? kind)
-            implicitHeight: panelColumn.implicitHeight + 2 * padding
-            padding: 12
-
-            ColumnLayout {
-                id: panelColumn
-                width: parent.width
-                spacing: 8
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label {
-                        Layout.fillWidth: true
-                        elide: Text.ElideRight
-                        font.pixelSize: Theme.fontBody
-                        font.bold: true
-                        color: Theme.text
-                        text: (root.kindNames[panelCard.kind] ?? panelCard.kind)
-                              + (panelCard.cell && panelCard.cell.label ? ": " + panelCard.cell.label : "")
-                    }
-                    ThemedButton {
-                        objectName: "panelClose"
-                        text: qsTr("Close")
-                        onClicked: root.closePanel()
-                    }
-                }
-
-                // The cell itself, live, at a fixed size, so range, zones,
-                // color and size are seen as they change
-                Cell {
-                    objectName: "panelPreview"
-                    visible: panelCard.hasSignal
-                    cell: panelCard.cell
-                    shown: false
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: panelCard.kind === "bar" || panelCard.kind === "shift-light"
-                                           || panelCard.kind === "segments" || panelCard.kind === "sparkline" ? 200 : 120
-                    Layout.preferredHeight: panelCard.kind === "shift-light" ? 40
-                                          : panelCard.kind === "segments" || panelCard.kind === "sparkline" ? 100
-                                          : panelCard.kind === "bar" || panelCard.kind === "seven-segment" ? 70 : 120
-                }
-
-                // A copy of the whole cell, for this run (section 5)
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    ThemedButton {
-                        objectName: "panelCopy"
-                        Layout.fillWidth: true
-                        text: qsTr("Copy")
-                        onClicked: root.copySelected()
-                    }
-                    ThemedButton {
-                        objectName: "panelPaste"
-                        Layout.fillWidth: true
-                        enabled: root.canPaste
-                        text: qsTr("Paste after")
-                        onClicked: root.pasteAfter(root.selected)
-                    }
-                }
-
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: panelCard.phone ? 2 : 4
-                    columnSpacing: 8
-                    rowSpacing: 8
-
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Label") }
-                    ThemedTextField {
-                        id: labelField
-                        objectName: "panelLabel"
-                        visible: panelCard.hasSignal
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: Theme.touchTarget
-                        maximumLength: DashboardBook.maxLabel
-                        text: panelCard.cell && panelCard.cell.label ? panelCard.cell.label : ""
-                        onEditingFinished: {
-                            root.setLabel(text)
-                            text = Qt.binding(() => panelCard.cell && panelCard.cell.label
-                                                    ? panelCard.cell.label : "")
-                        }
-                    }
-                    Caption { visible: panelCard.hasSignal; text: qsTr("Signal") }
-                    RowLayout {
-                        visible: panelCard.hasSignal
-                        Layout.fillWidth: true
-                        spacing: 8
-                        ThemedButton {
-                            objectName: "panelSignal"
-                            Layout.fillWidth: true
-                            text: qsTr("Change signal")
-                            onClicked: root.changeSignal()
-                        }
-                        ThemedButton {
-                            objectName: "panelKind"
-                            Layout.fillWidth: true
-                            text: qsTr("Change kind")
-                            onClicked: root.changeKind()
-                        }
-                    }
-
-                    Caption {
-                        objectName: "panelSignalName"
-                        visible: panelCard.hasSignal && panelCard.entry !== null
-                        Layout.fillWidth: true
-                        Layout.columnSpan: panelCard.phone ? 2 : 4
-                        Layout.preferredWidth: 0
-                        elide: Text.ElideRight
-                        text: panelCard.entry ? qsTr("Signal: %1").arg(panelCard.entry.name) : ""
-                    }
-                    Caption {
-                        objectName: "panelFromCaption"
-                        visible: panelCard.hasSignal
-                        text: panelCard.kind === "shift-light"
-                              ? qsTr("First light at (%1)").arg(panelCard.unitShown)
-                              : qsTr("From (%1)").arg(panelCard.unitShown)
-                    }
-                    OptionField {
-                        objectName: "panelFrom"
-                        visible: panelCard.hasSignal
-                        option: "from"
-                        clearable: false
-                        fallback: panelCard.range.from
-                    }
-                    Caption {
-                        objectName: "panelToCaption"
-                        visible: panelCard.hasSignal
-                        text: panelCard.kind === "shift-light"
-                              ? qsTr("Shift at (%1)").arg(panelCard.unitShown)
-                              : qsTr("To (%1)").arg(panelCard.unitShown)
-                    }
-                    OptionField {
-                        objectName: "panelTo"
-                        visible: panelCard.hasSignal
-                        option: "to"
-                        clearable: false
-                        fallback: panelCard.range.to
-                    }
-                    Caption {
-                        objectName: "panelShiftHint"
-                        visible: panelCard.kind === "shift-light"
-                        Layout.fillWidth: true
-                        Layout.columnSpan: panelCard.phone ? 2 : 4
-                        Layout.preferredWidth: 0
-                        wrapMode: Text.WordWrap
-                        text: qsTr("The lights fill green, amber, red between the two and flash at the shift point.")
-                    }
-
-                    Caption { objectName: "panelColdBelowCaption"; visible: panelCard.drawsValue; text: qsTr("Cold below") }
-                    OptionField { objectName: "panelColdBelow"; visible: panelCard.drawsValue; option: "coldBelow" }
-                    Caption { objectName: "panelWarnBelowCaption"; visible: panelCard.drawsValue; text: qsTr("Warning below") }
-                    OptionField { objectName: "panelWarnBelow"; visible: panelCard.drawsValue; option: "warnBelow" }
-                    Caption { objectName: "panelDangerBelowCaption"; visible: panelCard.drawsValue; text: qsTr("Danger below") }
-                    OptionField { objectName: "panelDangerBelow"; visible: panelCard.drawsValue; option: "dangerBelow" }
-                    Caption { objectName: "panelWarnFromCaption"; visible: panelCard.drawsValue; text: qsTr("Warning from") }
-                    OptionField { objectName: "panelWarnFrom"; visible: panelCard.drawsValue; option: "warnFrom" }
-                    Caption { objectName: "panelDangerFromCaption"; visible: panelCard.drawsValue; text: qsTr("Danger from") }
-                    OptionField { objectName: "panelDangerFrom"; visible: panelCard.drawsValue; option: "dangerFrom" }
-
-                    Caption { objectName: "panelDecimalsCaption"; visible: panelCard.drawsValue; text: qsTr("Decimals") }
-                    SpinBox {
-                        objectName: "panelDecimals"
-                        visible: panelCard.drawsValue
-                        Accessible.name: qsTr("Decimals")
-                        Layout.preferredHeight: Theme.touchTarget
-                        from: 0
-                        to: 6
-                        value: panelCard.cell && panelCard.cell.options
-                               && panelCard.cell.options.decimals !== undefined
-                               ? panelCard.cell.options.decimals
-                               : panelCard.entry ? panelCard.entry.decimals : 0
-                        onValueModified: root.setOptions({ decimals: value })
-                    }
-
-                    // The span, in the grid's units, which the words name
-                    Caption { text: qsTr("Columns") }
-                    SpinBox {
-                        objectName: "panelW"
-                        Accessible.name: qsTr("Columns")
-                        Layout.preferredHeight: Theme.touchTarget
-                        from: 1
-                        to: DashboardBook.maxColumns
-                        value: panelCard.cell ? panelCard.cell.w : 1
-                        onValueModified: root.resize(value, panelCard.cell.h)
-                    }
-                    Caption { text: root.phoneForm ? qsTr("Height") : qsTr("Rows") }
-                    SpinBox {
-                        objectName: "panelH"
-                        Accessible.name: root.phoneForm ? qsTr("Height") : qsTr("Rows")
-                        // The phone reads it in columns, the unit Columns uses
-                        textFromValue: v => root.phoneForm ? DashboardBook.heightInColumns(v) : String(v)
-                        Layout.preferredHeight: Theme.touchTarget
-                        // A stored h under the phone's step stays reachable
-                        from: root.phoneForm && panelCard.cell
-                              ? Math.min(root.spanScale, panelCard.cell.h) : 1
-                        // The desktop's 16, or a taller stored cell's own height
-                        to: root.phoneForm ? DashboardBook.maxRows
-                            : Math.max(DashboardBook.format1MaxRows, panelCard.cell ? panelCard.cell.h : 1)
-                        stepSize: root.spanScale
-                        value: panelCard.cell ? panelCard.cell.h : 1
-                        onValueModified: root.resize(panelCard.cell.w, root.phoneForm
-                            ? DashboardBook.stepRows(panelCard.cell.h, value > panelCard.cell.h)
-                            : value)
-                    }
-
-                    // A checkbox, as every other yes-or-no in the app
-                    ThemedCheckBox {
-                        objectName: "panelPeak"
-                        Layout.columnSpan: panelCard.phone ? 2 : 4
-                        text: qsTr("Peak hold")
-                        Accessible.name: qsTr("Peak hold")
-                        visible: root.peakKinds.indexOf(panelCard.kind) >= 0
-                        implicitHeight: Math.max(implicitIndicatorHeight + topPadding + bottomPadding,
-                                                 Theme.touchTarget)
-                        checked: panelCard.cell && panelCard.cell.options
-                                 ? panelCard.cell.options.peak === true : false
-                        onToggled: root.setOptions({ peak: checked })
-                    }
-
-                    // The kind's own
-                    Caption { visible: panelCard.kind === "analog"; text: qsTr("Major step") }
-                    OptionField {
-                        objectName: "panelMajorStep"
-                        visible: panelCard.kind === "analog"
-                        option: "majorStep"
-                        converted: false
-                    }
-                    Caption { visible: panelCard.kind === "analog"; text: qsTr("Caption") }
-                    ThemedTextField {
-                        objectName: "panelCaption"
-                        visible: panelCard.kind === "analog"
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: Theme.touchTarget
-                        maximumLength: 40
-                        readonly property string current: panelCard.cell && panelCard.cell.options
-                                                          && panelCard.cell.options.caption
-                                                          ? panelCard.cell.options.caption : ""
-                        text: current
-                        onEditingFinished: {
-                            root.setOptions({ caption: text === "" ? null : text })
-                            text = Qt.binding(() => current)
-                        }
-                    }
-                    Caption { visible: panelCard.kind === "digital"; text: qsTr("Description") }
-                    ThemedTextField {
-                        objectName: "panelDescription"
-                        visible: panelCard.kind === "digital"
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: Theme.touchTarget
-                        maximumLength: 80
-                        readonly property string current: panelCard.cell && panelCard.cell.options
-                                                          && panelCard.cell.options.description
-                                                          ? panelCard.cell.options.description : ""
-                        text: current
-                        onEditingFinished: {
-                            root.setOptions({ description: text === "" ? null : text })
-                            text = Qt.binding(() => current)
-                        }
-                    }
-                    Caption { visible: panelCard.kind === "segments"; text: qsTr("Cells") }
-                    SpinBox {
-                        objectName: "panelCells"
-                        Accessible.name: qsTr("Cells")
-                        visible: panelCard.kind === "segments"
-                        Layout.preferredHeight: Theme.touchTarget
-                        from: 2
-                        to: 64
-                        value: panelCard.cell && panelCard.cell.options
-                               && panelCard.cell.options.cells !== undefined
-                               ? panelCard.cell.options.cells : 24
-                        onValueModified: root.setOptions({ cells: value })
-                    }
-                    Caption { visible: panelCard.kind === "segments"; text: qsTr("Curve") }
-                    OptionField {
-                        objectName: "panelRise"
-                        Accessible.name: qsTr("Curve")
-                        visible: panelCard.kind === "segments"
-                        option: "rise"
-                        converted: false
-                        fallback: 1.6
-                    }
-                    Caption { visible: panelCard.kind === "seven-segment"; text: qsTr("Digits") }
-                    SpinBox {
-                        objectName: "panelDigits"
-                        Accessible.name: qsTr("Digits")
-                        visible: panelCard.kind === "seven-segment"
-                        Layout.preferredHeight: Theme.touchTarget
-                        from: 1
-                        to: 8
-                        value: panelCard.cell && panelCard.cell.options
-                               && panelCard.cell.options.digits !== undefined
-                               ? panelCard.cell.options.digits : root.selectedDigits
-                        onValueModified: root.setOptions({ digits: value })
-                    }
-                    Caption { visible: panelCard.kind === "sparkline"; text: qsTr("Window (s)") }
-                    SpinBox {
-                        objectName: "panelWindow"
-                        Accessible.name: qsTr("Window (s)")
-                        visible: panelCard.kind === "sparkline"
-                        Layout.preferredHeight: Theme.touchTarget
-                        from: 10
-                        to: 120
-                        stepSize: 10
-                        value: panelCard.cell && panelCard.cell.options
-                               && panelCard.cell.options.window !== undefined
-                               ? panelCard.cell.options.window : 30
-                        onValueModified: root.setOptions({ window: value })
-                    }
-                    Caption { visible: panelCard.kind === "bar"; text: qsTr("Standing up") }
-                    Switch {
-                        objectName: "panelVertical"
-                        Accessible.name: qsTr("Standing up")
-                        visible: panelCard.kind === "bar"
-                        implicitHeight: Math.max(implicitIndicatorHeight + topPadding + bottomPadding,
-                                                 Theme.touchTarget)
-                        checked: panelCard.cell && panelCard.cell.options
-                                 ? panelCard.cell.options.vertical === true : false
-                        onToggled: {
-                            // Standing up is a tall, narrow bar: the default
-                            // span follows the toggle, and a size the user
-                            // chose stays; one write, so one undo step
-                            // (the write rebinds this switch, so its state is read first)
-                            const on = checked
-                            const c = panelCard.cell
-                            const s = root.spanScale
-                            let base = root.doc
-                            if (c && on && c.w === 2 * s && c.h === 2 * s)
-                                base = DashboardBook.resizeCell(base, root.pageIndex, root.selected, s, 4 * s)
-                            else if (c && !on && c.w === s && c.h === 4 * s)
-                                base = DashboardBook.resizeCell(base, root.pageIndex, root.selected, 2 * s, 2 * s)
-                            root.setOptions({ vertical: on }, base)
-                        }
-                    }
-                    Caption { visible: panelCard.kind === "bar"; text: qsTr("Scale marks") }
-                    Switch {
-                        objectName: "panelMarks"
-                        Accessible.name: qsTr("Scale marks")
-                        visible: panelCard.kind === "bar"
-                        implicitHeight: Math.max(implicitIndicatorHeight + topPadding + bottomPadding,
-                                                 Theme.touchTarget)
-                        checked: panelCard.cell && panelCard.cell.options
-                                 ? panelCard.cell.options.marks !== false : true
-                        onToggled: root.setOptions({ marks: checked })
-                    }
-                    Caption { visible: panelCard.kind === "shift-light"; text: qsTr("Lights") }
-                    SpinBox {
-                        objectName: "panelCount"
-                        Accessible.name: qsTr("Lights")
-                        visible: panelCard.kind === "shift-light"
-                        Layout.preferredHeight: Theme.touchTarget
-                        from: 1
-                        to: 32
-                        value: panelCard.cell && panelCard.cell.options
-                               && panelCard.cell.options.count !== undefined
-                               ? panelCard.cell.options.count : root.selectedCount
-                        onValueModified: root.setOptions({ count: value })
-                    }
-                }
-
-                // The value's color from a fixed set; zones and Night still win.
-                // Shift lights keep their own green, amber and red
-                RowLayout {
-                    Layout.fillWidth: true
-                    visible: panelCard.drawsValue
-                    spacing: 8
-
-                    Caption { Layout.alignment: Qt.AlignTop; Layout.topMargin: 10; text: qsTr("Color") }
-                    Flow {
-                        id: colorRow
-                        objectName: "panelColors"
-                        Layout.fillWidth: true
-                        Layout.preferredWidth: 0
-                        Layout.minimumWidth: 0
-                        spacing: 8
-                        // Night draws no pick: the row dims, and stays choosable
-                        opacity: Theme.nightActive ? 0.45 : 1
-                        // A name this version doesn't know reads as Default, as it draws
-                        readonly property string current: panelCard.cell && panelCard.cell.options
-                                                          && Theme.gaugeColorNames.indexOf(panelCard.cell.options.color) >= 0
-                                                          ? panelCard.cell.options.color : ""
-                        // A custom color: "#rrggbb" as stored, else ""
-                        readonly property string custom: panelCard.cell && panelCard.cell.options
-                                                         && Theme.isGaugeHex(panelCard.cell.options.color)
-                                                         ? panelCard.cell.options.color : ""
-                        // The Custom entry's fields show while it is open or a custom color is set
-                        property bool customOpen: false
-                        readonly property bool customShown: customOpen || custom !== ""
-                        // The panel is one instance for every gauge: another gauge starts closed
-                        Connections {
-                            target: root
-                            function onSelectedChanged() { colorRow.customOpen = false }
-                            function onPageIndexChanged() { colorRow.customOpen = false }
-                        }
-                        ThemedButton {
-                            objectName: "panelColor_default"
-                            text: qsTr("Default")
-                            Accessible.name: qsTr("Default color")
-                            checkable: true
-                            checked: colorRow.current === "" && colorRow.custom === ""
-                            onClicked: { colorRow.customOpen = false; root.setOptions({ color: null }) }
-                        }
-                        Repeater {
-                            model: Theme.gaugeColorNames
-                            AbstractButton {
-                                id: swatch
-                                required property string modelData
-                                objectName: "panelColor_" + modelData
-                                width: Theme.touchTarget
-                                height: Theme.touchTarget
-                                checkable: true
-                                checked: colorRow.current === modelData
-                                Accessible.name: qsTr("Color %1").arg(Theme.gaugeColorLabel(modelData))
-                                onToggled: { toggle(); colorRow.customOpen = false; root.setOptions({ color: modelData }) }
-                                contentItem: Item {}
-                                background: Rectangle {
-                                    anchors.centerIn: parent
-                                    width: Math.min(parent.width, 32)
-                                    height: width
-                                    radius: 6
-                                    color: Theme.gaugeSwatch(swatch.modelData)
-                                    border.width: swatch.checked ? 3 : 1
-                                    border.color: swatch.checked ? Theme.text : Theme.outline
-                                }
-                            }
-                        }
-                        ThemedButton {
-                            objectName: "panelColor_custom"
-                            text: qsTr("Custom...")
-                            Accessible.name: qsTr("Custom color")
-                            // Not checkable: a click would flip the state the row's own rules decide
-                            checked: colorRow.customShown
-                            onClicked: colorRow.customOpen = !colorRow.customShown || colorRow.custom === ""
-                        }
-                    }
-                }
-
-                // Three whole numbers make a color of the user's own, stored as
-                // "#rrggbb"; nothing is refused for being hard to see, it is said
-                RowLayout {
-                    id: customRow
-                    objectName: "panelColorCustom"
-                    Layout.fillWidth: true
-                    visible: panelCard.drawsValue && colorRow.customShown
-                    spacing: 4
-                    // The color the fields start from: the stored custom one, else what the gauge draws now
-                    readonly property color base: colorRow.custom !== "" ? colorRow.custom
-                        : Theme.gaugeColor(panelCard.cell && panelCard.cell.options ? panelCard.cell.options.color : "") || Theme.gaugeValue
-                    function channel(i) { return Math.round([base.r, base.g, base.b][i] * 255) }
-                    // True once a field's text was edited by the user since it was bound: only then is a
-                    // color equal to the drawn one worth storing (a pass-through sends editingFinished too)
-                    property bool edited: false
-                    // "#rrggbb" for three well-formed whole numbers 0 to 255, else ""
-                    function typed() {
-                        let out = "#"
-                        for (const f of [fieldR, fieldG, fieldB]) {
-                            const t = f.text.trim()
-                            if (!/^[0-9]{1,3}$/.test(t) || Number(t) > 255)
-                                return ""
-                            out += (Number(t) < 16 ? "0" : "") + Number(t).toString(16)
-                        }
-                        return out
-                    }
-                    readonly property string previewHex: { void fieldR.text; void fieldG.text; void fieldB.text; return typed() }
-                    // The fields show the color again; what was typed is gone
-                    function rebind() {
-                        edited = false
-                        fieldR.text = Qt.binding(() => String(customRow.channel(0)))
-                        fieldG.text = Qt.binding(() => String(customRow.channel(1)))
-                        fieldB.text = Qt.binding(() => String(customRow.channel(2)))
-                    }
-                    // A value that isn't a whole number 0 to 255 stays typed, with its reason under the fields
-                    function commit() {
-                        const hex = typed()
-                        if (hex === "")
-                            return
-                        // A focus pass-through sends editingFinished with nothing typed: nothing to store
-                        if (edited || !Qt.colorEqual(hex, base))
-                            root.setOptions({ color: hex })
-                        rebind()
-                    }
-                    // Another gauge, or the row hidden: what was left typed doesn't follow
-                    Connections {
-                        target: colorRow
-                        function onCustomShownChanged() { customRow.rebind() }
-                    }
-                    Connections {
-                        target: root
-                        function onSelectedChanged() { customRow.rebind() }
-                        function onPageIndexChanged() { customRow.rebind() }
-                    }
-                    Caption { text: "R" }
-                    ChannelField { id: fieldR; objectName: "panelColorR"; index: 0; row: customRow }
-                    Caption { text: "G" }
-                    ChannelField { id: fieldG; objectName: "panelColorG"; index: 1; row: customRow }
-                    Caption { text: "B" }
-                    ChannelField { id: fieldB; objectName: "panelColorB"; index: 2; row: customRow }
-                }
-                // The preview, and under 3:1 what it means
-                RowLayout {
-                    Layout.fillWidth: true
-                    visible: customRow.visible
-                    spacing: 8
-                    Rectangle {
-                        objectName: "panelColorPreview"
-                        Layout.preferredWidth: 32
-                        Layout.preferredHeight: 32
-                        radius: 6
-                        color: customRow.previewHex !== "" ? customRow.previewHex : "transparent"
-                        border.width: 1
-                        border.color: Theme.outline
-                    }
-                    Caption {
-                        objectName: "panelColorWhy"
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        visible: customRow.previewHex === ""
-                        color: Theme.danger
-                        text: qsTr("Each value is a whole number from 0 to 255")
-                    }
-                    Caption {
-                        objectName: "panelColorHard"
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        // The look it is hard to read in (a layout can be opened under the other one); no
-                        // color is hard in both, since the two surfaces sit at the two ends of the lightness
-                        readonly property var hardIn: customRow.previewHex === "" ? []
-                            : Theme.lookNames.filter(l => Theme.gaugeContrast(customRow.previewHex, l) < 3)
-                        visible: hardIn.length > 0
-                        text: hardIn[0] === "dark" ? qsTr("Hard to read in Dark") : qsTr("Hard to read in Light")
-                    }
-                }
-
-                Caption {
-                    objectName: "panelColorNight"
-                    Layout.fillWidth: true
-                    visible: panelCard.drawsValue && Theme.nightActive
-                    wrapMode: Text.Wrap
-                    text: qsTr("Night draws every gauge in its own tint")
-                }
-
-                // The order: both forms' grids follow it
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: panelCard.phone ? 2 : 4
-                    columnSpacing: 8
-                    rowSpacing: 8
-                    ThemedButton {
-                        objectName: "panelEarlier"
-                        Layout.fillWidth: true
-                        enabled: root.selected > 0
-                        text: qsTr("Move earlier")
-                        onClicked: root.moveTo(root.selected - 1)
-                    }
-                    ThemedButton {
-                        objectName: "panelLater"
-                        Layout.fillWidth: true
-                        enabled: root.selected < root.shownCells.length - 1
-                        text: qsTr("Move later")
-                        onClicked: root.moveTo(root.selected + 1)
-                    }
-                    ThemedButton {
-                        objectName: "panelStart"
-                        Layout.fillWidth: true
-                        enabled: root.selected > 0
-                        text: qsTr("To the start")
-                        onClicked: root.moveTo(0)
-                    }
-                    ThemedButton {
-                        objectName: "panelEnd"
-                        Layout.fillWidth: true
-                        enabled: root.selected < root.shownCells.length - 1
-                        text: qsTr("To the end")
-                        onClicked: root.moveTo(root.shownCells.length - 1)
-                    }
-                }
-
-                // Remove, last and quiet, in edit mode or out of it; Undo
-                // takes it back, so it asks nothing
-                ThemedButton {
-                    objectName: "panelRemove"
-                    flat: true
-                    text: qsTr("Remove")
-                    Accessible.name: qsTr("Remove %1").arg(panelCard.name)
-                    onClicked: root.removeCell(root.selected)
-                }
-            }
-        }
+        DashCellPanel { host: root }
     }
 
     // Add's kinds, each with a still preview
     Component {
         id: addPanel
-        GaugeCard {
-            objectName: "dashAddPanel"
-            readonly property real touchMin: Theme.touchTarget
-            implicitHeight: addColumn.implicitHeight + 2 * padding
-            padding: 12
-            ColumnLayout {
-                id: addColumn
-                width: parent.width
-                spacing: 8
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label {
-                        Layout.fillWidth: true
-                        font.pixelSize: Theme.fontBody
-                        font.bold: true
-                        color: Theme.text
-                        text: root.changingKind ? qsTr("Change this gauge's kind")
-                                                : qsTr("Add a gauge: its kind")
-                    }
-                    ThemedButton {
-                        objectName: "addClose"
-                        text: root.changingKind ? qsTr("Back") : qsTr("Close")
-                        onClicked: {
-                            if (root.changingKind) {
-                                root.leaveKindList()
-                                return
-                            }
-                            root.commitTyping()
-                            root.panel = ""
-                        }
-                    }
-                }
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    Repeater {
-                        // A blank has no signal to keep, so a change never offers it
-                        model: root.changingKind ? root.drawnKinds.filter(k => k !== "blank")
-                                                 : root.drawnKinds
-                        ColumnLayout {
-                            id: kindTile
-                            required property string modelData
-                            // Comparisons, not an indexOf on an array literal: the QML
-                            // compiler's C++ for that narrows qsizetype to int, which
-                            // Xcode's -Wshorten-64-to-32 rejects
-                            readonly property bool wide: modelData === "bar"
-                                                         || modelData === "shift-light"
-                                                         || modelData === "segments"
-                                                         || modelData === "sparkline"
-                            spacing: 4
-                            Loader {
-                                objectName: "preview_" + kindTile.modelData
-                                Layout.preferredWidth: kindTile.wide ? 200 : 120
-                                Layout.preferredHeight: kindTile.modelData === "shift-light" ? 40
-                                                      : kindTile.modelData === "segments"
-                                                        || kindTile.modelData === "sparkline" ? 100
-                                                      : kindTile.wide || kindTile.modelData === "seven-segment" ? 70
-                                                      : 120
-                                sourceComponent: root.kindComponent(kindTile.modelData)
-                                // Still: 60 percent of a 0 to 100 range, never live
-                                onLoaded: {
-                                    const g = item as GaugeBase
-                                    g.from = 0
-                                    g.to = 100
-                                    g.hasValue = true
-                                    g.value = 60
-                                    g.label = root.kindNames[kindTile.modelData]
-                                    // A sparkline's still is a made-up trace, and it
-                                    // reads nothing (no source)
-                                    if (kindTile.modelData === "sparkline") {
-                                        const spark = item as SparkGauge
-                                        spark.shown = false
-                                        spark.windowS = 12   // 120 points at 10 Hz fill the box
-                                        const still = []
-                                        for (let i = 0; i < 120; ++i)
-                                            still.push(i * 100, 55 + 25 * Math.sin(i / 10))
-                                        spark.samples = still
-                                    }
-                                }
-                            }
-                            ThemedButton {
-                                objectName: "addKind_" + kindTile.modelData
-                                Layout.fillWidth: true
-                                text: root.kindNames[kindTile.modelData]
-                                // The cell's own kind is marked, and no change to it
-                                readonly property bool current: root.changingKind && root.selectedCell
-                                                                && root.selectedCell.kind === kindTile.modelData
-                                checkable: current
-                                checked: current
-                                onClicked: root.pickKind(kindTile.modelData)
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        DashAddPanel { host: root }
     }
 
     // A signal for Add's kind, or the edited cell's new one: the session's
     // rows with references, or those of the profile Settings has chosen
     Component {
         id: signalPanel
-        GaugeCard {
-            id: signalCard
-            objectName: "dashSignalPanel"
-            readonly property real touchMin: Theme.touchTarget
-            // The rows the bar leaves: every filter property shares one
-            // change signal, so reading active re-filters on any change
-            readonly property var offered: root.pickable(root.addKind !== "" ? root.addKind
-                                                         : root.selectedCell ? root.selectedCell.kind : "")
-            readonly property var rows: {
-                const f = rowFilter
-                const all = offered
-                if (!f.active)
-                    return all
-                return all.filter(r => f.matches(r.name, r.unit, r.group, false))
-            }
-            implicitHeight: signalColumn.implicitHeight + 2 * padding
-            padding: 12
-            SignalFilter { id: rowFilter }
-            ColumnLayout {
-                id: signalColumn
-                width: parent.width
-                spacing: 8
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label {
-                        Layout.fillWidth: true
-                        font.pixelSize: Theme.fontBody
-                        font.bold: true
-                        color: Theme.text
-                        elide: Text.ElideRight
-                        text: root.addKind !== ""
-                              ? qsTr("Add a gauge: a signal for the %1").arg(root.kindNames[root.addKind])
-                              : qsTr("A signal for this gauge")
-                    }
-                    ThemedButton {
-                        objectName: "signalBack"
-                        text: qsTr("Back")
-                        onClicked: root.panel = root.addKind !== "" ? "add" : "cell"
-                    }
-                }
-                // The text alone: a Popup doesn't take the page's zoom, and
-                // Plotted only means nothing to a gauge
-                SignalFilterBar {
-                    objectName: "signalFilter"
-                    Layout.fillWidth: true
-                    filter: rowFilter
-                    filterButtonShown: false
-                }
-                Label {
-                    objectName: "signalNone"
-                    visible: signalCard.rows.length === 0
-                    Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    color: Theme.textDim
-                    text: signalCard.offered.length > 0 ? qsTr("No signal matches.")
-                        : Bridge.connected ? qsTr("This session's profile has no signal a gauge can show.")
-                        : qsTr("No signals: connect, or choose a profile in Settings.")
-                }
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    Repeater {
-                        model: signalCard.rows
-                        ThemedButton {
-                            required property var modelData
-                            objectName: "pickSignal_" + modelData.ref
-                            text: modelData.unit !== "" && modelData.unit !== modelData.name ? qsTr("%1 (%2)").arg(modelData.name).arg(modelData.unit)
-                                                        : modelData.name
-                            onClicked: root.pickSignal(modelData)
-                        }
-                    }
-                }
-            }
-        }
+        DashSignalPanel { host: root }
     }
 
     // No session on the phone: the connect list, in the panel's place above
@@ -2283,6 +1234,7 @@ Page {
     property var connectUris: []
     property string connectVehicleUri: ""
     property var connectAdapters: []
+    property var connectProfileWords: ({})
     // A tapped row outlives the list, which the Loader makes again each show
     property string connectTapped: ""
     readonly property bool connectShown: form === "phone" && !Bridge.connected && !editing
@@ -2299,6 +1251,7 @@ Page {
             recents: root.connectUris
             vehicleUri: root.connectVehicleUri
             adapters: root.connectAdapters
+            profileWords: root.connectProfileWords
             tapped: root.connectTapped
             onPicked: uri => root.connectTapped = uri
             onConnectTo: uri => root.connectToUri(uri)
@@ -2336,145 +1289,27 @@ Page {
         }
     }
 
-    // The desktop's link state: the dot and words, and the Night switch at
-    // their end (ADR-0058 section 6: a status with a tap)
-    Component {
-        id: linkState
-        RowLayout {
-            spacing: 10
-            // Under 60 px the label would read "N...n": the dot and the label
-            // fade (opacity, so the layout still holds them) and the header's
-            // pill carries the state alone
-            Rectangle {
-                objectName: "linkDot"
-                implicitWidth: 8; implicitHeight: 8   // layout-managed
-                radius: 4
-                color: Theme.linkColor(Bridge.linkState)
-                opacity: linkLabel.opacity
-            }
-            Label {
-                id: linkLabel
-                objectName: "linkLabel"
-                Layout.fillWidth: true
-                opacity: width >= 60 ? 1 : 0
-                elide: Text.ElideMiddle
-                // Short statuses come from Theme.linkLabel; "ok" adds the
-                // address where the row leaves room for it (the header
-                // shows it anyway). Long-form detail (episode counts,
-                // error codes) stays in LiveView's banner.
-                readonly property bool roomForAddress: width >= 150
-                text: Bridge.linkState === "ok"
-                      ? (roomForAddress ? qsTr("Live · %1").arg(Bridge.uriLabel) : qsTr("Live"))
-                      : Theme.linkLabel(Bridge.linkState)
-                font.pixelSize: Theme.fontCaption
-                color: Theme.linkColor(Bridge.linkState)
-            }
-            NightSwitch {}
-        }
-    }
     Component { id: toolNight; NightSwitch {} }
+    // The Night switch, for the page's parts
+    readonly property Component nightSwitch: toolNight
 
     // The drive view's one line of chrome: the link state and the address,
     // and a log's or recording's progress (section 2). It takes no taps
-    Item {
+    DashDriveStatus {
         id: driveStatus
-        objectName: "driveStatusLine"
-        visible: root.driving
-        x: 0
-        y: root.driveInsetTop
-        width: root.width
-        height: 28
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: root.margin
-            anchors.rightMargin: root.margin
-            spacing: 6
-            Rectangle {
-                objectName: "driveStatusDot"
-                implicitWidth: 8; implicitHeight: 8   // layout-managed
-                radius: 4
-                color: Theme.linkColor(Bridge.linkState)
-            }
-            Label {
-                objectName: "driveStatusWord"
-                font.pixelSize: Theme.fontCaption
-                color: Theme.text
-                text: Theme.linkShortLabel(Bridge.linkState)
-            }
-            Label {
-                objectName: "driveStatusAddress"
-                Layout.fillWidth: true
-                Layout.minimumWidth: 0
-                elide: Text.ElideRight
-                font.pixelSize: Theme.fontCaption
-                color: Theme.textDim
-                text: qsTr("· %1").arg(Bridge.uriLabel)
-            }
-            Label {
-                objectName: "driveStatusRun"
-                visible: Bridge.logActive || Bridge.recordingActive || root.driveLogEnded
-                font.pixelSize: Theme.fontCaption
-                color: Theme.text
-                text: Bridge.logActive ? qsTr("Log")
-                    : root.driveLogEnded ? qsTr("Log ended") : qsTr("Recording")
-            }
-            Label {
-                objectName: "driveStatusTime"
-                visible: Bridge.logActive
-                font.family: Theme.valueFamily
-                font.features: { "tnum": 1 }
-                font.pixelSize: Theme.fontCaption
-                color: Theme.text
-                text: root.driveLogTime
-            }
-            Label {
-                objectName: "driveStatusDetail"
-                readonly property string detail:
-                    Bridge.logActive ? root.driveLogSize
-                  : !Bridge.recordingActive || Bridge.markCount === 0 ? ""
-                  : Bridge.markCount === 1 ? qsTr("1 mark")
-                  : qsTr("%1 marks").arg(Bridge.markCount)
-                visible: detail !== ""
-                font.pixelSize: Theme.fontCaption
-                color: Theme.textDim
-                text: qsTr("· %1").arg(detail)
-            }
-        }
+        host: root
     }
 
-    // What the log did without being asked: Start log's refusal, or an
-    // end the user didn't ask for (a failed write, the session's end), in
-    // words beside a warning dot, until Dismiss or the next log. Start log
-    // sits in Main's header, so the bridge holds the words
-    // (Bridge.logNotice); the header and the drive view's sheet show them
-    component LogNotice: RowLayout {
-        id: notice
-        required property string name
-        readonly property real touchMin: Theme.touchTarget
-        objectName: name
-        Layout.fillWidth: true
-        visible: Bridge.logNotice !== ""
-        spacing: 10
-        Rectangle {
-            implicitWidth: 8; implicitHeight: 8   // layout-managed
-            radius: 4
-            color: Theme.warning
-        }
-        Label {
-            objectName: notice.name + "Text"
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.text
-            font.pixelSize: Theme.fontCaption
-            text: Bridge.logNotice
-        }
-        ThemedButton {
-            objectName: notice.name + "Dismiss"
-            compact: true
-            text: qsTr("Dismiss")
-            Accessible.name: qsTr("Dismiss the log's notice")
-            onClicked: Bridge.clearLogNotice()
-        }
+    // The alert band in the drive view, where Main's is hidden: under
+    // the status line, over the gauges' top, moving nothing
+    AlertBand {
+        id: driveAlertBand
+        objectName: "driveAlertBand"
+        visible: root.driving && shown
+        z: 2
+        x: Theme.barGap
+        y: driveStatus.y + driveStatus.height
+        width: root.width - 2 * Theme.barGap
     }
 
     // ---- The drive view's controls (ADR-0059's appendix "the reveal from
@@ -2483,146 +1318,9 @@ Page {
     // session's row over the view's, Exit drive nearest the tabs; on its
     // side one row, the view's controls first. Its ground keeps the gauges
     // from showing through, and a touch anywhere on it restarts the delay
-    Rectangle {
+    DashDriveSheet {
         id: driveSheet
-        objectName: "driveToolsBackdrop"
-        readonly property bool wide: root.width > root.height
-        visible: root.driving && root.barsShown > 0
-        z: 3
-        x: 0
-        y: root.height - root.barsShown * (root.driveTabBarHeight + height)
-        width: root.width
-        height: sheetGrid.implicitHeight + 2 * Theme.barGap
-        color: Theme.bg
-        // Keeps a press between the controls off the gauges; driveToolsTouch counts it
-        MouseArea {
-            anchors.fill: parent
-            enabled: root.driving
-        }
-        Rectangle {
-            anchors { left: parent.left; right: parent.right; top: parent.top }
-            height: root.hairlineWidth
-            color: Theme.hairline
-        }
-        GridLayout {
-            id: sheetGrid
-            objectName: "driveSheet"
-            readonly property real touchMin: Theme.touchTarget
-            x: root.margin
-            y: Theme.barGap
-            width: parent.width - 2 * root.margin
-            columns: driveSheet.wide ? 2 : 1
-            columnSpacing: Theme.barGap
-            rowSpacing: Theme.barGap
-
-            LogNotice {
-                name: "driveLogNotice"
-                Layout.row: 0
-                Layout.column: 0
-                Layout.columnSpan: sheetGrid.columns
-            }
-            RowLayout {
-                objectName: "driveSessionRow"
-                Layout.row: 1
-                Layout.column: driveSheet.wide ? 1 : 0
-                Layout.fillWidth: true
-                spacing: Theme.barGap
-                Item { Layout.fillWidth: true; visible: driveSheet.wide }
-                SheetButton {
-                    objectName: "driveStartLog"
-                    highlighted: true
-                    visible: Bridge.connected && !Bridge.recordingActive
-                             && !root.isReplay(Bridge.currentUri)
-                    enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
-                    text: qsTr("Start log")
-                    Accessible.name: qsTr("Start a log of the ticked signals")
-                    onClicked: Bridge.startLog()
-                }
-                Label {
-                    objectName: "driveLogReadout"
-                    visible: Bridge.logActive
-                    // Gives way first, so Stop log and Mark keep their size
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 0
-                    Layout.minimumWidth: 0
-                    elide: Text.ElideRight
-                    font.family: Theme.valueFamily
-                    font.features: { "tnum": 1 }
-                    font.pixelSize: Theme.fontBody
-                    color: Theme.text
-                    text: root.driveLogSize === "" ? root.driveLogTime
-                        : qsTr("%1 · %2").arg(root.driveLogTime).arg(root.driveLogSize)
-                }
-                SheetButton {
-                    objectName: "driveStopLog"
-                    highlighted: true
-                    visible: Bridge.logActive
-                    enabled: !Bridge.disconnecting
-                    text: qsTr("Stop log")
-                    onClicked: Bridge.stopLog()
-                }
-                SheetButton {
-                    objectName: "driveMark"
-                    visible: Bridge.recordingActive
-                    text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount) : qsTr("Mark")
-                    Accessible.name: qsTr("Mark the recording")
-                    onClicked: Bridge.mark()
-                }
-                Item { Layout.fillWidth: true; visible: !driveSheet.wide }
-                // Stop log takes its place while a log runs, as in the header
-                SheetButton {
-                    objectName: "driveDisconnect"
-                    flat: true
-                    visible: !Bridge.logActive
-                    enabled: !Bridge.connecting && !Bridge.disconnecting
-                    text: Bridge.disconnecting ? qsTr("Disconnecting…") : qsTr("Disconnect")
-                    onClicked: Bridge.disconnectSession()
-                }
-            }
-            RowLayout {
-                objectName: "driveViewRow"
-                Layout.row: driveSheet.wide ? 1 : 2
-                Layout.column: 0
-                Layout.fillWidth: true
-                spacing: Theme.barGap
-                SheetButton {
-                    objectName: "driveExit"
-                    flat: true
-                    text: qsTr("Exit drive")
-                    Accessible.name: qsTr("Exit drive: leave the full-screen gauges")
-                    onClicked: root.leaveDrive(true)
-                }
-                Item { Layout.fillWidth: true; visible: !driveSheet.wide }
-                SheetButton {
-                    objectName: "driveResetPeaks"
-                    flat: true
-                    text: qsTr("Reset peaks")
-                    onClicked: root.resetPeaks()
-                }
-                Loader {
-                    objectName: "driveNight"
-                    active: root.driving
-                    sourceComponent: toolNight
-                }
-                Item { Layout.fillWidth: true; visible: driveSheet.wide }
-            }
-        }
-        // Over the controls: a press restarts the delay and goes on to them
-        MouseArea {
-            objectName: "driveToolsTouch"
-            anchors.fill: parent
-            z: 1
-            enabled: root.driving
-            onPressed: mouse => {
-                root.barTouched()
-                mouse.accepted = false
-            }
-        }
-    }
-    // A touch's size each way, drawn compact, as the header's buttons
-    component SheetButton: ThemedButton {
-        compact: !flat
-        Layout.minimumWidth: Theme.touchTarget
+        host: root
     }
 
     // ---- The header: on the desktop the title, the link state and the
@@ -2631,423 +1329,9 @@ Page {
     // last, the desktop's page strip, on the panel's upper edge. The drive
     // view shows none of it: its controls are in the sheet
 
-    ColumnLayout {
+    DashTopBar {
         id: topBar
-        visible: !root.driving
-        // Over the pages, so the shown tab covers the panel's top line
-        z: 1
-        x: (root.width - width) / 2
-        y: root.topGap
-        width: Math.max(0, root.width - 2 * root.margin)
-        spacing: root.gap / 2
-
-        PageHeader {
-            id: header
-            Layout.fillWidth: true
-            title: root.phoneForm ? "" : qsTr("Dashboard")
-            spacing: root.phoneForm ? 8 : 10
-            // At a narrow width the row's buttons are compact, the link
-            // state gives way first and the title last, so the row fits
-            // whatever the font's widths
-            titleShrinks: true
-            // Reset peaks and Edit at a phone's touch size
-            readonly property real touchMin: Theme.touchTarget
-
-            // The desktop's link state follows the title. No width of
-            // its own: it takes what the title and buttons leave
-            Loader {
-                objectName: "linkInRow"
-                Layout.fillWidth: true
-                Layout.preferredWidth: 0
-                active: !root.phoneForm
-                visible: active
-                sourceComponent: linkState
-            }
-            // Drive, at the start of the phone's row. Its tools sit at the
-            // right. With no session it stays, and says what it waits for
-            ThemedButton {
-                id: driveButton
-                objectName: "dashDrive"
-                flat: true
-                compact: true
-                Layout.minimumWidth: Theme.touchTarget
-                visible: root.phoneForm
-                enabled: Bridge.connected && !root.editing
-                text: !Bridge.connected ? qsTr("Connect first")
-                    : root.driving ? qsTr("Exit drive") : qsTr("Drive")
-                Accessible.name: !Bridge.connected ? qsTr("Connect first: a session shows the gauges full screen")
-                               : root.driving ? qsTr("Exit drive: leave the full-screen gauges")
-                                              : qsTr("Drive: show the gauges full screen")
-                onClicked: root.driving ? root.leaveDrive(true) : root.enterDrive()
-            }
-            Item {
-                objectName: "toolRowStart"
-                Layout.fillWidth: true
-                visible: root.phoneForm
-            }
-            // A row too narrow for every tool (a small window, a phone zoomed
-            // far in, or no session, whose Drive words are longer) drops Reset
-            // peaks, which edit mode's Pages row then offers (moreResetPeaks).
-            // Judged against the bar's width (the row can't shrink under its
-            // tools) and the tools' own widths, never the row's: no loop.
-            // The layout rounds each width up to a whole pixel, and each item
-            // shown ahead of the tools (the fills too) takes a spacing
-            readonly property real toolsWidth: {
-                let ahead = 0
-                for (const item of children) {
-                    if (item === resetPeaksButton)
-                        break
-                    if (item.visible)
-                        ahead += spacing + (item === driveButton ? Math.ceil(item.implicitWidth) : 0)
-                }
-                return ahead + Math.ceil(resetPeaksButton.implicitWidth) + spacing
-                    + Math.ceil(editButton.implicitWidth)
-                    + (nightLoader.active ? spacing + Math.ceil(nightLoader.implicitWidth) : 0)
-            }
-            readonly property bool holdsResetPeaks: topBar.width >= Math.max(root.toolRowFull, toolsWidth)
-            ThemedButton {
-                id: resetPeaksButton
-                objectName: "resetPeaks"
-                flat: true
-                compact: root.compact || root.phoneForm
-                visible: header.holdsResetPeaks
-                text: qsTr("Reset peaks")
-                onClicked: root.resetPeaks()
-            }
-            ThemedButton {
-                id: editButton
-                objectName: "dashEdit"
-                compact: root.compact || root.phoneForm
-                horizontalPadding: root.phoneForm ? 18 : (compact ? 6 : 8)
-                visible: !root.editing && !root.driving
-                text: qsTr("Edit")
-                onClicked: root.startEditing()
-            }
-            Loader {
-                id: nightLoader
-                objectName: "toolRowNight"
-                active: root.phoneForm
-                visible: active
-                sourceComponent: toolNight
-            }
-        }
-
-        LogNotice { name: "dashLogNotice" }
-
-        // Edit mode's bar: Undo and Redo where Drive stands outside edit
-        // mode, Add and Page, and Done in Edit's place at the end. Compact
-        // on the phone, and Add's words shortened on a narrow page, so the
-        // row holds them at a 320 px width and a large font
-        RowLayout {
-            objectName: "dashEditBar"
-            readonly property real touchMin: Theme.touchTarget
-            Layout.fillWidth: true
-            visible: root.editing
-            // Tighter on a phone, where a wider face and a large font need the room
-            spacing: root.form === "phone" ? 4 : 8
-            // Disabled rather than hidden with nothing to take back, so the row never moves
-            ThemedButton {
-                objectName: "dashUndo"
-                flat: true
-                enabled: root.canUndo
-                text: qsTr("Undo")
-                Accessible.name: root.canUndo ? qsTr("Undo: %1").arg(root.undoWords) : qsTr("Undo")
-                onClicked: root.undo()
-            }
-            ThemedButton {
-                objectName: "dashRedo"
-                flat: true
-                enabled: root.canRedo
-                text: qsTr("Redo")
-                Accessible.name: root.canRedo ? qsTr("Redo: %1").arg(root.redoWords) : qsTr("Redo")
-                onClicked: root.redo()
-            }
-            Item { Layout.fillWidth: true }
-            ThemedButton {
-                objectName: "dashAdd"
-                compact: root.form === "phone"
-                enabled: DashboardBook.canAddCell(root.doc, root.pageIndex)
-                text: root.compact ? qsTr("Add") : qsTr("Add gauge")
-                Accessible.name: qsTr("Add a gauge")
-                onClicked: root.startAdd()
-            }
-            ThemedButton {
-                objectName: "dashMore"
-                compact: root.form === "phone"
-                checkable: true
-                checked: root.moreShown
-                text: qsTr("Page")
-                onClicked: {
-                    root.moreShown = !root.moreShown
-                    root.confirmReset = false
-                    root.confirmRemovePage = false
-                }
-            }
-            ThemedButton {
-                objectName: "dashDone"
-                compact: root.form === "phone"
-                highlighted: true
-                text: qsTr("Done")
-                onClicked: root.stopEditing()
-            }
-        }
-
-        // How a gauge is reached, while no panel is open
-        Label {
-            objectName: "dashEditHint"
-            visible: root.editing && root.panel === ""
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.textDim
-            font.pixelSize: Theme.fontCaption
-            text: root.form === "phone" ? qsTr("Tap a gauge to change it; hold it to move it")
-                                        : qsTr("Click a gauge to change it; hold it to move it")
-        }
-
-        // The pages' controls, then a gap, then Reset (it replaces every page,
-        // so it stands apart) and Reset peaks where the tool row has no room
-        Flow {
-            id: moreRow
-            objectName: "dashMoreRow"
-            readonly property real touchMin: Theme.touchTarget
-            Layout.fillWidth: true
-            Layout.minimumWidth: 0
-            Layout.preferredWidth: 1
-            visible: root.editing && root.moreShown && !root.confirmReset && !root.confirmRemovePage
-            spacing: 8
-            ThemedTextField {
-                id: pageName
-                objectName: "moreRename"
-                width: Math.min(220, topBar.width)
-                height: Theme.touchTarget
-                maximumLength: DashboardBook.maxLabel
-                text: root.pages[root.pageIndex] ? root.pages[root.pageIndex].name : ""
-                placeholderText: qsTr("Page name")
-                Accessible.name: qsTr("This page's name")
-                onEditingFinished: {
-                    root.renamePage(text)
-                    text = Qt.binding(() => root.pages[root.pageIndex]
-                                            ? root.pages[root.pageIndex].name : "")
-                }
-            }
-            // The phone's only way to a new page; the desktop's is the strip's "+"
-            ThemedButton {
-                id: moreAddPage
-                objectName: "moreAddPage"
-                visible: root.phoneForm
-                enabled: DashboardBook.canAddPage(root.doc)
-                text: qsTr("Add page")
-                onClicked: root.addPage()
-            }
-            // Nothing to move with one page
-            ThemedButton {
-                id: moreLeft
-                objectName: "moreLeft"
-                visible: root.pages.length > 1
-                enabled: root.pageIndex > 0
-                text: qsTr("Move page left")
-                onClicked: root.movePage(-1)
-            }
-            ThemedButton {
-                id: moreRight
-                objectName: "moreRight"
-                visible: root.pages.length > 1
-                enabled: root.pageIndex < root.pages.length - 1
-                text: qsTr("Move page right")
-                onClicked: root.movePage(1)
-            }
-            ThemedButton {
-                id: moreRemovePage
-                objectName: "moreRemovePage"
-                enabled: DashboardBook.canRemovePage(root.doc)
-                text: qsTr("Remove page")
-                onClicked: root.confirmRemovePage = true
-            }
-            ThemedButton {
-                id: moreExport
-                objectName: "moreExport"
-                text: qsTr("Export layout")
-                onClicked: {
-                    root.noteLayout("")
-                    layoutSaveDialog.open()
-                }
-            }
-            ThemedButton {
-                id: moreLoad
-                objectName: "moreLoad"
-                text: qsTr("Load layout")
-                onClicked: {
-                    root.noteLayout("")
-                    layoutOpenDialog.open()
-                }
-            }
-            Item {
-                objectName: "moreResetGap"
-                // The bar's width and the controls' own, never the flow's: a
-                // hidden flow sizes itself from its children, and would loop
-                readonly property real used: pageName.width + moreRemovePage.width + moreRow.spacing
-                    + moreExport.width + moreLoad.width + 2 * moreRow.spacing
-                    + (moreAddPage.visible ? moreAddPage.width + moreRow.spacing : 0)
-                    + (moreLeft.visible ? moreLeft.width + moreRight.width + 2 * moreRow.spacing : 0)
-                readonly property real tail: moreReset.width
-                    + (moreResetPeaks.visible ? moreResetPeaks.width + moreRow.spacing : 0)
-                width: Math.max(16, topBar.width - used - tail - 2 * moreRow.spacing)
-                height: 1
-            }
-            ThemedButton {
-                id: moreReset
-                objectName: "moreReset"
-                flat: true
-                text: qsTr("Reset")
-                Accessible.name: qsTr("Reset: replace this form's pages with the built-in layout")
-                onClicked: root.confirmReset = true
-            }
-            // Reset peaks, when the tool row has no room for it
-            ThemedButton {
-                id: moreResetPeaks
-                objectName: "moreResetPeaks"
-                flat: true
-                visible: !header.holdsResetPeaks
-                text: qsTr("Reset peaks")
-                onClicked: root.resetPeaks()
-            }
-        }
-        Label {
-            objectName: "dashLayoutNote"
-            visible: root.editing && root.moreShown && root.layoutNote !== ""
-            Layout.fillWidth: true
-            Layout.preferredWidth: 0
-            wrapMode: Text.WordWrap
-            color: root.layoutNoteBad ? Theme.danger : Theme.textDim
-            font.pixelSize: Theme.fontCaption
-            text: root.layoutNote
-        }
-        FileDialog {
-            id: layoutSaveDialog
-            title: qsTr("Export this layout")
-            fileMode: FileDialog.SaveFile
-            defaultSuffix: "json"
-            nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
-            currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-            currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-                         + "/" + root.layoutFileName()
-            onAccepted: root.exportLayoutTo(layoutSaveDialog.selectedFile)
-        }
-        DocumentOpenDialog {
-            id: layoutOpenDialog
-            objectName: "layoutOpenDialog"
-            title: qsTr("Load a layout")
-            nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
-            currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-            onAccepted: root.loadLayoutFrom(layoutOpenDialog.selectedFile)
-            onFailed: words => root.noteLayout(words, true)
-        }
-        RowLayout {
-            objectName: "dashRemovePageConfirm"
-            readonly property real touchMin: Theme.touchTarget
-            Layout.fillWidth: true
-            visible: root.editing && root.confirmRemovePage
-            spacing: 8
-            Label {
-                objectName: "removePageQuestion"
-                Layout.fillWidth: true
-                Layout.minimumWidth: 0
-                wrapMode: Text.WordWrap
-                color: Theme.warning
-                font.pixelSize: Theme.fontCaption
-                text: qsTr("Remove the page \"%1\" and its gauges?")
-                      .arg(root.pages[root.pageIndex] ? root.pages[root.pageIndex].name : "")
-            }
-            ThemedButton {
-                objectName: "removePageConfirm"
-                compact: root.form === "phone"
-                text: qsTr("Remove")
-                onClicked: root.removePage()
-            }
-            ThemedButton {
-                objectName: "removePageKeep"
-                compact: root.form === "phone"
-                text: qsTr("Keep")
-                onClicked: root.confirmRemovePage = false
-            }
-        }
-        RowLayout {
-            objectName: "dashResetConfirm"
-            readonly property real touchMin: Theme.touchTarget
-            Layout.fillWidth: true
-            visible: root.editing && root.confirmReset
-            spacing: 8
-            Label {
-                Layout.fillWidth: true
-                Layout.minimumWidth: 0
-                wrapMode: Text.WordWrap
-                color: Theme.warning
-                font.pixelSize: Theme.fontCaption
-                text: qsTr("Replace this form's pages with the built-in layout?")
-            }
-            ThemedButton {
-                objectName: "resetConfirm"
-                compact: root.form === "phone"
-                text: qsTr("Reset")
-                onClicked: root.resetForm()
-            }
-            ThemedButton {
-                objectName: "resetKeep"
-                compact: root.form === "phone"
-                text: qsTr("Keep")
-                onClicked: root.confirmReset = false
-            }
-        }
-
-        RowLayout {
-            objectName: "dashProblem"
-            Layout.fillWidth: true
-            visible: (root.problem === "damaged" || root.problem === "newer"
-                      || root.problem === "dropped") && !root.problemDismissed
-            Label {
-                objectName: "dashProblemText"
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                color: Theme.warning
-                font.pixelSize: Theme.fontCaption
-                text: root.problem === "newer"
-                      ? qsTr("The saved dashboard was made by a newer version of Havne. "
-                             + "This shows the built-in one; the saved one is kept.")
-                      : root.problem === "dropped"
-                      ? qsTr("Part of the saved dashboard couldn't be read: %1 left out. "
-                             + "The saved text is kept.").arg(root.droppedWords)
-                      : qsTr("The saved dashboard couldn't be read. "
-                             + "This shows the built-in one; the saved text is kept.")
-            }
-            ThemedButton {
-                objectName: "dashProblemDismiss"
-                compact: true
-                text: qsTr("Dismiss")
-                onClicked: root.problemDismissed = true
-            }
-        }
-
-        // The desktop's pages as tabs, with two or more or in edit mode;
-        // last in the column, so the panel starts at its foot
-        Loader {
-            id: stripHost
-            objectName: "dashPageStripHost"
-            Layout.fillWidth: true
-            Layout.preferredHeight: item ? (item as DashPageStrip).implicitHeight : 0
-            active: !root.phoneForm
-            visible: root.stripShown
-            sourceComponent: Component {
-                DashPageStrip {
-                    pages: root.pages
-                    current: root.pageIndex
-                    editing: root.editing
-                    canAddPage: DashboardBook.canAddPage(root.doc)
-                    hairlineWidth: root.hairlineWidth
-                    onPageChosen: (i) => root.goTo(i)
-                    onAddRequested: root.addPage()
-                }
-            }
-        }
+        host: root
     }
 
     // After an undo or a redo, the step's words; outside edit mode, after each
@@ -3366,8 +1650,9 @@ Page {
                         id: cellRepeater
                         model: pageView.cells.length
 
-                        Cell {
+                        DashCell {
                             id: placedCell
+                            host: root
                             required property int index
                             readonly property var box: pageView.boxes[pageView.reflowing
                                 ? DashboardBook.movedIndex(index, root.held, root.dropAt) : index]
