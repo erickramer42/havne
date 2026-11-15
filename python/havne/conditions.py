@@ -118,8 +118,10 @@ class ConditionSet:
         if (text_or_bytes is None) == (path is None):
             raise ValueError("a condition file's text or its path, one of them")
         if path is not None:
+            # One byte past core's bound, so core refuses a longer file in
+            # its words without all of it read
             with open(path, "rb") as f:
-                data = f.read()
+                data = f.read(e.ECUIO_CONDITION_FILE_MAX_BYTES + 1)
         else:
             data = utf8(text_or_bytes)
         self._handle = ctypes.POINTER(e.ecuio_condition_set_t)()
