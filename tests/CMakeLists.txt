@@ -1771,6 +1771,19 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 
     add_executable(test_bridge
         test_bridge.cpp
+        test_bridge_bluetooth.cpp
+        test_bridge_frames.cpp
+        test_bridge_readonce.cpp
+        test_bridge_obdb.cpp
+        test_bridge_health.cpp
+        test_bridge_replay.cpp
+        test_bridge_diagnostics.cpp
+        test_bridge_signalfiles.cpp
+        test_bridge_live.cpp
+        test_bridge_fake.cpp
+        test_bridge_signals.cpp
+        test_bridge_recorder.cpp
+        test_bridge_conditions.cpp
         test_recording_view.cpp
         test_viewer_frames.cpp
         test_recording_import.cpp
@@ -1798,16 +1811,13 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/carryover.cpp
         ../app/adapterrelay.cpp
         ../app/windowtheme.cpp
+        bridge_support.h
         fake_bt_socket.h
         fake_theme.h
     )
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
     app_enable_warnings(test_bridge)
-    # One file of many tests, past MSVC's default section limit
-    if(MSVC)
-        target_compile_options(test_bridge PRIVATE /bigobj)
-    endif()
 
     # core/src for pid_support.h: core's judgment of the unsupported
     # signals, fed to the model (test_core's precedent)
