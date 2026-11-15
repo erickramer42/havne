@@ -102,6 +102,7 @@ qt_add_qml_module(app_ui
         qml/RecordingJumpRow.qml
         qml/StretchesPanel.qml
         qml/ConditionsPanel.qml
+        qml/RecordingSpanStats.qml
         qml/PageHeader.qml
         qml/DashboardPage.qml
         qml/ConnectList.qml
