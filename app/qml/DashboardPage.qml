@@ -445,6 +445,10 @@ Page {
         layoutNote = words
         layoutNoteBad = bad === true
     }
+    // A form's name in the export's note and the load's words, so the two agree
+    function formWord(f) {
+        return f === "phone" ? qsTr("phone") : qsTr("desktop")
+    }
     // The picked vehicle's picks the store has, each as the file a layout
     // names (ADR-0064, "Dashboards") with the references its profile
     // gives: [{ name, sha256, from, profile, refs }]. sha256 is the
@@ -484,10 +488,11 @@ Page {
             noteLayout(qsTr("Not saved: %1").arg(r.words), true)
             return false
         }
-        noteLayout((needed.length === 0
-                    ? qsTr("Saved this layout to a file")
-                    : qsTr("Saved this layout to a file. It needs the plugins %1")
-                          .arg(needed.map(f => f.name).join(", ")))
+        noteLayout(qsTr("Saved this layout to a file. It's a %1 layout: it loads on a %1, not on a %2. "
+                        + "A layout isn't scaled between forms")
+                       .arg(formWord(form)).arg(formWord(form === "phone" ? "desktop" : "phone"))
+                   + (needed.length === 0 ? ""
+                      : qsTr(". It needs the plugins %1").arg(needed.map(f => f.name).join(", ")))
                    + (unloaded.length === 0 ? ""
                       : qsTr(". The vehicle's picks %1 aren't in the store, so a gauge reading them isn't listed as needing them")
                             .arg(unloaded.join(", "))))
@@ -524,8 +529,7 @@ Page {
         } else if (read.problem === "otherform") {
             noteLayout(qsTr("Not loaded: the file is a %1 layout and this is the %2 form. "
                             + "A layout isn't scaled between forms")
-                       .arg(read.form === "phone" ? qsTr("phone") : qsTr("desktop"))
-                       .arg(form === "phone" ? qsTr("phone") : qsTr("desktop")), true)
+                       .arg(formWord(read.form)).arg(formWord(form)), true)
         } else {
             commitTyping()
             cancelHold()
@@ -535,8 +539,7 @@ Page {
             if (read.problem === "dropped")
                 words.push(qsTr("%1 left out because they couldn't be read").arg(droppedText(read.dropped)))
             if (read.notes.indexOf("no-form") >= 0)
-                words.push(qsTr("the file named no form, so it was read as the %1 form")
-                           .arg(form === "phone" ? qsTr("phone") : qsTr("desktop")))
+                words.push(qsTr("the file named no form, so it was read as the %1 form").arg(formWord(form)))
             if (read.missing.length > 0)
                 words.push(qsTr("it needs plugins this vehicle doesn't pick: %1. Import or pick them under "
                                 + "Signals; until then those gauges read not in profile")

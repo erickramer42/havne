@@ -3604,7 +3604,8 @@ TestCase {
         const raw = JSON.parse(Bridge.layoutFileText(url).text)
         compare(raw.form, "desktop")
         compare(raw.files, [])
-        compare(page.layoutNote, "Saved this layout to a file")
+        compare(page.layoutNote, "Saved this layout to a file. It's a desktop layout: it loads on a desktop, "
+                + "not on a phone. A layout isn't scaled between forms")
         page.destroy()
 
         const second = docOf([cellOf("X")])
@@ -3736,6 +3737,38 @@ TestCase {
         compare(find(page, "dashStore").desktopUnread, "", "the unread text is never touched")
     }
 
+    // The export's note names the form the file loads on, in the words the
+    // other form's refusal gives the same file; on the narrowest phone it
+    // wraps inside the page
+    function test_theExportsNoteNamesTheFormItLoadsOn_data() {
+        return [
+            { tag: "desktop", form: "desktop", other: "phone", props: {} },
+            { tag: "phone", form: "phone", other: "desktop", props: { width: 320, height: 832 } }
+        ]
+    }
+    function test_theExportsNoteNamesTheFormItLoadsOn(data) {
+        const url = layoutUrl("layout-form-" + data.tag + ".json")
+        const props = Object.assign({ form: data.form }, data.props)
+        const src = storedPageOf(props, docOf([cellOf("A")]))
+        src.startEditing()
+        click(src, "dashMore")
+        verify(src.exportLayoutTo(url), src.layoutNote)
+        verify(!src.layoutNoteBad)
+        compare(src.layoutNote, "Saved this layout to a file. It's a " + data.form + " layout: it loads on a "
+                + data.form + ", not on a " + data.other + ". A layout isn't scaled between forms")
+        const note = find(src, "dashLayoutNote")
+        verify(note.visible, "the note shows in the More row")
+        verify(waitForPolish(note), "the note laid out")
+        verify(note.mapToItem(src, note.width, 0).x <= src.width + 0.5 && note.contentWidth <= note.width + 0.5,
+               "inside the page: " + note.contentWidth + " of " + note.width + " in " + src.width)
+        src.destroy()
+        const page = storedPageOf({ form: data.other }, docOf([cellOf("B")]))
+        page.startEditing()
+        verify(!page.loadLayoutFrom(url))
+        verify(page.layoutNote.indexOf("is a " + data.form + " layout") >= 0
+               && page.layoutNote.indexOf("A layout isn't scaled between forms") >= 0, page.layoutNote)
+    }
+
     function test_aDamagedOrNewerOrEmptyFileIsRefusedInWords_data() {
         return [
             { tag: "damaged", text: "{ nope", words: "isn't a dashboard layout" },
@@ -3844,7 +3877,8 @@ TestCase {
         const raw = JSON.parse(Bridge.layoutFileText(url).text)
         compare(raw.files, [{ name: "Boosty", sha256: picked[0].sha256 }],
                 "the pick the layout needs, by name and its written file's hash")
-        compare(page.layoutNote, "Saved this layout to a file. It needs the plugins Boosty")
+        compare(page.layoutNote, "Saved this layout to a file. It's a desktop layout: it loads on a desktop, "
+                + "not on a phone. A layout isn't scaled between forms. It needs the plugins Boosty")
         compare(page.layoutFileName(), "dashboard-test-car-desktop.json")
         page.destroy()
 
