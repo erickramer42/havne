@@ -943,7 +943,18 @@ TEST(ConditionSessionTest, AReplayOfTheRecordingGivesTheSameEvents)
         ASSERT_NE(recorder, nullptr);
         ASSERT_EQ(ecuio_session_record(s.s, recorder), ECUIO_OK);
         ASSERT_EQ(ecuio_session_start(s.s), ECUIO_OK);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1800));
+        // Each first judgment and both holds: about 1.25 s of the mock's time
+        const auto until =
+            std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (std::chrono::steady_clock::now() < until) {
+            {
+                std::lock_guard<std::mutex> lock(live.seen.m);
+                if (live.seen.events.size() >= 6) {
+                    break;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
         EXPECT_EQ(ecuio_session_close(s.s), ECUIO_OK);
         EXPECT_EQ(ecuio_recorder_close(recorder, "the test ended"), ECUIO_OK);
     }

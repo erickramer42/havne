@@ -339,6 +339,34 @@ inline size_t condition_term_bytes()
            6 * (sizeof t->unit + sizeof d->name + sizeof d->unit);
 }
 
+// Condition i's terms for its line, every slot past info's count zero,
+// and with binding its binding against signals and file (as
+// ecuio_condition_set_resolve takes them). ECUIO_OK, or the status of the
+// first read core refused
+inline ecuio_status_t read_terms(const ecuio_condition_set_t* set, uint32_t i,
+                                 const ecuio_condition_info_t& info,
+                                 ecuio_condition_term_t* terms,
+                                 const ecuio_signal_set_t* signals,
+                                 const ecuio_signal_file_t* file,
+                                 ecuio_condition_binding_t* binding)
+{
+    std::memset(terms, 0,
+                sizeof(ecuio_condition_term_t) * ECUIO_CONDITION_MAX_TERMS);
+    for (uint32_t k = 0; k < info.term_count && k < ECUIO_CONDITION_MAX_TERMS;
+         ++k) {
+        const ecuio_status_t st =
+            ecuio_condition_set_get_term(set, i, k, &terms[k]);
+        if (st != ECUIO_OK) {
+            return st;
+        }
+    }
+    if (binding == nullptr) {
+        return ECUIO_OK;
+    }
+    std::memset(binding, 0, sizeof *binding);
+    return ecuio_condition_set_resolve(set, i, signals, file, binding);
+}
+
 // The bytes a condition's line takes at most
 inline size_t condition_def_bytes(const ecuio_condition_info_t& info)
 {

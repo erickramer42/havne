@@ -17,6 +17,9 @@ import sys
 import tempfile
 
 LOG = "(1700000000.250000) can0 7E8#04410C1AF8\n"
+FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
+CONDITIONS = os.path.join(FIXTURES, "conditions")
+SIGNALS = os.path.join(FIXTURES, "signals")
 LAYOUT = b'{"format": 2, "form": "desktop", "pages": [{"name": "E", "cells": []}]}\n'
 
 
@@ -60,6 +63,29 @@ def main():
                               "--seconds", "1"],
             "layout": lambda n: ["layout", "check", layout],
             "layout-refused": lambda n: ["layout", "check", latin1],
+            "conditions-refused": lambda n: [
+                "conditions", "check", os.path.join(CONDITIONS, "refused.json")],
+            "conditions-unread": lambda n: ["conditions", "check", missing],
+            "conditions-no-profile": lambda n: [
+                "conditions", "check", os.path.join(CONDITIONS, "example.json"),
+                "--profile", "none-such"],
+            "wrap": lambda n: ["plugins", "wrap",
+                               os.path.join(SIGNALS, "extras.json"),
+                               "--out", os.path.join(tmp, n + ".json")],
+            "wrap-refused": lambda n: [
+                "plugins", "wrap", os.path.join(SIGNALS, "refused.json"),
+                "--out", os.path.join(tmp, n + ".json")],
+            "wrap-unread": lambda n: ["plugins", "wrap", missing, "--out",
+                                      os.path.join(tmp, n + ".json")],
+            "put-unread": lambda n: [
+                "plugins", "put", missing, os.path.join(SIGNALS, "extras.json"),
+                "--out", os.path.join(tmp, n + ".json")],
+            "drop-unread": lambda n: ["plugins", "drop", missing, "--variant",
+                                      "base", "--out",
+                                      os.path.join(tmp, n + ".json")],
+            "match-unread": lambda n: ["plugins", "match", missing, "--vin",
+                                       "1FAFAKE10M0000001"],
+            "check-unread": lambda n: ["plugins", "check", missing],
             "log-unread": lambda n: ["log", "mock://write-fail",
                                      os.path.join(tmp, n), "--conditions",
                                      missing],
@@ -75,9 +101,13 @@ def main():
                                             "--count", "5", "--record", unmade],
         }
         # A run into a writable file ends with this exit
-        exits = {"layout-refused": 3, "log-unread": 3, "log-bad-uri": 3,
-                 "log-unrecorded": 1, "health-bad-uri": 3, "stream-unread": 3,
-                 "stream-bad-uri": 3, "stream-unrecorded": 1}
+        exits = {"layout-refused": 3, "conditions-refused": 3,
+                 "conditions-unread": 3, "conditions-no-profile": 3,
+                 "wrap-refused": 3, "wrap-unread": 3, "put-unread": 3,
+                 "drop-unread": 3, "match-unread": 3, "check-unread": 3,
+                 "log-unread": 3, "log-bad-uri": 3, "log-unrecorded": 1,
+                 "health-bad-uri": 3, "stream-unread": 3, "stream-bad-uri": 3,
+                 "stream-unrecorded": 1}
         if sys.platform.startswith("linux"):
             # play is Linux's alone; elsewhere it is usage, before any line
             commands["play-no-interface"] = lambda n: [

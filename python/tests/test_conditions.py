@@ -3,8 +3,9 @@
 #          the package (ADR-0063)
 #
 # tests/fixtures/conditions/example.json from its path and from its text,
-# field for field; a refused file's line, column and words; each
-# condition resolved against obd2, the mock, no signals and a signal file
+# field for field; a refused file's line, column and words; a file past
+# core's bound read to a byte past it alone; each condition resolved
+# against obd2, the mock, no signals and a signal file
 # (tests/fixtures/signals/extras.json), against havne-cli's own lines
 # where the tree has it; a set left unclosed and collected, and one
 # closed. Then a set in a session: the replay fixture's engine start
@@ -97,6 +98,32 @@ def test_a_refused_file_says_where():
     with pytest.raises(havne.Error) as e:
         havne.ConditionSet("")
     assert e.value.name == "INVALID_ARGUMENT" and "line 1" in e.value.detail
+
+
+def test_a_file_past_cores_bound_is_read_no_further(tmp_path, monkeypatch):
+    bound = havne._ecuio.ECUIO_CONDITION_FILE_MAX_BYTES
+    empty = b'{"havne_conditions":1,"conditions":[]}'
+    at = tmp_path / "at.json"
+    at.write_bytes(empty + b" " * (bound - len(empty)))
+    assert havne.ConditionSet(path=str(at)).conditions == []
+    over = tmp_path / "over.json"
+    over.write_bytes(empty + b" " * (4 * bound))
+    asked = []
+
+    def spy(*args, **kwargs):
+        f = open(*args, **kwargs)
+        read = f.read
+
+        def bounded(*n):
+            asked.append(n)
+            return read(*n)
+        f.read = bounded
+        return f
+    monkeypatch.setattr(havne.conditions, "open", spy, raising=False)
+    with pytest.raises(havne.Error) as e:
+        havne.ConditionSet(path=str(over))
+    assert e.value.name == "INVALID_ARGUMENT", e.value.detail
+    assert asked == [(bound + 1,)]
 
 
 def test_the_example_resolves_against_a_profile():
