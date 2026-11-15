@@ -4374,6 +4374,17 @@ profile  raw
                 + "a span's later ones are drawn as one to its end")
         panel.info = { conditionsCut: true }
         compare(line.text, "Showing the first 3: the recording holds more condition events than the viewer reads")
+        const lost = " lost while recording: an entry may be missing, or run on past its end"
+        panel.info = { conditionEventsLost: 3 }
+        verify(line.visible, "a loss alone shows the line")
+        compare(line.text, "3 condition events were" + lost)
+        panel.info = { conditionEventsLost: 1 }
+        compare(line.text, "1 condition event was" + lost)
+        panel.info = { conditionsCut: true, conditionEventsLost: 2 }
+        compare(line.text, "Showing the first 3: the recording holds more condition events than the viewer reads. "
+                + "2 condition events were" + lost)
+        panel.info = { conditionEventsLost: 0 }
+        verify(!line.visible, "no loss, no line")
     }
 
     // A recording with no conditions offers no panel
