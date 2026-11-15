@@ -15,8 +15,9 @@ Safety, regulatory and warranty caveats are in
 ## Where things stand
 
 **Current phase: v0.8.0, conditions** (the roadmap's row below), whose
-computed grammar is built. v0.7.4, follow-ups on the dashboard and the
-viewer, is out (its section below): a Dashboard layout saved to a file
+computed grammar is built on `integ/v080`, off dev. v0.7.4, follow-ups
+on the dashboard and the viewer, is released and tagged (its section
+below): a Dashboard layout saved to a file
 and loaded back, more gauge colors, steady trends on the Dashboard and
 Live's chart, every plugin variant offered for a vehicle, Compare's
 difference trace, the demo car under `obd2`, and Android's own document
@@ -796,11 +797,14 @@ PATCH may carry"): the C ABI grows, append-only
     whole passes given 120 s, and the ELM327 chatty close's knobs set
     under the lock that counts its requests.
 
-  Run on the test phone with the mock, not on a car: the six open
-  dialogs, the exports through a provider, a layout's export, uninstall
-  and load, the viewer's grips by finger, and the Dashboard's trends
-  under `mock://demo`. Live's chart and the connect list's fold have not
-  been looked at there.
+  Run on the test phone with the mock, not on a car: the release
+  candidate's APK (Live's chart through the demo's rev-limiter pulls, the
+  Dashboard's trends across page switches, two layout exports under one
+  name and each loaded back, the three imports refusing a layout file,
+  a CSV saved to a cloud provider online and offline) and development
+  builds before it (the six open dialogs, a folder export, a layout's
+  export, uninstall and load, the viewer's grips by finger). The connect
+  list's fold has not been looked at there.
 
 ### Waiting on a tester: an iPhone download
 
