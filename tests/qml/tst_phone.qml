@@ -798,6 +798,58 @@ TestCase {
         verify(bottom <= main.contentItem.height + 0.5, "the panel ends at " + bottom)
     }
 
+    // The Conditions panel in the chart's place on a phone: its rows and
+    // buttons a touch's size inside the width at 384 and 320 px, and a row's
+    // press gives the chart back centered on its entry
+    function test_theConditionsPanelFitsAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theConditionsPanelFitsAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Conditions", uri: "replay://x?profile=obd2", source: "",
+                    folder: Harness.recordingFixtures + "/conditions", profile: "obd2" })
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const fits = (item, name) => {
+            const top = item.mapToItem(main.contentItem, 0, 0).y
+            const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+            verify(bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+            const right = item.mapToItem(main.contentItem, item.width, 0).x
+            verify(right <= main.contentItem.width + 0.5, name + " ends at " + right)
+        }
+        fits(find(page, "jumpConditions"), "jumpConditions")
+        find(page, "jumpConditions").clicked()
+        verify(waitForPolish(main), "laid out")
+        verify(find(page, "conditionsPanel").visible, "the panel is up")
+        verify(!find(page, "chartFrame").visible, "in the chart's place")
+        fits(find(page, "conditionsClose"), "conditionsClose")
+        const list = find(page, "conditionList")
+        tryVerify(() => list.itemAtIndex(2) !== null && list.itemAtIndex(2).width > 0, 2000,
+                  "the rows are laid out")
+        for (let i = 0; i < 3; ++i) {
+            const row = list.itemAtIndex(i)
+            fits(find(row, "conditionRowArea"), "row " + i)
+            for (const name of ["conditionTime", "conditionName", "conditionLength"]) {
+                const label = find(row, name)
+                const right = label.mapToItem(main.contentItem, label.width, 0).x
+                verify(right <= main.contentItem.width + 0.5, name + " of row " + i + " ends at " + right)
+            }
+        }
+        page.setView(0, 2000)
+        mouseClick(find(list.itemAtIndex(0), "conditionRowArea"))
+        verify(!page.conditionsOpen, "the panel gives the chart back")
+        verify(waitForPolish(main), "laid out")
+        verify(find(page, "chartFrame").visible)
+        compare(page.viewT0, 11376)
+        compare(page.cursorMs, 7251)
+    }
+
     // A recording folder of number signals (twelve unless given), three
     // samples each
     function wideRecording(name, count) {

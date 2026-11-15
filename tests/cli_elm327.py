@@ -2,6 +2,7 @@
 # Testing: HARNESS: CliElm327RunTest (ctest)
 #
 #   python tests/cli_elm327.py adapter <havne-cli>
+#   python tests/cli_elm327.py reconnect <havne-cli>
 #   python tests/cli_elm327.py session <havne-cli>
 #   python tests/cli_elm327.py modules <havne-cli>
 #   python tests/cli_elm327.py plugin <havne-cli> <plugins/example-sim>
@@ -13,6 +14,9 @@
 # echo, the automatic search, headers on and off, the count digit, the
 # adapter's wait; a second host is refused while one is connected, and
 # the next connection starts from the power-on settings.
+# reconnect: a host that connects again at once after its close is never
+# refused: RECONNECTS rounds, each closing as soon as it's answered or
+# right after its command, unanswered, so its close follows its bytes.
 # session: core's own elm327:// session against it reads the simulated
 # car: the VIN, the mock's three stored codes, the engine speed's values.
 # modules: modules=2's second module answers a uds-generic DID through it
@@ -25,14 +29,17 @@ import json
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 SKIP = 77
+RECONNECTS = 200
 
 
 class Emulator:
     """havne-cli sim <uri> --elm327 tcp:0 as a child, its port read from
-    its elm327 line"""
+    its elm327 line, its later lines read on a thread as they come: a
+    full pipe (Windows' holds 4 KiB) would hold the emulator up"""
 
     def __init__(self, cli, uri, seconds=60, extra=()):
         self.p = subprocess.Popen(
@@ -46,18 +53,25 @@ class Emulator:
                 host, port = j["listen"].rsplit(":", 1)
                 assert host == "127.0.0.1", j
                 self.port = int(port)
+                self.reader = threading.Thread(target=self._read, daemon=True)
+                self.reader.start()
                 return
             if j["type"] == "error":
                 raise AssertionError("the emulator didn't start: %r" % j)
         raise AssertionError("no elm327 line: %r" % self.lines)
+
+    def _read(self):
+        for line in self.p.stdout:
+            if line.strip():
+                self.lines.append(json.loads(line))
 
     def end(self, wait=False):
         """Its lines after the elm327 one: at its seconds' end (its end
         line), or cut short now"""
         if not wait:
             self.p.terminate()
-        out, _ = self.p.communicate(timeout=60)
-        self.lines += [json.loads(l) for l in out.splitlines() if l.strip()]
+        self.p.wait(timeout=60)
+        self.reader.join(timeout=60)
         return self.lines
 
 
@@ -136,6 +150,27 @@ def adapter(cli):
            end[0]["requests"] == 5 and end[0]["replies"] == 4,
            "the sim's counts: five requests, the functional 22 01 refused "
            "unsent: %r" % end)
+
+
+def reconnect(cli):
+    emu = Emulator(cli, "mock://emu?values=canned", seconds=120)
+    try:
+        for n in range(RECONNECTS):
+            h = Host(emu.port)
+            # the last is answered, so every connect is taken by the end
+            if n % 2 == 0 or n == RECONNECTS - 1:
+                out, _ = h.send("ATI")
+                expect(out == "ATI\rELM327 v1.4b\r\r>",
+                       "round %d, a power on's answer: %r" % (n, out))
+            else:
+                h.s.sendall(b"ATI\r")
+            h.close()
+    finally:
+        lines = emu.end()
+    events = [l["event"] for l in lines if l["type"] == "client"]
+    expect("refused" not in events, "a host refused: %r" % events)
+    expect(events.count("connected") == RECONNECTS,
+           "%d connected: %r" % (RECONNECTS, events))
 
 
 def stream(cli, uri, extra):
@@ -232,7 +267,8 @@ def main():
     if mode == "plugin":
         rc = plugin(cli, sys.argv[3])
     else:
-        rc = {"adapter": adapter, "session": session, "modules": modules,
+        rc = {"adapter": adapter, "reconnect": reconnect, "session": session,
+              "modules": modules,
               "python-obd": python_obd}[mode](cli)
     print("ok" if not rc else "skipped")
     return rc or 0

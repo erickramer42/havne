@@ -46,7 +46,14 @@ class RecordingView : public QObject
                    unitSystemChanged)
     Q_PROPERTY(double durationMs READ durationMs NOTIFY stateChanged)
     // { format, utcStartMs (0 for none), noSummary, rowsTorn,
-    //   recordsDropped, notesDropped }
+    //   recordsDropped, notesDropped, conditionEvents (events.log's cond
+    //   lines, every one counted), conditionsCut (more than the reader
+    //   keeps: an entry open at the last kept line ends there, not at the
+    //   end), conditionSpanCount (every entry the kept lines make),
+    //   conditionSpansCut (more than ViewerConditionSpans), conditionPartsCut
+    //   (the kept spans' stale parts past as many again: a span's next part
+    //   runs to its end), conditionBound (ViewerConditionSpans, for the
+    //   words) }
     Q_PROPERTY(QVariantMap info READ info NOTIFY stateChanged)
     // One map per signal, in the reader's order: { index, name, unit,
     // decimals, isText, plotRank, plotted (the default), samples,
@@ -59,6 +66,16 @@ class RecordingView : public QObject
     // (ECUIO_CHECK_*), id (-1 for the whole bus), extended, atMs,
     // lengthMs, count, code }
     Q_PROPERTY(QVariantList findings READ findings NOTIFY stateChanged)
+    // The recording's condition events (ADR-0063 section 8) paired into
+    // entries, by start and then key, the first ViewerConditionSpans: an
+    // ON span, { on: true }, or a stretch judged stale while OFF, { on:
+    // false }. Each { key, name (conditions.json's while its hash matches,
+    // else the key), level (ECUIO_ALERT_* for an alert condition, else 0),
+    // on, fromMs, toMs, heldStart (ON when the recording began: from 0),
+    // openEnd (still so at the end: to durationMs), stale: [{ fromMs,
+    // toMs }] (an ON span's parts judged stale; an OFF entry's whole) }
+    Q_PROPERTY(QVariantList conditionSpans READ conditionSpans NOTIFY
+                   stateChanged)
     // The check's outcome: { ran, error (why it didn't: "the recording
     // has no frames", a row it refused), frames, ids, isotpSkipped, isotpFlagsUnknown,
     // isotpNoWire, tornRows }
@@ -98,6 +115,9 @@ public:
 
     // The most signals a recording plots on open
     static constexpr int ViewerPlotted = 4;
+    // The most condition entries the viewer keeps: a condition flapping
+    // through a long drive gives more than a chart or a list can show apart
+    static constexpr int ViewerConditionSpans = 4096;
 
     explicit RecordingView(QObject* parent = nullptr);
     ~RecordingView() override;
@@ -113,6 +133,7 @@ public:
     QVariantList signalList() const;
     QVariantList markers() const { return m_markers; }
     QVariantList findings() const { return m_findings; }
+    QVariantList conditionSpans() const { return m_conditionSpans; }
     QVariantMap check() const { return m_check; }
     bool stale() const { return m_stale; }
     QString decodedWith() const { return m_decodedWith; }
@@ -295,6 +316,9 @@ public:
     }
     // The asks' task runs out of memory at each means ask while on
     void setLoseMeansForTesting(bool on) { m_loseMeansForTesting = on; }
+    // The next opens read their condition events as core's cut ones
+    // (ECUIO_RECORDING_INFO_CONDITIONS_CUT), which takes a million lines
+    void setConditionsCutForTesting(bool on) { m_conditionsCutForTesting = on; }
 
 signals:
     void stateChanged();
@@ -379,6 +403,10 @@ private:
     };
 
     struct FrameSet;
+    struct ConditionSpan;
+    // Pairs the open reader's condition events into res's entries
+    static void pairConditions(Result& res, const QString& folder,
+                               std::atomic<bool>* cancel);
     static void run(const std::shared_ptr<Result>& res,
                     std::atomic<bool>* cancel, RecordingView* view,
                     quint64 generation, const QString& folder,
@@ -455,6 +483,11 @@ private:
     std::vector<Signal> m_signals;
     QVariantList m_markers;
     QVariantList m_findings;
+    QVariantList m_conditionSpans;
+    double m_conditionSpanCount = 0;
+    bool m_conditionPartsCut = false;
+    bool m_conditionsCut = false;
+    bool m_conditionsCutForTesting = false;
     QVariantMap m_check;
 
     std::thread m_worker;

@@ -564,6 +564,12 @@ Page {
     onStretchListChanged: chart.requestPaint()
     onBandsShownChanged: chart.requestPaint()
     onJumpIndexChanged: chart.requestPaint()
+    // The Conditions panel (ADR-0063 section 10): open in the Stretches
+    // panel's place, one of the two at a time, and the entry of
+    // conditionList last shown from it, -1 for none
+    property bool conditionsOpen: false
+    property int conditionPick: -1
+    onConditionPickChanged: chart.requestPaint()
     // An ask that failed (the file changed since the open): not a
     // recording with no pull
     property bool pullsHereFailed: false
@@ -896,6 +902,18 @@ Page {
     function centerOn(t) {
         const half = (viewT1 - viewT0) / 2
         setView(t - half, t + half)
+    }
+    // A Conditions row: the view centered on its entry and the cursor at its
+    // start, as a finding's row; a phone's panel gives the chart back
+    function showCondition(i) {
+        const s = conditionList[i]
+        if (s === undefined)
+            return
+        conditionPick = i
+        centerOn((s.fromMs + s.toMs) / 2)
+        setCursor(s.fromMs)
+        if (Theme.compact)
+            conditionsOpen = false
     }
 
     // The cursors' time tags on the axis row, for the layout to keep its
@@ -1634,6 +1652,56 @@ Page {
         return kind === 7 ? Theme.textDim : kind === 1 || kind === 4 || kind === 5 ? Theme.danger : Theme.warning
     }
 
+    // The recording's conditions drawn none, warning, then danger, so the
+    // louder level is on top where two overlap
+    // RecordingView.conditionSpans copied once into plain objects at each
+    // open: a paint that read the C++ maps would make a wrapper for each
+    // span and each stale part, the garbage behind Qt 6.12's sweep crash.
+    // Nothing else reads conditionSpans
+    readonly property var conditionList: recording.conditionSpans.map(s => ({
+        key: s.key, name: s.name, level: s.level, on: s.on, fromMs: s.fromMs, toMs: s.toMs,
+        heldStart: s.heldStart, openEnd: s.openEnd,
+        stale: Array.from(s.stale, p => ({ fromMs: p.fromMs, toMs: p.toMs })) }))
+    readonly property var conditionsByLevel: conditionList.slice()
+        .sort((a, b) => (a.on ? a.level : -1) - (b.on ? b.level : -1))
+    // The conditions' two 4 px rows, the lower's top at y: an alert's ON
+    // spans on it in their level's role, everything else 6 px above in
+    // textDim, so a span inside an alert's keeps pixels of its own. A
+    // stretch with no new data is dashed 3 px on, 3 off from its own start,
+    // so the dashes stay put as the view pans. spans: conditionsByLevel
+    function drawConditions(ctx, y, left, right, xOf, spans) {
+        const dashed = (top, origin, x0, x1) => {
+            for (let x = origin + Math.max(0, Math.floor((x0 - origin) / 6)) * 6; x < x1; x += 6) {
+                const a = Math.max(x, x0), b = Math.min(x + 3, x1)
+                if (b > a)
+                    ctx.fillRect(a, top, b - a, 4)
+            }
+        }
+        for (const s of spans) {
+            const from = xOf(s.fromMs), to = Math.max(xOf(s.toMs), from + 2)
+            const x0 = Math.max(left, from), x1 = Math.min(right, to)
+            if (x1 <= x0)
+                continue
+            const top = s.on && s.level > 0 ? y : y - 6
+            ctx.fillStyle = conditionsPanel.colorOf(s)
+            if (!s.on) {
+                dashed(top, from, x0, x1)
+                continue
+            }
+            let at = x0
+            for (const p of s.stale) {
+                const p0 = Math.max(at, xOf(p.fromMs)), p1 = Math.min(x1, xOf(p.toMs))
+                if (p1 <= p0)
+                    continue
+                ctx.fillRect(at, top, p0 - at, 4)
+                dashed(top, xOf(p.fromMs), p0, p1)
+                at = p1
+            }
+            if (x1 > at)
+                ctx.fillRect(at, top, x1 - at, 4)
+        }
+    }
+
     // Where the values can come from (ADR-0049's appendix of 2026-11-06):
     // as recorded (signals.csv), or the frames decoded through the
     // recording's own signal file or a profile the app has loaded
@@ -1872,6 +1940,8 @@ Page {
             root.stretchFailed = false
             root.jumpIndex = -1
             root.stretchesOpen = false
+            root.conditionsOpen = false
+            root.conditionPick = -1
             root.alignPullHere = 0
             if (recording.state !== RecordingView.Open)
                 return
@@ -2573,6 +2643,22 @@ Page {
             onApplyRequested: rules => root.applyStretchRules(rules)
             onCloseRequested: root.stretchesOpen = false
         }
+        // The recording's conditions, each row centering the view on its
+        // entry: in the same place as Stretches, one of the two at a time
+        ConditionsPanel {
+            id: conditionsPanel
+            objectName: "conditionsPanel"
+            visible: root.conditionsOpen && recording.state === RecordingView.Open && !root.exportShown
+            Layout.fillWidth: true
+            Layout.fillHeight: Theme.compact
+            spans: root.conditionList
+            info: recording.info
+            timeText: ms => root.timeText(ms, true)
+            lengthText: ms => root.lengthText(ms)
+            picked: root.conditionPick
+            onShowRequested: i => root.showCondition(i)
+            onCloseRequested: root.conditionsOpen = false
+        }
 
         // The Jump row over the chart on the desktop; on a phone under it,
         // so a recording still opens onto its chart
@@ -2595,9 +2681,20 @@ Page {
             canNextCruise: root.nextStretch("cruise") >= 0
             bandsShown: root.bandsShown
             stretchesOpen: root.stretchesOpen
+            conditionsShown: root.conditionList.length > 0
+            conditionsOpen: root.conditionsOpen
             onJumpRequested: (kind, direction) => root.jump(kind, direction)
             onBandsToggled: root.bandsShown = !root.bandsShown
-            onStretchesToggled: root.stretchesOpen = !root.stretchesOpen
+            onStretchesToggled: {
+                root.stretchesOpen = !root.stretchesOpen
+                if (root.stretchesOpen)
+                    root.conditionsOpen = false
+            }
+            onConditionsToggled: {
+                root.conditionsOpen = !root.conditionsOpen
+                if (root.conditionsOpen)
+                    root.stretchesOpen = false
+            }
         }
 
         Rectangle {
@@ -2606,7 +2703,7 @@ Page {
             // Maximized with Frames chosen, the table has the page instead;
             // a phone's Stretches panel stands in the chart's place
             visible: recording.state === RecordingView.Open && !root.exportShown
-                     && !(Theme.compact && root.stretchesOpen)
+                     && !(Theme.compact && (root.stretchesOpen || root.conditionsOpen))
                      && !(root.chartMaximized && root.framesShown)
             Layout.fillWidth: true
             // A share of the page, so the rows show under it; the splitter
@@ -2670,15 +2767,27 @@ Page {
                              shares: root.paneShares, ranges: root.paneRanges,
                              mixedLabel: qsTr("mixed") } })
                 onDrawnChanged: root.notePanes(drawn)
-                // Findings as bars along the plot's foot, markers as dashed
+                // Findings as bars along the plot's foot and the conditions in two
+                // rows over them, the picked condition tinted, markers as dashed
                 // lines with their labels, the cursors as solid lines over
                 // their span's tint, the extremes' dots on the traces
                 decorateBelow: function(ctx, l) {
-                    if (!root.bandsShown || root.stretchList === null)
-                        return
                     const span = root.viewT1 - root.viewT0
                     const xOf = t => l.left + (t - root.viewT0) / span * (l.plotW - 1)
                     const plotEnd = l.left + l.plotW
+                    // The condition last shown from the list, tinted the
+                    // plot's height so the eye finds it after the move
+                    const picked = root.conditionList[root.conditionPick]
+                    if (picked !== undefined) {
+                        const x0 = Math.max(l.left, xOf(picked.fromMs))
+                        const x1 = Math.min(plotEnd, xOf(picked.toMs))
+                        if (x1 > x0) {
+                            ctx.fillStyle = Qt.alpha(conditionsPanel.colorOf(picked), 0.15)
+                            ctx.fillRect(x0, l.top, x1 - x0, l.plotH)
+                        }
+                    }
+                    if (!root.bandsShown || root.stretchList === null)
+                        return
                     const chosen = root.jumpIndex >= 0 ? root.stretchesOf(root.jumpKind)[root.jumpIndex]
                                                        : undefined
                     for (const s of root.stretchList) {
@@ -2707,6 +2816,7 @@ Page {
                         const left = Math.max(l.left, x0)
                         ctx.fillRect(left, l.top + l.plotH - 4, Math.max(2, Math.min(plotEnd, x1) - left), 4)
                     }
+                    root.drawConditions(ctx, l.top + l.plotH - 10, l.left, plotEnd, xOf, root.conditionsByLevel)
                     ctx.strokeStyle = Theme.textDim
                     ctx.fillStyle = Theme.textDim
                     ctx.lineWidth = 1

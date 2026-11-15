@@ -387,15 +387,21 @@ def test_a_default_pick_is_named_pick_in_a_recording(tmp_path):
     assert "\nfocus  " not in events
 
 
+SESSIONS_IN_TURN = 20
+
+
 @contextlib.contextmanager
 def elm327_emulator():
     """The address of an ELM327 emulator (havne-cli sim --elm327 tcp:0),
-    a session that asks its signals on every platform"""
+    a session that asks its signals on every platform. Its later lines
+    are read on a thread: a full pipe (Windows' holds 4 KiB) would hold
+    the emulator up"""
     cli = os.environ.get("HAVNE_CLI", "")
     if not cli:
         pytest.skip("HAVNE_CLI names no havne-cli")
     emu = subprocess.Popen([cli, "sim", "mock://emu?values=canned", "--elm327", "tcp:0",
                             "--seconds", "120"], stdout=subprocess.PIPE, text=True)
+    reader = None
     try:
         port = None
         for line in emu.stdout:
@@ -405,10 +411,27 @@ def elm327_emulator():
                 port = j["listen"].rsplit(":", 1)[1]
                 break
         assert port, "the emulator said where it listens"
+        reader = threading.Thread(target=emu.stdout.read, daemon=True)
+        reader.start()
         yield f"elm327://127.0.0.1:{port}"
     finally:
         emu.terminate()
-        emu.communicate(timeout=60)
+        if reader is None:
+            emu.communicate(timeout=60)
+        else:
+            reader.join(timeout=60)
+            emu.wait(timeout=60)
+            emu.stdout.close()
+
+
+def test_a_session_right_after_another_on_one_emulator_connects():
+    """The emulator takes a host the moment the last one closed: a
+    session made, closed and made again at once, as the cases on one
+    emulator do"""
+    with elm327_emulator() as address:
+        for _ in range(SESSIONS_IN_TURN):
+            with havne.Session(address) as s:
+                assert s.signals
 
 
 def test_the_ranked_signals_are_the_default_pick_havne_cli_makes():
