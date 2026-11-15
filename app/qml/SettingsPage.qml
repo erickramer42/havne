@@ -862,7 +862,7 @@ Pane {
                    + " · " + Theme.nightSummary() },
         { key: "advanced", title: qsTr("Advanced"),
           summary: Theme.developerMode ? qsTr("developer mode") : qsTr("off") }
-    ].concat(Theme.compact ? [{ key: "log", title: qsTr("Log"), summary: "" }] : [])
+    ].concat(Theme.compact ? [{ key: "log", title: qsTr("Activity"), summary: "" }] : [])
 
     // The tab-bar form has no sidebar to list the Log: its row, last, opens
     // the Log page itself, as does Show log beside a failed connect
@@ -1063,7 +1063,7 @@ Pane {
         : profileChoice === "default" ? [defaultProfile, standInProfile(standIn)]
         : [standInProfile(standIn)]).concat([
         { name: "raw", label: qsTr("raw (log only)"),
-          hint: qsTr("Raw (log only): no decode, frames reach the Log page only. On an adapter it listens "
+          hint: qsTr("Raw (log only): no decode, frames reach the Activity page only. On an adapter it listens "
                      + "to the engine ECU (0x7E8); add ?filter= for another ID. An ELM327 "
                      + "hears only replies to its requests, so add ?poll= there") },
         { name: "uds-generic", label: qsTr("uds-generic (DIDs)"),
