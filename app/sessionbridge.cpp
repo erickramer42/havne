@@ -2,6 +2,7 @@
 // Testing: BRIDGE: BridgeTest (test_bridge); Manual smoke
 
 #include "sessionbridge.h"
+#include "bridgetext.h"
 #include "carryover.h"
 #include "healthreport.h"
 #include "obdbimport.h"
@@ -48,47 +49,9 @@
 #include <chrono>
 #include <cstring>
 
+using namespace bridgetext;
+
 namespace {
-
-// A file or folder for display: relative to Documents when under it,
-// so the account name stays out of the log and the page
-QString documentsRelative(const QString& path)
-{
-    const QString docs =
-        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (!docs.isEmpty()) {
-        const QString rel = QDir(docs).relativeFilePath(path);
-        if (QDir::isRelativePath(rel) && !rel.startsWith(QLatin1String(".."))) {
-            return QDir::toNativeSeparators(QStringLiteral("Documents/") + rel);
-        }
-    }
-    return QDir::toNativeSeparators(path);
-}
-
-// A failed create or start, in words: the status, then core's detail
-// (which URI key, which vendor call, the vendor's text) when it has one.
-// Call it on the thread that made the call: the detail is thread-local.
-QString failureText(ecuio_status_t rc)
-{
-    QString status = QString::fromUtf8(ecuio_status_string(rc));
-    const char* detail = ecuio_last_error_detail();
-    if (detail == nullptr || detail[0] == '\0') {
-        return status;
-    }
-    return status + QStringLiteral(": ") + QString::fromUtf8(detail);
-}
-
-// The activity log's numbers: an ID or count as 0x7E8, a byte as 0C.
-QString hexId(uint32_t v)
-{
-    return QStringLiteral("0x") + QString::number(v, 16).toUpper();
-}
-
-QString hexByte(uint8_t b)
-{
-    return QStringLiteral("%1").arg(static_cast<uint>(b), 2, 16,
-                                    QLatin1Char('0')).toUpper();
-}
 
 // A clear's vehicle speed in the unit system, converted by core
 // (ADR-0022): "48 km/h", "30 mph"; "" if core can't convert it.
@@ -227,13 +190,6 @@ SessionBridge::~SessionBridge()
     }
     m_replayFiles.clear();
     ecuio_shutdown();
-}
-
-// "1 signal", "2 signals": the activity log's count of a file's signals
-static QString signalCountText(int count)
-{
-    return count == 1 ? QStringLiteral("1 signal")
-                      : QStringLiteral("%1 signals").arg(count);
 }
 
 QVariantMap SessionBridge::importSignalFile(const QUrl& url)
@@ -2364,8 +2320,6 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
 
 namespace {
 
-QString detailOr(ecuio_status_t rc);
-
 // A recorder's folder, absolute; empty if core couldn't give it whole, so
 // a caller never acts on a cut path
 QString folderOf(ecuio_recorder_t* recorder)
@@ -3218,15 +3172,6 @@ QString conditionCountText(uint32_t count)
 {
     return count == 1 ? QStringLiteral("1 condition")
                       : QStringLiteral("%1 conditions").arg(count);
-}
-
-// Core's words for a refused call, else its status
-QString detailOr(ecuio_status_t rc)
-{
-    const char* detail = ecuio_last_error_detail();
-    return detail != nullptr && detail[0] != '\0'
-               ? QString::fromUtf8(detail)
-               : QString::fromUtf8(ecuio_status_string(rc));
 }
 
 } // namespace

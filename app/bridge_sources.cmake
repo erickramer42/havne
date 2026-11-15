@@ -6,6 +6,7 @@
 # models. Absolute paths, since tests/ compiles them from its own directory.
 # A new bridge source joins this list alone.
 set(APP_BRIDGE_SOURCES
+    ${CMAKE_CURRENT_LIST_DIR}/bridgetext.h
     ${CMAKE_CURRENT_LIST_DIR}/framelistmodel.cpp
     ${CMAKE_CURRENT_LIST_DIR}/framelistmodel.h
     ${CMAKE_CURRENT_LIST_DIR}/hostclock.h
