@@ -235,10 +235,9 @@ void ecuio_recorder::take_event(const event_body& e)
 
 void ecuio_recorder::lost_line(uint64_t host_us, uint64_t lost)
 {
-    event_line(host_us, "drop",
-               "the recording lost " + std::to_string(lost) +
-                   (lost == 1 ? " condition event" : " condition events") +
-                   ": the disk fell behind");
+    std::string text;
+    ecuio_recording_rows::append_lost_text(text, lost);
+    event_line(host_us, "drop", text);
 }
 
 void ecuio_recorder::take_conditions(const uint8_t* body, size_t size)

@@ -865,7 +865,8 @@ int main(void)
         offsetof(ecuio_recording_conditions_t, lines_skipped) != 4 ||
         offsetof(ecuio_recording_conditions_t, length) != 8 ||
         offsetof(ecuio_recording_conditions_t, sha256) != 16 ||
-        offsetof(ecuio_recording_conditions_t, reserved) != 88 ||
+        offsetof(ecuio_recording_conditions_t, events_lost) != 88 ||
+        offsetof(ecuio_recording_conditions_t, reserved) != 96 ||
         ECUIO_RECORDING_CONDITIONS_NAMED != 0x1u ||
         ECUIO_RECORDING_CONDITIONS_PRESENT != 0x2u ||
         ECUIO_RECORDING_CONDITIONS_MATCH != 0x4u ||

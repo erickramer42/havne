@@ -56,14 +56,17 @@ Stats.__doc__ = ("A signal's statistics over a span: first and last the values i
                  "its ends; lowest, highest and mean leaving a NaN out, each NaN with no "
                  "sample; lowest_us and highest_us the first sample at each, or None")
 RecordedConditions = namedtuple("RecordedConditions",
-                                "sha256 present matches events lines_skipped cut")
+                                "sha256 present matches events lines_skipped cut "
+                                "events_lost")
 RecordedConditions.__doc__ = ("The set of conditions a recording's session judged (ADR-0063 "
                               "section 8): sha256 the hash events.log's header names for "
                               "conditions.json (None when it names none), whether the copy is "
                               "in the folder and matches it, the cond lines read (events), "
-                              "those that didn't parse, and cut when there were more than "
+                              "those that didn't parse, cut when there were more than "
                               "ECUIO_RECORDING_MAX_CONDITION_EVENTS, of which the first that "
-                              "many are kept")
+                              "many are kept, and events_lost, the events the recorder had "
+                              "no room for and never wrote: above zero, a firing or a turn "
+                              "OFF may be missing")
 RecordedConditionEvent = namedtuple(
     "RecordedConditionEvent", "host_us timestamp_us key state fired stale held value term")
 RecordedConditionEvent.__doc__ = ("A cond line: the recording's time and the session's, the "
@@ -143,7 +146,8 @@ class Recording:
             bool(c.flags & e.ECUIO_RECORDING_CONDITIONS_PRESENT),
             bool(c.flags & e.ECUIO_RECORDING_CONDITIONS_MATCH),
             self.info.condition_events, c.lines_skipped,
-            bool(self.info.flags & e.ECUIO_RECORDING_INFO_CONDITIONS_CUT))
+            bool(self.info.flags & e.ECUIO_RECORDING_INFO_CONDITIONS_CUT),
+            c.events_lost)
 
     def __enter__(self):
         return self

@@ -2951,6 +2951,8 @@ TEST(RecordingViewTest, AConditionsOnAndOffLinesPairIntoSpans)
     EXPECT_EQ(v.info().value(QStringLiteral("conditionEvents")).toDouble(),
               7.0);
     EXPECT_FALSE(v.info().value(QStringLiteral("conditionsCut")).toBool());
+    EXPECT_EQ(v.info().value(QStringLiteral("conditionEventsLost")).toDouble(),
+              0.0);
     EXPECT_EQ(v.info().value(QStringLiteral("conditionSpanCount")).toDouble(),
               3.0);
     EXPECT_FALSE(v.info().value(QStringLiteral("conditionSpansCut")).toBool());
@@ -3037,6 +3039,34 @@ TEST(RecordingViewTest, AHeldStartAndAnOpenEndRunToTheEdges)
     EXPECT_EQ(open.value(QStringLiteral("fromMs")).toDouble(), 20000.0);
     EXPECT_EQ(open.value(QStringLiteral("toMs")).toDouble(), v.durationMs());
     EXPECT_TRUE(open.value(QStringLiteral("openEnd")).toBool());
+}
+
+// The events a recorder lost are counted for the panel's line, beside the
+// span their loss leaves open: conditions-lost is the conditions fixture
+// less three events, coolant_high's turn OFF among them, and its drop line
+TEST(RecordingViewTest, TheConditionEventsARecorderLostAreCounted)
+{
+    RecordingView v;
+    v.open(fixture("conditions-lost"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_EQ(v.info().value(QStringLiteral("conditionEvents")).toDouble(),
+              4.0);
+    EXPECT_EQ(v.info().value(QStringLiteral("conditionEventsLost")).toDouble(),
+              3.0);
+    const QList<QVariantMap> spans = spansOf(v);
+    ASSERT_FALSE(spans.isEmpty());
+    EXPECT_EQ(spans[0].value(QStringLiteral("key")).toString(),
+              QStringLiteral("coolant_high"));
+    EXPECT_TRUE(spans[0].value(QStringLiteral("openEnd")).toBool())
+        << "its turn OFF was among the lost";
+
+    // Another recording's count replaces it
+    v.open(fixture("conditions"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_EQ(v.info().value(QStringLiteral("conditionEventsLost")).toDouble(),
+              0.0);
 }
 
 // A conditions.json that isn't the one the header names can't say the

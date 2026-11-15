@@ -689,6 +689,7 @@ void RecordingView::stop()
     m_conditionSpanCount = 0;
     m_conditionPartsCut = false;
     m_conditionsCut = false;
+    m_conditionEventsLost = 0;
     m_check.clear();
     if (m_stale) {
         m_stale = false;
@@ -876,6 +877,9 @@ void RecordingView::finish(const std::shared_ptr<Result>& res,
     m_conditionsCut =
         res->cutForTesting ||
         (m_info.flags & ECUIO_RECORDING_INFO_CONDITIONS_CUT) != 0;
+    ecuio_recording_conditions_t conditions{};
+    ecuio_recording_get_conditions(m_reader, &conditions);
+    m_conditionEventsLost = static_cast<double>(conditions.events_lost);
 
     const ecuio_check_summary_t& sum = res->summary;
     const bool ran =
@@ -947,6 +951,7 @@ QVariantMap RecordingView::info() const
          m_conditionSpanCount > ViewerConditionSpans},
         {QStringLiteral("conditionPartsCut"), m_conditionPartsCut},
         {QStringLiteral("conditionBound"), ViewerConditionSpans},
+        {QStringLiteral("conditionEventsLost"), m_conditionEventsLost},
     };
 }
 

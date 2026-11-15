@@ -53,7 +53,8 @@ class RecordingView : public QObject
     //   conditionSpansCut (more than ViewerConditionSpans), conditionPartsCut
     //   (the kept spans' stale parts past as many again: a span's next part
     //   runs to its end), conditionBound (ViewerConditionSpans, for the
-    //   words) }
+    //   words), conditionEventsLost (the events the recorder had no room
+    //   for and never wrote: an entry may be missing or run past its end) }
     Q_PROPERTY(QVariantMap info READ info NOTIFY stateChanged)
     // One map per signal, in the reader's order: { index, name, unit,
     // decimals, isText, plotRank, plotted (the default), samples,
@@ -487,6 +488,7 @@ private:
     double m_conditionSpanCount = 0;
     bool m_conditionPartsCut = false;
     bool m_conditionsCut = false;
+    double m_conditionEventsLost = 0;
     bool m_conditionsCutForTesting = false;
     QVariantMap m_check;
 

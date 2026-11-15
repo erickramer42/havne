@@ -790,9 +790,14 @@ bool ecuio_recording::read_events(const std::string& folder)
                 info.records_dropped = records;
                 info.notes_dropped = notes;
             }
-        } else if (rows::equals(e.rest, kind_len, "drop") &&
-                   rows::parse_drop(text, text_len, &count)) {
-            drop_frames += count;
+        } else if (rows::equals(e.rest, kind_len, "drop")) {
+            if (rows::parse_drop(text, text_len, &count)) {
+                drop_frames += count;
+            } else if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
+                       rows::parse_lost(text, text_len, &count)) {
+                conditions.events_lost +=
+                    (std::min)(count, UINT64_MAX - conditions.events_lost);
+            }
         } else if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
                    rows::equals(e.rest, kind_len, "cond")) {
             if (!(rows::parse_cond_line(text, text_len, &cond) &&

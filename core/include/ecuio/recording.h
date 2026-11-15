@@ -535,7 +535,10 @@ typedef struct ecuio_recording_conditions {
     uint64_t length;        /* conditions.json's bytes; 0 when it's absent */
     char sha256[72];        /* the header's, 64 lowercase hex digits; ""
                                when it names none */
-    uint64_t reserved[5];   /* zero; ABI growth space */
+    uint64_t events_lost;   /* condition events the recorder lost: the sum
+                               of its drop lines that count them (format
+                               3), which stops at UINT64_MAX */
+    uint64_t reserved[4];   /* zero; ABI growth space */
 } ecuio_recording_conditions_t;
 
 #if defined(__cplusplus)
@@ -543,11 +546,15 @@ static_assert(sizeof(ecuio_recording_conditions_t) == 128,
               "ecuio_recording_conditions_t size is ABI");
 static_assert(offsetof(ecuio_recording_conditions_t, sha256) == 16,
               "recording conditions sha256 offset is ABI");
+static_assert(offsetof(ecuio_recording_conditions_t, events_lost) == 88,
+              "recording conditions events_lost offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_recording_conditions_t) == 128,
                "ecuio_recording_conditions_t size is ABI");
 _Static_assert(offsetof(ecuio_recording_conditions_t, sha256) == 16,
                "recording conditions sha256 offset is ABI");
+_Static_assert(offsetof(ecuio_recording_conditions_t, events_lost) == 88,
+               "recording conditions events_lost offset is ABI");
 #endif
 
 /* One cond line: an event of the recording's set, as the session gave it
@@ -650,7 +657,10 @@ ecuio_status_t ecuio_recording_get_signals(const ecuio_recording_t* r,
  * ecuio_recording_get_signals answers for the signal file. A conditions
  * line that isn't conditions.json and its SHA-256 names none; the open
  * goes on. A conditions.json past ECUIO_CONDITION_FILE_MAX_BYTES, which
- * ecuio_condition_set_load refuses, is present but never MATCH. */
+ * ecuio_condition_set_load refuses, is present but never MATCH.
+ * events_lost counts the events the recorder had no room for and never
+ * wrote (its drop lines "the recording lost N condition events"): above
+ * zero, a condition's cond lines may miss a firing or a turn OFF. */
 ecuio_status_t
 ecuio_recording_get_conditions(const ecuio_recording_t* r,
                                ecuio_recording_conditions_t* out);

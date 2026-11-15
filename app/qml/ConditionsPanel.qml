@@ -49,8 +49,9 @@ ColumnLayout {
         const words = span.on ? qsTr("ON for %1").arg(length) : qsTr("no new data for %1").arg(length)
         return span.openEnd ? qsTr("%1, to the end").arg(words) : words
     }
-    // The line over the list when it doesn't hold every entry, or a span's
-    // stretches with no new data are drawn as one to its end
+    // The line over the list when it doesn't hold every entry, a span's
+    // stretches with no new data are drawn as one to its end, or the
+    // recorder lost events
     function cutText() {
         const shown = info.conditionsCut === true
             ? qsTr("Showing the first %1: the recording holds more condition events than the viewer reads")
@@ -62,7 +63,13 @@ ColumnLayout {
             ? qsTr("Past %1 stretches with no new data, a span's later ones are drawn as one to its end")
               .arg(info.conditionBound)
             : ""
-        return shown !== "" && parts !== "" ? shown + ". " + parts : shown + parts
+        const lost = info.conditionEventsLost === 1
+            ? qsTr("1 condition event was lost while recording: an entry may be missing, or run on past its end")
+            : info.conditionEventsLost > 0
+              ? qsTr("%1 condition events were lost while recording: an entry may be missing, or run on past its end")
+                .arg(info.conditionEventsLost)
+              : ""
+        return [shown, parts, lost].filter(t => t !== "").join(". ")
     }
 
     RowLayout {

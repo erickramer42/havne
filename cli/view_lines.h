@@ -279,7 +279,8 @@ inline void signed_us(Line& l, int64_t us)
 // 4); conditions is null when the header names no set, the folder holds
 // none and events.log has no cond line, else {sha256|null, present,
 // matches, events (every cond line that parses), lines_skipped, cut (more
-// than the reader keeps)} (ADR-0063 section 8); and with view --frames,
+// than the reader keeps), events_lost (the events the recorder had no
+// room for and never wrote)} (ADR-0063 section 8); and with view --frames,
 // frames: the profile its frames decoded through, or "signals.json" for
 // the recording's own file
 inline void opened_line(Line& l, uint32_t recording,
@@ -333,7 +334,8 @@ inline void opened_line(Line& l, uint32_t recording,
         l.ch('}');
     }
     l.key("conditions");
-    if (cs.flags == 0 && i.condition_events == 0 && cs.lines_skipped == 0) {
+    if (cs.flags == 0 && i.condition_events == 0 && cs.lines_skipped == 0 &&
+        cs.events_lost == 0) {
         l.raw("null");
     } else {
         l.ch('{');
@@ -356,6 +358,8 @@ inline void opened_line(Line& l, uint32_t recording,
         l.key("cut");
         l.raw((i.flags & ECUIO_RECORDING_INFO_CONDITIONS_CUT) != 0 ? "true"
                                                                    : "false");
+        l.key("events_lost");
+        l.u64(cs.events_lost);
         l.ch('}');
     }
     if (frames != nullptr) {
