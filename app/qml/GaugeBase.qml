@@ -55,6 +55,11 @@ Item {
     property color accent: Theme.gaugeValue   // normal-zone color
     // The big value's color outside a zone: the look's, or the cell's picked one
     property color readoutColor: Theme.gaugeReadout
+    // The cell's picked color ("" for none): with no value it tints the title,
+    // so a page's color grouping shows while it is built offline; a pick the
+    // title can't be read in (under the text ratio) leaves it dim
+    property string picked: ""
+    readonly property color titleColor: !hasValue && picked !== "" && Theme.gaugeTextReadable(picked) ? picked : Theme.textDim
     // The hold shown: a kind with a scale marks its peak on it (the dial's
     // tell-tale, the bar's and the ring's mark, the cells' notch); off by
     // default. Reset peaks clears it

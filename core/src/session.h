@@ -58,6 +58,9 @@ struct ecuio_session {
     std::unique_ptr<ecuio_condition_eval> conditions_pending;
     std::unique_ptr<ecuio_condition_eval> conditions_retired;
     bool conditions_swap = false;
+    /* conditions_swap's copy for a worker's look outside the lock (set
+     * with it, cleared by the take): ecuio_session_conditions_waiting */
+    std::atomic<bool> conditions_waiting{false};
     /* Under the same mutex: the attaches so far, and what a recording
      * keeps of the newest attach's set (recorder.h; NULL with none) */
     uint32_t conditions_generation = 0;
@@ -113,6 +116,10 @@ struct ecuio_session {
     ecuio_request_timing_t timing_rows[ECUIO_PROFILE_MAX_REQUESTS]{};
     std::atomic<int32_t> last_error{ECUIO_OK};
     std::atomic<uint32_t> error_count{0};
+    /* Set by the attach of a transport whose worker judges its link
+     * (link_health.h: J2534, ELM327, SocketCAN), before create returns:
+     * the conditions' link terms bind only then */
+    bool judges_link = false;
     /* Written once by the transport's attach, then the profile by
      * create, before create returns; read-only afterwards, so
      * ecuio_session_get_info needs no lock. */

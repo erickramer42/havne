@@ -61,13 +61,14 @@ GaugeBase {
         id: heading
         anchors { left: parent.left; right: parent.right; top: parent.top }
         Text {
+            objectName: "gaugeTitle"
             Accessible.ignored: true
             width: parent.width
             text: gauge.label
             elide: Text.ElideRight
             font.pixelSize: 12
             font.weight: Font.DemiBold
-            color: Theme.textDim
+            color: gauge.titleColor
         }
         Text {
             Accessible.ignored: true

@@ -4477,3 +4477,223 @@ TEST_F(Elm327SessionTest, AConditionOnASignalTheSessionDoesntGetSaysSo)
     ASSERT_EQ(ecuio_profile_unregister(profile.c_str()), ECUIO_OK);
     ecuio_signal_file_free(file);
 }
+
+/* ---- Link terms (ADR-0063 step 6) ---- */
+
+namespace {
+
+/* The conditions callback's events, from the worker */
+struct LinkEvents {
+    std::mutex m;
+    std::vector<ecuio_condition_event_t> events;
+
+    static void cb(const ecuio_condition_event_t* e, uint32_t n, void* user)
+    {
+        auto* self = static_cast<LinkEvents*>(user);
+        std::lock_guard<std::mutex> g(self->m);
+        self->events.insert(self->events.end(), e, e + n);
+    }
+    /* An event of condition c into state, flagged LINK, with code */
+    bool has(uint32_t c, uint32_t state, int32_t code)
+    {
+        std::lock_guard<std::mutex> g(m);
+        for (const ecuio_condition_event_t& e : events) {
+            if (e.condition == c && e.state == state && e.code == code &&
+                (e.flags & ECUIO_CONDITION_LINK) != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
+/* Conditions c0, c1, ... on these whens, attached to the session */
+void attach_whens(ecuio_session_t* s, const std::vector<std::string>& whens)
+{
+    std::string json = R"({"havne_conditions":1,"conditions":[)";
+    for (size_t i = 0; i < whens.size(); ++i) {
+        const std::string k = std::to_string(i);
+        json += (i == 0 ? "" : ",") + std::string(R"({"key":"c)") + k +
+                R"(","name":"C)" + k + R"(","when":)" + whens[i] + "}";
+    }
+    json += "]}";
+    ecuio_condition_set_t* set = nullptr;
+    ASSERT_EQ(ecuio_condition_set_load(json.data(), json.size(), &set),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_session_set_conditions(s, set, nullptr), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_condition_set_free(set);
+}
+
+} // namespace
+
+/* An adapter gone silent is a hard failure the worker judges its link
+ * terms on at once, and the link's return ends them */
+TEST_F(Elm327SessionTest, ASilentAdapterFiresALinkTermAndItsReturnEndsIt)
+{
+    LinkEvents ev; /* before the session: the worker calls into it */
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C&identify=0&diagnose=0")), ECUIO_OK);
+    ASSERT_NO_FATAL_FAILURE(attach_whens(
+        s.s, {R"({"link":"hard_failure"})", R"({"link":"not_ok"})"}));
+    ASSERT_EQ(ecuio_register_conditions_callback(s.s, LinkEvents::cb, &ev),
+              ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    const ShortTimeouts timeouts(500, 0);
+    set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
+    ASSERT_TRUE(wait_for(
+        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 4000));
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ev.has(0, ECUIO_CONDITION_ON,
+                          ECUIO_ERR_TRANSPORT_HARD_FAILURE) &&
+                   ev.has(1, ECUIO_CONDITION_ON,
+                          ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+        },
+        1000))
+        << "judged where the worker published the state";
+    ecuio_condition_state_t st[2] = {};
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_session_get_condition_states(s.s, st, 2, &n), ECUIO_OK);
+    EXPECT_EQ(st[0].state, ECUIO_CONDITION_ON);
+    EXPECT_EQ(st[0].flags, 0u);
+    EXPECT_EQ(st[0].fired, 1u);
+    set_knobs([](fake_elm327::knobs& k) { k.silent = false; });
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 10000));
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ev.has(0, ECUIO_CONDITION_OFF, ECUIO_OK) &&
+                   ev.has(1, ECUIO_CONDITION_OFF, ECUIO_OK);
+        },
+        1000));
+    std::lock_guard<std::mutex> g(ev.m);
+    for (size_t i = 1; i < ev.events.size(); ++i) {
+        EXPECT_GE(ev.events[i].timestamp_us, ev.events[i - 1].timestamp_us)
+            << "never back in time, " << i;
+    }
+}
+
+/* A set attached while the adapter is silent, with no frame to take it,
+ * is judged on the hard failure at the worker's next pass */
+TEST_F(Elm327SessionTest, ASetAttachedWhileTheAdapterIsSilentReportsTheFault)
+{
+    LinkEvents ev; /* before the session: the worker calls into it */
+    Session s;
+    ASSERT_EQ(s.create(uri("?poll=0x0C&identify=0&diagnose=0")), ECUIO_OK);
+    ASSERT_EQ(ecuio_register_conditions_callback(s.s, LinkEvents::cb, &ev),
+              ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    const ShortTimeouts timeouts(500, 0);
+    set_knobs([](fake_elm327::knobs& k) { k.silent = true; });
+    ASSERT_TRUE(wait_for(
+        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 4000));
+    ASSERT_NO_FATAL_FAILURE(attach_whens(s.s, {R"({"link":"hard_failure"})"}));
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ev.has(0, ECUIO_CONDITION_ON,
+                          ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+        },
+        8000))
+        << "judged on the state the worker found, with no frame";
+    ecuio_condition_state_t st{};
+    uint32_t n = 0;
+    ASSERT_EQ(ecuio_session_get_condition_states(s.s, &st, 1, &n), ECUIO_OK);
+    EXPECT_EQ(st.state, ECUIO_CONDITION_ON);
+    EXPECT_EQ(st.fired, 1u);
+    set_knobs([](fake_elm327::knobs& k) { k.silent = false; });
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 10000));
+    EXPECT_TRUE(wait_for(
+        [&] { return ev.has(0, ECUIO_CONDITION_OFF, ECUIO_OK); }, 1000));
+}
+
+/* A listening session's quiet bus is a timeout inside the monitor's own
+ * loop, which takes a set attached then */
+TEST_F(Elm327SessionTest, ASetAttachedWhileTheMonitorHearsNothingReportsIt)
+{
+    LinkEvents ev; /* before the session: the worker calls into it */
+    Session s;
+    ASSERT_NO_FATAL_FAILURE(listen_on(s));
+    ASSERT_EQ(ecuio_register_conditions_callback(s.s, LinkEvents::cb, &ev),
+              ECUIO_OK);
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 3000));
+    ASSERT_NO_FATAL_FAILURE(attach_whens(s.s, {R"({"link":"timeout"})"}));
+    EXPECT_TRUE(wait_for(
+        [&] {
+            return ev.has(0, ECUIO_CONDITION_ON, ECUIO_ERR_VEHICLE_TIMEOUT);
+        },
+        2000))
+        << "judged in the monitor's loop, with no message";
+    EXPECT_TRUE(fake_monitoring()) << "the monitor kept running";
+    on_bus(0x7E8, {0x41, 0x0C, 0x1A, 0xF8});
+    EXPECT_TRUE(wait_for(
+        [&] { return ev.has(0, ECUIO_CONDITION_OFF, ECUIO_OK); }, 2000));
+}
+
+namespace {
+
+/* A worker's operator new calls between frame from and frame to, set
+ * once the link has come back */
+struct LinkNews {
+    static constexpr int kFrom = 8;
+    std::atomic<int> frames{0};
+    std::atomic<int> to{INT32_MAX};
+    std::atomic<unsigned long> at_from{0};
+    std::atomic<unsigned long> at_to{0};
+    std::atomic<bool> reached{false};
+    std::atomic<uint32_t> events{0};
+};
+
+void link_news_cb(const ecuio_frame_t*, void* user)
+{
+    auto* w = static_cast<LinkNews*>(user);
+    const int n = ++w->frames;
+    if (n == LinkNews::kFrom) {
+        w->at_from = new_counter::on_this_thread();
+    } else if (n == w->to.load()) {
+        w->at_to = new_counter::on_this_thread();
+        w->reached = true;
+    }
+}
+
+void link_news_events(const ecuio_condition_event_t*, uint32_t count,
+                      void* user)
+{
+    static_cast<LinkNews*>(user)->events.fetch_add(count);
+}
+
+} // namespace
+
+/* The worker judges the link's changes and delivers their events with no
+ * operator new, as it does a frame's */
+TEST_F(Elm327SessionTest, TheWorkerAllocatesNothingAcrossTheLinkChangesItJudges)
+{
+    LinkNews w;
+    Session s;
+    ASSERT_EQ(s.create(uri("?probe=0&identify=0")), ECUIO_OK);
+    ASSERT_NO_FATAL_FAILURE(attach_whens(
+        s.s, {R"({"link":"not_ok"})", R"({"link":"timeout"})",
+              R"({"all":[{"signal":["obd2.rpm"],"unit":"RPM","above":1},)"
+              R"({"link":"not_ok"}]})"}));
+    ASSERT_EQ(ecuio_register_frame_callback(s.s, link_news_cb, &w), ECUIO_OK);
+    ASSERT_EQ(ecuio_register_conditions_callback(s.s, link_news_events, &w),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s.s), ECUIO_OK);
+    ASSERT_TRUE(
+        wait_for([&] { return w.frames.load() > LinkNews::kFrom; }, 8000));
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = true; });
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 5000));
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = false; });
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 10000));
+    w.to = w.frames.load() + 8;
+    ASSERT_TRUE(wait_for([&] { return w.reached.load(); }, 8000));
+    EXPECT_EQ(ecuio_session_close(s.s), ECUIO_OK);
+    EXPECT_GE(w.events.load(), 7u)
+        << "the first judgment, then ON and OFF for each condition";
+    EXPECT_EQ(w.at_to.load() - w.at_from.load(), 0u)
+        << "operator new on the worker across the link's changes";
+}

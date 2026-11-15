@@ -19,12 +19,28 @@ uint32_t slot_of(uint16_t id)
     return (uint32_t{id} * 40503u >> 4) & (eval::kHashSlots - 1);
 }
 
+/* Whether a link term naming test holds in the link's state */
+bool link_holds(uint8_t test, int32_t state)
+{
+    switch (test) {
+    case ECUIO_TERM_LINK_NOT_OK:
+        return state != ECUIO_OK;
+    case ECUIO_TERM_LINK_TIMEOUT:
+        return state == ECUIO_ERR_VEHICLE_TIMEOUT;
+    case ECUIO_TERM_LINK_REQUEST_FAILED:
+        return state == ECUIO_ERR_REQUEST_FAILED;
+    case ECUIO_TERM_LINK_HARD_FAILURE:
+        return state == ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+    default:
+        return false;
+    }
+}
+
 } // namespace
 
-std::unique_ptr<ecuio_condition_eval>
-ecuio_condition_eval::make(const ecuio_condition_set_t* set,
-                           const ecuio_signal_set_t* signal_set,
-                           const ecuio_signal_file_t* file, uint32_t generation)
+std::unique_ptr<ecuio_condition_eval> ecuio_condition_eval::make(
+    const ecuio_condition_set_t* set, const ecuio_signal_set_t* signal_set,
+    const ecuio_signal_file_t* file, uint32_t generation, bool link)
 {
     std::unique_ptr<ecuio_condition_eval> e(new ecuio_condition_eval());
     e->generation = generation;
@@ -50,7 +66,7 @@ ecuio_condition_eval::make(const ecuio_condition_set_t* set,
         for (uint32_t k = 0;
              c.why == ECUIO_CONDITION_WHY_NONE && k < from.info.term_count;
              ++k) {
-            if (from.terms[k].kind == ECUIO_TERM_LINK) {
+            if (from.terms[k].kind == ECUIO_TERM_LINK && !link) {
                 c.why = ECUIO_CONDITION_WHY_NO_LINK;
             } else if (from.terms[k].kind == ECUIO_TERM_CHECK) {
                 c.why = ECUIO_CONDITION_WHY_NO_CHECK;
@@ -72,6 +88,13 @@ ecuio_condition_eval::make(const ecuio_condition_set_t* set,
             out.max_age_us = t.max_age_us;
             out.condition = i;
             out.test = static_cast<uint8_t>(t.test);
+            if (t.kind == ECUIO_TERM_LINK) {
+                out.link = 1;
+                out.signal = kEmpty;
+                e->link_terms.push_back(static_cast<uint16_t>(e->terms.size()));
+                e->terms.push_back(out);
+                continue;
+            }
             const uint16_t id = static_cast<uint16_t>(b.signal_id[k]);
             uint32_t s = slot_of(id);
             while (e->hash[s] != kEmpty && e->signals[e->hash[s]].id != id) {
@@ -121,7 +144,8 @@ size_t ecuio_condition_eval::bytes() const
            points.capacity() * sizeof(point) +
            conditions.capacity() * sizeof(condition) +
            events.capacity() * sizeof(ecuio_condition_event_t) +
-           dirty.capacity() * sizeof(uint32_t);
+           dirty.capacity() * sizeof(uint32_t) +
+           link_terms.capacity() * sizeof(uint16_t);
 }
 
 ecuio_condition_eval::joined
@@ -146,6 +170,9 @@ ecuio_condition_eval::join(const condition& c) const
 /* The time past which term t's sample can't be judged */
 uint64_t ecuio_condition_eval::expiry(const term& t) const
 {
+    if (t.link != 0) {
+        return UINT64_MAX;
+    }
     const signal& s = signals[t.signal];
     return t.max_age_us != 0 ? s.time_us + t.max_age_us : s.fresh_until_us;
 }
@@ -166,7 +193,8 @@ void ecuio_condition_eval::changed(uint32_t index, uint64_t at_us,
     condition& c = conditions[index];
     c.since_us = at_us;
     c.changed_term = decider;
-    c.value = signals[terms[c.first_term + decider].signal].value;
+    const term& by = terms[c.first_term + decider];
+    c.value = by.link != 0 ? 0.0 : signals[by.signal].value;
     ecuio_condition_event_t* e = nullptr;
     if (c.event_frame == frame && events[c.last_event].timestamp_us == at_us) {
         e = &events[c.last_event];
@@ -187,9 +215,11 @@ void ecuio_condition_eval::changed(uint32_t index, uint64_t at_us,
     e->condition = index;
     e->state = c.state;
     e->flags = (c.stale != 0 ? ECUIO_CONDITION_STALE : 0u) |
-               (fired ? ECUIO_CONDITION_FIRED : 0u);
+               (fired ? ECUIO_CONDITION_FIRED : 0u) |
+               (at_link != 0 ? ECUIO_CONDITION_LINK : 0u);
     e->term = decider;
     e->value = c.value;
+    e->code = by.link != 0 ? link_state : 0;
     e->generation = generation;
 }
 
@@ -395,9 +425,9 @@ void ecuio_condition_eval::settle(uint64_t now_us, bool hold_at_now)
     next_check_us = least;
 }
 
-uint32_t ecuio_condition_eval::judge(uint64_t time_us,
-                                     const ecuio_value_t* values,
-                                     uint32_t count)
+/* A judge call's start: its time, never before the last, and every
+ * deadline before it settled */
+uint64_t ecuio_condition_eval::begin(uint64_t time_us)
 {
     event_count = 0;
     ++frame;
@@ -406,12 +436,58 @@ uint32_t ecuio_condition_eval::judge(uint64_t time_us,
     if (next_check_us < time_us) {
         settle(time_us, false);
     }
+    return time_us;
+}
+
+uint32_t ecuio_condition_eval::judge(uint64_t time_us,
+                                     const ecuio_value_t* values,
+                                     uint32_t count)
+{
+    at_link = 0;
+    time_us = begin(time_us);
     for (uint32_t i = 0; i < count; ++i) {
         if (values[i].kind != ECUIO_VALUE_TEXT &&
             values[i].kind != ECUIO_VALUE_HEX) {
             feed(time_us, values[i]);
         }
     }
+    return finish(time_us);
+}
+
+uint32_t ecuio_condition_eval::judge_link(uint64_t time_us, int32_t state)
+{
+    at_link = 1;
+    time_us = begin(time_us);
+    set_link(state);
+    const uint32_t n = finish(time_us);
+    at_link = 0;
+    return n;
+}
+
+void ecuio_condition_eval::set_link(int32_t state)
+{
+    link_state = state;
+    for (const uint16_t k : link_terms) {
+        term& t = terms[k];
+        const uint8_t truth = link_holds(t.test, state) ? 1 : 0;
+        if (truth == t.truth && t.judged != 0) {
+            continue;
+        }
+        t.truth = truth;
+        t.judged = 1;
+        condition& c = conditions[t.condition];
+        c.changed_term = uint32_t{k} - c.first_term;
+        if (c.dirty == 0) {
+            c.dirty = 1;
+            dirty[dirty_count++] = t.condition;
+        }
+    }
+}
+
+/* A judge call's end: the conditions its inputs changed joined again,
+ * then the holds ending at its time; the events in order */
+uint32_t ecuio_condition_eval::finish(uint64_t time_us)
+{
     for (uint32_t i = 0; i < dirty_count; ++i) {
         condition& c = conditions[dirty[i]];
         c.dirty = 0;
@@ -441,7 +517,8 @@ uint8_t ecuio_condition_eval::sampled_terms(uint32_t index) const
     const condition& c = conditions[index];
     uint8_t bits = 0;
     for (uint32_t k = 0; k < c.term_count && k < 8; ++k) {
-        if (signals[terms[c.first_term + k].signal].sampled != 0) {
+        const term& t = terms[c.first_term + k];
+        if (t.link != 0 || signals[t.signal].sampled != 0) {
             bits = static_cast<uint8_t>(bits | (1u << k));
         }
     }

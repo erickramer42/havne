@@ -18,6 +18,8 @@ TestCase {
         // scroll area, which clips what's below it from a click
         SettingsPage { width: 1000; height: 1400 }
     }
+    Component { id: dashComponent; DashboardPage { width: 1280; height: 800 } }
+    Component { id: hubComponent; SignalHub {} }
 
     // The page's stored URI, Record switch and versions (test_qml keeps
     // them in a scratch ini), written straight to the store
@@ -43,6 +45,7 @@ TestCase {
         stored.setValue("recording", false)
         stored.setValue("adapterVersions", "{}")
         stored.sync()
+        storedVehicles.setValue("book", "")
         storedVehicles.setValue("document", "")
         storedVehicles.sync()
         // After a turn: the last case's page writes its Settings as it goes
@@ -73,8 +76,8 @@ TestCase {
         Harness.clearFakeKnobs()
         Harness.stopElm327Emulator()
         Bridge.vehicleLabel = ""
-        Bridge.deleteUnusedSignalFiles([])   // the store starts empty too
-        for (const p of Bridge.plugins())     // and so do the plugins
+        Bridge.dropImport()                   // no file waits for the next case
+        for (const p of Bridge.plugins())     // and the store starts empty
             Bridge.removePlugin(p.sha256)
     }
 
@@ -293,8 +296,8 @@ TestCase {
               parts: ["deviceCount", "deviceList", "presetsToggle", "profile_raw", "uriField"] },
             { tag: "vehicle", title: "Vehicle", summary: "None",
               parts: ["vehicle_none", "vehicleLabelField", "vehicleNew", "vehicleMore"] },
-            { tag: "signals", title: "Signals", summary: "pick a vehicle",
-              parts: ["pluginsNone"] },
+            { tag: "signals", title: "Signals", summary: "none yet",
+              parts: ["signalImport", "signalsNone"] },
             { tag: "recording", title: "Recording", summary: "off",
               parts: ["recordBox", "recordStatus"] },
             { tag: "display", title: "Display", summary: "100 % · metric · Night off",
@@ -1900,26 +1903,6 @@ TestCase {
         verify(!result.visible)
     }
 
-    // The signal files and the own signals belong to the picked vehicle. With
-    // none picked their parts hold nothing, and a part that stays visible
-    // adds a gap of its own to the Vehicle section's column
-    function test_thePartsOfAPickedVehicleAreAbsentWithNone() {
-        const page = createPage()
-        page.open("signals")
-        verify(!find(page, "signalFilesTitle").visible, "no files with no vehicle")
-        verify(!find(page, "signalImport").visible, "no import with no vehicle")
-        verify(!find(page, "obdbImport").visible, "no OBDb import with no vehicle")
-        const need = find(page, "signalFilesNeedVehicle")
-        verify(need.visible, "the line says a vehicle is needed")
-        verify(need.text.indexOf("vehicle") >= 0, need.text)
-        verify(!find(page, "settingsOwnSignalsPart").visible, "no own signals with no vehicle")
-        page.changeVehicles(VehicleBook.add(page.vehicles, "A"))
-        verify(find(page, "signalFilesTitle").visible, "files with a vehicle")
-        verify(find(page, "signalImport").visible, "import with a vehicle")
-        verify(!find(page, "signalFilesNeedVehicle").visible, "and no line then")
-        verify(find(page, "settingsOwnSignalsPart").visible, "own signals with a vehicle")
-    }
-
     // ADR-0027 section 1: every change to the list is made in the section, a
     // label typed or left to its default
     function test_theVehicleSectionMakesNamesAndForgetsVehicles() {
@@ -2009,22 +1992,58 @@ TestCase {
         verify(!row.visible, "and Cancel leaves it closed")
     }
 
-    // ---- The vehicle's signal files (ADR-0051) ----
+    // ---- The one store's list and Import (ADR-0064) ----
 
-    // A signal file of one DID on the engine ECU
-    function signalFileText(name, did) {
-        return JSON.stringify({
+    // A signal file of one DID on the engine ECU; with obd2, one that
+    // reads all of obd2 too
+    function signalFileText(name, did, obd2) {
+        const doc = {
             havne_signals: 1, name: name, source: { name: "t" },
             ecus: [{ id: "pcm", rx: "7E8" }],
             signals: [{ key: "a", name: "A", read: { service: "22", number: did || "D100" },
                         field: { byte: 0, bits: 8 } }]
-        })
+        }
+        if (obd2)
+            doc.extends = "obd2"
+        return JSON.stringify(doc)
     }
 
-    function importFile(page, fileName, name, did) {
-        const url = Harness.writeScratchFile(fileName, signalFileText(name, did))
+    // A signal file read through Import and kept as a new plugin
+    function importFile(page, fileName, name, did, obd2) {
+        const url = Harness.writeScratchFile(fileName, signalFileText(name, did, obd2))
         verify(url.toString() !== "", "the scratch file is written")
-        return page.importSignalFile(url)
+        return page.importFile(url) && page.keepPending("", "")
+    }
+
+    // The example plugin's package read through Import, under version
+    // when given
+    function importExample(page, version) {
+        const url = version === undefined
+            ? Harness.writeExamplePlugin("example-sim.havne-plugin.json")
+            : Harness.writeExamplePlugin("example-sim-" + version + ".havne-plugin.json", version)
+        verify(url.toString() !== "", "the example plugin is packed")
+        return page.importFile(url)
+    }
+
+    // The list's row for a profile: what the page holds, and its item
+    function rowData(page, profile) {
+        const r = page.variantRows.find(e => e.profile === profile)
+        verify(r !== undefined, profile + " is listed")
+        return r
+    }
+    function rowOf(page, profile) {
+        const i = page.variantRows.findIndex(e => e.profile === profile)
+        verify(i >= 0, profile + " is listed")
+        return find(page, "signalRow_" + i)
+    }
+    // A press on a row: picked for the vehicle, or its pick undone
+    function pressRow(page, profile) {
+        const b = find(rowOf(page, profile), "rowPick")
+        verify(b.enabled, "the row takes a press")
+        b.clicked()
+    }
+    function signalsRow(page) {
+        return page.pageList.find(r => r.key === "signals")
     }
 
     // The drive view's settings (ADR-0059 section 9), a phone's: stored at
@@ -2112,36 +2131,36 @@ TestCase {
         press(page, "vehicleNew")
         page.open("signals")
         verify(importFile(page, "offline.json", "Offline"))
-        page.chooseProfile("user.offline")
-        compare(page.offlineUri, "mock://?profile=user.offline")
+        page.chooseProfile("plugin.offline.base")
+        compare(page.offlineUri, "mock://?profile=plugin.offline.base")
         compare(Bridge.profileSignals(page.offlineUri).map(r => r.name), ["A"],
-                "the picked vehicle's own file, before any connect")
+                "the picked vehicle's own plugin, before any connect")
     }
 
     // With Default chosen and no URI typed (as after a restart) the list
-    // falls back to the picked vehicle's sets: its plugin first, then its
-    // files that load; the sets and the profiles' names reach the Dashboard
-    function test_theOfflineUriFallsBackToTheVehiclesPick() {
+    // falls back to the picked vehicle's first pick; the picks and the
+    // profiles' names reach the Dashboard
+    function test_theOfflineUriFallsBackToTheVehiclesFirstPick() {
         const page = createPage()
         page.uriField.text = ""
         press(page, "vehicleNew")
         page.open("signals")
         verify(importFile(page, "fallback.json", "Fallback"))
         page.chooseProfile("default")
-        compare(page.offlineUri, "mock://?profile=user.fallback", "the vehicle's file")
+        compare(page.offlineUri, "mock://?profile=plugin.fallback.base", "the vehicle's pick")
         compare(Bridge.profileSignals(page.offlineUri).map(r => r.name), ["A"])
 
-        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
-        page.pickPluginVariant("plugin.example-sim.my2019")
+        verify(importExample(page))
+        pressRow(page, "plugin.example-sim.my2019")
         page.chooseProfile("default")
-        compare(page.offlineUri, "mock://?profile=plugin.example-sim.my2019", "the plugin comes first")
+        compare(page.offlineUri, "mock://?profile=plugin.fallback.base", "the first pick, in the picks' order")
         compare(JSON.stringify(page.pickedSets),
-                JSON.stringify([{ profile: "plugin.example-sim.my2019", name: "Example: the simulated car",
-                                  variant: "my2019" },
-                                { profile: "user.fallback", name: "Fallback", variant: "" }]))
+                JSON.stringify([{ profile: "plugin.fallback.base", name: "Fallback", variant: "base" },
+                                { profile: "plugin.example-sim.my2019",
+                                  name: "Example: the simulated car", variant: "my2019" }]))
         compare(page.profileNames["plugin.example-sim.base"], "Example: the simulated car",
                 "every variant of a loaded plugin by its name")
-        compare(page.profileNames["user.fallback"], "Fallback")
+        compare(page.profileNames["plugin.fallback.base"], "Fallback")
 
         page.uriField.text = "mock://demo"
         compare(page.offlineUri, "mock://demo", "a typed URI still wins")
@@ -2152,7 +2171,7 @@ TestCase {
     }
 
     // An adapter's address under Default (the vehicle's saved one, restored
-    // at a restart) lists the vehicle's first set that reads all of obd2,
+    // at a restart) lists the vehicle's first pick that reads all of obd2,
     // which stands in for Default there; a typed profile= or the Profile
     // row's choice still wins, and a plugin removed after its pick leaves
     // the address as it is
@@ -2163,12 +2182,12 @@ TestCase {
         verify(importFile(page, "standin.json", "Standin"))
         page.uriField.text = "elm327://COM3"
         compare(page.profileChoice, "default")
-        compare(page.offlineUri, "elm327://COM3", "a file that doesn't read obd2 stands in for nothing")
+        compare(page.offlineUri, "elm327://COM3", "a pick that doesn't read obd2 stands in for nothing")
 
-        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
-        page.pickPluginVariant("plugin.example-sim.my2019")
+        verify(importExample(page))
+        pressRow(page, "plugin.example-sim.my2019")
         page.uriField.text = "elm327://COM3"
-        compare(page.offlineUri, "mock://?profile=plugin.example-sim.my2019", "the plugin, which extends obd2")
+        compare(page.offlineUri, "mock://?profile=plugin.example-sim.my2019", "the pick that extends obd2")
         verify(Bridge.profileSignals(page.offlineUri).some(r => r.ref === "key:clutch_slip"),
                "the plugin's own signals are listed")
         page.uriField.text = "j2534://Some Adapter"
@@ -2185,144 +2204,1344 @@ TestCase {
 
         page.chooseProfile("default")
         compare(page.uriField.text, "elm327://COM3")
-        page.removePlugin(page.pluginList[0].sha256)
-        compare(page.pickedVehicle.plugin, "", "the pick goes with the plugin")
+        verify(page.removePlugin(page.pluginList.find(p => p.id === "example-sim").sha256))
+        compare(page.picks, ["plugin.standin.base"], "the pick goes with the plugin")
         compare(page.offlineUri, "elm327://COM3", "and the address is listed as it is")
         page.uriField.text = ""
-        compare(page.offlineUri, "mock://?profile=user.standin", "the vehicle's file, with no address")
+        compare(page.offlineUri, "mock://?profile=plugin.standin.base", "the vehicle's pick, with no address")
     }
 
-    function test_anImportedFileIsTheVehiclesAndAProfile() {
+    // A plugin is everyone's: it is imported and listed with no vehicle,
+    // and says so until a vehicle picks one of its variants
+    function test_aPluginNoVehiclePicksSaysItIsNotInUse() {
+        const page = createPage()
+        page.open("signals")
+        verify(find(page, "signalsNone").visible)
+        compare(signalsRow(page).summary, "none yet")
+        verify(find(page, "signalImport").visible, "Import needs no vehicle")
+        verify(!find(page, "settingsOwnSignalsPart").visible, "no own signals with no vehicle")
+        verify(importFile(page, "extras.json", "Extras"))
+        compare(find(page, "signalNote").text, "Extras 1.0.0 added")
+        verify(!find(page, "signalsNone").visible)
+        compare(signalsRow(page).summary, "1 plugin")
+        let row = rowOf(page, "plugin.extras.base")
+        verify(!find(row, "rowPick").enabled, "no vehicle to pick it for")
+        verify(find(row, "rowUnused").visible)
+        compare(find(row, "rowUnused").text, "Not in use: add or pick a vehicle, then pick it here.")
+        verify(!find(row, "rowCaption").visible, "no car, no groups")
+
+        press(page, "vehicleNew")
+        compare(signalsRow(page).summary, "1 plugin, none picked")
+        row = rowOf(page, "plugin.extras.base")
+        verify(find(row, "rowUnused").visible, "still no vehicle's")
+        compare(find(row, "rowUnused").text, "Not in use: press it to pick it for Vehicle 1.")
+        verify(!find(row, "rowCaption").visible, "imported for no vehicle, and not picked")
+        verify(find(page, "settingsOwnSignalsPart").visible, "own signals with a vehicle")
+        pressRow(page, "plugin.extras.base")
+        compare(page.picks, ["plugin.extras.base"])
+        row = rowOf(page, "plugin.extras.base")
+        compare(find(row, "rowCaption").text, "For this car:", "a pick is this car's")
+        verify(find(row, "rowPick").checked)
+        verify(find(row, "rowPickMark").visible, "a mark, not the fill alone")
+        verify(!find(row, "rowUnused").visible)
+        compare(find(row, "rowPick").Accessible.name, "Extras 1.0.0, 1 signal · yours, picked")
+        compare(signalsRow(page).summary, "1 plugin: Extras")
+        verify(signalsRow(page).warn !== true)
+
+        // Another vehicle's pick keeps it in use; a press again undoes a pick
+        press(page, "vehicleNew")
+        compare(page.picks, [])
+        verify(!find(rowOf(page, "plugin.extras.base"), "rowUnused").visible, "Vehicle 1 picks it")
+        verify(!rowData(page, "plugin.extras.base").forCar, "Vehicle 1's pick, not this one's")
+        compare(signalsRow(page).summary, "1 plugin, none picked")
+        pressRow(page, "plugin.extras.base")
+        verify(rowData(page, "plugin.extras.base").forCar)
+        pressRow(page, "plugin.extras.base")
+        compare(page.picks, [], "pressed again, undone")
+        verify(!rowData(page, "plugin.extras.base").forCar, "and no longer this car's")
+    }
+
+    // One Import, a signal file: it waits for where it goes, and As a new
+    // plugin makes it a plugin of the user's own, imported for the picked
+    // vehicle and picked for it at once. The book is stored under its own
+    // key, the earlier version's left as it was
+    function test_aSignalFileWaitsThenIsKeptAsAPluginAndPicked() {
+        storedVehicles.setValue("document", "an earlier version's text")
+        storedVehicles.sync()
         let page = createPage()
-        verify(!find(page, "signalFilesTitle").visible, "no vehicle, no files")
         press(page, "vehicleNew")
         page.open("signals")
-        verify(find(page, "signalFilesNone").visible)
-        compare(find(page, "signalFilesNone").text,
-                "None yet. Import adds a signal file, which is then offered under Profile "
-                + "as a profile of its own")
-        verify(importFile(page, "extras.json", "Extras"))
-        compare(page.pickedVehicle.signals.length, 1)
-        compare(page.pickedVehicle.signals[0].profile, "user.extras")
-        compare(find(find(page, "signalFile_0"), "signalFileText").text,
-                "Extras: 1 signal, profile user.extras")
-        compare(find(page, "signalNote").text, "Extras added: 1 signal, profile user.extras")
-        compare(page.vehicleProfiles[0].hint, "Your signal file Extras: 1 signal")
-        verify(!find(page, "signalFilesNone").visible)
-        compare(Harness.storedSignalFiles(), [page.pickedVehicle.signals[0].sha256 + ".json"])
+        verify(page.importFile(Harness.writeScratchFile("extras.json", signalFileText("Extras"))))
+        verify(find(page, "importPanel").visible, "it waits for where it goes")
+        compare(find(page, "importText").text, "Extras: a signal file")
+        verify(findChild(page, "importInto_0") === null, "no plugin of the user's own to take it")
+        compare(Harness.storedPlugins(), [], "nothing kept yet")
+        press(page, "importAsNew")
+        verify(!find(page, "importPanel").visible)
+        compare(Harness.storedPlugins().length, 1)
+        compare(page.picks, ["plugin.extras.base"], "picked at once for the picked vehicle")
+        compare(find(page, "signalNote").text, "Extras 1.0.0 added: picked for Vehicle 1")
+        const row = rowOf(page, "plugin.extras.base")
+        compare(find(row, "rowCaption").text, "For this car:")
+        compare(find(row, "rowTitle").text, "Extras 1.0.0")
+        compare(find(row, "rowReads").text, "1 signal · yours")
+        verify(find(row, "rowPick").checked)
 
-        // The file's profile is a choice under Profile
+        // Its profile is a choice under Profile, and a session decodes
+        // with it; nothing changes the store or the picks meanwhile
         find(page, "uriField").text = "mock://demo"
-        press(page, "profile_user.extras")
-        compare(find(page, "uriField").text, "mock://demo?profile=user.extras")
-        compare(find(page, "errorLabel").text, "")
+        const choice = find(page, "profile_plugin.extras.base")
+        compare(choice.text, "Extras")
+        choice.clicked()
+        compare(find(page, "uriField").text, "mock://demo?profile=plugin.extras.base")
+        compare(find(page, "profileHint").text, "The signals of Extras 1.0.0, picked for this vehicle")
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 5000, "a session decodes with it")
+        compare(find(page, "errorLabel").text, "")
+        page.open("signals")
+        verify(find(page, "signalLockedNote").visible)
+        verify(!find(page, "signalImport").enabled)
+        verify(!find(rowOf(page, "plugin.extras.base"), "rowPick").enabled)
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000)
 
-        // A new page registers it again (the bridge, which keeps the file
-        // loaded, outlives it; a restart's read from the copy is
-        // BridgeTest.SignalFileUseRegistersItsProfile's)
         page.destroy()
         wait(10)
+        tryVerify(() => { storedVehicles.sync(); return String(storedVehicles.value("book", "")) !== "" },
+                  2000, "the book is written")
+        const book = JSON.parse(storedVehicles.value("book"))
+        compare(book.format, 2)
+        compare(book.list[0].picks, ["plugin.extras.base"])
+        compare(storedVehicles.value("document"), "an earlier version's text",
+                "the earlier version's key is never written")
         page = createPage()
-        compare(find(find(page, "signalFile_0"), "signalFileText").text,
-                "Extras: 1 signal, profile user.extras")
-        verify(findChild(page, "profile_user.extras"), "still a choice")
+        compare(page.picks, ["plugin.extras.base"], "a restart keeps the pick")
+        verify(find(rowOf(page, "plugin.extras.base"), "rowPick").checked)
 
-        // Two signals are counted as signals
+        // The same file again is the same plugin; two signals are counted
+        verify(importFile(page, "again.json", "Extras"))
+        compare(find(page, "signalNote").text, "Extras 1.0.0 is here already")
+        compare(Harness.storedPlugins().length, 1)
         const pair = JSON.parse(signalFileText("Pair"))
         pair.signals.push({ key: "b", name: "B", read: { service: "22", number: "D101" },
                             field: { byte: 0, bits: 8 } })
-        verify(page.importSignalFile(Harness.writeScratchFile("pair.json", JSON.stringify(pair))))
-        compare(find(page, "signalNote").text, "Pair added: 2 signals, profile user.pair")
-        compare(find(find(page, "signalFile_1"), "signalFileText").text,
-                "Pair: 2 signals, profile user.pair")
-        compare(page.vehicleProfiles[1].hint, "Your signal file Pair: 2 signals")
+        verify(page.importFile(Harness.writeScratchFile("pair.json", JSON.stringify(pair))))
+        press(page, "importAsNew")
+        compare(find(rowOf(page, "plugin.pair.base"), "rowReads").text, "2 signals · yours")
+        compare(signalsRow(page).summary, "2 plugins: Extras and 1 more")
     }
 
-    // Through the phone's picker: each of the Signals page's three opens
-    // hands its pick to its import, and a picker with no document says so
-    function test_theSignalsPagesPicksReachTheirImports() {
+    // Through the phone's picker: the Signals page's one open hands its
+    // pick to the import, and a picker with no document says so, with no
+    // earlier note left beside the words and Replace's target dropped
+    function test_theSignalsPagesPickReachesItsImport() {
         const page = createPage()
         press(page, "vehicleNew")
+        page.open("signals")
         DocumentPicker.setPickerForTesting(true)
-        const signals = find(page, "signalImportDialog")
-        signals.usePicker = true
-        signals.open()
-        DocumentPicker.deliver(signals.request, -1,
+        const dialog = find(page, "signalImportDialog")
+        dialog.usePicker = true
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1,
             Harness.writeScratchFile("picked (1).json", signalFileText("Picked")).toString(),
             "picked (1).json")
-        compare(find(page, "signalNote").text, "Picked added: 1 signal, profile user.picked")
-        for (const name of ["signalImportDialog", "obdbDialog"]) {
-            const d = find(page, name)
-            d.usePicker = true
-            d.open()
-            page.signalNote = "an earlier import's note"
-            DocumentPicker.deliver(d.request, -1, "", "")
-            compare(find(page, "signalProblem").text, "The picker returned no document", name)
-            compare(find(page, "signalNote").text, "", "no earlier note beside the words: " + name)
-            page.signalProblem = ""
-        }
+        verify(find(page, "importPanel").visible, "the pick reached the import: the file waits")
+        compare(find(page, "importText").text, "Picked: a signal file")
+        verify(page.keepPending("", ""))
+        compare(find(page, "signalNote").text, "Picked 1.0.0 added: picked for Vehicle 1")
 
-        const plugins = find(page, "pluginDialog")
-        plugins.usePicker = true
-        plugins.open()
-        DocumentPicker.deliver(plugins.request, -1,
-            Harness.writeScratchFile("bad (1).havne-plugin.json", "{}").toString(), "bad (1).havne-plugin.json")
-        const refused = find(page, "pluginProblem").text
-        verify(refused !== "" && refused !== "The picker returned no document",
-               "the pick reached the import, which refused it: " + refused)
-        page.pluginNote = "an earlier import's note"
-        plugins.open()
-        DocumentPicker.deliver(plugins.request, -1, "", "")
-        compare(find(page, "pluginProblem").text, "The picker returned no document")
-        compare(find(page, "pluginNote").text, "", "no earlier note beside the words")
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, "", "")
+        compare(find(page, "signalProblem").text, "The picker returned no document")
+        compare(find(page, "signalNote").text, "", "no earlier note beside the words")
+
+        page.signalProblem = ""
+        page.startReplace(rowData(page, "plugin.picked.base"))
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, "", "")
+        compare(find(page, "signalProblem").text, "The picker returned no document")
+        compare(page.replaceTarget, null, "and the next Import is an import")
     }
 
-    function test_aRefusedOrClashingFileIsNotAdded() {
+    // Through the phone's save picker: the Signals page's one save offers
+    // the page's own name each time and hands its pick to the write; a
+    // picker with no document says so, with no earlier note left beside
+    // the words and no save left waiting, and a cancel leaves none either
+    function test_theSignalsPagesSavePickReachesItsWrite() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(page.importFile(Harness.writeScratchFile("picked.json", signalFileText("Picked")))
+               && page.keepPending("", ""))
+        page.open("signals")
+        DocumentPicker.setPickerForTesting(true)
+        const row = rowData(page, "plugin.picked.base")
+        const save = find(page, "signalSaveDialog")
+        save.usePicker = true
+        page.saveVariantAs(row)
+        compare(DocumentPicker.titleForTesting(), "picked.json")
+        const out = Harness.writeScratchFile("picked out (1).json", "")
+        DocumentPicker.deliver(save.request, -1, out.toString(), "89", -1)
+        compare(find(page, "signalProblem").text, "")
+        compare(find(page, "signalNote").text, "Picked saved to the file you chose")
+        verify(Harness.readScratchFile(out).includes("Picked"), "the picked document holds the file")
+
+        page.saveVariantAs(row)
+        compare(DocumentPicker.titleForTesting(), "picked.json",
+                "the page's name again, never the last answer's")
+        DocumentPicker.deliver(save.request, -1, "", "")
+        compare(find(page, "signalProblem").text, "The picker returned no document")
+        compare(find(page, "signalNote").text, "", "no earlier note beside the words")
+        compare(page.saving, null, "and no save waits")
+
+        page.exportPluginAs(row.sha256)
+        compare(DocumentPicker.titleForTesting(), "picked.havne-plugin.json",
+                "an export's own name")
+        DocumentPicker.deliver(save.request, 0, "", "")
+        compare(page.saving, null, "a cancel leaves no save waiting")
+        compare(find(page, "signalProblem").text, "", "and says nothing")
+
+        // A pick answered with no save waiting is written nowhere, and
+        // its document's verdict is taken as any refused save's is
+        const uri = "content://com.android.externalstorage.documents/document/"
+                    + "primary%3ADownload%2Fpicked.json"
+        page.saveVariantAs(row)
+        page.saving = null
+        DocumentPicker.deliver(save.request, -1, uri, "picked.json",
+                               DocumentPicker.launchedMsForTesting() + 50)
+        compare(DocumentPicker.verdictOfForTesting(uri), 0, "the refusal took the verdict")
+    }
+
+    // A file core refuses, or one that is none of the three kinds, keeps
+    // nothing and says why, never naming the path
+    function test_aFileCoreRefusesOrOfNoKindIsNotKept() {
         const page = createPage()
         press(page, "vehicleNew")
         const bad = Harness.writeScratchFile("bad.json", signalFileText("Bad").replace("bits", "bitz"))
-        verify(!page.importSignalFile(bad))
-        const words = find(page, "signalProblem").text
+        verify(!(page.importFile(bad) && page.keepPending("", "")))
+        let words = find(page, "signalProblem").text
         verify(words.includes("bitz") && words.includes("line"), words)
         verify(!words.includes("bad.json"), "never the path")
-        compare(page.pickedVehicle.signals, [])
-        compare(Harness.storedSignalFiles(), [])
+        compare(page.picks, [])
+        compare(Harness.storedPlugins(), [])
+        page.discardImport()
 
-        verify(importFile(page, "a.json", "Extras"))
-        compare(find(page, "signalProblem").text, "", "a good import clears the last refusal")
-        press(page, "vehicleNew")
-        verify(!importFile(page, "b.json", "Extras", "D101"), "another file making user.extras")
+        verify(!page.importFile(Harness.writeScratchFile("other.json", "{\"ecu\": 1}")))
         compare(find(page, "signalProblem").text,
-                "user.extras is made by another file already (Extras, in Vehicle 1)")
-        compare(page.pickedVehicle.signals, [])
-        compare(Harness.storedSignalFiles().length, 1, "the refused copy went")
+                "The file is neither a plugin, a signal file nor an OBDb signal set")
+        verify(!find(page, "importPanel").visible, "nothing waits")
 
-        verify(importFile(page, "a2.json", "Extras"), "the same file in another vehicle is shared")
-        compare(Harness.storedSignalFiles().length, 1)
+        verify(!page.importFile(Harness.writeScratchFile("broken.havne-plugin.json",
+                                                         "{\"havne_plugin\": 2}")))
+        words = find(page, "signalProblem").text
+        verify(words !== "" && !words.includes("broken.havne"), words)
+        compare(Harness.storedPlugins(), [])
+
+        verify(importFile(page, "good.json", "Extras"))
+        compare(find(page, "signalProblem").text, "", "a good import clears the last refusal")
     }
 
-    // ---- An OBDb set imported (ADR-0051's appendix of 2026-11-06) ----
+    // Into: the waiting file as a variant of a plugin of the user's own,
+    // under the id typed, new or in a variant's place. Replace... on a row
+    // puts the next signal file read in that row's place, and nothing else
+    function test_aSignalFileGoesIntoAPluginOfTheUsersOwnOrInAVariantsPlace() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "extras.json", "Extras"))
+        verify(page.importFile(Harness.writeScratchFile("track.json", signalFileText("Track day", "D101"))))
+        const into = find(page, "importInto_0")
+        compare(into.text, "Into Extras")
+        verify(!find(page, "importVariantField").visible, "no variant asked before Into")
+        into.clicked()
+        verify(find(page, "importVariantField").visible)
+        compare(page.importVariantField.text, "track-day", "the id the file's name gives")
+        verify(!find(page, "importReplaces").visible)
+        page.importVariantField.text = "base"
+        compare(find(page, "importReplaces").text, "replaces base")
+        page.importVariantField.text = "Bad Id"
+        press(page, "importKeep")
+        verify(find(page, "signalProblem").text !== "", "core refuses the id")
+        verify(find(page, "importPanel").visible, "and the file still waits")
+        compare(page.pluginList[0].version, "1.0.0", "nothing changed")
+        page.importVariantField.text = "track"
+        press(page, "importKeep")
+        compare(find(page, "signalProblem").text, "")
+        verify(!find(page, "importPanel").visible)
+        compare(find(page, "signalNote").text,
+                "Extras 1.1.0 now has the variant track: picked for Vehicle 1")
+        compare(page.variantRows.map(r => page.rowTitle(r)),
+                ["Extras 1.1.0: base", "Extras 1.1.0: track"])
+        compare(page.picks, ["plugin.extras.base", "plugin.extras.track"])
+        compare(Harness.storedPlugins().length, 1, "one copy: the plugin's newest")
+        compare(signalsRow(page).summary, "1 plugin: Extras: base and 1 more")
 
-    function obdbPreview(page, year) {
-        find(page, "obdbYearField").text = year
-        return page.previewObdb(Harness.obdbFixture)
+        // The same id again takes that variant's place; its pick stays
+        verify(page.importFile(Harness.writeScratchFile("other.json", signalFileText("Other", "D102"))))
+        find(page, "importInto_0").clicked()
+        page.importVariantField.text = "track"
+        press(page, "importKeep")
+        compare(find(page, "signalNote").text, "Extras 1.2.0: variant track replaced")
+        compare(page.picks.length, 2)
+
+        // The field emptied: the id is the one the file's name gives, so
+        // the variant of that id is the one said, replaced and picked
+        pressRow(page, "plugin.extras.base")
+        compare(page.picks, ["plugin.extras.track"])
+        verify(page.importFile(Harness.writeScratchFile("base.json", signalFileText("Base", "D104"))))
+        find(page, "importInto_0").clicked()
+        compare(page.importVariantField.text, "base")
+        page.importVariantField.text = ""
+        compare(find(page, "importReplaces").text, "replaces base")
+        press(page, "importKeep")
+        compare(find(page, "signalNote").text, "Extras 1.3.0: variant base replaced: picked for Vehicle 1")
+        compare(page.picks, ["plugin.extras.track", "plugin.extras.base"], "not the plugin's last variant")
+        verify(Bridge.pluginVariantText(page.pluginList[0].sha256, "base").text.includes("D104"))
+
+        // Replace...: only a signal file takes a variant's place
+        page.startReplace(rowData(page, "plugin.extras.base"))
+        compare(find(page, "signalImportDialog").title, "Replace Extras: base with a signal file")
+        verify(!page.importFile(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
+        compare(find(page, "signalProblem").text, "Not a signal file: only one takes a variant's place")
+        compare(page.pluginList.length, 1, "the package was not imported")
+        compare(page.replaceTarget, null, "and the next Import is an import")
+        // It picks nothing: a variant the vehicle doesn't pick stays so
+        pressRow(page, "plugin.extras.base")
+        compare(page.profileChoice, "default")
+        page.startReplace(rowData(page, "plugin.extras.base"))
+        verify(page.importFile(Harness.writeScratchFile("third.json", signalFileText("Third", "D103"))))
+        verify(!find(page, "importPanel").visible, "kept at once")
+        compare(find(page, "signalNote").text, "Extras 1.4.0: variant base replaced")
+        verify(Bridge.pluginVariantText(page.pluginList[0].sha256, "base").text.includes("D103"),
+               "the row reads the new file")
+        compare(page.picks, ["plugin.extras.track"], "Replace picks nothing")
+        compare(page.profileChoice, "default", "and the field reads what it read")
+        pressRow(page, "plugin.extras.base")
+
+        // One variant of several is removed alone, its pick with it
+        page.openRow = "plugin.extras.track"
+        const remove = find(rowOf(page, "plugin.extras.track"), "rowRemoveVariant")
+        verify(remove.visible)
+        remove.clicked()
+        compare(page.picks, ["plugin.extras.base"])
+        compare(page.variantRows.map(r => page.rowTitle(r)), ["Extras 1.5.0"])
+        page.openRow = "plugin.extras.base"
+        const row = rowOf(page, "plugin.extras.base")
+        verify(find(row, "rowReplace").visible)
+        verify(!find(row, "rowRemoveVariant").visible, "never a plugin's last variant")
+        verify(!find(row, "rowCopy").visible, "the user's own needs no copy")
     }
 
-    // The report shows what converted, what differs and what's left out,
-    // and nothing is kept until Keep
+    // One Import, a package: it goes in as it is, each variant a row the
+    // picked vehicle picks; the car's VIN (typed in the lookup here: the
+    // mock has none) puts the variants it covers first. A pick under
+    // Default is read at once and connects; a newer version takes the
+    // earlier one's place, and a removal takes the picks
+    function test_aPackageGoesInAsItIsAndItsVariantsArePickedHere() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importExample(page))
+        verify(!find(page, "importPanel").visible, "a package asks nothing")
+        compare(find(page, "signalNote").text,
+                "Example: the simulated car 1.0.0 added: pick a variant below")
+        compare(page.variantRows.map(r => page.rowTitle(r)),
+                ["Example: the simulated car 1.0.0: base", "Example: the simulated car 1.0.0: my2019"])
+        // Its Boost takes the place of obd2's, so base adds four to obd2
+        compare(page.variantRows.map(r => page.rowReads(r)), ["obd2 + 4 signals", "obd2 + 5 signals"])
+        compare(page.picks, [], "several variants: the pick is the user's")
+        verify(!find(rowOf(page, "plugin.example-sim.base"), "rowCaption").visible, "no VIN, no groups")
+        compare(find(rowOf(page, "plugin.example-sim.my2019"), "rowUnused").text,
+                "Not in use: press a variant to pick it for Vehicle 1.")
+        compare(Harness.storedPlugins().length, 1)
+
+        find(page, "vinLookupField").text = "ZZZFAKE11G0000001"   // 2016: before my2019
+        compare(page.variantRows.map(r => r.variant), ["base", "my2019"])
+        compare(page.variantRows.map(r => r.caption), ["For this car:", ""], "a match lifts the plugin whole")
+        verify(!find(rowOf(page, "plugin.example-sim.my2019"), "rowCaption").visible)
+        find(page, "vinLookupField").text = "ZZZFAKE11M0000001"   // 2021
+        compare(page.variantRows.map(r => r.caption), ["For this car:", ""])
+        find(page, "vinLookupField").text = ""
+        verify(!rowData(page, "plugin.example-sim.base").forCar, "no VIN, no match")
+
+        const field = find(page, "uriField")
+        field.text = "mock://demo"
+        pressRow(page, "plugin.example-sim.my2019")
+        compare(page.picks, ["plugin.example-sim.my2019"])
+        compare(field.text, "mock://demo?profile=plugin.example-sim.my2019", "read at once under Default")
+        compare(page.variantRows.map(r => r.variant), ["base", "my2019"])
+        compare(page.variantRows.map(r => r.caption), ["For this car:", ""], "a pick lifts its plugin")
+        verify(find(rowOf(page, "plugin.example-sim.my2019"), "rowPickMark").visible, "with its mark")
+        verify(!rowData(page, "plugin.example-sim.base").picked, "the other variant beside it")
+        const choice = find(page, "profile_plugin.example-sim.my2019")
+        compare(choice.text, "Example: the simulated car: my2019")
+        verify(choice.checked)
+        compare(find(page, "profileHint").text,
+                "obd2's signals and those of Example: the simulated car 1.0.0: my2019, "
+                + "picked for this vehicle")
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "a session decodes with the variant")
+        compare(find(page, "errorLabel").text, "")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+
+        verify(importExample(page, "1.1.0"))
+        compare(find(page, "signalNote").text, "Example: the simulated car 1.1.0 replaces 1.0.0")
+        compare(Harness.storedPlugins().length, 1)
+        compare(page.picks, ["plugin.example-sim.my2019"], "the pick is the new version's")
+        verify(importExample(page, "1.1.0"))
+        compare(find(page, "signalNote").text, "Example: the simulated car 1.1.0 is here already")
+
+        // Someone else's plugin can be imported again: its removal asks nothing
+        page.openRow = "plugin.example-sim.base"
+        const row = rowOf(page, "plugin.example-sim.base")
+        compare(find(row, "rowRemove").text, "Remove the plugin")
+        find(row, "rowRemove").clicked()
+        compare(page.confirming, "")
+        verify(find(page, "signalsNone").visible)
+        compare(Harness.storedPlugins(), [])
+        compare(page.picks, [], "a removed plugin's variant is no pick")
+        compare(field.text, "mock://demo", "the field reads Default again")
+        tryVerify(() => findChild(page, "profile_plugin.example-sim.my2019") === null, 1000,
+                  "a variant no plugin registers isn't offered")
+    }
+
+    // A plugin is this car's when it was imported for the vehicle, a VIN
+    // matches one of its variants or the vehicle picks one. It then lists
+    // whole under "For this car:", its other variants beside that one, so
+    // a first pick lifts the plugin's rows once and a second moves nothing
+    function test_aPluginWithAVariantOfThisCarsListsWhole() {
+        const page = createPage()
+        page.open("signals")
+        verify(importExample(page))   // with no vehicle: nobody's import
+        press(page, "vehicleNew")
+        verify(importFile(page, "extras.json", "Extras"))
+        const extras = "plugin.extras.base"
+        const base = "plugin.example-sim.base"
+        const my2019 = "plugin.example-sim.my2019"
+        pressRow(page, extras)   // the import's pick, undone: still this vehicle's import
+        compare(page.picks, [])
+        compare(page.variantRows.map(r => r.profile), [extras, base, my2019])
+        compare(page.variantRows.map(r => r.caption), ["For this car:", "Other plugins:", ""])
+        compare(find(rowOf(page, base), "rowCaption").text, "Other plugins:")
+
+        pressRow(page, my2019)
+        compare(page.picks, [my2019])
+        compare(page.variantRows.map(r => r.caption), ["For this car:", "", ""], "the pick lifts its plugin")
+        verify(rowData(page, base).forCar, "the variant beside the picked one")
+        verify(!rowData(page, base).picked)
+        verify(find(rowOf(page, my2019), "rowPickMark").visible)
+        const order = page.variantRows.map(r => r.profile)
+        compare(order.indexOf(my2019), order.indexOf(base) + 1, "the plugin's variants in their order")
+        pressRow(page, my2019)
+        pressRow(page, base)
+        compare(page.variantRows.map(r => r.profile), order, "another variant picked moves nothing")
+        pressRow(page, base)
+        compare(page.picks, [])
+        compare(page.variantRows.map(r => r.caption), ["For this car:", "Other plugins:", ""],
+                "the picks undone, the plugin is back with the others")
+
+        find(page, "vinLookupField").text = "ZZZFAKE11G0000001"   // 2016: base's, before my2019
+        compare(page.variantRows.map(r => r.caption), ["For this car:", "", ""], "a VIN's match lifts it too")
+        verify(rowData(page, my2019).forCar, "the variant the VIN doesn't cover, beside the one it does")
+    }
+
+    // A press keeps the focus on its variant's row: the rows stay as they
+    // are through a pick and its undoing, and a first pick, which lifts
+    // the plugin past another, takes the focus with the row
+    function test_aPickKeepsTheFocusOnItsRow() {
+        const page = createPage()
+        page.open("signals")
+        verify(importExample(page))
+        verify(importFile(page, "zed.json", "Zed"))   // with no vehicle: nobody's, after the example
+        press(page, "vehicleNew")
+        const my2019 = "plugin.example-sim.my2019"
+        const zed = "plugin.zed.base"
+        compare(page.variantRows.map(r => r.profile), ["plugin.example-sim.base", my2019, zed])
+
+        const button = find(rowOf(page, my2019), "rowPick")
+        button.forceActiveFocus()
+        verify(button.activeFocus)
+        button.clicked()
+        compare(page.picks, [my2019])
+        verify(find(rowOf(page, my2019), "rowPick") === button, "the same button after the pick")
+        verify(button.checked)
+        verify(button.activeFocus, "the pick keeps the focus")
+        button.clicked()
+        compare(page.picks, [], "pressed again, undone")
+        verify(find(rowOf(page, my2019), "rowPick") === button && button.activeFocus, "and once undone")
+
+        // Zed's pick lifts it past the example: the focus goes with the row
+        const last = find(rowOf(page, zed), "rowPick")
+        last.forceActiveFocus()
+        last.clicked()
+        compare(page.variantRows.map(r => r.profile), [zed, "plugin.example-sim.base", my2019])
+        const moved = find(rowOf(page, zed), "rowPick")
+        verify(moved !== last, "the row is in another place")
+        verify(moved.activeFocus, "the focus is on the variant pressed")
+        verify(moved.checked)
+        moved.clicked()
+        compare(page.variantRows.map(r => r.profile), ["plugin.example-sim.base", my2019, zed])
+        verify(find(rowOf(page, zed), "rowPick").activeFocus, "and back with it")
+    }
+
+    // A session's matches are kept on the vehicle its VIN identified, by
+    // their profiles alone and never another car's, and stay once the VIN
+    // goes with the session: through a page made again, a VIN typed in the
+    // lookup, which is asked about in their place, and another vehicle's
+    // turn, which has none of them. A replaced plugin takes its own, and a
+    // session whose VIN is no vehicle's marks only while it runs
+    function test_aSessionsVinMatchesStayWithItsVehicle() {
+        let page = createPage()
+        press(page, "vehicleNew")
+        const car = page.pickedVehicle.id
+        page.open("signals")
+        verify(importExample(page))
+        const base = "plugin.example-sim.base"
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+        Bridge.identifyForTesting("ZZZFAKE11G0000001")   // a 2016: base alone
+        tryVerify(() => rowData(page, base).forCar, 1000, "marked while it runs")
+        compare(page.pickedVehicle.vinMatches, [], "the VIN is no vehicle's: nothing kept")
+
+        // The VIN names the picked vehicle (an adapter's recognize does
+        // it; the mock's URI is no adapter's, so the key is set here)
+        const salt = page.vehicles.salt !== "" ? page.vehicles.salt : Bridge.newSalt()
+        const doc = VehicleBook.copy(page.vehicles)
+        doc.salt = salt
+        page.saveVehicles(VehicleBook.change(doc, v => v.vinKey = Bridge.vinKey(salt)))
+        Bridge.identifyForTesting("ZZZFAKE11G0000001")
+        compare(page.pickedVehicle.vinMatches, [base])
+        verify(!VehicleBook.serialize(page.vehicles).includes("ZZZFAKE"), "never the VIN")
+
+        // Another car's VIN with this vehicle picked (a replay of it, which
+        // recognizes no vehicle) keeps nothing
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // 2021: both variants
+        compare(page.pickedVehicle.vinMatches, [base], "not another car's")
+
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+        compare(Bridge.pluginMatches(""), [], "the VIN went with the session")
+        verify(rowData(page, base).forCar, "the vehicle's matches stay")
+
+        // The page made again (the app's next start) reads them from the book
+        page.destroy()
+        wait(10)
+        page = createPage()
+        page.open("signals")
+        compare(page.pickedVehicle.id, car)
+        verify(rowData(page, base).forCar)
+
+        // A VIN typed in the lookup is the one asked about, in their place
+        find(page, "vinLookupField").text = "1FAFAKE13Y0000001"   // another manufacturer
+        verify(!rowData(page, base).forCar, "the typed VIN's: none")
+        find(page, "vinLookupField").text = ""
+        verify(rowData(page, base).forCar)
+
+        // Another vehicle has none of them; its own turn back has them
+        press(page, "vehicleNew")
+        verify(!rowData(page, base).forCar, "not this one's")
+        page.pickVehicle(car)
+        verify(rowData(page, base).forCar)
+
+        // A replacement takes the replaced plugin's matches (its new
+        // version's match may not cover the car) and keeps the pick
+        pressRow(page, base)
+        verify(importExample(page, "1.1.0"))
+        compare(page.pickedVehicle.vinMatches, [])
+        compare(page.picks, [base], "the pick kept")
+        pressRow(page, base)
+        verify(!rowData(page, base).forCar, "no match left, and no pick")
+
+        // A session whose VIN is no vehicle's: marked while it runs alone
+        press(page, "vehicleNew")
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected again")
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")
+        tryVerify(() => rowData(page, base).forCar, 1000, "marked")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+        tryVerify(() => !rowData(page, base).forCar, 1000, "gone with the VIN")
+        compare(page.pickedVehicle.vinMatches, [], "nothing kept on this one")
+    }
+
+    // A session's VIN puts the variants it covers first (ADR-0052 section
+    // 5); nothing is picked while it runs, and once it ends the matches
+    // stay on the vehicle its VIN identified, though the VIN goes
+    function test_aSessionsVinMarksItsVariantsPickedOnceItEnds() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importExample(page))
+        verify(importFile(page, "extras.json", "Extras"))
+        pressRow(page, "plugin.extras.base")   // the import's pick, undone
+        // The car's VIN names the picked vehicle
+        const doc = VehicleBook.copy(page.vehicles)
+        doc.salt = Bridge.newSalt()
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // a 2021 the example covers
+        page.saveVehicles(VehicleBook.change(doc, v => v.vinKey = Bridge.vinKey(doc.salt)))
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")
+        tryVerify(() => rowData(page, "plugin.example-sim.my2019").forCar, 1000, "marked")
+        compare(page.variantRows.map(r => r.caption), ["For this car:", "", ""],
+                "the plugin imported for this vehicle and the VIN's two")
+        verify(!find(rowOf(page, "plugin.example-sim.base"), "rowPick").enabled)
+        verify(!find(page, "signalImport").enabled)
+        verify(!find(page, "formSave").enabled)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+        compare(page.pickedVehicle.vinMatches,
+                ["plugin.example-sim.base", "plugin.example-sim.my2019"], "kept on the vehicle")
+        verify(rowData(page, "plugin.example-sim.base").forCar, "the session's matches stay")
+        pressRow(page, "plugin.example-sim.base")
+        compare(page.picks, ["plugin.example-sim.base"])
+        compare(find(page, "uriField").text, "mock://demo?profile=plugin.example-sim.base")
+        pressRow(page, "plugin.example-sim.base")
+        compare(page.picks, [], "pressed again, undone")
+        compare(find(page, "uriField").text, "mock://demo")
+
+        // Another vehicle has no matches of this car's
+        press(page, "vehicleNew")
+        verify(!rowData(page, "plugin.example-sim.base").forCar)
+    }
+
+    // Mine marks an imported plugin as the user's: its variants can then
+    // be changed here, its removal asks, and a newer export of the same
+    // plugin updates it in place, saying from which version to which
+    function test_mineMarksAPluginAsTheUsersAndItsNewerExportUpdatesIt() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "trip.json", "Trip extras"))
+        verify(page.importFile(Harness.writeScratchFile("two.json", signalFileText("Two", "D101"))))
+        verify(page.keepPending(page.pluginList[0].sha256, "two"))
+        const first = Harness.writeScratchFile("trip-1.havne-plugin.json", "")
+        page.saving = page.pluginSave(page.pluginList[0].sha256)
+        compare(page.saving.file, "trip-extras.havne-plugin.json", "the name the dialog starts from")
+        verify(page.saveTo(first))
+        compare(find(page, "signalNote").text, "Trip extras exported to the file you chose")
+        verify(page.importFile(Harness.writeScratchFile("three.json", signalFileText("Three", "D102"))))
+        verify(page.keepPending(page.pluginList[0].sha256, "three"))
+        const second = Harness.writeScratchFile("trip-2.havne-plugin.json", "")
+        page.saving = page.pluginSave(page.pluginList[0].sha256)
+        verify(page.saveTo(second))
+
+        // The user's own has no copy anywhere else: its removal asks
+        page.openRow = "plugin.trip-extras.base"
+        find(rowOf(page, "plugin.trip-extras.base"), "rowRemove").clicked()
+        verify(find(page, "signalsConfirm").visible)
+        compare(find(page, "signalsConfirmText").text,
+                "Remove Trip extras? It is yours, and no other copy exists")
+        verify(!find(page, "signalImport").enabled, "nothing else past the question")
+        press(page, "signalsConfirmCancel")
+        compare(page.pluginList.length, 1, "Cancel keeps it")
+        find(rowOf(page, "plugin.trip-extras.base"), "rowRemove").clicked()
+        press(page, "signalsConfirmRemove")
+        compare(page.pluginList.length, 0)
+        compare(page.picks, [])
+
+        // As it comes to another device: someone else's until Mine
+        verify(page.importFile(first))
+        compare(find(page, "signalNote").text, "Trip extras 1.1.0 added: pick a variant below")
+        page.openRow = "plugin.trip-extras.base"
+        let row = rowOf(page, "plugin.trip-extras.base")
+        compare(find(row, "rowReads").text, "1 signal")
+        verify(find(row, "rowMine").visible)
+        verify(find(row, "rowCopy").visible)
+        verify(!find(row, "rowReplace").visible, "someone else's variants aren't changed here")
+        verify(find(row, "rowMineLine").visible)
+        compare(find(row, "rowMineLine").text,
+                "Mine marks it as yours, so its variants can be changed here; a newer export "
+                + "of the same plugin then updates it in place.")
+        find(row, "rowCopy").clicked()
+        verify(find(row, "rowCopyPanel").visible)
+        find(row, "rowMine").clicked()
+        compare(find(page, "signalNote").text, "Trip extras is yours now")
+        row = rowOf(page, "plugin.trip-extras.base")
+        compare(find(row, "rowReads").text, "1 signal · yours")
+        verify(find(row, "rowReplace").visible)
+        verify(!find(row, "rowMine").visible)
+        verify(!find(row, "rowMineLine").visible)
+        verify(!find(row, "rowCopy").visible)
+        verify(!find(row, "rowCopyPanel").visible, "Copy's choices go with Copy")
+        verify(!page.copyShown)
+        pressRow(page, "plugin.trip-extras.two")
+
+        verify(page.importFile(second))
+        compare(find(page, "signalNote").text, "Trip extras updated from 1.1.0 to 1.2.0")
+        compare(page.variantRows.map(r => r.variant), ["base", "two", "three"])
+        verify(page.variantRows.every(r => r.mine), "still the user's")
+        compare(page.picks, ["plugin.trip-extras.two"], "the pick stays")
+        compare(Harness.storedPlugins().length, 1)
+    }
+
+    // More opens a row's actions and leaves the row as wide as it was, so
+    // a title beside it keeps its lines, on a phone too
+    function test_anOpenRowIsAsWideAsAClosedOne_data() {
+        return [{ tag: "desktop", width: 1000, compact: false }, { tag: "phone", width: 384, compact: true }]
+    }
+    function test_anOpenRowIsAsWideAsAClosedOne(data) {
+        Theme.compact = data.compact
+        const page = createPage(data.compact)
+        page.width = data.width
+        press(page, "vehicleNew")
+        verify(importExample(page))
+        page.open("signals")
+        const profile = "plugin.example-sim.my2019"
+        const pick = find(rowOf(page, profile), "rowPick")
+        waitForPolish(find(page, "settingsSignalsPageColumn"))
+        const closed = { width: pick.width, height: pick.height }
+        verify(closed.width > 100, "laid out")
+        find(rowOf(page, profile), "rowMore").clicked()
+        compare(page.openRow, profile)
+        waitForPolish(find(page, "settingsSignalsPageColumn"))
+        const open = find(rowOf(page, profile), "rowPick")
+        compare(open.width, closed.width)
+        compare(open.height, closed.height, "the title wraps no further")
+        verify(find(rowOf(page, profile), "rowMore").checked)
+    }
+
+    // Copy to my plugin puts a variant of someone else's plugin into a
+    // plugin of the user's own, new or one of theirs; Save as a signal
+    // file writes a variant as the store has it, session or not
+    function test_aVariantIsCopiedIntoAPluginOfTheUsersOwnAndSavedAsASignalFile() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importExample(page))
+        const theirs = page.pluginList[0].sha256
+        page.openRow = "plugin.example-sim.my2019"
+        let row = rowOf(page, "plugin.example-sim.my2019")
+        verify(!find(row, "rowCopyPanel").visible)
+        find(row, "rowCopy").clicked()
+        verify(find(row, "rowCopyPanel").visible)
+        verify(findChild(row, "copyInto_0") === null, "no plugin of the user's own yet")
+        find(row, "copyAsNew").clicked()
+        compare(find(page, "signalProblem").text, "")
+        compare(page.ownPlugins.length, 1)
+        const copy = page.ownPlugins[0]
+        compare(find(page, "signalNote").text,
+                "Example: the simulated car: my2019 copied into " + copy.name + " " + copy.version
+                + " (The copy won't follow Example: the simulated car's updates to my2019)")
+        verify(!page.copyShown, "the choice closes")
+        compare(page.pluginList.length, 2, "the original stays")
+        compare(page.picks, [], "a copy is no pick")
+        verify(rowData(page, copy.profiles[0]).mine)
+
+        page.openRow = "plugin.example-sim.base"
+        row = rowOf(page, "plugin.example-sim.base")
+        find(row, "rowCopy").clicked()
+        const intoOwn = find(row, "copyInto_0")
+        compare(intoOwn.text, "Into " + copy.name)
+        intoOwn.clicked()
+        compare(find(page, "signalProblem").text, "")
+        compare(page.ownPlugins.length, 1)
+        compare(page.ownPlugins[0].variants.length, 2, "a variant of its own beside the first")
+
+        const what = page.variantSave(rowData(page, "plugin.example-sim.my2019"))
+        compare(what.file, "example-sim-my2019.json", "the variant, where the plugin has several")
+        const url = Harness.writeScratchFile("saved.json", "x".repeat(2000))
+        page.saving = what
+        verify(page.saveTo(url))
+        compare(page.saving, null)
+        compare(Harness.readScratchFile(url), Bridge.pluginVariantText(theirs, "my2019").text)
+        compare(find(page, "signalNote").text,
+                "Example: the simulated car: my2019 saved to the file you chose")
+        verify(page.importFile(url), "it reads back as a signal file")
+        compare(page.pendingImport.kind, "signals")
+        press(page, "importDiscard")
+        compare(page.pendingImport, null)
+        verify(!find(page, "importPanel").visible)
+
+        verify(importFile(page, "extras.json", "Extras"))
+        compare(page.variantSave(rowData(page, "plugin.extras.base")).file, "extras.json")
+        page.saving = { kind: "variant", sha256: "a".repeat(64), variant: "base", name: "Gone",
+                        file: "gone.json" }
+        verify(!page.saveTo(url))
+        compare(find(page, "signalProblem").text, "The store has no such plugin")
+        compare(find(page, "signalNote").text, "")
+
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+        page.open("signals")
+        page.openRow = "plugin.example-sim.base"
+        row = rowOf(page, "plugin.example-sim.base")
+        verify(find(row, "rowSave").enabled, "Save reads the copy alone")
+        verify(find(row, "rowExport").enabled)
+        verify(!find(row, "rowCopy").enabled)
+        verify(!find(row, "rowRemove").enabled)
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+    }
+
+    // Export plugin... writes the store's copy, on every plugin; one with
+    // a share-alike variant says what that asks before the dialog. The
+    // file imports again as the same plugin
+    function test_exportSaysWhatAShareAlikeVariantAsksAndWritesTheStoresCopy() {
+        const page = createPage()
+        find(page, "vehicleLabelField").text = "Daily driver"
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(obdbRead(page, "2021"))
+        press(page, "obdbKeep")
+        const profile = "plugin.daily-driver-obdb.my2021"
+        const sha = rowData(page, profile).sha256
+        page.openRow = profile
+        const row = rowOf(page, profile)
+        verify(!find(row, "rowExportNote").visible)
+        verify(page.exportWaits(sha), "the note comes before the dialog")
+        verify(find(row, "rowExportNote").visible)
+        compare(find(row, "exportNoteText").text,
+                "Variant 'my2021' holds data under CC-BY-SA-4.0, a share-alike license: whoever "
+                + "passes the plugin on keeps that license and the variant's source with it")
+        find(row, "exportCancel").clicked()
+        verify(!find(row, "rowExportNote").visible)
+
+        const url = Harness.writeScratchFile("out.havne-plugin.json", "")
+        page.saving = page.pluginSave(sha)
+        compare(page.saving.file, "daily-driver-obdb.havne-plugin.json")
+        verify(page.saveTo(url))
+        compare(find(page, "signalNote").text, "Daily driver OBDb exported to the file you chose")
+        verify(page.importFile(url))
+        compare(find(page, "signalNote").text, "Daily driver OBDb 1.0.0 is here already")
+        compare(page.pluginList.length, 1)
+
+        // Someone else's plugin under no such license goes straight to
+        // the dialog, and its export is the package byte for byte
+        const packed = Harness.writeExamplePlugin("example-sim.havne-plugin.json")
+        verify(page.importFile(packed))
+        const example = page.pluginList.find(p => p.id === "example-sim").sha256
+        verify(!page.exportWaits(example))
+        compare(page.exportNote, "")
+        const copy = Harness.writeScratchFile("example-out.havne-plugin.json", "")
+        page.saving = page.pluginSave(example)
+        verify(page.saveTo(copy))
+        compare(Harness.readScratchFile(copy), Harness.readScratchFile(packed))
+        verify(page.exportWaits("0123"), "a plugin the store lacks opens no dialog")
+        compare(find(page, "signalProblem").text, "The store has no such plugin")
+    }
+
+    // The profile row with one and two picks that read all of obd2: on an
+    // adapter, where Default is obd2, the first such pick takes Default's
+    // place and says "obd2 + <name>"; a pick made while the field reads
+    // Default is read at once, one made under a chosen profile leaves the
+    // field alone; on mock:// Default isn't obd2, so nothing stands in
+    function test_theFirstPickThatReadsObd2StandsInForDefaultOnAnAdapter() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        const field = find(page, "uriField")
+        field.text = "elm327://COM9"
+        compare(page.profileChoice, "default")
+        verify(importFile(page, "plus.json", "Plus", "D100", true))
+        compare(find(page, "signalNote").text,
+                "Plus 1.0.0 added: picked for Vehicle 1, now reading obd2 + Plus")
+        compare(field.text, "elm327://COM9?profile=plugin.plus.base")
+        compare(page.rowReads(rowData(page, "plugin.plus.base")), "obd2 + 1 signal · yours")
+        const plus = find(page, "profile_plugin.plus.base")
+        compare(plus.text, "obd2 + Plus")
+        verify(plus.checked)
+        compare(page.profiles.filter(p => p.name === "plugin.plus.base").length, 1,
+                "one button for the pick: the stand-in")
+        tryVerify(() => findChild(page, "profile_default") === null, 1000,
+                  "the pick reads all of obd2: Default goes")
+        compare(find(page, "profileHint").text,
+                "obd2's signals and those of Plus 1.0.0, picked for this vehicle")
+
+        // Typed back to Default, both show, so the row is the URI's
+        field.text = "elm327://COM9"
+        verify(find(page, "profile_default").checked)
+        verify(!find(page, "profile_plugin.plus.base").checked)
+
+        // A second such pick is read too, but the first still stands in
+        verify(importFile(page, "more.json", "More", "D101", true))
+        compare(page.picks, ["plugin.plus.base", "plugin.more.base"])
+        compare(field.text, "elm327://COM9?profile=plugin.more.base")
+        field.text = "elm327://COM9"
+        compare(page.standIn.profile, "plugin.plus.base", "the first pick, not the last")
+        compare(page.profiles.map(p => p.name),
+                ["default", "plugin.plus.base", "raw", "uds-generic", "plugin.more.base"])
+        compare(find(page, "profile_plugin.more.base").text, "obd2 + More")
+
+        // The first unpicked, the next stands in
+        pressRow(page, "plugin.plus.base")
+        compare(page.standIn.profile, "plugin.more.base")
+        pressRow(page, "plugin.more.base")
+        compare(page.standIn, null)
+        compare(page.profiles.map(p => p.name), ["default", "raw", "uds-generic"])
+
+        // A profile the user chose stays when a pick is made
+        press(page, "vehicleNew")
+        field.text = "elm327://COM9?profile=raw"
+        verify(importFile(page, "third.json", "Third", "D102", true))
+        compare(field.text, "elm327://COM9?profile=raw")
+        compare(page.profileChoice, "raw")
+        compare(find(page, "signalNote").text, "Third 1.0.0 added: picked for Vehicle 2")
+        compare(find(page, "profile_plugin.third.base").text, "obd2 + Third")
+        tryVerify(() => findChild(page, "profile_default") === null, 1000)
+
+        // On mock://, Default isn't obd2: the pick is a choice of its own
+        field.text = "mock://demo"
+        compare(page.standIn, null)
+        compare(find(page, "profile_plugin.third.base").text, "Third")
+        verify(find(page, "profile_default"))
+    }
+
+    // A pick no plugin here has (a version that dropped the variant, a
+    // plugin removed elsewhere) is listed so it can be seen and undone,
+    // and the list's Signals row says so, in the danger color
+    function test_aPickTheStoreLacksIsListedAndUnpicked() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "extras.json", "Extras"))
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles,
+            ["plugin.gone.base", "plugin.extras.base", "plugin.extras.dropped"]))
+        compare(page.missingPicks.map(m => m.text),
+                ["plugin.gone.base: not in the store", "dropped is no longer in Extras"])
+        compare(signalsRow(page).summary, "1 plugin: Extras, 2 picks missing")
+        verify(signalsRow(page).warn, "flagged for the list's danger color")
+        const first = find(page, "pickMissing_0")
+        verify(first.visible)
+        compare(find(first, "pickMissingText").text, "plugin.gone.base: not in the store")
+        find(first, "pickMissingUnpick").clicked()
+        compare(page.picks, ["plugin.extras.base", "plugin.extras.dropped"])
+        compare(signalsRow(page).summary, "1 plugin: Extras, 1 pick missing")
+        find(find(page, "pickMissing_0"), "pickMissingUnpick").clicked()
+        compare(page.picks, ["plugin.extras.base"])
+        verify(signalsRow(page).warn !== true)
+        tryVerify(() => findChild(page, "pickMissing_0") === null, 1000)
+
+        // A missing first pick stands in for nothing: the next one does
+        verify(importFile(page, "plus.json", "Plus", "D101", true))
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base", "plugin.plus.base"]))
+        find(page, "uriField").text = "elm327://COM9"
+        compare(page.standIn.profile, "plugin.plus.base")
+    }
+
+    // The signal files the move into the plugin store left behind are
+    // listed with why, the picked vehicle's then the book's own; Save
+    // writes one out and Remove drops its record
+    function test_theFilesThatDidntMoveAreListedAndRemoved() {
+        const a = "a".repeat(64)
+        const b = "b".repeat(64)
+        const book = VehicleBook.change(VehicleBook.add(VehicleBook.empty(), "Daily driver"), v => {
+            v.unmigrated = [{ sha256: a, name: "Old extras", words: "line 3: no such key 'bitz'" }]
+        })
+        book.unmigrated = [{ sha256: b, name: "Loose", words: "Its vehicle was not read", kept: false }]
+        storedVehicles.setValue("book", VehicleBook.serialize(book))
+        storedVehicles.sync()
+        const page = createPage()
+        page.open("signals")
+        verify(find(page, "unmigratedTitle").visible)
+        compare(find(page, "unmigratedTitle").text, "Not moved from the earlier version:")
+        compare(find(find(page, "unmigrated_0"), "unmigratedText").text,
+                "Old extras: line 3: no such key 'bitz'")
+        compare(find(find(page, "unmigrated_1"), "unmigratedText").text,
+                "Loose: Its vehicle was not read (its copy is still in the earlier version's folder)")
+        compare(page.unmigratedSave(page.unmigratedRows[0]).file, "signals.json")
+
+        // Neither copy is anywhere in this test's folders: Save says so
+        page.saving = page.unmigratedSave(page.unmigratedRows[0])
+        verify(!page.saveTo(Harness.writeScratchFile("left.json", "")))
+        compare(find(page, "signalProblem").text, "Its copy is gone from the earlier version's folder")
+
+        find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
+        compare(page.unmigratedRows.map(r => r.name), ["Loose"])
+        verify(page.pickedVehicle.unmigrated === undefined, "the vehicle's record is gone")
+        find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
+        compare(page.unmigratedRows, [])
+        verify(page.vehicles.unmigrated === undefined)
+        tryVerify(() => !find(page, "unmigratedTitle").visible, 1000)
+
+        // Forget all keeps the book's own records: they are no vehicle's
+        page.saveVehicles(Object.assign(VehicleBook.copy(page.vehicles),
+                                        { unmigrated: [{ sha256: b, name: "Loose", words: "w" }] }))
+        page.forgetVehicles(true)
+        compare(page.unmigratedRows.map(r => r.name), ["Loose"])
+    }
+
+    // The bytes the move kept of a file go only once no vehicle lists the
+    // file; until then Save as a signal file writes them out
+    function test_aFileThatDidntMoveKeepsItsBytesWhileAVehicleListsIt() {
+        const c = "c".repeat(64)
+        const text = signalFileText("Kept", "D105")
+        verify(Harness.keepUnmigrated(c, text))
+        try {
+            const listed = v => {
+                v.unmigrated = [{ sha256: c, name: "Kept", words: "line 2: no such key" }]
+            }
+            let book = VehicleBook.change(VehicleBook.add(VehicleBook.empty(), "Daily driver"), listed)
+            book = VehicleBook.change(VehicleBook.add(book, "Weekend car"), listed)
+            storedVehicles.setValue("book", VehicleBook.serialize(book))
+            storedVehicles.sync()
+            const page = createPage()
+            page.open("signals")
+            compare(page.pickedVehicle.label, "Weekend car")
+            const out = Harness.writeScratchFile("kept.json", "")
+            page.saving = page.unmigratedSave(page.unmigratedRows[0])
+            verify(page.saveTo(out))
+            compare(Harness.readScratchFile(out), text, "the bytes as the move kept them")
+            compare(find(page, "signalNote").text, "Kept saved to the file you chose")
+
+            find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
+            compare(page.unmigratedRows, [])
+            compare(Harness.keptUnmigrated(), [c], "the other vehicle lists it still")
+            press(page, "vehicle_" + page.vehicles.list[0].id)
+            compare(page.unmigratedRows.map(r => r.name), ["Kept"])
+            find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
+            compare(page.unmigratedRows, [])
+            compare(Harness.keptUnmigrated(), [], "no vehicle lists it: the bytes go")
+        } finally {
+            Bridge.removeUnmigratedFile(c)
+        }
+    }
+
+    // A forgotten vehicle's file that didn't move is the book's own from
+    // then on: listed, saved and removed as before, its bytes kept until
+    // it is removed
+    function test_aForgottenVehiclesFileThatDidntMoveStaysListed() {
+        const d = "d".repeat(64)
+        const text = signalFileText("Kept", "D106")
+        verify(Harness.keepUnmigrated(d, text))
+        try {
+            const book = VehicleBook.change(VehicleBook.add(VehicleBook.empty(), "Daily driver"), v => {
+                v.unmigrated = [{ sha256: d, name: "Kept", words: "line 2: no such key" }]
+            })
+            storedVehicles.setValue("book", VehicleBook.serialize(book))
+            storedVehicles.sync()
+            const page = createPage()
+            page.open("signals")
+            compare(page.unmigratedRows.map(r => r.loose), [false], "the vehicle's")
+            press(page, "vehicleForget")
+            press(page, "vehicleConfirm")
+            compare(page.pickedVehicle, null)
+            compare(page.unmigratedRows.map(r => r.name), ["Kept"], "listed still")
+            compare(page.unmigratedRows.map(r => r.loose), [true], "the book's own now")
+            compare(Harness.keptUnmigrated(), [d])
+            const out = Harness.writeScratchFile("kept.json", "")
+            page.saving = page.unmigratedSave(page.unmigratedRows[0])
+            verify(page.saveTo(out))
+            compare(Harness.readScratchFile(out), text, "and saved as before")
+            find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
+            compare(page.unmigratedRows, [])
+            compare(Harness.keptUnmigrated(), [], "removed, its bytes go")
+        } finally {
+            Bridge.removeUnmigratedFile(d)
+        }
+    }
+
+    // A book a later Havne saved is left as it is: no vehicle is shown,
+    // the page says why, and nothing is written over it
+    function test_aBookFromALaterHavneIsLeftAsItIs() {
+        const later = JSON.stringify({ format: 3, salt: "s", picked: "v1",
+                                       list: [{ id: "v1", label: "Daily driver", shape: "new" }] })
+        storedVehicles.setValue("book", later)
+        storedVehicles.sync()
+        const page = createPage()
+        verify(page.bookLater)
+        compare(page.pickedVehicle, null)
+        page.open("vehicle")
+        verify(find(page, "vehicleBookLater").visible)
+        compare(find(page, "vehicleBookLater").text,
+                "This vehicle list was saved by a later Havne and is left as it is.")
+        verify(!find(page, "vehicleNew").enabled)
+        page.saveVehicles(VehicleBook.add(VehicleBook.empty(), "Mine"))
+        compare(page.pickedVehicle, null, "no vehicle is made over it")
+        verify(importFile(page, "extras.json", "Extras"), "the store works without the book")
+        page.destroy()
+        wait(10)
+        storedVehicles.sync()
+        compare(storedVehicles.value("book"), later, "the stored book is as it was")
+    }
+
+    // ---- A connect from a list reads the vehicle's plugin (ADR-0064 Q5) ----
+
+    // The rule: an address that names no profile takes the picked
+    // vehicle's first pick that loads and reads all of obd2, where obd2
+    // is asked: a J2534 or ELM327 adapter, or a CAN interface that sends.
+    // Any other address passes as it is, and each row has its word
+    function test_aListsAddressTakesTheStandInOnlyWhereObd2IsAsked() {
+        const page = createPage()
+        page.j2534Devices = []
+        page.serialPorts = [{ name: "COM5", device: "" }]
+        page.bluetoothAdapters = []
+        page.canInterfaces = [{ name: "vcan0", kind: "vcan", up: true },
+                              { name: "can0", kind: "can", up: true, modes: ["one-shot"] },
+                              { name: "can1", kind: "can", up: true, modes: ["listen-only"] },
+                              { name: "can2", kind: "can", up: false, modes: ["one-shot"] }]
+        press(page, "vehicleNew")
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "no pick, nothing composed")
+        verify(importFile(page, "plain.json", "Plain"))
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "a pick that doesn't read obd2")
+        compare(page.connectProfileWords["elm327://COM5"], undefined)
+        verify(importFile(page, "plus.json", "Plus", "D101", true))
+        verify(importFile(page, "more.json", "More", "D102", true))
+        const plus = "plugin.plus.base"
+        compare(page.picks, ["plugin.plain.base", plus, "plugin.more.base"])
+
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5?profile=" + plus,
+                "the first pick that reads obd2, not the last")
+        compare(page.listConnectUri("j2534://Vendor X"), "j2534://Vendor X?profile=" + plus)
+        compare(page.listConnectUri("elm327://192.168.0.10:35000?poll=0C"),
+                "elm327://192.168.0.10:35000?poll=0C&profile=" + plus,
+                "appended last, the other keys where they were")
+        compare(page.listConnectUri("elm327://COM5?profile=obd2"), "elm327://COM5?profile=obd2",
+                "an address that names a profile wins")
+        compare(page.listConnectUri("elm327://COM5?profile=raw&poll=0C"),
+                "elm327://COM5?profile=raw&poll=0C")
+        compare(page.listConnectUri("mock://demo"), "mock://demo", "the demo's Default isn't obd2")
+        compare(page.listConnectUri("replay://C:/recordings/one"), "replay://C:/recordings/one")
+
+        compare(page.listConnectUri("socketcan://vcan0"), "socketcan://vcan0?profile=" + plus,
+                "a virtual bus sends")
+        compare(page.listConnectUri("socketcan://can0"), "socketcan://can0?profile=" + plus,
+                "a controller up in one-shot mode sends")
+        compare(page.listConnectUri("socketcan://can1"), "socketcan://can1", "a listener keeps listening")
+        compare(page.listConnectUri("socketcan://can2"), "socketcan://can2", "down")
+        compare(page.listConnectUri("socketcan://can9"), "socketcan://can9", "not listed")
+
+        compare(page.connectProfileWords["elm327://COM5"], "obd2 + Plus")
+        compare(page.connectProfileWords["socketcan://vcan0"], "obd2 + Plus")
+        compare(page.connectProfileWords["socketcan://can1"], undefined,
+                "no word on a row that isn't composed")
+        compare(page.listProfileWord("elm327://COM5?profile=plugin.more.base"), "More",
+                "a plugin's profile by its name")
+        compare(page.listConnectUri("elm327://COM5?profile=plugin.more.base"),
+                "elm327://COM5?profile=plugin.more.base", "a pick's profile, named, is read")
+        compare(page.listProfileWord("elm327://COM5?profile=raw"), "")
+        compare(page.listProfileWord("mock://demo"), "")
+
+        // A pick the store lacks stands in for nothing: the next does
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base", "plugin.more.base"]))
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5?profile=plugin.more.base")
+        compare(page.listProfileWord("elm327://COM5?profile=plugin.gone.base"), "a plugin not in the store")
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base"]))
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5")
+
+        // A plugin's or a signal file's profile the vehicle doesn't pick is
+        // dropped, as the field drops it; a built-in profile stays
+        page.saveVehicles(VehicleBook.setPicks(page.vehicles, [plus]))
+        compare(page.listConnectUri("elm327://COM5?profile=plugin.more.base&poll=0C"),
+                "elm327://COM5?poll=0C&profile=" + plus, "the vehicle's own pick is read in its place")
+        compare(page.listProfileWord("elm327://COM5?profile=plugin.more.base"), "obd2 + Plus")
+        compare(page.listConnectUri("mock://demo?profile=plugin.more.base"), "mock://demo")
+        compare(page.listConnectUri("elm327://COM5?profile=user.old"), "elm327://COM5?profile=" + plus)
+        press(page, "vehicle_none")
+        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "no vehicle, no pick")
+        compare(page.listConnectUri("elm327://COM5?profile=" + plus), "elm327://COM5",
+                "nor a plugin's profile")
+        compare(page.listConnectUri("elm327://COM5?profile=raw"), "elm327://COM5?profile=raw")
+        compare(page.connectProfileWords["elm327://COM5"], undefined)
+    }
+
+    // A list's connect puts the composed address in the field, as typed
+    // text, before the connect; one that fails is kept nowhere. The
+    // address here is a closed TCP port, an adapter's on every platform
+    function test_aListConnectFillsTheFieldWithTheProfileItReads() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "D100", true))
+        const field = find(page, "uriField")
+        field.text = "mock://other"
+        const closed = "elm327://127.0.0.1:1"
+        page.connectFromList(closed)
+        compare(field.text, closed + "?profile=plugin.plus.base", "before the connect answers")
+        compare(page.profileChoice, "plugin.plus.base", "the row follows the field")
+        verify(find(page, "profile_plugin.plus.base").checked)
+        tryVerify(() => !Bridge.connecting, 10000, "the connect ends")
+        verify(!Bridge.connected, "nothing listens there")
+        verify(find(page, "errorLabel").text !== "")
+        compare(page.recentUris, [], "a failed connect is no recent address")
+        compare(page.pickedVehicle.uri, "")
+
+        // The demo is left as it is
+        page.connectFromList("mock://demo")
+        compare(field.text, "mock://demo")
+        tryVerify(() => Bridge.connected, 5000, "connects")
+        compare(Bridge.currentUri, "mock://demo")
+    }
+
+    // A session on the emulator, ended. It serves one host at a time,
+    // so this waits until it has seen the host go
+    function endSession() {
+        const closed = Harness.emulatorClients("closed")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
+        tryVerify(() => Harness.emulatorClients("closed") > closed, 5000,
+                  "the emulator sees the host go")
+    }
+
+    // On an adapter (havne-cli's ELM327 emulator, on every platform) the
+    // connect runs under the pick's profile, and what is kept is the
+    // row's address without it: the vehicle's address and
+    // the recent list name no profile, so each connect adds the pick of
+    // the vehicle picked then, and another vehicle reads its own
+    function test_aListConnectOnAnAdapterReadsThePluginAndKeepsTheRowsAddress() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "1E1C", true))
+        const uri = emulatorUri()
+        const composed = uri + "?profile=plugin.plus.base"
+        const field = find(page, "uriField")
+        field.text = ""
+        page.connectFromList(uri)
+        compare(field.text, composed)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, composed)
+        compare(find(page, "errorLabel").text, "")
+        tryVerify(() => Bridge.signalModel.rowCount() > 0, 5000)
+        verify(Bridge.profileSignals(Bridge.currentUri).some(r => r.ref === "key:a"),
+               "the session reads the plugin's signal with obd2's")
+        tryVerify(() => page.pickedVehicle.uri === uri, 10000, "the vehicle keeps the row's address")
+        endSession()
+        sameList(page.connectUris, [uri])
+        compare(page.connectProfileWords[uri], "obd2 + Plus", "the row says what it reads")
+
+        // Another vehicle, which picks nothing, reads the row as it is
+        press(page, "vehicleNew")
+        compare(page.picks, [])
+        compare(page.connectProfileWords[uri], undefined)
+        page.connectFromList(uri)
+        compare(field.text, uri)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, uri, "not the first vehicle's plugin")
+        tryVerify(() => page.pickedVehicle.uri === uri, 10000)
+        endSession()
+
+        // The first again: the field reads its address as its row connects
+        press(page, "vehicle_" + page.vehicles.list[0].id)
+        compare(field.text, composed)
+    }
+
+    // The recent list keeps the row's address too; an address typed
+    // after it is kept as typed
+    function test_aListConnectKeepsTheRowsAddressInTheRecentList() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "1E1C", true))
+        const uri = emulatorUri()
+        find(page, "uriField").text = ""
+        page.connectFromList(uri)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, uri + "?profile=plugin.plus.base")
+        sameList(page.recentUris, [uri])
+        endSession()
+        const raw = uri + "?profile=raw"
+        find(page, "uriField").text = raw
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        sameList(page.recentUris, [raw, uri])
+        endSession()
+    }
+
+    // An address typed with a plugin's profile is kept as typed. A list
+    // reads it for a vehicle that picks the plugin; for another it drops
+    // the profile, so the plugin is never remembered as that vehicle's
+    function test_aRowNamingAPluginReadsItOnlyForAVehicleThatPicksIt() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "1E1C", true))
+        const uri = emulatorUri()
+        const composed = uri + "?profile=plugin.plus.base"
+        const field = find(page, "uriField")
+        field.text = composed
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        tryVerify(() => page.pickedVehicle.uri === composed, 10000, "kept as typed")
+        sameList(page.recentUris, [composed])
+        endSession()
+        compare(page.listConnectUri(composed), composed, "its vehicle picks the plugin")
+        compare(page.connectProfileWords[composed], "Plus")
+
+        press(page, "vehicleNew")
+        compare(page.listConnectUri(composed), uri)
+        compare(page.connectProfileWords[composed], undefined, "no word: it reads Default")
+        page.connectFromList(composed)
+        compare(field.text, uri)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, uri, "not the first vehicle's plugin")
+        tryVerify(() => page.pickedVehicle.uri === uri, 10000, "nor is it remembered as this vehicle's")
+        sameList(page.recentUris, [uri, composed])
+        compare(page.vehicles.list[0].uri, composed, "the first vehicle's stays")
+        endSession()
+    }
+
+    // A kept row follows the vehicle's picks: with the first undone the
+    // next that reads obd2 is read, at a start as at a connect, and with
+    // the plugin removed the row connects as it is
+    function test_aKeptRowFollowsTheVehiclesPicks() {
+        let page = createPage()
+        press(page, "vehicleNew")
+        verify(importFile(page, "plus.json", "Plus", "1E1C", true))
+        verify(importFile(page, "more.json", "More", "D102", true))
+        const uri = emulatorUri()
+        const plus = uri + "?profile=plugin.plus.base"
+        const more = uri + "?profile=plugin.more.base"
+        find(page, "uriField").text = ""
+        page.connectFromList(uri)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, plus)
+        tryVerify(() => page.pickedVehicle.uri === uri, 10000)
+        endSession()
+
+        page.open("signals")
+        pressRow(page, "plugin.plus.base")
+        compare(page.picks, ["plugin.more.base"])
+        sameList(page.connectUris, [uri])
+        compare(page.connectProfileWords[uri], "obd2 + More")
+        compare(page.listConnectUri(plus), more, "a row that names the pick undone reads the pick of now")
+        page.connectFromList(uri)
+        tryVerify(() => Bridge.connected, 10000, "connects")
+        compare(Bridge.currentUri, more)
+        endSession()
+
+        // As at a quit and a start
+        page.destroy()
+        wait(10)
+        stored.sync()
+        compare(stored.value("uri"), uri, "the last address is the row's")
+        page = createPage()
+        compare(find(page, "uriField").text, more, "and the field reads the pick of now")
+
+        verify(page.removePlugin(page.pluginList.find(p => p.id === "more").sha256))
+        compare(page.picks, [])
+        compare(page.listConnectUri(uri), uri)
+        compare(page.connectProfileWords[uri], undefined)
+    }
+
+    // ---- An OBDb set imported (ADR-0051's appendix of 2026-11-06, ADR-0064 Q3) ----
+
+    // The OBDb fixture read through Import under the year typed
+    function obdbRead(page, year) {
+        if (!page.importFile(Harness.obdbFixture))
+            return false
+        if (year !== "") {
+            find(page, "obdbYearField").text = ""   // a year typed, even the one a VIN gave
+            find(page, "obdbYearField").text = year
+        }
+        return page.obdbReport !== null
+    }
+
+    // One Import, an OBDb set: the report shows what converted, what
+    // differs and what's left out, converted again when the year is
+    // changed, and nothing is kept until Keep; kept, it is a plugin of the
+    // user's own, picked for the vehicle
     function test_anObdbSetShowsItsReportBeforeItIsKept() {
         const page = createPage()
         find(page, "vehicleLabelField").text = "Daily driver"
         press(page, "vehicleNew")
-        verify(find(page, "obdbImport").enabled)
-        verify(!find(page, "obdbReport").visible)
-        verify(obdbPreview(page, "2021"))
         page.open("signals")
+        verify(!find(page, "obdbReport").visible)
+        verify(obdbRead(page, ""))
         verify(find(page, "obdbReport").visible)
+        compare(find(page, "obdbSummary").text,
+                "Daily driver OBDb from OBDb: 6 signals converted, 5 fields differ, 6 left out, "
+                + "no model year, so the commands OBDb gives for some years only are left out")
+        find(page, "obdbYearField").text = "2021"
         compare(find(page, "obdbSummary").text,
                 "Daily driver OBDb from OBDb: 7 signals converted, 6 fields differ, "
                 + "5 left out, model year 2021")
@@ -2330,52 +3549,55 @@ TestCase {
         compare(find(page, "obdbSkipped").count, 5)
         compare(find(page, "obdbFileNotes").count, 2)
         compare(find(page, "obdbKeep").text, "Keep")
-        compare(page.pickedVehicle.signals, [], "nothing kept yet")
-        compare(Harness.storedSignalFiles(), [])
+        compare(page.pluginList.length, 0, "nothing kept yet")
+        compare(Harness.storedPlugins(), [])
 
         press(page, "obdbKeep")
-        verify(!find(page, "obdbReport").visible)
-        compare(page.pickedVehicle.signals.length, 1)
-        compare(page.pickedVehicle.signals[0].profile, "user.daily-driver-obdb")
-        compare(find(page, "signalNote").text,
-                "Daily driver OBDb added: obd2 and 7 of your own, profile user.daily-driver-obdb")
-        compare(Harness.storedSignalFiles(), [page.pickedVehicle.signals[0].sha256 + ".json"])
-        verify(Bridge.isObdbImport(page.pickedVehicle.signals[0].sha256))
+        verify(!find(page, "importPanel").visible)
+        compare(page.picks, ["plugin.daily-driver-obdb.my2021"], "a typed year names the variant")
+        compare(find(page, "signalNote").text, "Daily driver OBDb 1.0.0 added: picked for Daily driver")
+        const row = rowOf(page, "plugin.daily-driver-obdb.my2021")
+        compare(find(row, "rowCaption").text, "For this car:")
+        compare(find(row, "rowTitle").text, "Daily driver OBDb 1.0.0")
+        compare(find(row, "rowReads").text, "obd2 + 7 signals · yours")
+        compare(Harness.storedPlugins().length, 1)
+        verify(page.pluginList[0].obdb)
     }
 
     function test_anObdbSetDiscardedIsNotKept() {
         const page = createPage()
         press(page, "vehicleNew")
-        verify(obdbPreview(page, ""))
-        compare(find(page, "obdbSummary").text,
-                "Vehicle 1 OBDb from OBDb: 6 signals converted, 5 fields differ, 6 left out, "
-                + "no model year, so the commands OBDb gives for some years only are left out")
-        press(page, "obdbDiscard")
-        verify(!find(page, "obdbReport").visible)
-        compare(page.pickedVehicle.signals, [])
-        compare(Harness.storedSignalFiles(), [])
+        page.open("signals")
+        verify(obdbRead(page, ""))
+        verify(find(page, "obdbReport").visible)
+        press(page, "importDiscard")
+        verify(!find(page, "importPanel").visible)
+        compare(page.pluginList.length, 0)
         verify(!page.keepObdb(), "nothing to keep")
-        compare(page.pickedVehicle.signals, [])
+        compare(page.pluginList.length, 0)
 
         // A report is the vehicle's it was read for
-        verify(obdbPreview(page, "2021"))
+        verify(obdbRead(page, "2021"))
         press(page, "vehicleNew")
-        verify(!find(page, "obdbReport").visible, "another vehicle picked")
+        compare(page.pendingImport, null, "another vehicle picked: the file no longer waits")
         verify(!page.keepObdb())
-        compare(page.pickedVehicle.signals, [])
+        compare(page.pluginList.length, 0)
     }
 
-    // The set read again replaces the vehicle's earlier import, and says
-    // so before Keep; a file the user named is never replaced
+    // The set read again takes the place of the vehicle's earlier import,
+    // and says so before Keep; the pick follows it. A plugin the user
+    // named so is never replaced
     function test_anObdbSetReadAgainReplacesTheEarlierImport() {
         const page = createPage()
         find(page, "vehicleLabelField").text = "Daily driver"
         press(page, "vehicleNew")
-        verify(obdbPreview(page, "2019"))
+        page.open("signals")
+        verify(obdbRead(page, "2019"))
         press(page, "obdbKeep")
-        const earlier = page.pickedVehicle.signals[0].sha256
+        const earlier = page.pluginList[0].sha256
+        compare(page.picks, ["plugin.daily-driver-obdb.my2019"])
 
-        verify(obdbPreview(page, "2021"))
+        verify(obdbRead(page, "2021"))
         verify(find(page, "obdbSummary").text.endsWith(
                    "; replaces the vehicle's earlier OBDb import"),
                find(page, "obdbSummary").text)
@@ -2383,46 +3605,46 @@ TestCase {
         // The report at a phone's width, as test_everyItemFitsAPhonesWidth
         const width = page.width
         page.width = 320
-        const column = find(page, "settingsConnectionPageColumn")
+        const column = find(page, "settingsSignalsPageColumn")
         tryCompare(column, "width", 320 - 2 * Theme.pageMargin)
         waitForPolish(column)
         compare(pastTheEdge(column, column, []).join("; "), "",
                 "nothing past the column's right edge, " + column.width)
         page.width = width
         press(page, "obdbKeep")
-        compare(page.pickedVehicle.signals.length, 1)
-        verify(page.pickedVehicle.signals[0].sha256 !== earlier)
-        compare(page.pickedVehicle.signals[0].profile, "user.daily-driver-obdb")
+        compare(page.pluginList.length, 1)
+        verify(page.pluginList[0].sha256 !== earlier)
+        compare(page.picks, ["plugin.daily-driver-obdb.my2021"], "the pick follows the import")
         compare(find(page, "signalNote").text,
-                "Daily driver OBDb replaced the vehicle's earlier OBDb import: obd2 and 7 "
-                + "of your own, profile user.daily-driver-obdb")
-        compare(Harness.storedSignalFiles(), [page.pickedVehicle.signals[0].sha256 + ".json"],
-                "the earlier copy went")
+                "Daily driver OBDb replaced the vehicle's earlier OBDb import")
+        compare(Harness.storedPlugins().length, 1, "the earlier copy went")
 
-        // The same year again is the same file
-        verify(obdbPreview(page, "2021"))
+        // The same year again is the same plugin
+        verify(obdbRead(page, "2021"))
         press(page, "obdbKeep")
-        compare(page.pickedVehicle.signals.length, 1)
-        compare(find(page, "signalNote").text, "Daily driver OBDb is this vehicle's already")
+        compare(page.pluginList.length, 1)
+        compare(find(page, "signalNote").text, "Daily driver OBDb is here already")
 
-        // A file the user named so is the user's: the import takes a name
-        // of its own beside it
+        // A plugin the user named so is the user's: the import takes an
+        // id of its own beside it
         find(page, "vehicleLabelField").text = "Weekend car"
         press(page, "vehicleNew")
         verify(importFile(page, "mine.json", "Weekend car OBDb"))
-        verify(obdbPreview(page, "2021"))
+        verify(obdbRead(page, "2021"))
         verify(!find(page, "obdbSummary").text.includes("replaces"))
         press(page, "obdbKeep")
-        compare(page.pickedVehicle.signals.map(f => f.name),
-                ["Weekend car OBDb", "Weekend car OBDb 2"])
+        compare(page.pluginList.filter(p => p.name === "Weekend car OBDb").map(p => p.id),
+                ["weekend-car-obdb", "weekend-car-obdb-2"])
     }
 
     // The year: typed, else a typed VIN's, else the connected car's once
-    // its VIN names the picked vehicle, kept once the session ends; one
-    // that isn't a year is refused before the file is read
+    // its VIN names the picked vehicle, kept once the session ends. A
+    // VIN's year fills the field and names no variant; one that isn't a
+    // year is refused, and the set waits for another
     function test_theObdbYearComesFromAVin() {
         const page = createPage()
         press(page, "vehicleNew")
+        page.open("signals")
         compare(page.obdbVinYear(), 0)
         find(page, "vinLookupField").text = "1FAFAKE10M0000001"
         compare(page.obdbVinYear(), 2021)
@@ -2433,7 +3655,7 @@ TestCase {
         find(page, "uriField").text = "mock://demo"
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 5000, "connected")
-        verify(!find(page, "obdbImport").enabled, "nothing changes the vehicle while it runs")
+        verify(!find(page, "signalImport").enabled, "nothing changes the store while it runs")
         Bridge.identifyForTesting("1FAFAKE13Y0000001")
         compare(page.obdbVinYear(), 0, "not the picked vehicle's VIN")
         const salt = page.vehicles.salt !== "" ? page.vehicles.salt : Bridge.newSalt()
@@ -2446,14 +3668,48 @@ TestCase {
         tryVerify(() => !Bridge.disconnecting, 5000)
         compare(Bridge.vinModelYear(""), 0, "the VIN went with the session")
         compare(page.obdbVinYear(), 2000, "its year stays")
-        verify(find(page, "obdbImport").enabled)
+        verify(find(page, "signalImport").enabled)
 
-        find(page, "obdbYearField").text = "19x"
-        verify(!page.previewObdb(Harness.obdbFixture))
+        verify(obdbRead(page, "19x") === false)
         compare(find(page, "signalProblem").text, "A model year is 1980 to 2039, or empty for none")
-        find(page, "obdbYearField").text = "1979"
-        verify(!page.previewObdb(Harness.obdbFixture))
         verify(!find(page, "obdbReport").visible)
+        verify(find(page, "importPanel").visible, "the set waits for a year")
+        find(page, "obdbYearField").text = "1979"
+        compare(find(page, "signalProblem").text, "A model year is 1980 to 2039, or empty for none")
+        find(page, "obdbYearField").text = "2021"
+        compare(find(page, "signalProblem").text, "")
+        verify(find(page, "obdbReport").visible)
+        compare(page.obdbReport.year, 2021)
+
+        verify(obdbRead(page, ""))
+        compare(find(page, "obdbYearField").text, "2000", "the field takes the car's year")
+        verify(page.obdbYearFromVin)
+        compare(page.obdbReport.year, 2000)
+        press(page, "obdbKeep")
+        compare(page.picks, ["plugin.vehicle-1-obdb.base"], "a VIN's year names no variant")
+    }
+
+    // The year in the field is the waiting set's: it goes with a discard
+    // and with the vehicle, so one vehicle's year never converts another's
+    function test_theObdbYearGoesWithItsSet() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        find(page, "vinLookupField").text = "1FAFAKE10M0000001"
+        verify(obdbRead(page, ""))
+        compare(find(page, "obdbYearField").text, "2021")
+        verify(page.obdbYearFromVin)
+        page.discardImport()
+        compare(find(page, "obdbYearField").text, "")
+        verify(!page.obdbYearFromVin)
+        find(page, "vinLookupField").text = ""
+
+        verify(obdbRead(page, "2019"))
+        compare(page.obdbReport.year, 2019)
+        press(page, "vehicleNew")
+        compare(find(page, "obdbYearField").text, "", "the last vehicle's year isn't this one's")
+        verify(obdbRead(page, ""))
+        compare(page.obdbReport.year, 0)
     }
 
     // A long report shows a list's first rows and counts the rest
@@ -2468,7 +3724,7 @@ TestCase {
                                                  fmt: { len: 8, unit: "scalar" } }] })
         const url = Harness.writeScratchFile("long.json", JSON.stringify({ commands: commands }))
         find(page, "obdbYearField").text = ""
-        verify(page.previewObdb(url))
+        verify(page.importFile(url))
         compare(page.obdbReport.skipped.length, 120)
         compare(find(page, "obdbSkipped").count, page.obdbRowsShown)
         compare(find(page, "obdbSkippedMore").text, "and " + (120 - page.obdbRowsShown) + " more")
@@ -2477,392 +3733,162 @@ TestCase {
         verify(!find(page, "obdbChangedMore").visible)
     }
 
-    function test_aFileThatIsNotAnObdbSetIsRefused() {
+    // With no vehicle picked an OBDb set is imported all the same: named
+    // "OBDb set", imported for none, and not in use until a vehicle picks it
+    function test_anObdbSetWithNoVehicleIsImportedForNone() {
         const page = createPage()
-        press(page, "vehicleNew")
-        find(page, "obdbYearField").text = ""
-        verify(!page.previewObdb(Harness.writeScratchFile("notobdb.json", "{\"ecu\": 1}")))
-        const words = find(page, "signalProblem").text
-        verify(words.startsWith("Not an OBDb set Havne can read"), words)
-        verify(!words.includes("notobdb.json"), "never the path")
-        verify(!find(page, "obdbReport").visible)
-        compare(Harness.storedSignalFiles(), [])
+        page.open("signals")
+        verify(obdbRead(page, ""))
+        verify(find(page, "obdbSummary").text.startsWith("OBDb set from OBDb: "),
+               find(page, "obdbSummary").text)
+        press(page, "obdbKeep")
+        compare(find(page, "signalNote").text, "OBDb set 1.0.0 added")
+        compare(page.pluginList[0].importedFor, "")
+        verify(find(rowOf(page, "plugin.obdb-set.base"), "rowUnused").visible)
     }
 
-    // A copy goes when no vehicle keeps it; the vehicle's own file asks first
-    function test_removeAndForgetDeleteTheCopiesNoVehicleKeeps() {
+    // The Signals page's states on a phone (qml.md's density): at 384 x
+    // 832 every button is a touch's size, and at 320 px, the narrowest
+    // phone, nothing lies past the column
+    function test_theSignalsPagesStatesFitAPhone_data() {
+        return [{ tag: "list" }, { tag: "open row" }, { tag: "copy" }, { tag: "import panel" },
+                { tag: "obdb report" }, { tag: "export note" }, { tag: "confirm" },
+                { tag: "missing pick" }, { tag: "not moved" }]
+    }
+    function test_theSignalsPagesStatesFitAPhone(data) {
+        Theme.compact = true
+        Theme.dense = true
+        if (data.tag === "not moved") {
+            const book = VehicleBook.change(VehicleBook.add(VehicleBook.empty(), "W".repeat(40)), v => {
+                v.unmigrated = [{ sha256: "a".repeat(64), name: "A file's name as long as a name may be",
+                                  words: "line 12, column 40: the words a loader gives, at their length" }]
+            })
+            book.unmigrated = [{ sha256: "b".repeat(64), name: "Loose", words: "w", kept: false }]
+            storedVehicles.setValue("book", VehicleBook.serialize(book))
+            storedVehicles.sync()
+        }
+        const page = createPage(true)
+        page.width = 384
+        page.height = 832
+        if (page.pickedVehicle === null) {
+            find(page, "vehicleLabelField").text = "W".repeat(40)
+            press(page, "vehicleNew")
+        }
+        verify(importExample(page))
+        verify(importFile(page, "long.json", "A plugin of the user's own with a name that wraps"))
+        const own = page.ownPlugins[0]
+        const theirs = "plugin.example-sim.my2019"
+        if (data.tag === "open row") {
+            page.openRow = theirs
+        } else if (data.tag === "copy") {
+            page.openRow = theirs
+            page.copyShown = true
+        } else if (data.tag === "import panel") {
+            verify(page.importFile(Harness.writeScratchFile("track.json", signalFileText("Track day", "D101"))))
+            page.importInto = own.sha256
+        } else if (data.tag === "obdb report") {
+            verify(obdbRead(page, "2021"))
+        } else if (data.tag === "export note") {
+            verify(obdbRead(page, "2021"))
+            verify(page.keepObdb())
+            const obdb = page.pluginList.find(p => p.obdb)
+            page.openRow = obdb.profiles[0]
+            verify(page.exportWaits(obdb.sha256))
+        } else if (data.tag === "confirm") {
+            page.askRemovePlugin(own.sha256)
+            verify(page.confirmingPlugin() !== null)
+        } else if (data.tag === "missing pick") {
+            page.saveVehicles(VehicleBook.setPicks(page.vehicles,
+                                                   page.picks.concat(["plugin.gone-from-the-store.base"])))
+        }
+        page.open("signals")
+        const shown = find(page, "settingsSignalsPage")
+        verify(shown.visible, "Signals shows")
+        const column = find(page, "settingsSignalsPageColumn")
+        waitForPolish(column)
+        const buttons = buttonsUnder(shown, [])
+        verify(buttons.length > 2, "buttons to measure")
+        for (const b of buttons) {
+            const o = b.mapToItem(null, 0, 0)
+            const e = b.mapToItem(null, b.width, b.height)
+            const name = b.objectName !== "" ? b.objectName : b.text
+            verify(e.y - o.y >= 48 - 0.5, name + " is " + (e.y - o.y) + " tall")
+            verify(e.x - o.x >= 48 - 0.5, name + " is " + (e.x - o.x) + " wide")
+        }
+        page.width = 320
+        tryCompare(column, "width", 320 - 2 * Theme.pageMargin)
+        waitForPolish(column)
+        tryVerify(() => pastTheEdge(column, column, []).length === 0, 2000)
+        compare(pastTheEdge(column, column, []).join("; "), "", "nothing past the column at 320")
+    }
+
+    // What the store holds for a vehicle goes with it: after Forget a
+    // plugin imported for it is no longer first for a vehicle that takes
+    // its id, and the plugins themselves stay
+    function test_forgetReleasesWhatWasImportedForTheVehicle() {
         const page = createPage()
         press(page, "vehicleNew")
-        verify(importFile(page, "a.json", "Extras"))
+        page.open("signals")
+        verify(importFile(page, "extras.json", "Extras"))
+        compare(page.pluginList[0].importedFor, "v1")
         press(page, "vehicleDuplicate")
-        compare(page.pickedVehicle.signals.length, 1, "Duplicate copies the files")
-        press(page, "signalRemove_0")
-        compare(page.pickedVehicle.signals, [])
-        compare(Harness.storedSignalFiles().length, 1, "the first vehicle keeps it")
-        page.pickVehicle("v1")
-        press(page, "signalRemove_0")
-        compare(Harness.storedSignalFiles(), [], "no vehicle keeps it now")
-
-        verify(importFile(page, "own.json", "Mine"))
-        const own = page.pickedVehicle.signals[0]
-        page.saveVehicles(VehicleBook.setOwn(page.vehicles, own))
-        press(page, "signalRemove_0")
-        compare(find(page, "vehicleConfirmText").text,
-                "Remove Mine? It was written here, and no other copy exists")
-        compare(find(page, "vehicleConfirm").text, "Remove")
-        press(page, "vehicleCancel")
-        compare(page.pickedVehicle.signals.length, 1, "Cancel keeps it")
-        press(page, "signalRemove_0")
+        compare(page.picks, ["plugin.extras.base"], "Duplicate copies the picks")
+        verify(rowData(page, "plugin.extras.base").forCar, "the copy picks it")
+        pressRow(page, "plugin.extras.base")
+        verify(!rowData(page, "plugin.extras.base").forCar, "imported for the first, not the copy")
+        press(page, "vehicleForget")
         press(page, "vehicleConfirm")
-        compare(page.pickedVehicle.signals, [])
-        compare(Harness.storedSignalFiles(), [])
+        page.pickVehicle("v1")
+        pressRow(page, "plugin.extras.base")
+        compare(page.picks, [])
+        verify(rowData(page, "plugin.extras.base").forCar, "imported for this one, picked or not")
+        press(page, "vehicleForget")
+        press(page, "vehicleConfirm")
+        compare(page.vehicles.list.length, 0)
+        compare(page.pluginList.length, 1, "the plugin stays")
+        compare(page.pluginList[0].importedFor, "", "but is no vehicle's import")
+        verify(find(rowOf(page, "plugin.extras.base"), "rowUnused").visible)
 
-        verify(importFile(page, "c.json", "Body"))
+        press(page, "vehicleNew")
+        verify(obdbRead(page, ""))
+        press(page, "obdbKeep")
+        compare(page.pluginList.filter(p => p.importedFor !== "").length, 1)
         press(page, "vehicleForgetAll")
         press(page, "vehicleConfirm")
-        compare(Harness.storedSignalFiles(), [], "Forget all takes the copies")
-        verify(!findChild(page, "profile_user.body"))
+        compare(page.pluginList.length, 2, "Forget all keeps the plugins")
+        compare(page.pluginList.filter(p => p.importedFor !== "").length, 0)
+        verify(findChild(page, "profile_plugin.extras.base") === null, "no vehicle, no pick offered")
     }
 
-    function importExtending(page, fileName, name) {
-        const doc = JSON.parse(signalFileText(name))
-        doc.extends = "obd2"
-        const url = Harness.writeScratchFile(fileName, JSON.stringify(doc))
-        verify(url.toString() !== "", "the scratch file is written")
-        return page.importSignalFile(url)
-    }
-
-    // A file that extends obd2 takes obd2's place on an adapter, where
-    // Default is obd2 (ADR-0052): its button reads "obd2 + <name>" and
-    // Default's goes once the field reads another profile. Imported while
-    // the field reads Default with no profile= of its own, it's read
-    // instead, and the note says so; a profile the user picked stays, a
-    // second such file keeps a button of its own, and on mock:// Default
-    // isn't obd2, so nothing stands in
-    function test_aFileExtendingObd2TakesItsPlaceOnAnAdapter() {
+    // A pick's profile is its vehicle's: a pick of another vehicle, or
+    // New, puts the field back to Default (its connection kept), so it
+    // never connects, and is remembered, with the last one's signals; a
+    // built-in profile stays
+    function test_aPickLeavesAnotherVehiclesProfileBehind() {
         const page = createPage()
         press(page, "vehicleNew")
-        const field = find(page, "uriField")
-        field.text = "elm327://COM9"
+        const first = page.pickedVehicle.id
+        verify(importFile(page, "extras.json", "Extras"))
+        find(page, "uriField").text = "mock://demo"
+        page.chooseProfile("plugin.extras.base")
+        compare(find(page, "uriField").text, "mock://demo?profile=plugin.extras.base")
+        press(page, "vehicleNew")
+        compare(find(page, "uriField").text, "mock://demo", "New: Default")
         compare(page.profileChoice, "default")
-        verify(importExtending(page, "plus.json", "Plus"))
-        compare(find(page, "signalNote").text,
-                "Plus added: now reading obd2 + Plus, profile user.plus")
-        compare(field.text, "elm327://COM9?profile=user.plus")
-        compare(find(find(page, "signalFile_0"), "signalFileText").text,
-                "Plus: obd2 and 1 of your own, profile user.plus")
-        const plus = find(page, "profile_user.plus")
-        compare(plus.text, "obd2 + Plus")
-        verify(plus.checked)
-        compare(page.profiles.filter(p => p.name === "user.plus").length, 1,
-                "one button for the file: the stand-in")
-        tryVerify(() => findChild(page, "profile_default") === null, 1000,
-                  "the file reads all of obd2: Default goes")
-        compare(find(page, "profileHint").text,
-                "obd2's signals and 1 of your own, from your signal file Plus")
 
-        // Typed back to Default, both show, so the row is the URI's
-        field.text = "elm327://COM9"
-        verify(find(page, "profile_default").checked)
-        verify(!find(page, "profile_user.plus").checked)
+        const second = page.pickedVehicle.id
+        press(page, "vehicle_" + first)
+        page.chooseProfile("plugin.extras.base")
+        press(page, "vehicleDuplicate")
+        verify(page.pickedVehicle.id !== first && page.pickedVehicle.id !== second)
+        compare(find(page, "uriField").text, "mock://demo?profile=plugin.extras.base",
+                "the copy has the pick: its profile stays")
+        press(page, "vehicle_" + second)
+        compare(find(page, "uriField").text, "mock://demo", "another's goes")
 
-        // A second such file keeps its own button; Default stays read
-        verify(importExtending(page, "more.json", "More"))
-        compare(find(page, "signalNote").text,
-                "More added: obd2 and 1 of your own, profile user.more")
-        compare(field.text, "elm327://COM9")
-        compare(find(page, "profile_user.more").text, "More")
-        compare(page.vehicleProfiles.find(p => p.name === "user.more").hint,
-                "Your signal file More: obd2 and 1 of your own", "its own, not obd2's")
-        compare(find(page, "profile_user.plus").text, "obd2 + Plus")
-
-        // A profile the user picked stays when one is imported
-        press(page, "vehicleNew")
-        field.text = "elm327://COM9?profile=raw"
-        verify(importExtending(page, "third.json", "Third"))
-        compare(field.text, "elm327://COM9?profile=raw")
-        compare(page.profileChoice, "raw")
-        compare(find(page, "signalNote").text,
-                "Third added: obd2 and 1 of your own, profile user.third")
-        compare(find(page, "profile_user.third").text, "obd2 + Third")
-        tryVerify(() => findChild(page, "profile_default") === null, 1000)
-
-        // On mock://, Default isn't obd2: the file is a choice of its own
-        field.text = "mock://demo"
-        compare(find(page, "profile_user.third").text, "Third")
-        verify(find(page, "profile_default"))
-    }
-
-    // ---- The app's plugins (ADR-0052) ----
-
-    // With no VIN at all, every loaded plugin's variants are the picked
-    // vehicle's to pick (ADR-0052's appendix of 2026-11-13): none marked,
-    // nothing asking for a VIN, and the one picked is the vehicle's, in
-    // the URI's profile and offered under Profile; no vehicle, no variants
-    function test_aVariantIsPickedWithNoVinKnown() {
-        const page = createPage()
-        page.open("signals")
-        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
-        verify(findChild(page, "pluginOther_0") === null, "no vehicle picked")
-        verify(!find(page, "pluginOthersText").visible)
-
-        press(page, "vehicleNew")
-        verify(!find(page, "pluginMatchesText").visible, "nothing marked")
-        verify(findChild(page, "pluginMatch_0") === null)
-        const others = find(page, "pluginOthersText")
-        verify(others.visible)
-        compare(others.text, "Pick a variant for this vehicle:")
-        verify(!others.text.includes("VIN"))
-        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
-        compare(find(page, "pluginOther_1").text, "Example: the simulated car: my2019")
-
-        const field = find(page, "uriField")
-        field.text = "elm327://COM9"
-        press(page, "pluginOther_1")
-        compare(page.pickedVehicle.plugin, "plugin.example-sim.my2019")
-        compare(field.text, "elm327://COM9?profile=plugin.example-sim.my2019")
-        verify(find(page, "pluginOther_1").checked)
-        verify(!find(page, "pluginOther_0").checked)
-        const choice = find(page, "profile_plugin.example-sim.my2019")
-        compare(choice.text, "Example: the simulated car: my2019")
-        verify(choice.checked)
-    }
-
-    // A packed plugin imported is listed with its variants; a VIN typed
-    // in the lookup (the mock has none) puts the variants it covers first
-    // under its own caption, the rest after, and the one picked is kept
-    // in the vehicle, read through the URI's profile, offered under
-    // Profile and connected; removed, it goes from the list and the row.
-    // An import of its id replaces it, and a package core refuses says so
-    function test_aPluginIsImportedMatchedByTheVinAndConnected() {
-        const page = createPage()
-        page.open("signals")
-        verify(find(page, "pluginsNone").visible)
-        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
-        compare(find(page, "pluginNote").text,
-                "Example: the simulated car 1.0.0 added: plugin.example-sim.base, "
-                + "plugin.example-sim.my2019")
-        compare(find(find(page, "plugin_0"), "pluginText").text,
-                "Example: the simulated car 1.0.0: base, my2019")
-        verify(!find(page, "pluginsNone").visible)
-        compare(Harness.storedPlugins().length, 1)
-
-        press(page, "vehicleNew")
-        verify(findChild(page, "pluginMatch_0") === null)
-        find(page, "vinLookupField").text = "ZZZFAKE11M0000001"   // 2021
-        const matched = find(page, "pluginMatchesText")
-        verify(matched.visible)
-        compare(matched.text, "For this car, by its VIN:")
-        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
-        compare(find(page, "pluginMatch_1").text, "Example: the simulated car: my2019")
-        verify(!find(page, "pluginOthersText").visible, "both matched, none other")
-        tryVerify(() => findChild(page, "pluginOther_0") === null, 1000)
-        find(page, "vinLookupField").text = "ZZZFAKE11G0000001"   // 2016
-        tryVerify(() => findChild(page, "pluginMatch_1") === null, 1000, "before my2019")
-        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
-        compare(find(page, "pluginOthersText").text, "Other plugins:")
-        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019",
-                "the variant it doesn't cover after, still offered")
-        tryVerify(() => find(page, "pluginMatch_0").mapToItem(page, 0, 0).y
-                        < find(page, "pluginOther_0").mapToItem(page, 0, 0).y, 1000,
-                  "the match comes first, once the flows are placed")
-        find(page, "vinLookupField").text = "ZZZFAKE11M0000001"
-
-        const field = find(page, "uriField")
-        field.text = "mock://demo"
-        press(page, "pluginMatch_1")
-        compare(page.pickedVehicle.plugin, "plugin.example-sim.my2019")
-        compare(field.text, "mock://demo?profile=plugin.example-sim.my2019")
-        verify(find(page, "pluginMatch_1").checked)
-        const choice = find(page, "profile_plugin.example-sim.my2019")
-        compare(choice.text, "Example: the simulated car: my2019")
-        verify(choice.checked)
-        press(page, "connectButton")
-        tryVerify(() => Bridge.connected, 5000, "a session decodes with the variant")
-        compare(find(page, "errorLabel").text, "")
-        Bridge.disconnectSession()
-        tryVerify(() => !Bridge.disconnecting, 5000)
-
-        // Its id again replaces it; a package core refuses says why
-        verify(page.importPlugin(Harness.writeExamplePlugin("newer.havne-plugin.json", "1.1.0")))
-        compare(find(page, "pluginNote").text, "Example: the simulated car 1.1.0 replaces 1.0.0")
-        compare(Harness.storedPlugins().length, 1)
-        verify(!page.importPlugin(Harness.writeScratchFile("bad.havne-plugin.json", "{}")))
-        const words = find(page, "pluginProblem").text
-        verify(words.includes("line") && !words.includes("bad.havne"), words)
-
-        press(page, "pluginRemove_0")
-        compare(find(page, "pluginProblem").text, "")
-        verify(find(page, "pluginsNone").visible)
-        compare(Harness.storedPlugins(), [])
-        tryVerify(() => findChild(page, "profile_plugin.example-sim.my2019") === null, 1000,
-                  "a variant no plugin registers isn't offered")
-        compare(page.pickedVehicle.plugin, "", "a removed plugin's variant is no pick")
-        compare(field.text, "mock://demo", "the field reads Default again")
-    }
-
-
-    // A session's VIN marks the variants it covers (ADR-0052 section 5);
-    // nothing that changes the vehicle is used while it runs. Its matches
-    // are kept on the vehicle the VIN identified, by their profiles alone,
-    // never another car's, and stay once the VIN goes with the session:
-    // through the plugins read again, a page made again, and another
-    // vehicle's turn, which shows none of them; a replaced plugin takes
-    // its own. A session whose VIN is no vehicle's marks them only while
-    // it runs. A pick, and the pick pressed again to undo it, keep the
-    // button and its focus, and a button never runs past the page
-    function test_aSessionsVinMatchesStayWithItsVehicle() {
-        let page = createPage()
-        press(page, "vehicleNew")
-        const car = page.pickedVehicle.id
-        verify(page.importPlugin(Harness.writeExamplePlugin("example.havne-plugin.json")))
-        find(page, "uriField").text = "mock://demo"
-        press(page, "connectButton")
-        tryVerify(() => Bridge.connected, 5000, "connected")
-        Bridge.identifyForTesting("ZZZFAKE11G0000001")   // a 2016: base alone
-        tryVerify(() => findChild(page, "pluginMatch_0") !== null, 1000, "marked while it runs")
-        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
-        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019")
-        compare(page.pickedVehicle.vinMatches, [], "the VIN is no vehicle's: nothing kept")
-        verify(!find(page, "pluginMatch_0").enabled)
-        verify(!find(page, "pluginOther_0").enabled)
-        verify(!find(page, "signalImport").enabled)
-        verify(!find(page, "formSave").enabled)
-        verify(!find(page, "pluginImport").enabled)
-
-        // The VIN names the picked vehicle (an adapter's recognize does
-        // it; the mock's URI is no adapter's, so the key is set here)
-        const salt = page.vehicles.salt !== "" ? page.vehicles.salt : Bridge.newSalt()
-        const doc = VehicleBook.copy(page.vehicles)
-        doc.salt = salt
-        page.saveVehicles(VehicleBook.change(doc, v => v.vinKey = Bridge.vinKey(salt)))
-        Bridge.identifyForTesting("ZZZFAKE11G0000001")
-        compare(page.pickedVehicle.vinMatches, ["plugin.example-sim.base"])
-        verify(!VehicleBook.serialize(page.vehicles).includes("ZZZFAKE"), "never the VIN")
-
-        // Another car's VIN with this vehicle picked (a replay of it, which
-        // recognizes no vehicle) marks its own while it runs, keeps nothing
-        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // 2021: both
-        tryVerify(() => findChild(page, "pluginMatch_1") !== null, 1000, "the session's marked")
-        compare(page.pickedVehicle.vinMatches, ["plugin.example-sim.base"], "not another car's")
-
-        Bridge.disconnectSession()
-        tryVerify(() => !Bridge.disconnecting, 5000)
-        compare(Bridge.pluginMatches(""), [], "the VIN went with the session")
-        compare(find(page, "pluginMatchesText").text, "For this car, by its VIN:")
-        tryVerify(() => findChild(page, "pluginMatch_1") === null, 1000, "the vehicle's alone")
-        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
-        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019")
-        verify(find(page, "pluginMatch_0").enabled)
-
-        // What an import or a removal runs after the session asks the
-        // bridge again, with no VIN
-        page.loadPlugins()
-        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
-        tryVerify(() => findChild(page, "pluginMatch_1") === null, 1000)
-
-        // The page made again (the app's next start) reads them from the book
-        page.destroy()
-        wait(10)
-        page = createPage()
-        compare(page.pickedVehicle.id, car)
-        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
-        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019")
-
-        // A VIN typed in the lookup is the one asked about, in their place
-        find(page, "vinLookupField").text = "1FAFAKE13Y0000001"   // another manufacturer
-        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "the typed VIN's: none")
-        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
-        find(page, "vinLookupField").text = ""
-        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
-
-        // Another vehicle has none of them; its own turn back has them
-        press(page, "vehicleNew")
-        verify(!find(page, "pluginMatchesText").visible)
-        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "not this one's")
-        compare(find(page, "pluginOthersText").text, "Pick a variant for this vehicle:")
-        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
-        page.saveVehicles(VehicleBook.pick(page.vehicles, car))
-        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
-
-        // The pressed button stays, with its focus, through the save
-        find(page, "uriField").text = "mock://demo"
-        const button = find(page, "pluginMatch_0")
-        button.forceActiveFocus()
-        verify(button.activeFocus)
-        button.clicked()
-        compare(page.pickedVehicle.plugin, "plugin.example-sim.base")
-        compare(find(page, "uriField").text, "mock://demo?profile=plugin.example-sim.base")
-        verify(find(page, "pluginMatch_0") === button, "the same button after the pick")
-        verify(button.checked)
-        verify(button.activeFocus, "the pick keeps the focus")
-        button.clicked()
-        compare(page.pickedVehicle.plugin, "", "pressed again, undone")
-        compare(find(page, "uriField").text, "mock://demo")
-        verify(find(page, "pluginMatch_0") === button && button.activeFocus, "and once undone")
-
-        // A replacement takes the replaced plugin's matches (its new
-        // version's match may not cover the car) and keeps the pick
-        press(page, "pluginMatch_0")
-        verify(page.importPlugin(Harness.writeExamplePlugin("newer.havne-plugin.json", "1.1.0")))
-        compare(page.pickedVehicle.vinMatches, [])
-        compare(page.pickedVehicle.plugin, "plugin.example-sim.base", "the pick kept")
-        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "no mark")
-        compare(find(page, "pluginOthersText").text, "Pick a variant for this vehicle:")
-        verify(find(page, "pluginOther_0").checked)
-        verify(findChild(page, "pluginOther_2") === null, "a pick that loads is listed once")
-        press(page, "pluginOther_0")
-        compare(page.pickedVehicle.plugin, "")
-
-        // A session whose VIN is no vehicle's: marked while it runs alone
-        press(page, "vehicleNew")
-        find(page, "uriField").text = "mock://demo"
-        press(page, "connectButton")
-        tryVerify(() => Bridge.connected, 5000, "connected again")
-        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // 2021: both
-        tryVerify(() => findChild(page, "pluginMatch_1") !== null, 1000, "both marked")
-
-        // Either list's row narrower than its text (a phone, a long name)
-        const match = find(page, "pluginMatch_0")
-        match.parent.width = 100
-        verify(match.implicitWidth > 100)
-        verify(match.width <= 100, match.width + " in a row of 100")
-
-        Bridge.disconnectSession()
-        tryVerify(() => !Bridge.disconnecting, 5000)
-        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "gone with the VIN")
-        compare(find(page, "pluginOther_1").text, "Example: the simulated car: my2019")
-        const other = find(page, "pluginOther_1")
-        other.parent.width = 100
-        verify(other.implicitWidth > 100)
-        verify(other.width <= 100, other.width + " in a row of 100")
-        compare(page.pickedVehicle.vinMatches, [], "nothing kept on this one")
-    }
-
-    // A copy that doesn't load lists no variant and leaves the others'
-    // listed; a vehicle's pick that doesn't load (its plugin refused, or
-    // its variant gone from a newer version) is listed after them, so it
-    // can be undone there
-    function test_aPickThatDoesntLoadIsShownAndUndone() {
-        const page = createPage()
-        page.open("signals")
-        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
-        press(page, "vehicleNew")
-        page.pluginList = [{ sha256: "0".repeat(64), ok: false, words: "a load failed for the test" }]
-            .concat(page.pluginList)
-        compare(find(find(page, "plugin_0"), "pluginText").text, "a load failed for the test")
-        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
-        compare(find(page, "pluginOther_1").text, "Example: the simulated car: my2019")
-        verify(findChild(page, "pluginOther_2") === null)
-
-        page.saveVehicles(VehicleBook.setPlugin(page.vehicles, "plugin.gone.base"))
-        const gone = find(page, "pluginOther_2")
-        compare(gone.text, "plugin.gone.base: doesn't load")
-        verify(gone.checked)
-        verify(!find(page, "pluginOther_0").checked)
-        press(page, "pluginOther_2")
-        compare(page.pickedVehicle.plugin, "", "undone")
-        tryVerify(() => findChild(page, "pluginOther_2") === null, 1000, "and gone from the list")
+        page.chooseProfile("raw")
+        press(page, "vehicle_" + first)
+        compare(find(page, "uriField").text, "mock://demo?profile=raw", "a built-in stays")
     }
 
     // A copy's own signals are its own: its own file is copied under a
@@ -2879,7 +3905,8 @@ TestCase {
         verify(page.pickedVehicle.id !== first)
         verify(page.pickedVehicle.own !== "" && page.pickedVehicle.own !== VehicleBook.find(page.vehicles, first).own,
                "the copy's own file is a copy")
-        compare(page.ownFile.name, "Vehicle 1 (copy) own")
+        compare(page.pickedVehicle.own, "plugin.vehicle-1-copy-signals.base")
+        compare(page.ownFile.name, "Vehicle 1 (copy) signals")
         compare(page.ownSignals.map(s => s.key), ["trans_temp"])
         typeSignal(page, "Gear", "D101")
         press(page, "formSave")
@@ -2901,7 +3928,8 @@ TestCase {
         typeSignal(page, "Oil Temp", "D103")
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
-        compare(page.ownFile.name, "Vehicle 1 own 2")
+        compare(page.ownFile.name, "Vehicle 1 signals")
+        compare(page.pickedVehicle.own, "plugin.vehicle-1-signals-2.base", "an id of its own")
     }
 
     // The form and the section's words are the picked vehicle's: a pick or
@@ -2912,7 +3940,7 @@ TestCase {
         press(page, "vehicleNew")
         const first = page.pickedVehicle.id
         const bad = Harness.writeScratchFile("bad.json", signalFileText("Bad").replace("bits", "bitz"))
-        verify(!page.importSignalFile(bad))
+        verify(!(page.importFile(bad) && page.keepPending("", "")))
         verify(find(page, "signalProblem").text !== "")
         typeSignal(page, "Trans Temp", "1E1C", "16")
         press(page, "formSave")
@@ -2934,10 +3962,11 @@ TestCase {
         compare(page.confirming, "", "the question goes with the pick")
     }
 
-    // Edit then a new name renames the signal; a new signal whose name
-    // makes a saved one's key is refused, not saved over it; the same name
-    // again replaces it, as designed
-    function test_anEditRenamesAndAKeyIsNeverTakenTwice() {
+    // Edit then a new name renames the signal under the key it has; a new
+    // signal whose name makes a key a saved one keeps gets a key of its
+    // own, never the other's place; the same name again replaces, as
+    // designed; and an Edit can't take another saved signal's name
+    function test_anEditKeepsTheKeyAndAKeyIsNeverTakenTwice() {
         const page = createPage()
         press(page, "vehicleNew")
         typeSignal(page, "Trans Temp", "1E1C", "16")
@@ -2947,6 +3976,16 @@ TestCase {
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
         compare(page.ownSignals.map(s => s.name), ["Trans Fluid Temp"])
+        compare(page.ownSignals.map(s => s.key), ["trans_temp"], "renamed, the key it was saved with")
+        compare(page.editingKey, "", "the Edit is over")
+
+        // The name the first was saved under, typed for a new signal
+        page.clearForm()
+        typeSignal(page, "Trans Temp", "D100")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.map(s => s.key), ["trans_temp", "trans_temp_2"])
+        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D100"], "neither saved over")
 
         page.clearForm()
         typeSignal(page, "Boost (psi)", "D101")
@@ -2954,33 +3993,88 @@ TestCase {
         page.clearForm()
         typeSignal(page, "Boost psi", "D102")
         press(page, "formSave")
-        compare(find(page, "formProblem").text,
-                "Boost (psi), saved already, has the key boost_psi too: edit it, or give this one another name")
-        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D101"])
+        compare(find(page, "formProblem").text, "")
+        compare(page.ownSignals.map(s => s.key), ["trans_temp", "trans_temp_2", "boost_psi", "boost_psi_2"])
         page.clearForm()
         typeSignal(page, "Boost (psi)", "D103")
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
-        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D103"], "the same name replaces")
+        compare(page.ownSignals.map(s => s.read.number), ["1E1C", "D100", "D103", "D102"],
+                "the same name replaces")
+        compare(page.ownSignals[2].key, "boost_psi")
 
-        // An Edit renamed to another signal's key is refused too
+        // The loaded variant has the keys the form kept
+        compare(Bridge.profileSignals("mock://?profile=" + page.pickedVehicle.own).map(r => r.ref)
+                    .filter(r => r.startsWith("key:")).sort(),
+                ["key:boost_psi", "key:boost_psi_2", "key:trans_temp", "key:trans_temp_2"])
+
+        // An Edit renamed to another saved signal's name is refused
         press(page, "ownEdit_0")
         find(page, "formName").text = "Boost psi"
         press(page, "formSave")
-        verify(find(page, "formProblem").text.startsWith("Boost (psi), saved already"))
-        compare(page.ownSignals.length, 2)
+        compare(find(page, "formProblem").text, "Boost psi is saved already: give this one another name")
+        compare(page.ownSignals.map(s => s.name),
+                ["Trans Fluid Temp", "Trans Temp", "Boost (psi)", "Boost psi"])
     }
 
-    // A file the vehicle has already isn't added again; a Read once's
-    // reply shows only on the vehicle it was asked for
-    function test_aFileAgainAndAReplyElsewhereSaySo() {
+    // A Dashboard gauge names a form signal by its key (ADR-0057), so it
+    // reads on after the signal is renamed
+    function test_aGaugeBoundToAFormSignalReadsOnAfterItsRename() {
         const page = createPage()
         press(page, "vehicleNew")
-        verify(importFile(page, "extras.json", "Extras"))
-        verify(!importFile(page, "extras.json", "Extras"))
-        compare(find(page, "signalNote").text, "Extras is this vehicle's already")
-        compare(page.pickedVehicle.signals.length, 1)
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        const own = page.pickedVehicle.own
+        const uri = "mock://demo?profile=" + own
 
+        const dash = createTemporaryObject(dashComponent, testCase.Window.window.contentItem)
+        const doc = DashboardBook.builtIn("desktop")
+        doc.pages = [{ name: "Own", cells: [
+            { kind: "digital", w: 2, h: 4, label: "Fluid temp", refs: ["key:trans_temp"], unit: "",
+              options: {} }] }]
+        dash.doc = doc
+        const hub = createTemporaryObject(hubComponent, testCase)
+        const gauge = gaugeLabeled(dash, "Fluid temp")
+        verify(gauge, "the cell draws a gauge")
+
+        compare(Bridge.connectSession(uri), "")
+        tryVerify(() => gauge.hasValue, 5000, "the gauge reads the signal")
+        compare(hub.byRef["key:trans_temp"].name, "Trans Temp")
+        Bridge.disconnectSession()
+        tryVerify(() => page.idle, 5000, "the session ends")
+
+        press(page, "ownEdit_0")
+        find(page, "formName").text = "Transmission fluid temperature"
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.pickedVehicle.own, own, "the same variant")
+
+        compare(Bridge.connectSession(uri), "")
+        tryVerify(() => hub.byRef["key:trans_temp"] !== undefined
+                        && hub.byRef["key:trans_temp"].name === "Transmission fluid temperature", 5000,
+                  "the renamed signal under its key")
+        tryVerify(() => gauge.hasValue, 5000, "the gauge reads on")
+        verify(gauge.note !== "not in profile", gauge.note)
+    }
+
+    // The page's gauge (a GaugeBase item) of that label, null for none
+    function gaugeLabeled(within, label) {
+        for (let i = 0; i < within.children.length; ++i) {
+            const child = within.children[i]
+            if (child.label === label && child.note !== undefined && child.valueText !== undefined)
+                return child
+            const found = gaugeLabeled(child, label)
+            if (found !== null)
+                return found
+        }
+        return null
+    }
+
+    // A Read once's reply shows only on the vehicle it was asked for
+    function test_aReadOncesReplyShowsOnlyOnItsVehicle() {
+        const page = createPage()
+        press(page, "vehicleNew")
         const reply = { ok: true, request: "22 1E 1C", reply: "62 1E 1C 12 34",
                         value: "4660", nrc: 0, words: "" }
         page.readOnceFor = "another vehicle"
@@ -2989,82 +4083,6 @@ TestCase {
         page.readOnceFor = page.pickedId
         Bridge.readOnceResult(reply)
         compare(page.readResult.reply, "62 1E 1C 12 34")
-    }
-
-    // A file that no longer loads shows in the list's Signals row, in
-    // danger, as well as on the page
-    function test_theSignalsRowSaysAFileDoesntLoad() {
-        const page = createPage()
-        press(page, "vehicleNew")
-        verify(importFile(page, "extras.json", "Extras"))
-        const row = () => page.pageList.find(r => r.key === "signals")
-        compare(row().summary, "1 file")
-        verify(row().warn !== true)
-        const info = Object.assign({}, page.signalInfo)
-        const sha = page.pickedVehicle.signals[0].sha256
-        info[sha] = Object.assign({}, info[sha], { ok: false })
-        page.signalInfo = info
-        compare(row().summary, "1 file, doesn't load")
-        verify(row().warn, "flagged for the list's danger color")
-    }
-
-    // Of several files the row counts the ones that don't load
-    function test_theSignalsRowCountsTheFilesThatDontLoad() {
-        const page = createPage()
-        press(page, "vehicleNew")
-        verify(importFile(page, "first.json", "First", "D100"))
-        verify(importFile(page, "second.json", "Second", "D101"))
-        verify(importFile(page, "third.json", "Third", "D102"))
-        const row = () => page.pageList.find(r => r.key === "signals")
-        compare(row().summary, "3 files")
-        const info = Object.assign({}, page.signalInfo)
-        const files = page.pickedVehicle.signals
-        info[files[0].sha256] = Object.assign({}, info[files[0].sha256], { ok: false })
-        page.signalInfo = info
-        compare(row().summary, "3 files, 1 doesn't load", "one of three, said as a count")
-        const two = Object.assign({}, info)
-        two[files[1].sha256] = Object.assign({}, info[files[1].sha256], { ok: false })
-        page.signalInfo = two
-        compare(row().summary, "3 files, 2 don't load")
-    }
-
-    // A file is saved out as the vehicle has it, byte for byte (a Save
-    // replaces what was at the target), under its profile's name; its
-    // button stays on while a session runs, since it only reads the copy;
-    // a missing copy says so
-    function test_aFileIsSavedOutAsTheVehicleHasIt() {
-        const page = createPage()
-        press(page, "vehicleNew")
-        verify(importFile(page, "extras.json", "Extras"))
-        const f = page.pickedVehicle.signals[0]
-        compare(page.saveFileName(f), "extras.json")
-        const url = Harness.writeScratchFile("saved.json", "x".repeat(2000))
-        verify(page.saveSignalFileTo(f.sha256, url))
-        compare(Harness.readScratchFile(url), signalFileText("Extras"))
-        compare(Harness.readScratchFile(url), Bridge.signalFileText(f.sha256))
-        compare(find(page, "signalNote").text, "Extras saved to the file you chose")
-
-        typeSignal(page, "Trans Temp", "1E1C", "16")
-        press(page, "formSave")
-        const own = page.pickedVehicle.signals.find(e => e.sha256 === page.pickedVehicle.own)
-        compare(page.saveFileName(own), "vehicle-1-own.json")
-        const ownUrl = Harness.writeScratchFile("own.json", "")
-        verify(page.saveSignalFileTo(own.sha256, ownUrl))
-        compare(Harness.readScratchFile(ownUrl), Bridge.signalFileText(own.sha256))
-        compare(JSON.parse(Harness.readScratchFile(ownUrl)).signals.map(s => s.name),
-                ["Trans Temp"])
-
-        verify(!page.saveSignalFileTo("a".repeat(64), url))
-        compare(find(page, "signalProblem").text, "Its copy is missing: import the file again")
-        compare(find(page, "signalNote").text, "")
-
-        find(page, "uriField").text = "mock://demo"
-        press(page, "connectButton")
-        tryVerify(() => Bridge.connected, 5000, "connected")
-        verify(find(page, "signalSave_0").enabled, "Save reads the copy alone")
-        verify(!find(page, "signalImport").enabled)
-        Bridge.disconnectSession()
-        tryVerify(() => !Bridge.disconnecting, 5000)
     }
 
     // One request ID to a module: a Save whose typed one differs moves the
@@ -3078,51 +4096,20 @@ TestCase {
         find(page, "formTx").text = ""
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
-        compare(find(page, "formNote").text, "Gear saved in Vehicle 1 own")
+        compare(find(page, "formNote").text, "Gear saved in Vehicle 1 signals")
         typeSignal(page, "Oil", "D102")
         find(page, "formRx").text = "7E9"
         find(page, "formTx").text = "7E2"
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
-        compare(find(page, "formNote").text, "Oil saved in Vehicle 1 own; 7E9 asks on 7E2 for Gear too")
+        compare(find(page, "formNote").text, "Oil saved in Vehicle 1 signals; 7E9 asks on 7E2 for Gear too")
         compare(page.ownFile.ecus.map(e => e.tx), ["7E2"])
         typeSignal(page, "Pressure", "D103")
         find(page, "formRx").text = "7E9"
         find(page, "formTx").text = ""
         press(page, "formSave")
-        compare(find(page, "formNote").text, "Pressure saved in Vehicle 1 own")
+        compare(find(page, "formNote").text, "Pressure saved in Vehicle 1 signals")
         compare(page.ownFile.ecus.map(e => e.tx), ["7E2"], "blank keeps the module's")
-    }
-
-    // A file's or a plugin's profile is its vehicle's: a pick of another,
-    // or New, puts the field back to Default (its connection kept), so it
-    // never connects, and is remembered, with the last one's signals; a
-    // built-in profile stays
-    function test_aPickLeavesAnotherVehiclesProfileBehind() {
-        const page = createPage()
-        press(page, "vehicleNew")
-        const first = page.pickedVehicle.id
-        verify(importFile(page, "extras.json", "Extras"))
-        find(page, "uriField").text = "mock://demo"
-        page.chooseProfile("user.extras")
-        compare(find(page, "uriField").text, "mock://demo?profile=user.extras")
-        press(page, "vehicleNew")
-        compare(find(page, "uriField").text, "mock://demo", "New: Default")
-        compare(page.profileChoice, "default")
-
-        const second = page.pickedVehicle.id
-        press(page, "vehicle_" + first)
-        page.chooseProfile("user.extras")
-        press(page, "vehicleDuplicate")
-        verify(page.pickedVehicle.id !== first && page.pickedVehicle.id !== second)
-        compare(find(page, "uriField").text, "mock://demo?profile=user.extras",
-                "the copy has the file: its profile stays")
-        press(page, "vehicle_" + second)
-        compare(find(page, "uriField").text, "mock://demo", "another's goes")
-
-        page.chooseProfile("raw")
-        press(page, "vehicle_" + first)
-        compare(find(page, "uriField").text, "mock://demo?profile=raw", "a built-in stays")
     }
 
     // ---- The vehicle's own signals (ADR-0051's form) ----
@@ -3173,15 +4160,18 @@ TestCase {
         typeSignal(page, "Trans Temp", "1E1C", "16")
         press(page, "formSave")
         compare(find(page, "formProblem").text, "")
-        compare(find(page, "formNote").text, "Trans Temp saved in Vehicle 1 own")
+        compare(find(page, "formNote").text, "Trans Temp saved in Vehicle 1 signals")
         compare(ownText(page, 0), "Trans Temp: 22 1E1C on 7E8")
-        compare(find(find(page, "signalFile_0"), "signalFileText").text,
-                "Vehicle 1 own: 1 signal, profile user.vehicle-1-own")
-        verify(findChild(page, "profile_user.vehicle-1-own"), "a profile under Profile")
-        compare(page.pickedVehicle.own, page.pickedVehicle.signals[0].sha256)
-        compare(Harness.storedSignalFiles().length, 1)
+        const own = "plugin.vehicle-1-signals.base"
+        compare(page.pickedVehicle.own, own, "the vehicle's own variant")
+        compare(page.picks, [own], "made with the first save, and picked")
+        compare(find(rowOf(page, own), "rowTitle").text, "Vehicle 1 signals 1.0.0")
+        compare(find(rowOf(page, own), "rowReads").text, "1 signal · yours")
+        compare(find(rowOf(page, own), "rowCaption").text, "For this car:")
+        verify(findChild(page, "profile_" + own), "a profile under Profile")
+        compare(Harness.storedPlugins().length, 1)
 
-        // A second signal joins the file; the last copy goes
+        // A second signal goes into the same variant; the last copy goes
         page.fillForm(SignalForm.emptyFields())
         typeSignal(page, "Gear", "D101")
         press(page, "formKind_enum")
@@ -3189,7 +4179,11 @@ TestCase {
         press(page, "formSave")
         compare(page.ownSignals.map(s => s.key), ["trans_temp", "gear"])
         compare(page.ownSignals[1].values, { "0": "Park", "3": "Drive" })
-        compare(Harness.storedSignalFiles().length, 1, "one copy: the file's newest")
+        compare(Harness.storedPlugins().length, 1, "one copy: the plugin's newest")
+        compare(page.pluginList.length, 1, "no second plugin")
+        compare(page.pickedVehicle.own, own)
+        compare(page.picks, [own])
+        compare(find(rowOf(page, own), "rowReads").text, "2 signals · yours")
 
         // Edit fills the form; Save replaces the signal of that name
         press(page, "ownEdit_0")
@@ -3200,19 +4194,35 @@ TestCase {
         press(page, "formSave")
         compare(page.ownSignals.map(s => s.read.number), ["1E1D", "D101"])
 
-        // The last signal's Remove takes the file, once asked: it was
+        // The variant as a signal file, named by its plugin
+        const what = page.variantSave(rowData(page, own))
+        compare(what.file, "vehicle-1-signals.json")
+        const url = Harness.writeScratchFile("own.json", "")
+        page.saving = what
+        verify(page.saveTo(url))
+        compare(JSON.parse(Harness.readScratchFile(url)).signals.map(s => s.name),
+                ["Trans Temp", "Gear"])
+
+        // The last signal's Remove takes the plugin, once asked: it was
         // written here and has no copy elsewhere
         press(page, "ownRemove_1")
         compare(page.ownSignals.length, 1)
-        compare(find(page, "formNote").text, "Removed from Vehicle 1 own")
+        compare(find(page, "formNote").text, "Removed from Vehicle 1 signals")
         press(page, "ownRemove_0")
         compare(page.ownSignals.length, 1, "asked first")
-        compare(find(page, "vehicleConfirmText").text,
-                "Remove Vehicle 1 own? It was written here, and no other copy exists")
-        press(page, "vehicleConfirm")
-        compare(page.pickedVehicle.signals, [])
+        compare(find(page, "signalsConfirmText").text,
+                "Remove Vehicle 1 signals? It is yours, and no other copy exists")
+        press(page, "signalsConfirmRemove")
+        compare(page.picks, [])
         compare(page.pickedVehicle.own, "")
-        compare(Harness.storedSignalFiles(), [])
+        compare(Harness.storedPlugins(), [])
+
+        // The next save makes the variant again
+        typeSignal(page, "Oil Temp", "D103")
+        press(page, "formSave")
+        compare(find(page, "formProblem").text, "")
+        compare(page.pickedVehicle.own, own)
+        compare(page.picks, [own])
     }
 
     function test_theFormShowsTheLoadersWords() {
@@ -3224,7 +4234,7 @@ TestCase {
         verify(words.includes("big-endian"), words)
         verify(!/^line \d/.test(words), "no line and column: " + words)
         compare(page.ownSignals, [])
-        compare(Harness.storedSignalFiles(), [])
+        compare(Harness.storedPlugins(), [])
 
         // Read once checks the draft first, then needs an adapter
         find(page, "uriField").text = "mock://demo"
@@ -3420,11 +4430,11 @@ TestCase {
         press(page, "vehicleNew")
         verify(importFile(page, "extras.json", "Extras"))
         find(page, "uriField").text = uri
-        page.chooseProfile("user.extras")
-        compare(find(page, "uriField").text, uri + "?profile=user.extras")
+        page.chooseProfile("plugin.extras.base")
+        compare(find(page, "uriField").text, uri + "?profile=plugin.extras.base")
         press(page, "connectButton")
         tryVerify(() => page.pickedVehicle.id === daily, 10000, "the VIN picks Daily driver")
-        compare(find(page, "uriField").text, uri + "?profile=user.extras",
+        compare(find(page, "uriField").text, uri + "?profile=plugin.extras.base",
                 "the session's URI stays while it runs")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
@@ -3454,14 +4464,14 @@ TestCase {
         // Another car's VIN: the fake's is no vehicle's yet
         page.saveVehicles(VehicleBook.change(page.vehicles, v => v.vinKey = "another-cars-key"))
         find(page, "uriField").text = uri
-        page.chooseProfile("user.extras")
+        page.chooseProfile("plugin.extras.base")
         press(page, "connectButton")
         tryVerify(() => page.pickedVehicle.id !== weekend, 30000, "the VIN adds a vehicle")
         // The connect result keeps the URI on its own turn, after the VIN
         tryVerify(() => Bridge.connected && page.pickedVehicle.uri === uri, 30000,
                   "the connect keeps the URI")
-        compare(page.pickedVehicle.signals, [])
-        compare(page.pickedVehicle.uri, uri, "no profile of Weekend car's file")
+        compare(page.pickedVehicle.picks, [])
+        compare(page.pickedVehicle.uri, uri, "no profile of Weekend car's pick")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 30000)
         tryVerify(() => find(page, "uriField").text === uri, 5000, "Default at the session's end")

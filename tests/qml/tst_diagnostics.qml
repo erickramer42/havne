@@ -31,6 +31,7 @@ TestCase {
     }
 
     function cleanup() {
+        DocumentPicker.setPickerForTesting(false)
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.unitSystem = 0
@@ -52,6 +53,23 @@ TestCase {
         const item = findChild(page, name)
         verify(item, name + " exists")
         return item
+    }
+
+    // Save report through the save picker: a picker with no document says so
+    // in the report's note
+    function test_theReportsPickerSaysWhyNothingWasSaved() {
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        verify(page)
+        const dialog = find(page, "reportDialog")
+        dialog.usePicker = true
+        DocumentPicker.setPickerForTesting(true)
+        dialog.open()
+        compare(DocumentPicker.titleForTesting(), "health-report.txt")
+        compare(DocumentPicker.mimeTypeForTesting(), "application/octet-stream",
+                "two filters' suffixes: the name typed is kept")
+        DocumentPicker.deliver(dialog.request, -1, "", "")
+        compare(page.reportNote, "Report not saved: The picker returned no document")
+        verify(page.reportFailed)
     }
 
     // The mock's one ECU, once its read has reached the page
@@ -220,7 +238,7 @@ TestCase {
         const findings = Harness.recordingFixtures + "/findings"
         page.vehicles = { salt: "", picked: "v1", list: [{
             id: "v1", label: "Daily driver", vinKey: "", uri: "", plotted: [], unplotted: [],
-            signals: [], own: "", plugin: "", baseline: findings }] }
+            picks: [], own: "", baseline: findings }] }
         compare(page.baselineFolder, findings)
         verify(page.saveReportTo(txt, 1))
         const named = Harness.readScratchFile(txt)

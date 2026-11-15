@@ -110,14 +110,25 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
                               uint32_t event_count = 0,
                               uint32_t generation = 0);
 
+/* On the worker, pinned: the condition events a change of the link's
+ * state gave at time_us (generation's), after its link record, as one
+ * record of events, the held states first (a cond line writes no word
+ * for ECUIO_CONDITION_LINK). A full ring carries them, as a frame's
+ * events are. Never blocks, never allocates. */
+void ecuio_recorder_put_events(ecuio_recorder_t* r, uint64_t host_us,
+                               uint64_t time_us,
+                               const ecuio_condition_event_t* events,
+                               uint32_t event_count, uint32_t generation);
+
 /* On the worker that judges the link, at each transition: its state and
- * episode count at their time, pinned here; link may be NULL. It goes in
- * after the condition events carried before it; one that doesn't fit is
- * carried, the latest state, ahead of the next record that fits, so a
- * full ring loses frames but never the link's state. Never blocks, never
- * allocates. */
+ * episode count at their time, pinned here, and its session time (0 for
+ * none known), which places it in an armed recording; link may be NULL.
+ * It goes in after the condition events carried before it; one that
+ * doesn't fit is carried, the latest state, ahead of the next record that
+ * fits, so a full ring loses frames but never the link's state. Never
+ * blocks, never allocates. */
 void ecuio_record_link_state(ecuio_record_link* link, int32_t state,
-                             uint32_t episodes);
+                             uint32_t episodes, uint64_t t_us = 0);
 
 /* On a requesting worker, as it publishes reply timing: the rows every
  * 10 s of session time and when final, pinned here; link may be NULL.

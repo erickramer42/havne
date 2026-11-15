@@ -17,6 +17,7 @@
 #include "framefilter.h"
 #include "recordingimport.h"
 #include "signalfilter.h"
+#include "alerttone.h"
 #include "conditionmodel.h"
 #include "conditionstore.h"
 #include <QTimer>
@@ -901,9 +902,12 @@ public:
     // refused unread, and a leading UTF-8 BOM is skipped. A local file is
     // written whole or not at all and is never removed; a provider's document
     // is written in place (it can't be atomic) and a refused or failed save
-    // removes it only if it was empty when the save began.
+    // removes it only when healthreport.h's pickedDocumentRemovable says so.
     // Each logs one line
     Q_INVOKABLE QVariantMap saveLayoutFile(const QString& text, const QUrl& url);
+    // A save a page refuses before it calls the bridge: the document its pick
+    // made goes by the same rule
+    Q_INVOKABLE void dropPicked(const QUrl& url);
     Q_INVOKABLE QVariantMap layoutFileText(const QUrl& url);
     static constexpr qint64 layoutFileMaxBytes = 66016 + 16384;
     static int layoutFileBound()
@@ -982,8 +986,10 @@ public:
     // held too, for previewObdbImport, whose report comes first: it
     // converts the held bytes as previewObdb converts a file's, as often
     // as the year or the name is changed. Words never name the path.
-    // Each logs one line
-    Q_INVOKABLE QVariantMap readImport(const QUrl& url);
+    // Each logs one line. only, when given ("signals", Replace's read),
+    // refuses a file of any other kind with nothing kept or held
+    Q_INVOKABLE QVariantMap readImport(const QUrl& url,
+                                       const QString& only = QString());
     Q_INVOKABLE QVariantMap previewObdbImport(int modelYear,
                                               const QString& name);
     // The pending signal file kept: as a new plugin of the user's own
@@ -1041,6 +1047,15 @@ public:
     // the lines for the activity log, none once the move is done. Called
     // before QML loads, so the caller logs them when the Log page listens
     QStringList migrateStores(QSettings& prefs);
+    // A signal file the move left behind (the vehicle book's unmigrated
+    // record, by its hash) saved where the user chose, as saveVariantFile
+    // writes: its bytes as the move kept them, else the copy still in the
+    // earlier version's folder. { ok, words }, words never naming a path.
+    // Logs one line. Remove deletes the kept bytes alone, never the
+    // earlier folder's copy: true when none is left
+    Q_INVOKABLE QVariantMap saveUnmigratedFile(const QString& sha,
+                                               const QUrl& url);
+    Q_INVOKABLE bool removeUnmigratedFile(const QString& sha);
     // Export plugin: the store's packed copy written to url byte for
     // byte (a local file, or Android's content:// through QFile), so the
     // file loads wherever the copy does and holds nothing of the store's
@@ -1081,6 +1096,9 @@ public:
                                         const QString& profile);
     Q_INVOKABLE QStringList unpickVariant(const QStringList& picks,
                                           const QString& profile);
+    // The picks the store has as a layout file names what it needs
+    // (PluginStore::pickFiles): { profile, name, sha256, from }
+    Q_INVOKABLE QVariantList pickFiles(const QStringList& picks);
     // The profiles a recording's frames can decode through in the viewer
     // (RecordingView::openFrames; ADR-0049's appendix of 2026-11-06): the
     // built-in obd2 and mock, each signal file the vehicles' book has
@@ -1147,6 +1165,9 @@ public:
     }
     // The next n attaches refused where core's call is made
     void failConditionsAttachesForTesting(int n) { m_failAttaches = n; }
+    // The alert tones asked, and a later time for the tone's 5 s
+    const AlertTone& alertToneForTesting() const { return m_tone; }
+    void addToneTimeForTesting(uint64_t us) { m_toneTimeAddedForTesting += us; }
 
     ConditionModel* conditionModel() const { return m_conditionModel; }
     QString conditionsPending() const { return m_conditionsPending; }
@@ -1759,6 +1780,13 @@ private:
     QString m_conditionsProblem;
     bool m_conditionsFromRecording = false;
     QVariantMap m_alertLevels;
+    // The tone (ADR-0063 section 9): each condition's last tone on the
+    // host clock, sized at the attach like the slots and kept by key
+    static constexpr uint64_t ToneGapUs = 5000000;
+    static constexpr uint64_t NoTone = UINT64_MAX;
+    AlertTone m_tone;
+    std::vector<uint64_t> m_toneAtUs;
+    uint64_t m_toneTimeAddedForTesting = 0;
 
     SignalListModel* m_signalModel = nullptr;
     LiveSignalModel* m_liveSignalModel = nullptr;

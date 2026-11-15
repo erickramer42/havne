@@ -19,6 +19,9 @@ ColumnLayout {
 
     // The opened recording (its stretchDefaults follow the unit system)
     required property RecordingView view
+    // view.stretchDefaults as a plain object, copied again on its NOTIFY, so a
+    // cell's read makes no new JS wrapper of the view's map
+    readonly property var defaults: Object.assign({}, view.stretchDefaults)
     // The levels in force, by key, in display units
     property var rules: ({})
     // The words of the last refusal or failed read, from the page
@@ -130,7 +133,7 @@ ColumnLayout {
             id: input
             objectName: "rule_" + cell.key
             Layout.fillWidth: true
-            placeholderText: panel.shown(panel.view.stretchDefaults[cell.key])
+            placeholderText: panel.shown(panel.defaults[cell.key])
             inputMethodHints: Qt.ImhFormattedNumbersOnly
             Accessible.name: cell.modelData.name
             onAccepted: panel.apply()

@@ -27,6 +27,7 @@ TestCase {
     }
 
     function cleanup() {
+        DocumentPicker.setPickerForTesting(false)
         Theme.developerMode = false
         Bridge.model.newestFirst = true
         Bridge.model.clearSelection()
@@ -48,6 +49,20 @@ TestCase {
         const page = createTemporaryObject(component, testCase.parent)
         verify(page, "the page loads")
         return page
+    }
+
+    // Export CSV through the save picker: a CSV's type, and a picker with
+    // no document says so in the export's words
+    function test_theFrameExportsPickerSaysWhyNothingWasSaved() {
+        const page = create(logComponent)
+        const dialog = find(page, "frameExportDialog")
+        dialog.usePicker = true
+        DocumentPicker.setPickerForTesting(true)
+        dialog.open()
+        compare(DocumentPicker.mimeTypeForTesting(), "text/csv")
+        DocumentPicker.deliver(dialog.request, -1, "", "")
+        compare(page.exportNote, "The picker returned no document")
+        verify(page.exportFailed)
     }
 
     function test_theActivityLogTakesTheBridgesLines() {

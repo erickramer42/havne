@@ -245,9 +245,13 @@ GaugeBase {
         Accessible.ignored: true
         anchors.horizontalCenter: parent.horizontalCenter
         y: gauge.cy - gauge.r * 0.36 - height / 2
+        objectName: "gaugeCaption"
         text: gauge.caption
+        // A signal's name can be long: it stays inside the dial's face
+        width: Math.min(implicitWidth, gauge.r * 1.3)
+        elide: Text.ElideRight
         font.pixelSize: Math.max(10, gauge.size * 0.038)
-        color: Theme.textDim
+        color: gauge.titleColor
     }
     Column {
         anchors.horizontalCenter: parent.horizontalCenter

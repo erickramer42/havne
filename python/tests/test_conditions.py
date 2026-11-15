@@ -217,7 +217,7 @@ def test_a_replay_fires_its_conditions_as_havne_cli_says():
         ("rpm_fresh", "off", True, True, None), ("link", "off", False, False, "no_link")]
     assert all(b.generation == 1 and b.fired == 0 for b in before)
     # The first judgment, the engine's start, and the hold's end at its own time
-    assert got[0] == havne.ConditionEvent(366063, "running", "off", False, False, 0.0, 0, 1)
+    assert got[0] == havne.ConditionEvent(366063, "running", "off", False, False, 0.0, 0, 1, 0)
     fired = [e for e in got if e.fired]
     assert [e.key for e in fired[:3]] == ["rpm_fresh", "running", "turning"]
     running = next(e for e in fired if e.key == "running")

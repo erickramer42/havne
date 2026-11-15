@@ -450,6 +450,10 @@ bool RecordingView::saveHealthReport(const QUrl& url, int filterIndex,
                                      const QString& baselineFolder)
 {
     if (m_state != Open || m_reporting) {
+        // The picker made the document the report would have filled
+        if (m_throughProvider || !url.isLocalFile()) {
+            removeIfRemovable(pathOfUrl(url));
+        }
         return false;
     }
     if (m_reportWorker.joinable()) {
@@ -486,7 +490,7 @@ bool RecordingView::saveHealthReport(const QUrl& url, int filterIndex,
     } catch (const std::system_error&) {
         // The picker made the document the report would have filled
         if (provider || !url.isLocalFile()) {
-            removeIfEmpty(pathOfUrl(url));
+            removeIfRemovable(pathOfUrl(url));
         }
         return false;
     }

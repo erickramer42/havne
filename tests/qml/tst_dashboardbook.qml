@@ -1418,6 +1418,50 @@ TestCase {
         compare(DashboardBook.neededFiles(doc, []), [])
     }
 
+    // A file's name is cut to its bound in code points, a variant's part
+    // whole, and a needed file is named so
+    function test_aFilesNameIsCutToItsBoundWithItsVariantWhole() {
+        const most = DashboardBook.maxFileName
+        const variant = ": " + "v".repeat(24)
+        compare(DashboardBook.fittedFileName("Boost"), "Boost")
+        compare(DashboardBook.fittedFileName("n".repeat(most)), "n".repeat(most), "a name at the bound is whole")
+        compare(DashboardBook.fittedFileName("n".repeat(most + 1)), "n".repeat(most - 3) + "...")
+        compare(DashboardBook.fittedFileName("n".repeat(63) + variant), "n".repeat(most - 29) + "..." + variant,
+                "the plugin's name gives way, the variant stays whole")
+        compare(DashboardBook.fittedFileName("a: " + "n".repeat(60) + variant),
+                "a: " + "n".repeat(most - 32) + "..." + variant, "the last \": \" is the variant's")
+        const wide = String.fromCodePoint(0x1F600)
+        compare(DashboardBook.fittedFileName(wide.repeat(most)), wide.repeat(most), "counted in code points")
+        compare(DashboardBook.fittedFileName(wide.repeat(most + 1)), wide.repeat(most - 3) + "...",
+                "and cut between them")
+        compare(DashboardBook.fittedFileName("a: " + "v".repeat(most)), "a: " + "v".repeat(most - 6) + "...",
+                "a part after \": \" too long to keep is cut with the rest")
+
+        const doc = { format: DashboardBook.format, pages: [
+            { name: "A", cells: [cell("a", { refs: ["key:boost"] })] }] }
+        const needed = DashboardBook.neededFiles(
+            doc, [{ name: "n".repeat(63) + variant, sha256: sha, refs: ["key:boost"] }])
+        compare(needed, [{ name: "n".repeat(most - 29) + "..." + variant, sha256: sha }])
+        verify(DashboardBook.exportText(doc, "desktop", needed) !== "", "so the layout can be written")
+    }
+
+    // A missing file a pick is named as is a pick that changed, not one
+    // the vehicle lacks
+    function test_aMissingFileNamedAsAPickIsAChangedPick() {
+        const variant = ": " + "v".repeat(24)
+        const long = "n".repeat(63) + variant
+        const picks = [{ name: "Boosty" }, { name: "Shared: base" }, { name: long }]
+        const missing = names => names.map(n => ({ name: n, sha256: sha }))
+        const changed = names => DashboardBook.changedFiles(missing(names), picks).map(f => f.name)
+        compare(changed(["Boosty"]), ["Boosty"], "the pick's own name")
+        compare(changed(["Shared"]), ["Shared"], "the plugin's name, where the pick names its variant too")
+        compare(changed([DashboardBook.fittedFileName(long)]), [DashboardBook.fittedFileName(long)],
+                "a name the layout cut")
+        compare(changed(["Boost", "Shared: other", "Share", "Else"]), [], "no other name")
+        compare(changed(["Else", "Boosty"]), ["Boosty"])
+        compare(DashboardBook.changedFiles(missing(["Boosty"]), []), [])
+    }
+
     function test_anExportPastTheFilesBoundIsRefused() {
         // A control character escapes to 6 bytes: each name fits fileFits
         const files = []

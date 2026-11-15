@@ -370,8 +370,9 @@ void request_worker(ecuio_socketcan_transport* t)
     ecuio_session_t* s = t->session;
     ecuio_request_engine& e = t->engine;
     isotp_rx& iso = *t->isotp;
-    link_health h(s->last_error, s->error_count, s->record_link.get());
     socketcan_clock clock;
+    link_health h(s->last_error, s->error_count, s->record_link.get(), s,
+                  t->epoch, &clock.last_out_us, &clock.last_host_us);
     uint32_t drops = 0;
     bool overflow_pending = false;
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
@@ -413,6 +414,7 @@ void request_worker(ecuio_socketcan_transport* t)
     };
 
     while (!t->stop.load()) {
+        link_judge_waiting(h);
         if (t->fd < 0) {
             if (wait_for_stop(t, h.backoff_ms ? h.backoff_ms
                                               : LINK_BACKOFF_BASE_MS)) {
@@ -682,8 +684,9 @@ void socketcan_worker(ecuio_socketcan_transport* t)
         return;
     }
     ecuio_session_t* s = t->session;
-    link_health h(s->last_error, s->error_count, s->record_link.get());
     socketcan_clock clock;
+    link_health h(s->last_error, s->error_count, s->record_link.get(), s,
+                  t->epoch, &clock.last_out_us, &clock.last_host_us);
     ecuio_frame_t* frame = t->frame.get();
     uint32_t drops = 0; /* SO_RXQ_OVFL's count on this socket */
     bool overflow_pending = false;
@@ -693,6 +696,7 @@ void socketcan_worker(ecuio_socketcan_transport* t)
                         CMSG_SPACE(sizeof(uint32_t))];
 
     while (!t->stop.load()) {
+        link_judge_waiting(h);
         if (t->fd < 0) {
             if (wait_for_stop(t, h.backoff_ms ? h.backoff_ms
                                               : LINK_BACKOFF_BASE_MS)) {
@@ -1015,6 +1019,7 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
         session->transport =
             new ecuio_transport_t{&kSocketCanTransportOps, nullptr};
         session->transport->impl = impl.release();
+        session->judges_link = true;
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }

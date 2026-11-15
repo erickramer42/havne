@@ -1783,6 +1783,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
+        ../app/alerttone.cpp
         ../app/conditionmodel.cpp
         ../app/conditionstore.cpp
         ../app/storemigration.cpp
@@ -1863,6 +1864,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
+        ../app/alerttone.cpp
         ../app/conditionmodel.cpp
         ../app/conditionstore.cpp
         ../app/storemigration.cpp
@@ -1915,6 +1917,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ECUIO_IMPORT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/import"
         ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
         ECUIO_OBDB_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/obdb/example-car.json"
+        ECUIO_VEHICLEBOOK_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/data/vehiclebook"
         ECUIO_LAYOUT_CORPUS="${CMAKE_CURRENT_SOURCE_DIR}/data/layouts"
     )
     # Settings keeps only a real adapter's connect, so its cases connect to
