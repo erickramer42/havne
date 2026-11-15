@@ -1205,6 +1205,11 @@ Pane {
         { key: "signals", title: qsTr("Signals"),
           summary: signalsSummary(),
           warn: missingPicks.length > 0 || refusedPlugins.length > 0 },
+        { key: "alerts", title: qsTr("Alerts"),
+          summary: Bridge.conditionsProblem !== "" ? qsTr("doesn't load")
+                   : settingsAlerts.conditions.length === 0 ? qsTr("none")
+                   : qsTr("%n alert(s)", "", settingsAlerts.conditions.length),
+          warn: Bridge.conditionsProblem !== "" },
         { key: "recording", title: qsTr("Recording"),
           summary: !Bridge.recording ? qsTr("off")
                    : Bridge.armedActive ? qsTr("on · armed")
@@ -1243,13 +1248,22 @@ Pane {
         }
         pageKey = key
     }
-    // Back from a page: the form returns to Signals, the rest to the list
+    // Back from a page: the form returns to Signals, an alert's editor to
+    // Alerts, the rest to the list
     function back() {
         if (backLeaves && pageKey === "connection") {
             leaveRequested()
             return
         }
-        pageKey = pageKey === "ownform" ? "signals" : ""
+        pageKey = pageKey === "ownform" ? "signals" : pageKey === "alertedit" ? "alerts" : ""
+    }
+    // A gauge's Alert (ADR-0063 section 9): the editor on a new condition,
+    // a copy of the gauge's levels; "" when it opened, else why not (an
+    // edit waiting in the editor, no room, a file that doesn't load)
+    function openAlertDraft(c) {
+        if (pageKey === "alertedit" && settingsAlertEditor.changed())
+            return qsTr("An alert's edit waits in Settings > Alerts: save or cancel it first.")
+        return settingsAlerts.openDraft(c)
     }
     // The form for a new signal (Add a signal), as a page of its own
     function openOwnForm() {
@@ -1985,6 +1999,36 @@ Pane {
                 SettingsOwnForm {
                     id: settingsOwnForm
                     host: page
+                }
+            }
+
+            SettingsSubpage {
+                objectName: "settingsAlertsPage"
+                anchors.fill: parent
+                visible: page.shownKey === "alerts"
+                title: qsTr("Alerts")
+                backShown: !page.twoPane
+                onBackRequested: page.back()
+
+                SettingsAlerts {
+                    id: settingsAlerts
+                    host: page
+                }
+            }
+
+            SettingsSubpage {
+                objectName: "settingsAlertEditPage"
+                anchors.fill: parent
+                visible: page.shownKey === "alertedit"
+                title: settingsAlertEditor.isNew ? qsTr("New alert") : qsTr("Edit alert")
+                backName: qsTr("Back to Alerts")
+                backShown: true
+                onBackRequested: page.back()
+
+                SettingsAlertEditor {
+                    id: settingsAlertEditor
+                    host: page
+                    alerts: settingsAlerts
                 }
             }
 

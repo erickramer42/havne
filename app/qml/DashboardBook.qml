@@ -713,6 +713,49 @@ QtObject {
             return { from: lo, to: hi }
         return { from: 0, to: 100 }
     }
+    // A number typed in the display unit, back in the stored unit
+    // (Bridge.decodedValue's), to six decimals, which drop the
+    // conversion's noise (212 deg F is 100 deg C): the zones' and the
+    // alerts' one rounding
+    function roundStored(decoded) {
+        return Math.round(decoded * 1e6) / 1e6
+    }
+
+    // ---- The built-in sets' refs (Bridge.gaugeSignals): a page copies the
+    // map once with copySets and passes the copy, never the bridge's map,
+    // since each read of that makes a new JS wrapper
+
+    function copySets(gaugeSignals) {
+        const out = {}
+        for (const key in gaugeSignals)
+            out[key] = Array.from(gaugeSignals[key])
+        return out
+    }
+    // The ref and its counterparts in the other built-in set, the ref first
+    function counterparts(ref, sets) {
+        for (const key in sets) {
+            const refs = sets[key]
+            if (refs.indexOf(ref) >= 0)
+                return [ref].concat(refs.filter(r => r !== ref))
+        }
+        return [ref]
+    }
+    // Refs with each one's counterparts after them, their own first: a cell
+    // or an alert made under one profile reads under another
+    function lookupRefs(refs, sets) {
+        let all = refs ?? []
+        for (const ref of refs ?? [])
+            all = all.concat(counterparts(ref, sets).filter(r => all.indexOf(r) < 0))
+        return all
+    }
+    // The set's key whose refs hold the ref, "" for none
+    function keyOfRef(ref, sets) {
+        for (const key in sets) {
+            if (sets[key].indexOf(ref) >= 0)
+                return key
+        }
+        return ""
+    }
 
     // ---- A drag (section 4): one cell's order while it's held
 

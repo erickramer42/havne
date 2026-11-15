@@ -388,6 +388,76 @@ TestCase {
         verify(find(band, "alertBandStale").visible, "the stale line shows")
     }
 
+    // The Alerts page and an alert's editor at both phone widths, opened
+    // from a gauge's Alert as on the phone: the list with a long name, the
+    // editor with a signal term's picker open and a link term beside it
+    function test_theAlertsPagesFitAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theAlertsPagesFitAPhone(data) {
+        const none = '{"havne_conditions":1,"conditions":[]}\n'
+        verify(Bridge.saveConditions(JSON.stringify({ havne_conditions: 1, conditions: [
+            { key: "long", name: "W".repeat(40), when: { signal: ["id:2001"], unit: "°C", above: 115 },
+              alert: { level: "danger", banner: true } },
+            { key: "link", name: "Link lost", when: { link: "hard_failure" }, alert: { level: "warning" } }] }))
+            .ok, "two alerts saved")
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const settings = find(main.contentItem, "settingsPage")
+        const walk = (what) => {
+            verify(settings.visible, what + " is on screen")
+            verify(waitForPolish(main), what + " laid out")
+            compare(pastTheEdge(settings, main.contentItem, []), [], what + " stays inside")
+        }
+        main.gotoPage(Array.from(settings.parent.children).indexOf(settings))
+        settings.open("alerts")
+        walk("the list")
+
+        // A gauge's Alert opens the editor in Settings
+        const dash = find(main.contentItem, "dashboardPage")
+        dash.form = "phone"
+        const doc = DashboardBook.builtIn("phone")
+        doc.pages = [{ name: "Test", cells: [{ kind: "digital", w: 6, h: 12, label: "Coolant",
+                                               refs: ["id:2001"], unit: "°C",
+                                               options: { from: 0, to: 150, dangerFrom: 115 } }] }]
+        dash.doc = doc
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.select(0)
+        find(dash, "panelAlert").clicked()
+        verify(settings.visible, "Settings comes forward")
+        compare(settings.pageKey, "alertedit", "on the alert's editor")
+        const editor = find(settings, "settingsAlertEditor")
+        compare(editor.nameField.text, "Coolant")
+        find(editor, "alertTermSignal").clicked()
+        find(editor, "alertTermAdd").clicked()
+        find(find(editor, "alertTerm_1"), "alertTermKind_link").clicked()
+        // A term with no signal in the profile offers all four comparisons
+        find(editor, "alertTermAdd").clicked()
+        const loose = find(editor, "alertTerm_2")
+        for (const word of ["above", "below", "equals", "differs"])
+            verify(find(loose, "alertComparison_" + word).visible, word + " is offered")
+        verify(find(editor, "alertJoin").visible, "the join row shows")
+        editor.recordBox.checked = true
+        walk("the editor")
+
+        // A second Alert leaves the edit waiting and says why on Dash
+        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        dash.select(0)
+        find(dash, "panelAlert").clicked()
+        verify(dash.visible, "Dash stays")
+        verify(find(dash, "dashAlertNote").text.indexOf("save or cancel it first") >= 0,
+               find(dash, "dashAlertNote").text)
+        verify(editor.recordBox.checked, "the edit waits")
+        main.gotoPage(Array.from(settings.parent.children).indexOf(settings))
+        find(editor, "alertCancel").clicked()
+        compare(settings.pageKey, "alerts")
+        Bridge.saveConditions(none)
+    }
+
     // A value too long for its row (a refusal's words, a text) is bounded by
     // its column, whatever its text: the name keeps its third and the value
     // ends at the row's margin, at 384 px and the narrowest phone's 320

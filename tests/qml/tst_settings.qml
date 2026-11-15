@@ -298,6 +298,8 @@ TestCase {
               parts: ["vehicle_none", "vehicleLabelField", "vehicleNew", "vehicleMore"] },
             { tag: "signals", title: "Signals", summary: "none yet",
               parts: ["signalImport", "signalsNone"] },
+            { tag: "alerts", title: "Alerts", summary: "none",
+              parts: ["alertAdd", "alertsNone"] },
             { tag: "recording", title: "Recording", summary: "off",
               parts: ["recordBox", "recordStatus"] },
             { tag: "display", title: "Display", summary: "100 % · metric · Night off",

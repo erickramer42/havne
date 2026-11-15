@@ -13625,6 +13625,163 @@ TEST(BridgeTest, TheStoreRefusesAFileCoreRefuses)
     EXPECT_EQ(bridge.conditionModel()->rowCount(), 0);
 }
 
+// The Alerts page's Import: a picked file goes through saveConditions, so
+// one core refuses, or one that can't be read, leaves the saved file as it
+// was; a leading BOM is skipped, and no refusal names the file's path
+TEST(BridgeTest, AnImportedConditionFileReplacesTheSavedOneOrLeavesIt)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir picked;
+    ASSERT_TRUE(picked.isValid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(mockConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+
+    const QVariantMap kept = bridge.importConditions(writeScratch(
+        picked.path(), "other.json", QByteArray("\xEF\xBB\xBF") + otherConditions()));
+    ASSERT_TRUE(kept.value(QStringLiteral("ok")).toBool())
+        << kept.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(kept.value(QStringLiteral("conditions")).toInt(), 1);
+    EXPECT_EQ(kept.value(QStringLiteral("pending")).toString(), QString());
+    EXPECT_EQ(readFile(ConditionStore::path()), otherConditions())
+        << "the file replaces the saved one, its BOM left out";
+    EXPECT_EQ(bridge.conditionsText(), QString::fromUtf8(otherConditions()));
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 1);
+
+    const auto refused = [&](const QUrl& url, const QString& words) {
+        log.clear();
+        const QVariantMap r = bridge.importConditions(url);
+        EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool()) << words.toStdString();
+        const QString said = r.value(QStringLiteral("words")).toString();
+        EXPECT_TRUE(said.contains(words)) << said.toStdString();
+        EXPECT_FALSE(said.contains(picked.path())) << said.toStdString();
+        EXPECT_EQ(readFile(ConditionStore::path()), otherConditions())
+            << "the saved file stays: " << words.toStdString();
+        EXPECT_EQ(bridge.conditionModel()->rowCount(), 1);
+        ASSERT_EQ(log.size(), 1) << words.toStdString();
+        EXPECT_EQ(log.first(), QStringLiteral("Alerts not imported: ") + said);
+    };
+    refused(writeScratch(picked.path(), "refused.json",
+                         R"({"havne_conditions":1,"conditions":[{"key":"a","name":"A",)"
+                         R"("when":{"signal":["id:1001"],"unit":"RPM","abov":3}}]})"),
+            QStringLiteral("abov"));
+    refused(QUrl::fromLocalFile(picked.path() + QStringLiteral("/none.json")),
+            QStringLiteral("Couldn't read the file"));
+    refused(writeScratch(picked.path(), "latin1.json", QByteArray("{\xE9}")),
+            QStringLiteral("The file isn't UTF-8 text"));
+    QByteArray tooLong = otherConditions();
+    tooLong.append(QByteArray(ECUIO_CONDITION_FILE_MAX_BYTES, ' '));
+    refused(writeScratch(picked.path(), "long.json", tooLong),
+            QStringLiteral("The file is over 256 KiB, a condition file's most"));
+}
+
+// Export writes the saved file's bytes where the user chose, and says why
+// when there are none or the target takes no file; no line names a path
+TEST(BridgeTest, AnExportedConditionFileIsTheSavedOne)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QUrl target = QUrl::fromLocalFile(out.path() + QStringLiteral("/c.json"));
+    QVariantMap r = bridge.exportConditions(target);
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString(),
+              QStringLiteral("There are no saved alerts to export"));
+    EXPECT_FALSE(QFile::exists(target.toLocalFile()));
+
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(mockConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    log.clear();
+    r = bridge.exportConditions(target);
+    EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(readFile(target.toLocalFile()), mockConditions());
+    ASSERT_EQ(log.size(), 1);
+    EXPECT_EQ(log.first(), QStringLiteral("Alerts exported to a file (%1 bytes)")
+                               .arg(mockConditions().size()));
+
+    ASSERT_TRUE(QDir(out.path()).mkdir(QStringLiteral("folder")));
+    log.clear();
+    r = bridge.exportConditions(QUrl::fromLocalFile(out.path() + QStringLiteral("/folder")));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString(),
+              QStringLiteral("Couldn't write the file"));
+    EXPECT_TRUE(QFileInfo(out.path() + QStringLiteral("/folder")).isDir());
+    ASSERT_EQ(log.size(), 1);
+    EXPECT_FALSE(log.first().contains(out.path())) << log.first().toStdString();
+}
+
+// A saved file core refused at the start is exported as it is, so it can
+// be mended elsewhere
+TEST(BridgeTest, AnExportOfAFileCoreRefusedIsTheFileAsItIs)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    const QByteArray typo =
+        R"({"havne_conditions":1,"conditions":[{"key":"x"}]})";
+    {
+        QFile file(ConditionStore::path());
+        ASSERT_TRUE(QDir().mkpath(QFileInfo(file).absolutePath()));
+        ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+        file.write(typo);
+    }
+    SessionBridge bridge;
+    ASSERT_FALSE(bridge.conditionsProblem().isEmpty());
+    const QUrl target = QUrl::fromLocalFile(out.path() + QStringLiteral("/c.json"));
+    const QVariantMap r = bridge.exportConditions(target);
+    EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool())
+        << r.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(readFile(target.toLocalFile()), typo);
+
+    // Read again as at the start: a file core takes clears the problem
+    {
+        QFile file(ConditionStore::path());
+        ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        file.write(mockConditions());
+    }
+    bridge.reloadSavedConditionsForTesting();
+    EXPECT_EQ(bridge.conditionsProblem(), QString());
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 3);
+}
+
+// A level typed in the display unit back in the def's: the inverse of
+// displayValue in either unit system, and a unit no system converts as typed
+TEST(BridgeTest, ADecodedValueIsTheDisplayValuesInverse)
+{
+    SessionBridge bridge;
+    const QString degC = QString::fromUtf8("\xC2\xB0" "C");
+    bridge.setUnitSystem(0);
+    EXPECT_EQ(bridge.decodedValue(degC, 90.0), 90.0);
+    EXPECT_EQ(bridge.decodedValue(QStringLiteral("kPa"), 101.5), 101.5);
+    bridge.setUnitSystem(1);
+    EXPECT_NEAR(bridge.decodedValue(degC, 212.0), 100.0, 1e-9);
+    EXPECT_NEAR(bridge.decodedValue(degC, -40.0), -40.0, 1e-9);
+    EXPECT_NEAR(bridge.decodedValue(QStringLiteral("kPa"), 14.5037737730209), 100.0, 1e-6);
+    EXPECT_NEAR(bridge.decodedValue(QStringLiteral("km/h"), 62.1371192237334), 100.0, 1e-6);
+    for (const double v : {-40.0, 0.0, 0.5, 98.25, 1200.0}) {
+        for (const char* unit : {"\xC2\xB0" "C", "kPa", "bar", "km/h", "g/s", "L/h"}) {
+            const QString u = QString::fromUtf8(unit);
+            EXPECT_NEAR(bridge.decodedValue(u, bridge.displayValue(u, v)), v, 1e-9 * (1 + std::fabs(v)))
+                << unit << " at " << v;
+        }
+    }
+    EXPECT_EQ(bridge.decodedValue(QStringLiteral("RPM"), 3000.0), 3000.0);
+    EXPECT_EQ(bridge.decodedValue(QString(), 7.0), 7.0);
+}
+
 // The rows come from the file, offline too; connected, the tick gives
 // each its state, its value in the display unit and the defs its terms
 // bind, and an alert ON names its level for its signal
