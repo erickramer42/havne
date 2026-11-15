@@ -318,6 +318,14 @@ private:
     uint64_t m_startUs = ecuio_clock_us();
 };
 
+// A value, and a def's range, as displayed in a unit system (ADR-0022):
+// the signal model's roles and SessionBridge::profileSignals share them
+ecuio_display_value_t displayed(const char* unit, uint8_t decimals,
+                                double value, uint32_t units);
+std::pair<double, double> displayedRange(const char* unit,
+                                         uint8_t decimals, double lo,
+                                         double hi, uint32_t units);
+
 class SignalListModel : public QAbstractListModel
 {
     Q_OBJECT

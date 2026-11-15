@@ -748,8 +748,8 @@ void FrameIdModel::refresh()
 }
 
 // A value, its unit and its decimals in a unit system (ADR-0022)
-static ecuio_display_value_t displayed(const char* unit, uint8_t decimals,
-                                       double value, uint32_t units)
+ecuio_display_value_t displayed(const char* unit, uint8_t decimals,
+                                double value, uint32_t units)
 {
     ecuio_display_value_t out;
     if (ecuio_display_convert(unit, decimals, value, units, &out) !=
@@ -769,9 +769,9 @@ static ecuio_display_value_t displayed(const char* unit, uint8_t decimals,
 // near DBL_MAX times 1.8 is inf, and inf isn't a range), or the converted
 // ends meet (ends one ulp apart can round to one number, and lo == hi
 // isn't a range, as core's refusal of a == b says)
-static std::pair<double, double> displayedRange(const char* unit,
-                                                uint8_t decimals, double lo,
-                                                double hi, uint32_t units)
+std::pair<double, double> displayedRange(const char* unit,
+                                         uint8_t decimals, double lo,
+                                         double hi, uint32_t units)
 {
     const double none = std::numeric_limits<double>::quiet_NaN();
     if (std::isnan(lo) || std::isnan(hi)) {
