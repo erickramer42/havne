@@ -14,6 +14,9 @@ find_package(Qt6 6.12 REQUIRED COMPONENTS Quick QuickControls2 Network)
 
 qt_standard_project_setup(REQUIRES 6.12)
 
+# APP_BRIDGE_SOURCES: the bridge's own sources, which tests/ compiles too
+include(${CMAKE_CURRENT_SOURCE_DIR}/bridge_sources.cmake)
+
 # The App QML module and the bridge it binds live in a static library
 # of their own, so test_qml (tests/CMakeLists.txt) loads the same module
 # the app does. Whatever links it also links app_uiplugin and imports
@@ -62,8 +65,7 @@ qt_add_library(app_ui STATIC
     recordingframes.h
     recordingview.cpp
     recordingview.h
-    sessionbridge.cpp
-    sessionbridge.h
+    ${APP_BRIDGE_SOURCES}
     signalfilter.cpp
     signalfilter.h
     latencystats.h
