@@ -13,6 +13,9 @@ add_library(ecuio-core STATIC
     src/profile_registry.cpp
     src/queue.cpp
     src/recorder.cpp
+    src/recorder_armed.cpp
+    src/recorder_text.cpp
+    src/recorder_writer.cpp
     src/recording_check.cpp
     src/recording_reader.cpp
     src/scrub.cpp
