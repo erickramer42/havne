@@ -170,8 +170,9 @@ Pane {
     readonly property var pickedVehicle: VehicleBook.picked(vehicles)
     // A book a later Havne saved is left as it is: none shown, none saved
     readonly property bool bookLater: VehicleBook.isLater(vehicles)
-    // A removal waiting for its second press: "", "forget", "forgetAll"
-    // or "removePlugin:<sha256>"
+    // A removal waiting for its second press, asked where it was pressed:
+    // "", "forget", "forgetAll", "removePlugin:<sha256>" (in the plugin's
+    // open row) or "removeOwn:<sha256>" (under the vehicle's own signals)
     property string confirming: ""
     // The picked vehicle's plotted signals reach Live once this session's
     // rows exist; a change of rows before that isn't the user's
@@ -729,9 +730,31 @@ Pane {
     }
 
     function confirmingPlugin() {
-        if (!confirming.startsWith("removePlugin:"))
-            return null
-        return pluginBySha[confirming.substring("removePlugin:".length)] || null
+        for (const head of ["removePlugin:", "removeOwn:"]) {
+            if (confirming.startsWith(head))
+                return pluginBySha[confirming.substring(head.length)] || null
+        }
+        return null
+    }
+    function pluginQuestion(p) {
+        return qsTr("Remove %1? It is yours, and no other copy exists").arg(p.name)
+    }
+    // The question a row of the list asks, "" for none: a plugin's in its
+    // open row, where its Remove was pressed
+    function rowQuestion(entry, open) {
+        if (open && confirming === "removePlugin:" + entry.sha256 && confirmingPlugin() !== null)
+            return pluginQuestion(confirmingPlugin())
+        return ""
+    }
+    function ownQuestion() {
+        return confirming.startsWith("removeOwn:") && confirmingPlugin() !== null
+            ? pluginQuestion(confirmingPlugin()) : ""
+    }
+    // The question's Remove: what it asked about goes
+    function confirmRemoval() {
+        const p = confirmingPlugin()
+        confirming = ""
+        return p !== null && removePlugin(p.sha256)
     }
 
     // A removed plugin's variants are no vehicle's pick or own variant any
@@ -1124,7 +1147,7 @@ Pane {
             removeVariant({ sha256: place.plugin.sha256, variant: place.variant,
                             profile: pickedVehicle.own })
         else
-            confirming = "removePlugin:" + place.plugin.sha256
+            confirming = "removeOwn:" + place.plugin.sha256
     }
 
     // Forget and Forget all: what the store holds as imported for the

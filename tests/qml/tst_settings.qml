@@ -2810,6 +2810,47 @@ TestCase {
         verify(!rowData(page, "plugin.example-sim.base").forCar)
     }
 
+    // On a phone the removal's question is drawn where Remove was pressed:
+    // the last plugin of a list longer than the page asks inside the
+    // page's view, never at the top of a page whose controls then all read
+    // disabled
+    function test_aRemovalAsksInsideAPhonesView() {
+        const page = createPage()
+        page.width = 384
+        page.height = 832
+        press(page, "vehicleNew")
+        page.open("signals")
+        for (let i = 1; i <= 24; ++i)
+            verify(importFile(page, "p" + i + ".json", "Plugin " + i, "D1" + String(i).padStart(2, "0")))
+        const last = page.variantRows[page.variantRows.length - 1].profile
+        page.openRow = last
+        const flick = find(page, "settingsSignalsPage")
+        const row = rowOf(page, last)
+        const remove = find(row, "rowRemove")
+        verify(waitForPolish(page.Window.window), "laid out")
+        // Scrolled as a thumb would: Remove at the view's foot
+        const bottomOf = item => item.mapToItem(flick.contentItem, 0, item.height).y
+        flick.contentY = Math.max(0, bottomOf(remove) - flick.height)
+        // The page's top, Import and all, is scrolled out of the view
+        const importBottom = bottomOf(find(page, "signalImport"))
+        verify(importBottom < flick.contentY + flick.headerHeight,
+               "Import ends at " + importBottom + ", the view starts at " + (flick.contentY + flick.headerHeight))
+        remove.clicked()
+        const question = find(row, "signalsConfirm")
+        tryVerify(() => question.visible && question.height > 0, 2000, "the row asks")
+        verify(waitForPolish(page.Window.window), "laid out")
+        for (const name of ["signalsConfirmText", "signalsConfirmRemove", "signalsConfirmCancel"]) {
+            const item = find(question, name)
+            const top = item.mapToItem(flick.contentItem, 0, 0).y
+            verify(top >= flick.contentY + flick.headerHeight - 0.5
+                   && bottomOf(item) <= flick.contentY + flick.height + 0.5,
+                   name + " from " + top + " to " + bottomOf(item) + " in a view from "
+                   + (flick.contentY + flick.headerHeight) + " to " + (flick.contentY + flick.height))
+        }
+        find(question, "signalsConfirmCancel").clicked()
+        compare(page.confirming, "")
+    }
+
     // A signal file waiting on Into keeps no choice of a plugin that goes
     // or is rewritten (a variant dropped gives it a new sha256): Keep
     // hides until Into is chosen again, and the file still waits
@@ -2857,17 +2898,22 @@ TestCase {
         page.saving = page.pluginSave(page.pluginList[0].sha256)
         verify(page.saveTo(second))
 
-        // The user's own has no copy anywhere else: its removal asks
+        // The user's own has no copy anywhere else: its removal asks, in
+        // its row, in the actions' place
         page.openRow = "plugin.trip-extras.base"
-        find(rowOf(page, "plugin.trip-extras.base"), "rowRemove").clicked()
-        verify(find(page, "signalsConfirm").visible)
-        compare(find(page, "signalsConfirmText").text,
+        const asking = rowOf(page, "plugin.trip-extras.base")
+        find(asking, "rowRemove").clicked()
+        verify(find(asking, "signalsConfirm").visible)
+        verify(!find(asking, "rowActions").visible, "the question in the actions' place")
+        compare(find(asking, "signalsConfirmText").text,
                 "Remove Trip extras? It is yours, and no other copy exists")
         verify(!find(page, "signalImport").enabled, "nothing else past the question")
-        press(page, "signalsConfirmCancel")
+        verify(!find(asking, "rowMore").enabled, "the asking row stays open")
+        find(asking, "signalsConfirmCancel").clicked()
         compare(page.pluginList.length, 1, "Cancel keeps it")
-        find(rowOf(page, "plugin.trip-extras.base"), "rowRemove").clicked()
-        press(page, "signalsConfirmRemove")
+        verify(find(asking, "rowActions").visible, "the actions back")
+        find(asking, "rowRemove").clicked()
+        find(asking, "signalsConfirmRemove").clicked()
         compare(page.pluginList.length, 0)
         compare(page.picks, [])
 
@@ -4260,9 +4306,11 @@ TestCase {
         compare(find(page, "formNote").text, "Removed from Vehicle 1 signals")
         press(page, "ownRemove_0")
         compare(page.ownSignals.length, 1, "asked first")
-        compare(find(page, "signalsConfirmText").text,
+        const question = find(page, "ownConfirm")
+        verify(question.visible, "asked under the own signals, where it was pressed")
+        compare(find(question, "signalsConfirmText").text,
                 "Remove Vehicle 1 signals? It is yours, and no other copy exists")
-        press(page, "signalsConfirmRemove")
+        find(question, "signalsConfirmRemove").clicked()
         compare(page.picks, [])
         compare(page.pickedVehicle.own, "")
         compare(Harness.storedPlugins(), [])
