@@ -576,6 +576,15 @@ if(TARGET havne-cli)
             CliConditionsRunTest.ASignalNeverReceivedIsSaidOnALaterLine
             CliConditionsRunTest.ALogRecordsItsConditions
             PROPERTIES TIMEOUT 60)
+        # A live stream whose reader stalls drops condition lines, and the
+        # end line counts each one: the lines received and the count are
+        # the recording's cond lines (about 30 s)
+        add_test(NAME CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/cli_conditions_drop.py
+                    $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
+            PROPERTIES TIMEOUT 90 COST 30)
         # A replay reads with its recording's own signals.json (ADR-0051
         # section 4): no --signals, the copy's values; its hash broken, raw
         add_test(NAME CliReplayTest.AReplayReadsWithItsOwnSignalFile
