@@ -346,6 +346,12 @@ TEST(ConditionSessionTest, AnAttachBindsTheSetAndPublishesItsStates)
     EXPECT_EQ(attach(s.s, condition(0, rpm(R"("above":1)"))),
               ECUIO_ERR_SESSION_CLOSED);
     EXPECT_EQ(states_of(s.s).size(), size_t{1});
+    /* A callback isn't taken after the close; taking one away still is */
+    Seen seen;
+    EXPECT_EQ(ecuio_register_conditions_callback(s.s, on_conditions, &seen),
+              ECUIO_ERR_SESSION_CLOSED);
+    EXPECT_EQ(ecuio_unregister_conditions_callback(s.s, on_conditions, &seen),
+              ECUIO_OK);
 }
 
 TEST(ConditionSessionTest, AFramesEventsFollowItsValuesInOneCall)

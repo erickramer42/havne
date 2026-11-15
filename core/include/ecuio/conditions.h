@@ -369,9 +369,10 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
  * fault reports it. A NULL set takes the conditions away. file is the signal file whose set the session
  * decodes with, for key: references, or NULL. The session copies what it
  * needs: the set may be freed once this returns. Before or after
- * ecuio_session_start. Every state starts OFF and STALE, and each call
- * that succeeds begins a new generation: 1 for a session's first, one
- * more for each after it, a removal included.
+ * ecuio_session_start. Every state starts OFF and STALE, or OFF and
+ * UNAVAILABLE (with no STALE) for a condition that can't be judged, and
+ * each call that succeeds begins a new generation: 1 for a session's
+ * first, one more for each after it, a removal included.
  *
  * A check term is not judged: its condition is unavailable
  * (ECUIO_CONDITION_WHY_NO_CHECK). A link term is judged on a session
@@ -439,6 +440,12 @@ typedef struct ecuio_condition_event {
 typedef void (*ecuio_conditions_callback_t)(
     const ecuio_condition_event_t* events, uint32_t count, void* user_data);
 
+/* Register and unregister a conditions callback, as the frame callback's
+ * pair does (core.h): ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL
+ * session or callback (unregister: a NULL session);
+ * ECUIO_ERR_SESSION_CLOSED to register on a closed session (unregister
+ * is allowed after the close, and idempotent); ECUIO_ERR_OUT_OF_MEMORY
+ * if the list can't grow. */
 ecuio_status_t ecuio_register_conditions_callback(
     ecuio_session_t* session, ecuio_conditions_callback_t callback,
     void* user_data);
