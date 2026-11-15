@@ -321,6 +321,88 @@ TEST(BridgeTest, AnExportOfAFileCoreRefusedIsTheFileAsItIs)
     EXPECT_EQ(bridge.conditionModel()->rowCount(), 3);
 }
 
+// A saved file past the bound is read as no set, but it is the user's
+// copy: Export says it wasn't read rather than that nothing is saved, and
+// the first save keeps it beside the new file as conditions.json.bad-1
+TEST(BridgeTest,
+     AnOverBoundSavedFileIsKeptBesideTheFirstSaveAndExportSaysItWasntRead)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir out;
+    ASSERT_TRUE(out.isValid());
+    QByteArray big = mockConditions();
+    big.append(QByteArray(ECUIO_CONDITION_FILE_MAX_BYTES, ' '));
+    {
+        QFile file(ConditionStore::path());
+        ASSERT_TRUE(QDir().mkpath(QFileInfo(file).absolutePath()));
+        ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+        file.write(big);
+    }
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_FALSE(bridge.conditionsProblem().isEmpty());
+    const QUrl target =
+        QUrl::fromLocalFile(out.path() + QStringLiteral("/c.json"));
+    const QVariantMap r = bridge.exportConditions(target);
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString(),
+              bridge.conditionsProblem())
+        << "not \"There are no saved alerts to export\"";
+
+    const QVariantMap saved =
+        bridge.saveConditions(QString::fromUtf8(mockConditions()));
+    ASSERT_TRUE(saved.value(QStringLiteral("ok")).toBool())
+        << saved.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(readFile(ConditionStore::path()), mockConditions());
+    EXPECT_EQ(readFile(ConditionStore::path() + QStringLiteral(".bad-1")), big)
+        << "the old file is kept, byte for byte";
+    EXPECT_EQ(saved.value(QStringLiteral("aside")).toString(),
+              QStringLiteral("conditions.json.bad-1"));
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("The conditions file that didn't load is kept as "
+                       "conditions.json.bad-1")))
+        << log.join(u'\n').toStdString();
+
+    // A second save has nothing unreadable to keep
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(otherConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    EXPECT_FALSE(
+        QFile::exists(ConditionStore::path() + QStringLiteral(".bad-2")));
+}
+
+// The file that didn't load may be gone by the time the user saves (moved
+// or deleted by hand): the save has nothing to keep aside and goes through,
+// where a refusal would block every save until a restart
+TEST(BridgeTest, AnUnreadableSavedFileRemovedByHandDoesNotBlockTheNextSave)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QByteArray big = mockConditions();
+    big.append(QByteArray(ECUIO_CONDITION_FILE_MAX_BYTES, ' '));
+    {
+        QFile file(ConditionStore::path());
+        ASSERT_TRUE(QDir().mkpath(QFileInfo(file).absolutePath()));
+        ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+        file.write(big);
+    }
+    SessionBridge bridge;
+    ASSERT_FALSE(bridge.conditionsProblem().isEmpty());
+    ASSERT_TRUE(QFile::remove(ConditionStore::path()));
+
+    const QVariantMap saved =
+        bridge.saveConditions(QString::fromUtf8(mockConditions()));
+    EXPECT_TRUE(saved.value(QStringLiteral("ok")).toBool())
+        << saved.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(saved.value(QStringLiteral("aside")).toString(), QString());
+    EXPECT_EQ(readFile(ConditionStore::path()), mockConditions());
+    EXPECT_FALSE(
+        QFile::exists(ConditionStore::path() + QStringLiteral(".bad-1")));
+}
+
 // A level typed in the display unit back in the def's: the inverse of
 // displayValue in either unit system, and a unit no system converts as typed
 TEST(BridgeTest, ADecodedValueIsTheDisplayValuesInverse)

@@ -45,9 +45,11 @@ public:
     bool load(QString* words);
 
     // A file's bytes in place of the kept one: { ok, words, conditions,
-    // name }. Refused, with core's words and nothing written, for a file
-    // core refuses or one past ECUIO_CONDITION_FILE_MAX_BYTES; refused with
-    // the write's words, the old file kept, when it can't be written
+    // name, aside }. Refused, with core's words and nothing written, for a
+    // file core refuses or one past ECUIO_CONDITION_FILE_MAX_BYTES; refused
+    // with the write's words, the old file kept, when it can't be written.
+    // A file load couldn't read or take for its size is first moved to
+    // conditions.json.bad-N, whose name aside carries ("" when none moved)
     QVariantMap save(const QByteArray& bytes);
 
     // The kept file's bytes ("" with none) and its set (nullptr with none)
@@ -58,6 +60,13 @@ public:
     const QByteArray& refused() const { return m_refused; }
 
 private:
+    // Moves an unreadable or over-bound file to conditions.json.bad-N
+    // (the first free N), so the save that follows doesn't write over it:
+    // *to is its name, "" when the file is gone (moved by hand since the
+    // load). false when it can't be moved
+    bool moveAside(QString* to) const;
+
+    bool m_unreadable = false; // the file is there, and load couldn't take it
     QByteArray m_bytes;
     ConditionSetPtr m_set;
     QByteArray m_refused;

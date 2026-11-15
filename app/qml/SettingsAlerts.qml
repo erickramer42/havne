@@ -325,8 +325,8 @@ ColumnLayout {
         Label {
             objectName: "alertConfirmText"
             text: root.confirming !== "import"
-                  ? qsTr("Start again with no alerts? The saved file is replaced.")
-                  : root.unreadable ? qsTr("Import replaces the saved file, which doesn't load, with the file's.")
+                  ? qsTr("Start again with no alerts? The saved file is replaced; one that couldn't be read is kept beside it.")
+                  : root.unreadable ? qsTr("Import replaces the saved file, which doesn't load, with the file's. A file that couldn't be read is kept beside it.")
                   : qsTr("Import replaces the %n saved alert(s) with the file's.", "", root.conditions.length)
             color: Theme.text
             wrapMode: Text.Wrap

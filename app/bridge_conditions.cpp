@@ -253,6 +253,12 @@ QVariantMap SessionBridge::saveConditions(const QString& text)
         return result;
     }
     m_conditionsProblem.clear();
+    const QString aside = result.value(QStringLiteral("aside")).toString();
+    if (!aside.isEmpty()) {
+        emit logMessage(QStringLiteral("The conditions file that didn't load "
+                                       "is kept as %1")
+                            .arg(aside));
+    }
     const QString wait = conditionsWait();
     const QString saved =
         QStringLiteral("Alerts saved: %1")
@@ -315,7 +321,10 @@ QVariantMap SessionBridge::exportConditions(const QUrl& url)
     QString words;
     bool written = false;
     if (bytes.isEmpty()) {
-        words = QStringLiteral("There are no saved alerts to export");
+        // A file that couldn't be read is not an empty store: its problem says so
+        words = m_conditionsProblem.isEmpty()
+                    ? QStringLiteral("There are no saved alerts to export")
+                    : m_conditionsProblem;
     } else {
         written = writeToUrl(url, bytes);
         if (!written) {

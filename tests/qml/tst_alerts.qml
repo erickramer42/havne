@@ -334,7 +334,7 @@ TestCase {
 
         find(alerts, "alertImport").clicked()
         compare(find(alerts, "alertConfirmText").text,
-                "Import replaces the saved file, which doesn't load, with the file's.")
+                "Import replaces the saved file, which doesn't load, with the file's. A file that couldn't be read is kept beside it.")
         find(alerts, "alertConfirmNo").clicked()
         find(alerts, "alertRestart").clicked()
         verify(find(alerts, "alertConfirm").visible)

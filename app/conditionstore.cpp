@@ -49,6 +49,7 @@ bool ConditionStore::load(QString* words)
     m_bytes.clear();
     m_set.reset();
     m_refused.clear();
+    m_unreadable = false;
     QFile file(path());
     if (!file.exists()) {
         return true;
@@ -56,11 +57,13 @@ bool ConditionStore::load(QString* words)
     if (!file.open(QIODevice::ReadOnly)) {
         // Qt's error strings can name the path: the words never do
         *words = QStringLiteral("the saved conditions can't be read");
+        m_unreadable = true;
         return false;
     }
     const QByteArray bytes = file.read(ECUIO_CONDITION_FILE_MAX_BYTES + 1);
     if (bytes.size() > static_cast<qsizetype>(ECUIO_CONDITION_FILE_MAX_BYTES)) {
         *words = tooLong();
+        m_unreadable = true;
         return false;
     }
     ConditionSetPtr set = loadConditionSet(bytes, words);
@@ -71,6 +74,25 @@ bool ConditionStore::load(QString* words)
     m_bytes = bytes;
     m_set = std::move(set);
     return true;
+}
+
+bool ConditionStore::moveAside(QString* to) const
+{
+    to->clear();
+    if (!QFile::exists(path())) {
+        return true;
+    }
+    for (int n = 1; n <= 99; ++n) {
+        const QString aside = path() + QStringLiteral(".bad-%1").arg(n);
+        if (!QFile::exists(aside)) {
+            if (!QFile::rename(path(), aside)) {
+                return false;
+            }
+            *to = QFileInfo(aside).fileName();
+            return true;
+        }
+    }
+    return false;
 }
 
 QVariantMap ConditionStore::save(const QByteArray& bytes)
@@ -91,6 +113,13 @@ QVariantMap ConditionStore::save(const QByteArray& bytes)
     if (!QDir().mkpath(QFileInfo(where).absolutePath())) {
         return refuse(QStringLiteral("the settings folder can't be made"));
     }
+    // A file load couldn't take is the user's only copy: kept beside the new one
+    QString aside;
+    if (m_unreadable && !moveAside(&aside)) {
+        return refuse(QStringLiteral(
+            "the saved file can't be read, and can't be moved aside"));
+    }
+    m_unreadable = false;
     // A temporary beside it, renamed over the old file at commit
     QSaveFile file(where);
     if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() ||
@@ -105,5 +134,6 @@ QVariantMap ConditionStore::save(const QByteArray& bytes)
             {QStringLiteral("conditions"),
              static_cast<int>(ecuio_condition_set_count(m_set.get()))},
             {QStringLiteral("name"),
-             QString::fromUtf8(ecuio_condition_set_name(m_set.get()))}};
+             QString::fromUtf8(ecuio_condition_set_name(m_set.get()))},
+            {QStringLiteral("aside"), aside}};
 }
