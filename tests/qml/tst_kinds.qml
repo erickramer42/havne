@@ -847,4 +847,58 @@ TestCase {
         g.samples = [0, 9, 100, 100]
         compare(box.width, empty, "a three-digit label")
     }
+
+    // Every kind with a title draws it in the pick while there is no value,
+    // at 3:1 on the look's surface; a value, or no pick, leaves it dim
+    function test_aPickedColorTintsEachTitleWithNoValue_data() {
+        return [ { tag: "digital", comp: digitalC, name: "gaugeTitle" },
+                 { tag: "bar", comp: barC, name: "gaugeTitle" },
+                 { tag: "spark", comp: sparkC, name: "gaugeTitle" },
+                 { tag: "analog", comp: analogC, name: "gaugeCaption" } ]
+    }
+    function test_aPickedColorTintsEachTitleWithNoValue(data) {
+        for (const look of ["dark", "daylight"]) {
+            usePalette(look)
+            const pick = Theme.gaugeColor("stone")
+            const g = make(data.comp, { label: "Boost", caption: "Boost", picked: pick })
+            const title = find(g, data.name)
+            same(title.color, pick, data.tag + " in " + look)
+            verify(Theme.gaugeContrast(String(pick), look) >= 4.5, "the pick reads as text in " + look)
+            g.hasValue = true
+            same(title.color, Theme.textDim, data.tag + " with a value")
+            g.hasValue = false
+            g.picked = ""
+            same(title.color, Theme.textDim, data.tag + " with no pick")
+        }
+    }
+
+    // The title is small text: a pick sets it only at the text ratio (4.5:1)
+    // on the card's surface and on the page behind a plain cell; any other
+    // stays dim. Daylight's red, blue and green fail it
+    function test_aTitleTakesAPickOnlyWhereItReadsAsText() {
+        const ratio = (hex, bg) => {
+            const lin = v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)
+            const lum = c => 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+            const a = lum(Qt.color(hex)), b = lum(Qt.color(bg))
+            return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+        }
+        let dimmed = 0
+        for (const look of ["dark", "daylight"]) {
+            usePalette(look)
+            const g = make(digitalC, { label: "Boost" })
+            const title = find(g, "gaugeTitle")
+            for (const name of Theme.gaugeColorNames) {
+                const pick = Theme.gaugeColor(name)
+                g.picked = pick
+                const p = Theme.palettes[look]
+                const reads = ratio(pick, p.surface) >= 4.5 && ratio(pick, p.bg) >= 4.5
+                same(title.color, reads ? pick : Theme.textDim, name + " in " + look)
+                if (!reads) ++dimmed
+            }
+        }
+        verify(dimmed > 0, "some pick is too faint for text in some look")
+        usePalette("daylight")
+        const c = make(digitalC, { label: "Boost", picked: "#ffff00" })
+        same(find(c, "gaugeTitle").color, Theme.textDim, "a custom pick too faint for text")
+    }
 }
