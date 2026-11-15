@@ -1278,7 +1278,8 @@ Pane {
         { key: "alerts", title: qsTr("Alerts"),
           summary: Bridge.conditionsProblem !== "" ? qsTr("doesn't load")
                    : settingsAlerts.conditions.length === 0 ? qsTr("none")
-                   : qsTr("%n alert(s)", "", settingsAlerts.conditions.length),
+                   : settingsAlerts.conditions.length === 1 ? qsTr("1 condition")
+                   : qsTr("%1 conditions").arg(settingsAlerts.conditions.length),
           warn: Bridge.conditionsProblem !== "" },
         { key: "recording", title: qsTr("Recording"),
           summary: !Bridge.recording ? qsTr("off")

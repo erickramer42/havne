@@ -106,7 +106,8 @@ Pane {
     function exportFramesTo(url) {
         const r = Bridge.exportFrames(url)
         exportFailed = !r.ok
-        exportNote = r.ok ? qsTr("%n frame(s) exported; ", "", r.written)
+        exportNote = r.ok ? (r.written === 1 ? qsTr("1 frame exported; ")
+                                             : qsTr("%1 frames exported; ").arg(r.written))
                             + qsTr("%n left out (identification and text signals)", "", r.leftOut)
                           : r.words
         return r.ok

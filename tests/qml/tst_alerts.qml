@@ -134,6 +134,28 @@ TestCase {
         compare(term.Accessible.description, "key:not_here")
     }
 
+    // Counts read one or many, never "(s)": Settings' Alerts row counts
+    // conditions, a record-only one too, and Import's question and note
+    // count the alerts they replace and read
+    function test_countsReadOneOrMany() {
+        save([rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 })])
+        const page = settingsOf()
+        const row = () => page.pageList.find(r => r.key === "alerts")
+        compare(row().summary, "1 condition")
+        save([rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 }),
+              { key: "rec", name: "Record only", when: { signal: ["id:1001"], unit: "RPM", above: 5000 },
+                record: { after: 2 } }])
+        compare(row().summary, "2 conditions", "a record-only condition counts")
+        const alerts = find(page, "settingsAlertsPart")
+        alerts.confirming = "import"
+        compare(find(alerts, "alertConfirmText").text, "Import replaces the 2 saved alerts with the file's.")
+        alerts.confirming = ""
+        const file = Harness.writeScratchFile("alerts-two.json", JSON.stringify(
+            { havne_conditions: 1, conditions: [rpm("a", "A", { link: "not_ok" }), rpm("b", "B", { link: "timeout" })] }))
+        verify(alerts.importFrom(file), find(alerts, "alertProblem").text)
+        compare(find(alerts, "alertSaveNote").text, "Imported 2 alerts.")
+    }
+
     // ---- The editor
 
     // A row opens its alert; a change saved goes into the file through
@@ -683,7 +705,7 @@ TestCase {
             { havne_conditions: 1, conditions: [
                 rpm("other", "Other", { signal: ["id:1001"], unit: "RPM", below: 100000 })] }))
         verify(alerts.importFrom(file), find(alerts, "alertProblem").text)
-        compare(find(alerts, "alertSaveNote").text, "Imported 1 alert(s).")
+        compare(find(alerts, "alertSaveNote").text, "Imported 1 alert.")
         tryCompare(find(rowOf(page, 0), "alertState"), "text", "ON", 5000)
         compare(wordsOf(rowOf(page, 0), "alertName"), "Other")
     }
@@ -709,7 +731,7 @@ TestCase {
             { havne_conditions: 1, conditions: [rpm("one", "One", { link: "not_ok" })] }))
         verify(alerts.importFrom(file), find(alerts, "alertProblem").text)
         compare(find(alerts, "alertSaveNote").text,
-                "Imported 1 alert(s): the change applies when this recording ends.")
+                "Imported 1 alert: the change applies when this recording ends.")
         compare(stored().conditions.map(c => c.key), ["one"], "the file is replaced at once")
     }
 

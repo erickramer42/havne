@@ -337,7 +337,8 @@ ColumnLayout {
             text: root.confirming !== "import"
                   ? qsTr("Start again with no alerts? The saved file is replaced.")
                   : root.unreadable ? qsTr("Import replaces the saved file, which doesn't load, with the file's.")
-                  : qsTr("Import replaces the %n saved alert(s) with the file's.", "", root.conditions.length)
+                  : root.conditions.length === 1 ? qsTr("Import replaces the 1 saved alert with the file's.")
+                  : qsTr("Import replaces the %1 saved alerts with the file's.").arg(root.conditions.length)
             color: Theme.text
             wrapMode: Text.Wrap
             Layout.fillWidth: true
@@ -519,8 +520,8 @@ ColumnLayout {
             return false
         }
         problem = ""
-        note = r.pending !== "" ? qsTr("Imported %n alert(s): the change %1.", "", r.conditions).arg(r.pending)
-                                : qsTr("Imported %n alert(s).", "", r.conditions)
+        const imported = r.conditions === 1 ? qsTr("Imported 1 alert") : qsTr("Imported %1 alerts").arg(r.conditions)
+        note = r.pending !== "" ? qsTr("%1: the change %2.").arg(imported).arg(r.pending) : imported + qsTr(".")
         return true
     }
     function exportTo(url) {
