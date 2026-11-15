@@ -117,7 +117,9 @@ ColumnLayout {
             required property var modelData
             required property int index
             width: list.width
-            height: list.rowH
+            // A phone's row holds the name on up to two lines, the level
+            // and the length under it
+            height: Theme.compact ? Math.max(list.rowH, rowGrid.implicitHeight + 8) : list.rowH
             color: area.hovered || panel.picked === entry.index ? Theme.elevatedLight : "transparent"
             AbstractButton {
                 id: area
@@ -128,14 +130,18 @@ ColumnLayout {
                 HoverHandler { cursorShape: Qt.PointingHandCursor }
                 onClicked: panel.showRequested(entry.index)
             }
-            RowLayout {
+            GridLayout {
+                id: rowGrid
                 anchors.fill: parent
                 anchors.leftMargin: 8
                 anchors.rightMargin: 8
-                spacing: Theme.spacing
+                columnSpacing: Theme.spacing
+                rowSpacing: 0
                 // The chart's mark: solid while ON, dashed with no new data
                 Row {
                     objectName: "conditionSwatch"
+                    Layout.row: 0
+                    Layout.column: 0
                     spacing: entry.modelData.on ? 0 : 2
                     Repeater {
                         model: entry.modelData.on ? 1 : 2
@@ -148,6 +154,8 @@ ColumnLayout {
                 }
                 Label {
                     objectName: "conditionTime"
+                    Layout.row: 0
+                    Layout.column: 1
                     text: panel.timeText(entry.modelData.fromMs)
                     color: Theme.textDim
                     font.family: Theme.valueFamily
@@ -155,26 +163,38 @@ ColumnLayout {
                 }
                 Label {
                     objectName: "conditionName"
+                    Layout.row: 0
+                    Layout.column: 2
                     text: entry.modelData.name
                     color: Theme.text
+                    wrapMode: Theme.compact ? Text.Wrap : Text.NoWrap
+                    maximumLineCount: 2
                     elide: Text.ElideRight
                     Layout.fillWidth: true
                     Layout.minimumWidth: 48
                 }
-                Label {
-                    objectName: "conditionLevel"
-                    visible: text !== ""
-                    text: panel.levelWord(entry.modelData)
-                    color: Theme.textDim
-                    font.pixelSize: Theme.fontCaption
-                }
-                Label {
-                    objectName: "conditionLength"
-                    text: panel.lengthOf(entry.modelData)
-                    color: Theme.textDim
-                    font.pixelSize: Theme.fontCaption
-                    elide: Text.ElideRight
-                    Layout.maximumWidth: Math.max(80, entry.width * 0.4)
+                RowLayout {
+                    Layout.row: Theme.compact ? 1 : 0
+                    Layout.column: Theme.compact ? 2 : 3
+                    Layout.fillWidth: Theme.compact
+                    spacing: Theme.spacing
+                    Label {
+                        objectName: "conditionLevel"
+                        visible: text !== ""
+                        text: panel.levelWord(entry.modelData)
+                        color: Theme.textDim
+                        font.pixelSize: Theme.fontCaption
+                    }
+                    Label {
+                        objectName: "conditionLength"
+                        text: panel.lengthOf(entry.modelData)
+                        color: Theme.textDim
+                        font.pixelSize: Theme.fontCaption
+                        elide: Text.ElideRight
+                        Layout.fillWidth: Theme.compact
+                        Layout.maximumWidth: Theme.compact ? Number.POSITIVE_INFINITY
+                                                           : Math.max(80, entry.width * 0.4)
+                    }
                 }
             }
         }

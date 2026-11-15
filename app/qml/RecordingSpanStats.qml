@@ -93,12 +93,16 @@ ColumnLayout {
                 objectName: "statCard_" + modelData.index
                 Layout.fillWidth: true
                 Layout.preferredWidth: 1
-                Layout.preferredHeight: Theme.touchTarget
+                // Taller where the three values take more than one line, and
+                // as tall as the card beside it
+                Layout.preferredHeight: Math.max(Theme.touchTarget, cardColumn.implicitHeight + 8)
+                Layout.fillHeight: true
                 color: Theme.surface
                 radius: 4
                 border.color: Theme.hairline
                 border.width: 1
                 ColumnLayout {
+                    id: cardColumn
                     anchors.fill: parent
                     anchors.leftMargin: 6
                     anchors.rightMargin: 6
@@ -124,6 +128,9 @@ ColumnLayout {
                     Label {
                         objectName: "statLine"
                         Layout.fillWidth: true
+                        // At most a value to a line: a narrow card cuts none
+                        wrapMode: Text.Wrap
+                        maximumLineCount: 3
                         elide: Text.ElideRight
                         color: Theme.textDim
                         font.pixelSize: Theme.fontCaption
