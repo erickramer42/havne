@@ -673,6 +673,11 @@ private:
     part call(size_t start, const std::string& name, unsigned depth)
     {
         const function* f = function_named(name);
+        if (f == nullptr && format_ < 2) {
+            fail(start, "calls " + name +
+                            "(), which isn't a function, and a format 1 file "
+                            "calls none (functions need \"havne_signals\": 2)");
+        }
         if (f == nullptr) {
             fail(start, "calls " + name +
                             "(), which isn't a function: min, max, abs, clamp, "
