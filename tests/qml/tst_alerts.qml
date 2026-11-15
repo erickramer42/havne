@@ -190,6 +190,27 @@ TestCase {
         verify(c.record.after === 3.33333, String(c.record.after))
     }
 
+    // A group's own keys beside its terms (notes, x-) stay through an
+    // edit: the editor reads unchanged as it opened, and a Save with
+    // another join keeps each in its place
+    function test_aGroupsOwnKeysStayThroughAnEdit() {
+        save([rpm("both", "Both high", { notes: "why both", all: [
+                  { signal: ["id:1001"], unit: "RPM", above: 6000 },
+                  { signal: ["id:2001"], unit: "°C", above: 110 }], "x-tool": { v: 1 } })])
+        const page = settingsOf()
+        rowOf(page, 0).clicked()
+        const editor = editorOf(page)
+        verify(!editor.changed(), "an editor left as it opened reads unchanged")
+        find(editor, "alertJoin_any").clicked()
+        find(editor, "alertSave").clicked()
+        compare(page.pageKey, "alerts", find(editor, "alertEditorProblem").text)
+        const w = stored().conditions[0].when
+        compare(Object.keys(w), ["notes", "any", "x-tool"], "each key in its place")
+        compare(w.notes, "why both")
+        compare(w["x-tool"].v, 1)
+        compare(w.any.length, 2)
+    }
+
     // The sound switch is live and says where it plays
     function test_theSoundSaysItPlaysOnAndroid() {
         save([rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 })])

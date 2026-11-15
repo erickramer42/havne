@@ -158,12 +158,21 @@ QtObject {
         const w = c.when ?? ({})
         return Array.isArray(w.all) ? "all" : Array.isArray(w.any) ? "any" : ""
     }
-    // when for terms: one term alone, more under join
-    function whenOf(terms, join) {
+    // when for terms: one term alone, more under join. A group rebuilt
+    // from was keeps was's other keys (notes, x-), each in its place
+    function whenOf(terms, join, was) {
         if (terms.length === 1)
             return copy(terms[0])
+        const list = join === "any" ? "any" : "all"
+        const old = was ?? ({})
+        const keys = Array.isArray(old.all) || Array.isArray(old.any) ? Object.keys(old) : [list]
         const w = {}
-        w[join === "any" ? "any" : "all"] = copy(terms)
+        for (const k of keys) {
+            if (k === "all" || k === "any")
+                w[list] = copy(terms)
+            else
+                w[k] = copy(old[k])
+        }
         return w
     }
     // "signal", "link", "check"

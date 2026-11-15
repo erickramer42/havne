@@ -238,7 +238,7 @@ ColumnLayout {
             }
             built.push(t)
         }
-        c.when = ConditionBook.whenOf(built, join)
+        c.when = ConditionBook.whenOf(built, join, root.alerts.draft.when)
         const seconds = [[forInput, "for", c], [clearForInput, "clear_for", c]]
         if (recordCheck.checked) {
             c.record = Object.assign({}, c.record ?? {})
