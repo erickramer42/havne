@@ -118,6 +118,7 @@ qt_add_qml_module(app_ui
         qml/DashboardPage.qml
         qml/DashCell.qml
         qml/DashCellPanel.qml
+        qml/DashAddPanel.qml
         qml/LogNotice.qml
         qml/ConnectList.qml
         qml/DashPageStrip.qml
