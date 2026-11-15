@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"as": "desktop", "cells": 1, "dropped": {"cells": 0, "pages": 0}, "first_cell": {"h": 4, "w": 2}, "form": null, "needs_files": [], "notes": ["no-form", "assumed-desktop"], "ok": true, "pages": 1, "problem": "", "type": "layout", "words": null}

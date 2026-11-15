@@ -2,7 +2,8 @@
 // Testing: SegmentRow and SegmentButton, the one look of a closed choice:
 //          the surface track with the hairline edge, the picked segment's
 //          fill and outline as a selected ThemedButton draws them, in Dark
-//          and Daylight. No session.
+//          and Daylight; the Recordings page's switches' tracks in every
+//          palette. No session.
 
 import QtQuick
 import QtTest
@@ -43,10 +44,25 @@ TestCase {
         }
     }
 
+    Component {
+        id: recordingsMaker
+        RecordingsPage { width: 900; height: 900 }
+    }
+
     // Whatever a case sets of the shared Theme, put back, pass or fail
     function cleanup() {
         Theme.night = "off"
+        Theme.nightStyle = "amber"
         Theme.look = "dark"
+    }
+
+    function usePalette(name) {
+        const night = Theme.nightPalettes.indexOf(name) >= 0
+        Theme.night = night ? "on" : "off"
+        if (night)
+            Theme.nightStyle = name === "nightRed" ? "red" : "amber"
+        else
+            Theme.look = name
     }
 
     function sameColor(actual, expected, what) {
@@ -81,6 +97,32 @@ TestCase {
         compare(h.picked, "b")
         sameColor(h.second.background.color, Theme.elevatedLight, "picked moves")
         compare(h.first.background.border.width, 0)
+    }
+
+    // The Recordings page's switches (Import's kind, the viewer's view and
+    // its frames table) sit on the same track: each named segment's row is
+    // a SegmentRow's, in every palette
+    function test_theRecordingsPagesSwitchesAreOnTheTrack_data() {
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
+    }
+    function test_theRecordingsPagesSwitchesAreOnTheTrack(data) {
+        usePalette(data.name)
+        compare(Theme.active, data.name)
+        const page = createTemporaryObject(recordingsMaker, testCase.parent)
+        verify(page)
+        for (const name of ["importKind_csv", "importKind_candump", "detailView_values",
+                            "detailView_frames", "detailView_about", "framesTable_frames",
+                            "framesTable_byId"]) {
+            const segment = findChild(page, name)
+            verify(segment, "no " + name)
+            // a SegmentButton's parent is the track's row
+            const track = segment.parent.parent
+            sameColor(track.color, Theme.surface, name + ": track fill")
+            verify(track.border !== undefined, name + ": its track has an edge")
+            compare(track.border.width, 1, name + ": track edge")
+            sameColor(track.border.color, Theme.hairline, name + ": track edge color")
+            compare(track.radius, Theme.radius, name + ": track radius")
+        }
     }
 
     // A locked row draws dim, as the buttons under it do

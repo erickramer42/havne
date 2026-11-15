@@ -479,6 +479,42 @@ TEST(SessionControlTest, TheCloseLeavesOnlyASessionEntered)
     EXPECT_FALSE(ecuio_engine_session_leave(&e, 1, &q));
 }
 
+/* The close's wait for a request still out: its deadline, never past the
+ * engine's wait from the close's start, a 78 extending nothing; a
+ * channel not leaving, or with nothing out, adds nothing */
+TEST(SessionControlTest, TheClosesWaitIsTheRequestsDeadlineWithinItsBound)
+{
+    static ecuio_request_engine e;
+    uds_engine(&e, 2);
+    ASSERT_TRUE(ecuio_engine_session(&e, 0x03, ECUIO_ENGINE_KEEPALIVE_US));
+    Ecu ecu;
+    int64_t now = 0;
+    (void)steps(&e, 0, &now, std::ref(ecu), 4);
+    bool leave[ECUIO_MAX_CHANNELS] = {true, false};
+    EXPECT_EQ(ecuio_engine_leave_wait_until(&e, leave, now), 0)
+        << "nothing is out";
+    const int32_t r = ecuio_engine_due(&e, 0, now);
+    ASSERT_NE(r, ECUIO_ENGINE_NONE);
+    const uint8_t service = ecuio_engine_request_of(&e, 0, r).bytes[0];
+    ecuio_engine_sent(&e, 0, r, true, now);
+    const int64_t sent = now;
+    EXPECT_EQ(ecuio_engine_leave_wait_until(&e, leave, sent + 10 * kMs),
+              sent + ECUIO_ENGINE_WAIT_US)
+        << "its deadline, before the bound";
+    leave[0] = false;
+    EXPECT_EQ(ecuio_engine_leave_wait_until(&e, leave, sent), 0)
+        << "a channel that isn't leaving";
+    leave[0] = true;
+    const uint8_t pending[3] = {ECUIO_NEGATIVE_RESPONSE, service,
+                                ECUIO_NRC_RESPONSE_PENDING};
+    (void)ecuio_engine_on_frame(&e, 0, pending, 3, sent + 5 * kMs, nullptr);
+    ASSERT_GT(e.chans[0].deadline_us, sent + 10 * kMs + ECUIO_ENGINE_WAIT_US)
+        << "the 78 extended the request's own wait";
+    EXPECT_EQ(ecuio_engine_leave_wait_until(&e, leave, sent + 10 * kMs),
+              sent + 10 * kMs + ECUIO_ENGINE_WAIT_US)
+        << "the bound, whatever the 78 says";
+}
+
 /* With no ?session=, nothing changes: no session request, ever */
 TEST(SessionControlTest, TheDefaultSendsNoSessionRequest)
 {

@@ -250,6 +250,41 @@ inline std::vector<uint32_t> estimate_intervals(const ExportArgs& a)
     return {0u, 100u, 250u};
 }
 
+// The intervals to size: these and one row per sweep, which an interval's
+// rows are judged against (its own place when listed, else last)
+inline std::vector<uint32_t> with_sweep(std::vector<uint32_t> rows)
+{
+    for (uint32_t ms : rows) {
+        if (ms == 0) {
+            return rows;
+        }
+    }
+    rows.push_back(0);
+    return rows;
+}
+
+// An interval that gives no fewer rows than every sweep: the recording is
+// slower than it, so it thins nothing (the app's Export says the same);
+// with no row at all there is no rate to be slower than
+inline bool no_fewer_than_sweep(uint32_t row_ms, uint64_t rows,
+                                uint64_t sweep_rows)
+{
+    return row_ms > 0 && sweep_rows > 0 && rows >= sweep_rows;
+}
+
+// The sweep's rows among sized intervals (with_sweep put one there)
+inline uint64_t sweep_rows_of(const uint32_t* row_ms,
+                              const ecuio_export_estimate_t* sized,
+                              size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        if (row_ms[i] == 0) {
+            return sized[i].rows;
+        }
+    }
+    return UINT64_MAX;
+}
+
 // The arguments after `import`; false with *why, a usage error. The
 // CSV's map is read by main from map_path into options.column_map_utf8,
 // or with none guessed from the file (ecuio_import_csv_guess, its time
@@ -393,10 +428,12 @@ inline void guessed_line(Line& l, const std::string& text)
 //  "made_up":N,"left_out":{"identification":N,...}}; csv and folder add
 //  "values":N and "signals":N after made_up, csv then "layout":"wide"|"long",
 //  "rows":N, "row_ms":N and "missing":N (the named columns the recording
-//  has no values for; schema 1 growth), folder "files":N and
+//  has no values for; schema 1 growth), then "no_fewer_than_sweep":true
+//  only for an interval that thins nothing; folder "files":N and
 //  "files_left_out":N
 inline void exported_line(Line& l, const ExportArgs& a,
-                          const ecuio_export_report_t& r, uint64_t missing = 0)
+                          const ecuio_export_report_t& r, uint64_t missing = 0,
+                          bool no_fewer = false)
 {
     l.raw("{\"type\":\"exported\"");
     l.key("format");
@@ -426,6 +463,10 @@ inline void exported_line(Line& l, const ExportArgs& a,
         l.u64(a.options.row_ms);
         l.key("missing");
         l.u64(missing);
+        if (no_fewer) {
+            l.key("no_fewer_than_sweep");
+            l.raw("true");
+        }
     }
     if (a.options.format == ECUIO_EXPORT_FOLDER) {
         l.key("files");
@@ -452,10 +493,12 @@ inline void exported_line(Line& l, const ExportArgs& a,
 
 // {"type":"estimate","format":"csv","layout":"wide","columns":N,"missing":N,
 //  "sizes":[{"row_ms":N,"rows":N,"bytes":N},...]}: what ecuio_export_estimate
-//  says the wide CSV would hold at each interval, the bytes exact
+//  says the wide CSV would hold at each interval, the bytes exact; an
+//  interval that thins nothing against sweep_rows (the sweep's rows) adds
+//  "no_fewer_than_sweep":true (schema 1 growth)
 inline void estimate_line(Line& l, const uint32_t* row_ms,
                           const ecuio_export_estimate_t* sized, size_t count,
-                          uint64_t missing)
+                          uint64_t missing, uint64_t sweep_rows = UINT64_MAX)
 {
     l.raw("{\"type\":\"estimate\",\"format\":\"csv\",\"layout\":\"wide\"");
     l.key("columns");
@@ -474,6 +517,10 @@ inline void estimate_line(Line& l, const uint32_t* row_ms,
         l.u64(sized[i].rows);
         l.key("bytes");
         l.u64(sized[i].bytes);
+        if (no_fewer_than_sweep(row_ms[i], sized[i].rows, sweep_rows)) {
+            l.key("no_fewer_than_sweep");
+            l.raw("true");
+        }
         l.ch('}');
     }
     l.raw("]}");

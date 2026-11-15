@@ -13,6 +13,7 @@
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QThreadPool>
 #include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
@@ -702,9 +703,41 @@ double askedStep(RecordingView& v, int signal, double t, bool forward)
     return got;
 }
 
+// The answer to one column means ask, waited for on the GUI thread: each
+// signal's means, in the ask's order
+std::vector<QList<double>> askedMeans(RecordingView& v, const QVariantList& ids,
+                                      double t0, double t1, int columns,
+                                      int waitMs = 10000)
+{
+    QVariantList got;
+    bool answered = false;
+    const auto c = QObject::connect(&v, &RecordingView::columnMeansReady,
+                                    [&](int, const QVariantList& m) {
+                                        got = m;
+                                        answered = true;
+                                    });
+    EXPECT_GT(v.columnMeans(ids, t0, t1, columns), 0);
+    EXPECT_TRUE(waitFor([&] { return answered; }, waitMs));
+    QObject::disconnect(c);
+    std::vector<QList<double>> out;
+    for (qsizetype k = 0; k < got.size(); ++k) {
+        const QVariantMap m = got[k].toMap();
+        EXPECT_EQ(m.value(QStringLiteral("index")).toInt(), ids[k].toInt());
+        out.push_back(m.value(QStringLiteral("means")).value<QList<double>>());
+    }
+    return out;
+}
+
+// A span's mean as a statistics ask gives it: [t0, t1) in ms
+double meanOver(RecordingView& v, int signal, double t0, double t1)
+{
+    const QVariantList got = askedStats(v, {signal}, t0, t1 - 0.001);
+    return got.value(0).toMap().value(QStringLiteral("mean")).toDouble();
+}
+
 // The answer to one stretches ask, waited for on the GUI thread
 QVariantList askedStretches(RecordingView& v, bool pulls, bool cruises,
-                            const QVariantMap& rules = {})
+                            const QVariantMap& rules = {}, int waitMs = 10000)
 {
     QVariantList got;
     bool answered = false;
@@ -716,7 +749,7 @@ QVariantList askedStretches(RecordingView& v, bool pulls, bool cruises,
                                     });
     EXPECT_GT(v.stretches(pulls, cruises, rules), 0)
         << v.stretchesProblem().toStdString();
-    EXPECT_TRUE(waitFor([&] { return answered; }));
+    EXPECT_TRUE(waitFor([&] { return answered; }, waitMs));
     QObject::disconnect(c);
     return got;
 }
@@ -849,9 +882,9 @@ TEST(RecordingViewTest, OnlyTheNewestStretchesAskIsAnswered)
         << "a closed recording's answer is dropped";
 }
 
-// A pass over a long recording takes a while and core can't be told to
-// stop it: a close leaves it to end on its own, the reader open under it
-// until then, and never waits
+// A pass over a long recording takes a while: a close leaves it to stop
+// at its next second, the reader open under it until then, and never
+// waits
 TEST(RecordingViewTest, ACloseNeverWaitsForAStretchesPass)
 {
     RecordingView v;
@@ -876,12 +909,12 @@ TEST(RecordingViewTest, ACloseNeverWaitsForAStretchesPass)
     ASSERT_TRUE(waitFor([&] { return settled(v); }));
     EXPECT_EQ(askedStretches(v, false, true).size(), 2);
     answers = 0;
-    // The abandoned pass reads the closed recording to its end, and its
-    // answer goes nowhere
+    // The abandoned pass stops once its hold ends, and its answer goes
+    // nowhere
     EXPECT_FALSE(waitFor([&] { return answers > 0; }, hold + 500));
 }
 
-// The view gone mid-pass: the pass ends on its own and posts to no one
+// The view gone mid-pass: the pass stops on its own and posts to no one
 TEST(RecordingViewTest, DestroyedWithAStretchesPassUnderWayIsSafe)
 {
     QElapsedTimer timer;
@@ -897,6 +930,138 @@ TEST(RecordingViewTest, DestroyedWithAStretchesPassUnderWayIsSafe)
     EXPECT_LT(timer.elapsed(), hold / 2) << "the ask or the destructor waited";
     // Its answer arrives for a view that is gone, and is dropped
     EXPECT_FALSE(waitFor([] { return false; }, hold + 500));
+}
+
+namespace {
+
+// pull-twice's events.log over a long signals.csv: speed, engine speed
+// and throttle every stepMs, a ten-second pull every periodS seconds for
+// 6000 s. Every 120 s at 10 ms (the default) is 1.8 million rows and 50
+// pulls, fewer than the viewer's first ask holds, so one call is a whole
+// pass; every 60 s is 100, which takes a second call
+QString denseRecording(const QTemporaryDir& dir, int periodS = 120,
+                       int stepMs = 10)
+{
+    const QString folder =
+        dir.filePath(QStringLiteral("dense-%1-%2").arg(periodS).arg(stepMs));
+    QDir().mkpath(folder);
+    QFile::copy(fixture("pull-twice") + QStringLiteral("/events.log"),
+                folder + QStringLiteral("/events.log"));
+    QFile f(folder + QStringLiteral("/signals.csv"));
+    if (!f.open(QIODevice::WriteOnly)) {
+        return {};
+    }
+    f.write("host_us,signal,value,unit\n");
+    QByteArray chunk;
+    const qint64 period = periodS * qint64{1000000};
+    for (qint64 us = 0; us < 6000 * qint64{1000000}; us += stepMs * 1000) {
+        const bool pull = us % period >= period - 10000000;
+        const qint64 into = us % period - (period - 10000000);
+        chunk += QByteArray::number(us) + ",Vehicle Speed," +
+                 QByteArray::number(pull ? 60 + into / 500000 : 60) +
+                 ",km/h\n" + QByteArray::number(us + 1) + ",RPM," +
+                 QByteArray::number(pull ? 2500 + into / 2500 : 2500) +
+                 ",rpm\n" + QByteArray::number(us + 2) + ",Throttle," +
+                 (pull ? "100.0" : "12.0") + ",%\n";
+        if (chunk.size() > (1 << 20)) {
+            f.write(chunk);
+            chunk.clear();
+        }
+    }
+    f.write(chunk);
+    return folder;
+}
+
+} // namespace
+
+// A close stops a stretches pass under way at its next second: a pass held
+// at an ask halfway through its read and closed there ends at that ask
+TEST(RecordingViewTest, ACloseStopsAStretchesPassUnderWay)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = denseRecording(dir);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }, 60000));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    // An unoptimized build on CI's macOS runner reads it in about 10 s
+    ASSERT_GE(askedStretches(v, true, false, {}, 120000).size(), 20);
+    const int whole = v.stretchesAsksForTesting();
+    ASSERT_GT(whole, 100);
+
+    const int half = whole / 2;
+    v.setStretchesHoldAtAskForTesting(half);
+    ASSERT_GT(v.stretches(true, false), 0);
+    ASSERT_TRUE(
+        waitFor([&] { return v.stretchesHeldForTesting() > 0; }, 120000));
+    v.close();
+    ASSERT_TRUE(waitFor([&] { return v.readsStoppedForTesting() > 0; }))
+        << "the pass read on to its end";
+    EXPECT_EQ(v.stretchesAsksForTesting(), half)
+        << "a whole pass asks " << whole << " times";
+}
+
+// More stretches than a pass's first call holds: the pass asks again for
+// them all, and a stop landing in that second call ends it there, CANCELED
+// with no answer, rather than reading on to the recording's end
+TEST(RecordingViewTest, AStopInAPassesSecondCallEndsIt)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = denseRecording(dir, 60, 100);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }, 60000));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    ASSERT_EQ(askedStretches(v, true, false, {}, 120000).size(), 100)
+        << "past the first call's 64";
+    const int both = v.stretchesAsksForTesting();
+    ASSERT_GT(both, 4);
+    ASSERT_EQ(both % 2, 0) << "two calls over the same range ask alike";
+
+    int answers = 0;
+    QObject::connect(&v, &RecordingView::stretchesReady,
+                     [&](int, const QVariantList&, bool) { ++answers; });
+    v.setStretchesStopAtAskForTesting(both / 2 + 2);
+    ASSERT_GT(v.stretches(true, false), 0);
+    ASSERT_TRUE(waitFor([&] { return v.readsStoppedForTesting() > 0; }))
+        << "the second call read on to its end";
+    EXPECT_EQ(v.stretchesAsksForTesting(), both / 2 + 2)
+        << "ended at the stop, its second ask";
+    EXPECT_FALSE(waitFor([&] { return answers > 0; }, 300));
+}
+
+// A close during the asks' hold: the statistics and step reads taken
+// before it are never made, and none is answered
+TEST(RecordingViewTest, AClosedOpensStatsAndStepAreNotRead)
+{
+    RecordingView v;
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    int answers = 0;
+    QObject::connect(&v, &RecordingView::statsReady,
+                     [&](int, const QVariantList&) { ++answers; });
+    QObject::connect(&v, &RecordingView::stepReady,
+                     [&](int, double) { ++answers; });
+    const int hold = 300;
+    v.setAsksHoldForTesting(hold);
+    QElapsedTimer timer;
+    timer.start();
+    ASSERT_GT(v.stats({rpm}, 0, 30000), 0);
+    ASSERT_GT(v.step(rpm, 100, true), 0);
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
+    v.close();
+    EXPECT_EQ(v.readsStoppedForTesting(), 0) << "nothing stopped yet";
+    ASSERT_TRUE(
+        waitFor([&] { return v.readsStoppedForTesting() == 2; }, hold + 2000));
+    EXPECT_LT(timer.elapsed(), hold + 1000);
+    EXPECT_FALSE(waitFor([&] { return answers > 0; }, 300));
+    EXPECT_EQ(v.readsStoppedForTesting(), 2);
 }
 
 // A file changed since the open: the ask says it failed, with no stretch,
@@ -1320,6 +1485,173 @@ TEST(RecordingViewTest, AStepAskFindsTheNextSample)
     EXPECT_EQ(v.step(99, 100, true), 0) << "no such signal";
 }
 
+// A column's mean is over the column's own span of the recording's time,
+// wherever its ends fall in a second: what a difference between two
+// recordings a part of a second apart is taken from. A query's columns of
+// a second or more hold the whole seconds that start in them
+TEST(RecordingViewTest, ColumnMeansAreOverEachColumnsOwnSpan)
+{
+    RecordingView v;
+    EXPECT_EQ(v.columnMeans({0}, 0, 1000, 1), 0) << "not open";
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    const int vin =
+        signalNamed(v, "VIN").value(QStringLiteral("index")).toInt();
+
+    // Ten columns of 2 s that start half a second into a second
+    const std::vector<QList<double>> got =
+        askedMeans(v, {rpm, vin}, 500, 20500, 10);
+    ASSERT_EQ(got.size(), 2u);
+    ASSERT_EQ(got[0].size(), 10);
+    int apart = 0;
+    for (int c = 0; c < 10; ++c) {
+        const double from = 500 + 2000.0 * c;
+        EXPECT_NEAR(got[0][c], meanOver(v, rpm, from, from + 2000), 1e-9)
+            << "column " << c;
+        // The whole seconds a query places there are another span
+        if (std::abs(got[0][c] - meanOver(v, rpm, from + 500, from + 2500)) >
+            0.5) {
+            ++apart;
+        }
+    }
+    EXPECT_GT(apart, 0) << "no column tells its own span from whole seconds";
+    ASSERT_EQ(got[1].size(), 10);
+    for (int c = 0; c < 10; ++c) {
+        EXPECT_TRUE(std::isnan(got[1][c])) << "a text signal has no mean";
+    }
+
+    // Columns under a second, and one with no sample in it (RPM is sampled
+    // ten times a second)
+    const std::vector<QList<double>> narrow =
+        askedMeans(v, {rpm}, 1050, 1350, 6);
+    ASSERT_EQ(narrow.size(), 1u);
+    ASSERT_EQ(narrow[0].size(), 6);
+    EXPECT_EQ(narrow[0][1], meanOver(v, rpm, 1100, 1150));
+    EXPECT_TRUE(std::isnan(narrow[0][0])) << "1050 to 1100 holds no sample";
+
+    EXPECT_EQ(v.columnMeans({}, 0, 1000, 4), 0) << "no signals";
+    EXPECT_EQ(v.columnMeans({99}, 0, 1000, 4), 0) << "no such signal";
+    EXPECT_EQ(v.columnMeans({rpm}, 1000, 1000, 4), 0) << "an empty span";
+    EXPECT_EQ(v.columnMeans({rpm}, 2000, 1000, 4), 0) << "backward";
+    EXPECT_EQ(v.columnMeans({rpm}, 0, 1000, 0), 0) << "no columns";
+    EXPECT_EQ(v.columnMeans({rpm}, 0, 1000, 65537), 0) << "too many columns";
+    EXPECT_FALSE(v.stale());
+}
+
+// A window from before the start: the columns before it are empty, and
+// the one across it reads from the start
+TEST(RecordingViewTest, ColumnMeansFromBeforeTheStartAreEmptyUntilIt)
+{
+    RecordingView v;
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    const std::vector<QList<double>> got = askedMeans(v, {rpm}, -2500, 3500, 6);
+    ASSERT_EQ(got.size(), 1u);
+    ASSERT_EQ(got[0].size(), 6);
+    EXPECT_TRUE(std::isnan(got[0][0])) << "-2.5 to -1.5 s";
+    EXPECT_TRUE(std::isnan(got[0][1])) << "-1.5 to -0.5 s";
+    EXPECT_NEAR(got[0][2], meanOver(v, rpm, 0, 500), 1e-9)
+        << "across the start";
+    EXPECT_NEAR(got[0][3], meanOver(v, rpm, 500, 1500), 1e-9);
+    EXPECT_NEAR(got[0][5], meanOver(v, rpm, 2500, 3500), 1e-9);
+}
+
+// The means are in the units the view displays, as its statistics are
+TEST(RecordingViewTest, ColumnMeansAreInDisplayUnits)
+{
+    RecordingView v;
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const int coolant =
+        signalNamed(v, "Coolant").value(QStringLiteral("index")).toInt();
+    const double metric = askedMeans(v, {coolant}, 0, 30000, 3).at(0).at(1);
+    v.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    const double imperial = askedMeans(v, {coolant}, 0, 30000, 3).at(0).at(1);
+    EXPECT_NEAR(imperial, metric * 9.0 / 5.0 + 32.0, 1e-9);
+    EXPECT_NEAR(imperial, meanOver(v, coolant, 10000, 20000), 1e-9);
+}
+
+// A later means ask replaces an earlier one, a pass under way included,
+// and a close drops one; the other kinds still answer
+TEST(RecordingViewTest, ALaterColumnMeansAskReplacesAnEarlierOne)
+{
+    RecordingView v;
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    std::vector<int> answered;
+    const auto c = QObject::connect(
+        &v, &RecordingView::columnMeansReady,
+        [&](int request, const QVariantList&) { answered.push_back(request); });
+    int last = 0;
+    for (int k = 1; k <= 20; ++k) {
+        last = v.columnMeans({rpm}, 0, 1000.0 * k, 500);
+        ASSERT_GT(last, 0);
+    }
+    ASSERT_TRUE(
+        waitFor([&] { return !answered.empty() && answered.back() == last; }));
+    EXPECT_EQ(answered.size(), 1u) << "an earlier ask was answered too";
+    EXPECT_EQ(askedStats(v, {rpm}, 1000, 3000).size(), 1);
+
+    // An answer posted and waiting when a newer ask is put in is dropped:
+    // no events run in the wait
+    answered.clear();
+    ASSERT_GT(v.columnMeans({rpm}, 0, 30000, 500), 0);
+    QThread::msleep(300);
+    last = v.columnMeans({rpm}, 0, 20000, 500);
+    ASSERT_GT(last, 0);
+    ASSERT_TRUE(
+        waitFor([&] { return !answered.empty() && answered.back() == last; }));
+    EXPECT_EQ(answered.size(), 1u) << "the answer before was delivered too";
+
+    // A pass the task has taken stops when a newer ask arrives
+    answered.clear();
+    const int stopped = v.meansStoppedForTesting();
+    int held = v.asksHeldForTesting();
+    v.setAsksHoldForTesting(200);
+    ASSERT_GT(v.columnMeans({rpm}, 0, 30000, 500), 0);
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > held; }));
+    last = v.columnMeans({rpm}, 0, 20000, 500);
+    ASSERT_GT(last, 0);
+    ASSERT_TRUE(
+        waitFor([&] { return !answered.empty() && answered.back() == last; }));
+    EXPECT_EQ(answered.size(), 1u);
+    EXPECT_EQ(v.meansStoppedForTesting(), stopped + 1)
+        << "the pass under way read on to its end";
+
+    answered.clear();
+    held = v.asksHeldForTesting();
+    v.setAsksHoldForTesting(300);
+    ASSERT_GT(v.columnMeans({rpm}, 0, 30000, 500), 0);
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > held; }));
+    v.close();
+    EXPECT_FALSE(waitFor([&] { return !answered.empty(); }, 800))
+        << "a closed recording's means were answered";
+    QObject::disconnect(c);
+}
+
+// A means ask the task has no memory for is answered with no rows, so a
+// page pairing two views' answers isn't left waiting; the next one answers
+TEST(RecordingViewTest, AColumnMeansAskTheTaskCantAnswerSaysSo)
+{
+    RecordingView v;
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    v.setLoseMeansForTesting(true);
+    EXPECT_TRUE(askedMeans(v, {rpm}, 0, 30000, 50).empty());
+    EXPECT_EQ(askedStats(v, {rpm}, 1000, 3000).size(), 1)
+        << "the other kinds answer";
+    v.setLoseMeansForTesting(false);
+    EXPECT_EQ(askedMeans(v, {rpm}, 0, 30000, 50).size(), 1u);
+}
+
 // Only the newest ask of a kind is answered, so a dragged cursor's span
 // never shows an older one's numbers; each kind answers for itself
 TEST(RecordingViewTest, ALaterAskReplacesAnEarlierOne)
@@ -1387,8 +1719,50 @@ TEST(RecordingViewTest, ACloseDropsAnAskAndANewOpenAnswers)
     EXPECT_EQ(askedStats(v, {rpm}, 1000, 3000).size(), 1);
 }
 
-// An asks' thread the system can't start: a statistics or step ask says 0,
-// leaves nothing queued, and the next ask answers once threads are there
+// A statistics ask over a long recording with a NaN in most seconds reads
+// its raw rows, and core's call can't be stopped: a close leaves the ask
+// to end on its own, the reader open under it until then, and never waits
+TEST(RecordingViewTest, ACloseNeverWaitsForAStatsOrStepAsk)
+{
+    RecordingView v;
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    const int rpm =
+        signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+    int answers = 0;
+    QObject::connect(&v, &RecordingView::statsReady,
+                     [&](int, const QVariantList&) { ++answers; });
+    QObject::connect(&v, &RecordingView::stepReady,
+                     [&](int, double) { ++answers; });
+    const int hold = 2000;
+    v.setAsksHoldForTesting(hold);
+    QElapsedTimer timer;
+    timer.start();
+    ASSERT_GT(v.stats({rpm}, 0, 30000), 0);
+    ASSERT_GT(v.step(rpm, 100, true), 0);
+    // The task has taken an ask and is at its read
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
+    v.close();
+    EXPECT_LT(timer.elapsed(), hold / 2)
+        << "an ask or the close waited for the read";
+    EXPECT_EQ(v.state(), RecordingView::Closed);
+
+    // Another recording opens and answers while the first ask still holds
+    v.setAsksHoldForTesting(0);
+    v.open(fixture("pull-early"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    EXPECT_EQ(askedStats(v, {rpm}, 1000, 3000).size(), 1);
+    EXPECT_GE(askedStep(v, rpm, 100, true), 0.0);
+    EXPECT_LT(timer.elapsed(), hold)
+        << "the new asks waited for the abandoned one";
+    answers = 0;
+    // The abandoned ask makes no read once its hold ends, and nothing is
+    // answered
+    EXPECT_FALSE(waitFor([&] { return answers > 0; }, hold + 500));
+}
+
+// An asks' task that can't be started: a statistics or step ask says 0,
+// leaves nothing queued, and the next ask answers once one can
 TEST(RecordingViewTest, AnAsksThreadThatCantStartSaysSoAndTheNextAskAnswers)
 {
     RecordingView v;
@@ -1414,17 +1788,38 @@ TEST(RecordingViewTest, AnAsksThreadThatCantStartSaysSoAndTheNextAskAnswers)
     QObject::disconnect(cs);
 }
 
+// The view gone mid-ask: the task ends on its own and posts to no one
 TEST(RecordingViewTest, DestroyedWithAnAskUnderWayIsSafe)
 {
-    auto v = std::make_unique<RecordingView>();
-    v->open(fixture("pull-early"));
-    ASSERT_TRUE(waitFor([&] { return settled(*v); }));
-    const int rpm =
-        signalNamed(*v, "RPM").value(QStringLiteral("index")).toInt();
-    ASSERT_GT(v->stats({rpm}, 0, 30000), 0);
-    ASSERT_GT(v->step(rpm, 100, true), 0);
-    v.reset();
-    QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
+    QElapsedTimer timer;
+    const int hold = 1500;
+    int answers = 0;
+    {
+        RecordingView v;
+        v.open(fixture("pull-early"));
+        ASSERT_TRUE(waitFor([&] { return settled(v); }));
+        const int rpm =
+            signalNamed(v, "RPM").value(QStringLiteral("index")).toInt();
+        QObject::connect(&v, &RecordingView::statsReady,
+                         [&](int, const QVariantList&) { ++answers; });
+        QObject::connect(&v, &RecordingView::stepReady,
+                         [&](int, double) { ++answers; });
+        v.setAsksHoldForTesting(hold);
+        timer.start();
+        ASSERT_GT(v.stats({rpm}, 0, 30000), 0);
+        ASSERT_GT(v.step(rpm, 100, true), 0);
+        ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
+    }
+    EXPECT_LT(timer.elapsed(), hold / 2) << "an ask or the destructor waited";
+    // The task reads on by itself, its hold and the read, and ends
+    EXPECT_TRUE(QThreadPool::globalInstance()->waitForDone(hold + 10000))
+        << "the abandoned task never ended";
+    EXPECT_GE(timer.elapsed(), hold - 50)
+        << "no read was under way when the view went";
+    // Its answers, posted for a view that is gone, run here and reach no one
+    QCoreApplication::processEvents();
+    QCoreApplication::sendPostedEvents();
+    EXPECT_EQ(answers, 0);
 }
 
 // The file gone under an open recording: a partial second's raw rows
@@ -1934,6 +2329,40 @@ TEST(RecordingViewTest, AFailedReportLeavesAPickedDocumentGone)
     EXPECT_TRUE(QFile::exists(picked));
 }
 
+TEST(RecordingViewTest, ARefusedReportLeavesAReplacedDocumentAlone)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.setThroughProviderForTesting(true);
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    {
+        QFile frames(folder + QStringLiteral("/frames.csv"));
+        ASSERT_TRUE(frames.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        frames.write("not a frames file\n");
+    }
+    const QString picked = root.path() + QStringLiteral("/picked.txt");
+    const QByteArray theirs("the user's earlier report\n");
+    {
+        QFile f(picked);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(theirs);
+    }
+    QList<QVariantMap> saved;
+    QObject::connect(&v, &RecordingView::reportSaved,
+                     [&](const QVariantMap& r) { saved << r; });
+    ASSERT_TRUE(v.saveHealthReport(QUrl::fromLocalFile(picked), 0));
+    ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
+    EXPECT_FALSE(saved[0].value(QStringLiteral("ok")).toBool());
+    QFile after(picked);
+    ASSERT_TRUE(after.open(QIODevice::ReadOnly));
+    EXPECT_EQ(after.readAll(), theirs) << "the replaced document stays";
+}
+
 TEST(RecordingViewTest, AStoppedReportLeavesAPickedDocumentGone)
 {
     QTemporaryDir root;
@@ -1998,6 +2427,322 @@ TEST(RecordingViewTest, AReportWhoseThreadCantStartSaysSo)
     ASSERT_TRUE(v.saveHealthReport(QUrl::fromLocalFile(picked), 0));
     ASSERT_TRUE(waitFor([&] { return !saved.isEmpty(); }));
     EXPECT_TRUE(saved[0].value(QStringLiteral("ok")).toBool());
+}
+
+// A statistics ask put in while a column means pass is under way is
+// answered before the pass ends (the pass gives way and resumes), and the
+// means still arrive, the same as a pass that was never interrupted
+TEST(RecordingViewTest, AStatisticsAskDuringAMeansPassIsAnsweredBeforeItEnds)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = denseRecording(dir);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }, 120000));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    const QVariantList ids{0, 1, 2};
+    const int columns = 65536;
+    QElapsedTimer timer;
+    timer.start();
+    // An unoptimized build on CI's macOS runner takes over 10 s
+    const std::vector<QList<double>> alone =
+        askedMeans(v, ids, 0, 6.0e6, columns, 120000);
+    const qint64 whole = timer.elapsed();
+    ASSERT_EQ(v.meansYieldsForTesting(), 0);
+
+    qint64 statsAt = -1;
+    qint64 meansAt = -1;
+    std::vector<QList<double>> got;
+    QObject::connect(
+        &v, &RecordingView::statsReady,
+        [&](int, const QVariantList&) { statsAt = timer.elapsed(); });
+    QObject::connect(&v, &RecordingView::columnMeansReady,
+                     [&](int, const QVariantList& m) {
+                         meansAt = timer.elapsed();
+                         for (const QVariant& one : m) {
+                             got.push_back(one.toMap()
+                                               .value(QStringLiteral("means"))
+                                               .value<QList<double>>());
+                         }
+                     });
+    // The pass is taken and held, so the statistics ask waits before its
+    // first column and it gives way at its second
+    const int hold = 100;
+    v.setAsksHoldForTesting(hold);
+    timer.restart();
+    ASSERT_GT(v.columnMeans(ids, 0, 6.0e6, columns), 0);
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
+    v.setAsksHoldForTesting(0);
+    const qint64 askedAt = timer.elapsed();
+    ASSERT_GT(v.stats(ids, 2.9e6, 3.1e6), 0);
+    ASSERT_TRUE(waitFor([&] { return statsAt >= 0 && meansAt >= 0; }, 120000));
+    EXPECT_LT(statsAt, meansAt) << "the statistics waited for the whole pass";
+    EXPECT_EQ(v.meansYieldsForTesting(), 1);
+    ASSERT_EQ(got.size(), alone.size());
+    for (size_t k = 0; k < got.size(); ++k) {
+        ASSERT_EQ(got[k].size(), alone[k].size());
+        for (qsizetype c = 0; c < got[k].size(); ++c) {
+            const double a = got[k][c];
+            const double b = alone[k][c];
+            ASSERT_TRUE(a == b || (std::isnan(a) && std::isnan(b)))
+                << "signal " << k << " column " << c;
+        }
+    }
+    if (whole < 100) {
+        GTEST_SKIP() << "the wait isn't judged: a whole pass took " << whole
+                     << " ms, too short to tell";
+    }
+    EXPECT_LT(statsAt - askedAt, hold + whole / 2)
+        << "a whole pass takes " << whole << " ms";
+}
+
+namespace {
+
+// The column means answers that arrive, with their request numbers, and
+// whether a statistics answer came, for the replacement cases
+struct MeansWatch {
+    QObject context; // its connections end with it
+    QList<int> requests;
+    std::vector<QList<double>> got;
+    bool statsDone = false;
+    explicit MeansWatch(RecordingView& v)
+    {
+        QObject::connect(&v, &RecordingView::columnMeansReady, &context,
+                         [this](int request, const QVariantList& m) {
+                             requests << request;
+                             for (const QVariant& one : m) {
+                                 got.push_back(
+                                     one.toMap()
+                                         .value(QStringLiteral("means"))
+                                         .value<QList<double>>());
+                             }
+                         });
+        QObject::connect(
+            &v, &RecordingView::statsReady, &context,
+            [this](int, const QVariantList&) { statsDone = true; });
+    }
+};
+
+} // namespace
+
+// A newer means ask that arrives while the older pass has given way to a
+// statistics ask, before it resumes, ends it at its next column: only the
+// newer ask is answered, over its own range
+TEST(RecordingViewTest, ANewerMeansAskReplacesAPassThatGaveWay)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = denseRecording(dir);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }, 120000));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    const QVariantList ids{0};
+    const std::vector<QList<double>> alone =
+        askedMeans(v, ids, 1.0e6, 2.0e6, 50);
+    MeansWatch w(v);
+    // Held in the turn that takes the pass and again in the one that takes
+    // the statistics it gave way to: the newer ask lands in the second hold
+    const int hold = 200;
+    v.setAsksHoldForTesting(hold);
+    ASSERT_GT(v.columnMeans(ids, 0, 6.0e6, 65536), 0);
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
+    ASSERT_GT(v.stats(ids, 2.9e6, 3.1e6), 0);
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 1; }));
+    ASSERT_EQ(v.meansYieldsForTesting(), 1);
+    const int stopped = v.meansStoppedForTesting();
+    v.setAsksHoldForTesting(0);
+    const int newer = v.columnMeans(ids, 1.0e6, 2.0e6, 50);
+    ASSERT_GT(newer, 0);
+    ASSERT_TRUE(waitFor([&] { return !w.requests.isEmpty(); }, 120000));
+    QThread::msleep(300);
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(w.statsDone);
+    ASSERT_EQ(w.requests.size(), 1) << "the older pass answered too";
+    EXPECT_EQ(w.requests[0], newer);
+    ASSERT_EQ(w.got.size(), 1u);
+    EXPECT_EQ(w.got[0], alone[0]);
+    EXPECT_EQ(v.meansStoppedForTesting(), stopped + 1)
+        << "the older pass read on to its end";
+    EXPECT_EQ(v.readsStoppedForTesting(), 0) << "no close ended it";
+}
+
+// A newer means ask that arrives while the task waits to take the
+// statistics ask a pass gave way to replaces the pass in that take: the
+// older pass never resumes, and only the newer ask is answered
+TEST(RecordingViewTest, ANewerMeansAskTakenWithTheAskAPassGaveWayToReplacesIt)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = denseRecording(dir);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }, 120000));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    const QVariantList ids{0};
+    const std::vector<QList<double>> alone =
+        askedMeans(v, ids, 1.0e6, 2.0e6, 50);
+    MeansWatch w(v);
+    v.setYieldHoldForTesting(300);
+    v.setAsksHoldForTesting(100);
+    ASSERT_GT(v.columnMeans(ids, 0, 6.0e6, 65536), 0);
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
+    v.setAsksHoldForTesting(0);
+    ASSERT_GT(v.stats(ids, 2.9e6, 3.1e6), 0);
+    // The pass has given way, and the task waits before its next take
+    ASSERT_TRUE(waitFor([&] { return v.meansYieldsForTesting() > 0; }));
+    const int stopped = v.meansStoppedForTesting();
+    const int newer = v.columnMeans(ids, 1.0e6, 2.0e6, 50);
+    ASSERT_GT(newer, 0);
+    ASSERT_TRUE(waitFor([&] { return !w.requests.isEmpty(); }, 120000));
+    QThread::msleep(300);
+    QCoreApplication::processEvents();
+    EXPECT_TRUE(w.statsDone);
+    ASSERT_EQ(w.requests.size(), 1) << "the older pass answered too";
+    EXPECT_EQ(w.requests[0], newer);
+    ASSERT_EQ(w.got.size(), 1u);
+    EXPECT_EQ(w.got[0], alone[0]);
+    EXPECT_EQ(v.meansYieldsForTesting(), 1);
+    EXPECT_EQ(v.meansStoppedForTesting(), stopped + 1)
+        << "the replaced pass went uncounted";
+    EXPECT_EQ(v.readsStoppedForTesting(), 0) << "no close ended it";
+}
+
+// A newer stretches ask ends an older pass under way at its next second: it
+// has no answer and doesn't keep the pool busy for a whole pass
+TEST(RecordingViewTest, ANewerStretchesAskStalesTheOlderPass)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = denseRecording(dir);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }, 120000));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    QList<int> requests;
+    QList<int> counts;
+    QObject::connect(&v, &RecordingView::stretchesReady,
+                     [&](int request, const QVariantList& list, bool) {
+                         requests << request;
+                         counts << list.size();
+                     });
+    // Held at the start, so the first pass meets the second ask before it
+    // reads
+    v.setStretchesHoldForTesting(200);
+    const int older = v.stretches(true, false);
+    const int newer = v.stretches(true, false);
+    ASSERT_GT(older, 0);
+    ASSERT_GT(newer, older);
+    ASSERT_TRUE(waitFor([&] { return !requests.isEmpty(); }, 120000));
+    EXPECT_EQ(v.stretchesStaledForTesting(), 1)
+        << "the older pass read on to its end";
+    ASSERT_EQ(requests.size(), 1);
+    EXPECT_EQ(requests[0], newer);
+    EXPECT_GE(counts[0], 20);
+}
+
+// A stretches ask whose pass can't start leaves the pass under way alone:
+// it reads on and is answered
+TEST(RecordingViewTest, AStretchesAskThatCantStartLeavesTheOlderPassAlone)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = denseRecording(dir);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }, 120000));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    QList<int> requests;
+    QList<int> counts;
+    QObject::connect(&v, &RecordingView::stretchesReady,
+                     [&](int request, const QVariantList& list, bool) {
+                         requests << request;
+                         counts << list.size();
+                     });
+    v.setStretchesHoldForTesting(200);
+    const int older = v.stretches(true, false);
+    ASSERT_GT(older, 0);
+    v.setFailThreadForTesting(true);
+    EXPECT_EQ(v.stretches(true, false), 0);
+    v.setFailThreadForTesting(false);
+    ASSERT_TRUE(waitFor([&] { return !requests.isEmpty(); }, 120000))
+        << "the pass under way was ended";
+    EXPECT_EQ(v.stretchesStaledForTesting(), 0);
+    ASSERT_EQ(requests.size(), 1);
+    EXPECT_EQ(requests[0], older);
+    EXPECT_GE(counts[0], 20);
+}
+
+// A close that lands while a means pass that gave way is in hand, before it
+// resumes, ends it there: no answer comes, and the open's stop counts it
+TEST(RecordingViewTest, ACloseEndsAMeansPassThatGaveWay)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString folder = denseRecording(dir);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }, 120000));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    const QVariantList ids{0, 1, 2};
+    int answers = 0;
+    QObject::connect(&v, &RecordingView::statsReady,
+                     [&](int, const QVariantList&) { ++answers; });
+    QObject::connect(&v, &RecordingView::columnMeansReady,
+                     [&](int, const QVariantList&) { ++answers; });
+    const int yieldHold = 300;
+    v.setYieldHoldForTesting(yieldHold);
+    v.setAsksHoldForTesting(100);
+    ASSERT_GT(v.columnMeans(ids, 0, 6.0e6, 65536), 0);
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
+    v.setAsksHoldForTesting(0);
+    ASSERT_GT(v.stats(ids, 2.9e6, 3.1e6), 0);
+    // The pass has given way, and the task waits before its next take
+    ASSERT_TRUE(waitFor([&] { return v.meansYieldsForTesting() > 0; }));
+    EXPECT_EQ(v.readsStoppedForTesting(), 0) << "nothing stopped yet";
+    v.close();
+    ASSERT_TRUE(waitFor([&] { return v.readsStoppedForTesting() > 0; },
+                        yieldHold + 5000))
+        << "the pass read on after the close";
+    QThreadPool::globalInstance()->waitForDone(10000);
+    QThread::msleep(50);
+    QCoreApplication::processEvents();
+    EXPECT_EQ(answers, 0);
+    EXPECT_EQ(v.readsStoppedForTesting(), 1)
+        << "the pass alone: the statistics ask went with the close";
+}
+
+// A report thread the system can't start leaves the bytes of a document the
+// user chose to replace where they were: only the picker's empty one goes
+TEST(RecordingViewTest, AReportWhoseThreadCantStartKeepsTheUsersDocument)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString folder = carRecording(root);
+    ASSERT_FALSE(folder.isEmpty());
+    RecordingView v;
+    v.setThroughProviderForTesting(true);
+    v.open(folder);
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    const QString picked = root.path() + QStringLiteral("/picked.txt");
+    {
+        QFile f(picked);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write("the user's earlier report");
+    }
+    v.setFailThreadForTesting(true);
+    EXPECT_FALSE(v.saveHealthReport(QUrl::fromLocalFile(picked), 0));
+    QFile f(picked);
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly)) << "the user's document went";
+    EXPECT_EQ(f.readAll(), QByteArray("the user's earlier report"));
 }
 
 // A CSV import holds values alone, and Save report stays offered on it:

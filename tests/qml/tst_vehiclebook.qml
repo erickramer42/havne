@@ -275,6 +275,42 @@ TestCase {
                 "a list that isn't one costs no entry")
     }
 
+    // The variants a VIN matched, kept on its vehicle (ADR-0052's appendix
+    // of 2026-11-13): none in an entry stored before them; anything but a
+    // list of text leaves that entry out; set on the picked vehicle alone;
+    // gone with Forget VIN (they came from it) and from Duplicate (which
+    // leaves the VIN key); a removed plugin's profiles leave every vehicle,
+    // and a replaced one's matches, its pick kept
+    function test_aVehiclesVinMatches() {
+        const old = book()
+        delete old.list[0].vinMatches
+        compare(VehicleBook.parse(JSON.stringify(old)).list[0].vinMatches, [])
+        for (const wrong of [7, "plugin.example-sim.base", [7], null]) {
+            const bad = book()
+            bad.list[1].vinMatches = wrong
+            compare(VehicleBook.parse(JSON.stringify(bad)).list.map(v => v.id), ["v1"], JSON.stringify(wrong))
+        }
+
+        const d = VehicleBook.setVinMatches(VehicleBook.pick(book(), "v2"), ["plugin.other.a"])
+        compare(VehicleBook.picked(d).vinMatches, ["plugin.other.a"])
+        compare(VehicleBook.find(d, "v1").vinMatches, [simBase, sim2019], "the others unchanged")
+        compare(VehicleBook.picked(VehicleBook.setVinMatches(d, [])).vinMatches, [])
+
+        compare(VehicleBook.picked(VehicleBook.forgetVin(book())).vinMatches, [])
+        compare(VehicleBook.picked(VehicleBook.duplicate(book(), "Copy")).vinMatches, [])
+
+        const dropped = VehicleBook.dropProfiles(d, [sim2019, "plugin.other.a"])
+        compare(VehicleBook.find(dropped, "v1").vinMatches, [simBase])
+        compare(VehicleBook.find(dropped, "v2").vinMatches, [])
+
+        // A replaced plugin's matches leave every vehicle, its pick stays
+        const replaced = VehicleBook.dropVinMatches(d, [sim2019, "plugin.other.a"])
+        compare(VehicleBook.find(replaced, "v1").vinMatches, [simBase])
+        compare(VehicleBook.find(replaced, "v2").vinMatches, [])
+        compare(VehicleBook.find(replaced, "v1").picks, [extras, sim2019, own], "the pick kept")
+        compare(VehicleBook.find(d, "v1").vinMatches, [simBase, sim2019], "its argument unchanged")
+    }
+
     // A vehicle's baseline recording (ADR-0049's appendix of 2026-11-06):
     // the picked vehicle's set and cleared, the others' left; Duplicate
     // doesn't copy it (a recording of that car)

@@ -46,6 +46,13 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+# --part is judged where it is read: k from 1 and no more than n
+case "$part" in
+    all|gtest) ;;
+    *) if ! [[ $part =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || [ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]; then
+           echo "--part takes gtest or <k>/<n> with k from 1 to n" >&2; exit 2
+       fi ;;
+esac
 
 case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*) ;;
@@ -130,15 +137,21 @@ cover() { # cover <name> <seconds, 0 for none> <program> [args...]: into raw-<na
 # under the tool. The bound stands in for ctest's per-case TIMEOUT.
 start=$SECONDS
 owned=""
+skip=""
 failed=""
 gtest_jobs=${COVERAGE_JOBS:-3}
 if [ -z "$regex" ]; then
     # Binaries with a RUN_SERIAL case (shared logs, the fake DLL's knobs) run alone, last
-    serial=$(ctest --test-dir "$TREE" -C RelWithDebInfo -N --show-only=json-v1 2>/dev/null |
-        "${PYTHON:-python}" -c 'import json,sys,os
+    # A list that can't be read would run the serial binaries in the parallel batch
+    listed=$(ctest --test-dir "$TREE" -C RelWithDebInfo -N --show-only=json-v1 2>"$LOGDIR/ctest-list.err") ||
+        { line coverage FAIL 0 "ctest couldn't list the tests; see $LOGDIR/ctest-list.err"; exit 1; }
+    # python alone under its own guard: in a pipeline only sort's status would count
+    serial=$("${PYTHON:-python}" -c 'import json,sys,os
 for t in json.load(sys.stdin)["tests"]:
     if any(p["name"] == "RUN_SERIAL" and p["value"] for p in t.get("properties", [])):
-        print(os.path.basename(t["command"][0]))' | tr -d '\r' | sort -u)
+        print(os.path.basename(t["command"][0]))' <<<"$listed") ||
+        { line coverage FAIL 0 "the serial list couldn't be read from ctest's JSON"; exit 1; }
+    serial=$(tr -d '\r' <<<"$serial" | sort -u)
     cover_one() { # <exe>: from a working directory of its own (the tool writes a log there)
         local exe=$1 name abs
         name=$(basename "$exe" .exe)
@@ -169,17 +182,24 @@ for t in json.load(sys.stdin)["tests"]:
         [ -e "$rcfile" ] || continue
         [ "$(cat "$rcfile")" = 0 ] || failed="$failed $(basename "$rcfile" | sed 's/^rc-//')"
     done
-    [ -z "$owned" ] || ctest_args+=(-E "^(${owned#|})\.")
+    [ -z "$owned" ] || skip="$skip|^(${owned#|})\."
 fi
+# Left out: under the tool on CI's runners core's module wait runs out and the
+# Ctrl+Break child is killed (0xC000013A); both run in the plain suite
+skip="^(CliSessionRunTest\.TheStreamNamesEachModulesSession|CliSignalTest\.CtrlBreakEndsTheStreamCleanly)\$$skip"
+ctest_args+=(-E "$skip")
 # --part: the gtest binaries alone, or the k-th of n interleaved slices of ctest's
 # other cases (ctest -I k,,n), so a runner each can share the work
 case "$part" in
     all) ;;
     gtest) ctest_skip=1 ;;
     [1-9]*/[1-9]*) ctest_args+=(-I "${part%/*},,${part#*/}") ;;
-    *) echo "--part takes gtest or <k>/<n> (k from 1)" >&2; exit 2 ;;
 esac
-[ -n "${ctest_skip:-}" ] || cover ctest 0 "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
+ctest_ran=0
+if [ -z "${ctest_skip:-}" ]; then
+    cover ctest 0 "$(cygpath -w "$(command -v ctest)")" "${ctest_args[@]}"
+    ctest_ran=1
+fi
 cat "$LOGDIR"/cover-test_*.log "$LOGDIR/cover-ctest.log" > "$LOGDIR/coverage.log" 2>/dev/null
 dur=$((SECONDS - start))
 
@@ -239,7 +259,18 @@ gtests=$(cat "$LOGDIR"/cover-test_*.log 2>/dev/null | tr -d '\r' | awk '
     /^\[  PASSED  \] [0-9]+ test/ { p += $4 }
     /^\[  FAILED  \] [0-9]+ test/ { f += $4 }
     END { if (p + f) printf "gtest %d passed, %d failed", p, f }')
-line coverage ok "$dur" "$(head -n 1 <<<"$summary"); ${gtests:-no gtest summary}; ctest ${tests:-no summary}"
+# A binary or the ctest leg that left no report is missing from the figure, so the leg fails
+# with the line that says so (the ok line would read as a pass above the failure)
+missing=""
+for name in $failed; do
+    [ -e "$LOGDIR/raw-$name.xml" ] || missing="$missing $name"
+done
+[ "$ctest_ran" = 0 ] || [ -e "$LOGDIR/raw-ctest.xml" ] || missing="$missing ctest"
+if [ -n "$missing" ]; then
+    line coverage FAIL "$dur" "NO REPORT from:$missing (the figure lacks their lines); $(head -n 1 <<<"$summary")"
+else
+    line coverage ok "$dur" "$(head -n 1 <<<"$summary"); ${gtests:-no gtest summary}; ctest ${tests:-no summary}"
+fi
 tail -n +2 <<<"$summary"
 for name in $failed; do
     echo "FAILED: $name (see $LOGDIR/cover-$name.log)"
@@ -247,3 +278,4 @@ for name in $failed; do
 done
 sed -n '/The following tests FAILED:/,$p' "$LOGDIR/cover-ctest.log" | sed -n '2,25p'
 echo "report: $LOGDIR/cobertura.xml"
+[ -z "$missing" ] || exit 1

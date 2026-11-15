@@ -60,6 +60,7 @@ TestCase {
     // land before the disconnect, or the next case meets a connected
     // bridge and fails for the wrong reason
     function cleanup() {
+        DocumentPicker.setPickerForTesting(false)
         Theme.compact = false
         Theme.dense = false
         Theme.look = "dark"
@@ -73,6 +74,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Harness.clearFakeKnobs()
+        Harness.stopElm327Emulator()
         Bridge.vehicleLabel = ""
         Bridge.dropImport()                   // no file waits for the next case
         for (const p of Bridge.plugins())     // and the store starts empty
@@ -255,16 +257,24 @@ TestCase {
                 ["J2534 adapter", "Serial port", "CAN interface", "Bluetooth", "Bluetooth LE"])
     }
 
-    // A relay's refusal is not a connect's: the Log has nothing for it
-    function test_aRelayRefusalLeavesTheLogOut() {
+    // A relay's refusal is in the Log, and its Show log finds it
+    function test_aRelayRefusalIsInTheLog() {
         const page = createPage()
         const show = find(page, "errorShowLog")
-        page.requestConnect("mock://demo?profile=no-such-profile")
-        tryVerify(() => show.visible, 5000, "a connect's refusal offers the Log")
+        verify(!show.visible, "nothing refused yet")
+        const spy = createTemporaryObject(logSpyComponent, testCase,
+                                          { target: Bridge, signalName: "logMessage" })
         // the relay button, with the relay refusing what the field holds
         find(page, "relayButton").clicked()
-        verify(page.errorLabel.text !== "", "the relay's own words: " + page.errorLabel.text)
-        verify(!show.visible, "no Show log beside the relay's words")
+        const words = page.errorLabel.text
+        verify(words !== "", "the relay's own words")
+        compare(spy.count, 1, "one line logged")
+        compare(spy.signalArguments[0][0], "Relay: " + words)
+        verify(show.visible, "Show log beside the relay's words")
+        logSpy.target = page
+        logSpy.clear()
+        tap(show)
+        compare(logSpy.count, 1, "the Log asked for")
     }
 
     // A URI isn't prose: no capital first letter, no predicted words
@@ -1021,6 +1031,21 @@ TestCase {
                 "the same scheme keeps the query whole")
     }
 
+    // keepalive_ms is a key all three adapter schemes take, so a switch
+    // between them keeps it
+    function test_anotherSchemeKeepsKeepaliveMsAndGap() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+
+        type(uri, "elm327://COM5?profile=uds-generic&keepalive_ms=2000&gap=10")
+        press(page, "preset_j2534")
+        compare(uri.text, "j2534://?profile=uds-generic&keepalive_ms=2000&gap=10",
+                "J2534 takes keepalive_ms and gap")
+        press(page, "preset_wifi_obdx")
+        compare(uri.text, "elm327://192.168.4.1:23?profile=uds-generic&keepalive_ms=2000&gap=10",
+                "ELM327 takes keepalive_ms and gap")
+    }
+
     // The Units row sets the bridge's unit system, connected or not, and
     // shows the one in force
     function test_unitsRowSetsTheBridge() {
@@ -1120,6 +1145,68 @@ TestCase {
         compare(uri.text, "j2534://Fake?profile=raw")
     }
 
+    // The phone's words and list (Theme.mobile is the platform's, so the
+    // section's own `mobile` stands in): the count names Bluetooth alone,
+    // and the list takes all its rows where the desktop's stops at its cap
+    function test_theMobileFormsConnectionWords_data() {
+        return [{ tag: "phone", mobile: true }, { tag: "desktop", mobile: false }]
+    }
+    function test_theMobileFormsConnectionWords(data) {
+        const page = createPage()
+        const section = find(page, "adapterSection")
+        const list = find(page, "deviceList")
+        const count = find(page, "deviceCount")
+        section.mobile = data.mobile
+        page.j2534Devices = []
+        page.canInterfaces = []
+        page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" }]
+        const ports = []
+        for (let i = 0; i < 12; ++i)
+            ports.push({ name: "COM" + (10 + i), device: "" })
+        page.serialPorts = ports
+        compare(list.count, 13)
+        if (data.mobile) {
+            compare(count.text, "Bluetooth: 1 found; tap one, then Connect")
+            page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" },
+                                      { name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true }]
+            compare(count.text, "Bluetooth: 1 found; tap one, then Connect",
+                    "a folded headset is not an adapter found")
+            page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" }]
+            tryVerify(() => list.contentHeight > 0 && Math.abs(list.height - list.contentHeight) < 1,
+                      3000, "the page alone scrolls")
+        } else {
+            verify(count.text.indexOf("J2534 interfaces: 0, serial ports: 12") >= 0, count.text)
+            page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" },
+                                      { name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true }]
+            verify(count.text.indexOf(", Bluetooth: 1") >= 0, "a folded headset is not counted: " + count.text)
+            tryVerify(() => list.contentHeight > 0 && list.height < list.contentHeight,
+                      3000, "the desktop's list stops at its cap")
+        }
+    }
+
+    // A phone with only a headset paired has no adapter to connect to: the
+    // count and the Connection row say so, as the connect list does
+    function test_aFoldedHeadsetAloneIsNoAdapterFound_data() {
+        return [{ tag: "phone", mobile: true }, { tag: "desktop", mobile: false }]
+    }
+    function test_aFoldedHeadsetAloneIsNoAdapterFound(data) {
+        const page = createPage()
+        const section = find(page, "adapterSection")
+        const count = find(page, "deviceCount")
+        section.mobile = data.mobile
+        page.j2534Devices = []
+        page.canInterfaces = []
+        page.serialPorts = []
+        page.bluetoothAdapters = [{ name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true }]
+        verify(count.text.indexOf("None found") === 0, count.text)
+        verify(page.pageList.find(p => p.key === "connection").summary.indexOf("none found") === 0,
+               "the Connection row agrees")
+        page.bluetoothAdapters = [{ name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true },
+                                  { name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" }]
+        verify(count.text.indexOf("None found") !== 0, count.text)
+        verify(page.pageList.find(p => p.key === "connection").summary.indexOf("1 found") === 0)
+    }
+
     // The phone's Bluetooth adapters join the list after the ports
     // (ADR-0028 section 2): a paired classic one fills elm327://bt:<address>, a
     // BLE one elm327://ble:<address>, the query kept; the count names
@@ -1217,10 +1304,10 @@ TestCase {
         // SocketCAN asks an ECU through core's ISO-TP under a profile that
         // requests (ADR-0040): uds-generic stays with its request keys; under
         // Default, raw there, which only listens, the request keys go
-        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0"
+        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0&keepalive_ms=2000"
         compare(page.profileChoice, "uds-generic")
         tap(find(list.itemAtIndex(0), "deviceRowArea"))
-        compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0")
+        compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0&keepalive_ms=2000")
         compare(page.profileChoice, "uds-generic")
         uri.text = "j2534://?identify=0&poll=0C&baud=500000"
         compare(page.profileChoice, "default")
@@ -1566,21 +1653,38 @@ TestCase {
         verify(find(page, "recordBox").checked)
     }
 
-    // A restart gets back the last URI that connected, not a refused one.
-    // The mock is never kept, so this needs the fake DLL
-    function test_theLastConnectedUriComesBack() {
-        if (Harness.fakeDllPath === "")
-            skip("needs the fake J2534 DLL (Windows)")
-        const fake = "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
-        let page = createPage()
-        const error = find(page, "errorLabel")
-        find(page, "uriField").text = fake + "&profile=raw"
+    // An adapter's URI on every platform: havne-cli's ELM327 emulator on
+    // loopback (Harness), since the mock and a replay are never kept. A
+    // tree with havne-cli fails when it won't start, never skips
+    function emulatorUri() {
+        if (!Harness.hasHavneCli())
+            skip("needs havne-cli, which this tree doesn't build")
+        const uri = Harness.startElm327Emulator()
+        verify(uri !== "", Harness.emulatorWhy())
+        return uri
+    }
+
+    // Connects the field's URI and disconnects. The emulator serves one
+    // host at a time, so this waits until it has seen the host go
+    function connectAndLeave(page, uri) {
+        const closed = Harness.emulatorClients("closed")
+        find(page, "uriField").text = uri
         press(page, "connectButton")
-        tryVerify(() => Bridge.connected, 10000, "the URI connects")
+        tryVerify(() => Bridge.connected, 10000, uri + " connects")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        tryVerify(() => Harness.emulatorClients("closed") > closed, 5000,
+                  "the emulator sees the host go")
+    }
 
-        find(page, "uriField").text = fake + "&profile=uds-generic"
+    // A restart gets back the last URI that connected, not a refused one
+    function test_theLastConnectedUriComesBack() {
+        const emu = emulatorUri()
+        let page = createPage()
+        const error = find(page, "errorLabel")
+        connectAndLeave(page, emu + "?profile=raw")
+
+        find(page, "uriField").text = emu + "?profile=uds-generic"
         press(page, "connectButton")
         tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
 
@@ -1589,7 +1693,7 @@ TestCase {
         wait(10)
 
         page = createPage()
-        compare(find(page, "uriField").text, fake + "&profile=raw",
+        compare(find(page, "uriField").text, emu + "?profile=raw",
                 "the URI that connected, not the refused one")
         verify(find(page, "profile_raw").checked, "read back into the row")
     }
@@ -1636,32 +1740,24 @@ TestCase {
     // Only a connect that succeeded is written, the newest first, and the
     // list survives a restart
     function test_onlyASuccessfulConnectWritesTheRecentUris() {
-        if (Harness.fakeDllPath === "")
-            skip("needs the fake J2534 DLL (Windows)")
-        const fake = "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
-        const raw = fake + "&profile=raw"
+        const emu = emulatorUri()
+        const raw = emu + "?profile=raw"
         let page = createPage()
         sameList(page.recentUris, [], "nothing yet")
-        const field = find(page, "uriField")
-        for (const uri of [fake, raw, fake]) {
-            field.text = uri
-            press(page, "connectButton")
-            tryVerify(() => Bridge.connected, 10000, uri + " connects")
-            Bridge.disconnectSession()
-            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
-        }
-        sameList(page.recentUris, [fake, raw], "newest first, once")
+        for (const uri of [emu, raw, emu])
+            connectAndLeave(page, uri)
+        sameList(page.recentUris, [emu, raw], "newest first, once")
 
-        field.text = fake + "&profile=uds-generic"
+        find(page, "uriField").text = emu + "?profile=uds-generic"
         press(page, "connectButton")
         tryVerify(() => find(page, "errorLabel").visible, 5000, "core refuses it: no ?did=")
-        sameList(page.recentUris, [fake, raw], "a refusal writes nothing")
+        sameList(page.recentUris, [emu, raw], "a refusal writes nothing")
 
         // The page's store writes when the page goes, as at a quit
         page.destroy()
         wait(10)
         page = createPage()
-        sameList(page.recentUris, [fake, raw], "kept between runs")
+        sameList(page.recentUris, [emu, raw], "kept between runs")
     }
 
     // A replay or the mock is never kept (Recordings is a replay's way

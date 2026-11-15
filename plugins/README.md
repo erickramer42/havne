@@ -28,10 +28,14 @@ phone's `content://` file too) and keeps a copy named by its SHA-256
 in the app's own folder, beside the signal files' copies, which is
 loaded at each start. Plugins are the app's, not one vehicle's: every
 variant of every plugin is a profile, so a URI naming one connects.
-With a vehicle picked, the variants a plugin's `match` covers for the
-car's VIN (the connected car's, or one typed in the VIN lookup; the
-VIN itself is never stored) show as buttons, and the one picked is
-kept with the vehicle and offered under **What to read**. The VIN only
+With a vehicle picked, every variant of every plugin shows as a button,
+and the one picked is kept with the vehicle and offered under **What
+to read**. The variants a plugin's `match` covers for the car's VIN
+come first (the VIN typed in the lookup, else the connected car's and
+the matches kept from the last time this vehicle's VIN was read; the
+VIN itself is never stored, only which variants it matched, and a
+newer version of a plugin starts that over). A pick whose plugin no
+longer loads shows as "doesn't load", to be undone. The VIN only
 proposes: nothing is chosen for you. Importing an id already there
 replaces it, and **Remove** deletes the copy; neither goes ahead
 while a session decodes with the plugin.

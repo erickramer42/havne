@@ -1,5 +1,6 @@
 // File/layer: app/sessionbridge.h | Qt6 Core, app layer, C++17
-// Testing: UNIT: CoreTest (test_core); BRIDGE: BridgeTest (test_bridge)
+// Testing: UNIT: CoreTest (test_core); BRIDGE: BridgeTest (test_bridge);
+//          QML: QmlTest.dashboardbook
 
 #pragma once
 
@@ -162,10 +163,15 @@ public:
     // anchor; a shift-click selects every row from the anchor to its own
     // (a toggle when the anchor has left the ring)
     int selectedCount() const { return static_cast<int>(m_selected.size()); }
-    // A view row's time in microseconds, as the table shows it; -1 for a row
-    // that isn't there. A table keeps its place by time, since rows come and
-    // go while it's hidden
-    Q_INVOKABLE double timestampAt(int row) const;
+    // A view row's arrival number; -1 for a row that isn't there. A table
+    // keeps its place by it: rows come and go while it's hidden, and a
+    // frame's time can step back (a vendor's stamp that wraps)
+    Q_INVOKABLE double seqAt(int row) const;
+    // The view row of that arrival, or with it gone or filtered out the
+    // next row in the view's order (the first to arrive after it oldest
+    // first, before it newest first), the last row past them all; -1 with
+    // no rows
+    Q_INVOKABLE int rowAtSeq(double seq) const;
     Q_INVOKABLE void toggleSelected(int row);
     Q_INVOKABLE void selectThrough(int row);
     Q_INVOKABLE void clearSelection();
@@ -323,13 +329,12 @@ class SignalListModel : public QAbstractListModel
 public:
     explicit SignalListModel(QObject* parent = nullptr);
 
-    // Rolling history depth per signal: room for the strip chart's
-    // longest window, 120 s. A 100 ms window adds one to three samples
-    // (its lowest, highest and newest value, ADR-0005's appendix), and a
-    // signal refreshing at 20 Hz or less adds at most two, so 120 s of it
-    // fits; a faster one keeps a shorter span. Kept constexpr so tests
-    // can assert exact ring behavior without a config surface.
-    static constexpr int HistoryCapacity = 2400;
+    // Rolling history depth per signal: room for the longest window the
+    // strip chart and the Dashboard's traces draw, 120 s. A 100 ms window
+    // adds one to three samples (its lowest, highest and newest value,
+    // ADR-0005's appendix), so 120 s of any signal fits. Kept constexpr so
+    // tests can assert exact ring behavior without a config surface.
+    static constexpr int HistoryCapacity = 3600;
 
     // One signal's coalesce window, as the bridge's staging hands it
     // over: its newest value and its lowest and highest, each at its
@@ -533,6 +538,18 @@ public:
     // role lookups per row.
     Q_INVOKABLE QVariantList chartData(qint64 windowMs = 0, int columns = 0) const;
 
+    // One signal's trace for the Dashboard's sparkline and Number tile:
+    // [ts, val, ...] as chartData's samples, for the row of def `id`
+    // whether or not Live plots it, over the last windowMs before that
+    // row's newest sample, sliced as chartData slices (from time 0, so a
+    // sample keeps its slice as the window moves). A break is a point whose
+    // value is NaN: a stall in the ring past the stale time
+    // (ECUIO_VALUE_STALE_US), or a value that isn't a number, which also
+    // starts a new slice. [] for no such row, a text row or one with no
+    // history. The trace reads the model's ring, so it outlives the page
+    // that shows it.
+    Q_INVOKABLE QList<double> trace(int id, qint64 windowMs, int columns) const;
+
     /* Periodic age refresh: ageMs is computed from the clock at data(), but
      * dataChanged fires only on updateValues, so a stalled row would never
      * dim. Emits dataChanged over every row for AgeMsRole alone (no value
@@ -613,6 +630,12 @@ private:
     // An enum row's label for its newest value, "" when it has none
     static QString labelOf(const Entry& e);
     static void pushWindow(Entry& e, const WindowValue& w);
+    // The ring's samples at or after `from`, oldest first: every one when
+    // sliceMs <= 0, else each slice's lowest and highest and the newest.
+    // breakMs > 0 adds a nullptr for each stall longer than it and gives a
+    // value that isn't a number a point of its own (trace's breaks)
+    static std::vector<const Sample*>
+    sliced(const Entry& e, qint64 from, double sliceMs, qint64 breakMs = 0);
     // A row's value as displayed in the current unit system
     ecuio_display_value_t shown(const Entry& e, double value) const;
     // A row's range as displayed (displayedRange)
@@ -675,6 +698,9 @@ class SessionBridge : public QObject
     // The age past which a value is stale (ECUIO_VALUE_STALE_US), in ms:
     // Theme.staleMs, so the UI dims what core's computed signals refuse
     Q_PROPERTY(int valueStaleMs READ valueStaleMs CONSTANT)
+    // A layout file's byte bound (layoutFileText), which DashboardBook's
+    // maxBytes + fileKeysBytes must equal
+    Q_PROPERTY(int layoutFileMaxBytes READ layoutFileBound CONSTANT)
     // A Read once is running (readOnce); no session connects meanwhile
     Q_PROPERTY(bool readingOnce READ readingOnce NOTIFY readingOnceChanged)
     // The signals the Dashboard's gauges read: each gauge's key ("rpm",
@@ -826,21 +852,38 @@ public:
     Q_INVOKABLE QVariantMap importSignalText(const QString& text);
     Q_INVOKABLE QString signalFileText(const QString& sha) const;
     // A kept copy saved where the user chose (a local file, or Android's
-    // content:// from its document picker, through QFile): the copy's
+    // content:// from its document picker, by the content resolver): the copy's
     // bytes as imported or as the form wrote them, nothing added, so
     // havne-cli --signals and another vehicle read the same file. { ok,
     // words }, words never naming either path; a copy changed since it
     // was kept is refused, not saved. Logs one line
     Q_INVOKABLE QVariantMap saveSignalFile(const QString& sha, const QUrl& url);
+    // A dashboard layout file (ADR-0057's appendix on the layout file): the
+    // text DashboardBook.exportText made, written where the user chose (as
+    // saveSignalFile writes), and a picked file's text back. { ok, words }
+    // and { ok, words, text }, words never naming a path. The size is
+    // bounded at layoutFileMaxBytes either way, a text that isn't UTF-8 is
+    // refused unread, and a leading UTF-8 BOM is skipped. A local file is
+    // written whole or not at all and is never removed; a provider's document
+    // is written in place (it can't be atomic) and a refused or failed save
+    // removes it only if it was empty when the save began.
+    // Each logs one line
+    Q_INVOKABLE QVariantMap saveLayoutFile(const QString& text, const QUrl& url);
+    Q_INVOKABLE QVariantMap layoutFileText(const QUrl& url);
+    static constexpr qint64 layoutFileMaxBytes = 66016 + 16384;
+    static int layoutFileBound()
+    {
+        return static_cast<int>(layoutFileMaxBytes);
+    }
     // The Log page's Export CSV (FrameListModel::scrubbedCsv) to the file
-    // at url (a local file, or Android's content:// through QFile): { ok,
+    // at url (a local file, or Android's content:// by the content resolver): { ok,
     // words, written, leftOut, unattributed }, leftOut the identification
     // replies' and text signals' frames, words never naming the path. A
     // failed check writes nothing. Logs one line
     Q_INVOKABLE QVariantMap exportFrames(const QUrl& url);
     // Diagnostics' Save report (ADR-0054's appendix "the health report as
     // built"): the session's health to the file at url (a local file, or
-    // Android's content:// through QFile), in the format healthFormatFor
+    // Android's content:// by the content resolver), in the format healthFormatFor
     // picks from it and the dialog's filterIndex, with the values Live's
     // rows hold. No wait: a report still being read says so itself.
     // baselineFolder, the picked vehicle's baseline recording ("" none),

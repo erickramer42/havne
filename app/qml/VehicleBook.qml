@@ -269,6 +269,7 @@ QtObject {
         return change(doc, v => v.label = String(label).trim())
     }
 
+    // The matches came from the VIN, so they go with its key
     function forgetVin(doc) {
         return change(doc, v => {
             v.vinKey = ""

@@ -61,7 +61,8 @@ Pane {
     property var canInterfaces: []
 
     // The phone's Bluetooth adapters (ADR-0028 section 2): [{ name, address,
-    // kind }], kind "bt" (classic, paired) or "ble". Empty off Android
+    // kind, other }], kind "bt" (classic, paired) or "ble", other true for
+    // audio, wearable and health gear. Empty off Android
     property var bluetoothAdapters: Bluetooth.adapters
 
     // Each device's versions as last seen at a connect, { base: text }
@@ -93,8 +94,13 @@ Pane {
             detail: a.kind === "ble" ? qsTr("Bluetooth LE · %1").arg(a.address)
                                      : qsTr("Bluetooth, paired · %1").arg(a.address),
             kind: a.kind === "ble" ? qsTr("Bluetooth LE") : qsTr("Bluetooth"),
-            base: "elm327://" + a.kind + ":" + a.address
+            base: "elm327://" + a.kind + ":" + a.address,
+            other: a.other === true
         })))
+
+    // The rows the connect list shows: a paired headset, watch or health
+    // device is folded under "Other paired devices" there and isn't counted
+    readonly property int devicesShown: devices.filter(d => d.other !== true).length
 
     // A CAN interface's row: what it is, its state past error-active, and
     // why a connect would be refused before one is tried: listen-only to
@@ -1189,7 +1195,7 @@ Pane {
     readonly property string shownKey: twoPane && pageKey === "" ? "connection" : pageKey
     readonly property var pageList: [
         { key: "connection", title: qsTr("Connection"),
-          summary: (devices.length === 0 ? qsTr("none found") : qsTr("%1 found").arg(devices.length))
+          summary: (devicesShown === 0 ? qsTr("none found") : qsTr("%1 found").arg(devicesShown))
                    + " · " + profileLabel() },
         { key: "vehicle", title: qsTr("Vehicle"),
           summary: (pickedVehicle !== null ? pickedVehicle.label : qsTr("None"))
@@ -1552,11 +1558,11 @@ Pane {
         "mock": ["profile", "did", "diagnose"],
         "replay": ["profile", "did", "speed", "loop"],
         "j2534": ["baud", "flags", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                  "pack", "scan", "session", "profile", "did"],
+                  "pack", "scan", "gap", "session", "keepalive_ms", "profile", "did"],
         "elm327": ["baud", "serial", "filter", "txid", "poll", "probe", "identify", "diagnose",
-                   "pack", "scan", "session", "profile", "did"],
+                   "pack", "scan", "gap", "session", "keepalive_ms", "profile", "did"],
         "socketcan": ["profile", "did", "baud", "filter", "txid", "poll", "probe", "identify",
-                      "diagnose", "pack", "scan", "session"]
+                      "diagnose", "pack", "scan", "gap", "session", "keepalive_ms"]
     })
     // What a SocketCAN session that only listens takes: Default is raw
     // there, and core refuses it the keys that ask an ECU
@@ -1675,7 +1681,7 @@ Pane {
     // interfaces, the serial ports, the CAN interfaces and the phone's
     // Bluetooth adapters, as Connection's device list has them
     readonly property var connectAdapters: devices.map(d => ({
-            uri: d.base, title: d.title, kind: d.kind
+            uri: d.base, title: d.title, kind: d.kind, other: d.other === true
         }))
     // ---- A connect from a list (Home's, Dash's): an address that names
     // no profile reads the picked vehicle's plugin where obd2 is asked
