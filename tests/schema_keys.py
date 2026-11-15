@@ -11,7 +11,8 @@
 # doesn't map, an entry no call matches, and a schema object no call maps
 # all fail, so a key added on either side alone fails. The loaders' word
 # lists that a schema spells as an enum (kinds, groups, services, byte
-# orders, extends, tiers) are compared too.
+# orders, extends, tiers) are compared too, and a schema's request count
+# with profile.h's ECUIO_PROFILE_MAX_REQUESTS.
 
 import json
 import os
@@ -167,6 +168,17 @@ def pointer(doc, ptr):
     return node
 
 
+def strings_of(node):
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for v in node.values():
+            yield from strings_of(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from strings_of(v)
+
+
 def object_schemas(node, ptr=""):
     """Every pointer to a subschema of type object with properties"""
     found = []
@@ -270,6 +282,27 @@ def main():
     if not groups or set(groups) != spelled:
         failures.append(f"core/src/signals.cpp's groups {groups} vs "
                         f"signal-file.schema.json#/$defs/group/enum's {sorted(spelled)}")
+
+    # A schema's request bound ("at most N requests", N alone or after the
+    # define's name) is profile.h's; the signal-file schema states one
+    with open(os.path.join(root, "core/include/ecuio/profile.h"), encoding="utf-8") as f:
+        bound = re.search(r"#define ECUIO_PROFILE_MAX_REQUESTS (\d+)", f.read())
+    if bound is None:
+        failures.append("profile.h defines no ECUIO_PROFILE_MAX_REQUESTS: find it again")
+    else:
+        stated = False
+        for s in SCHEMAS:
+            for text in strings_of(schemas[s]):
+                for n in re.findall(r"at most (?:ECUIO_PROFILE_MAX_REQUESTS "
+                                    r"\(profile\.h, )?(\d+)\)? requests\b", text):
+                    stated = stated or s == "signal-file"
+                    if n != bound.group(1):
+                        failures.append(f"{s}.schema.json says {n} requests, "
+                                        f"profile.h's ECUIO_PROFILE_MAX_REQUESTS "
+                                        f"is {bound.group(1)}")
+        if not stated:
+            failures.append("signal-file.schema.json states no request bound "
+                            "(\"at most N requests\"): find it again")
 
     for f in failures:
         print("FAIL  " + f)

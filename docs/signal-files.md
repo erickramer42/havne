@@ -415,7 +415,7 @@ files use `gauge` and its `requires.core` names an older version.
 | A file | 1 MiB, UTF-8 |
 | Signals | 1024 a file |
 | Modules | 4, the base set's counted |
-| A session's requests | 256, the base set's counted (`obd2` alone asks over 90) |
+| A session's requests | 1024, the base set's counted (`obd2` alone asks over 90) |
 | `name` | 1 to 31 bytes |
 | `unit` | 0 to 15 bytes |
 | `decimals` | 0 to 3 |
@@ -462,8 +462,8 @@ A file is refused for:
   connection carries one width (a J2534 or ELM327 session refuses the
   mix before it opens the adapter), and `obd2`'s modules are 11-bit, so
   a file that extends it takes 11-bit modules only.
-- **Its size:** more signals than fit a session's 256 requests with the
-  base set's.
+- **Its size:** more signals than fit a session's 1024 requests with
+  the base set's.
 
 Every refusal names the line and column of what it refuses, then why:
 
