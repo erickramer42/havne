@@ -264,6 +264,59 @@ inline bool ecuio_computed_run(const ecuio_computed_t& program,
     return true;
 }
 
+/* Whether program has no value whatever its other inputs are while the
+ * inputs in gone (bit k for input k) have none (ADR-0062 section 3): a
+ * push is its input's lack, a constant never lacks, if lacks with its
+ * predicate or both branches, all and any with both parts, any other step
+ * with either part. Each step's parts are judged apart, so a predicate
+ * that is constant or tied to a branch's input can leave a program
+ * without a value that this doesn't see. A program whose steps don't run
+ * to one value lacks one with any input gone, so one read wrong never
+ * hides an input. */
+inline bool ecuio_computed_lacks(const ecuio_computed_t& program, uint8_t gone)
+{
+    const uint32_t inputs = program.input_count < ECUIO_COMPUTED_MAX_INPUTS
+                                ? program.input_count
+                                : ECUIO_COMPUTED_MAX_INPUTS;
+    const bool any_gone = (gone & ((1u << inputs) - 1u)) != 0;
+    bool stack[ECUIO_COMPUTED_MAX_STEPS];
+    uint32_t depth = 0;
+    const uint32_t steps = program.step_count;
+    if (steps < 1 || steps > ECUIO_COMPUTED_MAX_STEPS) {
+        return any_gone;
+    }
+    for (uint32_t i = 0; i < steps; ++i) {
+        const uint8_t s = program.steps[i];
+        if (ecuio_computed_is_push(s, ECUIO_COMPUTED_PUSH_INPUT)) {
+            if ((s & 0x0Fu) >= inputs) {
+                return any_gone;
+            }
+            stack[depth++] = ((gone >> (s & 0x0Fu)) & 1u) != 0;
+            continue;
+        }
+        if (ecuio_computed_is_push(s, ECUIO_COMPUTED_PUSH_CONSTANT)) {
+            stack[depth++] = false;
+            continue;
+        }
+        ecuio_computed_shape shape{};
+        if (!ecuio_computed_shape_of(s, &shape) || depth < shape.takes) {
+            return any_gone;
+        }
+        depth -= shape.takes;
+        const bool* x = &stack[depth];
+        bool lacks = false;
+        if (s == ECUIO_COMPUTED_IF) {
+            lacks = x[0] || (x[1] && x[2]);
+        } else if (s == ECUIO_COMPUTED_ALL || s == ECUIO_COMPUTED_ANY) {
+            lacks = x[0] && x[1];
+        } else {
+            lacks = x[0] || (shape.takes > 1 && x[1]);
+        }
+        stack[depth++] = lacks;
+    }
+    return depth == 1 ? stack[0] : any_gone;
+}
+
 /* Marks in place (a byte per def of set) the defs each marked computed
  * def reads, and theirs in turn, down to the number defs under it
  * (ADR-0062): what a focus on a computed signal keeps asked. A marked

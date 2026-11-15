@@ -5295,6 +5295,117 @@ TEST(PidSupportTest, AComputedSignalFollowsItsInputs)
     EXPECT_EQ(ids[0], 11);
 }
 
+namespace {
+
+/* A program over inputs with these steps and constants */
+ecuio_computed_t program_of(std::initializer_list<uint16_t> inputs,
+                            std::initializer_list<uint8_t> steps,
+                            std::initializer_list<double> constants = {})
+{
+    ecuio_computed_t p = program_of(inputs);
+    for (uint8_t s : steps) {
+        p.steps[p.step_count++] = s;
+    }
+    for (double c : constants) {
+        p.constants[p.constant_count++] = c;
+    }
+    return p;
+}
+
+constexpr uint8_t kIn0 = ECUIO_COMPUTED_PUSH_INPUT | 0u;
+constexpr uint8_t kIn1 = ECUIO_COMPUTED_PUSH_INPUT | 1u;
+constexpr uint8_t kZero = ECUIO_COMPUTED_PUSH_CONSTANT | 0u;
+
+} // namespace
+
+/* An input the program can give a value without (a branch an if may not
+ * take, a part of an all or an any) lists nothing alone; one it can't
+ * (the predicate, both branches, a part of a sum) lists it, and so do
+ * inputs it can't do without together; a chain over each follows: 10
+ * reads the PID the car has, 11 the one it lacks */
+TEST(PidSupportTest, AComputedSignalListedOnlyByAnInputItCantDoWithout)
+{
+    const ecuio_channel_support_t car = first_vehicle();
+    ASSERT_FALSE(ecuio_pid_marked_unsupported(car, 0x0C));
+    ASSERT_TRUE(ecuio_pid_marked_unsupported(car, 0x5C));
+    const std::vector<ecuio_signal_def_t> defs = {
+        pid_def(10, 0x0C),    pid_def(11, 0x5C),    computed_over(20, 0),
+        computed_over(21, 1), computed_over(22, 2), computed_over(23, 3),
+        computed_over(24, 4), computed_over(25, 5), computed_over(26, 6),
+        computed_over(27, 7)};
+    const std::vector<ecuio_computed_t> programs = {
+        /* 20: if(a > 0, b / a, 0) */
+        program_of({10, 11},
+                   {kIn0, kZero, ECUIO_COMPUTED_GREATER, kIn1, kIn0,
+                    ECUIO_COMPUTED_DIVIDE, kZero, ECUIO_COMPUTED_IF},
+                   {0.0}),
+        /* 21: if(b > 0, a, 0) */
+        program_of({10, 11},
+                   {kIn1, kZero, ECUIO_COMPUTED_GREATER, kIn0, kZero,
+                    ECUIO_COMPUTED_IF},
+                   {0.0}),
+        /* 22: if(a > 0, b, b * 2) */
+        program_of({10, 11},
+                   {kIn0, kZero, ECUIO_COMPUTED_GREATER, kIn1, kIn1,
+                    ECUIO_COMPUTED_PUSH_CONSTANT | 1u, ECUIO_COMPUTED_MULTIPLY,
+                    ECUIO_COMPUTED_IF},
+                   {0.0, 2.0}),
+        /* 23: if(any(a > 0, b > 0), 1, 0) */
+        program_of({10, 11},
+                   {kIn0, kZero, ECUIO_COMPUTED_GREATER, kIn1, kZero,
+                    ECUIO_COMPUTED_GREATER, ECUIO_COMPUTED_ANY,
+                    ECUIO_COMPUTED_PUSH_CONSTANT | 1u, kZero,
+                    ECUIO_COMPUTED_IF},
+                   {0.0, 1.0}),
+        /* 24: if(all(a > 0, b > 0), 1, 0) */
+        program_of({10, 11},
+                   {kIn0, kZero, ECUIO_COMPUTED_GREATER, kIn1, kZero,
+                    ECUIO_COMPUTED_GREATER, ECUIO_COMPUTED_ALL,
+                    ECUIO_COMPUTED_PUSH_CONSTANT | 1u, kZero,
+                    ECUIO_COMPUTED_IF},
+                   {0.0, 1.0}),
+        /* 25: a + b, as format 1 writes it */
+        program_of({10, 11}, {kIn0, kIn1, ECUIO_COMPUTED_ADD}),
+        /* 26 over 20, 27 over 21 */
+        program_of({20}, {kIn0}), program_of({21}, {kIn0})};
+    for (const ecuio_computed_t& p : programs) {
+        ASSERT_TRUE(ecuio_computed_check(p));
+    }
+    EXPECT_EQ(unsupported_of(defs, programs, car),
+              (std::vector<uint16_t>{11, 21, 22, 25, 27}));
+
+    /* Inputs it can do without one at a time but not together: 12 reads
+     * a second PID the car lacks; 30 is if(any(b > 0, c > 0), 1, 0) over
+     * 11 and 12, 31 if(a > 0, b / a, c / a) over 10, 11 and 12 */
+    uint8_t lacked = 0;
+    for (uint8_t pid = 0x01; pid < 0x5C && lacked == 0; ++pid) {
+        if (pid % 0x20 != 0 && ecuio_pid_marked_unsupported(car, pid)) {
+            lacked = pid;
+        }
+    }
+    ASSERT_NE(lacked, 0);
+    const std::vector<ecuio_signal_def_t> both = {
+        pid_def(10, 0x0C), pid_def(11, 0x5C), pid_def(12, lacked),
+        computed_over(30, 0), computed_over(31, 1)};
+    const std::vector<ecuio_computed_t> together = {
+        program_of({11, 12},
+                   {kIn0, kZero, ECUIO_COMPUTED_GREATER, kIn1, kZero,
+                    ECUIO_COMPUTED_GREATER, ECUIO_COMPUTED_ANY,
+                    ECUIO_COMPUTED_PUSH_CONSTANT | 1u, kZero,
+                    ECUIO_COMPUTED_IF},
+                   {0.0, 1.0}),
+        program_of({10, 11, 12},
+                   {kIn0, kZero, ECUIO_COMPUTED_GREATER, kIn1, kIn0,
+                    ECUIO_COMPUTED_DIVIDE, ECUIO_COMPUTED_PUSH_INPUT | 2u, kIn0,
+                    ECUIO_COMPUTED_DIVIDE, ECUIO_COMPUTED_IF},
+                   {0.0})};
+    for (const ecuio_computed_t& p : together) {
+        ASSERT_TRUE(ecuio_computed_check(p));
+    }
+    EXPECT_EQ(unsupported_of(both, together, car),
+              (std::vector<uint16_t>{11, 12, 30, 31}));
+}
+
 /* A chain as deep as the validator takes is followed to its end: 100
  * reads the PID the car lacks, each next def reads the one before */
 TEST(PidSupportTest, AChainAsDeepAsTheValidatorTakesIsFollowedToItsEnd)

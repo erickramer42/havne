@@ -17,6 +17,7 @@
 #include <initializer_list>
 #include <limits>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -345,6 +346,114 @@ TEST(ComputedTest, AllAndAnyJoinAsAConditionsTermsDo)
         EXPECT_EQ(join(ECUIO_COMPUTED_ANY, r.p, r.q), r.any)
             << r.p << " " << r.q;
     }
+}
+
+/* Whether a program lacks a value with some inputs gone (ADR-0062
+ * section 3): each row's inputs gone one at a time as the rules give it,
+ * and the ones gone only together; then held to the machine: whatever the
+ * set of inputs gone, a program said to lack a value gives none for every
+ * value of the others, and one input gone alone that isn't gives a value
+ * for some. A program the steps can't run to one value lacks one with any
+ * input gone. */
+TEST(ComputedTest, AProgramLacksAValueWithTheInputsItCantDoWithout)
+{
+    /* in(i) > 0, then the rest */
+    const auto is_pos = [](unsigned i, std::initializer_list<uint8_t> rest) {
+        std::vector<uint8_t> v = {in(i), kZero, op(ECUIO_COMPUTED_GREATER)};
+        v.insert(v.end(), rest.begin(), rest.end());
+        return v;
+    };
+    struct Row {
+        const char* what;
+        std::vector<uint8_t> steps;
+        uint8_t alone;    /* bit k: input k gone alone leaves no value */
+        uint8_t together; /* a set gone together that does, or 0 */
+    };
+    const uint8_t IF = op(ECUIO_COMPUTED_IF);
+    const uint8_t DIV = op(ECUIO_COMPUTED_DIVIDE);
+    const std::vector<Row> rows = {
+        {"a", {in(0)}, 0x1, 0},
+        {"a constant", {kOne}, 0x0, 0},
+        {"a + b", {in(0), in(1), op(ECUIO_COMPUTED_ADD)}, 0x3, 0},
+        {"abs(c)", {in(2), op(ECUIO_COMPUTED_ABS)}, 0x4, 0},
+        {"if(a > 0, b, c)", is_pos(0, {in(1), in(2), IF}), 0x1, 0x6},
+        {"if(a > 0, b, b)", is_pos(0, {in(1), in(1), IF}), 0x3, 0},
+        {"if(a > 0, b + c, b)",
+         is_pos(0, {in(1), in(2), op(ECUIO_COMPUTED_ADD), in(1), IF}), 0x3, 0},
+        {"if(not(a > 0), b, b * c)",
+         is_pos(0, {op(ECUIO_COMPUTED_NOT), in(1), in(1), in(2),
+                    op(ECUIO_COMPUTED_MULTIPLY), IF}),
+         0x3, 0},
+        {"if(all(a > 0, b > 0), 1, 0)",
+         is_pos(0, {in(1), kZero, op(ECUIO_COMPUTED_GREATER),
+                    op(ECUIO_COMPUTED_ALL), kOne, kZero, IF}),
+         0x0, 0x3},
+        {"if(any(a > 0, b > 0), 1, 0)",
+         is_pos(0, {in(1), kZero, op(ECUIO_COMPUTED_GREATER),
+                    op(ECUIO_COMPUTED_ANY), kOne, kZero, IF}),
+         0x0, 0x3},
+        {"if(s > 0, a / s, b / s)",
+         is_pos(0, {in(1), in(0), DIV, in(2), in(0), DIV, IF}), 0x1, 0x6},
+        {"if(a > b, c, 0) + d",
+         {in(0), in(1), op(ECUIO_COMPUTED_GREATER), in(2), kZero, IF, in(3),
+          op(ECUIO_COMPUTED_ADD)},
+         0xB,
+         0},
+    };
+    const double grid[] = {-1.0, 0.0, 2.0};
+    for (const Row& r : rows) {
+        SCOPED_TRACE(r.what);
+        ecuio_computed_t p = program({}, {0.0, 1.0});
+        for (const uint8_t s : r.steps) {
+            p.steps[p.step_count++] = s;
+        }
+        ASSERT_TRUE(ecuio_computed_check(p));
+        EXPECT_FALSE(ecuio_computed_lacks(p, 0));
+        for (unsigned k = 0; k < ECUIO_COMPUTED_MAX_INPUTS; ++k) {
+            EXPECT_EQ(ecuio_computed_lacks(p, static_cast<uint8_t>(1u << k)),
+                      ((r.alone >> k) & 1u) != 0)
+                << "input " << k << " alone";
+        }
+        if (r.together != 0) {
+            EXPECT_TRUE(ecuio_computed_lacks(p, r.together)) << "together";
+        }
+        for (unsigned gone = 1; gone < 16; ++gone) {
+            bool some_value = false;
+            for (unsigned c = 0; c < 81; ++c) {
+                double inputs[4] = {grid[c % 3], grid[c / 3 % 3],
+                                    grid[c / 9 % 3], grid[c / 27 % 3]};
+                for (unsigned k = 0; k < 4; ++k) {
+                    if (((gone >> k) & 1u) != 0) {
+                        inputs[k] = kNone;
+                    }
+                }
+                double out = 0.0;
+                some_value = ecuio_computed_run(p, inputs, &out) || some_value;
+            }
+            if (ecuio_computed_lacks(p, static_cast<uint8_t>(gone))) {
+                EXPECT_FALSE(some_value) << "gone " << gone;
+            } else if ((gone & (gone - 1)) == 0) {
+                EXPECT_TRUE(some_value) << "gone " << gone << " alone";
+            }
+        }
+    }
+
+    ecuio_computed_t none = program({});
+    EXPECT_TRUE(ecuio_computed_lacks(none, 0x8)) << "no steps";
+    EXPECT_FALSE(ecuio_computed_lacks(none, 0)) << "no steps, none gone";
+    ecuio_computed_t two = program({in(0), in(1)});
+    EXPECT_TRUE(ecuio_computed_lacks(two, 0x4)) << "two values left";
+    ecuio_computed_t under = program({in(0), op(ECUIO_COMPUTED_ADD)});
+    EXPECT_TRUE(ecuio_computed_lacks(under, 0x2)) << "too few values";
+    ecuio_computed_t unlisted = program({in(0), 0x2F});
+    EXPECT_TRUE(ecuio_computed_lacks(unlisted, 0x2)) << "a step unlisted";
+    ecuio_computed_t past = program({in(0)});
+    past.input_count = 1;
+    past.steps[0] = in(1);
+    EXPECT_TRUE(ecuio_computed_lacks(past, 0x1))
+        << "an index past the count, its one input gone";
+    EXPECT_FALSE(ecuio_computed_lacks(past, 0x2))
+        << "an index past the count, a bit past the inputs";
 }
 
 // Each listed step in the smallest program its types allow
