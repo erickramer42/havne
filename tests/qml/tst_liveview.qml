@@ -50,6 +50,7 @@ TestCase {
         Bridge.liveSignalModel.filter.clear()
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[]}')
         Harness.clearFakeKnobs()
         Bridge.deleteUnusedSignalFiles([])
         Theme.night = "off"
@@ -59,6 +60,16 @@ TestCase {
 
     function sameColor(actual, expected, what) {
         verify(Qt.colorEqual(actual, expected), what + ": " + actual + ", expected " + expected)
+    }
+
+    // A danger alert on the demo's RPM, saved as the app's conditions
+    // (cleanup() empties them)
+    function saveRpmDanger() {
+        const saved = Bridge.saveConditions(
+            '{"havne_conditions":1,"conditions":[{"key":"rpm","name":"Engine on",' +
+            '"when":{"signal":["id:1001"],"unit":"RPM","above":-1},' +
+            '"alert":{"level":"danger"}}]}')
+        verify(saved.ok, saved.words)
     }
 
     function connectMock(page) {
@@ -963,5 +974,70 @@ TestCase {
         verify(button && button.visible, "Connect… is offered")
         verify(!button.highlighted, "secondary: the header holds the primary")
         compare(button.text, "Connect…")
+    }
+
+    // An alert ON on a signal fills its value's cell in the level's role,
+    // the mark beside a danger; the name keeps its color, other rows none
+    function test_anAlertFillsTheValueCellAlone_data() {
+        return Theme.paletteNames.map(p => ({ tag: p, palette: p }))
+    }
+    function test_anAlertFillsTheValueCellAlone(data) {
+        usePalette(data.palette)
+        // In the window: under the TestCase item every visible reads false
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const list = connectMock(page)
+        let rpm = null, other = null
+        for (let i = 0; i < list.count; ++i) {
+            const item = list.itemAtIndex(i)
+            if (findChild(item, "nameLabel").text === "RPM")
+                rpm = item
+            else if (other === null)
+                other = item
+        }
+        verify(rpm && other, "the demo's RPM row and another")
+        tryVerify(() => rpm.hasValue, 5000, "RPM has a value")
+        const value = findChild(rpm, "valueLabel")
+        const fill = findChild(rpm, "valueAlert")
+        const mark = findChild(rpm, "valueAlertMark")
+        verify(!fill.visible, "no alert, no fill")
+
+        page.alertLevels = { "1001": 2 }
+        verify(fill.visible, "a danger fills the cell")
+        sameColor(fill.color, Theme.alertDangerFill, "the danger's fill")
+        sameColor(value.color, Theme.textOnAlertDanger, "the value's text on it")
+        verify(mark.visible, "the mark beside a danger")
+        sameColor(mark.color, Theme.textOnAlertDanger, "the mark in the text's color")
+        sameColor(findChild(rpm, "nameLabel").color, Theme.text, "the name keeps its color")
+        verify(rpm.Accessible.name.indexOf(", danger alert") > 0, rpm.Accessible.name)
+        verify(!findChild(other, "valueAlert").visible, "a row no alert reads has no fill")
+
+        page.alertLevels = { "1001": 1 }
+        sameColor(fill.color, Theme.alertWarnFill, "the warning's fill")
+        sameColor(value.color, Theme.textOnAlertWarn, "the value's text on it")
+        verify(!mark.visible, "a warning has no mark")
+
+        page.alertLevels = ({})
+        verify(!fill.visible, "the fill goes with the alert")
+        sameColor(value.color, Theme.text, "and the value's own color is back")
+    }
+
+    // The page's levels follow the bridge's: a saved alert on the demo's RPM
+    // fills its row's value through Bridge.alertLevels
+    function test_theBridgesAlertFillsTheRowItReads() {
+        saveRpmDanger()
+        const page = createTemporaryObject(pageComponent, testCase.parent)
+        const list = connectMock(page)
+        let rpm = null
+        for (let i = 0; i < list.count; ++i) {
+            const item = list.itemAtIndex(i)
+            if (findChild(item, "nameLabel").text === "RPM")
+                rpm = item
+        }
+        verify(rpm, "the demo's RPM row")
+        const fill = findChild(rpm, "valueAlert")
+        tryVerify(() => fill.visible, 10000, "the RPM's danger fills its value")
+        verify(findChild(rpm, "valueAlertMark").visible, "with the mark")
+        Bridge.disconnectSession()
+        tryVerify(() => !fill.visible, 10000, "and leaves at the disconnect")
     }
 }

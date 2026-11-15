@@ -832,6 +832,14 @@ Page {
         refreshRows()
         panel = "signal"
     }
+    // Bridge.alertLevels copied once per change, by def id: a bridge map read
+    // in each cell's binding makes a JS wrapper per read (the Qt 6.12 sweep)
+    property var alertLevels: {
+        const levels = Bridge.alertLevels, copy = {}
+        for (const id in levels)
+            copy[id] = levels[id]
+        return copy
+    }
     // Bridge.gaugeSignals as plain arrays, read once (it is CONSTANT): each read
     // of a bridge map makes a new JS wrapper, and every cell's lookup reads it
     readonly property var gaugeSets: {
@@ -1280,6 +1288,9 @@ Page {
         // A trace reads the model's history of the def, kept whatever page shows
         readonly property var traceSource: Bridge.signalModel
         readonly property int signalId: entry ? entry.id : -1
+        // The highest alert ON that reads the signal; a preview cell shows none
+        readonly property int alertLevel: signalId >= 0 && pageNo >= 0
+                                          ? (root.alertLevels[String(signalId)] ?? 0) : 0
         readonly property bool stale: hasValue && entry.ageMs > Theme.staleMs
         // An enumeration's label, which only `digital` is offered
         readonly property string valueLabel: entry && entry.isEnum ? entry.label : ""
@@ -1406,7 +1417,7 @@ Page {
         readonly property var shared: ["value", "windowHigh", "windowLow", "hasValue", "stale",
                                        "from", "to", "label", "unit", "note", "decimals",
                                        "coldBelow", "warnFrom", "dangerFrom", "warnBelow", "dangerBelow", "accent", "readoutColor",
-                                       "showPeak", "picked"]
+                                       "showPeak", "picked", "alertLevel"]
         readonly property var own: ({
             "analog": ["majorStep", "minorStep", "labelDivisor", "caption", "peakLabel",
                        "showProgress", "needleColor"],

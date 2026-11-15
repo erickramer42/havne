@@ -83,6 +83,7 @@ TestCase {
 
     function cleanup() {
         Theme.night = "off"
+        Theme.nightStyle = "amber"
         Theme.look = "dark"
         Theme.nightFrom = "19:00"
         Theme.nightUntil = "07:00"
@@ -92,9 +93,20 @@ TestCase {
         Bridge.pickGauges = []
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[]}')
         Bridge.useSignalFiles([])
         Bridge.deleteUnusedSignalFiles([])
         Harness.clearFakeKnobs()
+    }
+
+    // A danger alert on the demo's RPM, saved as the app's conditions
+    // (cleanup() empties them)
+    function saveRpmDanger() {
+        const saved = Bridge.saveConditions(
+            '{"havne_conditions":1,"conditions":[{"key":"rpm","name":"Engine on",' +
+            '"when":{"signal":["id:1001"],"unit":"RPM","above":-1},' +
+            '"alert":{"level":"danger"}}]}')
+        verify(saved.ok, saved.words)
     }
 
     // A page with these properties, showing `doc` when one is given (a
@@ -1872,5 +1884,47 @@ TestCase {
         Theme.night = "on"
         verify(Qt.colorEqual(g.titleColor, Theme.textDim), "Night: no pick: " + g.titleColor)
         Theme.night = "off"
+    }
+
+    // An alert ON on a cell's signal colors that gauge's value in the
+    // level's role; a cell no alert reads keeps its own
+    function test_anAlertColorsTheGaugeItsSignalIs_data() {
+        return Theme.paletteNames.map(p => ({ tag: p, palette: p }))
+    }
+    function test_anAlertColorsTheGaugeItsSignalIs(data) {
+        const night = Theme.nightPalettes.indexOf(data.palette) >= 0
+        Theme.night = night ? "on" : "off"
+        if (night)
+            Theme.nightStyle = data.palette === "nightRed" ? "red" : "amber"
+        else
+            Theme.look = data.palette
+        const page = createTemporaryObject(pageComponent, testCase)
+        const found = gauges(page)
+        connect("mock://demo")
+        const tach = found["Engine speed"]
+        const coolant = found["Coolant"]
+        tryVerify(() => tach.hasValue && coolant.hasValue, 5000, "both read")
+        const own = coolant.valueColor
+        page.alertLevels = { "1001": 2 }
+        compare(tach.alertLevel, 2, "the RPM cell takes the danger")
+        verify(Qt.colorEqual(tach.valueColor, Theme.alertDangerFill), "in the danger's role")
+        compare(coolant.alertLevel, 0, "a cell no alert reads")
+        verify(Qt.colorEqual(coolant.valueColor, own), "keeps its color")
+        page.alertLevels = { "1001": 1 }
+        verify(Qt.colorEqual(tach.valueColor, Theme.alertWarnFill), "in the warning's role")
+    }
+
+    // The page's levels follow the bridge's: a saved alert on the demo's RPM
+    // reaches the tach through Bridge.alertLevels, not a level set by hand
+    function test_theBridgesAlertReachesTheGaugeItReads() {
+        saveRpmDanger()
+        const page = createTemporaryObject(pageComponent, testCase)
+        const found = gauges(page)
+        connect("mock://demo")
+        const tach = found["Engine speed"]
+        tryVerify(() => tach.alertLevel === 2, 10000, "the RPM's danger reaches the tach")
+        compare(found["Coolant"].alertLevel, 0, "a gauge no alert reads")
+        Bridge.disconnectSession()
+        tryVerify(() => tach.alertLevel === 0, 10000, "and leaves at the disconnect")
     }
 }

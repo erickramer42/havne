@@ -901,4 +901,54 @@ TestCase {
         const c = make(digitalC, { label: "Boost", picked: "#ffff00" })
         same(find(c, "gaugeTitle").color, Theme.textDim, "a custom pick too faint for text")
     }
+
+    // ---- An alert ON on the signal
+
+    // The value's text in the level's role over its zone's, the mark for a
+    // danger only, the zones' drawing the value's own; in each palette
+    function test_anAlertColorsTheValueAndMarksDanger_data() {
+        const kinds = [{ k: "dial", c: analogC }, { k: "ring", c: ringC },
+                       { k: "number", c: digitalC }, { k: "bar", c: barC },
+                       { k: "cells", c: segmentsC, value: 1000 }, { k: "sparkline", c: sparkC },
+                       { k: "digits", c: readoutC, digits: true }]
+        const rows = []
+        for (const p of Theme.paletteNames)
+            for (const k of kinds)
+                for (const zones of [true, false])
+                    rows.push(Object.assign({ tag: k.k + ", " + p + (zones ? "" : ", no zones"),
+                                              palette: p, zones: zones }, k))
+        return rows
+    }
+    function test_anAlertColorsTheValueAndMarksDanger(data) {
+        usePalette(data.palette)
+        const props = { label: "Coolant", value: data.value ?? 10, hasValue: true }
+        if (!data.zones)
+            Object.assign(props, { warnFrom: NaN, dangerFrom: NaN })
+        const g = make(data.c, props)
+        const drawn = () => data.digits ? g.digitColor : find(g, "readout").color
+        const mark = find(g, "dangerMark")
+        const normal = drawn()
+        compare(mark.opacity, 0, "no alert, no mark")
+        compare(mark.visible, data.zones, "a danger zone keeps the mark's slot")
+
+        g.alertLevel = 1
+        same(drawn(), Theme.alertWarnFill, "a warning's role")
+        compare(mark.opacity, 0, "a warning has no mark")
+        compare(mark.visible, data.zones, "a warning opens no slot")
+        verify(g.Accessible.name.indexOf(", warning alert") > 0, g.Accessible.name)
+
+        g.alertLevel = 2
+        same(drawn(), Theme.alertDangerFill, "a danger's role")
+        verify(mark.visible, "a danger shows the mark, with or without a zone")
+        compare(mark.opacity, 1, "a danger has the mark")
+        verify(g.Accessible.name.indexOf(", danger alert") > 0, g.Accessible.name)
+        same(g.zoneColor(g.value, "#123456"), "#123456", "the zones stay the value's")
+
+        g.hasValue = false
+        same(drawn(), Theme.textDim, "no value: no alert's color")
+        compare(mark.opacity, 0, "and no mark")
+        g.hasValue = true
+        g.alertLevel = 0
+        same(drawn(), normal, "back to its own color")
+    }
 }
