@@ -144,7 +144,9 @@ def main(argv):
     # them, every-key.json, holds every key the loader takes, each term
     # kind, and a reference of each form to each kind of signal in that
     # signal file; another, holds.json, joins two terms under a hold, so
-    # the judged run meets a term changing while a hold runs.
+    # the judged run meets a term changing while a hold runs; links.json
+    # joins link terms with signal terms, so a change of the link meets an
+    # age bound running out.
     # ConditionFileTest loads each fixture, so a seed the loader refuses
     # by mistake fails there.
     condition_files = sorted(glob.glob(os.path.join(ROOT, "tests/fixtures/conditions/*.json")))
