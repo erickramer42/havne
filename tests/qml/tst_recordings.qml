@@ -4057,7 +4057,7 @@ profile  raw
     function vehicleBook(baseline) {
         const entry = (id, label, folder) => ({
             id: id, label: label, vinKey: "", uri: "", plotted: [], unplotted: [],
-            signals: [], own: "", plugin: "", baseline: folder })
+            picks: [], own: "", baseline: folder })
         return { salt: "", picked: "v1",
                  list: [entry("v1", "Daily driver", baseline), entry("v2", "Weekend car", "")] }
     }

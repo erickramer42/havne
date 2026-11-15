@@ -2,6 +2,7 @@
 // Testing: QML: QmlTest.<name>, one per tests/qml/tst_*.qml (test_qml)
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -33,8 +34,10 @@
 #include "recordingimport.h"
 #include "recordingview.h"
 #include "signalstore.h"
+#include "storemigration.h"
 #include "windowtheme.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -413,8 +416,55 @@ public:
     // The plugin store's copies, by file name
     Q_INVOKABLE QStringList storedPlugins() const
     {
-        return QDir(PluginStore::root()).entryList(QDir::Files, QDir::Name);
+        return QDir(PluginStore::root())
+            .entryList({QStringLiteral("*.havne-plugin.json")}, QDir::Files,
+                       QDir::Name);
     }
+
+    // The vehicle book's corpus (tests/data/vehiclebook), the contract
+    // between the migration and VehicleBook's reader: each case's name,
+    // and a case's text, ext "json" the earlier format's and
+    // "expect.json" format 2's
+    Q_INVOKABLE QStringList vehicleBookCases() const
+    {
+        QStringList out;
+        const QString tail = QStringLiteral(".expect.json");
+        const QStringList names = QDir(QStringLiteral(ECUIO_VEHICLEBOOK_CORPUS))
+                                      .entryList({QStringLiteral("*") + tail},
+                                                 QDir::Files, QDir::Name);
+        for (const QString& name : names) {
+            out << name.chopped(tail.size());
+        }
+        return out;
+    }
+    Q_INVOKABLE QString vehicleBookText(const QString& name,
+                                        const QString& ext) const
+    {
+        QFile f(QStringLiteral(ECUIO_VEHICLEBOOK_CORPUS "/") + name +
+                QLatin1Char('.') + ext);
+        return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll())
+                                           : QString();
+    }
+
+    // A signal file the store's move left behind, kept as the move keeps
+    // one (under StoreMigration::unmigratedRoot, named by its hash): true
+    // when written. keptUnmigrated lists the hashes kept
+    Q_INVOKABLE bool keepUnmigrated(const QString& sha, const QString& text)
+    {
+        QDir().mkpath(StoreMigration::unmigratedRoot());
+        QFile f(StoreMigration::unmigratedRoot() + QLatin1Char('/') + sha +
+                QStringLiteral(".json"));
+        const QByteArray bytes = text.toUtf8();
+        return f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size();
+    }
+    Q_INVOKABLE QStringList keptUnmigrated() const
+    {
+        return StoreMigration::unmigrated();
+    }
+
+    // The activity lines the store's move gave at this run's start
+    Q_INVOKABLE QStringList storesMoved() const { return m_storesMoved; }
+    void setStoresMoved(const QStringList& lines) { m_storesMoved = lines; }
 
     Q_INVOKABLE void clearFakeKnobs()
     {
@@ -563,10 +613,52 @@ private:
     QStringList m_armed;
     QTemporaryDir m_scratch;
     QString m_recordingsRoot;
+    QStringList m_storesMoved;
     std::unique_ptr<QProcess> m_emulator;
     QString m_emulatorWhy;
     QHash<QString, int> m_clientEvents;
 };
+
+// The corpus's two vehicles as an older Havne left them, in the settings
+// folder a run starts from: the three signal files by the SHA-256 of
+// their bytes, the earlier format's book, the saved addresses and the
+// example plugin one vehicle picked
+void stageOldStores(const QString& settingsDir)
+{
+    const QDir from(QStringLiteral(ECUIO_VEHICLEBOOK_CORPUS "/signals"));
+    const QString to = settingsDir + QStringLiteral("/signals");
+    QDir().mkpath(to);
+    const QStringList names =
+        from.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name);
+    for (const QString& name : names) {
+        QFile in(from.filePath(name));
+        if (!in.open(QIODevice::ReadOnly)) {
+            continue;
+        }
+        const QByteArray bytes = in.readAll();
+        const QString sha = QString::fromLatin1(
+            QCryptographicHash::hash(bytes, QCryptographicHash::Sha256)
+                .toHex());
+        QFile out(to + QLatin1Char('/') + sha + QStringLiteral(".json"));
+        if (out.open(QIODevice::WriteOnly)) {
+            out.write(bytes);
+        }
+    }
+    QFile book(QStringLiteral(ECUIO_VEHICLEBOOK_CORPUS "/two-vehicles.json"));
+    QSettings prefs;
+    if (book.open(QIODevice::ReadOnly)) {
+        prefs.setValue(QStringLiteral("vehicles/document"),
+                       QString::fromUtf8(book.readAll()));
+    }
+    prefs.setValue(QStringLiteral("session/uri"),
+                   QStringLiteral("elm327://COM5?profile=user.shared-pids"));
+    prefs.setValue(
+        QStringLiteral("session/recentUris"),
+        QStringLiteral("[\"elm327://COM5?profile=user.shared-pids\"]"));
+    prefs.sync();
+    PluginStore store;
+    (void)store.import(packed_plugin::example());
+}
 
 // The relay's adapter as main() makes it on the phone, opening at once:
 // with it the relay is available, and Settings shows its box
@@ -616,7 +708,24 @@ public slots:
         qputenv("HAVNE_SETTINGS_DIR", m_settingsDir.path().toUtf8());
         QQuickStyle::setStyle(QStringLiteral("Basic"));   // as main() sets it
 
+        // A run of tst_storemove.qml starts where an older Havne left
+        // off: the store reads its mark once, so nothing can be staged
+        // after the move below
+        const QStringList args = QCoreApplication::arguments();
+        const bool staged =
+            std::any_of(args.begin(), args.end(), [](const QString& a) {
+                return a.endsWith(QStringLiteral("tst_storemove.qml"));
+            });
+        if (staged) {
+            stageOldStores(m_settingsDir.path());
+        }
+
         m_bridge = std::make_unique<SessionBridge>();
+        // As main() does, before any page reads the vehicle book
+        {
+            QSettings preferences;
+            m_harness.setStoresMoved(m_bridge->migrateStores(preferences));
+        }
         // Settings lists the recordings: here an empty scratch folder,
         // never the user's Documents
         m_bridge->setRecordingsRootForTesting(m_recordingsDir.path());

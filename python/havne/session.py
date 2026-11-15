@@ -191,7 +191,8 @@ class Stream:
                 c.timestamp_us, keys[c.condition] if c.condition < len(keys) else "",
                 "on" if c.state == e.ECUIO_CONDITION_ON else "off",
                 bool(c.flags & e.ECUIO_CONDITION_FIRED),
-                bool(c.flags & e.ECUIO_CONDITION_STALE), c.value, c.term, c.generation)
+                bool(c.flags & e.ECUIO_CONDITION_STALE), c.value, c.term, c.generation,
+                c.code)
         name, unit = self._session._names.get(c.signal_id, ("", ""))
         has_text = c.kind in TEXT_KINDS or (c.kind == e.ECUIO_VALUE_ENUM and c.text_len > 0)
         return Value(c.timestamp_us, c.arbitration_id, c.signal_id, name, unit, c.kind,

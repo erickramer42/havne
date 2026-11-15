@@ -329,6 +329,44 @@ QString ConditionModel::firingsText(int row, uint64_t firings) const
         .arg(firings);
 }
 
+QString ConditionModel::key(int row) const
+{
+    return row < 0 || static_cast<size_t>(row) >= m_rows.size()
+               ? QString()
+               : m_rows[static_cast<size_t>(row)].key;
+}
+
+int ConditionModel::rowOfKey(const QString& key) const
+{
+    for (size_t i = 0; i < m_rows.size(); ++i) {
+        if (m_rows[i].key == key) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+uint32_t ConditionModel::toneLevel(int row) const
+{
+    if (row < 0 || static_cast<size_t>(row) >= m_rows.size()) {
+        return ECUIO_ALERT_NONE;
+    }
+    const Row& r = m_rows[static_cast<size_t>(row)];
+    constexpr uint32_t kSounds =
+        ECUIO_CONDITION_USE_ALERT | ECUIO_CONDITION_ALERT_SOUND;
+    return (r.uses & kSounds) == kSounds ? r.level : ECUIO_ALERT_NONE;
+}
+
+bool ConditionModel::sounds() const
+{
+    for (size_t i = 0; i < m_rows.size(); ++i) {
+        if (toneLevel(static_cast<int>(i)) != ECUIO_ALERT_NONE) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::map<uint32_t, int> ConditionModel::alertLevels() const
 {
     std::map<uint32_t, int> levels;

@@ -36,6 +36,12 @@
 // of its terms sorted, and a term's truth can change only when a sample
 // lands on or crosses one of them, so a new sample visits the points
 // between the sample before it and itself and no other term.
+//
+// A link term reads the session's link state, never a frame: judge_link
+// gives each change of it, on the worker that judges the link, at the
+// session's time of the change, and set_link the state a set taken
+// meanwhile starts from. A link term has no age bound and is judged
+// from the first state it is given.
 
 #ifndef ECUIO_CONDITION_EVAL_H
 #define ECUIO_CONDITION_EVAL_H
@@ -78,6 +84,8 @@ struct ecuio_condition_eval {
         uint8_t has_clear = 0;
         uint8_t truth = 0;  /* kept across a stale stretch */
         uint8_t judged = 0; /* its signal's sample is within its bound */
+        uint8_t link = 0;   /* a link term: test is ECUIO_TERM_LINK_*,
+                               signal unused */
     };
     /* A signal some term reads: its newest sample, its terms, and their
      * levels and clears in order */
@@ -136,6 +144,12 @@ struct ecuio_condition_eval {
     uint32_t event_count = 0;
     std::vector<uint32_t> dirty;
     uint32_t dirty_count = 0;
+    /* The link terms, and the link state they were last judged on */
+    std::vector<uint16_t> link_terms;
+    int32_t link_state = ECUIO_OK;
+    /* judge_link's call under way: its events are flagged
+     * ECUIO_CONDITION_LINK */
+    uint8_t at_link = 0;
     /* No later than any condition's check_us */
     uint64_t next_check_us = UINT64_MAX;
     uint64_t frame = 0;
@@ -150,12 +164,14 @@ struct ecuio_condition_eval {
     uint64_t dropped = 0;
 
     /* The set bound to signal_set (and file, for key: references), as
-     * ecuio_condition_set_resolve binds it; a condition with a link or a
-     * check term is unavailable. Every state starts OFF and stale.
+     * ecuio_condition_set_resolve binds it; a condition with a check
+     * term is unavailable, and one with a link term unless link (the
+     * session has link health). Every state starts OFF and stale.
      * Throws bad_alloc. */
     static std::unique_ptr<ecuio_condition_eval>
     make(const ecuio_condition_set_t* set, const ecuio_signal_set_t* signal_set,
-         const ecuio_signal_file_t* file, uint32_t generation);
+         const ecuio_signal_file_t* file, uint32_t generation,
+         bool link = false);
 
     /* Judges one frame: its time and the values it decoded. Returns the
      * events, in `events`, valid until the next call. Allocates
@@ -163,11 +179,22 @@ struct ecuio_condition_eval {
     uint32_t judge(uint64_t time_us, const ecuio_value_t* values,
                    uint32_t count);
 
+    /* Judges a change of the link's state at time_us, as judge judges a
+     * frame: the deadlines before it first, on the state before. Its
+     * events carry ECUIO_CONDITION_LINK. Allocates nothing. */
+    uint32_t judge_link(uint64_t time_us, int32_t state);
+
+    /* The link's state with no event: each link term's truth, joined at
+     * the next judge or judge_link. For a set the worker takes, before
+     * it judges anything. */
+    void set_link(int32_t state);
+
     /* Condition index's state as it stands */
     ecuio_condition_state_t state_of(uint32_t index) const;
 
     /* Condition index's terms whose signal has a sample since the make,
-     * a bit each from term 0; 0 for a condition left unavailable */
+     * a link term among them, a bit each from term 0; 0 for a condition
+     * left unavailable */
     uint8_t sampled_terms(uint32_t index) const;
 
     /* The bytes the evaluator holds: its own and its vectors' */
@@ -181,6 +208,8 @@ private:
     void sample(uint16_t index);
     void rejoin(uint32_t index, uint64_t at_us, uint32_t decider);
     void settle(uint64_t now_us, bool hold_at_now);
+    uint64_t begin(uint64_t time_us);
+    uint32_t finish(uint64_t time_us);
     void settle_one(uint32_t index, uint64_t now_us, bool hold_at_now);
     void changed(uint32_t index, uint64_t at_us, uint32_t decider, bool fired);
     void watch(uint32_t index, uint64_t deadline_us);

@@ -710,6 +710,8 @@ ApplicationWindow {
                         recents: settingsView.connectUris
                         vehicleUri: settingsView.vehicleUri
                         adapters: settingsView.connectAdapters
+                        profileWords: settingsView.connectProfileWords
+                        profileNames: settingsView.profileNames
                         onConnectToUri: uri => settingsView.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()
                         onLogRequested: root.openLog()
@@ -732,6 +734,7 @@ ApplicationWindow {
                         connectUris: settingsView.connectUris
                         connectVehicleUri: settingsView.vehicleUri
                         connectAdapters: settingsView.connectAdapters
+                        connectProfileWords: settingsView.connectProfileWords
                         onConnectListShown: root.listAdapters()
                         onConnectToUri: uri => settingsView.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()

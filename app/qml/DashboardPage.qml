@@ -68,8 +68,8 @@ Page {
         property bool phoneDrive: false
         property int driveHints: 0
     }
-    // The vehicles' document (Main binds Settings'): the signal files a
-    // layout file names are the picked vehicle's
+    // The vehicles' document (Main binds Settings'): the files a layout
+    // file names are the picked vehicle's picks'
     property var vehicles: VehicleBook.empty()
     // Settings' URI and profile, whose signals Add offers with no session
     property string offlineUri: ""
@@ -445,15 +445,21 @@ Page {
         layoutNote = words
         layoutNoteBad = bad === true
     }
-    // The picked vehicle's signal files, each with the references its
-    // profile gives: [{ name, sha256, profile, refs }]. A file whose profile
-    // isn't registered (it doesn't load) gives none
+    // A form's name in the export's note and the load's words, so the two agree
+    function formWord(f) {
+        return f === "phone" ? qsTr("phone") : qsTr("desktop")
+    }
+    // The picked vehicle's picks the store has, each as the file a layout
+    // names (ADR-0064, "Dashboards") with the references its profile
+    // gives: [{ name, sha256, from, profile, refs }]. sha256 is the
+    // variant's written file's; from the hashes of the signal files it was
+    // made from, which a layout saved by an earlier version names
     function vehicleFiles() {
         const v = VehicleBook.picked(vehicles)
         if (!v)
             return []
-        return v.signals.map(f => ({
-            name: f.name, sha256: f.sha256, profile: f.profile,
+        return Bridge.pickFiles(v.picks).map(f => ({
+            name: f.name, sha256: f.sha256, from: f.from, profile: f.profile,
             refs: Bridge.profileSignals("mock://?profile=" + f.profile).map(r => r.ref) }))
     }
     // The name a layout file is offered under
@@ -462,13 +468,15 @@ Page {
         const slug = v ? v.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") : ""
         return "dashboard-" + (slug !== "" ? slug + "-" : "") + form + ".json"
     }
-    // Writes this form's layout, and the signal files it needs by name, to
-    // the file at url
+    // Writes this form's layout, and the picks' files it needs by name,
+    // to the file at url. A pick no plugin here has gives no references,
+    // so the layout can't say it needs it: the note names the pick
     function exportLayoutTo(url) {
         commitTyping()
         const files = vehicleFiles()
         const needed = DashboardBook.neededFiles(doc, files)
-        const unloaded = files.filter(f => f.refs.length === 0).map(f => f.name)
+        const v = VehicleBook.picked(vehicles)
+        const unloaded = (v ? v.picks : []).filter(p => !files.some(f => f.profile === p))
         const text = DashboardBook.exportText(doc, form, needed)
         if (text === "") {
             Bridge.dropPicked(url)
@@ -480,12 +488,13 @@ Page {
             noteLayout(qsTr("Not saved: %1").arg(r.words), true)
             return false
         }
-        noteLayout((needed.length === 0
-                    ? qsTr("Saved this layout to a file")
-                    : qsTr("Saved this layout to a file. It needs the signal files %1")
-                          .arg(needed.map(f => f.name).join(", ")))
+        noteLayout(qsTr("Saved this layout to a file. It's a %1 layout: it loads on a %1, not on a %2. "
+                        + "A layout isn't scaled between forms")
+                       .arg(formWord(form)).arg(formWord(form === "phone" ? "desktop" : "phone"))
+                   + (needed.length === 0 ? ""
+                      : qsTr(". It needs the plugins %1").arg(needed.map(f => f.name).join(", ")))
                    + (unloaded.length === 0 ? ""
-                      : qsTr(". The vehicle's signal files %1 don't load, so a gauge reading them isn't listed as needing them")
+                      : qsTr(". The vehicle's picks %1 aren't in the store, so a gauge reading them isn't listed as needing them")
                             .arg(unloaded.join(", "))))
         return true
     }
@@ -502,8 +511,16 @@ Page {
             noteLayout(qsTr("Not loaded: %1").arg(r.words), true)
             return false
         }
+        // A pick is found by its written file's hash, or by the hash of a
+        // signal file it was made from
         const files = vehicleFiles()
-        const read = DashboardBook.importProblem(r.text, form, files.map(f => f.sha256))
+        const have = []
+        for (const f of files) {
+            have.push(f.sha256)
+            for (let i = 0; i < f.from.length; ++i)
+                have.push(f.from[i])
+        }
+        const read = DashboardBook.importProblem(r.text, form, have)
         if (read.problem === "none") {
             noteLayout(qsTr("Not loaded: the file is empty"), true)
         } else if (read.problem === "damaged") {
@@ -513,8 +530,7 @@ Page {
         } else if (read.problem === "otherform") {
             noteLayout(qsTr("Not loaded: the file is a %1 layout and this is the %2 form. "
                             + "A layout isn't scaled between forms")
-                       .arg(read.form === "phone" ? qsTr("phone") : qsTr("desktop"))
-                       .arg(form === "phone" ? qsTr("phone") : qsTr("desktop")), true)
+                       .arg(formWord(read.form)).arg(formWord(form)), true)
         } else {
             commitTyping()
             cancelHold()
@@ -524,12 +540,19 @@ Page {
             if (read.problem === "dropped")
                 words.push(qsTr("%1 left out because they couldn't be read").arg(droppedText(read.dropped)))
             if (read.notes.indexOf("no-form") >= 0)
-                words.push(qsTr("the file named no form, so it was read as the %1 form")
-                           .arg(form === "phone" ? qsTr("phone") : qsTr("desktop")))
-            if (read.missing.length > 0)
-                words.push(qsTr("it needs signal files this vehicle lacks: %1. Import them under Signals; "
-                                + "until then those gauges read not in profile")
-                           .arg(read.missing.map(f => f.name).join(", ")))
+                words.push(qsTr("the file named no form, so it was read as the %1 form").arg(formWord(form)))
+            // A pick changed since the save (Replace, an edit in the form)
+            // is picked still: only its file is another
+            const changedPicks = DashboardBook.changedFiles(read.missing, files)
+            const absent = read.missing.filter(m => changedPicks.indexOf(m) < 0)
+            if (changedPicks.length > 0)
+                words.push(qsTr("it was saved with another version of %1: a gauge reading a signal the "
+                                + "picked version lacks reads not in profile")
+                           .arg(changedPicks.map(f => f.name).join(", ")))
+            if (absent.length > 0)
+                words.push(qsTr("it needs plugins this vehicle doesn't pick: %1. Import or pick them under "
+                                + "Signals; until then those gauges read not in profile")
+                           .arg(absent.map(f => f.name).join(", ")))
             const changed = edit(read.doc, stepOf("", qsTr("load a layout"), -1, -1, 0))
             if (!changed)
                 words[0] = qsTr("The file holds the layout already shown")
@@ -2408,6 +2431,7 @@ Page {
     property var connectUris: []
     property string connectVehicleUri: ""
     property var connectAdapters: []
+    property var connectProfileWords: ({})
     // A tapped row outlives the list, which the Loader makes again each show
     property string connectTapped: ""
     readonly property bool connectShown: form === "phone" && !Bridge.connected && !editing
@@ -2424,6 +2448,7 @@ Page {
             recents: root.connectUris
             vehicleUri: root.connectVehicleUri
             adapters: root.connectAdapters
+            profileWords: root.connectProfileWords
             tapped: root.connectTapped
             onPicked: uri => root.connectTapped = uri
             onConnectTo: uri => root.connectToUri(uri)
