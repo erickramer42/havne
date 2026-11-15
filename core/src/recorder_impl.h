@@ -417,6 +417,7 @@ struct ecuio_recorder {
     void close_window(uint64_t end_us, const std::string& why);
 
     void flush_items(uint64_t limit);
+    void take_focus_items(uint64_t limit);
 
     static uint64_t place_of(const record_head& rh, const uint8_t* body,
                              size_t size, uint64_t pos);

@@ -363,6 +363,21 @@ void ecuio_recorder::flush_items(uint64_t limit)
     }
 }
 
+/* The held focus items at or before limit, taken into win_focus: a
+ * window opening there names them in its header, once */
+void ecuio_recorder::take_focus_items(uint64_t limit)
+{
+    for (auto it = pending.begin();
+         it != pending.end() && it->host_us <= limit;) {
+        if (it->kind == item_kind::focus) {
+            win_focus = it->focus;
+            it = pending.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 /* A record's place in session time: a frame's own, a link change's
  * own, or the newest before it, from pos */
 uint64_t ecuio_recorder::place_of(const record_head& rh, const uint8_t* body,
@@ -414,6 +429,7 @@ bool ecuio_recorder::advance_tail(bool final)
         if (w != nullptr && pos >= w->start_us &&
             (w->open_end || pos <= w->end_us)) {
             if (!w->opened) {
+                take_focus_items(host_us);
                 open_window(*w, t, host_us);
             }
             flush_items(host_us);
