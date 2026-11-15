@@ -1818,10 +1818,6 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 
     set_target_properties(test_bridge PROPERTIES AUTOMOC ON)
     app_enable_warnings(test_bridge)
-    # One file of many tests, past MSVC's default section limit
-    if(MSVC)
-        target_compile_options(test_bridge PRIVATE /bigobj)
-    endif()
 
     # core/src for pid_support.h: core's judgment of the unsupported
     # signals, fed to the model (test_core's precedent)
