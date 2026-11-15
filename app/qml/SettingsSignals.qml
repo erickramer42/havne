@@ -34,14 +34,11 @@ ColumnLayout {
     // A row's press: the pick made or undone, and the focus, when the
     // button had it, kept on that variant's row, which a first pick
     // moves up with its plugin
+    signal focusRow(string profile)
     function pressRow(profile, focused) {
         root.host.togglePick(profile)
-        if (!focused)
-            return
-        const at = root.host.variantRows.findIndex(r => r.profile === profile)
-        const item = at >= 0 ? rows.itemAt(at) : null
-        if (item !== null)
-            item.pickButton.forceActiveFocus()
+        if (focused)
+            root.focusRow(profile)
     }
     // What a row shows while the list is shorter than its items
     readonly property var noRow: ({ sha256: "", id: "", name: "", version: "", variant: "",
@@ -386,19 +383,25 @@ ColumnLayout {
     // The model is the rows' count: a pick changes a row's data and not
     // their number, so the items stay and a press keeps its focus
     Repeater {
-        id: rows
         model: root.host.variantRows.length
         ColumnLayout {
             id: row
             required property int index
             readonly property var entry: root.host.variantRows[index] ?? root.noRow
-            readonly property Item pickButton: pick
             readonly property bool open: root.host.openRow === entry.profile
             readonly property string title: root.host.rowTitle(entry)
             readonly property string reads: root.host.rowReads(entry)
             objectName: "signalRow_" + index
             Layout.fillWidth: true
             spacing: Theme.spacing / 2
+
+            Connections {
+                target: root
+                function onFocusRow(profile) {
+                    if (profile === row.entry.profile)
+                        pick.forceActiveFocus()
+                }
+            }
 
             Label {
                 objectName: "rowCaption"
