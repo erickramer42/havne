@@ -1572,6 +1572,7 @@ struct ShownConditions {
     std::string name;
     const char* source = "file";
     std::vector<std::string> keys;
+    std::vector<uint8_t> link_terms; // a bit for each link term
     std::vector<ecuio_condition_info_t> infos;
     std::vector<ecuio_condition_state_t> states; // as last written
     std::vector<ecuio_condition_state_t> now;    // poll_conditions' read
@@ -1601,6 +1602,7 @@ bool attach_conditions(Output& out, ecuio_session_t* session,
     shown->name = ecuio_condition_set_name(set);
     shown->source = source;
     shown->keys.resize(count);
+    shown->link_terms.assign(count, 0);
     shown->infos.resize(count);
     shown->states.resize(count);
     shown->now.resize(count);
@@ -1617,6 +1619,14 @@ bool attach_conditions(Output& out, ecuio_session_t* session,
     for (uint32_t i = 0; i < count; ++i) {
         ecuio_condition_set_get(set, i, &shown->infos[i]);
         shown->keys[i] = shown->infos[i].key;
+        for (uint32_t k = 0; k < shown->infos[i].term_count && k < 8; ++k) {
+            ecuio_condition_term_t t{};
+            if (ecuio_condition_set_get_term(set, i, k, &t) == ECUIO_OK &&
+                t.kind == ECUIO_TERM_LINK) {
+                shown->link_terms[i] =
+                    static_cast<uint8_t>(shown->link_terms[i] | 1u << k);
+            }
+        }
     }
     for (uint32_t i = 0; i < count; ++i) {
         shown->infos[i].key = shown->keys[i].c_str();
@@ -2614,6 +2624,7 @@ struct Stream {
     // --conditions: each condition's key by its index, set before start
     // and never changed after; the events no line was written for
     std::vector<std::string> condition_keys;
+    std::vector<uint8_t> condition_link_terms;
     std::atomic<uint64_t> conditions_dropped{0};
 };
 
@@ -2647,17 +2658,20 @@ void on_frame(const ecuio_frame_t* f, void* user)
 }
 
 // A frame's condition events (ADR-0063), after its values line: a line
-// each, only for a frame that was written. An event with no line is a
-// change the reader never sees, so each is counted for the end line.
+// each, only for a frame that was written; a link change's, which have no
+// frame, whenever they come. An event with no line is a change the
+// reader never sees, so each is counted for the end line.
 void on_conditions(const ecuio_condition_event_t* events, uint32_t count,
                    void* user)
 {
     auto* s = static_cast<Stream*>(user);
     const uint64_t lost = cli::write_condition_events(
         events, count, s->condition_keys, s->last_written,
-        s->limit != 0 && s->seen > s->limit, [s](const char* line, size_t n) {
+        s->limit != 0 && s->seen > s->limit,
+        [s](const char* line, size_t n) {
             return s->ring.push(cli::LineKind::Condition, line, n, s->wait);
-        });
+        },
+        &s->condition_link_terms);
     if (lost != 0) {
         s->conditions_dropped.fetch_add(lost, std::memory_order_relaxed);
     }
@@ -3410,6 +3424,7 @@ int run_stream(const StreamArgs& args)
         }
         conditions = nullptr;
         stream->condition_keys = shown.keys;
+        stream->condition_link_terms = shown.link_terms;
         ecuio_register_conditions_callback(session, on_conditions,
                                            stream.get());
     }

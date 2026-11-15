@@ -131,6 +131,24 @@ inline const char* term_link_word(uint32_t test)
     }
 }
 
+// The link's state (ecuio_session_get_error_state's code) in the words a
+// link term names it by, "ok" for ECUIO_OK and "not_ok" for any other
+inline const char* link_state_word(int32_t code)
+{
+    switch (code) {
+    case ECUIO_OK:
+        return "ok";
+    case ECUIO_ERR_VEHICLE_TIMEOUT:
+        return "timeout";
+    case ECUIO_ERR_REQUEST_FAILED:
+        return "request_failed";
+    case ECUIO_ERR_TRANSPORT_HARD_FAILURE:
+        return "hard_failure";
+    default:
+        return "not_ok";
+    }
+}
+
 // A check term's kind as the file writes it
 inline const char* term_check_word(uint32_t test)
 {
@@ -475,11 +493,13 @@ inline void conditions_line(Line& l, const char* name, const char* source,
 
 // {"type":"condition", t_us, key, state (on|off), fired, stale, value,
 // term}: one event, at its own time (a deadline's is earlier than the
-// frame line before it). Fits a buffer of kConditionLineBytes.
+// frame line before it); link_term, when the term is a link term, adds
+// link, the link's state in link_state_word's words. Fits a buffer of
+// kConditionLineBytes.
 constexpr size_t kConditionLineBytes = 256 + 6 * ECUIO_CONDITION_KEY_MAX;
 
 inline void condition_event_line(Line& l, const ecuio_condition_event_t& e,
-                                 const char* key)
+                                 const char* key, bool link_term = false)
 {
     l.raw("{\"type\":\"condition\"");
     l.key("t_us");
@@ -496,6 +516,10 @@ inline void condition_event_line(Line& l, const ecuio_condition_event_t& e,
     l.number(e.value);
     l.key("term");
     l.u64(e.term);
+    if (link_term) {
+        l.key("link");
+        word(l, link_state_word(e.code));
+    }
     l.ch('}');
 }
 
@@ -558,33 +582,38 @@ inline bool availability_changed(const ecuio_condition_state_t* was,
     return false;
 }
 
-// A frame's condition events into a stream: a line each through
-// push(line, size), which says whether it took the line. Returns the
-// events lost: every one of a frame whose own line was dropped, each
-// line push refused, and an event of a condition keys has no entry for.
-// The events of a frame past --count are none: the stream ended before
-// it.
+// A frame's or a link change's condition events into a stream: a line
+// each through push(line, size), which says whether it took the line.
+// Returns the events lost: every one of a frame whose own line was
+// dropped, each line push refused, and an event of a condition keys has
+// no entry for. A link change's events (ECUIO_CONDITION_LINK) have no
+// frame of their own. Nothing is written past --count: the stream ended
+// there. link_terms, when given, holds a bit for each link term of each
+// condition (bit k: term k).
 template <typename Push>
-uint64_t write_condition_events(const ecuio_condition_event_t* events,
-                                uint32_t count,
-                                const std::vector<std::string>& keys,
-                                bool frame_written, bool past_count, Push push)
+uint64_t
+write_condition_events(const ecuio_condition_event_t* events, uint32_t count,
+                       const std::vector<std::string>& keys, bool frame_written,
+                       bool past_count, Push push,
+                       const std::vector<uint8_t>* link_terms = nullptr)
 {
     if (past_count) {
         return 0;
     }
-    if (!frame_written) {
-        return count;
-    }
     uint64_t lost = 0;
     for (uint32_t i = 0; i < count; ++i) {
-        if (events[i].condition >= keys.size()) {
+        const ecuio_condition_event_t& e = events[i];
+        if (e.condition >= keys.size() ||
+            (!frame_written && (e.flags & ECUIO_CONDITION_LINK) == 0)) {
             ++lost;
             continue;
         }
+        const bool link_term =
+            link_terms != nullptr && e.condition < link_terms->size() &&
+            e.term < 8 && (((*link_terms)[e.condition] >> e.term) & 1u) != 0;
         char buf[kConditionLineBytes];
         Line l(buf, sizeof buf);
-        condition_event_line(l, events[i], keys[events[i].condition].c_str());
+        condition_event_line(l, e, keys[e.condition].c_str(), link_term);
         if (!l.finish() || !push(l.data(), l.size())) {
             ++lost;
         }
