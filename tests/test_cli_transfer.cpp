@@ -276,6 +276,61 @@ TEST(CliTransferTest, TheEstimateLineSaysWhatCoreSized)
               "\"bytes\":260}]}");
 }
 
+// An interval with no fewer rows than every sweep thins nothing, and its
+// lines say so; the sweep is sized beside --rows' interval for the rule
+TEST(CliTransferTest, AnIntervalThatThinsNothingSaysSo)
+{
+    EXPECT_EQ(cli::with_sweep({100u}), (std::vector<uint32_t>{100u, 0u}));
+    EXPECT_EQ(cli::with_sweep({0u, 100u, 250u}),
+              (std::vector<uint32_t>{0u, 100u, 250u}));
+    EXPECT_TRUE(cli::no_fewer_than_sweep(100, 40, 40));
+    EXPECT_TRUE(cli::no_fewer_than_sweep(100, 41, 40));
+    EXPECT_FALSE(cli::no_fewer_than_sweep(100, 39, 40));
+    EXPECT_FALSE(cli::no_fewer_than_sweep(0, 40, 40));
+    EXPECT_FALSE(cli::no_fewer_than_sweep(100, 40, UINT64_MAX));
+    /* no row at all (a range holding no sample): no rate to be slower than */
+    EXPECT_FALSE(cli::no_fewer_than_sweep(100, 0, 0));
+
+    const uint32_t rows[] = {100u, 250u, 0u};
+    ecuio_export_estimate_t sized[3] = {};
+    sized[0].rows = 40;
+    sized[1].rows = 16;
+    sized[2].rows = 40;
+    for (ecuio_export_estimate_t& s : sized) {
+        s.columns = 2;
+    }
+    EXPECT_EQ(cli::sweep_rows_of(rows, sized, 3), 40u);
+    EXPECT_EQ(cli::sweep_rows_of(rows, sized, 2), UINT64_MAX);
+    char buf[512];
+    cli::Line l(buf, sizeof buf);
+    /* the first two shown, the sweep sized for the rule alone */
+    cli::estimate_line(l, rows, sized, 2, 0, 40);
+    EXPECT_EQ(text(l),
+              "{\"type\":\"estimate\",\"format\":\"csv\",\"layout\":\"wide\","
+              "\"columns\":2,\"missing\":0,\"sizes\":[{\"row_ms\":100,"
+              "\"rows\":40,\"bytes\":0,\"no_fewer_than_sweep\":true},"
+              "{\"row_ms\":250,\"rows\":16,\"bytes\":0}]}");
+
+    Args g({"havne-cli", "export", "rec", "grid.csv", "--format", "csv",
+            "--rows", "100"});
+    cli::ExportArgs grid;
+    std::string why;
+    ASSERT_TRUE(cli::parse_export(g.argc(), g.argv.data(), grid, &why));
+    ecuio_export_report_t r{};
+    r.rows = 40;
+    char out[1024];
+    cli::Line yes(out, sizeof out);
+    cli::exported_line(yes, grid, r, 0, true);
+    EXPECT_NE(text(yes).find("\"row_ms\":100,\"missing\":0,"
+                             "\"no_fewer_than_sweep\":true,\"left_out\""),
+              std::string::npos)
+        << text(yes);
+    cli::Line no(out, sizeof out);
+    cli::exported_line(no, grid, r, 0, false);
+    EXPECT_EQ(text(no).find("no_fewer_than_sweep"), std::string::npos)
+        << text(no);
+}
+
 TEST(CliTransferTest, TheLinesSayWhatCoreReports)
 {
     Args a({"havne-cli", "export", "rec", "out.pcapng", "--format", "pcapng"});

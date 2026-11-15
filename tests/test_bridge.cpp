@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <gtest/gtest.h>
+#include <functional>
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -31,11 +32,13 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <map>
 #include <vector>
@@ -53,7 +56,9 @@
 #include "pluginstore.h"
 #include "readonce.h"
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
+#include "urlwrite.h"
 #include "windowtheme.h"
+#include "new_counter.h" // operator new counted per thread: the conditions callback
 #include <ecuio/profile.h>
 #include <ecuio/signals.h>
 #include <ecuio/version.h>
@@ -1750,24 +1755,76 @@ TEST(BridgeTest, FrameLogOrdersByArrivalNotTimestamp)
     bridge.disconnectSession();
 }
 
-TEST(BridgeTest, AFrameRowsTimeIsReadByItsViewRow)
+/* A table keeps its place by a row's arrival number, which a stamp that
+ * steps back (a vendor's 32-bit stamp wrapping) leaves in order: each row is
+ * found again by its own, in either order and under a filter, and one that
+ * has gone or is filtered out gives the next row in the view's order. */
+TEST(BridgeTest, AFrameRowIsFoundAgainByItsArrivalAcrossAStampThatStepsBack)
 {
     SessionBridge bridge;
     FrameListModel* proxy = bridge.model();
-    EXPECT_EQ(proxy->timestampAt(0), -1) << "no rows";
-    for (quint64 t : {100u, 200u, 300u}) {
+    EXPECT_EQ(proxy->seqAt(0), -1) << "no rows";
+    EXPECT_EQ(proxy->rowAtSeq(0), -1) << "no rows";
+    // The stamp wraps after the fourth frame; the IDs alternate
+    const quint64 stamps[] = {4000, 5000, 6000, 7000, 100, 200, 300, 400};
+    const int n = static_cast<int>(std::size(stamps));
+    for (int k = 0; k < n; ++k) {
         ecuio_frame_t f{};
-        f.timestamp_us = t;
+        f.timestamp_us = stamps[k];
+        f.arbitration_id = k % 2 == 0 ? 0x123 : 0x124;
+        f.data_length = 1;
+        proxy->appendFrame(f, 1);
+    }
+    ASSERT_EQ(proxy->count(), n);
+    for (const bool newestFirst : {true, false}) {
+        proxy->setNewestFirst(newestFirst);
+        for (int row = 0; row < n; ++row) {
+            // Rows are in arrival order: the kth frame's number is k
+            const int k = newestFirst ? n - 1 - row : row;
+            EXPECT_EQ(proxy->seqAt(row), k) << "row " << row;
+            EXPECT_EQ(proxy->rowAtSeq(k), row) << "row " << row;
+        }
+        EXPECT_EQ(proxy->seqAt(-1), -1);
+        EXPECT_EQ(proxy->seqAt(n), -1);
+        EXPECT_EQ(proxy->rowAtSeq(n + 5), newestFirst ? 0 : n - 1)
+            << "past them all: the newest row";
+    }
+
+    // Only 0x124's frames (arrivals 1, 3, 5, 7): one the filter leaves out
+    // gives the next shown row in the view's order
+    ASSERT_TRUE(proxy->setFilter(QStringLiteral("124"), QString(), 0, 0)
+                    .value(QStringLiteral("ids"))
+                    .toString()
+                    .isEmpty());
+    ASSERT_EQ(proxy->count(), 4);
+    proxy->setNewestFirst(false);
+    EXPECT_EQ(proxy->rowAtSeq(5), 2) << "a shown arrival is its own row";
+    EXPECT_EQ(proxy->rowAtSeq(4), 2)
+        << "oldest first: the first to arrive after";
+    EXPECT_EQ(proxy->rowAtSeq(0), 0);
+    EXPECT_EQ(proxy->rowAtSeq(8), 3) << "past them all: the last row";
+    proxy->setNewestFirst(true);
+    EXPECT_EQ(proxy->rowAtSeq(5), 1) << "a shown arrival is its own row";
+    EXPECT_EQ(proxy->rowAtSeq(4), 2)
+        << "newest first: the last to arrive before";
+    EXPECT_EQ(proxy->rowAtSeq(0), 3) << "none arrived before: the last row";
+    EXPECT_EQ(proxy->rowAtSeq(8), 0);
+    proxy->setFilter(QString(), QString(), 0, 0);
+
+    // The arrival numbers run on across a clear, so a place noted before it
+    // is before every row: the oldest one
+    proxy->clear();
+    for (int k = 0; k < 3; ++k) {
+        ecuio_frame_t f{};
+        f.timestamp_us = 50;
         f.arbitration_id = 0x123;
         f.data_length = 1;
         proxy->appendFrame(f, 1);
     }
-    EXPECT_EQ(proxy->timestampAt(0), 300) << "newest first";
-    EXPECT_EQ(proxy->timestampAt(2), 100);
+    EXPECT_EQ(proxy->seqAt(2), n) << "newest first: the oldest row is last";
+    EXPECT_EQ(proxy->rowAtSeq(3), 2);
     proxy->setNewestFirst(false);
-    EXPECT_EQ(proxy->timestampAt(0), 100) << "oldest first";
-    EXPECT_EQ(proxy->timestampAt(-1), -1);
-    EXPECT_EQ(proxy->timestampAt(3), -1);
+    EXPECT_EQ(proxy->rowAtSeq(3), 0);
 }
 
 TEST(BridgeTest, FrameLogOrdersNewestFirstByDefault)
@@ -5993,6 +6050,241 @@ TEST(BridgeTest, ChartDataKeepsEachSlicesPointsAsTheWindowSlides)
         << "the same points, slice for slice";
 }
 
+/* The Dashboard's trace (ADR-0057's note "a trace reads the model's
+ * history"): one row's samples sliced as chartData slices them, for any row
+ * whether Live plots it or not, over the window before its own newest sample */
+TEST(BridgeTest, ATraceIsTheChartsSlicingForAnyRow)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    EXPECT_TRUE(model.trace(1001, 5000, 10).isEmpty()) << "no history yet";
+    for (qint64 t = 0; t < 20000; t += 10) {
+        const double wave = static_cast<double>(
+            (t / 10) % 100 < 50 ? (t / 10) % 50 : 50 - (t / 10) % 50);
+        model.updateValues(
+            {{uint16_t(1001), wave}, {uint16_t(2001), double(t)}}, t);
+    }
+    const auto chartOf = [&model](int s, qint64 windowMs, int columns) {
+        QList<double> out;
+        for (const QVariant& v : model.chartData(windowMs, columns)
+                                     .at(s)
+                                     .toMap()
+                                     .value("samples")
+                                     .toList())
+            out << v.toDouble();
+        return out;
+    };
+    const std::pair<qint64, int> shapes[] = {
+        {0, 0}, {5000, 0}, {5000, 10}, {5000, 300}, {120000, 40}};
+    for (const auto& shape : shapes) {
+        EXPECT_EQ(model.trace(1001, shape.first, shape.second),
+                  chartOf(0, shape.first, shape.second))
+            << shape.first << " ms, " << shape.second << " columns";
+        EXPECT_EQ(model.trace(2001, shape.first, shape.second),
+                  chartOf(1, shape.first, shape.second))
+            << shape.first << " ms, " << shape.second << " columns";
+    }
+
+    const QList<double> plotted = model.trace(1001, 5000, 10);
+    model.toggleSubscribed(0);
+    ASSERT_EQ(model.chartData().size(), 1) << "Live no longer plots it";
+    EXPECT_EQ(model.trace(1001, 5000, 10), plotted)
+        << "the Dashboard still traces it";
+
+    model.updateValues({{uint16_t(2001), 1.0}}, 30000);
+    const QList<double> own = model.trace(1001, 5000, 0);
+    ASSERT_FALSE(own.isEmpty());
+    EXPECT_EQ(own.first(), 19990.0 - 5000.0)
+        << "the window ends at the row's own newest";
+
+    EXPECT_TRUE(model.trace(4242, 5000, 10).isEmpty()) << "no such def";
+    EXPECT_TRUE(model.trace(-1, 5000, 10).isEmpty());
+    EXPECT_TRUE(model.trace(1001 + 65536, 5000, 10).isEmpty())
+        << "an id past 16 bits is no def's";
+}
+
+TEST(BridgeTest, ATextRowHasNoTrace)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    defs[1].kind = ECUIO_VALUE_HEX; /* id 2001, a text row */
+    model.setSignalSet(&set);
+    model.updateTexts({{uint16_t(2001), QStringLiteral("62 F1 90")}}, 10);
+    model.updateValues({{uint16_t(1001), 5.0}}, 10);
+    EXPECT_TRUE(model.trace(2001, 0, 0).isEmpty());
+    EXPECT_EQ(model.trace(1001, 0, 0), (QList<double>{10, 5}));
+}
+
+/* A one-window spike (a fuel cut's lambda) keeps its height and its place
+ * in every read while it is in the window, however the window has moved */
+TEST(BridgeTest, ATraceKeepsAOneWindowSpikeInPlaceAsItScrolls)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    const auto window = [](qint64 endMs, double high) {
+        SignalListModel::WindowValue w;
+        w.id = 1001;
+        w.last = 1.0;
+        w.lastMs = endMs;
+        w.min = 0.98;
+        w.minMs = endMs - 70;
+        w.max = high;
+        w.maxMs = endMs - 40;
+        return w;
+    };
+    const qint64 windowMs = 30000;
+    const int columns = 100; /* slices of 300 ms, three windows in each */
+    const qint64 spikeAt = 5100 - 40;
+    int reads = 0;
+    for (qint64 end = 100; end <= windowMs; end += 100) {
+        model.updateWindow({window(end, end == 5100 ? 1.99 : 1.0)});
+        if (end < 5100)
+            continue;
+        const QList<double> t = model.trace(1001, windowMs, columns);
+        bool found = false;
+        for (int i = 0; i + 1 < t.size(); i += 2)
+            found =
+                found || (t.at(i) == double(spikeAt) && t.at(i + 1) == 1.99);
+        ASSERT_TRUE(found) << "the spike at its own time and height, read at "
+                           << end;
+        ++reads;
+    }
+    EXPECT_GT(reads, 200);
+}
+
+TEST(BridgeTest, ATraceIsInTheUnitSystem)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    std::memset(defs[0].unit, 0, sizeof defs[0].unit);
+    std::memcpy(defs[0].unit, "km/h", 4);
+    model.setSignalSet(&set);
+    model.updateValues({{uint16_t(1001), 100.0}}, 0);
+    model.updateValues({{uint16_t(1001), 110.0}}, 100);
+    model.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    const QList<double> mph = model.trace(1001, 0, 0);
+    ASSERT_EQ(mph.size(), 4);
+    EXPECT_NEAR(mph.at(1), 100.0 * 0.621371192237334, 1e-9);
+    EXPECT_NEAR(mph.at(3), 110.0 * 0.621371192237334, 1e-9);
+    model.setUnitSystem(ECUIO_UNITS_METRIC);
+    EXPECT_EQ(model.trace(1001, 0, 0), (QList<double>{0, 100, 100, 110}));
+}
+
+/* Two minutes of windows, each with its lowest, highest and newest apart
+ * (three points for each window), fit the ring: the longest trace is whole */
+TEST(BridgeTest, TheRingHoldsTheLongestTracesWindow)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    const qint64 longestMs = 120000;
+    for (qint64 end = 0; end <= longestMs; end += 100) {
+        SignalListModel::WindowValue w;
+        w.id = 1001;
+        w.last = static_cast<double>(end % 7);
+        w.lastMs = end;
+        w.min = -1.0;
+        w.minMs = end - 60;
+        w.max = 50.0;
+        w.maxMs = end - 30;
+        model.updateWindow({w});
+    }
+    const QList<double> t = model.trace(1001, longestMs, 0);
+    ASSERT_FALSE(t.isEmpty());
+    EXPECT_LE(t.first(), 100.0)
+        << "the trace reaches back to its window's start";
+    EXPECT_EQ(t.at(t.size() - 2), double(longestMs));
+}
+
+/* A trace breaks only where the ring stalls past the stale time, never on
+ * its slices' spacing: a phone tile's 120 s over 40 columns (3 s slices)
+ * draws a signal every 100 ms as one piece, and a lone sample between two
+ * stalls keeps its value */
+TEST(BridgeTest, ATraceBreaksOnlyWhereTheRingStalls)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    const auto breaks = [](const QList<double>& t) {
+        int n = 0;
+        for (int i = 1; i < t.size(); i += 2) {
+            n += std::isnan(t.at(i)) ? 1 : 0;
+        }
+        return n;
+    };
+    qint64 t = 0;
+    for (; t < 120000; t += 100) {
+        model.updateValues({{uint16_t(1001), static_cast<double>(t % 900)}}, t);
+    }
+    const QList<double> narrow = model.trace(1001, 120000, 40);
+    ASSERT_GT(narrow.size(), 40);
+    EXPECT_EQ(breaks(narrow), 0) << "slices 3 s wide are no stall";
+
+    const qint64 stall = SessionBridge::valueStaleMs() + 500;
+    t += stall;
+    model.updateValues({{uint16_t(1001), 1.99}}, t);
+    t += stall;
+    for (const qint64 end = t + 2000; t < end; t += 100) {
+        model.updateValues({{uint16_t(1001), 1.0}}, t);
+    }
+    const QList<double> after = model.trace(1001, 120000, 40);
+    EXPECT_EQ(breaks(after), 2) << "one break for each stall";
+    bool lone = false;
+    for (int i = 3; i + 2 < after.size(); i += 2) {
+        lone = lone || (std::isnan(after.at(i - 2)) && after.at(i) == 1.99 &&
+                        std::isnan(after.at(i + 2)));
+    }
+    EXPECT_TRUE(lone) << "the lone sample between the stalls, at its value";
+    EXPECT_EQ(breaks(model.trace(1001, 120000, 0)), 2) << "unsliced too";
+}
+
+/* A value that isn't a number is a point of its own: the slice it falls in
+ * still shows its lowest and highest number */
+TEST(BridgeTest, AValueThatIsntANumberHidesNoSlicesExtremes)
+{
+    SignalListModel model;
+    ecuio_signal_def_t defs[2];
+    ecuio_signal_set_t set;
+    buildTestSignalSet(defs, set);
+    model.setSignalSet(&set);
+    model.updateValues(
+        {{uint16_t(1001), std::numeric_limits<double>::quiet_NaN()}}, 1000);
+    model.updateValues({{uint16_t(1001), 1.0}}, 1100);
+    model.updateValues({{uint16_t(1001), 9.0}}, 1200);
+    model.updateValues({{uint16_t(1001), 5.0}}, 1300);
+    model.updateValues({{uint16_t(1001), 4.0}}, 1400);
+    /* one slice of 5 s holds them all */
+    const QList<double> t = model.trace(1001, 5000, 1);
+    QList<double> numbers;
+    int breaks = 0;
+    for (int i = 0; i + 1 < t.size(); i += 2) {
+        if (std::isnan(t.at(i + 1))) {
+            ++breaks;
+            EXPECT_TRUE(numbers.isEmpty())
+                << "the break comes first, at its time";
+        } else {
+            numbers << t.at(i) << t.at(i + 1);
+        }
+    }
+    EXPECT_GE(breaks, 1);
+    EXPECT_EQ(numbers, (QList<double>{1100, 1, 1200, 9, 1400, 4}))
+        << "the slice's low, its high and the newest";
+}
+
 TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
 {
     SessionBridge bridge;
@@ -7255,6 +7547,153 @@ TEST(BridgeTest, ARowReadsPastTheConditionsPickAndMinSweepLines)
               QStringLiteral("elm327://COM5?profile=obd2"));
     EXPECT_EQ(row.value(QStringLiteral("durationMs")).toLongLong(), 25500);
 }
+
+// A format 3 header's "signal file" line is no signal, and a header holds a
+// line for each of its signals, past 400 lines
+TEST(BridgeTest, ARecordingsRowCountsASignalFilesSignalsOnly)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString dir = root.path() + QStringLiteral("/20261112-090000");
+    ASSERT_TRUE(QDir().mkpath(dir));
+    QFile frames(dir + QStringLiteral("/frames.csv"));
+    ASSERT_TRUE(frames.open(QIODevice::WriteOnly));
+    QFile events(dir + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+    events.write(
+        "ecuio session recording, format 3 (ADR-0049)\n"
+        "uri  mock://demo\n"
+        "signal file  signals.json,"
+        "0000000000000000000000000000000000000000000000000000000000000000"
+        "\n");
+    for (int i = 0; i < 500; ++i) {
+        events.write("signal  S" + QByteArray::number(i) +
+                     ",number,km/h,1,1,1\n");
+    }
+    events.write("columns  local time, seconds\n\n"
+                 "09:00:25.000  +25.500  end  x\n");
+    events.close();
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    const QVariantList rows = bridge.recentRecordings(10);
+    ASSERT_EQ(rows.size(), 1);
+    EXPECT_EQ(rows.at(0).toMap().value(QStringLiteral("signals")).toInt(), 500);
+}
+
+// A focus line far longer than one read names picks whose quoted names hold
+// "columns" and "signal  " after spaces: a later part of it, trimmed, starts
+// with one of them wherever the parts fall, and still counts as no line
+TEST(BridgeTest, ARecordingsRowJudgesOnlyALinesStart)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString dir = root.path() + QStringLiteral("/20261113-090000");
+    ASSERT_TRUE(QDir().mkpath(dir));
+    QFile frames(dir + QStringLiteral("/frames.csv"));
+    ASSERT_TRUE(frames.open(QIODevice::WriteOnly));
+    QByteArray focus = "focus  ";
+    for (int i = 0; focus.size() < 40000; ++i) {
+        const QByteArray pad(1 + i % 18, ' ');
+        focus += (i == 0 ? "\"" : ",\"") + pad +
+                 (i % 2 == 0 ? "columns, x" : "signal  y, z") + "\"";
+    }
+    // The case's premise: parts of 1099 or 1100 bytes both start with them
+    for (const int part : {1099, 1100}) {
+        int words = 0;
+        for (int at = part; at < focus.size(); at += part) {
+            const QByteArray rest = focus.mid(at).trimmed();
+            words += rest.startsWith("columns") || rest.startsWith("signal  ");
+        }
+        EXPECT_GE(words, 2) << part;
+    }
+    QFile events(dir + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+    events.write("ecuio session recording, format 3 (ADR-0049)\n"
+                 "uri  mock://demo\n" +
+                 focus + "\n");
+    for (int i = 0; i < 5; ++i) {
+        events.write("signal  S" + QByteArray::number(i) +
+                     ",number,km/h,1,1,1\n");
+    }
+    events.write("columns  local time, seconds\n\n"
+                 "09:00:25.000  +25.500  end  x\n");
+    events.close();
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    const QVariantList rows = bridge.recentRecordings(10);
+    ASSERT_EQ(rows.size(), 1);
+    const QVariantMap row = rows.at(0).toMap();
+    EXPECT_EQ(row.value(QStringLiteral("signals")).toInt(), 5);
+    EXPECT_TRUE(row.value(QStringLiteral("log")).toBool());
+}
+
+#ifdef _WIN32
+// A read that fails before the file's end (its bytes locked by another
+// handle) ends the header's read: the row comes back, no signal counted
+TEST(BridgeTest, ARecordingsRowEndsAtAReadThatFails)
+{
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    const QString dir = root.path() + QStringLiteral("/20261113-100000");
+    ASSERT_TRUE(QDir().mkpath(dir));
+    QFile frames(dir + QStringLiteral("/frames.csv"));
+    ASSERT_TRUE(frames.open(QIODevice::WriteOnly));
+    frames.close();
+    const QString path = dir + QStringLiteral("/events.log");
+    {
+        QFile events(path);
+        ASSERT_TRUE(events.open(QIODevice::WriteOnly));
+        events.write("ecuio session recording, format 3 (ADR-0049)\n"
+                     "uri  mock://demo\n");
+        for (int i = 0; i < 50; ++i) {
+            events.write("signal  S" + QByteArray::number(i) +
+                         ",number,km/h,1,1,1\n");
+        }
+        events.write("columns  local time, seconds\n\n");
+    }
+    const std::wstring native = QDir::toNativeSeparators(path).toStdWString();
+    HANDLE locker = CreateFileW(native.c_str(), GENERIC_READ | GENERIC_WRITE,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    ASSERT_NE(locker, INVALID_HANDLE_VALUE);
+    OVERLAPPED whole{};
+    ASSERT_TRUE(LockFileEx(locker,
+                           LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                           0, MAXDWORD, MAXDWORD, &whole));
+    {
+        // What the row's read meets: nothing read, and not at the end
+        QFile probe(path);
+        ASSERT_TRUE(probe.open(QIODevice::ReadOnly | QIODevice::Text));
+        EXPECT_TRUE(probe.readLine(1100).isEmpty());
+        EXPECT_FALSE(probe.atEnd());
+    }
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    std::atomic<bool> done{false};
+    std::atomic<int> counted{-1};
+    std::thread reader([&] {
+        counted = bridge.recordingRow(dir)
+                      .value(QStringLiteral("signals"), -2)
+                      .toInt();
+        done = true;
+    });
+    QElapsedTimer waited;
+    waited.start();
+    while (!done && waited.elapsed() < 20000) {
+        QThread::msleep(10);
+    }
+    if (!done) {
+        // The read spins on: nothing can stop it, so the process ends here
+        ADD_FAILURE() << "the header's read never ended";
+        std::fflush(stdout);
+        std::_Exit(1);
+    }
+    reader.join();
+    UnlockFileEx(locker, 0, MAXDWORD, MAXDWORD, &whole);
+    CloseHandle(locker);
+    EXPECT_EQ(counted.load(), 0);
+}
+#endif
 
 TEST(BridgeTest, RecentRecordingsListTheNewestFirst)
 {
@@ -9965,13 +10404,14 @@ TEST(BridgeTest, ASignalFilesRowsAreReferencedByTheirKeys)
     bridge.useSignalFiles({});
 }
 
-/* The mock sends no Service 01 value, and says so: under a signal file
- * that extends obd2, obd2's rows, the file's own PID and what is computed
- * from a PID are hidden as not sent by the ECU (ADR-0039 section 6), so a
- * Dashboard cell reads "not sent by this ECU", never "waiting for data"
- * for good; the file's DID, which the mock answers, and what is computed
- * from it have values. The ECU's line is logged once. */
-TEST(BridgeTest, TheMockDisclaimsThePidsItNeverSends)
+/* The mock answers Service 01 from its drive cycle and says what it
+ * doesn't send: under a signal file that extends obd2, the PIDs its ECU
+ * lacks (the file's own among them) and what is computed from one are
+ * hidden as not sent by the ECU (ADR-0039 section 6), so a Dashboard cell
+ * reads "not sent by this ECU", never "waiting for data" for good; obd2's
+ * engine speed and Boost, the file's DID and what is computed from it
+ * have values. The ECU's line is logged once. */
+TEST(BridgeTest, TheMockSendsTheDemoCarsPidsAndHidesTheRest)
 {
     SettingsDirScope dir;
     ASSERT_TRUE(dir.valid());
@@ -10022,24 +10462,68 @@ TEST(BridgeTest, TheMockDisclaimsThePidsItNeverSends)
     EXPECT_FALSE(hasValue("Own PID"));
     EXPECT_TRUE(hidden("Of PID")) << "computed from a PID the ECU lacks";
     EXPECT_FALSE(hasValue("Of PID"));
-    EXPECT_TRUE(hidden("RPM")) << "obd2's";
-    EXPECT_TRUE(hidden("Boost")) << "obd2's computed signal";
+    EXPECT_FALSE(hidden("RPM")) << "obd2's, which the demo car sends";
+    EXPECT_FALSE(hidden("Boost"))
+        << "obd2's computed signal, from MAP and baro";
+    ASSERT_TRUE(spinUntil(
+        [&] {
+            const QVariantList now = modelRows(bridge);
+            return rowNamed(now, QStringLiteral("RPM"))
+                       .value(QStringLiteral("hasValue"))
+                       .toBool() &&
+                   rowNamed(now, QStringLiteral("Boost"))
+                       .value(QStringLiteral("hasValue"))
+                       .toBool();
+        },
+        3000));
 
-    // Every row but the file's DID and what it feeds: obd2's are refs by
-    // ID, the file's own by key
+    // obd2's rows the ECU doesn't send are hidden, the rest shown in Live:
+    // each field of a PID the demo car doesn't answer (sim_ecu.h's drive
+    // PIDs and its diagnostics' readiness and counts since a clear)
+    static const uint8_t kDemoPids[] = {
+        0x01, 0x04, 0x05, 0x0B, 0x0C, 0x0D, 0x0F, 0x10, 0x11, 0x1F, 0x21,
+        0x24, 0x30, 0x31, 0x33, 0x41, 0x42, 0x44, 0x46, 0x4D, 0x4E, 0x5C};
+    const ecuio_signal_set_t* obd2 = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("obd2", &obd2), ECUIO_OK);
+    int notSent = 0;
+    for (uint32_t i = 0; i < obd2->count; ++i) {
+        const ecuio_signal_def_t& d = obd2->defs[i];
+        if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
+            continue; /* Boost: MAP and baro are sent */
+        }
+        const auto pid = static_cast<uint8_t>(d.mux_key);
+        notSent += std::find(std::begin(kDemoPids), std::end(kDemoPids), pid) ==
+                           std::end(kDemoPids)
+                       ? 1
+                       : 0;
+    }
+    uint32_t unsupported = 0;
+    ASSERT_EQ(ecuio_session_get_unsupported_signals(bridge.sessionForTesting(),
+                                                    nullptr, 0, &unsupported),
+              ECUIO_OK);
     int byId = 0;
-    for (const QString& ref : refsOf(rows)) {
-        byId += ref.startsWith(QStringLiteral("id:")) ? 1 : 0;
+    int byIdHidden = 0;
+    for (const QVariant& r : rows) {
+        const QVariantMap row = r.toMap();
+        if (row.value(QStringLiteral("ref"))
+                .toString()
+                .startsWith(QStringLiteral("id:"))) {
+            ++byId;
+            byIdHidden += row.value(QStringLiteral("hidden")).toBool() ? 1 : 0;
+        }
     }
     ASSERT_GT(byId, 100);
-    EXPECT_EQ(model->hiddenCount(), byId + 2);
-    EXPECT_EQ(bridge.liveSignalModel()->rowCount(), 2) << "Live lists the rest";
+    EXPECT_EQ(byIdHidden, notSent);
+    EXPECT_EQ(model->hiddenCount(), byIdHidden + 2) << "Own PID and Of PID";
+    EXPECT_EQ(model->hiddenCount(), static_cast<int>(unsupported));
+    EXPECT_EQ(bridge.liveSignalModel()->rowCount(),
+              model->rowCount() - model->hiddenCount());
 
     spinLoop(300);
     const QStringList ecu = log.filter(QStringLiteral("ECU 0x7E8: supports "));
     ASSERT_EQ(ecu.size(), 1) << log.join(QLatin1Char('\n')).toStdString();
     EXPECT_TRUE(
-        ecu.first().startsWith(QStringLiteral("ECU 0x7E8: supports 0 PIDs; ")))
+        ecu.first().startsWith(QStringLiteral("ECU 0x7E8: supports 22 PIDs")))
         << ecu.first().toStdString();
     EXPECT_TRUE(
         ecu.first().contains(QStringLiteral("(not in its supported PIDs)")))
@@ -10960,6 +11444,395 @@ TEST(BridgeTest, SignalFileSavedOutIsItsCopyByteForByte)
     refused(sha, QUrl::fromLocalFile(out.path() + QStringLiteral("/b.json")),
             "Its copy has changed since it was kept: import the file again");
     EXPECT_FALSE(QFile::exists(out.path() + QStringLiteral("/b.json")));
+}
+
+/* A layout file (ADR-0057's appendix on the layout file): the text goes out
+ * and comes back as it was, a file already at the target is replaced whole,
+ * and a write that can't be made leaves what was there. */
+TEST(BridgeTest, ALayoutFileRoundTripsItsText)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    SessionBridge bridge;
+    const QString text =
+        QStringLiteral("{\"format\":2,\"label\":\"caf\u00e9 \U0001F600\",\"pages\":[]}");
+    const QUrl target = QUrl::fromLocalFile(dir.path() + QStringLiteral("/l.json"));
+    writeScratch(dir.path(), "l.json", QByteArray(5000, 'x'));
+    const QVariantMap saved = bridge.saveLayoutFile(text, target);
+    EXPECT_TRUE(saved.value(QStringLiteral("ok")).toBool())
+        << saved.value(QStringLiteral("words")).toString().toStdString();
+    QFile f(target.toLocalFile());
+    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+    EXPECT_EQ(f.readAll(), text.toUtf8()) << "the text as UTF-8, replacing the file";
+    f.close();
+    const QVariantMap read = bridge.layoutFileText(target);
+    EXPECT_TRUE(read.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(read.value(QStringLiteral("text")).toString(), text);
+}
+
+TEST(BridgeTest, ALayoutFileIsReadWithinItsBoundAndAsUtf8)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    SessionBridge bridge;
+    const auto refused = [&](const QUrl& url, const char* expected) {
+        const QVariantMap r = bridge.layoutFileText(url);
+        EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool()) << expected;
+        const QString words = r.value(QStringLiteral("words")).toString();
+        EXPECT_EQ(words.toStdString(), expected);
+        EXPECT_FALSE(words.contains(dir.path()));
+        EXPECT_TRUE(r.value(QStringLiteral("text")).toString().isEmpty());
+    };
+    refused(QUrl::fromLocalFile(dir.path() + QStringLiteral("/none.json")),
+            "Couldn't read the file");
+    const qint64 most = SessionBridge::layoutFileMaxBytes;
+    const QUrl at = writeScratch(dir.path(), "at.json", QByteArray(most, ' '));
+    EXPECT_TRUE(bridge.layoutFileText(at).value(QStringLiteral("ok")).toBool());
+    const QUrl over =
+        writeScratch(dir.path(), "over.json", QByteArray(most + 1, ' '));
+    refused(over, "The file is over 82400 bytes, a layout file's most");
+    refused(writeScratch(dir.path(), "latin1.json", QByteArray("{\"a\":\"\xE9\"}")),
+            "The file isn't UTF-8 text");
+    refused(writeScratch(dir.path(), "cut.json", QByteArray("{\"a\":\"\xE2\x82\"}")),
+            "The file isn't UTF-8 text");
+    const QVariantMap bom = bridge.layoutFileText(
+        writeScratch(dir.path(), "bom.json", QByteArray("\xEF\xBB\xBF{}")));
+    EXPECT_TRUE(bom.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(bom.value(QStringLiteral("text")).toString().toStdString(), "{}")
+        << "a leading BOM is skipped, once";
+}
+
+TEST(BridgeTest, ALayoutThatCantBeSavedLeavesTheFileAsItWas)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    SessionBridge bridge;
+    const QByteArray before(3000, 'y');
+    const QUrl target = writeScratch(dir.path(), "keep.json", before);
+    const auto unchanged = [&] {
+        QFile f(target.toLocalFile());
+        EXPECT_TRUE(f.open(QIODevice::ReadOnly));
+        EXPECT_EQ(f.readAll(), before) << "an existing file is never touched";
+    };
+    // Past the bound: refused before anything is opened
+    QVariantMap r = bridge.saveLayoutFile(
+        QString(SessionBridge::layoutFileMaxBytes + 1, QLatin1Char('x')), target);
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "The layout is over 82400 bytes, a layout file's most");
+    unchanged();
+    // Nothing to save
+    r = bridge.saveLayoutFile(QString(), target);
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "There is no layout to save");
+    unchanged();
+    // A target that can't take a file: a folder stays a folder, nothing
+    // is removed, and the words name no path
+    r = bridge.saveLayoutFile(QStringLiteral("{}"),
+                              QUrl::fromLocalFile(dir.path()));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
+              "Couldn't write the file");
+    EXPECT_TRUE(QFileInfo(dir.path()).isDir());
+    unchanged();
+    r = bridge.saveLayoutFile(
+        QStringLiteral("{}"),
+        QUrl::fromLocalFile(dir.path() + QStringLiteral("/no/such/folder/l.json")));
+    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
+    EXPECT_FALSE(QFileInfo(dir.path() + QStringLiteral("/no")).exists());
+    unchanged();
+}
+
+// A provider's document is opened by its URI as Android's Uri.parse wants it:
+// encoded, so a name the picker makes for a name taken ("report (1).csv")
+// keeps its space and parentheses apart from the path's own separators
+TEST(BridgeTest, APickedUrlIsOpenedByItsEncodedName)
+{
+    EXPECT_EQ(
+        pathOfUrl(
+            QUrl(QStringLiteral(
+                "content://com.android.externalstorage.documents/document/"
+                "primary%3ADocuments%2Freport (1).csv")))
+            .toStdString(),
+        "content://com.android.externalstorage.documents/document/"
+        "primary%3ADocuments%2Freport%20(1).csv");
+    EXPECT_EQ(pathOfUrl(QUrl::fromLocalFile(QStringLiteral("/tmp/a b (1).csv")))
+                  .toStdString(),
+              "/tmp/a b (1).csv");
+}
+
+// Android's document picker hands back a URI's text, encoded: the URL made of
+// it opens by that same text, so the content resolver is asked for the
+// document picked, its escapes and parentheses as they came
+TEST(BridgeTest, APickersUriOpensByTheTextItCameAs)
+{
+    for (const char* uri : {
+             "content://com.android.externalstorage.documents/document/"
+             "primary%3ADownload%2Fname%20(1).json",
+             "content://com.android.externalstorage.documents/document/"
+             "primary%3ADownload%2Fname%20%281%29.json",
+             "content://com.android.providers.downloads.documents/document/"
+             "msf%3A1000000034",
+             "content://com.android.providers.media.documents/document/"
+             "document%3A42",
+             "content://com.google.android.apps.docs.storage/document/"
+             "acc%3D1%3Bdoc%3Dencoded%3DAbC-_d%2Be%3D%3D",
+             "content://com.android.externalstorage.documents/document/"
+             "primary%3ADocuments%2F%C3%B8l%20%26%20%23%20%25.json",
+         }) {
+        const QString text = QString::fromLatin1(uri);
+        const QUrl url = pickedUrl(text);
+        EXPECT_TRUE(url.isValid()) << uri;
+        EXPECT_FALSE(url.isLocalFile()) << uri;
+        EXPECT_EQ(pathOfUrl(url).toStdString(), uri);
+    }
+}
+
+// A picker through a provider makes the document before the app writes. A
+// QUrl that isn't a file URL stands in for a content:// one: QFile opens its
+// text as a path. A save that refuses removes only a document that was empty
+// when the save began
+TEST(BridgeTest, ARefusedSaveThroughAProviderRemovesOnlyAnEmptyDocument)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    // pathOfUrl encodes a URL: a folder whose path an encoding changes (a
+    // space or a non-ASCII name in it; a drive letter's case is no change)
+    // can't stand in for a provider's
+    if (QUrl(dir.path(), QUrl::TolerantMode)
+            .toString(QUrl::FullyEncoded)
+            .compare(dir.path(), Qt::CaseInsensitive) != 0) {
+        GTEST_SKIP() << "the temporary folder's path changes when encoded";
+    }
+    SessionBridge bridge;
+    const auto provider = [&](const QString& name) {
+        return QUrl(dir.path() + QLatin1Char('/') + name, QUrl::TolerantMode);
+    };
+    const auto make = [&](const QUrl& url, const QByteArray& bytes) {
+        QFile f(url.isLocalFile() ? url.toLocalFile() : url.toString());
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly))
+            << url.toString().toStdString();
+        f.write(bytes);
+    };
+    const auto tooBig =
+        QString(SessionBridge::layoutFileMaxBytes + 1, QLatin1Char('x'));
+    const QByteArray theirs("the user's layout");
+    struct Save {
+        const char* name;
+        std::function<QVariantMap(const QUrl&)> run;
+    };
+    const Save saves[] = {
+        {"nothing to save",
+         [&](const QUrl& u) { return bridge.saveLayoutFile(QString(), u); }},
+        {"over the bound",
+         [&](const QUrl& u) { return bridge.saveLayoutFile(tooBig, u); }},
+        {"a signal file that isn't kept",
+         [&](const QUrl& u) {
+             return bridge.saveSignalFile(QStringLiteral("0123456789abcdef"),
+                                          u);
+         }},
+    };
+    for (const Save& save : saves) {
+        SCOPED_TRACE(save.name);
+        const QUrl made = provider(QStringLiteral("made(1).json"));
+        make(made, QByteArray());
+        EXPECT_FALSE(save.run(made).value(QStringLiteral("ok")).toBool());
+        EXPECT_FALSE(QFile::exists(made.toString()))
+            << "the picker's empty document goes";
+        const QUrl chosen = provider(QStringLiteral("chosen.json"));
+        make(chosen, theirs);
+        EXPECT_FALSE(save.run(chosen).value(QStringLiteral("ok")).toBool());
+        QFile after(chosen.toString());
+        ASSERT_TRUE(after.open(QIODevice::ReadOnly));
+        EXPECT_EQ(after.readAll(), theirs) << "a replaced document stays";
+        after.close();
+        QFile::remove(chosen.toString());
+    }
+    // A local target is never removed by a refusal
+    const QUrl local =
+        QUrl::fromLocalFile(dir.path() + QStringLiteral("/local.json"));
+    make(local, QByteArray());
+    EXPECT_FALSE(bridge.saveLayoutFile(QString(), local)
+                     .value(QStringLiteral("ok"))
+                     .toBool());
+    EXPECT_TRUE(QFile::exists(local.toLocalFile()));
+}
+
+// A save pick's verdict, from its document's last_modified against the
+// picker's launch and answer: the window allows 2 s of skew each way, and a
+// time past the answer says nothing (a replaced document's upload ending
+// meanwhile)
+TEST(BridgeTest, ASavePicksVerdictIsItsDocumentsTimeAgainstTheLaunch)
+{
+    const qint64 launched = 1'700'000'000'000;
+    const qint64 answered = launched + 60'000;
+    EXPECT_EQ(kPickMadeWindowMs, 2000);
+    const auto judged = [&](qint64 modified) {
+        return judgePick(launched, answered, modified);
+    };
+    EXPECT_EQ(judged(launched), PickMade::Made);
+    EXPECT_EQ(judged(answered), PickMade::Made);
+    EXPECT_EQ(judged(launched - kPickMadeWindowMs), PickMade::Made)
+        << "a provider's clock 2 s behind";
+    EXPECT_EQ(judged(launched - kPickMadeWindowMs - 1), PickMade::Replaced);
+    EXPECT_EQ(judged(launched - 86'400'000), PickMade::Replaced);
+    EXPECT_EQ(judged(answered + kPickMadeWindowMs), PickMade::Made)
+        << "a provider's clock 2 s ahead";
+    EXPECT_EQ(judged(answered + kPickMadeWindowMs + 1), PickMade::Unknown)
+        << "past the answer";
+    EXPECT_EQ(judged(-1), PickMade::Unknown) << "no time";
+    EXPECT_EQ(judged(0), PickMade::Unknown) << "a provider's none";
+}
+
+// A pick's verdict is taken once, a later pick of the same document replaces
+// it, and one with no time clears it
+TEST(BridgeTest, ASavePicksVerdictIsTakenOnce)
+{
+    const QString where = QStringLiteral("content://test/document/verdict");
+    notePick(where, PickMade::Made);
+    EXPECT_EQ(peekPick(where), PickMade::Made);
+    notePick(where, PickMade::Replaced);
+    EXPECT_EQ(takePick(where), PickMade::Replaced);
+    EXPECT_EQ(takePick(where), PickMade::Unknown) << "taken once";
+    notePick(where, PickMade::Made);
+    notePick(where, PickMade::Unknown);
+    EXPECT_EQ(takePick(where), PickMade::Unknown);
+}
+
+// Each branch of the rule a failed save removes its document by, judged at
+// the save's entry; a missing document stands in for one a provider won't
+// open (Proton Drive's, still uploading)
+TEST(BridgeTest, APickedDocumentIsRemovableByItsVerdictAndItsBytes)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QByteArray none;
+    const QByteArray some("the user's bytes");
+    struct Case {
+        const char* name;
+        PickMade verdict;
+        const QByteArray* bytes; // null: unreadable
+        bool removable;
+    };
+    const Case cases[] = {
+        {"made, empty", PickMade::Made, &none, true},
+        {"made, unreadable", PickMade::Made, nullptr, true},
+        {"made, holding bytes", PickMade::Made, &some, false},
+        {"replaced, empty", PickMade::Replaced, &none, false},
+        {"replaced, unreadable", PickMade::Replaced, nullptr, false},
+        {"no verdict, empty", PickMade::Unknown, &none, true},
+        {"no verdict, unreadable", PickMade::Unknown, nullptr, false},
+        {"no verdict, holding bytes", PickMade::Unknown, &some, false},
+    };
+    int n = 0;
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.name);
+        const QString path = dir.filePath(QStringLiteral("doc-%1").arg(++n));
+        if (c.bytes != nullptr) {
+            QFile f(path);
+            ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+            f.write(*c.bytes);
+        }
+        notePick(path, c.verdict);
+        EXPECT_EQ(pickedDocumentRemovable(path), c.removable);
+        EXPECT_EQ(peekPick(path), PickMade::Unknown) << "the save took it";
+    }
+}
+
+// The verdict through the bridge's saves (a non-file QUrl stands in for a
+// provider's, as in ARefusedSaveThroughAProviderRemovesOnlyAnEmptyDocument):
+// a refused layout save and the live report's refusal with no session
+// remove the pick's own empty document and leave one the user chose to
+// replace, empty or not
+TEST(BridgeTest, ARefusedSaveFollowsItsSavePicksVerdict)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    if (QUrl(dir.path(), QUrl::TolerantMode)
+            .toString(QUrl::FullyEncoded)
+            .compare(dir.path(), Qt::CaseInsensitive) != 0) {
+        GTEST_SKIP() << "the temporary folder's path changes when encoded";
+    }
+    SessionBridge bridge;
+    const auto provider = [&](const QString& name) {
+        return QUrl(dir.path() + QLatin1Char('/') + name, QUrl::TolerantMode);
+    };
+    const auto make = [&](const QUrl& url, const QByteArray& bytes) {
+        QFile f(url.toString());
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(bytes);
+    };
+    const QByteArray theirs("the user's earlier save");
+    struct Save {
+        const char* name;
+        std::function<QVariantMap(const QUrl&)> run;
+    };
+    const Save saves[] = {
+        {"a layout with nothing to save",
+         [&](const QUrl& u) { return bridge.saveLayoutFile(QString(), u); }},
+        {"a report with no session",
+         [&](const QUrl& u) { return bridge.saveHealthReport(u, 0); }},
+    };
+    for (const Save& save : saves) {
+        SCOPED_TRACE(save.name);
+        const QUrl made = provider(QStringLiteral("made.txt"));
+        make(made, QByteArray());
+        notePick(pathOfUrl(made), PickMade::Made);
+        EXPECT_FALSE(save.run(made).value(QStringLiteral("ok")).toBool());
+        EXPECT_FALSE(QFile::exists(made.toString()))
+            << "the pick's own empty document goes";
+
+        const QUrl replaced = provider(QStringLiteral("replaced.txt"));
+        make(replaced, QByteArray());
+        notePick(pathOfUrl(replaced), PickMade::Replaced);
+        EXPECT_FALSE(save.run(replaced).value(QStringLiteral("ok")).toBool());
+        EXPECT_TRUE(QFile::exists(replaced.toString()))
+            << "an empty document the user chose to replace stays";
+        EXPECT_EQ(peekPick(pathOfUrl(replaced)), PickMade::Unknown)
+            << "the save took the verdict";
+
+        const QUrl full = provider(QStringLiteral("full.txt"));
+        make(full, theirs);
+        notePick(pathOfUrl(full), PickMade::Made);
+        EXPECT_FALSE(save.run(full).value(QStringLiteral("ok")).toBool());
+        QFile after(full.toString());
+        ASSERT_TRUE(after.open(QIODevice::ReadOnly));
+        EXPECT_EQ(after.readAll(), theirs) << "a document with bytes stays";
+        after.close();
+        QFile::remove(replaced.toString());
+        QFile::remove(full.toString());
+    }
+}
+
+// A save a page refuses before it calls the bridge (a layout that can't be
+// written as a file) drops the pick's own empty document by the same rule
+TEST(BridgeTest, ASaveThePageRefusesDropsOnlyThePicksOwnDocument)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    if (QUrl(dir.path(), QUrl::TolerantMode)
+            .toString(QUrl::FullyEncoded)
+            .compare(dir.path(), Qt::CaseInsensitive) != 0) {
+        GTEST_SKIP() << "the temporary folder's path changes when encoded";
+    }
+    SessionBridge bridge;
+    const auto empty = [&](const QString& name) {
+        const QUrl url(dir.path() + QLatin1Char('/') + name,
+                       QUrl::TolerantMode);
+        QFile f(url.toString());
+        EXPECT_TRUE(f.open(QIODevice::WriteOnly));
+        return url;
+    };
+    const QUrl made = empty(QStringLiteral("made.json"));
+    notePick(pathOfUrl(made), PickMade::Made);
+    bridge.dropPicked(made);
+    EXPECT_FALSE(QFile::exists(made.toString()));
+    const QUrl replaced = empty(QStringLiteral("replaced.json"));
+    notePick(pathOfUrl(replaced), PickMade::Replaced);
+    bridge.dropPicked(replaced);
+    EXPECT_TRUE(QFile::exists(replaced.toString()));
+    EXPECT_EQ(peekPick(pathOfUrl(replaced)), PickMade::Unknown);
 }
 
 // ---- An OBDb set imported in the app (ADR-0051's appendix of 2026-11-06)
@@ -12161,6 +13034,61 @@ TEST(BridgeTest, ExportFramesWritesTheFileAndLogsOneLine)
     }
 }
 
+// The frames CSV through a provider (a non-file QUrl stands in, as in
+// ARefusedSaveThroughAProviderRemovesOnlyAnEmptyDocument): a refused export
+// removes the picker's empty document and leaves one that held bytes, and a
+// good one writes into the empty document
+TEST(BridgeTest, ARefusedFramesExportThroughAProviderRemovesOnlyAnEmptyDocument)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    if (QUrl(dir.path(), QUrl::TolerantMode)
+            .toString(QUrl::FullyEncoded)
+            .compare(dir.path(), Qt::CaseInsensitive) != 0) {
+        GTEST_SKIP() << "the temporary folder's path changes when encoded";
+    }
+    SessionBridge bridge;
+    FrameMaker m;
+    heldForExport(*bridge.model(), m);
+    const auto provider = [&](const QString& name) {
+        return QUrl(dir.path() + QLatin1Char('/') + name, QUrl::TolerantMode);
+    };
+    const auto make = [&](const QUrl& url, const QByteArray& bytes) {
+        QFile f(url.toString());
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly));
+        f.write(bytes);
+    };
+    // A good export fills the picker's empty document
+    const QUrl fresh = provider(QStringLiteral("fresh.csv"));
+    make(fresh, QByteArray());
+    EXPECT_TRUE(
+        bridge.exportFrames(fresh).value(QStringLiteral("ok")).toBool());
+    {
+        QFile f(fresh.toString());
+        ASSERT_TRUE(f.open(QIODevice::ReadOnly));
+        EXPECT_FALSE(f.readAll().isEmpty());
+    }
+    // A frame echoing the VIN: the check refuses
+    m.add(*bridge.model(), 0x7E8,
+          {0x62, 0xD8, 0x01, 'Z', 'Z', 'Z', 'F', 'A', 'K', 'E',
+           '1',  '1',  'M',  '0', '0', '0', '0', '0', '0', '1'},
+          6000, ECUIO_FRAME_FLAG_REASSEMBLED);
+    const QUrl made = provider(QStringLiteral("made.csv"));
+    make(made, QByteArray());
+    EXPECT_FALSE(
+        bridge.exportFrames(made).value(QStringLiteral("ok")).toBool());
+    EXPECT_FALSE(QFile::exists(made.toString()))
+        << "the picker's empty document goes";
+    const QUrl chosen = provider(QStringLiteral("chosen.csv"));
+    const QByteArray theirs("the user's earlier export\n");
+    make(chosen, theirs);
+    EXPECT_FALSE(
+        bridge.exportFrames(chosen).value(QStringLiteral("ok")).toBool());
+    QFile after(chosen.toString());
+    ASSERT_TRUE(after.open(QIODevice::ReadOnly));
+    EXPECT_EQ(after.readAll(), theirs) << "a replaced document stays";
+}
+
 // ---- The health report, Diagnostics' Save report (ADR-0054's appendix
 // "the health report as built") ----------------------------------------
 
@@ -12522,4 +13450,1226 @@ TEST(BridgeTest, WindowThemeWarnsOfAColorItCannotFollow)
         QStringLiteral("no notifying property 'surface'")))
         << "a property that never notifies: "
         << g_themeWarnings[1].toStdString();
+}
+
+// ---------------------------------------------------------------------------
+// The conditions (ADR-0063 section 9): the app's saved set
+// (app/conditionstore.h), its rows (app/conditionmodel.h) and the bridge's
+// attach, callback and tick. The mock's first 15 s are its KeyOn (0 rpm),
+// so a condition true there fires at the first frame and stays ON.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Three conditions on the mock's set: an alert ON from the first frame,
+// a danger alert ON with it, and a mark-only one that stays OFF
+QByteArray mockConditions()
+{
+    return QByteArray(
+        R"({"havne_conditions":1,"name":"Bridge test","conditions":[)"
+        R"({"key":"stopped","name":"Engine stopped",)"
+        R"("when":{"signal":["id:1001"],"unit":"RPM","below":300},)"
+        R"("alert":{"level":"warning","banner":true}},)"
+        R"({"key":"cold","name":"Coolant cold",)"
+        R"("when":{"signal":["id:2001"],"unit":")"
+        "\xC2\xB0"
+        R"(C","above":-100},)"
+        R"("alert":{"level":"danger","sound":true}},)"
+        R"({"key":"fast","name":"Moving",)"
+        R"("when":{"signal":["id:3001"],"unit":"km/h","above":250},)"
+        R"("mark":true}]})");
+}
+
+// One condition, so a set told from mockConditions by its count; of two
+// terms, on two units
+QByteArray otherConditions()
+{
+    return QByteArray(R"({"havne_conditions":1,"conditions":[)"
+                      R"({"key":"second","name":"Second set","when":{"all":[)"
+                      R"({"signal":["id:1001"],"unit":"RPM","below":300},)"
+                      R"({"signal":["id:3001"],"unit":"km/h","below":250}]},)"
+                      R"("alert":{"level":"warning"}}]})");
+}
+
+// The model's rows, each a map by role name
+QVariantList conditionRows(const ConditionModel* model)
+{
+    QVariantList rows;
+    const QHash<int, QByteArray> roles = model->roleNames();
+    for (int r = 0; r < model->rowCount(); ++r) {
+        QVariantMap row;
+        for (auto it = roles.begin(); it != roles.end(); ++it) {
+            row.insert(QString::fromLatin1(it.value()),
+                       model->data(model->index(r), it.key()));
+        }
+        rows << row;
+    }
+    return rows;
+}
+
+QVariantMap conditionRow(const ConditionModel* model, int r)
+{
+    return conditionRows(model).value(r).toMap();
+}
+
+// Whether row r reads live and in that state, within 5 s
+bool rowReads(const SessionBridge& bridge, int r, const char* state)
+{
+    return spinUntil(
+        [&]() {
+            const QVariantMap row = conditionRow(bridge.conditionModel(), r);
+            return row.value(QStringLiteral("live")).toBool() &&
+                   row.value(QStringLiteral("state")).toString() ==
+                       QLatin1String(state);
+        },
+        5000);
+}
+
+// An event as core's worker gives it
+ecuio_condition_event_t conditionEvent(uint32_t condition, uint32_t generation,
+                                       uint32_t flags, double value,
+                                       uint64_t at_us = 1000000,
+                                       uint32_t term = 0)
+{
+    ecuio_condition_event_t e{};
+    e.timestamp_us = at_us;
+    e.term = term;
+    e.condition = condition;
+    e.state = (flags & ECUIO_CONDITION_FIRED) != 0 ? ECUIO_CONDITION_ON
+                                                   : ECUIO_CONDITION_OFF;
+    e.flags = flags;
+    e.value = value;
+    e.generation = generation;
+    return e;
+}
+
+// The lines of log starting with prefix
+QStringList linesStarting(const QStringList& log, const QString& prefix)
+{
+    QStringList lines;
+    for (const QString& line : log) {
+        if (line.startsWith(prefix))
+            lines << line;
+    }
+    return lines;
+}
+
+} // namespace
+
+// A file is read by core before it's kept: one core refuses, or one too
+// long, leaves the kept file as it was; the save replaces it whole, with
+// nothing left beside it
+TEST(BridgeTest, TheStoreRefusesAFileCoreRefuses)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    ConditionStore store;
+    QString words;
+    EXPECT_TRUE(store.load(&words)) << "no file is no set";
+    EXPECT_EQ(store.set(), nullptr);
+
+    QVariantMap saved = store.save(mockConditions());
+    ASSERT_TRUE(saved.value(QStringLiteral("ok")).toBool())
+        << saved.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(saved.value(QStringLiteral("conditions")).toInt(), 3);
+    EXPECT_EQ(saved.value(QStringLiteral("name")).toString(),
+              QStringLiteral("Bridge test"));
+    EXPECT_EQ(readFile(ConditionStore::path()), mockConditions());
+    EXPECT_EQ(QDir(QFileInfo(ConditionStore::path()).absolutePath())
+                  .entryList(QDir::Files),
+              QStringList{QStringLiteral("conditions.json")})
+        << "the save leaves only conditions.json";
+
+    const QByteArray refused =
+        R"({"havne_conditions":1,"conditions":[{"key":"a","name":"A",)"
+        R"("when":{"signal":["id:1001"],"unit":"RPM","abov":3}}]})";
+    saved = store.save(refused);
+    EXPECT_FALSE(saved.value(QStringLiteral("ok")).toBool());
+    EXPECT_TRUE(saved.value(QStringLiteral("words"))
+                    .toString()
+                    .contains(QStringLiteral("abov")))
+        << "core's words: "
+        << saved.value(QStringLiteral("words")).toString().toStdString();
+    EXPECT_EQ(readFile(ConditionStore::path()), mockConditions());
+    EXPECT_EQ(ecuio_condition_set_count(store.set()), 3u)
+        << "the kept set stays";
+
+    QByteArray tooLong = mockConditions();
+    tooLong.append(QByteArray(ECUIO_CONDITION_FILE_MAX_BYTES, ' '));
+    saved = store.save(tooLong);
+    EXPECT_FALSE(saved.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(saved.value(QStringLiteral("words")).toString(),
+              QStringLiteral("a condition file is at most 256 KiB"));
+    EXPECT_EQ(readFile(ConditionStore::path()), mockConditions());
+
+    ConditionStore again;
+    EXPECT_TRUE(again.load(&words)) << words.toStdString();
+    EXPECT_EQ(again.bytes(), mockConditions());
+    EXPECT_EQ(ecuio_condition_set_count(again.set()), 3u);
+
+    // A file core refuses, put there by hand: read as no set, with words
+    {
+        QFile f(ConditionStore::path());
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write(refused);
+    }
+    ConditionStore damaged;
+    EXPECT_FALSE(damaged.load(&words));
+    EXPECT_TRUE(words.contains(QStringLiteral("abov"))) << words.toStdString();
+    EXPECT_EQ(damaged.set(), nullptr);
+    EXPECT_TRUE(damaged.bytes().isEmpty());
+    SessionBridge bridge;
+    EXPECT_TRUE(bridge.conditionsProblem().startsWith(
+        QStringLiteral("The saved conditions weren't read: ")))
+        << bridge.conditionsProblem().toStdString();
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 0);
+}
+
+// The rows come from the file, offline too; connected, the tick gives
+// each its state, its value in the display unit and the defs its terms
+// bind, and an alert ON names its level for its signal
+TEST(BridgeTest, AConditionsEventsReachTheModelOnTheTick)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QVariantMap saved =
+        bridge.saveConditions(QString::fromUtf8(mockConditions()));
+    ASSERT_TRUE(saved.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(saved.value(QStringLiteral("pending")).toString(), QString());
+    EXPECT_EQ(bridge.conditionsText(), QString::fromUtf8(mockConditions()));
+    const ConditionModel* model = bridge.conditionModel();
+    ASSERT_EQ(model->rowCount(), 3);
+    QVariantMap row = conditionRow(model, 0);
+    EXPECT_EQ(row.value(QStringLiteral("key")).toString(),
+              QStringLiteral("stopped"));
+    EXPECT_FALSE(row.value(QStringLiteral("live")).toBool())
+        << "no session judges it";
+    EXPECT_EQ(row.value(QStringLiteral("defIds")).toList(), QVariantList{-1})
+        << "bound to no session's signals";
+
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://conditions")).isEmpty());
+    ASSERT_TRUE(rowReads(bridge, 0, "on"));
+    ASSERT_TRUE(rowReads(bridge, 1, "on"));
+    row = conditionRow(model, 0);
+    EXPECT_EQ(row.value(QStringLiteral("name")).toString(),
+              QStringLiteral("Engine stopped"));
+    EXPECT_EQ(row.value(QStringLiteral("level")).toString(),
+              QStringLiteral("warning"));
+    EXPECT_EQ(row.value(QStringLiteral("uses")).toStringList(),
+              QStringList{QStringLiteral("alert")});
+    EXPECT_TRUE(row.value(QStringLiteral("banner")).toBool());
+    EXPECT_FALSE(row.value(QStringLiteral("sound")).toBool());
+    EXPECT_TRUE(row.value(QStringLiteral("enabled")).toBool());
+    EXPECT_FALSE(row.value(QStringLiteral("stale")).toBool());
+    EXPECT_FALSE(row.value(QStringLiteral("unavailable")).toBool());
+    EXPECT_EQ(row.value(QStringLiteral("why")).toString(), QString());
+    EXPECT_EQ(row.value(QStringLiteral("fired")).toLongLong(), 1);
+    EXPECT_EQ(row.value(QStringLiteral("value")).toDouble(), 0.0);
+    EXPECT_EQ(row.value(QStringLiteral("unit")).toString(),
+              QStringLiteral("RPM"));
+    EXPECT_GE(row.value(QStringLiteral("sinceMs")).toLongLong(), 0);
+    EXPECT_EQ(row.value(QStringLiteral("defIds")).toList(),
+              QVariantList{ECUIO_MOCK_SIG_RPM_ID});
+
+    row = conditionRow(model, 1);
+    EXPECT_EQ(row.value(QStringLiteral("level")).toString(),
+              QStringLiteral("danger"));
+    EXPECT_TRUE(row.value(QStringLiteral("sound")).toBool());
+    EXPECT_EQ(row.value(QStringLiteral("unit")).toString(),
+              QStringLiteral("°C"));
+    const double celsius = row.value(QStringLiteral("value")).toDouble();
+    EXPECT_TRUE(std::isfinite(celsius));
+    bridge.setUnitSystem(ECUIO_UNITS_IMPERIAL);
+    row = conditionRow(model, 1);
+    EXPECT_EQ(row.value(QStringLiteral("unit")).toString(),
+              QStringLiteral("°F"));
+    EXPECT_GT(row.value(QStringLiteral("value")).toDouble(), celsius)
+        << "a warm engine's deg F is above its deg C";
+    bridge.setUnitSystem(ECUIO_UNITS_METRIC);
+
+    row = conditionRow(model, 2);
+    EXPECT_EQ(row.value(QStringLiteral("state")).toString(),
+              QStringLiteral("off"));
+    EXPECT_EQ(row.value(QStringLiteral("level")).toString(), QString());
+    EXPECT_EQ(row.value(QStringLiteral("uses")).toStringList(),
+              QStringList{QStringLiteral("mark")});
+
+    const QVariantMap levels{{QString::number(ECUIO_MOCK_SIG_RPM_ID), 1},
+                             {QString::number(ECUIO_MOCK_SIG_COOLANT_ID), 2}};
+    EXPECT_EQ(bridge.alertLevels(), levels)
+        << "a mark-only condition names no level";
+    EXPECT_EQ(bridge.alertLevelOf(ECUIO_MOCK_SIG_COOLANT_ID), 2);
+    EXPECT_EQ(bridge.alertLevelOf(ECUIO_MOCK_SIG_SPEED_ID), 0);
+
+    const int connected = static_cast<int>(
+        log.indexOf(QStringLiteral("Connected: mock://conditions")));
+    const int judging = static_cast<int>(
+        log.indexOf(QStringLiteral("Alerts: judging 3 conditions")));
+    EXPECT_GT(judging, connected) << "after the session's lines";
+    EXPECT_TRUE(log.contains(QStringLiteral("Alert: Engine stopped, 0 RPM")))
+        << log.join(u'\n').toStdString();
+
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    row = conditionRow(model, 0);
+    EXPECT_FALSE(row.value(QStringLiteral("live")).toBool());
+    EXPECT_EQ(row.value(QStringLiteral("state")).toString(),
+              QStringLiteral("off"));
+    EXPECT_TRUE(bridge.alertLevels().isEmpty());
+    EXPECT_EQ(model->rowCount(), 3) << "the saved set's rows offline";
+}
+
+// A re-attach begins a new generation: an event of the set before is
+// passed by, one of the set attached is the tick's
+TEST(BridgeTest, AnEventOfTheSetBeforeIsIgnored)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(mockConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://generations")).isEmpty());
+    ASSERT_TRUE(rowReads(bridge, 0, "on"));
+    EXPECT_EQ(bridge.conditionsGenerationForTesting(), 1u);
+
+    // A firing of the set before, still in the window: written, not lost
+    const ecuio_condition_event_t staged =
+        conditionEvent(0, 1, ECUIO_CONDITION_FIRED, 777);
+    bridge.dispatchConditionsForTesting(&staged, 1);
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(otherConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    EXPECT_EQ(bridge.conditionsGenerationForTesting(), 2u)
+        << "no recorder: at once";
+    EXPECT_TRUE(log.contains(QStringLiteral("Alert: Engine stopped, 777 RPM")))
+        << "the window's firing before the re-attach: "
+        << log.join(u'\n').toStdString();
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 1);
+    ASSERT_TRUE(rowReads(bridge, 0, "on"));
+    EXPECT_TRUE(log.contains(QStringLiteral("Alerts saved: 1 condition")));
+    EXPECT_TRUE(log.contains(QStringLiteral("Alerts: judging 1 condition")));
+
+    const ecuio_condition_event_t old =
+        conditionEvent(0, 1, ECUIO_CONDITION_FIRED, 4321);
+    bridge.dispatchConditionsForTesting(&old, 1);
+    const ecuio_condition_event_t now =
+        conditionEvent(0, 2, ECUIO_CONDITION_FIRED, 1234, 1000000, 1);
+    bridge.dispatchConditionsForTesting(&now, 1);
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return log.contains(QStringLiteral("Alert: Second set, 1234 km/h"));
+        },
+        5000))
+        << "in the unit of the term that settled it: "
+        << log.join(u'\n').toStdString();
+    EXPECT_EQ(conditionRow(bridge.conditionModel(), 0)
+                  .value(QStringLiteral("unit"))
+                  .toString(),
+              QStringLiteral("km/h"));
+    EXPECT_TRUE(
+        linesStarting(log, QStringLiteral("Alert: Second set, 4321")).isEmpty())
+        << "the set before's event";
+    EXPECT_TRUE(
+        linesStarting(log, QStringLiteral("Alert: Second set fired")).isEmpty())
+        << "the two weren't counted together";
+
+    // An index the set attached doesn't hold
+    const ecuio_condition_event_t past =
+        conditionEvent(5, 2, ECUIO_CONDITION_FIRED, 99);
+    bridge.dispatchConditionsForTesting(&past, 1);
+    spinLoop(300);
+    EXPECT_TRUE(
+        linesStarting(log, QStringLiteral("Alert: Second set, 99 ")).isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+// Each firing is a line of the activity log, and a note in the
+// recording; several of one condition's in one window are one line, and
+// a change that isn't a firing is none
+TEST(BridgeTest, EachFiringIsAnActivityLine)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(mockConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://firings")).isEmpty());
+    ASSERT_TRUE(rowReads(bridge, 0, "on"));
+    ASSERT_TRUE(rowReads(bridge, 1, "on"));
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return log.contains(QStringLiteral("Alert: Engine stopped, 0 RPM"));
+        },
+        5000));
+    EXPECT_EQ(
+        linesStarting(log, QStringLiteral("Alert: Engine stopped")).size(), 1)
+        << "one firing, one line";
+    EXPECT_EQ(
+        linesStarting(log, QStringLiteral("Alert: Coolant cold, ")).size(), 1);
+
+    const uint32_t g = bridge.conditionsGenerationForTesting();
+    std::vector<ecuio_condition_event_t> window;
+    for (int i = 0; i < 1000; ++i) {
+        window.push_back(conditionEvent(0, g, ECUIO_CONDITION_FIRED, i));
+        window.push_back(conditionEvent(0, g, 0, i)); // back OFF
+    }
+    window.push_back(conditionEvent(2, g, ECUIO_CONDITION_FIRED, 260));
+    window.push_back(
+        conditionEvent(1, g, ECUIO_CONDITION_STALE, 20)); // no firing
+    bridge.dispatchConditionsForTesting(window.data(),
+                                        static_cast<uint32_t>(window.size()));
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return log.contains(
+                QStringLiteral("Alert: Engine stopped fired 1000 times"));
+        },
+        5000))
+        << log.join(u'\n').toStdString();
+    EXPECT_TRUE(log.contains(QStringLiteral("Condition: Moving, 260 km/h")))
+        << "a condition with no alert";
+    EXPECT_EQ(linesStarting(log, QStringLiteral("Alert: Coolant cold")).size(),
+              1)
+        << "a STALE change isn't a firing";
+
+    // In the order they fired, whatever their order in the set; a
+    // condition's place is its window's first firing
+    const ecuio_condition_event_t first[] = {
+        conditionEvent(2, g, ECUIO_CONDITION_FIRED, 1, 2000000),
+        conditionEvent(0, g, ECUIO_CONDITION_FIRED, 2, 3000000),
+    };
+    bridge.dispatchConditionsForTesting(first, 2);
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return log.contains(QStringLiteral("Alert: Engine stopped, 2 RPM"));
+        },
+        5000));
+    EXPECT_LT(log.indexOf(QStringLiteral("Condition: Moving, 1 km/h")),
+              log.indexOf(QStringLiteral("Alert: Engine stopped, 2 RPM")));
+    const ecuio_condition_event_t second[] = {
+        conditionEvent(0, g, ECUIO_CONDITION_FIRED, 11, 4000000),
+        conditionEvent(2, g, ECUIO_CONDITION_FIRED, 12, 5000000),
+        conditionEvent(0, g, ECUIO_CONDITION_FIRED, 13, 6000000),
+    };
+    bridge.dispatchConditionsForTesting(second, 3);
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return log.contains(QStringLiteral("Condition: Moving, 12 km/h"));
+        },
+        5000));
+    EXPECT_LT(
+        log.indexOf(QStringLiteral("Alert: Engine stopped fired 2 times")),
+        log.indexOf(QStringLiteral("Condition: Moving, 12 km/h")));
+
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    const QString folder = root.path() + QLatin1Char('/') + folders.first();
+    const QByteArray events = readFile(folder + QStringLiteral("/events.log"));
+    EXPECT_TRUE(events.contains("Alert: Engine stopped, 0 RPM"))
+        << "noted in the recording";
+    EXPECT_TRUE(events.contains("Alert: Engine stopped fired 1000 times"));
+    EXPECT_EQ(readFile(folder + QStringLiteral("/conditions.json")),
+              mockConditions())
+        << "the set the session judged";
+}
+
+// A recording holds its set (ADR-0063 section 6): an edit saved while one
+// runs waits for its end, then is judged; a disconnect ends the wait too
+TEST(BridgeTest, AnEditDuringARecordingWaitsForItsEnd)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(mockConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://edit")).isEmpty());
+    ASSERT_TRUE(rowReads(bridge, 0, "on"));
+    ASSERT_TRUE(bridge.startLog());
+
+    QVariantMap saved =
+        bridge.saveConditions(QString::fromUtf8(otherConditions()));
+    ASSERT_TRUE(saved.value(QStringLiteral("ok")).toBool());
+    EXPECT_EQ(saved.value(QStringLiteral("pending")).toString(),
+              QStringLiteral("applies when this recording ends"));
+    EXPECT_EQ(bridge.conditionsPending(),
+              QStringLiteral("applies when this recording ends"));
+    EXPECT_EQ(bridge.conditionsGenerationForTesting(), 1u)
+        << "core would refuse it";
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 3) << "the set judged";
+    EXPECT_EQ(bridge.conditionsText(), QString::fromUtf8(otherConditions()))
+        << "saved";
+    EXPECT_TRUE(
+        log.contains(QStringLiteral("Alerts saved: 1 condition; the change "
+                                    "applies when this recording ends")));
+
+    bridge.stopLog();
+    EXPECT_EQ(bridge.conditionsPending(), QString());
+    EXPECT_EQ(bridge.conditionsGenerationForTesting(), 2u);
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 1);
+    ASSERT_TRUE(rowReads(bridge, 0, "on"));
+    EXPECT_TRUE(log.contains(QStringLiteral("Alerts: judging 1 condition")));
+    const QStringList folders = recordingFolders(root.path());
+    ASSERT_EQ(folders.size(), 1);
+    EXPECT_EQ(readFile(root.path() + QLatin1Char('/') + folders.first() +
+                       QStringLiteral("/conditions.json")),
+              mockConditions())
+        << "the recording kept its set";
+
+    // A disconnect ends a recording's wait: the saved set, offline
+    ASSERT_TRUE(bridge.startLog());
+    saved = bridge.saveConditions(QString::fromUtf8(mockConditions()));
+    EXPECT_FALSE(saved.value(QStringLiteral("pending")).toString().isEmpty());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_EQ(bridge.conditionsPending(), QString());
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 3);
+    EXPECT_FALSE(conditionRow(bridge.conditionModel(), 0)
+                     .value(QStringLiteral("live"))
+                     .toBool());
+}
+
+// A replay is judged by its recording's own conditions.json while it
+// matches the header's hash (ADR-0063 decision 12); an edit then waits for
+// the replay's end, and a copy changed since is passed by for the saved set
+TEST(BridgeTest, AReplayJudgesByItsRecordingsCopy)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    bridge.setRecordingsRootForTesting(root.path());
+    bridge.setRecording(true);
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(mockConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://recorded")).isEmpty());
+    ASSERT_TRUE(rowReads(bridge, 0, "on"));
+    ASSERT_TRUE(
+        spinUntil([&bridge]() { return bridge.frameCount() > 10; }, 5000));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    bridge.setRecording(false);
+
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(otherConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    const QVariantList rows = bridge.recentRecordings(1);
+    ASSERT_EQ(rows.size(), 1);
+    const QString uri =
+        rows.first().toMap().value(QStringLiteral("uri")).toString();
+    const QString folder =
+        rows.first().toMap().value(QStringLiteral("folder")).toString();
+
+    log.clear();
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    EXPECT_TRUE(bridge.conditionsFromRecording());
+    EXPECT_TRUE(log.contains(
+        QStringLiteral("Alerts: judging the recording's own 3 conditions")))
+        << log.join(u'\n').toStdString();
+    ASSERT_EQ(bridge.conditionModel()->rowCount(), 3);
+    EXPECT_EQ(conditionRow(bridge.conditionModel(), 1)
+                  .value(QStringLiteral("key"))
+                  .toString(),
+              QStringLiteral("cold"));
+    ASSERT_TRUE(rowReads(bridge, 0, "on")) << "the replay fires what fired";
+    EXPECT_TRUE(log.contains(QStringLiteral("Alert: Engine stopped, 0 RPM")));
+
+    const QVariantMap saved =
+        bridge.saveConditions(QString::fromUtf8(otherConditions()));
+    EXPECT_EQ(saved.value(QStringLiteral("pending")).toString(),
+              QStringLiteral("applies when this replay is disconnected"));
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 3);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+    EXPECT_FALSE(bridge.conditionsFromRecording());
+    EXPECT_EQ(bridge.conditionsPending(), QString());
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 1) << "the saved set's rows";
+
+    // A copy changed since the recording: the saved set, and a line
+    {
+        QFile copy(folder + QStringLiteral("/conditions.json"));
+        ASSERT_TRUE(copy.open(QIODevice::Append));
+        copy.write(" ");
+    }
+    log.clear();
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    EXPECT_FALSE(bridge.conditionsFromRecording());
+    const qsizetype unmatched = log.indexOf(QStringLiteral(
+        "Replay: the recording's conditions.json doesn't match its hash; "
+        "judging the saved conditions"));
+    EXPECT_GE(unmatched, 0) << log.join(u'\n').toStdString();
+    const QStringList connected =
+        linesStarting(log, QStringLiteral("Connected: "));
+    ASSERT_EQ(connected.size(), 1);
+    EXPECT_GT(unmatched, log.indexOf(connected.first()))
+        << "with the connect's lines";
+    EXPECT_TRUE(log.contains(QStringLiteral("Alerts: judging 1 condition")));
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 1);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+
+    // With no saved set, the line says none is judged
+    {
+        SettingsDirScope none;
+        ASSERT_TRUE(none.valid());
+        SessionBridge fresh;
+        fresh.setRecordingsRootForTesting(root.path());
+        QStringList lines;
+        QObject::connect(&fresh, &SessionBridge::logMessage,
+                         [&lines](const QString& line) { lines << line; });
+        ASSERT_TRUE(fresh.connectSession(uri).isEmpty());
+        EXPECT_TRUE(lines.contains(QStringLiteral(
+            "Replay: the recording's conditions.json doesn't match its "
+            "hash; judging none")))
+            << lines.join(u'\n').toStdString();
+        EXPECT_TRUE(linesStarting(lines, QStringLiteral("Alerts")).isEmpty());
+        EXPECT_EQ(fresh.conditionModel()->rowCount(), 0);
+        ASSERT_TRUE(disconnectAndWait(fresh));
+    }
+
+    // A copy that matches but isn't judged: the saved set in its place
+    {
+        QFile copy(folder + QStringLiteral("/conditions.json"));
+        ASSERT_TRUE(copy.open(QIODevice::ReadWrite));
+        copy.resize(copy.size() - 1);
+    }
+    bridge.failConditionsAttachesForTesting(1);
+    log.clear();
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    EXPECT_FALSE(bridge.conditionsFromRecording());
+    EXPECT_FALSE(
+        linesStarting(log, QStringLiteral("Replay: the recording's "
+                                          "conditions.json isn't judged ("))
+            .isEmpty())
+        << log.join(u'\n').toStdString();
+    EXPECT_TRUE(log.contains(QStringLiteral("Alerts: judging 1 condition")));
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 1);
+    EXPECT_EQ(bridge.conditionsGenerationForTesting(), 1u);
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+// The level a signal's alerts give it is the highest ON among them,
+// whatever their order; one OFF, or a condition with no alert, gives none
+TEST(BridgeTest, TheHighestAlertOnASignalIsItsLevel)
+{
+    const QByteArray file =
+        R"({"havne_conditions":1,"conditions":[)"
+        R"({"key":"d","name":"D","when":{"signal":["id:1001"],"unit":"RPM","above":1},)"
+        R"("alert":{"level":"danger"}},)"
+        R"({"key":"w","name":"W","when":{"all":[)"
+        R"({"signal":["id:1001"],"unit":"RPM","above":1},)"
+        R"({"signal":["id:4001"],"unit":"%","above":1}]},"alert":{"level":"warning"}},)"
+        R"({"key":"off","name":"Off","when":{"signal":["id:3001"],"unit":"km/h","above":1},)"
+        R"("alert":{"level":"danger"}},)"
+        R"({"key":"m","name":"M","when":{"signal":["id:6001"],"unit":"%","above":1},)"
+        R"("mark":true}]})";
+    QString words;
+    ConditionSetPtr set = loadConditionSet(file, &words);
+    ASSERT_NE(set, nullptr) << words.toStdString();
+    const ecuio_signal_set_t* mock = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("mock", &mock), ECUIO_OK);
+    ConditionModel model;
+    model.setConditions(set.get(), mock, nullptr);
+    EXPECT_TRUE(model.alertLevels().empty()) << "nothing judged yet";
+    ecuio_condition_state_t states[4] = {};
+    for (ecuio_condition_state_t& s : states) {
+        s.state = ECUIO_CONDITION_ON;
+    }
+    states[2].state = ECUIO_CONDITION_OFF;
+    model.applyStates(states, 4);
+    const std::map<uint32_t, int> levels{
+        {ECUIO_MOCK_SIG_RPM_ID, ECUIO_ALERT_DANGER},
+        {ECUIO_MOCK_SIG_THROTTLE_ID, ECUIO_ALERT_WARNING}};
+    EXPECT_EQ(model.alertLevels(), levels);
+}
+
+// A term on a signal the session reports it doesn't get reads
+// unavailable, in the app's words; so does one bound to a def in
+// another unit
+TEST(BridgeTest, AConditionOnASignalTheMockDisclaimsReadsNotReceived)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    SessionBridge bridge;
+    ASSERT_TRUE(
+        bridge
+            .saveConditions(QStringLiteral(
+                R"({"havne_conditions":1,"conditions":[)"
+                R"({"key":"fuel","name":"Fuel pressure",)"
+                R"("when":{"signal":["obd2.pid_0a"],"unit":"kPa","above":1}},)"
+                R"({"key":"unit","name":"Engine speed in Hz",)"
+                R"("when":{"signal":["obd2.rpm"],"unit":"Hz","above":1}}]})"))
+            .value(QStringLiteral("ok"))
+            .toBool());
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://disclaims?profile=obd2"))
+            .isEmpty());
+    const ConditionModel* model = bridge.conditionModel();
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return conditionRow(model, 0)
+                .value(QStringLiteral("unavailable"))
+                .toBool();
+        },
+        5000));
+    QVariantMap row = conditionRow(model, 0);
+    EXPECT_EQ(row.value(QStringLiteral("why")).toString(),
+              QStringLiteral("the ECU doesn't send its signal"));
+    EXPECT_EQ(row.value(QStringLiteral("defIds")).toList(),
+              QVariantList{ECUIO_OBD2_PID_SIG_ID(0x0A, 0)});
+    row = conditionRow(model, 1);
+    EXPECT_TRUE(row.value(QStringLiteral("unavailable")).toBool());
+    EXPECT_EQ(row.value(QStringLiteral("why")).toString(),
+              QStringLiteral("its unit isn't its signal's"));
+    EXPECT_EQ(row.value(QStringLiteral("defIds")).toList(),
+              QVariantList{ECUIO_OBD2_SIG_RPM_ID})
+        << "a term bound to a def it can't judge still names it";
+    EXPECT_EQ(ConditionModel::whyText(ECUIO_CONDITION_WHY_NONE), QString());
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+// The worker's callback writes a slot made at the attach: nothing is
+// allocated per event, however many come (counted on this thread through
+// the same call core's worker makes)
+TEST(BridgeTest, TheBridgeAllocatesNothingPerConditionEvent)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(mockConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://news")).isEmpty());
+    ASSERT_TRUE(rowReads(bridge, 0, "on"));
+    const uint32_t g = bridge.conditionsGenerationForTesting();
+    ecuio_condition_event_t events[3] = {
+        conditionEvent(0, g, ECUIO_CONDITION_FIRED, 1),
+        conditionEvent(1, g, 0, 2),
+        conditionEvent(2, g, ECUIO_CONDITION_FIRED, 3),
+    };
+    bridge.dispatchConditionsForTesting(events, 3);
+    const unsigned long before = new_counter::on_this_thread();
+    for (int i = 0; i < 10000; ++i) {
+        bridge.dispatchConditionsForTesting(events, 3);
+    }
+    EXPECT_EQ(new_counter::on_this_thread() - before, 0ul);
+    // Each landed: no tick ran between them, and the mock never moves
+    EXPECT_TRUE(spinUntil(
+        [&log]() {
+            return log.contains(
+                QStringLiteral("Condition: Moving fired 10001 times"));
+        },
+        5000))
+        << log.join(u'\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+namespace {
+
+// Three alerts on an engine speed the mock never reaches, so only the
+// events a case dispatches fire: two that sound, at each level, and one
+// that doesn't
+QByteArray toneConditions()
+{
+    return QByteArray(
+        R"({"havne_conditions":1,"conditions":[)"
+        R"({"key":"hot","name":"Hot","when":{"signal":["id:1001"],)"
+        R"("unit":"RPM","above":20000},)"
+        R"("alert":{"level":"danger","sound":true}},)"
+        R"({"key":"warm","name":"Warm","when":{"signal":["id:1001"],)"
+        R"("unit":"RPM","above":19000},)"
+        R"("alert":{"level":"warning","sound":true}},)"
+        R"({"key":"quiet","name":"Quiet","when":{"signal":["id:1001"],)"
+        R"("unit":"RPM","above":18000},)"
+        R"("alert":{"level":"danger","banner":true}}]})");
+}
+
+// A session of mock://demo judging toneConditions, its log kept
+struct ToneRun {
+    SettingsDirScope dir;
+    SessionBridge bridge;
+    QStringList log;
+    uint32_t generation = 0;
+
+    bool start()
+    {
+        QObject::connect(&bridge, &SessionBridge::logMessage,
+                         [this](const QString& line) { log << line; });
+        if (!dir.valid() ||
+            !bridge.saveConditions(QString::fromUtf8(toneConditions()))
+                 .value(QStringLiteral("ok"))
+                 .toBool() ||
+            !bridge.connectSession(QStringLiteral("mock://demo")).isEmpty() ||
+            !rowReads(bridge, 0, "off")) {
+            return false;
+        }
+        generation = bridge.conditionsGenerationForTesting();
+        return true;
+    }
+    // Each condition fired in one window, then the tick that writes it
+    bool fire(std::initializer_list<uint32_t> conditions)
+    {
+        std::vector<ecuio_condition_event_t> events;
+        for (uint32_t c : conditions) {
+            events.push_back(
+                conditionEvent(c, generation, ECUIO_CONDITION_FIRED, 20001));
+        }
+        const qsizetype before =
+            linesStarting(log, QStringLiteral("Alert: ")).size();
+        bridge.dispatchConditionsForTesting(
+            events.data(), static_cast<uint32_t>(events.size()));
+        const auto want = before + static_cast<qsizetype>(events.size());
+        return spinUntil(
+            [&]() {
+                return linesStarting(log, QStringLiteral("Alert: ")).size() >=
+                       want;
+            },
+            5000);
+    }
+    uint64_t danger() const
+    {
+        return bridge.alertToneForTesting().playedForTesting(
+            ECUIO_ALERT_DANGER);
+    }
+    uint64_t warning() const
+    {
+        return bridge.alertToneForTesting().playedForTesting(
+            ECUIO_ALERT_WARNING);
+    }
+};
+
+} // namespace
+
+// A firing whose alert sounds plays one tone; another of the same
+// condition within 5 s plays none, and one after it plays again
+TEST(BridgeTest, ASoundingFiringPlaysOnceInFiveSeconds)
+{
+    ToneRun run;
+    ASSERT_TRUE(run.start()) << run.log.join(u'\n').toStdString();
+    EXPECT_EQ(run.danger(), 0u) << "nothing fired yet";
+
+    ASSERT_TRUE(run.fire({0})) << run.log.join(u'\n').toStdString();
+    EXPECT_EQ(run.danger(), 1u);
+    EXPECT_EQ(run.warning(), 0u);
+
+    ASSERT_TRUE(run.fire({0}));
+    EXPECT_EQ(run.danger(), 1u) << "a second firing at once";
+    // 3 s added leaves the ticks' own time 2 s of margin
+    run.bridge.addToneTimeForTesting(3000000);
+    ASSERT_TRUE(run.fire({0}));
+    EXPECT_EQ(run.danger(), 1u) << "within 5 s of the tone";
+
+    run.bridge.addToneTimeForTesting(2000000);
+    ASSERT_TRUE(run.fire({0}));
+    EXPECT_EQ(run.danger(), 2u) << "5 s after the tone";
+    ASSERT_TRUE(disconnectAndWait(run.bridge));
+}
+
+// Each condition keeps its own 5 s, and a level its own tone. Firings in
+// one tick are one tone, the loudest, and each of them waits its 5 s
+TEST(BridgeTest, EachConditionSoundsItsOwnLevel)
+{
+    ToneRun run;
+    ASSERT_TRUE(run.start()) << run.log.join(u'\n').toStdString();
+    ASSERT_TRUE(run.fire({0}));
+    ASSERT_TRUE(run.fire({1}));
+    EXPECT_EQ(run.danger(), 1u);
+    EXPECT_EQ(run.warning(), 1u) << "the second condition's own tone";
+
+    run.bridge.addToneTimeForTesting(5000000);
+    ASSERT_TRUE(run.fire({1, 0}));
+    EXPECT_EQ(run.danger(), 2u) << "one tick: the danger tone";
+    EXPECT_EQ(run.warning(), 1u) << "one tick: one tone";
+    ASSERT_TRUE(run.fire({1}));
+    EXPECT_EQ(run.warning(), 1u) << "the warning sounded with the danger";
+    ASSERT_TRUE(disconnectAndWait(run.bridge));
+}
+
+// An alert without "sound" plays nothing when it fires
+TEST(BridgeTest, AnAlertWithoutSoundPlaysNone)
+{
+    ToneRun run;
+    ASSERT_TRUE(run.start()) << run.log.join(u'\n').toStdString();
+    ASSERT_TRUE(run.fire({2})) << run.log.join(u'\n').toStdString();
+    EXPECT_EQ(run.danger(), 0u);
+    EXPECT_EQ(run.warning(), 0u);
+    ASSERT_TRUE(disconnectAndWait(run.bridge));
+}
+
+// Many firings of a sounding alert in one window are one tone, and the
+// worker's events allocate nothing; the tick's lines are 7a's
+TEST(BridgeTest, AWindowsFiringsAreOneToneAndItsEventsAllocateNothing)
+{
+    ToneRun run;
+    ASSERT_TRUE(run.start()) << run.log.join(u'\n').toStdString();
+    const ecuio_condition_event_t event =
+        conditionEvent(0, run.generation, ECUIO_CONDITION_FIRED, 20001);
+    run.bridge.dispatchConditionsForTesting(&event, 1);
+    const unsigned long before = new_counter::on_this_thread();
+    for (int i = 0; i < 9999; ++i) {
+        run.bridge.dispatchConditionsForTesting(&event, 1);
+    }
+    EXPECT_EQ(new_counter::on_this_thread() - before, 0ul);
+    EXPECT_TRUE(spinUntil(
+        [&run]() {
+            return run.log.contains(
+                QStringLiteral("Alert: Hot fired 10000 times"));
+        },
+        5000))
+        << run.log.join(u'\n').toStdString();
+    EXPECT_EQ(run.danger(), 1u);
+    ASSERT_TRUE(disconnectAndWait(run.bridge));
+}
+
+// An edit saved mid-session keeps the 5 s of each condition whose key it
+// keeps, wherever the condition now sits, and its new ones sound
+TEST(BridgeTest, AnEditKeepsEachConditionsFiveSecondsByItsKey)
+{
+    ToneRun run;
+    ASSERT_TRUE(run.start()) << run.log.join(u'\n').toStdString();
+    ASSERT_TRUE(run.fire({0}));
+    ASSERT_EQ(run.danger(), 1u);
+
+    // A condition before Hot and one past the old set's end, both new
+    QByteArray grown = toneConditions();
+    grown.replace(
+        R"("conditions":[)",
+        R"("conditions":[{"key":"first","name":"First","when":{"signal":)"
+        R"(["id:1001"],"unit":"RPM","above":21000},"alert":)"
+        R"({"level":"warning","sound":true}},)");
+    grown.replace(
+        R"(]})", R"(,{"key":"last","name":"Last","when":{"signal":["id:1001"],)"
+                 R"("unit":"RPM","above":22000},"alert":)"
+                 R"({"level":"danger","sound":true}}]})");
+    const QVariantMap saved =
+        run.bridge.saveConditions(QString::fromUtf8(grown));
+    ASSERT_TRUE(saved.value(QStringLiteral("ok")).toBool())
+        << saved.value(QStringLiteral("words")).toString().toStdString();
+    ASSERT_EQ(run.bridge.conditionModel()->rowCount(), 5);
+    run.generation = run.bridge.conditionsGenerationForTesting();
+
+    ASSERT_TRUE(run.fire({1})) << run.log.join(u'\n').toStdString();
+    EXPECT_EQ(run.danger(), 1u) << "Hot, now second, within its 5 s";
+    ASSERT_TRUE(run.fire({4}));
+    EXPECT_EQ(run.danger(), 2u) << "the new last condition sounds";
+    ASSERT_TRUE(run.fire({0}));
+    EXPECT_EQ(run.warning(), 1u) << "the new first condition sounds";
+    ASSERT_TRUE(disconnectAndWait(run.bridge));
+}
+
+namespace {
+
+// A tone maker standing in for Android's: each call recorded in a state
+// the case keeps after the player is gone
+struct FakeTones : AlertTone::Backend {
+    struct State {
+        std::mutex mutex;
+        std::condition_variable changed;
+        std::vector<std::pair<uint32_t, std::chrono::steady_clock::time_point>>
+            starts;
+        int makes = 0;
+        int releases = 0;
+        std::vector<std::chrono::steady_clock::time_point> makeTimes;
+        std::vector<std::chrono::steady_clock::time_point> releaseTimes;
+        int failMakes = 0;    // the next n makes fail
+        int failStarts = 0;   // the next n starts fail
+        int blockFirstMs = 0; // the first start takes this long
+    };
+    std::shared_ptr<State> s = std::make_shared<State>();
+
+    bool make() override
+    {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        ++s->makes;
+        s->makeTimes.push_back(std::chrono::steady_clock::now());
+        s->changed.notify_all();
+        if (s->failMakes > 0) {
+            --s->failMakes;
+            return false;
+        }
+        return true;
+    }
+    bool start(uint32_t level) override
+    {
+        int block = 0;
+        {
+            std::lock_guard<std::mutex> lock(s->mutex);
+            std::swap(block, s->blockFirstMs);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(block));
+        std::lock_guard<std::mutex> lock(s->mutex);
+        s->changed.notify_all();
+        if (s->failStarts > 0) {
+            --s->failStarts;
+            return false;
+        }
+        s->starts.emplace_back(level, std::chrono::steady_clock::now());
+        return true;
+    }
+    void release() override
+    {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        ++s->releases;
+        s->releaseTimes.push_back(std::chrono::steady_clock::now());
+        s->changed.notify_all();
+    }
+};
+
+// Waits up to ms for pred over the state, under its lock
+template <typename Pred> bool toneState(FakeTones::State& s, int ms, Pred pred)
+{
+    std::unique_lock<std::mutex> lock(s.mutex);
+    return s.changed.wait_for(lock, std::chrono::milliseconds(ms),
+                              [&]() { return pred(s); });
+}
+
+} // namespace
+
+// A tone plays out before the next starts, and the asks meanwhile are one
+// tone, the loudest: a warning then a danger is a beep, then two beeps
+TEST(BridgeTest, ATonePlaysOutAndAsksMeanwhileMergeIntoTheLoudest)
+{
+    auto fake = std::make_unique<FakeTones>();
+    const std::shared_ptr<FakeTones::State> s = fake->s;
+    {
+        AlertTone tone(std::move(fake), {1000, 3000, 5000});
+        tone.play(ECUIO_ALERT_WARNING);
+        ASSERT_TRUE(toneState(*s, 2000, [](FakeTones::State& t) {
+            return t.starts.size() == 1;
+        }));
+        tone.play(ECUIO_ALERT_WARNING);
+        tone.play(ECUIO_ALERT_DANGER);
+        tone.play(ECUIO_ALERT_WARNING);
+        ASSERT_TRUE(toneState(*s, 4000, [](FakeTones::State& t) {
+            return t.starts.size() == 2;
+        }));
+        {
+            std::lock_guard<std::mutex> lock(s->mutex);
+            EXPECT_EQ(s->starts[0].first, ECUIO_ALERT_WARNING);
+            EXPECT_EQ(s->starts[1].first, ECUIO_ALERT_DANGER);
+            EXPECT_GE(s->starts[1].second - s->starts[0].second,
+                      std::chrono::milliseconds(1000))
+                << "the first tone played out";
+            EXPECT_EQ(s->makes, 1);
+        }
+        // Nothing was left waiting: no third tone after the second's room
+        EXPECT_FALSE(toneState(*s, 1300, [](FakeTones::State& t) {
+            return t.starts.size() > 2;
+        })) << "the three asks were one tone";
+    }
+    EXPECT_EQ(s->releases, 1) << "released as the player ends";
+}
+
+// A generator that can't be made, or fails, is made again on a later ask
+// once the retry interval has passed, and not before
+TEST(BridgeTest, AFailedToneGeneratorIsMadeAgainAfterAPause)
+{
+    auto fake = std::make_unique<FakeTones>();
+    const std::shared_ptr<FakeTones::State> s = fake->s;
+    s->failMakes = 1;
+    AlertTone tone(std::move(fake), {50, 5000, 400});
+    // Asks every 50 ms until the backend sees n makes
+    const auto askUntilMade = [&](uint32_t level, int n) {
+        for (int i = 0; i < 100; ++i) {
+            tone.play(level);
+            if (toneState(*s, 50,
+                          [n](FakeTones::State& t) { return t.makes >= n; })) {
+                return true;
+            }
+        }
+        return false;
+    };
+    ASSERT_TRUE(askUntilMade(ECUIO_ALERT_WARNING, 1));
+    ASSERT_TRUE(askUntilMade(ECUIO_ALERT_WARNING, 2));
+    ASSERT_TRUE(toneState(
+        *s, 2000, [](FakeTones::State& t) { return t.starts.size() == 1; }));
+    {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        EXPECT_GE(s->makeTimes[1] - s->makeTimes[0],
+                  std::chrono::milliseconds(400))
+            << "made again within the interval, though asked meanwhile";
+        s->failStarts = 1;
+    }
+
+    // A start that fails releases the generator; a later ask makes another
+    ASSERT_TRUE(askUntilMade(ECUIO_ALERT_DANGER, 3));
+    ASSERT_TRUE(toneState(
+        *s, 2000, [](FakeTones::State& t) { return t.starts.size() == 2; }));
+    std::lock_guard<std::mutex> lock(s->mutex);
+    ASSERT_EQ(s->releaseTimes.size(), 1u);
+    EXPECT_GE(s->makeTimes[2] - s->releaseTimes[0],
+              std::chrono::milliseconds(400))
+        << "made again within the interval after the failed start";
+    EXPECT_EQ(s->starts[1].first, ECUIO_ALERT_DANGER);
+}
+
+// An ask still waiting past the stale bound, behind a start that blocked,
+// plays nothing; a fresh one plays
+TEST(BridgeTest, AToneAskedLongBeforeItsTurnPlaysNone)
+{
+    auto fake = std::make_unique<FakeTones>();
+    const std::shared_ptr<FakeTones::State> s = fake->s;
+    s->blockFirstMs = 700;
+    AlertTone tone(std::move(fake), {50, 300, 5000});
+    tone.play(ECUIO_ALERT_WARNING);
+    ASSERT_TRUE(
+        toneState(*s, 2000, [](FakeTones::State& t) { return t.makes == 1; }));
+    tone.play(ECUIO_ALERT_DANGER); // waits behind the blocked start
+    ASSERT_TRUE(
+        spinUntil([&tone]() { return tone.staleForTesting() == 1; }, 5000))
+        << "the late danger wasn't dropped";
+    {
+        std::lock_guard<std::mutex> lock(s->mutex);
+        ASSERT_EQ(s->starts.size(), 1u) << "the late danger played";
+        EXPECT_EQ(s->starts[0].first, ECUIO_ALERT_WARNING);
+    }
+    tone.play(ECUIO_ALERT_DANGER);
+    ASSERT_TRUE(toneState(
+        *s, 2000, [](FakeTones::State& t) { return t.starts.size() == 2; }));
+}
+
+// An ask of a level already waiting brings its time up to date: behind a
+// start that blocked, the newer danger plays though the older is stale
+TEST(BridgeTest, AFreshAskBehindABlockedStartPlaysThoughOneOfItsLevelWaited)
+{
+    auto fake = std::make_unique<FakeTones>();
+    const std::shared_ptr<FakeTones::State> s = fake->s;
+    s->blockFirstMs = 1500;
+    AlertTone tone(std::move(fake), {50, 1000, 5000});
+    tone.play(ECUIO_ALERT_WARNING);
+    ASSERT_TRUE(
+        toneState(*s, 2000, [](FakeTones::State& t) { return t.makes == 1; }));
+    tone.play(ECUIO_ALERT_DANGER);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    tone.play(ECUIO_ALERT_DANGER); // the older is about to be stale
+    ASSERT_TRUE(toneState(*s, 5000, [](FakeTones::State& t) {
+        return t.starts.size() == 2;
+    })) << "the fresh danger was dropped with the stale one";
+    std::lock_guard<std::mutex> lock(s->mutex);
+    EXPECT_EQ(s->starts[1].first, ECUIO_ALERT_DANGER);
+}
+
+// play hands a tone to a running player with no allocation, and only the
+// two levels are tones
+TEST(BridgeTest, PlayAllocatesNothingAndOnlyTheTwoLevelsAreTones)
+{
+    auto fake = std::make_unique<FakeTones>();
+    const std::shared_ptr<FakeTones::State> s = fake->s;
+    AlertTone tone(std::move(fake), {1, 1000, 5000});
+    tone.play(ECUIO_ALERT_WARNING);
+    ASSERT_TRUE(toneState(
+        *s, 2000, [](FakeTones::State& t) { return t.starts.size() == 1; }));
+    const unsigned long before = new_counter::on_this_thread();
+    for (int i = 0; i < 10000; ++i) {
+        tone.play(i % 2 == 0 ? ECUIO_ALERT_DANGER : ECUIO_ALERT_WARNING);
+    }
+    EXPECT_EQ(new_counter::on_this_thread() - before, 0ul);
+    tone.play(ECUIO_ALERT_NONE);
+    tone.play(7);
+    EXPECT_EQ(tone.playedForTesting(ECUIO_ALERT_DANGER), 5000u)
+        << "a level past danger plays nothing";
+    EXPECT_EQ(tone.playedForTesting(ECUIO_ALERT_WARNING), 5001u);
+    EXPECT_EQ(tone.playedForTesting(ECUIO_ALERT_NONE), 0u);
+}
+
+// An attach core refuses leaves the slots as they were: the set still
+// judged keeps its events
+TEST(BridgeTest, ARefusedAttachKeepsTheSlotsOfTheSetJudged)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(mockConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://refused")).isEmpty());
+    ASSERT_TRUE(rowReads(bridge, 0, "on"));
+    ASSERT_EQ(bridge.conditionsGenerationForTesting(), 1u);
+
+    bridge.failConditionsAttachesForTesting(1);
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(otherConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    EXPECT_FALSE(
+        linesStarting(log, QStringLiteral("Alerts not judged: ")).isEmpty())
+        << log.join(u'\n').toStdString();
+    EXPECT_EQ(bridge.conditionsGenerationForTesting(), 1u);
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 3) << "the set judged";
+
+    // The third slot of generation 1: kept at its size and generation
+    const ecuio_condition_event_t third =
+        conditionEvent(2, 1, ECUIO_CONDITION_FIRED, 7);
+    bridge.dispatchConditionsForTesting(&third, 1);
+    EXPECT_TRUE(spinUntil(
+        [&log]() {
+            return log.contains(QStringLiteral("Condition: Moving, 7 km/h"));
+        },
+        5000))
+        << log.join(u'\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+// A saved file core refuses at the start is kept for its editor: its text
+// is the conditions' text until a save that core takes replaces it
+TEST(BridgeTest, AFileCoreRefusedAtTheStartKeepsItsText)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    const QByteArray typo =
+        R"({"havne_conditions":1,"conditions":[{"key":"x"}]})";
+    {
+        QFile file(ConditionStore::path());
+        ASSERT_TRUE(QDir().mkpath(QFileInfo(file).absolutePath()));
+        ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+        file.write(typo);
+    }
+    SessionBridge bridge;
+    EXPECT_TRUE(bridge.conditionsProblem().startsWith(
+        QStringLiteral("The saved conditions weren't read: ")))
+        << bridge.conditionsProblem().toStdString();
+    EXPECT_EQ(bridge.conditionsText(), QString::fromUtf8(typo));
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 0);
+    EXPECT_EQ(readFile(ConditionStore::path()), typo)
+        << "the file left as it was";
+
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(mockConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    EXPECT_EQ(bridge.conditionsProblem(), QString());
+    EXPECT_EQ(bridge.conditionsText(), QString::fromUtf8(mockConditions()));
+    EXPECT_EQ(readFile(ConditionStore::path()), mockConditions());
+    EXPECT_EQ(bridge.conditionModel()->rowCount(), 3);
 }

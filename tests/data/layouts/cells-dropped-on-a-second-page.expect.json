@@ -1,0 +1,15 @@
+[
+ {
+  "as": "desktop",
+  "problem": "dropped",
+  "form": "desktop",
+  "pages": 2,
+  "cells": 3,
+  "files": [],
+  "notes": [],
+  "dropped": {
+   "pages": 0,
+   "cells": 1
+  }
+ }
+]

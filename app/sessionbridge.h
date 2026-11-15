@@ -1,5 +1,6 @@
 // File/layer: app/sessionbridge.h | Qt6 Core, app layer, C++17
-// Testing: UNIT: CoreTest (test_core); BRIDGE: BridgeTest (test_bridge)
+// Testing: UNIT: CoreTest (test_core); BRIDGE: BridgeTest (test_bridge);
+//          QML: QmlTest.dashboardbook
 
 #pragma once
 
@@ -16,6 +17,9 @@
 #include "framefilter.h"
 #include "recordingimport.h"
 #include "signalfilter.h"
+#include "alerttone.h"
+#include "conditionmodel.h"
+#include "conditionstore.h"
 #include <QTimer>
 #include <QHash>
 #include <QUrl>
@@ -35,6 +39,7 @@
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
 #include "ecuio/recording.h"
+#include "ecuio/conditions.h"
 #include "latencystats.h"
 
 class QSettings;
@@ -162,10 +167,15 @@ public:
     // anchor; a shift-click selects every row from the anchor to its own
     // (a toggle when the anchor has left the ring)
     int selectedCount() const { return static_cast<int>(m_selected.size()); }
-    // A view row's time in microseconds, as the table shows it; -1 for a row
-    // that isn't there. A table keeps its place by time, since rows come and
-    // go while it's hidden
-    Q_INVOKABLE double timestampAt(int row) const;
+    // A view row's arrival number; -1 for a row that isn't there. A table
+    // keeps its place by it: rows come and go while it's hidden, and a
+    // frame's time can step back (a vendor's stamp that wraps)
+    Q_INVOKABLE double seqAt(int row) const;
+    // The view row of that arrival, or with it gone or filtered out the
+    // next row in the view's order (the first to arrive after it oldest
+    // first, before it newest first), the last row past them all; -1 with
+    // no rows
+    Q_INVOKABLE int rowAtSeq(double seq) const;
     Q_INVOKABLE void toggleSelected(int row);
     Q_INVOKABLE void selectThrough(int row);
     Q_INVOKABLE void clearSelection();
@@ -323,13 +333,12 @@ class SignalListModel : public QAbstractListModel
 public:
     explicit SignalListModel(QObject* parent = nullptr);
 
-    // Rolling history depth per signal: room for the strip chart's
-    // longest window, 120 s. A 100 ms window adds one to three samples
-    // (its lowest, highest and newest value, ADR-0005's appendix), and a
-    // signal refreshing at 20 Hz or less adds at most two, so 120 s of it
-    // fits; a faster one keeps a shorter span. Kept constexpr so tests
-    // can assert exact ring behavior without a config surface.
-    static constexpr int HistoryCapacity = 2400;
+    // Rolling history depth per signal: room for the longest window the
+    // strip chart and the Dashboard's traces draw, 120 s. A 100 ms window
+    // adds one to three samples (its lowest, highest and newest value,
+    // ADR-0005's appendix), so 120 s of any signal fits. Kept constexpr so
+    // tests can assert exact ring behavior without a config surface.
+    static constexpr int HistoryCapacity = 3600;
 
     // One signal's coalesce window, as the bridge's staging hands it
     // over: its newest value and its lowest and highest, each at its
@@ -533,6 +542,18 @@ public:
     // role lookups per row.
     Q_INVOKABLE QVariantList chartData(qint64 windowMs = 0, int columns = 0) const;
 
+    // One signal's trace for the Dashboard's sparkline and Number tile:
+    // [ts, val, ...] as chartData's samples, for the row of def `id`
+    // whether or not Live plots it, over the last windowMs before that
+    // row's newest sample, sliced as chartData slices (from time 0, so a
+    // sample keeps its slice as the window moves). A break is a point whose
+    // value is NaN: a stall in the ring past the stale time
+    // (ECUIO_VALUE_STALE_US), or a value that isn't a number, which also
+    // starts a new slice. [] for no such row, a text row or one with no
+    // history. The trace reads the model's ring, so it outlives the page
+    // that shows it.
+    Q_INVOKABLE QList<double> trace(int id, qint64 windowMs, int columns) const;
+
     /* Periodic age refresh: ageMs is computed from the clock at data(), but
      * dataChanged fires only on updateValues, so a stalled row would never
      * dim. Emits dataChanged over every row for AgeMsRole alone (no value
@@ -613,6 +634,12 @@ private:
     // An enum row's label for its newest value, "" when it has none
     static QString labelOf(const Entry& e);
     static void pushWindow(Entry& e, const WindowValue& w);
+    // The ring's samples at or after `from`, oldest first: every one when
+    // sliceMs <= 0, else each slice's lowest and highest and the newest.
+    // breakMs > 0 adds a nullptr for each stall longer than it and gives a
+    // value that isn't a number a point of its own (trace's breaks)
+    static std::vector<const Sample*>
+    sliced(const Entry& e, qint64 from, double sliceMs, qint64 breakMs = 0);
     // A row's value as displayed in the current unit system
     ecuio_display_value_t shown(const Entry& e, double value) const;
     // A row's range as displayed (displayedRange)
@@ -675,6 +702,9 @@ class SessionBridge : public QObject
     // The age past which a value is stale (ECUIO_VALUE_STALE_US), in ms:
     // Theme.staleMs, so the UI dims what core's computed signals refuse
     Q_PROPERTY(int valueStaleMs READ valueStaleMs CONSTANT)
+    // A layout file's byte bound (layoutFileText), which DashboardBook's
+    // maxBytes + fileKeysBytes must equal
+    Q_PROPERTY(int layoutFileMaxBytes READ layoutFileBound CONSTANT)
     // A Read once is running (readOnce); no session connects meanwhile
     Q_PROPERTY(bool readingOnce READ readingOnce NOTIFY readingOnceChanged)
     // The signals the Dashboard's gauges read: each gauge's key ("rpm",
@@ -792,6 +822,24 @@ class SessionBridge : public QObject
     // "ECU 0x7E8 refused 3 more requests", "" when every refusal is named
     Q_PROPERTY(
         QString refusedUnnamed READ refusedUnnamed NOTIFY refusedUnnamedChanged)
+    // The conditions (ADR-0063 section 9): the set the app keeps
+    // (ConditionStore) or, on a replay, the recording's own copy, one row
+    // per condition, judged while a session runs
+    Q_PROPERTY(ConditionModel* conditionModel READ conditionModel CONSTANT)
+    // Why a saved edit isn't judged yet ("applies when this recording
+    // ends"), "" when the set judged is the one saved
+    Q_PROPERTY(QString conditionsPending READ conditionsPending NOTIFY
+                   conditionsChanged)
+    // Why the saved file wasn't read at startup, "" when it was or there's none
+    Q_PROPERTY(QString conditionsProblem READ conditionsProblem NOTIFY
+                   conditionsChanged)
+    // A replay judging its recording's own conditions.json, not the saved set
+    Q_PROPERTY(bool conditionsFromRecording READ conditionsFromRecording NOTIFY
+                   conditionsChanged)
+    // For each def id (as text) an alert ON reads, the highest level
+    // (ECUIO_ALERT_WARNING 1, _DANGER 2); a def with none is absent
+    Q_PROPERTY(
+        QVariantMap alertLevels READ alertLevels NOTIFY alertLevelsChanged)
 
 public:
     explicit SessionBridge(QObject* parent = nullptr);
@@ -826,21 +874,41 @@ public:
     Q_INVOKABLE QVariantMap importSignalText(const QString& text);
     Q_INVOKABLE QString signalFileText(const QString& sha) const;
     // A kept copy saved where the user chose (a local file, or Android's
-    // content:// from its document picker, through QFile): the copy's
+    // content:// from its document picker, by the content resolver): the copy's
     // bytes as imported or as the form wrote them, nothing added, so
     // havne-cli --signals and another vehicle read the same file. { ok,
     // words }, words never naming either path; a copy changed since it
     // was kept is refused, not saved. Logs one line
     Q_INVOKABLE QVariantMap saveSignalFile(const QString& sha, const QUrl& url);
+    // A dashboard layout file (ADR-0057's appendix on the layout file): the
+    // text DashboardBook.exportText made, written where the user chose (as
+    // saveSignalFile writes), and a picked file's text back. { ok, words }
+    // and { ok, words, text }, words never naming a path. The size is
+    // bounded at layoutFileMaxBytes either way, a text that isn't UTF-8 is
+    // refused unread, and a leading UTF-8 BOM is skipped. A local file is
+    // written whole or not at all and is never removed; a provider's document
+    // is written in place (it can't be atomic) and a refused or failed save
+    // removes it only when healthreport.h's pickedDocumentRemovable says so.
+    // Each logs one line
+    Q_INVOKABLE QVariantMap saveLayoutFile(const QString& text, const QUrl& url);
+    // A save a page refuses before it calls the bridge: the document its pick
+    // made goes by the same rule
+    Q_INVOKABLE void dropPicked(const QUrl& url);
+    Q_INVOKABLE QVariantMap layoutFileText(const QUrl& url);
+    static constexpr qint64 layoutFileMaxBytes = 66016 + 16384;
+    static int layoutFileBound()
+    {
+        return static_cast<int>(layoutFileMaxBytes);
+    }
     // The Log page's Export CSV (FrameListModel::scrubbedCsv) to the file
-    // at url (a local file, or Android's content:// through QFile): { ok,
+    // at url (a local file, or Android's content:// by the content resolver): { ok,
     // words, written, leftOut, unattributed }, leftOut the identification
     // replies' and text signals' frames, words never naming the path. A
     // failed check writes nothing. Logs one line
     Q_INVOKABLE QVariantMap exportFrames(const QUrl& url);
     // Diagnostics' Save report (ADR-0054's appendix "the health report as
     // built"): the session's health to the file at url (a local file, or
-    // Android's content:// through QFile), in the format healthFormatFor
+    // Android's content:// by the content resolver), in the format healthFormatFor
     // picks from it and the dialog's filterIndex, with the values Live's
     // rows hold. No wait: a report still being read says so itself.
     // baselineFolder, the picked vehicle's baseline recording ("" none),
@@ -1059,6 +1127,37 @@ public:
     void dispatchFrameForTesting(const ecuio_frame_t& frame);
     // onValues on the calling thread, as core's worker calls it
     void dispatchValuesForTesting(const ecuio_value_batch_t& batch);
+    // onConditions on the calling thread, as core's worker calls it
+    void dispatchConditionsForTesting(const ecuio_condition_event_t* events,
+                                      uint32_t count);
+    // The generation of the session's last attach, as core counts them
+    uint32_t conditionsGenerationForTesting() const
+    {
+        return m_conditionsGeneration;
+    }
+    // The next n attaches refused where core's call is made
+    void failConditionsAttachesForTesting(int n) { m_failAttaches = n; }
+    // The alert tones asked, and a later time for the tone's 5 s
+    const AlertTone& alertToneForTesting() const { return m_tone; }
+    void addToneTimeForTesting(uint64_t us) { m_toneTimeAddedForTesting += us; }
+
+    ConditionModel* conditionModel() const { return m_conditionModel; }
+    QString conditionsPending() const { return m_conditionsPending; }
+    QString conditionsProblem() const { return m_conditionsProblem; }
+    bool conditionsFromRecording() const { return m_conditionsFromRecording; }
+    QVariantMap alertLevels() const { return m_alertLevels; }
+    // The saved condition file's text, "" with none: what the Alerts page
+    // edits and saves again; while conditionsProblem says core refused the
+    // file, the refused file's text
+    Q_INVOKABLE QString conditionsText() const;
+    // A condition file in place of the saved one: ConditionStore::save's
+    // map plus "pending" (conditionsPending's words). Kept, it is judged at
+    // once by a session with no recorder; a recording holds its set
+    // (ADR-0063 section 6), so with one the edit waits for its end, and
+    // a replay judging its recording's copy keeps it to the end
+    Q_INVOKABLE QVariantMap saveConditions(const QString& text);
+    // alertLevels' level for one def, 0 for none
+    Q_INVOKABLE int alertLevelOf(int defId) const;
     // The samples one window can hold, from the next connect
     void setValueSampleLimitForTesting(int samples) { m_valueSampleLimit = samples; }
     static constexpr int defaultValueSampleLimit() { return DefaultValueSampleLimit; }
@@ -1402,6 +1501,8 @@ signals:
     // The folder is absolute, as recordingRow takes it
     void logStopped(const QString& folder, bool byUser);
     void unitSystemChanged();
+    void conditionsChanged();
+    void alertLevelsChanged();
     void minSweepMsChanged();
     void pickGaugesChanged();
     void diagnosticsChanged();
@@ -1419,6 +1520,42 @@ private:
     static void onValues(const ecuio_value_batch_t* batch, void* user_data);
     // GUI thread, before the session starts: sizes the staging for set
     void prepareValueStaging(const ecuio_signal_set_t* set);
+    // Core's conditions callback (ADR-0063 section 6): WORKER thread, each
+    // event into its condition's slot under m_conditionsMutex
+    static void onConditions(const ecuio_condition_event_t* events,
+                             uint32_t count, void* user_data);
+    // GUI thread: count slots for the attach of this generation, the
+    // events of any other passed by
+    void prepareConditionStaging(uint32_t count, uint32_t generation);
+    // GUI thread: set (nullptr: none) attached to session, judged with its
+    // signal file, and the model's rows; false with *why core's words,
+    // nothing changed. Core copies the set. The window's events of the set
+    // before are flushed first.
+    bool attachConditions(ecuio_session_t* session,
+                          const ecuio_condition_set_t* set, QString* why);
+    // GUI thread, before the start: the replay's own copy, else the saved set
+    void attachSessionConditions(ecuio_session_t* session, const QString& uri);
+    // Why an edit saved now waits ("applies when this recording ends"),
+    // "" when it can be judged at once
+    QString conditionsWait() const;
+    // The saved set judged now: attached to the session, or shown offline
+    void applySavedConditions();
+    // A session's end (or a start that failed): nothing judged, no edit
+    // waiting, the saved set's rows shown offline
+    void endSessionConditions();
+    // The activity lines of the connect's attach, written after "Session:"
+    QStringList m_conditionsLines;
+    // The model's rows of the saved set with no session
+    void showSavedConditions();
+    // The tick's half: the window's events into the model and the
+    // activity log, then the states core keeps
+    void flushConditions(ecuio_session_t* session);
+    // alertLevels from the model; emits on a change
+    void judgeAlertLevels();
+    // A replay's recording's conditions.json when its hash is the
+    // header's; nullptr otherwise, with *unused why when the header names
+    // one ("doesn't match its hash")
+    ConditionSetPtr recordingConditions(const QString& uri, QString* unused);
     // GUI thread: swaps the staging out and drains it, each sample's wait
     // into the delivery figures and each signal's window into the model's
     // batch
@@ -1558,6 +1695,38 @@ private:
     static constexpr int ValueTextLimit = 256 * 1024;       // bytes per window
     int m_valueSampleLimit = DefaultValueSampleLimit;
     quint64 m_valuesDropped = 0;        // this session's, past the limits
+
+    // The conditions. A slot is one condition's window of events: the
+    // newest, and the firings with the first of them, so the worker writes
+    // a fixed slot per condition whatever the bus rate (sized at attach,
+    // never grown on the worker)
+    struct ConditionSlot {
+        bool has = false;
+        uint64_t firings = 0;
+        ecuio_condition_event_t newest{};
+        ecuio_condition_event_t first{}; // the window's first firing
+    };
+    std::mutex m_conditionsMutex; // guards the staging and its generation
+    std::vector<ConditionSlot> m_conditionStaging[2];
+    int m_activeConditions = 0;       // the one onConditions writes
+    uint32_t m_stagingGeneration = 0; // the attach whose events are kept
+    ConditionStore m_conditionStore;
+    ConditionModel* m_conditionModel = nullptr;
+    int m_failAttaches = 0; // failConditionsAttachesForTesting
+    uint32_t m_conditionsGeneration =
+        0; // this session's attaches, core's count
+    std::vector<ecuio_condition_state_t> m_conditionStates; // the tick's read
+    QString m_conditionsPending;
+    QString m_conditionsProblem;
+    bool m_conditionsFromRecording = false;
+    QVariantMap m_alertLevels;
+    // The tone (ADR-0063 section 9): each condition's last tone on the
+    // host clock, sized at the attach like the slots and kept by key
+    static constexpr uint64_t ToneGapUs = 5000000;
+    static constexpr uint64_t NoTone = UINT64_MAX;
+    AlertTone m_tone;
+    std::vector<uint64_t> m_toneAtUs;
+    uint64_t m_toneTimeAddedForTesting = 0;
 
     SignalListModel* m_signalModel = nullptr;
     LiveSignalModel* m_liveSignalModel = nullptr;

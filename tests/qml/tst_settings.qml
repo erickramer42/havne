@@ -57,6 +57,7 @@ TestCase {
     // land before the disconnect, or the next case meets a connected
     // bridge and fails for the wrong reason
     function cleanup() {
+        DocumentPicker.setPickerForTesting(false)
         Theme.compact = false
         Theme.dense = false
         Theme.look = "dark"
@@ -70,6 +71,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Harness.clearFakeKnobs()
+        Harness.stopElm327Emulator()
         Bridge.vehicleLabel = ""
         Bridge.deleteUnusedSignalFiles([])   // the store starts empty too
         for (const p of Bridge.plugins())     // and so do the plugins
@@ -252,16 +254,24 @@ TestCase {
                 ["J2534 adapter", "Serial port", "CAN interface", "Bluetooth", "Bluetooth LE"])
     }
 
-    // A relay's refusal is not a connect's: the Log has nothing for it
-    function test_aRelayRefusalLeavesTheLogOut() {
+    // A relay's refusal is in the Log, and its Show log finds it
+    function test_aRelayRefusalIsInTheLog() {
         const page = createPage()
         const show = find(page, "errorShowLog")
-        page.requestConnect("mock://demo?profile=no-such-profile")
-        tryVerify(() => show.visible, 5000, "a connect's refusal offers the Log")
+        verify(!show.visible, "nothing refused yet")
+        const spy = createTemporaryObject(logSpyComponent, testCase,
+                                          { target: Bridge, signalName: "logMessage" })
         // the relay button, with the relay refusing what the field holds
         find(page, "relayButton").clicked()
-        verify(page.errorLabel.text !== "", "the relay's own words: " + page.errorLabel.text)
-        verify(!show.visible, "no Show log beside the relay's words")
+        const words = page.errorLabel.text
+        verify(words !== "", "the relay's own words")
+        compare(spy.count, 1, "one line logged")
+        compare(spy.signalArguments[0][0], "Relay: " + words)
+        verify(show.visible, "Show log beside the relay's words")
+        logSpy.target = page
+        logSpy.clear()
+        tap(show)
+        compare(logSpy.count, 1, "the Log asked for")
     }
 
     // A URI isn't prose: no capital first letter, no predicted words
@@ -1018,6 +1028,21 @@ TestCase {
                 "the same scheme keeps the query whole")
     }
 
+    // keepalive_ms is a key all three adapter schemes take, so a switch
+    // between them keeps it
+    function test_anotherSchemeKeepsKeepaliveMsAndGap() {
+        const page = createPage()
+        const uri = find(page, "uriField")
+
+        type(uri, "elm327://COM5?profile=uds-generic&keepalive_ms=2000&gap=10")
+        press(page, "preset_j2534")
+        compare(uri.text, "j2534://?profile=uds-generic&keepalive_ms=2000&gap=10",
+                "J2534 takes keepalive_ms and gap")
+        press(page, "preset_wifi_obdx")
+        compare(uri.text, "elm327://192.168.4.1:23?profile=uds-generic&keepalive_ms=2000&gap=10",
+                "ELM327 takes keepalive_ms and gap")
+    }
+
     // The Units row sets the bridge's unit system, connected or not, and
     // shows the one in force
     function test_unitsRowSetsTheBridge() {
@@ -1117,6 +1142,68 @@ TestCase {
         compare(uri.text, "j2534://Fake?profile=raw")
     }
 
+    // The phone's words and list (Theme.mobile is the platform's, so the
+    // section's own `mobile` stands in): the count names Bluetooth alone,
+    // and the list takes all its rows where the desktop's stops at its cap
+    function test_theMobileFormsConnectionWords_data() {
+        return [{ tag: "phone", mobile: true }, { tag: "desktop", mobile: false }]
+    }
+    function test_theMobileFormsConnectionWords(data) {
+        const page = createPage()
+        const section = find(page, "adapterSection")
+        const list = find(page, "deviceList")
+        const count = find(page, "deviceCount")
+        section.mobile = data.mobile
+        page.j2534Devices = []
+        page.canInterfaces = []
+        page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" }]
+        const ports = []
+        for (let i = 0; i < 12; ++i)
+            ports.push({ name: "COM" + (10 + i), device: "" })
+        page.serialPorts = ports
+        compare(list.count, 13)
+        if (data.mobile) {
+            compare(count.text, "Bluetooth: 1 found; tap one, then Connect")
+            page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" },
+                                      { name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true }]
+            compare(count.text, "Bluetooth: 1 found; tap one, then Connect",
+                    "a folded headset is not an adapter found")
+            page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" }]
+            tryVerify(() => list.contentHeight > 0 && Math.abs(list.height - list.contentHeight) < 1,
+                      3000, "the page alone scrolls")
+        } else {
+            verify(count.text.indexOf("J2534 interfaces: 0, serial ports: 12") >= 0, count.text)
+            page.bluetoothAdapters = [{ name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" },
+                                      { name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true }]
+            verify(count.text.indexOf(", Bluetooth: 1") >= 0, "a folded headset is not counted: " + count.text)
+            tryVerify(() => list.contentHeight > 0 && list.height < list.contentHeight,
+                      3000, "the desktop's list stops at its cap")
+        }
+    }
+
+    // A phone with only a headset paired has no adapter to connect to: the
+    // count and the Connection row say so, as the connect list does
+    function test_aFoldedHeadsetAloneIsNoAdapterFound_data() {
+        return [{ tag: "phone", mobile: true }, { tag: "desktop", mobile: false }]
+    }
+    function test_aFoldedHeadsetAloneIsNoAdapterFound(data) {
+        const page = createPage()
+        const section = find(page, "adapterSection")
+        const count = find(page, "deviceCount")
+        section.mobile = data.mobile
+        page.j2534Devices = []
+        page.canInterfaces = []
+        page.serialPorts = []
+        page.bluetoothAdapters = [{ name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true }]
+        verify(count.text.indexOf("None found") === 0, count.text)
+        verify(page.pageList.find(p => p.key === "connection").summary.indexOf("none found") === 0,
+               "the Connection row agrees")
+        page.bluetoothAdapters = [{ name: "Headset", address: "AA:BB:CC:DD:EE:FF", kind: "bt", other: true },
+                                  { name: "Adapter A", address: "00:11:22:33:44:55", kind: "bt" }]
+        verify(count.text.indexOf("None found") !== 0, count.text)
+        verify(page.pageList.find(p => p.key === "connection").summary.indexOf("1 found") === 0)
+    }
+
     // The phone's Bluetooth adapters join the list after the ports
     // (ADR-0028 section 2): a paired classic one fills elm327://bt:<address>, a
     // BLE one elm327://ble:<address>, the query kept; the count names
@@ -1214,10 +1301,10 @@ TestCase {
         // SocketCAN asks an ECU through core's ISO-TP under a profile that
         // requests (ADR-0040): uds-generic stays with its request keys; under
         // Default, raw there, which only listens, the request keys go
-        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0"
+        uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0&keepalive_ms=2000"
         compare(page.profileChoice, "uds-generic")
         tap(find(list.itemAtIndex(0), "deviceRowArea"))
-        compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0")
+        compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0&keepalive_ms=2000")
         compare(page.profileChoice, "uds-generic")
         uri.text = "j2534://?identify=0&poll=0C&baud=500000"
         compare(page.profileChoice, "default")
@@ -1563,21 +1650,38 @@ TestCase {
         verify(find(page, "recordBox").checked)
     }
 
-    // A restart gets back the last URI that connected, not a refused one.
-    // The mock is never kept, so this needs the fake DLL
-    function test_theLastConnectedUriComesBack() {
-        if (Harness.fakeDllPath === "")
-            skip("needs the fake J2534 DLL (Windows)")
-        const fake = "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
-        let page = createPage()
-        const error = find(page, "errorLabel")
-        find(page, "uriField").text = fake + "&profile=raw"
+    // An adapter's URI on every platform: havne-cli's ELM327 emulator on
+    // loopback (Harness), since the mock and a replay are never kept. A
+    // tree with havne-cli fails when it won't start, never skips
+    function emulatorUri() {
+        if (!Harness.hasHavneCli())
+            skip("needs havne-cli, which this tree doesn't build")
+        const uri = Harness.startElm327Emulator()
+        verify(uri !== "", Harness.emulatorWhy())
+        return uri
+    }
+
+    // Connects the field's URI and disconnects. The emulator serves one
+    // host at a time, so this waits until it has seen the host go
+    function connectAndLeave(page, uri) {
+        const closed = Harness.emulatorClients("closed")
+        find(page, "uriField").text = uri
         press(page, "connectButton")
-        tryVerify(() => Bridge.connected, 10000, "the URI connects")
+        tryVerify(() => Bridge.connected, 10000, uri + " connects")
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        tryVerify(() => Harness.emulatorClients("closed") > closed, 5000,
+                  "the emulator sees the host go")
+    }
 
-        find(page, "uriField").text = fake + "&profile=uds-generic"
+    // A restart gets back the last URI that connected, not a refused one
+    function test_theLastConnectedUriComesBack() {
+        const emu = emulatorUri()
+        let page = createPage()
+        const error = find(page, "errorLabel")
+        connectAndLeave(page, emu + "?profile=raw")
+
+        find(page, "uriField").text = emu + "?profile=uds-generic"
         press(page, "connectButton")
         tryVerify(() => error.visible, 5000, "core refuses it: no ?did=")
 
@@ -1586,7 +1690,7 @@ TestCase {
         wait(10)
 
         page = createPage()
-        compare(find(page, "uriField").text, fake + "&profile=raw",
+        compare(find(page, "uriField").text, emu + "?profile=raw",
                 "the URI that connected, not the refused one")
         verify(find(page, "profile_raw").checked, "read back into the row")
     }
@@ -1633,32 +1737,24 @@ TestCase {
     // Only a connect that succeeded is written, the newest first, and the
     // list survives a restart
     function test_onlyASuccessfulConnectWritesTheRecentUris() {
-        if (Harness.fakeDllPath === "")
-            skip("needs the fake J2534 DLL (Windows)")
-        const fake = "j2534://" + Harness.fakeDllPath + "?probe=0&identify=0&diagnose=0"
-        const raw = fake + "&profile=raw"
+        const emu = emulatorUri()
+        const raw = emu + "?profile=raw"
         let page = createPage()
         sameList(page.recentUris, [], "nothing yet")
-        const field = find(page, "uriField")
-        for (const uri of [fake, raw, fake]) {
-            field.text = uri
-            press(page, "connectButton")
-            tryVerify(() => Bridge.connected, 10000, uri + " connects")
-            Bridge.disconnectSession()
-            tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
-        }
-        sameList(page.recentUris, [fake, raw], "newest first, once")
+        for (const uri of [emu, raw, emu])
+            connectAndLeave(page, uri)
+        sameList(page.recentUris, [emu, raw], "newest first, once")
 
-        field.text = fake + "&profile=uds-generic"
+        find(page, "uriField").text = emu + "?profile=uds-generic"
         press(page, "connectButton")
         tryVerify(() => find(page, "errorLabel").visible, 5000, "core refuses it: no ?did=")
-        sameList(page.recentUris, [fake, raw], "a refusal writes nothing")
+        sameList(page.recentUris, [emu, raw], "a refusal writes nothing")
 
         // The page's store writes when the page goes, as at a quit
         page.destroy()
         wait(10)
         page = createPage()
-        sameList(page.recentUris, [fake, raw], "kept between runs")
+        sameList(page.recentUris, [emu, raw], "kept between runs")
     }
 
     // A replay or the mock is never kept (Recordings is a replay's way
@@ -2146,6 +2242,45 @@ TestCase {
         compare(page.vehicleProfiles[1].hint, "Your signal file Pair: 2 signals")
     }
 
+    // Through the phone's picker: each of the Signals page's three opens
+    // hands its pick to its import, and a picker with no document says so
+    function test_theSignalsPagesPicksReachTheirImports() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        DocumentPicker.setPickerForTesting(true)
+        const signals = find(page, "signalImportDialog")
+        signals.usePicker = true
+        signals.open()
+        DocumentPicker.deliver(signals.request, -1,
+            Harness.writeScratchFile("picked (1).json", signalFileText("Picked")).toString(),
+            "picked (1).json")
+        compare(find(page, "signalNote").text, "Picked added: 1 signal, profile user.picked")
+        for (const name of ["signalImportDialog", "obdbDialog", "signalSaveDialog"]) {
+            const d = find(page, name)
+            d.usePicker = true
+            d.open()
+            page.signalNote = "an earlier import's note"
+            DocumentPicker.deliver(d.request, -1, "", "")
+            compare(find(page, "signalProblem").text, "The picker returned no document", name)
+            compare(find(page, "signalNote").text, "", "no earlier note beside the words: " + name)
+            page.signalProblem = ""
+        }
+
+        const plugins = find(page, "pluginDialog")
+        plugins.usePicker = true
+        plugins.open()
+        DocumentPicker.deliver(plugins.request, -1,
+            Harness.writeScratchFile("bad (1).havne-plugin.json", "{}").toString(), "bad (1).havne-plugin.json")
+        const refused = find(page, "pluginProblem").text
+        verify(refused !== "" && refused !== "The picker returned no document",
+               "the pick reached the import, which refused it: " + refused)
+        page.pluginNote = "an earlier import's note"
+        plugins.open()
+        DocumentPicker.deliver(plugins.request, -1, "", "")
+        compare(find(page, "pluginProblem").text, "The picker returned no document")
+        compare(find(page, "pluginNote").text, "", "no earlier note beside the words")
+    }
+
     function test_aRefusedOrClashingFileIsNotAdded() {
         const page = createPage()
         press(page, "vehicleNew")
@@ -2460,12 +2595,45 @@ TestCase {
 
     // ---- The app's plugins (ADR-0052) ----
 
-    // A packed plugin imported is listed with its variants; the VIN
-    // (typed in the lookup here: the mock has none) proposes the variants
-    // it covers for the picked vehicle, and the one picked is kept in the
-    // vehicle, read through the URI's profile, offered under Profile
-    // and connected; removed, it goes from the list and the row. An
-    // import of its id replaces it, and a package core refuses says so
+    // With no VIN at all, every loaded plugin's variants are the picked
+    // vehicle's to pick (ADR-0052's appendix of 2026-11-13): none marked,
+    // nothing asking for a VIN, and the one picked is the vehicle's, in
+    // the URI's profile and offered under Profile; no vehicle, no variants
+    function test_aVariantIsPickedWithNoVinKnown() {
+        const page = createPage()
+        page.open("signals")
+        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
+        verify(findChild(page, "pluginOther_0") === null, "no vehicle picked")
+        verify(!find(page, "pluginOthersText").visible)
+
+        press(page, "vehicleNew")
+        verify(!find(page, "pluginMatchesText").visible, "nothing marked")
+        verify(findChild(page, "pluginMatch_0") === null)
+        const others = find(page, "pluginOthersText")
+        verify(others.visible)
+        compare(others.text, "Pick a variant for this vehicle:")
+        verify(!others.text.includes("VIN"))
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOther_1").text, "Example: the simulated car: my2019")
+
+        const field = find(page, "uriField")
+        field.text = "elm327://COM9"
+        press(page, "pluginOther_1")
+        compare(page.pickedVehicle.plugin, "plugin.example-sim.my2019")
+        compare(field.text, "elm327://COM9?profile=plugin.example-sim.my2019")
+        verify(find(page, "pluginOther_1").checked)
+        verify(!find(page, "pluginOther_0").checked)
+        const choice = find(page, "profile_plugin.example-sim.my2019")
+        compare(choice.text, "Example: the simulated car: my2019")
+        verify(choice.checked)
+    }
+
+    // A packed plugin imported is listed with its variants; a VIN typed
+    // in the lookup (the mock has none) puts the variants it covers first
+    // under its own caption, the rest after, and the one picked is kept
+    // in the vehicle, read through the URI's profile, offered under
+    // Profile and connected; removed, it goes from the list and the row.
+    // An import of its id replaces it, and a package core refuses says so
     function test_aPluginIsImportedMatchedByTheVinAndConnected() {
         const page = createPage()
         page.open("signals")
@@ -2480,14 +2648,24 @@ TestCase {
         compare(Harness.storedPlugins().length, 1)
 
         press(page, "vehicleNew")
-        verify(find(page, "pluginMatchesText").text.startsWith("No match yet"))
         verify(findChild(page, "pluginMatch_0") === null)
         find(page, "vinLookupField").text = "ZZZFAKE11M0000001"   // 2021
-        compare(find(page, "pluginMatchesText").text, "For this car, by its VIN:")
+        const matched = find(page, "pluginMatchesText")
+        verify(matched.visible)
+        compare(matched.text, "For this car, by its VIN:")
         compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
         compare(find(page, "pluginMatch_1").text, "Example: the simulated car: my2019")
+        verify(!find(page, "pluginOthersText").visible, "both matched, none other")
+        tryVerify(() => findChild(page, "pluginOther_0") === null, 1000)
         find(page, "vinLookupField").text = "ZZZFAKE11G0000001"   // 2016
         tryVerify(() => findChild(page, "pluginMatch_1") === null, 1000, "before my2019")
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOthersText").text, "Other plugins:")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019",
+                "the variant it doesn't cover after, still offered")
+        tryVerify(() => find(page, "pluginMatch_0").mapToItem(page, 0, 0).y
+                        < find(page, "pluginOther_0").mapToItem(page, 0, 0).y, 1000,
+                  "the match comes first, once the flows are placed")
         find(page, "vinLookupField").text = "ZZZFAKE11M0000001"
 
         const field = find(page, "uriField")
@@ -2524,40 +2702,167 @@ TestCase {
     }
 
 
-    // A session's VIN proposes variants (ADR-0052 section 5); nothing that
-    // changes the vehicle is used while it runs, and once it ends its
-    // matches stay to be picked, though the VIN goes with the session. A
-    // pick pressed again is undone, and a button never runs past the page
-    function test_aSessionsVinProposesVariantsPickedOnceItEnds() {
-        const page = createPage()
+    // A session's VIN marks the variants it covers (ADR-0052 section 5);
+    // nothing that changes the vehicle is used while it runs. Its matches
+    // are kept on the vehicle the VIN identified, by their profiles alone,
+    // never another car's, and stay once the VIN goes with the session:
+    // through the plugins read again, a page made again, and another
+    // vehicle's turn, which shows none of them; a replaced plugin takes
+    // its own. A session whose VIN is no vehicle's marks them only while
+    // it runs. A pick, and the pick pressed again to undo it, keep the
+    // button and its focus, and a button never runs past the page
+    function test_aSessionsVinMatchesStayWithItsVehicle() {
+        let page = createPage()
         press(page, "vehicleNew")
+        const car = page.pickedVehicle.id
         verify(page.importPlugin(Harness.writeExamplePlugin("example.havne-plugin.json")))
         find(page, "uriField").text = "mock://demo"
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 5000, "connected")
-        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // a 2021 the example covers
-        tryVerify(() => findChild(page, "pluginMatch_1") !== null, 1000, "proposed")
+        Bridge.identifyForTesting("ZZZFAKE11G0000001")   // a 2016: base alone
+        tryVerify(() => findChild(page, "pluginMatch_0") !== null, 1000, "marked while it runs")
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019")
+        compare(page.pickedVehicle.vinMatches, [], "the VIN is no vehicle's: nothing kept")
         verify(!find(page, "pluginMatch_0").enabled)
+        verify(!find(page, "pluginOther_0").enabled)
         verify(!find(page, "signalImport").enabled)
         verify(!find(page, "formSave").enabled)
         verify(!find(page, "pluginImport").enabled)
+
+        // The VIN names the picked vehicle (an adapter's recognize does
+        // it; the mock's URI is no adapter's, so the key is set here)
+        const salt = page.vehicles.salt !== "" ? page.vehicles.salt : Bridge.newSalt()
+        const doc = VehicleBook.copy(page.vehicles)
+        doc.salt = salt
+        page.saveVehicles(VehicleBook.change(doc, v => v.vinKey = Bridge.vinKey(salt)))
+        Bridge.identifyForTesting("ZZZFAKE11G0000001")
+        compare(page.pickedVehicle.vinMatches, ["plugin.example-sim.base"])
+        verify(!VehicleBook.serialize(page.vehicles).includes("ZZZFAKE"), "never the VIN")
+
+        // Another car's VIN with this vehicle picked (a replay of it, which
+        // recognizes no vehicle) marks its own while it runs, keeps nothing
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // 2021: both
+        tryVerify(() => findChild(page, "pluginMatch_1") !== null, 1000, "the session's marked")
+        compare(page.pickedVehicle.vinMatches, ["plugin.example-sim.base"], "not another car's")
+
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000)
-        verify(findChild(page, "pluginMatch_0") !== null, "the session's matches stay")
+        compare(Bridge.pluginMatches(""), [], "the VIN went with the session")
         compare(find(page, "pluginMatchesText").text, "For this car, by its VIN:")
+        tryVerify(() => findChild(page, "pluginMatch_1") === null, 1000, "the vehicle's alone")
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019")
         verify(find(page, "pluginMatch_0").enabled)
-        press(page, "pluginMatch_0")
+
+        // What an import or a removal runs after the session asks the
+        // bridge again, with no VIN
+        page.loadPlugins()
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        tryVerify(() => findChild(page, "pluginMatch_1") === null, 1000)
+
+        // The page made again (the app's next start) reads them from the book
+        page.destroy()
+        wait(10)
+        page = createPage()
+        compare(page.pickedVehicle.id, car)
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: my2019")
+
+        // A VIN typed in the lookup is the one asked about, in their place
+        find(page, "vinLookupField").text = "1FAFAKE13Y0000001"   // another manufacturer
+        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "the typed VIN's: none")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
+        find(page, "vinLookupField").text = ""
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+
+        // Another vehicle has none of them; its own turn back has them
+        press(page, "vehicleNew")
+        verify(!find(page, "pluginMatchesText").visible)
+        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "not this one's")
+        compare(find(page, "pluginOthersText").text, "Pick a variant for this vehicle:")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
+        page.saveVehicles(VehicleBook.pick(page.vehicles, car))
+        compare(find(page, "pluginMatch_0").text, "Example: the simulated car: base")
+
+        // The pressed button stays, with its focus, through the save
+        find(page, "uriField").text = "mock://demo"
+        const button = find(page, "pluginMatch_0")
+        button.forceActiveFocus()
+        verify(button.activeFocus)
+        button.clicked()
         compare(page.pickedVehicle.plugin, "plugin.example-sim.base")
         compare(find(page, "uriField").text, "mock://demo?profile=plugin.example-sim.base")
-        press(page, "pluginMatch_0")
+        verify(find(page, "pluginMatch_0") === button, "the same button after the pick")
+        verify(button.checked)
+        verify(button.activeFocus, "the pick keeps the focus")
+        button.clicked()
         compare(page.pickedVehicle.plugin, "", "pressed again, undone")
         compare(find(page, "uriField").text, "mock://demo")
+        verify(find(page, "pluginMatch_0") === button && button.activeFocus, "and once undone")
 
-        // Its row narrower than its text (a phone, a long plugin name)
-        const button = find(page, "pluginMatch_0")
-        button.parent.width = 100
-        verify(button.implicitWidth > 100)
-        verify(button.width <= 100, button.width + " in a row of 100")
+        // A replacement takes the replaced plugin's matches (its new
+        // version's match may not cover the car) and keeps the pick
+        press(page, "pluginMatch_0")
+        verify(page.importPlugin(Harness.writeExamplePlugin("newer.havne-plugin.json", "1.1.0")))
+        compare(page.pickedVehicle.vinMatches, [])
+        compare(page.pickedVehicle.plugin, "plugin.example-sim.base", "the pick kept")
+        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "no mark")
+        compare(find(page, "pluginOthersText").text, "Pick a variant for this vehicle:")
+        verify(find(page, "pluginOther_0").checked)
+        verify(findChild(page, "pluginOther_2") === null, "a pick that loads is listed once")
+        press(page, "pluginOther_0")
+        compare(page.pickedVehicle.plugin, "")
+
+        // A session whose VIN is no vehicle's: marked while it runs alone
+        press(page, "vehicleNew")
+        find(page, "uriField").text = "mock://demo"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 5000, "connected again")
+        Bridge.identifyForTesting("ZZZFAKE11M0000001")   // 2021: both
+        tryVerify(() => findChild(page, "pluginMatch_1") !== null, 1000, "both marked")
+
+        // Either list's row narrower than its text (a phone, a long name)
+        const match = find(page, "pluginMatch_0")
+        match.parent.width = 100
+        verify(match.implicitWidth > 100)
+        verify(match.width <= 100, match.width + " in a row of 100")
+
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
+        tryVerify(() => findChild(page, "pluginMatch_0") === null, 1000, "gone with the VIN")
+        compare(find(page, "pluginOther_1").text, "Example: the simulated car: my2019")
+        const other = find(page, "pluginOther_1")
+        other.parent.width = 100
+        verify(other.implicitWidth > 100)
+        verify(other.width <= 100, other.width + " in a row of 100")
+        compare(page.pickedVehicle.vinMatches, [], "nothing kept on this one")
+    }
+
+    // A copy that doesn't load lists no variant and leaves the others'
+    // listed; a vehicle's pick that doesn't load (its plugin refused, or
+    // its variant gone from a newer version) is listed after them, so it
+    // can be undone there
+    function test_aPickThatDoesntLoadIsShownAndUndone() {
+        const page = createPage()
+        page.open("signals")
+        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
+        press(page, "vehicleNew")
+        page.pluginList = [{ sha256: "0".repeat(64), ok: false, words: "a load failed for the test" }]
+            .concat(page.pluginList)
+        compare(find(find(page, "plugin_0"), "pluginText").text, "a load failed for the test")
+        compare(find(page, "pluginOther_0").text, "Example: the simulated car: base")
+        compare(find(page, "pluginOther_1").text, "Example: the simulated car: my2019")
+        verify(findChild(page, "pluginOther_2") === null)
+
+        page.saveVehicles(VehicleBook.setPlugin(page.vehicles, "plugin.gone.base"))
+        const gone = find(page, "pluginOther_2")
+        compare(gone.text, "plugin.gone.base: doesn't load")
+        verify(gone.checked)
+        verify(!find(page, "pluginOther_0").checked)
+        press(page, "pluginOther_2")
+        compare(page.pickedVehicle.plugin, "", "undone")
+        tryVerify(() => findChild(page, "pluginOther_2") === null, 1000, "and gone from the list")
     }
 
     // A copy's own signals are its own: its own file is copied under a

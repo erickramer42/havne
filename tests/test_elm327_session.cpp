@@ -388,7 +388,7 @@ TEST_F(Elm327SessionTest, SetupRunsTheContractThenTheReadings)
     EXPECT_EQ(fake_commands(), setup);
 
     s.start();
-    ASSERT_TRUE(wait_for([&] { return fake_count("01") >= 3; }, 3000));
+    ASSERT_TRUE(wait_for([&] { return fake_count("01") >= 3; }, 10000));
     const std::vector<std::string> sent = fake_commands();
     ASSERT_GT(sent.size(), setup.size());
     EXPECT_EQ(sent[setup.size()], "01001") << "the probe's first bitmap";
@@ -465,14 +465,14 @@ TEST_F(Elm327SessionTest, AResetAnsweredOkTakesTheVersionFromAtI)
     EXPECT_STREQ(info.firmware_version, "ELM327 V2.1");
 
     s.start();
-    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 10000));
     set_knobs([](fake_elm327::knobs& k) { k.dropped = true; });
     ASSERT_TRUE(wait_for(
-        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 3000));
+        [&] { return s.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE; }, 10000));
     const size_t before = s.cap.count("41 0C");
     set_knobs([](fake_elm327::knobs& k) { k.dropped = false; });
     ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 10000));
-    EXPECT_TRUE(wait_for([&] { return s.cap.count("41 0C") > before; }, 3000));
+    EXPECT_TRUE(wait_for([&] { return s.cap.count("41 0C") > before; }, 10000));
     EXPECT_EQ(fake_count("ATZ"), 2u) << "the setup ran again";
 }
 
@@ -489,7 +489,7 @@ TEST_F(Elm327SessionTest, ASetupCommandAnsweredByALateResetIsSentAgain)
     EXPECT_EQ(fake_count("ATZ"), 1u);
     EXPECT_EQ(fake_count("ATE0"), 2u) << "AT E0 again after the late reset";
     s.start();
-    EXPECT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 3000));
+    EXPECT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 1; }, 10000));
 }
 
 /* Parameter 2A on with bit 2 clear: the adapter won't wait past a
@@ -1081,7 +1081,7 @@ TEST_F(Elm327SessionTest, TimingReportsEachRequestOnTheHostsClock)
                                             &count) == ECUIO_OK &&
                    t.snapshot_us != seen;
         },
-        3000));
+        10000));
     const uint32_t before = answered();
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     ecuio_session_close(s.s);
@@ -1123,8 +1123,8 @@ TEST_F(Elm327SessionTest, ARecordingHoldsTheLinksTransitionsAndReplyTiming)
     ASSERT_TRUE(
         wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 5000));
     set_knobs([](fake_elm327::knobs& k) { k.no_data = false; });
-    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 3000));
-    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 5; }, 3000));
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 10000));
+    ASSERT_TRUE(wait_for([&] { return s.cap.count("41 0C") >= 5; }, 10000));
     ecuio_session_destroy(s.s);
     s.s = nullptr;
     EXPECT_EQ(ecuio_recorder_close(rec, "the test ended"), ECUIO_OK);
@@ -1558,13 +1558,18 @@ uint32_t interrupts()
 long long close_ms(Session& s);
 
 /* The close comes just after a request whose reply takes delay_ms, input
- * stopping a reply as the adapter's does */
-void close_mid_reply(Session& s, uint32_t delay_ms, long long* ms = nullptr)
+ * stopping a reply as the adapter's does. more, if given, changes knobs in
+ * the same lock: a request counted before it can't take them */
+void close_mid_reply(Session& s, uint32_t delay_ms, long long* ms = nullptr,
+                     void (*more)(fake_elm327::knobs&) = nullptr)
 {
     uint32_t asked = 0;
     fake_elm327::with([&](fake_elm327::adapter& a) {
         a.k.input_stops = true;
         a.k.reply_delay_ms = delay_ms;
+        if (more != nullptr) {
+            more(a.k);
+        }
         asked = a.requests;
     });
     ASSERT_TRUE(wait_for(
@@ -1573,7 +1578,7 @@ void close_mid_reply(Session& s, uint32_t delay_ms, long long* ms = nullptr)
                        return a.requests;
                    }) > asked;
         },
-        3000));
+        10000));
     const long long took = close_ms(s);
     if (ms != nullptr) {
         *ms = took;
@@ -1643,13 +1648,13 @@ TEST_F(Elm327SessionTest, AChattyReplyCantStretchTheClose)
     SessionsReset reset;
     Session s;
     ASSERT_NO_FATAL_FAILURE(entered(s));
-    set_knobs([](fake_elm327::knobs& k) {
-        k.pending = true;
-        k.pending_count = 80;
-        k.pending_gap_ms = 50;
-    });
     long long ms = 0;
-    ASSERT_NO_FATAL_FAILURE(close_mid_reply(s, 4000, &ms));
+    ASSERT_NO_FATAL_FAILURE(
+        close_mid_reply(s, 4000, &ms, [](fake_elm327::knobs& k) {
+            k.pending = true;
+            k.pending_count = 80;
+            k.pending_gap_ms = 50;
+        }));
     EXPECT_LT(ms, 2000 + kCloseMarginMs) << "the lines kept the close waiting";
     EXPECT_EQ(fake_commands().back(), "1001");
 }

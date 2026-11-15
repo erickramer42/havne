@@ -9,9 +9,9 @@
 # build, and B's median over A's. A change that moves a figure by less
 # than the spread of either build hasn't moved it.
 #
-#   python3 scripts/bench_ab.py [-n N] <tree A> <tree B> load
-#   python3 scripts/bench_ab.py [-n N] <tree A> <tree B> timing [seconds]
-#   python3 scripts/bench_ab.py [-n N] <tree A> <tree B> decode
+#   python3 scripts/bench_ab.py [-n N] [--b-args ARGS] <tree A> <tree B> load
+#   python3 scripts/bench_ab.py [-n N] [--b-args ARGS] <tree A> <tree B> timing [seconds]
+#   python3 scripts/bench_ab.py [-n N] [--b-args ARGS] <tree A> <tree B> decode
 #
 # load: bench_bridge --load (the replay fixture through the bridge):
 #   the worker's frames a second looping, and frame to GUI thread p99 at
@@ -22,12 +22,17 @@
 #   and without a condition set, then its replay worker's frames a
 #   second; a figure only B has (a set A's core refuses, a row A's
 #   bench lacks) is listed with B's alone.
+#   --b-args adds ARGS (split as a shell would) to B's command alone, so
+#   one tree runs against itself with an option: `bench_ab.py -n 7 build
+#   build load --b-args "--conditions largest"` is the bridge's load run
+#   with the largest condition set attached (ADR-0063 section 3).
 #   N is 5 by default. The trees are build trees with the bench targets
 #   built (Release); each run's raw output and a CSV
 #   of every figure go to Testing/bench-ab/<stamp>/.
 
 import os
 import re
+import shlex
 import statistics
 import subprocess
 import sys
@@ -96,23 +101,44 @@ def parse_timing(text, seconds):
     return out
 
 
+def usage():
+    for line in open(__file__, encoding="utf-8"):
+        if not line.startswith("#"):
+            break
+        print(line[2:].rstrip())
+    sys.exit(2)
+
+
 def main():
-    args = sys.argv[1:]
     n = 5
-    if len(args) >= 2 and args[0] == "-n":
-        n, args = int(args[1]), args[2:]
-    if len(args) < 3 or args[2] not in ("load", "timing", "decode"):
-        for line in open(__file__, encoding="utf-8"):
-            if not line.startswith("#"):
-                break
-            print(line[2:].rstrip())
-        sys.exit(2)
+    b_args = []
+    args = []
+    given = sys.argv[1:]
+    i = 0
+    # The flags go before, between or after the trees and the kind
+    while i < len(given):
+        if given[i] in ("-n", "--b-args"):
+            if i + 1 >= len(given):
+                usage()
+            if given[i] == "-n":
+                n = int(given[i + 1])
+            else:
+                b_args = shlex.split(given[i + 1])
+            i += 2
+        else:
+            args.append(given[i])
+            i += 1
+    most = 4 if len(args) > 2 and args[2] == "timing" else 3
+    if len(args) < 3 or len(args) > most or \
+            args[2] not in ("load", "timing", "decode"):
+        usage()
     trees, kind = args[:2], args[2]
     seconds = int(args[3]) if kind == "timing" and len(args) > 3 else 10
     if kind in ("load", "decode"):
         cmds = [[exe(t, "bench_bridge"), "--" + kind] for t in trees]
     else:
         cmds = [[exe(t, "bench_timing"), str(seconds)] for t in trees]
+    cmds[1] += b_args
     out_dir = os.path.join("Testing", "bench-ab", time.strftime("%Y%m%d-%H%M%S"))
     os.makedirs(out_dir, exist_ok=True)
     figures = [{}, {}]
@@ -137,7 +163,8 @@ def main():
             for k, vs in figures[side].items():
                 for j, v in enumerate(vs):
                     fh.write(f"{'AB'[side]},\"{k}\",{j + 1},{v}\n")
-    print(f"\nA = {trees[0]}\nB = {trees[1]}\n{n} runs each, alternated; raw output in {out_dir}\n")
+    b_named = f" {' '.join(b_args)}" if b_args else ""
+    print(f"\nA = {trees[0]}\nB = {trees[1]}{b_named}\n{n} runs each, alternated; raw output in {out_dir}\n")
     print(f"| Figure | A median (lowest to highest) | B median (lowest to highest) | B / A |")
     print("|---|---|---|---|")
     for k in figures[0]:

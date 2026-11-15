@@ -747,10 +747,19 @@ bool not_received(const ecuio_condition_state_t& st)
            st.why == ECUIO_CONDITION_WHY_NOT_RECEIVED;
 }
 
+/* Timing advance (PID 0E), which the demo car never sends and the test
+ * can still feed */
+std::string timing_advance()
+{
+    return R"({"signal":["obd2.pid_0e"],"unit":"\u00b0","above":30})";
+}
+
 /* A session with no requests says what its support report disclaims: the
  * mock under obd2 lists fuel pressure unsupported, so once the session
- * runs a condition on it can't be judged and says why. An any with a term
- * on engine speed reads as engine speed judges it. */
+ * runs a condition on it can't be judged and says why. An any whose every
+ * term is never received says so too, and reads as its sampled term
+ * judges it once one is: engine speed is the demo car's, so the case
+ * feeds timing advance, which it never sends. */
 TEST(ConditionSessionTest, AConditionOnASignalTheMockDisclaimsSaysSo)
 {
     WorkerHold hold;
@@ -760,8 +769,8 @@ TEST(ConditionSessionTest, AConditionOnASignalTheMockDisclaimsSaysSo)
     ASSERT_EQ(hold.attach(s.s), ECUIO_OK);
     ASSERT_EQ(
         attach(s.s, condition(0, fuel_pressure()) + "," +
-                        condition(1, R"({"any":[)" + rpm(R"("above":3000)") +
-                                         "," + fuel_pressure() + "]}")),
+                        condition(1, R"({"any":[)" + timing_advance() + "," +
+                                         fuel_pressure() + "]}")),
         ECUIO_OK);
     EXPECT_EQ(states_of(s.s)[0].flags, ECUIO_CONDITION_STALE)
         << "nothing marked before the session runs";
@@ -771,12 +780,12 @@ TEST(ConditionSessionTest, AConditionOnASignalTheMockDisclaimsSaysSo)
         << "flags " << st[0].flags << ", why " << st[0].why;
     EXPECT_TRUE(not_received(st[1])) << "every term of the any";
     ASSERT_TRUE(hold.hold(5000));
-    engine_speed(s.s, 1, 800);
+    reply(s.s, 1, 0x0E, 140); /* 6 degrees */
     hold.release();
     st = states_of(s.s);
     EXPECT_TRUE(not_received(st[0]));
     EXPECT_EQ(st[1].flags & ECUIO_CONDITION_UNAVAILABLE, 0u)
-        << "engine speed sampled: the any is its to judge";
+        << "timing advance sampled: the any is its to judge";
     EXPECT_EQ(st[1].why, ECUIO_CONDITION_WHY_NONE);
 }
 

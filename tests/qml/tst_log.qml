@@ -27,6 +27,7 @@ TestCase {
     }
 
     function cleanup() {
+        DocumentPicker.setPickerForTesting(false)
         Theme.developerMode = false
         Bridge.model.newestFirst = true
         Bridge.model.clearSelection()
@@ -48,6 +49,20 @@ TestCase {
         const page = createTemporaryObject(component, testCase.parent)
         verify(page, "the page loads")
         return page
+    }
+
+    // Export CSV through the save picker: a CSV's type, and a picker with
+    // no document says so in the export's words
+    function test_theFrameExportsPickerSaysWhyNothingWasSaved() {
+        const page = create(logComponent)
+        const dialog = find(page, "frameExportDialog")
+        dialog.usePicker = true
+        DocumentPicker.setPickerForTesting(true)
+        dialog.open()
+        compare(DocumentPicker.mimeTypeForTesting(), "text/csv")
+        DocumentPicker.deliver(dialog.request, -1, "", "")
+        compare(page.exportNote, "The picker returned no document")
+        verify(page.exportFailed)
     }
 
     function test_theActivityLogTakesTheBridgesLines() {
@@ -152,8 +167,7 @@ TestCase {
         Bridge.logPaused = true
         list.follow = false
         list.positionViewAtIndex(20, ListView.Beginning)
-        const table = find(page, "frameTable")
-        tryCompare(list, "keptTimeUs", table.timeAt(20), 2000, "noted while shown")
+        tryCompare(list, "keptSeq", Bridge.model.seqAt(20), 2000, "noted while shown")
         find(page, "view_activity").clicked()
         compare(list.count, 0, "hidden: no rows")
         find(page, "view_frames").clicked()
@@ -162,22 +176,22 @@ TestCase {
         verify(!list.follow, "and it doesn't follow")
     }
 
-    // The place is the first row's time, not its index: frames that arrive
-    // while the table is hidden land above it (newest first), so the same
-    // index is another frame. Shown again, the same frame leads the view
-    function test_aHiddenTableKeepsItsPlaceByTimeWhileFramesArrive() {
+    // The place is the first row's arrival number, not its index: frames
+    // that arrive while the table is hidden land above it (newest first), so
+    // the same index is another frame. Shown again, the same frame leads the
+    // view
+    function test_aHiddenTableKeepsItsPlaceByArrivalWhileFramesArrive() {
         Theme.developerMode = true
         const page = create(logComponent)
         find(page, "view_frames").clicked()
         const list = find(page, "frameList")
-        const table = find(page, "frameTable")
         compare(Bridge.connectSession("mock://demo"), "")
         tryVerify(() => list.count >= 60, 10000, "frames to scroll through")
         Bridge.logPaused = true
         list.follow = false
         list.positionViewAtIndex(20, ListView.Beginning)
-        const kept = table.timeAt(20)
-        tryCompare(list, "keptTimeUs", kept, 2000, "noted while shown")
+        const kept = Bridge.model.seqAt(20)
+        tryCompare(list, "keptSeq", kept, 2000, "noted while shown")
         find(page, "view_activity").clicked()
         compare(list.count, 0, "hidden: no rows")
         const held = Bridge.model.count
@@ -186,7 +200,7 @@ TestCase {
         Bridge.logPaused = true
         find(page, "view_frames").clicked()
         tryVerify(() => list.count > 0, 2000, "shown again")
-        tryVerify(() => table.timeAt(list.indexAt(1, list.contentY + 1)) === kept, 2000,
+        tryVerify(() => Bridge.model.seqAt(list.indexAt(1, list.contentY + 1)) === kept, 2000,
                   "the same frame leads the view")
         verify(list.indexAt(1, list.contentY + 1) >= 50, "its index moved down past the new rows")
         verify(!list.follow, "and it doesn't follow")
@@ -199,24 +213,25 @@ TestCase {
         const page = create(logComponent)
         find(page, "view_frames").clicked()
         const list = find(page, "frameList")
-        const table = find(page, "frameTable")
         compare(Bridge.connectSession("mock://demo"), "")
         tryVerify(() => list.count >= 60, 10000, "frames to scroll through")
         Bridge.logPaused = true
         Bridge.model.newestFirst = false
         list.follow = false
         list.positionViewAtIndex(20, ListView.Beginning)
-        const kept = table.timeAt(20)
-        tryCompare(list, "keptTimeUs", kept, 2000, "noted while shown")
+        const kept = Bridge.model.seqAt(20)
+        tryCompare(list, "keptSeq", kept, 2000, "noted while shown")
+        tryVerify(() => list.itemAtIndex(20) !== null, 2000, "the kept row is drawn")
+        const keptUs = list.itemAtIndex(20).model.timestampUs
         find(page, "view_activity").clicked()
         // Only the frames after the kept one: from a microsecond on
-        const from = ((kept + 1) / 1e6).toFixed(6)
+        const from = ((keptUs + 1) / 1e6).toFixed(6)
         compare(Bridge.model.setFilter("", "", 0, 0, "", from + "-").times, "")
         find(page, "view_frames").clicked()
         tryVerify(() => list.count > 0, 2000, "shown again")
-        tryVerify(() => table.timeAt(list.indexAt(1, list.contentY + 1)) > kept, 2000,
-                  "the first row at or after the kept time")
-        compare(table.timeAt(list.indexAt(1, list.contentY + 1)), table.timeAt(0), "the oldest shown")
+        tryVerify(() => Bridge.model.seqAt(list.indexAt(1, list.contentY + 1)) > kept, 2000,
+                  "the first row to arrive after the kept one")
+        compare(list.indexAt(1, list.contentY + 1), 0, "the oldest shown")
     }
 
     // Clear forgets the place a hidden table keeps: scrolled up, cleared,
@@ -231,7 +246,7 @@ TestCase {
         Bridge.logPaused = true
         list.follow = false
         list.positionViewAtIndex(20, ListView.Beginning)
-        tryVerify(() => list.keptTimeUs > 0, 2000, "noted while shown")
+        tryVerify(() => list.keptSeq > 0, 2000, "noted while shown")
         find(page, "clearFrames").clicked()
         tryCompare(list, "count", 0, 2000, "cleared")
         compare(list.follow, true, "following again")
@@ -575,6 +590,30 @@ TestCase {
         compare(page.rateText(0), "-")
         compare(page.rateText(2.25), "2.3/s")
         compare(page.rateText(20.4), "20/s")
+    }
+
+    // By ID is one named list; its rows' Texts are ignored, since the rows
+    // refresh twice a second and a new ID adds one (355)
+    function test_byIdsRowsAreNotAccessibleNodes() {
+        Theme.developerMode = true
+        const page = create(logComponent)
+        heldFrames(page)
+        find(page, "table_byId").clicked()
+        const ids = find(page, "idList")
+        tryVerify(() => ids.count >= 2 && ids.itemAtIndex(0) !== null, 3000, "the IDs show")
+        compare(ids.Accessible.name, "Frames by ID")
+        let texts = 0
+        const walk = item => {
+            for (const child of item.children) {
+                if (child.textFormat !== undefined) {
+                    ++texts
+                    verify(child.Accessible.ignored, "a Text is ignored: '" + child.text + "'")
+                }
+                walk(child)
+            }
+        }
+        walk(ids.itemAtIndex(0))
+        compare(texts, 4, "the four columns were walked")
     }
 
     // One number as a standard and as an extended ID: each By ID row's

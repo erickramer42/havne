@@ -268,16 +268,16 @@ TestCase {
         }
     }
 
-    // The mock sends no Service 01 value and says so (ADR-0039 section
-    // 6): under obd2 each built-in gauge reads "not sent by this ECU"
-    // within a tick, never "waiting for data" for good
-    function test_theMocksGaugesSayWhatItNeverSends() {
+    // The demo car answers Service 01 from its drive cycle: under obd2
+    // each built-in gauge gets a value, Boost from MAP and baro, and none
+    // reads "not sent by this ECU"
+    function test_theDemoCarsGaugesGetValuesUnderObd2() {
         const page = createTemporaryObject(pageComponent, testCase)
         const all = gauges(page)
         connect("mock://demo?profile=obd2")
         for (const label in gaugeSignals) {
-            tryCompare(all[label], "note", "not sent by this ECU", 3000, label)
-            compare(all[label].hasValue, false, label)
+            tryVerify(() => all[label].hasValue, 3000, label + " gets a value")
+            compare(all[label].note, "", label)
         }
     }
 
@@ -917,7 +917,7 @@ TestCase {
             { tag: "seven-segment", kind: "seven-segment", options: { digits: 3 },
               check: g => g.count === 3 && !g.showPeak },
             { tag: "sparkline", kind: "sparkline", options: { window: 60 },
-              check: g => g.span === 60 && g.historyLength === 600 },
+              check: g => g.span === 60 && g.windowMs === 60000 },
             { tag: "a vertical bar", kind: "bar", options: { vertical: true, marks: false, peak: true },
               check: g => g.vertical && !g.marks && g.showPeak },
             { tag: "a bar's defaults", kind: "bar", options: {},
@@ -936,10 +936,10 @@ TestCase {
         verify(data.check(g), "the options reach the gauge")
     }
 
-    // A sparkline samples only while its page is the one shown: the other
-    // page's takes none (a SwipeView keeps it visible), the page left starts
-    // its trace again, and the one reached starts sampling
-    function test_aSparklineOnAnotherPageTakesNoSamples() {
+    // A sparkline reads the model's history only while its page is the one
+    // shown (a SwipeView keeps the other visible), and a page left keeps its
+    // trace: back on it, the trace holds what came while it was away
+    function test_aSparklineKeepsItsTraceAcrossAPageChange() {
         const cell = label => ({ kind: "sparkline", w: 2, h: 3, label: label,
                                  refs: refsOf("Engine speed"), unit: "RPM", options: { window: 10 } })
         const d = docOf([cell("First")])
@@ -949,12 +949,25 @@ TestCase {
         const a = gaugeOf(findChild(page, "dashCell_0_0"))
         const b = gaugeOf(findChild(page, "dashCell_1_0"))
         verify(a && b, "both load (the neighbor loads at once)")
-        tryVerify(() => a.history.length > 3, 5000, "the shown page samples")
+        verify(a.traceSource === Bridge.signalModel && a.signalId >= 0, "it reads the model's row")
+        tryVerify(() => a.samples.length > 6, 5000, "the shown page reads")
         wait(300)
-        compare(b.history.length, 0, "the other page takes none")
+        compare(b.samples.length, 0, "the other page reads nothing")
         page.goTo(1)
-        tryVerify(() => b.history.length > 3, 5000, "the page reached samples")
-        tryVerify(() => a.history.length === 0 || a.history.length <= 1, 2000, "the page left starts again")
+        tryVerify(() => b.samples.length > 6, 5000, "the page reached reads, its history whole")
+        const kept = a.samples.length
+        const leftAt = a.samples[kept - 2]
+        verify(kept > 6, "the page left keeps its trace")
+        wait(600)
+        compare(a.samples.length, kept, "and reads nothing meanwhile")
+        page.goTo(0)
+        tryVerify(() => {
+            const s = a.samples
+            for (let i = 0; i < s.length; i += 2)
+                if (s[i] > leftAt && s[i] < s[s.length - 2])
+                    return true
+            return false
+        }, 5000, "back on it, the trace holds what came while it was away")
     }
 
     // Dismiss is a touch's size on the phone: the line's words are the only
@@ -1828,5 +1841,36 @@ TestCase {
         verify(Qt.colorEqual(blue.accent, Theme.gaugeValue), "info draws as the value: " + blue.accent)
         verify(Qt.colorEqual(green.accent, Theme.success), "success stays: " + green.accent)
         compare(page.doc.pages[0].cells[0].options.accent, "info", "the stored word stays")
+    }
+
+    // A dial with no caption names its signal and says the unit once; a typed
+    // caption wins (the hub's label, never the unit, is the default)
+    function test_aCaptionlessDialShowsItsSignalsName() {
+        const cell = (caption) => ({ kind: "analog", w: 4, h: 4, label: "Engine speed",
+                                     refs: refsOf("Engine speed"), unit: "RPM",
+                                     options: caption === null ? { from: 0, to: 8000 }
+                                                               : { from: 0, to: 8000, caption: caption } })
+        const page = pageOf({}, docOf([cell(null), cell("x1000 r/min")]), true)
+        tryVerify(() => allLoaded(page), 5000, "the gauges load")
+        const bare = gaugeOf(findChild(page, "dashCell_0_0"))
+        const typed = gaugeOf(findChild(page, "dashCell_0_1"))
+        compare(findChild(bare, "gaugeCaption").text, "Engine speed", "the name, not the unit")
+        compare(bare.unit, "RPM", "the unit stays under the value")
+        compare(findChild(typed, "gaugeCaption").text, "x1000 r/min", "a typed caption wins")
+    }
+
+    // With no session a picked color tints the title, so a page's grouping
+    // shows while it is built; Night draws no pick
+    function test_aPickedColorTintsTheTitleBeforeASession() {
+        const page = pageOf({}, docOf([{ kind: "digital", w: 2, h: 4, label: "Engine speed",
+                                         refs: refsOf("Engine speed"), unit: "RPM",
+                                         options: { from: 0, to: 8000, color: "stone" } }]), true)
+        tryVerify(() => allLoaded(page), 5000, "the gauge loads")
+        const g = gaugeOf(findChild(page, "dashCell_0_0"))
+        verify(!g.hasValue, "no session")
+        verify(Qt.colorEqual(g.titleColor, Theme.gaugeColor("stone")), "the pick: " + g.titleColor)
+        Theme.night = "on"
+        verify(Qt.colorEqual(g.titleColor, Theme.textDim), "Night: no pick: " + g.titleColor)
+        Theme.night = "off"
     }
 }

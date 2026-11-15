@@ -76,11 +76,20 @@ A simulated vehicle that needs no hardware. The label is free text and
 only names the session (`mock://demo`). The default profile is `mock`:
 a drive cycle with engine, boost, temperatures and a diagnostic report.
 `diagnose=0` turns the simulated ECU's trouble codes, readiness and
-freeze frame off; the default is on.
+freeze frame off; the default is on. Under `profile=obd2`, or a signal
+file or plugin that extends it, the same car answers the OBD-II PIDs
+its drive cycle gives (engine speed, road speed, load, temperatures,
+manifold and barometric pressure, airflow, throttle, lambda, battery),
+so the `obd2` layout shows values; the rest of `obd2`'s signals read as
+not sent by this ECU. A profile that reads other ECUs (a signal file's
+or plugin's `ecus`, `uds-generic`'s `<ecu>:`) gives each a channel of its
+own after the engine ECU's, four in all; those ECUs answer no OBD-II
+PID, so a PID read there reads as not sent.
 
 ```
 mock://demo
 mock://demo?diagnose=0
+mock://demo?profile=obd2
 ```
 
 ### replay://

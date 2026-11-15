@@ -541,12 +541,17 @@ def test_a_session_with_nothing_to_judge_lists_no_unsupported_or_absent_signal()
         assert s.absent_signals() == []
 
 
-def test_the_mock_under_obd2_lists_every_signal_unsupported():
-    """mock:// answers its PID bitmaps at create, listing no PID, so every
-    Service 01 signal (and the computed Boost) is unsupported before start"""
+def test_the_demo_car_under_obd2_lists_the_signals_it_lacks():
+    """mock:// under obd2 walks its demo car's PID bitmaps at create, so
+    before start the signals the car doesn't answer are unsupported (PID 55
+    among them) and engine and vehicle speed are not"""
     with havne.Session("mock://py?profile=obd2&diagnose=0") as s:
-        everything = list(s.signals)
-        assert s.unsupported_signals() == everything, "the set's order"
+        ids = {name: sid for sid, (name, _) in s.signals.items()}
+        lacking = s.unsupported_signals()
+        assert 0 < len(lacking) < len(ids), "some, not all"
+        assert ids["Rear O2 Short Trim B3"] in lacking
+        assert ids["RPM"] not in lacking and ids["Vehicle Speed"] not in lacking
+        assert lacking == sorted(lacking, key=list(s.signals).index), "the set's order"
         assert s.absent_signals() == []
 
 

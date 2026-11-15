@@ -131,7 +131,8 @@ ColumnLayout {
     }
     // "18,402 rows, 1.2 MB" for an interval; "" for none known; an
     // interval that gives no fewer rows than every sweep (the recording is
-    // slower than it) says so, not a size that looks like a saving
+    // slower than it) says so, not a size that looks like a saving; with
+    // no row at all there is no rate to be slower than
     function sizeOf(ms) {
         if (ms < 0)
             return ""
@@ -139,7 +140,7 @@ ColumnLayout {
         if (s === undefined)
             return exporter.sizing ? qsTr("Sizing...") : ""
         const sweep = sizes.find(x => x.rowMs === 0)
-        if (ms > 0 && sweep !== undefined && s.rows >= sweep.rows)
+        if (ms > 0 && sweep !== undefined && sweep.rows > 0 && s.rows >= sweep.rows)
             return qsTr("no fewer rows than every sweep")
         const rows = Number(s.rows).toLocaleString(numberLocale, 'f', 0)
         return s.rows === 1 ? qsTr("1 row, %1").arg(bytesText(s.bytes))
@@ -206,14 +207,15 @@ ColumnLayout {
         onTriggered: panel.askSizes()
     }
 
-    FileDialog {
+    DocumentSaveDialog {
         id: saveDialog
+        objectName: "exportSaveDialog"
         title: qsTr("Export the recording")
-        fileMode: FileDialog.SaveFile
         defaultSuffix: panel.format === "pcapng" ? "pcapng" : "csv"
         nameFilters: panel.format === "pcapng" ? [qsTr("pcapng (*.pcapng)")] : [qsTr("CSV (*.csv)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         onAccepted: panel.exportTo(saveDialog.selectedFile)
+        onFailed: words => { panel.failed = true; panel.note = qsTr("Not exported: %1").arg(words) }
     }
     FolderDialog {
         id: folderDialog

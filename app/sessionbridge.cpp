@@ -38,6 +38,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QStringConverter>
 #include <QStringList>
 #include <QtGlobal>
 
@@ -403,12 +404,41 @@ int FrameListModel::rowOfSeq(quint64 seq) const
     return m_newestFirst ? count() - 1 - age : age;
 }
 
-double FrameListModel::timestampAt(int row) const
+double FrameListModel::seqAt(int row) const
 {
     if (row < 0 || row >= count()) {
         return -1;
     }
-    return static_cast<double>(rowAt(row).timestampUs);
+    return static_cast<double>(rowAt(row).seq);
+}
+
+int FrameListModel::rowAtSeq(double seq) const
+{
+    const int n = count();
+    if (n == 0) {
+        return -1;
+    }
+    const quint64 oldestSeq = m_nextSeq - static_cast<quint64>(m_count);
+    const quint64 want = seq > 0 ? static_cast<quint64>(seq) : 0;
+    // The oldest shown row at or after the arrival, by age (0 = oldest);
+    // n when every shown row arrived before it
+    int age = 0;
+    bool exact = false;
+    if (m_filter.active()) {
+        const auto it = std::lower_bound(m_shown.begin(), m_shown.end(), want);
+        age = static_cast<int>(it - m_shown.begin());
+        exact = it != m_shown.end() && *it == want;
+    } else if (want >= oldestSeq) {
+        age = static_cast<int>(
+            std::min<quint64>(want - oldestSeq, static_cast<quint64>(n)));
+        exact = age < n;
+    }
+    if (!m_newestFirst) {
+        return std::min(age, n - 1);
+    }
+    // Newest first the next row is the one that arrived before it
+    const int next = exact ? age : age - 1;
+    return n - 1 - std::max(next, 0);
 }
 
 void FrameListModel::notifySelected(int first, int last)
@@ -1153,64 +1183,140 @@ QVariantList SignalListModel::chartData(qint64 windowMs, int columns) const
         m["decimals"] = static_cast<int>(now.decimal_places);
         m["value"] = now.value;
 
-        // Flattened [ts, val, ts, val, ...], oldest first.
-        // When full, the oldest surviving sample sits at histHead (the
-        // next eviction slot); while filling, samples are dense from 0.
+        // Flattened [ts, val, ts, val, ...], oldest first
         QVariantList samples;
-        const auto put = [&](const Sample& s) {
-            samples.append(static_cast<double>(s.timestampMs));
-            samples.append(now.converted ? shown(e, s.value).value : s.value);
-        };
-        // A slice's lowest and highest, in time order, once each
-        const Sample* low = nullptr;
-        const Sample* high = nullptr;
-        const auto flush = [&]() {
-            if (low != nullptr) {
-                const Sample* a = low->timestampMs <= high->timestampMs ? low : high;
-                const Sample* b = a == low ? high : low;
-                put(*a);
-                if (b != a) put(*b);
-            }
-            low = high = nullptr;
-        };
-        const uint32_t start = (e.histCount == HistoryCapacity)
-                                ? e.histHead : 0;
-        qint64 slice = -1;
-        const Sample* last = nullptr;
-        for (uint32_t i = 0; i < e.histCount; ++i) {
-            const Sample& s = e.history[(start + i) % HistoryCapacity];
-            if (s.timestampMs < from) continue;
-            last = &s;
-            if (sliceMs <= 0.0) {
-                put(s);
-                continue;
-            }
-            // Slices counted from time 0, not from the window's start:
-            // the window slides with every update, and slices measured
-            // from it would put the same samples in other slices each
-            // time, so a noisy trace's peaks crawl as it scrolls
-            const qint64 k = static_cast<qint64>(
-                std::floor(static_cast<double>(s.timestampMs) / sliceMs));
-            if (k != slice) {
-                flush();
-                slice = k;
-            }
-            if (low == nullptr || s.value < low->value) low = &s;
-            if (high == nullptr || s.value > high->value) high = &s;
+        for (const Sample* s : sliced(e, from, sliceMs)) {
+            samples.append(static_cast<double>(s->timestampMs));
+            samples.append(now.converted ? shown(e, s->value).value : s->value);
         }
-        if (sliceMs > 0.0) {
-            /* the newest sample always: the trace ends, and its label
-             * sits, where the value is now */
-            if (last != nullptr && last != low && last != high) {
-                flush();
-                put(*last);
-            } else {
-                flush();
-            }
+        if (samples.isEmpty()) {
+            continue;
         }
-        if (samples.isEmpty()) continue;
         m["samples"] = samples;
         out.append(m);
+    }
+    return out;
+}
+
+std::vector<const SignalListModel::Sample*>
+SignalListModel::sliced(const Entry& e, qint64 from, double sliceMs,
+                        qint64 breakMs)
+{
+    std::vector<const Sample*> out;
+    // A slice's lowest and highest, in time order, once each
+    const Sample* low = nullptr;
+    const Sample* high = nullptr;
+    const auto flush = [&]() {
+        if (low != nullptr) {
+            const Sample* a =
+                low->timestampMs <= high->timestampMs ? low : high;
+            const Sample* b = a == low ? high : low;
+            out.push_back(a);
+            if (b != a) {
+                out.push_back(b);
+            }
+        }
+        low = high = nullptr;
+    };
+    // When full, the oldest surviving sample sits at histHead (the next
+    // eviction slot); while filling, samples are dense from 0
+    const uint32_t start = (e.histCount == HistoryCapacity) ? e.histHead : 0;
+    qint64 slice = -1;
+    const Sample* last = nullptr;
+    bool lastOut = false;
+    for (uint32_t i = 0; i < e.histCount; ++i) {
+        const Sample& s = e.history[(start + i) % HistoryCapacity];
+        if (s.timestampMs < from) {
+            continue;
+        }
+        if (breakMs > 0) {
+            // A stall in the ring is a break; a value that isn't a number is
+            // its own point, so it hides no slice's extremes
+            const bool stalled =
+                last != nullptr && s.timestampMs - last->timestampMs > breakMs;
+            const bool number = std::isfinite(s.value);
+            if (stalled || !number) {
+                flush();
+                slice = -1;
+            }
+            if (stalled) {
+                out.push_back(nullptr);
+            }
+            last = &s;
+            lastOut = !number;
+            if (!number) {
+                out.push_back(&s);
+                continue;
+            }
+        }
+        last = &s;
+        if (sliceMs <= 0.0) {
+            out.push_back(&s);
+            continue;
+        }
+        // Slices counted from time 0, not from the window's start: slices
+        // measured from a sliding window would move a noisy trace's peaks
+        const qint64 k = static_cast<qint64>(
+            std::floor(static_cast<double>(s.timestampMs) / sliceMs));
+        if (k != slice) {
+            flush();
+            slice = k;
+        }
+        if (low == nullptr || s.value < low->value) {
+            low = &s;
+        }
+        if (high == nullptr || s.value > high->value) {
+            high = &s;
+        }
+    }
+    if (sliceMs > 0.0) {
+        // The newest sample always: the trace ends where the value is now
+        if (last != nullptr && !lastOut && last != low && last != high) {
+            flush();
+            out.push_back(last);
+        } else {
+            flush();
+        }
+    }
+    return out;
+}
+
+QList<double> SignalListModel::trace(int id, qint64 windowMs, int columns) const
+{
+    QList<double> out;
+    if (id < 0 || id > 0xFFFF) {
+        return out;
+    }
+    const int row = m_rowOfId.value(static_cast<uint16_t>(id), -1);
+    if (row < 0) {
+        return out;
+    }
+    const Entry& e = m_entries[static_cast<size_t>(row)];
+    if (e.isText || e.histCount == 0) {
+        return out;
+    }
+    const uint32_t newest =
+        (e.histHead + HistoryCapacity - 1) % HistoryCapacity;
+    const qint64 from = windowMs > 0 ? e.history[newest].timestampMs - windowMs
+                                     : std::numeric_limits<qint64>::min();
+    const double sliceMs = (windowMs > 0 && columns > 0)
+                               ? static_cast<double>(windowMs) / columns
+                               : 0.0;
+    const bool converted = shown(e, e.value).converted;
+    const std::vector<const Sample*> picked =
+        sliced(e, from, sliceMs, SessionBridge::valueStaleMs());
+    out.reserve(static_cast<qsizetype>(picked.size() * 2));
+    double lastTs = 0.0;
+    for (const Sample* s : picked) {
+        // A break: a point that isn't a number, at the stall's start
+        if (s == nullptr) {
+            out.append(lastTs);
+            out.append(std::numeric_limits<double>::quiet_NaN());
+            continue;
+        }
+        lastTs = static_cast<double>(s->timestampMs);
+        out.append(lastTs);
+        out.append(converted ? shown(e, s->value).value : s->value);
     }
     return out;
 }
@@ -1535,6 +1641,13 @@ SessionBridge::SessionBridge(QObject* parent)
     (void)ecuio_init();   // optional and always ECUIO_OK (core.h), paired below
     m_pluginStore.setLog(
         [this](const QString& line) { emit logMessage(line); });
+    m_conditionModel = new ConditionModel(this);
+    if (!m_conditionStore.load(&m_conditionsProblem)) {
+        m_conditionsProblem =
+            QStringLiteral("The saved conditions weren't read: %1")
+                .arg(m_conditionsProblem);
+    }
+    showSavedConditions();
 
     connect(m_coalesceTimer, &QTimer::timeout, this, [this]() {
         notifyFrameCounts();
@@ -1555,6 +1668,8 @@ SessionBridge::SessionBridge(QObject* parent)
         // queues a report as it drops (at most one pending).
         notifyDropped();
         flushValues();
+        flushConditions(
+            m_session); // after the values: a firing's value is shown
         pollRecording();
     });
     // A tick asks its row: the default pick follows on the next tick
@@ -1636,10 +1751,10 @@ static QString signalCountText(int count)
 
 QVariantMap SessionBridge::importSignalFile(const QUrl& url)
 {
-    // Android's content:// URIs open through QFile as they are
-    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
     QVariantMap result;
-    if (!file.open(QIODevice::ReadOnly)) {
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
         result = {{QStringLiteral("ok"), false},
                   {QStringLiteral("words"),
                    QStringLiteral("Couldn't read the file")}};
@@ -1689,12 +1804,16 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
 {
     QString words;
     const QByteArray bytes = SignalStore::bytes(sha, &words);
+    const bool removable = pickedDocumentRemovable(url);
     bool written = false;
     if (!bytes.isEmpty()) {
         written = writeToUrl(url, bytes);
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
+    }
+    if (!written) {
+        dropPickedDocument(url, removable);
     }
     emit logMessage(
         written ? QStringLiteral("Signal file %1 saved to a file (%2 bytes)")
@@ -1708,16 +1827,87 @@ QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
     return {{QStringLiteral("ok"), true}, {QStringLiteral("words"), QString()}};
 }
 
+QVariantMap SessionBridge::saveLayoutFile(const QString& text, const QUrl& url)
+{
+    const QByteArray bytes = text.toUtf8();
+    const bool removable = pickedDocumentRemovable(url);
+    QString words;
+    bool written = false;
+    if (bytes.isEmpty()) {
+        words = QStringLiteral("There is no layout to save");
+    } else if (bytes.size() > layoutFileMaxBytes) {
+        words = QStringLiteral("The layout is over %1 bytes, a layout file's most")
+                    .arg(layoutFileMaxBytes);
+    } else {
+        written = writeToUrl(url, bytes);
+        if (!written) {
+            words = QStringLiteral("Couldn't write the file");
+        }
+    }
+    if (!written) {
+        dropPickedDocument(url, removable);
+    }
+    emit logMessage(written ? QStringLiteral("Layout saved to a file (%1 bytes)")
+                                  .arg(bytes.size())
+                            : QStringLiteral("Layout not saved: %1").arg(words));
+    return {{QStringLiteral("ok"), written}, {QStringLiteral("words"), words}};
+}
+
+void SessionBridge::dropPicked(const QUrl& url)
+{
+    dropPickedDocument(url, pickedDocumentRemovable(url));
+}
+
+QVariantMap SessionBridge::layoutFileText(const QUrl& url)
+{
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
+    QString words;
+    QString text;
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
+        words = QStringLiteral("Couldn't read the file");
+    } else {
+        QByteArray bytes = file.read(layoutFileMaxBytes + 1);
+        if (bytes.size() > layoutFileMaxBytes) {
+            words = QStringLiteral("The file is over %1 bytes, a layout file's most")
+                        .arg(layoutFileMaxBytes);
+        } else {
+            if (bytes.startsWith("\xEF\xBB\xBF")) {
+                bytes.remove(0, 3);
+            }
+            QStringDecoder utf8(QStringDecoder::Utf8,
+                                QStringConverter::Flag::Stateless |
+                                    QStringConverter::Flag::ConvertInitialBom);
+            text = utf8(bytes);
+            if (utf8.hasError()) {
+                text.clear();
+                words = QStringLiteral("The file isn't UTF-8 text");
+            }
+        }
+    }
+    emit logMessage(words.isEmpty()
+                        ? QStringLiteral("Layout file read (%1 characters)")
+                              .arg(text.size())
+                        : QStringLiteral("Layout file not read: %1").arg(words));
+    return {{QStringLiteral("ok"), words.isEmpty()},
+            {QStringLiteral("words"), words},
+            {QStringLiteral("text"), text}};
+}
+
 QVariantMap SessionBridge::exportFrames(const QUrl& url)
 {
     const FrameListModel::ScrubbedCsv csv = m_frameLog->scrubbedCsv();
     QString words = csv.words;
+    const bool removable = pickedDocumentRemovable(url);
     bool written = false;
     if (csv.ok) {
         written = writeToUrl(url, csv.bytes);
         if (!written) {
             words = QStringLiteral("Couldn't write the file");
         }
+    }
+    if (!written) {
+        dropPickedDocument(url, removable);
     }
     const qulonglong leftOut = csv.identification + csv.textValues;
     emit logMessage(
@@ -1740,6 +1930,7 @@ QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex,
 {
     if (m_session == nullptr || !connected()) {
         const QString words = QStringLiteral("No session");
+        dropPickedDocument(url, pickedDocumentRemovable(url));
         emit logMessage(
             QStringLiteral("Health report not saved: %1").arg(words));
         return {{QStringLiteral("ok"), false},
@@ -1785,13 +1976,19 @@ int SessionBridge::deleteUnusedSignalFiles(const QStringList& keep)
 QVariantMap SessionBridge::previewObdb(const QUrl& url, int modelYear,
                                        const QString& name)
 {
-    // Android's content:// URIs open through QFile as they are
-    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
-    if (!file.open(QIODevice::ReadOnly)) {
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
         return previewObdbBytes({}, QStringLiteral("Couldn't read the file"),
                                 modelYear, name);
     }
-    // One byte past the bound is enough for the conversion to refuse it
+    if (file.size() > static_cast<qint64>(ECUIO_OBDB_MAX_BYTES)) {
+        return previewObdbBytes(
+            {},
+            QStringLiteral("The file is over %1 MiB, an OBDb set's most")
+                .arg(ECUIO_OBDB_MAX_BYTES / (1024 * 1024)),
+            modelYear, name);
+    }
     return previewObdbBytes(file.read(ECUIO_OBDB_MAX_BYTES + 1), QString(),
                             modelYear, name);
 }
@@ -1946,10 +2143,10 @@ static QString pluginImportLine(const QVariantMap& result)
 
 QVariantMap SessionBridge::importPlugin(const QUrl& url)
 {
-    // Android's content:// URIs open through QFile as they are
-    QFile file(url.isLocalFile() ? url.toLocalFile() : url.toString());
+    // A picked file opens through openPicked: Android's content:// by the content resolver
+    QFile file;
     QVariantMap result;
-    if (!file.open(QIODevice::ReadOnly)) {
+    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
         result = {{QStringLiteral("ok"), false},
                   {QStringLiteral("words"),
                    QStringLiteral("Couldn't read the file")}};
@@ -2778,6 +2975,32 @@ QString SessionBridge::replayUriFor(const QString& folder,
     return uri;
 }
 
+namespace {
+
+// A recording's events.log header, as cli::RecordedSignals reads it;
+// false when there's no events.log to read
+bool readRecordedHeader(const QString& folder, cli::RecordedSignals* recorded)
+{
+    QFile events(folder + QStringLiteral("/events.log"));
+    if (!events.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+    // The header alone: its lines up to the blank one (the enum labels'
+    // lines make it longer than a few)
+    while (!events.atEnd()) {
+        QByteArray line = events.readLine(64 * 1024);
+        if (line.endsWith('\n')) {
+            line.chop(1);
+        }
+        if (!recorded->take(line.toStdString())) {
+            break;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
 {
     const std::string uri8 = uri.toStdString();
@@ -2787,20 +3010,8 @@ QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
     }
     const QString folder = QString::fromStdString(folder8);
     cli::RecordedSignals recorded;
-    QFile events(folder + QStringLiteral("/events.log"));
-    if (!events.open(QIODevice::ReadOnly)) {
+    if (!readRecordedHeader(folder, &recorded)) {
         return uri;
-    }
-    // The header alone: its lines up to the blank one (the enum labels'
-    // lines make it longer than a few)
-    while (!events.atEnd()) {
-        QByteArray line = events.readLine(64 * 1024);
-        if (line.endsWith('\n')) {
-            line.chop(1);
-        }
-        if (!recorded.take(line.toStdString())) {
-            break;
-        }
     }
     if (!recorded.names_file()) {
         return uri;
@@ -2904,15 +3115,36 @@ QVariantMap recordingRowOf(const QFileInfo& info)
     qint64 durationMs = -1;
     QFile events(folder + QStringLiteral("/events.log"));
     if (events.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        // A header holds a line a signal; a file with no "columns" line is read no further
-        for (int n = 0; n < 400 && !events.atEnd(); ++n) {
-            const QString line = QString::fromUtf8(events.readLine()).trimmed();
+        // A header holds a line for each signal and each enum label, at most
+        // about 140 bytes each (every name byte a quote); a file with no
+        // "columns" line is read no further than that many lines at 150
+        constexpr qint64 kHeaderBytes =
+            static_cast<qint64>(ECUIO_SET_MAX_TABLE +
+                                ECUIO_SIGNAL_FILE_MAX_SIGNALS) *
+            150;
+        // A line longer than a read (a "focus" line names every pick) comes in
+        // parts, and only the part that starts it is judged
+        constexpr qint64 kLineBytes = 1100;
+        qint64 read = 0;
+        bool startsLine = true;
+        while (read < kHeaderBytes && !events.atEnd()) {
+            const QByteArray raw = events.readLine(kLineBytes);
+            if (raw.isEmpty()) {
+                break; // a read that failed before the end
+            }
+            read += raw.size();
+            const bool judged = startsLine;
+            startsLine = raw.endsWith('\n');
+            if (!judged) {
+                continue;
+            }
+            const QString line = QString::fromUtf8(raw).trimmed();
             if (line.startsWith(QLatin1String("columns"))) {
                 break;
             }
             if (line.startsWith(QLatin1String("uri ")) && recorded.isEmpty()) {
                 recorded = line.mid(4).trimmed();
-            } else if (line.startsWith(QLatin1String("signal "))) {
+            } else if (line.startsWith(QLatin1String("signal  "))) {
                 ++signalCount;
             } else if (line.startsWith(QLatin1String("focus "))) {
                 isLog = true;
@@ -3037,6 +3269,11 @@ QString SessionBridge::connectCoreOnly(const QString& uri,
         // values to onValues, after onFrame
         rc = ecuio_register_values_callback(session, &SessionBridge::onValues, this);
     }
+    if (rc == ECUIO_OK) {
+        // ADR-0063: a frame's condition events, after its values
+        rc = ecuio_register_conditions_callback(
+            session, &SessionBridge::onConditions, this);
+    }
     if (rc != ECUIO_OK) {
         ecuio_session_destroy(session);
         return QString::fromUtf8(ecuio_status_string(rc));
@@ -3096,6 +3333,10 @@ QString SessionBridge::startSession(ecuio_session_t* session,
     m_pickLine.clear();
     m_pickLinePending = false;
     applyDefaultPick(session, false, true);
+    // Before the recorder, which holds the set the session judges then
+    // (ECUIO_ERR_IN_USE after), and before the start, so the first frame
+    // is judged
+    attachSessionConditions(session, uri);
     // Attached before the worker starts, so the recording holds every frame
     startRecording(session, uri);
     m_accepting.store(true, std::memory_order_release);
@@ -3107,7 +3348,10 @@ QString SessionBridge::startSession(ecuio_session_t* session,
         stopRecording(QStringLiteral("the session didn't start: %1").arg(err));
         ecuio_unregister_frame_callback(session, &SessionBridge::onFrame, this);
         ecuio_unregister_values_callback(session, &SessionBridge::onValues, this);
+        ecuio_unregister_conditions_callback(
+            session, &SessionBridge::onConditions, this);
         ecuio_session_destroy(session);
+        endSessionConditions();
         return err;
     }
     return {};
@@ -3141,6 +3385,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_errorEpisodes = 0;
     emit linkStateChanged();
     setLogPaused(false);       // a new session always logs
+    // Precise: a coarse timer fires up to 5 % early, and the ring's 120 s
+    // counts on ten windows a second
+    m_coalesceTimer->setTimerType(Qt::PreciseTimer);
     m_coalesceTimer->start(100);
     emit connectedChanged(true);
     emit framesReset();
@@ -3155,6 +3402,9 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     if (m_pickLinePending) {
         m_pickLinePending = false;
         writePickLine();
+    }
+    for (const QString& line : std::exchange(m_conditionsLines, {})) {
+        emit logMessage(line);
     }
     m_replayFrames = info.replay_frames;
     m_sleptUs = sleptUs();
@@ -3333,6 +3583,8 @@ void SessionBridge::disconnectSession()
     m_coalesceTimer->stop();
     notifyFrameCounts();   // the last tick's worth
     flushValues();         // and its values
+    flushConditions(session); // and its condition events
+    endSessionConditions();
     emit logMessage(deliveryText(deliveryStats()));
     m_valueSet = nullptr;  // the drain's; onValues stops at m_accepting
     m_stagingBuffer.clear();
@@ -3445,6 +3697,7 @@ void SessionBridge::setUnitSystem(int units)
     }
     if (units == unitSystem()) return;
     m_signalModel->setUnitSystem(static_cast<uint32_t>(units));
+    m_conditionModel->setUnitSystem(static_cast<uint32_t>(units));
     emit unitSystemChanged();
     emit clearMovingChanged();
     if (m_diagnosticsShownCount > 0) {
@@ -3802,6 +4055,12 @@ void SessionBridge::stopRecording(const QString& why, bool byUser,
     m_recorder = nullptr;
     (void)ecuio_recorder_close(recorder, why.toUtf8().constData());
     emit recordingStateChanged();
+    // The recording held its set: an edit saved meanwhile is judged now
+    if (!m_conditionsPending.isEmpty() && conditionsWait().isEmpty()) {
+        m_conditionsPending.clear();
+        applySavedConditions();
+        emit conditionsChanged();
+    }
     if (!m_logActive) {
         return;
     }
@@ -4030,6 +4289,12 @@ void SessionBridge::dispatchValuesForTesting(const ecuio_value_batch_t& batch)
     onValues(&batch, this);
 }
 
+void SessionBridge::dispatchConditionsForTesting(
+    const ecuio_condition_event_t* events, uint32_t count)
+{
+    onConditions(events, count, this);
+}
+
 // ---- Decoded values from core's worker (ADR-0024) ----
 
 void SessionBridge::ValueStaging::prepare(size_t defs, size_t samplesMax,
@@ -4202,6 +4467,380 @@ void SessionBridge::flushValues()
     }
     ++m_signalBatchCount;
     emit signalBatchChanged();
+}
+
+// ---- Conditions (ADR-0063 sections 6 and 9) ----
+
+namespace {
+
+// "1 condition", "2 conditions"
+QString conditionCountText(uint32_t count)
+{
+    return count == 1 ? QStringLiteral("1 condition")
+                      : QStringLiteral("%1 conditions").arg(count);
+}
+
+// Core's words for a refused call, else its status
+QString detailOr(ecuio_status_t rc)
+{
+    const char* detail = ecuio_last_error_detail();
+    return detail != nullptr && detail[0] != '\0'
+               ? QString::fromUtf8(detail)
+               : QString::fromUtf8(ecuio_status_string(rc));
+}
+
+} // namespace
+
+void SessionBridge::onConditions(const ecuio_condition_event_t* events,
+                                 uint32_t count, void* user_data)
+{
+    SessionBridge* self = static_cast<SessionBridge*>(user_data);
+    if (events == nullptr || self == nullptr) {
+        return;
+    }
+    if (!self->m_accepting.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(self->m_conditionsMutex);
+    std::vector<ConditionSlot>& window =
+        self->m_conditionStaging[self->m_activeConditions];
+    for (uint32_t i = 0; i < count; ++i) {
+        const ecuio_condition_event_t& e = events[i];
+        // A set since replaced: its index means another condition now
+        if (e.generation != self->m_stagingGeneration ||
+            e.condition >= window.size()) {
+            continue;
+        }
+        ConditionSlot& slot = window[e.condition];
+        if ((e.flags & ECUIO_CONDITION_FIRED) != 0 && slot.firings++ == 0) {
+            slot.first = e;
+        }
+        slot.newest = e;
+        slot.has = true;
+    }
+}
+
+void SessionBridge::prepareConditionStaging(uint32_t count, uint32_t generation)
+{
+    std::lock_guard<std::mutex> lock(m_conditionsMutex);
+    for (std::vector<ConditionSlot>& window : m_conditionStaging) {
+        window.assign(count, ConditionSlot{});
+    }
+    m_activeConditions = 0;
+    m_stagingGeneration = generation;
+}
+
+bool SessionBridge::attachConditions(ecuio_session_t* session,
+                                     const ecuio_condition_set_t* set,
+                                     QString* why)
+{
+    if (m_conditionsGeneration != 0) {
+        flushConditions(session);
+    }
+    size_t staged = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_conditionsMutex);
+        staged = m_conditionStaging[0].size();
+    }
+    // The slots first, under the generation core is about to begin: a
+    // first judgment can come before the call returns
+    const uint32_t count = ecuio_condition_set_count(set);
+    const uint32_t next = m_conditionsGeneration + 1;
+    prepareConditionStaging(count, next);
+    const ecuio_signal_set_t* signalSet = ecuio_session_signal_set(session);
+    const ecuio_signal_file_t* file = fileOfSet(signalSet);
+    const ecuio_status_t rc =
+        m_failAttaches > 0 ? (--m_failAttaches, ECUIO_ERR_OUT_OF_MEMORY)
+                           : ecuio_session_set_conditions(session, set, file);
+    if (rc != ECUIO_OK) {
+        *why = detailOr(rc);
+        prepareConditionStaging(static_cast<uint32_t>(staged),
+                                m_conditionsGeneration);
+        return false;
+    }
+    m_conditionsGeneration = next;
+    m_conditionStates.assign(count, ecuio_condition_state_t{});
+    // A condition whose key the new set keeps keeps its last tone: an edit
+    // of another doesn't let it sound again within its 5 s
+    std::vector<std::pair<QString, uint64_t>> toned;
+    for (size_t i = 0; i < m_toneAtUs.size(); ++i) {
+        if (m_toneAtUs[i] != NoTone) {
+            toned.emplace_back(m_conditionModel->key(static_cast<int>(i)),
+                               m_toneAtUs[i]);
+        }
+    }
+    m_conditionModel->setConditions(set, signalSet, file);
+    m_toneAtUs.assign(count, NoTone);
+    for (const auto& [key, at] : toned) {
+        const int row = m_conditionModel->rowOfKey(key);
+        if (row >= 0 && static_cast<size_t>(row) < m_toneAtUs.size()) {
+            m_toneAtUs[static_cast<size_t>(row)] = at;
+        }
+    }
+    if (m_conditionModel->sounds()) {
+        m_tone.prepare();
+    }
+    judgeAlertLevels();
+    return true;
+}
+
+ConditionSetPtr SessionBridge::recordingConditions(const QString& uri,
+                                                   QString* unused)
+{
+    std::string folder8;
+    if (!uri.startsWith(QLatin1String("replay://"), Qt::CaseInsensitive) ||
+        !cli::replay_folder(uri.toStdString(), &folder8)) {
+        return nullptr;
+    }
+    const QString folder = QString::fromStdString(folder8);
+    cli::RecordedSignals recorded;
+    if (!readRecordedHeader(folder, &recorded) ||
+        recorded.conditions_sha256.empty()) {
+        return nullptr;
+    }
+    QFile copy(folder + QStringLiteral("/conditions.json"));
+    if (!copy.open(QIODevice::ReadOnly)) {
+        *unused = QStringLiteral("is missing");
+        return nullptr;
+    }
+    const QByteArray bytes = copy.read(ECUIO_CONDITION_FILE_MAX_BYTES + 1);
+    const std::string sha =
+        QCryptographicHash::hash(bytes, QCryptographicHash::Sha256)
+            .toHex()
+            .toStdString();
+    if (sha != recorded.conditions_sha256) {
+        *unused = QStringLiteral("doesn't match its hash");
+        return nullptr;
+    }
+    QString words;
+    ConditionSetPtr set = loadConditionSet(bytes, &words);
+    if (!set) {
+        *unused = QStringLiteral("doesn't load (%1)").arg(words);
+    }
+    return set;
+}
+
+void SessionBridge::attachSessionConditions(ecuio_session_t* session,
+                                            const QString& uri)
+{
+    m_conditionsGeneration = 0;
+    m_conditionsPending.clear();
+    m_conditionsFromRecording = false;
+    m_conditionsLines.clear();
+    prepareConditionStaging(0, 0);
+    // ADR-0063 decision 12: a replay is judged by its recording's own copy
+    QString unused;
+    const ConditionSetPtr own = recordingConditions(uri, &unused);
+    QString why;
+    if (own != nullptr) {
+        if (attachConditions(session, own.get(), &why)) {
+            m_conditionsFromRecording = true;
+            m_conditionsLines
+                << QStringLiteral("Alerts: judging the recording's own %1")
+                       .arg(conditionCountText(
+                           ecuio_condition_set_count(own.get())));
+            emit conditionsChanged();
+            return;
+        }
+        unused = QStringLiteral("isn't judged (%1)").arg(why);
+    }
+    const ecuio_condition_set_t* saved = m_conditionStore.set();
+    if (!unused.isEmpty()) {
+        const QString judged = saved != nullptr
+                                   ? QStringLiteral("the saved conditions")
+                                   : QStringLiteral("none");
+        m_conditionsLines << QStringLiteral(
+                                 "Replay: the recording's conditions.json %1; "
+                                 "judging %2")
+                                 .arg(unused, judged);
+    }
+    if (saved == nullptr) {
+        emit conditionsChanged();
+        return;
+    }
+    if (attachConditions(session, saved, &why)) {
+        m_conditionsLines << QStringLiteral("Alerts: judging %1")
+                                 .arg(conditionCountText(
+                                     ecuio_condition_set_count(saved)));
+    } else {
+        m_conditionsLines << QStringLiteral("Alerts not judged: %1").arg(why);
+        showSavedConditions();
+    }
+    emit conditionsChanged();
+}
+
+QString SessionBridge::conditionsWait() const
+{
+    if (m_session == nullptr || !connected()) {
+        return {};
+    }
+    if (m_conditionsFromRecording) {
+        return QStringLiteral("applies when this replay is disconnected");
+    }
+    if (m_recorder != nullptr) {
+        return QStringLiteral("applies when this recording ends");
+    }
+    return {};
+}
+
+void SessionBridge::showSavedConditions()
+{
+    m_conditionModel->setConditions(m_conditionStore.set(), nullptr, nullptr);
+    judgeAlertLevels();
+}
+
+void SessionBridge::applySavedConditions()
+{
+    if (m_session == nullptr || !connected()) {
+        showSavedConditions();
+        return;
+    }
+    QString why;
+    const ecuio_condition_set_t* set = m_conditionStore.set();
+    const uint32_t count = ecuio_condition_set_count(set);
+    if (attachConditions(m_session, set, &why)) {
+        emit logMessage(QStringLiteral("Alerts: judging %1")
+                            .arg(conditionCountText(count)));
+    } else {
+        emit logMessage(QStringLiteral("Alerts not judged: %1").arg(why));
+    }
+}
+
+void SessionBridge::endSessionConditions()
+{
+    m_conditionsGeneration = 0;
+    prepareConditionStaging(0, 0);
+    m_conditionStates.clear();
+    m_toneAtUs.clear();
+    m_conditionsPending.clear();
+    m_conditionsFromRecording = false;
+    m_conditionsLines.clear();
+    showSavedConditions();
+    emit conditionsChanged();
+}
+
+QString SessionBridge::conditionsText() const
+{
+    return QString::fromUtf8(m_conditionStore.bytes().isEmpty()
+                                 ? m_conditionStore.refused()
+                                 : m_conditionStore.bytes());
+}
+
+QVariantMap SessionBridge::saveConditions(const QString& text)
+{
+    QVariantMap result = m_conditionStore.save(text.toUtf8());
+    if (!result.value(QStringLiteral("ok")).toBool()) {
+        result.insert(QStringLiteral("pending"), QString());
+        return result;
+    }
+    m_conditionsProblem.clear();
+    const QString wait = conditionsWait();
+    const QString saved =
+        QStringLiteral("Alerts saved: %1")
+            .arg(conditionCountText(static_cast<uint32_t>(
+                result.value(QStringLiteral("conditions")).toInt())));
+    emit logMessage(wait.isEmpty()
+                        ? saved
+                        : QStringLiteral("%1; the change %2").arg(saved, wait));
+    m_conditionsPending = wait;
+    if (wait.isEmpty()) {
+        applySavedConditions();
+    }
+    result.insert(QStringLiteral("pending"), wait);
+    emit conditionsChanged();
+    return result;
+}
+
+int SessionBridge::alertLevelOf(int defId) const
+{
+    return m_alertLevels.value(QString::number(defId)).toInt();
+}
+
+void SessionBridge::judgeAlertLevels()
+{
+    QVariantMap levels;
+    for (const auto& [id, level] : m_conditionModel->alertLevels()) {
+        levels.insert(QString::number(id), level);
+    }
+    if (levels != m_alertLevels) {
+        m_alertLevels = levels;
+        emit alertLevelsChanged();
+    }
+}
+
+void SessionBridge::flushConditions(ecuio_session_t* session)
+{
+    if (session == nullptr || m_conditionsGeneration == 0) {
+        return;
+    }
+    std::vector<ConditionSlot>* full = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(m_conditionsMutex);
+        full = &m_conditionStaging[m_activeConditions];
+        m_activeConditions ^= 1;
+    }
+    // The worker writes the other one now. Each firing is a line, in the
+    // order they fired; several of one condition's in a window, one line
+    struct Fired {
+        uint64_t at;
+        int row;
+    };
+    std::vector<Fired> fired;
+    // One tone a tick, the loudest that may sound. A 5 s starts at the ask,
+    // heard or not: one the player drops (stale, a failed generator) too
+    const uint64_t now = ecuio_clock_us() + m_toneTimeAddedForTesting;
+    uint32_t tone = ECUIO_ALERT_NONE;
+    for (size_t i = 0; i < full->size(); ++i) {
+        ConditionSlot& slot = (*full)[i];
+        if (!slot.has) {
+            continue;
+        }
+        m_conditionModel->applyTerm(static_cast<int>(i), slot.newest.term);
+        if (slot.firings == 0) {
+            continue;
+        }
+        fired.push_back({slot.first.timestamp_us, static_cast<int>(i)});
+        const uint32_t level = m_conditionModel->toneLevel(static_cast<int>(i));
+        if (level != ECUIO_ALERT_NONE && i < m_toneAtUs.size() &&
+            (m_toneAtUs[i] == NoTone || now - m_toneAtUs[i] >= ToneGapUs)) {
+            m_toneAtUs[i] = now;
+            tone = std::max(tone, level);
+        }
+    }
+    if (tone != ECUIO_ALERT_NONE) {
+        m_tone.play(tone);
+    }
+    std::stable_sort(
+        fired.begin(), fired.end(),
+        [](const Fired& a, const Fired& b) { return a.at < b.at; });
+    // A handler of the lines may attach again: they go out once the slots
+    // and the model are done with
+    QStringList lines;
+    for (const Fired& f : fired) {
+        const ConditionSlot& slot = (*full)[static_cast<size_t>(f.row)];
+        lines << (slot.firings == 1
+                      ? m_conditionModel->firingText(f.row, slot.first.value,
+                                                     slot.first.term)
+                      : m_conditionModel->firingsText(f.row, slot.firings));
+    }
+    for (ConditionSlot& slot : *full) {
+        slot = ConditionSlot{};
+    }
+    // The states core keeps: UNAVAILABLE and NOT_RECEIVED are the getter's
+    // alone, and can change after the attach
+    uint32_t n = 0;
+    const auto size = static_cast<uint32_t>(m_conditionStates.size());
+    if (size > 0 &&
+        ecuio_session_get_condition_states(session, m_conditionStates.data(),
+                                           size, &n) == ECUIO_OK &&
+        n == size &&
+        m_conditionStates[0].generation == m_conditionsGeneration) {
+        m_conditionModel->applyStates(m_conditionStates.data(), n);
+    }
+    judgeAlertLevels();
+    for (const QString& line : lines) {
+        emit logMessage(line);
+    }
 }
 
 SessionBridge::DeliveryStats SessionBridge::deliveryStats() const

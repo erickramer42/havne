@@ -177,6 +177,155 @@ TestCase {
         compare(linesOf(tr).length, 2, "the line on either side")
     }
 
+    // A crowded trace calm, then swinging, then calm, a point every 20 ms
+    function calmSwingCalm(from) {
+        const pairs = []
+        for (let i = 0; i < 400; ++i)
+            pairs.push([from + i * 20, i >= 150 && i < 250 ? (i % 2 ? 2 : 0) : 1 + i / 400])
+        return pairs
+    }
+
+    // The band columns are counted from time 0, not from the plot's left
+    // edge: the same samples laid out with "now" a fraction of a column
+    // later give the same pieces, moved left by as much
+    function test_bandColumnsKeepTheirTimeAsTheChartScrolls() {
+        const trace = series(0, calmSwingCalm(1003), 2)
+        const at = nowMs => layout([trace, series(1, [[0, 0], [nowMs, 0]])], { windowMs: 10000 })
+                            .traces.filter(t => t.row === 0)[0]
+        const a = at(9100), b = at(9137)
+        const dx = b.segments[0][0].x - a.segments[0][0].x
+        verify(dx < 0 && Math.abs(dx % ChartLayout.bandColumnW) > 0.1,
+               "now moved " + dx + " px, not a whole column")
+        verify(bandsOf(a).length > 0 && linesOf(a).length > 0, "a band between lines")
+        compare(b.pieces.length, a.pieces.length, "as many pieces")
+        const same = (p, q, what) => {
+            near(q.x, p.x + dx, 1e-6, what + "'s x")
+            near(q.y, p.y, 1e-6, what + "'s y")
+        }
+        for (let i = 0; i < a.pieces.length; ++i) {
+            const pa = a.pieces[i], pb = b.pieces[i]
+            compare(pb.band, pa.band, "piece " + i)
+            const runs = pa.band ? ["top", "bottom"] : ["points"]
+            for (const run of runs) {
+                compare(pb[run].length, pa[run].length, "piece " + i + "'s " + run)
+                for (let k = 0; k < pa[run].length; ++k)
+                    same(pa[run][k], pb[run][k], "piece " + i + "'s " + run + " " + k)
+            }
+        }
+        // Without a phase the columns count from 0 px
+        const seg = [{ x: 0.5, y: 0 }, { x: 3.5, y: 0 }]
+        compare(ChartLayout.bandPieces(seg, 2, 6)[0].points.map(p => p.x), [0.5, 2, 3.5])
+        compare(ChartLayout.bandPieces(seg, 2, 6, 1)[0].points.map(p => p.x), [0.5, 1, 3, 3.5])
+    }
+
+    // A holding chart's label column fits the window's extremes and only
+    // widens while the series stay the same, so the plot (and "now") keeps
+    // its width as a value gains a digit; without held it fits the labels
+    function test_thePlotKeepsItsWidthAsAValueGainsADigit() {
+        const v = (pairs, unit) => [series(0, pairs, 1, unit || "V")]
+        const room = chars => chartW - (chars * 7 + ChartLayout.swatchW + ChartLayout.labelGap)
+        const swing = v([[0, 9.5], [500, 10.5], [1000, 9.6]])
+        const before = layout(swing, { held: null })
+        const newest = layout(v([[0, 9.5], [500, 9.6], [1000, 10.5]]), { held: null })
+        compare(before.plotW, newest.plotW, "10.5 in the window takes its room")
+        compare(before.plotW, room(6))
+        compare(layout(v([[0, -0.5], [1000, 0.4]]), { held: null }).plotW, room(6),
+                "and the sign of -0.5 V")
+        compare(layout(swing).plotW, room(5), "without held, 9.6 V's room alone")
+
+        const calm = v([[1000, 9.6], [2000, 9.7]])
+        const fresh = layout(calm)
+        verify(fresh.plotW > before.plotW, "alone, 9.7 V needs less")
+        compare(layout(calm, { held: before.held }).plotW, before.plotW, "held, the column stays")
+        compare(layout(v([[1000, 9.6], [2000, 9.7]], "A"), { held: before.held }).plotW, fresh.plotW,
+                "another unit starts over")
+        compare(layout(calm.concat([series(1, [[1000, 1], [2000, 2]])]), { held: before.held }).plotW,
+                fresh.plotW, "and so does another series")
+    }
+
+    // A crowded trace stays crowded until its points spread past
+    // denseLeave, so a count near denseSpacing doesn't flip its drawing
+    // from paint to paint; a sparse one stays sparse until denseSpacing
+    function test_aPointCountNearTheThresholdDoesntFlip() {
+        // 345 px of plot: 2.7, 3.5 and 4.4 px per point
+        const crowded = layout([series(0, zigzag(130), 2)])
+        verify(bandsOf(crowded.traces[0]).length > 0, "2.7 px per point is crowded")
+        compare(crowded.held.dense[0], true)
+        const between = [series(0, zigzag(100), 2)]
+        verify(bandsOf(layout(between, { held: crowded.held }).traces[0]).length > 0,
+               "3.5 px per point stays crowded")
+        const sparse = layout(between)
+        compare(bandsOf(sparse.traces[0]).length, 0, "and stays sparse coming from sparse")
+        compare(sparse.held.dense[0], false)
+        compare(bandsOf(layout([series(0, zigzag(80), 2)], { held: crowded.held }).traces[0]).length, 0,
+                "4.4 px per point is sparse again")
+        verify(bandsOf(layout([series(0, zigzag(130), 2)], { held: sparse.held }).traces[0]).length > 0,
+               "2.7 px per point is crowded again")
+    }
+
+    // Held, a trace's range widens at once to round ends and narrows only
+    // when the window's range, rounded afresh, is under narrowShare of it,
+    // so a trace isn't rescaled at every paint as its extremes come and go;
+    // a flat trace stays flat until it moves by flatLeave digits. Without
+    // held the range is the window's
+    function test_aHeldRangeWidensAtOnceAndNarrowsLate() {
+        const ramp = (lo, hi) => [series(0, [[0, lo], [500, (lo + hi) / 2], [1000, hi]])]
+        const range = l => [l.traces[0].vMin, l.traces[0].vMax]
+        const first = layout(ramp(0, 100), { held: null })
+        compare(range(first), [0, 100])
+        compare(first.held.ranges[0].flat, false)
+        const y50 = first.traces[0].segments[0][1].y
+        // Rounded afresh, 10 to 85 would be 10 to 90
+        const inside = layout(ramp(10, 85), { held: first.held })
+        compare(range(inside), [0, 100], "75 of 100 is kept")
+        near(inside.traces[0].segments[0][1].y, y50 + (50 - 47.5) / 100 * inside.plotH, 1e-9,
+             "drawn on the held scale")
+        compare(range(layout(ramp(10, 60), { held: first.held })), [10, 60], "50 of 100 narrows")
+        compare(range(layout(ramp(0, 103), { held: first.held })), [0, 120],
+                "past it widens at once, to a round end")
+        compare(range(layout(ramp(0, 103))), [0, 103], "not held, the window's")
+        // Just widened, a max a hair lower stays: rounded afresh it's 9 of 12
+        const v2 = (lo, hi) => [series(0, [[0, lo], [500, (lo + hi) / 2], [1000, hi]], 2)]
+        const wide = layout(v2(-0.04, 8.04), { held: null })
+        compare(range(wide), [-2, 10])
+        compare(range(layout(v2(-0.04, 7.96), { held: wide.held })), [-2, 10], "no flip as 8 is crossed")
+
+        const level = (a, b) => [series(0, [[0, a], [1000, b]], 0)]
+        const flat = layout(level(5, 5), { held: null })
+        compare(flat.traces[0].flat, true)
+        compare(layout(level(5, 6), { held: flat.held }).traces[0].flat, true, "a digit stays flat")
+        compare(layout(level(5, 7), { held: flat.held }).traces[0].flat, false, "two digits leave")
+        compare(layout(level(5, 6), { held: null }).traces[0].flat, false, "a digit from moving moves")
+    }
+
+    // A chart that holds hands each layout's held to the next paint; one
+    // that doesn't (the recordings viewer) lays out each paint afresh
+    function test_aHoldingChartKeepsItsLabelColumn() {
+        let newest = 10.5
+        const chart = createTemporaryObject(stripChart, this, {
+            holds: true, layoutOpts: opts({}),
+            fetch: w => [series(0, [[0, 9.5], [1000, newest]], 1, "V")] })
+        tryVerify(() => chart.drawn !== null, 2000, "drawn")
+        const wide = chart.drawn.plotW
+        const repaint = () => {
+            chart.drawn = null
+            chart.requestPaint()
+            tryVerify(() => chart.drawn !== null, 2000, "drawn again")
+        }
+        newest = 9.6
+        repaint()
+        compare(chart.drawn.plotW, wide, "held")
+        chart.held = null
+        repaint()
+        verify(chart.drawn.plotW > wide, "started over")
+        chart.holds = false
+        newest = 10.5
+        repaint()
+        newest = 9.6
+        repaint()
+        verify(chart.drawn.plotW > wide, "not holding")
+    }
+
     function test_nothingToDraw() {
         compare(layout([]), null, "no series")
         compare(layout(null), null, "no list")
@@ -201,6 +350,24 @@ TestCase {
     function test_labelColumnIsCapped() {
         const l = layout([series(0, [[0, 1], [1000, 2]], 0, "a very long unit name indeed")])
         compare(l.plotW, chartW - chartW * 0.4)
+    }
+
+    // A label wider than its column loses its unit from the end, never a
+    // digit: with room for part of the unit that part and an ellipsis, with
+    // less room than the number alone the number whole
+    function test_aLabelsCutTakesTheUnitAndKeepsTheNumberWhole() {
+        // 138 px of label room at 7 px a character: 19 characters
+        const wide = layout([series(0, [[0, 1], [1000, 2]], 0, "a very long unit name indeed")])
+        compare(wide.traces[0].label, "2 a very long unit…")
+        // 100 px wide the column is capped at 40, which leaves the label 18:
+        // less than "123456.789", let alone its unit
+        const narrow = ChartLayout.layout([series(0, [[0, 1], [1000, 123456.789]], 3, "kPa")],
+                                          100, chartH, opts())
+        compare(narrow.traces[0].label, "123456.789", "the number whole, the unit gone")
+        // Room for the number and an ellipsis, none for a letter of the unit
+        const between = ChartLayout.layout([series(0, [[0, 1], [1000, 1234.5]], 1, "kPa")],
+                                           160, chartH, opts())
+        compare(between.traces[0].label, "1234.5", "no ellipsis stands for a unit wholly cut")
     }
 
     // A trace spans the plot's height from its own minimum to its maximum
@@ -662,6 +829,27 @@ TestCase {
                         { assign: { 0: "drive", 1: "drive" } })
         compare(l.panes.map(p => p.key).join("|"), "drive|unit %")
         compare(inPane(l, 1), 0)
+    }
+
+    // A series that names a pane of its own gets it, whatever its unit's
+    // pane, with its own word in the pane's label (a comparison's
+    // differences beside the signals they are of)
+    function test_aSeriesOwnPaneWinsAndNamesItsLabel() {
+        const own = (row, lo, hi) => Object.assign(ramp(row, "rpm", lo, hi),
+                                                   { pane: "difference rpm", paneLabel: "D rpm" })
+        const l = paned([ramp(0, "rpm", 800, 6000), own(1, -40, 25), ramp(2, "%", 0, 100), own(3, -5, 60)],
+                        600, { assign: { 1: "drive" } })
+        compare(l.panes.map(p => p.key).join("|"), "unit rpm|difference rpm|unit %")
+        compare(l.panes.map(p => p.label).join("|"), "rpm|D rpm|%")
+        compare([0, 1, 2, 3].map(r => inPane(l, r)).join(","), "0,1,2,1")
+        // The pane's range is its own traces', not the signal's
+        verify(l.panes[1].vMin <= -40 && l.panes[1].vMax >= 60 && l.panes[1].vMax < 800,
+               "the difference's own range: " + l.panes[1].vMin + " to " + l.panes[1].vMax)
+        // Folded past the limit, the mixed pane lists the word too
+        const folded = paned([ramp(0, "rpm", 800, 6000), ramp(2, "%", 0, 100), own(1, -40, 25)],
+                             600, { max: 2 })
+        compare(folded.panes.length, 2)
+        compare(folded.panes[1].label, "% \u00b7 D rpm")
     }
 
     // Past the limit, the last units fold into one mixed pane: no axis, its

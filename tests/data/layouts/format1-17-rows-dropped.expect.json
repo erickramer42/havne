@@ -1,0 +1,40 @@
+[
+ {
+  "as": "phone",
+  "problem": "dropped",
+  "form": "",
+  "pages": 1,
+  "cells": 1,
+  "files": [],
+  "notes": [
+   "no-form"
+  ],
+  "dropped": {
+   "pages": 0,
+   "cells": 1
+  },
+  "first_cell": {
+   "w": 6,
+   "h": 12
+  }
+ },
+ {
+  "as": "desktop",
+  "problem": "dropped",
+  "form": "",
+  "pages": 1,
+  "cells": 1,
+  "files": [],
+  "notes": [
+   "no-form"
+  ],
+  "dropped": {
+   "pages": 0,
+   "cells": 1
+  },
+  "first_cell": {
+   "w": 2,
+   "h": 4
+  }
+ }
+]

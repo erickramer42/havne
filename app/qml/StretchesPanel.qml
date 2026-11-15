@@ -19,6 +19,9 @@ ColumnLayout {
 
     // The opened recording (its stretchDefaults follow the unit system)
     required property RecordingView view
+    // view.stretchDefaults as a plain object, copied again on its NOTIFY, so a
+    // cell's read makes no new JS wrapper of the view's map
+    readonly property var defaults: Object.assign({}, view.stretchDefaults)
     // The levels in force, by key, in display units
     property var rules: ({})
     // The words of the last refusal or failed read, from the page
@@ -26,7 +29,9 @@ ColumnLayout {
     signal applyRequested(var rules)
     signal closeRequested()
 
-    // What a field says it is: its key, name and unit
+    // What a field says it is: its key, name and unit ("speed" for the unit
+    // system's speed unit, which a cell reads itself so a change of units
+    // never remakes the cells and empties their fields)
     readonly property string speedUnit: Bridge.unitSystem === 1 ? "mph" : "km/h"
     readonly property var fields: [
         { key: "pullLevel", name: qsTr("Pull throttle"), unit: "%" },
@@ -34,24 +39,29 @@ ColumnLayout {
         { key: "pullHoldS", name: qsTr("Pull at least"), unit: "s" },
         { key: "pullGapS", name: qsTr("A dip shorter than"), unit: "s" },
         { key: "pullRise", name: qsTr("Engine speed rises"), unit: "rpm" },
-        { key: "pullGain", name: qsTr("Speed gains, no rpm"), unit: panel.speedUnit },
+        { key: "pullGain", name: qsTr("Speed gains, no rpm"), unit: "speed" },
         { key: "cruiseHoldS", name: qsTr("Cruise at least"), unit: "s" },
-        { key: "cruiseSpeedBand", name: qsTr("Speed within"), unit: panel.speedUnit },
+        { key: "cruiseSpeedBand", name: qsTr("Speed within"), unit: "speed" },
         { key: "cruiseThrottleBand", name: qsTr("Throttle within"), unit: "%" },
-        { key: "cruiseFloor", name: qsTr("Cruise above"), unit: panel.speedUnit }]
+        { key: "cruiseFloor", name: qsTr("Cruise above"), unit: "speed" }]
 
     // What was typed that isn't a number, in words; "" for none
     property string typedProblem: ""
 
-    // A default as the field's placeholder: up to three decimals, no locale
+    // The locale levels are written and read in (a test sets another)
+    property var numberLocale: Qt.locale()
+    // A level as written in a field and a placeholder: up to three
+    // decimals, the locale's decimal point and no group separator, so
+    // numberOf reads back what it wrote
     function shown(value) {
-        return value === undefined ? "" : String(Number(Number(value).toFixed(3)))
+        return value === undefined ? ""
+            : String(Number(Number(value).toFixed(3))).replace(".", numberLocale.decimalPoint)
     }
     // A number as typed, in the locale or plain; NaN for one that isn't
     function numberOf(text) {
         const t = text.trim()
         try {
-            return Number.fromLocaleString(Qt.locale(), t)
+            return Number.fromLocaleString(numberLocale, t)
         } catch (e) {
             return Number(t)
         }
@@ -96,7 +106,7 @@ ColumnLayout {
         for (let i = 0; i < fieldRepeater.count; ++i) {
             const item = cellAt(i)
             const v = rules[item.key]
-            item.field.text = v === undefined ? "" : String(v)
+            item.field.text = shown(v)
         }
         typedProblem = ""
     }
@@ -114,7 +124,7 @@ ColumnLayout {
         spacing: 2
         Label {
             Layout.fillWidth: true
-            text: cell.modelData.name + " (" + cell.modelData.unit + ")"
+            text: cell.modelData.name + " (" + (cell.modelData.unit === "speed" ? panel.speedUnit : cell.modelData.unit) + ")"
             color: Theme.textDim
             font.pixelSize: Theme.fontCaption
             elide: Text.ElideRight
@@ -123,7 +133,7 @@ ColumnLayout {
             id: input
             objectName: "rule_" + cell.key
             Layout.fillWidth: true
-            placeholderText: panel.shown(panel.view.stretchDefaults[cell.key])
+            placeholderText: panel.shown(panel.defaults[cell.key])
             inputMethodHints: Qt.ImhFormattedNumbersOnly
             Accessible.name: cell.modelData.name
             onAccepted: panel.apply()

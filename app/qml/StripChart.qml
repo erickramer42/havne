@@ -33,6 +33,11 @@ Canvas {
     // The last layout drawn, null for none: a page places its own marks
     // (a cursor, markers) by its plotW, top and plotH
     property var drawn: null
+    // Set, each paint passes the last layout's held to the next (the label
+    // column, each trace's crowded drawing and its range), so a scrolling
+    // chart stays still; a page sets held null to start over
+    property bool holds: false
+    property var held: null
     // A page's marks, drawn over the traces: decorate(ctx, layout)
     property var decorate: null
     // A page's marks drawn under the traces, after the grid: a band's fill
@@ -259,8 +264,12 @@ Canvas {
         const opts = { measure: text => tabularWidth(ctx, text) }
         for (const k in chart.layoutOpts)
             opts[k] = chart.layoutOpts[k]
+        if (chart.holds)
+            opts.held = chart.held
         const l = ChartLayout.layout(series, shownW, shownH, opts)
         chart.drawn = l
+        if (l && chart.holds)
+            chart.held = l.held
         if (!l) {
             setTraces([])
             return

@@ -15,31 +15,33 @@ GaugeBase {
     id: gauge
 
     property string description: ""   // second line under the label
-    property int historyLength: 80     // samples at the 10 Hz clock below
-    property var history: []
+    readonly property int windowMs: 8000
     // Whether the page holding this tile is on screen: a tile on another
-    // page takes no samples (its trace picks up where it stopped)
+    // page reads nothing, and its trace is whole when it shows again
     property bool shown: true
+    // What the trace reads (Bridge.signalModel, a test's stand-in) and the
+    // def it reads, as SparkGauge's
+    property var traceSource: null
+    property int signalId: -1
+    // [ts, val, ...] oldest first, as read last
+    property var samples: []
 
-    // Clear with the peaks, so a new session draws a fresh trace
-    onPeaksReset: history = []
-
-    // A fixed sample clock, not onValueChanged: an unchanged value
-    // still advances the trace, so the x axis stays time
+    // A read every 100 ms (the bridge's tick) while shown
     Timer {
+        objectName: "traceReader"
         interval: 100
         repeat: true
-        objectName: "sampler"
-        running: gauge.hasValue && gauge.visible && gauge.shown
-        // A value that isn't a number is never kept, as SparkGauge's
-        onTriggered: {
-            if (!isFinite(gauge.value))
-                return
-            const h = gauge.history.slice(1 - gauge.historyLength)
-            h.push(gauge.value)
-            gauge.history = h
-        }
+        running: gauge.visible && gauge.shown && !gauge.brief && gauge.traceSource !== null
+                 && gauge.signalId >= 0
+        triggeredOnStart: true
+        onTriggered: gauge.readTrace()
     }
+    function readTrace() {
+        if (traceSource === null || signalId < 0)
+            return
+        samples = traceSource.trace(signalId, windowMs, Math.max(1, Math.floor(trace.width / 3)))
+    }
+    onSignalIdChanged: samples = []
 
     readonly property bool roomy: height >= 160
     // Too short for the trace and the footer: the label and the value alone
@@ -48,43 +50,25 @@ GaugeBase {
                                         ? gauge.zoneColor(gauge.value, gauge.readoutColor)
                                         : Theme.textDim
 
-    // Polyline for the sparkline, newest sample on the right edge.
-    // Range is the visible window, padded to at least 4 % of full scale
-    // so idle noise doesn't fill the box.
+    // The trace's pieces for a box, newest sample on the right edge, scaled
+    // to the window's own low and high
     function tracePoints(w, h) {
-        const n = history.length
-        if (n < 2) return []
-        let lo = Infinity, hi = -Infinity
-        for (const v of history) {
-            if (v < lo) lo = v
-            if (v > hi) hi = v
-        }
-        const minSpan = (to - from) * 0.04
-        if (hi - lo < minSpan) {
-            const mid = (hi + lo) / 2
-            lo = mid - minSpan / 2
-            hi = mid + minSpan / 2
-        }
-        const step = w / (historyLength - 1)
-        const pts = []
-        for (let i = 0; i < n; ++i) {
-            pts.push(Qt.point(w - (n - 1 - i) * step,
-                              h - 2 - (history[i] - lo) / (hi - lo) * (h - 4)))
-        }
-        return pts
+        const e = traceExtent(samples)
+        return tracePieces(samples, windowMs, w, h, e.lo, e.hi)
     }
 
     Column {
         id: heading
         anchors { left: parent.left; right: parent.right; top: parent.top }
         Text {
+            objectName: "gaugeTitle"
             Accessible.ignored: true
             width: parent.width
             text: gauge.label
             elide: Text.ElideRight
             font.pixelSize: 12
             font.weight: Font.DemiBold
-            color: Theme.textDim
+            color: gauge.titleColor
         }
         Text {
             Accessible.ignored: true
@@ -164,7 +148,7 @@ GaugeBase {
             fillColor: "transparent"
             joinStyle: ShapePath.RoundJoin
             capStyle: ShapePath.RoundCap
-            PathPolyline { path: trace.points }
+            PathMultiline { paths: trace.points }
         }
     }
     // Beside the value on a card too short for a trace; else in the trace's

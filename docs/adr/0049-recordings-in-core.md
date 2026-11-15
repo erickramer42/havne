@@ -1231,6 +1231,22 @@ chart shared as `app/qml/StripChart.qml`.
   laptop to 30 frames a second. Past 20,000 rows in view
   (`rawRowsPerFrame`), columns stay a second wide and come from the
   summaries.
+
+  *Note of 2026-11-12, the bound's rows.* The bound counts the rows a frame
+  draws: the plotted signals', and in a comparison both recordings'
+  together. The reader's narrow query passes by a row of a signal it wasn't
+  asked for in about 1 ns and merges one it was in about 22 ns (the dense
+  hour on the desktop with 180,000 rows in view: 0.21 ms a query asked for 4
+  signals, 3.9 ms asked for all 50), so the count of every signal's rows put
+  two 35 s demo logs lined up on a pull on second-wide columns and saved
+  nothing. A second bound keeps the view inside the reader's 8 MiB of parsed
+  rows, which hold every signal's: 150,000 rows of either recording in view
+  (`rawRowsCached`). Past the cache each frame reads its seconds from the
+  file again: a query took 40 ms with 250,000 rows in view against 0.4 ms
+  with 230,000. The 150,000 is under what the cache holds on any compiler (a
+  second's rows sit in a vector that may have grown to twice its size).
+  Crossing into the narrower columns reads the view's seconds once: about 20
+  ms for 150,000 rows on the desktop.
 - **The frame rate.** Section 10 asks for 60 frames a second panning
   and pinching with four signals at the viewer's full width, on the
   test phone and the laptop, and a GPU path if the Canvas can't. A
