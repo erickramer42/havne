@@ -1765,6 +1765,10 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
 
     find_package(Qt6 6.12 COMPONENTS Core Gui Network REQUIRED)   # app/CMakeLists.txt's minimum
 
+    # APP_BRIDGE_SOURCES: the bridge's own sources, which test_bridge and
+    # bench_bridge compile as app_ui does
+    include(${CMAKE_SOURCE_DIR}/app/bridge_sources.cmake)
+
     add_executable(test_bridge
         test_bridge.cpp
         test_recording_view.cpp
@@ -1776,7 +1780,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/recordingview.cpp
         ../app/recordingexport.cpp
         ../app/recordingframes.cpp
-        ../app/sessionbridge.cpp
+        ${APP_BRIDGE_SOURCES}
         ../app/recordingimport.cpp
         ../app/healthreport.cpp
         ../app/framefilter.cpp
@@ -1857,7 +1861,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     # docs/testing.md; built with the tests, never run by ctest
     add_executable(bench_bridge
         bench_bridge.cpp
-        ../app/sessionbridge.cpp
+        ${APP_BRIDGE_SOURCES}
         ../app/recordingimport.cpp
         ../app/healthreport.cpp
         ../app/framefilter.cpp
