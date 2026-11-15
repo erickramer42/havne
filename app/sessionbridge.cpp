@@ -1707,6 +1707,19 @@ SessionBridge::SessionBridge(QObject* parent)
         emit logProgressChanged();
     });
 
+    // What Armed says about starting follows everything that decides it
+    for (auto changed :
+         {&SessionBridge::recordingStateChanged,
+          &SessionBridge::logStateChanged, &SessionBridge::conditionsChanged,
+          &SessionBridge::currentUriChanged,
+          &SessionBridge::disconnectingChanged}) {
+        connect(this, changed, this, [this]() { judgeArmedWhy(); });
+    }
+    connect(this, &SessionBridge::connectedChanged, this,
+            [this]() { judgeArmedWhy(); });
+    connect(m_conditionModel, &QAbstractItemModel::modelReset, this,
+            [this]() { judgeArmedWhy(); });
+
     // The activity lines go into the recording's events.log as notes,
     // but for those core writes in its own form (logUnnoted)
     connect(this, &SessionBridge::logMessage, this,
@@ -3886,6 +3899,8 @@ void SessionBridge::startRecording(ecuio_session_t* session, const QString& uri)
 
 namespace {
 
+QString detailOr(ecuio_status_t rc);
+
 // A recorder's folder, absolute; empty if core couldn't give it whole, so
 // a caller never acts on a cut path
 QString folderOf(ecuio_recorder_t* recorder)
@@ -3916,7 +3931,7 @@ bool holdsFrames(const QString& folder)
 ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
                                               const QString& uri,
                                               const QString& failed,
-                                              QString* reason)
+                                              QString* reason, uint32_t flags)
 {
     const auto fail = [this, &failed, reason](const QString& why) {
         if (reason != nullptr) {
@@ -3964,6 +3979,7 @@ ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
     o.label_utf8 = label8.constData();
     o.header_lines = header.data();
     o.header_line_count = static_cast<uint32_t>(header.size());
+    o.flags = flags;
     ecuio_recorder_t* recorder = nullptr;
     ecuio_status_t rc = ecuio_recorder_open(&o, &recorder);
     if (rc != ECUIO_OK) {
@@ -3982,6 +3998,8 @@ ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
         rc = ecuio_session_record(session, recorder);
     }
     if (rc != ECUIO_OK) {
+        // Core's words first: the close below can clear them
+        const QString detail = detailOr(rc);
         // The folder is this call's own, made by the open above; a
         // session never attached wrote it no frame, so nothing is lost
         const QString folder =
@@ -3991,7 +4009,7 @@ ecuio_recorder_t* SessionBridge::openRecorder(ecuio_session_t* session,
         if (!folder.isEmpty() && !holdsFrames(folder)) {
             (void)QDir(folder).removeRecursively();
         }
-        return fail(QString::fromUtf8(ecuio_status_string(rc)));
+        return fail(detail);
     }
     return recorder;
 }
@@ -4022,6 +4040,9 @@ bool SessionBridge::startLog()
     }
     if (m_session == nullptr || !m_connected.load(std::memory_order_acquire)) {
         return refuse(QStringLiteral("not connected"));
+    }
+    if (m_armedActive) {
+        return refuse(QStringLiteral("Armed is recording this session"));
     }
     // One recorder a session: Record sessions' is attached from the start
     if (m_recorder != nullptr) {
@@ -4091,6 +4112,153 @@ void SessionBridge::stopLog()
     stopRecording(QStringLiteral("Stop log"), true);
 }
 
+QString SessionBridge::armedRefusal() const
+{
+    if (m_session == nullptr || !m_connected.load(std::memory_order_acquire)) {
+        return QStringLiteral("not connected");
+    }
+    if (m_disconnecting) {
+        return QStringLiteral("disconnecting");
+    }
+    if (m_armedActive) {
+        return QString();
+    }
+    if (m_logActive) {
+        return QStringLiteral("a log is running");
+    }
+    if (m_recorder != nullptr) {
+        return QStringLiteral("Recording this session already");
+    }
+    // A replay is judged by its recording's own conditions, which an
+    // armed copy of it would only duplicate: refused as a log of one is
+    if (!m_recordReplays && m_currentUri.startsWith(QLatin1String("replay://"),
+                                                    Qt::CaseInsensitive)) {
+        return QStringLiteral("a replay plays a recording already");
+    }
+    // The words core's attach refuses with (ADR-0063 decision D4)
+    if (!m_skipArmedJudgmentForTesting &&
+        (m_conditionsGeneration == 0 || !m_conditionModel->anyRecords())) {
+        return QStringLiteral("no condition records");
+    }
+    return QString();
+}
+
+void SessionBridge::judgeArmedWhy()
+{
+    const QString why = armedRefusal();
+    if (why != m_armedWhy) {
+        m_armedWhy = why;
+        emit armedWhyChanged();
+    }
+}
+
+bool SessionBridge::startArmed()
+{
+    const auto refuse = [this](const QString& why) {
+        const QString line = QStringLiteral("Armed not started: %1").arg(why);
+        setLogNotice(line);
+        emit logMessage(line);
+        return false;
+    };
+    if (m_armedActive) {
+        return refuse(QStringLiteral("armed already"));
+    }
+    const QString why = armedRefusal();
+    if (!why.isEmpty()) {
+        return refuse(why);
+    }
+    QString failed;
+    ecuio_recorder_t* recorder = openRecorder(
+        m_session, m_currentUri, QStringLiteral("Armed not started"), &failed,
+        ECUIO_RECORD_ARMED);
+    if (recorder == nullptr) {
+        // openRecorder wrote the activity log's line
+        setLogNotice(QStringLiteral("Armed not started: %1").arg(failed));
+        return false;
+    }
+    setLogNotice(QString());
+    m_armedActive = true;
+    m_armedInWindow = false;
+    m_armedWindows = 0;
+    m_armedFolder.clear();
+    adoptRecorder(recorder);
+    emit armedStateChanged();
+    emit logMessage(QStringLiteral(
+        "Armed: nothing is written until a condition that records fires"));
+    judgeArmedWhy();
+    return true;
+}
+
+void SessionBridge::stopArmed()
+{
+    // A teardown under way ends it itself, once the session is gone
+    if (!m_armedActive || m_disconnecting) {
+        return;
+    }
+    stopRecording(QStringLiteral("Stop armed"), true);
+}
+
+void SessionBridge::pollArmed(const ecuio_recorder_state_t& st)
+{
+    const bool inWindow = st.state == ECUIO_RECORDING_ACTIVE;
+    const bool rose = static_cast<int>(st.windows) > m_armedWindows;
+    const bool wasIn = m_armedInWindow;
+    if (!rose && inWindow == wasIn) {
+        return;
+    }
+    if (wasIn && (rose || !inWindow)) {
+        emit logMessage(
+            QStringLiteral("Armed window closed: %1").arg(m_armedFolder));
+        m_armedInWindow = false;
+    }
+    if (rose) {
+        // Windows that opened and closed between two polls show as one
+        const int opened = static_cast<int>(st.windows) - m_armedWindows;
+        m_armedWindows = static_cast<int>(st.windows);
+        m_recordingFolder = folderOf(m_recorder);
+        m_armedFolder = QFileInfo(m_recordingFolder).fileName();
+        emit logMessage(
+            opened > 1
+                ? QStringLiteral("Armed windows opened (%1), newest: %2")
+                      .arg(opened)
+                      .arg(m_armedFolder)
+                : QStringLiteral("Armed window opened: %1").arg(m_armedFolder));
+        m_armedInWindow = true;
+        if (!inWindow) {
+            emit logMessage(
+                QStringLiteral("Armed window closed: %1").arg(m_armedFolder));
+            m_armedInWindow = false;
+        }
+    }
+    emit armedStateChanged();
+    emit recordingStateChanged();
+}
+
+void SessionBridge::endArmed()
+{
+    if (m_armedInWindow) {
+        emit logMessage(
+            QStringLiteral("Armed window closed: %1").arg(m_armedFolder));
+    }
+    // A window opened by the close's last drain isn't seen here: the
+    // line says what was seen
+    if (!m_armedFailure.isEmpty()) {
+        emit logMessage(QStringLiteral("Armed ended: %1").arg(m_armedFailure));
+        m_armedFailure.clear();
+    } else {
+        emit logMessage(m_armedWindows == 0
+                            ? QStringLiteral("Armed ended: no window opened")
+                            : QStringLiteral("Armed ended: %1 window%2")
+                                  .arg(m_armedWindows)
+                                  .arg(m_armedWindows == 1
+                                           ? QString()
+                                           : QStringLiteral("s")));
+    }
+    m_armedActive = false;
+    m_armedInWindow = false;
+    emit armedStateChanged();
+}
+
 qint64 SessionBridge::logElapsedMs() const
 {
     return m_logActive ? m_logClock.elapsed() : m_logElapsedMs;
@@ -4129,10 +4297,19 @@ void SessionBridge::stopRecording(const QString& why, bool byUser,
                 .toUtf8()
                 .constData());
     }
+    if (m_armedActive) {
+        ecuio_recorder_state_t last{};
+        if (ecuio_recorder_get_state(m_recorder, &last) == ECUIO_OK) {
+            pollArmed(last);
+        }
+    }
     ecuio_recorder_t* recorder = m_recorder;
     m_recorder = nullptr;
     (void)ecuio_recorder_close(recorder, why.toUtf8().constData());
     emit recordingStateChanged();
+    if (m_armedActive) {
+        endArmed();
+    }
     // The recording held its set: an edit saved meanwhile is judged now
     if (!m_conditionsPending.isEmpty() && conditionsWait().isEmpty()) {
         m_conditionsPending.clear();
@@ -4176,6 +4353,14 @@ bool SessionBridge::mark(const QString& label)
     if (m_recorder == nullptr) {
         return false;
     }
+    // Between windows a mark would go nowhere (recording.h)
+    if (m_armedActive) {
+        ecuio_recorder_state_t st{};
+        if (ecuio_recorder_get_state(m_recorder, &st) != ECUIO_OK ||
+            st.state != ECUIO_RECORDING_ACTIVE) {
+            return false;
+        }
+    }
     const QString text = label.trimmed().isEmpty()
                              ? QStringLiteral("Mark %1").arg(m_markCount + 1)
                              : label.trimmed();
@@ -4194,18 +4379,30 @@ void SessionBridge::pollRecording()
 {
     ecuio_recorder_state_t st{};
     if (m_recorder == nullptr ||
-        ecuio_recorder_get_state(m_recorder, &st) != ECUIO_OK ||
-        st.state != ECUIO_RECORDING_FAILED) {
+        ecuio_recorder_get_state(m_recorder, &st) != ECUIO_OK) {
+        return;
+    }
+    if (m_armedActive) {
+        pollArmed(st);
+    }
+    if (st.state != ECUIO_RECORDING_FAILED) {
         return;
     }
     const QString reason = QString::fromUtf8(st.reason);
     const bool log = m_logActive;
+    const bool armed = m_armedActive;
+    if (armed) {
+        m_armedFailure = reason;
+    }
     stopRecording(QStringLiteral("a write failed"));
     emit logMessage(QStringLiteral("Recording stopped: %1").arg(reason));
     // The Dashboard's notice gets the recorder's own words (the disk is
     // full), not the recording's end note
     if (log) {
         setLogNotice(QStringLiteral("Log ended: %1").arg(reason));
+    }
+    if (armed) {
+        setLogNotice(QStringLiteral("Armed ended: %1").arg(reason));
     }
 }
 

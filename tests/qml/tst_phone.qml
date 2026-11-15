@@ -34,6 +34,9 @@ TestCase {
     }
 
     function cleanup() {
+        // The armed cases save a set that records: none outlives them
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[{"key":"c","name":"C",'
+                              + '"when":{"signal":["id:1001"],"unit":"RPM","above":90000},"mark":true}]}')
         Relay.stop()
         Theme.developerMode = false
         Theme.night = "off"
@@ -842,6 +845,58 @@ TestCase {
         const panel = find(page, "stretchesPanel")
         const bottom = panel.mapToItem(main.contentItem, 0, panel.height).y
         verify(bottom <= main.contentItem.height + 0.5, "the panel ends at " + bottom)
+    }
+
+    // The Conditions panel in the chart's place on a phone: its rows and
+    // buttons a touch's size inside the width at 384 and 320 px, and a row's
+    // press gives the chart back centered on its entry
+    function test_theConditionsPanelFitsAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theConditionsPanelFitsAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 832
+        main.font.pixelSize = 16
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Conditions", uri: "replay://x?profile=obd2", source: "",
+                    folder: Harness.recordingFixtures + "/conditions", profile: "obd2" })
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const fits = (item, name) => {
+            const top = item.mapToItem(main.contentItem, 0, 0).y
+            const bottom = item.mapToItem(main.contentItem, 0, item.height).y
+            verify(bottom - top >= 47.5, name + " is " + (bottom - top) + " tall")
+            const right = item.mapToItem(main.contentItem, item.width, 0).x
+            verify(right <= main.contentItem.width + 0.5, name + " ends at " + right)
+        }
+        fits(find(page, "jumpConditions"), "jumpConditions")
+        find(page, "jumpConditions").clicked()
+        verify(waitForPolish(main), "laid out")
+        verify(find(page, "conditionsPanel").visible, "the panel is up")
+        verify(!find(page, "chartFrame").visible, "in the chart's place")
+        fits(find(page, "conditionsClose"), "conditionsClose")
+        const list = find(page, "conditionList")
+        tryVerify(() => list.itemAtIndex(2) !== null && list.itemAtIndex(2).width > 0, 2000,
+                  "the rows are laid out")
+        for (let i = 0; i < 3; ++i) {
+            const row = list.itemAtIndex(i)
+            fits(find(row, "conditionRowArea"), "row " + i)
+            for (const name of ["conditionTime", "conditionName", "conditionLength"]) {
+                const label = find(row, name)
+                const right = label.mapToItem(main.contentItem, label.width, 0).x
+                verify(right <= main.contentItem.width + 0.5, name + " of row " + i + " ends at " + right)
+            }
+        }
+        page.setView(0, 2000)
+        mouseClick(find(list.itemAtIndex(0), "conditionRowArea"))
+        verify(!page.conditionsOpen, "the panel gives the chart back")
+        verify(waitForPolish(main), "laid out")
+        verify(find(page, "chartFrame").visible)
+        compare(page.viewT0, 11376)
+        compare(page.cursorMs, 7251)
     }
 
     // A recording folder of number signals (twelve unless given), three
@@ -2170,6 +2225,98 @@ TestCase {
         verify(!start.enabled, "nothing ticked: a text row's default is unticked")
         Bridge.signalModel.toggleSubscribed(0)
         tryVerify(() => start.enabled, 2000, "the ticked text row is a log's")
+    }
+
+    // The armed recorder's button (ADR-0063 section 7): off with its reason
+    // while no condition records, "Armed" while it waits, "Recording
+    // (window N)" in a window, Mark only in a window; it fits at 384 and 320 px
+    function armedConditions(bound) {
+        return '{"havne_conditions":1,"conditions":[{"key":"rec","name":"Engine stopped",'
+               + '"when":{"signal":["id:3001"],"unit":"km/h",' + bound + '},'
+               + '"record":{"before":0.2,"after":0.2}}]}'
+    }
+    function test_theHeadersArmedHasItsStatesAndFitsAPhone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 384
+        main.height = 800
+        main.font.pixelSize = 16
+        const armed = find(main.contentItem, "armedButton")
+        const mark = find(main.contentItem, "markButton")
+        const start = find(main.contentItem, "startLogButton")
+        const row = find(main.contentItem, "headerRow")
+        verify(!armed.visible, "nothing to arm before a connect")
+        verify(Bridge.saveConditions(armedConditions('"above":90000')).ok, "a set that records")
+        // With no record condition: shown, off, and says why
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[{"key":"c","name":"C",'
+                              + '"when":{"signal":["id:1001"],"unit":"RPM","above":90000},"mark":true}]}')
+        compare(Bridge.connectSession("mock://armed"), "", "mock://armed connects")
+        tryVerify(() => armed.visible, 5000, "Armed once connected")
+        verify(!armed.enabled, "no condition records")
+        compare(armed.text, "Arm", "off, it says what a press does")
+        compare(Bridge.armedWhy, "no condition records")
+        compare(armed.Accessible.description, "no condition records")
+        // A tap on the disabled button says why, as a refused press does
+        const host = find(main.contentItem, "armedHost")
+        Bridge.clearLogNotice()
+        waitForRendering(main.contentItem)
+        mouseClick(host)
+        tryCompare(Bridge, "logNotice", "Armed not started: no condition records", 3000)
+        verify(!Bridge.armedActive, "a tap on the explanation arms nothing")
+        const widths = [384, 320]
+        for (const width of widths) {
+            main.width = width
+            waitForRendering(main.contentItem)
+            const out = pastTheEdge(row, main.contentItem, [])
+            compare(out.length, 0, "idle at " + width + " px: " + out.join(", "))
+        }
+        main.width = 384
+        // A set that records, never firing: armed and waiting
+        verify(Bridge.saveConditions(armedConditions('"above":90000')).ok)
+        tryVerify(() => armed.enabled, 3000, "a condition records")
+        Bridge.clearLogNotice()
+        mouseClick(host)
+        tryVerify(() => Bridge.armedActive, 3000, "a press arms; the explanation stays out of it")
+        compare(Bridge.logNotice, "", "no refusal while it can start")
+        verify(armed.checked, "shown as on")
+        compare(armed.text, "Armed")
+        verify(!start.visible, "Start log steps aside: one recorder")
+        verify(!mark.visible, "Mark only inside a window")
+        for (const width of widths) {
+            main.width = width
+            waitForRendering(main.contentItem)
+            const out = pastTheEdge(row, main.contentItem, [])
+            compare(out.length, 0, "waiting at " + width + " px: " + out.join(", "))
+        }
+        main.width = 384
+        armed.clicked()
+        verify(!Bridge.armedActive, "a second press disarms")
+        tryVerify(() => start.visible, 2000, "Start log is back")
+        // A set that fires at once: a window, with Mark
+        verify(Bridge.saveConditions(armedConditions('"below":1')).ok)
+        tryVerify(() => armed.enabled, 3000)
+        armed.clicked()
+        tryVerify(() => Bridge.armedRecording, 10000, "a window opens")
+        compare(armed.text, "Window 1", "a phone's header has no room for more")
+        verify(mark.visible, "Mark inside a window")
+        for (const width of widths) {
+            main.width = width
+            waitForRendering(main.contentItem)
+            compare(armed.text, "Window 1")
+            const out = pastTheEdge(row, main.contentItem, [])
+            compare(out.length, 0, "in a window at " + width + " px: " + out.join(", "))
+        }
+        // With room (420 px of header row and up) it says the whole of it
+        main.width = 600
+        waitForRendering(main.contentItem)
+        compare(armed.text, "Recording (window 1)")
+        compare(pastTheEdge(row, main.contentItem, []).length, 0, "in a window at 600 px")
+        main.width = 384
+        armed.clicked()
+        verify(!Bridge.armedActive)
+        verify(!mark.visible, "Mark goes with the recorder")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000)
     }
 
     function test_theHeadersLogStartsStopsAndOpensItsFolder() {

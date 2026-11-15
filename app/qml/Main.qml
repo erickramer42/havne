@@ -452,7 +452,8 @@ ApplicationWindow {
                         Label {
                             id: headerTitle
                             objectName: "headerTitle"
-                            visible: !(markButton.visible || startLogButton.visible || Bridge.logActive)
+                            visible: !(markButton.visible || startLogButton.visible
+                                       || armedHost.visible || Bridge.logActive)
                                      || headerRow.width >= 420
                             text: qsTr("Havne")
                             font.pixelSize: Theme.fontEmphasis
@@ -539,6 +540,7 @@ ApplicationWindow {
                                     id: recordingNote
                                     objectName: "linkPillRecording"
                                     visible: Bridge.connected && Bridge.recordingActive && !Bridge.logActive
+                                             && !Bridge.armedActive
                                     font.pixelSize: Theme.fontCaption
                                     color: Theme.textDim
                                     text: qsTr("· recording")
@@ -579,6 +581,7 @@ ApplicationWindow {
                             id: markButton
                             objectName: "markButton"
                             visible: Bridge.recordingActive && (!Bridge.logActive || root.headerHasRoom)
+                                     && (!Bridge.armedActive || Bridge.armedRecording)
                             text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount)
                                                        : qsTr("Mark")
                             Accessible.name: qsTr("Mark the recording")
@@ -599,6 +602,57 @@ ApplicationWindow {
                             text: qsTr("Start log")
                             Accessible.name: qsTr("Start a log of the ticked signals")
                             onClicked: Bridge.startLog()
+                        }
+                        // The armed recorder (ADR-0063 section 7): writes nothing until
+                        // a condition that records fires, then a window of its own per
+                        // firing. Mark stands beside it only inside a window. Stands
+                        // where Start log would, the session's one recorder; disabled
+                        // with its reason (armedWhy) while no condition records. A
+                        // disabled control sees no pointer, so an enabled item around
+                        // it gives the reason: a tooltip on hover, and a tap says it
+                        // in the Dashboard's notice (what a refused press says)
+                        Item {
+                            id: armedHost
+                            objectName: "armedHost"
+                            visible: Bridge.connected && !Bridge.logActive
+                                     && (Bridge.armedActive || !Bridge.recordingActive)
+                                     && !Bridge.currentUri.toLowerCase().startsWith("replay://")
+                            implicitWidth: armedButton.implicitWidth
+                            implicitHeight: armedButton.implicitHeight
+                            Layout.minimumWidth: Theme.compact ? Theme.touchTarget : 0
+                            readonly property bool explaining: !armedButton.enabled && Bridge.armedWhy !== ""
+                            ToolTip.visible: armedHover.hovered && explaining
+                            ToolTip.text: Bridge.armedWhy
+                            HoverHandler { id: armedHover }
+                            TapHandler {
+                                objectName: "armedExplain"
+                                enabled: armedHost.explaining
+                                onTapped: Bridge.startArmed()
+                            }
+                        HeaderButton {
+                            id: armedButton
+                            objectName: "armedButton"
+                            anchors.fill: parent
+                            enabled: !Bridge.disconnecting
+                                     && (Bridge.armedActive || Bridge.armedWhy === "")
+                            checkable: true
+                            checked: Bridge.armedActive
+                            // "Recording (window N)" leaves Mark and Disconnect no room
+                            // under 420 px of header row, and "Armed" beside Start log leaves
+                            // the status its address: the words shorten ("Window N", "Arm"
+                            // until it is on), the name doesn't
+                            text: Bridge.armedRecording
+                                  ? (headerRow.width < 420 ? qsTr("Window %1")
+                                                           : qsTr("Recording (window %1)")).arg(Bridge.armedWindows)
+                                  : Bridge.armedActive ? qsTr("Armed") : qsTr("Arm")
+                            Accessible.name: Bridge.armedRecording
+                                             ? qsTr("Stop the armed recorder, recording window %1").arg(Bridge.armedWindows)
+                                             : Bridge.armedActive ? qsTr("Stop the armed recorder")
+                                                                  : qsTr("Arm a recorder for the conditions that record")
+                            Accessible.description: Bridge.armedActive ? "" : Bridge.armedWhy
+                            onToggled: toggle()
+                            onClicked: Bridge.armedActive ? Bridge.stopArmed() : Bridge.startArmed()
+                        }
                         }
                         // While a log runs: its time, and its folder's size once
                         // there is one to read; one line where the row has room,

@@ -781,6 +781,20 @@ class SessionBridge : public QObject
     // sits in Main's header, on every page, so the Dashboard may not exist
     // when the refusal lands
     Q_PROPERTY(QString logNotice READ logNotice NOTIFY logNoticeChanged)
+    // The armed recorder (ADR-0063 section 7): Armed holds the one recorder
+    // slot as a log does (recordingActive holds), and writes nothing until
+    // a condition that records fires. armedRecording: a window is writing
+    // (the only time a Mark goes anywhere); armedWindows: the windows
+    // opened so far; armedFolder: the newest window's folder name, "" before
+    // the first
+    Q_PROPERTY(bool armedActive READ armedActive NOTIFY armedStateChanged)
+    Q_PROPERTY(bool armedRecording READ armedRecording NOTIFY armedStateChanged)
+    Q_PROPERTY(int armedWindows READ armedWindows NOTIFY armedStateChanged)
+    Q_PROPERTY(QString armedFolder READ armedFolder NOTIFY armedStateChanged)
+    // Why Armed can't start now, "" when it can (and while it runs): not
+    // connected, a log or Record sessions holds the recorder, a replay,
+    // or no enabled condition records
+    Q_PROPERTY(QString armedWhy READ armedWhy NOTIFY armedWhyChanged)
     // The picked vehicle's label (ADR-0027 section 2), "" for none: an adapter
     // session's recording folder is named "<stamp> <label>". Settings
     // sets it before each connect.
@@ -1323,6 +1337,20 @@ public:
     // logStopped; nothing with no log running, or while disconnecting
     // (the teardown's end closes it)
     Q_INVOKABLE void stopLog();
+    bool armedActive() const { return m_armedActive; }
+    bool armedRecording() const { return m_armedInWindow; }
+    int armedWindows() const { return m_armedWindows; }
+    QString armedFolder() const { return m_armedFolder; }
+    QString armedWhy() const { return m_armedWhy; }
+    // Start armed: a recorder opened with ECUIO_RECORD_ARMED through the
+    // log's openRecorder and attached to the running session, which
+    // records no focus: the whole session is the pre-roll. False, with the
+    // reason in the activity log and the Dashboard's notice and nothing
+    // opened, for any armedWhy, or when core refuses the attach (its detail)
+    Q_INVOKABLE bool startArmed();
+    // Stop armed: the recorder closed, a window under way ended with it;
+    // nothing while not armed or disconnecting (the teardown's end closes it)
+    Q_INVOKABLE void stopArmed();
     QString vehicleLabel() const { return m_vehicleLabel; }
     void setVehicleLabel(const QString& label);
     // The VIN (ADR-0027 section 3) stays in the bridge: QML gets a salted
@@ -1450,6 +1478,12 @@ public:
     // Test seam: record a replay too, to compare it with its source. The
     // app never records one: it would copy the recording it plays
     void setRecordReplaysForTesting(bool on) { m_recordReplays = on; }
+    // Armed no longer judges "no condition records" itself, so core's own
+    // refusal at the attach reaches the user
+    void skipArmedJudgmentForTesting(bool on)
+    {
+        m_skipArmedJudgmentForTesting = on;
+    }
     // Test seam: the next load of the plugin copy with this hash fails
     void failPluginLoadForTesting(const QString& sha)
     {
@@ -1517,6 +1551,8 @@ signals:
     void logStateChanged();
     void logProgressChanged();
     void logNoticeChanged();
+    void armedStateChanged();
+    void armedWhyChanged();
     // A log ended: byUser for Stop log, false for the session's end or a
     // failed write (reported as a Record sessions recording's end is).
     // The folder is absolute, as recordingRow takes it
@@ -1601,7 +1637,17 @@ private:
     // to `reason` when the caller wants it, when it can't be
     ecuio_recorder_t* openRecorder(ecuio_session_t* session, const QString& uri,
                                    const QString& failed,
-                                   QString* reason = nullptr);
+                                   QString* reason = nullptr,
+                                   uint32_t flags = 0);
+    // armedWhy, judged again; armedWhyChanged when it differs
+    void judgeArmedWhy();
+    QString armedRefusal() const;
+    // An armed recorder's windows against the last poll: the opened and
+    // closed lines, armedStateChanged on a change
+    void pollArmed(const ecuio_recorder_state_t& st);
+    // The armed recorder's end: its last window's line and a line saying
+    // what it wrote
+    void endArmed();
     // logNotice, with its change signal when it changes
     void setLogNotice(const QString& text);
     // m_recorder from here, its folder shown and its marks from 0
@@ -1875,6 +1921,13 @@ private:
     bool m_noting = true;              // logUnnoted clears it for its line
     int m_markCount = 0;               // the recording's marks, from 0
     bool m_logActive = false;          // m_recorder is Start log's
+    bool m_armedActive = false;        // m_recorder is Armed's
+    bool m_armedInWindow = false;      // a window is writing (last poll)
+    int m_armedWindows = 0;            // windows seen opened
+    QString m_armedFolder;             // the newest window's folder name
+    QString m_armedWhy;                // armedWhy's last answer
+    QString m_armedFailure;            // a failed write's reason, for the end
+    bool m_skipArmedJudgmentForTesting = false;
     HostElapsedTimer m_logClock;       // from Start log, sleeps counted
     qint64 m_logElapsedMs = 0;         // the last log's, once it ends
     qint64 m_logBytes = 0;             // countLogBytes' last sum
