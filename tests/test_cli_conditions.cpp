@@ -628,3 +628,21 @@ TEST(CliConditionTest, TheClosedLineCountsWhatTheRecorderLost)
     std::error_code ec;
     fs::remove_all(root, ec);
 }
+
+TEST(CliConditionTest, AnArmedClosedLineCountsItsWindowsAndAnyCutPreRoll)
+{
+    char buf[192];
+    ecuio_recorder_state_t st{};
+    st.windows = 3;
+    cli::Line a(buf, sizeof buf);
+    cli::recording_closed_line(a, true, 0, &st);
+    EXPECT_EQ(std::string(a.data(), a.size()),
+              R"({"type":"recording","state":"closed","whole":true,)"
+              R"("windows":3})");
+    st.preroll_short = 1;
+    cli::Line b(buf, sizeof buf);
+    cli::recording_closed_line(b, true, 0, &st);
+    EXPECT_EQ(std::string(b.data(), b.size()),
+              R"({"type":"recording","state":"closed","whole":true,)"
+              R"("windows":3,"preroll_short":1})");
+}

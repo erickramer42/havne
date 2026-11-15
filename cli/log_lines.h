@@ -5,7 +5,8 @@
 //
 // `log <uri> <folder> [--signal <name>]... [--pick ranked]
 // [--min-sweep <ms>] [--label <name>] [--seconds S]
-// [--signals <file> | --plugin <pkg>]`: its arguments, the picked names
+// [--signals <file> | --plugin <pkg>] [--conditions <file> [--armed]]`:
+// its arguments, the picked names
 // resolved against the session's set (in the order given, which is the
 // focus's and the folder's `focus` line's; under --pick ranked the
 // default pick's, in the set's order, cli/default_pick.h), the `focus`
@@ -20,6 +21,7 @@
 #include "jsonl.h"
 
 #include "ecuio/core.h"
+#include "ecuio/recording.h"
 #include "ecuio/signals.h"
 
 #include <cerrno>
@@ -45,6 +47,7 @@ struct LogArgs {
     uint32_t min_sweep_ms = 0;      /* --min-sweep; 0 none */
     const char* conditions = nullptr; /* --conditions' file */
     bool pick_ranked = false;       /* --pick ranked */
+    bool armed = false;             /* --armed */
 };
 
 // --pick's one word: "ranked", the default pick the CLI can know (the
@@ -125,6 +128,8 @@ inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
                 return false;
             }
             a.conditions = argv[++i];
+        } else if (s == "--armed") {
+            a.armed = true;
         } else if (s == "--pick") {
             if (!has_value || !parse_pick(argv[++i])) {
                 *why = pick_why();
@@ -158,6 +163,11 @@ inline bool parse_log(int argc, char** argv, LogArgs& a, std::string* why)
     }
     if (a.signals != nullptr && a.plugin != nullptr) {
         *why = "--signals and --plugin each give the profile: one at a time";
+        return false;
+    }
+    if (a.armed && a.conditions == nullptr) {
+        *why = "--armed goes with --conditions: a condition with record "
+               "opens each window";
         return false;
     }
     return true;
@@ -252,6 +262,8 @@ struct LogReadout {
     uint64_t seconds = 0; /* session time since start, whole */
     uint64_t bytes = 0;   /* the folder's files */
     uint64_t values = 0;  /* rows written to signals.csv */
+    bool armed = false;   /* --armed: windows is said */
+    uint32_t windows = 0; /* windows opened so far */
 };
 
 // The bytes of a recording's files in folder: size_of(path) gives a
@@ -269,7 +281,8 @@ uint64_t recording_bytes(const std::string& folder, SizeOf size_of)
     return total;
 }
 
-// {"type":"log", seconds, bytes, values}
+// {"type":"log", seconds, bytes, values}, and windows when armed (bytes
+// the newest window's)
 inline void log_line(Line& l, const LogReadout& r)
 {
     l.raw("{\"type\":\"log\"");
@@ -279,6 +292,69 @@ inline void log_line(Line& l, const LogReadout& r)
     l.u64(r.bytes);
     l.key("values");
     l.u64(r.values);
+    if (r.armed) {
+        l.key("windows");
+        l.u64(r.windows);
+    }
+    l.ch('}');
+}
+
+// An armed log's recording lines (ADR-0063 section 7), judged at each read
+// of the recorder's state: a window line when windows rose since the last
+// read (the newest window's folder), and an armed line once no window is
+// open, at the start too. Windows that open and close between two reads
+// show as a jump in the count.
+struct ArmedSeen {
+    uint32_t windows = 0;
+    bool armed_said = false;
+};
+
+struct ArmedDue {
+    bool window = false; /* {"type":"recording","state":"window",...} */
+    bool armed = false;  /* {"type":"recording","state":"armed",...} */
+};
+
+inline ArmedDue armed_due(ArmedSeen& seen, uint32_t state, uint32_t windows)
+{
+    ArmedDue due;
+    if (windows > seen.windows) {
+        due.window = true;
+        seen.windows = windows;
+        seen.armed_said = false;
+    }
+    if (state == ECUIO_RECORDING_ARMED && !seen.armed_said) {
+        due.armed = true;
+        seen.armed_said = true;
+    }
+    return due;
+}
+
+inline size_t armed_window_line_bytes(const char* folder)
+{
+    return 96 + Line::string_bytes(folder);
+}
+
+// {"type":"recording","state":"window","window":N,"folder":...}
+inline void armed_window_line(Line& l, uint32_t window, const char* folder)
+{
+    l.raw("{\"type\":\"recording\"");
+    l.key("state");
+    l.string("window", SIZE_MAX);
+    l.key("window");
+    l.u64(window);
+    l.key("folder");
+    l.string(folder, std::strlen(folder));
+    l.ch('}');
+}
+
+// {"type":"recording","state":"armed","windows":N}
+inline void armed_line(Line& l, uint32_t windows)
+{
+    l.raw("{\"type\":\"recording\"");
+    l.key("state");
+    l.string("armed", SIZE_MAX);
+    l.key("windows");
+    l.u64(windows);
     l.ch('}');
 }
 
@@ -289,8 +365,9 @@ inline size_t log_end_line_bytes(const char* folder)
 
 // {"type":"end", reason, folder, seconds, bytes, values}: reason is
 // interrupted, seconds, recording-failed, replay-end or output-failed; the
-// recording's folder and its last readout. A null folder leaves the key
-// out: the line the recording keeps of itself names no path
+// recording's folder and its last readout (an armed log's newest window,
+// and windows). A null folder leaves the key out: the line the recording
+// keeps of itself names no path, nor does an armed log that never fired
 inline void log_end_line(Line& l, const char* reason, const char* folder,
                          const LogReadout& r)
 {
@@ -307,6 +384,10 @@ inline void log_end_line(Line& l, const char* reason, const char* folder,
     l.u64(r.bytes);
     l.key("values");
     l.u64(r.values);
+    if (r.armed) {
+        l.key("windows");
+        l.u64(r.windows);
+    }
     l.ch('}');
 }
 

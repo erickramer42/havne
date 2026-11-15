@@ -501,8 +501,10 @@ inline void condition_event_line(Line& l, const ecuio_condition_event_t& e,
 
 // A recording's end, stream --record's and log's: {"type":"recording",
 // state closed, whole}, and conditions_lost when the recorder had no room
-// for some of the set's events (its drop line says so in events.log)
-inline void recording_closed_line(Line& l, bool whole, uint64_t lost)
+// for some of the set's events (its drop line says so in events.log); an
+// armed one's windows, and preroll_short when a full ring cut any
+inline void recording_closed_line(Line& l, bool whole, uint64_t lost,
+                                  const ecuio_recorder_state_t* armed = nullptr)
 {
     l.raw("{\"type\":\"recording\"");
     l.key("state");
@@ -513,20 +515,31 @@ inline void recording_closed_line(Line& l, bool whole, uint64_t lost)
         l.key("conditions_lost");
         l.u64(lost);
     }
+    if (armed != nullptr) {
+        l.key("windows");
+        l.u64(armed->windows);
+        if (armed->preroll_short != 0) {
+            l.key("preroll_short");
+            l.u64(armed->preroll_short);
+        }
+    }
     l.ch('}');
 }
 
 // Closes the recorder and writes its closed line; true when its files
-// ended whole. The lost count is read first, since the close frees the
+// ended whole. The counts are read first, since the close frees the
 // recorder: after an interrupt whose session close still runs, a later
-// loss is counted by events.log's drop line alone.
+// loss is counted by events.log's drop line alone, and an armed log's
+// windows are those opened before the close (its own last pass can open
+// one more, which only the folders show).
 inline bool close_with_line(Line& l, ecuio_recorder_t* recorder,
-                            const char* why)
+                            const char* why, bool armed = false)
 {
     ecuio_recorder_state_t state{};
     ecuio_recorder_get_state(recorder, &state);
     const bool whole = ecuio_recorder_close(recorder, why) == ECUIO_OK;
-    recording_closed_line(l, whole, state.conditions_lost);
+    recording_closed_line(l, whole, state.conditions_lost,
+                          armed ? &state : nullptr);
     return whole;
 }
 
