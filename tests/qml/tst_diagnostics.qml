@@ -220,7 +220,7 @@ TestCase {
         const findings = Harness.recordingFixtures + "/findings"
         page.vehicles = { salt: "", picked: "v1", list: [{
             id: "v1", label: "Daily driver", vinKey: "", uri: "", plotted: [], unplotted: [],
-            signals: [], own: "", plugin: "", baseline: findings }] }
+            picks: [], own: "", baseline: findings }] }
         compare(page.baselineFolder, findings)
         verify(page.saveReportTo(txt, 1))
         const named = Harness.readScratchFile(txt)

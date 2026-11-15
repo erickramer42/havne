@@ -103,8 +103,8 @@ QtObject {
         return m
     }
 
-    // A new vehicle's own file, named "<label> own" or name when given
-    // (VehicleBook.ownName: one no other file's profile has)
+    // A new vehicle's own signals as a file, named "<label> own" or name
+    // when given (SettingsPage.ownName)
     function emptyFile(label, name) {
         return { havne_signals: 1,
                  name: name !== undefined ? String(name) : qsTr("%1 own").arg(String(label).trim()),
@@ -115,8 +115,19 @@ QtObject {
     function parseFile(text) {
         try {
             const d = JSON.parse(text)
-            return d !== null && typeof d === "object" && Array.isArray(d.signals)
-                    && Array.isArray(d.ecus) ? d : null
+            if (d === null || typeof d !== "object" || !Array.isArray(d.signals)
+                    || !Array.isArray(d.ecus))
+                return null
+            // The loader's rule made explicit, so the form's edits keep
+            // it: a signal that names no ECU reads the file's first
+            if (d.ecus.length > 0) {
+                for (const s of d.signals) {
+                    if (s !== null && typeof s === "object" && s.read !== undefined
+                            && s.ecu === undefined)
+                        s.ecu = d.ecus[0].id
+                }
+            }
+            return d
         } catch (e) {
             return null
         }

@@ -3313,7 +3313,7 @@ TestCase {
         const folder = Harness.recordingFixtures + "/findings"
         find(main.contentItem, "settingsPage").vehicles = { salt: "", picked: "v1", list: [{
             id: "v1", label: "Daily driver", vinKey: "", uri: "", plotted: [], unplotted: [],
-            signals: [], own: "", plugin: "", baseline: folder }] }
+            picks: [], own: "", baseline: folder }] }
         compare(find(main.contentItem, "diagnosticsPage").baselineFolder, folder)
         compare(find(main.contentItem, "recordingsPage").baselineFolder, folder)
     }
@@ -3325,21 +3325,18 @@ TestCase {
         verify(main, "Main loads")
         const settings = find(main.contentItem, "settingsPage")
         const dash = find(main.contentItem, "dashboardPage")
-        verify(Bridge.importPlugin(Harness.writeExamplePlugin("main-sets.havne-plugin.json")).ok)
+        verify(settings.importFile(Harness.writeExamplePlugin("main-sets.havne-plugin.json")))
         try {
-            settings.loadPlugins()
-            settings.vehicles = { salt: "", picked: "v1", list: [{
-                id: "v1", label: "Desk car", vinKey: "", uri: "", plotted: [], unplotted: [],
-                signals: [], own: "", plugin: "plugin.example-sim.my2019", baseline: "" }] }
+            settings.vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Desk car"),
+                                                     ["plugin.example-sim.my2019"])
             compare(JSON.stringify(dash.pickedSets),
                     JSON.stringify([{ profile: "plugin.example-sim.my2019",
                                       name: "Example: the simulated car", variant: "my2019" }]))
             compare(dash.profileNames["plugin.example-sim.base"], "Example: the simulated car")
             compare(dash.offlineUri, settings.offlineUri)
         } finally {
-            for (const p of Bridge.plugins())
-                Bridge.removePlugin(p.sha256)
-            settings.loadPlugins()
+            for (const p of settings.pluginList)
+                settings.removePlugin(p.sha256)
         }
     }
 
