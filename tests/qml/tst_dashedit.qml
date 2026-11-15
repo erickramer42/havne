@@ -268,10 +268,12 @@ TestCase {
         compare(find(page, "panelFrom").text, data.from)
         compare(find(page, "panelTo").text, data.to)
         type(find(page, "panelTo"), data.units === 1 ? "212" : "100")
-        compare(page.doc.pages[0].cells[1].options.to, 100)
+        // Exactly: compare() passes numbers within 1e-5, and the inverse's
+        // noise is under that
+        verify(page.doc.pages[0].cells[1].options.to === 100, String(page.doc.pages[0].cells[1].options.to))
         compare(find(page, "panelTo").text, data.units === 1 ? "212" : "100", "re-bound")
         type(find(page, "panelWarnFrom"), data.units === 1 ? "194" : "90")
-        compare(page.doc.pages[0].cells[1].options.warnFrom, 90)
+        verify(page.doc.pages[0].cells[1].options.warnFrom === 90, String(page.doc.pages[0].cells[1].options.warnFrom))
         tryCompare(find(page, "dashCell_0_1"), "cell", page.doc.pages[0].cells[1])
     }
 
@@ -2470,8 +2472,9 @@ TestCase {
     // table's case sets up itself
     readonly property var withSignal: ["panelPreview", "panelLabel", "panelSignal", "panelKind", "panelFrom",
                                        "panelFromCaption", "panelTo", "panelToCaption", "panelSignalName"]
-    // What the value's text and tone read: every kind that draws a value
-    readonly property var valueDrawn: ["panelColdBelow", "panelWarnBelow", "panelDangerBelow",
+    // What the value's text and tone read: every kind that draws a value.
+    // panelAlert shows while the cell has a level, which the table's case gives it
+    readonly property var valueDrawn: ["panelAlert", "panelColdBelow", "panelWarnBelow", "panelDangerBelow",
                                        "panelWarnFrom", "panelDangerFrom", "panelDecimals", "panelColors",
                                        "panelColdBelowCaption", "panelWarnBelowCaption",
                                        "panelDangerBelowCaption", "panelWarnFromCaption",
@@ -2558,6 +2561,8 @@ TestCase {
         wait(0)
         const cell = data.kind === "blank" ? { kind: "blank", w: 2, h: 4, refs: [] }
                                            : cellOf("A", data.kind)
+        if (data.kind !== "blank")
+            cell.options.dangerFrom = 7000
         const page = pageOf({}, docOf([cell, cellOf("B")]))
         page.startEditing()
         press(find(page, "dashCell_0_0"))

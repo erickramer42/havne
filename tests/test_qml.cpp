@@ -28,6 +28,7 @@
 #include <QWindow>
 #include <QtQuickTest>
 
+#include "conditionstore.h"
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "recordingexport.h"
@@ -279,6 +280,21 @@ public:
             static_cast<int>(QGuiApplication::styleHints()->colorScheme());
         QGuiApplication::styleHints()->setColorScheme(Qt::ColorScheme::Unknown);
         return scheme;
+    }
+
+    // The saved condition file written as text and read again as at the
+    // start: core's refusal of it is the bridge's conditionsProblem. False
+    // when it can't be written
+    Q_INVOKABLE bool writeSavedConditions(const QString& text)
+    {
+        QFile f(ConditionStore::path());
+        if (!QDir().mkpath(QFileInfo(f).absolutePath()) || !f.open(QIODevice::WriteOnly)) {
+            return false;
+        }
+        f.write(text.toUtf8());
+        f.close();
+        BridgeSingleton::instance->reloadSavedConditionsForTesting();
+        return true;
     }
 
     // The running recording's next write fails, as on a full disk

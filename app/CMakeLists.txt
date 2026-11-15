@@ -75,7 +75,8 @@ qt_add_library(app_ui STATIC
 )
 
 set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml
-                            qml/DashboardBook.qml qml/SignalForm.qml qml/Immersive.qml PROPERTIES
+                            qml/DashboardBook.qml qml/SignalForm.qml qml/Immersive.qml
+                            qml/ConditionBook.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -125,6 +126,10 @@ qt_add_qml_module(app_ui
         qml/SettingsProfile.qml
         qml/SettingsRecording.qml
         qml/SettingsSignals.qml
+        qml/SettingsAlerts.qml
+        qml/SettingsAlertEditor.qml
+        qml/AlertSignalPicker.qml
+        qml/ConditionBook.qml
         qml/SettingsVehiclePicker.qml
         qml/SettingsVinLookup.qml
         qml/NavButton.qml

@@ -204,6 +204,14 @@ ApplicationWindow {
         if (logBackTab.page !== cameFrom || !goBack())
             gotoPage(dashboardPage)
     }
+    // A gauge's Alert: Settings' alert editor on the new condition
+    function openAlertDraft(condition) {
+        const why = settingsView.openAlertDraft(condition)
+        if (why === "")
+            gotoPage(settingsPage)
+        else
+            dashboardView.alertNote = why
+    }
     // A connect list's "Other address..." (Dash's, Home's): Back returns to
     // that page, not to Settings' list
     function openConnectFromDash() {
@@ -805,6 +813,7 @@ ApplicationWindow {
                         onConnectToUri: uri => settingsView.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()
                         onLogRequested: root.openLog()
+                        onAlertRequested: condition => root.openAlertDraft(condition)
                         driveHideMs: settingsView.driveHideMs
                         driveOrientation: settingsView.driveOrientation
                         driveTabBarHeight: tabBar.height

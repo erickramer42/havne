@@ -608,6 +608,25 @@ Page {
     // The shown page scrolls to a cell, so what a panel edited is seen again
     signal revealRequested(int cell)
 
+    // A gauge's Alert (ADR-0063 section 9): a new condition from the cell's
+    // own levels, refs and unit, which Main opens in Settings' editor as a
+    // copy bound to nothing; null for a cell with no level
+    signal alertRequested(var condition)
+    function alertOf(cell, name) {
+        if (cell === null || cell.kind === "blank" || !Array.isArray(cell.refs) || cell.refs.length === 0)
+            return null
+        const o = cell.options ?? ({})
+        // The range the cell draws: its own ends, else its unit's default
+        const range = DashboardBook.defaultRange(cell.unit ?? "")
+        return ConditionBook.alertFromLevels(name, cell.refs, cell.unit ?? "", o,
+                                             typeof o.from === "number" ? o.from : range.from,
+                                             typeof o.to === "number" ? o.to : range.to, [])
+    }
+    // Why a gauge's Alert didn't open the editor, under the button until
+    // another cell is picked
+    property string alertNote: ""
+    onSelectedChanged: alertNote = ""
+
     // ---- The drive view (ADR-0059): this page with every bar hidden
 
     property bool driving: false
@@ -842,41 +861,18 @@ Page {
     }
     // Bridge.gaugeSignals as plain arrays, read once (it is CONSTANT): each read
     // of a bridge map makes a new JS wrapper, and every cell's lookup reads it
-    readonly property var gaugeSets: {
-        const sets = Bridge.gaugeSignals, copy = {}
-        for (const key in sets)
-            copy[key] = Array.from(sets[key])
-        return copy
-    }
-    // The picked ref and its counterparts in the other built-in set
+    readonly property var gaugeSets: DashboardBook.copySets(Bridge.gaugeSignals)
     function counterparts(ref) {
-        const sets = gaugeSets
-        for (const key in sets) {
-            const refs = sets[key]
-            if (refs.indexOf(ref) >= 0)
-                return [ref].concat(refs.filter(r => r !== ref))
-        }
-        return [ref]
+        return DashboardBook.counterparts(ref, gaugeSets)
     }
-    // A cell's refs with the counterparts of each in the built-in sets, its
-    // own first: a cell made under one profile reads under another
     function lookupRefs(refs) {
-        let all = refs ?? []
-        for (const ref of refs ?? [])
-            all = all.concat(counterparts(ref).filter(r => all.indexOf(r) < 0))
-        return all
+        return DashboardBook.lookupRefs(refs, gaugeSets)
     }
     function labelFor(row) {
         return Array.from(String(row.name)).slice(0, DashboardBook.maxLabel).join("")
     }
-    // The Bridge.gaugeSignals key whose refs hold this ref ("" for none)
     function keyOfRef(ref) {
-        const sets = gaugeSets
-        for (const key in sets) {
-            if (sets[key].indexOf(ref) >= 0)
-                return key
-        }
-        return ""
+        return DashboardBook.keyOfRef(ref, gaugeSets)
     }
     // What a gauge on this row starts with, in the unit the cell stores: the
     // signal file's own gauge (its range and levels), else the row's range
@@ -1194,15 +1190,9 @@ Page {
     function shownUnit(unit) {
         return Bridge.unitSystem === 0 ? unit : Bridge.displayUnit(unit)
     }
-    // A number typed in the unit shown, in the unit stored. Each of
-    // core's conversions is linear, so two points give it back; six
-    // decimals drop the arithmetic's noise (212 deg F is 100 deg C)
+    // A number typed in the unit shown, in the unit stored
     function stored(unit, v) {
-        if (Bridge.unitSystem === 0)
-            return v
-        const a = Bridge.displayValue(unit, 0), b = Bridge.displayValue(unit, 1)
-        const x = b !== a ? (v - a) / (b - a) : v
-        return Math.round(x * 1e6) / 1e6
+        return Bridge.unitSystem === 0 ? v : DashboardBook.roundStored(Bridge.decodedValue(unit, v))
     }
     // A number for a field: at most four decimals, none trailing
     function fieldText(v, places) {
@@ -1714,6 +1704,31 @@ Page {
                         text: qsTr("Paste after")
                         onClicked: root.pasteAfter(root.selected)
                     }
+                    ThemedButton {
+                        objectName: "panelAlert"
+                        readonly property var condition:
+                            root.alertOf(panelCard.cell, panelCard.cell && panelCard.cell.label
+                                         ? panelCard.cell.label
+                                         : panelCard.entry !== null ? panelCard.entry.name : panelCard.name)
+                        // A kind that draws no zone keeps a level it can't show; a
+                        // row of another unit than the cell's levels has no alert
+                        readonly property bool mismatch:
+                            panelCard.entry !== null && panelCard.entry.unit !== ""
+                            && panelCard.unitShown !== "" && panelCard.entry.unit !== panelCard.unitShown
+                        visible: panelCard.drawsValue && condition !== null && !mismatch
+                        Layout.fillWidth: true
+                        text: qsTr("Alert")
+                        Accessible.name: qsTr("Make an alert from this gauge's levels")
+                        onClicked: root.alertRequested(condition)
+                    }
+                }
+                Label {
+                    objectName: "dashAlertNote"
+                    visible: root.alertNote !== ""
+                    text: root.alertNote
+                    color: Theme.danger
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
                 }
 
                 GridLayout {
