@@ -526,6 +526,100 @@ TEST(BridgeTest, AConditionsEventsReachTheModelOnTheTick)
     EXPECT_EQ(model->rowCount(), 3) << "the saved set's rows offline";
 }
 
+// The tick applies a row's value term, which tells the model's handlers:
+// one that saves the conditions attaches again, reassigning the slots the
+// tick reads. The tick finishes with the slots it had, so the firing of
+// the set before still goes out under that set's name
+TEST(BridgeTest, AHandlerThatSavesConditionsMidTickLeavesTheTicksFiringsIntact)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(otherConditions()))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    int handled = 0;
+    QObject::connect(
+        bridge.conditionModel(), &QAbstractItemModel::dataChanged,
+        [&bridge, &handled](const QModelIndex&, const QModelIndex&,
+                            const QList<int>& roles) {
+            if (!roles.contains(ConditionModel::UnitRole) || handled++ > 0) {
+                return;
+            }
+            bridge.saveConditions(QString::fromUtf8(mockConditions()));
+        });
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://conditions")).isEmpty());
+    ASSERT_TRUE(spinUntil(
+        [&log]() {
+            for (const QString& line : log) {
+                if (line.startsWith(QStringLiteral("Alert: Second set"))) {
+                    return true;
+                }
+            }
+            return false;
+        },
+        5000, 10))
+        << log.join(u'\n').toStdString();
+    EXPECT_GE(handled, 1)
+        << "a value term changed, so the handler ran in the tick";
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
+// A handler that attaches again mid-tick leaves the rest of the tick's
+// (row, term) pairs unapplied: they were the set before's rows, and the
+// set attached has rows of its own at those numbers
+TEST(BridgeTest, AHandlerThatSavesConditionsMidTickLeavesTheNewSetsRowsAlone)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    const QByteArray cond =
+        R"({"key":"KEY","name":"NAME","when":{"all":[)"
+        R"({"signal":["id:1001"],"unit":"RPM","below":300},)"
+        R"({"signal":["id:3001"],"unit":"km/h","below":250}]},)"
+        R"("alert":{"level":"warning"}})";
+    const auto setOf = [&cond](const char* a, const char* b) {
+        QByteArray one = cond;
+        QByteArray two = cond;
+        one.replace("KEY", a).replace("NAME", a);
+        two.replace("KEY", b).replace("NAME", b);
+        return QByteArray(R"({"havne_conditions":1,"conditions":[)") + one +
+               "," + two + "]}";
+    };
+    SessionBridge bridge;
+    ASSERT_TRUE(bridge.saveConditions(QString::fromUtf8(setOf("aa", "bb")))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    std::vector<int> seen; // the rows whose unit changed, in order
+    int mark = -1;
+    bool saved = false;
+    QObject::connect(
+        bridge.conditionModel(), &QAbstractItemModel::dataChanged,
+        [&](const QModelIndex& at, const QModelIndex&,
+            const QList<int>& roles) {
+            if (!roles.contains(ConditionModel::UnitRole)) {
+                return;
+            }
+            seen.push_back(at.row());
+            if (!saved) {
+                saved = true;
+                bridge.saveConditions(QString::fromUtf8(setOf("cc", "dd")));
+                // Queued: it runs once the tick that is calling us has returned
+                QTimer::singleShot(
+                    0, [&]() { mark = static_cast<int>(seen.size()); });
+            }
+        });
+    ASSERT_TRUE(
+        bridge.connectSession(QStringLiteral("mock://conditions")).isEmpty());
+    ASSERT_TRUE(spinUntil([&mark]() { return mark >= 0; }, 5000, 10));
+    EXPECT_EQ(mark, 1) << "the tick's other pair was left alone: "
+                       << seen.size();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 // A re-attach begins a new generation: an event of the set before is
 // passed by, one of the set attached is the tick's
 TEST(BridgeTest, AnEventOfTheSetBeforeIsIgnored)

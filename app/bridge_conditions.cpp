@@ -375,6 +375,10 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
         int row;
     };
     std::vector<Fired> fired;
+    // The model's value terms, applied once the slots are cleared: its
+    // signal reaches handlers that may attach again, which reassign them
+    std::vector<std::pair<int, uint32_t>> terms;
+    const uint32_t generation = m_conditionsGeneration;
     // One tone a tick, the loudest that may sound. A 5 s starts at the ask,
     // heard or not: one the player drops (stale, a failed generator) too
     const uint64_t now = ecuio_clock_us() + m_toneTimeAddedForTesting;
@@ -384,7 +388,7 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
         if (!slot.has) {
             continue;
         }
-        m_conditionModel->applyTerm(static_cast<int>(i), slot.newest.term);
+        terms.emplace_back(static_cast<int>(i), slot.newest.term);
         if (slot.firings == 0) {
             continue;
         }
@@ -414,6 +418,12 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
     }
     for (ConditionSlot& slot : *full) {
         slot = ConditionSlot{};
+    }
+    for (const auto& t : terms) {
+        if (m_conditionsGeneration != generation) {
+            break; // a handler attached again: the rows are another set's
+        }
+        m_conditionModel->applyTerm(t.first, t.second);
     }
     // The states core keeps: UNAVAILABLE and NOT_RECEIVED are the getter's
     // alone, and can change after the attach
