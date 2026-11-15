@@ -653,6 +653,18 @@ ApplicationWindow {
                 }
             }
 
+            // The highest alert ON, on every page under the header; the
+            // drive view shows its own over the gauges
+            AlertBand {
+                id: alertBand
+                objectName: "alertBand"
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.barGap
+                Layout.rightMargin: Theme.barGap
+                Layout.topMargin: Theme.barGap
+                visible: shown && !root.driving
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true

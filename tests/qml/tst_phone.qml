@@ -336,6 +336,55 @@ TestCase {
         compare(over, [], "nothing past the edge")
     }
 
+    // Main's alert band ON, its longest words (a long name, three alerts,
+    // the stale line), on every page at the two narrowest phone widths: under
+    // the header, above the page, nothing past the edge; Live's alert cell too
+    Component { id: alertRowsC; ListModel {} }
+    function test_theAlertBandFitsEveryPageOnAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theAlertBandFitsEveryPageOnAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 800
+        main.font.pixelSize = 16
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const rows = createTemporaryObject(alertRowsC, testCase)
+        const row = (key, level, name) => ({
+            key: key, name: name, enabled: true, level: level, banner: true, live: true,
+            state: "on", stale: true, unavailable: false, fired: 1, value: 112.5,
+            unit: "°C", decimals: 1, staleSinceMs: new Date(2026, 10, 15, 8, 30, 5).getTime() })
+        rows.append(row("a", "danger", "Coolant far past its limit while the engine still runs hard"))
+        rows.append(row("b", "warning", "Oil warm"))
+        rows.append(row("c", "warning", "Boost high"))
+        const band = find(main.contentItem, "alertBand")
+        band.conditions = rows
+        tryVerify(() => band.shown && band.visible, 2000, "the band is ON")
+        find(main.contentItem, "livePage").alertLevels = { "1001": 2 }
+        const header = find(main.contentItem, "headerBar")
+        const over = []
+        const pages = ["homePage", "dashboardPage", "livePage", "diagnosticsPage", "logPage",
+                       "recordingsPage", "settingsPage"]
+        for (const name of pages) {
+            const page = find(main.contentItem, name)
+            main.gotoPage(Array.from(page.parent.children).indexOf(page))
+            verify(waitForPolish(main), name + " laid out")
+            verify(band.visible, "the band on " + name)
+            const top = band.mapToItem(main.contentItem, 0, 0).y
+            const bottom = top + band.height
+            verify(top >= header.mapToItem(main.contentItem, 0, header.height).y - 0.5,
+                   "under the header on " + name)
+            verify(page.mapToItem(main.contentItem, 0, 0).y >= bottom - 0.5,
+                   name + " starts under the band")
+            const out = pastTheEdge(page, main.contentItem, pastTheEdge(band, main.contentItem, []))
+            if (out.length > 0)
+                over.push(name + ": " + out.slice(0, 4).join(", "))
+        }
+        compare(over, [], "nothing past the edge")
+        verify(find(band, "alertBandStale").visible, "the stale line shows")
+    }
+
     // A value too long for its row (a refusal's words, a text) is bounded by
     // its column, whatever its text: the name keeps its third and the value
     // ends at the row's margin, at 384 px and the narrowest phone's 320

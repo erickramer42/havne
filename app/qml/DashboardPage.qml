@@ -2603,6 +2603,18 @@ Page {
         }
     }
 
+    // The alert band in the drive view, where Main's is hidden: under
+    // the status line, over the gauges' top, moving nothing
+    AlertBand {
+        id: driveAlertBand
+        objectName: "driveAlertBand"
+        visible: root.driving && shown
+        z: 2
+        x: Theme.barGap
+        y: driveStatus.y + driveStatus.height
+        width: root.width - 2 * Theme.barGap
+    }
+
     // What the log did without being asked: Start log's refusal, or an
     // end the user didn't ask for (a failed write, the session's end), in
     // words beside a warning dot, until Dismiss or the next log. Start log
