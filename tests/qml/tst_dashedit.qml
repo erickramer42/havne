@@ -2644,6 +2644,15 @@ TestCase {
         verify(find(cell, "gauge").item.Accessible.ignored, "not announced where it isn't")
     }
 
+    // A blank cell has no label: its Remove says what it removes
+    function test_aBlankCellsRemoveNamesTheCell() {
+        const blank = { kind: "blank", w: 2, h: 4, refs: [] }
+        const page = pageOf({}, docOf([blank, cellOf("B")]))
+        page.startEditing()
+        compare(find(find(page, "dashCell_0_0"), "cellRemove").Accessible.name, "Remove blank cell")
+        compare(find(find(page, "dashCell_0_1"), "cellRemove").Accessible.name, "Remove B")
+    }
+
     // Outside edit mode a blank cell has nothing to hold
     function test_aBlankCellIsHeldOnlyInEditMode() {
         const blank = { kind: "blank", w: 2, h: 4, refs: [] }
