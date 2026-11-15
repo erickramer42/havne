@@ -16,6 +16,8 @@
 #include "framefilter.h"
 #include "recordingimport.h"
 #include "signalfilter.h"
+#include "conditionmodel.h"
+#include "conditionstore.h"
 #include <QTimer>
 #include <QHash>
 #include <QUrl>
@@ -35,6 +37,7 @@
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
 #include "ecuio/recording.h"
+#include "ecuio/conditions.h"
 #include "latencystats.h"
 
 class QSettings;
@@ -792,6 +795,24 @@ class SessionBridge : public QObject
     // "ECU 0x7E8 refused 3 more requests", "" when every refusal is named
     Q_PROPERTY(
         QString refusedUnnamed READ refusedUnnamed NOTIFY refusedUnnamedChanged)
+    // The conditions (ADR-0063 section 9): the set the app keeps
+    // (ConditionStore) or, on a replay, the recording's own copy, one row
+    // per condition, judged while a session runs
+    Q_PROPERTY(ConditionModel* conditionModel READ conditionModel CONSTANT)
+    // Why a saved edit isn't judged yet ("applies when this recording
+    // ends"), "" when the set judged is the one saved
+    Q_PROPERTY(QString conditionsPending READ conditionsPending NOTIFY
+                   conditionsChanged)
+    // Why the saved file wasn't read at startup, "" when it was or there's none
+    Q_PROPERTY(QString conditionsProblem READ conditionsProblem NOTIFY
+                   conditionsChanged)
+    // A replay judging its recording's own conditions.json, not the saved set
+    Q_PROPERTY(bool conditionsFromRecording READ conditionsFromRecording NOTIFY
+                   conditionsChanged)
+    // For each def id (as text) an alert ON reads, the highest level
+    // (ECUIO_ALERT_WARNING 1, _DANGER 2); a def with none is absent
+    Q_PROPERTY(
+        QVariantMap alertLevels READ alertLevels NOTIFY alertLevelsChanged)
 
 public:
     explicit SessionBridge(QObject* parent = nullptr);
@@ -1059,6 +1080,34 @@ public:
     void dispatchFrameForTesting(const ecuio_frame_t& frame);
     // onValues on the calling thread, as core's worker calls it
     void dispatchValuesForTesting(const ecuio_value_batch_t& batch);
+    // onConditions on the calling thread, as core's worker calls it
+    void dispatchConditionsForTesting(const ecuio_condition_event_t* events,
+                                      uint32_t count);
+    // The generation of the session's last attach, as core counts them
+    uint32_t conditionsGenerationForTesting() const
+    {
+        return m_conditionsGeneration;
+    }
+    // The next n attaches refused where core's call is made
+    void failConditionsAttachesForTesting(int n) { m_failAttaches = n; }
+
+    ConditionModel* conditionModel() const { return m_conditionModel; }
+    QString conditionsPending() const { return m_conditionsPending; }
+    QString conditionsProblem() const { return m_conditionsProblem; }
+    bool conditionsFromRecording() const { return m_conditionsFromRecording; }
+    QVariantMap alertLevels() const { return m_alertLevels; }
+    // The saved condition file's text, "" with none: what the Alerts page
+    // edits and saves again; while conditionsProblem says core refused the
+    // file, the refused file's text
+    Q_INVOKABLE QString conditionsText() const;
+    // A condition file in place of the saved one: ConditionStore::save's
+    // map plus "pending" (conditionsPending's words). Kept, it is judged at
+    // once by a session with no recorder; a recording holds its set
+    // (ADR-0063 section 6), so with one the edit waits for its end, and
+    // a replay judging its recording's copy keeps it to the end
+    Q_INVOKABLE QVariantMap saveConditions(const QString& text);
+    // alertLevels' level for one def, 0 for none
+    Q_INVOKABLE int alertLevelOf(int defId) const;
     // The samples one window can hold, from the next connect
     void setValueSampleLimitForTesting(int samples) { m_valueSampleLimit = samples; }
     static constexpr int defaultValueSampleLimit() { return DefaultValueSampleLimit; }
@@ -1402,6 +1451,8 @@ signals:
     // The folder is absolute, as recordingRow takes it
     void logStopped(const QString& folder, bool byUser);
     void unitSystemChanged();
+    void conditionsChanged();
+    void alertLevelsChanged();
     void minSweepMsChanged();
     void pickGaugesChanged();
     void diagnosticsChanged();
@@ -1419,6 +1470,42 @@ private:
     static void onValues(const ecuio_value_batch_t* batch, void* user_data);
     // GUI thread, before the session starts: sizes the staging for set
     void prepareValueStaging(const ecuio_signal_set_t* set);
+    // Core's conditions callback (ADR-0063 section 6): WORKER thread, each
+    // event into its condition's slot under m_conditionsMutex
+    static void onConditions(const ecuio_condition_event_t* events,
+                             uint32_t count, void* user_data);
+    // GUI thread: count slots for the attach of this generation, the
+    // events of any other passed by
+    void prepareConditionStaging(uint32_t count, uint32_t generation);
+    // GUI thread: set (nullptr: none) attached to session, judged with its
+    // signal file, and the model's rows; false with *why core's words,
+    // nothing changed. Core copies the set. The window's events of the set
+    // before are flushed first.
+    bool attachConditions(ecuio_session_t* session,
+                          const ecuio_condition_set_t* set, QString* why);
+    // GUI thread, before the start: the replay's own copy, else the saved set
+    void attachSessionConditions(ecuio_session_t* session, const QString& uri);
+    // Why an edit saved now waits ("applies when this recording ends"),
+    // "" when it can be judged at once
+    QString conditionsWait() const;
+    // The saved set judged now: attached to the session, or shown offline
+    void applySavedConditions();
+    // A session's end (or a start that failed): nothing judged, no edit
+    // waiting, the saved set's rows shown offline
+    void endSessionConditions();
+    // The activity lines of the connect's attach, written after "Session:"
+    QStringList m_conditionsLines;
+    // The model's rows of the saved set with no session
+    void showSavedConditions();
+    // The tick's half: the window's events into the model and the
+    // activity log, then the states core keeps
+    void flushConditions(ecuio_session_t* session);
+    // alertLevels from the model; emits on a change
+    void judgeAlertLevels();
+    // A replay's recording's conditions.json when its hash is the
+    // header's; nullptr otherwise, with *unused why when the header names
+    // one ("doesn't match its hash")
+    ConditionSetPtr recordingConditions(const QString& uri, QString* unused);
     // GUI thread: swaps the staging out and drains it, each sample's wait
     // into the delivery figures and each signal's window into the model's
     // batch
@@ -1558,6 +1645,31 @@ private:
     static constexpr int ValueTextLimit = 256 * 1024;       // bytes per window
     int m_valueSampleLimit = DefaultValueSampleLimit;
     quint64 m_valuesDropped = 0;        // this session's, past the limits
+
+    // The conditions. A slot is one condition's window of events: the
+    // newest, and the firings with the first of them, so the worker writes
+    // a fixed slot per condition whatever the bus rate (sized at attach,
+    // never grown on the worker)
+    struct ConditionSlot {
+        bool has = false;
+        uint64_t firings = 0;
+        ecuio_condition_event_t newest{};
+        ecuio_condition_event_t first{}; // the window's first firing
+    };
+    std::mutex m_conditionsMutex; // guards the staging and its generation
+    std::vector<ConditionSlot> m_conditionStaging[2];
+    int m_activeConditions = 0;       // the one onConditions writes
+    uint32_t m_stagingGeneration = 0; // the attach whose events are kept
+    ConditionStore m_conditionStore;
+    ConditionModel* m_conditionModel = nullptr;
+    int m_failAttaches = 0; // failConditionsAttachesForTesting
+    uint32_t m_conditionsGeneration =
+        0; // this session's attaches, core's count
+    std::vector<ecuio_condition_state_t> m_conditionStates; // the tick's read
+    QString m_conditionsPending;
+    QString m_conditionsProblem;
+    bool m_conditionsFromRecording = false;
+    QVariantMap m_alertLevels;
 
     SignalListModel* m_signalModel = nullptr;
     LiveSignalModel* m_liveSignalModel = nullptr;

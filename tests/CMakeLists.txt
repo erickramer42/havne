@@ -1715,6 +1715,8 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
+        ../app/conditionmodel.cpp
+        ../app/conditionstore.cpp
         ../app/storemigration.cpp
         ../app/signalfilter.cpp
         ../app/blepicker.cpp
@@ -1793,6 +1795,8 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/readonce.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
+        ../app/conditionmodel.cpp
+        ../app/conditionstore.cpp
         ../app/storemigration.cpp
         ../app/signalfilter.cpp
         ../app/carryover.cpp
