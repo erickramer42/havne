@@ -467,6 +467,8 @@ bool moveFiles(QSettings& prefs, PluginStore& store, const OldBook& old,
     NotMoved left;
     for (const OldFile& f : files) {
         if (!profileOf(store, f.sha).isEmpty()) {
+            // A copy an earlier run kept, while its wrap failed, is no one's now
+            (void)StoreMigration::removeUnmigrated(f.sha);
             report->made += fresh.contains(f.sha) ? 1 : 0;
             report->kept += fresh.contains(f.sha) ? 0 : 1;
             continue;

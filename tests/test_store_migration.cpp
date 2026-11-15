@@ -874,6 +874,38 @@ TEST(BridgeTest, OneStoreMigrationAFileThatDoesntWrapIsKeptAsUnmigrated)
     EXPECT_TRUE(QFile::exists(old.copyOf(badSha))) << "the old copy stays";
 }
 
+/* A run that kept a file's bytes as unmigrated and stopped before the
+ * book was written, and a next run whose wrap of that file succeeds (its
+ * old copy is whole now): no book lists the kept bytes, so the run that
+ * moves the file removes them */
+TEST(BridgeTest, OneStoreMigrationAKeptCopyOfAFileThatMovesLaterIsRemoved)
+{
+    OldState old;
+    ASSERT_TRUE(old.valid());
+    const QByteArray good = signalFile(QStringLiteral("Good"));
+    const QString sha = sha256Of(good);
+    writeBytes(old.copyOf(sha), "changed since");
+    old.set(kOldBook,
+            bookOf({vehicle(QStringLiteral("v1"),
+                            QStringLiteral("elm327://COM5?profile=user.good"),
+                            {named(sha, QStringLiteral("Good"),
+                                   QStringLiteral("user.good"))},
+                            sha)}));
+
+    StoreMigration::stopAfterForTesting(Step::Copied);
+    const Report first = old.start();
+    EXPECT_TRUE(first.stopped) << said(first);
+    EXPECT_EQ(StoreMigration::unmigrated(), QStringList{sha})
+        << "the bytes as they were are kept";
+
+    writeBytes(old.copyOf(sha), good);
+    const Report second = old.start();
+    EXPECT_TRUE(second.marked) << said(second);
+    EXPECT_EQ(second.made, 1) << said(second);
+    EXPECT_TRUE(StoreMigration::unmigrated().isEmpty())
+        << "the file moved, so no copy of it is left over";
+}
+
 /* A copy past what core reads of anything, and one the folder can't
  * take: the book records that its bytes are only in the old folder (kept
  * false), which that folder's removal must spare, and the log says so.
