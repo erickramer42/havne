@@ -38,6 +38,12 @@ Page {
     property alias zoomHome: zoomHome
     property alias column: column
     property alias filterCount: filterCount
+    property alias framesFilterPanel: viewerFrames.framesFilterPanel
+    property alias viewerFrameIds: viewerFrames.viewerFrameIds
+    property alias viewerFrameTable: viewerFrames.viewerFrameTable
+    property alias framesHeadComponent: framesHeadComponent
+    property alias idsHeadComponent: idsHeadComponent
+    property alias viewFrames: viewFrames
 
     // Main puts the URI in Settings' field and shows it
     signal replayRequested(string uri)
@@ -3381,127 +3387,9 @@ Page {
             }
         }
 
-        // ---- The frames of the part in view, read from frames.csv ----
-        ColumnLayout {
-            objectName: "viewerFrames"
-            visible: root.framesShown
-            Layout.fillWidth: true
-            Layout.fillHeight: root.chartMaximized || root.pinnedViewer
-            spacing: Theme.spacing
-
-            // The table's tools: here, or in the table's head on the pinned form
-            ColumnLayout {
-                id: framesToolsHome
-                visible: framesTools.parent === framesToolsHome
-                Layout.fillWidth: true
-                // A layout fills by default: this one keeps its content's height
-                Layout.fillHeight: false
-                ColumnLayout {
-                    id: framesTools
-                    parent: root.currentHead && root.framesShown ? root.currentHead.toolsSlot
-                                                                 : framesToolsHome
-                    Layout.fillWidth: true
-                    spacing: Theme.spacing
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: Theme.spacing
-
-                        SegmentRow {
-                            SegmentButton {
-                                tapHeight: root.segmentHeight
-                                objectName: "framesTable_frames"
-                                text: qsTr("List")
-                                selected: !root.framesById
-                                onClicked: root.framesById = false
-                            }
-                            SegmentButton {
-                                tapHeight: root.segmentHeight
-                                objectName: "framesTable_byId"
-                                text: qsTr("By ID")
-                                selected: root.framesById
-                                onClicked: {
-                                    root.framesById = true
-                                    viewFrames.ids.refresh()
-                                }
-                            }
-                        }
-                        ThemedButton {
-                            objectName: "framesFilterToggle"
-                            text: viewFrames.frames.filterTerms > 0
-                                  ? qsTr("Filter (%1)").arg(viewFrames.frames.filterTerms)
-                                  : qsTr("Filter")
-                            checkable: true
-                            checked: root.framesFilterOpen
-                            onClicked: root.framesFilterOpen = !root.framesFilterOpen
-                        }
-                    }
-
-                    FrameFilterPanel {
-                        id: framesFilterPanel
-                        visible: root.framesFilterOpen
-                        frames: viewFrames.frames
-                    }
-
-                    // How many rows the part in view has, and when it has more than
-                    // the table holds, where the table begins
-                    Label {
-                        objectName: "framesWords"
-                        Layout.fillWidth: true
-                        Layout.preferredWidth: 0
-                        wrapMode: Text.WordWrap
-                        color: viewFrames.error !== "" ? Theme.danger : Theme.textDim
-                        font.pixelSize: Theme.fontCaption
-                        text: viewFrames.error !== "" ? viewFrames.error
-                              : viewFrames.loading ? qsTr("Reading the frames…")
-                              : viewFrames.note !== "" ? viewFrames.note
-                              : viewFrames.frames.filterTerms > 0
-                                ? qsTr("Showing %1 of %2 frames").arg(viewFrames.frames.count)
-                                                                 .arg(viewFrames.frames.heldCount)
-                                : viewFrames.rows === 1 ? qsTr("1 frame in view")
-                                                       : qsTr("%1 frames in view").arg(viewFrames.rows)
-                    }
-                }
-            }
-
-            // A fixed height, the page scrolling and the table inside it;
-            // maximized, what the page has left
-            FrameTable {
-                id: viewerFrameTable
-                objectName: "viewerFrameTable"
-                visible: !root.framesById
-                Layout.preferredHeight: root.chartMaximized || root.pinnedViewer ? 0 : 280
-                Layout.minimumHeight: root.pinnedViewer ? root.pinnedListMin : 0
-                Layout.fillHeight: root.chartMaximized || root.pinnedViewer
-                head: framesHeadComponent
-                headScrolls: root.pinnedViewer
-                live: false
-                frames: viewFrames.frames
-                emptyText: viewFrames.loading ? qsTr("Reading the frames…")
-                         : viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")
-                         : qsTr("No frame in view")
-                // A tap puts the chart's cursor at the frame's time, whether
-                // or not a signal has a sample there
-                onRowClicked: (index, modifiers, timestampUs) => root.setCursor(timestampUs / 1000)
-            }
-            FrameIdList {
-                id: viewerFrameIds
-                objectName: "viewerFrameIds"
-                visible: root.framesById
-                Layout.preferredHeight: root.chartMaximized || root.pinnedViewer ? 0 : 280
-                Layout.minimumHeight: root.pinnedViewer ? root.pinnedListMin : 0
-                Layout.fillHeight: root.chartMaximized || root.pinnedViewer
-                head: idsHeadComponent
-                headScrolls: root.pinnedViewer
-                ids: viewFrames.ids
-                refreshing: root.framesById && root.framesShown
-                emptyText: viewFrames.frames.heldCount > 0 ? qsTr("No frame the filter shows")
-                                                           : qsTr("No frame in view")
-                onIdTapped: (id, extended) => {
-                    framesFilterPanel.showId(id, extended)
-                    root.framesFilterOpen = true
-                    root.framesById = false
-                }
-            }
+        RecordingFramesView {
+            id: viewerFrames
+            host: root
         }
 
         RecordingSignalRows {
