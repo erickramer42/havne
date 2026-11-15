@@ -973,509 +973,50 @@ struct ecuio_recorder {
     std::atomic<uint32_t> prerolls_short{0};
     std::atomic<uint64_t> frames_passed{0};
 
-    uint64_t rel(uint64_t host_us) const
-    {
-        return host_us > base_us ? host_us - base_us : 0;
-    }
+    uint64_t rel(uint64_t host_us) const;
 
-    void fail_text(const std::string& why)
-    {
-        {
-            std::lock_guard<std::mutex> g(reason_m);
-            if (failed()) {
-                return;
-            }
-            reason = why;
-        }
-        state.store(ECUIO_RECORDING_FAILED, std::memory_order_release);
-    }
+    void fail_text(const std::string& why);
 
-    bool failed() const
-    {
-        return state.load(std::memory_order_acquire) == ECUIO_RECORDING_FAILED;
-    }
+    bool failed() const;
 
-    void fail(int err)
-    {
-        {
-            std::lock_guard<std::mutex> g(reason_m);
-            if (failed()) {
-                return;
-            }
-            reason = write_reason(err);
-        }
-        state.store(ECUIO_RECORDING_FAILED, std::memory_order_release);
-    }
+    void fail(int err);
 
-    /* Writes and clears out; on a failed write the recording stops
-     * writing, and what follows is dropped */
-    void write(FILE* f, std::string& out)
-    {
-        if (out.empty() || f == nullptr) {
-            out.clear();
-            return;
-        }
-        if (!failed()) {
-            if (fail_next.exchange(false)) {
-                fail(ENOSPC);
-            } else if (std::fwrite(out.data(), 1, out.size(), f) !=
-                       out.size()) {
-                fail(errno != 0 ? errno : EIO);
-            }
-        }
-        out.clear();
-    }
+    void write(FILE* f, std::string& out);
 
-    void copy_out(uint64_t pos, void* dst, size_t n) const
-    {
-        const size_t at = static_cast<size_t>(pos % cap);
-        const size_t first = (std::min)(n, cap - at);
-        std::memcpy(dst, ring.get() + at, first);
-        if (n > first) {
-            std::memcpy(static_cast<uint8_t*>(dst) + first, ring.get(),
-                        n - first);
-        }
-    }
+    void copy_out(uint64_t pos, void* dst, size_t n) const;
 
-    void copy_in(uint64_t pos, const void* src, size_t n)
-    {
-        const size_t at = static_cast<size_t>(pos % cap);
-        const size_t first = (std::min)(n, cap - at);
-        std::memcpy(ring.get() + at, src, first);
-        if (n > first) {
-            std::memcpy(ring.get(), static_cast<const uint8_t*>(src) + first,
-                        n - first);
-        }
-    }
+    void copy_in(uint64_t pos, const void* src, size_t n);
 
-    const def_entry* def(uint16_t id) const
-    {
-        auto it = std::lower_bound(
-            defs.begin(), defs.end(), id,
-            [](const def_entry& d, uint16_t v) { return d.id < v; });
-        return (it != defs.end() && it->id == id) ? &*it : nullptr;
-    }
+    const def_entry* def(uint16_t id) const;
 
-    /* "HH:mm:ss.zzz  +S.sss  <kind>  <text>" at host_us */
-    void event_line(uint64_t host_us, const char* kind, const std::string& text)
-    {
-        host_us = rel(host_us);
-        const auto at = wall_base + std::chrono::microseconds(host_us);
-        const std::time_t t = std::chrono::system_clock::to_time_t(at);
-        const long long ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                at.time_since_epoch())
-                .count() %
-            1000;
-        const std::tm tm = local_tm(t);
-        char stamp[32];
-        std::snprintf(stamp, sizeof stamp, "%02d:%02d:%02d.%03lld", tm.tm_hour,
-                      tm.tm_min, tm.tm_sec, ms < 0 ? ms + 1000 : ms);
-        event_out += stamp;
-        event_out += "  ";
-        append_seconds(event_out, host_us);
-        event_out += "  ";
-        event_out += kind;
-        event_out += "  ";
-        event_out += text;
-        event_out += '\n';
-    }
+    void event_line(uint64_t host_us, const char* kind,
+                    const std::string& text);
 
-    void drop_line(uint64_t host_us, uint64_t dropped)
-    {
-        event_line(host_us, "drop",
-                   "the recording dropped " + std::to_string(dropped) +
-                       (dropped == 1 ? " frame" : " frames") +
-                       ": the disk fell behind");
-    }
+    void drop_line(uint64_t host_us, uint64_t dropped);
 
-    void add_marker(uint64_t host_us, const std::string& label)
-    {
-        if (markers == nullptr && !failed()) {
-            markers = open_file(folder + "/markers.csv");
-            if (markers == nullptr) {
-                fail(errno != 0 ? errno : EIO);
-                return;
-            }
-            marker_out += "host_us,label\n";
-        }
-        append_u64(marker_out, rel(host_us));
-        marker_out += ',';
-        marker_out += csv_quoted(label.data(), label.size());
-        marker_out += '\n';
-    }
+    void add_marker(uint64_t host_us, const std::string& label);
 
-    /* "cond  <key>,<on|off>,<flags>,<value>,<term>,<host_us>,<t_us>", and
-     * a marker named for the condition at a firing of one with mark */
-    void take_event(const event_body& e)
-    {
-        const ecuio_condition_record* set = conditions.get();
-        if (set == nullptr || e.condition >= set->conditions.size()) {
-            return;
-        }
-        const ecuio_condition_record::entry& c = set->conditions[e.condition];
-        ecuio_recording_rows::cond_line line;
-        const size_t key_len =
-            c.key.size() < sizeof line.key ? c.key.size() : sizeof line.key - 1;
-        std::memcpy(line.key, c.key.data(), key_len);
-        line.on = e.state == ECUIO_CONDITION_ON;
-        line.flags = e.flags;
-        line.value = e.value;
-        line.term = e.term;
-        line.host_us = rel(e.host_us);
-        line.t_us = e.t_us;
-        cond_text.clear();
-        ecuio_recording_rows::append_cond_text(cond_text, line);
-        event_line(e.host_us, "cond", cond_text);
-        if ((e.flags & ECUIO_CONDITION_FIRED) != 0 && c.mark) {
-            add_marker(e.host_us, c.name);
-        }
-    }
+    void take_event(const event_body& e);
 
-    void lost_line(uint64_t host_us, uint64_t lost)
-    {
-        event_line(host_us, "drop",
-                   "the recording lost " + std::to_string(lost) +
-                       (lost == 1 ? " condition event" : " condition events") +
-                       ": the disk fell behind");
-    }
+    void lost_line(uint64_t host_us, uint64_t lost);
 
-    void take_conditions(const uint8_t* body, size_t size)
-    {
-        if (size < sizeof(conditions_body)) {
-            return;
-        }
-        conditions_body cb;
-        std::memcpy(&cb, body, sizeof cb);
-        size_t at = sizeof cb;
-        for (uint32_t k = 0; k < cb.events && at + sizeof(event_body) <= size;
-             ++k) {
-            event_body e;
-            std::memcpy(&e, body + at, sizeof e);
-            at += sizeof e;
-            take_event(e);
-        }
-        if (cb.lost > 0) {
-            lost_line(cb.lost_us, cb.lost);
-        }
-    }
+    void take_conditions(const uint8_t* body, size_t size);
 
-    void take_link(const uint8_t* body, size_t size)
-    {
-        if (size < sizeof(link_body)) {
-            return;
-        }
-        link_body lb;
-        std::memcpy(&lb, body, sizeof lb);
-        event_line(lb.host_us, "link", link_text(lb.state, lb.episodes));
-    }
+    void take_link(const uint8_t* body, size_t size);
 
-    /* latency.csv's rows whose counts changed since their last row
-     * (ADR-0017's appendix of 2026-10-31), the file made with the first */
-    void take_timing(const uint8_t* body, size_t size)
-    {
-        if (size < sizeof(timing_body)) {
-            return;
-        }
-        timing_body tb;
-        std::memcpy(&tb, body, sizeof tb);
-        /* t_s on the recording's clock, as every other file's time: the
-         * snapshot's session time is the session's, older than the
-         * recording when the recorder attached after start */
-        const uint64_t ms = (rel(tb.host_us) + 500) / 1000;
-        char at[32];
-        std::snprintf(at, sizeof at, "%llu.%03llu",
-                      static_cast<unsigned long long>(ms / 1000),
-                      static_cast<unsigned long long>(ms % 1000));
-        static const char kHex[] = "0123456789ABCDEF";
-        for (uint32_t i = 0; i < tb.rows && i < ECUIO_PROFILE_MAX_REQUESTS;
-             ++i) {
-            const size_t off = sizeof tb + i * sizeof(ecuio_request_timing_t);
-            if (off + sizeof(ecuio_request_timing_t) > size) {
-                break;
-            }
-            ecuio_request_timing_t r;
-            std::memcpy(&r, body + off, sizeof r);
-            const uint64_t total =
-                uint64_t{r.answered} + r.refused + r.timeouts;
-            if (total == timing_totals[i]) {
-                continue;
-            }
-            timing_totals[i] = total;
-            const bool latency_has = r.answered + r.refused > 0;
-            const bool interval_has = r.intervals > 0;
-            latency_out += at;
-            latency_out += ',';
-            append_hex(latency_out,
-                       r.channel < channels ? rx_ids[r.channel] : 0);
-            latency_out += ',';
-            for (uint8_t k = 0; k < r.length && k < 3; ++k) {
-                if (k > 0) {
-                    latency_out += ' ';
-                }
-                latency_out += kHex[r.request[k] >> 4];
-                latency_out += kHex[r.request[k] & 0x0F];
-            }
-            for (uint32_t n : {r.answered, r.refused, r.timeouts, r.packed}) {
-                latency_out += ',';
-                append_u64(latency_out, n);
-            }
-            latency_out += ',';
-            append_quantile(latency_out, r.latency_p50_us, latency_has);
-            latency_out += ',';
-            append_quantile(latency_out, r.latency_p99_us,
-                            (r.flags & ECUIO_TIMING_LATENCY_P99) != 0);
-            latency_out += ',';
-            append_quantile(latency_out, r.latency_p999_us,
-                            (r.flags & ECUIO_TIMING_LATENCY_P999) != 0);
-            latency_out += ',';
-            append_quantile(latency_out, r.latency_max_us, latency_has);
-            latency_out += ',';
-            append_u64(latency_out, r.intervals);
-            latency_out += ',';
-            append_u64(latency_out, r.intervals_mixed);
-            latency_out += ',';
-            append_quantile(latency_out, r.interval_p50_us, interval_has);
-            latency_out += ',';
-            append_quantile(latency_out, r.interval_p99_us,
-                            (r.flags & ECUIO_TIMING_INTERVAL_P99) != 0);
-            latency_out += ',';
-            append_quantile(latency_out, r.interval_p999_us,
-                            (r.flags & ECUIO_TIMING_INTERVAL_P999) != 0);
-            latency_out += ',';
-            append_quantile(latency_out, r.interval_max_us, interval_has);
-            latency_out += ',';
-            latency_out += clock_name(tb.timing.interval_clock);
-            latency_out += '\n';
-        }
-        if (!latency_out.empty() && latency == nullptr && !failed()) {
-            latency = open_file(folder + "/latency.csv");
-            if (latency == nullptr) {
-                fail(errno != 0 ? errno : EIO);
-                return;
-            }
-            latency_out.insert(0, ECUIO_TIMING_COLUMNS "\n");
-        }
-    }
+    void take_timing(const uint8_t* body, size_t size);
 
-    void take_frame(const uint8_t* body, size_t size)
-    {
-        if (size < sizeof(frame_body)) {
-            return;
-        }
-        frame_body fb;
-        std::memcpy(&fb, body, sizeof fb);
-        size_t at = sizeof fb;
-        if (at + fb.length > size) {
-            return;
-        }
-        const uint64_t host_us = rel(fb.host_us);
-        append_u64(frame_out, host_us);
-        frame_out += ',';
-        append_u64(frame_out, fb.timestamp_us);
-        frame_out += ',';
-        append_hex(frame_out, fb.id);
-        frame_out += ',';
-        append_hex(frame_out, fb.flags);
-        frame_out += ',';
-        static const char kHex[] = "0123456789ABCDEF";
-        for (uint16_t i = 0; i < fb.length; ++i) {
-            if (i > 0) {
-                frame_out += ' ';
-            }
-            const uint8_t b = body[at + i];
-            frame_out += kHex[b >> 4];
-            frame_out += kHex[b & 0x0F];
-        }
-        frame_out += '\n';
-        at += fb.length;
-        frame_rows.fetch_add(1, std::memory_order_relaxed);
+    void take_frame(const uint8_t* body, size_t size);
 
-        for (uint16_t v = 0; v < fb.values; ++v) {
-            if (at + sizeof(value_head) > size) {
-                return;
-            }
-            value_head vh;
-            std::memcpy(&vh, body + at, sizeof vh);
-            at += sizeof vh;
-            const def_entry* d = def(vh.signal_id);
-            const bool text = is_text_kind(vh.kind);
-            const size_t len = text ? vh.text_len : sizeof(double);
-            if (at + len > size) {
-                return;
-            }
-            if (d != nullptr) {
-                append_u64(value_out, host_us);
-                value_out += ',';
-                value_out += d->name;
-                value_out += ',';
-                if (text) {
-                    value_out += csv_quoted(
-                        reinterpret_cast<const char*>(body + at), len);
-                } else {
-                    double x;
-                    std::memcpy(&x, body + at, sizeof x);
-                    ecuio_recording_rows::append_value(value_out, x);
-                }
-                value_out += ',';
-                value_out += d->unit;
-                value_out += '\n';
-                value_rows.fetch_add(1, std::memory_order_relaxed);
-            }
-            at += len;
-        }
-        for (uint32_t k = 0; k < fb.events; ++k) {
-            if (at + sizeof(event_body) > size) {
-                return;
-            }
-            event_body e;
-            std::memcpy(&e, body + at, sizeof e);
-            at += sizeof e;
-            take_event(e);
-        }
-    }
+    bool drain_ring();
 
-    /* Everything the worker has queued; true when there was any */
-    bool drain_ring()
-    {
-        bool any = false;
-        uint64_t t = tail.load(std::memory_order_relaxed);
-        const uint64_t h = head.load(std::memory_order_acquire);
-        while (h - t >= sizeof(record_head)) {
-            record_head rh;
-            copy_out(t, &rh, sizeof rh);
-            if (rh.size < sizeof rh || rh.size > h - t) {
-                break;
-            }
-            const size_t body = rh.size - sizeof rh;
-            if (scratch.size() < body) {
-                scratch.resize(body);
-            }
-            copy_out(t + sizeof rh, scratch.data(), body);
-            if (rh.dropped_before > 0 && body >= sizeof(uint64_t)) {
-                uint64_t host_us;
-                std::memcpy(&host_us, scratch.data(), sizeof host_us);
-                drop_line(host_us, rh.dropped_before);
-            }
-            switch (rh.type) {
-            case kRecordFrame:
-                take_frame(scratch.data(), body);
-                break;
-            case kRecordLink:
-                take_link(scratch.data(), body);
-                break;
-            case kRecordTiming:
-                take_timing(scratch.data(), body);
-                break;
-            case kRecordConditions:
-                take_conditions(scratch.data(), body);
-                break;
-            default:
-                break;
-            }
-            t += rh.size;
-            any = true;
-        }
-        tail.store(t, std::memory_order_release);
-        write(frames, frame_out);
-        write(signals, value_out);
-        write(events, event_out);
-        write(markers, marker_out);
-        write(latency, latency_out);
-        return any;
-    }
+    bool drain_items();
 
-    bool drain_items()
-    {
-        std::deque<item> taken;
-        {
-            std::lock_guard<std::mutex> g(note_m);
-            taken.swap(items);
-        }
-        for (const item& it : taken) {
-            switch (it.kind) {
-            case item_kind::begin:
-                /* The file before the header line naming its hash */
-                if (!it.bytes.empty() && !failed()) {
-                    errno = 0;
-                    if (fail_next.exchange(false)) {
-                        fail(ENOSPC);
-                    } else if (!write_bytes(
-                                   folder + "/" +
-                                       ecuio_recording_rows::kSignalFileName,
-                                   it.bytes)) {
-                        fail(errno != 0 ? errno : EIO);
-                    }
-                }
-                if (conditions != nullptr && !failed()) {
-                    errno = 0;
-                    if (!write_bytes(folder + "/" +
-                                         ecuio_recording_rows::kConditionsName,
-                                     conditions->bytes)) {
-                        fail(errno != 0 ? errno : EIO);
-                    }
-                }
-                event_out += it.text;
-                begin_rows();
-                break;
-            default:
-                write_item(it);
-                break;
-            }
-        }
-        write(frames, frame_out);
-        write(signals, value_out);
-        write(events, event_out);
-        write(markers, marker_out);
-        return !taken.empty();
-    }
+    void begin_rows();
 
-    /* frames.csv's and signals.csv's header rows */
-    void begin_rows()
-    {
-        frame_out += "host_us,timestamp_us,id,flags,data\n";
-        /* A byte-order mark, so a spreadsheet reads the units' UTF-8 as
-         * UTF-8 (ADR-0017) */
-        value_out += "\xEF\xBB\xBFhost_us,signal,value,unit\n";
-    }
+    void write_item(const item& it);
 
-    /* A note, a mark, a focus's lines or an asleep line */
-    void write_item(const item& it)
-    {
-        switch (it.kind) {
-        case item_kind::focus: {
-            size_t at = 0;
-            while (at <= it.bytes.size()) {
-                const size_t end =
-                    (std::min)(it.bytes.find('\0', at), it.bytes.size());
-                event_line(it.host_us, it.text.c_str(),
-                           it.bytes.substr(at, end - at));
-                at = end + 1;
-            }
-            break;
-        }
-        case item_kind::note:
-            event_line(it.host_us, "note", it.text);
-            break;
-        case item_kind::asleep:
-            event_line(it.host_us, "asleep", it.text);
-            break;
-        case item_kind::mark:
-            add_marker(it.host_us, it.text);
-            break;
-        case item_kind::begin:
-            break;
-        }
-    }
-
-    void write_outs()
-    {
-        write(frames, frame_out);
-        write(signals, value_out);
-        write(events, event_out);
-        write(markers, marker_out);
-        write(latency, latency_out);
-    }
+    void write_outs();
 
     /* ---- The armed writer (ADR-0063 section 7) ----
      * The scan reads each record ahead of the tail and keeps the windows
@@ -1489,619 +1030,1172 @@ struct ecuio_recorder {
      * before the frame judged before it. The files keep the recording's
      * clock, and notes and marks go by it. */
 
-    /* The caller's items, held with their times; the begin item is the
-     * attach's header, which a window builds itself */
-    void take_items()
-    {
-        std::deque<item> taken;
-        {
-            std::lock_guard<std::mutex> g(note_m);
-            taken.swap(items);
-        }
-        for (item& it : taken) {
-            if (it.kind == item_kind::begin) {
-                continue;
-            }
-            if (pending.size() >= note_cap) {
-                notes_dropped.fetch_add(1, std::memory_order_relaxed);
-                continue;
-            }
-            pending.push_back(std::move(it));
-        }
-    }
+    void take_items();
 
-    /* Each condition event in a record's body */
     template <typename F>
-    static void each_event(uint32_t type, const uint8_t* body, size_t size, F f)
+    static void each_event(uint32_t type, const uint8_t* body, size_t size,
+                           F f);
+
+    void scan_event(const event_body& e, uint64_t record_us);
+
+    void follow(const record_head& rh, const uint8_t* body, size_t size);
+
+    void write_record(const record_head& rh, const uint8_t* body, size_t size);
+
+    uint64_t first_frame_t_us(uint64_t at) const;
+
+    std::string window_header(const window& w);
+
+    void open_window(window& w, uint64_t at, uint64_t host_us);
+
+    void close_window(uint64_t end_us, const std::string& why);
+
+    void flush_items(uint64_t limit);
+
+    static uint64_t place_of(const record_head& rh, const uint8_t* body,
+                             size_t size, uint64_t pos);
+
+    bool pressed() const;
+
+    bool advance_tail(bool final);
+
+    bool armed_pass(bool final);
+
+    void flush_all();
+
+    void sync_all();
+
+    void check_sleep();
+
+    uint64_t host_us_of(uint64_t clock_us) const;
+
+    void run();
+
+    void close_files();
+
+    ~ecuio_recorder();
+};
+
+uint64_t ecuio_recorder::rel(uint64_t host_us) const
+{
+    return host_us > base_us ? host_us - base_us : 0;
+}
+
+void ecuio_recorder::fail_text(const std::string& why)
+{
     {
-        size_t at = 0;
-        uint32_t count = 0;
-        if (type == kRecordFrame) {
-            if (size < sizeof(frame_body)) {
-                return;
-            }
-            frame_body fb;
-            std::memcpy(&fb, body, sizeof fb);
-            at = sizeof fb + fb.length;
-            for (uint16_t v = 0; v < fb.values; ++v) {
-                if (at + sizeof(value_head) > size) {
-                    return;
-                }
-                value_head vh;
-                std::memcpy(&vh, body + at, sizeof vh);
-                at += sizeof vh +
-                      (is_text_kind(vh.kind) ? vh.text_len : sizeof(double));
-            }
-            count = fb.events;
-        } else if (type == kRecordConditions) {
-            if (size < sizeof(conditions_body)) {
-                return;
-            }
-            conditions_body cb;
-            std::memcpy(&cb, body, sizeof cb);
-            at = sizeof cb;
-            count = cb.events;
+        std::lock_guard<std::mutex> g(reason_m);
+        if (failed()) {
+            return;
         }
-        for (uint32_t k = 0; k < count && at + sizeof(event_body) <= size;
-             ++k) {
-            event_body e;
-            std::memcpy(&e, body + at, sizeof e);
-            at += sizeof e;
-            f(e);
+        reason = why;
+    }
+    state.store(ECUIO_RECORDING_FAILED, std::memory_order_release);
+}
+
+bool ecuio_recorder::failed() const
+{
+    return state.load(std::memory_order_acquire) == ECUIO_RECORDING_FAILED;
+}
+
+void ecuio_recorder::fail(int err)
+{
+    {
+        std::lock_guard<std::mutex> g(reason_m);
+        if (failed()) {
+            return;
+        }
+        reason = write_reason(err);
+    }
+    state.store(ECUIO_RECORDING_FAILED, std::memory_order_release);
+}
+
+/* Writes and clears out; on a failed write the recording stops
+ * writing, and what follows is dropped */
+void ecuio_recorder::write(FILE* f, std::string& out)
+{
+    if (out.empty() || f == nullptr) {
+        out.clear();
+        return;
+    }
+    if (!failed()) {
+        if (fail_next.exchange(false)) {
+            fail(ENOSPC);
+        } else if (std::fwrite(out.data(), 1, out.size(), f) !=
+                   out.size()) {
+            fail(errno != 0 ? errno : EIO);
         }
     }
+    out.clear();
+}
 
-    /* A record condition's change at the scan, at its session time: a rise
-     * opens a window or carries the last one on; the last fall gives the
-     * window its end, after past it or the record that settled it,
-     * whichever is later */
-    void scan_event(const event_body& e, uint64_t record_us)
-    {
-        const ecuio_condition_record* set = conditions.get();
-        if (set == nullptr || e.condition >= scan_on.size() ||
-            e.condition >= set->conditions.size() ||
-            !set->conditions[e.condition].record) {
-            return;
-        }
-        const ecuio_condition_record::entry& c = set->conditions[e.condition];
-        const bool on = e.state == ECUIO_CONDITION_ON &&
-                        (e.flags & ECUIO_CONDITION_STALE) == 0;
-        if (on == (scan_on[e.condition] != 0)) {
-            return;
-        }
-        scan_on[e.condition] = on ? 1 : 0;
-        if (on) {
-            ++scan_active;
-            const uint64_t start =
-                e.t_us > c.before_us ? e.t_us - c.before_us : 0;
-            if (!windows_q.empty()) {
-                window& w = windows_q.back();
-                if (w.open_end || start <= w.end_us) {
-                    w.open_end = true;
-                    if (!w.opened && start < w.start_us) {
-                        w.start_us = start;
-                    }
-                    return;
-                }
-            }
-            window w;
-            w.start_us = start;
-            w.trigger = e.condition;
-            windows_q.push_back(w);
-            return;
-        }
-        --scan_active;
-        if (windows_q.empty()) {
-            return;
-        }
-        window& w = windows_q.back();
-        w.end_us =
-            (std::max)(w.end_us, (std::max)(e.t_us + c.after_us, record_us));
-        if (scan_active == 0) {
-            w.open_end = false;
-        }
+void ecuio_recorder::copy_out(uint64_t pos, void* dst, size_t n) const
+{
+    const size_t at = static_cast<size_t>(pos % cap);
+    const size_t first = (std::min)(n, cap - at);
+    std::memcpy(dst, ring.get() + at, first);
+    if (n > first) {
+        std::memcpy(static_cast<uint8_t*>(dst) + first, ring.get(),
+                    n - first);
     }
+}
 
-    /* What the tail passes, written or not: the conditions' states and the
-     * link's, for the next window's header and held lines */
-    void follow(const record_head& rh, const uint8_t* body, size_t size)
-    {
-        if (rh.type == kRecordLink && size >= sizeof(link_body)) {
-            link_body lb;
-            std::memcpy(&lb, body, sizeof lb);
-            win_link_state = lb.state;
-            win_link_episodes = lb.episodes;
+void ecuio_recorder::copy_in(uint64_t pos, const void* src, size_t n)
+{
+    const size_t at = static_cast<size_t>(pos % cap);
+    const size_t first = (std::min)(n, cap - at);
+    std::memcpy(ring.get() + at, src, first);
+    if (n > first) {
+        std::memcpy(ring.get(), static_cast<const uint8_t*>(src) + first,
+                    n - first);
+    }
+}
+
+const def_entry* ecuio_recorder::def(uint16_t id) const
+{
+    auto it = std::lower_bound(
+        defs.begin(), defs.end(), id,
+        [](const def_entry& d, uint16_t v) { return d.id < v; });
+    return (it != defs.end() && it->id == id) ? &*it : nullptr;
+}
+
+/* "HH:mm:ss.zzz  +S.sss  <kind>  <text>" at host_us */
+void ecuio_recorder::event_line(uint64_t host_us, const char* kind,
+                                const std::string& text)
+{
+    host_us = rel(host_us);
+    const auto at = wall_base + std::chrono::microseconds(host_us);
+    const std::time_t t = std::chrono::system_clock::to_time_t(at);
+    const long long ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            at.time_since_epoch())
+            .count() %
+        1000;
+    const std::tm tm = local_tm(t);
+    char stamp[32];
+    std::snprintf(stamp, sizeof stamp, "%02d:%02d:%02d.%03lld", tm.tm_hour,
+                  tm.tm_min, tm.tm_sec, ms < 0 ? ms + 1000 : ms);
+    event_out += stamp;
+    event_out += "  ";
+    append_seconds(event_out, host_us);
+    event_out += "  ";
+    event_out += kind;
+    event_out += "  ";
+    event_out += text;
+    event_out += '\n';
+}
+
+void ecuio_recorder::drop_line(uint64_t host_us, uint64_t dropped)
+{
+    event_line(host_us, "drop",
+               "the recording dropped " + std::to_string(dropped) +
+                   (dropped == 1 ? " frame" : " frames") +
+                   ": the disk fell behind");
+}
+
+void ecuio_recorder::add_marker(uint64_t host_us, const std::string& label)
+{
+    if (markers == nullptr && !failed()) {
+        markers = open_file(folder + "/markers.csv");
+        if (markers == nullptr) {
+            fail(errno != 0 ? errno : EIO);
             return;
         }
-        each_event(rh.type, body, size, [this](const event_body& e) {
-            if (e.condition < tail_cond.size()) {
-                tail_state& s = tail_cond[e.condition];
-                s.on = e.state == ECUIO_CONDITION_ON;
-                s.stale = (e.flags & ECUIO_CONDITION_STALE) != 0;
-                s.value = e.value;
-                s.term = e.term;
-            }
-        });
+        marker_out += "host_us,label\n";
     }
+    append_u64(marker_out, rel(host_us));
+    marker_out += ',';
+    marker_out += csv_quoted(label.data(), label.size());
+    marker_out += '\n';
+}
 
-    /* A record into the open window */
-    void write_record(const record_head& rh, const uint8_t* body, size_t size)
-    {
-        if (rh.dropped_before > 0 && size >= sizeof(uint64_t)) {
+/* "cond  <key>,<on|off>,<flags>,<value>,<term>,<host_us>,<t_us>", and
+ * a marker named for the condition at a firing of one with mark */
+void ecuio_recorder::take_event(const event_body& e)
+{
+    const ecuio_condition_record* set = conditions.get();
+    if (set == nullptr || e.condition >= set->conditions.size()) {
+        return;
+    }
+    const ecuio_condition_record::entry& c = set->conditions[e.condition];
+    ecuio_recording_rows::cond_line line;
+    const size_t key_len =
+        c.key.size() < sizeof line.key ? c.key.size() : sizeof line.key - 1;
+    std::memcpy(line.key, c.key.data(), key_len);
+    line.on = e.state == ECUIO_CONDITION_ON;
+    line.flags = e.flags;
+    line.value = e.value;
+    line.term = e.term;
+    line.host_us = rel(e.host_us);
+    line.t_us = e.t_us;
+    cond_text.clear();
+    ecuio_recording_rows::append_cond_text(cond_text, line);
+    event_line(e.host_us, "cond", cond_text);
+    if ((e.flags & ECUIO_CONDITION_FIRED) != 0 && c.mark) {
+        add_marker(e.host_us, c.name);
+    }
+}
+
+void ecuio_recorder::lost_line(uint64_t host_us, uint64_t lost)
+{
+    event_line(host_us, "drop",
+               "the recording lost " + std::to_string(lost) +
+                   (lost == 1 ? " condition event" : " condition events") +
+                   ": the disk fell behind");
+}
+
+void ecuio_recorder::take_conditions(const uint8_t* body, size_t size)
+{
+    if (size < sizeof(conditions_body)) {
+        return;
+    }
+    conditions_body cb;
+    std::memcpy(&cb, body, sizeof cb);
+    size_t at = sizeof cb;
+    for (uint32_t k = 0; k < cb.events && at + sizeof(event_body) <= size;
+         ++k) {
+        event_body e;
+        std::memcpy(&e, body + at, sizeof e);
+        at += sizeof e;
+        take_event(e);
+    }
+    if (cb.lost > 0) {
+        lost_line(cb.lost_us, cb.lost);
+    }
+}
+
+void ecuio_recorder::take_link(const uint8_t* body, size_t size)
+{
+    if (size < sizeof(link_body)) {
+        return;
+    }
+    link_body lb;
+    std::memcpy(&lb, body, sizeof lb);
+    event_line(lb.host_us, "link", link_text(lb.state, lb.episodes));
+}
+
+/* latency.csv's rows whose counts changed since their last row
+ * (ADR-0017's appendix of 2026-10-31), the file made with the first */
+void ecuio_recorder::take_timing(const uint8_t* body, size_t size)
+{
+    if (size < sizeof(timing_body)) {
+        return;
+    }
+    timing_body tb;
+    std::memcpy(&tb, body, sizeof tb);
+    /* t_s on the recording's clock, as every other file's time: the
+     * snapshot's session time is the session's, older than the
+     * recording when the recorder attached after start */
+    const uint64_t ms = (rel(tb.host_us) + 500) / 1000;
+    char at[32];
+    std::snprintf(at, sizeof at, "%llu.%03llu",
+                  static_cast<unsigned long long>(ms / 1000),
+                  static_cast<unsigned long long>(ms % 1000));
+    static const char kHex[] = "0123456789ABCDEF";
+    for (uint32_t i = 0; i < tb.rows && i < ECUIO_PROFILE_MAX_REQUESTS;
+         ++i) {
+        const size_t off = sizeof tb + i * sizeof(ecuio_request_timing_t);
+        if (off + sizeof(ecuio_request_timing_t) > size) {
+            break;
+        }
+        ecuio_request_timing_t r;
+        std::memcpy(&r, body + off, sizeof r);
+        const uint64_t total =
+            uint64_t{r.answered} + r.refused + r.timeouts;
+        if (total == timing_totals[i]) {
+            continue;
+        }
+        timing_totals[i] = total;
+        const bool latency_has = r.answered + r.refused > 0;
+        const bool interval_has = r.intervals > 0;
+        latency_out += at;
+        latency_out += ',';
+        append_hex(latency_out,
+                   r.channel < channels ? rx_ids[r.channel] : 0);
+        latency_out += ',';
+        for (uint8_t k = 0; k < r.length && k < 3; ++k) {
+            if (k > 0) {
+                latency_out += ' ';
+            }
+            latency_out += kHex[r.request[k] >> 4];
+            latency_out += kHex[r.request[k] & 0x0F];
+        }
+        for (uint32_t n : {r.answered, r.refused, r.timeouts, r.packed}) {
+            latency_out += ',';
+            append_u64(latency_out, n);
+        }
+        latency_out += ',';
+        append_quantile(latency_out, r.latency_p50_us, latency_has);
+        latency_out += ',';
+        append_quantile(latency_out, r.latency_p99_us,
+                        (r.flags & ECUIO_TIMING_LATENCY_P99) != 0);
+        latency_out += ',';
+        append_quantile(latency_out, r.latency_p999_us,
+                        (r.flags & ECUIO_TIMING_LATENCY_P999) != 0);
+        latency_out += ',';
+        append_quantile(latency_out, r.latency_max_us, latency_has);
+        latency_out += ',';
+        append_u64(latency_out, r.intervals);
+        latency_out += ',';
+        append_u64(latency_out, r.intervals_mixed);
+        latency_out += ',';
+        append_quantile(latency_out, r.interval_p50_us, interval_has);
+        latency_out += ',';
+        append_quantile(latency_out, r.interval_p99_us,
+                        (r.flags & ECUIO_TIMING_INTERVAL_P99) != 0);
+        latency_out += ',';
+        append_quantile(latency_out, r.interval_p999_us,
+                        (r.flags & ECUIO_TIMING_INTERVAL_P999) != 0);
+        latency_out += ',';
+        append_quantile(latency_out, r.interval_max_us, interval_has);
+        latency_out += ',';
+        latency_out += clock_name(tb.timing.interval_clock);
+        latency_out += '\n';
+    }
+    if (!latency_out.empty() && latency == nullptr && !failed()) {
+        latency = open_file(folder + "/latency.csv");
+        if (latency == nullptr) {
+            fail(errno != 0 ? errno : EIO);
+            return;
+        }
+        latency_out.insert(0, ECUIO_TIMING_COLUMNS "\n");
+    }
+}
+
+void ecuio_recorder::take_frame(const uint8_t* body, size_t size)
+{
+    if (size < sizeof(frame_body)) {
+        return;
+    }
+    frame_body fb;
+    std::memcpy(&fb, body, sizeof fb);
+    size_t at = sizeof fb;
+    if (at + fb.length > size) {
+        return;
+    }
+    const uint64_t host_us = rel(fb.host_us);
+    append_u64(frame_out, host_us);
+    frame_out += ',';
+    append_u64(frame_out, fb.timestamp_us);
+    frame_out += ',';
+    append_hex(frame_out, fb.id);
+    frame_out += ',';
+    append_hex(frame_out, fb.flags);
+    frame_out += ',';
+    static const char kHex[] = "0123456789ABCDEF";
+    for (uint16_t i = 0; i < fb.length; ++i) {
+        if (i > 0) {
+            frame_out += ' ';
+        }
+        const uint8_t b = body[at + i];
+        frame_out += kHex[b >> 4];
+        frame_out += kHex[b & 0x0F];
+    }
+    frame_out += '\n';
+    at += fb.length;
+    frame_rows.fetch_add(1, std::memory_order_relaxed);
+
+    for (uint16_t v = 0; v < fb.values; ++v) {
+        if (at + sizeof(value_head) > size) {
+            return;
+        }
+        value_head vh;
+        std::memcpy(&vh, body + at, sizeof vh);
+        at += sizeof vh;
+        const def_entry* d = def(vh.signal_id);
+        const bool text = is_text_kind(vh.kind);
+        const size_t len = text ? vh.text_len : sizeof(double);
+        if (at + len > size) {
+            return;
+        }
+        if (d != nullptr) {
+            append_u64(value_out, host_us);
+            value_out += ',';
+            value_out += d->name;
+            value_out += ',';
+            if (text) {
+                value_out += csv_quoted(
+                    reinterpret_cast<const char*>(body + at), len);
+            } else {
+                double x;
+                std::memcpy(&x, body + at, sizeof x);
+                ecuio_recording_rows::append_value(value_out, x);
+            }
+            value_out += ',';
+            value_out += d->unit;
+            value_out += '\n';
+            value_rows.fetch_add(1, std::memory_order_relaxed);
+        }
+        at += len;
+    }
+    for (uint32_t k = 0; k < fb.events; ++k) {
+        if (at + sizeof(event_body) > size) {
+            return;
+        }
+        event_body e;
+        std::memcpy(&e, body + at, sizeof e);
+        at += sizeof e;
+        take_event(e);
+    }
+}
+
+/* Everything the worker has queued; true when there was any */
+bool ecuio_recorder::drain_ring()
+{
+    bool any = false;
+    uint64_t t = tail.load(std::memory_order_relaxed);
+    const uint64_t h = head.load(std::memory_order_acquire);
+    while (h - t >= sizeof(record_head)) {
+        record_head rh;
+        copy_out(t, &rh, sizeof rh);
+        if (rh.size < sizeof rh || rh.size > h - t) {
+            break;
+        }
+        const size_t body = rh.size - sizeof rh;
+        if (scratch.size() < body) {
+            scratch.resize(body);
+        }
+        copy_out(t + sizeof rh, scratch.data(), body);
+        if (rh.dropped_before > 0 && body >= sizeof(uint64_t)) {
             uint64_t host_us;
-            std::memcpy(&host_us, body, sizeof host_us);
+            std::memcpy(&host_us, scratch.data(), sizeof host_us);
             drop_line(host_us, rh.dropped_before);
-            win_dropped += rh.dropped_before;
         }
         switch (rh.type) {
         case kRecordFrame:
-            take_frame(body, size);
+            take_frame(scratch.data(), body);
             break;
         case kRecordLink:
-            take_link(body, size);
+            take_link(scratch.data(), body);
             break;
         case kRecordTiming:
-            take_timing(body, size);
+            take_timing(scratch.data(), body);
             break;
         case kRecordConditions:
-            take_conditions(body, size);
+            take_conditions(scratch.data(), body);
             break;
         default:
             break;
         }
+        t += rh.size;
+        any = true;
     }
+    tail.store(t, std::memory_order_release);
+    write(frames, frame_out);
+    write(signals, value_out);
+    write(events, event_out);
+    write(markers, marker_out);
+    write(latency, latency_out);
+    return any;
+}
 
-    /* The session time of the first frame from ring position at on */
-    uint64_t first_frame_t_us(uint64_t at) const
+bool ecuio_recorder::drain_items()
+{
+    std::deque<item> taken;
     {
-        while (scan - at >= sizeof(record_head)) {
-            record_head rh;
-            copy_out(at, &rh, sizeof rh);
-            if (rh.size < sizeof rh || rh.size > scan - at) {
-                break;
-            }
-            if (rh.type == kRecordFrame &&
-                rh.size >= sizeof rh + sizeof(frame_body)) {
-                frame_body fb;
-                copy_out(at + sizeof rh, &fb, sizeof fb);
-                return fb.timestamp_us;
-            }
-            at += rh.size;
-        }
-        return 0;
+        std::lock_guard<std::mutex> g(note_m);
+        taken.swap(items);
     }
-
-    /* A window's header: a recording begun mid-session's, at its start */
-    std::string window_header(const window& w)
-    {
-        std::string h = std::string(ecuio_recording_rows::kFormat3) + "\n";
-        h += started_lines(wall_base);
-        h += armed_core;
-        const ecuio_condition_record::entry& c =
-            conditions->conditions[w.trigger];
-        h += "trigger  " + c.key + "," +
-             std::to_string((uint64_t{c.before_us} + 500) / 1000) + " ms\n";
-        size_t named = 0;
-        const std::vector<std::string> parts = focus_parts_with(
-            win_focus.ids,
-            [this](uint16_t id, std::string* name) {
-                const def_entry* d = def(id);
-                if (d != nullptr) {
-                    *name = d->name;
+    for (const item& it : taken) {
+        switch (it.kind) {
+        case item_kind::begin:
+            /* The file before the header line naming its hash */
+            if (!it.bytes.empty() && !failed()) {
+                errno = 0;
+                if (fail_next.exchange(false)) {
+                    fail(ENOSPC);
+                } else if (!write_bytes(
+                               folder + "/" +
+                                   ecuio_recording_rows::kSignalFileName,
+                               it.bytes)) {
+                    fail(errno != 0 ? errno : EIO);
                 }
-                return d != nullptr;
-            },
-            &named);
-        h += focus_header(parts, named, win_focus);
-        h += header_link(win_link_state, win_link_episodes);
-        h += armed_signals;
-        h += armed_caller;
-        h += "columns  local time, seconds since the recording started "
-             "(host_us / 1e6 in the CSV files), kind, text\n\n";
-        return h;
-    }
-
-    /* The front window's folder, made at its first record (at, host_us):
-     * the copies and the header written and flushed before the folder is
-     * given to get_folder, so a front end never reads a half-made one */
-    void open_window(window& w, uint64_t at, uint64_t host_us)
-    {
-        w.opened = true;
-        base_us = host_us;
-        wall_base = start_wall + std::chrono::microseconds(host_us);
-        std::string leaf;
-        std::string why;
-        const std::time_t second =
-            std::chrono::system_clock::to_time_t(wall_base);
-        if (second != name_second) {
-            name_second = second;
-            name_next = 1;
-        }
-        if (failed() || !make_recording_folder(root, second, label_tail, &leaf,
-                                               &why, &name_next)) {
-            if (!why.empty()) {
-                fail_text(why);
             }
+            if (conditions != nullptr && !failed()) {
+                errno = 0;
+                if (!write_bytes(folder + "/" +
+                                     ecuio_recording_rows::kConditionsName,
+                                 conditions->bytes)) {
+                    fail(errno != 0 ? errno : EIO);
+                }
+            }
+            event_out += it.text;
+            begin_rows();
+            break;
+        default:
+            write_item(it);
+            break;
+        }
+    }
+    write(frames, frame_out);
+    write(signals, value_out);
+    write(events, event_out);
+    write(markers, marker_out);
+    return !taken.empty();
+}
+
+/* frames.csv's and signals.csv's header rows */
+void ecuio_recorder::begin_rows()
+{
+    frame_out += "host_us,timestamp_us,id,flags,data\n";
+    /* A byte-order mark, so a spreadsheet reads the units' UTF-8 as
+     * UTF-8 (ADR-0017) */
+    value_out += "\xEF\xBB\xBFhost_us,signal,value,unit\n";
+}
+
+/* A note, a mark, a focus's lines or an asleep line */
+void ecuio_recorder::write_item(const item& it)
+{
+    switch (it.kind) {
+    case item_kind::focus: {
+        size_t at = 0;
+        while (at <= it.bytes.size()) {
+            const size_t end =
+                (std::min)(it.bytes.find('\0', at), it.bytes.size());
+            event_line(it.host_us, it.text.c_str(),
+                       it.bytes.substr(at, end - at));
+            at = end + 1;
+        }
+        break;
+    }
+    case item_kind::note:
+        event_line(it.host_us, "note", it.text);
+        break;
+    case item_kind::asleep:
+        event_line(it.host_us, "asleep", it.text);
+        break;
+    case item_kind::mark:
+        add_marker(it.host_us, it.text);
+        break;
+    case item_kind::begin:
+        break;
+    }
+}
+
+void ecuio_recorder::write_outs()
+{
+    write(frames, frame_out);
+    write(signals, value_out);
+    write(events, event_out);
+    write(markers, marker_out);
+    write(latency, latency_out);
+}
+
+/* The caller's items, held with their times; the begin item is the
+ * attach's header, which a window builds itself */
+void ecuio_recorder::take_items()
+{
+    std::deque<item> taken;
+    {
+        std::lock_guard<std::mutex> g(note_m);
+        taken.swap(items);
+    }
+    for (item& it : taken) {
+        if (it.kind == item_kind::begin) {
+            continue;
+        }
+        if (pending.size() >= note_cap) {
+            notes_dropped.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
+        pending.push_back(std::move(it));
+    }
+}
+
+/* Each condition event in a record's body */
+template <typename F>
+void ecuio_recorder::each_event(uint32_t type, const uint8_t* body, size_t size,
+                                F f)
+{
+    size_t at = 0;
+    uint32_t count = 0;
+    if (type == kRecordFrame) {
+        if (size < sizeof(frame_body)) {
             return;
         }
-        folder = absolute(leaf);
-        errno = 0;
-        if ((!window_json.empty() &&
-             !write_bytes(folder + "/" + ecuio_recording_rows::kSignalFileName,
-                          window_json)) ||
-            !write_bytes(folder + "/" + ecuio_recording_rows::kConditionsName,
-                         conditions->bytes)) {
-            fail(errno != 0 ? errno : EIO);
+        frame_body fb;
+        std::memcpy(&fb, body, sizeof fb);
+        at = sizeof fb + fb.length;
+        for (uint16_t v = 0; v < fb.values; ++v) {
+            if (at + sizeof(value_head) > size) {
+                return;
+            }
+            value_head vh;
+            std::memcpy(&vh, body + at, sizeof vh);
+            at += sizeof vh +
+                  (is_text_kind(vh.kind) ? vh.text_len : sizeof(double));
+        }
+        count = fb.events;
+    } else if (type == kRecordConditions) {
+        if (size < sizeof(conditions_body)) {
             return;
         }
-        frames = open_file(folder + "/frames.csv");
-        signals = open_file(folder + "/signals.csv");
-        events = open_file(folder + "/events.log");
-        if (frames == nullptr || signals == nullptr || events == nullptr) {
-            fail(errno != 0 ? errno : EIO);
-            return;
-        }
-        std::memset(timing_totals, 0, sizeof timing_totals);
-        win_frames0 = frame_rows.load(std::memory_order_relaxed);
-        win_values0 = value_rows.load(std::memory_order_relaxed);
-        win_notes0 = notes_dropped.load(std::memory_order_relaxed);
-        win_dropped = 0;
-        win_last_host = host_us;
-        event_out += window_header(w);
-        begin_rows();
-        /* Each condition standing ON at the window's start */
-        const uint64_t t_us = first_frame_t_us(at);
-        for (uint32_t i = 0; i < tail_cond.size(); ++i) {
-            const tail_state& s = tail_cond[i];
-            if (!s.on) {
-                continue;
-            }
-            event_body e{};
-            e.host_us = host_us;
-            e.t_us = t_us;
-            e.value = s.value;
-            e.condition = i;
-            e.term = s.term;
-            e.state = ECUIO_CONDITION_ON;
-            e.flags = static_cast<uint8_t>(
-                ECUIO_CONDITION_HELD | (s.stale ? ECUIO_CONDITION_STALE : 0u));
-            take_event(e);
-        }
-        write_outs();
-        flush_all();
-        if (early_any && w.start_us <= early_upto_us) {
-            prerolls_short.fetch_add(1, std::memory_order_relaxed);
-        }
-        {
-            std::lock_guard<std::mutex> g(folder_m);
-            published = folder;
-        }
-        windows_opened.fetch_add(1, std::memory_order_release);
-        in_window = true;
-        window_open.store(true, std::memory_order_release);
+        conditions_body cb;
+        std::memcpy(&cb, body, sizeof cb);
+        at = sizeof cb;
+        count = cb.events;
     }
-
-    /* The open window's end line at end_us and its files closed */
-    void close_window(uint64_t end_us, const std::string& why)
-    {
-        if (!in_window) {
-            return;
-        }
-        event_out += '\n';
-        event_line(
-            end_us, "end",
-            why + ": " + std::to_string(frame_rows.load() - win_frames0) +
-                " frames, " + std::to_string(value_rows.load() - win_values0) +
-                " values, " + std::to_string(win_dropped) +
-                " records dropped, " +
-                std::to_string(notes_dropped.load() - win_notes0) +
-                " notes dropped");
-        write_outs();
-        sync_all();
-        close_files();
-        in_window = false;
-        window_open.store(false, std::memory_order_release);
+    for (uint32_t k = 0; k < count && at + sizeof(event_body) <= size;
+         ++k) {
+        event_body e;
+        std::memcpy(&e, body + at, sizeof e);
+        at += sizeof e;
+        f(e);
     }
+}
 
-    /* The held items at or before limit, the recording's time of the record
-     * the tail is at: into the window when that record is written in it,
-     * else gone; a focus moves the next header's either way */
-    void flush_items(uint64_t limit)
-    {
-        while (!pending.empty() && pending.front().host_us <= limit) {
-            const item it = std::move(pending.front());
-            pending.pop_front();
-            if (it.kind == item_kind::focus) {
-                win_focus = it.focus;
-            }
-            if (in_window) {
-                write_item(it);
-            }
-        }
+/* A record condition's change at the scan, at its session time: a rise
+ * opens a window or carries the last one on; the last fall gives the
+ * window its end, after past it or the record that settled it,
+ * whichever is later */
+void ecuio_recorder::scan_event(const event_body& e, uint64_t record_us)
+{
+    const ecuio_condition_record* set = conditions.get();
+    if (set == nullptr || e.condition >= scan_on.size() ||
+        e.condition >= set->conditions.size() ||
+        !set->conditions[e.condition].record) {
+        return;
     }
-
-    /* A record's place in session time: a frame's own, a link change's
-     * own, or the newest before it, from pos */
-    static uint64_t place_of(const record_head& rh, const uint8_t* body,
-                             size_t size, uint64_t pos)
-    {
-        if (rh.type == kRecordFrame && size >= sizeof(frame_body)) {
-            frame_body fb;
-            std::memcpy(&fb, body, sizeof fb);
-            return (std::max)(pos, fb.timestamp_us);
-        }
-        if (rh.type == kRecordLink && size >= sizeof(link_body)) {
-            link_body lb;
-            std::memcpy(&lb, body, sizeof lb);
-            return (std::max)(pos, lb.t_us);
-        }
-        return pos;
+    const ecuio_condition_record::entry& c = set->conditions[e.condition];
+    const bool on = e.state == ECUIO_CONDITION_ON &&
+                    (e.flags & ECUIO_CONDITION_STALE) == 0;
+    if (on == (scan_on[e.condition] != 0)) {
+        return;
     }
-
-    bool pressed() const
-    {
-        const uint64_t queued = head.load(std::memory_order_acquire) -
-                                tail.load(std::memory_order_relaxed);
-        return queued > cap / 4 * kPressedQuarters;
-    }
-
-    /* The tail as far as the windows allow; final (the recorder closing,
-     * or its session gone) holds nothing back */
-    bool advance_tail(bool final)
-    {
-        bool any = false;
-        for (;;) {
-            const uint64_t t = tail.load(std::memory_order_relaxed);
-            if (scan - t < sizeof(record_head)) {
-                break;
-            }
-            record_head rh;
-            copy_out(t, &rh, sizeof rh);
-            const size_t body = rh.size - sizeof rh;
-            if (scratch.size() < body) {
-                scratch.resize(body);
-            }
-            copy_out(t + sizeof rh, scratch.data(), body);
-            uint64_t host_us = 0;
-            if (body >= sizeof host_us) {
-                std::memcpy(&host_us, scratch.data(), sizeof host_us);
-            }
-            const uint64_t pos = place_of(rh, scratch.data(), body, tail_pos);
-            window* w = windows_q.empty() ? nullptr : &windows_q.front();
-            if (w != nullptr && pos >= w->start_us &&
-                (w->open_end || pos <= w->end_us)) {
-                if (!w->opened) {
-                    open_window(*w, t, host_us);
+    scan_on[e.condition] = on ? 1 : 0;
+    if (on) {
+        ++scan_active;
+        const uint64_t start =
+            e.t_us > c.before_us ? e.t_us - c.before_us : 0;
+        if (!windows_q.empty()) {
+            window& w = windows_q.back();
+            if (w.open_end || start <= w.end_us) {
+                w.open_end = true;
+                if (!w.opened && start < w.start_us) {
+                    w.start_us = start;
                 }
-                flush_items(host_us);
-                if (in_window) { /* a failed open writes nothing */
-                    write_record(rh, scratch.data(), body);
-                    win_last_host = (std::max)(win_last_host, host_us);
-                }
-            } else if (w != nullptr && !w->open_end && pos > w->end_us) {
-                /* Past the window's end: a firing whose before reaches
-                 * back into it would carry it on, until the scan is that
-                 * far past its end */
-                if (!final && !pressed() &&
-                    !(scanned_frame &&
-                      newest_frame_us > w->end_us + longest_before)) {
-                    break;
-                }
-                if (!w->opened) { /* a full ring let all of it go */
-                    prerolls_short.fetch_add(1, std::memory_order_relaxed);
-                }
-                close_window(win_last_host, kWindowEnded);
-                windows_q.pop_front();
-                continue;
-            } else {
-                const bool old =
-                    scanned_frame && pos + longest_before < newest_frame_us;
-                if (!final && !old) {
-                    if (!pressed()) {
-                        break;
-                    }
-                    early_any = true;
-                    early_upto_us = (std::max)(early_upto_us, pos);
-                }
-                flush_items(host_us);
-                if (rh.type == kRecordFrame) {
-                    frames_passed.fetch_add(1, std::memory_order_relaxed);
-                }
-            }
-            follow(rh, scratch.data(), body);
-            tail_pos = pos;
-            tail.store(t + rh.size, std::memory_order_release);
-            any = true;
-        }
-        return any;
-    }
-
-    /* One wake of an armed writer: the scan to the head, the tail after
-     * it; final leaves the open window for close to end */
-    bool armed_pass(bool final)
-    {
-        bool any = false;
-        const uint64_t h = head.load(std::memory_order_acquire);
-        while (h - scan >= sizeof(record_head)) {
-            record_head rh;
-            copy_out(scan, &rh, sizeof rh);
-            if (rh.size < sizeof rh || rh.size > h - scan) {
-                break;
-            }
-            const size_t body = rh.size - sizeof rh;
-            if (scratch.size() < body) {
-                scratch.resize(body);
-            }
-            copy_out(scan + sizeof rh, scratch.data(), body);
-            const uint64_t pos =
-                place_of(rh, scratch.data(), body, newest_frame_us);
-            if (rh.type == kRecordFrame || rh.type == kRecordLink) {
-                newest_frame_us = pos;
-                scanned_frame = true;
-            }
-            each_event(
-                rh.type, scratch.data(), body,
-                [this, pos](const event_body& e) { scan_event(e, pos); });
-            scan += rh.size;
-            any = true;
-        }
-        any = advance_tail(final) || any;
-        if (final) {
-            /* The tail is at the scan: a window still unopened had all of
-             * its records let go by a full ring */
-            while (!windows_q.empty() && !windows_q.front().opened) {
-                prerolls_short.fetch_add(1, std::memory_order_relaxed);
-                windows_q.pop_front();
-            }
-            /* What came after the last record: the open window's while a
-             * record condition is ON, else past its end and in no window */
-            const bool ended =
-                in_window && !windows_q.empty() && !windows_q.front().open_end;
-            flush_items(ended ? win_last_host : UINT64_MAX);
-        }
-        write_outs();
-        return any;
-    }
-
-    void flush_all()
-    {
-        for (FILE* f : {frames, signals, events, markers, latency}) {
-            if (f != nullptr && !failed() && std::fflush(f) != 0) {
-                fail(errno != 0 ? errno : EIO);
-            }
-        }
-    }
-
-    void sync_all()
-    {
-        for (FILE* f : {frames, signals, events, markers, latency}) {
-            if (f != nullptr && !failed() && !sync_file(f)) {
-                fail(errno != 0 ? errno : EIO);
-            }
-        }
-        syncs.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    /* An asleep line when the machine's slept count rose a second or more
-     * since the last wake (ADR-0049 section 2): stamped as the writer
-     * woke, its N s the N s before. Smaller rises are taken in without a
-     * line, as the app's tick takes them. */
-    void check_sleep()
-    {
-        if (!attached.load(std::memory_order_acquire)) {
-            return;
-        }
-        const uint64_t now = ecuio_clock_slept_us() +
-                             slept_added.load(std::memory_order_relaxed);
-        if (!sleep_armed) {
-            sleep_armed = true;
-            slept_seen = slept_at_attach;
-        }
-        const uint64_t rise = now > slept_seen ? now - slept_seen : 0;
-        slept_seen = (std::max)(now, slept_seen);
-        if (rise < kSleepLineUs) {
-            return;
-        }
-        const uint64_t tenths = (rise + 50000) / 100000;
-        const uint64_t host_us = host_us_of(ecuio_record_clock_us());
-        std::string text = "Asleep for " + std::to_string(tenths / 10) + "." +
-                           std::to_string(tenths % 10) +
-                           " s: nothing was read meanwhile";
-        if (armed) {
-            pending.push_back(
-                item{item_kind::asleep, host_us, std::move(text), {}, {}});
-        } else {
-            event_line(host_us, "asleep", text);
-        }
-    }
-
-    uint64_t host_us_of(uint64_t clock_us) const
-    {
-        return clock_us > zero_us ? clock_us - zero_us : 0;
-    }
-
-    void run()
-    {
-        auto last_flush = std::chrono::steady_clock::now();
-        auto last_sync = last_flush;
-        bool busy = false;
-        for (;;) {
-            bool stopping;
-            {
-                std::unique_lock<std::mutex> lk(wake_m);
-                wake_cv.wait_for(lk, busy ? kBusyWake : kIdleWake,
-                                 [this] { return stop; });
-                stopping = stop;
-            }
-            wakes.fetch_add(1, std::memory_order_relaxed);
-            if (hold.load(std::memory_order_acquire) && !stopping) {
-                continue;
-            }
-            /* Nothing until a session attaches: it completes the header
-             * item open queued; one closed unattached leaves its files empty */
-            if (!attached.load(std::memory_order_acquire)) {
-                if (stopping) {
-                    return;
-                }
-                continue;
-            }
-            /* Read before the pass: a detach after it can still put */
-            const bool gone = detached.load(std::memory_order_acquire);
-            if (armed) {
-                /* Its session gone, no record follows: nothing held back */
-                const bool final = stopping || gone;
-                take_items();
-                check_sleep();
-                busy = armed_pass(final);
-            } else {
-                /* The items first: the header comes ahead of any row */
-                const bool notes = drain_items();
-                check_sleep();
-                const bool frames_taken = drain_ring();
-                busy = notes || frames_taken;
-            }
-            if (gone && tail.load(std::memory_order_relaxed) ==
-                            head.load(std::memory_order_acquire)) {
-                drained.store(true, std::memory_order_release);
-            }
-            const auto now = std::chrono::steady_clock::now();
-            if (now - last_flush >= kFlushEvery) {
-                flush_all();
-                last_flush = now;
-            }
-            if (now - last_sync >= kSyncEvery) {
-                sync_all();
-                last_sync = now;
-            }
-            if (stopping) {
                 return;
             }
         }
+        window w;
+        w.start_us = start;
+        w.trigger = e.condition;
+        windows_q.push_back(w);
+        return;
     }
+    --scan_active;
+    if (windows_q.empty()) {
+        return;
+    }
+    window& w = windows_q.back();
+    w.end_us =
+        (std::max)(w.end_us, (std::max)(e.t_us + c.after_us, record_us));
+    if (scan_active == 0) {
+        w.open_end = false;
+    }
+}
 
-    void close_files()
+/* What the tail passes, written or not: the conditions' states and the
+ * link's, for the next window's header and held lines */
+void ecuio_recorder::follow(const record_head& rh, const uint8_t* body,
+                            size_t size)
+{
+    if (rh.type == kRecordLink && size >= sizeof(link_body)) {
+        link_body lb;
+        std::memcpy(&lb, body, sizeof lb);
+        win_link_state = lb.state;
+        win_link_episodes = lb.episodes;
+        return;
+    }
+    each_event(rh.type, body, size, [this](const event_body& e) {
+        if (e.condition < tail_cond.size()) {
+            tail_state& s = tail_cond[e.condition];
+            s.on = e.state == ECUIO_CONDITION_ON;
+            s.stale = (e.flags & ECUIO_CONDITION_STALE) != 0;
+            s.value = e.value;
+            s.term = e.term;
+        }
+    });
+}
+
+/* A record into the open window */
+void ecuio_recorder::write_record(const record_head& rh, const uint8_t* body,
+                                  size_t size)
+{
+    if (rh.dropped_before > 0 && size >= sizeof(uint64_t)) {
+        uint64_t host_us;
+        std::memcpy(&host_us, body, sizeof host_us);
+        drop_line(host_us, rh.dropped_before);
+        win_dropped += rh.dropped_before;
+    }
+    switch (rh.type) {
+    case kRecordFrame:
+        take_frame(body, size);
+        break;
+    case kRecordLink:
+        take_link(body, size);
+        break;
+    case kRecordTiming:
+        take_timing(body, size);
+        break;
+    case kRecordConditions:
+        take_conditions(body, size);
+        break;
+    default:
+        break;
+    }
+}
+
+/* The session time of the first frame from ring position at on */
+uint64_t ecuio_recorder::first_frame_t_us(uint64_t at) const
+{
+    while (scan - at >= sizeof(record_head)) {
+        record_head rh;
+        copy_out(at, &rh, sizeof rh);
+        if (rh.size < sizeof rh || rh.size > scan - at) {
+            break;
+        }
+        if (rh.type == kRecordFrame &&
+            rh.size >= sizeof rh + sizeof(frame_body)) {
+            frame_body fb;
+            copy_out(at + sizeof rh, &fb, sizeof fb);
+            return fb.timestamp_us;
+        }
+        at += rh.size;
+    }
+    return 0;
+}
+
+/* A window's header: a recording begun mid-session's, at its start */
+std::string ecuio_recorder::window_header(const window& w)
+{
+    std::string h = std::string(ecuio_recording_rows::kFormat3) + "\n";
+    h += started_lines(wall_base);
+    h += armed_core;
+    const ecuio_condition_record::entry& c =
+        conditions->conditions[w.trigger];
+    h += "trigger  " + c.key + "," +
+         std::to_string((uint64_t{c.before_us} + 500) / 1000) + " ms\n";
+    size_t named = 0;
+    const std::vector<std::string> parts = focus_parts_with(
+        win_focus.ids,
+        [this](uint16_t id, std::string* name) {
+            const def_entry* d = def(id);
+            if (d != nullptr) {
+                *name = d->name;
+            }
+            return d != nullptr;
+        },
+        &named);
+    h += focus_header(parts, named, win_focus);
+    h += header_link(win_link_state, win_link_episodes);
+    h += armed_signals;
+    h += armed_caller;
+    h += "columns  local time, seconds since the recording started "
+         "(host_us / 1e6 in the CSV files), kind, text\n\n";
+    return h;
+}
+
+/* The front window's folder, made at its first record (at, host_us):
+ * the copies and the header written and flushed before the folder is
+ * given to get_folder, so a front end never reads a half-made one */
+void ecuio_recorder::open_window(window& w, uint64_t at, uint64_t host_us)
+{
+    w.opened = true;
+    base_us = host_us;
+    wall_base = start_wall + std::chrono::microseconds(host_us);
+    std::string leaf;
+    std::string why;
+    const std::time_t second =
+        std::chrono::system_clock::to_time_t(wall_base);
+    if (second != name_second) {
+        name_second = second;
+        name_next = 1;
+    }
+    if (failed() || !make_recording_folder(root, second, label_tail, &leaf,
+                                           &why, &name_next)) {
+        if (!why.empty()) {
+            fail_text(why);
+        }
+        return;
+    }
+    folder = absolute(leaf);
+    errno = 0;
+    if ((!window_json.empty() &&
+         !write_bytes(folder + "/" + ecuio_recording_rows::kSignalFileName,
+                      window_json)) ||
+        !write_bytes(folder + "/" + ecuio_recording_rows::kConditionsName,
+                     conditions->bytes)) {
+        fail(errno != 0 ? errno : EIO);
+        return;
+    }
+    frames = open_file(folder + "/frames.csv");
+    signals = open_file(folder + "/signals.csv");
+    events = open_file(folder + "/events.log");
+    if (frames == nullptr || signals == nullptr || events == nullptr) {
+        fail(errno != 0 ? errno : EIO);
+        return;
+    }
+    std::memset(timing_totals, 0, sizeof timing_totals);
+    win_frames0 = frame_rows.load(std::memory_order_relaxed);
+    win_values0 = value_rows.load(std::memory_order_relaxed);
+    win_notes0 = notes_dropped.load(std::memory_order_relaxed);
+    win_dropped = 0;
+    win_last_host = host_us;
+    event_out += window_header(w);
+    begin_rows();
+    /* Each condition standing ON at the window's start */
+    const uint64_t t_us = first_frame_t_us(at);
+    for (uint32_t i = 0; i < tail_cond.size(); ++i) {
+        const tail_state& s = tail_cond[i];
+        if (!s.on) {
+            continue;
+        }
+        event_body e{};
+        e.host_us = host_us;
+        e.t_us = t_us;
+        e.value = s.value;
+        e.condition = i;
+        e.term = s.term;
+        e.state = ECUIO_CONDITION_ON;
+        e.flags = static_cast<uint8_t>(
+            ECUIO_CONDITION_HELD | (s.stale ? ECUIO_CONDITION_STALE : 0u));
+        take_event(e);
+    }
+    write_outs();
+    flush_all();
+    if (early_any && w.start_us <= early_upto_us) {
+        prerolls_short.fetch_add(1, std::memory_order_relaxed);
+    }
     {
-        for (FILE** f : {&frames, &signals, &events, &markers, &latency}) {
-            if (*f != nullptr) {
-                if (std::fclose(*f) != 0 && !failed()) {
-                    fail(errno != 0 ? errno : EIO);
+        std::lock_guard<std::mutex> g(folder_m);
+        published = folder;
+    }
+    windows_opened.fetch_add(1, std::memory_order_release);
+    in_window = true;
+    window_open.store(true, std::memory_order_release);
+}
+
+/* The open window's end line at end_us and its files closed */
+void ecuio_recorder::close_window(uint64_t end_us, const std::string& why)
+{
+    if (!in_window) {
+        return;
+    }
+    event_out += '\n';
+    event_line(
+        end_us, "end",
+        why + ": " + std::to_string(frame_rows.load() - win_frames0) +
+            " frames, " + std::to_string(value_rows.load() - win_values0) +
+            " values, " + std::to_string(win_dropped) +
+            " records dropped, " +
+            std::to_string(notes_dropped.load() - win_notes0) +
+            " notes dropped");
+    write_outs();
+    sync_all();
+    close_files();
+    in_window = false;
+    window_open.store(false, std::memory_order_release);
+}
+
+/* The held items at or before limit, the recording's time of the record
+ * the tail is at: into the window when that record is written in it,
+ * else gone; a focus moves the next header's either way */
+void ecuio_recorder::flush_items(uint64_t limit)
+{
+    while (!pending.empty() && pending.front().host_us <= limit) {
+        const item it = std::move(pending.front());
+        pending.pop_front();
+        if (it.kind == item_kind::focus) {
+            win_focus = it.focus;
+        }
+        if (in_window) {
+            write_item(it);
+        }
+    }
+}
+
+/* A record's place in session time: a frame's own, a link change's
+ * own, or the newest before it, from pos */
+uint64_t ecuio_recorder::place_of(const record_head& rh, const uint8_t* body,
+                                  size_t size, uint64_t pos)
+{
+    if (rh.type == kRecordFrame && size >= sizeof(frame_body)) {
+        frame_body fb;
+        std::memcpy(&fb, body, sizeof fb);
+        return (std::max)(pos, fb.timestamp_us);
+    }
+    if (rh.type == kRecordLink && size >= sizeof(link_body)) {
+        link_body lb;
+        std::memcpy(&lb, body, sizeof lb);
+        return (std::max)(pos, lb.t_us);
+    }
+    return pos;
+}
+
+bool ecuio_recorder::pressed() const
+{
+    const uint64_t queued = head.load(std::memory_order_acquire) -
+                            tail.load(std::memory_order_relaxed);
+    return queued > cap / 4 * kPressedQuarters;
+}
+
+/* The tail as far as the windows allow; final (the recorder closing,
+ * or its session gone) holds nothing back */
+bool ecuio_recorder::advance_tail(bool final)
+{
+    bool any = false;
+    for (;;) {
+        const uint64_t t = tail.load(std::memory_order_relaxed);
+        if (scan - t < sizeof(record_head)) {
+            break;
+        }
+        record_head rh;
+        copy_out(t, &rh, sizeof rh);
+        const size_t body = rh.size - sizeof rh;
+        if (scratch.size() < body) {
+            scratch.resize(body);
+        }
+        copy_out(t + sizeof rh, scratch.data(), body);
+        uint64_t host_us = 0;
+        if (body >= sizeof host_us) {
+            std::memcpy(&host_us, scratch.data(), sizeof host_us);
+        }
+        const uint64_t pos = place_of(rh, scratch.data(), body, tail_pos);
+        window* w = windows_q.empty() ? nullptr : &windows_q.front();
+        if (w != nullptr && pos >= w->start_us &&
+            (w->open_end || pos <= w->end_us)) {
+            if (!w->opened) {
+                open_window(*w, t, host_us);
+            }
+            flush_items(host_us);
+            if (in_window) { /* a failed open writes nothing */
+                write_record(rh, scratch.data(), body);
+                win_last_host = (std::max)(win_last_host, host_us);
+            }
+        } else if (w != nullptr && !w->open_end && pos > w->end_us) {
+            /* Past the window's end: a firing whose before reaches
+             * back into it would carry it on, until the scan is that
+             * far past its end */
+            if (!final && !pressed() &&
+                !(scanned_frame &&
+                  newest_frame_us > w->end_us + longest_before)) {
+                break;
+            }
+            if (!w->opened) { /* a full ring let all of it go */
+                prerolls_short.fetch_add(1, std::memory_order_relaxed);
+            }
+            close_window(win_last_host, kWindowEnded);
+            windows_q.pop_front();
+            continue;
+        } else {
+            const bool old =
+                scanned_frame && pos + longest_before < newest_frame_us;
+            if (!final && !old) {
+                if (!pressed()) {
+                    break;
                 }
-                *f = nullptr;
+                early_any = true;
+                early_upto_us = (std::max)(early_upto_us, pos);
+            }
+            flush_items(host_us);
+            if (rh.type == kRecordFrame) {
+                frames_passed.fetch_add(1, std::memory_order_relaxed);
             }
         }
+        follow(rh, scratch.data(), body);
+        tail_pos = pos;
+        tail.store(t + rh.size, std::memory_order_release);
+        any = true;
     }
+    return any;
+}
 
-    /* Files still open only when open failed part way, which reported
-     * its own failure: closed, nothing more recorded */
-    ~ecuio_recorder()
-    {
-        for (FILE* f : {frames, signals, events, markers, latency}) {
-            if (f != nullptr) {
-                (void)std::fclose(f);
-            }
+/* One wake of an armed writer: the scan to the head, the tail after
+ * it; final leaves the open window for close to end */
+bool ecuio_recorder::armed_pass(bool final)
+{
+    bool any = false;
+    const uint64_t h = head.load(std::memory_order_acquire);
+    while (h - scan >= sizeof(record_head)) {
+        record_head rh;
+        copy_out(scan, &rh, sizeof rh);
+        if (rh.size < sizeof rh || rh.size > h - scan) {
+            break;
+        }
+        const size_t body = rh.size - sizeof rh;
+        if (scratch.size() < body) {
+            scratch.resize(body);
+        }
+        copy_out(scan + sizeof rh, scratch.data(), body);
+        const uint64_t pos =
+            place_of(rh, scratch.data(), body, newest_frame_us);
+        if (rh.type == kRecordFrame || rh.type == kRecordLink) {
+            newest_frame_us = pos;
+            scanned_frame = true;
+        }
+        each_event(
+            rh.type, scratch.data(), body,
+            [this, pos](const event_body& e) { scan_event(e, pos); });
+        scan += rh.size;
+        any = true;
+    }
+    any = advance_tail(final) || any;
+    if (final) {
+        /* The tail is at the scan: a window still unopened had all of
+         * its records let go by a full ring */
+        while (!windows_q.empty() && !windows_q.front().opened) {
+            prerolls_short.fetch_add(1, std::memory_order_relaxed);
+            windows_q.pop_front();
+        }
+        /* What came after the last record: the open window's while a
+         * record condition is ON, else past its end and in no window */
+        const bool ended =
+            in_window && !windows_q.empty() && !windows_q.front().open_end;
+        flush_items(ended ? win_last_host : UINT64_MAX);
+    }
+    write_outs();
+    return any;
+}
+
+void ecuio_recorder::flush_all()
+{
+    for (FILE* f : {frames, signals, events, markers, latency}) {
+        if (f != nullptr && !failed() && std::fflush(f) != 0) {
+            fail(errno != 0 ? errno : EIO);
         }
     }
-};
+}
+
+void ecuio_recorder::sync_all()
+{
+    for (FILE* f : {frames, signals, events, markers, latency}) {
+        if (f != nullptr && !failed() && !sync_file(f)) {
+            fail(errno != 0 ? errno : EIO);
+        }
+    }
+    syncs.fetch_add(1, std::memory_order_relaxed);
+}
+
+/* An asleep line when the machine's slept count rose a second or more
+ * since the last wake (ADR-0049 section 2): stamped as the writer
+ * woke, its N s the N s before. Smaller rises are taken in without a
+ * line, as the app's tick takes them. */
+void ecuio_recorder::check_sleep()
+{
+    if (!attached.load(std::memory_order_acquire)) {
+        return;
+    }
+    const uint64_t now = ecuio_clock_slept_us() +
+                         slept_added.load(std::memory_order_relaxed);
+    if (!sleep_armed) {
+        sleep_armed = true;
+        slept_seen = slept_at_attach;
+    }
+    const uint64_t rise = now > slept_seen ? now - slept_seen : 0;
+    slept_seen = (std::max)(now, slept_seen);
+    if (rise < kSleepLineUs) {
+        return;
+    }
+    const uint64_t tenths = (rise + 50000) / 100000;
+    const uint64_t host_us = host_us_of(ecuio_record_clock_us());
+    std::string text = "Asleep for " + std::to_string(tenths / 10) + "." +
+                       std::to_string(tenths % 10) +
+                       " s: nothing was read meanwhile";
+    if (armed) {
+        pending.push_back(
+            item{item_kind::asleep, host_us, std::move(text), {}, {}});
+    } else {
+        event_line(host_us, "asleep", text);
+    }
+}
+
+uint64_t ecuio_recorder::host_us_of(uint64_t clock_us) const
+{
+    return clock_us > zero_us ? clock_us - zero_us : 0;
+}
+
+void ecuio_recorder::run()
+{
+    auto last_flush = std::chrono::steady_clock::now();
+    auto last_sync = last_flush;
+    bool busy = false;
+    for (;;) {
+        bool stopping;
+        {
+            std::unique_lock<std::mutex> lk(wake_m);
+            wake_cv.wait_for(lk, busy ? kBusyWake : kIdleWake,
+                             [this] { return stop; });
+            stopping = stop;
+        }
+        wakes.fetch_add(1, std::memory_order_relaxed);
+        if (hold.load(std::memory_order_acquire) && !stopping) {
+            continue;
+        }
+        /* Nothing until a session attaches: it completes the header
+         * item open queued; one closed unattached leaves its files empty */
+        if (!attached.load(std::memory_order_acquire)) {
+            if (stopping) {
+                return;
+            }
+            continue;
+        }
+        /* Read before the pass: a detach after it can still put */
+        const bool gone = detached.load(std::memory_order_acquire);
+        if (armed) {
+            /* Its session gone, no record follows: nothing held back */
+            const bool final = stopping || gone;
+            take_items();
+            check_sleep();
+            busy = armed_pass(final);
+        } else {
+            /* The items first: the header comes ahead of any row */
+            const bool notes = drain_items();
+            check_sleep();
+            const bool frames_taken = drain_ring();
+            busy = notes || frames_taken;
+        }
+        if (gone && tail.load(std::memory_order_relaxed) ==
+                        head.load(std::memory_order_acquire)) {
+            drained.store(true, std::memory_order_release);
+        }
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_flush >= kFlushEvery) {
+            flush_all();
+            last_flush = now;
+        }
+        if (now - last_sync >= kSyncEvery) {
+            sync_all();
+            last_sync = now;
+        }
+        if (stopping) {
+            return;
+        }
+    }
+}
+
+void ecuio_recorder::close_files()
+{
+    for (FILE** f : {&frames, &signals, &events, &markers, &latency}) {
+        if (*f != nullptr) {
+            if (std::fclose(*f) != 0 && !failed()) {
+                fail(errno != 0 ? errno : EIO);
+            }
+            *f = nullptr;
+        }
+    }
+}
+
+/* Files still open only when open failed part way, which reported
+ * its own failure: closed, nothing more recorded */
+ecuio_recorder::~ecuio_recorder()
+{
+    for (FILE* f : {frames, signals, events, markers, latency}) {
+        if (f != nullptr) {
+            (void)std::fclose(f);
+        }
+    }
+}
 
 uint64_t ecuio_record_clock_us()
 {
