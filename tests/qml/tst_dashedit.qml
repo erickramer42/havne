@@ -3849,12 +3849,15 @@ TestCase {
     }
 
     // A signal file kept as a plugin of the user's own: its keepSignalText answer
-    function keptPlugin(name, key, did) {
+    // A signal file kept as a plugin of its own, or (into, a plugin's
+    // hash) as that plugin's variant, added or put in its place
+    function keptPlugin(name, key, did, into, variant) {
         const file = { havne_signals: 1, name: name, source: { name: "t" },
                        ecus: [{ id: "pcm", rx: "7E8" }],
-                       signals: [{ key: key, name: name, read: { service: "22", number: did },
+                       signals: [{ key: key, name: name.substring(0, 24),
+                                   read: { service: "22", number: did },
                                    field: { byte: 0, bits: 8 }, unit: "kPa" }] }
-        const r = Bridge.keepSignalText(JSON.stringify(file), "", "", "")
+        const r = Bridge.keepSignalText(JSON.stringify(file), into || "", variant || "", "")
         verify(r.ok, r.words)
         return r
     }
@@ -3914,6 +3917,47 @@ TestCase {
         page.startEditing()
         verify(page.loadLayoutFrom(oldUrl), page.layoutNote)
         verify(page.layoutNote.indexOf("doesn't pick") < 0, page.layoutNote)
+        page.destroy()
+
+        // The pick's variant replaced since the layout was saved: the pick
+        // is the vehicle's still, and the load says its file is another
+        const first = Bridge.plugins().find(p => p.profiles.indexOf(profile) >= 0)
+        keptPlugin("Boosty", "boosty", "D101", first.sha256, profile.split(".").pop())
+        verify(Bridge.pickFiles([profile])[0].sha256 !== picked[0].sha256, "another written file")
+        page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        compare(page.layoutNote, "Loaded the layout. it was saved with another version of Boosty: a gauge "
+                + "reading a signal the picked version lacks reads not in profile")
+    }
+
+    // A plugin's name with its variant can pass a file name's bound: the
+    // layout names the pick by a name cut to fit, its variant whole, and
+    // a load finds the pick by its hash
+    function test_aLongPluginNameWithAVariantStillExports() {
+        // The longest name a signal file can carry: its profile's bound
+        const name = "N".repeat(56)
+        const variant = "v".repeat(24)
+        const first = keptPlugin(name, "longy", "D100")
+        const second = keptPlugin(name, "longer", "D101", first.sha256, variant)
+        const profile = second.profiles.find(p => p.endsWith("." + variant))
+        verify(profile !== undefined, JSON.stringify(second.profiles))
+        const vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Test car"), [profile])
+        const picked = Bridge.pickFiles([profile])
+        compare(picked[0].name, name + ": " + variant, "past the bound as the store names it")
+
+        const url = layoutUrl("layout-long-name.json")
+        let page = storedPageOf({ vehicles: vehicles },
+                                docOf([Object.assign(cellOf("Longer"), { refs: ["key:longer"] })]))
+        verify(page.exportLayoutTo(url), page.layoutNote)
+        compare(JSON.parse(Bridge.layoutFileText(url).text).files,
+                [{ name: "N".repeat(51) + "...: " + variant, sha256: picked[0].sha256 }])
+        page.destroy()
+
+        page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        compare(page.layoutNote, "Loaded the layout", "the pick is found by its hash")
     }
 
     // A pick no plugin here has gives no references, so a layout can't

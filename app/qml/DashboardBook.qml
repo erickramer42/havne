@@ -183,9 +183,34 @@ QtObject {
         return utf8Bytes(text) > maxBytes + fileKeysBytes ? "" : text
     }
 
+    // A file's name within maxFileName code points. A longer one gives
+    // way before its last ": " (a plugin's name before its variant),
+    // ending "...", so two variants of one plugin keep their own names
+    function fittedFileName(name) {
+        if (codePoints(name) <= maxFileName)
+            return name
+        const dots = "..."
+        const at = name.lastIndexOf(": ")
+        const keep = at >= 0 && codePoints(name.substring(at)) + dots.length < maxFileName
+                   ? name.substring(at) : ""
+        const head = name.substring(0, name.length - keep.length)
+                         .match(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\s\S]/g)
+        return head.slice(0, maxFileName - codePoints(keep) - dots.length).join("") + dots + keep
+    }
+
+    // Of a load's missing files, those a file of `vehicleFiles` is named
+    // as (its name as a layout writes it, or the missing name with
+    // ": <variant>" after it): the pick has changed since the layout was
+    // saved, so its file is another
+    function changedFiles(missing, vehicleFiles) {
+        return missing.filter(m => vehicleFiles.some(
+            f => fittedFileName(f.name) === m.name || f.name.startsWith(m.name + ": ")))
+    }
+
     // The files, of `vehicleFiles` ([{ name, sha256, refs }], refs the
     // "key:" and "id:" references the file's profile gives), that a cell
-    // of doc reads by a "key:" reference: [{ name, sha256 }]
+    // of doc reads by a "key:" reference: [{ name, sha256 }], each name
+    // within the file's bound (fittedFileName)
     function neededFiles(doc, vehicleFiles) {
         const used = {}
         for (const p of doc.pages) {
@@ -197,7 +222,7 @@ QtObject {
         const out = []
         for (const f of vehicleFiles) {
             if (f.refs.some(r => r.startsWith("key:") && used[r] === true))
-                out.push({ name: f.name, sha256: f.sha256 })
+                out.push({ name: fittedFileName(f.name), sha256: f.sha256 })
         }
         return out
     }

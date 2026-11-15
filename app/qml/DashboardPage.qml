@@ -513,8 +513,9 @@ Page {
         }
         // A pick is found by its written file's hash, or by the hash of a
         // signal file it was made from
+        const files = vehicleFiles()
         const have = []
-        for (const f of vehicleFiles()) {
+        for (const f of files) {
             have.push(f.sha256)
             for (let i = 0; i < f.from.length; ++i)
                 have.push(f.from[i])
@@ -540,10 +541,18 @@ Page {
                 words.push(qsTr("%1 left out because they couldn't be read").arg(droppedText(read.dropped)))
             if (read.notes.indexOf("no-form") >= 0)
                 words.push(qsTr("the file named no form, so it was read as the %1 form").arg(formWord(form)))
-            if (read.missing.length > 0)
+            // A pick changed since the save (Replace, an edit in the form)
+            // is picked still: only its file is another
+            const changedPicks = DashboardBook.changedFiles(read.missing, files)
+            const absent = read.missing.filter(m => changedPicks.indexOf(m) < 0)
+            if (changedPicks.length > 0)
+                words.push(qsTr("it was saved with another version of %1: a gauge reading a signal the "
+                                + "picked version lacks reads not in profile")
+                           .arg(changedPicks.map(f => f.name).join(", ")))
+            if (absent.length > 0)
                 words.push(qsTr("it needs plugins this vehicle doesn't pick: %1. Import or pick them under "
                                 + "Signals; until then those gauges read not in profile")
-                           .arg(read.missing.map(f => f.name).join(", ")))
+                           .arg(absent.map(f => f.name).join(", ")))
             const changed = edit(read.doc, stepOf("", qsTr("load a layout"), -1, -1, 0))
             if (!changed)
                 words[0] = qsTr("The file holds the layout already shown")

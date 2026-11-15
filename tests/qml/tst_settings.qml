@@ -2399,6 +2399,16 @@ TestCase {
         DocumentPicker.deliver(save.request, 0, "", "")
         compare(page.saving, null, "a cancel leaves no save waiting")
         compare(find(page, "signalProblem").text, "", "and says nothing")
+
+        // A pick answered with no save waiting is written nowhere, and
+        // its document's verdict is taken as any refused save's is
+        const uri = "content://com.android.externalstorage.documents/document/"
+                    + "primary%3ADownload%2Fpicked.json"
+        page.saveVariantAs(row)
+        page.saving = null
+        DocumentPicker.deliver(save.request, -1, uri, "picked.json",
+                               DocumentPicker.launchedMsForTesting() + 50)
+        compare(DocumentPicker.verdictOfForTesting(uri), 0, "the refusal took the verdict")
     }
 
     // A file core refuses, or one that is none of the three kinds, keeps

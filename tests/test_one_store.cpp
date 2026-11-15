@@ -1349,10 +1349,6 @@ TEST(BridgeTest, OneStoreAVehiclesPicksKeepTheirOrderAndTheFirstObd2OneStandsIn)
         column(offered, "forThisCar").contains(QStringLiteral("true")));
 }
 
-/* The index is the store's own file: it keeps keys it doesn't know,
- * holds the migration's mark, maps a wrapped file to its plugin, is no
- * copy to an older store's listing, and goes with its last fact; a
- * plugin's facts go with the plugin, a copy that no longer loads too */
 // A save out of the store that is refused removes only the document its
 // own pick made, as every save does: one the user chose to replace stays,
 // and so does one with bytes
@@ -1473,6 +1469,10 @@ TEST(BridgeTest, OneStoreAPicksFileIsItsWrittenTextAndTheFileThatMadeIt)
     EXPECT_TRUE(b.bridge.pickFiles({}).isEmpty());
 }
 
+/* The index is the store's own file: it keeps keys it doesn't know,
+ * holds the migration's mark, maps a wrapped file to its plugin, is no
+ * copy to an older store's listing, and goes with its last fact; a
+ * plugin's facts go with the plugin, a copy that no longer loads too */
 TEST(BridgeTest, OneStoreTheIndexKeepsWhatItDoesntKnowAndGoesWithItsLastFact)
 {
     SettingsDir dir;

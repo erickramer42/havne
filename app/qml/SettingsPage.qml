@@ -818,8 +818,10 @@ Pane {
     function saveTo(url) {
         const what = saving
         saving = null
-        if (what === null)
+        if (what === null) {
+            Bridge.dropPicked(url)
             return false
+        }
         const r = what.kind === "variant" ? Bridge.saveVariantFile(what.sha256, what.variant, url)
                 : what.kind === "plugin" ? Bridge.exportPlugin(what.sha256, url)
                 : Bridge.saveUnmigratedFile(what.sha256, url)
