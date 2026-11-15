@@ -2524,6 +2524,7 @@ TestCase {
         const remove = find(rowOf(page, "plugin.extras.track"), "rowRemoveVariant")
         verify(remove.visible)
         remove.clicked()
+        find(rowOf(page, "plugin.extras.track"), "signalsConfirmRemove").clicked()
         compare(page.picks, ["plugin.extras.base"])
         compare(page.variantRows.map(r => page.rowTitle(r)), ["Extras 1.5.0"])
         page.openRow = "plugin.extras.base"
@@ -2848,6 +2849,37 @@ TestCase {
                    + (flick.contentY + flick.headerHeight) + " to " + (flick.contentY + flick.height))
         }
         find(question, "signalsConfirmCancel").clicked()
+        compare(page.confirming, "")
+    }
+
+    // Remove this variant asks in its row first, as the whole plugin's
+    // Remove does: the list is as it was until the question is answered
+    function test_removeThisVariantAsksFirst() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "trip.json", "Trip extras"))
+        verify(page.importFile(Harness.writeScratchFile("two.json", signalFileText("Two", "D101"))))
+        verify(page.keepPending(page.pluginList[0].sha256, "two"))
+        const two = "plugin.trip-extras.two"
+        const listed = () => page.variantRows.map(r => r.profile).sort()
+        const before = listed()
+        compare(before.length, 2)
+        page.openRow = two
+        const row = rowOf(page, two)
+        find(row, "rowRemoveVariant").clicked()
+        compare(listed(), before, "asked first")
+        const question = find(row, "signalsConfirm")
+        verify(question.visible, "in the variant's row")
+        compare(find(question, "signalsConfirmText").text,
+                "Remove the variant two of Trip extras? It is yours, and no other copy exists")
+        verify(!find(row, "rowActions").visible, "the question in the actions' place")
+        verify(!find(page, "signalImport").enabled, "nothing else past the question")
+        find(question, "signalsConfirmCancel").clicked()
+        compare(listed(), before, "Cancel keeps it")
+        find(row, "rowRemoveVariant").clicked()
+        find(question, "signalsConfirmRemove").clicked()
+        compare(listed(), ["plugin.trip-extras.base"])
         compare(page.confirming, "")
     }
 
@@ -3198,7 +3230,8 @@ TestCase {
 
     // The signal files the move into the plugin store left behind are
     // listed with why, the picked vehicle's then the book's own; Save
-    // writes one out and Remove drops its record
+    // writes one out and Remove drops its record, asking first in the
+    // file's row where the kept copy goes with it
     function test_theFilesThatDidntMoveAreListedAndRemoved() {
         const a = "a".repeat(64)
         const b = "b".repeat(64)
@@ -3223,9 +3256,21 @@ TestCase {
         verify(!page.saveTo(Harness.writeScratchFile("left.json", "")))
         compare(find(page, "signalProblem").text, "Its copy is gone from the earlier version's folder")
 
-        find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
+        const kept = find(page, "unmigrated_0")
+        find(kept, "unmigratedRemove").clicked()
+        compare(page.unmigratedRows.map(r => r.name), ["Old extras", "Loose"], "asked first")
+        const question = find(kept, "unmigratedConfirm")
+        verify(question.visible, "in the file's row")
+        compare(find(question, "signalsConfirmText").text, "Remove Old extras? Its kept copy goes with it")
+        verify(!find(kept, "unmigratedSave").visible, "the question in the buttons' place")
+        verify(!find(page, "signalImport").enabled, "nothing else past the question")
+        find(question, "signalsConfirmCancel").clicked()
+        compare(page.unmigratedRows.length, 2, "Cancel keeps it")
+        find(kept, "unmigratedRemove").clicked()
+        find(question, "signalsConfirmRemove").clicked()
         compare(page.unmigratedRows.map(r => r.name), ["Loose"])
         verify(page.pickedVehicle.unmigrated === undefined, "the vehicle's record is gone")
+        // Its copy is still in the earlier version's folder: nothing to ask
         find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
         compare(page.unmigratedRows, [])
         verify(page.vehicles.unmigrated === undefined)
@@ -3262,11 +3307,13 @@ TestCase {
             compare(find(page, "signalNote").text, "Kept saved to the file you chose")
 
             find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
-            compare(page.unmigratedRows, [])
+            compare(page.unmigratedRows, [], "another vehicle lists it: no question")
             compare(Harness.keptUnmigrated(), [c], "the other vehicle lists it still")
             press(page, "vehicle_" + page.vehicles.list[0].id)
             compare(page.unmigratedRows.map(r => r.name), ["Kept"])
             find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
+            compare(Harness.keptUnmigrated(), [c], "the last listing asks first")
+            find(find(page, "unmigrated_0"), "signalsConfirmRemove").clicked()
             compare(page.unmigratedRows, [])
             compare(Harness.keptUnmigrated(), [], "no vehicle lists it: the bytes go")
         } finally {
@@ -3301,6 +3348,7 @@ TestCase {
             verify(page.saveTo(out))
             compare(Harness.readScratchFile(out), text, "and saved as before")
             find(find(page, "unmigrated_0"), "unmigratedRemove").clicked()
+            find(find(page, "unmigrated_0"), "signalsConfirmRemove").clicked()
             compare(page.unmigratedRows, [])
             compare(Harness.keptUnmigrated(), [], "removed, its bytes go")
         } finally {

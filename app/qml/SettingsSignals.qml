@@ -529,7 +529,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Remove this variant")
                     enabled: root.canChange
-                    onClicked: root.host.removeVariant(row.entry)
+                    onClicked: root.host.askRemoveVariant(row.entry)
                 }
                 ThemedButton {
                     objectName: "rowRemove"
@@ -648,7 +648,16 @@ ColumnLayout {
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
             }
+            RemoveQuestion {
+                id: leftQuestion
+                objectName: "unmigratedConfirm"
+                words: root.host.unmigratedQuestion(leftRow.modelData)
+                canRemove: root.host.idle
+                onRemoveChosen: root.host.confirmRemoval()
+                onCancelChosen: root.host.confirming = ""
+            }
             Flow {
+                visible: !leftQuestion.visible
                 Layout.fillWidth: true
                 spacing: Theme.spacing
                 ThemedButton {
@@ -664,7 +673,7 @@ ColumnLayout {
                     width: Math.min(implicitWidth, parent.width)
                     text: qsTr("Remove")
                     enabled: root.canChange
-                    onClicked: root.host.removeUnmigrated(leftRow.modelData)
+                    onClicked: root.host.askRemoveUnmigrated(leftRow.modelData)
                 }
             }
         }

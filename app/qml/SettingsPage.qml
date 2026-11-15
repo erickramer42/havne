@@ -172,7 +172,9 @@ Pane {
     readonly property bool bookLater: VehicleBook.isLater(vehicles)
     // A removal waiting for its second press, asked where it was pressed:
     // "", "forget", "forgetAll", "removePlugin:<sha256>" (in the plugin's
-    // open row) or "removeOwn:<sha256>" (under the vehicle's own signals)
+    // open row), "removeOwn:<sha256>" (under the vehicle's own signals),
+    // "removeVariant:<profile>" (in its row) or "removeUnmigrated:<key>"
+    // (unmigratedKey, in the file's row)
     property string confirming: ""
     // The picked vehicle's plotted signals reach Live once this session's
     // rows exist; a change of rows before that isn't the user's
@@ -719,6 +721,12 @@ Pane {
         return true
     }
 
+    // A variant of the user's own has no copy anywhere else either: its
+    // Remove asks first, as the whole plugin's does
+    function askRemoveVariant(row) {
+        confirming = "removeVariant:" + row.profile
+    }
+
     // A plugin of the user's own has no copy anywhere else, so its
     // removal asks first
     function askRemovePlugin(sha) {
@@ -740,10 +748,13 @@ Pane {
         return qsTr("Remove %1? It is yours, and no other copy exists").arg(p.name)
     }
     // The question a row of the list asks, "" for none: a plugin's in its
-    // open row, where its Remove was pressed
+    // open row, where its Remove was pressed, and a variant's in its own
     function rowQuestion(entry, open) {
         if (open && confirming === "removePlugin:" + entry.sha256 && confirmingPlugin() !== null)
             return pluginQuestion(confirmingPlugin())
+        if (confirming === "removeVariant:" + entry.profile)
+            return qsTr("Remove the variant %1 of %2? It is yours, and no other copy exists")
+                       .arg(entry.variant, entry.name)
         return ""
     }
     function ownQuestion() {
@@ -752,8 +763,19 @@ Pane {
     }
     // The question's Remove: what it asked about goes
     function confirmRemoval() {
+        const asked = confirming
         const p = confirmingPlugin()
         confirming = ""
+        if (asked.startsWith("removeVariant:")) {
+            const row = variantRows.find(r => "removeVariant:" + r.profile === asked)
+            return row !== undefined && removeVariant(row)
+        }
+        if (asked.startsWith("removeUnmigrated:")) {
+            const record = unmigratedRows.find(r => "removeUnmigrated:" + unmigratedKey(r) === asked)
+            if (record !== undefined)
+                removeUnmigrated(record)
+            return record !== undefined
+        }
         return p !== null && removePlugin(p.sha256)
     }
 
@@ -876,6 +898,24 @@ Pane {
     function unmigratedText(r) {
         return qsTr("%1: %2").arg(r.name, r.words)
                + (r.kept ? "" : qsTr(" (its copy is still in the earlier version's folder)"))
+    }
+
+    function unmigratedKey(r) {
+        return (r.loose ? "book:" : "vehicle:") + r.sha256
+    }
+    // A removal that deletes the kept bytes (no other record lists them)
+    // asks first: they are the file's one copy here
+    function askRemoveUnmigrated(record) {
+        const after = record.loose ? VehicleBook.dropLooseUnmigrated(vehicles, record.sha256)
+                                   : VehicleBook.dropUnmigrated(vehicles, record.sha256)
+        if (record.kept && !VehicleBook.hashListed(after, record.sha256))
+            confirming = "removeUnmigrated:" + unmigratedKey(record)
+        else
+            removeUnmigrated(record)
+    }
+    function unmigratedQuestion(record) {
+        return confirming === "removeUnmigrated:" + unmigratedKey(record)
+            ? qsTr("Remove %1? Its kept copy goes with it").arg(record.name) : ""
     }
 
     // The record out of the book; its kept bytes go once nothing lists
