@@ -2644,6 +2644,15 @@ TestCase {
         verify(find(cell, "gauge").item.Accessible.ignored, "not announced where it isn't")
     }
 
+    // A blank cell has no label: its Remove says what it removes
+    function test_aBlankCellsRemoveNamesTheCell() {
+        const blank = { kind: "blank", w: 2, h: 4, refs: [] }
+        const page = pageOf({}, docOf([blank, cellOf("B")]))
+        page.startEditing()
+        compare(find(find(page, "dashCell_0_0"), "cellRemove").Accessible.name, "Remove blank cell")
+        compare(find(find(page, "dashCell_0_1"), "cellRemove").Accessible.name, "Remove B")
+    }
+
     // Outside edit mode a blank cell has nothing to hold
     function test_aBlankCellIsHeldOnlyInEditMode() {
         const blank = { kind: "blank", w: 2, h: 4, refs: [] }
@@ -3610,7 +3619,7 @@ TestCase {
         compare(raw.form, "desktop")
         compare(raw.files, [])
         compare(page.layoutNote, "Saved this layout to a file. It's a desktop layout: it loads on a desktop, "
-                + "not on a phone. A layout isn't scaled between forms")
+                + "not on a phone. A layout isn't scaled between forms.")
         page.destroy()
 
         const second = docOf([cellOf("X")])
@@ -3760,7 +3769,7 @@ TestCase {
         verify(src.exportLayoutTo(url), src.layoutNote)
         verify(!src.layoutNoteBad)
         compare(src.layoutNote, "Saved this layout to a file. It's a " + data.form + " layout: it loads on a "
-                + data.form + ", not on a " + data.other + ". A layout isn't scaled between forms")
+                + data.form + ", not on a " + data.other + ". A layout isn't scaled between forms.")
         const note = find(src, "dashLayoutNote")
         verify(note.visible, "the note shows in the More row")
         verify(waitForPolish(note), "the note laid out")
@@ -3886,7 +3895,7 @@ TestCase {
         compare(raw.files, [{ name: "Boosty", sha256: picked[0].sha256 }],
                 "the pick the layout needs, by name and its written file's hash")
         compare(page.layoutNote, "Saved this layout to a file. It's a desktop layout: it loads on a desktop, "
-                + "not on a phone. A layout isn't scaled between forms. It needs the plugins Boosty")
+                + "not on a phone. A layout isn't scaled between forms. It needs the plugin Boosty.")
         compare(page.layoutFileName(), "dashboard-test-car-desktop.json")
         page.destroy()
 

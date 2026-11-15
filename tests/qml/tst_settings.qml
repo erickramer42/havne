@@ -169,6 +169,30 @@ TestCase {
                 "nothing past the edge once connected")
     }
 
+    // A refusal's words break at spaces, never inside a word: a refused
+    // replay address wrapped mid-word on the phone
+    function test_aRefusalWrapsAtWordsNotInThem() {
+        const page = createPage()
+        page.width = 320
+        const column = find(page, "settingsConnectionPageColumn")
+        tryCompare(column, "width", 320 - 2 * Theme.pageMargin)
+        const label = find(page, "errorLabel")
+        label.visible = true
+        // A word of about 0.6 of the label's width: one fits, two don't
+        label.text = "W"
+        waitForPolish(column)
+        const word = "W".repeat(Math.floor(label.width * 0.6 / label.contentWidth))
+        label.text = word
+        waitForPolish(column)
+        const one = label.contentWidth
+        verify(one > label.width * 0.5 && one < label.width * 0.7, "a word: " + one + " in " + label.width)
+        label.text = word + " " + word + " " + word
+        waitForPolish(column)
+        tryCompare(label, "lineCount", 3, 1000, "a word to a line")
+        verify(label.contentWidth <= one + 1,
+               "no line runs past a whole word: " + label.contentWidth + " vs " + one)
+    }
+
     SignalSpy {
         id: logSpy
         signalName: "logRequested"

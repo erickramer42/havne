@@ -323,7 +323,8 @@ GaugeCard {
             objectName: "cellRemove"
             compact: true
             text: "\u00D7"
-            Accessible.name: qsTr("Remove %1").arg(card.label)
+            Accessible.name: card.kind === "blank" ? qsTr("Remove blank cell")
+                                                 : qsTr("Remove %1").arg(card.host.cellName(card.cell))
             onClicked: card.host.removeCell(card.cellIndex)
             // A touch's size drawn as a smaller raised square with an edge:
             // a button, not an empty tile, and inside a short cell

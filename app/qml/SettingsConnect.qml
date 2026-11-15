@@ -98,7 +98,7 @@ ColumnLayout {
             objectName: "errorLabel"
             visible: false
             color: Theme.danger
-            wrapMode: Text.WrapAnywhere
+            wrapMode: Text.Wrap
             Layout.fillWidth: true
             text: ""
         }

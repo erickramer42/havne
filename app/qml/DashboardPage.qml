@@ -494,10 +494,12 @@ Page {
                         + "A layout isn't scaled between forms")
                        .arg(formWord(form)).arg(formWord(form === "phone" ? "desktop" : "phone"))
                    + (needed.length === 0 ? ""
-                      : qsTr(". It needs the plugins %1").arg(needed.map(f => f.name).join(", ")))
+                      : (needed.length === 1 ? qsTr(". It needs the plugin %1") : qsTr(". It needs the plugins %1"))
+                            .arg(needed.map(f => f.name).join(", ")))
                    + (unloaded.length === 0 ? ""
                       : qsTr(". The vehicle's picks %1 aren't in the store, so a gauge reading them isn't listed as needing them")
-                            .arg(unloaded.join(", "))))
+                            .arg(unloaded.join(", ")))
+                   + ".")
         return true
     }
     // Loads a layout file as this form's layout, one undo step. Refused in
