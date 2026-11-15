@@ -7,6 +7,7 @@
 #include "urlwrite.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QPointer>
 
 #ifdef Q_OS_ANDROID
@@ -45,6 +46,18 @@ constexpr bool codesAreTheListeners()
 }
 static_assert(codesAreTheListeners(),
               "the listener takes exactly the codes the picks get");
+const char* verdictWords(PickMade made)
+{
+    switch (made) {
+    case PickMade::Made:
+        return "made by the pick";
+    case PickMade::Replaced:
+        return "chosen to replace";
+    case PickMade::Unknown:
+        break;
+    }
+    return "no time, judged by its bytes";
+}
 } // namespace
 
 int DocumentPicker::requestOfCode(int code) const
@@ -56,12 +69,40 @@ int DocumentPicker::pick()
 {
     const int request = ++m_last;
     m_pending = request;
+    m_save = false;
     start(request);
     return request;
 }
 
+int DocumentPicker::pickSave(const QString& title, const QString& suffix)
+{
+    const int request = ++m_last;
+    m_pending = request;
+    m_save = true;
+    m_title = title;
+    m_mimeType = mimeTypeOf(suffix);
+    m_launchedMs = QDateTime::currentMSecsSinceEpoch();
+    start(request);
+    return request;
+}
+
+QString DocumentPicker::mimeTypeOf(const QString& suffix) const
+{
+    const QString s = suffix.toLower();
+    if (s == QLatin1String("json")) {
+        return QStringLiteral("application/json");
+    }
+    if (s == QLatin1String("csv")) {
+        return QStringLiteral("text/csv");
+    }
+    if (s == QLatin1String("txt")) {
+        return QStringLiteral("text/plain");
+    }
+    return QStringLiteral("application/octet-stream");
+}
+
 void DocumentPicker::deliver(int request, int resultCode, const QString& uri,
-                             const QString& name)
+                             const QString& name, qint64 modifiedMs)
 {
     if (request == 0 || request != m_pending) {
         return;
@@ -72,8 +113,27 @@ void DocumentPicker::deliver(int request, int resultCode, const QString& uri,
     } else if (uri.isEmpty()) {
         emit failed(request, tr("The picker returned no document"));
     } else {
+        if (m_save) {
+            // Noted before the answer, so the save it starts finds it, under
+            // the name that save opens it by
+            const qint64 answeredMs = QDateTime::currentMSecsSinceEpoch();
+            const PickMade made =
+                judgePick(m_launchedMs, answeredMs, modifiedMs);
+            notePick(pathOfUrl(pickedUrl(uri)), made);
+            // No URI or name: a cloud path can carry a person's folders
+            qInfo("DocumentPicker: a save's document, last modified %lld, "
+                  "the picker launched %lld, answered %lld: %s",
+                  static_cast<long long>(modifiedMs),
+                  static_cast<long long>(m_launchedMs),
+                  static_cast<long long>(answeredMs), verdictWords(made));
+        }
         emit picked(request, pickedUrl(uri), name);
     }
+}
+
+int DocumentPicker::verdictOfForTesting(const QString& uri) const
+{
+    return static_cast<int>(peekPick(pathOfUrl(pickedUrl(uri))));
 }
 
 // Queued, so the caller has the request number before its answer
@@ -102,12 +162,19 @@ QJniObject javaText(const char* text)
     return QJniObject::fromString(QString::fromLatin1(text));
 }
 
-// OpenableColumns.DISPLAY_NAME of the picked document, "" when the provider
-// doesn't say
-QString displayName(const QJniObject& uri)
+struct DocumentFacts {
+    QString name;
+    qint64 modifiedMs = -1;
+};
+
+// OpenableColumns.DISPLAY_NAME of the picked document ("" when the provider
+// doesn't say) and, asked for, its Document.COLUMN_LAST_MODIFIED (-1 when it
+// doesn't)
+DocumentFacts documentFacts(const QJniObject& uri, bool withModified)
 {
+    DocumentFacts facts;
     if (!uri.isValid()) {
-        return {};
+        return facts;
     }
     QJniEnvironment env;
     // Plain JNI, checked: a null projection asks for every column
@@ -115,10 +182,18 @@ QString displayName(const QJniObject& uri)
     jobjectArray columns =
         text == nullptr
             ? nullptr
-            : env->NewObjectArray(1, text, javaText("_display_name").object());
-    if (columns == nullptr) {
+            : env->NewObjectArray(withModified ? 2 : 1, text,
+                                  javaText("_display_name").object());
+    if (columns != nullptr && withModified) {
+        env->SetObjectArrayElement(columns, 1,
+                                   javaText("last_modified").object());
+    }
+    if (columns == nullptr || env->ExceptionCheck()) {
         env->ExceptionClear();
-        return {};
+        if (columns != nullptr) {
+            env->DeleteLocalRef(columns);
+        }
+        return facts;
     }
     const QJniObject cursor = contentResolver().callObjectMethod(
         "query",
@@ -127,21 +202,33 @@ QString displayName(const QJniObject& uri)
         uri.object(), columns, static_cast<jobject>(nullptr),
         static_cast<jobject>(nullptr), static_cast<jobject>(nullptr));
     env->DeleteLocalRef(columns);
-    QString name;
     if (cursor.isValid()) {
         // By name: a provider may answer more columns than were asked
-        const jint column =
-            cursor.callMethod<jint>("getColumnIndex", "(Ljava/lang/String;)I",
-                                    javaText("_display_name").object());
-        if (column >= 0 && cursor.callMethod<jboolean>("moveToFirst")) {
-            name = cursor
-                       .callObjectMethod("getString", "(I)Ljava/lang/String;",
-                                         column)
-                       .toString();
+        const auto columnOf = [&cursor](const char* name) {
+            return cursor.callMethod<jint>("getColumnIndex",
+                                           "(Ljava/lang/String;)I",
+                                           javaText(name).object());
+        };
+        const jint nameColumn = columnOf("_display_name");
+        const jint modifiedColumn =
+            withModified ? columnOf("last_modified") : -1;
+        if (cursor.callMethod<jboolean>("moveToFirst")) {
+            if (nameColumn >= 0) {
+                facts.name =
+                    cursor
+                        .callObjectMethod("getString", "(I)Ljava/lang/String;",
+                                          nameColumn)
+                        .toString();
+            }
+            if (modifiedColumn >= 0 && !cursor.callMethod<jboolean>(
+                                           "isNull", "(I)Z", modifiedColumn)) {
+                facts.modifiedMs =
+                    cursor.callMethod<jlong>("getLong", "(I)J", modifiedColumn);
+            }
         }
         cursor.callMethod<void>("close");
     }
-    return name;
+    return facts;
 }
 
 // On the GUI thread: the result reaches the pick it answers, the name asked
@@ -157,21 +244,24 @@ void answer(const QPointer<DocumentPicker>& self, int code, int resultCode,
         self->deliver(request, resultCode, uri, {});
         return;
     }
-    QThreadPool::globalInstance()->start([self, request, resultCode, uri] {
-        const QString name = displayName(contentUri(uri));
-        QCoreApplication* app = QCoreApplication::instance();
-        if (app == nullptr) {
-            return;
-        }
-        QMetaObject::invokeMethod(
-            app,
-            [self, request, resultCode, uri, name] {
-                if (self) {
-                    self->deliver(request, resultCode, uri, name);
-                }
-            },
-            Qt::QueuedConnection);
-    });
+    const bool save = self->savePending();
+    QThreadPool::globalInstance()->start(
+        [self, request, resultCode, uri, save] {
+            const DocumentFacts facts = documentFacts(contentUri(uri), save);
+            QCoreApplication* app = QCoreApplication::instance();
+            if (app == nullptr) {
+                return;
+            }
+            QMetaObject::invokeMethod(
+                app,
+                [self, request, resultCode, uri, facts] {
+                    if (self) {
+                        self->deliver(request, resultCode, uri, facts.name,
+                                      facts.modifiedMs);
+                    }
+                },
+                Qt::QueuedConnection);
+        });
 }
 
 } // namespace
@@ -231,15 +321,27 @@ bool DocumentPicker::available() const
 void DocumentPicker::start(int request)
 {
     QJniObject intent("android/content/Intent", "(Ljava/lang/String;)V",
-                      javaText("android.intent.action.OPEN_DOCUMENT").object());
+                      javaText(m_save ? "android.intent.action.CREATE_DOCUMENT"
+                                      : "android.intent.action.OPEN_DOCUMENT")
+                          .object());
     intent.callObjectMethod(
         "addCategory", "(Ljava/lang/String;)Landroid/content/Intent;",
         javaText("android.intent.category.OPENABLE").object());
-    // Every file: each dialog offers All files, and a provider's MIME type for
-    // a .json or .csv varies, so a filter would gray out the user's file
+    // An open asks for every file: each dialog offers All files, and a
+    // provider's MIME type for a .json or .csv varies, so a filter would gray
+    // out the user's file. A save names its own type
+    const QJniObject type =
+        m_save ? QJniObject::fromString(m_mimeType) : javaText("*/*");
     intent.callObjectMethod("setType",
                             "(Ljava/lang/String;)Landroid/content/Intent;",
-                            javaText("*/*").object());
+                            type.object());
+    if (m_save && !m_title.isEmpty()) {
+        intent.callObjectMethod(
+            "putExtra",
+            "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;",
+            javaText("android.intent.extra.TITLE").object(),
+            QJniObject::fromString(m_title).object());
+    }
     // Asked first for words of its own (the manifest's <queries> makes the
     // picker visible)
     const QJniObject context = QNativeInterface::QAndroidApplication::context();
@@ -251,7 +353,8 @@ void DocumentPicker::start(int request)
                               "()Landroid/content/pm/PackageManager;")
             .object());
     if (!handler.isValid()) {
-        failLater(request, tr("No app on this phone opens documents"));
+        failLater(request, m_save ? tr("No app on this phone saves documents")
+                                  : tr("No app on this phone opens documents"));
         return;
     }
     // Plain JNI, checked: Qt's own launch clears an exception unseen (a

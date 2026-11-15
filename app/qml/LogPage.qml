@@ -7,7 +7,6 @@ pragma ComponentBehavior: Bound
 import QtCore
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 
 Pane {
@@ -286,14 +285,15 @@ Pane {
                 color: page.exportFailed ? Theme.danger : Theme.textDim
                 font.pixelSize: Theme.fontCaption
             }
-            FileDialog {
+            DocumentSaveDialog {
                 id: exportDialog
+                objectName: "frameExportDialog"
                 title: qsTr("Export the frames as CSV")
-                fileMode: FileDialog.SaveFile
                 defaultSuffix: "csv"
                 nameFilters: [qsTr("CSV files (*.csv)"), qsTr("All files (*)")]
                 currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
                 onAccepted: page.exportFramesTo(exportDialog.selectedFile)
+                onFailed: words => { page.exportFailed = true; page.exportNote = words }
             }
             Flow {
                 objectName: "selectionBar"

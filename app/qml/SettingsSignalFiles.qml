@@ -5,7 +5,6 @@
 import QtCore
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 
 pragma ComponentBehavior: Bound
@@ -292,13 +291,14 @@ ColumnLayout {
         root.host.signalNote = ""
         root.host.signalProblem = words
     }
-    FileDialog {
+    DocumentSaveDialog {
         id: saveDialog
+        objectName: "signalSaveDialog"
         title: qsTr("Save a copy of the signal file")
-        fileMode: FileDialog.SaveFile
         defaultSuffix: "json"
         nameFilters: [qsTr("Signal files (*.json)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         onAccepted: root.host.saveSignalFileTo(root.host.savingSha, saveDialog.selectedFile)
+        onFailed: words => root.pickFailed(words)
     }
 }

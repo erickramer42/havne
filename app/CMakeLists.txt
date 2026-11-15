@@ -88,6 +88,7 @@ qt_add_qml_module(app_ui
         qml/SegmentRow.qml
         qml/CsvGuessPreview.qml
         qml/DocumentOpenDialog.qml
+        qml/DocumentSaveDialog.qml
         qml/RecordingExportPanel.qml
         qml/RecordingJumpRow.qml
         qml/StretchesPanel.qml
