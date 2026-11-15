@@ -29,6 +29,15 @@ void SignalFilter::setPlottedOnly(bool on)
     emit changed();
 }
 
+void SignalFilter::setAskedOnly(bool on)
+{
+    if (on == m_askedOnly) {
+        return;
+    }
+    m_askedOnly = on;
+    emit changed();
+}
+
 QVariantList SignalFilter::groups() const
 {
     QVariantList list;
@@ -40,13 +49,17 @@ QVariantList SignalFilter::groups() const
 
 bool SignalFilter::active() const
 {
-    return !m_words.isEmpty() || m_plottedOnly || !m_groups.empty();
+    return !m_words.isEmpty() || m_plottedOnly || m_askedOnly ||
+           !m_groups.empty();
 }
 
 bool SignalFilter::matches(const QString& name, const QString& unit, int group,
-                           bool plotted) const
+                           bool plotted, bool asked) const
 {
     if (m_plottedOnly && !plotted) {
+        return false;
+    }
+    if (m_askedOnly && !asked) {
         return false;
     }
     if (!m_groups.empty() && m_groups.count(known(group)) == 0) {
@@ -87,6 +100,7 @@ void SignalFilter::clear()
     m_text.clear();
     m_words.clear();
     m_plottedOnly = false;
+    m_askedOnly = false;
     m_groups.clear();
     emit changed();
 }

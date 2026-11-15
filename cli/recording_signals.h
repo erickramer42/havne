@@ -19,11 +19,16 @@
 namespace cli {
 
 // What events.log's header says decoded the session: its "profile" line
-// and its "signal file  signals.json,<SHA-256>" line (format 3)
+// and its "signal file  signals.json,<SHA-256>" line (format 3), and the
+// conditions it judged, its "conditions  conditions.json,<SHA-256>" line
+// (ADR-0063 section 8)
 struct RecordedSignals {
     std::string profile; // "" when the header has none
     std::string sha256;  // 64 lowercase hex digits; "" when it names no file
     bool ended = false;  // the header's blank line was seen
+    // The same for conditions.json; last and initialized, so the app's
+    // {profile, sha256, ended} builds one and draws no warning
+    std::string conditions_sha256 = {};
 
     // Takes one line of events.log from its first, its line end cut;
     // false once the header has ended (the blank line), so a caller stops
@@ -42,22 +47,31 @@ struct RecordedSignals {
             return false;
         }
         static const char kProfile[] = "profile  ";
-        static const char kFile[] = "signal file  signals.json,";
         const size_t np = sizeof kProfile - 1;
-        const size_t nf = sizeof kFile - 1;
         if (l.compare(0, np, kProfile) == 0) {
             profile = l.substr(np);
-        } else if (l.compare(0, nf, kFile) == 0 && l.size() == nf + 64) {
-            const std::string hex = l.substr(nf);
-            bool ok = true;
-            for (const char c : hex) {
-                ok = ok && ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
-            }
-            if (ok) {
-                sha256 = hex;
-            }
+        } else {
+            named(l, "signal file  signals.json,", &sha256);
+            named(l, "conditions  conditions.json,", &conditions_sha256);
         }
         return true;
+    }
+
+    // A header line of a copy and its SHA-256 into *hash, when the line is
+    // the key and 64 lowercase hex digits
+    static void named(const std::string& l, const char* key, std::string* hash)
+    {
+        const size_t n = std::char_traits<char>::length(key);
+        if (l.size() != n + 64 || l.compare(0, n, key) != 0) {
+            return;
+        }
+        const std::string hex = l.substr(n);
+        for (const char c : hex) {
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+                return;
+            }
+        }
+        *hash = hex;
     }
 
     // A file named and a profile it was recorded under

@@ -46,6 +46,12 @@ qt_add_library(app_ui STATIC
     pluginstore.h
     signalstore.cpp
     signalstore.h
+    conditionmodel.cpp
+    conditionmodel.h
+    conditionstore.cpp
+    conditionstore.h
+    storemigration.cpp
+    storemigration.h
     recordingimport.cpp
     recordingimport.h
     recordingexport.cpp
@@ -88,6 +94,7 @@ qt_add_qml_module(app_ui
         qml/SegmentRow.qml
         qml/CsvGuessPreview.qml
         qml/DocumentOpenDialog.qml
+        qml/DocumentSaveDialog.qml
         qml/RecordingExportPanel.qml
         qml/RecordingJumpRow.qml
         qml/StretchesPanel.qml

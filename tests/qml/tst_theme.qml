@@ -1,8 +1,9 @@
 // File/layer: tests/qml/tst_theme.qml | Qt Quick Test, QML tier
 // Testing: Theme's link-state color and label for every state the
 //          bridge publishes and an unknown one, the chart trace
-//          palette, the stale age as core's, and the window's color
-//          scheme following the look. No session.
+//          palette, the stale age as core's, the window's color
+//          scheme following the look, and the alert roles' contrast.
+//          No session.
 
 import QtCore
 import QtQuick
@@ -120,7 +121,8 @@ TestCase {
         "bg", "surface", "elevated", "elevatedLight", "outline", "primary", "textOnPrimary",
         "hairline", "text", "textDim", "success", "warning", "danger", "info",
         "gaugeValue", "gaugeReadout", "gaugeNeedle",
-        "gaugeTick", "gaugeWarn", "gaugeDanger"]
+        "gaugeTick", "gaugeWarn", "gaugeDanger",
+        "alertWarnFill", "alertDangerFill", "textOnAlertWarn", "textOnAlertDanger"]
 
     function test_paletteNamesAndClamps() {
         compare(Theme.paletteNames.join(","), "dark,nightAmber,nightRed,daylight")
@@ -225,7 +227,8 @@ TestCase {
                        ["gaugeWarn", "gaugeDanger"], ["surface", "gaugeReadout"],
                        ["surface", "gaugeNeedle"], ["surface", "gaugeTick"],
                        ["bg", "surface"], ["surface", "elevated"], ["bg", "text"],
-                       ["text", "textDim"], ["warning", "danger"]]
+                       ["text", "textDim"], ["warning", "danger"],
+                       ["alertWarnFill", "alertDangerFill"]]
         for (const [a, b] of pairs)
             verify(!Qt.colorEqual(Theme[a], Theme[b]), a + " and " + b + " are both " + Theme[a]
                    + " in " + data.name)
@@ -241,7 +244,8 @@ TestCase {
         usePalette(data.name)
         for (const r of ["primary", "textOnPrimary", "hairline", "text", "textDim", "success", "warning", "danger", "info",
                          "gaugeValue", "gaugeReadout", "gaugeNeedle", "gaugeTick", "gaugeWarn",
-                         "gaugeDanger", "stretchPull", "stretchCruise"]) {
+                         "gaugeDanger", "stretchPull", "stretchCruise", "alertWarnFill",
+                         "alertDangerFill"]) {
             const h = Qt.color(Theme[r]).hsvHue * 360
             verify(h >= 0 && h <= 60, r + " is " + Theme[r] + ", hue " + h.toFixed(0) + " in " + data.name)
         }
@@ -296,12 +300,37 @@ TestCase {
         // The label on a danger fill (Clear codes), night palettes included
         const textOnDanger = contrast(Theme.textOnDanger, Theme.danger)
         verify(textOnDanger >= 4.5, "textOnDanger on danger is " + textOnDanger.toFixed(2) + ":1 in " + data.name)
+        // An alert's words on its band, each level
+        for (const [fg, fill] of [["textOnAlertWarn", "alertWarnFill"],
+                                  ["textOnAlertDanger", "alertDangerFill"]]) {
+            const c = contrast(Theme[fg], Theme[fill])
+            verify(c >= 4.5, fg + " on " + fill + " is " + c.toFixed(2) + ":1 in " + data.name)
+        }
         // Control borders and the lit color against what they sit on: 3:1
         for (const [fg, bgName] of [["outline", "bg"], ["gaugeValue", "surface"],
                                     ["gaugeNeedle", "surface"], ["stretchPull", "surface"],
                                     ["stretchCruise", "surface"]]) {
             const c = contrast(Theme[fg], Theme[bgName])
             verify(c >= 3, fg + " on " + bgName + " is " + c.toFixed(2) + ":1 in " + data.name)
+        }
+    }
+
+    // An alert's band stands off the page and the panel it lies over, 3:1
+    // in every theme; at night it is no brighter than the text, since
+    // nothing outshines it there
+    function test_alertFillsStandOffTheirPages_data() {
+        return Theme.paletteNames.map(n => ({ tag: n, name: n }))
+    }
+    function test_alertFillsStandOffTheirPages(data) {
+        usePalette(data.name)
+        for (const fill of ["alertWarnFill", "alertDangerFill"]) {
+            for (const page of ["bg", "surface"]) {
+                const c = contrast(Theme[fill], Theme[page])
+                verify(c >= 3, fill + " on " + page + " is " + c.toFixed(2) + ":1 in " + data.name)
+            }
+            if (Theme.nightPalettes.indexOf(data.name) >= 0)
+                verify(lum(Theme[fill]) < lum(Theme.text),
+                       fill + " " + Theme[fill] + " outshines the text in " + data.name)
         }
     }
 

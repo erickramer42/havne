@@ -7,7 +7,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-// A FrameListModel's rows as a table. The Log page's live frames and the
+// A FrameListModel's rows as a table. The Activity page's live frames and the
 // recording viewer's frames share it; what a tap does is the user's.
 Rectangle {
     id: table
@@ -20,7 +20,7 @@ Rectangle {
     // Shown while the table has no rows
     property string emptyText: ""
     // The nearest ancestor's touchMin (the recordings page asks for a phone's
-    // touch size; the Log page has none), as ThemedButton takes it
+    // touch size; the Activity page has none), as ThemedButton takes it
     // qmllint disable missing-property
     readonly property real touchMin: {
         for (let p = table.parent; p; p = p.parent) {

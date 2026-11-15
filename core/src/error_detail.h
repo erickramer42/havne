@@ -11,9 +11,15 @@
 #ifndef ECUIO_ERROR_DETAIL_H
 #define ECUIO_ERROR_DETAIL_H
 
+#include <cstddef>
+
+/* The most bytes a detail holds, its NUL not counted */
+inline constexpr size_t ecuio_detail_max = 511;
+
 void ecuio_detail_clear();
 
-/* printf-style; replaces this thread's detail, cut at 511 bytes. */
+/* printf-style; replaces this thread's detail, cut at ecuio_detail_max
+ * bytes. */
 void ecuio_detail_set(const char* fmt, ...)
 #if defined(__GNUC__) || defined(__clang__)
     __attribute__((format(printf, 1, 2)))

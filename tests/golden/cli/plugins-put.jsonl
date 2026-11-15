@@ -1,0 +1,3 @@
+{"schema": 1, "type": "start"}
+{"fixtures": 0, "id": "desk-extras", "name": "Desk extras", "package": 0, "tiers": ["data"], "type": "plugin", "variants": [{"id": "base", "profile": "plugin.desk-extras.base"}, {"id": "gauged-extras", "profile": "plugin.desk-extras.gauged-extras"}], "version": "1.1.0"}
+{"action": "added", "lineage": "8c52c402d1bba2cdab9b0209b616bcd5", "notes": null, "type": "written", "variant": "gauged-extras", "version": "1.1.0"}

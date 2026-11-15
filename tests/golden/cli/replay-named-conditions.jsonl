@@ -1,0 +1,10 @@
+{"schema": 1, "type": "start"}
+{"backend": "replay", "baud": 0, "channels": [], "profile": "obd2", "protocol_id": 0, "replay": {"frames": 217, "loop": false, "span_ms": 30000, "speed_milli": 0}, "type": "session"}
+{"conditions": [{"alert": "warning", "available": true, "key": "running", "mark": true, "record": false, "why": null}, {"alert": null, "available": true, "key": "turning", "mark": false, "record": false, "why": null}, {"alert": null, "available": true, "key": "rpm_fresh", "mark": false, "record": false, "why": null}, {"alert": null, "available": false, "key": "link", "mark": false, "record": true, "why": "no_link"}], "generation": 1, "name": "Engine start", "source": "file", "type": "conditions"}
+{"ch": 0, "data": "41 05 8C", "flags": 256, "id": "0x7E8", "t_us": 0, "type": "frame"}
+{"ch": 0, "data": "41 0C 0C 80", "flags": 256, "id": "0x7E8", "t_us": 125000, "type": "frame"}
+{"fired": true, "key": "running", "stale": false, "state": "on", "t_us": 125000, "term": 0, "type": "condition", "value": 800}
+{"fired": false, "key": "turning", "stale": false, "state": "off", "t_us": 125000, "term": 0, "type": "condition", "value": 800}
+{"fired": true, "key": "rpm_fresh", "stale": false, "state": "on", "t_us": 125000, "term": 0, "type": "condition", "value": 800}
+{"ch": 0, "data": "41 05 8C", "flags": 256, "id": "0x7E8", "t_us": 250000, "type": "frame"}
+{"conditions_dropped": 0, "dropped_frames": 0, "dropped_values": 0, "frames": 3, "reason": "count", "type": "end"}

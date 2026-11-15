@@ -44,6 +44,9 @@
 //    than one Single Frame (over 7 bytes), as a long reply takes;
 //    ECUIO_FAKE_PENDING=1 answers each request with "response pending"
 //    (7F <service> 78) at once, ahead of that reply.
+//    ECUIO_FAKE_HELD_SERVICE=<service, hex> answers each request of that
+//    service with 7F <service> 78 alone: its answer never comes, so each
+//    stays out for the engine's pending wait.
 //    ECUIO_FAKE_UNSUPPORTED_NRC sets the code of the negative reply to
 //    an unsupported PID or DID (hex or decimal), or 0 for no reply at
 //    all. The supported-PID bitmaps (PIDs 0x00, 0x20, 0x40) mark the
@@ -846,6 +849,13 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
     const unsigned long long_delay_ms =
         fake_j2534::knob_ms("ECUIO_FAKE_LONG_REPLY_DELAY_MS", 0);
     const bool pending_first = fake_j2534::knob_on("ECUIO_FAKE_PENDING");
+    long held_service = -1;
+    {
+        char hb[32] = {};
+        if (fake_j2534::read_knob("ECUIO_FAKE_HELD_SERVICE", hb, sizeof(hb))) {
+            held_service = strtol(hb, nullptr, 16);
+        }
+    }
     long unsupported_nrc = -1;
     {
         char nb[32] = {};
@@ -975,6 +985,15 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
                            (n == 5 && (req[4] == 0x03 || req[4] == 0x04 ||
                                        req[4] == 0x07 || req[4] == 0x0A)));
 
+        if (request && req[4] == held_service) {
+            unsigned char pending[7];
+            unsigned long pending_len = 0;
+            fake_j2534::build_negative(req, 0x78, pending, &pending_len);
+            fake_j2534::enqueue_rx_locked(pending, pending_len,
+                                          fake_j2534::vendor_stamp(written_us),
+                                          0, written_us);
+            return STATUS_NOERROR; /* the answer never comes */
+        }
         if (request) {
             if (!fake_j2534::build_obd2_response(req, n, unsupported_nrc,
                                                  echo, &echo_len)) {

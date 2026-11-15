@@ -1,17 +1,22 @@
 # File/layer: python/tests/test_session.py | pytest
 # Testing: HARNESS, PythonTest.test_session: the package against the
-#          shared core on mock://, the simulated car
+#          shared core on mock://, the simulated car, a replay folder,
+#          the ELM327 emulator (havne-cli sim --elm327)
 #
 # Sessions and streams: values with their names and units, frames whole,
 # a slow reader's drops counted and said once, a close from another
 # thread ending the iteration, core's refusals as havne.Error, the
 # caller's word passed to a clear, and a clear of the simulated car
-# through core's gate. A session, sim or recording left unclosed is
-# released when it's collected (a stream a script keeps keeps its session).
+# through core's gate, and the unsupported and absent signals. A session,
+# sim or recording left unclosed is released when it's collected (a stream
+# a script keeps keeps its session).
 
+import contextlib
 import gc
+import json
 import logging
 import os
+import subprocess
 import threading
 import time
 import weakref
@@ -228,6 +233,33 @@ def test_the_info_says_the_mock():
         assert s.diagnostics(0).flags & c.ECUIO_DIAG_COMPLETE
 
 
+def test_the_vin_waits_for_core_to_have_it_in(monkeypatch):
+    # The report stood in for (the mock identifies nothing): F190's VIN
+    # beside a 09 02 still out is core's pick but not in yet
+    def report(flags):
+        ident = c.ecuio_channel_identity_t()
+        ident.flags = flags
+        ident.items = 2
+        for i, (request, outcome, text) in enumerate(
+                ((b"\x09\x02", c.ECUIO_IDENTITY_UNASKED, b""),
+                 (b"\x22\xF1\x90", c.ECUIO_IDENTITY_ANSWERED, b"FAKEJ2534VIN00001"))):
+            item = ident.list[i]
+            for k, byte in enumerate(request):
+                item.request[k] = byte
+            item.length = len(request)
+            item.outcome = outcome
+            item.text = text
+            item.text_length = len(text)
+        return ident
+    with havne.Session("mock://py") as s:
+        assert s.vin(0) == ""
+        monkeypatch.setattr(s, "identity", lambda channel=0: report(0))
+        assert s.vin(0) == ""
+        monkeypatch.setattr(s, "identity",
+                            lambda channel=0: report(c.ECUIO_IDENTITY_VIN))
+        assert s.vin(0) == "FAKEJ2534VIN00001"
+
+
 def test_a_clear_needs_the_caller_s_word():
     with havne.Session("mock://py") as s:
         with pytest.raises(ValueError):
@@ -336,6 +368,95 @@ def test_a_focus_takes_a_minimum_time_between_sweeps():
         assert "focus" in e.value.detail
 
 
+def test_a_default_pick_is_named_pick_in_a_recording(tmp_path):
+    """ECUIO_FOCUS_DEFAULT_PICK: a recording's header says "pick", not
+    "focus"; with no signals it is core's INVALID_ARGUMENT"""
+    with havne.Session("mock://py") as s:
+        sid, (name, unit) = next(iter(s.signals.items()))
+        with pytest.raises(havne.Error) as e:
+            s.set_focus([], default_pick=True)
+        assert e.value.name == "INVALID_ARGUMENT"
+        assert "default pick" in e.value.detail
+        s.set_focus([sid], default_pick=True)
+        rec = s.record(tmp_path)
+        folder = rec.folder
+    assert ended(folder)
+    with open(os.path.join(folder, "events.log"), encoding="utf-8") as f:
+        events = f.read()
+    assert f"\npick  {name}\n" in events
+    assert "\nfocus  " not in events
+
+
+@contextlib.contextmanager
+def elm327_emulator():
+    """The address of an ELM327 emulator (havne-cli sim --elm327 tcp:0),
+    a session that asks its signals on every platform"""
+    cli = os.environ.get("HAVNE_CLI", "")
+    if not cli:
+        pytest.skip("HAVNE_CLI names no havne-cli")
+    emu = subprocess.Popen([cli, "sim", "mock://emu?values=canned", "--elm327", "tcp:0",
+                            "--seconds", "120"], stdout=subprocess.PIPE, text=True)
+    try:
+        port = None
+        for line in emu.stdout:
+            j = json.loads(line)
+            assert j["type"] != "error", j
+            if j["type"] == "elm327":
+                port = j["listen"].rsplit(":", 1)[1]
+                break
+        assert port, "the emulator said where it listens"
+        yield f"elm327://127.0.0.1:{port}"
+    finally:
+        emu.terminate()
+        emu.communicate(timeout=60)
+
+
+def test_the_ranked_signals_are_the_default_pick_havne_cli_makes():
+    """ranked_signals(): cli/default_pick.h's rule, the app's and --pick
+    ranked's: the set's ranked signals and those added, in the set's
+    order, each once; a set that ranks none gives none, whatever is added,
+    and so does a session that asks nothing"""
+    with elm327_emulator() as address:
+        with havne.Session(address + "?profile=obd2") as s:
+            ranked = s.ranked_signals()
+            assert len(ranked) == 14, "obd2's ranked signals"
+            picked = [s.signals[i][0] for i in s.ranked_signals(["Fuel Level"])]
+            assert picked[:9] == ["Engine Load", "Coolant Temp", "RPM", "Vehicle Speed",
+                                  "Intake Air Temp", "Fuel Level", "Battery Voltage",
+                                  "MAF", "Engine Oil Temp"]
+            assert len(picked) == len(ranked) + 1
+            assert s.ranked_signals(ranked) == ranked, "an added id already ranked is there once"
+            with pytest.raises(KeyError):
+                s.ranked_signals(["no such signal"])
+            s.set_focus(ranked, default_pick=True)
+    with havne.Session("mock://py?profile=obd2") as s:
+        assert s.ranked_signals() == [], "the mock asks nothing, so it takes no pick"
+        assert s.ranked_signals(["Fuel Level"]) == []
+    with havne.Session("mock://py") as s:
+        sid = next(iter(s.signals))
+        assert s.ranked_signals() == []
+        assert s.ranked_signals([sid]) == [], "an unranked set's pick is the whole set"
+
+
+def test_a_ranked_text_signal_is_not_counted_in_the_pick():
+    def file_of(temp_plot):
+        temp = {"key": "temp", "name": "Temp", "read": {"service": "22", "number": "1E1C"},
+                "field": {"byte": 0, "bits": 8}}
+        if temp_plot:
+            temp["plot"] = temp_plot
+        return havne.SignalFile(json.dumps({
+            "havne_signals": 1, "name": "Ranked text", "source": {"name": "a test"},
+            "ecus": [{"id": "pcm", "rx": "7E8"}],
+            "signals": [{"key": "part", "name": "Part", "kind": "text", "plot": 1,
+                         "read": {"service": "22", "number": "F187"},
+                         "field": {"byte": 0}}, temp]}))
+    with elm327_emulator() as address:
+        with havne.Session(address, signals=file_of(0)) as s:
+            assert s.ranked_signals() == [], "a text rank alone ranks nothing"
+        with havne.Session(address, signals=file_of(2)) as s:
+            assert [s.signals[i][0] for i in s.ranked_signals()] == ["Temp"]
+
+
 def test_a_focus_id_outside_a_uint16_or_not_an_int_is_a_value_error():
     with havne.Session("mock://py") as s:
         sid = next(iter(s.signals))
@@ -344,6 +465,42 @@ def test_a_focus_id_outside_a_uint16_or_not_an_int_is_a_value_error():
                 s.set_focus([bad])
         s.set_focus([sid])
 
+
+def test_a_session_that_asks_nothing_leaves_nothing_unasked():
+    with havne.Session("mock://py") as s:
+        assert s.unasked_signals() == []
+        s.set_focus([next(iter(s.signals))])
+        s.start()
+        time.sleep(0.2)
+        assert s.unasked_signals() == [], "the mock asks nothing"
+
+
+def test_the_unasked_signals_follow_the_focus_on_a_session_that_asks():
+    """Through the ELM327 emulator (havne-cli sim --elm327 tcp:0): a focus
+    on engine speed leaves vehicle speed and Boost (whose MAP is parked)
+    unasked, never engine speed itself; its end leaves none"""
+    with elm327_emulator() as address:
+        with havne.Session(address + "?profile=obd2") as s:
+            ids = {name: sid for sid, (name, unit) in s.signals.items()}
+            s.set_focus(["RPM"])
+            s.start()
+
+            def wait_for(done):
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    got = s.unasked_signals()
+                    if done(got):
+                        return got
+                    time.sleep(0.05)
+                return s.unasked_signals()
+
+            unasked = wait_for(lambda got: len(got) > 0)
+            assert ids["Vehicle Speed"] in unasked
+            assert ids["Boost"] in unasked
+            assert ids["RPM"] not in unasked
+            assert unasked == sorted(unasked, key=list(s.signals).index), "the set's order"
+            s.set_focus([])
+            assert wait_for(lambda got: got == []) == []
 
 
 def test_a_session_asks_no_extended_session_unless_the_uri_does():
@@ -376,3 +533,74 @@ def test_session_state_gives_a_refusal_its_code_and_nothing_else_does(monkeypatc
         report.session = 3
         entered = s.session_state(0)
         assert entered.state == "entered" and entered.session == "03" and entered.nrc is None
+
+
+def test_a_session_with_nothing_to_judge_lists_no_unsupported_or_absent_signal():
+    with havne.Session("mock://py") as s:
+        assert s.unsupported_signals() == []
+        assert s.absent_signals() == []
+
+
+def test_the_demo_car_under_obd2_lists_the_signals_it_lacks():
+    """mock:// under obd2 walks its demo car's PID bitmaps at create, so
+    before start the signals the car doesn't answer are unsupported (PID 55
+    among them) and engine and vehicle speed are not"""
+    with havne.Session("mock://py?profile=obd2&diagnose=0") as s:
+        ids = {name: sid for sid, (name, _) in s.signals.items()}
+        lacking = s.unsupported_signals()
+        assert 0 < len(lacking) < len(ids), "some, not all"
+        assert ids["Rear O2 Short Trim B3"] in lacking
+        assert ids["RPM"] not in lacking and ids["Vehicle Speed"] not in lacking
+        assert lacking == sorted(lacking, key=list(s.signals).index), "the set's order"
+        assert s.absent_signals() == []
+
+
+def short_reply_replay(tmp_path, frames):
+    """A replay folder (frames.csv alone, as the fixture) of frames answers
+    to PID 55 that end after bank 1's byte"""
+    folder = tmp_path / f"short-{frames}"
+    folder.mkdir(exist_ok=True)
+    rows = [f"{10000 * k},{10000 * k},0x7E8,0x0,41 55 80" for k in range(frames)]
+    text = "\n".join(["host_us,timestamp_us,id,flags,data", *rows]) + "\n"
+    (folder / "frames.csv").write_text(text, encoding="utf-8", newline="\n")
+    return "replay://" + str(folder).replace("\\", "/") + "?profile=obd2&speed=max"
+
+
+def test_a_field_past_every_reply_is_absent_once_enough_replies_have_ended(tmp_path):
+    """A replay of PID 55 answered with bank 1's byte alone: bank 3's
+    signal is absent after ECUIO_ABSENT_AFTER_FRAMES replies, not before,
+    and not while no values stream is open"""
+    n = c.ECUIO_ABSENT_AFTER_FRAMES
+    for frames, opened, want in ((n - 1, True, False), (n, True, True), (n, False, False)):
+        with havne.Session(short_reply_replay(tmp_path, frames)) as s:
+            ids = {name: sid for sid, (name, _) in s.signals.items()}
+            values = s.values(capacity=c.ECUIO_QUEUE_MAX_VALUES) if opened else None
+            s.start()
+            if values is not None:
+                list(values)             # ends at the replay's last frame
+            else:
+                time.sleep(0.5)
+            absent = s.absent_signals()
+            assert (ids["Rear O2 Short Trim B3"] in absent) is want, (frames, opened, absent)
+            assert ids["Rear O2 Short Trim B1"] not in absent, "bank 1's byte arrived"
+            assert absent == sorted(absent, key=list(s.signals).index), "the set's order"
+
+
+def test_a_list_that_grew_between_the_count_and_the_fill_is_read_again():
+    """core says 3, then 5: the short fill is no answer. A stand-in for the
+    getter, since no session grows its list between two calls on demand"""
+    asks = []
+
+    def getter(handle, ids, capacity, count):
+        asks.append(capacity)
+        count._obj.value = 3 if len(asks) == 1 else 5
+        for i in range(min(capacity, count._obj.value) if ids else 0):
+            ids[i] = 100 + i
+        return 0
+
+    class Stub:
+        def _handle(self):
+            return None
+
+    assert havne.Session._listed(Stub(), getter, "stub") == [100, 101, 102, 103, 104]
+    assert asks == [0, 3, 5]

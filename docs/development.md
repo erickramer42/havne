@@ -311,12 +311,15 @@ when the env-gated routing case skips in the cross-arch step, since
 that means the x86 paths are wrong. The cross-arch line names each
 case that skipped: any other skip is reported, not failed (the
 surrogate's session-log case skips while another checkout's run holds
-its fixed log name). Where `build-win32` has the shared core
-(`HAVNE_SHARED_CORE`, on by default), the Win32 step also builds the
-x86 `ecuio.dll` and `test_c_abi_shared`, and the cross-arch step runs
-`c_abi_shared` and `ExportsTest.TheLibraryExportsTheDeclarations` in
-`build-win32` (its line adds `x86 core 2/2`), since CI never builds the
-x86 DLL. The trees must already be configured. Off Windows, or without
+its fixed log name). The Win32 step also builds the x86 `test_signals`,
+and the cross-arch step runs its `ComputedTest` in `build-win32`: the
+computed machine's results bit for bit under the x86 compiler. Where
+`build-win32` has the shared core (`HAVNE_SHARED_CORE`, on by default),
+the Win32 step also builds the x86 `ecuio.dll` and `test_c_abi_shared`,
+and the cross-arch step adds `c_abi_shared` and
+`ExportsTest.TheLibraryExportsTheDeclarations`, since CI never builds
+the x86 DLL. Its line adds `x86 core N/N`, the cases it ran in
+`build-win32`. The trees must already be configured. Off Windows, or without
 `build-win32`, the Win32 and cross-arch steps are left out.
 
 `--suite` and `--changed` are for the edit-and-check loop; a pull request

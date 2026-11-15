@@ -492,7 +492,7 @@ ApplicationWindow {
                             // What the pill shows, the recording note included
                             readonly property string spoken: recordingNote.visible
                                                              ? text + " " + recordingNote.text : text
-                            Accessible.name: enabled ? qsTr("%1: show the log").arg(spoken) : spoken
+                            Accessible.name: enabled ? qsTr("%1: show the activity").arg(spoken) : spoken
                             onClicked: root.gotoPage(root.logPage)
                             // A dot and a word at rest, no capsule
                             background: Rectangle {
@@ -595,7 +595,7 @@ ApplicationWindow {
                             highlighted: true
                             visible: Bridge.connected && !Bridge.recordingActive
                                      && !Bridge.currentUri.toLowerCase().startsWith("replay://")
-                            enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
+                            enabled: !Bridge.disconnecting && Bridge.signalModel.tickedCount > 0
                             text: qsTr("Start log")
                             Accessible.name: qsTr("Start a log of the ticked signals")
                             onClicked: Bridge.startLog()
@@ -683,7 +683,7 @@ ApplicationWindow {
                                 { label: qsTr("Dashboard"), icon: "" },
                                 { label: qsTr("Live"),   icon: "" },
                                 { label: qsTr("Diagnostics"), icon: "" },
-                                { label: qsTr("Log"),       icon: "" },
+                                { label: qsTr("Activity"),  icon: "" },
                                 { label: qsTr("Recordings"), icon: "" },
                                 { label: qsTr("Settings"),  icon: "" }
                             ]
@@ -719,7 +719,15 @@ ApplicationWindow {
                     DashboardPage {
                         id: dashboardView
                         objectName: "dashboardPage"
+                        // The gauges join the session's default pick
+                        Binding {
+                            target: Bridge
+                            property: "pickGauges"
+                            value: dashboardView.pickRefs
+                        }
                         offlineUri: settingsView.offlineUri
+                        pickedSets: settingsView.pickedSets
+                        profileNames: settingsView.profileNames
                         vehicles: settingsView.vehicles
                         connectUris: settingsView.connectUris
                         connectVehicleUri: settingsView.vehicleUri

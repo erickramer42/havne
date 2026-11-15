@@ -1030,17 +1030,17 @@ TestCase {
 
     // keepalive_ms is a key all three adapter schemes take, so a switch
     // between them keeps it
-    function test_anotherSchemeKeepsKeepaliveMs() {
+    function test_anotherSchemeKeepsKeepaliveMsAndGap() {
         const page = createPage()
         const uri = find(page, "uriField")
 
-        type(uri, "elm327://COM5?profile=uds-generic&keepalive_ms=2000")
+        type(uri, "elm327://COM5?profile=uds-generic&keepalive_ms=2000&gap=10")
         press(page, "preset_j2534")
-        compare(uri.text, "j2534://?profile=uds-generic&keepalive_ms=2000",
-                "J2534 takes keepalive_ms")
+        compare(uri.text, "j2534://?profile=uds-generic&keepalive_ms=2000&gap=10",
+                "J2534 takes keepalive_ms and gap")
         press(page, "preset_wifi_obdx")
-        compare(uri.text, "elm327://192.168.4.1:23?profile=uds-generic&keepalive_ms=2000",
-                "ELM327 takes keepalive_ms")
+        compare(uri.text, "elm327://192.168.4.1:23?profile=uds-generic&keepalive_ms=2000&gap=10",
+                "ELM327 takes keepalive_ms and gap")
     }
 
     // The Units row sets the bridge's unit system, connected or not, and
@@ -2118,6 +2118,80 @@ TestCase {
                 "the picked vehicle's own file, before any connect")
     }
 
+    // With Default chosen and no URI typed (as after a restart) the list
+    // falls back to the picked vehicle's sets: its plugin first, then its
+    // files that load; the sets and the profiles' names reach the Dashboard
+    function test_theOfflineUriFallsBackToTheVehiclesPick() {
+        const page = createPage()
+        page.uriField.text = ""
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "fallback.json", "Fallback"))
+        page.chooseProfile("default")
+        compare(page.offlineUri, "mock://?profile=user.fallback", "the vehicle's file")
+        compare(Bridge.profileSignals(page.offlineUri).map(r => r.name), ["A"])
+
+        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
+        page.pickPluginVariant("plugin.example-sim.my2019")
+        page.chooseProfile("default")
+        compare(page.offlineUri, "mock://?profile=plugin.example-sim.my2019", "the plugin comes first")
+        compare(JSON.stringify(page.pickedSets),
+                JSON.stringify([{ profile: "plugin.example-sim.my2019", name: "Example: the simulated car",
+                                  variant: "my2019" },
+                                { profile: "user.fallback", name: "Fallback", variant: "" }]))
+        compare(page.profileNames["plugin.example-sim.base"], "Example: the simulated car",
+                "every variant of a loaded plugin by its name")
+        compare(page.profileNames["user.fallback"], "Fallback")
+
+        page.uriField.text = "mock://demo"
+        compare(page.offlineUri, "mock://demo", "a typed URI still wins")
+        page.uriField.text = ""
+        press(page, "vehicle_none")
+        compare(page.offlineUri, "", "no vehicle, nothing to fall back to")
+        compare(page.pickedSets.length, 0)
+    }
+
+    // An adapter's address under Default (the vehicle's saved one, restored
+    // at a restart) lists the vehicle's first set that reads all of obd2,
+    // which stands in for Default there; a typed profile= or the Profile
+    // row's choice still wins, and a plugin removed after its pick leaves
+    // the address as it is
+    function test_anAdaptersAddressListsTheVehiclesObd2StandIn() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.open("signals")
+        verify(importFile(page, "standin.json", "Standin"))
+        page.uriField.text = "elm327://COM3"
+        compare(page.profileChoice, "default")
+        compare(page.offlineUri, "elm327://COM3", "a file that doesn't read obd2 stands in for nothing")
+
+        verify(page.importPlugin(Harness.writeExamplePlugin("example-sim.havne-plugin.json")))
+        page.pickPluginVariant("plugin.example-sim.my2019")
+        page.uriField.text = "elm327://COM3"
+        compare(page.offlineUri, "mock://?profile=plugin.example-sim.my2019", "the plugin, which extends obd2")
+        verify(Bridge.profileSignals(page.offlineUri).some(r => r.ref === "key:clutch_slip"),
+               "the plugin's own signals are listed")
+        page.uriField.text = "j2534://Some Adapter"
+        compare(page.offlineUri, "mock://?profile=plugin.example-sim.my2019", "on any adapter")
+        page.uriField.text = "mock://demo"
+        compare(page.offlineUri, "mock://demo", "not on the demo, whose Default isn't obd2")
+
+        page.uriField.text = "elm327://COM3?profile=raw"
+        compare(page.offlineUri, "elm327://COM3?profile=raw", "a typed profile= wins")
+        page.uriField.text = "elm327://COM3"
+        page.chooseProfile("uds-generic")
+        compare(page.offlineUri, page.uriField.text, "the Profile row's choice wins")
+        verify(page.offlineUri.indexOf("profile=uds-generic") >= 0, page.offlineUri)
+
+        page.chooseProfile("default")
+        compare(page.uriField.text, "elm327://COM3")
+        page.removePlugin(page.pluginList[0].sha256)
+        compare(page.pickedVehicle.plugin, "", "the pick goes with the plugin")
+        compare(page.offlineUri, "elm327://COM3", "and the address is listed as it is")
+        page.uriField.text = ""
+        compare(page.offlineUri, "mock://?profile=user.standin", "the vehicle's file, with no address")
+    }
+
     function test_anImportedFileIsTheVehiclesAndAProfile() {
         let page = createPage()
         verify(!find(page, "signalFilesTitle").visible, "no vehicle, no files")
@@ -2181,7 +2255,7 @@ TestCase {
             Harness.writeScratchFile("picked (1).json", signalFileText("Picked")).toString(),
             "picked (1).json")
         compare(find(page, "signalNote").text, "Picked added: 1 signal, profile user.picked")
-        for (const name of ["signalImportDialog", "obdbDialog"]) {
+        for (const name of ["signalImportDialog", "obdbDialog", "signalSaveDialog"]) {
             const d = find(page, name)
             d.usePicker = true
             d.open()
@@ -3221,6 +3295,34 @@ TestCase {
         Bridge.signalModel.toggleSubscribed(0)
     }
 
+    // A text row's tick is the vehicle's too, though it changes no plotted
+    // count: the ticked count carries it
+    function test_aTextRowsTickIsKeptForTheVehicle() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        find(page, "vehicleLabelField").text = "Weekend car"
+        press(page, "vehicleNew")
+        find(page, "uriField").text = "j2534://" + Harness.fakeDllPath
+            + "?profile=uds-generic&did=F190:text,1E1C:u16&identify=0&diagnose=0"
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "the fake connects")
+        tryVerify(() => page.plottedApplied, 5000, "the vehicle's choices applied")
+        const plotted = Bridge.signalModel.subscribedCount
+        const writes = logSpyComponent.createObject(testCase,
+            { target: page, signalName: "vehiclesChanged" })
+        Bridge.signalModel.toggleSubscribed(0)   // DID F190, a text row
+        compare(Bridge.signalModel.subscribedCount, plotted, "it plots nothing")
+        const names = Bridge.signalModel.plottedNames()
+        compare(names.length, 1)
+        compare(page.pickedVehicle.plotted, names, "the tick is kept")
+        compare(writes.count, 1, "one write for the text row's tick")
+        // A number's untick changes both counts, and is still one write
+        Bridge.signalModel.toggleSubscribed(1)   // DID 1E1C
+        compare(writes.count, 2, "one write for the number's untick")
+        writes.destroy()
+    }
+
     // ADR-0027 sections 2-4 through the fake: the connect keeps the URI, the VIN
     // is learned and logged, Live's plotting is kept and comes back
     function test_anAdaptersConnectKeepsItsVehiclesSetup() {
@@ -3373,6 +3475,11 @@ TestCase {
         const choice = find(page, "minSweepChoice")
         verify(choice.visible)
         verify(find(page, "minSweepNote").text.includes("file size"))
+        // Every requesting session's, not a log's alone
+        verify(find(page, "minSweepNote").text.includes("on Live, the Dashboard and in a log"))
+        // Core paces a pick alone, never the whole set
+        verify(find(page, "minSweepNote").text.includes("asking every signal (its profile ranks none) isn't held to it"))
+        compare(choice.Accessible.name, "Minimum time between sweeps")
         compare(choice.count, 5)
         compare(choice.textAt(0), "Off")
         compare(choice.textAt(2), "250 ms")

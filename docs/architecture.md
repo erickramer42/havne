@@ -129,7 +129,7 @@ trouble codes, and `replay://` adds `speed` (0.1 to 100, or `max`),
 `loop`, a stretch (`from`, `to`) and fault injection (`faults`, `seed`,
 [ADR-0041](adr/0041-replay-fault-injection.md)). `j2534://`,
 `elm327://` and `socketcan://` share the request keys (`filter`,
-`txid`, `poll`, `probe`, `identify`, `diagnose`, `pack`, `scan`)
+`txid`, `poll`, `probe`, `identify`, `diagnose`, `pack`, `scan`, `gap`)
 and derive their channels and requests the same way
 (`core/src/request_setup.h`), so a run sheet's query means the same on
 each; `baud` is the CAN rate on all three, `j2534://` adds `flags`, and

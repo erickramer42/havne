@@ -59,7 +59,8 @@ static fn_pt_read_version g_read_version;       /* optional: may be null */
 
 static HANDLE g_pipe = INVALID_HANDLE_VALUE;
 
-/* Batched read buffer: one ReadMsgs call returns up to 16 messages.
+/* Read buffer: a call asks for one message; the room for 16 takes a
+ * vendor that returns more than it asked (counted lost).
  * Static rather than on the stack, because 16 PASSTHRU_MSGs are about
  * 67 KB. Safe because the child is single-threaded. */
 static PASSTHRU_MSG s_read_batch[ECUIO_SUR_MAX_FRAMES_PER_READ];

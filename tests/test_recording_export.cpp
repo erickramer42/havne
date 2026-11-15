@@ -26,6 +26,7 @@
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
 #include "recordingexport.h"
+#include "urlwrite.h"
 
 namespace {
 
@@ -436,6 +437,38 @@ TEST(RecordingExportTest, ARefusedExportLeavesAReplacedDocumentAlone)
                          QUrl::fromLocalFile(picked)));
     EXPECT_EQ(bytesOf(picked), theirs) << "a thread that can't start";
     e.setFailThreadForTesting(false);
+}
+
+/* A save pick's verdict decides (healthreport.h): an empty document the user
+ * chose to replace stays through a refused export and a refused start, the
+ * refusal takes the verdict (a later refusal with none goes by the read), and
+ * one the pick made goes */
+TEST(RecordingExportTest, ARefusedExportFollowsTheSavePicksVerdict)
+{
+    QTemporaryDir dir;
+    RecordingExport e;
+    e.setThroughProviderForTesting(true);
+    const QString source = formulaRecording(dir);
+    const QString picked = dir.filePath(QStringLiteral("picked.csv"));
+    const QUrl url = QUrl::fromLocalFile(picked);
+    writeFile(picked, QByteArray());
+
+    notePick(pathOfUrl(url), PickMade::Replaced);
+    EXPECT_FALSE(ok(exported(e, source, Options{}, url)));
+    EXPECT_TRUE(QFileInfo::exists(picked)) << "a refused export";
+
+    notePick(pathOfUrl(url), PickMade::Replaced);
+    EXPECT_FALSE(e.start(asMap(QString(), Options{}), url));
+    EXPECT_TRUE(QFileInfo::exists(picked)) << "a refused start";
+
+    EXPECT_FALSE(e.start(asMap(QString(), Options{}), url));
+    EXPECT_FALSE(QFileInfo::exists(picked))
+        << "the earlier refusal took the verdict: the empty document goes";
+
+    writeFile(picked, QByteArray());
+    notePick(pathOfUrl(url), PickMade::Made);
+    EXPECT_FALSE(ok(exported(e, source, Options{}, url)));
+    EXPECT_FALSE(QFileInfo::exists(picked)) << "the pick's own goes";
 }
 
 /* A copy that fails after it wrote some bytes: a document empty when the

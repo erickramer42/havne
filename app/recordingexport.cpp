@@ -293,12 +293,12 @@ QVariantMap runFile(const Job& job, Stop& stop)
 {
     const bool provider = job.throughProvider || !job.target.isLocalFile();
     const QString target = whereOf(job.target);
-    // A picker has already made the document it names: one that was empty
+    // A picker has already made the document it names: one judged removable
     // when this began goes if nothing is written, even part written; one
     // the user chose to replace stays
-    const bool madeEmpty = provider && isEmptyDocument(target);
+    const bool removable = provider && pickedDocumentRemovable(target);
     const auto dropPicked = [&] {
-        if (madeEmpty) {
+        if (removable) {
             removePicked(target);
         }
     };
@@ -598,12 +598,12 @@ bool RecordingExport::start(const QVariantMap& options, const QUrl& target)
     const int format = options.value(QStringLiteral("format")).toInt();
     const QString folder = options.value(QStringLiteral("folder")).toString();
     // A picker has already made the document a file export would fill: a
-    // start that refuses, or can't run, leaves it only when it holds bytes
-    // (never a folder target)
+    // start that refuses, or can't run, removes it only when it is removable
+    // (healthreport.h; never a folder target)
     const auto dropPicked = [&] {
         if (format != Folder && !target.isEmpty() &&
             (m_throughProvider || !target.isLocalFile())) {
-            removeIfEmpty(whereOf(target));
+            removeIfRemovable(whereOf(target));
         }
     };
     if (m_busy || folder.isEmpty() || target.isEmpty() ||

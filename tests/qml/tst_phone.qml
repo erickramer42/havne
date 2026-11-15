@@ -2110,6 +2110,19 @@ TestCase {
     // A log from the header (ADR-0056 section 1): Start log while
     // connected, then Stop log and the readout in Mark's and Disconnect's
     // place, fitting a phone; Stop log opens the folder in the viewer
+    // A log records the ticked rows, text rows among them: a session whose
+    // one ticked row is a text offers Start log
+    function test_startLogTakesATickedTextRowAlone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const start = find(main.contentItem, "startLogButton")
+        compare(Bridge.connectSession("mock://demo?profile=uds-generic&did=F190:text"), "")
+        tryVerify(() => start.visible, 5000, "Start log once connected")
+        verify(!start.enabled, "nothing ticked: a text row's default is unticked")
+        Bridge.signalModel.toggleSubscribed(0)
+        tryVerify(() => start.enabled, 2000, "the ticked text row is a log's")
+    }
+
     function test_theHeadersLogStartsStopsAndOpensItsFolder() {
         const main = createTemporaryObject(mainComponent, testCase)
         verify(main, "Main loads")
@@ -2689,6 +2702,27 @@ TestCase {
         mouseClick(pill)
         wait(0)
         compare(main.currentPage, before, "a tap stays put")
+    }
+
+    // The sidebar's page that shows the session's activity is called
+    // Activity: "Log" names Start log and a recording
+    function test_theSidebarNamesTheActivityPage() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1400
+        main.height = 800
+        verify(waitForPolish(main), "laid out")
+        tryVerify(() => !find(main.contentItem, "tabBar").visible, 2000, "the sidebar shows")
+        const labels = []
+        function walk(item) {
+            if (item.label !== undefined && item.active !== undefined)
+                labels.push(item.label)
+            for (const c of item.children)
+                walk(c)
+        }
+        walk(main.contentItem)
+        verify(labels.indexOf("Activity") >= 0, "the sidebar lists Activity: " + labels)
+        verify(labels.indexOf("Log") < 0, "no Log entry: " + labels)
     }
 
     // Dash with no session on the phone: the recent addresses, the newest
@@ -3435,6 +3469,49 @@ TestCase {
             signals: [], own: "", plugin: "", baseline: folder }] }
         compare(find(main.contentItem, "diagnosticsPage").baselineFolder, folder)
         compare(find(main.contentItem, "recordingsPage").baselineFolder, folder)
+    }
+
+    // Main hands the Dashboard Settings' picked sets and profile names, so
+    // its offline list and its gauges' notes name the vehicle's plugin
+    function test_theDashboardTakesSettingsPickedSetsAndNames() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const settings = find(main.contentItem, "settingsPage")
+        const dash = find(main.contentItem, "dashboardPage")
+        verify(Bridge.importPlugin(Harness.writeExamplePlugin("main-sets.havne-plugin.json")).ok)
+        try {
+            settings.loadPlugins()
+            settings.vehicles = { salt: "", picked: "v1", list: [{
+                id: "v1", label: "Desk car", vinKey: "", uri: "", plotted: [], unplotted: [],
+                signals: [], own: "", plugin: "plugin.example-sim.my2019", baseline: "" }] }
+            compare(JSON.stringify(dash.pickedSets),
+                    JSON.stringify([{ profile: "plugin.example-sim.my2019",
+                                      name: "Example: the simulated car", variant: "my2019" }]))
+            compare(dash.profileNames["plugin.example-sim.base"], "Example: the simulated car")
+            compare(dash.offlineUri, settings.offlineUri)
+        } finally {
+            for (const p of Bridge.plugins())
+                Bridge.removePlugin(p.sha256)
+            settings.loadPlugins()
+        }
+    }
+
+    // Main hands the bridge the Dashboard's cells (ADR-0056's default
+    // pick): one list of refs for each cell, its counterparts in the
+    // built-in sets among them, a blank cell's none
+    function test_theDashboardsGaugesJoinTheDefaultPick() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        const dash = find(main.contentItem, "dashboardPage")
+        let cells = 0
+        for (const p of dash.pages)
+            cells += p.cells.length
+        verify(cells > 0, "the built-in layout has cells")
+        compare(Bridge.pickGauges.length, cells)
+        compare(dash.pickRefs.length, cells)
+        const rpm = Bridge.gaugeSignals.rpm
+        verify(Bridge.pickGauges.some(refs => rpm.every(r => refs.indexOf(r) >= 0)),
+               "the tach's cell names the RPM of both built-in sets")
     }
 
     // The relay's line beside its button (ADR-0047): the traffic wraps in

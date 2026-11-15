@@ -5,7 +5,6 @@
 import QtCore
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import App
 
@@ -1743,15 +1742,18 @@ Page {
     }
 
     // Save report's file: text first, the one a shop or a buyer reads
-    FileDialog {
+    DocumentSaveDialog {
         id: reportDialog
+        objectName: "reportDialog"
         title: qsTr("Save the health report")
-        fileMode: FileDialog.SaveFile
         defaultSuffix: "txt"
         nameFilters: [qsTr("Text (*.txt)"), qsTr("JSON (*.json)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+                     + "/health-report.txt"
         onAccepted: root.saveReportTo(reportDialog.selectedFile,
                                       reportDialog.selectedNameFilter.index)
+        onFailed: words => { root.reportFailed = true; root.reportNote = qsTr("Report not saved: %1").arg(words) }
     }
 
     // The signal rows' filter: Live has its own

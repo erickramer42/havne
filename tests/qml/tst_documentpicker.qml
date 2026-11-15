@@ -6,10 +6,11 @@ import QtTest
 import App
 import AppTest
 
-// The open dialogs' own picker (DocumentPicker, DocumentOpenDialog.qml):
-// each answer reaches the dialog that asked, as Android's would. The desktop
-// stands in for the phone through setPickerForTesting and deliver(), the
-// call Android's activity result makes
+// The dialogs' own picker (DocumentPicker, DocumentOpenDialog.qml,
+// DocumentSaveDialog.qml): each answer reaches the dialog that asked, as
+// Android's would, and a save's notes whether the pick made its document. The
+// desktop stands in for the phone through setPickerForTesting and deliver(),
+// the call Android's activity result makes
 TestCase {
     id: testCase
     name: "DocumentPicker"
@@ -22,6 +23,26 @@ TestCase {
 
     Component { id: plainComponent; DocumentOpenDialog {} }
     Component { id: pickerComponent; DocumentOpenDialog { usePicker: true } }
+    Component {
+        id: saveComponent
+        DocumentSaveDialog {
+            usePicker: true
+            defaultSuffix: "json"
+            nameFilters: ["JSON (*.json)", "All files (*)"]
+        }
+    }
+    Component {
+        id: reportComponent
+        DocumentSaveDialog {
+            usePicker: true
+            defaultSuffix: "txt"
+            nameFilters: ["Text (*.txt)", "JSON (*.json)"]
+        }
+    }
+    Component { id: plainSaveComponent; DocumentSaveDialog { nameFilters: ["Text (*.txt)", "JSON (*.json)"] } }
+    readonly property string pageName: "file:///C:/Docs/dashboard-phone.json"
+    readonly property string downloadsUri:
+        "content://com.android.providers.downloads.documents/document/89"
     SignalSpy { id: pickedSpy; target: DocumentPicker; signalName: "picked" }
 
     function init() {
@@ -30,6 +51,7 @@ TestCase {
     }
     function cleanup() {
         DocumentPicker.setPickerForTesting(false)
+        DocumentPicker.setPlatformTypesForTesting({})
     }
 
     // A picker's dialog and a tally of its answers
@@ -245,5 +267,222 @@ TestCase {
         tryVerify(() => s.failed.length === 1)
         compare(s.failed[0], "This build has no document picker")
         compare(s.d.request, 0)
+    }
+
+    // A save's dialog and a tally of its answers
+    function saving(props) {
+        const d = createTemporaryObject(saveComponent, testCase, props || {})
+        verify(d)
+        const s = { d: d, accepted: 0, rejected: 0, failed: [] }
+        d.accepted.connect(() => s.accepted++)
+        d.rejected.connect(() => s.rejected++)
+        d.failed.connect(words => s.failed.push(words))
+        return s
+    }
+
+    // A save offers the page's name and its suffix's type; the answer reaches
+    // the dialog as it came
+    function test_aSaveOffersItsNameAndTypeAndAnswersItsDialog() {
+        const s = saving({ currentFile: pageName })
+        s.d.open()
+        verify(s.d.request > 0, "a pick under way")
+        compare(DocumentPicker.titleForTesting(), "dashboard-phone.json")
+        compare(DocumentPicker.mimeTypeForTesting(), "application/json")
+        DocumentPicker.deliver(s.d.request, ok, providerUri, "name (1).json",
+                               DocumentPicker.launchedMsForTesting())
+        compare(s.accepted, 1)
+        compare(s.d.selectedFile, Qt.url(providerUri), "the URI as it came")
+        compare(s.d.selectedName, "name (1).json")
+        compare(s.d.selectedNameFilter.index, 0, "the one JSON filter")
+    }
+
+    // Filters of two suffixes ask no type, so a provider keeps the name typed
+    // ("report.json", never "report.json.txt"); the filter follows the name
+    function test_aSaveOfTwoSuffixesAsksNoTypeAndTakesItsFilterByName() {
+        const d = createTemporaryObject(reportComponent, testCase)
+        verify(d)
+        d.open()
+        compare(DocumentPicker.mimeTypeForTesting(), "application/octet-stream")
+        DocumentPicker.deliver(d.request, ok, providerUri, "report.json", -1)
+        compare(d.selectedNameFilter.index, 1, "the JSON filter")
+        d.open()
+        DocumentPicker.deliver(d.request, ok, downloadsUri, "report.txt", -1)
+        compare(d.selectedNameFilter.index, 0, "the text filter")
+        compare(d.suffixesOf(["Text (*.txt)", "JSON (*.json)", "All files (*)"]),
+                ["txt", "json"])
+    }
+
+    // Downloads names its document by an id: a second save offers the page's
+    // name again, never the last answer's "89"
+    function test_aSecondSaveOffersThePagesNameAgain() {
+        const s = saving({ currentFile: pageName })
+        s.d.open()
+        DocumentPicker.deliver(s.d.request, ok, downloadsUri, "", -1)
+        compare(s.d.selectedName, "89", "the answer's last part, with no name")
+        s.d.open()
+        compare(DocumentPicker.titleForTesting(), "dashboard-phone.json")
+
+        const plain = saving()
+        plain.d.open()
+        compare(DocumentPicker.titleForTesting(), "", "a page that names none")
+        DocumentPicker.deliver(plain.d.request, ok, downloadsUri, "", -1)
+        plain.d.open()
+        compare(DocumentPicker.titleForTesting(), "", "never the last answer's id")
+        plain.d.selectedFile = "file:///C:/Docs/20261105-220322.csv"
+        plain.d.open()
+        compare(DocumentPicker.titleForTesting(), "20261105-220322.csv",
+                "a name the page set before the open")
+    }
+
+    function test_aSavesTypeFollowsItsSuffix() {
+        compare(DocumentPicker.mimeTypeOf("json"), "application/json")
+        compare(DocumentPicker.mimeTypeOf("JSON"), "application/json")
+        compare(DocumentPicker.mimeTypeOf("csv"), "text/csv")
+        compare(DocumentPicker.mimeTypeOf("txt"), "text/plain")
+        compare(DocumentPicker.mimeTypeOf("pcapng"), "application/octet-stream")
+        compare(DocumentPicker.mimeTypeOf(""), "application/octet-stream")
+    }
+
+    // A save asks the platform's own type for its suffix, so the picker
+    // offers the documents of that suffix to replace; with none named, the
+    // app's own
+    function test_aSaveAsksThePlatformsTypeForItsSuffix() {
+        DocumentPicker.setPlatformTypesForTesting({ csv: "text/comma-separated-values" })
+        compare(DocumentPicker.saveTypeOf("csv"), "text/comma-separated-values")
+        compare(DocumentPicker.saveTypeOf("CSV"), "text/comma-separated-values")
+        compare(DocumentPicker.saveTypeOf("json"), "application/json")
+        compare(DocumentPicker.saveTypeOf(""), "application/octet-stream")
+
+        const d = createTemporaryObject(saveComponent, testCase,
+                                        { defaultSuffix: "csv", nameFilters: ["CSV (*.csv)"] })
+        verify(d)
+        d.open()
+        compare(DocumentPicker.mimeTypeForTesting(), "text/comma-separated-values",
+                "the pick asks the platform's type")
+
+        DocumentPicker.setPlatformTypesForTesting({})
+        compare(DocumentPicker.saveTypeOf("csv"), "text/csv", "no platform type off a phone")
+    }
+
+    // A save's answer notes whether the pick made its document, by its
+    // last_modified against the launch; an open's answer notes nothing
+    function test_aSavesAnswerNotesItsVerdict() {
+        const made = "content://test/document/verdict-made"
+        const replaced = "content://test/document/verdict-replaced"
+        const s = saving()
+        s.d.open()
+        const launched = DocumentPicker.launchedMsForTesting()
+        verify(launched > 0, "the launch is kept")
+        DocumentPicker.deliver(s.d.request, ok, made, "a.json", launched + 50)
+        compare(DocumentPicker.verdictOfForTesting(made), 1, "made by the pick")
+        s.d.open()
+        DocumentPicker.deliver(s.d.request, ok, replaced, "b.json",
+                               DocumentPicker.launchedMsForTesting() - 3600 * 1000)
+        compare(DocumentPicker.verdictOfForTesting(replaced), 2, "chosen to replace")
+        s.d.open()
+        DocumentPicker.deliver(s.d.request, ok, made, "a.json", -1)
+        compare(DocumentPicker.verdictOfForTesting(made), 0, "no time clears it")
+        s.d.open()
+        DocumentPicker.deliver(s.d.request, ok, made, "a.json", Date.now() + 60000)
+        compare(DocumentPicker.verdictOfForTesting(made), 0,
+                "a time past the answer says nothing")
+        // A document made late in a long pick: past the launch's window, at
+        // the answer
+        s.d.open()
+        wait(2500)
+        DocumentPicker.deliver(s.d.request, ok, made, "a.json", Date.now())
+        compare(DocumentPicker.verdictOfForTesting(made), 1, "made at the answer")
+        compare(s.accepted, 5)
+
+        const opened = "content://test/document/verdict-opened"
+        const o = spied()
+        o.d.open()
+        DocumentPicker.deliver(o.d.request, ok, opened, "c.json", Date.now())
+        compare(o.accepted, 1)
+        compare(DocumentPicker.verdictOfForTesting(opened), 0, "an open notes nothing")
+        compare(s.accepted, 5, "the open's answer isn't the save's")
+        DocumentPicker.deliver(0, ok, replaced, "", -1)
+        compare(DocumentPicker.verdictOfForTesting(replaced), 2, "a stale answer notes nothing")
+    }
+
+    // The verdict is noted under the name the save opens the document by: a
+    // refused save on the dialog's own URL takes it
+    function test_aRefusedSaveTakesItsPicksVerdict() {
+        const uri = "content://com.android.externalstorage.documents/document/"
+                    + "primary%3ADownload%2Fa%20(1).json"
+        const s = saving()
+        s.d.open()
+        DocumentPicker.deliver(s.d.request, ok, uri, "a (1).json",
+                               DocumentPicker.launchedMsForTesting() + 50)
+        compare(DocumentPicker.verdictOfForTesting(uri), 1, "made by the pick")
+        verify(!Bridge.saveLayoutFile("", s.d.selectedFile).ok)
+        compare(DocumentPicker.verdictOfForTesting(uri), 0, "the save took it")
+    }
+
+    // A URI Qt's URL writes back another way (lower-case hex, an unreserved
+    // letter encoded): the verdict is still the save's to take
+    function test_aVerdictIsKeyedAsTheSaveNamesTheDocument() {
+        const uri = "content://com.android.externalstorage.documents/document/"
+                    + "primary%3aDownload%2F%41b.json"
+        const s = saving()
+        s.d.open()
+        DocumentPicker.deliver(s.d.request, ok, uri, "Ab.json",
+                               DocumentPicker.launchedMsForTesting() + 50)
+        compare(DocumentPicker.verdictOfForTesting(uri), 1, "made by the pick")
+        verify(!Bridge.saveLayoutFile("", s.d.selectedFile).ok)
+        compare(DocumentPicker.verdictOfForTesting(uri), 0, "the save took it")
+    }
+
+    // A refused save pick writes nothing: no answer, no verdict
+    function test_aCanceledSaveNotesNothingAndSaysNothing() {
+        const uri = "content://test/document/verdict-canceled"
+        const s = saving()
+        s.d.open()
+        DocumentPicker.deliver(s.d.request, canceled, uri, "", Date.now())
+        compare(s.rejected, 1)
+        compare(s.accepted, 0)
+        compare(s.failed, [])
+        compare(DocumentPicker.verdictOfForTesting(uri), 0)
+        s.d.open()
+        DocumentPicker.deliver(s.d.request, ok, "", "", -1)
+        compare(s.failed, ["The picker returned no document"])
+    }
+
+    // A save pick and an open pick share the picker: the newer is answered
+    function test_aSaveAfterAnOpenMakesTheOpenStale() {
+        const o = spied()
+        const s = saving()
+        o.d.open()
+        const older = o.d.request
+        s.d.open()
+        DocumentPicker.deliver(older, ok, providerUri, "late.json")
+        compare(o.accepted, 0)
+        DocumentPicker.deliver(s.d.request, ok, providerUri, "x.json", -1)
+        compare(s.accepted, 1)
+    }
+
+    function test_aSavePickThatCantStartSaysWhy() {
+        DocumentPicker.setPickerForTesting(false)
+        const s = saving()
+        s.d.open()
+        tryVerify(() => s.failed.length === 1)
+        compare(s.failed[0], "This build has no document picker")
+    }
+
+    // Elsewhere the save is Qt's FileDialog: its answer and filter are the
+    // dialog's
+    function test_qtsSaveDialogsAnswerIsTheDialogs() {
+        const d = createTemporaryObject(plainSaveComponent, testCase)
+        verify(d)
+        verify(!d.usePicker)
+        let accepted = 0
+        d.accepted.connect(() => accepted++)
+        const url = Harness.writeScratchFile("qt-save.json", "{}")
+        d.fileDialog.selectedFile = url
+        d.fileDialog.accepted()
+        compare(accepted, 1)
+        compare(d.selectedFile, url)
+        compare(d.selectedName, "qt-save.json")
+        compare(d.selectedNameFilter.index, d.fileDialog.selectedNameFilter.index)
     }
 }

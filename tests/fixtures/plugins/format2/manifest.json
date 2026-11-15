@@ -1,0 +1,11 @@
+{
+  "havne_plugin": 1,
+  "id": "format2",
+  "name": "Format 2 on an older core",
+  "version": "1.0.0",
+  "requires": { "core": "0.7.0" },
+  "source": { "name": "Havne's tests", "license": "MIT" },
+  "tiers": ["data"],
+  "ecus": [ { "id": "pcm", "rx": "7E8" } ],
+  "variants": [ { "id": "base", "files": ["data/a.json"] } ]
+}

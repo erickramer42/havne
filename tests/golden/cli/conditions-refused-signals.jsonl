@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"code": 11, "detail": "line 13, column 7: unknown key 'scael' in signal 'pedal'", "message": "invalid argument", "type": "error"}

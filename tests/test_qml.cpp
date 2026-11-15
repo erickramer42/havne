@@ -285,6 +285,24 @@ public:
             BridgeSingleton::instance->recorderForTesting());
     }
 
+    // The rows named marked unasked, as the bridge marks them from core's
+    // list on a session that asks (the mock asks nothing, so its list
+    // stays empty and the bridge leaves the marks alone)
+    Q_INVOKABLE void markUnasked(const QStringList& names)
+    {
+        SignalListModel* model = BridgeSingleton::instance->signalModel();
+        std::vector<uint16_t> ids;
+        for (int r = 0; r < model->rowCount(); ++r) {
+            const QModelIndex i = model->index(r);
+            if (names.contains(
+                    model->data(i, SignalListModel::NameRole).toString())) {
+                ids.push_back(static_cast<uint16_t>(
+                    model->data(i, SignalListModel::IdRole).toUInt()));
+            }
+        }
+        model->applyUnasked(ids);
+    }
+
     // A file of text in a scratch folder of the harness's own, as a URL a
     // file dialog would give; an empty URL when it can't be written
     Q_INVOKABLE QUrl writeScratchFile(const QString& name, const QString& text)
@@ -572,6 +590,11 @@ public:
         // debugger instead, and a failure would print nothing.
         if (!qEnvironmentVariableIsSet("QT_FORCE_STDERR_LOGGING")) {
             qputenv("QT_FORCE_STDERR_LOGGING", "1");
+        }
+        // Whole collections, as main() sets them: Qt 6.12's incremental
+        // collector can crash sweeping a QVariantMap's JS wrapper
+        if (!qEnvironmentVariableIsSet("QV4_GC_TIMELIMIT")) {
+            qputenv("QV4_GC_TIMELIMIT", "0");
         }
     }
 

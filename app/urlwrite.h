@@ -1,6 +1,7 @@
 // File/layer: app/urlwrite.h | Qt6 Core, app layer, C++17, header-only
 // Testing: BRIDGE: BridgeTest, RecordingExportTest (test_bridge); MANUAL SMOKE:
-//          the Android run sheet (a provider's document written and closed)
+//          the Android run sheet (a provider's document written and closed,
+//          a save pick's verdict)
 //
 // Bytes to the file a picker chose. A local file is written whole or not
 // at all: QSaveFile writes beside it and renames, so a failed write leaves
@@ -12,7 +13,9 @@
 
 #include <QByteArray>
 #include <QFile>
+#include <QHash>
 #include <QIODevice>
+#include <QMutex>
 #include <QSaveFile>
 #ifdef Q_OS_ANDROID
 #include <unistd.h>
@@ -37,6 +40,69 @@ inline QString pathOfUrl(const QUrl& url)
 inline QUrl pickedUrl(const QString& uri)
 {
     return QUrl::fromEncoded(uri.toUtf8(), QUrl::TolerantMode);
+}
+
+// What a save pick knows of its document. Android's save picker answers a
+// document the user chose to replace exactly as one it made, so the
+// document's last_modified, read at the answer, is the evidence
+enum class PickMade { Unknown, Made, Replaced };
+
+// A document modified between the picker's launch and its answer is the
+// pick's own; one modified before the launch is one the user chose to
+// replace. The window allows 2 s of skew each way, a provider's clock behind
+// the phone's or ahead of it, and whole-second times; a skew past it only
+// leaves the document behind. A time past the answer (a replaced document's
+// upload ending meanwhile, or a clock far ahead), no time and 0 (a
+// provider's none) are Unknown
+constexpr qint64 kPickMadeWindowMs = 2000;
+constexpr PickMade judgePick(qint64 launchedMs, qint64 answeredMs,
+                             qint64 modifiedMs)
+{
+    if (modifiedMs <= 0 || modifiedMs > answeredMs + kPickMadeWindowMs) {
+        return PickMade::Unknown;
+    }
+    return modifiedMs >= launchedMs - kPickMadeWindowMs ? PickMade::Made
+                                                        : PickMade::Replaced;
+}
+
+namespace pickbook {
+struct Book {
+    QMutex lock;
+    QHash<QString, PickMade> made;
+};
+inline Book& book()
+{
+    static Book b;
+    return b;
+}
+} // namespace pickbook
+
+// Each save pick's answer notes its verdict under the name a save opens the
+// document by (pathOfUrl of its URL), replacing an earlier pick's (Unknown
+// removes it); a save takes it once, at its entry, on any thread
+inline void notePick(const QString& where, PickMade made)
+{
+    pickbook::Book& b = pickbook::book();
+    const QMutexLocker locked(&b.lock);
+    if (made == PickMade::Unknown) {
+        b.made.remove(where);
+    } else {
+        b.made.insert(where, made);
+    }
+}
+
+inline PickMade takePick(const QString& where)
+{
+    pickbook::Book& b = pickbook::book();
+    const QMutexLocker locked(&b.lock);
+    return b.made.take(where);
+}
+
+inline PickMade peekPick(const QString& where)
+{
+    pickbook::Book& b = pickbook::book();
+    const QMutexLocker locked(&b.lock);
+    return b.made.value(where, PickMade::Unknown);
 }
 
 #ifdef Q_OS_ANDROID

@@ -6,7 +6,6 @@ import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs
 
 pragma ComponentBehavior: Bound
 
@@ -75,6 +74,60 @@ Page {
     // Settings' URI and profile, whose signals Add offers with no session
     property string offlineUri: ""
     onOfflineUriChanged: if (panel === "signal") refreshRows()
+    // Settings' picked vehicle's sets ([{ profile, name, variant }], its
+    // plugin first) and the names of the profiles it knows (profile: name)
+    property var pickedSets: []
+    property var profileNames: ({})
+
+    // The profile a session on uri reads: its last profile=, else the
+    // scheme's default as core picks it (core.cpp, ecuio_session_create)
+    function profileOf(uri) {
+        const at = uri.indexOf("?")
+        let profile = ""
+        for (const pair of (at < 0 ? [] : uri.slice(at + 1).split("&"))) {
+            if (pair.startsWith("profile="))
+                profile = pair.slice("profile=".length)
+        }
+        if (profile !== "")
+            return profile
+        const scheme = uri.slice(0, Math.max(0, uri.indexOf("://")))
+        return scheme === "mock" ? "mock"
+             : scheme === "replay" || scheme === "socketcan" ? "raw" : "obd2"
+    }
+    function profileName(profile) {
+        return profileNames[profile] ?? profile
+    }
+    // The session's profile, "" with none
+    readonly property string sessionProfile: Bridge.connected ? profileOf(Bridge.currentUri) : ""
+    // While a session runs, each ref a picked set the session isn't
+    // reading has, to that set's name (the first set's that has it); its
+    // variant alone when the session reads another variant of that plugin
+    readonly property var neededSets: {
+        const needed = {}
+        if (sessionProfile === "")
+            return needed
+        const reading = profileName(sessionProfile)
+        for (const s of pickedSets) {
+            if (s.profile === sessionProfile)
+                continue
+            const name = s.name === reading && s.variant
+                         ? qsTr("variant %1").arg(s.variant) : s.name
+            for (const row of Bridge.profileSignals("mock://?profile=" + s.profile)) {
+                if (row.ref !== "" && needed[row.ref] === undefined)
+                    needed[row.ref] = name
+            }
+        }
+        return needed
+    }
+    // A cell's note without its signal: the picked set that has it, else
+    // the profile the session reads
+    function missingNote(refs) {
+        for (const ref of refs) {
+            if (neededSets[ref] !== undefined)
+                return qsTr("needs %1").arg(neededSets[ref])
+        }
+        return qsTr("not in %1").arg(profileName(sessionProfile))
+    }
 
     // The stored text read: the document, or the built-in layout with
     // the reason when there is none or it can't be used
@@ -98,6 +151,16 @@ Page {
         return words.join(qsTr(" and "))
     }
     readonly property var pages: doc && Array.isArray(doc.pages) ? doc.pages : []
+    // Every page's cells' refs (lookupRefs): Main hands them to
+    // Bridge.pickGauges, so the default pick asks what the gauges show
+    readonly property var pickRefs: {
+        const all = []
+        for (const p of pages) {
+            for (const c of (Array.isArray(p.cells) ? p.cells : []))
+                all.push(lookupRefs(c && Array.isArray(c.refs) ? c.refs : []))
+        }
+        return all
+    }
     property bool problemDismissed: false
     // A different stored text is a different problem, so its line shows again
     readonly property string storedText: form === "phone" ? store.phone : store.desktop
@@ -408,6 +471,7 @@ Page {
         const unloaded = files.filter(f => f.refs.length === 0).map(f => f.name)
         const text = DashboardBook.exportText(doc, form, needed)
         if (text === "") {
+            Bridge.dropPicked(url)
             noteLayout(qsTr("Not saved: this layout can't be written as a file"), true)
             return false
         }
@@ -745,9 +809,17 @@ Page {
         refreshRows()
         panel = "signal"
     }
+    // Bridge.gaugeSignals as plain arrays, read once (it is CONSTANT): each read
+    // of a bridge map makes a new JS wrapper, and every cell's lookup reads it
+    readonly property var gaugeSets: {
+        const sets = Bridge.gaugeSignals, copy = {}
+        for (const key in sets)
+            copy[key] = Array.from(sets[key])
+        return copy
+    }
     // The picked ref and its counterparts in the other built-in set
     function counterparts(ref) {
-        const sets = Bridge.gaugeSignals
+        const sets = gaugeSets
         for (const key in sets) {
             const refs = sets[key]
             if (refs.indexOf(ref) >= 0)
@@ -768,7 +840,7 @@ Page {
     }
     // The Bridge.gaugeSignals key whose refs hold this ref ("" for none)
     function keyOfRef(ref) {
-        const sets = Bridge.gaugeSignals
+        const sets = gaugeSets
         for (const key in sets) {
             if (sets[key].indexOf(ref) >= 0)
                 return key
@@ -835,6 +907,44 @@ Page {
                                         Object.assign(cleared, startOptions(selectedCell.kind, row)))
         edit(next, stepOf("", qsTr("changed %1's signal").arg(cellName(selectedCell)), selected, selected))
         panel = "cell"
+    }
+
+    // Add's every signal of a set: the listed profile's own rows (a signal
+    // file's or a plugin's, by key) that a gauge of `kind` can show, and of
+    // those the ones this page doesn't show yet, as many as it has room for
+    readonly property string listedName: {
+        const uri = Bridge.connected ? Bridge.currentUri : offlineUri
+        return uri === "" ? "" : profileName(profileOf(uri))
+    }
+    function addAllPlan(kind) {
+        const own = pickable(kind).filter(r => r.ref.startsWith("key:"))
+        let shown = []
+        for (const c of shownCells)
+            shown = shown.concat(Array.isArray(c.refs) ? c.refs : [])
+        const missing = own.filter(r => shown.indexOf(r.ref) < 0)
+        const room = Math.max(0, DashboardBook.maxCells - shownCells.length)
+        return { own: own.length, missing: missing.length, adding: missing.slice(0, room) }
+    }
+    // The button's words: all, the rest, or as many as the page has room for
+    function addAllWords(plan) {
+        if (plan.adding.length < plan.missing)
+            return qsTr("Add %1 of the %2 missing signals of %3: a page holds %4 cells")
+                       .arg(plan.adding.length).arg(plan.missing).arg(listedName).arg(DashboardBook.maxCells)
+        return plan.adding.length === plan.own
+               ? qsTr("Add all %1 signals of %2").arg(plan.own).arg(listedName)
+               : qsTr("Add %1 more of the %2 signals of %3").arg(plan.adding.length).arg(plan.own).arg(listedName)
+    }
+    function addAllSignals() {
+        const plan = addAllPlan(addKind)
+        if (addKind === "" || plan.adding.length === 0)
+            return
+        const cells = plan.adding.map(r => newCell(addKind, r))
+        const words = cells.length === 1 ? qsTr("added 1 signal of %1").arg(listedName)
+                                         : qsTr("added %1 signals of %2").arg(cells.length).arg(listedName)
+        if (edit(DashboardBook.addCells(doc, pageIndex, cells), stepOf("", words, -1, -1))) {
+            addKind = ""
+            panel = ""
+        }
     }
     Connections {
         target: Bridge
@@ -1137,7 +1247,10 @@ Page {
         readonly property string label: cell && typeof cell.label === "string" ? cell.label : ""
         readonly property SignalHub.Entry entry: hub.lookup(root.lookupRefs(cell && cell.refs ? cell.refs : []))
 
+        // A signal the session isn't asking has no value to show: its
+        // last one would read as no new data (the note says not asked)
         readonly property bool hasValue: Bridge.connected && entry !== null && entry.hasValue
+                                         && !entry.unasked
         readonly property real value: entry ? entry.value : 0
         readonly property real windowHigh: entry ? entry.windowHigh : 0
         readonly property real windowLow: entry ? entry.windowLow : 0
@@ -1160,11 +1273,12 @@ Page {
         readonly property string note: {
             let words = ""
             if (!Bridge.connected) words = qsTr("no session")
-            else if (entry === null) words = qsTr("not in this profile: %1").arg(label)
+            else if (entry === null) words = root.missingNote(root.lookupRefs(cell && cell.refs ? cell.refs : []))
             // Live's rule (hiddenCount): the ECU reported it unsupported, or
             // never answered it
             else if (entry.hidden) words = qsTr("not sent by this ECU")
             else if (entry.refusedCode !== "") words = qsTr("refused (%1)").arg(entry.refusedCode)
+            else if (entry.unasked) words = qsTr("not asked")
             else if (!entry.hasValue) words = qsTr("waiting for data")
             return words !== "" && mismatch ? qsTr("%1 (expected %2)").arg(words).arg(expectedUnit)
                                             : words
@@ -2241,6 +2355,17 @@ Page {
                         onClicked: root.panel = root.addKind !== "" ? "add" : "cell"
                     }
                 }
+                // Every signal of the listed set at once, with Add's kind
+                ThemedButton {
+                    objectName: "addAllSignals"
+                    readonly property var plan: root.addKind !== "" ? root.addAllPlan(root.addKind)
+                                                                     : ({ own: 0, missing: 0, adding: [] })
+                    visible: plan.own > 1 && plan.adding.length > 0
+                    Layout.fillWidth: true
+                    Layout.maximumWidth: implicitWidth
+                    text: root.addAllWords(plan)
+                    onClicked: root.addAllSignals()
+                }
                 // The text alone: a Popup doesn't take the page's zoom, and
                 // Plotted only means nothing to a gauge
                 SignalFilterBar {
@@ -2257,7 +2382,7 @@ Page {
                     color: Theme.textDim
                     text: signalCard.offered.length > 0 ? qsTr("No signal matches.")
                         : Bridge.connected ? qsTr("This session's profile has no signal a gauge can show.")
-                        : qsTr("No signals: connect, or choose a profile in Settings.")
+                        : qsTr("No signals: connect, or pick a plugin for your vehicle under Settings > Signals.")
                 }
                 Flow {
                     Layout.fillWidth: true
@@ -2533,7 +2658,7 @@ Page {
                     highlighted: true
                     visible: Bridge.connected && !Bridge.recordingActive
                              && !root.isReplay(Bridge.currentUri)
-                    enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
+                    enabled: !Bridge.disconnecting && Bridge.signalModel.tickedCount > 0
                     text: qsTr("Start log")
                     Accessible.name: qsTr("Start a log of the ticked signals")
                     onClicked: Bridge.startLog()
@@ -2922,16 +3047,17 @@ Page {
             font.pixelSize: Theme.fontCaption
             text: root.layoutNote
         }
-        FileDialog {
+        DocumentSaveDialog {
             id: layoutSaveDialog
+            objectName: "layoutSaveDialog"
             title: qsTr("Export this layout")
-            fileMode: FileDialog.SaveFile
             defaultSuffix: "json"
             nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
             currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
             currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
                          + "/" + root.layoutFileName()
             onAccepted: root.exportLayoutTo(layoutSaveDialog.selectedFile)
+            onFailed: words => root.noteLayout(qsTr("Not saved: %1").arg(words), true)
         }
         DocumentOpenDialog {
             id: layoutOpenDialog
