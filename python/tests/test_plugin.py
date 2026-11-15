@@ -9,11 +9,11 @@
 # loading at once each read their own folder; a read that raises is a
 # file core can't read; a file is read no further than core's bound. A
 # packed plugin (one file, no read callback) loads too. A folder plugin's
-# variants each give their own signal's gauge. A plugin names the core it
-# requires. A signal file wraps to a packed plugin, a variant goes in and
-# comes out (ADR-0064), each as havne-cli writes it, the lineage kept and
-# an ECU's rename said; each variant names its source, and its text reads
-# back as its set.
+# variants each give their own signal's gauge and format. A plugin names
+# the core it requires. A signal file wraps to a packed plugin, a variant
+# goes in and comes out (ADR-0064), each as havne-cli writes it, the
+# lineage kept and an ECU's rename said; each variant names its source,
+# and its text reads back as its set.
 
 import json
 import os
@@ -220,6 +220,8 @@ def test_a_plugin_says_a_variant_s_expression(tmp_path):
     assert plugin.expr("hot", "chain") == "if(oil > 100, 1, 0)"
     assert plugin.expr("hot_twice", "chain") == "hot * 2"
     assert plugin.expr("no_such_signal", "chain") is None
+    assert plugin.format() == 1, "the first variant's, when none is named"
+    assert plugin.format("chain") == 2, "the newest among its files"
 
 
 def fixture_text(name):

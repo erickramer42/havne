@@ -224,6 +224,12 @@ class Plugin:
         return _expr(lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)),
                      key)
 
+    def format(self, variant=None):
+        """A variant's signal-file format (the first variant when None):
+        the newest "havne_signals" among its files"""
+        return lib.ecuio_signal_file_format(
+            lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)))
+
     def source(self, variant=None):
         """Where a variant's signals come from (the first variant when
         None): its first data file's own "source", else the manifest's,
