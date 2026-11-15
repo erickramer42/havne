@@ -4615,7 +4615,26 @@ bool SessionBridge::attachConditions(ecuio_session_t* session,
     }
     m_conditionsGeneration = next;
     m_conditionStates.assign(count, ecuio_condition_state_t{});
+    // A condition whose key the new set keeps keeps its last tone: an edit
+    // of another doesn't let it sound again within its 5 s
+    std::vector<std::pair<QString, uint64_t>> toned;
+    for (size_t i = 0; i < m_toneAtUs.size(); ++i) {
+        if (m_toneAtUs[i] != NoTone) {
+            toned.emplace_back(m_conditionModel->key(static_cast<int>(i)),
+                               m_toneAtUs[i]);
+        }
+    }
     m_conditionModel->setConditions(set, signalSet, file);
+    m_toneAtUs.assign(count, NoTone);
+    for (const auto& [key, at] : toned) {
+        const int row = m_conditionModel->rowOfKey(key);
+        if (row >= 0 && static_cast<size_t>(row) < m_toneAtUs.size()) {
+            m_toneAtUs[static_cast<size_t>(row)] = at;
+        }
+    }
+    if (m_conditionModel->sounds()) {
+        m_tone.prepare();
+    }
     judgeAlertLevels();
     return true;
 }
@@ -4747,6 +4766,7 @@ void SessionBridge::endSessionConditions()
     m_conditionsGeneration = 0;
     prepareConditionStaging(0, 0);
     m_conditionStates.clear();
+    m_toneAtUs.clear();
     m_conditionsPending.clear();
     m_conditionsFromRecording = false;
     m_conditionsLines.clear();
@@ -4821,15 +4841,29 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
         int row;
     };
     std::vector<Fired> fired;
+    // One tone a tick, the loudest that may sound. A 5 s starts at the ask,
+    // heard or not: one the player drops (stale, a failed generator) too
+    const uint64_t now = ecuio_clock_us() + m_toneTimeAddedForTesting;
+    uint32_t tone = ECUIO_ALERT_NONE;
     for (size_t i = 0; i < full->size(); ++i) {
         ConditionSlot& slot = (*full)[i];
         if (!slot.has) {
             continue;
         }
         m_conditionModel->applyTerm(static_cast<int>(i), slot.newest.term);
-        if (slot.firings > 0) {
-            fired.push_back({slot.first.timestamp_us, static_cast<int>(i)});
+        if (slot.firings == 0) {
+            continue;
         }
+        fired.push_back({slot.first.timestamp_us, static_cast<int>(i)});
+        const uint32_t level = m_conditionModel->toneLevel(static_cast<int>(i));
+        if (level != ECUIO_ALERT_NONE && i < m_toneAtUs.size() &&
+            (m_toneAtUs[i] == NoTone || now - m_toneAtUs[i] >= ToneGapUs)) {
+            m_toneAtUs[i] = now;
+            tone = std::max(tone, level);
+        }
+    }
+    if (tone != ECUIO_ALERT_NONE) {
+        m_tone.play(tone);
     }
     std::stable_sort(
         fired.begin(), fired.end(),
