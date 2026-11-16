@@ -150,7 +150,9 @@ v0.8.0, conditions and alerts, is the latest release. Next:
 | [docs/addresses.md](docs/addresses.md) | Every address form and option, with its default and an example |
 | [docs/architecture.md](docs/architecture.md) | How the parts fit together and why, and a map of the other docs |
 | [docs/adr/](docs/adr/README.md) | The architecture decision records |
-| [docs/testing.md](docs/testing.md) | Test tiers, what each test pins, and what isn't verified |
+| [docs/testing.md](docs/testing.md) | Test tiers, which areas each reaches, and what isn't verified |
+| [docs/testing-inventory.md](docs/testing-inventory.md) | What each test pins, by area, with the evidence |
+| [docs/performance.md](docs/performance.md) | Measured costs: per frame, a recording, reply timing, a connect |
 | [docs/signal-files.md](docs/signal-files.md) | Writing your own signals: the format, what's refused at load, using a file, importing an OBDb set |
 | [docs/condition-files.md](docs/condition-files.md) | Writing conditions: tests of a signal or the link, alerts, armed recording |
 | [plugins/README.md](plugins/README.md) | Plugins: the package, its variants, the example for the simulated car |
