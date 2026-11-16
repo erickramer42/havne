@@ -6272,6 +6272,68 @@ void see_frames(const ecuio_frame_t* frame, void* user)
     }
 }
 
+/* The mock reads a signal of no declared ECU as its engine ECU's, where
+ * registration counted it for the set's first ECU. A set that registers
+ * can so ask the mock's engine ECU more than a module's most: create
+ * refuses it as the address's, in words, never as out of memory. */
+TEST(CoreTest, TheMockRefusesInWordsASetThatOverfillsItsEngineEcu)
+{
+    const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
+    constexpr uint32_t kOwn = 1000;  /* the engine ECU's DIDs */
+    constexpr uint32_t kStray = 100; /* DIDs on an ID no ECU declares */
+    static_assert(kOwn + 1 <= ECUIO_MODULE_MAX_REQUESTS &&
+                      kOwn + 1 + kStray > ECUIO_MODULE_MAX_REQUESTS,
+                  "the engine ECU's own fit, and not with the stray ones");
+    static ecuio_channel_decl_t other_first[2] = {{0x7E9, 0x7E1, 0, 0},
+                                                  {0x7E8, 0x7E0, 0, 0}};
+    static ecuio_signal_def_t defs[kOwn + kStray + 1];
+    for (uint32_t i = 0; i < kOwn + kStray; ++i) {
+        defs[i] = obd2->defs[0];
+        defs[i].id = static_cast<uint16_t>(100 + i);
+        defs[i].message_id = i < kOwn ? 0x7E8u : 0x7EAu;
+        defs[i].byte_order = ECUIO_BYTE_ORDER_BE;
+        defs[i].start_byte = 3;
+        defs[i].bit_length = 8;
+        defs[i].mux_length = 3;
+        defs[i].mux_key = 0x620000u | (0x1000u + i);
+        std::snprintf(defs[i].name, sizeof defs[i].name, "Signal %u", i);
+    }
+    /* One Service 01 signal, so the mock walks the PIDs */
+    defs[kOwn + kStray] = obd2->defs[0];
+    ASSERT_EQ(defs[kOwn + kStray].mux_length, 2u);
+    ASSERT_EQ(defs[kOwn + kStray].mux_key >> 8, 0x41u);
+    ASSERT_EQ(defs[kOwn + kStray].message_id, 0x7E8u);
+    static ecuio_signal_set_t set = {};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = kOwn + kStray + 1;
+    set.defs = defs;
+    set.channel_count = 2;
+    set.channels = other_first;
+
+    ecuio_validation_t v;
+    ASSERT_EQ(ecuio_profile_register("test-stray", &set, &v), ECUIO_OK)
+        << v.code << " at " << v.index;
+    ecuio_session_t* session = nullptr;
+    EXPECT_EQ(ecuio_session_create("mock://a?profile=test-stray", &session),
+              ECUIO_ERR_BAD_URI);
+    EXPECT_EQ(session, nullptr);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              "the profile asks the mock's engine ECU (0x7E8) more than 1024 "
+              "requests: the mock reads the signals of no declared ECU as "
+              "the engine ECU's");
+    ecuio_session_destroy(session);
+
+    /* Without the stray ones it connects */
+    set.count = kOwn;
+    defs[kOwn - 1] = defs[kOwn + kStray];
+    session = nullptr;
+    EXPECT_EQ(ecuio_session_create("mock://a?profile=test-stray", &session),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_session_destroy(session);
+    EXPECT_EQ(ecuio_profile_unregister("test-stray"), ECUIO_OK);
+}
+
 /* A set that declares another ECU: the mock declares its channel after
  * the engine ECU's, and that ECU answers the supported-PID walk with
  * bitmaps listing no data PID, so a Service 01 signal read there is listed

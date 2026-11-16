@@ -442,7 +442,13 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
         return ECUIO_ERR_OUT_OF_MEMORY;
     case ecuio_plan_result::module_full:
         /* Registration holds each of a set's modules to it; a ?filter=
-         * puts every signal on one */
+         * puts every signal on one, which is the URI's doing */
+        if (params.rx_id != 0) {
+            ecuio_detail_set("?filter= asks every signal of the profile of "
+                             "one ECU, and they ask more than %u requests",
+                             static_cast<unsigned>(ECUIO_MODULE_MAX_REQUESTS));
+            return ECUIO_ERR_BAD_URI;
+        }
         ecuio_detail_set("the profile's signals ask more than %u requests of "
                          "one ECU",
                          static_cast<unsigned>(ECUIO_MODULE_MAX_REQUESTS));

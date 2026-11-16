@@ -411,6 +411,19 @@ TEST(RequestTableTest, APickOnlyTableAsksNothingUntilAFocusKeepsARow)
     EXPECT_EQ(in_rotation(*e), 2u);
     EXPECT_EQ(e->untimed, 0u);
 
+    /* A request dropped before a focus kept it is never asked, so it
+     * takes no row, though the focus counts it kept */
+    ecuio_engine_drop(e.get(), 11, ECUIO_DROP_NOT_SUPPORTED, 0x31);
+    keep_rows(e.get(), {7, 11, 13});
+    EXPECT_EQ(e->kept, 3u);
+    EXPECT_EQ(in_rotation(*e), 2u);
+    EXPECT_EQ(e->timing_of[11], ECUIO_TIMING_NONE);
+    EXPECT_EQ(e->timing_of[13], 4u) << "the next row is the next asked one's";
+    EXPECT_EQ(e->timing_taken, 5u);
+    EXPECT_EQ(e->untimed, 0u);
+    EXPECT_EQ(e->timing_of[5], 0u) << "one dropped after it was asked keeps "
+                                      "its row";
+
     /* A table asked whole is never unpicked, a focus on it or not */
     auto whole = std::make_unique<ecuio_request_engine>();
     ASSERT_TRUE(ecuio_engine_init(whole.get(), 1, 4));

@@ -1473,7 +1473,9 @@ inline void ecuio_engine_focus_keep(ecuio_request_engine* e,
         if (r.parked == 0) {
             r.slow = 0;
             ++e->kept;
-            ecuio_engine_take_row(e, i);
+            if (r.dropped == 0) {
+                ecuio_engine_take_row(e, i); /* a dropped one is never asked */
+            }
         }
     }
     e->focused = true;

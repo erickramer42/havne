@@ -5227,3 +5227,66 @@ TEST_F(Elm327SessionTest, AnUnpickedSessionOnASilentEcuStaysNotResponding)
     EXPECT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 5000));
     fake_ecu::set_module_dids(nullptr);
 }
+
+/* ?filter= asks every signal of one ECU: on a set whose modules together
+ * ask more than one module's most that is the address's fault, said so */
+TEST_F(Elm327SessionTest, AFilterOverASetPastAModulesMostIsABadUri)
+{
+    /* Two modules of kEach DIDs, no DID read by both: each within a
+     * module's most, together past it */
+    constexpr uint32_t kEach = 600;
+    static_assert(kEach <= ECUIO_MODULE_MAX_REQUESTS &&
+                      2 * kEach > ECUIO_MODULE_MAX_REQUESTS,
+                  "one module fits, both on one ECU don't");
+    static ecuio_channel_decl_t channels[2] = {{0x7E8, 0x7E0, 0, 0},
+                                               {0x7E9, 0x7E1, 0, 0}};
+    static ecuio_signal_def_t defs[2 * kEach];
+    for (uint32_t i = 0; i < 2 * kEach; ++i) {
+        defs[i] = car_sized::set()->defs[0];
+        defs[i].id = static_cast<uint16_t>(100 + i);
+        defs[i].message_id = channels[i < kEach ? 0 : 1].rx_id;
+        defs[i].mux_key = 0x620000u | (0x1000u + i);
+        std::snprintf(defs[i].name, sizeof defs[i].name, "Signal %u", i);
+    }
+    static ecuio_signal_set_t apart = {};
+    apart.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    apart.count = 2 * kEach;
+    apart.defs = defs;
+    apart.channel_count = 2;
+    apart.channels = channels;
+    ecuio_validation_t v{};
+    ASSERT_EQ(ecuio_profile_register("elm327-filter-apart", &apart, &v),
+              ECUIO_OK)
+        << v.code << " at " << v.index;
+    ASSERT_EQ(
+        ecuio_profile_register("elm327-filter-car", car_sized::set(), nullptr),
+        ECUIO_OK);
+    {
+        Session s;
+        EXPECT_EQ(s.create(uri("?profile=elm327-filter-apart&filter=0x7E8")),
+                  ECUIO_ERR_BAD_URI);
+        EXPECT_EQ(std::string(ecuio_last_error_detail()),
+                  "?filter= asks every signal of the profile of one ECU, and "
+                  "they ask more than 1024 requests");
+        EXPECT_TRUE(fake_commands().empty()) << "refused before the port opens";
+    }
+    {
+        /* Without ?filter= it is two modules, and connects */
+        Session s;
+        EXPECT_EQ(s.create(uri("?profile=elm327-filter-apart&identify=0&"
+                               "diagnose=0")),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+    }
+    {
+        /* The car-sized set's modules read the same DIDs: of one ECU they
+         * are one module's most, which fits */
+        Session s;
+        EXPECT_EQ(s.create(uri("?profile=elm327-filter-car&filter=0x7E8&"
+                               "identify=0&diagnose=0")),
+                  ECUIO_OK)
+            << ecuio_last_error_detail();
+    }
+    EXPECT_EQ(ecuio_profile_unregister("elm327-filter-car"), ECUIO_OK);
+    EXPECT_EQ(ecuio_profile_unregister("elm327-filter-apart"), ECUIO_OK);
+}

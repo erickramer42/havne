@@ -141,7 +141,7 @@ ecuio_status_t ecuio_profile_register(const char* name,
     }
     /* Every derived request must fit the engine's table, or the rest would
      * silently never be asked. Counted on the set's own channels: a
-     * ?filter= override merges them, which can only dedupe more. */
+     * ?filter= override puts them all on one, which attach judges. */
     if (signal_set != nullptr) {
         const ecuio_status_t fits = fits_request_table(signal_set, out);
         if (fits != ECUIO_OK) {
