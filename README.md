@@ -17,7 +17,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 ## Engineering highlights
 
 - **Vendor drivers run out of process.** Each J2534 DLL runs in a surrogate of its own architecture, so a crashing driver ends its process, not the app ([ADR-0025](docs/adr/0025-one-j2534-backend.md)).
-- **Fast paths, measured.** Decoding allocates nothing per frame; a recorded engine start replays at over 300,000 frames a second on the dev machine, and CI reruns it ([load test](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
+- **Fast paths, measured.** Decoding allocates nothing per frame; a recorded engine start replays at over 300,000 frames a second on the dev machine, and CI reruns it ([load test](docs/performance.md#load-test-the-replay-fixture-through-the-bridge)).
 - **Measured on a real car.** A second controller on its bus showed Havne's adapter read adding 52 ms; fixing it cut latency from 65.5-73.7 ms to 16.4 ms ([session sheet](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
 - **Protocol logic with no I/O, fuzzed.** The request engine, ISO-TP and the ELM327 layer take no I/O or clock, so rules are unit tests; parsers run fuzzed in CI ([ADR-0015](docs/adr/0015-request-engine.md)).
 - **A user's signals are data.** Signal files are JSON that core reads from bytes and refuses at load with line and column, so every platform loads them alike ([ADR-0051](docs/adr/0051-signal-files.md)).
@@ -61,7 +61,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 
 *A pull in the Recordings viewer: each unit in its own pane on one time axis, the cursor's values beside them, lambda going lean on the limiter's fuel cut.*
 
-Every page on the desktop and the phone, in Dark and in Night's amber and red: [docs/screenshots.md](docs/screenshots.md).
+Every page on a desktop or laptop and on the phone, in Dark and in Night's amber and red: [docs/screenshots.md](docs/screenshots.md).
 
 ## Architecture
 
@@ -137,7 +137,7 @@ v0.8.0, conditions and alerts, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.9.0-v0.11.0 | The whole car through plugins; discovery of the whole bus; the scan tool |
+| v0.9.0-v0.11.0 | The whole car through plugins, then the conversation tier behind safety gates; discovery of the whole bus; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known issues and the roadmap; [CHANGELOG.md](CHANGELOG.md) what each release changed.
@@ -150,15 +150,18 @@ v0.8.0, conditions and alerts, is the latest release. Next:
 | [docs/addresses.md](docs/addresses.md) | Every address form and option, with its default and an example |
 | [docs/architecture.md](docs/architecture.md) | How the parts fit together and why, and a map of the other docs |
 | [docs/adr/](docs/adr/README.md) | The architecture decision records |
-| [docs/testing.md](docs/testing.md) | Test tiers, what each test pins, and what isn't verified |
+| [docs/testing.md](docs/testing.md) | Test tiers, which areas each reaches, and what isn't verified |
+| [docs/testing-inventory.md](docs/testing-inventory.md) | What each test pins, by area, with the evidence |
+| [docs/performance.md](docs/performance.md) | Measured costs: per frame, a recording, reply timing, a connect |
 | [docs/signal-files.md](docs/signal-files.md) | Writing your own signals: the format, what's refused at load, using a file, importing an OBDb set |
 | [docs/condition-files.md](docs/condition-files.md) | Writing conditions: tests of a signal or the link, alerts, armed recording |
 | [plugins/README.md](plugins/README.md) | Plugins: the package, its variants, the example for the simulated car |
-| [docs/j2534.md](docs/j2534.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
+| [docs/j2534.md](docs/j2534.md), [docs/surrogate.md](docs/surrogate.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
 | [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
 | [docs/ios.md](docs/ios.md) | Havne on iPhone: installing CI's unsigned build with your own Apple ID, what works there |
-| [docs/screenshots.md](docs/screenshots.md) | Every page on the desktop and the phone, in Dark and in Night's amber and red |
-| [docs/development.md](docs/development.md) | Builds, tests, CI, releases, troubleshooting |
+| [docs/screenshots.md](docs/screenshots.md) | Every page on a desktop or laptop and on the phone, in Dark and in Night's amber and red |
+| [docs/development.md](docs/development.md) | Builds, tests, troubleshooting |
+| [docs/ci.md](docs/ci.md), [docs/mobile-build.md](docs/mobile-build.md), [docs/packaging.md](docs/packaging.md) | CI and the C ABI check; the Android and iOS builds; the Linux packages, the SBOM and releases |
 | [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and what only hardware can confirm |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestones and lessons learned |
 | [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) | Where to start, the rules a change follows, reporting a vulnerability |

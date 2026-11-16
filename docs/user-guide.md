@@ -1,6 +1,6 @@
 # User guide
 
-How to do each task in the Havne app, on the desktop and on a phone. Each
+How to do each task in the Havne app, on a desktop or laptop and on a phone. Each
 section is the steps for one task. The address you connect with, and
 every option it takes, is in [addresses.md](addresses.md).
 
@@ -41,6 +41,16 @@ options go after `?` in the address ([addresses.md](addresses.md)). A WiFi
 adapter isn't listed: **WiFi and other addresses: show** offers the two
 common WiFi addresses, and the computer or phone must be on the adapter's
 WiFi network first.
+
+Settings composes the address from a preset or a device (a J2534
+interface or a serial port), a profile row (default, `raw`,
+`uds-generic`, the picked vehicle's signal files and plugin variant) and
+a DID field, and leaves the address field editable: a typed address sets
+the row and the field from its `profile=` and `did=`, and the next click
+recomposes it with every other key kept. Core judges the result at
+connect, and Settings shows its words. The header opens Settings, and
+the connect lists on Home and Dash hand it the address of the row
+chosen.
 
 **Without a car:** Home's and Dash's lists end with a **Demo data** row,
 and **WiFi and other addresses: show** on Connection has a `mock://demo`
@@ -94,6 +104,10 @@ open, and SocketCAN interfaces.
 5. Drag the chart to pause it and look back through the last two minutes
    while the values keep updating; a tap reads each trace's value at that
    moment. **Live** (or Space on a desktop) follows now again.
+
+A value never received shows "—", never a made-up 0. A value older than
+3 s dims, and ages refresh every tick, so a signal that stops arriving
+dims even when nothing else changes.
 
 Units follow **Settings, Display, Units** (metric or imperial).
 
@@ -345,6 +359,20 @@ Signals beyond the built-in profiles come as **plugins**: a package someone made
 **Add a signal**, under **Your own signals**, writes one signal at a time into the vehicle's own plugin ("Daily driver signals"). **Edit** changes a saved one; a new name keeps every gauge that shows the signal bound to it.
 
 **Look up a VIN** on the Vehicle page decodes a VIN's model year and make on the device, and marks the variants that VIN matches; the VIN isn't saved.
+
+## The Activity page, Settings and developer mode
+
+**Activity** has the activity log and, in its **Frames** view, the raw
+frames, filtered by ID, data bytes, length, time, direction and flag,
+and exported as CSV with the car's identity left out. It opens from the status in the top bar, on
+a phone from the Activity row at the end of Settings' list, and from a
+failed connect's **Show activity**.
+
+**Settings** is a list of pages: Connection, Vehicle, Signals,
+Recording, Display (with the theme) and Advanced. Advanced has
+**developer mode**, which adds extra readouts and tools: a frame-rate
+badge, the Recordings viewer's frame test, Export's raw frames and the
+adapter relay.
 
 ## The drive view
 

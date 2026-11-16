@@ -871,6 +871,21 @@ TestCase {
         verify(!Bridge.armedActive)
     }
 
+    // The header's disabled Armed explains itself the same way
+    function test_aDisabledArmedInTheHeaderExplainsItselfWhenTapped() {
+        const s = phoneMain()
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[{"key":"c","name":"C",'
+                              + '"when":{"signal":["id:1001"],"unit":"RPM","above":90000},"mark":true}]}')
+        connect("mock://demo")
+        const armed = find(s.main.contentItem, "armedButton")
+        tryVerify(() => armed.visible, 5000, "Armed shows while connected")
+        verify(!armed.enabled, "no condition records")
+        Bridge.clearLogNotice()
+        mouseClick(find(s.main.contentItem, "armedHost"))
+        tryCompare(Bridge, "logNotice", "Armed not started: no condition records", 3000)
+        verify(!Bridge.armedActive)
+    }
+
     // Each control a touch's size on the glass, 8 from its neighbor, inside the window
     function test_theSheetsTargetsAreATouchsSize_data() {
         return [{ tag: "upright", w: 384, h: 832 }, { tag: "on its side", w: 832, h: 384 }]

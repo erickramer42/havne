@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # File/layer: packaging/linux/runtime-sources.sh | release packaging, Linux
 # Testing: run by .github/workflows/release.yml's publish job, and by hand
-#          (docs/development.md, "Linux: the AppImage")
+#          (docs/packaging.md, "Linux: the AppImage")
 #
 # Fetches the source the AppImage's runtime asks to travel with it, each
 # checked against its SHA-256: the runtime links libfuse statically, so

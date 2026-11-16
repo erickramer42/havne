@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # File/layer: packaging/linux/make-appimage.sh | release packaging, Linux x86_64 and aarch64
 # Testing: run by .github/workflows/ci.yml's linux-appimage job, and by
-#          hand in WSL (docs/development.md, "Linux: the AppImage")
+#          hand in WSL (docs/packaging.md, "Linux: the AppImage")
 #
 # Packs a built Release tree into an AppImage and checks it:
 #   dist/havne-<version>-linux-<arch>.AppImage, <arch> the build
@@ -115,7 +115,7 @@ fetch "linuxdeploy-plugin-qt-$arch.AppImage" \
 # (--appimage-version). A new pin changes the release, both SHA-256s and
 # the commit together, and THIRD_PARTY_NOTICES.txt's runtime section with
 # the versions of what it links statically (its build scripts at that
-# commit; docs/development.md, "Linux: the AppImage")
+# commit; docs/packaging.md, "Linux: the AppImage")
 runtime_release=20251108 runtime_commit=dd6cebe
 # The release attaches this runtime's source (runtime-sources.sh)
 grep -qx "runtime_release=$runtime_release" packaging/linux/runtime-sources.sh \

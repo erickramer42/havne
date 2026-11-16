@@ -3,7 +3,7 @@
 - **Status:** Accepted.
 - **Date:** 2026-10-29.
 - **Builds on:** the release workflow (`.github/workflows/release.yml`,
-  `packaging/windows/stage.ps1`; `docs/development.md`, "Releases");
+  `packaging/windows/stage.ps1`; `docs/packaging.md`, "Releases");
   [ADR-0025](0025-one-j2534-backend.md) (the two surrogates);
   [ADR-0031](0031-command-line-client.md) (`havne-cli`, which a probe
   test drives).

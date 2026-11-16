@@ -3,7 +3,7 @@
 - **Status:** Accepted.
 - **Date:** 2026-10-29.
 - **Builds on:** the release workflow (`.github/workflows/release.yml`;
-  `docs/development.md`, "Releases");
+  `docs/packaging.md`, "Releases");
   [ADR-0001](0001-qt-free-core-c-abi.md) (the C ABI the core package
   carries); [ADR-0031](0031-command-line-client.md) (`havne-cli`);
   [ADR-0034](0034-debug-symbols-and-probes.md) section 2 (Linux debug info, which

@@ -20,7 +20,13 @@ port, answers and a cable pull, no bus; its monitor, #18; its WiFi,
 adapters on the car (2026-10-27); their run sheets are
 [elm327-bench-runsheet.md](elm327-bench-runsheet.md) (the VX) and
 [elm327-vehicle-runsheet.md](elm327-vehicle-runsheet.md) (the MX+,
-which has no bench session):
+which has no bench session). The other sheets are
+[bench-runsheet.md](bench-runsheet.md) (J2534 on the bench),
+[vehicle-runsheet.md](vehicle-runsheet.md),
+[android-phone-runsheet.md](android-phone-runsheet.md),
+[socketcan-desk-runsheet.md](socketcan-desk-runsheet.md) and
+[two-ecu-car-runsheet.md](two-ecu-car-runsheet.md) (both ECUs in one
+session, the recorders on a car, a second listener):
 
 | Session | Kind |
 |---|---|
@@ -162,4 +168,4 @@ which has no bench session):
 - **Every item for any other adapter.** Each CONFIRMED above is the
   VX's. A second adapter, x64 or another vendor's, walks the whole
   list again; the x64 surrogate it would load in has met only the fake
-  ([testing.md](../testing.md#gaps-not-verified)).
+  ([testing.md](../testing-inventory.md#gaps-in-detail)).

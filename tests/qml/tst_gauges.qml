@@ -525,6 +525,29 @@ TestCase {
         compare(g.formatScale(95), "95")
     }
 
+    // The caption keeps clear of the scale's numerals on a small dial, where
+    // the text sizes' floors make the caption and the numerals as tall as
+    // the face is wide
+    function test_theCaptionClearsTheNumeralsOnASmallDial() {
+        for (const side of [90, 120, 160, 300]) {
+            const g = createTemporaryObject(analogC, testCase.parent,
+                { width: side, height: side, from: 0, to: 120, majorStep: 20, minorStep: 10,
+                  caption: "Coolant Temp", value: 60, hasValue: true })
+            const caption = findChild(g, "gaugeCaption")
+            verify(caption, "the caption is there")
+            const box = { x: caption.x, y: caption.y, r: caption.x + caption.width, b: caption.y + caption.height }
+            let shown = 0
+            for (const t of g.children) {
+                if (!(t instanceof Text) || t === caption || t.objectName !== "" || !t.visible)
+                    continue
+                ++shown
+                const apart = t.x >= box.r || t.x + t.width <= box.x || t.y >= box.b || t.y + t.height <= box.y
+                verify(apart, "numeral " + t.text + " clear of the caption at " + side + " px")
+            }
+            verify(shown > 2, "the numerals are counted at " + side + " px: " + shown)
+        }
+    }
+
     // A step that does not divide the range draws no tick past its end
     function test_aStepThatDoesNotDivideTheRangeStopsAtTheEnd() {
         const g = createTemporaryObject(analogC, testCase.parent,

@@ -38,7 +38,7 @@ in the order a user meets them:
   cap (ADR-0003) is never decoded, so its values are lost along with
   its Log row.
 
-It isn't a CPU problem. `bench_bridge` (docs/testing.md, Performance)
+It isn't a CPU problem. `bench_bridge` (docs/performance.md)
 measured, on 2026-10-26 (Release, dev machine, median of three runs of
 20,000 frames, us), with the bridge's rows found by id and its staging
 by def index:
@@ -269,7 +269,7 @@ recorded too.
   > looks up its ID, reads its key once per shape, and only the defs
   > found go through `ecuio_def_applies_to_frame` and the decode, in
   > the set's order. The cost per frame follows the values a frame
-  > carries, not the profile ([docs/testing.md](../testing.md#performance)).
+  > carries, not the profile ([docs/testing.md](../performance.md)).
   > Every def that matches still decodes whether or not a view shows
   > it: the Dashboard reads every signal.
 

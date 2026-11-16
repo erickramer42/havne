@@ -31,7 +31,7 @@ Three needs meet here:
   time on the chart) needs real
   traffic at more than real time, with frames that carry their own
   times. `bench_bridge` measured the GUI thread's match against every
-  def ([testing.md](../testing.md#performance)); the worker's per-frame
+  def ([testing.md](../performance.md)); the worker's per-frame
   copy and the tick's per-row update are unmeasured, and only a
   sustained stream can show which of them costs most.
 - **Demonstration.** Showing what QtTune does on a car, without one.

@@ -1,6 +1,6 @@
 // File/layer: tests/bench_timing.cpp | test-only, C++17, Qt-free, benchmark
 // Testing: none of its own; a measurement, not a test. Not registered
-//          with ctest. docs/testing.md ("Reply timing") records its
+//          with ctest. docs/performance.md ("Reply timing") records its
 //          results and how to run it.
 //
 // Reply timing (ADR-0042 section 4) against the fakes' ECU through each

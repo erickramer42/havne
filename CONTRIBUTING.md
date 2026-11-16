@@ -19,8 +19,8 @@ document that holds the detail. Then, by what you want to do:
 
 | You want to... | Read |
 |---|---|
-| Know what works, what's broken and what's planned | [STATUS.md](STATUS.md): "Where things stand", "Known issues", the roadmap |
-| Find something to work on | STATUS.md's [backlog](STATUS.md#backlog) (sized **S**, **M** or **L**; an **S** item is the gentlest start) and [docs/testing.md's gaps](docs/testing.md#gaps-not-verified) |
+| Know what works, what's broken and what's planned | [STATUS.md](STATUS.md): "At a glance", "Known issues", the roadmap |
+| Find something to work on | STATUS.md's [backlog](STATUS.md#backlog) (sized **S**, **M** or **L**; an **S** item is the gentlest start) and [docs/testing.md's gaps](docs/testing-inventory.md#gaps-in-detail) |
 | Build it and run the tests | [docs/development.md](docs/development.md): "Toolchain", "Build configurations", "Running tests", "Troubleshooting" |
 | Understand why something is built the way it is | The [ADR index](docs/adr/README.md). Search it before proposing a change: the decision, and the alternatives it turned down, may already be written up |
 | Change the core, a transport or the C ABI | architecture.md's "Sessions, profiles and decode", the public headers in `core/include/ecuio/` (each documents its contract), [ADR-0007](docs/adr/0007-uri-selected-transports.md) (transports by URI) and [ADR-0016](docs/adr/0016-signal-definition-layout.md) (the def layout) |
@@ -28,7 +28,7 @@ document that holds the detail. Then, by what you want to do:
 | Work on J2534 | [docs/j2534.md](docs/j2534.md), then ADRs [0010](docs/adr/0010-j2534-v0404-shared-types.md), [0014](docs/adr/0014-single-threaded-surrogate.md) and [0025](docs/adr/0025-one-j2534-backend.md) |
 | Work on ELM327 adapters or Bluetooth | [docs/elm327.md](docs/elm327.md), then [ADR-0026](docs/adr/0026-elm327-transport.md) and its appendices and [ADR-0028](docs/adr/0028-app-fed-streams.md) (Bluetooth through the app) |
 | Work on the UI | architecture.md's "The UI layer", [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) (10 Hz updates), the QML tests in `tests/qml/` |
-| Work on Android | [ADR-0028](docs/adr/0028-app-fed-streams.md), [ADR-0029](docs/adr/0029-android-background-sessions.md), development.md's "Build configurations" (Mobile, then *Android*); the signed release APK: [ADR-0030](docs/adr/0030-signed-android-releases.md) and development.md's "Releases" |
+| Work on Android | [ADR-0028](docs/adr/0028-app-fed-streams.md), [ADR-0029](docs/adr/0029-android-background-sessions.md), [docs/mobile-build.md](docs/mobile-build.md) (*Android*); the signed release APK: [ADR-0030](docs/adr/0030-signed-android-releases.md) and development.md's "Releases" |
 | Know how a change is verified | [docs/testing.md](docs/testing.md): the tiers, every verified behavior with the test that pins it, and the gaps |
 | Fuzz a parser | [fuzz/README.md](fuzz/README.md) |
 | Report a security problem | [SECURITY.md](SECURITY.md), privately; the threat model is [docs/security-assurance.md](docs/security-assurance.md) |
@@ -140,7 +140,7 @@ ctest --test-dir build
   built before the app's; `scripts/verify.sh` (Git Bash) builds both trees,
   runs the suite and the cross-arch subset, and prints one line per step.
 - **Android** builds from the same sources with Qt's Android kit
-  (development.md's "Build configurations", *Android*); CI cross-builds it
+  ([docs/mobile-build.md](docs/mobile-build.md), *Android*); CI cross-builds it
   and uploads a debug APK.
 
 The build validates that the core never links Qt; the CI matrix runs ctest on

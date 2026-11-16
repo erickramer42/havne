@@ -758,8 +758,13 @@ Pane {
         return ""
     }
     function ownQuestion() {
-        return confirming.startsWith("removeOwn:") && confirmingPlugin() !== null
-            ? pluginQuestion(confirmingPlugin()) : ""
+        const p = confirmingPlugin()
+        if (!confirming.startsWith("removeOwn:") || p === null || ownPlace === null)
+            return ""
+        return p.variants.length > 1
+            ? qsTr("Remove the variant %1 of %2? It is yours, and no other copy exists")
+                  .arg(ownPlace.variant, p.name)
+            : pluginQuestion(p)
     }
     // The question's Remove: what it asked about goes
     function confirmRemoval() {
@@ -776,6 +781,9 @@ Pane {
                 removeUnmigrated(record)
             return record !== undefined
         }
+        if (p !== null && asked.startsWith("removeOwn:") && p.variants.length > 1 && ownPlace !== null)
+            return removeVariant({ sha256: p.sha256, variant: ownPlace.variant,
+                                   profile: pickedVehicle.own })
         return p !== null && removePlugin(p.sha256)
     }
 
@@ -1173,21 +1181,15 @@ Pane {
         changeVehicles(doc)
     }
 
-    // The last signal's removal takes the variant with it, once asked
-    // when it is the plugin's last: it was written here and has no copy
-    // elsewhere
+    // The last signal's removal takes the variant with it, once asked: it
+    // was written here and has no copy elsewhere
     function removeOwnSignal(key) {
         const doc = SignalForm.withoutSignal(ownFile, key)
         if (doc.signals.length > 0) {
             saveOwn(doc, qsTr("Removed from %1").arg(doc.name))
             return
         }
-        const place = ownPlace
-        if (place.plugin.variants.length > 1)
-            removeVariant({ sha256: place.plugin.sha256, variant: place.variant,
-                            profile: pickedVehicle.own })
-        else
-            confirming = "removeOwn:" + place.plugin.sha256
+        confirming = "removeOwn:" + ownPlace.plugin.sha256
     }
 
     // Forget and Forget all: what the store holds as imported for the

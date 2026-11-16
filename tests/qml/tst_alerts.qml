@@ -280,6 +280,22 @@ TestCase {
         compare(w.any.length, 2)
     }
 
+    // A group of one term stays a group: the editor reads it unchanged as
+    // it opened and a Save writes it back as the group
+    function test_aGroupOfOneTermStaysAGroup() {
+        save([rpm("one", "One in a group", { all: [
+                  { signal: ["id:1001"], unit: "RPM", above: 6000 }] })])
+        const page = settingsOf()
+        rowOf(page, 0).clicked()
+        const editor = editorOf(page)
+        verify(!editor.changed(), "an editor left as it opened reads unchanged")
+        find(editor, "alertSave").clicked()
+        compare(page.pageKey, "alerts", find(editor, "alertEditorProblem").text)
+        const w = stored().conditions[0].when
+        compare(Object.keys(w), ["all"], "still a group")
+        compare(w.all.length, 1)
+    }
+
     // The sound switch is live and says where it plays
     function test_theSoundSaysItPlaysOnAndroid() {
         save([rpm("high", "High revs", { signal: ["id:1001"], unit: "RPM", above: 6000 })])
