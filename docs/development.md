@@ -312,7 +312,7 @@ client/transport: in this order:
    them, so a suite run pushes out older ones. It holds the child's lines
    (`[surrogate HH:MM:SS.mmm]`) and the client's (`[sur ...]`) in time
    order. A session started while another holds that file logs to
-   `ecuio-surrogate-<pid>-<n>.log` instead ([j2534.md](j2534.md#surrogate)).
+   `ecuio-surrogate-<pid>-<n>.log` instead ([surrogate.md](surrogate.md)).
    - The child logs one line per vendor call with its status:
      `OP_OPEN`, `OP_CONNECT`, `OP_DISCONNECT`, `OP_WRITE`,
      `OP_IOCTL`, `OP_START_FILTER` and `OP_STOP_FILTER`. Grep for the
@@ -630,7 +630,7 @@ gets a `NOLINTNEXTLINE(<check>)` with the reason beside it.
 | A `QmlTest` case fails with "Received a warning that resulted in a failure" | A binding in the app's QML raised a warning: the message names the file and line under `qrc:/qt/qml/App/`. Fix the binding; a common cause is a delegate reading its `index` (-1) while the model resets. |
 | `test_qml` exits at once and prints that a QML type isn't available, or `module "App" is not installed` | The module's plugin isn't linked or imported. Whatever links `app_ui` also links `app_uiplugin` and has `Q_IMPORT_QML_PLUGIN(AppPlugin)` in one source file, as `app/main.cpp` and `tests/test_qml.cpp` do. |
 | Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
-| Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
+| Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [surrogate.md](surrogate.md). |
 | Surrogate opens fail, in tests or the app, and the session log says "built from other shared headers" | One tree was built from older copies of `j2534_ptypes.h` or `surrogate_protocol.h`, usually a stale `build-win32`. Rebuild both trees, Win32 first. |
 | Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
 | In the app, an x86 adapter (for example the OBDX Pro VX) fails with "surrogate process failed: no surrogate (ecuio-j2534-surrogate.exe)", and `%TEMP%\ecuio-surrogate.log` holds an `open: no surrogate exe` line | No surrogate next to `havne.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |

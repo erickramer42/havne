@@ -598,7 +598,7 @@ bool transact(ecuio_j2534_sur_handle_t* h, const ecuio_sur_request_t& req,
     return true;
 }
 
-/* Decode the child's exit code (j2534.md "Child exit codes") so a spawn
+/* Decode the child's exit code (surrogate.md "Child exit codes") so a spawn
  * failure names its stage in the session log. Returns the code, or
  * STILL_ACTIVE while the child runs (it then logs nothing). */
 DWORD log_child_exit(const ecuio_j2534_sur_handle_t* h)
