@@ -6,8 +6,8 @@
   Python package reading it, the armed recorder with the focus keeping
   a condition's signals, and link terms; the appendices of 2026-11-12
   to 2026-11-15), and step 7, the app (the appendix "the Alerts
-  page as built"). Not built: the live checks (v0.8.1) and
-  `ecuio_recording_evaluate` (v0.8.1). "Decided" at the end records
+  page as built"). Not built: the live checks (v0.9.0) and
+  `ecuio_recording_evaluate` (v0.9.0). "Decided" at the end records
   each choice.
 - **Date:** 2026-11-10.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (requests as data,
@@ -1767,3 +1767,5 @@ Section 12's step 7 in the app (the bridge's judging, the tone, the banner, Arme
 **The events a recording lost (2026-11-15).** A `drop` line that counts lost condition events is summed into `events_lost` in `ecuio_recording_conditions_t` (format 3 alone; the sum stops at `UINT64_MAX`). Above zero, the recording's `cond` lines may miss a firing or a turn OFF: a condition can read ON to the end that fell during the loss. `havne-cli view` and `info` give it in the conditions' `events_lost`, Python's `Recording.conditions.events_lost` is that count, and the viewer's Conditions panel says how many events the recorder lost, since an entry may then be missing or run on past its end.
 
 **What the focus line holds (2026-11-15).** The signals a condition adds to a focus are swept and written to `signals.csv`, but a recording's `focus` line holds the caller's picks alone, and the default wide export's columns follow it: the export stays the caller's picks, and a condition's signal is a column only when the caller picked it.
+
+**No v0.8.1 (2026-11-15).** The work this ADR places in v0.8.1 is v0.9.0's, the release after v0.8.0: the desktop's sound and Android's background notification, the live checks and `ecuio_recording_evaluate`.

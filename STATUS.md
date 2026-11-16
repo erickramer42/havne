@@ -820,7 +820,7 @@ For people who want a log or a warning to start from the car's own state. A feat
   - signal files in format 2: functions, comparisons, `if`, `all`, `any` and chains of computed signals up to 8 deep ([ADR-0062](docs/adr/0062-computed-grammar.md));
   - a request budget of 1024 and a default pick of ranked signals, so an OBDb import of a whole car's set keeps its signals ([ADR-0051](docs/adr/0051-signal-files.md), [ADR-0056](docs/adr/0056-analysis-log.md)).
 - **Verified:** the Windows suite and the cross-arch subset on `dev`'s tip; the app on the test phone with the mock (the store's migration, the one list, the looks), not on a car. Conditions have run against the simulated car and recordings only.
-- **Left for v0.8.1:** the live checks as terms and `ecuio_recording_evaluate` (ADR-0063), a recording whose every condition event was lost saying so, a dial's caption over a numeral, the long-files limits, the signal store's removal from the app (ADR-0064 step 6), and a choice of where a pull ends (at the throttle's lift, the limiter included, or at top speed).
+- **Left for v0.9.0:** the live checks as terms and `ecuio_recording_evaluate` (ADR-0063), a recording whose every condition event was lost saying so, a dial's caption over a numeral, the long-files limits, the signal store's removal from the app (ADR-0064 step 6), and a choice of where a pull ends (at the throttle's lift, the limiter included, or at top speed).
 
 ### Waiting on a tester: an iPhone download
 

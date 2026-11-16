@@ -13,7 +13,7 @@
 // can't be made or fails is made again on a later ask, at most once a
 // retry interval. On Android the backend is android.media.ToneGenerator
 // over JNI on the alarm stream; elsewhere there is none (the desktop's
-// sound is v0.8.1's) and the tones are only counted.
+// sound is v0.9.0's) and the tones are only counted.
 
 #pragma once
 
