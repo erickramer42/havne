@@ -25,7 +25,7 @@ building to about 16 psi, and coolant and oil climbing toward the fan's cut-in.*
 
 | Light | Night, amber | Night, red |
 |---|---|---|
-| [![The Dashboard in the Light look in a 2nd-gear pull at 5,992 rpm](images/desktop-dashboard-light.png)](images/desktop-dashboard-light.png) | [![The Dashboard in Night's amber style in a 2nd-gear pull at 6,867 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 7,004 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
+| [![The Dashboard in the Light look in a 2nd-gear pull at 6,049 rpm](images/desktop-dashboard-light.png)](images/desktop-dashboard-light.png) | [![The Dashboard in Night's amber style in a 2nd-gear pull at 6,856 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 6,867 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
 
 ### Live
 
@@ -60,11 +60,23 @@ readiness monitors, each done this drive and complete since the clear.*
 *A recording in the viewer: rpm and speed through the first loop's
 pulls, coolant and oil warming from the cold start.*
 
-![The viewer on a pull, maximized: rpm, throttle, lambda and boost in a pane each, the cursor at peak boost at 18.4 s](images/viewer.png)
+![The viewer on a recording of a minute: rpm, throttle, lambda and boost in panes, a pull's band at each of the two pulls](images/viewer.png)
 
-*One pull, the chart maximized: from before the throttle opens through
-the limiter, with the cursor at peak boost (16.7 psi, lambda 0.82, rpm
-climbing).*
+*A recording of the first minute: rpm, throttle, lambda and boost through two pulls, each marked by a band.*
+
+### Alerts
+
+![Settings, Alerts: an Engine speed high danger alert and a Speed above 50 warning alert](images/desktop-alerts.png)
+
+*Settings, Alerts, on the simulated vehicle under `obd2`: a danger alert on engine speed and a warning alert on speed, each listed with its level.*
+
+![Live with the alert band over it: a danger alert, Engine speed high, firing at 6,049 rpm, with one more alert on](images/desktop-alert-band.png)
+
+*An alert firing: the highest one, danger above warning, in a band under the header on every page, with the value it fired at and how many more are on. The RPM and speed values in the list take their alerts' colors.*
+
+![The viewer with its Conditions panel open: each time an alert was on, with the bars along the chart's foot](images/desktop-viewer-conditions.png)
+
+*A recording that held the two alerts: Conditions... lists each time one was on with its start and length, and the bars along the foot of the chart show the same stretches.*
 
 ### Link health
 

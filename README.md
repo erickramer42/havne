@@ -57,7 +57,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 </tbody>
 </table>
 
-![The Recordings viewer on a log of a pull: rpm, throttle, lambda and boost in a pane each, the cursor at peak boost reading 4,992 rpm, lambda 0.82 and 16.7 psi](docs/images/viewer.png)
+![The Recordings viewer on a minute of the simulated car: rpm, throttle, lambda and boost through two pulls, each marked by a band](docs/images/viewer.png)
 
 *A pull in the Recordings viewer: each unit in its own pane on one time axis, the cursor's values beside them, lambda going lean on the limiter's fuel cut.*
 
