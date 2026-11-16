@@ -182,6 +182,14 @@ Page {
     property bool moreShown: false
     property bool confirmReset: false
     property bool confirmRemovePage: false
+    // The preset list's purpose: "" shut, "add" (a new page after the shown
+    // one) or "replace" (the shown page's gauges); confirmReplaceKey is the
+    // preset a replace waits to be sure of
+    property string presetList: ""
+    property string confirmReplaceKey: ""
+    // Whether the layout file the open dialog picks adds its pages (the
+    // preset list's From a file) or replaces every page (Load layout)
+    property bool fileAdds: false
 
     // ---- The gesture (section 4): hold, then release or drag
 
@@ -397,6 +405,8 @@ Page {
         moreShown = false
         confirmReset = false
         confirmRemovePage = false
+        presetList = ""
+        confirmReplaceKey = ""
         noteLayout("")
         clearHistory()
     }
@@ -505,8 +515,8 @@ Page {
     // Loads a layout file as this form's layout, one undo step. Refused in
     // words for a file that can't be read, a newer one and one of the other
     // form; never while Reset's or Remove's question is open
-    function loadLayoutFrom(url) {
-        if (confirmReset || confirmRemovePage) {
+    function loadLayoutFrom(url, adding) {
+        if (confirmReset || confirmRemovePage || confirmReplaceKey !== "") {
             noteLayout(qsTr("Answer the question first"), true)
             return false
         }
@@ -540,7 +550,7 @@ Page {
             cancelHold()
             selected = -1
             panel = ""
-            const words = [qsTr("Loaded the layout")]
+            const words = [adding === true ? qsTr("Added the file's pages") : qsTr("Loaded the layout")]
             if (read.problem === "dropped")
                 words.push(qsTr("%1 left out because they couldn't be read").arg(droppedText(read.dropped)))
             if (read.notes.indexOf("no-form") >= 0)
@@ -557,11 +567,24 @@ Page {
                 words.push(qsTr("it needs plugins this vehicle doesn't pick: %1. Import or pick them under "
                                 + "Signals; until then those gauges read not in profile")
                            .arg(absent.map(f => f.name).join(", ")))
-            const changed = edit(read.doc, stepOf("", qsTr("load a layout"), -1, -1, 0))
-            if (!changed)
-                words[0] = qsTr("The file holds the layout already shown")
-            else
-                goTo(0)
+            let changed
+            if (adding === true) {
+                presetList = ""
+                const after = pageIndex
+                changed = edit(DashboardBook.insertPages(doc, after, read.doc.pages),
+                               stepOf("", qsTr("added pages from a file"), -1, -1, after + 1))
+                if (!changed) {
+                    noteLayout(qsTr("Not added: a form holds %1 pages at most").arg(DashboardBook.maxPages), true)
+                    return false
+                }
+                goTo(after + 1)
+            } else {
+                changed = edit(read.doc, stepOf("", qsTr("load a layout"), -1, -1, 0))
+                if (!changed)
+                    words[0] = qsTr("The file holds the layout already shown")
+                else
+                    goTo(0)
+            }
             noteLayout(words.join(". "))
             return changed
         }
@@ -1036,6 +1059,69 @@ Page {
                  stepOf("", qsTr("added a page"), -1, -1, pages.length)))
             goTo(pages.length - 1)
     }
+    // The preset list (the "+" tab, Add page, Replace this page with...)
+    function openPresets(mode) {
+        commitTyping()
+        confirmReset = false
+        confirmRemovePage = false
+        confirmReplaceKey = ""
+        presetList = mode
+    }
+    function closePresets() {
+        presetList = ""
+        confirmReplaceKey = ""
+    }
+    function addBlankPage() {
+        presetList = ""
+        addPage()
+    }
+    // A preset as a new page after the shown one; one undo step
+    function addPresetPage(key) {
+        const page = DashboardBook.presetPage(key, formKey)
+        presetList = ""
+        if (page === null) {
+            noteLayout(qsTr("The preset couldn't be read"), true)
+            return false
+        }
+        const after = pageIndex
+        if (!edit(DashboardBook.insertPages(doc, after, [page]),
+                  stepOf("", qsTr("added the page %1").arg(page.name), -1, -1, after + 1)))
+            return false
+        goTo(after + 1)
+        return true
+    }
+    // True when the shown page's gauges are one preset's: replacing them
+    // loses nothing a preset doesn't give back
+    function shownPageIsPreset() {
+        return DashboardBook.losesNothing(pages[pageIndex], formKey)
+    }
+    function replaceChosen(key) {
+        presetList = ""
+        if (DashboardBook.presetPage(key, formKey) === null)
+            noteLayout(qsTr("The preset couldn't be read"), true)
+        else if (shownPageIsPreset())
+            replaceWithPreset(key)
+        else
+            confirmReplaceKey = key
+    }
+    function replaceWithPreset(key) {
+        confirmReplaceKey = ""
+        presetList = ""
+        const page = DashboardBook.presetPage(key, formKey)
+        if (page === null) {
+            noteLayout(qsTr("The preset couldn't be read"), true)
+            return false
+        }
+        selected = -1
+        panel = ""
+        addKind = ""
+        return edit(DashboardBook.replacePage(doc, pageIndex, page),
+                    stepOf("", qsTr("replaced the page with %1").arg(page.name), -1, -1))
+    }
+    function presetLabel(key) {
+        const p = DashboardBook.presets.find(q => q.key === key)
+        return p ? p.label : key
+    }
     function movePage(by) {
         const to = pageIndex + by
         if (edit(DashboardBook.movePage(doc, pageIndex, to), stepOf("", qsTr("moved the page"), -1, -1, to)))
@@ -1071,6 +1157,7 @@ Page {
     onPagesChanged: goTo(pageIndex)
     // A page change closes whatever panel was open
     onPageIndexChanged: {
+        closePresets()
         cancelHold()
         selected = -1
         panel = ""

@@ -1,0 +1,189 @@
+{
+ "format": 2,
+ "form": "desktop",
+ "files": [],
+ "pages": [
+  {
+   "name": "Standard",
+   "cells": [
+    {
+     "kind": "shift-light",
+     "w": 12,
+     "h": 1,
+     "label": "Shift lights",
+     "refs": [
+      "id:1001",
+      "id:7003"
+     ],
+     "unit": "RPM",
+     "options": {
+      "count": 15,
+      "from": 4500,
+      "to": 6500
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 8,
+     "label": "Engine speed",
+     "refs": [
+      "id:1001",
+      "id:7003"
+     ],
+     "unit": "RPM",
+     "options": {
+      "from": 0,
+      "to": 8000,
+      "majorStep": 1000,
+      "minorStep": 250,
+      "labelDivisor": 1000,
+      "caption": "×1000 r/min",
+      "peak": true,
+      "progress": true,
+      "dangerFrom": 6800
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 2,
+     "h": 8,
+     "label": "Vehicle speed",
+     "refs": [
+      "id:3001",
+      "id:7004"
+     ],
+     "unit": "km/h",
+     "options": {
+      "from": 0,
+      "to": 260,
+      "majorStep": 20,
+      "minorStep": 10,
+      "peak": true
+     }
+    },
+    {
+     "kind": "ring",
+     "w": 1,
+     "h": 4,
+     "label": "Coolant",
+     "refs": [
+      "id:2001",
+      "id:7002"
+     ],
+     "unit": "°C",
+     "options": {
+      "from": 0,
+      "to": 130,
+      "coldBelow": 60,
+      "warnFrom": 105,
+      "dangerFrom": 115
+     }
+    },
+    {
+     "kind": "ring",
+     "w": 1,
+     "h": 4,
+     "label": "Oil temp",
+     "refs": [
+      "id:9001",
+      "id:7010"
+     ],
+     "unit": "°C",
+     "options": {
+      "from": 0,
+      "to": 160,
+      "coldBelow": 70,
+      "warnFrom": 125,
+      "dangerFrom": 140
+     }
+    },
+    {
+     "kind": "analog",
+     "w": 1,
+     "h": 4,
+     "label": "Boost",
+     "refs": [
+      "id:13001",
+      "id:7011"
+     ],
+     "unit": "kPa",
+     "options": {
+      "caption": "Boost",
+      "from": -100,
+      "to": 200
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 1,
+     "h": 4,
+     "label": "IAT",
+     "refs": [
+      "id:5001",
+      "id:7005"
+     ],
+     "unit": "°C",
+     "options": {
+      "from": 0,
+      "to": 120,
+      "description": "Intake air temperature",
+      "warnFrom": 55,
+      "dangerFrom": 70
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 1,
+     "h": 4,
+     "label": "MAF",
+     "refs": [
+      "id:8001",
+      "id:7009"
+     ],
+     "unit": "g/s",
+     "options": {
+      "from": 0,
+      "to": 500,
+      "description": "Mass air flow"
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 1,
+     "h": 4,
+     "label": "Lambda",
+     "refs": [
+      "id:10001",
+      "id:11544"
+     ],
+     "unit": "λ",
+     "options": {
+      "from": 0.5,
+      "to": 2,
+      "description": "Commanded equivalence ratio"
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 1,
+     "h": 4,
+     "label": "Battery",
+     "refs": [
+      "id:14001",
+      "id:7008"
+     ],
+     "unit": "V",
+     "options": {
+      "from": 10,
+      "to": 16,
+      "dangerBelow": 11.8,
+      "warnBelow": 12.4,
+      "warnFrom": 14.8,
+      "dangerFrom": 15.2
+     }
+    }
+   ]
+  }
+ ]
+}
