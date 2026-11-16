@@ -1680,6 +1680,15 @@ QVariantMap RecordingView::stretchDefaults() const
     return out;
 }
 
+QVariantMap RecordingView::stretchRuleNames() const
+{
+    QVariantMap out;
+    for (const StretchRule& r : kStretchRules) {
+        out.insert(QLatin1String(r.key), QString::fromLatin1(r.name));
+    }
+    return out;
+}
+
 void RecordingView::setStretchesProblem(const QString& words)
 {
     if (words != m_stretchesProblem) {

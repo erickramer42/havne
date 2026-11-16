@@ -196,9 +196,10 @@ Page {
         // The maximized chart's strip of the cursor's values folded to a
         // tab, so the plot has the width
         property bool stripFolded: false
-        // The panes' heights once a seam is dragged, as JSON: a share per
-        // pane, kept by the count of panes ({ "3": [0.5, 0.25, 0.25] })
-        property string paneShares: "{}"
+        // Each recording's pane arrangement (ChartLayout.viewsParse): the
+        // panes its signals sit in and the panes' heights once a seam is
+        // dragged, by the recording's folder name
+        property string views: "{}"
         // The second cursor's hint has been shown
         property bool spanHintSeen: false
         // The stretches' levels the user set, as JSON by key, in display
@@ -227,13 +228,137 @@ Page {
     // open, a close and a change of units); the heights' shares are kept
     readonly property int paneLimit: phoneShape && !chartMaximized ? 3 : ChartLayout.paneMax
     property var paneRanges: ({})
-    readonly property var paneShares: {
-        try {
-            const v = JSON.parse(viewerSettings.paneShares)
-            return v !== null && typeof v === "object" && !Array.isArray(v) ? v : {}
-        } catch (e) {
-            return {}
+    // The pane arrangement kept with the open recording, by its folder's
+    // name; another recording opens with the panes its units make
+    readonly property var viewsBook: ChartLayout.viewsParse(viewerSettings.views)
+    function viewNameOf(folder) {
+        const parts = String(folder).replace(/[\\/]+$/, "").split(/[\\/]/)
+        return parts[parts.length - 1]
+    }
+    readonly property string viewName: recording.state === RecordingView.Open ? viewNameOf(recording.folder) : ""
+    readonly property var viewEntry: viewName !== "" ? viewsBook[viewName] : undefined
+    // Signal name -> pane key, and pane count -> heights' shares
+    readonly property var viewAssign: viewEntry !== undefined ? viewEntry.assign : ({})
+    readonly property var paneShares: viewEntry !== undefined ? viewEntry.shares : ({})
+    function writeView(patch) {
+        if (viewName === "")
+            return
+        viewerSettings.views = JSON.stringify(ChartLayout.viewsWith(viewsBook, viewName, patch, Date.now()))
+        chart.requestPaint()
+    }
+    // The assignment as the layout reads it: signal index -> pane key, the
+    // names the recording lacks passed by
+    function assignRows() {
+        const out = {}
+        for (const s of recording.signalList) {
+            const key = viewAssign[s.name]
+            if (key !== undefined)
+                out[s.index] = key
         }
+        return out
+    }
+    // A signal's pane, "" for the one its unit makes
+    function setPaneOf(name, key) {
+        const next = Object.assign({}, viewAssign)
+        if (key === "")
+            delete next[name]
+        else
+            next[name] = key
+        writeView({ assign: next })
+    }
+    // The panes a signal can join: each ordinary pane now drawn, named by the
+    // signals plotted in it
+    function paneChoices() {
+        const l = chart.drawn
+        const out = []
+        if (!l)
+            return out
+        const byKey = {}
+        for (const tr of l.traces) {
+            if (tr.pinned || tr.pane === undefined)
+                continue
+            const key = l.panes[tr.pane].key
+            if (key === "mixed" || key === "difference")
+                continue
+            const s = recording.signalList.find(x => x.index === tr.row)
+            if (s === undefined)
+                continue
+            if (byKey[key] === undefined) {
+                byKey[key] = []
+                out.push({ key: key, names: byKey[key] })
+            }
+            if (byKey[key].indexOf(s.name) < 0)
+                byKey[key].push(s.name)
+        }
+        return out.map(c => ({ key: c.key, label: c.names.join(", ") }))
+    }
+    // A new pane's key: the lowest "own:n" no pane or assignment holds
+    function newPaneKey() {
+        const used = Object.keys(viewAssign).map(n => viewAssign[n])
+        for (const c of paneChoices())
+            used.push(c.key)
+        let n = 1
+        while (used.indexOf("own:" + n) >= 0)
+            ++n
+        return "own:" + n
+    }
+    // The pane a plotted signal is drawn in: its label, "" when not drawn
+    function paneLabelOf(index) {
+        const l = chart.drawn
+        if (!l)
+            return ""
+        for (const tr of l.traces) {
+            if (tr.row === index && !tr.pinned && tr.pane !== undefined)
+                return l.panes[tr.pane].label
+        }
+        return ""
+    }
+    // The menu's entries for one signal: [{ text, key, checked }], key "" for
+    // the unit's own pane, "new" for a pane of its own
+    property string paneMenuName: ""
+    property var paneMenuItems: []
+    function openPaneMenu(index, anchor) {
+        const s = recording.signalList.find(x => x.index === index)
+        if (s === undefined || s.isText || plotted[index] !== true)
+            return
+        paneMenuName = s.name
+        const here = viewAssign[s.name]
+        const items = [{ text: qsTr("By unit"), key: "", checked: here === undefined }]
+        for (const c of paneChoices())
+            items.push({ text: qsTr("With %1").arg(c.label), key: c.key, checked: here === c.key })
+        items.push({ text: qsTr("New pane"), key: "new", checked: false })
+        paneMenuItems = items
+        paneMenu.popup(anchor)
+    }
+    function choosePane(key) {
+        setPaneOf(paneMenuName, key === "new" ? newPaneKey() : key)
+    }
+    // The signal whose value label lies at (x, y) in the chart, -1 for none
+    function labelRowAt(x, y) {
+        const l = chart.drawn
+        if (!l)
+            return -1
+        for (const tr of l.traces) {
+            if (tr.pinned || tr.labelY === undefined || !tr.labeled)
+                continue
+            if (x >= l.labelX - 8 && Math.abs(y - tr.labelY) <= ChartLayout.lineH)
+                return tr.row
+        }
+        return -1
+    }
+    // Said under the chart while the arrangement has more panes than fit
+    readonly property string paneFoldNote: {
+        const l = chart.drawn
+        if (!l)
+            return ""
+        const folded = {}
+        for (const tr of l.traces) {
+            const k = tr.pane !== undefined ? l.panes[tr.pane].key : ""
+            if (k === "mixed" || k === "difference")
+                folded[String(tr.paneKey)] = true
+        }
+        const n = Object.keys(folded).length
+        return n === 0 ? "" : qsTr("%n pane(s) are folded into the last one: maximize the chart or move a signal", "", n)
     }
     function setPaneRange(key, range) {
         const next = Object.assign({}, paneRanges)
@@ -250,8 +375,7 @@ Page {
             next[count] = shares
         else
             delete next[count]
-        viewerSettings.paneShares = JSON.stringify(next)
-        chart.requestPaint()
+        writeView({ shares: next })
     }
     // The drawn panes' places, assigned only when they change, so the
     // seams' and axes' handlers aren't made again at every paint
@@ -1274,7 +1398,7 @@ Page {
                 const there = labelOf(root.compareReadout[p.mine], fromInView)
                 out.push({ columns: { lows: d, highs: d, t0: difference.t0, t1: difference.t1 },
                            row: p.mine, slot: root.slotOf(p.mine), decimals: s.decimals, unit: s.unit,
-                           pane: "difference " + ChartLayout.paneKey(s.unit),
+                           pane: "difference " + ChartLayout.paneKey(s.unit), pinned: true,
                            paneLabel: qsTr("Δ %1").arg(s.unit), labelValue: there - here })
             }
         }
@@ -1930,6 +2054,9 @@ Page {
                 defaults[s.index] = s.plotted
             root.slots = ({})
             root.plotted = defaults
+            // A kept arrangement is used again: stamped, so the oldest goes first
+            viewerSettings.views = JSON.stringify(ChartLayout.viewsTouched(
+                root.viewsBook, root.viewNameOf(recording.folder), Date.now()))
             root.readout = ({})
             let rows = 0
             for (const s of recording.signalList)
@@ -2392,6 +2519,26 @@ Page {
         RecordingChart {
             id: chartFrame
             host: root
+        }
+
+        // The panes a signal can be drawn in (its row's Pane button, or a
+        // long press on its label in the chart)
+        Menu {
+            id: paneMenu
+            objectName: "paneMenu"
+            Instantiator {
+                model: root.paneMenuItems
+                delegate: MenuItem {
+                    required property var modelData
+                    objectName: "paneChoice_" + (modelData.key === "" ? "unit" : modelData.key === "new" ? "new" : modelData.key)
+                    text: modelData.text
+                    checkable: true
+                    checked: modelData.checked
+                    onTriggered: root.choosePane(modelData.key)
+                }
+                onObjectAdded: (index, object) => paneMenu.insertItem(index, object)
+                onObjectRemoved: (index, object) => paneMenu.removeItem(object)
+            }
         }
 
         // The splitter: drag it to make the chart taller or shorter, kept

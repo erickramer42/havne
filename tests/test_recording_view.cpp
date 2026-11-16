@@ -1328,6 +1328,14 @@ TEST(RecordingViewTest, TheDefaultsAreCoresOwn)
         return d.value(QLatin1String(key)).toDouble();
     };
     EXPECT_EQ(v.stretchDefaults().size(), 10);
+    // Every rule has the name a refusal and the panel's field use
+    const QVariantMap names = v.stretchRuleNames();
+    const QVariantMap defaults = v.stretchDefaults();
+    EXPECT_EQ(names.size(), defaults.size());
+    for (auto it = defaults.constBegin(); it != defaults.constEnd(); ++it) {
+        EXPECT_TRUE(names.contains(it.key())) << it.key().toStdString();
+        EXPECT_FALSE(names.value(it.key()).toString().isEmpty());
+    }
     EXPECT_EQ(value("pullLevel"), ECUIO_STRETCH_DEFAULT_PULL_LEVEL);
     EXPECT_EQ(value("pullLoadLevel"), ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL);
     EXPECT_EQ(value("pullHoldS"), ECUIO_STRETCH_DEFAULT_PULL_HOLD_US / 1e6);

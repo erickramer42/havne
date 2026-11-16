@@ -33,17 +33,19 @@ ColumnLayout {
     // system's speed unit, which a cell reads itself so a change of units
     // never remakes the cells and empties their fields)
     readonly property string speedUnit: Bridge.unitSystem === 1 ? "mph" : "km/h"
+    // The names come from the view's table, the words a refusal uses
     readonly property var fields: [
-        { key: "pullLevel", name: qsTr("Pull throttle"), unit: "%" },
-        { key: "pullLoadLevel", name: qsTr("Pull load, with no throttle"), unit: "%" },
-        { key: "pullHoldS", name: qsTr("Pull at least"), unit: "s" },
-        { key: "pullGapS", name: qsTr("A dip shorter than"), unit: "s" },
-        { key: "pullRise", name: qsTr("Engine speed rises"), unit: "rpm" },
-        { key: "pullGain", name: qsTr("Speed gains, no rpm"), unit: "speed" },
-        { key: "cruiseHoldS", name: qsTr("Cruise at least"), unit: "s" },
-        { key: "cruiseSpeedBand", name: qsTr("Speed within"), unit: "speed" },
-        { key: "cruiseThrottleBand", name: qsTr("Throttle within"), unit: "%" },
-        { key: "cruiseFloor", name: qsTr("Cruise above"), unit: "speed" }]
+        { key: "pullLevel", unit: "%" },
+        { key: "pullLoadLevel", unit: "%" },
+        { key: "pullHoldS", unit: "s" },
+        { key: "pullGapS", unit: "s" },
+        { key: "pullRise", unit: "rpm" },
+        { key: "pullGain", unit: "speed" },
+        { key: "cruiseHoldS", unit: "s" },
+        { key: "cruiseSpeedBand", unit: "speed" },
+        { key: "cruiseThrottleBand", unit: "%" },
+        { key: "cruiseFloor", unit: "speed" }].map(f => ({ key: f.key, unit: f.unit,
+                                                          name: view.stretchRuleNames[f.key] }))
 
     // What was typed that isn't a number, in words; "" for none
     property string typedProblem: ""

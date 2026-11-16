@@ -20,6 +20,15 @@ ColumnLayout {
     parent: root.host.currentHead ? root.host.currentHead.zoomSlot : root.host.zoomHome
     Layout.fillWidth: true
     spacing: 10
+    Label {
+        objectName: "paneFoldNote"
+        visible: root.host.paneFoldNote !== "" && root.host.recording.state === RecordingView.Open
+        text: root.host.paneFoldNote
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+        color: Theme.textDim
+        font.pixelSize: Theme.fontCaption
+    }
     // Zoom, and where the cursor is
     // Compact on a phone: at their desktop widths the buttons, Frame
     // test among them, outgrow its width
