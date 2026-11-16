@@ -244,11 +244,16 @@ GaugeBase {
     Text {
         Accessible.ignored: true
         anchors.horizontalCenter: parent.horizontalCenter
-        y: gauge.cy - gauge.r * 0.36 - height / 2
+        // Below the upper numerals' ring (they sit at 45 degrees off the
+        // vertical), which a small dial's text sizes would otherwise reach
+        y: Math.max(gauge.cy - gauge.r * 0.36 - height / 2,
+                    gauge.cy - gauge.numRadius * Math.SQRT1_2 + gauge.numSize * 0.7 + 1)
         objectName: "gaugeCaption"
         text: gauge.caption
-        // A signal's name can be long: it stays inside the dial's face
-        width: Math.min(implicitWidth, gauge.r * 1.3)
+        // A signal's name can be long: it stays inside the face, between the
+        // numerals at the sides
+        width: Math.max(0, Math.min(implicitWidth,
+                                    2 * (gauge.numRadius - gauge.numSize * gauge.labelEm / 2 - 2)))
         elide: Text.ElideRight
         font.pixelSize: Math.max(10, gauge.size * 0.038)
         color: gauge.titleColor
