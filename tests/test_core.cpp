@@ -7153,9 +7153,10 @@ TEST(CoreTest, LinkQuietRunGoesQuietWithoutAnEpisode)
 
 /* An idle pass of a session that asks only its picks, with nothing
  * picked, is no quiet read: the run a quiet read was counting starts
- * over, and a timeout its picks left ends. A hard failure or failing
- * writes are the adapter's and stay. */
-TEST(CoreTest, LinkAnUnpickedPassCountsNoQuietAndEndsATimeout)
+ * over, and a timeout quiet reads alone made ends. One a request's wait
+ * ran out for stays, pass after pass, until a reply. A hard failure or
+ * failing writes are the adapter's and stay. */
+TEST(CoreTest, LinkAnUnpickedPassCountsNoQuietAndEndsOnlyAQuietReadsTimeout)
 {
     std::atomic<int32_t> published{ECUIO_OK};
     std::atomic<uint32_t> episodes{0};
@@ -7166,20 +7167,60 @@ TEST(CoreTest, LinkAnUnpickedPassCountsNoQuietAndEndsATimeout)
     }
     EXPECT_EQ(published.load(), ECUIO_OK);
     for (uint32_t i = 0; i + 1 < LINK_HEALTH_QUIET_RUN; ++i) {
-        link_on_request_timeout(h);
+        link_on_read(h, false, false, true);
     }
     link_on_unpicked(h);
     EXPECT_EQ(h.quiet_runs, 0u) << "the run starts over";
-    link_on_request_timeout(h);
-    EXPECT_EQ(published.load(), ECUIO_OK) << "one timeout after it is no run";
+    link_on_read(h, false, false, true);
+    EXPECT_EQ(published.load(), ECUIO_OK)
+        << "one quiet read after it is no run";
 
+    /* Picks all dropped: nothing left to ask, and the reads count */
+    for (uint32_t i = 0; i < LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_read(h, false, false, true);
+    }
+    ASSERT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+    h.recovered = false;
+    link_on_unpicked(h);
+    EXPECT_EQ(published.load(), ECUIO_OK)
+        << "nothing asked, nothing unanswered";
+    EXPECT_TRUE(h.recovered);
+    EXPECT_EQ(episodes.load(), 0u);
+
+    /* Requests nothing answered: the walk's, identification's or
+     * diagnostics', or picks since taken away */
     for (uint32_t i = 0; i < LINK_HEALTH_QUIET_RUN; ++i) {
         link_on_request_timeout(h);
     }
     ASSERT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+    h.recovered = false;
+    for (uint32_t i = 0; i < 3 * LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_unpicked(h);
+        ASSERT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT)
+            << "pass " << i << ": something asked went unanswered";
+    }
+    EXPECT_FALSE(h.recovered) << "or the worker would ask it all again";
+
+    /* One unanswered request is enough to keep a quiet read's timeout */
+    link_on_read(h, false, true, false);
+    ASSERT_EQ(published.load(), ECUIO_OK);
+    link_on_request_timeout(h);
+    for (uint32_t i = 0; i < LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_read(h, false, false, true);
+    }
+    ASSERT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
     link_on_unpicked(h);
-    EXPECT_EQ(published.load(), ECUIO_OK)
-        << "nothing asked, nothing unanswered";
+    EXPECT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+
+    /* A reply ends it, and what timed out before it no longer counts */
+    link_on_read(h, false, true, false);
+    ASSERT_EQ(published.load(), ECUIO_OK);
+    for (uint32_t i = 0; i < LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_read(h, false, false, true);
+    }
+    ASSERT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+    link_on_unpicked(h);
+    EXPECT_EQ(published.load(), ECUIO_OK);
     EXPECT_EQ(episodes.load(), 0u);
 
     link_on_read(h, true, false, false);
@@ -7193,6 +7234,10 @@ TEST(CoreTest, LinkAnUnpickedPassCountsNoQuietAndEndsATimeout)
     link_health w(published2, episodes2);
     link_on_write(w, false);
     ASSERT_EQ(published2.load(), ECUIO_ERR_REQUEST_FAILED);
+    for (uint32_t i = 0; i < 2 * LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_request_timeout(w);
+    }
+    EXPECT_FALSE(w.unanswered) << "the state is the writes'";
     link_on_unpicked(w);
     EXPECT_EQ(published2.load(), ECUIO_ERR_REQUEST_FAILED);
 }

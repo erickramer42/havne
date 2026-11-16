@@ -479,6 +479,74 @@ TEST_F(SocketCanRequestTest, ASetPastARotationIsAskedOnlyItsPicks)
         << "nothing asked: nothing fails to answer";
 }
 
+/* Such a session with nothing picked still asks identification and
+ * diagnostics. On a bus with no ECU the link says not responding and
+ * keeps saying so: an idle pass never turns that into OK, which would
+ * have the worker ask it all again and flap for the session's life. */
+TEST_F(SocketCanRequestTest, AnUnpickedSessionOnASilentBusStaysNotResponding)
+{
+    struct Profile {
+        Profile()
+        {
+            EXPECT_EQ(ecuio_profile_register("socketcan-quiet-car",
+                                             car_sized::set(), nullptr),
+                      ECUIO_OK);
+        }
+        ~Profile()
+        {
+            EXPECT_EQ(ecuio_profile_unregister("socketcan-quiet-car"),
+                      ECUIO_OK);
+        }
+    } profile; /* before the session, which holds the set */
+    Session s("?profile=socketcan-quiet-car");
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    const auto state = [&] {
+        int32_t last = -1;
+        uint32_t episodes = 0;
+        EXPECT_EQ(ecuio_session_get_error_state(s.get(), &last, &episodes),
+                  ECUIO_OK);
+        return last;
+    };
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.get(), &info), ECUIO_OK);
+    ASSERT_NE(info.flags & ECUIO_SESSION_INFO_PICK_ONLY, 0u);
+    ASSERT_TRUE(
+        wait_for([&] { return state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 10000ms))
+        << "what it asked went unanswered";
+    /* Until every item of both modules is settled, unanswered; the
+     * state is read all the while, so a flap fails here in its words */
+    const auto settled_all = [&] {
+        for (uint32_t c = 0; c < 2; ++c) {
+            ecuio_channel_identity_t id{};
+            ecuio_channel_diagnostics_t diag{};
+            if (ecuio_session_get_channel_identity(s.get(), c, &id) !=
+                    ECUIO_OK ||
+                ecuio_session_get_channel_diagnostics(s.get(), c, &diag) !=
+                    ECUIO_OK ||
+                (id.flags & ECUIO_IDENTITY_COMPLETE) == 0 ||
+                (diag.flags & ECUIO_DIAG_COMPLETE) == 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const auto settle_by = std::chrono::steady_clock::now() + 12000ms;
+    while (!settled_all()) {
+        ASSERT_EQ(state(), ECUIO_ERR_VEHICLE_TIMEOUT)
+            << "the timeout ended with nothing answered";
+        ASSERT_LT(std::chrono::steady_clock::now(), settle_by)
+            << "identification and diagnostics never settled";
+        std::this_thread::sleep_for(5ms);
+    }
+    /* Three quiet runs: a flap would show OK within the first */
+    const auto end = std::chrono::steady_clock::now() + 3000ms;
+    while (std::chrono::steady_clock::now() < end) {
+        ASSERT_EQ(state(), ECUIO_ERR_VEHICLE_TIMEOUT)
+            << "an idle pass with nothing picked ended the timeout";
+        std::this_thread::sleep_for(5ms);
+    }
+}
+
 /* A frame of up to 8 bytes onto the bus from a raw socket */
 bool put(int fd, canid_t id, const std::vector<uint8_t>& data)
 {

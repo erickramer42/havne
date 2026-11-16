@@ -5,7 +5,8 @@
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: CoreTest, RecorderTest, ConditionSessionTest (test_core);
 //          HARNESS: J2534HealthTest (test_j2534_health), J2534ConditionTest
-//          (test_j2534_stream), Elm327SessionTest (test_elm327)
+//          and J2534AdoptionTest (test_j2534_stream), Elm327SessionTest
+//          (test_elm327), SocketCanRequestTest (test_vcan)
 
 #ifndef ECUIO_LINK_HEALTH_H
 #define ECUIO_LINK_HEALTH_H
@@ -77,6 +78,8 @@ struct link_health {
                                   * only by a sent one */
     uint32_t backoff_ms = 0;     /* 0 = the normal cadence */
     uint32_t quiet_runs = 0;
+    bool unanswered = false;     /* a request's wait ran out since the
+                                  * last matched reply */
     bool recovered = false;      /* back to OK since the worker last
                                   * looked: the probe resumes */
     /* The last change's session time and host time since epoch, with a
@@ -169,12 +172,16 @@ inline void link_count_quiet(link_health& h)
 
 /* An idle pass of a session that asks only its picks, with nothing
  * picked (ecuio_engine_unpicked): nothing is asked, so no read is a
- * quiet one, and a VEHICLE_TIMEOUT left by picks since taken away ends.
- * A hard failure or failing writes are the adapter's, and stay. */
+ * quiet one, and a VEHICLE_TIMEOUT that quiet reads alone made (picks
+ * all dropped, since taken away) ends. One a request's wait ran out for
+ * stays until a reply: the walk, identification and diagnostics ask on
+ * such a session too, and OK here would have the worker ask them again
+ * and time out again, for as long as the ECU is silent. A hard failure
+ * or failing writes are the adapter's, and stay. */
 inline void link_on_unpicked(link_health& h)
 {
     h.quiet_runs = 0;
-    if (h.state == ECUIO_ERR_VEHICLE_TIMEOUT) {
+    if (h.state == ECUIO_ERR_VEHICLE_TIMEOUT && !h.unanswered) {
         link_set_state(h, ECUIO_OK);
     }
 }
@@ -224,6 +231,7 @@ inline void link_on_read(link_health& h, bool hard_failure, bool matched,
         link_set_state(h, ECUIO_OK);
         h.backoff_ms = 0;
         h.quiet_runs = 0;
+        h.unanswered = false;
         return;
     }
 
@@ -242,6 +250,7 @@ inline void link_on_read(link_health& h, bool hard_failure, bool matched,
 inline void link_on_request_timeout(link_health& h)
 {
     if (!h.write_failed) {
+        h.unanswered = true;
         link_count_quiet(h);
     }
 }

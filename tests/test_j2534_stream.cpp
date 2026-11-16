@@ -2879,6 +2879,92 @@ TEST_F(J2534AdoptionTest, ASetPastARotationIsAskedOnlyItsPicks)
     EXPECT_EQ(ecuio_profile_unregister("j2534-car"), ECUIO_OK);
 }
 
+/* Such a session with nothing picked still asks identification and
+ * diagnostics. On a vehicle that answers none of it (every read the
+ * adapter's ERR_TIMEOUT) the link says not responding and keeps saying
+ * so: an idle pass never turns that into OK, which would have the
+ * worker ask it all again and flap for the session's life. */
+TEST_F(J2534AdoptionTest, AnUnpickedSessionOnASilentEcuStaysNotResponding)
+{
+    KnobGuard quiet("ECUIO_FAKE_READ_STATUS", "9");
+    ASSERT_EQ(
+        ecuio_profile_register("j2534-quiet-car", car_sized::set(), nullptr),
+        ECUIO_OK);
+    char uri[700];
+    snprintf(uri, sizeof(uri), "j2534://%s?profile=j2534-quiet-car",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const auto state = [&] {
+        int32_t last = -1;
+        uint32_t episodes = 0;
+        EXPECT_EQ(ecuio_session_get_error_state(session, &last, &episodes),
+                  ECUIO_OK);
+        return last;
+    };
+    const auto within = [](int ms, const std::function<bool()>& done) {
+        const auto end =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        while (!done() && std::chrono::steady_clock::now() < end) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return done();
+    };
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    ASSERT_NE(info.flags & ECUIO_SESSION_INFO_PICK_ONLY, 0u);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+    ASSERT_TRUE(within(10000, [&] {
+        return state() == ECUIO_ERR_VEHICLE_TIMEOUT;
+    })) << "what it asked went unanswered";
+    /* Until every item of both modules is settled, unanswered; the
+     * state is read all the while, so a flap fails here in its words */
+    const auto settled_all = [&] {
+        for (uint32_t c = 0; c < 2; ++c) {
+            ecuio_channel_identity_t id{};
+            ecuio_channel_diagnostics_t diag{};
+            if (ecuio_session_get_channel_identity(session, c, &id) !=
+                    ECUIO_OK ||
+                ecuio_session_get_channel_diagnostics(session, c, &diag) !=
+                    ECUIO_OK ||
+                (id.flags & ECUIO_IDENTITY_COMPLETE) == 0 ||
+                (diag.flags & ECUIO_DIAG_COMPLETE) == 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const auto settle_by =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(12000);
+    while (!settled_all()) {
+        ASSERT_EQ(state(), ECUIO_ERR_VEHICLE_TIMEOUT)
+            << "the timeout ended with nothing answered";
+        ASSERT_LT(std::chrono::steady_clock::now(), settle_by)
+            << "identification and diagnostics never settled";
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    unsigned long settled = 0;
+    get_write_count(&settled);
+    EXPECT_GT(settled, 0u);
+    /* Three quiet runs: a flap would show OK within the first */
+    const auto end =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(3000);
+    while (std::chrono::steady_clock::now() < end) {
+        ASSERT_EQ(state(), ECUIO_ERR_VEHICLE_TIMEOUT)
+            << "an idle pass with nothing picked ended the timeout";
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    unsigned long after = 0;
+    get_write_count(&after);
+    EXPECT_EQ(after, settled) << "nothing is asked again while nothing answers";
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+    EXPECT_EQ(ecuio_profile_unregister("j2534-quiet-car"), ECUIO_OK);
+}
+
 /* ADR-0051's appendix of 2026-11-10: a focus on obd2's computed Boost alone
  * asks its inputs, MAP and baro, and nothing else, and Boost computes from
  * the fake ECU's 35 kPa and 101 kPa */

@@ -5145,3 +5145,85 @@ TEST_F(Elm327SessionTest, ASetPastARotationIsAskedOnlyItsPicks)
     ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 5000))
         << "nothing asked: nothing fails to answer";
 }
+
+/* Such a session with nothing picked still asks identification and
+ * diagnostics. An ECU that answers none of it isn't responding, and the
+ * link says so for as long as nothing answers: an idle pass never turns
+ * that into OK, which would have the worker ask it all again, time out
+ * again, and flap for the session's life. */
+TEST_F(Elm327SessionTest, AnUnpickedSessionOnASilentEcuStaysNotResponding)
+{
+    struct Profile {
+        Profile()
+        {
+            EXPECT_EQ(ecuio_profile_register("elm327-quiet-car",
+                                             car_sized::set(), nullptr),
+                      ECUIO_OK);
+        }
+        ~Profile()
+        {
+            EXPECT_EQ(ecuio_profile_unregister("elm327-quiet-car"), ECUIO_OK);
+        }
+    } profile; /* before the session, which holds the set */
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = true; });
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=elm327-quiet-car")), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+    ASSERT_NE(info.flags & ECUIO_SESSION_INFO_PICK_ONLY, 0u);
+    s.start();
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 10000))
+        << "what it asked went unanswered";
+    /* Until every item of both modules is settled, unanswered; the
+     * state is read all the while, so a flap fails here in its words */
+    const auto settled_all = [&] {
+        for (uint32_t c = 0; c < 2; ++c) {
+            ecuio_channel_identity_t id{};
+            ecuio_channel_diagnostics_t diag{};
+            if (ecuio_session_get_channel_identity(s.s, c, &id) != ECUIO_OK ||
+                ecuio_session_get_channel_diagnostics(s.s, c, &diag) !=
+                    ECUIO_OK ||
+                (id.flags & ECUIO_IDENTITY_COMPLETE) == 0 ||
+                (diag.flags & ECUIO_DIAG_COMPLETE) == 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const auto settle_by =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(12000);
+    while (!settled_all()) {
+        ASSERT_EQ(s.state(), ECUIO_ERR_VEHICLE_TIMEOUT)
+            << "the timeout ended with nothing answered";
+        ASSERT_LT(std::chrono::steady_clock::now(), settle_by)
+            << "identification and diagnostics never settled";
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    const uint32_t settled =
+        on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.requests; });
+    EXPECT_GT(settled, 0u);
+    /* Three quiet runs: a flap would show OK within the first */
+    const auto end =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(3000);
+    while (std::chrono::steady_clock::now() < end) {
+        ASSERT_EQ(s.state(), ECUIO_ERR_VEHICLE_TIMEOUT)
+            << "an idle pass with nothing picked ended the timeout";
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    EXPECT_EQ(
+        on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.requests; }),
+        settled)
+        << "nothing is asked again while nothing answers";
+
+    /* The ECU back and a signal picked: its reply ends the timeout */
+    set_knobs([](fake_elm327::knobs& k) { k.no_data = false; });
+    EXPECT_TRUE(fake_ecu::set_module_dids("7E8:1007=2A"));
+    const uint16_t pick = car_sized::id_of(7);
+    ASSERT_EQ(ecuio_session_set_focus(s.s, &pick, 1), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 5000));
+    fake_ecu::set_module_dids(nullptr);
+}
