@@ -156,7 +156,7 @@ v0.8.0, conditions and alerts, is the latest release. Next:
 | [docs/signal-files.md](docs/signal-files.md) | Writing your own signals: the format, what's refused at load, using a file, importing an OBDb set |
 | [docs/condition-files.md](docs/condition-files.md) | Writing conditions: tests of a signal or the link, alerts, armed recording |
 | [plugins/README.md](plugins/README.md) | Plugins: the package, its variants, the example for the simulated car |
-| [docs/j2534.md](docs/j2534.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
+| [docs/j2534.md](docs/j2534.md), [docs/surrogate.md](docs/surrogate.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
 | [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
 | [docs/ios.md](docs/ios.md) | Havne on iPhone: installing CI's unsigned build with your own Apple ID, what works there |
 | [docs/screenshots.md](docs/screenshots.md) | Every page on the desktop and the phone, in Dark and in Night's amber and red |

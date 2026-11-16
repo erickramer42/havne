@@ -237,7 +237,8 @@ Tests round-trip real frames through both pairs.
 
 ## J2534
 
-The full reference is [j2534.md](j2534.md).
+The full reference is [j2534.md](j2534.md); the surrogate has its own,
+[surrogate.md](surrogate.md).
 
 - **Routing:** the loader reads the DLL's PE header and loads it in a
   **surrogate**, a separate process of the DLL's architecture that the
@@ -652,6 +653,7 @@ Detail and gaps: [testing.md](testing.md), with each test in [testing-inventory.
 | Every address form and option, with its default | [addresses.md](addresses.md) |
 | Why was it built this way | [adr/](adr/README.md) |
 | How the J2534 stack works, op by op | [j2534.md](j2534.md) |
+| How the J2534 surrogate process works | [surrogate.md](surrogate.md) |
 | How the ELM327 transport works, and the adapters it has run on | [elm327.md](elm327.md) |
 | How to build, run tests, troubleshoot | [development.md](development.md) |
 | How CI runs, and how the C ABI is checked | [ci.md](ci.md) |
