@@ -42,6 +42,16 @@ adapter isn't listed: **WiFi and other addresses: show** offers the two
 common WiFi addresses, and the computer or phone must be on the adapter's
 WiFi network first.
 
+Settings composes the address from a preset or a device (a J2534
+interface or a serial port), a profile row (default, `raw`,
+`uds-generic`, the picked vehicle's signal files and plugin variant) and
+a DID field, and leaves the address field editable: a typed address sets
+the row and the field from its `profile=` and `did=`, and the next click
+recomposes it with every other key kept. Core judges the result at
+connect, and Settings shows its words. The header opens Settings, and
+the connect lists on Home and Dash hand it the address of the row
+chosen.
+
 **Without a car:** Home's and Dash's lists end with a **Demo data** row,
 and **WiFi and other addresses: show** on Connection has a `mock://demo`
 button: a simulated car that runs every page. Replaying a recording is
@@ -94,6 +104,10 @@ open, and SocketCAN interfaces.
 5. Drag the chart to pause it and look back through the last two minutes
    while the values keep updating; a tap reads each trace's value at that
    moment. **Live** (or Space on a desktop) follows now again.
+
+A value never received shows "—", never a made-up 0. A value older than
+3 s dims, and ages refresh every tick, so a signal that stops arriving
+dims even when nothing else changes.
 
 Units follow **Settings, Display, Units** (metric or imperial).
 
