@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-15, **Version:** v0.7.4 (v0.8.0 built, not released),
+**Updated:** 2026-11-15, **Version:** v0.8.0,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,11 +14,11 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.8.0, conditions** (the roadmap's row below), built
-on `dev` and waiting for its release: conditions and alerts, armed
-recording, the one plugin store and the computed grammar (its section
-below). v0.7.4, follow-ups
-on the dashboard and the viewer, is released and tagged (its section
+**Current phase: v0.9.0, the whole car through plugins** (the roadmap's
+row below), with what v0.8.0 left out (its section lists it). v0.8.0, conditions, is out (its
+section below): conditions and alerts, armed recording, the one plugin
+store and the computed grammar. v0.7.4, follow-ups
+on the dashboard and the viewer, came before it (its section
 below): a Dashboard layout saved to a file
 and loaded back, more gauge colors, steady trends on the Dashboard and
 Live's chart, every plugin variant offered for a vehicle, Compare's
@@ -660,8 +660,8 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.7.2 | Finishing the Dashboard and signals: the desktop's gauges in the new design, undo in edit mode, a Light look, built-in layouts by what people watch, a signal file's dial range and warning levels, Python's exports and health report | Released |
 | v0.7.3 | The analysis viewer: the log's navigation aids, chart panes with two cursors, a recording's statistics, Live's pause, and the phone pass's fixes | Released |
 | v0.7.4 | Follow-ups on v0.7.3's theme: a Dashboard layout exported and loaded, more gauge colors, every plugin variant offered for a vehicle, the viewer's difference trace, the demo car under obd2, and Android's own document picker | Released |
-| v0.8.0 | Conditions: a condition file judged in a session, alerts in the app (banner, tone, colors, the Alerts page), armed recording, one plugin store for every import, a fuller grammar for computed signals, and a request budget of 1024 | Built, awaiting release |
-| v0.9.0-v0.11.0 | v0.9.0, the whole car through plugins: a profile sized for every module, sessions a plugin declares, and a plugin's own conversation with a module, security access to unlock reads among it. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
+| v0.8.0 | Conditions: a condition file judged in a session, alerts in the app (banner, tone, colors, the Alerts page), armed recording, one plugin store for every import, a fuller grammar for computed signals, and a request budget of 1024 | Released |
+| v0.9.0-v0.11.0 | v0.9.0, the whole car through plugins: what v0.8.0 left out, a profile sized for every module, a vehicle's plugins read together in one session (a signal set of your own, an OBDb import and `obd2`), sessions a plugin declares, and a plugin's own conversation with a module, security access to unlock reads among it. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning

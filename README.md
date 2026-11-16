@@ -133,11 +133,10 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## Status
 
-v0.7.4, follow-ups on the Dashboard and the viewer, is the latest release. Next:
+v0.8.0, conditions and alerts, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.8.0 | Conditions: alerts, armed recording, one plugin store (built, awaiting release) |
 | v0.9.0-v0.11.0 | The whole car through plugins; discovery of the whole bus; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 

@@ -11,6 +11,8 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-15
+
 ### Added
 
 - Conditions and alerts. A condition file is a set of named tests of a session: a signal above or below a level (with hysteresis and a hold), the link's state (`timeout`, `not_ok`, `request_failed`, `hard_failure`) or one of the frames check's findings, joined by `all` or `any`, each with what it is for (an alert, a recording, a marker). Conditions are judged on the frames' own time: one turns ON and OFF after its holds, and one whose input is older than its age bound keeps its state and says it is stale. The same recording replayed gives the same events at any speed. See [docs/condition-files.md](docs/condition-files.md).
@@ -1815,7 +1817,8 @@ The first release with a Windows download
   shell with a responsive layout.
 - CI on Windows, macOS and Linux, running the core's tests.
 
-[Unreleased]: https://github.com/erickramer42/havne/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/erickramer42/havne/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/erickramer42/havne/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/erickramer42/havne/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/erickramer42/havne/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/erickramer42/havne/compare/v0.7.1...v0.7.2
