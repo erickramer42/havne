@@ -1,6 +1,6 @@
 # User guide
 
-How to do each task in the Havne app, on the desktop and on a phone. Each
+How to do each task in the Havne app, on a desktop or laptop and on a phone. Each
 section is the steps for one task. The address you connect with, and
 every option it takes, is in [addresses.md](addresses.md).
 

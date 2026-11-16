@@ -61,7 +61,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 
 *A pull in the Recordings viewer: each unit in its own pane on one time axis, the cursor's values beside them, lambda going lean on the limiter's fuel cut.*
 
-Every page on the desktop and the phone, in Dark and in Night's amber and red: [docs/screenshots.md](docs/screenshots.md).
+Every page on a desktop or laptop and on the phone, in Dark and in Night's amber and red: [docs/screenshots.md](docs/screenshots.md).
 
 ## Architecture
 
@@ -159,7 +159,7 @@ v0.8.0, conditions and alerts, is the latest release. Next:
 | [docs/j2534.md](docs/j2534.md), [docs/surrogate.md](docs/surrogate.md), [docs/elm327.md](docs/elm327.md) | How each adapter transport works |
 | [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
 | [docs/ios.md](docs/ios.md) | Havne on iPhone: installing CI's unsigned build with your own Apple ID, what works there |
-| [docs/screenshots.md](docs/screenshots.md) | Every page on the desktop and the phone, in Dark and in Night's amber and red |
+| [docs/screenshots.md](docs/screenshots.md) | Every page on a desktop or laptop and on the phone, in Dark and in Night's amber and red |
 | [docs/development.md](docs/development.md) | Builds, tests, troubleshooting |
 | [docs/ci.md](docs/ci.md), [docs/mobile-build.md](docs/mobile-build.md), [docs/packaging.md](docs/packaging.md) | CI and the C ABI check; the Android and iOS builds; the Linux packages, the SBOM and releases |
 | [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and what only hardware can confirm |
