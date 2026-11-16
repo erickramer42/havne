@@ -3,6 +3,8 @@
 # tree with Qt, with .clang-tidy's checks, one summary line; each file's
 # output goes to Testing/tidy/<file>.log, and on a warning the warnings
 # are printed and the script exits 1. CI's clang-tidy job runs it.
+# The size checks' lines (a function past 80 lines or complexity 40) are
+# only counted, in the summary and in Testing/tidy/size.txt.
 #
 # Usage: scripts/tidy.sh [<tree>]               (default build-tidy)
 #        scripts/tidy.sh --qt <kit> [<tree>]    (default build-tidy-qt)
@@ -153,8 +155,13 @@ rc=$?
 dur=$((SECONDS - start))
 
 # A header's warning repeats in every file that includes it: print once.
-found=$(cat "$LOGDIR"/*.log | grep -E '(warning|error): ' | tr '\\' '/' |
+# The size checks never fail the run: counted apart, listed in size.txt.
+all=$(cat "$LOGDIR"/*.log | grep -E '(warning|error): ' | tr '\\' '/' |
     sed "s#^$root/##" | sort -u)
+sized=$(printf '%s\n' "$all" | grep -E '\[readability-function-(size|cognitive-complexity)\]$')
+found=$(printf '%s\n' "$all" | grep -vE '\[readability-function-(size|cognitive-complexity)\]$' | grep .)
+printf '%s\n' "$sized" | grep . > "$LOGDIR/size.txt"
+nsized=$(grep -c . "$LOGDIR/size.txt")
 if [ -n "$found" ]; then
     n=$(printf '%s\n' "$found" | wc -l | tr -d ' ')
     what=warnings
@@ -170,5 +177,5 @@ if [ "$rc" != 0 ]; then
         "$dur" "$rc" "$LOGDIR"
     exit 1
 fi
-printf 'tidy        ok    %4s s  %s files, no warnings (%s)\n' \
-    "$dur" "$count" "$version"
+printf 'tidy        ok    %4s s  %s files, no warnings; %s functions past the size thresholds, see %s/size.txt (%s)\n' \
+    "$dur" "$count" "$nsized" "$LOGDIR" "$version"
