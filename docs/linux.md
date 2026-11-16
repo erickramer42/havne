@@ -252,6 +252,45 @@ commands). On any bus it goes silent for good, and `havne-cli sim`
 ends with `yielded`, once another node sends on 0x7E8 (or 0x7E9 with
 `?modules=2`): an ECU answers there already.
 
+### SocketCAN: development and the tests
+
+`socketcan://` ([ADR-0032](adr/0032-socketcan-listening.md)) reads an
+interface someone has brought up; Havne never configures one.
+
+```sh
+# A virtual bus, for development and the tests (lasts until reboot)
+sudo modprobe vcan can-isotp
+sudo ip link add dev vcan0 type vcan
+sudo ip link set vcan0 mtu 72        # CAN FD, if the kernel's default is 16
+sudo ip link set up vcan0
+
+# The simulated car on it, and a session listening
+havne-cli play mock://demo --to vcan0 &
+havne-cli stream "socketcan://vcan0?profile=mock" --values
+
+# The simulated ECU on it (ADR-0046), and a session asking
+havne-cli sim mock://sim --on vcan0 &
+havne-cli stream "socketcan://vcan0?profile=obd2" --values
+
+# A real adapter (gs_usb: candleLight, CANable), listen-only at the bus's rate
+sudo ip link set can0 up type can bitrate 500000 listen-only on
+havne-cli stream socketcan://can0
+```
+
+Under WSL a USB adapter reaches Linux through `usbipd-win`, run on
+Windows: `usbipd list`, `usbipd bind --busid <id>` (once, as
+administrator) and `usbipd attach --wsl --busid <id>`; the WSL kernel
+has `gs_usb`, `slcan`, `peak_usb` and `kvaser_usb`.
+
+The tests: `test_socketcan` runs everywhere; `SocketCanBusTest` (in
+`test_vcan`) needs `vcan0` up and skips without it, and its
+interface-down case needs root:
+
+```sh
+sudo --preserve-env=ECUIO_VCAN_REQUIRED build-core/tests/test_vcan \
+  --gtest_filter='SocketCanBusTest.TheInterfaceGoingDown*'
+```
+
 ## Where Havne keeps things
 
 | What | Where |
@@ -277,6 +316,30 @@ sudo bpftrace -e 'usdt:/usr/bin/havne-cli:ecuio:frame { @[arg1] = count(); }' \
 ```
 
 counts the frames per CAN ID.
+
+### Probes in a build tree
+
+Core built where `<sys/sdt.h>` exists
+(`systemtap-sdt-dev`) carries three probes under provider `ecuio`, each
+one `nop` until a tracer attaches:
+
+| Probe | Arguments |
+|---|---|
+| `session_start` | session, backend (`ECUIO_BACKEND_*`) |
+| `session_close` | session |
+| `frame` | session, arbitration ID, flags, data length, `timestamp_us` |
+
+```sh
+readelf --notes build-core/cli/havne-cli | grep -A1 'Provider: ecuio'   # they're there
+# frames per ID while a stream runs
+sudo bpftrace -e 'usdt:build-core/cli/havne-cli:ecuio:frame { @[arg1] = count(); }' \
+  -c 'build-core/cli/havne-cli stream mock://demo --count 200'
+```
+
+`ProbeNotesTest` checks the notes in `test_core` and `havne-cli`; CI's
+`linux-build` runs `tests/probe_trace.sh` under `sudo`, which counts a
+`mock://` stream's probes (locally: `sudo sh tests/probe_trace.sh
+build-core/cli/havne-cli`).
 
 ## What has run where
 
