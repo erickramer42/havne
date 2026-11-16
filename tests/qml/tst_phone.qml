@@ -918,7 +918,7 @@ TestCase {
         verify(find(page, "stretchesPanel").visible, "the panel is up")
         verify(!find(page, "chartFrame").visible, "in the chart's place")
         for (const name of ["stretchesApply", "stretchesReset", "stretchesClose", "rule_pullLevel",
-                            "rule_pullRise"]) {
+                            "rule_pullRise", "pullEnd_lift", "pullEnd_topSpeed"]) {
             const item = find(page, name)
             const top = item.mapToItem(main.contentItem, 0, 0).y
             const bottom = item.mapToItem(main.contentItem, 0, item.height).y

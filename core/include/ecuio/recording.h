@@ -830,6 +830,14 @@ ecuio_status_t ecuio_recording_role_signal(const ecuio_recording_t* r,
 #define ECUIO_STRETCH_PULLS   0x1u
 #define ECUIO_STRETCH_CRUISES 0x2u
 
+/* ecuio_stretch_rules_t.flags: where a pull ends. Clear, it ends at the
+ * lift: the run's last sample at the level (throttle, or engine load with
+ * no throttle signal), so a pull run onto the limiter includes the fuel
+ * cut; set, at vehicle speed's first sample at its highest in the run,
+ * which leaves the fuel cut out. No effect with no vehicle-speed signal,
+ * where the lift ends it either way. */
+#define ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED 0x1u
+
 /* The defaults a zero field of ecuio_stretch_rules_t takes, from road
  * logs sampled at 3 to 4 Hz (ADR-0056's appendix of 2026-11-12). The gap
  * outlasts the lift between two gears, 925 ms at the longest, and stays
@@ -857,7 +865,8 @@ ecuio_status_t ecuio_recording_role_signal(const ecuio_recording_t* r,
 typedef struct ecuio_stretch_rules {
     uint32_t kinds;              /* ECUIO_STRETCH_*: which to find, one or
                                     both */
-    uint32_t flags;              /* zero */
+    uint32_t flags;              /* ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED or
+                                    zero */
     double pull_level;           /* throttle, % */
     double pull_load_level;      /* engine load, %, with no throttle */
     uint64_t pull_hold_us;       /* the shortest pull */
@@ -943,9 +952,11 @@ _Static_assert(sizeof(ecuio_recording_stretch_t) == 64,
  * A pull: a run of throttle samples at or above pull_level (engine load
  * at pull_load_level with no throttle signal, BY_LOAD) lasting
  * pull_hold_us, a dip under the level shorter than pull_gap_us, from the
- * dip's first sample to the next at the level, kept inside it; it ends
- * at vehicle speed's first sample at its highest in the run, so the
- * limiter's flat speed ends it, and speed must have risen over it. With
+ * dip's first sample to the next at the level, kept inside it; it ends at
+ * the run's last sample at the level, the lift, or with
+ * ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED at vehicle speed's first sample at
+ * its highest in the run, so the limiter's flat speed ends it; with a
+ * vehicle-speed signal speed must have risen over it either way. With
  * no speed signal the whole run is the pull (BY_ENGINE_SPEED), since an
  * upshift drops engine speed. Engine speed must climb pull_min_rise
  * inside the pull: the most a sample stands above an earlier one, the
@@ -968,9 +979,9 @@ _Static_assert(sizeof(ecuio_recording_stretch_t) == 64,
  *
  * ECUIO_ERR_NULL_ARGUMENT for NULL rules or count, or NULL out with a
  * capacity; ECUIO_ERR_INVALID_ARGUMENT for kinds of 0 or one this core
- * doesn't know, nonzero flags or reserved, a negative or NaN level,
- * band, rise or gain, a role index past the signals or on a text signal, or
- * from_us >= to_us; ECUIO_ERR_RECORDING_CHANGED as for a query.
+ * doesn't know, a flag this core doesn't know or nonzero reserved, a
+ * negative or NaN level, band, rise or gain, a role index past the signals
+ * or on a text signal, or from_us >= to_us; ECUIO_ERR_RECORDING_CHANGED as for a query.
  */
 ecuio_status_t ecuio_recording_stretches(const ecuio_recording_t* r,
                                          const ecuio_stretch_rules_t* rules,

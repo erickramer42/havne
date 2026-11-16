@@ -3286,6 +3286,55 @@ profile  raw
                   "the defaults find the two again")
     }
 
+    // Where a pull ends: at the throttle's lift unless the panel's choice
+    // says top speed, asked at its tap, kept with the levels, and Defaults
+    // puts the lift back. pull-twice's throttle lifts 2 ms after speed tops
+    function test_thePanelChoosesWhereAPullEnds() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        compare(page.stretchesOf("pull").map(s => s.toMs), [25002, 35002], "the lift")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        const lift = find(page, "pullEnd_lift")
+        const top = find(page, "pullEnd_topSpeed")
+        verify(lift.selected && !top.selected, "the lift is the default")
+        top.clicked()
+        verify(top.selected && !lift.selected)
+        tryVerify(() => page.stretchList !== null, 10000, "asked again at the tap")
+        compare(page.stretchesOf("pull").map(s => s.toMs), [25000, 35000], "top speed")
+        compare(page.stretchRules.pullEnd, "top-speed", "kept with the levels")
+        find(page, "stretchesReset").clicked()
+        verify(lift.selected, "Defaults puts the lift back")
+        tryVerify(() => page.stretchList !== null
+                  && page.stretchesOf("pull").map(s => s.toMs).join() === "25002,35002", 10000,
+                  "the lift's ends again")
+        compare(page.stretchRules.pullEnd, undefined)
+    }
+
+    // A stored end that is no word of the choice reads as the lift, with no
+    // refusal; a stored top speed opens selected
+    function test_aStoredPullEndIsReadAsTheLiftUnlessItIsTopSpeed() {
+        setStoredRules("{\"pullEnd\": \"sideways\"}")
+        let page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        compare(page.rulesProblem, "", "no refusal")
+        compare(page.stretchesOf("pull").map(s => s.toMs), [25002, 35002])
+        page.destroy()
+        setStoredRules("{\"pullEnd\": \"top-speed\"}")
+        page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        compare(page.stretchesOf("pull").map(s => s.toMs), [25000, 35000])
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        verify(find(page, "pullEnd_topSpeed").selected, "the panel shows the stored end")
+    }
+
     // The name the Stretches panel gives a rule: core's refusal and the panel's own
     // words say the rule by it
     function fieldName(page, key) {

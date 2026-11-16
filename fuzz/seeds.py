@@ -341,6 +341,14 @@ def main(argv):
     write(out, "fuzz_recording", "stretches-cruise",
           stretch_seed(3, cruise.get("Throttle", []),
                        cruise.get("Vehicle Speed", []), []))
+    # Both ends of a pull on a speed measure: the road log's throttle and
+    # speeds (switches 1, speed measures; 16, an engine speed; 32, a pull
+    # ends at top speed)
+    twice = signal_rows("tests/fixtures/recording/pull-twice/signals.csv")
+    write(out, "fuzz_recording", "stretches-pull-top-speed",
+          stretch_seed(1 | 16 | 32, twice.get("Throttle", []),
+                       twice.get("Vehicle Speed", []),
+                       [(t, v / 60) for t, v in twice.get("RPM", [])]))
     vin = b"ZZZFAKE11M0000001"
     ecu = header + (
         b"100000,100000,0x7E8,0x100,49 02 01 " + b" ".join(b"%02X" % c for c in vin) + b"\n"

@@ -819,7 +819,8 @@ TEST(RecordingViewTest, AStretchesAskFindsThePullsAndCruises)
     EXPECT_EQ(first.value(QStringLiteral("kind")).toString(),
               QStringLiteral("pull"));
     EXPECT_EQ(first.value(QStringLiteral("fromMs")).toDouble(), 18002.0);
-    EXPECT_EQ(first.value(QStringLiteral("toMs")).toDouble(), 25000.0);
+    EXPECT_EQ(first.value(QStringLiteral("toMs")).toDouble(), 25002.0)
+        << "the throttle's lift, its sample 2 ms after speed's";
     EXPECT_EQ(first.value(QStringLiteral("start")).toDouble(), 70.0);
     EXPECT_EQ(first.value(QStringLiteral("end")).toDouble(), 128.0);
     EXPECT_EQ(first.value(QStringLiteral("unit")).toString(),
@@ -828,7 +829,16 @@ TEST(RecordingViewTest, AStretchesAskFindsThePullsAndCruises)
     EXPECT_EQ(first.value(QStringLiteral("signal")).toInt(), speed);
     const QVariantMap second = pulls[1].toMap();
     EXPECT_EQ(second.value(QStringLiteral("fromMs")).toDouble(), 31002.0);
-    EXPECT_EQ(second.value(QStringLiteral("toMs")).toDouble(), 35000.0);
+    EXPECT_EQ(second.value(QStringLiteral("toMs")).toDouble(), 35002.0);
+    // Asked to end at top speed: speed's first sample at its highest
+    const QVariantList atTop = askedStretches(
+        v, true, false,
+        {{QStringLiteral("pullEnd"), QStringLiteral("top-speed")}});
+    ASSERT_EQ(atTop.size(), 2);
+    EXPECT_EQ(atTop[0].toMap().value(QStringLiteral("toMs")).toDouble(),
+              25000.0);
+    EXPECT_EQ(atTop[1].toMap().value(QStringLiteral("toMs")).toDouble(),
+              35000.0);
     EXPECT_TRUE(askedStretches(v, false, true).isEmpty())
         << "cruises alone: the log has none";
 
@@ -1267,6 +1277,9 @@ TEST(RecordingViewTest, AStretchesRuleOutOfRangeIsRefusedWithWords)
          "Speed within must be a number from 0 to 1000 km/h"},
         {"cruiseFloor", true,
          "Cruise above must be a number from 0 to 1000 km/h"},
+        {"pullEnd", QStringLiteral("top"),
+         "Where a pull ends must be lift or top-speed"},
+        {"pullEnd", 1, "Where a pull ends must be lift or top-speed"},
         {"pullSpeed", 1, "'pullSpeed' isn't a stretch rule"},
     };
     changes = 0;
@@ -1274,8 +1287,8 @@ TEST(RecordingViewTest, AStretchesRuleOutOfRangeIsRefusedWithWords)
         EXPECT_EQ(v.stretches(true, true, rule(r.key, r.value)), 0) << r.key;
         EXPECT_EQ(v.stretchesProblem(), QLatin1String(r.words)) << r.key;
     }
-    EXPECT_EQ(changes, 11) << "a change for each new wording, none for the "
-                              "two refusals that repeat the one before";
+    EXPECT_EQ(changes, 12) << "a change for each new wording, none for the "
+                              "three refusals that repeat the one before";
     // One bad rule among good ones refuses the ask
     EXPECT_EQ(v.stretches(true, true,
                           {{QStringLiteral("pullLevel"), 90},
@@ -1327,7 +1340,10 @@ TEST(RecordingViewTest, TheDefaultsAreCoresOwn)
         EXPECT_TRUE(d.contains(QLatin1String(key))) << key;
         return d.value(QLatin1String(key)).toDouble();
     };
-    EXPECT_EQ(v.stretchDefaults().size(), 10);
+    EXPECT_EQ(v.stretchDefaults().size(), 11);
+    EXPECT_EQ(v.stretchDefaults().value(QStringLiteral("pullEnd")),
+              QVariant(QStringLiteral("lift")))
+        << "a pull ends at the lift unless asked";
     EXPECT_EQ(value("pullLevel"), ECUIO_STRETCH_DEFAULT_PULL_LEVEL);
     EXPECT_EQ(value("pullLoadLevel"), ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL);
     EXPECT_EQ(value("pullHoldS"), ECUIO_STRETCH_DEFAULT_PULL_HOLD_US / 1e6);

@@ -91,6 +91,7 @@ int run(int argc, char** argv)
             levels; // --stretch-level, read once --units is
         bool imperial = false;
         bool has_units = false;
+        bool has_pull_end = false;
         for (int i = 2; i < argc; ++i) {
             const std::string a = argv[i];
             const bool has_value = i + 1 < argc;
@@ -123,6 +124,13 @@ int run(int argc, char** argv)
                 view.rules.kinds = kinds;
             } else if (a == "--stretch-level" && has_value) {
                 levels.push_back(argv[++i]);
+            } else if (a == "--pull-end" && has_value) {
+                if (!cli::parse_pull_end(argv[++i], view.rules.flags)) {
+                    std::fprintf(stderr, "havne-cli: --pull-end takes lift or "
+                                         "top-speed\n");
+                    return kExitUsage;
+                }
+                has_pull_end = true;
             } else if (a == "--role" && has_value) {
                 uint32_t role = 0;
                 std::string name;
@@ -202,10 +210,11 @@ int run(int argc, char** argv)
         }
         const bool aligns_pulls = view.align.kind == cli::AlignOn::pull;
         if (!view.stretches && !aligns_pulls &&
-            (!levels.empty() || !view.roles.empty() || has_units)) {
-            std::fprintf(stderr, "havne-cli: --stretch-level, --role and "
-                                 "--units go with --stretches or --align-on "
-                                 "pull:\n");
+            (!levels.empty() || !view.roles.empty() || has_units ||
+             has_pull_end)) {
+            std::fprintf(stderr, "havne-cli: --stretch-level, --role, "
+                                 "--pull-end and --units go with --stretches "
+                                 "or --align-on pull:\n");
             return kExitUsage;
         }
         if (aligns_pulls && view.align.pulls.size() != 1 &&

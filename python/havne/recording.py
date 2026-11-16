@@ -91,6 +91,7 @@ _ROLE_FIELDS = {"rpm": "engine_speed", "speed": "vehicle_speed", "throttle": "th
                 "load": "engine_load"}
 _KINDS = {"pulls": e.ECUIO_STRETCH_PULLS, "cruises": e.ECUIO_STRETCH_CRUISES,
           "all": e.ECUIO_STRETCH_PULLS | e.ECUIO_STRETCH_CRUISES}
+_PULL_ENDS = {"lift": 0, "top-speed": e.ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED}
 _LEVELS = ("pull_level", "pull_load_level", "pull_hold_us", "pull_gap_us", "pull_min_rise",
            "pull_min_gain", "cruise_hold_us", "cruise_speed_band", "cruise_throttle_band",
            "cruise_floor")
@@ -314,7 +315,8 @@ class Recording:
               "ecuio_recording_role_signal")
         return None if index.value == _NO_INDEX else self.signals[index.value]
 
-    def stretches(self, kinds="all", from_us=0, to_us=None, roles=None, cancel=None, **levels):
+    def stretches(self, kinds="all", from_us=0, to_us=None, roles=None, cancel=None,
+                  pull_end="lift", **levels):
         """The pulls and cruises (kinds 'pulls', 'cruises' or 'all') within
         the closed range [from_us, to_us] (to_us the recording's end by
         default; an empty default range answers []), in time order, as
@@ -323,11 +325,16 @@ class Recording:
         core's pick; levels are ecuio_stretch_rules_t's own fields in its
         units (pull_level=85, pull_gap_us=750_000, pull_min_rise in rpm,
         pull_min_gain and cruise_floor in km/h), each left out taking
-        core's default. cancel is find_marker's"""
+        core's default. pull_end is where a pull ends: 'lift', at the
+        throttle's lift, the limiter included, or 'top-speed', at speed's
+        first sample at its highest. cancel is find_marker's"""
         rules = e.ecuio_stretch_rules_t()
         if kinds not in _KINDS:
             raise ValueError(f"kinds is 'pulls', 'cruises' or 'all', not {kinds!r}")
+        if pull_end not in _PULL_ENDS:
+            raise ValueError(f"pull_end is 'lift' or 'top-speed', not {pull_end!r}")
         rules.kinds = _KINDS[kinds]
+        rules.flags = _PULL_ENDS[pull_end]
         for field in _ROLE_FIELDS.values():
             setattr(rules, field, _NO_INDEX)
         for role, signal in (roles or {}).items():

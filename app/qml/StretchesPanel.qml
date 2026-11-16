@@ -9,10 +9,11 @@ import App
 pragma ComponentBehavior: Bound
 
 // The viewer's Stretches panel (ADR-0056 section 6): the levels that make a
-// stretch a pull or a cruise, with core's defaults shown in each field.
-// Apply asks again with the typed levels; a field left empty, or typed as 0,
-// takes the default. The page owns the ask, the stored levels and the words
-// of a refusal; this panel reads them and says what was typed.
+// stretch a pull or a cruise, with core's defaults shown in each field, and
+// where a pull ends. Apply asks again with the typed levels; a field left
+// empty, or typed as 0, takes the default; a pull's end asks again at its
+// tap. The page owns the ask, the stored levels and the words of a refusal;
+// this panel reads them and says what was typed.
 ColumnLayout {
     id: panel
     spacing: Theme.spacing
@@ -44,6 +45,9 @@ ColumnLayout {
         { key: "cruiseSpeedBand", name: qsTr("Speed within"), unit: "speed" },
         { key: "cruiseThrottleBand", name: qsTr("Throttle within"), unit: "%" },
         { key: "cruiseFloor", name: qsTr("Cruise above"), unit: "speed" }]
+
+    // Where a pull ends: "lift" (the default) or "top-speed"
+    property string pullEnd: "lift"
 
     // What was typed that isn't a number, in words; "" for none
     property string typedProblem: ""
@@ -87,7 +91,14 @@ ColumnLayout {
             }
             out[item.key] = n
         }
+        if (pullEnd === "top-speed")
+            out.pullEnd = pullEnd
         return out
+    }
+    // A pull's end chosen: asked for at once, with the levels typed
+    function choosePullEnd(word) {
+        pullEnd = word
+        apply()
     }
     function apply() {
         const typed = typedRules()
@@ -98,6 +109,7 @@ ColumnLayout {
     function reset() {
         for (let i = 0; i < fieldRepeater.count; ++i)
             cellAt(i).field.text = ""
+        pullEnd = "lift"
         typedProblem = ""
         applyRequested({})
     }
@@ -108,6 +120,7 @@ ColumnLayout {
             const v = rules[item.key]
             item.field.text = shown(v)
         }
+        pullEnd = rules.pullEnd === "top-speed" ? "top-speed" : "lift"
         typedProblem = ""
     }
     onRulesChanged: fill()
@@ -191,6 +204,48 @@ ColumnLayout {
         wrapMode: Text.WordWrap
         color: Theme.danger
         text: panel.typedProblem !== "" ? panel.typedProblem : panel.problem
+    }
+
+    // Where a pull ends: at the throttle's lift, the limiter's fuel cut
+    // included, or at top speed, which leaves it out
+    ColumnLayout {
+        Layout.fillWidth: true
+        spacing: 2
+        Label {
+            Layout.fillWidth: true
+            text: qsTr("A pull ends")
+            color: Theme.textDim
+            font.pixelSize: Theme.fontCaption
+            elide: Text.ElideRight
+        }
+        SegmentRow {
+            objectName: "pullEnd"
+            Layout.fillWidth: Theme.compact
+            SegmentButton {
+                objectName: "pullEnd_lift"
+                tapHeight: Theme.touchTarget
+                share: Theme.compact
+                wrapMode: Theme.compact ? Text.Wrap : Text.NoWrap
+                Layout.preferredHeight: Math.max(Theme.touchTarget, implicitContentHeight)
+                labelSize: Theme.fontBody
+                text: qsTr("At the throttle's lift")
+                selected: panel.pullEnd === "lift"
+                checked: selected
+                onClicked: panel.choosePullEnd("lift")
+            }
+            SegmentButton {
+                objectName: "pullEnd_topSpeed"
+                tapHeight: Theme.touchTarget
+                share: Theme.compact
+                wrapMode: Theme.compact ? Text.Wrap : Text.NoWrap
+                Layout.preferredHeight: Math.max(Theme.touchTarget, implicitContentHeight)
+                labelSize: Theme.fontBody
+                text: qsTr("At top speed")
+                selected: panel.pullEnd === "top-speed"
+                checked: selected
+                onClicked: panel.choosePullEnd("top-speed")
+            }
+        }
     }
 
     Flickable {

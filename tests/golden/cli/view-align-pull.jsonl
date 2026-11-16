@@ -11,9 +11,9 @@
 {"host_us": 11500000, "index": 0, "label": "pull", "recording": 1, "type": "marker"}
 {"found": true, "host_us": 31002000, "offset_us": -31002000, "on": "pull:2,1", "recording": 0, "type": "align"}
 {"found": true, "host_us": 12301000, "offset_us": -12301000, "on": "pull:2,1", "recording": 1, "type": "align"}
-{"cruise_floor": 56.32704, "cruise_speed_band": 2, "engine_load": null, "engine_speed": "RPM", "pull_gain": 10, "recording": 0, "throttle": "Throttle", "type": "roles", "vehicle_speed": "Vehicle Speed"}
+{"cruise_floor": 56.32704, "cruise_speed_band": 2, "engine_load": null, "engine_speed": "RPM", "pull_end": "lift", "pull_gain": 10, "recording": 0, "throttle": "Throttle", "type": "roles", "vehicle_speed": "Vehicle Speed"}
 {"by_engine_speed": false, "by_load": false, "cut_end": true, "cut_start": false, "end": 151, "from_us": 0, "kind": "pull", "length_us": 3000000, "no_throttle": false, "recording": 0, "signal": "Vehicle Speed", "start": 140, "to_us": 3000000, "type": "stretch"}
-{"cruise_floor": 56.32704, "cruise_speed_band": 2, "engine_load": null, "engine_speed": "RPM", "pull_gain": 10, "recording": 1, "throttle": "Throttle", "type": "roles", "vehicle_speed": null}
+{"cruise_floor": 56.32704, "cruise_speed_band": 2, "engine_load": null, "engine_speed": "RPM", "pull_end": "lift", "pull_gain": 10, "recording": 1, "throttle": "Throttle", "type": "roles", "vehicle_speed": null}
 {"by_engine_speed": true, "by_load": false, "cut_end": true, "cut_start": false, "end": 4642, "from_us": 0, "kind": "pull", "length_us": 3000000, "no_throttle": false, "recording": 1, "signal": "RPM", "start": 2247, "to_us": 3000000, "type": "stretch"}
 {"column_us": 500000, "columns": 8, "from_us": -1000000, "to_us": 3000000, "type": "axis"}
 {"highest": [4300, 4300, 4460, 4750, 5040, 5185, 5475, 5765], "lowest": [4300, 4300, 4460, 4615, 4875, 5185, 5340, 5600], "mean": [4300, 4300, 4460, 4682.5, 4957.5, 5185, 5407.5, 5682.5], "recording": 0, "samples": [2, 2, 1, 2, 2, 1, 2, 2], "signal": "RPM", "type": "columns"}

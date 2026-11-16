@@ -1458,6 +1458,11 @@ if(TARGET havne-cli)
     app_cli_usage(ViewAPullGainOfWordsIsUsage
         "view|x|--align-on|pull:1|--stretch-level|pull-gain=some")
     app_cli_usage(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal")
+    app_cli_usage_says(ViewAPullEndThatIsntOneIsUsage
+        "view|x|--stretches|--pull-end|top" "--pull-end takes lift or top-speed")
+    app_cli_usage_says(ViewAPullEndWithoutStretchesIsUsage
+        "view|x|--pull-end|lift" "--pull-end and --units go with")
+    app_cli_usage(ViewAPullEndWithoutAWordIsUsage "view|x|--stretches|--pull-end")
     # pulls, cruises or all after --stretches is its word, never a folder
     app_cli_usage_says(ViewStretchesAndItsWordNameNoFolder "view|--stretches|all"
         "view needs a recording's folder")
