@@ -1,22 +1,98 @@
 # Development guide
 
-Building, testing and CI for contributors. For the short build
-instructions, see the [README](../README.md#try-it).
+Building, testing and CI for contributors.
+
+## Start here
+
+**What you need**
+
+| | Windows | Linux | macOS |
+|---|---|---|---|
+| Qt | 6.12+, kit `msvc2022_64` | 6.12+, kit `linux_gcc_64` | 6.12+, kit `clang_64` |
+| Compiler | MSVC 2022+ (Visual Studio) | GCC 10+ | Xcode 16+ |
+| CMake | 3.21+ | 3.21+ | 3.21+ |
+| Also | Git Bash, for `scripts/verify.sh` | `libgl1-mesa-dev`, `libxkbcommon-dev` (Debian, Ubuntu) | |
+
+GoogleTest is fetched on the first configure. Python 3 is optional (the
+pinned clang-tidy wheel, aqtinstall, the Python tests); Qt isn't needed
+for a core-only build. Android and iOS: [mobile-build.md](mobile-build.md).
+Installing Qt with aqtinstall: [its section](#installing-qt-with-aqtinstall).
+
+**Quickest first build, no Qt:** the core, `havne-cli` and their tests.
+
+```sh
+cmake -B build-core -DHAVNE_BUILD_CORE_ONLY=ON
+cmake --build build-core --config Release
+ctest --test-dir build-core -C Release --output-on-failure
+```
+
+**Windows, the app and the tests.** Build the Win32 tree first, so the
+x86 J2534 surrogate exists when the app tree is configured and copies it
+next to `havne.exe`:
+
+```sh
+cmake -B build-win32 -A Win32 -DHAVNE_BUILD_CORE_ONLY=ON
+cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
+cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/msvc2022_64
+cmake --build build --config Release
+build/app/Release/havne.exe
+ctest --test-dir build -C Release --output-on-failure
+```
+
+Once both trees are configured, `scripts/verify.sh` (Git Bash) is the
+everyday rebuild-and-test: it builds `build-win32`, then `build`, runs
+the suite and the cross-arch subset, and prints one line per step
+([Recommended verification sequence](#recommended-verification-sequence)).
+
+**Linux and macOS, the app and the tests.**
+
+```sh
+cmake -B build -DCMAKE_PREFIX_PATH=/path/to/qt
+cmake --build build
+ctest --test-dir build -C Release --output-on-failure
+build/app/havne                              # Linux
+build/app/Havne.app/Contents/MacOS/Havne    # macOS
+```
+
+Showing the window under X11 also needs `libxkbcommon-x11-0` and
+`libxcb-cursor0`. A source build on Windows needs a current Microsoft
+Visual C++ Redistributable (x64). Linux users who only want to run
+Havne: [linux.md](linux.md).
+
+**The rest of this guide**
+
+- Builds: [Build configurations](#build-configurations) (the desktop
+  platforms and the surrogate's two trees), [Test fixtures](#test-fixtures-the-two-fake-vendors)
+  and [mobile-build.md](mobile-build.md) (Android, iOS, the app icon).
+- Tests: [Recommended verification sequence](#recommended-verification-sequence),
+  [Running tests](#running-tests) (ctest, QML, cross-arch, fuzzing,
+  coverage) and [testing.md](testing.md) for what each suite pins.
+- Tools: [The command-line client](#the-command-line-client),
+  [Everyday tools](#everyday-tools) (preferences, qmllint, warnings,
+  formatting, clang-tidy) and [linux.md](linux.md) (SocketCAN, USDT
+  tracing).
+- When it breaks: [Troubleshooting](#troubleshooting) (with a crash
+  dump on Windows) and [Portability traps](#portability-traps).
+- CI and releases: [ci.md](ci.md) (the jobs, the workarounds, the C ABI
+  check) and [packaging.md](packaging.md) (the Linux packages, the SBOM,
+  releases, the Android release key).
 
 ## Toolchain
 
+The table in Start here has Qt, the compiler and CMake. CMake 3.21+ is
+required for `qt_standard_project_setup()`; the compiler minimums are
+Qt 6.12's (a core-only build needs just C++17 and no Qt); the app needs
+Qt's Core, Gui and Quick. The rest:
+
 | Component | Version | Notes |
 |---|---|---|
-| CMake | 3.21+ | Required for `qt_standard_project_setup()` |
-| Qt | 6.12+ (LGPL) | Core, Gui and Quick. Not needed for core-only builds. |
-| C++ compiler | C++17 | MSVC 2022+, GCC 10+, Xcode 16+: Qt 6.12's minimums. A core-only build needs just C++17. |
 | GoogleTest | 1.14.0 | Fetched automatically on the first configure if it isn't installed |
 | Android NDK, JDK | NDK r27, JDK 21 | Android builds only. Qt 6.12's Android kit expects these versions. |
 | Xcode | 16+ (iOS 18 SDK) | iOS builds only, on a macOS host |
 | Python (optional) | 3.x, 64-bit | Installs the pinned clang-tidy wheel for `scripts/tidy.sh`, and aqtinstall if you install Qt that way |
 | OpenCppCoverage (optional) | any | Windows line coverage, `scripts/coverage.sh` |
 
-## Installing Qt with aqtinstall
+### Installing Qt with aqtinstall
 
 Released aqtinstall (3.3.x) can't install Qt 6.11+: download.qt.io
 changed its repository layout, and aqt requests a stale
@@ -43,24 +119,14 @@ vendor DLL loads in a surrogate process of its own architecture
 ([ADR-0025](adr/0025-one-j2534-backend.md)). Most, the VX's among
 them, are 32-bit, and their surrogate comes from a core-only Win32
 tree, because Qt ships no 32-bit kits; the app tree copies it next to
-`havne.exe`, beside its own x64 surrogate, which is why the Win32
-tree is built first. The Visual Studio generator is multi-config, so
-`--config` and `-C` are required:
-
-```sh
-# 1. The Win32 tree: the x86 surrogate, and the x86 fakes the cross-arch tests load
-cmake -B build-win32 -A Win32 -DHAVNE_BUILD_CORE_ONLY=ON
-cmake --build build-win32 --config Release --target ecuio-j2534-surrogate fake_j2534 fake_j2534_legacy
-
-# 2. The app tree, configured after step 1 so it finds the surrogate
-cmake -B build -DCMAKE_PREFIX_PATH=<qt-install>/msvc2022_64
-cmake --build build --config Release   # prints "Deploying x64 J2534 surrogate" and "Deploying Win32 J2534 surrogate"
-build/app/Release/havne.exe           # windeployqt has run post-build
-```
-
-`scripts/verify.sh` (Git Bash) runs both builds in this order, then
-the whole suite and the cross-arch subset
-([Running tests](#running-tests)).
+`havne.exe`, beside its own x64 surrogate. The recipe is in
+[Start here](#start-here): its first tree also builds the x86 fakes the
+cross-arch tests load, and the app tree's build prints "Deploying x64
+J2534 surrogate" and "Deploying Win32 J2534 surrogate" (windeployqt has
+run post-build). The Visual Studio generator is multi-config, so
+`--config` and `-C` are required. `scripts/verify.sh` (Git Bash) runs
+both builds in this order, then the whole suite and the cross-arch
+subset ([Running tests](#running-tests)).
 
 **How the app tree finds the surrogates (automatic).** The x64 one
 is the app tree's own `ecuio-j2534-surrogate` target
@@ -86,18 +152,15 @@ Resolution order:
    surrogate through `ECUIO_SURROGATE_EXE` at runtime: see the
    cross-arch run below.
 
-Build order matters: build the Win32 tree **first**, then configure
-or reconfigure the x64 tree so auto-detection finds the exe.
-Detection runs only at configure time, so an x64 tree configured
-before the Win32 surrogate existed has no copy step at all, and
-building it again doesn't add one. Check the configure output for
-`Deploying Win32 J2534 surrogate: <path>`. If it isn't there, re-run
-`cmake -B build` after building the Win32 tree.
-
-Once the copy step exists, the Visual Studio generator runs it on
-every app build (`copy_if_different`). Keep the order on every
-rebuild too: Win32 tree, then app. Building the app first deploys the
-previous surrogate.
+Build order matters, on every build: the Win32 tree **first**, then
+configure or reconfigure the x64 tree so auto-detection finds the exe.
+Detection runs only at configure time, so an x64 tree configured before
+the Win32 surrogate existed has no copy step at all, and building it
+again doesn't add one. Check the configure output for `Deploying Win32
+J2534 surrogate: <path>`; if it isn't there, re-run `cmake -B build`
+after building the Win32 tree. Once the copy step exists, the Visual
+Studio generator runs it on every app build (`copy_if_different`), so
+building the app before the Win32 tree deploys the previous surrogate.
 
 **Cache caveat.** The cache variable
 persists across reconfigures. A tree previously configured with an
@@ -111,15 +174,9 @@ cmake -B build -U HAVNE_SURROGATE_SOURCE
 Blowing away `CMakeCache.txt` is the blunt equivalent and equally
 safe: regeneration is cheap.
 
-**Full app, Linux and macOS.** Single-config generators drop the
-`Release/` path segment. On macOS the app is a bundle:
-
-```sh
-cmake -B build -DCMAKE_PREFIX_PATH=/path/to/qt
-cmake --build build
-build/app/havne                              # Linux
-build/app/Havne.app/Contents/MacOS/Havne    # macOS
-```
+**Full app, Linux and macOS.** The recipe is in [Start here](#start-here).
+Single-config generators drop the `Release/` path segment, and on macOS
+the app is a bundle.
 
 On Debian or Ubuntu, Qt's desktop kit needs `libgl1-mesa-dev` and
 `libxkbcommon-dev` to build (the `linux-build` CI job installs both).
@@ -133,15 +190,11 @@ doesn't copy it (the release zip carries its own). Linux and macOS
 need the Qt runtime libraries. A J2534 vendor driver is needed only
 for a real adapter; the tests use the in-tree fake.
 
-**Core only, no Qt.** This mirrors the Ubuntu CI job:
-
-```sh
-cmake -B build-core -DHAVNE_BUILD_CORE_ONLY=ON
-cmake --build build-core --config Release
-```
+**Core only, no Qt.** The first recipe in [Start here](#start-here); it
+mirrors the Ubuntu CI job.
 
 **The cross-arch tree** is the Win32 tree of the Windows recipe
-above: besides the surrogate it builds the x86 fake DLLs that test
+in Start here: besides the surrogate it builds the x86 fake DLLs that test
 the x64 to x86 path. Only the surrogate and vendor DLLs are ever x86.
 
 > **Note:** **Rebuild both trees** after any change to `j2534_ptypes.h` or
@@ -177,9 +230,10 @@ negative assertion will catch it, but best not to trigger it).
 
 ## Recommended verification sequence
 
-`scripts/verify.sh` (Git Bash on Windows; any shell elsewhere) runs
-steps 1-3 below and prints one line per step (a run on the dev
-machine, 2026-10-26; the times vary with the machine's load):
+`scripts/verify.sh` (Git Bash on Windows; off Windows it builds `build`
+and runs ctest alone) rebuilds, runs the tests and prints one line per
+step. The trees must already be configured (Start here has the first
+configure):
 
 ```sh
 scripts/verify.sh                         # both trees, full suite, cross-arch
@@ -188,14 +242,22 @@ scripts/verify.sh --build-only            # both trees, no tests
 scripts/verify.sh --suite Bridge,Qml      # named suites, after the build
 scripts/verify.sh --changed               # the steps this branch's changes need
 scripts/verify.sh --changed --dry-run     # the plan, nothing run
+scripts/verify.sh --cross-only            # win32, build and cross-arch alone
+scripts/verify.sh --no-cross              # without the cross-arch step
 ```
 
 ```
-win32       ok       3 s  0 warnings
-build       ok      89 s  0 warnings
-ctest       ok     109 s  404/404 passed, 2 skipped
-cross-arch  ok      45 s  76/76 passed, 0 skipped
+win32       ok      <s>  <n> warnings
+build       ok      <s>  <n> warnings
+ctest       ok      <s>  <passed>/<total> passed, <n> skipped
+cross-arch  ok      <s>  <passed>/<total> passed, <n> skipped
 ```
+
+The times and counts vary with the tree and the machine's load.
+`--cross-only` is the half of a branch's verify that CI never runs: it
+needs Windows and a configured `build-win32`, takes only `--no-devices`
+(which changes nothing there, as no device is read) and `--dry-run`, and
+writes no stamp.
 
 Full output goes to `Testing/verify/<step>.log` (git-ignored). On a
 failure it prints the compiler errors or the failed test names and
@@ -212,7 +274,7 @@ the Win32 step also builds the x86 `ecuio.dll` and `test_c_abi_shared`,
 and the cross-arch step adds `c_abi_shared` and
 `ExportsTest.TheLibraryExportsTheDeclarations`, since CI never builds
 the x86 DLL. Its line adds `x86 core N/N`, the cases it ran in
-`build-win32`. The trees must already be configured. Off Windows, or without
+`build-win32`. Off Windows, or without
 `build-win32`, the Win32 and cross-arch steps are left out.
 
 `--suite` and `--changed` are for the edit-and-check loop; a pull request
@@ -484,52 +546,8 @@ python tests/golden.py run --golden tests/golden/cli/mock.jsonl --ignore core --
 On Windows, give `golden.py` the executable's absolute path:
 Python's `CreateProcess` doesn't resolve `build-core/cli/...`.
 
-## SocketCAN on Linux
 
-The virtual bus, the simulated ECU on it and the SocketCAN tests are in
-[linux.md](linux.md#socketcan-development-and-the-tests).
-
-## Debug symbols and tracing
-
-[ADR-0034](adr/0034-debug-symbols-and-probes.md). Every MSVC Release
-build writes a PDB beside each binary (`/Zi`, `/DEBUG`, with `/OPT:REF`
-and `/OPT:ICF` kept), and each release publishes the shipped
-executables' PDBs as `havne-X.Y.Z-windows-x64-symbols.zip`.
-
-**A crash dump on Windows.** Windows keeps one when asked, per program,
-in the registry (as administrator):
-
-```bat
-reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\havne.exe" /v DumpType /t REG_DWORD /d 2
-```
-
-The next crash leaves a full dump in `%LOCALAPPDATA%\CrashDumps`. Open
-it in WinDbg or Visual Studio with the release's unzipped symbols on the
-symbol path (`.sympath+ <folder>`, then `!analyze -v`); the PDB must be
-the same release's, as the debugger checks.
-
-USDT probes: [linux.md](linux.md#probes-in-a-build-tree).
-
-## Troubleshooting
-
-| Symptom | Cause and fix |
-|---|---|
-| `QmlCacheGeneratedCode` unresolved externals after adding a QML file | Stale QML cache. Do a clean reconfigure (`rm -rf build`). |
-| On Windows, every build recompiles the whole QML cache (about a minute) although nothing changed | After an AUTOMOC rerun that leaves the moc list as it was, Qt's metatype step leaves `build/app/meta_types/app_ui_json_file_list.txt` older than `app_ui_autogen/timestamp_<config>`, so the step reruns on every build. Touch the list (`touch build/app/meta_types/app_ui_json_file_list.txt`); the next build is a no-op. |
-| A `QmlTest` case fails with "Received a warning that resulted in a failure" | A binding in the app's QML raised a warning: the message names the file and line under `qrc:/qt/qml/App/`. Fix the binding; a common cause is a delegate reading its `index` (-1) while the model resets. |
-| `test_qml` exits at once and prints that a QML type isn't available, or `module "App" is not installed` | The module's plugin isn't linked or imported. Whatever links `app_ui` also links `app_uiplugin` and has `Q_IMPORT_QML_PLUGIN(AppPlugin)` in one source file, as `app/main.cpp` and `tests/test_qml.cpp` do. |
-| Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
-| Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
-| Surrogate opens fail, in tests or the app, and the session log says "built from other shared headers" | One tree was built from older copies of `j2534_ptypes.h` or `surrogate_protocol.h`, usually a stale `build-win32`. Rebuild both trees, Win32 first. |
-| Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
-| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "surrogate process failed: no surrogate (ecuio-j2534-surrogate.exe)", and `%TEMP%\ecuio-surrogate.log` holds an `open: no surrogate exe` line | No surrogate next to `havne.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
-| The cross-arch routing case skips although the variables were exported | They're named something else, for example `HAVNE_SURROGATE_EXE`: nothing reads that. The names are `ECUIO_SURROGATE_EXE` and `ECUIO_FAKE_DLL` (Cross-arch run, above). The rest of the run passes on the x64 surrogate, so the skip is the only sign. |
-| Cross-arch test fails expecting an x86 DLL, or the session log names `ecuio-j2534-surrogate-x64.exe` | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code: unset skips, wrong-value fails. |
-| In the app or a test, an x64 DLL fails with "no surrogate (ecuio-j2534-surrogate-x64.exe): none next to the app" | The x64 surrogate wasn't copied: the app and each J2534 test copy it from their own tree POST_BUILD (`app_deploy_surrogate` in `tests/CMakeLists.txt`). Build the target again. |
-| J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |
-| Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
-
-Mobile build and iOS Simulator smoke problems: [mobile-build.md](mobile-build.md#troubleshooting).
+## Everyday tools
 
 **Preferences:** the app keeps the zoom, the units, the last URI that
 connected and the Record sessions switch with QML `Settings`; on
@@ -603,25 +621,56 @@ that isn't the pin (an LLVM on PATH, say) unless `CLANG_TIDY_ANY=1`, for
 trying a new pin; `$CLANG_TIDY` names another binary. A warning that is wrong at one line
 gets a `NOLINTNEXTLINE(<check>)` with the reason beside it.
 
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `QmlCacheGeneratedCode` unresolved externals after adding a QML file | Stale QML cache. Do a clean reconfigure (`rm -rf build`). |
+| On Windows, every build recompiles the whole QML cache (about a minute) although nothing changed | After an AUTOMOC rerun that leaves the moc list as it was, Qt's metatype step leaves `build/app/meta_types/app_ui_json_file_list.txt` older than `app_ui_autogen/timestamp_<config>`, so the step reruns on every build. Touch the list (`touch build/app/meta_types/app_ui_json_file_list.txt`); the next build is a no-op. |
+| A `QmlTest` case fails with "Received a warning that resulted in a failure" | A binding in the app's QML raised a warning: the message names the file and line under `qrc:/qt/qml/App/`. Fix the binding; a common cause is a delegate reading its `index` (-1) while the model resets. |
+| `test_qml` exits at once and prints that a QML type isn't available, or `module "App" is not installed` | The module's plugin isn't linked or imported. Whatever links `app_ui` also links `app_uiplugin` and has `Q_IMPORT_QML_PLUGIN(AppPlugin)` in one source file, as `app/main.cpp` and `tests/test_qml.cpp` do. |
+| Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |
+| Surrogate test fails with child exit code 5 | An export can't be found by name, usually because of x86 `__stdcall` decoration. Check the `.def` file. Other exit codes are listed in [j2534.md](j2534.md#surrogate). |
+| Surrogate opens fail, in tests or the app, and the session log says "built from other shared headers" | One tree was built from older copies of `j2534_ptypes.h` or `surrogate_protocol.h`, usually a stale `build-win32`. Rebuild both trees, Win32 first. |
+| Cross-arch test fails with odd values, but same-arch passes | A stale `build-win32` fake: the fakes carry no build fingerprint. Rebuild both trees. |
+| In the app, an x86 adapter (for example the OBDX Pro VX) fails with "surrogate process failed: no surrogate (ecuio-j2534-surrogate.exe)", and `%TEMP%\ecuio-surrogate.log` holds an `open: no surrogate exe` line | No surrogate next to `havne.exe`, so the child never launched. The x64 tree was configured before `build-win32` had a surrogate. Build the Win32 tree, re-run `cmake -B build`, check for `Deploying Win32 J2534 surrogate` in the output, and rebuild. Setting `ECUIO_SURROGATE_EXE` also works. |
+| The cross-arch routing case skips although the variables were exported | They're named something else, for example `HAVNE_SURROGATE_EXE`: nothing reads that. The names are `ECUIO_SURROGATE_EXE` and `ECUIO_FAKE_DLL` (Cross-arch run, above). The rest of the run passes on the x64 surrogate, so the skip is the only sign. |
+| Cross-arch test fails expecting an x86 DLL, or the session log names `ecuio-j2534-surrogate-x64.exe` | `ECUIO_FAKE_DLL` points at an x64 fake (or the wrong tree). Check the value, not the code: unset skips, wrong-value fails. |
+| In the app or a test, an x64 DLL fails with "no surrogate (ecuio-j2534-surrogate-x64.exe): none next to the app" | The x64 surrogate wasn't copied: the app and each J2534 test copy it from their own tree POST_BUILD (`app_deploy_surrogate` in `tests/CMakeLists.txt`). Build the target again. |
+| J2534 test fails as `Failed (Timeout)` | A genuine hang, bounded by the 30 s ceiling. Attach to the surviving test and surrogate processes and check thread wait states before killing; the child log is `%TEMP%\ecuio-surrogate.log`, and earlier spawns' logs are kept beside it under dated names. |
+| Linker warning LNK4070 on a fake DLL | The `.def` file's `LIBRARY` directive disagrees with the output filename. Make them match. |
+
+Mobile build and iOS Simulator smoke problems: [mobile-build.md](mobile-build.md#troubleshooting).
+
+### A crash dump on Windows
+
+
+[ADR-0034](adr/0034-debug-symbols-and-probes.md). Every MSVC Release
+build writes a PDB beside each binary (`/Zi`, `/DEBUG`, with `/OPT:REF`
+and `/OPT:ICF` kept), and each release publishes the shipped
+executables' PDBs as `havne-X.Y.Z-windows-x64-symbols.zip`.
+
+A crash dump: Windows keeps one when asked, per program,
+in the registry (as administrator):
+
+```bat
+reg add "HKLM\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\havne.exe" /v DumpType /t REG_DWORD /d 2
+```
+
+The next crash leaves a full dump in `%LOCALAPPDATA%\CrashDumps`. Open
+it in WinDbg or Visual Studio with the release's unzipped symbols on the
+symbol path (`.sympath+ <folder>`, then `!analyze -v`); the PDB must be
+the same release's, as the debugger checks.
+
+On Linux, core's USDT probes: [linux.md](linux.md#probes-in-a-build-tree).
+
 ## Portability traps
 
 CI builds core with GCC, MSVC and AppleClang, and cross-compiles it
-with the Android NDK's Clang and for iOS. Code that compiles cleanly
-on MSVC is not necessarily portable:
-
-- Designated initializers are C++20. MSVC accepts them in C++17 mode
-  and GCC rejects them. Use constructor helpers such as `mk()` in
-  `signal_sets.cpp`.
-- `strncpy_s` / Annex K is MSVC-only. Use a bounded copy such as
-  `copy_str()`.
-- An implicit int to enum conversion fails on MSVC with C2664.
-
-## CI
-
-The jobs and what each does, the triggers, the temporary workarounds and
-the C ABI check are in [ci.md](ci.md).
-
-## Releases and packaging
-
-The Linux AppImage, the core packages and tarball, the SBOM, the release
-workflow and the Android release key are in [packaging.md](packaging.md).
+with the Android NDK's Clang and for iOS, so code that compiles cleanly
+on MSVC isn't necessarily portable. Three traps have bitten:
+designated initializers are C++20 (MSVC accepts them in C++17 mode, GCC
+rejects them; use constructor helpers such as `mk()` in
+`signal_sets.cpp`); `strncpy_s` and the rest of Annex K are MSVC-only
+(use a bounded copy such as `copy_str()`); and an implicit int to enum
+conversion fails on MSVC with C2664.
