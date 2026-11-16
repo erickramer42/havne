@@ -2,7 +2,7 @@
 
 - **Status:** Accepted. Built: "Build steps" 1 to 5 and the phone run
   (the appendices of 2026-11-13 to 2026-11-15). Not built: step 6,
-  `SignalStore` out of the app (v0.9.0).
+  `SignalStore` out of the app (v0.8.1).
 - **Date:** 2026-11-13.
 - **Builds on:** [ADR-0013](0013-protocol-profiles.md) (profiles chosen
   by the URI, never inferred, section 3);
