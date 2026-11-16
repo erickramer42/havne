@@ -4196,12 +4196,17 @@ TestCase {
     }
 
     // The list's buttons wrap inside the narrowest phone
-    function test_thePresetListFitsTheNarrowestPhone() {
-        const page = pageOf({ form: "phone", width: 320, height: 640 }, docOf([cellOf("A")]))
+    function test_thePresetListFitsTheNarrowestPhone_data() {
+        // 280 stands in for a wider font on 320 (CI's Linux and macOS)
+        return [{ tag: "320", width: 320 }, { tag: "280", width: 280 }]
+    }
+    function test_thePresetListFitsTheNarrowestPhone(data) {
+        const page = pageOf({ form: "phone", width: data.width, height: 640 }, docOf([cellOf("A")]))
         page.startEditing()
         openPresetList(page)
         const flow = find(page, "dashPresetList")
-        verify(flow.width <= page.width + 8, "the list is no wider than the page: " + flow.width)
+        verify(waitForPolish(page.Window.window), "laid out")
+        verify(flow.width <= flow.parent.width + 0.5, "the list is no wider than its bar: " + flow.width + " in " + flow.parent.width)
         for (const n of ["preset_blank", "preset_standard", "preset_temperatures", "preset_showcase",
                          "preset_file", "preset_cancel"]) {
             const b = find(page, n)
@@ -4295,4 +4300,61 @@ TestCase {
         page.openPresets("replace")
         verify(find(page, "preset_standard").enabled, "a replace adds no page")
     }
+
+    // ---- Presets: the phone pass's findings
+
+    // A ring draws a square face: its box is at least one (the phone's row is
+    // a quarter of a column), so its value and caption have the room a ring
+    // of 2 by 6 lacked; the desktop's ring is the Standard page's own
+    function test_aShowcaseRingIsAtLeastASquare() {
+        for (const c of DashboardBook.presetPage("showcase", "phone").cells.filter(x => x.kind === "ring"))
+            verify(Number(DashboardBook.heightInColumns(c.h)) >= c.w, c.label + " is " + c.w + " by " + c.h)
+        const std = DashboardBook.presetPage("standard", "desktop").cells.filter(x => x.kind === "ring")[0]
+        for (const c of DashboardBook.presetPage("showcase", "desktop").cells.filter(x => x.kind === "ring"))
+            verify(c.w === std.w && c.h === std.h, c.label + " is " + c.w + " by " + c.h)
+    }
+
+    // A Temperatures cell for a signal the car lacks says why in a whole
+    // note, not "not in ...": at the phone's width and at 320, which stands
+    // in for a wider font
+    function test_theTemperaturesUnavailableNotesFitTheirCells_data() {
+        return [{ tag: "384", width: 384 }, { tag: "320", width: 320 }]
+    }
+    function test_theTemperaturesUnavailableNotesFitTheirCells(data) {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const d = DashboardBook.builtIn("phone")
+        d.pages = [DashboardBook.presetPage("temperatures", "phone")]
+        const page = pageOf({ form: "phone", width: data.width, height: 832 }, d)
+        const cells = d.pages[0].cells
+        let seen = 0
+        for (let i = 0; i < cells.length; ++i) {
+            if (cells[i].label !== "Outside air" && cells[i].label !== "Catalyst")
+                continue
+            const cell = find(page, "dashCell_0_" + i)
+            const note = find(cell, "gaugeNote")
+            tryVerify(() => cell.width > 0 && note.visible, 5000, cells[i].label + " says why")
+            verify(!note.truncated, cells[i].label + " is whole: " + note.text + " in " + note.width)
+            const right = note.mapToItem(cell, note.width, 0).x
+            verify(right <= cell.width + 0.5, "inside its cell: " + right + " of " + cell.width)
+            ++seen
+        }
+        compare(seen, 2)
+    }
+
+    // The list takes the Page row's place on the phone, so the gauges keep
+    // the height the row would have held
+    function test_theListTakesThePageRowsPlaceOnAPhone() {
+        const first = docOf([cellOf("A")])
+        first.pages.push({ name: "Two", cells: [cellOf("B")] }, { name: "Three", cells: [] })
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, first)
+        page.startEditing()
+        click(page, "dashMore")
+        verify(find(page, "dashMoreRow").visible)
+        click(page, "moreAddPage")
+        verify(find(page, "dashPresetList").visible)
+        verify(!find(page, "dashMoreRow").visible, "the row gives way to the list")
+        click(page, "preset_cancel")
+        verify(find(page, "dashMoreRow").visible, "and comes back")
+    }
 }
+

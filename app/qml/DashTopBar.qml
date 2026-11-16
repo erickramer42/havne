@@ -198,6 +198,7 @@ ColumnLayout {
         Layout.minimumWidth: 0
         Layout.preferredWidth: 1
         visible: topBar.host.editing && topBar.host.moreShown && !topBar.host.confirmReset && !topBar.host.confirmRemovePage && topBar.host.confirmReplaceKey === ""
+                 && topBar.host.presetList === ""
         spacing: 8
         ThemedTextField {
             id: pageName
