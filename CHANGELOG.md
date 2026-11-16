@@ -11,6 +11,18 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Changed
+
+- **A set may declare 32 modules** (`ECUIO_MAX_CHANNELS`, 4 before), so a signal file, a plugin, an OBDb import and `uds-generic`'s `?did=` take up to 32 ECUs. Every declared module is still opened when the session connects. (ADR-0065)
+- **C API, breaking:** the set's layout is 5 (`ECUIO_SIGNAL_SET_LAYOUT`): `ecuio_channel_decl_t` is 16 bytes (`flags` and `reserved` after `rx_id` and `tx_id`, both zero; a set with either set is refused, `ECUIO_VALIDATE_ERR_CHANNEL_RESERVED`). A set built by hand is rebuilt against the header.
+- **C API:** `ecuio_session_info_t` gains `module_count` in its reserved room (432 bytes kept); `channel_count`, `rx_ids` and `tx_ids` list the first four modules, and `ecuio_session_get_module` gives any module's IDs. The three channel reports and `ecuio_session_clear_diagnostics` take an index under `module_count`.
+- **C API:** `ECUIO_SIM_MAX_REPLIES` is 66 (10 before): a caller that sized 10 replies and reads to `*count` must size by the constant.
+- `havne-cli`'s `session` line lists every module in `channels`; the Python package gains `Session.modules`.
+
+### Fixed
+
+- Running out of memory while a session is created or a recorder attached no longer leaves an adapter's port and wire log open, and is answered as an error instead of an exception across the C API.
+
 ## [0.8.0] - 2026-11-15
 
 ### Added
