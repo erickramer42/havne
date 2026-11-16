@@ -653,7 +653,10 @@ Detail and gaps: [testing.md](testing.md).
 | Why was it built this way | [adr/](adr/README.md) |
 | How the J2534 stack works, op by op | [j2534.md](j2534.md) |
 | How the ELM327 transport works, and the adapters it has run on | [elm327.md](elm327.md) |
-| How to build, run tests, read CI, troubleshoot | [development.md](development.md) |
+| How to build, run tests, troubleshoot | [development.md](development.md) |
+| How CI runs, and how the C ABI is checked | [ci.md](ci.md) |
+| How to build for Android and iOS, and make the app icon | [mobile-build.md](mobile-build.md) |
+| How the Linux packages and the SBOM are made, and how a release is cut | [packaging.md](packaging.md) |
 | How to run Havne on Linux: the downloads, adapters and permissions, SocketCAN, tracing | [linux.md](linux.md) |
 | How to write a file of your own signals: DIDs and PIDs, enumerations, computed signals | [signal-files.md](signal-files.md) |
 | How to write conditions: alerts, armed recording, markers | [condition-files.md](condition-files.md) |

@@ -158,7 +158,8 @@ v0.8.0, conditions and alerts, is the latest release. Next:
 | [docs/linux.md](docs/linux.md) | Havne on Linux: the AppImage, the core packages, adapters and permissions, SocketCAN, tracing |
 | [docs/ios.md](docs/ios.md) | Havne on iPhone: installing CI's unsigned build with your own Apple ID, what works there |
 | [docs/screenshots.md](docs/screenshots.md) | Every page on the desktop and the phone, in Dark and in Night's amber and red |
-| [docs/development.md](docs/development.md) | Builds, tests, CI, releases, troubleshooting |
+| [docs/development.md](docs/development.md) | Builds, tests, troubleshooting |
+| [docs/ci.md](docs/ci.md), [docs/mobile-build.md](docs/mobile-build.md), [docs/packaging.md](docs/packaging.md) | CI and the C ABI check; the Android and iOS builds; the Linux packages, the SBOM and releases |
 | [docs/bench-sessions/](docs/bench-sessions/bench-prep.md) | Real-hardware sessions, their run sheets, and what only hardware can confirm |
 | [docs/engineering-log.md](docs/engineering-log.md) | Milestones and lessons learned |
 | [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) | Where to start, the rules a change follows, reporting a vulnerability |
