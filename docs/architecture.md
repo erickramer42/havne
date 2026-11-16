@@ -431,196 +431,77 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 
 ## The UI layer
 
-- **Bridge threading:** two of `SessionBridge`'s functions run on the
-  worker thread. The frame callback touches only atomics and posts a
-  copy of the frame; the values callback stages each value under one
-  short lock, which the 100 ms tick swaps out. Everything else runs on
-  the GUI thread. It links QtCore, Gui and Network (no QML), so `test_bridge` can
-  exercise it headless. So do the stores beside it (`app/signalstore.h`,
-  `app/pluginstore.h`), which `test_bridge` compiles too.
-- **The QML module is a library:** the `App` module (the pages,
-  `Theme`, the bridge and its `Bridge` registration) builds as the
-  static library `app_ui`. The app and `test_qml` both link it and
-  its plugin, so the QML tests load the module the app runs.
-- **Bridge in QML:** pages reach it as the `Bridge` singleton of the
-  `App` module (`Bridge.connected`, `Bridge.signalModel`). The
-  registration lives in `app/bridgesingleton.h`, so the bridge itself
-  stays QtCore-only, and qmllint checks every binding against it.
-- **Bridge outputs:** it exposes a frame model (a ring of the newest
-  10k frames, newest or oldest first, with a pause for the Activity page), a
-  signal model (value, `hasValue`, `ageMs`, `decimals`, and a
-  360-point history per signal: each window's lowest, highest and
-  newest, at their frames' times), the unit
-  system, device discovery, and the link state. Each session ends with
-  its delivery figures in the activity log: frames received and
-  dropped, and how long frames took to reach the GUI thread and values
-  the model (median, p99, max).
-- **Recording is core's**
+The pages are QML over a thin C++ bridge. None of them parses a frame,
+converts a unit or picks a precision: core hands over final display
+values. Each part links to the doc that holds its detail.
+
+- **The bridge** (`SessionBridge`, `app/sessionbridge.h`) sits between
+  core and QML. Two of its functions run on the worker thread: the frame
+  callback touches only atomics and posts a copy of the frame, and the
+  values callback stages each value under one short lock, which the
+  100 ms tick swaps out. Everything else runs on the GUI thread. It
+  links QtCore, Gui and Network (no QML), so `test_bridge` exercises it
+  headless, with the stores beside it (`app/signalstore.h`,
+  `app/pluginstore.h`). The bounds and the coalescing:
+  [ADR-0003](adr/0003-backpressure-bounds-in-flight-frames.md),
+  [ADR-0005](adr/0005-coalesced-signal-updates.md); the costs:
+  [performance.md](performance.md).
+- **Pages get data through one singleton.** The `App` QML module (the
+  pages, `Theme`, the bridge's registration) builds as the static
+  library `app_ui`, which the app and `test_qml` both link, so the QML
+  tests load the module the app runs. Pages reach the bridge as the
+  `Bridge` singleton (`Bridge.connected`, `Bridge.signalModel`),
+  registered in `app/bridgesingleton.h` so the bridge stays QtCore-only
+  and qmllint checks every binding ([development.md](development.md#everyday-tools)).
+  It exposes a frame model (the newest 10k frames), a signal model
+  (value, `hasValue`, `ageMs`, `decimals`, a 360-point history), the unit
+  system, device discovery and the link state ([Link health](#link-health)).
+  A value never received shows "—", never a made-up 0, and an old one
+  dims ([user-guide.md](user-guide.md#read-live-values)).
+- **Display strings come from core:** each def's name, and the unit and
+  decimal places `ecuio_display_convert` gives for the chosen unit
+  system ([ADR-0022](adr/0022-display-units.md)), so no page formats a
+  value of its own. History and recordings keep the decoded values.
+- **Recording and viewing are core's**
   ([ADR-0017](adr/0017-session-recording.md),
-  [ADR-0049](adr/0049-recordings-in-core.md), `ecuio/recording.h`):
-  with it on, one folder per connect holds every frame the session
-  read, each decoded value and the activity lines. The worker queues
-  each frame and its values into a ring and the recorder's thread
-  writes the files, so a slow disk never holds the worker up and the
-  frames the Activity page drops are recorded too. The bridge opens the
-  recorder, attaches it before the session starts (Record sessions) or
-  to the running session (Start log, `ecuio_session_record`), notes its
-  activity lines and closes it after the teardown or at Stop log;
-  `havne-cli stream --record` does the same, and `havne-cli log`
-  records a session narrowed to the signals named, the analysis log from
-  the command line ([ADR-0056](adr/0056-analysis-log.md)). Reading one
-  back is core's
-  too: `ecuio_recording_open` reads the folder once into each signal's
-  per-second summaries and
-  an index of where each second starts, so its memory follows the
-  recording's seconds, not its size, and a query answers each column's
-  lowest and highest from the summaries, or from the raw rows when
-  zoomed in. `havne-cli view` writes what it reads as JSON lines,
-  several recordings aligned on a threshold, a marker or their UTC
-  starts. `havne-cli export` writes a recording for another tool,
-  scrubbed of the car's identity unless `--raw`
-  ([ADR-0054](adr/0054-exports-and-imports.md)): pcapng (its frames,
-  for Wireshark), CSV (its number values, by default a column a signal
-  and a row a sweep with `Time (ms)` first, sized by `--rows` and
-  priced by `ecuio_export_estimate` before it is written, ADR-0056
-  section 5; the long form, a row a value after a comment line that
-  pandas skips with `skiprows=1`, is `--layout long`) or a folder (a copy of the
-  recording to send, which reads and replays as the original; the
-  caller names it by its time, since the original's name can hold the
-  vehicle's label). `ecuio_recording_check` reads `frames.csv` in one pass for
-  what's wrong with it (gaps, rate drops, late IDs, overflows, broken
-  ISO-TP sequences) and `events.log` for the link's changes and the
-  sleeps, its memory per ID, not per frame; `havne-cli info` prints
-  its findings. The app's Recordings page is the viewer on both
-  (`RecordingView`, `app/recordingview.h`: the open and the check on a
-  thread of its own, then the columns, the values at a cursor and the
-  alignments on the GUI thread), drawn by Live's chart
-  (`StripChart.qml`); a second recording overlays the first, aligned
-  as `havne-cli view` aligns them, and the header's Mark writes a
-  marker while recording. `ecuio_recording_open_frames` reads a
-  recording through its frames instead, decoded by a profile, so a raw
-  recording has values and a signal file written later decodes an
-  older one (the viewer's decode choice, `havne-cli view --frames`).
-  `havne-cli import` makes a recording's folder from another tool's
-  log: a `candump -L` log's frames, or a logger's CSV of values through
-  a column map ([ADR-0054](adr/0054-exports-and-imports.md)), which core
-  guesses from the file's header when none is given
-  (`ecuio_import_csv_guess`, `havne-cli import csv --print-map`,
-  `havne.guess_csv_map`; the app's Import panel shows the guess for
-  editing before it imports). A health
-  report (`ecuio_health_export`, `havne-cli health`, Save report on the
-  Diagnostics and Recordings pages) writes a car's readiness, trouble
-  codes, freeze frame and key values from a session or a recording as
-  one JSON or text file, checked for the car's identity like an export.
-  A vehicle keeps a baseline recording, which the viewer overlays on
-  another, the two lined up on their engine starts, and which the health
-  report names by its start and length, never its folder.
-- **Display strings come from core:** each def's name, and the unit
-  and decimal places `ecuio_display_convert` gives for the chosen unit
-  system, metric or imperial
-  ([ADR-0022](adr/0022-display-units.md)), on Live and the Dashboard
-  alike, so neither page formats a unit, converts a value or picks a
-  precision of its own. The bridge converts on the way out; its
-  history and recordings keep the decoded values.
-- **Pages:** **Home** (with no session, the connect list: the recent
-  addresses and the adapters on hand, the chosen row connecting through
-  Settings; once connected, the session's status), **Dashboard** (pages of gauges and
-  shift lights that the user builds in its edit mode,
-  [ADR-0057](adr/0057-dashboards.md); the header's Start log and Stop
-  log write an analysis log, [ADR-0056](adr/0056-analysis-log.md)),
-  **Live** (value table and strip chart), **Diagnostics**
-  (trouble codes, readiness, the freeze frame, clearing the codes, a
-  health report), **Activity** (the activity log, and the raw
-  frames, filtered by ID, mask, length and time, by ID, and exported as
-  CSV with the car's identity left out), **Recordings** (the recordings
-  list with its Import, and the viewer, with a vehicle's baseline, a
-  health report and a Values | Frames switch), **Settings**
-  (a list of pages: Connection, Vehicle, Signals, Recording, Display
-  with the theme, and Advanced with developer mode's extra readouts and tools:
-  a frame-rate badge, the viewer's frame test, Export's raw frames and the
-  adapter relay). The phone has no
-  Home: it opens on the Dashboard, whose list of recent addresses
-  connects with no session, and its tab bar lists five pages. Live and the
-  Recordings page share one signal filter (`SignalFilterBar.qml`, its
-  rule in `app/signalfilter.h`, [ADR-0050](adr/0050-finding-a-signal.md)):
-  words over the name and unit, plotted only, and the groups core
-  gives each def. Settings is
-  the one place a session is connected; the header opens it, and the
-  connect lists on Home and on Dash hand it the address of the row chosen.
-  It composes the URI from a preset or a device (a J2534 interface or
-  a serial port), a profile row
-  (default, `raw`, `uds-generic`, the picked vehicle's signal files and
-  plugin variant) and a DID field, and leaves the
-  field editable: a typed URI sets the row and the field from its
-  `profile=` and `did=`, and the next click recomposes it with every
-  other key kept. Core judges the result at connect and Settings shows
-  its words.
-  Navigation is a sidebar of all seven pages at 720 px and wider, and
-  below that a tab bar of five (Dash, Live, Codes, Recs, Settings): the
-  Activity opens from the status in the top bar, from the Activity row at the end
-  of Settings' list on a phone, and from a failed connect's Show activity. On a phone, Android's Back
-  takes one route across the pages ([ADR-0059](adr/0059-drive-view.md)).
-- **`Theme`** resolves one of four palettes (the looks `dark` and
-  `daylight`, and `nightAmber` and `nightRed`) from three kept controls: the look, Night (off, on or
-  scheduled) and its style ([ADR-0058](adr/0058-night-mode.md)). It
-  holds the gauges' color roles, the chart's series colors, the type
-  (Barlow, and Barlow Semi Condensed for readings), the monospace family
-  and page margin, and the link-state color and label functions, so
-  every page shows a state the same way.
-  `PageHeader` gives every page but Home and the phone's Dashboard the
-  same title row; the phone's Dashboard has a tool row (Drive, Reset
-  peaks, Edit, the Night switch) in its place. Where the title row is
-  crowded (the desktop Dashboard's), its title can give way, eliding,
-  so the row fits whatever the font.
-- **Live** keys each chart trace's color to its list row, so the
-  row's swatch is the legend and a trace keeps its color when
-  another signal is unsubscribed. The ticks choose what's plotted and
-  nothing else. Each trace scales on its own, so its value is printed
-  at its right-hand end; its range is at least a few displayed digits,
-  so a one-count step stays small, and a gap longer than the stale
-  threshold breaks the trace instead of drawing a ramp. The layout is
-  arithmetic in the `ChartLayout` singleton, which the tests run with
-  synthetic series; the Canvas only strokes what it returns. A Canvas
-  paints an image at its own size, so this one is sized up by the
-  zoom and scaled back down, which keeps it as sharp as the rest.
-- **`SignalHub`** gives the Dashboard signals by reference, because a
-  gauge wants "the RPM signal" whichever profile provides it: `id:<n>`
-  for a built-in def and `key:<k>` for a signal file's own. The pages
-  themselves are one JSON document per form (phone, desktop) in the
-  app's settings, which `DashboardBook` reads and edits as pure rules
-  ([ADR-0057](adr/0057-dashboards.md)).
-- **Freshness:** a value never received shows "—", never a fabricated
-  0. A value older than 3 s dims; the model refreshes ages every tick,
-  so a signal that stops arriving dims even when nothing else changes.
-- **Preferences** are Qt's `QSettings` under the product's name (the
-  registry on Windows); `HAVNE_SETTINGS_DIR` gives one instance an ini
-  file of its own, which the test driver uses. They keep the look, zoom,
-  units, the last address that connected, the Record sessions switch, the
-  splitters' shares and each device's versions as last seen at a connect
-  (shown on its row in Settings, since the list opens no adapter). At launch the earlier
-  name's preferences are copied once into an empty store, and the
-  recent recordings read the earlier name's folder beside the current
-  one ([ADR-0001](adr/0001-qt-free-core-c-abi.md)'s appendix of
-  2026-10-28). **Vehicles**
-  ([ADR-0027](adr/0027-vehicle-profiles.md)) are one JSON document
-  among them: each named vehicle's adapter URI and plotted signals,
-  recognized at the next connect by a salted hash of its VIN.
-  A vehicle also names its signal files and the plugin variant picked
-  for it. The files themselves are copies kept by their SHA-256 beside
-  the preferences (`signals/<sha256>.json`,
-  `plugins/<sha256>.havne-plugin.json` under `HAVNE_SETTINGS_DIR` when
-  it's set, else the app's data folder), each registered as profiles
-  when the app loads it. A signal file's copy goes when no vehicle
-  keeps it; a plugin's only on its **Remove**, and neither while a
-  session decodes with it.
-- **On a phone**
-  ([ADR-0029](adr/0029-android-background-sessions.md)), Qt's GUI loop
-  keeps running in the background, and while an adapter session is up
-  a `connectedDevice` foreground service holds a partial wake lock and
-  shows a notification. `main.cpp` drops drawing events while the app
-  isn't active: Qt 6.12's Android plugin otherwise waits forever for a
-  surface after the screen turns off. The phone's Bluetooth reaches
-  core as an app-fed stream ([ELM327](#elm327)).
+  [ADR-0049](adr/0049-recordings-in-core.md)): one folder per connect
+  holds every frame, each decoded value and the activity lines. The
+  worker queues them into a ring and the recorder's thread writes the
+  files, so a slow disk never holds the worker up and the frames the
+  Activity page drops are recorded too. Reading, exports, imports, the
+  health report and the analysis log are core's as well, with
+  `havne-cli` and the Recordings page as two front ends
+  ([ADR-0054](adr/0054-exports-and-imports.md),
+  [ADR-0056](adr/0056-analysis-log.md),
+  [the command-line client](development.md#the-command-line-client),
+  [user-guide.md](user-guide.md#view-and-export-a-recording)).
+- **Pages and navigation:** Home, Dashboard, Live, Diagnostics,
+  Activity, Recordings and Settings, as a sidebar on a desktop (a
+  laptop too) and a tab bar of five on a phone
+  ([user-guide.md](user-guide.md), [screenshots.md](screenshots.md)).
+  Settings is the one place a session is connected: it composes the
+  address and core judges it at connect
+  ([user-guide.md](user-guide.md#connect)). Android's Back takes one
+  route across the pages ([ADR-0059](adr/0059-drive-view.md)).
+- **Desktop and phone share the module;** the phone differs in its
+  navigation and the Drive view. The Dashboard's pages are one JSON
+  document per form, and a gauge names its signal by a reference that
+  outlives the profile (`SignalHub`: `id:<n>` for a built-in def,
+  `key:<k>` for a signal file's own)
+  ([ADR-0057](adr/0057-dashboards.md)). `Theme` resolves one of four
+  palettes from the look and Night ([ADR-0058](adr/0058-night-mode.md)),
+  so every page shows a link state the same way.
+- **Preferences and vehicles:** Qt's `QSettings` under the product's
+  name, or an ini file under `HAVNE_SETTINGS_DIR`
+  ([development.md](development.md#everyday-tools)). A named vehicle is
+  recognized by a salted hash of its VIN
+  ([ADR-0027](adr/0027-vehicle-profiles.md)); its signal files and
+  plugins are copies kept by their SHA-256
+  ([signal-files.md](signal-files.md), [ADR-0064](adr/0064-one-store.md)).
+- **On a phone,** a session keeps running in the background
+  ([mobile-build.md](mobile-build.md#the-phone-in-the-background),
+  [ADR-0029](adr/0029-android-background-sessions.md)), and the phone's
+  Bluetooth reaches core as an app-fed stream ([ELM327](#elm327)).
 
 ## How it's verified
 
