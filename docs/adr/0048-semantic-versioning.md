@@ -28,7 +28,7 @@ section 3) and, from v0.5.0, the plugin formats.
    ...). PATCH is for fixes alone, a `hotfix/*` branch's release. A
    MINOR release may break the C ABI, as semver allows before 1.0, but
    only on purpose: the break goes in `abi/suppressions.abignore` with
-   its reason (docs/development.md, "The C ABI check") and in the
+   its reason (docs/ci.md, "The C ABI check") and in the
    CHANGELOG. The CMake package keeps `SameMinorVersion`, so
    `find_package(ecuio 0.4)` takes any 0.4.x and no other.
 3. **1.0.0 is the finished reader:** the read side complete and
