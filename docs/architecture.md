@@ -641,7 +641,7 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 
 The fake emits only what a test injected or what it echoes, so J2534
 tests assert exact counts. Tests against the timed mock assert ranges.
-Detail and gaps: [testing.md](testing.md).
+Detail and gaps: [testing.md](testing.md), with each test in [testing-inventory.md](testing-inventory.md).
 
 ## Where to find what
 
@@ -662,7 +662,9 @@ Detail and gaps: [testing.md](testing.md).
 | How to write conditions: alerts, armed recording, markers | [condition-files.md](condition-files.md) |
 | How to install Havne on an iPhone for testing, and what works there | [ios.md](ios.md) |
 | What each page looks like, on the desktop and the phone, in Dark and in Night's amber and red | [screenshots.md](screenshots.md) |
-| What is verified, by which test, and the known gaps | [testing.md](testing.md) |
+| Which areas each verification tier reaches, and the known gaps | [testing.md](testing.md) |
+| What is verified, by which test, with the evidence | [testing-inventory.md](testing-inventory.md) |
+| What the stack costs: per frame, a recording, a connect, with how each was measured | [performance.md](performance.md) |
 | Why the design and checks are enough for what Havne does, and where they stop | [security-assurance.md](security-assurance.md) |
 | What changed in each release | [CHANGELOG.md](../CHANGELOG.md) |
 | How it got here, and the lessons along the way | [engineering-log.md](engineering-log.md) |

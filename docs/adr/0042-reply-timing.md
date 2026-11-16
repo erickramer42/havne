@@ -132,7 +132,7 @@ list): the recorder's header is that list, and each of the CLI's
 
 ### 4. The benchmark
 
-What v0.3.5 publishes in [docs/testing.md](../testing.md#performance),
+What v0.3.5 publishes in [docs/testing.md](../performance.md),
 all with no hardware:
 
 - The delivery figures as today (`bench_bridge --load`: frames a

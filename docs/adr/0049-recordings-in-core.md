@@ -804,7 +804,7 @@ and any outside program see none of them.
   build vary by tens of percent on a desktop (`scripts/bench_ab.py`),
   so the 10% is checked as `bench_ab.py` checks a change: alternating
   runs, recorded against unrecorded, their medians compared, on the dev
-  machine, and the figures go into `docs/testing.md` ("Cost per
+  machine, and the figures go into `docs/performance.md` ("Cost per
   frame"). CI gates a looser ratio, as it gates the bench's other two
   (the recorded run at least 0.8 of the unrecorded one in the same
   bench), so a regression fails it and a noisy runner doesn't. No

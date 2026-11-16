@@ -1,7 +1,7 @@
 // File/layer: tests/bench_recording.cpp | bench_recording, Qt-free, C++17
 // Testing: none (a measurement, not in ctest): the reader's open (ADR-0049
 //          section 9), on the laptop and, built with the NDK, on the test
-//          phone; docs/testing.md "Performance" records its figures
+//          phone; docs/performance.md records its figures
 //
 // bench_recording [--fixture <dir>] [--scratch <dir>] [--runs N] [--bound S]
 //                 [--keep]

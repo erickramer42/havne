@@ -20,7 +20,7 @@ document that holds the detail. Then, by what you want to do:
 | You want to... | Read |
 |---|---|
 | Know what works, what's broken and what's planned | [STATUS.md](STATUS.md): "At a glance", "Known issues", the roadmap |
-| Find something to work on | STATUS.md's [backlog](STATUS.md#backlog) (sized **S**, **M** or **L**; an **S** item is the gentlest start) and [docs/testing.md's gaps](docs/testing.md#gaps-not-verified) |
+| Find something to work on | STATUS.md's [backlog](STATUS.md#backlog) (sized **S**, **M** or **L**; an **S** item is the gentlest start) and [docs/testing.md's gaps](docs/testing-inventory.md#gaps-in-detail) |
 | Build it and run the tests | [docs/development.md](docs/development.md): "Toolchain", "Build configurations", "Running tests", "Troubleshooting" |
 | Understand why something is built the way it is | The [ADR index](docs/adr/README.md). Search it before proposing a change: the decision, and the alternatives it turned down, may already be written up |
 | Change the core, a transport or the C ABI | architecture.md's "Sessions, profiles and decode", the public headers in `core/include/ecuio/` (each documents its contract), [ADR-0007](docs/adr/0007-uri-selected-transports.md) (transports by URI) and [ADR-0016](docs/adr/0016-signal-definition-layout.md) (the def layout) |

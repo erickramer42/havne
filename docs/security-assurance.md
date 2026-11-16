@@ -98,7 +98,7 @@ named, and the phone's adapter relay on its own localhost, which only
 
 - **The pipe's protections have no direct test.** Every surrogate test
   exercises them, but nothing tries to connect as another user, squat
-  the name or look for a leaked handle ([testing.md](testing.md#gaps-not-verified)).
+  the name or look for a leaked handle ([testing.md](testing-inventory.md#gaps-in-detail)).
 - **The surrogate isn't sandboxed beyond its process.** A vendor DLL
   runs with the user's rights, as it would in any J2534 tool; the
   surrogate contains its crashes, not its privileges.
@@ -106,7 +106,7 @@ named, and the phone's adapter relay on its own localhost, which only
   tested.** Its checks on oversized batch and ioctl lengths exist, but
   no test child sends one, and no fuzzer reaches them: the client
   compiles only on Windows, against a live pipe, and the fuzz job runs
-  on Linux ([testing.md](testing.md#gaps-not-verified)).
+  on Linux ([testing.md](testing-inventory.md#gaps-in-detail)).
 - **An adapter can't be authenticated.** Nothing in the ELM327
   command set proves which device answers, and a WiFi adapter's open
   access point lets anyone in range join it. The parser treats every
