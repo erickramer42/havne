@@ -1,5 +1,5 @@
 // File/layer: app/qml/Main.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.phone, QmlTest.linkhealth, QmlTest.driveview (test_qml);
+// Testing: QML: QmlTest.phone, QmlTest.linkhealth, QmlTest.driveview, QmlTest.alerts (test_qml);
 //          BENCH, Manual smoke
 
 import QtCore
@@ -203,6 +203,14 @@ ApplicationWindow {
     function logBack() {
         if (logBackTab.page !== cameFrom || !goBack())
             gotoPage(dashboardPage)
+    }
+    // A gauge's Alert: Settings' alert editor on the new condition, or the
+    // cell's note says why not; a draft opened takes an earlier refusal away
+    function openAlertDraft(condition) {
+        const why = settingsView.openAlertDraft(condition)
+        dashboardView.alertNote = why
+        if (why === "")
+            gotoPage(settingsPage)
     }
     // A connect list's "Other address..." (Dash's, Home's): Back returns to
     // that page, not to Settings' list
@@ -452,7 +460,8 @@ ApplicationWindow {
                         Label {
                             id: headerTitle
                             objectName: "headerTitle"
-                            visible: !(markButton.visible || startLogButton.visible || Bridge.logActive)
+                            visible: !(markButton.visible || startLogButton.visible
+                                       || armedHost.visible || Bridge.logActive)
                                      || headerRow.width >= 420
                             text: qsTr("Havne")
                             font.pixelSize: Theme.fontEmphasis
@@ -492,7 +501,7 @@ ApplicationWindow {
                             // What the pill shows, the recording note included
                             readonly property string spoken: recordingNote.visible
                                                              ? text + " " + recordingNote.text : text
-                            Accessible.name: enabled ? qsTr("%1: show the log").arg(spoken) : spoken
+                            Accessible.name: enabled ? qsTr("%1: show the activity").arg(spoken) : spoken
                             onClicked: root.gotoPage(root.logPage)
                             // A dot and a word at rest, no capsule
                             background: Rectangle {
@@ -539,6 +548,7 @@ ApplicationWindow {
                                     id: recordingNote
                                     objectName: "linkPillRecording"
                                     visible: Bridge.connected && Bridge.recordingActive && !Bridge.logActive
+                                             && !Bridge.armedActive
                                     font.pixelSize: Theme.fontCaption
                                     color: Theme.textDim
                                     text: qsTr("· recording")
@@ -579,6 +589,7 @@ ApplicationWindow {
                             id: markButton
                             objectName: "markButton"
                             visible: Bridge.recordingActive && (!Bridge.logActive || root.headerHasRoom)
+                                     && (!Bridge.armedActive || Bridge.armedRecording)
                             text: Bridge.markCount > 0 ? qsTr("Mark (%1)").arg(Bridge.markCount)
                                                        : qsTr("Mark")
                             Accessible.name: qsTr("Mark the recording")
@@ -595,10 +606,61 @@ ApplicationWindow {
                             highlighted: true
                             visible: Bridge.connected && !Bridge.recordingActive
                                      && !Bridge.currentUri.toLowerCase().startsWith("replay://")
-                            enabled: !Bridge.disconnecting && Bridge.signalModel.subscribedCount > 0
+                            enabled: !Bridge.disconnecting && Bridge.signalModel.tickedCount > 0
                             text: qsTr("Start log")
                             Accessible.name: qsTr("Start a log of the ticked signals")
                             onClicked: Bridge.startLog()
+                        }
+                        // The armed recorder (ADR-0063 section 7): writes nothing until
+                        // a condition that records fires, then a window of its own per
+                        // firing. Mark stands beside it only inside a window. Stands
+                        // where Start log would, the session's one recorder; disabled
+                        // with its reason (armedWhy) while no condition records. A
+                        // disabled control sees no pointer, so an enabled item around
+                        // it gives the reason: a tooltip on hover, and a tap says it
+                        // in the Dashboard's notice (what a refused press says)
+                        Item {
+                            id: armedHost
+                            objectName: "armedHost"
+                            visible: Bridge.connected && !Bridge.logActive
+                                     && (Bridge.armedActive || !Bridge.recordingActive)
+                                     && !Bridge.currentUri.toLowerCase().startsWith("replay://")
+                            implicitWidth: armedButton.implicitWidth
+                            implicitHeight: armedButton.implicitHeight
+                            Layout.minimumWidth: Theme.compact ? Theme.touchTarget : 0
+                            readonly property bool explaining: !armedButton.enabled && Bridge.armedWhy !== ""
+                            ToolTip.visible: armedHover.hovered && explaining
+                            ToolTip.text: Bridge.armedWhy
+                            HoverHandler { id: armedHover }
+                            TapHandler {
+                                objectName: "armedExplain"
+                                enabled: armedHost.explaining
+                                onTapped: Bridge.startArmed()
+                            }
+                        HeaderButton {
+                            id: armedButton
+                            objectName: "armedButton"
+                            anchors.fill: parent
+                            enabled: !Bridge.disconnecting
+                                     && (Bridge.armedActive || Bridge.armedWhy === "")
+                            checkable: true
+                            checked: Bridge.armedActive
+                            // "Recording (window N)" leaves Mark and Disconnect no room
+                            // under 420 px of header row, and "Armed" beside Start log leaves
+                            // the status its address: the words shorten ("Window N", "Arm"
+                            // until it is on), the name doesn't
+                            text: Bridge.armedRecording
+                                  ? (headerRow.width < 420 ? qsTr("Window %1")
+                                                           : qsTr("Recording (window %1)")).arg(Bridge.armedWindows)
+                                  : Bridge.armedActive ? qsTr("Armed") : qsTr("Arm")
+                            Accessible.name: Bridge.armedRecording
+                                             ? qsTr("Stop the armed recorder, recording window %1").arg(Bridge.armedWindows)
+                                             : Bridge.armedActive ? qsTr("Stop the armed recorder")
+                                                                  : qsTr("Arm a recorder for the conditions that record")
+                            Accessible.description: Bridge.armedActive ? "" : Bridge.armedWhy
+                            onToggled: toggle()
+                            onClicked: Bridge.armedActive ? Bridge.stopArmed() : Bridge.startArmed()
+                        }
                         }
                         // While a log runs: its time, and its folder's size once
                         // there is one to read; one line where the row has room,
@@ -653,6 +715,18 @@ ApplicationWindow {
                 }
             }
 
+            // The highest alert ON, on every page under the header; the
+            // drive view shows its own over the gauges
+            AlertBand {
+                id: alertBand
+                objectName: "alertBand"
+                Layout.fillWidth: true
+                Layout.leftMargin: Theme.barGap
+                Layout.rightMargin: Theme.barGap
+                Layout.topMargin: Theme.barGap
+                visible: shown && !root.driving
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -683,7 +757,7 @@ ApplicationWindow {
                                 { label: qsTr("Dashboard"), icon: "" },
                                 { label: qsTr("Live"),   icon: "" },
                                 { label: qsTr("Diagnostics"), icon: "" },
-                                { label: qsTr("Log"),       icon: "" },
+                                { label: qsTr("Activity"),  icon: "" },
                                 { label: qsTr("Recordings"), icon: "" },
                                 { label: qsTr("Settings"),  icon: "" }
                             ]
@@ -710,6 +784,8 @@ ApplicationWindow {
                         recents: settingsView.connectUris
                         vehicleUri: settingsView.vehicleUri
                         adapters: settingsView.connectAdapters
+                        profileWords: settingsView.connectProfileWords
+                        profileNames: settingsView.profileNames
                         onConnectToUri: uri => settingsView.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()
                         onLogRequested: root.openLog()
@@ -719,15 +795,25 @@ ApplicationWindow {
                     DashboardPage {
                         id: dashboardView
                         objectName: "dashboardPage"
+                        // The gauges join the session's default pick
+                        Binding {
+                            target: Bridge
+                            property: "pickGauges"
+                            value: dashboardView.pickRefs
+                        }
                         offlineUri: settingsView.offlineUri
+                        pickedSets: settingsView.pickedSets
+                        profileNames: settingsView.profileNames
                         vehicles: settingsView.vehicles
                         connectUris: settingsView.connectUris
                         connectVehicleUri: settingsView.vehicleUri
                         connectAdapters: settingsView.connectAdapters
+                        connectProfileWords: settingsView.connectProfileWords
                         onConnectListShown: root.listAdapters()
                         onConnectToUri: uri => settingsView.connectFromList(uri)
                         onOtherAddressRequested: root.openConnectFromDash()
                         onLogRequested: root.openLog()
+                        onAlertRequested: condition => root.openAlertDraft(condition)
                         driveHideMs: settingsView.driveHideMs
                         driveOrientation: settingsView.driveOrientation
                         driveTabBarHeight: tabBar.height

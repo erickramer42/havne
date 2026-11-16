@@ -1,0 +1,15 @@
+{"schema": 1, "type": "start"}
+{"conditions": {"cut": false, "events": 7, "events_lost": 0, "lines_skipped": 0, "matches": true, "present": true, "sha256": "b994212f73c749d232dbf190c81fa5b183a6a67c400009eb0239db4b0b882a5e"}, "duration_us": 30001000, "format": "core", "markers": 1, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signal_file": null, "signals": 2, "summary": true, "type": "opened", "utc_start_us": 1794582000000000}
+{"decimals": 0, "first_us": 1000, "group": "Engine", "highest": 112, "index": 0, "last_us": 30001000, "lowest": 100, "name": "Coolant Temp", "rank": 2, "rate_hz": 4, "recording": 0, "samples": 121, "text": false, "type": "signal", "unit": "\u00b0C"}
+{"decimals": 0, "first_us": 126000, "group": "Engine", "highest": 5400, "index": 1, "last_us": 23876000, "lowest": 800, "name": "RPM", "rank": 1, "rate_hz": 4, "recording": 0, "samples": 96, "text": false, "type": "signal", "unit": "RPM"}
+{"host_us": 12876000, "index": 0, "label": "Engine speed high", "recording": 0, "type": "marker"}
+{"fired": false, "held": false, "host_us": 1000, "key": "coolant_high", "recording": 0, "stale": false, "state": "off", "t_us": 0, "term": 0, "type": "condition", "value": 100}
+{"fired": false, "held": false, "host_us": 126000, "key": "rpm_high", "recording": 0, "stale": false, "state": "off", "t_us": 125000, "term": 0, "type": "condition", "value": 800}
+{"fired": true, "held": false, "host_us": 7251000, "key": "coolant_high", "recording": 0, "stale": false, "state": "on", "t_us": 7250000, "term": 0, "type": "condition", "value": 111}
+{"fired": true, "held": false, "host_us": 12876000, "key": "rpm_high", "recording": 0, "stale": false, "state": "on", "t_us": 12875000, "term": 0, "type": "condition", "value": 5400}
+{"fired": false, "held": false, "host_us": 13376000, "key": "rpm_high", "recording": 0, "stale": false, "state": "off", "t_us": 13375000, "term": 0, "type": "condition", "value": 4720}
+{"fired": false, "held": false, "host_us": 17501000, "key": "coolant_high", "recording": 0, "stale": false, "state": "off", "t_us": 17500000, "term": 0, "type": "condition", "value": 105}
+{"fired": false, "held": false, "host_us": 26876000, "key": "rpm_high", "recording": 0, "stale": true, "state": "off", "t_us": 26875000, "term": 0, "type": "condition", "value": 900}
+{"column_us": 10000334, "columns": 3, "from_us": 0, "to_us": 30001002, "type": "axis"}
+{"highest": [2200, 5400, 900], "lowest": [800, 900, 900], "mean": [872.7272727272727, 1990, 900], "recording": 0, "samples": [44, 40, 12], "signal": "RPM", "type": "columns"}
+{"highest": [112, 112, 100], "lowest": [100, 100, 100], "mean": [107.5, 107.35, 100], "recording": 0, "samples": [44, 40, 37], "signal": "Coolant Temp", "type": "columns"}

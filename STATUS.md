@@ -1,6 +1,6 @@
 # Havne: Project Status
 
-**Updated:** 2026-11-14, **Version:** v0.7.4,
+**Updated:** 2026-11-15, **Version:** v0.8.0,
 [![CI](https://github.com/erickramer42/havne/actions/workflows/ci.yml/badge.svg)](https://github.com/erickramer42/havne/actions/workflows/ci.yml)
 
 This file covers the project as it stands: what works, what comes
@@ -14,9 +14,12 @@ Safety, regulatory and warranty caveats are in
 
 ## Where things stand
 
-**Current phase: v0.8.0, conditions** (the roadmap's row below), whose
-computed grammar is built. v0.7.4, follow-ups on the dashboard and the
-viewer, is out (its section below): a Dashboard layout saved to a file
+**Current phase: v0.9.0, the whole car through plugins** (the roadmap's
+row below), with what v0.8.0 left out (its section lists it). v0.8.0, conditions, is out (its
+section below): conditions and alerts, armed recording, the one plugin
+store and the computed grammar. v0.7.4, follow-ups
+on the dashboard and the viewer, came before it (its section
+below): a Dashboard layout saved to a file
 and loaded back, more gauge colors, steady trends on the Dashboard and
 Live's chart, every plugin variant offered for a vehicle, Compare's
 difference trace, the demo car under `obd2`, and Android's own document
@@ -206,7 +209,7 @@ background too ([roadmap](#roadmap)).
     With `?session=03` it reads in the extended diagnostic session:
     `10 03` to each module first, tester present in quiet gaps, `10 01`
     at the close; a module that refuses is read in the default session
-    with its code named, and each module's report, the Log page,
+    with its code named, and each module's report, the Activity page,
     `havne-cli`'s `session` line (in `stream` and `log` alike) and
     Python's `session_state` say which session it was read in
     ([ADR-0060](docs/adr/0060-extended-session-reads.md)). Run parked on
@@ -264,7 +267,7 @@ background too ([roadmap](#roadmap)).
     ([ADR-0059](docs/adr/0059-drive-view.md)); a connect list of the
     recent addresses and the adapters on hand, on Dash on the phone and
     on the desktop's Home (ADR-0059's appendix); Settings as a list of
-    pages; Live's table and strip chart, the Log page's activity log, the
+    pages; Live's table and strip chart, the Activity page's activity log, the
     Recordings page's viewer (pan, zoom, a cursor, the frames check's
     findings, two runs overlaid and aligned with a Difference trace of
     the compared one less the open one, a vehicle's baseline
@@ -276,7 +279,7 @@ background too ([roadmap](#roadmap)).
     and the viewer's chart can take the whole page (a button, a
     double-click or `F`; on a phone on its side by default), a splitter
     sets the list's share, and a pinch or the wheel steps Live's
-    window; pages are denser on a phone's width or height. The Log page's
+    window; pages are denser on a phone's width or height. The Activity page's
     raw frame table with its bridge counters (developer mode, off until
     switched on, adds a frame-rate badge, the viewer's frame test,
     Export's raw frames and the adapter relay):
@@ -449,7 +452,7 @@ background too ([roadmap](#roadmap)).
   - **Evidence for field sessions:** opt-in recording of every frame,
     decoded value and activity line per connect
     ([ADR-0017](docs/adr/0017-session-recording.md)), written by core's
-    recorder on a thread of its own, so the frames the Log page drops
+    recorder on a thread of its own, so the frames the Activity page drops
     under load are recorded too
     ([ADR-0049](docs/adr/0049-recordings-in-core.md)), and read back
     offline by core's reader, the Recordings page and `havne-cli
@@ -463,7 +466,7 @@ background too ([roadmap](#roadmap)).
     `candump -L` log or another logger's CSV imported as a recording
     (`havne-cli import`, and the Recordings page's Import, which guesses
     a CSV's map from its header); the Recordings viewer exports a
-    recording as a CSV, pcapng or a folder copy, the Log page exports its
+    recording as a CSV, pcapng or a folder copy, the Activity page exports its
     frames, the app saves a report, and a surrogate
     session log of every vendor call, with every request and reply
     while recording. Session time counts the machine's sleep on every
@@ -484,13 +487,13 @@ background too ([roadmap](#roadmap)).
   [desk](docs/bench-sessions/socketcan-desk-runsheet.md) sheet, and
   [two-ecu-car-runsheet.md](docs/bench-sessions/two-ecu-car-runsheet.md)
   (both ECUs in one session, the recorders on a car, a second listener).
-- **Tests:** 2232 ctest cases on Windows (both trees rebuilt,
-  2026-11-14), all passing but six skips (the cross-arch case and
+- **Tests:** 2711 ctest cases on Windows (both trees rebuilt,
+  2026-11-15), all passing but six skips (the cross-arch case and
   the real-car recordings' diff, run locally; three cases that run on
   Linux only, Read once over SocketCAN and the Python package's vcan
   and ISO-TP fuzzing cases; and the Wireshark export's `tshark` run,
   without tshark installed), plus the
-  cross-arch subset (108/108); 0 MSVC warnings, and a GCC or Clang
+  cross-arch subset (111/111); 0 MSVC warnings, and a GCC or Clang
   warning fails CI. CI runs ctest on Windows,
   macOS and Linux, with SocketCAN's suites on Linux's `vcan0`; core
   under ASan and UBSan, `vcan0` included; 60 s of each libFuzzer
@@ -513,7 +516,7 @@ background too ([roadmap](#roadmap)).
 | Mock transport | A ~2-minute drive cycle on a vehicle model (`core/src/mock_drive_cycle.h`) whose readings stay consistent with each other, every tick round-tripped through the mock set (`CoreTest.MockDriveCycle*`) | none |
 | Replay transport | UNIT-tested, against a scrubbed real-bus fixture too; passive, default profile `raw` | [ADR-0023](docs/adr/0023-replay-transport.md) |
 | Bridge and models | Worker to GUI marshaling with bounded backpressure, 100 ms coalescing, a 10k-row frame log, a 360-point history per signal (each 100 ms window's lowest, highest and newest), link-health polling, recording; QML reaches it as the `Bridge` singleton | [ADR-0003](docs/adr/0003-backpressure-bounds-in-flight-frames.md), [ADR-0005](docs/adr/0005-coalesced-signal-updates.md) |
-| QML pages | Home, Dashboard, Live, Diagnostics, Log, Recordings, Settings; `test_qml` runs them against a real bridge, offscreen | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
+| QML pages | Home, Dashboard, Live, Diagnostics, Activity, Recordings, Settings; `test_qml` runs them against a real bridge, offscreen | [docs/architecture.md](docs/architecture.md#the-ui-layer) |
 | J2534 | HARNESS-verified through the surrogate: x64 in CI, x86 cross-arch. BENCH: one adapter, quiet bus. Vehicle: one car, through the surrogate, from 2026-10-22 to 2026-11-04 | [docs/j2534.md](docs/j2534.md) |
 | ELM327 | HARNESS-verified against a fake ELM327 on every platform (serial, TCP, app stream). BENCH: the VX on USB and WiFi, no bus. Vehicle: one car, through the MX+ (Bluetooth) and the VX (USB) | [docs/elm327.md](docs/elm327.md) |
 | Android app | Android 12 and later; Bluetooth through the phone, background sessions. On one phone and one car, with the MX+; built in CI, no tests run on the phone | [ADR-0028](docs/adr/0028-app-fed-streams.md), [ADR-0029](docs/adr/0029-android-background-sessions.md) |
@@ -657,7 +660,8 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.7.2 | Finishing the Dashboard and signals: the desktop's gauges in the new design, undo in edit mode, a Light look, built-in layouts by what people watch, a signal file's dial range and warning levels, Python's exports and health report | Released |
 | v0.7.3 | The analysis viewer: the log's navigation aids, chart panes with two cursors, a recording's statistics, Live's pause, and the phone pass's fixes | Released |
 | v0.7.4 | Follow-ups on v0.7.3's theme: a Dashboard layout exported and loaded, more gauge colors, every plugin variant offered for a vehicle, the viewer's difference trace, the demo car under obd2, and Android's own document picker | Released |
-| v0.8.0-v0.11.0 | v0.8.0, conditions: triggered logging, alerts and a fuller grammar for computed signals. v0.9.0, the whole car through plugins: a profile sized for every module, sessions a plugin declares, and a plugin's own conversation with a module, security access to unlock reads among it. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
+| v0.8.0 | Conditions: a condition file judged in a session, alerts in the app (banner, tone, colors, the Alerts page), armed recording, one plugin store for every import, a fuller grammar for computed signals, and a request budget of 1024 | Released |
+| v0.9.0-v0.11.0 | v0.9.0, the whole car through plugins: what v0.8.0 left out, a profile sized for every module, a vehicle's plugins read together in one session (a signal set of your own, an OBDb import and `obd2`), sessions a plugin declares, and a plugin's own conversation with a module, security access to unlock reads among it. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning
@@ -796,11 +800,27 @@ PATCH may carry"): the C ABI grows, append-only
     whole passes given 120 s, and the ELM327 chatty close's knobs set
     under the lock that counts its requests.
 
-  Run on the test phone with the mock, not on a car: the six open
-  dialogs, the exports through a provider, a layout's export, uninstall
-  and load, the viewer's grips by finger, and the Dashboard's trends
-  under `mock://demo`. Live's chart and the connect list's fold have not
-  been looked at there.
+  Run on the test phone with the mock, not on a car: the release
+  candidate's APK (Live's chart through the demo's rev-limiter pulls, the
+  Dashboard's trends across page switches, two layout exports under one
+  name and each loaded back, the three imports refusing a layout file,
+  a CSV saved to a cloud provider online and offline) and development
+  builds before it (the six open dialogs, a folder export, a layout's
+  export, uninstall and load, the viewer's grips by finger). The connect
+  list's fold has not been looked at there.
+
+### v0.8.0: conditions
+
+For people who want a log or a warning to start from the car's own state. A feature release: the C ABI grows, append-only (`ecuio/conditions.h`, the plugin wrap calls, `ECUIO_RECORD_ARMED`).
+- **Built:**
+  - a condition file (`docs/condition-files.md`, [ADR-0063](docs/adr/0063-conditions.md)): signal and link terms judged on the frames' own time, read and checked by `havne-cli conditions check`, `havne.ConditionSet` and the JSON Schema; a recording keeps its conditions and the viewer draws them;
+  - alerts in the app: the Alerts page, the banner on every page and in the drive view, colored gauge and Live values, and on Android a tone;
+  - an armed recorder that writes a window for each `record` condition (`havne-cli log --armed`, Python's `Recorder(armed=True)`, the app's Armed button);
+  - one plugin store: every import is a plugin, with one list and one Import on Settings, Signals, the vehicles' earlier signal files moved at the first start ([ADR-0064](docs/adr/0064-one-store.md)), and `havne-cli plugins wrap`, `put` and `drop`;
+  - signal files in format 2: functions, comparisons, `if`, `all`, `any` and chains of computed signals up to 8 deep ([ADR-0062](docs/adr/0062-computed-grammar.md));
+  - a request budget of 1024 and a default pick of ranked signals, so an OBDb import of a whole car's set keeps its signals ([ADR-0051](docs/adr/0051-signal-files.md), [ADR-0056](docs/adr/0056-analysis-log.md)).
+- **Verified:** the Windows suite and the cross-arch subset on `dev`'s tip; the app on the test phone with the mock (the store's migration, the one list, the looks), not on a car. Conditions have run against the simulated car and recordings only.
+- **Left for v0.9.0:** the live checks as terms and `ecuio_recording_evaluate` (ADR-0063), a recording whose every condition event was lost saying so, a dial's caption over a numeral, the long-files limits, the signal store's removal from the app (ADR-0064 step 6), and a choice of where a pull ends (at the throttle's lift, the limiter included, or at top speed).
 
 ### Waiting on a tester: an iPhone download
 

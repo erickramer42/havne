@@ -369,14 +369,18 @@ struct entry {
     bool replaces = false; /* it stands in a base def's place */
 };
 
-/* The expression compiler (ADR-0051 section 2): + - * /, parentheses,
- * unary minus, decimal constants and signals by key, into a program's
- * steps. At most 4 inputs, 16 constants, 16 operations. */
+/* The expression compiler (ADR-0051 section 2, ADR-0062): + - * /,
+ * parentheses, unary minus, decimal constants and signals by key, into a
+ * program's steps; format 2 adds function calls, comparisons and if(),
+ * each part a number or a truth, checked as it compiles. A format 1 file
+ * meets format 2's forms refused by name. At most 4 inputs, 16
+ * constants, 33 steps. */
 class compiler {
 public:
     compiler(const Value& at, const std::string& text,
-             const std::vector<entry>& entries, const ecuio_signal_set_t* base)
-        : at_(at), s_(text), entries_(entries), base_(base)
+             const std::vector<entry>& entries, const ecuio_signal_set_t* base,
+             uint32_t format)
+        : at_(at), s_(text), entries_(entries), base_(base), format_(format)
     {
     }
 
@@ -386,11 +390,19 @@ public:
         if (s_.size() > 256) {
             fail(0, "is longer than 256 characters");
         }
-        expr(0);
+        const part whole = comparison(0);
         skip();
         if (pos_ < s_.size()) {
+            if (s_[pos_] == ',' && format_ >= 2) {
+                fail(pos_, "has ',' outside a call");
+            }
             fail(pos_, "has " + q(s_.substr(pos_, 1)) +
                            " where an operator or the end should be");
+        }
+        if (whole.truth) {
+            const std::string shown = s_.size() <= 32 ? s_ : std::string("...");
+            fail(whole.at, "is a comparison where a number should be: if(" +
+                               shown + ", 1, 0) makes one");
         }
         if (p_.input_count == 0) {
             fail(0, "reads no signal: a constant is no signal of its own");
@@ -401,6 +413,15 @@ public:
     }
 
 private:
+    /* What a part of the expression compiled to: a truth or a number,
+     * where it starts, and its value when it is constants alone */
+    struct part {
+        bool truth = false;
+        size_t at = 0;
+        bool constant = false;
+        double value = 0.0;
+    };
+
     [[noreturn]] void fail(size_t at, const std::string& words)
     {
         refuse(at_, "expr " + q(s_) + " " + words + " (at character " +
@@ -416,12 +437,21 @@ private:
 
     void step(uint8_t s)
     {
-        /* 33 steps hold 16 operations and their 17 values, so a step
-         * past them is an operation past 16 */
         if (steps_ >= ECUIO_COMPUTED_MAX_STEPS) {
-            fail(pos_, "has more than 16 operations");
+            /* Format 1's steps are values and two-value operations, so 33
+             * steps are 16 operations there */
+            fail(pos_, format_ >= 2 ? "is longer than a program's 33 steps"
+                                    : "has more than 16 operations");
         }
         p_.steps[steps_++] = s;
+    }
+
+    /* A part that must be a number: what verb says what took it */
+    void number(const part& x, const std::string& verb)
+    {
+        if (x.truth) {
+            fail(x.at, verb + " a comparison where a number should be");
+        }
     }
 
     void operation(uint8_t s)
@@ -467,9 +497,10 @@ private:
             if (e == nullptr) {
                 fail(at, "reads " + q(name) + ", which no signal is");
             }
-            if (e->kind == "computed") {
+            if (e->kind == "computed" && format_ < 2) {
                 fail(at, "reads " + q(name) +
-                             ", a computed signal: one can't read another");
+                             ", a computed signal, which needs "
+                             "\"havne_signals\": 2");
             }
             if (e->kind == "text" || e->kind == "hex") {
                 fail(at, "reads " + q(name) + ", which is text");
@@ -492,37 +523,266 @@ private:
         ++p_.input_count;
     }
 
-    void expr(unsigned depth)
+    /* The comparison at pos_, if any: its step and length, or 0 */
+    size_t comparison_at(uint8_t* op) const
     {
-        term(depth);
+        const char c = pos_ < s_.size() ? s_[pos_] : '\0';
+        const char d = pos_ + 1 < s_.size() ? s_[pos_ + 1] : '\0';
+        if (c == '<' || c == '>') {
+            const bool less = c == '<';
+            *op = static_cast<uint8_t>(
+                d == '='
+                    ? (less ? ECUIO_COMPUTED_LESS_EQUAL
+                            : ECUIO_COMPUTED_GREATER_EQUAL)
+                    : (less ? ECUIO_COMPUTED_LESS : ECUIO_COMPUTED_GREATER));
+            return d == '=' ? 2 : 1;
+        }
+        if ((c == '=' || c == '!') && d == '=') {
+            *op = static_cast<uint8_t>(c == '=' ? ECUIO_COMPUTED_EQUAL
+                                                : ECUIO_COMPUTED_NOT_EQUAL);
+            return 2;
+        }
+        return 0;
+    }
+
+    /* A sum, then at most one comparison with another: a comparison binds
+     * looser than + and - and takes no neighbor */
+    part comparison(unsigned depth)
+    {
+        const part a = sum(depth);
+        skip();
+        uint8_t op = 0;
+        const size_t length = comparison_at(&op);
+        if (length == 0) {
+            if (format_ >= 2 && pos_ < s_.size() && s_[pos_] == '=') {
+                fail(pos_, "has '=' where '==' should be");
+            }
+            return a;
+        }
+        const std::string written = s_.substr(pos_, length);
+        if (format_ < 2) {
+            fail(pos_,
+                 "uses " + q(written) + ", which needs \"havne_signals\": 2");
+        }
+        number(a, "compares");
+        pos_ += length;
+        number(sum(depth), "compares");
+        step(op);
+        skip();
+        uint8_t next = 0;
+        const size_t neighbor = comparison_at(&next);
+        if (neighbor != 0 || (pos_ < s_.size() && s_[pos_] == '=')) {
+            fail(pos_, "has " +
+                           q(s_.substr(pos_, neighbor != 0 ? neighbor : 1)) +
+                           " beside a comparison: all() or any() joins two");
+        }
+        part r;
+        r.truth = true;
+        r.at = a.at;
+        return r;
+    }
+
+    /* x op y over two constants, as the machine works it out */
+    static part folded(const part& x, const part& y, char op)
+    {
+        part r;
+        r.at = x.at;
+        if (x.constant && y.constant) {
+            const double v = op == '+'   ? x.value + y.value
+                             : op == '-' ? x.value - y.value
+                             : op == '*' ? x.value * y.value
+                                         : x.value / y.value;
+            r.constant = std::isfinite(v);
+            r.value = v;
+        }
+        return r;
+    }
+
+    part sum(unsigned depth)
+    {
+        part a = term(depth);
         for (;;) {
             skip();
             if (pos_ < s_.size() && (s_[pos_] == '+' || s_[pos_] == '-')) {
                 const bool add = s_[pos_++] == '+';
-                term(depth);
+                const std::string verb = add ? "adds" : "subtracts";
+                number(a, verb);
+                const part b = term(depth);
+                number(b, verb);
                 operation(add ? ECUIO_COMPUTED_ADD : ECUIO_COMPUTED_SUBTRACT);
+                a = folded(a, b, add ? '+' : '-');
             } else {
-                return;
+                return a;
             }
         }
     }
 
-    void term(unsigned depth)
+    part term(unsigned depth)
     {
-        factor(depth);
+        part a = factor(depth);
         for (;;) {
             skip();
             if (pos_ < s_.size() && (s_[pos_] == '*' || s_[pos_] == '/')) {
                 const bool mul = s_[pos_++] == '*';
-                factor(depth);
+                const std::string verb = mul ? "multiplies" : "divides";
+                number(a, verb);
+                const part b = factor(depth);
+                number(b, verb);
                 operation(mul ? ECUIO_COMPUTED_MULTIPLY : ECUIO_COMPUTED_DIVIDE);
+                a = folded(a, b, mul ? '*' : '/');
             } else {
-                return;
+                return a;
             }
         }
     }
 
-    void factor(unsigned depth)
+    /* A function: what it takes, what it gives, its steps */
+    struct function {
+        const char* name;
+        uint8_t takes; /* the fewest parts */
+        bool more;     /* and any more past them (min, max, all, any) */
+        bool truths;   /* its parts are truths (if's first alone) */
+        bool gives_truth;
+    };
+
+    static const function* function_named(const std::string& name)
+    {
+        static const function kFunctions[] = {
+            {"min", 2, true, false, false},
+            {"max", 2, true, false, false},
+            {"abs", 1, false, false, false},
+            {"clamp", 3, false, false, false},
+            {"sqrt", 1, false, false, false},
+            {"round", 1, false, false, false},
+            {"floor", 1, false, false, false},
+            {"ceil", 1, false, false, false},
+            {"if", 3, false, true, false},
+            {"all", 2, true, true, true},
+            {"any", 2, true, true, true},
+            {"not", 1, false, true, true},
+        };
+        for (const function& f : kFunctions) {
+            if (name == f.name) {
+                return &f;
+            }
+        }
+        return nullptr;
+    }
+
+    /* name(...) at start, pos_ on its '(' */
+    part call(size_t start, const std::string& name, unsigned depth)
+    {
+        const function* f = function_named(name);
+        if (f == nullptr && format_ < 2) {
+            fail(start, "calls " + name +
+                            "(), which isn't a function, and a format 1 file "
+                            "calls none (functions need \"havne_signals\": 2)");
+        }
+        if (f == nullptr) {
+            fail(start, "calls " + name +
+                            "(), which isn't a function: min, max, abs, clamp, "
+                            "sqrt, round, floor, ceil, if, all, any or not");
+        }
+        if (format_ < 2) {
+            fail(start,
+                 "uses " + name + "(), which needs \"havne_signals\": 2");
+        }
+        const bool parts_word = f->truths;
+        ++pos_;
+        std::vector<part> args;
+        skip();
+        if (pos_ < s_.size() && s_[pos_] == ')') {
+            ++pos_;
+        } else {
+            for (;;) {
+                const part x = comparison(depth + 1);
+                const size_t k = args.size();
+                const bool want_truth =
+                    f->truths && !(std::strcmp(f->name, "if") == 0 && k > 0);
+                if (x.truth != want_truth) {
+                    fail(x.at, "gives " + name + "() a " +
+                                   (x.truth ? "comparison" : "number") +
+                                   " where a " +
+                                   (want_truth ? "comparison" : "number") +
+                                   " should be");
+                }
+                args.push_back(x);
+                emit(*f, args);
+                skip();
+                if (pos_ < s_.size() && s_[pos_] == ',') {
+                    ++pos_;
+                    continue;
+                }
+                if (pos_ < s_.size() && s_[pos_] == ')') {
+                    ++pos_;
+                    break;
+                }
+                if (pos_ >= s_.size()) {
+                    fail(pos_, "has no ')' to close its " + name + "(");
+                }
+                fail(pos_, "has " + q(s_.substr(pos_, 1)) +
+                               " where ',' or ')' should be");
+            }
+        }
+        const size_t n = args.size();
+        if (n < f->takes || (!f->more && n > f->takes)) {
+            const char* unit = parts_word ? " part" : " value";
+            fail(start, "gives " + name + "() " + std::to_string(n) + unit +
+                            (n == 1 ? "" : "s") + " where it takes " +
+                            std::to_string(f->takes) +
+                            (f->more ? " or more" : ""));
+        }
+        if (std::strcmp(f->name, "clamp") == 0 && args[1].constant &&
+            args[2].constant && args[1].value > args[2].value) {
+            using ecuio_json::number_text;
+            fail(args[1].at,
+                 "gives clamp() a low of " + number_text(args[1].value) +
+                     " above its high of " + number_text(args[2].value));
+        }
+        part r;
+        r.truth = f->gives_truth;
+        r.at = start;
+        return r;
+    }
+
+    /* A call's steps as its parts arrive: a run of min, max, all or any
+     * after each part past the first; clamp is max, then min; the rest
+     * after their last part */
+    void emit(const function& f, const std::vector<part>& args)
+    {
+        const size_t n = args.size();
+        const std::string name = f.name;
+        if (f.more) {
+            if (n >= 2) {
+                operation(
+                    static_cast<uint8_t>(name == "min"   ? ECUIO_COMPUTED_MIN
+                                         : name == "max" ? ECUIO_COMPUTED_MAX
+                                         : name == "all" ? ECUIO_COMPUTED_ALL
+                                                         : ECUIO_COMPUTED_ANY));
+            }
+            return;
+        }
+        if (name == "clamp") {
+            if (n == 2) {
+                operation(ECUIO_COMPUTED_MAX);
+            } else if (n == 3) {
+                operation(ECUIO_COMPUTED_MIN);
+            }
+            return;
+        }
+        if (n != f.takes) {
+            return;
+        }
+        operation(static_cast<uint8_t>(name == "abs"     ? ECUIO_COMPUTED_ABS
+                                       : name == "sqrt"  ? ECUIO_COMPUTED_SQRT
+                                       : name == "round" ? ECUIO_COMPUTED_ROUND
+                                       : name == "floor" ? ECUIO_COMPUTED_FLOOR
+                                       : name == "ceil"  ? ECUIO_COMPUTED_CEIL
+                                       : name == "not"   ? ECUIO_COMPUTED_NOT
+                                                         : ECUIO_COMPUTED_IF));
+    }
+
+    part factor(unsigned depth)
     {
         if (depth > 16) {
             fail(pos_, "nests deeper than 16");
@@ -534,20 +794,29 @@ private:
         const char c = s_[pos_];
         if (c == '(') {
             ++pos_;
-            expr(depth + 1);
+            const part inner = comparison(depth + 1);
             skip();
+            if (pos_ < s_.size() && s_[pos_] == ',' && format_ >= 2) {
+                fail(pos_, "has ',' outside a call");
+            }
             if (pos_ >= s_.size() || s_[pos_] != ')') {
                 fail(pos_, "has no ')' to close its '('");
             }
             ++pos_;
-            return;
+            return inner;
         }
         if (c == '-') {
+            const size_t start = pos_;
             ++pos_;
             constant(0.0);
-            factor(depth + 1);
+            const part x = factor(depth + 1);
+            number(x, "negates");
             operation(ECUIO_COMPUTED_SUBTRACT);
-            return;
+            part zero;
+            zero.constant = true;
+            part r = folded(zero, x, '-');
+            r.at = start;
+            return r;
         }
         if ((c >= '0' && c <= '9') || c == '.') {
             const size_t start = pos_;
@@ -589,7 +858,11 @@ private:
                 fail(start, "has a number too large");
             }
             constant(value);
-            return;
+            part r;
+            r.at = start;
+            r.constant = true;
+            r.value = value;
+            return r;
         }
         if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
             const size_t start = pos_;
@@ -599,8 +872,19 @@ private:
                     s_[pos_] == '.')) {
                 ++pos_;
             }
-            input(start, s_.substr(start, pos_ - start));
-            return;
+            const std::string name = s_.substr(start, pos_ - start);
+            /* A name before '(' is a call: no key ever was one, since
+             * format 1 refused a '(' after a value */
+            const size_t after = pos_;
+            skip();
+            if (pos_ < s_.size() && s_[pos_] == '(') {
+                return call(start, name, depth);
+            }
+            pos_ = after;
+            input(start, name);
+            part r;
+            r.at = start;
+            return r;
         }
         fail(pos_, "has " + q(s_.substr(pos_, 1)) + " where a value should be");
     }
@@ -609,6 +893,7 @@ private:
     const std::string& s_;
     const std::vector<entry>& entries_;
     const ecuio_signal_set_t* base_;
+    uint32_t format_;
     ecuio_computed_t p_{};
     std::vector<std::string> names_;
     size_t pos_ = 0;
@@ -708,8 +993,9 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
         }
         if (!shared) {
             if (f.channels.size() >= ECUIO_MAX_CHANNELS) {
-                refuse(e, "ecu " + q(id) + " is past the 4 ECUs one session "
-                          "reads, the base's counted");
+                refuse(e, "ecu " + q(id) + " is past the " +
+                              std::to_string(ECUIO_MAX_CHANNELS) +
+                              " ECUs one session reads, the base's counted");
             }
             for (const ecuio_channel_decl_t& c : f.channels) {
                 if (is_11_bit(c.rx_id) != is_11_bit(rx)) {
@@ -727,6 +1013,14 @@ void read_ecus(const Value* ecus, ecuio_signal_file& f,
         }
         ids->emplace_back(id, rx);
     }
+}
+
+void ecu_addresses(const Value& ecu, uint32_t* rx, uint32_t* tx)
+{
+    *rx = hex_of(*ecu.find("rx"), 1, 8, "an ECU's rx");
+    const Value* given = ecu.find("tx");
+    *tx = given != nullptr ? hex_of(*given, 1, 8, "an ECU's tx")
+                           : standard_tx(*rx);
 }
 
 /* A signal that reads a reply: its ECU, request and field into d */
@@ -910,28 +1204,104 @@ void read_source(const Value& source)
     if (source_name == nullptr) {
         refuse(source, "\"source\" needs a \"name\"");
     }
-    text_of(*source_name, 1, 512, "the source's name");
+    text_of(*source_name, 1, ECUIO_SOURCE_TEXT_MAX, "the source's name");
     for (const char* k : {"url", "commit", "license", "modified"}) {
         if (const Value* v = source.find(k)) {
-            text_of(*v, 1, 512, std::string("the source's ") + k);
+            text_of(*v, 1, ECUIO_SOURCE_TEXT_MAX,
+                    std::string("the source's ") + k);
         }
     }
+}
+
+/* ASCII alone, as profile_of reads a name: the process's locale (Qt and
+ * Python set one) would make a high byte a letter in some */
+bool share_alike(const std::string& license)
+{
+    std::string t;
+    for (char c : license) {
+        t += (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+    }
+    const auto alnum = [](char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+    };
+    /* "CC", "BY", ["NC",] "SA" from at, each part after a space or a
+     * hyphen; the end of the name not inside a longer word */
+    const auto name_at = [&](size_t at) {
+        size_t i = at;
+        const auto part = [&](const char* p, bool first) {
+            if (!first) {
+                if (i >= t.size() || (t[i] != '-' && t[i] != ' ')) {
+                    return false;
+                }
+                ++i;
+            }
+            if (t.compare(i, 2, p) != 0) {
+                return false;
+            }
+            i += 2;
+            return true;
+        };
+        if (!part("CC", true) || !part("BY", false)) {
+            return false;
+        }
+        const size_t before_nc = i;
+        if (!part("NC", false)) {
+            i = before_nc;
+        }
+        return part("SA", false) && (i == t.size() || !alnum(t[i]));
+    };
+    for (size_t at = t.find("CC"); at != std::string::npos;
+         at = t.find("CC", at + 1)) {
+        if ((at == 0 || (!alnum(t[at - 1]) && t[at - 1] != '-')) &&
+            name_at(at)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void take_source(const Value& source, ecuio_signal_source_t& out)
+{
+    out = ecuio_signal_source_t{};
+    const auto put = [&source](const char* key, char* to) {
+        if (const Value* v = source.find(key)) {
+            /* read_source bounds it at ECUIO_SOURCE_TEXT_MAX: the NUL fits */
+            std::copy_n(v->text.data(),
+                        std::min<size_t>(v->text.size(), ECUIO_SOURCE_TEXT_MAX),
+                        to);
+        }
+    };
+    put("name", out.name);
+    put("url", out.url);
+    put("commit", out.commit);
+    put("license", out.license);
+    put("modified", out.modified);
+    out.flags = share_alike(out.license) ? ECUIO_SOURCE_SHARE_ALIKE : 0u;
+}
+
+uint32_t format_of(const Value& root, const char* what)
+{
+    if (root.members.empty() || root.members.front().key != "havne_signals") {
+        refuse(root, std::string(what) + " starts with \"havne_signals\"");
+    }
+    const Value& version = root.members.front().value;
+    expect(version, Type::number, "\"havne_signals\"");
+    if (!version.integer || version.whole < ECUIO_SIGNAL_FILE_FORMAT_OLDEST ||
+        version.whole > ECUIO_SIGNAL_FILE_FORMAT) {
+        refuse(version, "\"havne_signals\" is format " +
+                            (version.integer ? std::to_string(version.whole)
+                                             : std::string("?")) +
+                            ", and this Havne reads formats " +
+                            std::to_string(ECUIO_SIGNAL_FILE_FORMAT_OLDEST) +
+                            " and " + std::to_string(ECUIO_SIGNAL_FILE_FORMAT));
+    }
+    return static_cast<uint32_t>(version.whole);
 }
 
 void read_file(const Value& root, ecuio_signal_file& f)
 {
     expect(root, Type::object, "the file");
-    if (root.members.empty() || root.members.front().key != "havne_signals") {
-        refuse(root, "a signal file starts with \"havne_signals\"");
-    }
-    const Value& version = root.members.front().value;
-    expect(version, Type::number, "\"havne_signals\"");
-    if (!version.integer || version.whole != ECUIO_SIGNAL_FILE_FORMAT) {
-        refuse(version, "\"havne_signals\" is format " +
-                            (version.integer ? std::to_string(version.whole)
-                                             : std::string("?")) +
-                            ", and this Havne reads format 1");
-    }
+    const uint32_t format = format_of(root, "a signal file");
     only_keys(root, {"havne_signals", "name", "source", "extends", "ecus", "signals"},
               "the file");
 
@@ -958,18 +1328,133 @@ void read_file(const Value& root, ecuio_signal_file& f)
         refuse(root, "the file needs a \"source\": where its signals come from");
     }
     read_source(*source);
+    take_source(*source, f.source);
 
     p.extends = root.find("extends");
     p.ecus = root.find("ecus");
     p.signals_at = root.find("signals");
     p.own_list = true;
+    p.format = format;
     build(p, f);
+}
+
+/* Computed signals reading each other (ADR-0062): no circle and no
+ * chain past ECUIO_COMPUTED_MAX_DEPTH, refused at the first signal of
+ * either in the file's order, at its expr. Depths settle pass by pass;
+ * one left unsettled is on a circle or reads one. An input is found by
+ * its ID, a replacement's (the base def's) too. Returns each signal's
+ * depth, 0 for one that isn't computed. */
+std::vector<uint32_t> check_chains(const std::vector<entry>& entries,
+                                   const ecuio_signal_file& f)
+{
+    const size_t n = entries.size();
+    /* The entries by ID, to find an input's */
+    std::vector<std::pair<uint16_t, size_t>> by_id(n);
+    for (size_t i = 0; i < n; ++i) {
+        by_id[i] = {entries[i].id, i};
+    }
+    std::sort(by_id.begin(), by_id.end());
+    /* Each signal's computed inputs, as entry indexes */
+    std::vector<std::vector<size_t>> reads(n);
+    std::vector<uint32_t> depth(n, 0);
+    bool chained = false;
+    for (size_t i = 0; i < n; ++i) {
+        if (entries[i].kind != "computed") {
+            continue;
+        }
+        const ecuio_computed_t& c =
+            f.computed[f.defs[entries[i].def].table_first];
+        for (uint32_t k = 0; k < c.input_count; ++k) {
+            const auto it =
+                std::lower_bound(by_id.begin(), by_id.end(),
+                                 std::pair<uint16_t, size_t>{
+                                     static_cast<uint16_t>(c.input_ids[k]), 0});
+            if (it != by_id.end() && it->first == c.input_ids[k] &&
+                entries[it->second].kind == "computed") {
+                reads[i].push_back(it->second);
+                chained = true;
+            }
+        }
+    }
+    if (!chained) {
+        for (size_t i = 0; i < n; ++i) {
+            depth[i] = entries[i].kind == "computed" ? 1 : 0;
+        }
+        return depth;
+    }
+    for (bool more = true; more;) {
+        more = false;
+        for (size_t i = 0; i < n; ++i) {
+            if (entries[i].kind != "computed" || depth[i] != 0) {
+                continue;
+            }
+            uint32_t d = 1;
+            for (const size_t j : reads[i]) {
+                d = depth[j] == 0 ? 0 : std::max(d, depth[j] + 1);
+                if (d == 0) {
+                    break;
+                }
+            }
+            if (d != 0) {
+                depth[i] = d;
+                more = true;
+            }
+        }
+    }
+    for (size_t i = 0; i < n; ++i) {
+        if (entries[i].kind != "computed") {
+            continue;
+        }
+        const Value& expr = *entries[i].v->find("expr");
+        if (depth[i] > ECUIO_COMPUTED_MAX_DEPTH) {
+            refuse(expr, "signal " + q(entries[i].key) + " sits " +
+                             std::to_string(depth[i]) +
+                             " computed signals deep: a chain goes " +
+                             std::to_string(ECUIO_COMPUTED_MAX_DEPTH) +
+                             " deep at most");
+        }
+        if (depth[i] != 0) {
+            continue;
+        }
+        /* The shortest way back to i, if i is on a circle */
+        std::vector<size_t> from(n, n);
+        std::vector<size_t> queue(reads[i]);
+        for (const size_t j : reads[i]) {
+            from[j] = i;
+        }
+        for (size_t at = 0; at < queue.size() && from[i] == n; ++at) {
+            for (const size_t j : reads[queue[at]]) {
+                if (from[j] == n) {
+                    from[j] = queue[at];
+                    queue.push_back(j);
+                }
+            }
+        }
+        if (from[i] == n) {
+            continue; /* it reads a circle: a later signal is on it */
+        }
+        std::vector<size_t> path{i};
+        for (size_t j = from[i]; j != i; j = from[j]) {
+            path.push_back(j);
+        }
+        std::string words = "signal " + q(entries[i].key);
+        for (size_t k = path.size(); k-- > 1;) {
+            words += (k + 1 == path.size() ? " reads " : ", which reads ") +
+                     q(entries[path[k]].key);
+        }
+        words += (path.size() == 1 ? " reads " : ", which reads ") +
+                 q(entries[i].key) +
+                 ": computed signals can't read in a circle";
+        refuse(expr, words);
+    }
+    return depth;
 }
 
 void build(const parts& in, ecuio_signal_file& f)
 {
     f.name = in.name;
     f.profile = in.profile;
+    f.format = in.format;
     const ecuio_signal_set_t* base = nullptr;
     if (in.extends != nullptr) {
         const Value* extends = in.extends;
@@ -1154,7 +1639,8 @@ void build(const parts& in, ecuio_signal_file& f)
                 refuse(s, what + " is computed and needs an \"expr\"");
             }
             expect(*expr, Type::string, what + "'s expr");
-            compiler c(*expr, expr->text, entries, base);
+            compiler c(*expr, expr->text, entries, base,
+                       i < in.formats.size() ? in.formats[i] : in.format);
             std::vector<std::string> names;
             ecuio_computed_t p = c.compile(&names);
             if (const Value* ages = s.find("max_age")) {
@@ -1167,6 +1653,13 @@ void build(const parts& in, ecuio_signal_file& f)
                     if (k == names.size()) {
                         refuse(m, what + "'s max_age names " + q(m.key) +
                                       ", which its expr doesn't read");
+                    }
+                    for (const entry& x : entries) {
+                        if (x.key == m.key && x.kind == "computed") {
+                            refuse(m, what + "'s max_age names " + q(m.key) +
+                                          ", a computed signal: its own "
+                                          "inputs carry their ages");
+                        }
                     }
                     const double seconds = finite_of(m.value, what + "'s max_age");
                     if (seconds < 0.1 || seconds > 60.0) {
@@ -1181,6 +1674,7 @@ void build(const parts& in, ecuio_signal_file& f)
             }
             d.table_first = static_cast<uint16_t>(f.computed.size());
             f.computed.push_back(p);
+            f.exprs.emplace_back(e.def, expr->text);
             read_gauge(s, d, e.def, f, what);
             continue;
         }
@@ -1201,26 +1695,54 @@ void build(const parts& in, ecuio_signal_file& f)
             read_gauge(s, d, e.def, f, what);
         }
     }
+    const std::vector<uint32_t> depth = check_chains(entries, f);
     for (const entry& e : entries) {
         f.keys.emplace_back(e.key, e.def);
     }
 
     /* A replacement keeps the base def's ID, so a computed signal reading
-     * that ID (obd2's Boost reads MAP and baro) reads the file's def */
-    for (const ecuio_signal_def_t& d : f.defs) {
+     * that ID (obd2's Boost reads MAP and baro) reads the file's def. A
+     * computed one is read in format 2: the reader's, or for a base
+     * program the replacement's. */
+    const auto format_of = [&](size_t i) {
+        return i < in.formats.size() ? in.formats[i] : in.format;
+    };
+    for (size_t r = 0; r < f.defs.size(); ++r) {
+        const ecuio_signal_def_t& d = f.defs[r];
         if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
             continue;
         }
+        const bool base_program = r < first_own;
         const ecuio_computed_t& p = f.computed[d.table_first];
         for (uint32_t k = 0; k < p.input_count && k < ECUIO_COMPUTED_MAX_INPUTS;
              ++k) {
-            for (const entry& e : entries) {
-                if (e.replaces && e.id == p.input_ids[k] &&
-                    e.kind != "number" && e.kind != "enum") {
-                    refuse(*e.v, "signal " + q(e.key) + " replaces " +
-                                     q(e.name) + ", which " + q(d.name) +
-                                     " reads: a signal a computed one reads is "
-                                     "a number or an enum");
+            for (size_t i = 0; i < entries.size(); ++i) {
+                const entry& e = entries[i];
+                if (!e.replaces || e.id != p.input_ids[k] ||
+                    e.kind == "number" || e.kind == "enum") {
+                    continue;
+                }
+                const std::string reads = "signal " + q(e.key) + " replaces " +
+                                          q(e.name) + ", which " + q(d.name) +
+                                          " reads";
+                if (e.kind != "computed") {
+                    refuse(*e.v, reads + ": a computed signal reads a number, "
+                                         "an enum or another computed signal");
+                }
+                if (format_of(base_program ? i : r - first_own) < 2) {
+                    refuse(*e.v, reads + ": a computed signal read by another "
+                                         "needs \"havne_signals\": 2");
+                }
+                if (p.max_age_us[k] != 0) {
+                    refuse(*e.v, reads + " with an age bound: a computed "
+                                         "input's ages are its own inputs'");
+                }
+                if (base_program && depth[i] + 1 > ECUIO_COMPUTED_MAX_DEPTH) {
+                    refuse(*e.v, reads + ": that puts " + q(d.name) + " " +
+                                     std::to_string(depth[i] + 1) +
+                                     " computed signals deep: a chain goes " +
+                                     std::to_string(ECUIO_COMPUTED_MAX_DEPTH) +
+                                     " deep at most");
                 }
             }
         }
@@ -1239,7 +1761,11 @@ void build(const parts& in, ecuio_signal_file& f)
     /* The rules above leave the validator nothing to refuse; if it does,
      * the words name the signal it named */
     ecuio_validation_t why{};
-    if (ecuio_validate_signal_set(&f.set, &why) != ECUIO_VALIDATE_OK) {
+    if (ecuio_validate_signal_set(&f.set, &why) ==
+        ECUIO_VALIDATE_ERR_OUT_OF_MEMORY) {
+        throw std::bad_alloc();
+    }
+    if (why.code != ECUIO_VALIDATE_OK) {
         const size_t first = first_own;
         /* Only these codes' index is a def's */
         const bool names_a_def =
@@ -1376,6 +1902,25 @@ const char* ecuio_signal_file_key(const ecuio_signal_file_t* file,
     return "";
 }
 
+uint32_t ecuio_signal_file_format(const ecuio_signal_file_t* file)
+{
+    return file != nullptr ? file->format : 0;
+}
+
+const char* ecuio_signal_file_expr(const ecuio_signal_file_t* file,
+                                   const ecuio_signal_def_t* def)
+{
+    if (file == nullptr || def == nullptr) {
+        return "";
+    }
+    for (const auto& e : file->exprs) {
+        if (&file->defs[e.first] == def) {
+            return e.second.c_str();
+        }
+    }
+    return "";
+}
+
 const ecuio_signal_gauge_t*
 ecuio_signal_file_gauge(const ecuio_signal_file_t* file,
                         const ecuio_signal_def_t* def)
@@ -1389,6 +1934,33 @@ ecuio_signal_file_gauge(const ecuio_signal_file_t* file,
         }
     }
     return nullptr;
+}
+
+ecuio_status_t ecuio_signal_file_source(const ecuio_signal_file_t* file,
+                                        ecuio_signal_source_t* out)
+{
+    if (file == nullptr || out == nullptr) {
+        ecuio_detail_set("the source needs a file and a struct to fill");
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (out->struct_size < sizeof(ecuio_signal_source_t)) {
+        ecuio_detail_set("the source's struct_size is %u, under its %u bytes",
+                         static_cast<unsigned>(out->struct_size),
+                         static_cast<unsigned>(sizeof(ecuio_signal_source_t)));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *out = file->source;
+    out->struct_size = sizeof(ecuio_signal_source_t);
+    return ECUIO_OK;
+}
+
+const char* ecuio_signal_file_text(const ecuio_signal_file_t* file,
+                                   size_t* length)
+{
+    if (length != nullptr) {
+        *length = file != nullptr ? file->bytes.size() : 0;
+    }
+    return file != nullptr ? file->bytes.c_str() : "";
 }
 
 void ecuio_signal_file_free(ecuio_signal_file_t* file)

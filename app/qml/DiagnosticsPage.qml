@@ -5,7 +5,6 @@
 import QtCore
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 
 pragma ComponentBehavior: Bound
@@ -101,7 +100,7 @@ Page {
         if (clearing)
             return qsTr("Clearing: reading the engine and vehicle speeds, then clearing")
         if (clearFailed)
-            return qsTr("Nothing was cleared: the report couldn't be saved first (the Log page says why)")
+            return qsTr("Nothing was cleared: the report couldn't be saved first (the Activity page says why)")
         if (savedTo !== "")
             return qsTr("The report was saved before the clear: %1").arg(savedTo)
         return qsTr("Read at connect · Clear codes… asks first and saves the report")
@@ -307,15 +306,18 @@ Page {
             }
         }
 
-        FileDialog {
+        DocumentSaveDialog {
             id: reportDialog
+            objectName: "reportDialog"
             title: qsTr("Save the health report")
-            fileMode: FileDialog.SaveFile
             defaultSuffix: "txt"
             nameFilters: [qsTr("Text (*.txt)"), qsTr("JSON (*.json)")]
             currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+            currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+                         + "/health-report.txt"
             onAccepted: root.saveReportTo(reportDialog.selectedFile,
                                           reportDialog.selectedNameFilter.index)
+            onFailed: words => { root.reportFailed = true; root.reportNote = qsTr("Report not saved: %1").arg(words) }
         }
 
         // Status line; disconnected, the empty state with a way to connect

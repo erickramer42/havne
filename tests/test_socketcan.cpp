@@ -888,6 +888,15 @@ TEST(SocketCanTest, TheUriIsCheckedBeforeAnyInterface)
     EXPECT_NE(c.detail.find("?poll= belongs to a profile that asks an ECU"),
               std::string::npos)
         << c.detail;
+    c = create("socketcan://vcan0?gap=5");
+    EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
+    EXPECT_NE(c.detail.find("?gap= belongs to a profile that asks an ECU"),
+              std::string::npos)
+        << c.detail;
+    c = create("socketcan://vcan0?profile=obd2&gap=1001");
+    EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
+    EXPECT_NE(c.detail.find("a time in ms from 0 to 1000"), std::string::npos)
+        << c.detail;
     c = create("socketcan://vcan0?profile=obd2&poll=0x1G");
     EXPECT_EQ(c.status, ECUIO_ERR_BAD_URI);
     EXPECT_NE(c.detail.find("a PID from 0x00 to 0xFF"), std::string::npos)

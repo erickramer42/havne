@@ -311,12 +311,15 @@ when the env-gated routing case skips in the cross-arch step, since
 that means the x86 paths are wrong. The cross-arch line names each
 case that skipped: any other skip is reported, not failed (the
 surrogate's session-log case skips while another checkout's run holds
-its fixed log name). Where `build-win32` has the shared core
-(`HAVNE_SHARED_CORE`, on by default), the Win32 step also builds the
-x86 `ecuio.dll` and `test_c_abi_shared`, and the cross-arch step runs
-`c_abi_shared` and `ExportsTest.TheLibraryExportsTheDeclarations` in
-`build-win32` (its line adds `x86 core 2/2`), since CI never builds the
-x86 DLL. The trees must already be configured. Off Windows, or without
+its fixed log name). The Win32 step also builds the x86 `test_signals`,
+and the cross-arch step runs its `ComputedTest` in `build-win32`: the
+computed machine's results bit for bit under the x86 compiler. Where
+`build-win32` has the shared core (`HAVNE_SHARED_CORE`, on by default),
+the Win32 step also builds the x86 `ecuio.dll` and `test_c_abi_shared`,
+and the cross-arch step adds `c_abi_shared` and
+`ExportsTest.TheLibraryExportsTheDeclarations`, since CI never builds
+the x86 DLL. Its line adds `x86 core N/N`, the cases it ran in
+`build-win32`. The trees must already be configured. Off Windows, or without
 `build-win32`, the Win32 and cross-arch steps are left out.
 
 `--suite` and `--changed` are for the edit-and-check loop; a pull request
@@ -673,6 +676,7 @@ build-core/cli/havne-cli`).
 | Symptom | Cause and fix |
 |---|---|
 | `QmlCacheGeneratedCode` unresolved externals after adding a QML file | Stale QML cache. Do a clean reconfigure (`rm -rf build`). |
+| On Windows, every build recompiles the whole QML cache (about a minute) although nothing changed | After an AUTOMOC rerun that leaves the moc list as it was, Qt's metatype step leaves `build/app/meta_types/app_ui_json_file_list.txt` older than `app_ui_autogen/timestamp_<config>`, so the step reruns on every build. Touch the list (`touch build/app/meta_types/app_ui_json_file_list.txt`); the next build is a no-op. |
 | A `QmlTest` case fails with "Received a warning that resulted in a failure" | A binding in the app's QML raised a warning: the message names the file and line under `qrc:/qt/qml/App/`. Fix the binding; a common cause is a delegate reading its `index` (-1) while the model resets. |
 | `test_qml` exits at once and prints that a QML type isn't available, or `module "App" is not installed` | The module's plugin isn't linked or imported. Whatever links `app_ui` also links `app_uiplugin` and has `Q_IMPORT_QML_PLUGIN(AppPlugin)` in one source file, as `app/main.cpp` and `tests/test_qml.cpp` do. |
 | Test discovery fails at build time with `0xc0000135` | A DLL is missing. Discovery runs the test binary during the build, so Qt-linked test targets must copy `$<TARGET_RUNTIME_DLLS>` POST_BUILD, ordered before `gtest_discover_tests`. |

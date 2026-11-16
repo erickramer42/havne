@@ -5,6 +5,7 @@
 #define ECUIO_QUEUE_H
 
 #include "ecuio/core.h"    /* ecuio_status_t, ecuio_session_t, ecuio_frame_t */
+#include "ecuio/conditions.h" /* ecuio_condition_event_t */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -15,16 +16,19 @@ extern "C" {
 
 /*
  * The pull queue (ADR-0053 section 4 and its appendix "the pull queue as
- * built"): a session's frames or decoded values, waiting for a caller to
+ * built"): a session's frames, decoded values or condition events
+ * (conditions.h), waiting for a caller to
  * read them on a thread of its own, so a program that can't take a
  * callback on the worker (Python's ctypes, which would hold the
  * interpreter's lock there; Rust, Go and C# the same) never runs on it.
- * Core's own handler copies each frame or value into the queue on the
- * worker and returns.
+ * Core's own handler copies each entry into the queue on the worker and
+ * returns.
  *
  * One kind per queue: ECUIO_QUEUE_FRAMES, read with
- * ecuio_queue_read_frames, or ECUIO_QUEUE_VALUES, read with
- * ecuio_queue_read_values; a program wanting both opens two.
+ * ecuio_queue_read_frames, ECUIO_QUEUE_VALUES, read with
+ * ecuio_queue_read_values, or ECUIO_QUEUE_CONDITIONS, read with
+ * ecuio_queue_read_conditions; a program wanting more than one kind
+ * opens a queue for each.
  *
  * The bound: a queue holds `capacity` entries, set at open. A full queue
  * drops its oldest entry for the new one and counts it; the count is the
@@ -60,12 +64,17 @@ typedef struct ecuio_queue ecuio_queue_t;
 /* The kinds (append-only) */
 #define ECUIO_QUEUE_FRAMES 1u
 #define ECUIO_QUEUE_VALUES 2u
+#define ECUIO_QUEUE_CONDITIONS 3u /* the events of the conditions attached
+                                     (conditions.h), read with
+                                     ecuio_queue_read_conditions; an entry
+                                     is an event */
 
 /* Capacity: 1 to these, in entries. A frame entry holds a whole
  * ecuio_frame_t (4120 bytes), so a frames queue at its ceiling holds
  * about 17 MB. */
 #define ECUIO_QUEUE_MAX_FRAMES 4096u
 #define ECUIO_QUEUE_MAX_VALUES 65536u
+#define ECUIO_QUEUE_MAX_CONDITIONS 65536u
 
 /* Queues one session takes */
 #define ECUIO_QUEUE_MAX_PER_SESSION 4u
@@ -130,7 +139,7 @@ ecuio_status_t ecuio_queue_open(ecuio_session_t* session, uint32_t kind,
  * closed (and the stream hadn't ended): ECUIO_ERR_SESSION_CLOSED; *count
  * 0 either way.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL queue, out, count or dropped;
- * ECUIO_ERR_INVALID_ARGUMENT for a capacity of 0, or the other kind's
+ * ECUIO_ERR_INVALID_ARGUMENT for a capacity of 0, or another kind's
  * queue. A frame's bytes past its data_length are zero. */
 ecuio_status_t ecuio_queue_read_frames(ecuio_queue_t* queue, ecuio_frame_t* out,
                                        uint32_t capacity, uint32_t* count,
@@ -139,6 +148,12 @@ ecuio_status_t ecuio_queue_read_values(ecuio_queue_t* queue,
                                        ecuio_queue_value_t* out,
                                        uint32_t capacity, uint32_t* count,
                                        uint64_t* dropped, uint32_t timeout_ms);
+
+ecuio_status_t ecuio_queue_read_conditions(ecuio_queue_t* queue,
+                                           ecuio_condition_event_t* out,
+                                           uint32_t capacity, uint32_t* count,
+                                           uint64_t* dropped,
+                                           uint32_t timeout_ms);
 
 /* Detaches the queue from its session if it's still attached, ends any
  * read under way (it returns what it took, or ECUIO_ERR_SESSION_CLOSED),

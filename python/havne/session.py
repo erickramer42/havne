@@ -1,9 +1,10 @@
 # File/layer: python/havne/session.py | Python 3.11+, the havne package
 # Testing: PythonTest.test_session, test_replay, test_recording,
-#          test_signal_file, test_vcan, test_j2534
+#          test_signal_file, test_conditions, test_vcan, test_j2534
 #
-# A session (core.h) and what a script reads from it: frames and values
-# through pull queues (queue.h, ADR-0053 section 4), never a callback, so
+# A session (core.h) and what a script reads from it: frames, values and
+# condition events through pull queues (queue.h, ADR-0053 section 4),
+# never a callback, so
 # no Python runs on core's worker; its report, identity and support; a
 # recording of it (recording.h); its health report as it stands
 # (health.py), from the newest value of each signal a values stream has
@@ -26,6 +27,7 @@ from collections import namedtuple
 
 from . import _ecuio as e
 from ._core import check, lib, text, utf8, with_profile
+from .conditions import _WHYS, ConditionEvent, ConditionState
 from .export import _whole, checked
 from .health import _report, options_for
 
@@ -38,6 +40,25 @@ Value = namedtuple("Value", "timestamp_us id signal_id name unit kind value text
 Value.__doc__ = ("A decoded value: its frame's time and ID, its def's id, name and "
                  "unit, ECUIO_VALUE_* kind, the number (an enum's raw one) and the "
                  "text (a TEXT or HEX value's, an enum's label), else None")
+
+RecorderState = namedtuple("RecorderState", "state frame_rows value_rows records_dropped "
+                                            "notes_dropped reason conditions_lost windows "
+                                            "preroll_short frames_passed",
+                           defaults=(0, 0, 0))
+RecorderState.__doc__ = ("A recorder's state: \"active\", \"armed\" (an armed recorder between "
+                         "windows), \"detached\" (its session destroyed; notes go on) or "
+                         "\"failed\"; the rows written to frames.csv and signals.csv; records "
+                         "the full ring dropped and notes the full queue dropped; the OS's "
+                         "reason for a failed write, else None; the condition events the ring "
+                         "and its carry had no room for, which a drop line in events.log names "
+                         "too; and an armed recorder's windows opened, those of them whose "
+                         "pre-roll a full ring cut, and the frames it let go outside every "
+                         "window (0 for any other recorder)")
+
+_RECORDER_STATES = {e.ECUIO_RECORDING_ACTIVE: "active",
+                    e.ECUIO_RECORDING_ARMED: "armed",
+                    e.ECUIO_RECORDING_DETACHED: "detached",
+                    e.ECUIO_RECORDING_FAILED: "failed"}
 
 ModuleSession = namedtuple("ModuleSession", "ecu asked session state nrc entries lost")
 ModuleSession.__doc__ = ("One module's extended session (ADR-0060), in havne-cli's words: its "
@@ -59,6 +80,14 @@ _SESSION_STATES = {
 }
 _EXTENDED = 0x03
 
+# A queue kind's entry, its read and what a dropped entry is called
+_KINDS = {
+    e.ECUIO_QUEUE_FRAMES: (e.ecuio_frame_t, "ecuio_queue_read_frames", "frames"),
+    e.ECUIO_QUEUE_VALUES: (e.ecuio_queue_value_t, "ecuio_queue_read_values", "values"),
+    e.ECUIO_QUEUE_CONDITIONS: (e.ecuio_condition_event_t, "ecuio_queue_read_conditions",
+                               "condition events"),
+}
+
 
 class _Queue:
     """A pull queue's handle and the lock its reads hold"""
@@ -75,7 +104,8 @@ class _Queue:
 
 
 class Stream:
-    """A pull queue of a session's frames or values. Iterating reads in
+    """A pull queue of a session's frames, values or condition events
+    (ConditionEvent, each with its condition's key). Iterating reads in
     batches, 100 ms at a time, so Ctrl+C lands within that, and ends when
     the stream does: a replay's last frame (ECUIO_ERR_STREAM_ENDED) or the
     session's close. `dropped` is the running total of entries a full queue
@@ -101,11 +131,10 @@ class Stream:
         check(lib.ecuio_queue_open(session._handle(), kind, capacity,
                                    ctypes.byref(self._queue.q)),
               "ecuio_queue_open")
-        entry = e.ecuio_frame_t if kind == e.ECUIO_QUEUE_FRAMES else e.ecuio_queue_value_t
+        entry, read, self._what = _KINDS[kind]
         self._buf = (entry * batch)()
         self._batch = batch
-        self._read = (lib.ecuio_queue_read_frames if kind == e.ECUIO_QUEUE_FRAMES
-                      else lib.ecuio_queue_read_values)
+        self._read = getattr(lib, read)
 
     def read(self, timeout=0.1):
         """What's waiting, as a list, waiting up to timeout seconds for the
@@ -131,9 +160,9 @@ class Stream:
                     if v.kind not in TEXT_KINDS:
                         self._held[v.signal_id] = (v.value, now)
         if dropped.value > self.dropped:
-            what = "frames" if self.kind == e.ECUIO_QUEUE_FRAMES else "values"
             log.warning("havne: %d %s dropped so far: the script reads slower than "
-                        "they arrive (a recording keeps every frame)", dropped.value, what)
+                        "they arrive (a recording keeps every frame)", dropped.value,
+                        self._what)
             self.dropped = dropped.value
         return entries
 
@@ -156,6 +185,14 @@ class Stream:
         if self.kind == e.ECUIO_QUEUE_FRAMES:
             return Frame(c.timestamp_us, c.arbitration_id, c.channel_id, c.flags,
                          ctypes.string_at(c.data, c.data_length))
+        if self.kind == e.ECUIO_QUEUE_CONDITIONS:
+            keys = self._session._condition_keys.get(c.generation, ())
+            return ConditionEvent(
+                c.timestamp_us, keys[c.condition] if c.condition < len(keys) else "",
+                "on" if c.state == e.ECUIO_CONDITION_ON else "off",
+                bool(c.flags & e.ECUIO_CONDITION_FIRED),
+                bool(c.flags & e.ECUIO_CONDITION_STALE), c.value, c.term, c.generation,
+                c.code)
         name, unit = self._session._names.get(c.signal_id, ("", ""))
         has_text = c.kind in TEXT_KINDS or (c.kind == e.ECUIO_VALUE_ENUM and c.text_len > 0)
         return Value(c.timestamp_us, c.arbitration_id, c.signal_id, name, unit, c.kind,
@@ -165,12 +202,25 @@ class Stream:
 class Recorder:
     """A recording of a session (ADR-0049), opened before or after its
     start (ADR-0056 section 3) and counting from then; it outlives the
-    session, so notes and marks go on until close()"""
+    session, so notes and marks go on until close(); state() says what it
+    wrote and lost.
 
-    def __init__(self, session, root, label=None):
+    armed=True (ADR-0063 section 7) writes nothing until a condition of the
+    session's set with record turns ON, then a folder per window, from its
+    before ahead of the firing to its after past the last record condition
+    turning OFF or stale; folder is the newest window's, "" before the
+    first. The session needs a set with an enabled condition that records,
+    or Error (ECUIO_ERR_INVALID_ARGUMENT, "no condition records")."""
+
+    def __init__(self, session, root, label=None, armed=False):
+        self._closed_state = None
+        # Every use of the handle and close() hold it, so no call runs on a freed one;
+        # reentrant: the session's finalizer may close it on a thread that holds it
+        self._lock = threading.RLock()
         opts = e.ecuio_record_options_t()
         opts.root_utf8 = utf8(str(root))
         opts.label_utf8 = utf8(label) if label else None
+        opts.flags = e.ECUIO_RECORD_ARMED if armed else 0
         self._r = ctypes.POINTER(e.ecuio_recorder_t)()
         check(lib.ecuio_recorder_open(ctypes.byref(opts), ctypes.byref(self._r)),
               "ecuio_recorder_open")
@@ -190,23 +240,73 @@ class Recorder:
     @property
     def folder(self):
         n = ctypes.c_uint32()
-        lib.ecuio_recorder_get_folder(self._r, None, 0, ctypes.byref(n))
-        buf = ctypes.create_string_buffer(n.value + 1)
-        check(lib.ecuio_recorder_get_folder(self._r, buf, n.value + 1, ctypes.byref(n)),
-              "ecuio_recorder_get_folder")
+        with self._lock:
+            lib.ecuio_recorder_get_folder(self._r, None, 0, ctypes.byref(n))
+            buf = ctypes.create_string_buffer(n.value + 1)
+            check(lib.ecuio_recorder_get_folder(self._r, buf, n.value + 1, ctypes.byref(n)),
+                  "ecuio_recorder_get_folder")
         return text(buf.raw)
 
     def note(self, line):
-        check(lib.ecuio_recorder_note(self._r, utf8(line)), "ecuio_recorder_note")
+        with self._lock:
+            check(lib.ecuio_recorder_note(self._r, utf8(line)), "ecuio_recorder_note")
 
     def mark(self, label):
-        check(lib.ecuio_recorder_mark(self._r, utf8(label)), "ecuio_recorder_mark")
+        with self._lock:
+            check(lib.ecuio_recorder_mark(self._r, utf8(label)), "ecuio_recorder_mark")
+
+    @staticmethod
+    def _read_state(r):
+        s = e.ecuio_recorder_state_t()
+        check(lib.ecuio_recorder_get_state(r, ctypes.byref(s)), "ecuio_recorder_get_state")
+        return RecorderState(_RECORDER_STATES.get(s.state, "unknown"), s.frame_rows,
+                             s.value_rows, s.records_dropped, s.notes_dropped,
+                             text(s.reason) if s.state == e.ECUIO_RECORDING_FAILED else None,
+                             s.conditions_lost, s.windows, s.preroll_short, s.frames_passed)
+
+    @staticmethod
+    def _settled_state(r):
+        """The state, once a detached session's last records are taken
+        (ECUIO_RECORDER_DRAINED; an armed recorder's windows wait on its
+        writer), 2 s at most: past that, the state as it stands, whose
+        rows and windows may still grow. close() waits here holding the
+        recorder's lock, so a state() on another thread waits too."""
+        give_up = time.monotonic() + 2.0
+        while True:
+            s = e.ecuio_recorder_state_t()
+            check(lib.ecuio_recorder_get_state(r, ctypes.byref(s)), "ecuio_recorder_get_state")
+            if (s.state != e.ECUIO_RECORDING_DETACHED or s.flags & e.ECUIO_RECORDER_DRAINED
+                    or time.monotonic() >= give_up):
+                return Recorder._read_state(r)
+            time.sleep(0.01)
+
+    def state(self):
+        """Its RecorderState now; after close(), the one the close read
+        first. The rows are what the writer had written then (the close
+        writes the rest); the drops and conditions_lost are counted as
+        records go in, so they are final once the session was destroyed
+        before the close, as Session.close() does"""
+        with self._lock:
+            if self._r is None:
+                return self._closed_state
+            return self._read_state(self._r)
 
     def close(self, why=None):
-        if self._r is not None:
+        """Closes the recording (its files end whole, with the summary)
+        and returns the state read just before, once a destroyed session's
+        last records are taken (2 s at most, else the state then, not
+        final); None when it was closed already. A write that failed raises Error after the close; so does
+        a state that couldn't be read, the recording closed all the same."""
+        with self._lock:
+            if self._r is None:
+                return None
             r, self._r = self._r, None
-            check(lib.ecuio_recorder_close(r, utf8(why) if why else None),
-                  "ecuio_recorder_close")
+            try:
+                self._closed_state = self._settled_state(r)
+            finally:
+                check(lib.ecuio_recorder_close(r, utf8(why) if why else None),
+                      "ecuio_recorder_close")
+            return self._closed_state
 
 
 class Session:
@@ -228,6 +328,12 @@ class Session:
             self._variant = plugin.variant_index(variant)
         self.uri = uri
         self._streams, self._queues, self._recorders = [], [], []
+        # Each attach's keys by its generation, so an event names its own:
+        # the newest KEPT_GENERATIONS attaches', under the lock that
+        # orders the attaches
+        self._condition_keys = {}
+        self._conditions_generation = 0
+        self._conditions_lock = threading.Lock()
         self._s = ctypes.POINTER(e.ecuio_session_t)()
         check(lib.ecuio_session_create(utf8(uri), ctypes.byref(self._s)), "ecuio_session_create")
         self._finalizer = weakref.finalize(self, _close_session, self._s, self._queues,
@@ -277,14 +383,91 @@ class Session:
         self._queues.append(s._queue)
         return s
 
-    def record(self, root, label=None):
+    #: How many attaches' keys a session keeps for the events still unread
+    KEPT_GENERATIONS = 64
+
+    def conditions(self, capacity=1024, batch=Stream.BATCH):
+        """A stream of the events of the conditions attached
+        (set_conditions), each a ConditionEvent; before start()"""
+        s = Stream(self, e.ECUIO_QUEUE_CONDITIONS, capacity, batch)
+        self._streams.append(s)
+        self._queues.append(s._queue)
+        return s
+
+    def set_conditions(self, conditions):
+        """Attaches a ConditionSet (ADR-0063), judged from the next frame
+        against the session's signals; None takes the conditions away.
+        Before or after start(). Every state starts off and stale. key:
+        references bind through the session's own signal file or plugin
+        variant. While a recording is open it is core's IN_USE: a
+        recording holds one set for its whole length (ADR-0063 section
+        12's step 7 decides a change of set within one). An event read
+        more than KEPT_GENERATIONS attaches after its own has "" for a
+        key."""
+        handle = None
+        keys = ()
+        if conditions is not None:
+            if not conditions._finalizer.alive:
+                raise ValueError("the condition set is closed")
+            handle = conditions._handle
+            keys = tuple(c.key for c in conditions.conditions)
+        session, file = self._handle(), self._decoding_file()
+        with self._conditions_lock:
+            # Core counts each attach that succeeds. The keys go in
+            # before the call: a reader on another thread may meet the
+            # attach's first event before the call returns
+            generation = self._conditions_generation + 1
+            self._condition_keys[generation] = keys
+            rc = None
+            try:
+                rc = lib.ecuio_session_set_conditions(session, handle, file)
+            finally:
+                # Core's answer alone says whether the set is attached,
+                # whatever interrupts this thread before check() raises
+                if rc == e.ECUIO_OK:
+                    self._conditions_generation = generation
+                    self._condition_keys.pop(generation - self.KEPT_GENERATIONS, None)
+                else:
+                    del self._condition_keys[generation]
+            check(rc, "ecuio_session_set_conditions")
+
+    def condition_states(self):
+        """A ConditionState for each condition attached, in the set's
+        order; [] with none"""
+        count = ctypes.c_uint32()
+        states, room = None, 0
+        while True:
+            check(lib.ecuio_session_get_condition_states(self._handle(), states, room,
+                                                         ctypes.byref(count)),
+                  "ecuio_session_get_condition_states")
+            if count.value <= room:
+                break
+            # More than there was room for: an attach on another thread
+            # may have grown the set since the last look
+            room = count.value
+            states = (e.ecuio_condition_state_t * room)()
+        out = []
+        for i in range(count.value):
+            s = states[i]
+            keys = self._condition_keys.get(s.generation, ())
+            unavailable = bool(s.flags & e.ECUIO_CONDITION_UNAVAILABLE)
+            out.append(ConditionState(
+                keys[i] if i < len(keys) else "",
+                "on" if s.state == e.ECUIO_CONDITION_ON else "off",
+                bool(s.flags & e.ECUIO_CONDITION_STALE), not unavailable,
+                _WHYS.get(s.why, "unknown") if unavailable else None,
+                s.since_us, s.fired, s.value, s.generation))
+        return out
+
+    def record(self, root, label=None, armed=False):
         """A recording of the session into a new folder under root, from
         now on: before start() it holds the whole session, after it the
         analysis log of a run under way (ADR-0056 section 3), its times
-        counted from this call. One recorder at a time: a second while
-        one is open is core's INVALID_ARGUMENT; after close() another can
-        open."""
-        r = Recorder(self, root, label)
+        counted from this call; armed=True, a folder per window around
+        the set's record conditions (Recorder). One recorder at a time: a
+        second while one is open is core's INVALID_ARGUMENT; after close()
+        another can open."""
+        r = Recorder(self, root, label, armed)
         self._recorders.append(r)
         return r
 
@@ -303,7 +486,7 @@ class Session:
             raise ValueError(f"a signal id is 0-65535, not {s}")
         return s
 
-    def set_focus(self, signals, min_sweep_ms=0):
+    def set_focus(self, signals, min_sweep_ms=0, default_pick=False):
         """Asks only the requests that carry these signals, until called
         again (ADR-0056 section 2): ids or names of the session's set, in
         any order; an empty list asks the whole set again. The picks run
@@ -317,15 +500,88 @@ class Session:
         adapter or a busy ECU; 0, the default, is none. One that isn't
         an int (a bool isn't) or is below 0 is a ValueError; one past
         ECUIO_FOCUS_MIN_SWEEP_MAX_MS, or one with an empty list, core's
-        INVALID_ARGUMENT."""
+        INVALID_ARGUMENT. default_pick: the focus is a front end's default
+        pick, not a log's (ECUIO_FOCUS_DEFAULT_PICK), so a recording's
+        header says "pick" in place of "focus"; with an empty list it is
+        core's INVALID_ARGUMENT (an empty pick sets no focus)."""
         if (isinstance(min_sweep_ms, bool) or not isinstance(min_sweep_ms, int)
                 or not 0 <= min_sweep_ms <= 0xFFFFFFFF):
             raise ValueError(f"min_sweep_ms is a whole number, not {min_sweep_ms!r}")
         ids = [self._signal_id(s, "the session's set") for s in signals]
         picks = (ctypes.c_uint16 * len(ids))(*ids) if ids else None
+        flags = e.ECUIO_FOCUS_DEFAULT_PICK if default_pick else 0
         check(lib.ecuio_session_set_focus_with(self._handle(), picks, len(ids),
-                                               min_sweep_ms, 0),
+                                               min_sweep_ms, flags),
               "ecuio_session_set_focus_with")
+
+    def ranked_signals(self, added=()):
+        """The session's default pick as the app and havne-cli's --pick
+        ranked make it (cli/default_pick.h): the set's ranked signals
+        (plot_rank nonzero; a text or hex signal's rank isn't counted) and
+        the ids or names added, in the set's order, each once. Empty when
+        the set ranks none (an empty pick sets no focus, and the whole set
+        is asked) and on a session that asks nothing (the mock, a replay, a
+        listening session), where neither front end sets a pick. A name
+        the set lacks is a KeyError, as in set_focus. Pass a list that
+        isn't empty to set_focus(..., default_pick=True)."""
+        extra = {self._signal_id(s, "the session's set") for s in added}
+        if not self.info.flags & e.ECUIO_SESSION_INFO_REQUESTS:
+            return []
+        sset = lib.ecuio_session_signal_set(self._handle())
+        if not sset:
+            return []
+        defs = [sset.contents.defs[i] for i in range(sset.contents.count)]
+
+        def ranked(d):
+            return d.plot_rank != 0 and d.kind not in TEXT_KINDS
+        if not any(ranked(d) for d in defs):
+            return []
+        return [d.id for d in defs if ranked(d) or d.id in extra]
+
+    def _listed(self, getter, name):
+        """The ids a count-and-buffer getter lists (capacity 0 asks the
+        count; a list that grew between the two calls is read again)"""
+        handle = self._handle()
+        count = ctypes.c_uint32(0)
+        check(getter(handle, None, 0, ctypes.byref(count)), name)
+        while True:
+            room = count.value
+            ids = (ctypes.c_uint16 * max(room, 1))()
+            check(getter(handle, ids, room, ctypes.byref(count)), name)
+            if count.value <= room:
+                return list(ids[:count.value])
+
+    def unsupported_signals(self):
+        """The ids, in the set's order, of the Service 01 signals their ECU
+        says it doesn't support (ecuio_session_get_unsupported_signals):
+        the PID's bitmap leaves it out, and a computed signal with such an
+        input is listed with it. Empty until a bitmap has been answered
+        and on a profile with no Service 01 signals. mock:// walks its demo
+        car's bitmaps at create, so under profile=obd2 it lists the set's
+        signals the car doesn't answer."""
+        return self._listed(lib.ecuio_session_get_unsupported_signals,
+                            "ecuio_session_get_unsupported_signals")
+
+    def absent_signals(self):
+        """The ids, in the set's order, of the signals the session's frames
+        name but don't carry (ecuio_session_get_absent_signals): a field
+        past the end of every reply for ECUIO_ABSENT_AFTER_FRAMES frames,
+        as an ECU that answers PID 55 with bank 1's byte alone; a signal
+        that arrives later leaves the list. Judged from the values decoded
+        for a values stream, so with none open (values() before start())
+        it is empty."""
+        return self._listed(lib.ecuio_session_get_absent_signals,
+                            "ecuio_session_get_absent_signals")
+
+    def unasked_signals(self):
+        """The ids, in the set's order, of the signals the focus leaves
+        unasked (ecuio_session_get_unasked_signals): those whose request
+        it parks, and a computed one with such an input. Empty with no
+        focus and on a session that asks nothing (mock://, replay://, a
+        listener); the worker judges each focus as it takes it, so a list
+        read at once after set_focus may still be the last one's."""
+        return self._listed(lib.ecuio_session_get_unasked_signals,
+                            "ecuio_session_get_unasked_signals")
 
     def start(self):
         check(lib.ecuio_session_start(self._handle()), "ecuio_session_start")
@@ -370,9 +626,13 @@ class Session:
         return out
 
     def vin(self, channel=0):
-        """The channel's VIN, "" until identification reads one"""
-        buf = ctypes.create_string_buffer(e.ECUIO_VIN_TEXT_LEN)
+        """The channel's VIN, "" until core has it in (ECUIO_IDENTITY_VIN:
+        09 02 answered with one, or F190 did once 09 02 settled), which
+        may be long before the rest of the identification is complete"""
         ident = self.identity(channel)
+        if not ident.flags & e.ECUIO_IDENTITY_VIN:
+            return ""
+        buf = ctypes.create_string_buffer(e.ECUIO_VIN_TEXT_LEN)
         check(lib.ecuio_identity_vin(ctypes.byref(ident), buf, len(buf)), "ecuio_identity_vin")
         return text(buf.raw)
 

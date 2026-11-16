@@ -292,6 +292,15 @@ Page {
     // across the gap instead of drawing a ramp
     readonly property int staleMs: Theme.staleMs
 
+    // Bridge.alertLevels copied once per change, by def id: a bridge map read
+    // in each row's binding makes a JS wrapper per read (the Qt 6.12 sweep)
+    property var alertLevels: {
+        const levels = Bridge.alertLevels, copy = {}
+        for (const id in levels)
+            copy[id] = levels[id]
+        return copy
+    }
+
     // A trace's range is at least this many displayed digits, so a step
     // of one or two (fuel level between 71 % and 73 %, the charging
     // voltage within 0.4 V) doesn't fill the plot's height
@@ -316,18 +325,18 @@ Page {
         if (Bridge.disconnecting) return qsTr("Disconnecting…")
         if (!Bridge.connected) return qsTr("Connect a session to read live values")
         if (Bridge.liveSignalModel.shownCount === 0)
-            return qsTr("This profile decodes no signals; its frames are on the Log page")
+            return qsTr("This profile decodes no signals; its frames are on the Activity page")
         // Refusals past an ECU's report list leave their rows blank: say
         // how many, since the rows can't
         const unnamed = Bridge.refusedUnnamed !== "" ? " · " + Bridge.refusedUnnamed : ""
-        // The plotted signals are what a log records: said while it runs,
-        // and where Start log is offered
+        // The ticked signals, text rows among them, are what a log records:
+        // said while it runs, and where Start log is offered
         if (Bridge.logActive)
-            return (Bridge.signalModel.subscribedCount === 1 ? qsTr("Logging the 1 plotted signal")
-                    : qsTr("Logging the %1 plotted signals").arg(Bridge.signalModel.subscribedCount)) + unnamed
+            return (Bridge.signalModel.tickedCount === 1 ? qsTr("Logging the 1 ticked signal")
+                    : qsTr("Logging the %1 ticked signals").arg(Bridge.signalModel.tickedCount)) + unnamed
         const logNote = !startLogOffered
             ? "" : (Theme.compact ? qsTr(" · Start log records them")
-                                  : qsTr(" · Start log records the plotted ones"))
+                                  : qsTr(" · Start log records the ticked ones"))
         if (Bridge.liveSignalModel.filter.active)
             return (Theme.compact ? qsTr("%1 of %2 shown · %3 plotted")
                                   : qsTr("Showing %1 of %2 signals · plotting %3"))
@@ -385,6 +394,7 @@ Page {
                 visible: Bridge.connected && Bridge.liveSignalModel.shownCount > 0
                 filter: Bridge.liveSignalModel.filter
                 codes: Bridge.liveSignalModel.groups
+                askedShown: true
             }
         }
 
@@ -505,12 +515,19 @@ Page {
                 required property bool isText
                 required property bool subscribed
                 required property bool hasValue
+                required property bool unasked          // the focus leaves it unasked
                 // The model notifies AgeMsRole per batch and on every
                 // coalesce tick (refreshAges), so a row that stops
                 // updating still re-evaluates and dims. A delegate-side
                 // clock stamped in onValueChanged would dim steady values
                 // that are still arriving.
                 required property double ageMs          // AgeMsRole; -1 = never arrived
+                // The row's roles as one object, for its def id (a role
+                // named id can't be a property beside this item's id)
+                required property var model
+                // The highest alert ON that reads it: 1 warning, 2 danger
+                readonly property int alertLevel: Bridge.connected && hasValue
+                                                  ? (root.alertLevels[String(model.id)] ?? 0) : 0
 
                 // Clear of the pinned scroll bar, so values stay readable
                 width: signalList.width - (signalList.overflows ? listBar.width : 0)
@@ -521,6 +538,8 @@ Page {
                 // change and never a node made, hidden or destroyed
                 Accessible.role: Accessible.ListItem
                 Accessible.name: signalDelegate.name + ": " + valueLabel.text
+                                 + (alertLevel === 2 ? qsTr(", danger alert")
+                                    : alertLevel === 1 ? qsTr(", warning alert") : "")
 
                 RowLayout {
                     id: rowLayout
@@ -528,15 +547,17 @@ Page {
                     anchors.leftMargin: 12
                     anchors.rightMargin: 12
 
-                    // Plots the row on the chart; the value keeps
-                    // updating either way, here and on the Dashboard
+                    // Plots the row on the chart and asks it; the value
+                    // keeps updating either way, here and on the
+                    // Dashboard. A text row's tick asks it alone
                     ThemedCheckBox {
                         id: plotBox
                         objectName: "plotCheck"
                         checked: signalDelegate.subscribed
-                        enabled: !signalDelegate.isText   // nothing to plot
                         onToggled: Bridge.signalModel.toggleSubscribed(signalDelegate.row)
-                        Accessible.name: qsTr("Plot %1").arg(signalDelegate.name)
+                        Accessible.name: signalDelegate.isText
+                                         ? qsTr("Ask %1").arg(signalDelegate.name)
+                                         : qsTr("Plot %1").arg(signalDelegate.name)
                     }
                     // The chart's legend: this row's trace color, hollow
                     // while the signal isn't plotted
@@ -550,10 +571,12 @@ Page {
                                                        : "transparent"
                         implicitWidth: 10; implicitHeight: 10   // layout-managed
                         radius: 2
-                        color: signalDelegate.subscribed ? swatch.trace : "transparent"
+                        // Filled for a plotted trace: a ticked text row is asked, never drawn
+                        readonly property bool drawn: signalDelegate.subscribed && !signalDelegate.isText
+                        color: swatch.drawn ? swatch.trace : "transparent"
                         border.width: 1
                         border.color: swatch.trace
-                        opacity: signalDelegate.subscribed ? 1.0 : 0.5
+                        opacity: swatch.drawn ? 1.0 : 0.5
                     }
                     Label {
                         id: nameLabel
@@ -588,13 +611,16 @@ Page {
                                         signalDelegate.width - 24 - nameLabel.x
                                         - nameLabel.implicitWidth - 12)
                         // A signal its ECU refused says so, with the code
-                        // by name (ADR-0051 section 3); one not yet
-                        // answered renders "—", not a fabricated 0.
+                        // by name (ADR-0051 section 3); one the session
+                        // isn't asking says that, whatever it last read;
+                        // one not yet answered renders "—", not a
+                        // fabricated 0.
                         text: !Bridge.connected ? qsTr("—")
                               : signalDelegate.refused !== ""
                                 ? (refusedFits || signalDelegate.refusedCode === ""
                                    ? signalDelegate.refused
                                    : qsTr("Refused (%1)").arg(signalDelegate.refusedCode))
+                              : signalDelegate.unasked ? qsTr("Not asked")
                               : !signalDelegate.hasValue ? qsTr("—")
                               : signalDelegate.isText ? signalDelegate.text
                               : signalDelegate.label !== "" ? signalDelegate.label
@@ -609,7 +635,32 @@ Page {
                             signalDelegate.width - 24 - plotBox.width - swatch.width
                             - nameLabel.Layout.minimumWidth - 3 * rowLayout.spacing))
                         elide: Text.ElideRight
-                        color: signalDelegate.refused !== "" ? Theme.textDim : Theme.text
+                        color: signalDelegate.alertLevel === 2 ? Theme.textOnAlertDanger
+                               : signalDelegate.alertLevel === 1 ? Theme.textOnAlertWarn
+                               : signalDelegate.refused !== ""
+                                 || (signalDelegate.unasked && Bridge.connected)
+                               ? Theme.textDim : Theme.text
+                        // An alert ON fills the value's cell in its level's
+                        // role, the mark beside a danger; the name keeps its color
+                        leftPadding: signalDelegate.alertLevel === 2 ? 26
+                                     : signalDelegate.alertLevel === 1 ? 6 : 0
+                        rightPadding: signalDelegate.alertLevel > 0 ? 6 : 0
+                        background: Rectangle {
+                            objectName: "valueAlert"
+                            visible: signalDelegate.alertLevel > 0
+                            color: signalDelegate.alertLevel === 2 ? Theme.alertDangerFill
+                                                                   : Theme.alertWarnFill
+                            radius: Theme.radius
+                            DangerMark {
+                                objectName: "valueAlertMark"
+                                visible: signalDelegate.alertLevel === 2
+                                x: 6
+                                anchors.verticalCenter: parent.verticalCenter
+                                size: 14
+                                color: Theme.textOnAlertDanger
+                                cutout: Theme.alertDangerFill
+                            }
+                        }
                         font.pixelSize: Theme.fontEmphasis
                         // The value face, its digits tabular, so a reading
                         // doesn't jitter as its digits change
@@ -637,6 +688,26 @@ Page {
                   ? qsTr("1 signal hidden: the ECU doesn't send it")
                   : qsTr("%1 signals hidden: the ECU doesn't send them")
                         .arg(Bridge.signalModel.hiddenCount)
+        }
+        // What the focus leaves unasked (ADR-0056 section 2): a tick asks a
+        // row, except under a log, whose signals stay as it started
+        Label {
+            id: unaskedNote
+            objectName: "unaskedNote"
+            visible: Bridge.connected && Bridge.signalModel.unaskedCount > 0
+                     && !root.chartMaximized
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            text: Bridge.logActive
+                  ? (Bridge.signalModel.unaskedCount === 1
+                     ? qsTr("1 signal not asked while the log runs")
+                     : qsTr("%1 signals not asked while the log runs")
+                           .arg(Bridge.signalModel.unaskedCount))
+                  : Bridge.signalModel.unaskedCount === 1
+                  ? qsTr("1 signal not asked: tick its row to ask it")
+                  : qsTr("%1 signals not asked: tick a row to ask it")
+                        .arg(Bridge.signalModel.unaskedCount)
         }
 
         // The chart's time window: the last N seconds of every trace. The

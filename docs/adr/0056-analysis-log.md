@@ -5,7 +5,8 @@
   with its estimate (sections 4 and 5), `havne-cli log` and the app's
   Start log and Stop log, the viewer's Export and a focus's minimum time
   between sweeps (the appendices). The navigation aids (section 6) are
-  v0.7.3's.
+  v0.7.3's. The unasked list and the default pick, the focus's second
+  use, are v0.8.0's (the appendices of 2026-11-13).
 - **Date:** 2026-11-07.
 - **Builds on:** [ADR-0015](0015-request-engine.md) (the request
   engine) and [ADR-0039](0039-full-service01-coverage.md) (its two rate classes);
@@ -977,6 +978,127 @@ levels in force for both recordings, where `havne-cli view --align-on pull:`
 uses core's defaults unless it is given levels (`--stretch-level`, `--role`),
 so the same numbers need the same levels on both sides.
 
+## Appendix: the signals a focus leaves unasked (2026-11-13)
+
+`ecuio_session_get_unasked_signals` (profile.h) lists, in the set's
+order, the signals the focus leaves unasked: a def whose request the
+focus parks, and a computed signal with such an input, followed through
+its chain. A def that shares a picked def's reply is asked, so it isn't
+listed; neither is a passive def, Service 09's, a request the probe or
+an NRC dropped (the unsupported and absent lists say those), nor a DID
+the scan hasn't found. With no focus, and on a session that asks
+nothing, the list is empty. The worker works it out as it takes each
+focus and whenever its table changes, so it follows a focus call
+between two requests. A front end shows "Not asked" from it, where
+"waiting for data" would promise a value that isn't coming; "not sent"
+and "refused" come from the other two lists and win over it.
+
+Python reads it as `Session.unasked_signals()`.
+
+## Appendix: a front end's default pick (2026-11-13)
+
+The focus has a second use: a front end asking only its default pick
+(the set's ranked signals, the gauges shown and the signals the user
+ticks), so a large set's rotation stays short. The worker asks it as
+any focus, with every rule above. `ecuio_session_set_focus_with` takes
+it under the flag `ECUIO_FOCUS_DEFAULT_PICK`, which changes one thing:
+a recording begun under it names the picks on a `pick` line where a
+log's focus has its `focus` line, so a reader tells a session's default
+from an analysis log's choice. The wide CSV takes its columns from a
+`focus` line alone; under a `pick` line it exports every number signal,
+as with no line. The folder export keeps the line.
+
+A pick with no signals is refused (INVALID_ARGUMENT): a front end
+whose pick is empty sets no focus and the whole set is asked. Any
+other flag is refused as before. Python takes it as
+`Session.set_focus(signals, default_pick=True)`.
+
+A pick runs in one rate class, as a log's focus does: every picked
+request is asked once in each sweep, so `obd2`'s ranked signals no longer
+take turns two fast to one slow. A set asked whole keeps its classes.
+The pick is short by design, and a slow request among a few picks
+costs little; keeping the classes would need the focus to keep each
+request's own class, a change to every focus, a log's included.
+
+## Appendix: the default pick in the app and havne-cli (2026-11-13)
+
+**The union.** `cli/default_pick.h` holds the rule every front end
+uses: a set's ranked defs (`plot_rank` nonzero, a text or hex def's
+rank not counted, as Live's default plot leaves text rows out) and the
+ids a front end adds, in the set's order, each once. A set that ranks
+none gives an empty pick, and an empty pick is no focus, so the whole
+set is asked (uds-generic, a signal file with no `plot` keys). Python's
+`Session.ranked_signals(added)` is the same rule, empty on a session
+that asks nothing.
+
+**The app.** The bridge adds the Dashboard's gauges (Main hands it
+every page's cells of the current form as lists of refs, each already
+holding its counterparts in the built-in sets, through `pickGauges`;
+the bridge finds each cell's first ref the set answers to, as
+`SignalHub` does) and the rows ticked on Live past their default. It
+sets the pick under `ECUIO_FOCUS_DEFAULT_PICK` with the minimum time
+between sweeps:
+
+- before `ecuio_session_start`, so a large set never runs one whole
+  sweep first, and before the recorder attaches, so the header names
+  the pick. The vehicle's ticks come after the connect, so the header's
+  `pick` line is the pick at the attach: the ranked signals and the
+  gauges, without the vehicle's ticks;
+- on the next coalesce tick after a tick, a gauge change or a new
+  minimum time, when the pick or the minimum changed (the minimum paces
+  a requesting session's pick, not a log's alone; core takes a minimum
+  only with a focus, so the whole set is never paced);
+- when a log ends (Stop log, a failed write, the log's recorder
+  refused), in place of the whole set.
+
+A session that asks nothing (the mock, a replay, a listening session)
+gets no pick. Under a log the log owns the focus, and ticks don't
+refocus. A pick core refuses (none of its signals is asked on this
+session, as under a `?poll=` that names none of them) leaves the
+session asking its whole set, and so does one the walk leaves with
+nothing to ask: the bridge sets the same pick again whenever the
+support reports' drops rise, and core's refusal decides. Each change
+writes one activity line, a note in a recording: "Asking N signals:
+<names>", "Asking every signal: the profile ranks none", or "Asking
+every signal: <core's words>"; with a minimum set, a whole-set line
+ends "; no minimum time between sweeps applies to it". Under `?poll=`
+the session asks its polled signals alone, so the lines say "Picked N
+signals; ?poll= asks only the polled ones among them: <names>" and
+"Asking every polled signal: ...".
+
+**What the user sees.** Live's row says "Not asked", dimmed, in the
+value's place while the focus leaves it unasked
+(`ecuio_session_get_unasked_signals`, read each tick); a refusal's
+words come first, and a hidden row isn't shown. A line under the list
+counts them ("N signals not asked: tick a row to ask it"; while a log
+runs, whose signals stay as it started, "N signals not asked while the
+log runs"), and the Filter popup has Asked only. A gauge reads "not
+asked", never its last value as no new data. A text row's box ticks
+it: the tick asks it and plots nothing, kept in the vehicle's `plotted`
+list. A log records the ticked rows, text rows among them: Start log is
+offered on the ticked count, and Live says "Logging the N ticked
+signals"; Plotted only and the swatch stay with the plotted numbers.
+
+**havne-cli.** `stream` and `log` take `--pick ranked`, under the app's
+rules: `stream` asks the set's ranked signals, `log` the ranked ones
+and its `--signal` names, both under the flag, the `focus` line adding
+`"pick":"ranked"` and the recording's header saying `pick`. A session
+that asks nothing takes no pick, and a set that ranks none adds none:
+`log`'s names stay an ordinary focus with its `--min-sweep`, and with
+no names the whole set is asked with no minimum; each says so on
+standard error. A pick core refuses leaves `stream` asking the whole
+set, said on standard error, as the app does. Two differences stay,
+each the app's own: `log`'s focus core refuses is an `error` line and
+exit 3, as the app's Start log refuses one; and the gauges and the
+per-vehicle ticks are the app's state, so a CLI user names those
+signals with `--signal`. Without the option both commands ask what
+they did, so no golden changes.
+
+**Gaps.** A refused pick is asked again only when the reports' drops
+rise, not when the request table grows (core works `focus_askable` out
+again then, `request_setup.h`); no profile today grows its table under
+a pick that ranks something (uds-generic ranks none).
+
 ## Appendix: a cancel for the reader's searches (2026-11-12)
 
 `ecuio_recording_stretches_with` and `ecuio_recording_find_with`
@@ -1098,3 +1220,61 @@ an ask that can't start leaves the pass under way to answer.
 `.ACloseEndsAMeansPassThatGaveWay`,
 `.ANewerStretchesAskStalesTheOlderPass`,
 `.AStretchesAskThatCantStartLeavesTheOlderPassAlone`.
+
+## Appendix: a pick's lines in a recording (2026-11-13)
+
+**The header.** The focus a recording begins under (a log's `focus`, a
+default pick's `pick`) is written on as many header lines as its names
+take, each holding at most 4 KiB of them, so a pick of the cap's 1024
+signals with the longest names stays far inside a row (32 KiB). The
+readers append the lines in order (the export's and the health
+report's header read did already). A pick given twice is picked once,
+at its first place, so a recording never names a signal twice. A line
+past a row, which an older core wrote for a large pick, is passed by
+whole: the signal lines after it are still read, though its names are
+lost to the wide CSV's default columns. The folder export still refuses
+such a line rather than drop a header line without a word.
+
+**A change after the attach.** A focus set or ended while a recorder
+takes the session's frames is an activity line, stamped at the call,
+of the header's kind word:
+
+    12:00:31.250  +31.250  pick  15 signals: "Engine Load","Coolant Temp",...
+    12:00:31.250  +31.250  pick  more: "Fuel Level"
+    12:00:48.100  +48.100  pick  15 signals, at least 250 ms between sweeps: "Engine Load",...
+    12:01:02.900  +62.900  focus  none: every signal asked
+
+The names are quoted as the header quotes them (signals.csv's rule), so
+a name holding a quote or a comma reads back whole; past 4 KiB of names
+the rest follow on `more: ` lines of the same time and kind. On a
+session that asks requests, a minimum time between sweeps follows the
+count (the words of the app's "Log started" line), so a new minimum on
+the same picks is a change of its own; a session that asks nothing
+takes a minimum and changes nothing, and its line never names one. An
+ended focus is `focus  none: every signal asked`. A line is written
+only when the picks, their kind word or the minimum differ from what
+the header or the last line named: the app's pick applied again as a
+walk drops requests, or a whole set asked again, writes nothing. Core
+writes the line for every front end, so havne-cli's and Python's
+recordings have it too, and the folder export keeps both kinds in its
+range, as it keeps `link` and `asleep`: a scrubbed copy says why a
+signal's samples begin or end mid-file, where the front end's note was
+left out. A range that starts after a change opens with that change's
+lines again, at its start (the clock and session time carried on, as
+ADR-0063 section 8's held cond lines are), so a copy from 120 s says
+what was asked then. A line that finds the recorder's queue full is
+dropped and counted with the notes.
+
+A change made while the recorder attaches is not lost between the two:
+the recorder keeps the focus its header named, and the attach compares
+the session's focus with it once attached, writing a line when they
+differ; a call that pinned the recorder first wrote it already, and the
+compare keeps it from being written twice. Older cores pass both kinds
+by (the reader skips a kind it doesn't know, the folder export counts
+one as left out); the format stays 3.
+
+**The app.** The bridge's "Asking N signals: ..." line is shown on the
+Log page and no longer noted in the recording, since core's line says
+the same; the lines that say why the whole set is asked ("Asking every
+signal: the profile ranks none", or core's refusal) are still notes,
+since core's `focus  none` line doesn't say why.

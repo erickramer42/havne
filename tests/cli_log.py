@@ -5,10 +5,12 @@
 #   python tests/cli_log.py demo <havne-cli>
 #   python tests/cli_log.py fails <havne-cli>
 #   python tests/cli_log.py replay <havne-cli> <fixture folder>
+#   python tests/cli_log.py armed <havne-cli> <fixture folder>
 #   python tests/cli_log.py interrupt <havne-cli>
 #   python tests/cli_log.py closed-pipe <havne-cli>
 #   python tests/cli_log.py focus-refused <havne-cli> <fake_j2534.dll>   (Windows)
 #   python tests/cli_log.py pace <havne-cli>
+#   python tests/cli_log.py pick <havne-cli>
 #   python tests/cli_log.py session <havne-cli> <fake_j2534.dll> <golden> [--update]   (Windows)
 #
 # demo: mock://demo logged for 2 s with two signals picked, the log line's
@@ -21,7 +23,13 @@
 # writes every number signal.
 # fails: a folder that can't be made ends the log before any frame, with
 # the reason (never the path) and exit 1. replay: a replay at max ends at
-# its last frame, reason replay-end, the recording whole. interrupt:
+# its last frame, reason replay-end, the recording whole. armed: --armed
+# over the replay at max with a condition on engine speed: an armed line,
+# window lines whose count climbs to two with each folder there, the
+# closed and end lines saying two windows, the end naming the newest
+# folder, each window ended whole with its trigger line and its frames
+# from the firing's before; a file with no condition that records is
+# refused at the start, exit 1, no folder made. interrupt:
 # Ctrl+Break (Windows, exit 77 without a console) or SIGINT ends the
 # log with reason interrupted, the recording closed whole and read back.
 # closed-pipe: standard output closed under a running log, and under a
@@ -34,7 +42,14 @@
 # minimum and with 250 ms, the focus line and the header saying so only
 # with one, and the wide export's sweep rows at most the time allows
 # (a ceiling alone: load takes rows away from both runs, so it can't fail
-# it), with at least one.
+# it), with at least one. pick, over the emulator's ELM327: --pick ranked
+# under obd2 joins a --signal to the ranked ones in the set's order, its
+# focus line saying pick ranked and events.log naming them on a pick
+# line, never a focus line; under uds-generic (which ranks none) the
+# names alone are a log's focus with its minimum, and with no names the
+# whole set has none; on the mock (which asks nothing) no pick; stream
+# --pick ranked writes its focus line after the session line, and a pick
+# core refuses (?poll=0x2F) leaves the whole set asked, exit 0.
 
 import csv
 import json
@@ -318,6 +333,80 @@ def replay(cli, fixture):
     return 0
 
 
+ARMED = ('{"havne_conditions":1,"conditions":[{"key":"high","name":"High",'
+         '"when":{"signal":["obd2.rpm"],"unit":"RPM","above":1000},'
+         '"record":{"before":2,"after":1}}]}')
+MARKED = ('{"havne_conditions":1,"conditions":[{"key":"high","name":"High",'
+          '"when":{"signal":["obd2.rpm"],"unit":"RPM","above":1000},"mark":true}]}')
+
+
+def armed(cli, fixture):
+    with tempfile.TemporaryDirectory(prefix="havne-cli-log-armed-") as base:
+        uri = f"replay://{Path(fixture).as_posix()}?profile=obd2&speed=max"
+        sets = Path(base) / "armed.json"
+        sets.write_text(ARMED, encoding="utf-8")
+        root = Path(base) / "windows"
+        code, rows, err = run(cli, ["log", uri, str(root), "--conditions", str(sets),
+                                    "--armed", "--seconds", "20"])
+        if code != 0:
+            print(f"FAIL  exit {code}\n{err}")
+            return 1
+        recording = [r for r in rows if r.get("type") == "recording"]
+        if recording[0] != {"type": "recording", "state": "armed", "windows": 0}:
+            print(f"FAIL  the first recording line {json.dumps(recording[0])}")
+            return 1
+        windows = [r for r in recording if r.get("state") == "window"]
+        counts = [r["window"] for r in windows]
+        if not windows or counts != sorted(set(counts)) or counts[-1] != 2:
+            print(f"FAIL  the window lines {counts!r}")
+            return 1
+        for w in windows:
+            if not Path(w["folder"]).is_dir():
+                print(f"FAIL  a window line's folder isn't there: {w['folder']!r}")
+                return 1
+        closed = recording[-1]
+        if closed.get("state") != "closed" or not closed.get("whole") or \
+                closed.get("windows") != 2:
+            print(f"FAIL  the closed line {json.dumps(closed)}")
+            return 1
+        end = rows[-1]
+        folders = sorted(p for p in root.iterdir())
+        if end.get("windows") != 2 or len(folders) != 2 or \
+                Path(end.get("folder", "")) != folders[-1]:
+            print(f"FAIL  the end line {json.dumps(end)}, folders {folders!r}")
+            return 1
+        for folder in folders:
+            if not whole(folder, "the window ended"):
+                return 1
+            text = (folder / "events.log").read_text(encoding="utf-8")
+            if "\ntrigger  high,2000 ms\n" not in text:
+                print(f"FAIL  {folder.name} has no trigger line")
+                return 1
+            fired = [l for l in text.splitlines() if "  cond  high,on,fired," in l]
+            t_fired = int(fired[0].split(",")[-1])
+            with open(folder / "frames.csv", encoding="utf-8") as f:
+                first = int(f.read().splitlines()[1].split(",")[1])
+            if not t_fired - 2000000 <= first < t_fired:
+                print(f"FAIL  {folder.name}'s first frame {first}, fired {t_fired}")
+                return 1
+
+        sets.write_text(MARKED, encoding="utf-8")
+        refused = Path(base) / "refused"
+        code, rows, err = run(cli, ["log", uri, str(refused), "--conditions", str(sets),
+                                    "--armed"])
+        failed = [r for r in rows if r.get("type") == "recording"]
+        line = failed[-1] if failed else {}
+        if code != 1 or line.get("state") != "failed" or \
+                not line.get("reason", "").startswith("no condition records"):
+            print(f"FAIL  a set that records nothing: exit {code}, {json.dumps(line)}")
+            return 1
+        if refused.exists() and any(refused.iterdir()):
+            print("FAIL  a refused armed log made a folder")
+            return 1
+    print("ok    an armed log writes a folder per window and names each")
+    return 0
+
+
 def interrupt(cli):
     env = dict(os.environ)
     env["HAVNE_CLI_LOG_EVERY_MS"] = "500"
@@ -473,13 +562,143 @@ def session_line(cli, dll, golden_file, update):
     return golden.report(golden.compare([last], expected, set()), golden_file)
 
 
+# obd2's ranked signals (kPlotOrder) in the set's order, Fuel Level
+# (unranked) among them where the set holds it
+OBD2_PICK = ["Engine Load", "Coolant Temp", "RPM", "Vehicle Speed",
+             "Intake Air Temp", "Fuel Level", "Battery Voltage", "MAF",
+             "Engine Oil Temp"]
+
+
+def header_lines(folder, word):
+    text = (folder / "events.log").read_bytes().decode("utf-8")
+    return [l for l in text.splitlines() if l.startswith(word + "  ")]
+
+
+def pick_run(cli, args):
+    """A run of args; its exit, rows, standard error and the one folder made"""
+    with tempfile.TemporaryDirectory(prefix="havne-cli-pick-") as root:
+        code, rows, err = run(cli, [a.replace("<root>", root) for a in args])
+        folders = [p for p in Path(root).iterdir() if p.is_dir()]
+        header = {}
+        if len(folders) == 1:
+            header = {w: header_lines(folders[0], w) for w in ("pick", "focus")}
+        return code, rows, err, header
+
+
+def focus_of(rows):
+    found = [r for r in rows if r.get("type") == "focus"]
+    return found[0] if found else None
+
+
+def pick(cli):
+    emulator = Emulator(cli)
+    try:
+        return pick_cases(cli, f"elm327://127.0.0.1:{emulator.port}")
+    finally:
+        emulator.end()
+
+
+def pick_cases(cli, elm):
+    obd2 = elm + "?profile=obd2&identify=0&diagnose=0&probe=0"
+    # A session that asks: the ranked signals and the names, a pick
+    code, rows, err, header = pick_run(cli, [
+        "log", obd2, "<root>", "--seconds", "1", "--pick", "ranked",
+        "--signal", "Fuel Level"])
+    focus = focus_of(rows)
+    names = [s["name"] for s in (focus or {}).get("signals", [])]
+    if code != 0 or focus is None or focus.get("pick") != "ranked" or \
+            len(names) != 15 or names[:len(OBD2_PICK)] != OBD2_PICK:
+        print(f"FAIL  the pick's focus line {focus}, exit {code}\n{err}")
+        return 1
+    if len(header["pick"]) != 1 or header["focus"] or \
+            not header["pick"][0].startswith("pick  " + ",".join(OBD2_PICK)):
+        print(f"FAIL  the header's pick {header!r}")
+        return 1
+
+    # A profile that ranks none: the names alone, a log's focus with its
+    # minimum; with no names the whole set, which takes no minimum
+    uds = elm + "?profile=uds-generic&did=1E1C:u16,F190:text&identify=0&diagnose=0"
+    code, rows, err, header = pick_run(cli, [
+        "log", uds, "<root>", "--seconds", "1", "--pick", "ranked",
+        "--signal", "DID 1E1C", "--min-sweep", "250"])
+    focus = focus_of(rows)
+    if code != 0 or "ranks no signal" not in err or focus is None or \
+            [s["name"] for s in focus["signals"]] != ["DID 1E1C"] or \
+            "pick" in focus or focus.get("min_sweep_ms") != 250:
+        print(f"FAIL  the unranked names' focus {focus}, exit {code}, {err!r}")
+        return 1
+    if header["pick"] or len(header["focus"]) != 1:
+        print(f"FAIL  the unranked names' header {header!r}")
+        return 1
+    code, rows, err, header = pick_run(cli, [
+        "log", uds, "<root>", "--seconds", "1", "--pick", "ranked",
+        "--min-sweep", "250"])
+    focus = focus_of(rows)
+    if code != 0 or "ranks no signal" not in err or focus is None or \
+            focus["signals"] != [] or "pick" in focus or "min_sweep_ms" in focus:
+        print(f"FAIL  the unranked whole set's focus {focus}, exit {code}, {err!r}")
+        return 1
+    if header["pick"] or header["focus"]:
+        print(f"FAIL  a set asked whole names a pick or a focus {header!r}")
+        return 1
+
+    # The mock asks nothing: no pick, the names an ordinary focus
+    code, rows, err, header = pick_run(cli, [
+        "log", "mock://demo?profile=obd2", "<root>", "--seconds", "1",
+        "--pick", "ranked", "--signal", "Fuel Level"])
+    focus = focus_of(rows)
+    if code != 0 or "asks no signal" not in err or focus is None or \
+            [s["name"] for s in focus["signals"]] != ["Fuel Level"] or \
+            "pick" in focus or header["pick"]:
+        print(f"FAIL  the mock's log {focus} {header!r}, exit {code}, {err!r}")
+        return 1
+    code, rows, err, header = pick_run(cli, [
+        "stream", "mock://demo?profile=obd2", "--count", "3", "--pick",
+        "ranked", "--record", "<root>"])
+    if code != 0 or "asks no signal" not in err or focus_of(rows) is not None \
+            or header["pick"]:
+        print(f"FAIL  the mock's stream {header!r}, exit {code}, {err!r}")
+        return 1
+
+    # stream on a session that asks: the ranked signals, a pick
+    code, rows, err, header = pick_run(cli, [
+        "stream", obd2, "--seconds", "1", "--pick", "ranked", "--record",
+        "<root>"])
+    types = [r.get("type") for r in rows]
+    focus = focus_of(rows)
+    if code != 0 or focus is None or len(focus["signals"]) != 14 or \
+            types.index("focus") != types.index("session") + 1:
+        print(f"FAIL  stream's lines {types!r}, exit {code}\n{err}")
+        return 1
+    if len(header["pick"]) != 1 or \
+            not header["pick"][0].startswith("pick  Engine Load,"):
+        print(f"FAIL  stream's recording names {header!r}")
+        return 1
+
+    # A pick core refuses (?poll= asks none of the ranked ones) leaves the
+    # whole set asked, as in the app, and the run goes on
+    polled = elm + "?profile=obd2&poll=0x2F&identify=0&diagnose=0"
+    code, rows, err, header = pick_run(cli, [
+        "stream", polled, "--seconds", "1", "--pick", "ranked"])
+    if code != 0 or "asking every signal: the focus leaves nothing" not in err \
+            or focus_of(rows) is not None:
+        print(f"FAIL  a refused pick: exit {code}, {err!r}")
+        return 1
+    print("ok    --pick ranked asks the ranked signals and names them a pick")
+    return 0
+
+
 def main(argv):
     if len(argv) >= 3 and argv[1] == "demo":
         return demo(argv[2])
+    if len(argv) >= 3 and argv[1] == "pick":
+        return pick(argv[2])
     if len(argv) >= 3 and argv[1] == "fails":
         return fails(argv[2])
     if len(argv) >= 4 and argv[1] == "replay":
         return replay(argv[2], argv[3])
+    if len(argv) >= 4 and argv[1] == "armed":
+        return armed(argv[2], argv[3])
     if len(argv) >= 3 and argv[1] == "interrupt":
         return interrupt(argv[2])
     if len(argv) >= 3 and argv[1] == "closed-pipe":

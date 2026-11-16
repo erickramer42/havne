@@ -1,8 +1,9 @@
 // File/layer: core/src/recording_rows.h | internal, C++17, Qt-free,
 //             header-only; ALL platforms
-// Testing: UNIT: RecordingRowsTest, RecordingTest (test_core); JsonTest
-//          (test_core); CsvExportTest and CsvGuessTest (kSparseTimes);
-//          FUZZ: fuzz_recording, fuzz_json
+// Testing: UNIT: RecordingRowsTest, RecordingTest, ConditionRecordingTest,
+//          JsonTest (test_core); CsvExportTest and CsvGuessTest
+//          (kSparseTimes); FolderExportTest (the cond lines);
+//          FUZZ: fuzz_recording, fuzz_json, fuzz_export
 //
 // The rows of a recording as the reader parses them (ADR-0049 section 5):
 // signals.csv's and markers.csv's CSV rows, events.log's header lines and
@@ -58,6 +59,10 @@ constexpr size_t kSha256Hex = 64;
  * plugin variant that decoded the recording, whose merged set the
  * signal file is */
 constexpr const char* kPluginKey = "plugin  ";
+/* "conditions  conditions.json,<SHA-256>" after it (ADR-0063 section 8):
+ * the set of conditions the session judged, copied beside it */
+constexpr const char* kConditionsKey = "conditions  ";
+constexpr const char* kConditionsName = "conditions.json";
 
 /* A UTF-8 byte-order mark's length at the start of a header row, or 0 */
 inline size_t bom_length(const char* p, size_t n)
@@ -604,13 +609,14 @@ inline int64_t days_from_civil(int64_t y, unsigned m, unsigned d)
     return era * 146097 + static_cast<int64_t>(doe) - 719468;
 }
 
-/* A signal file line's value, "signals.json," and 64 lowercase hex
- * digits: the digits into hex */
-inline bool parse_signal_file(const char* p, size_t n, std::string* hex)
+/* A copy's header line value, "<file>," and 64 lowercase hex digits (the
+ * signal file's, the conditions'): the digits into hex */
+inline bool parse_named_file(const char* p, size_t n, const char* file,
+                             std::string* hex)
 {
-    const size_t name = std::strlen(kSignalFileName);
-    if (n != name + 1 + kSha256Hex ||
-        std::memcmp(p, kSignalFileName, name) != 0 || p[name] != ',') {
+    const size_t name = std::strlen(file);
+    if (n != name + 1 + kSha256Hex || std::memcmp(p, file, name) != 0 ||
+        p[name] != ',') {
         return false;
     }
     const char* digits = p + name + 1;
@@ -622,6 +628,124 @@ inline bool parse_signal_file(const char* p, size_t n, std::string* hex)
     }
     hex->assign(digits, kSha256Hex);
     return true;
+}
+
+inline bool parse_signal_file(const char* p, size_t n, std::string* hex)
+{
+    return parse_named_file(p, n, kSignalFileName, hex);
+}
+
+/* A cond line's flag words as bits, ECUIO_CONDITION_STALE, _FIRED and
+ * _HELD's values (conditions.h; the reader asserts them) */
+constexpr uint32_t kCondStale = 0x1;
+constexpr uint32_t kCondFired = 0x2;
+constexpr uint32_t kCondHeld = 0x8;
+constexpr size_t kConditionKeyMax = 31; /* ECUIO_CONDITION_KEY_MAX */
+
+/* A cond line's text (ADR-0063 section 8):
+ * "<key>,<on|off>,<flags>,<value>,<term>,<host_us>,<t_us>". A key is 1 to
+ * 31 of a-z, 0-9 and _, and no field is quoted. A flag word the reader
+ * doesn't know and any field after the seventh are passed by, so a later
+ * writer can add either. */
+struct cond_line {
+    char key[kConditionKeyMax + 1] = {};
+    bool on = false;
+    uint32_t flags = 0;
+    double value = 0.0;
+    uint32_t term = 0;
+    uint64_t host_us = 0;
+    uint64_t t_us = 0;
+};
+
+inline bool parse_cond_line(const char* p, size_t n, cond_line* c)
+{
+    const char* f[7] = {};
+    size_t len[7] = {};
+    size_t field = 0;
+    size_t start = 0;
+    for (size_t i = 0; i <= n && field < 7; ++i) {
+        if (i == n || p[i] == ',') {
+            f[field] = p + start;
+            len[field] = i - start;
+            ++field;
+            start = i + 1;
+        }
+    }
+    if (field < 7 || len[0] == 0 || len[0] > kConditionKeyMax) {
+        return false;
+    }
+    for (size_t i = 0; i < len[0]; ++i) {
+        const char k = f[0][i];
+        if (!((k >= 'a' && k <= 'z') || (k >= '0' && k <= '9') || k == '_')) {
+            return false;
+        }
+    }
+    const bool on = equals(f[1], len[1], "on");
+    if (!on && !equals(f[1], len[1], "off")) {
+        return false;
+    }
+    uint32_t flags = 0;
+    for (size_t i = 0, w = 0; i <= len[2]; ++i) {
+        if (i == len[2] || f[2][i] == ' ') {
+            const char* word = f[2] + w;
+            const size_t wl = i - w;
+            flags |= equals(word, wl, "stale")   ? kCondStale
+                     : equals(word, wl, "fired") ? kCondFired
+                     : equals(word, wl, "held")  ? kCondHeld
+                                                 : 0u;
+            w = i + 1;
+        }
+    }
+    double value = 0.0;
+    uint64_t term = 0;
+    uint64_t host_us = 0;
+    uint64_t t_us = 0;
+    if (!parse_number(f[3], len[3], &value) ||
+        !parse_count(f[4], len[4], &term) || term > UINT32_MAX ||
+        !parse_count(f[5], len[5], &host_us) ||
+        !parse_count(f[6], len[6], &t_us)) {
+        return false;
+    }
+    std::memset(c->key, 0, sizeof c->key);
+    std::memcpy(c->key, f[0], len[0]);
+    c->on = on;
+    c->flags = flags;
+    c->value = value;
+    c->term = static_cast<uint32_t>(term);
+    c->host_us = host_us;
+    c->t_us = t_us;
+    return true;
+}
+
+/* A cond line's text as the recorder writes it, the flag words in the
+ * order fired, stale, held: parse_cond_line's inverse for the words it
+ * knows */
+inline void append_cond_text(std::string& out, const cond_line& c)
+{
+    out += c.key;
+    out += c.on ? ",on," : ",off,";
+    const char* sep = "";
+    if ((c.flags & kCondFired) != 0) {
+        out += "fired";
+        sep = " ";
+    }
+    if ((c.flags & kCondStale) != 0) {
+        out += sep;
+        out += "stale";
+        sep = " ";
+    }
+    if ((c.flags & kCondHeld) != 0) {
+        out += sep;
+        out += "held";
+    }
+    out += ',';
+    append_value(out, c.value);
+    char buf[72];
+    const int n = std::snprintf(buf, sizeof buf, ",%lu,%llu,%llu",
+                                static_cast<unsigned long>(c.term),
+                                static_cast<unsigned long long>(c.host_us),
+                                static_cast<unsigned long long>(c.t_us));
+    out.append(buf, static_cast<size_t>(n));
 }
 
 /* "yyyy-MM-ddTHH:mm:ss.zzzZ" as microseconds since 1970 UTC */
@@ -665,10 +789,16 @@ struct event_line {
 
 inline bool parse_event_line(const char* p, size_t n, event_line* e)
 {
-    /* "HH:mm:ss.zzz" then two spaces and '+' */
+    /* "HH:mm:ss.zzz", its places digits, then two spaces and '+' */
     if (n < 15 || p[2] != ':' || p[5] != ':' || p[8] != '.' || p[12] != ' ' ||
         p[13] != ' ' || p[14] != '+') {
         return false;
+    }
+    static constexpr size_t kDigits[] = {0, 1, 3, 4, 6, 7, 9, 10, 11};
+    for (const size_t d : kDigits) {
+        if (p[d] < '0' || p[d] > '9') {
+            return false;
+        }
     }
     size_t i = 15;
     const size_t whole = i;
@@ -765,6 +895,34 @@ inline bool parse_drop(const char* p, size_t n, uint64_t* frames)
         ++i;
     }
     return parse_count(p + len, i - len, frames) && i < n && p[i] == ' ';
+}
+
+/* The text of the drop line that counts condition events lost past the
+ * recorder's carry, which parse_lost reads back */
+inline void append_lost_text(std::string& out, uint64_t events)
+{
+    out += "the recording lost ";
+    out += std::to_string(events);
+    out += events == 1 ? " condition event" : " condition events";
+    out += ": the disk fell behind";
+}
+
+/* That line's count: "the recording lost N condition event[s]: ..." */
+inline bool parse_lost(const char* p, size_t n, uint64_t* events)
+{
+    const char* const lead = "the recording lost ";
+    const char* const what = " condition event";
+    const size_t len = std::strlen(lead);
+    const size_t what_len = std::strlen(what);
+    if (n <= len || std::memcmp(p, lead, len) != 0) {
+        return false;
+    }
+    size_t i = len;
+    while (i < n && p[i] >= '0' && p[i] <= '9') {
+        ++i;
+    }
+    return n - i >= what_len && std::memcmp(p + i, what, what_len) == 0 &&
+           parse_count(p + len, i - len, events);
 }
 
 } // namespace ecuio_recording_rows

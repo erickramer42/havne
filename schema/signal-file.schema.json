@@ -2,15 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/signal-file.schema.json",
   "title": "Havne signal file",
-  "description": "A Havne signal file (format 1, ADR-0051): a set of your own signals, read from a module's replies or computed from other signals. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
-  "$comment": "The loader (core/src/signal_file.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets. The loader alone checks: \"havne_signals\" as the first key; a file's size (1 MiB) and its JSON's rules (duplicate keys, depth 32); lengths in UTF-8 bytes (a schema counts characters, so non-ASCII text can pass here and be refused there); whole numbers written with no fraction or exponent (1.0 and 1e0 are refused); the profile name made from \"name\" (\"user.\" and the name in lower case, other runs of characters one \"-\") at most 63 characters; ECU ids and rx IDs given once each, a tx of the same width as its rx, one ID width across the file's ECUs and the base set's (obd2's are 11-bit), at most 4 ECUs with the base set's, an rx shared with the base set sharing its tx too; a signal's \"ecu\" listed in \"ecus\", and an ECU for every signal that reads a reply; signal keys given once each; a field ending within a reply's 4096 bytes; an enum's raw values within its field's bits; an expression's grammar (+ - * /, parentheses, unary minus, decimal constants, signals by key), its inputs (signals of the file that are neither computed nor text, or obd2.<key> with \"extends\": \"obd2\"), at most 4 inputs, 16 constants, 16 operations and 16 levels of nesting; \"max_age\" naming only inputs its expression reads; a gauge's min below its max, its levels within them and in order, and its range meeting what the signal's field can read; the signal set's validator; at most 256 requests with the base set's.",
+  "description": "A Havne signal file (formats 1 and 2, ADR-0051, ADR-0062): a set of your own signals, read from a module's replies or computed from other signals. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
+  "$comment": "The loader (core/src/signal_file.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets. The loader alone checks: \"havne_signals\" as the first key; a file's size (1 MiB) and its JSON's rules (duplicate keys, depth 32); lengths in UTF-8 bytes (a schema counts characters, so non-ASCII text can pass here and be refused there); whole numbers written with no fraction or exponent (1.0 and 1e0 are refused); the profile name made from \"name\" (\"user.\" and the name in lower case, other runs of characters one \"-\") at most 63 characters; ECU ids and rx IDs given once each, a tx of the same width as its rx, one ID width across the file's ECUs and the base set's (obd2's are 11-bit), at most 4 ECUs with the base set's, an rx shared with the base set sharing its tx too; a signal's \"ecu\" listed in \"ecus\", and an ECU for every signal that reads a reply; signal keys given once each; a field ending within a reply's 4096 bytes; an enum's raw values within its field's bits; an expression's grammar (+ - * /, parentheses, unary minus, decimal constants, signals by key; in format 2 also min, max, abs, clamp, sqrt, round, floor, ceil, if, all, any, not and the comparisons, each typed as a number or a truth), its inputs (signals of the file that are not text, computed ones only in format 2, or obd2.<key> with \"extends\": \"obd2\"), at most 4 inputs, 16 constants, 16 operations (a program of 33 steps in format 2) and 16 levels of nesting, a chain of computed signals at most 8 deep and none in a circle; \"max_age\" naming only inputs its expression reads; a gauge's min below its max, its levels within them and in order, and its range meeting what the signal's field can read; the signal set's validator; at most ECUIO_PROFILE_MAX_REQUESTS (profile.h, 1024) requests with the base set's.",
   "type": "object",
   "required": ["havne_signals", "name", "source", "signals"],
   "properties": {
     "havne_signals": {
       "title": "Format",
-      "description": "The signal-file format's version, and the file's first key. This Havne reads format 1.",
-      "const": 1
+      "description": "The signal-file format's version, and the file's first key. This Havne reads formats 1 and 2. Format 2 adds functions, comparisons and a computed signal that reads another; a file that uses them says 2, and the loader refuses them in a file that says 1.",
+      "enum": [1, 2]
     },
     "name": {
       "title": "Name",
@@ -495,10 +495,10 @@
         "kind": { "const": "computed" },
         "expr": {
           "title": "Expression",
-          "description": "+ - * /, parentheses, decimal constants and signals by key (obd2.<key> for the base set's, such as obd2.map): at most 4 inputs and 16 operations, 256 characters. A computed signal can't read another, or a text one.",
+          "description": "+ - * /, parentheses, decimal constants and signals by key (obd2.<key> for the base set's, such as obd2.map): at most 4 inputs, 256 characters. Format 2 adds calls (min, max, abs, clamp, sqrt, round, floor, ceil, if, all, any, not) and comparisons (< <= > >= == !=), and lets a computed signal read another, up to 8 deep. A computed signal can't read a text one.",
           "type": "string",
           "maxLength": 256,
-          "pattern": "^(?=.*[a-z_])[a-z0-9_.+*/() \\t-]+$"
+          "pattern": "^(?=.*[a-z_])[a-z0-9_.+*/() \\t,<>=!-]+$"
         },
         "max_age": {
           "title": "Max age",

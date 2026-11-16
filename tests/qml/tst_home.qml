@@ -21,6 +21,7 @@ TestCase {
     // A singleton's state, shared by every case
     function cleanup() {
         Theme.developerMode = false
+        Theme.compact = false
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
     }
@@ -82,11 +83,59 @@ TestCase {
         fuzzyCompare(column.x, (1280 - 560) / 2, 1, "centered")
         compare(find(page, "homeCoreVersion").text, "core " + Bridge.coreVersion)
         compare(find(page, "homeHint").text,
-                "Connect from here, or from Settings > Connection to choose a profile. To play a recording back, open Recordings.")
+                "Connect from here. An adapter reads the vehicle's picked plugin; choose anything else "
+                + "under Settings > Connection. To play a recording back, open Recordings.")
         const logo = find(page, "homeLogo")
         verify(logo.visible, "the logo")
         verify(logo.mapToItem(page, 0, logo.height).y <= list.mapToItem(page, 0, 0).y,
                "above the list")
+    }
+
+    // A row Settings has a word for says the plugin a connect reads:
+    // after its kind on the desktop, in the kind's place on the compact
+    // form, and in the row's spoken name; a row with none is as it was
+    function test_aRowSaysThePluginItsConnectReads() {
+        const page = createPage(1280, 720)
+        page.recents = ["elm327://COM9"]
+        page.adapters = someAdapters
+        page.profileWords = { "elm327://COM9": "obd2 + Daily driver extras",
+                              "j2534://Vendor A": "obd2 + Daily driver extras" }
+        const list = find(page, "homeConnectList")
+        tryVerify(() => findChild(list, "connectRow_2") !== null, 2000, "the recent and two adapters")
+        const recent = find(list, "connectRow_0")
+        compare(find(recent, "connectRowKind").text, "ELM327 adapter · obd2 + Daily driver extras")
+        compare(recent.Accessible.name, "elm327://COM9, ELM327 adapter, obd2 + Daily driver extras")
+        compare(find(find(list, "connectRow_1"), "connectRowKind").text,
+                "J2534 adapter · obd2 + Daily driver extras")
+        const plain = find(list, "connectRow_2")
+        compare(find(plain, "connectRowKind").text, "Serial port", "no word, the kind alone")
+        compare(plain.Accessible.name, "COM3, Serial port")
+        Theme.compact = true
+        compare(find(recent, "connectRowKind").text, "obd2 + Daily driver extras")
+        compare(find(plain, "connectRowKind").text, "Serial port")
+        Theme.compact = false
+
+        // A long name is cut inside the row, and the address beside it
+        // stays whole
+        page.profileWords = { "elm327://COM9": "obd2 + " + "A plugin with a long name ".repeat(8) }
+        const kind = find(recent, "connectRowKind")
+        tryVerify(() => kind.truncated, 2000, "the word is cut")
+        verify(kind.mapToItem(recent, kind.width, 0).x <= recent.width + 0.5, "inside its row")
+        const address = find(recent, "connectRowAddress")
+        verify(address.implicitWidth <= recent.width * 0.5, "an address that fits half the row")
+        verify(address.width >= address.implicitWidth - 0.5,
+               "the address is whole: " + address.width + " of " + address.implicitWidth)
+        verify(!address.truncated)
+    }
+
+    // The session card names a plugin's profile by the plugin's name
+    function test_theSessionsProfileIsAPluginsName() {
+        const page = createPage(1280, 720)
+        page.profileNames = { "plugin.daily-extras.base": "Daily driver extras" }
+        compare(page.profileOf("elm327://COM3?profile=plugin.daily-extras.base"), "Daily driver extras")
+        compare(page.profileOf("elm327://COM3?poll=0C&profile=raw"), "raw", "any other by its own")
+        compare(page.profileOf("elm327://COM3?profile=plugin.gone.base"), "plugin.gone.base")
+        compare(page.profileOf("mock://demo"), "default")
     }
 
     // Connect hands Main the chosen row; a tapped one is the choice

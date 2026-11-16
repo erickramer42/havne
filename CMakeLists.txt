@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(Havne
-    VERSION 0.7.4
+    VERSION 0.8.0
     DESCRIPTION "Cross-platform ECU reading, logging, and tuning"
     LANGUAGES C CXX
 )

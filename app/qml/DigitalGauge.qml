@@ -46,9 +46,7 @@ GaugeBase {
     readonly property bool roomy: height >= 160
     // Too short for the trace and the footer: the label and the value alone
     readonly property bool brief: height < 84
-    readonly property color levelColor: gauge.hasValue
-                                        ? gauge.zoneColor(gauge.value, gauge.readoutColor)
-                                        : Theme.textDim
+    readonly property color levelColor: gauge.valueColor
 
     // The trace's pieces for a box, newest sample on the right edge, scaled
     // to the window's own low and high
@@ -61,13 +59,14 @@ GaugeBase {
         id: heading
         anchors { left: parent.left; right: parent.right; top: parent.top }
         Text {
+            objectName: "gaugeTitle"
             Accessible.ignored: true
             width: parent.width
             text: gauge.label
             elide: Text.ElideRight
             font.pixelSize: 12
             font.weight: Font.DemiBold
-            color: Theme.textDim
+            color: gauge.titleColor
         }
         Text {
             Accessible.ignored: true
@@ -98,12 +97,12 @@ GaugeBase {
             font.features: Theme.valueFeatures
             color: gauge.levelColor
         }
-        // Past dangerFrom, beside the value
+        // Past dangerFrom or at a danger alert, beside the value
         DangerMark {
-            // The slot stays once a gauge has a danger zone, so the readout
-            // never moves as the mark appears
-            visible: gauge.hasDangerZone
-            opacity: gauge.inDanger ? 1 : 0
+            // A danger zone keeps the slot, so the readout never moves as the mark
+            // appears; a danger alert on a gauge with none opens it (dangerSlot)
+            visible: gauge.dangerSlot
+            opacity: gauge.showsDanger ? 1 : 0
             size: Math.max(14, readout.font.pixelSize * 0.55)
             anchors.verticalCenter: readout.verticalCenter
         }

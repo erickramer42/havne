@@ -98,7 +98,7 @@ ColumnLayout {
             objectName: "errorLabel"
             visible: false
             color: Theme.danger
-            wrapMode: Text.WrapAnywhere
+            wrapMode: Text.Wrap
             Layout.fillWidth: true
             text: ""
         }
@@ -106,7 +106,7 @@ ColumnLayout {
             objectName: "errorShowLog"
             visible: root.logExplains
             flat: true
-            text: qsTr("Show log")
+            text: qsTr("Show activity")
             Layout.alignment: Qt.AlignTop
             onClicked: root.host.logRequested()
         }

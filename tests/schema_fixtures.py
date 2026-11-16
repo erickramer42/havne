@@ -4,9 +4,11 @@
 #
 #   python tests/schema_fixtures.py <source dir> [<havne-cli>]
 #
-# schema/ against the files core's loaders read (ADR-0051, ADR-0052):
-# - every committed signal file, plugin manifest (a folder's or packed),
-#   a folder plugin's data files and value-fixture files validate;
+# schema/ against the files core's loaders read (ADR-0051, ADR-0052,
+# ADR-0063):
+# - every committed signal file, condition file, plugin manifest (a
+#   folder's or packed), a folder plugin's data files and value-fixture
+#   files validate;
 # - each file in tests/fixtures/schema/ (and tests/fixtures/signals/
 #   refused.json) fails validation at the rule its table entry names, and
 #   with havne-cli given, its check refuses the file in the words named;
@@ -42,6 +44,17 @@ REFUSED = {
         ("plugin-manifest", "required", "the manifest needs \"tiers\""),
     "signals/refused.json":
         ("signal-file", "additionalProperties", "unknown key 'scael' in signal 'pedal'"),
+    "schema/condition-unknown-key.json":
+        ("condition-file", "additionalProperties", "unknown key 'wen' in condition 'revs'"),
+    "schema/condition-wrong-type.json":
+        ("condition-file", "type", "condition 'revs''s for is a string, not a number"),
+    "schema/condition-missing-key.json":
+        ("condition-file", "required", "condition 'revs' needs a \"when\""),
+    "schema/condition-bad-word.json":
+        ("condition-file", "enum", "link 'down' isn't not_ok, timeout"),
+    "conditions/refused.json":
+        ("condition-file", "additionalProperties",
+         "unknown key 'abov' in condition 'pull''s when"),
 }
 
 DELETE = object()
@@ -84,6 +97,23 @@ PACKED = {
             ],
         },
     },
+}
+
+CONDITION_FILE = {
+    "havne_conditions": 1,
+    "name": "Schema edge",
+    "checks": {"gap": 1, "rate_drop": 10, "settle": 2},
+    "conditions": [
+        {"key": "hot", "name": "Hot",
+         "when": {"signal": ["obd2.coolant"], "unit": "deg C", "above": 110, "clear": 105,
+                  "max_age": 10},
+         "for": 2, "clear_for": 1,
+         "alert": {"level": "danger", "sound": True, "banner": True},
+         "record": {"before": 5, "after": 5}, "mark": True},
+        {"key": "both", "name": "Both",
+         "when": {"all": [{"link": "not_ok"}, {"check": "gap"},
+                          {"signal": ["key:gear", "id:1001"], "equals": 1}]}},
+    ],
 }
 
 S0 = ["signals", 0]
@@ -156,7 +186,7 @@ CASES = [
     ("notes that aren't text", SIGNAL_FILE, ["notes"], 1, False),
     ("a tool's own key", SIGNAL_FILE, S0 + ["x-tool"], {"any": [1]}, True),
     ("extends something other than obd2", SIGNAL_FILE, ["extends"], "uds", False),
-    ("format 2", SIGNAL_FILE, ["havne_signals"], 2, False),
+    ("format 3", SIGNAL_FILE, ["havne_signals"], 3, False),
     ("a $schema key", SIGNAL_FILE, ["$schema"], "signal-file.schema.json", False),
     ("the base packed plugin", PACKED, [], None, True),
     ("an id with a dash first", PACKED, ["id"], "-edge", False),
@@ -167,6 +197,11 @@ CASES = [
     ("a version of two parts", PACKED, ["version"], "1.0", False),
     ("a version of 16 characters", PACKED, ["version"], "65535.65535.6553", False),
     ("a required core with a suffix", PACKED, ["requires", "core"], "0.1.0-rc1", False),
+    ("a lineage of 32 hex digits", PACKED, ["lineage"], "0123456789abcdef" * 2, True),
+    ("a lineage of 31 digits", PACKED, ["lineage"], "a" * 31, False),
+    ("a lineage of 33 digits", PACKED, ["lineage"], "a" * 33, False),
+    ("a lineage in upper case", PACKED, ["lineage"], "A" * 32, False),
+    ("a lineage that is a number", PACKED, ["lineage"], 7, False),
     ("a tier named twice", PACKED, ["tiers"], ["data", "data"], False),
     ("a tier this core doesn't run", PACKED, ["tiers"], ["conversation"], False),
     ("a manufacturer code with an I", PACKED, ["match", 0, "wmi"], ["ZZI"], False),
@@ -181,6 +216,94 @@ CASES = [
     ("a data file with its own ECUs", PACKED, F0 + ["ecus"], [{"id": "pcm", "rx": "7E8"}], False),
     ("a data file with a name", PACKED, F0 + ["name"], "Oil", True),
     ("a data file with a source", PACKED, F0 + ["source"], {"name": "Elsewhere"}, True),
+]
+
+C0 = ["conditions", 0]
+W0 = C0 + ["when"]
+T2 = ["conditions", 1, "when", "all", 2]
+
+CONDITION_CASES = [
+    ("the base condition file", CONDITION_FILE, [], None, True),
+    ("no conditions", CONDITION_FILE, ["conditions"], [], True),
+    ("65 conditions", CONDITION_FILE, ["conditions"],
+     [{"key": "c%d" % n, "name": "C%d" % n, "when": {"link": "timeout"}} for n in range(65)],
+     False),
+    ("no conditions key", CONDITION_FILE, ["conditions"], DELETE, False),
+    ("no file name", CONDITION_FILE, ["name"], DELETE, True),
+    ("a file name of 64 bytes", CONDITION_FILE, ["name"], "n" * 64, False),
+    ("an empty file name", CONDITION_FILE, ["name"], "", False),
+    ("format 2", CONDITION_FILE, ["havne_conditions"], 2, False),
+    ("a $schema key", CONDITION_FILE, ["$schema"], "condition-file.schema.json", False),
+    ("a tool's own key", CONDITION_FILE, C0 + ["x-tool"], {"any": [1]}, True),
+    ("notes that aren't text", CONDITION_FILE, W0 + ["notes"], 1, False),
+    ("a gap of 0", CONDITION_FILE, ["checks", "gap"], 0, False),
+    ("a gap of 3600 s", CONDITION_FILE, ["checks", "gap"], 3600, True),
+    ("a gap of 3601 s", CONDITION_FILE, ["checks", "gap"], 3601, False),
+    ("a rate drop of 1", CONDITION_FILE, ["checks", "rate_drop"], 1, False),
+    ("a rate drop of 1.5", CONDITION_FILE, ["checks", "rate_drop"], 1.5, True),
+    ("a rate drop of 1001", CONDITION_FILE, ["checks", "rate_drop"], 1001, False),
+    ("a settle below 0", CONDITION_FILE, ["checks", "settle"], -1, False),
+    ("a check it doesn't take", CONDITION_FILE, ["checks", "late"], 1, False),
+    ("a key with a capital", CONDITION_FILE, C0 + ["key"], "Hot", False),
+    ("a key of 32 bytes", CONDITION_FILE, C0 + ["key"], "k" * 32, False),
+    ("a name of 40 bytes", CONDITION_FILE, C0 + ["name"], "n" * 40, True),
+    ("a name of 41 bytes", CONDITION_FILE, C0 + ["name"], "n" * 41, False),
+    ("a name a formula starts", CONDITION_FILE, C0 + ["name"], "=Hot", False),
+    ("no name", CONDITION_FILE, C0 + ["name"], DELETE, False),
+    ("enabled false", CONDITION_FILE, C0 + ["enabled"], False, True),
+    ("enabled as a number", CONDITION_FILE, C0 + ["enabled"], 0, False),
+    ("a hold of 600 s", CONDITION_FILE, C0 + ["for"], 600, True),
+    ("a hold of 601 s", CONDITION_FILE, C0 + ["for"], 601, False),
+    ("a clear hold below 0", CONDITION_FILE, C0 + ["clear_for"], -0.5, False),
+    ("an alert with no level", CONDITION_FILE, C0 + ["alert", "level"], DELETE, False),
+    ("an alert level of high", CONDITION_FILE, C0 + ["alert", "level"], "high", False),
+    ("an alert with a level alone", CONDITION_FILE, C0 + ["alert"], {"level": "warning"}, True),
+    ("a sound that isn't true or false", CONDITION_FILE, C0 + ["alert", "sound"], "on", False),
+    ("an empty record", CONDITION_FILE, C0 + ["record"], {}, True),
+    ("60 s before", CONDITION_FILE, C0 + ["record", "before"], 60, True),
+    ("61 s before", CONDITION_FILE, C0 + ["record", "before"], 61, False),
+    ("601 s after", CONDITION_FILE, C0 + ["record", "after"], 601, False),
+    ("mark false", CONDITION_FILE, C0 + ["mark"], False, True),
+    ("mark as text", CONDITION_FILE, C0 + ["mark"], "yes", False),
+    ("no when", CONDITION_FILE, C0 + ["when"], DELETE, False),
+    ("an empty when", CONDITION_FILE, W0, {}, False),
+    ("all and any together", CONDITION_FILE, W0,
+     {"all": [{"link": "timeout"}], "any": [{"link": "timeout"}]}, False),
+    ("an any of one term", CONDITION_FILE, W0, {"any": [{"check": "overflow"}]}, True),
+    ("an all of no terms", CONDITION_FILE, W0, {"all": []}, False),
+    ("an all of five terms", CONDITION_FILE, W0,
+     {"all": [{"link": "timeout"}] * 5}, False),
+    ("an any inside an all", CONDITION_FILE, W0,
+     {"all": [{"any": [{"link": "timeout"}]}]}, False),
+    ("a term of two kinds", CONDITION_FILE, W0, {"link": "timeout", "check": "gap"}, False),
+    ("a link state it doesn't know", CONDITION_FILE, W0, {"link": "down"}, False),
+    ("a check it doesn't know", CONDITION_FILE, W0, {"check": "asleep"}, False),
+    ("a unit on a link term", CONDITION_FILE, W0, {"link": "timeout", "unit": "V"}, False),
+    ("a signal that isn't a list", CONDITION_FILE, W0 + ["signal"], "obd2.coolant", False),
+    ("no references", CONDITION_FILE, W0 + ["signal"], [], False),
+    ("nine references", CONDITION_FILE, W0 + ["signal"], ["id:%d" % n for n in range(9)], False),
+    ("eight references", CONDITION_FILE, W0 + ["signal"], ["id:%d" % n for n in range(8)], True),
+    ("a reference by name", CONDITION_FILE, W0 + ["signal"], ["rpm"], False),
+    ("an id with a leading zero", CONDITION_FILE, W0 + ["signal"], ["id:07"], False),
+    ("an id of six digits", CONDITION_FILE, W0 + ["signal"], ["id:100000"], False),
+    ("an id of 65535", CONDITION_FILE, W0 + ["signal"], ["id:65535"], True),
+    ("an id of 65536", CONDITION_FILE, W0 + ["signal"], ["id:65536"], False),
+    ("an id of 70000", CONDITION_FILE, W0 + ["signal"], ["id:70000"], False),
+    ("a key with a capital in it", CONDITION_FILE, W0 + ["signal"], ["key:Boost"], False),
+    ("a reference given twice", CONDITION_FILE, W0 + ["signal"], ["id:1", "id:1"], False),
+    ("above and below together", CONDITION_FILE, W0 + ["below"], 90, False),
+    ("no comparison", CONDITION_FILE, W0 + ["above"], DELETE, False),
+    ("above with no unit", CONDITION_FILE, W0 + ["unit"], DELETE, False),
+    ("above with an empty unit", CONDITION_FILE, W0 + ["unit"], "", True),
+    ("a unit of 16 bytes", CONDITION_FILE, W0 + ["unit"], "u" * 16, False),
+    ("a level that is text", CONDITION_FILE, W0 + ["above"], "110", False),
+    ("equals with no unit", CONDITION_FILE, T2 + ["equals"], 0, True),
+    ("differs with a unit", CONDITION_FILE, T2,
+     {"signal": ["key:gear"], "differs": 1, "unit": "V"}, True),
+    ("a clear with equals", CONDITION_FILE, T2 + ["clear"], 0, False),
+    ("a max age of 0.05 s", CONDITION_FILE, W0 + ["max_age"], 0.05, False),
+    ("a max age of 60 s", CONDITION_FILE, W0 + ["max_age"], 60, True),
+    ("a hold inside a term", CONDITION_FILE, W0 + ["for"], 1, False),
 ]
 
 # Paths in the package, each as a packed file's name and its variant's
@@ -223,6 +346,31 @@ def keywords(errors):
     return found
 
 
+# Format 2 files (ADR-0062), each one change or two to the base: a call, a
+# comparison and a chain take the schema's widened characters. The loader
+# alone checks which format a form needs, so no case here is a format 1 file
+# using one
+F2 = changed(SIGNAL_FILE, ["havne_signals"], 2)
+F2_CHAIN = copy.deepcopy(F2)
+F2_CHAIN["signals"].append({"key": "quarter_rpm", "name": "Quarter RPM", "kind": "computed",
+                            "expr": "half_rpm / 2"})
+FORMAT2 = [
+    ("format 2", SIGNAL_FILE, None, F2, True),
+    ("a call in format 2", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "max(rpm_raw, 100)"), True),
+    ("a comparison in format 2", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "if(rpm_raw >= 1000, rpm_raw, 0)"), True),
+    ("a truth joined in format 2", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "if(all(rpm_raw > 1, rpm_raw != 5), 1, 0)"), True),
+    ("a computed signal reading another in format 2", SIGNAL_FILE, None, F2_CHAIN, True),
+    ("a character no format has", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "if(rpm_raw > 1, 1; 0)"), False),
+    ("a question mark in an expression", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "rpm_raw ? 1 : 0"), False),
+    ("a format 2 expression of 257 characters", SIGNAL_FILE, None,
+     changed(F2, S3 + ["expr"], "max(rpm_raw, 1)" + " " * 250), False),
+]
+
 class Cli:
     def __init__(self, exe, scratch):
         self.exe = exe
@@ -236,7 +384,7 @@ class Cli:
             path = os.path.join(self.scratch, f"case{self.count}.json")
             with open(path, "w", encoding="utf-8", newline="\n") as f:
                 json.dump(doc, f, ensure_ascii=False, indent=1)
-        word = "signals" if kind == "signal-file" else "plugins"
+        word = {"signal-file": "signals", "condition-file": "conditions"}.get(kind, "plugins")
         r = subprocess.run([self.exe, word, "check", path], capture_output=True, timeout=30)
         detail = ""
         for line in r.stdout.decode("utf-8", errors="replace").splitlines():
@@ -270,7 +418,7 @@ def main():
     root = sys.argv[1]
     fixtures = os.path.join(root, "tests", "fixtures")
     schemas = {}
-    for name in ("signal-file", "plugin-manifest", "plugin-fixtures"):
+    for name in ("signal-file", "plugin-manifest", "plugin-fixtures", "condition-file"):
         with open(os.path.join(root, "schema", name + ".schema.json"), encoding="utf-8") as f:
             schemas[name] = json.load(f)
         jsonschema.Draft202012Validator.check_schema(schemas[name])
@@ -301,10 +449,15 @@ def main():
 
     # Signal files
     for pattern in ("tests/fixtures/signal-files/*.json", "tests/fixtures/signals/*.json",
-                    "tests/golden/obdb/*.json"):
+                    "tests/golden/obdb/*.json", "examples/*.json"):
         for path in sorted(glob.glob(os.path.join(root, pattern))):
             if os.path.normpath(path) not in refused:
                 validate("signal-file", path)
+
+    # Condition files
+    for path in sorted(glob.glob(os.path.join(fixtures, "conditions", "*.json"))):
+        if os.path.normpath(path) not in refused:
+            validate("condition-file", path)
 
     # Plugins: folders with their data and fixture files, and packed ones
     for path in sorted(glob.glob(os.path.join(root, "plugins", "*", "manifest.json")) +
@@ -344,14 +497,15 @@ def main():
                                     f"{'it reads' if ok else repr(detail)}, not {words!r}")
 
         # Edge cases: one verdict from both
-        cases = list(CASES)
+        cases = list(CASES) + FORMAT2 + CONDITION_CASES
         for p, accepted in PATHS:
             doc = changed(PACKED, ["variants", 0, "files"], [p])
             doc["files"] = {p: PACKED["files"]["a.json"]}
             cases.append((f"the path {p[:24]!r}", PACKED, None, doc, accepted))
         for what, base, path, value, accepted in cases:
             doc = value if path is None else changed(base, path, value)
-            kind = "signal-file" if base is SIGNAL_FILE else "plugin-manifest"
+            kind = ("signal-file" if base is SIGNAL_FILE else
+                    "condition-file" if base is CONDITION_FILE else "plugin-manifest")
             checked += 1
             valid = validators[kind].is_valid(doc)
             if valid != accepted:

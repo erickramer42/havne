@@ -83,17 +83,30 @@ TestCase {
 
     function cleanup() {
         Theme.night = "off"
+        Theme.nightStyle = "amber"
         Theme.look = "dark"
         Theme.nightFrom = "19:00"
         Theme.nightUntil = "07:00"
         Theme.now = () => new Date()
         Theme.shortLayout = false
         Bridge.unitSystem = 0
+        Bridge.pickGauges = []
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        Bridge.saveConditions('{"havne_conditions":1,"conditions":[]}')
         Bridge.useSignalFiles([])
         Bridge.deleteUnusedSignalFiles([])
         Harness.clearFakeKnobs()
+    }
+
+    // A danger alert on the demo's RPM, saved as the app's conditions
+    // (cleanup() empties them)
+    function saveRpmDanger() {
+        const saved = Bridge.saveConditions(
+            '{"havne_conditions":1,"conditions":[{"key":"rpm","name":"Engine on",' +
+            '"when":{"signal":["id:1001"],"unit":"RPM","above":-1},' +
+            '"alert":{"level":"danger"}}]}')
+        verify(saved.ok, saved.words)
     }
 
     // A page with these properties, showing `doc` when one is given (a
@@ -280,6 +293,40 @@ TestCase {
         }
     }
 
+    // The refs the default pick takes from the page (pickRefs): one list
+    // for each cell of every page, each holding the cell's refs and their
+    // counterparts in the built-in sets, a blank cell's none
+    function test_thePicksRefsAreEachCellsLookupRefs() {
+        const page = pageOf({}, docOf([
+            { kind: "digital", w: 2, h: 4, label: "Engine", refs: ["id:7003"] },
+            { kind: "blank", w: 2, h: 4, label: "", refs: [] }]))
+        compare(page.pickRefs.length, 2)
+        for (const ref of Bridge.gaugeSignals.rpm)
+            verify(page.pickRefs[0].indexOf(ref) >= 0, ref + " among " + page.pickRefs[0])
+        compare(page.pickRefs[0][0], "id:7003", "the cell's own ref first")
+        compare(page.pickRefs[1].length, 0, "a blank cell picks nothing")
+    }
+
+    // A gauge whose signal the session's focus leaves unasked (a log that
+    // didn't tick it) says "not asked" in place of a last value that would
+    // read as no new data; asked again, it shows its value. The mock asks
+    // nothing, so the case marks the row as the bridge would.
+    function test_aGaugeWhoseSignalIsntAskedSaysSo() {
+        const page = createTemporaryObject(pageComponent, testCase)
+        const hub = createTemporaryObject(hubComponent, testCase)
+        const all = gauges(page)
+        connect("mock://demo")
+        const label = Object.keys(gaugeSignals)[0]
+        tryVerify(() => all[label].hasValue, 3000, label + " gets a value")
+        const name = hub.lookup(refsOf(label)).name
+        Harness.markUnasked([name])
+        tryCompare(all[label], "note", "not asked", 1000, label)
+        compare(all[label].hasValue, false, label)
+        Harness.markUnasked([])
+        tryVerify(() => all[label].hasValue, 1000, label + " shows its value again")
+        compare(all[label].note, "", label)
+    }
+
     // A set registered with no signal file (the mock's, copied and
     // renamed) has no refs (ADR-0057): its rows show in Live, but no
     // gauge binds them, though they carry the mock's IDs
@@ -299,7 +346,7 @@ TestCase {
             return false
         }, 3000, "the set's rows get values")
         for (const label in gaugeSignals) {
-            compare(all[label].note, "not in this profile: " + label, label)
+            compare(all[label].note, "not in " + profile, label)
             compare(all[label].hasValue, false, label)
         }
     }
@@ -446,7 +493,7 @@ TestCase {
         connect("mock://demo?profile=raw")
         wait(300)   // past a batch or two
         for (const label in gaugeSignals) {
-            compare(all[label].note, "not in this profile: " + label, label)
+            compare(all[label].note, "not in raw", label)
             compare(all[label].hasValue, false, label)
             compare(all[label].valueText, "—", label)
         }
@@ -456,6 +503,47 @@ TestCase {
         connect("mock://demo")
         tryVerify(() => Object.keys(gaugeSignals).every(label => all[label].hasValue),
                   3000, "the same gauges read again")
+    }
+
+    // A gauge without its signal names the vehicle's set that has it while
+    // the session reads another, else the profile the session reads, by
+    // the name the user knows it by
+    function test_aGaugeWithoutItsSignalNamesWhatHasIt() {
+        const file = { havne_signals: 1, name: "Extras", source: { name: "t" },
+                       ecus: [{ id: "pcm", rx: "7E8" }],
+                       signals: [{ key: "a", name: "A", read: { service: "22", number: "D100" },
+                                   field: { byte: 0, bits: 8 } }] }
+        const r = Bridge.importSignalFile(Harness.writeScratchFile("extras.json", JSON.stringify(file)))
+        verify(r.ok, "the file imports")
+        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
+        const cellA = { kind: "digital", w: 2, h: 4, label: "A", refs: ["key:a"], unit: "", options: {} }
+        const cellZ = { kind: "digital", w: 2, h: 4, label: "Z", refs: ["key:z"], unit: "", options: {} }
+        const d = DashboardBook.builtIn("desktop")
+        d.pages = [{ name: "Test", cells: [cellA, cellZ] }]
+        const page = pageOf({}, d, true)
+        page.pickedSets = [{ profile: r.profile, name: "Extras", variant: "" }]
+        page.profileNames = { [r.profile]: "Extras" }
+        const a = findChild(page, "dashCell_0_0")
+        const z = findChild(page, "dashCell_0_1")
+
+        connect("mock://demo")
+        tryVerify(() => a.note === "needs Extras", 3000, "the vehicle's file has it: " + a.note)
+        compare(z.note, "not in mock", "no set has it")
+
+        // A set named as the session's profile is (another variant of the
+        // same plugin) is named by its variant alone
+        page.profileNames = { [r.profile]: "Extras", "mock": "Extras" }
+        page.pickedSets = [{ profile: r.profile, name: "Extras", variant: "v2" }]
+        tryVerify(() => a.note === "needs variant v2", 3000, a.note)
+        page.profileNames = { [r.profile]: "Extras" }
+        page.pickedSets = [{ profile: r.profile, name: "Extras", variant: "v2" }]
+        tryVerify(() => a.note === "needs Extras", 3000, "no variant where the names differ: " + a.note)
+
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        connect("mock://demo?profile=" + r.profile)
+        tryVerify(() => z.note === "not in Extras", 3000, "the file's own name: " + z.note)
+        verify(a.note.indexOf("needs") < 0 && a.note.indexOf("not in") < 0, "read here: " + a.note)
     }
 
     // A phone on its side: the page beside the sidebar is narrow and
@@ -1034,6 +1122,8 @@ TestCase {
         const page = pageOf({}, doc, false)
         const all = gauges(page)
         const gone = gaugeOf(findChild(page, "dashCell_0_" + (doc.pages[0].cells.length - 1)))
+        // Main's binding: the gauges join the pick, so the unranked DID is asked
+        Bridge.pickGauges = page.pickRefs
         compare(Bridge.connectSession("j2534://" + Harness.fakeDllPath + "?profile="
                                       + r.profile + "&identify=0&diagnose=0"), "")
         tryCompare(all["Oil temp"], "note", "not sent by this ECU", 5000)
@@ -1763,5 +1853,78 @@ TestCase {
         verify(Qt.colorEqual(blue.accent, Theme.gaugeValue), "info draws as the value: " + blue.accent)
         verify(Qt.colorEqual(green.accent, Theme.success), "success stays: " + green.accent)
         compare(page.doc.pages[0].cells[0].options.accent, "info", "the stored word stays")
+    }
+
+    // A dial with no caption names its signal and says the unit once; a typed
+    // caption wins (the hub's label, never the unit, is the default)
+    function test_aCaptionlessDialShowsItsSignalsName() {
+        const cell = (caption) => ({ kind: "analog", w: 4, h: 4, label: "Engine speed",
+                                     refs: refsOf("Engine speed"), unit: "RPM",
+                                     options: caption === null ? { from: 0, to: 8000 }
+                                                               : { from: 0, to: 8000, caption: caption } })
+        const page = pageOf({}, docOf([cell(null), cell("x1000 r/min")]), true)
+        tryVerify(() => allLoaded(page), 5000, "the gauges load")
+        const bare = gaugeOf(findChild(page, "dashCell_0_0"))
+        const typed = gaugeOf(findChild(page, "dashCell_0_1"))
+        compare(findChild(bare, "gaugeCaption").text, "Engine speed", "the name, not the unit")
+        compare(bare.unit, "RPM", "the unit stays under the value")
+        compare(findChild(typed, "gaugeCaption").text, "x1000 r/min", "a typed caption wins")
+    }
+
+    // With no session a picked color tints the title, so a page's grouping
+    // shows while it is built; Night draws no pick
+    function test_aPickedColorTintsTheTitleBeforeASession() {
+        const page = pageOf({}, docOf([{ kind: "digital", w: 2, h: 4, label: "Engine speed",
+                                         refs: refsOf("Engine speed"), unit: "RPM",
+                                         options: { from: 0, to: 8000, color: "stone" } }]), true)
+        tryVerify(() => allLoaded(page), 5000, "the gauge loads")
+        const g = gaugeOf(findChild(page, "dashCell_0_0"))
+        verify(!g.hasValue, "no session")
+        verify(Qt.colorEqual(g.titleColor, Theme.gaugeColor("stone")), "the pick: " + g.titleColor)
+        Theme.night = "on"
+        verify(Qt.colorEqual(g.titleColor, Theme.textDim), "Night: no pick: " + g.titleColor)
+        Theme.night = "off"
+    }
+
+    // An alert ON on a cell's signal colors that gauge's value in the
+    // level's role; a cell no alert reads keeps its own
+    function test_anAlertColorsTheGaugeItsSignalIs_data() {
+        return Theme.paletteNames.map(p => ({ tag: p, palette: p }))
+    }
+    function test_anAlertColorsTheGaugeItsSignalIs(data) {
+        const night = Theme.nightPalettes.indexOf(data.palette) >= 0
+        Theme.night = night ? "on" : "off"
+        if (night)
+            Theme.nightStyle = data.palette === "nightRed" ? "red" : "amber"
+        else
+            Theme.look = data.palette
+        const page = createTemporaryObject(pageComponent, testCase)
+        const found = gauges(page)
+        connect("mock://demo")
+        const tach = found["Engine speed"]
+        const coolant = found["Coolant"]
+        tryVerify(() => tach.hasValue && coolant.hasValue, 5000, "both read")
+        const own = coolant.valueColor
+        page.alertLevels = { "1001": 2 }
+        compare(tach.alertLevel, 2, "the RPM cell takes the danger")
+        verify(Qt.colorEqual(tach.valueColor, Theme.alertDangerFill), "in the danger's role")
+        compare(coolant.alertLevel, 0, "a cell no alert reads")
+        verify(Qt.colorEqual(coolant.valueColor, own), "keeps its color")
+        page.alertLevels = { "1001": 1 }
+        verify(Qt.colorEqual(tach.valueColor, Theme.alertWarnFill), "in the warning's role")
+    }
+
+    // The page's levels follow the bridge's: a saved alert on the demo's RPM
+    // reaches the tach through Bridge.alertLevels, not a level set by hand
+    function test_theBridgesAlertReachesTheGaugeItReads() {
+        saveRpmDanger()
+        const page = createTemporaryObject(pageComponent, testCase)
+        const found = gauges(page)
+        connect("mock://demo")
+        const tach = found["Engine speed"]
+        tryVerify(() => tach.alertLevel === 2, 10000, "the RPM's danger reaches the tach")
+        compare(found["Coolant"].alertLevel, 0, "a gauge no alert reads")
+        Bridge.disconnectSession()
+        tryVerify(() => tach.alertLevel === 0, 10000, "and leaves at the disconnect")
     }
 }

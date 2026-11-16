@@ -44,7 +44,7 @@ Open a [GitHub Issue](https://github.com/erickramer42/havne/issues) with:
 2. What you expected, and what happened instead.
 3. How you connected: the URI (Settings shows it), the adapter, and the
    vehicle, if a session is involved.
-4. The activity log's lines around the problem (the Log page). A failed
+4. The activity log's lines around the problem (the Activity page). A failed
    connect's line says why it failed, and the "Session:" line says what
    the session ran on.
 
@@ -342,7 +342,7 @@ it still reads as evidence. Where they hide:
 - **URIs:** a Bluetooth adapter's URI (`elm327://bt:<address>`) carries its
   address; Havne's own labels shorten it, but Settings and the logs keep it
   whole.
-- **Screenshots:** check the Log page and Live for a VIN, and strip a
+- **Screenshots:** check the Activity page and Live for a VIN, and strip a
   phone screenshot's metadata (EXIF names the phone's maker and model).
 - **Recording folders** end with the vehicle's label, if you named one.
 

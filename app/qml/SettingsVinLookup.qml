@@ -27,8 +27,6 @@ ColumnLayout {
             maximumLength: 32
             placeholderText: qsTr("17 characters")
             inputMethodHints: Qt.ImhPreferUppercase | Qt.ImhNoPredictiveText | Qt.ImhSensitiveData
-            // A typed VIN proposes plugins too (ADR-0052 section 5)
-            onTextChanged: root.host.refreshMatches()
         }
     }
 

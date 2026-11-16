@@ -1,0 +1,1 @@
+{"salt":"00112233445566778899aabbccddeeff","picked":"v1","list":[{"id":"v1","label":"Daily driver","vinKey":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","uri":"j2534://Example","plotted":[],"unplotted":[],"signals":[],"own":"","plugin":"plugin.example-sim.base","vinMatches":["plugin.example-sim.base","plugin.example-sim.my2019"],"baseline":""}]}

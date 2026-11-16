@@ -22,11 +22,15 @@
         android:normalScreens="true"
         android:smallScreens="true" />
     <!-- The document picker (documentpicker.cpp) asks resolveActivity whether
-         any app opens documents before it starts; from Android 11 that
-         answer needs the intent declared here. -->
+         any app opens or saves documents before it starts; from Android 11
+         that answer needs the intents declared here. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.OPEN_DOCUMENT" />
+            <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.CREATE_DOCUMENT" />
             <data android:mimeType="*/*" />
         </intent>
     </queries>

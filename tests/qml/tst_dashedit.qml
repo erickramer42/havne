@@ -56,6 +56,8 @@ TestCase {
         Theme.look = "dark"
         Bridge.unitSystem = 0
         Bridge.useSignalFiles([])
+        for (const p of Bridge.plugins())     // the store starts empty
+            Bridge.removePlugin(p.sha256)
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
     }
@@ -266,10 +268,12 @@ TestCase {
         compare(find(page, "panelFrom").text, data.from)
         compare(find(page, "panelTo").text, data.to)
         type(find(page, "panelTo"), data.units === 1 ? "212" : "100")
-        compare(page.doc.pages[0].cells[1].options.to, 100)
+        // Exactly: compare() passes numbers within 1e-5, and the inverse's
+        // noise is under that
+        verify(page.doc.pages[0].cells[1].options.to === 100, String(page.doc.pages[0].cells[1].options.to))
         compare(find(page, "panelTo").text, data.units === 1 ? "212" : "100", "re-bound")
         type(find(page, "panelWarnFrom"), data.units === 1 ? "194" : "90")
-        compare(page.doc.pages[0].cells[1].options.warnFrom, 90)
+        verify(page.doc.pages[0].cells[1].options.warnFrom === 90, String(page.doc.pages[0].cells[1].options.warnFrom))
         tryCompare(find(page, "dashCell_0_1"), "cell", page.doc.pages[0].cells[1])
     }
 
@@ -457,6 +461,9 @@ TestCase {
         page.pickKind("ring")
         find(page, "dashSignalPanel")
         verify(find(page, "signalNone").visible, "nothing chosen, nothing to pick")
+        compare(find(page, "signalNone").text,
+                "No signals: connect, or pick a plugin for your vehicle under Settings > Signals.",
+                "names where a vehicle's signals come from")
 
         // While the list is open it follows Settings
         page.offlineUri = "mock://?profile=obd2"
@@ -471,6 +478,101 @@ TestCase {
         compare(page.doc.pages[0].cells[1].kind, "ring")
         compare(page.doc.pages[0].cells[1].unit, "km/h")
         compare(page.doc.pages[0].cells[1].options.to, 260)
+    }
+
+    // Add's every signal of a set: the listed file's own signals the page
+    // doesn't show, in Add's kind, as one undo step; then only what is
+    // left, as many as the page has room for
+    function threeSignalFile() {
+        const sig = (key, did) => ({ key: key, name: key.toUpperCase(), unit: "V",
+                                     read: { service: "22", number: did },
+                                     field: { byte: 0, bits: 8 } })
+        const file = { havne_signals: 1, name: "Three", source: { name: "t" },
+                       ecus: [{ id: "pcm", rx: "7E8" }],
+                       signals: [sig("a", "D100"), sig("b", "D101"), sig("c", "D102")] }
+        const r = Bridge.importSignalFile(Harness.writeScratchFile("three.json", JSON.stringify(file)))
+        verify(r.ok, "the file imports")
+        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
+        return r.profile
+    }
+    function test_addAllAddsTheSetsSignalsThePageLacksAsOneStep() {
+        const profile = threeSignalFile()
+        const b = { kind: "digital", w: 2, h: 4, label: "B", refs: ["key:b"], unit: "V", options: {} }
+        const page = storedPageOf({}, docOf([cellOf("A"), b]))
+        page.offlineUri = "mock://?profile=" + profile
+        page.profileNames = { [profile]: "Three" }
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_bar")
+        const all = find(page, "addAllSignals")
+        tryVerify(() => all.visible, 3000, "offered for a set of its own signals")
+        compare(all.text, "Add 2 more of the 3 signals of Three", "B is on the page already")
+        click(page, "addAllSignals")
+        compare(page.panel, "", "the list closes")
+        compare(labels(page), ["A", "B", "A", "C"], "the set's A and C, at the end")
+        const added = page.doc.pages[0].cells.slice(2)
+        compare(added.map(c => c.kind), ["bar", "bar"], "in Add's kind")
+        compare(added.map(c => JSON.stringify(c.refs)), ['["key:a"]', '["key:c"]'])
+        compare(added[0].unit, "V")
+        compare(find(page, "dashUndo").Accessible.name, "Undo: added 2 signals of Three")
+        click(page, "dashUndo")
+        compare(labels(page), ["A", "B"], "one undo takes both")
+
+        // Every signal on the page: no button
+        click(page, "dashRedo")
+        compare(labels(page), ["A", "B", "A", "C"])
+        click(page, "dashAdd")
+        click(page, "addKind_digital")
+        find(page, "dashSignalPanel")
+        verify(!find(page, "addAllSignals").visible, "every signal is on the page")
+    }
+    function test_addAllStopsAtThePagesRoom() {
+        const profile = threeSignalFile()
+        const cells = []
+        for (let i = 0; i < DashboardBook.maxCells - 2; ++i)
+            cells.push(cellOf("N" + i))
+        const page = pageOf({}, docOf(cells))
+        page.offlineUri = "mock://?profile=" + profile
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_digital")
+        const all = find(page, "addAllSignals")
+        tryVerify(() => all.visible, 3000, "offered")
+        compare(all.text, "Add 2 of the 3 missing signals of " + profile + ": a page holds "
+                + DashboardBook.maxCells + " cells",
+                "two places left, said so; a set with no name known reads as core names it")
+        click(page, "addAllSignals")
+        compare(page.doc.pages[0].cells.length, DashboardBook.maxCells, "the page is full")
+        compare(labels(page).slice(-2), ["A", "B"], "the set's first two")
+    }
+    // One signal left: the words and the undo step say it in the singular
+    function test_addAllNamesOneSignalInTheSingular() {
+        const profile = threeSignalFile()
+        const own = key => ({ kind: "digital", w: 2, h: 4, label: key.toUpperCase(), refs: ["key:" + key],
+                              unit: "V", options: {} })
+        const page = storedPageOf({}, docOf([own("b"), own("c")]))
+        page.offlineUri = "mock://?profile=" + profile
+        page.profileNames = { [profile]: "Three" }
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_digital")
+        const all = find(page, "addAllSignals")
+        tryVerify(() => all.visible, 3000, "offered")
+        compare(all.text, "Add 1 more of the 3 signals of Three")
+        click(page, "addAllSignals")
+        compare(labels(page), ["B", "C", "A"])
+        compare(find(page, "dashUndo").Accessible.name, "Undo: added 1 signal of Three")
+    }
+    // A set of the built-in IDs alone has no signal of its own to add
+    function test_addAllIsNotOfferedForABuiltInSet() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.offlineUri = "mock://?profile=obd2"
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_digital")
+        tryVerify(() => findChild(page, "pickSignal_" + Bridge.gaugeSignals["speed"][1]) !== null,
+                  3000, "obd2's rows are listed")
+        verify(!find(page, "addAllSignals").visible)
     }
 
     // A battery cell made on either built-in set refers to both. The IDs
@@ -2370,8 +2472,9 @@ TestCase {
     // table's case sets up itself
     readonly property var withSignal: ["panelPreview", "panelLabel", "panelSignal", "panelKind", "panelFrom",
                                        "panelFromCaption", "panelTo", "panelToCaption", "panelSignalName"]
-    // What the value's text and tone read: every kind that draws a value
-    readonly property var valueDrawn: ["panelColdBelow", "panelWarnBelow", "panelDangerBelow",
+    // What the value's text and tone read: every kind that draws a value.
+    // panelAlert shows while the cell has a level, which the table's case gives it
+    readonly property var valueDrawn: ["panelAlert", "panelColdBelow", "panelWarnBelow", "panelDangerBelow",
                                        "panelWarnFrom", "panelDangerFrom", "panelDecimals", "panelColors",
                                        "panelColdBelowCaption", "panelWarnBelowCaption",
                                        "panelDangerBelowCaption", "panelWarnFromCaption",
@@ -2458,6 +2561,8 @@ TestCase {
         wait(0)
         const cell = data.kind === "blank" ? { kind: "blank", w: 2, h: 4, refs: [] }
                                            : cellOf("A", data.kind)
+        if (data.kind !== "blank")
+            cell.options.dangerFrom = 7000
         const page = pageOf({}, docOf([cell, cellOf("B")]))
         page.startEditing()
         press(find(page, "dashCell_0_0"))
@@ -2537,6 +2642,15 @@ TestCase {
         verify(!find(cell, "gauge").item.Accessible.ignored, "announced where it's drawn")
         page.stopEditing()
         verify(find(cell, "gauge").item.Accessible.ignored, "not announced where it isn't")
+    }
+
+    // A blank cell has no label: its Remove says what it removes
+    function test_aBlankCellsRemoveNamesTheCell() {
+        const blank = { kind: "blank", w: 2, h: 4, refs: [] }
+        const page = pageOf({}, docOf([blank, cellOf("B")]))
+        page.startEditing()
+        compare(find(find(page, "dashCell_0_0"), "cellRemove").Accessible.name, "Remove blank cell")
+        compare(find(find(page, "dashCell_0_1"), "cellRemove").Accessible.name, "Remove B")
     }
 
     // Outside edit mode a blank cell has nothing to hold
@@ -3365,7 +3479,7 @@ TestCase {
         const note = find(oilCell, "gaugeNote")
         tryVerify(() => oilCell.width > 0, 3000, "laid out")
         verify(note.visible, "says why")
-        verify(note.text.indexOf("not in this profile") >= 0, note.text)
+        verify(note.text.indexOf("not in mock") >= 0, "names the session's profile: " + note.text)
         const right = note.mapToItem(oilCell, note.width, 0).x
         verify(right <= oilCell.width + 0.5, "inside its cell: " + right + " of " + oilCell.width)
         verify(note.contentWidth <= note.width + 0.5, "whole: " + note.contentWidth + " in " + note.width)
@@ -3504,7 +3618,8 @@ TestCase {
         const raw = JSON.parse(Bridge.layoutFileText(url).text)
         compare(raw.form, "desktop")
         compare(raw.files, [])
-        compare(page.layoutNote, "Saved this layout to a file")
+        compare(page.layoutNote, "Saved this layout to a file. It's a desktop layout: it loads on a desktop, "
+                + "not on a phone. A layout isn't scaled between forms.")
         page.destroy()
 
         const second = docOf([cellOf("X")])
@@ -3549,6 +3664,52 @@ TestCase {
         compare(labels(page), ["Paren"], "nothing read")
     }
 
+    // Export layout through the save picker: the pick's document holds the
+    // layout, each save offers the page's own name (Downloads names its
+    // document by an id, which a later save must never offer), and a picker
+    // with no document says so
+    function test_theSavePickerWritesTheLayoutAndOffersItsNameEachTime() {
+        const page = storedPageOf({}, docOf([cellOf("Saved")]))
+        const dialog = find(page, "layoutSaveDialog")
+        dialog.usePicker = true
+        DocumentPicker.setPickerForTesting(true)
+        const url = layoutUrl("layout-save-picked.json")
+        dialog.open()
+        compare(DocumentPicker.titleForTesting(), page.layoutFileName())
+        compare(DocumentPicker.mimeTypeForTesting(), "application/json")
+        DocumentPicker.deliver(dialog.request, -1, url.toString(), "89", -1)
+        verify(!page.layoutNoteBad, page.layoutNote)
+        const reader = storedPageOf({}, docOf([cellOf("X")]))
+        reader.loadLayoutFrom(url)
+        compare(labels(reader), ["Saved"], "the picked document holds the layout")
+
+        dialog.open()
+        compare(DocumentPicker.titleForTesting(), page.layoutFileName(),
+                "the page's name again, never the last answer's")
+        DocumentPicker.deliver(dialog.request, -1, "", "")
+        compare(page.layoutNote, "Not saved: The picker returned no document")
+        verify(page.layoutNoteBad)
+    }
+
+    // A layout the page can't write as a file is refused before the bridge's
+    // save: the pick's own document goes all the same (its verdict taken)
+    function test_aLayoutThatCantBeWrittenDropsThePicksDocument() {
+        const page = storedPageOf({}, docOf([cellOf("Saved")]))
+        const bad = JSON.parse(JSON.stringify(page.doc))
+        bad.format = 99
+        page.doc = bad
+        const uri = "content://com.android.externalstorage.documents/document/"
+                    + "primary%3ADownload%2Fbad-layout.json"
+        const dialog = find(page, "layoutSaveDialog")
+        dialog.usePicker = true
+        DocumentPicker.setPickerForTesting(true)
+        dialog.open()
+        DocumentPicker.deliver(dialog.request, -1, uri, "bad-layout.json",
+                               DocumentPicker.launchedMsForTesting() + 50)
+        compare(page.layoutNote, "Not saved: this layout can't be written as a file")
+        compare(DocumentPicker.verdictOfForTesting(uri), 0, "the refusal took the verdict")
+    }
+
     function test_twoQuickLoadsAreTwoUndoSteps() {
         const a = docOf([cellOf("A")])
         const b = docOf([cellOf("B")])
@@ -3588,6 +3749,38 @@ TestCase {
         compare(page.doc, desktop, "nothing changed")
         verify(!page.canUndo)
         compare(find(page, "dashStore").desktopUnread, "", "the unread text is never touched")
+    }
+
+    // The export's note names the form the file loads on, in the words the
+    // other form's refusal gives the same file; on the narrowest phone it
+    // wraps inside the page
+    function test_theExportsNoteNamesTheFormItLoadsOn_data() {
+        return [
+            { tag: "desktop", form: "desktop", other: "phone", props: {} },
+            { tag: "phone", form: "phone", other: "desktop", props: { width: 320, height: 832 } }
+        ]
+    }
+    function test_theExportsNoteNamesTheFormItLoadsOn(data) {
+        const url = layoutUrl("layout-form-" + data.tag + ".json")
+        const props = Object.assign({ form: data.form }, data.props)
+        const src = storedPageOf(props, docOf([cellOf("A")]))
+        src.startEditing()
+        click(src, "dashMore")
+        verify(src.exportLayoutTo(url), src.layoutNote)
+        verify(!src.layoutNoteBad)
+        compare(src.layoutNote, "Saved this layout to a file. It's a " + data.form + " layout: it loads on a "
+                + data.form + ", not on a " + data.other + ". A layout isn't scaled between forms.")
+        const note = find(src, "dashLayoutNote")
+        verify(note.visible, "the note shows in the More row")
+        verify(waitForPolish(note), "the note laid out")
+        verify(note.mapToItem(src, note.width, 0).x <= src.width + 0.5 && note.contentWidth <= note.width + 0.5,
+               "inside the page: " + note.contentWidth + " of " + note.width + " in " + src.width)
+        src.destroy()
+        const page = storedPageOf({ form: data.other }, docOf([cellOf("B")]))
+        page.startEditing()
+        verify(!page.loadLayoutFrom(url))
+        verify(page.layoutNote.indexOf("is a " + data.form + " layout") >= 0
+               && page.layoutNote.indexOf("A layout isn't scaled between forms") >= 0, page.layoutNote)
     }
 
     function test_aDamagedOrNewerOrEmptyFileIsRefusedInWords_data() {
@@ -3669,76 +3862,136 @@ TestCase {
         compare(labels(page), ["Other"])
     }
 
-    function test_theSignalFilesALayoutNeedsAreNamedAndTheLoadSaysWhichAreMissing() {
-        const file = { havne_signals: 1, name: "Boosty", source: { name: "t" },
+    // A signal file kept as a plugin of the user's own: its keepSignalText answer
+    // A signal file kept as a plugin of its own, or (into, a plugin's
+    // hash) as that plugin's variant, added or put in its place
+    function keptPlugin(name, key, did, into, variant) {
+        const file = { havne_signals: 1, name: name, source: { name: "t" },
                        ecus: [{ id: "pcm", rx: "7E8" }],
-                       signals: [{ key: "boosty", name: "Boosty", read: { service: "22", number: "D100" },
+                       signals: [{ key: key, name: name.substring(0, 24),
+                                   read: { service: "22", number: did },
                                    field: { byte: 0, bits: 8 }, unit: "kPa" }] }
-        const r = Bridge.importSignalFile(Harness.writeScratchFile("boosty.json", JSON.stringify(file)))
-        verify(r.ok, "the file imports")
-        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
-        let vehicles = VehicleBook.add(VehicleBook.empty(), "Test car")
-        vehicles = VehicleBook.addSignals(vehicles, { sha256: r.sha256, name: r.name, profile: r.profile })
-        compare(VehicleBook.picked(vehicles).signals.length, 1, "the vehicle has the file")
+        const r = Bridge.keepSignalText(JSON.stringify(file), into || "", variant || "", "")
+        verify(r.ok, r.words)
+        return r
+    }
+
+    // A layout file names the picks it needs, each by its name and its
+    // written file's hash. Loaded for a vehicle that doesn't pick one, the
+    // load names it; a file an earlier version saved names the signal file
+    // the plugin was made from, and that is found under the pick too
+    function test_thePluginsALayoutNeedsAreNamedAndTheLoadSaysWhichAreMissing() {
+        const profile = keptPlugin("Boosty", "boosty", "D100").profiles[0]
+        const vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Test car"), [profile])
+        const picked = Bridge.pickFiles([profile])
+        compare(picked.length, 1)
+        compare(picked[0].name, "Boosty")
 
         const own = docOf([cellOf("A"), Object.assign(cellOf("Boosty"), { refs: ["key:boosty"] })])
         const url = layoutUrl("layout-needs.json")
         let page = storedPageOf({ vehicles: vehicles }, own)
         verify(page.exportLayoutTo(url), page.layoutNote)
         const raw = JSON.parse(Bridge.layoutFileText(url).text)
-        compare(raw.files, [{ name: r.name, sha256: r.sha256 }], "the file the layout needs, by name and hash")
-        verify(page.layoutNote.indexOf(r.name) >= 0, page.layoutNote)
+        compare(raw.files, [{ name: "Boosty", sha256: picked[0].sha256 }],
+                "the pick the layout needs, by name and its written file's hash")
+        compare(page.layoutNote, "Saved this layout to a file. It's a desktop layout: it loads on a desktop, "
+                + "not on a phone. A layout isn't scaled between forms. It needs the plugin Boosty.")
         compare(page.layoutFileName(), "dashboard-test-car-desktop.json")
         page.destroy()
 
-        // A layout of cells that read no file names none
+        // A layout of cells that read no pick names none
         page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("A")]))
         const noneUrl = layoutUrl("layout-needs-none.json")
         verify(page.exportLayoutTo(noneUrl))
         compare(JSON.parse(Bridge.layoutFileText(noneUrl).text).files, [])
         page.destroy()
 
-        // Loaded where the vehicle lacks the file: the load names it
+        // Loaded where the vehicle doesn't pick it: the load names it
         page = storedPageOf({}, docOf([cellOf("X")]))
         page.startEditing()
         verify(page.loadLayoutFrom(url), page.layoutNote)
-        verify(page.layoutNote.indexOf("signal files this vehicle lacks: " + r.name) >= 0, page.layoutNote)
+        verify(page.layoutNote.indexOf("plugins this vehicle doesn't pick: Boosty") >= 0, page.layoutNote)
         compare(page.doc.pages[0].cells.length, 2, "the layout loads whole")
         page.destroy()
 
-        // And where it has it, nothing is said
+        // And where it picks it, nothing is said
         page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
         page.startEditing()
         verify(page.loadLayoutFrom(url), page.layoutNote)
-        verify(page.layoutNote.indexOf("lacks") < 0, page.layoutNote)
+        verify(page.layoutNote.indexOf("doesn't pick") < 0, page.layoutNote)
+        page.destroy()
+
+        // A file an earlier version saved names the signal file itself
+        compare(picked[0].from.length, 1, "the plugin was made from one file")
+        verify(picked[0].from[0] !== picked[0].sha256, "whose hash isn't the written file's")
+        const text = DashboardBook.exportText(own, "desktop", [{ name: "Boosty", sha256: picked[0].from[0] }])
+        verify(text !== "")
+        const oldUrl = Harness.writeScratchFile("layout-earlier.json", text)
+        page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(oldUrl), page.layoutNote)
+        verify(page.layoutNote.indexOf("doesn't pick") < 0, page.layoutNote)
+        page.destroy()
+
+        // The pick's variant replaced since the layout was saved: the pick
+        // is the vehicle's still, and the load says its file is another
+        const first = Bridge.plugins().find(p => p.profiles.indexOf(profile) >= 0)
+        keptPlugin("Boosty", "boosty", "D101", first.sha256, profile.split(".").pop())
+        verify(Bridge.pickFiles([profile])[0].sha256 !== picked[0].sha256, "another written file")
+        page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        compare(page.layoutNote, "Loaded the layout. it was saved with another version of Boosty: a gauge "
+                + "reading a signal the picked version lacks reads not in profile")
     }
 
-    // A vehicle's signal file that doesn't load gives no references, so a
-    // layout can't say it needs the file: the note names the file instead
-    function test_aSignalFileThatDoesntLoadIsNamedInTheExportsNote() {
-        let vehicles = VehicleBook.add(VehicleBook.empty(), "Test car")
-        vehicles = VehicleBook.addSignals(vehicles, { sha256: "a".repeat(64), name: "Gone file",
-                                                      profile: "profile_user.gone" })
+    // A plugin's name with its variant can pass a file name's bound: the
+    // layout names the pick by a name cut to fit, its variant whole, and
+    // a load finds the pick by its hash
+    function test_aLongPluginNameWithAVariantStillExports() {
+        // The longest name a signal file can carry: its profile's bound
+        const name = "N".repeat(56)
+        const variant = "v".repeat(24)
+        const first = keptPlugin(name, "longy", "D100")
+        const second = keptPlugin(name, "longer", "D101", first.sha256, variant)
+        const profile = second.profiles.find(p => p.endsWith("." + variant))
+        verify(profile !== undefined, JSON.stringify(second.profiles))
+        const vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Test car"), [profile])
+        const picked = Bridge.pickFiles([profile])
+        compare(picked[0].name, name + ": " + variant, "past the bound as the store names it")
+
+        const url = layoutUrl("layout-long-name.json")
+        let page = storedPageOf({ vehicles: vehicles },
+                                docOf([Object.assign(cellOf("Longer"), { refs: ["key:longer"] })]))
+        verify(page.exportLayoutTo(url), page.layoutNote)
+        compare(JSON.parse(Bridge.layoutFileText(url).text).files,
+                [{ name: "N".repeat(51) + "...: " + variant, sha256: picked[0].sha256 }])
+        page.destroy()
+
+        page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        compare(page.layoutNote, "Loaded the layout", "the pick is found by its hash")
+    }
+
+    // A pick no plugin here has gives no references, so a layout can't
+    // say it needs it: the export's note names the pick instead
+    function test_aPickTheStoreLacksIsNamedInTheExportsNote() {
+        const vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Test car"),
+                                              ["plugin.gone.base"])
         const own = docOf([cellOf("A"), Object.assign(cellOf("Gone"), { refs: ["key:gone"] })])
         const page = storedPageOf({ vehicles: vehicles }, own)
         verify(page.exportLayoutTo(layoutUrl("layout-unloaded.json")), page.layoutNote)
-        verify(page.layoutNote.indexOf("Gone file") >= 0, page.layoutNote)
-        verify(page.layoutNote.indexOf("don't load") >= 0, page.layoutNote)
+        verify(page.layoutNote.indexOf("plugin.gone.base") >= 0, page.layoutNote)
+        verify(page.layoutNote.indexOf("aren't in the store") >= 0, page.layoutNote)
         verify(!page.layoutNoteBad, "a note, not a refusal")
-        // A vehicle whose files all load says nothing of the kind
-        const file = { havne_signals: 1, name: "Loads", source: { name: "t" },
-                       ecus: [{ id: "pcm", rx: "7E8" }],
-                       signals: [{ key: "loads", name: "Loads", read: { service: "22", number: "D101" },
-                                   field: { byte: 0, bits: 8 }, unit: "kPa" }] }
-        const r = Bridge.importSignalFile(Harness.writeScratchFile("loads.json", JSON.stringify(file)))
-        verify(r.ok, "the file imports")
-        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
-        let good = VehicleBook.add(VehicleBook.empty(), "Good car")
-        good = VehicleBook.addSignals(good, { sha256: r.sha256, name: r.name, profile: r.profile })
+        // A vehicle whose picks are all here says nothing of the kind
+        const good = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Good car"),
+                                          [keptPlugin("Loads", "loads", "D101").profiles[0]])
         const plain = storedPageOf({ vehicles: good },
                                    docOf([cellOf("A"), Object.assign(cellOf("Loads"), { refs: ["key:loads"] })]))
         verify(plain.exportLayoutTo(layoutUrl("layout-plain.json")), plain.layoutNote)
-        verify(plain.layoutNote.indexOf("don't load") < 0, plain.layoutNote)
+        verify(plain.layoutNote.indexOf("aren't in the store") < 0, plain.layoutNote)
     }
 
     function test_theLayoutButtonsAreInTheMoreRow() {

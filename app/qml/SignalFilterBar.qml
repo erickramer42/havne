@@ -11,7 +11,8 @@ import QtQuick.Layouts
 // Finding a signal among many (ADR-0050): the one filter Live's list and
 // the Recordings page's signal rows share, one row high so it fits a
 // page's title row. A text field, and a Filter button whose popup holds
-// Plotted only, a box for each group in codes (in code order) and Clear.
+// Plotted only, Live's Asked only, a box for each group in codes (in code
+// order) and Clear.
 // It edits filter; the list it sits above applies filter's rule.
 RowLayout {
     id: bar
@@ -22,6 +23,8 @@ RowLayout {
     // False leaves the text field alone, with no Filter button and so no
     // popup (a list the groups and Plotted only don't apply to)
     property bool filterButtonShown: true
+    // Asked only: a session's list, whose default pick leaves rows unasked
+    property bool askedShown: false
 
     readonly property var choices: bar.filter.groupChoices(bar.codes)
     // The popup's content, which lives in the window's overlay
@@ -48,7 +51,8 @@ RowLayout {
         text: qsTr("Filter")
         // Lit while the popup's choices narrow the list
         checkable: true
-        checked: bar.filter.plottedOnly || bar.filter.groups.length > 0
+        checked: bar.filter.plottedOnly || bar.filter.askedOnly
+                 || bar.filter.groups.length > 0
         onClicked: options.opened ? options.close() : options.open()
         Accessible.name: qsTr("Filter the signals")
 
@@ -70,6 +74,13 @@ RowLayout {
                     text: qsTr("Plotted only")
                     checked: bar.filter.plottedOnly
                     onToggled: bar.filter.plottedOnly = checked
+                }
+                Switch {
+                    objectName: "askedOnly"
+                    visible: bar.askedShown
+                    text: qsTr("Asked only")
+                    checked: bar.filter.askedOnly
+                    onToggled: bar.filter.askedOnly = checked
                 }
                 Repeater {
                     model: bar.choices.length > 1 ? bar.choices : []

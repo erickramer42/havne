@@ -30,9 +30,9 @@
 
 /* The query keys attach reads, for create's check (internal.h). */
 extern "C" const char* const ecuio_elm327_query_keys[] = {
-    "baud",    "serial",   "filter",   "txid",         "poll",
-    "probe",   "identify", "diagnose", "pack",         "scan",
-    "profile", "did",      "session",  "keepalive_ms", nullptr};
+    "baud",     "serial",   "filter",       "txid", "poll", "probe",
+    "identify", "diagnose", "pack",         "scan", "gap",  "profile",
+    "did",      "session",  "keepalive_ms", nullptr};
 
 namespace {
 
@@ -1076,6 +1076,7 @@ monitor_end listen(transport* t, link_health& h)
     auto last_line = t->sent_at;
     auto window = t->sent_at;
     for (;;) {
+        link_judge_waiting(h);
         bool line = false;
         const bool prompt = take_bytes(t, "ATMA", on_line, &line);
         if (reset) {
@@ -1358,7 +1359,7 @@ void elm327_worker(transport* t)
 {
     ecuio_request_engine& e = t->engine;
     link_health h(t->session->last_error, t->session->error_count,
-                  t->session->record_link.get());
+                  t->session->record_link.get(), t->session, t->epoch);
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
@@ -1379,6 +1380,7 @@ void elm327_worker(transport* t)
     ecuio_take_focus(t->session, &e, focus_seen);
 
     while (!t->stop_requested.load()) {
+        link_judge_waiting(h);
         const int64_t now = now_us(t);
         for (uint32_t c = 0; c < e.chan_count; ++c) {
             if (ecuio_engine_expire(&e, c, now)) {
@@ -1560,7 +1562,8 @@ const ecuio_transport_ops_t kElm327Ops = {elm327_start, elm327_detach};
  *           two, which the ELM327 has protocols for
  *   serial  the serial port's rate for a wired adapter, default 38400;
  *           a Bluetooth port ignores it, a TCP address refuses it
- *   the request keys (ecuio_request_param lists them), as for j2534://
+ *   the request keys (ecuio_request_param lists them), as for j2534://;
+ *           without ?gap= the floor is the engine's default
  *   profile, did: core's, read by create */
 ecuio_status_t parse_query(const ecuio_uri_query* query, transport* t,
                            request_params* req)
@@ -1726,6 +1729,7 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     describe_session(t.get(), version, &session->info);
     ecuio_seed_reports(session, t->engine, t->rx_ids, t->chan_count);
     t->epoch = host_clock::now(); /* as mock: end of attach */
+    session->judges_link = true;
     wrap->impl = t.release();
     session->transport = wrap;
     return ECUIO_OK;

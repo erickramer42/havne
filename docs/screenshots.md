@@ -9,7 +9,7 @@ Dashboard is one panel with its pages as tabs, which these shots don't
 show. The README shows a few of these.
 
 - **Desktop:** the Windows app at 1280x800.
-- **Phone:** Live, Codes, the Log and Settings are from the test phone
+- **Phone:** Live, Codes, Activity and Settings are from the test phone
   (Android 16). The Dashboard and the drive view are the phone layout
   with its built-in default page, the same page drawn by the desktop
   build in the phone's form at the phone's width.
@@ -25,7 +25,7 @@ building to about 16 psi, and coolant and oil climbing toward the fan's cut-in.*
 
 | Light | Night, amber | Night, red |
 |---|---|---|
-| [![The Dashboard in the Light look in a 2nd-gear pull at 5,992 rpm](images/desktop-dashboard-light.png)](images/desktop-dashboard-light.png) | [![The Dashboard in Night's amber style in a 2nd-gear pull at 6,867 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 7,004 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
+| [![The Dashboard in the Light look in a 2nd-gear pull at 6,049 rpm](images/desktop-dashboard-light.png)](images/desktop-dashboard-light.png) | [![The Dashboard in Night's amber style in a 2nd-gear pull at 6,856 rpm](images/desktop-dashboard-amber.png)](images/desktop-dashboard-amber.png) | [![The Dashboard in Night's red style in a 2nd-gear pull at 6,867 rpm](images/desktop-dashboard-red.png)](images/desktop-dashboard-red.png) |
 
 ### Live
 
@@ -50,7 +50,7 @@ readiness monitors, each done this drive and complete since the clear.*
 
 | Activity | Frames |
 |---|---|
-| [![The Log's activity view: two connects and, between them, the disconnect's Delivery line](images/desktop-log-activity.png)](images/desktop-log-activity.png) | [![The Log's frame table, newest first](images/desktop-log-frames.png)](images/desktop-log-frames.png) |
+| [![Activity's view: two connects and, between them, the disconnect's Delivery line](images/desktop-log-activity.png)](images/desktop-log-activity.png) | [![Activity's frame table, newest first](images/desktop-log-frames.png)](images/desktop-log-frames.png) |
 | Each session's lines; a disconnect adds its Delivery line (none dropped, and the GUI thread's wait) | The raw frames: time, length, standard or extended ID, payload |
 
 ### Recordings
@@ -60,11 +60,23 @@ readiness monitors, each done this drive and complete since the clear.*
 *A recording in the viewer: rpm and speed through the first loop's
 pulls, coolant and oil warming from the cold start.*
 
-![The viewer on a pull, maximized: rpm, throttle, lambda and boost in a pane each, the cursor at peak boost at 18.4 s](images/viewer.png)
+![The viewer on a recording of a minute: rpm, throttle, lambda and boost in panes, a pull's band at each of the two pulls](images/viewer.png)
 
-*One pull, the chart maximized: from before the throttle opens through
-the limiter, with the cursor at peak boost (16.7 psi, lambda 0.82, rpm
-climbing).*
+*A recording of the first minute: rpm, throttle, lambda and boost through two pulls, each marked by a band.*
+
+### Alerts
+
+![Settings, Alerts: an Engine speed high danger alert and a Speed above 50 warning alert](images/desktop-alerts.png)
+
+*Settings, Alerts, on the simulated vehicle under `obd2`: a danger alert on engine speed and a warning alert on speed, each listed with its level.*
+
+![Live with the alert band over it: a danger alert, Engine speed high, firing at 6,049 rpm, with one more alert on](images/desktop-alert-band.png)
+
+*An alert firing: the highest one, danger above warning, in a band under the header on every page, with the value it fired at and how many more are on. The RPM and speed values in the list take their alerts' colors.*
+
+![The viewer with its Conditions panel open: each time an alert was on, with the bars along the chart's foot](images/desktop-viewer-conditions.png)
+
+*A recording that held the two alerts: Conditions... lists each time one was on with its start and length, and the bars along the foot of the chart show the same stretches.*
 
 ### Link health
 
@@ -115,9 +127,9 @@ the screen; a tap raises the controls from the bottom with the tab bar.*
 *On its side, the chart takes the page: a 2nd-gear pull, then the
 3rd-gear pull onto the limiter.*
 
-### Codes, Log and Settings
+### Codes, Activity and Settings
 
-| Codes | Log | Settings |
+| Codes | Activity | Settings |
 |---|---|---|
-| [![Codes on the test phone: the inspection verdict and ECU 0x7E8's codes with their titles](images/phone-codes.png)](images/phone-codes.png) | [![The Log's frame table on the test phone](images/phone-log.png)](images/phone-log.png) | [![Settings, Display on the test phone: size, Night, units, and the drive view's options](images/phone-settings-display.png)](images/phone-settings-display.png) |
-| The verdict, then each ECU's codes | The status opens the Log; here its frames | Display, with the drive view's bars and orientation |
+| [![Codes on the test phone: the inspection verdict and ECU 0x7E8's codes with their titles](images/phone-codes.png)](images/phone-codes.png) | [![Activity's frame table on the test phone](images/phone-log.png)](images/phone-log.png) | [![Settings, Display on the test phone: size, Night, units, and the drive view's options](images/phone-settings-display.png)](images/phone-settings-display.png) |
+| The verdict, then each ECU's codes | The status opens Activity; here its frames | Display, with the drive view's bars and orientation |

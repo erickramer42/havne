@@ -1606,3 +1606,5 @@ at the right edge, the window across. The ring holds 120 s of any signal
 second on the bridge's tick, which is a precise timer so that it never
 runs early), the longest window a sparkline takes. The Add tile's
 sparkline still draws a made-up trace and reads nothing.
+
+**Appendix, 2026-11-14: the words of a gauge without its signal.** State 2 reads "needs <name>" when a set the picked vehicle has (its plugin or a signal file), other than the one the session reads, has one of the cell's refs ("needs variant <id>" when the session reads another variant of the same plugin), and "not in <name>" otherwise, the name the user knows the session's profile by (a plugin's or a file's name, else the profile's own: "mock", "obd2", "raw"). The cell's label is no longer repeated: the card's title shows it. The dashboard UX review found the old words named neither profile and read the same for a pick the session didn't use and a signal the plugin lacks.

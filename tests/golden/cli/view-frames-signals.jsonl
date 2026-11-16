@@ -1,5 +1,5 @@
 {"schema": 1, "type": "start"}
-{"duration_us": 4000, "format": "unknown", "frames": "user.daily-driver-extras", "markers": 0, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signal_file": null, "signals": 6, "summary": false, "type": "opened", "utc_start_us": null}
+{"conditions": null, "duration_us": 4000, "format": "unknown", "frames": "user.daily-driver-extras", "markers": 0, "notes_dropped": 0, "recording": 0, "records_dropped": 0, "rows_torn": 0, "signal_file": null, "signals": 6, "summary": false, "type": "opened", "utc_start_us": null}
 {"decimals": 0, "first_us": 2000, "group": "Engine", "highest": 50, "index": 0, "last_us": 2000, "lowest": 50, "name": "Coolant Temp", "rank": 2, "rate_hz": null, "recording": 0, "samples": 1, "text": false, "type": "signal", "unit": "\u00b0C"}
 {"decimals": 0, "first_us": 2000, "group": "Engine", "highest": 1750, "index": 1, "last_us": 4000, "lowest": 1726, "name": "RPM", "rank": 1, "rate_hz": 1000, "recording": 0, "samples": 3, "text": false, "type": "signal", "unit": "RPM"}
 {"decimals": 0, "first_us": 2000, "group": "Vehicle", "highest": 50, "index": 2, "last_us": 3000, "lowest": 50, "name": "Vehicle Speed", "rank": 6, "rate_hz": 1000, "recording": 0, "samples": 2, "text": false, "type": "signal", "unit": "km/h"}

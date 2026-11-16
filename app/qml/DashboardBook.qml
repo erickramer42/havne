@@ -183,9 +183,34 @@ QtObject {
         return utf8Bytes(text) > maxBytes + fileKeysBytes ? "" : text
     }
 
+    // A file's name within maxFileName code points. A longer one gives
+    // way before its last ": " (a plugin's name before its variant),
+    // ending "...", so two variants of one plugin keep their own names
+    function fittedFileName(name) {
+        if (codePoints(name) <= maxFileName)
+            return name
+        const dots = "..."
+        const at = name.lastIndexOf(": ")
+        const keep = at >= 0 && codePoints(name.substring(at)) + dots.length < maxFileName
+                   ? name.substring(at) : ""
+        const head = name.substring(0, name.length - keep.length)
+                         .match(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\s\S]/g)
+        return head.slice(0, maxFileName - codePoints(keep) - dots.length).join("") + dots + keep
+    }
+
+    // Of a load's missing files, those a file of `vehicleFiles` is named
+    // as (its name as a layout writes it, or the missing name with
+    // ": <variant>" after it): the pick has changed since the layout was
+    // saved, so its file is another
+    function changedFiles(missing, vehicleFiles) {
+        return missing.filter(m => vehicleFiles.some(
+            f => fittedFileName(f.name) === m.name || f.name.startsWith(m.name + ": ")))
+    }
+
     // The files, of `vehicleFiles` ([{ name, sha256, refs }], refs the
     // "key:" and "id:" references the file's profile gives), that a cell
-    // of doc reads by a "key:" reference: [{ name, sha256 }]
+    // of doc reads by a "key:" reference: [{ name, sha256 }], each name
+    // within the file's bound (fittedFileName)
     function neededFiles(doc, vehicleFiles) {
         const used = {}
         for (const p of doc.pages) {
@@ -197,7 +222,7 @@ QtObject {
         const out = []
         for (const f of vehicleFiles) {
             if (f.refs.some(r => r.startsWith("key:") && used[r] === true))
-                out.push({ name: f.name, sha256: f.sha256 })
+                out.push({ name: fittedFileName(f.name), sha256: f.sha256 })
         }
         return out
     }
@@ -688,6 +713,49 @@ QtObject {
             return { from: lo, to: hi }
         return { from: 0, to: 100 }
     }
+    // A number typed in the display unit, back in the stored unit
+    // (Bridge.decodedValue's), to six decimals, which drop the
+    // conversion's noise (212 deg F is 100 deg C): the zones' and the
+    // alerts' one rounding
+    function roundStored(decoded) {
+        return Math.round(decoded * 1e6) / 1e6
+    }
+
+    // ---- The built-in sets' refs (Bridge.gaugeSignals): a page copies the
+    // map once with copySets and passes the copy, never the bridge's map,
+    // since each read of that makes a new JS wrapper
+
+    function copySets(gaugeSignals) {
+        const out = {}
+        for (const key in gaugeSignals)
+            out[key] = Array.from(gaugeSignals[key])
+        return out
+    }
+    // The ref and its counterparts in the other built-in set, the ref first
+    function counterparts(ref, sets) {
+        for (const key in sets) {
+            const refs = sets[key]
+            if (refs.indexOf(ref) >= 0)
+                return [ref].concat(refs.filter(r => r !== ref))
+        }
+        return [ref]
+    }
+    // Refs with each one's counterparts after them, their own first: a cell
+    // or an alert made under one profile reads under another
+    function lookupRefs(refs, sets) {
+        let all = refs ?? []
+        for (const ref of refs ?? [])
+            all = all.concat(counterparts(ref, sets).filter(r => all.indexOf(r) < 0))
+        return all
+    }
+    // The set's key whose refs hold the ref, "" for none
+    function keyOfRef(ref, sets) {
+        for (const key in sets) {
+            if (sets[key].indexOf(ref) >= 0)
+                return key
+        }
+        return ""
+    }
 
     // ---- A drag (section 4): one cell's order while it's held
 
@@ -746,6 +814,16 @@ QtObject {
             if (!hasPage(d, page) || !plain(cell))
                 return false
             d.pages[page].cells.push(cell)
+            return true
+        })
+    }
+    // Cells added at the page's end in one write: none of them past the
+    // page's room or not plain, else the write is refused whole
+    function addCells(doc, page, cells) {
+        return write(doc, d => {
+            if (!hasPage(d, page) || !Array.isArray(cells) || !cells.every(c => plain(c)))
+                return false
+            d.pages[page].cells = d.pages[page].cells.concat(cells)
             return true
         })
     }

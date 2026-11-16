@@ -321,7 +321,7 @@ One connect each, Disconnect between them; the engine keeps idling.
 
        j2534://OBDX Pro - VX?poll=0x0C
 
-   - [ ] Log page: `0x7E8` frames, DLC 4, `41 0C` plus two data bytes
+   - [ ] Activity page: `0x7E8` frames, DLC 4, `41 0C` plus two data bytes
          (the adapter hands over only the data: `len 8` in the session
          log, with the 4-byte CAN ID); RPM alone on Live; about 26
          requests a second. DLC 8 means the adapter passes padding
@@ -472,7 +472,7 @@ ignition-on.
 | A functional request (`?txid=0x7DF`) answers single-frame requests but never a segmented reply | The Flow Control's ID: the filter's flow-control message must be the physical request ID (0x7E0 for 0x7E8), which core sends for a functional `txid`. Ask that item physically meanwhile |
 | Writes fail with the ignition on (`OP_WRITE: status` nonzero) | BENCH prep #2, request framing (6-byte logical message with `ISO15765_FRAME_PAD`); then baud (500 k assumed) or a 29-bit vehicle (prep #4). The bare URI is 11-bit only. 29-bit IDs given with `?filter=`/`?txid=` connect with `CAN_29BIT_ID` automatically, but no 29-bit OBD IDs are prepared: record and stop rather than improvise |
 | Writes succeed but no frames arrive | The ECU doesn't answer physical 0x7E0: retry Phase 3's one PID with `?poll=0x0C&txid=0x7DF` (functional request, replies still on 0x7E8); then the flow-control filter (prep #1) |
-| `0x7E8` frames on the Log page, but Live shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. The `OP_READ frame` lines show the bytes as the vendor returned them |
+| `0x7E8` frames on the Activity page, but Live shows "—" everywhere | Payload shape: stamping already proves the channel matched, so suspect a PCI byte left in-band shifting `[41][PID]`. The `OP_READ frame` lines show the bytes as the vendor returned them |
 | Values implausible (-40 deg C, huge RPM) | Scaling or byte order: temperatures are unsigned 8-bit with a -40 offset; 2-byte PIDs are big-endian |
 | Link flips between ok and quiet while frames arrive | Unmatched frames interleaving with replies; note the frame IDs |
 | Values refresh much slower than once a rotation | Replies arriving after the next request: compare each `OP_READ frame` stamp with the request before it. Measure; don't fix in the session |

@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/condition-file.schema.json",
+  "title": "Havne condition file",
+  "description": "A Havne condition file (format 1, ADR-0063): named tests of a session, each one to four terms with its holds and what it is used for (an alert, a recording, a marker). Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
+  "$comment": "The loader (core/src/condition_file.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets. The loader alone checks: \"havne_conditions\" as the first key; a file's size (256 KiB) and its JSON's rules (duplicate keys, depth 32); lengths in UTF-8 bytes (a schema counts characters, so non-ASCII text can pass here and be refused there); the format written with no fraction or exponent (1.0 is refused); condition keys and names given once each; an obd2.<name> reference naming one of obd2's keys; a signal named once in a term's list, an obd2.<name> and its id: being one signal; a clear on the off side of its level; a checks gap or settle of at least a microsecond and a rate_drop of at least 1.01 once read to hundredths. What only a set of signals settles (a reference the set lacks, a unit that differs, a text signal) is not refused: havne-cli conditions check reports it against a profile or a signal file.",
+  "type": "object",
+  "required": ["havne_conditions", "conditions"],
+  "properties": {
+    "havne_conditions": {
+      "title": "Format",
+      "description": "The condition-file format's version, and the file's first key. This Havne reads format 1.",
+      "const": 1
+    },
+    "name": {
+      "title": "Name",
+      "description": "The file's name, 1 to 63 bytes. Optional.",
+      "$ref": "signal-file.schema.json#/$defs/plainText",
+      "minLength": 1,
+      "maxLength": 63
+    },
+    "checks": { "$ref": "#/$defs/checks" },
+    "conditions": {
+      "title": "Conditions",
+      "description": "The file's conditions, 0 to 64.",
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/condition" }
+    },
+    "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+  },
+  "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+  "additionalProperties": false,
+  "$defs": {
+    "checks": {
+      "title": "Checks",
+      "description": "The frames check's thresholds for every check term of the file. One left out takes the check's default.",
+      "type": "object",
+      "properties": {
+        "gap": {
+          "title": "Gap",
+          "description": "The whole bus quiet for longer than this many seconds is a gap: more than 0, up to 3600. The default is 1.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3600
+        },
+        "rate_drop": {
+          "title": "Rate drop",
+          "description": "An ID's interval past this multiple of its usual one is a rate drop: above 1, up to 1000, read to hundredths. The default is 10.",
+          "type": "number",
+          "exclusiveMinimum": 1,
+          "maximum": 1000
+        },
+        "settle": {
+          "title": "Settle",
+          "description": "An ID first heard more than this many seconds after the first frame is a late ID: more than 0, up to 3600. The default is 2.",
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3600
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "seconds600": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 600
+    },
+    "condition": {
+      "title": "Condition",
+      "description": "A named test: its terms, how long they hold before it turns ON and OFF, and its uses. A condition with no use is still judged and reported.",
+      "type": "object",
+      "required": ["key", "name", "when"],
+      "properties": {
+        "key": {
+          "title": "Key",
+          "description": "The condition's stable name, 1 to 31 of a-z, 0-9 and _, given once in the file. havne-cli's lines and a recording's lines name a condition by it.",
+          "$ref": "signal-file.schema.json#/$defs/key"
+        },
+        "name": {
+          "title": "Name",
+          "description": "The name shown for the condition and written as its marker's label, 1 to 40 bytes, not starting with = + - @, a tab or a CR, given once in the file.",
+          "$ref": "signal-file.schema.json#/$defs/displayText",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "enabled": {
+          "title": "Enabled",
+          "description": "false keeps the condition in the file and judges nothing. The default is true.",
+          "type": "boolean"
+        },
+        "when": { "$ref": "#/$defs/when" },
+        "for": {
+          "title": "For",
+          "description": "The terms stay true this many seconds before the condition turns ON, 0 to 600. The default is 0.",
+          "$ref": "#/$defs/seconds600"
+        },
+        "clear_for": {
+          "title": "Clear for",
+          "description": "The terms stay false this many seconds before the condition turns OFF, 0 to 600. The default is 0.",
+          "$ref": "#/$defs/seconds600"
+        },
+        "alert": { "$ref": "#/$defs/alert" },
+        "record": { "$ref": "#/$defs/record" },
+        "mark": {
+          "title": "Mark",
+          "description": "true writes a marker with the condition's name each time it fires.",
+          "type": "boolean"
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "when": {
+      "title": "When",
+      "description": "One term, or all or any over 1 to 4 terms. Terms join one level deep.",
+      "oneOf": [
+        { "$ref": "#/$defs/term" },
+        { "$ref": "#/$defs/join" }
+      ]
+    },
+    "terms": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": { "$ref": "#/$defs/term" }
+    },
+    "join": {
+      "title": "Join",
+      "description": "all is true when every term is; any when one is. A term whose input is too old to judge leaves the join unjudged unless the others settle it.",
+      "type": "object",
+      "properties": {
+        "all": { "title": "All", "$ref": "#/$defs/terms" },
+        "any": { "title": "Any", "$ref": "#/$defs/terms" },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["all"] },
+        { "required": ["any"] }
+      ]
+    },
+    "term": {
+      "title": "Term",
+      "description": "A test of one input: a signal against a level, the link's state, or one of the frames check's findings.",
+      "oneOf": [
+        { "$ref": "#/$defs/signalTerm" },
+        { "$ref": "#/$defs/linkTerm" },
+        { "$ref": "#/$defs/checkTerm" }
+      ]
+    },
+    "reference": {
+      "title": "Reference",
+      "description": "A signal by reference: id:<n> for a built-in set's signal by its id (0 to 65535; one from 20000 up names nothing), key:<key> for a signal file's own signal, or obd2.<name> for one of obd2's by the name a computed expression reads it by (obd2.coolant, obd2.pid_0b).",
+      "type": "string",
+      "pattern": "^(id:(0|[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])|key:[a-z0-9_]{1,31}|obd2\\.[a-z0-9_]{1,33})$"
+    },
+    "signalTerm": {
+      "title": "Signal term",
+      "description": "One number, enumeration or computed signal against a level in the signal's own unit. An enumeration takes equals and differs on its raw number.",
+      "type": "object",
+      "required": ["signal"],
+      "properties": {
+        "signal": {
+          "title": "Signal",
+          "description": "1 to 8 references, each signal once. The first the session's signals provide is the one read.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/reference" }
+        },
+        "unit": {
+          "title": "Unit",
+          "description": "The unit the level is in, 0 to 15 bytes, required with above and below (\"\" for a number that has none). The term is judged only on a signal with exactly this unit; left out, it is \"\".",
+          "$ref": "signal-file.schema.json#/$defs/plainText",
+          "maxLength": 15
+        },
+        "above": {
+          "title": "Above",
+          "description": "True when the value is above this level.",
+          "type": "number"
+        },
+        "below": {
+          "title": "Below",
+          "description": "True when the value is below this level.",
+          "type": "number"
+        },
+        "equals": {
+          "title": "Equals",
+          "description": "True when the value is this number.",
+          "type": "number"
+        },
+        "differs": {
+          "title": "Differs",
+          "description": "True when the value isn't this number.",
+          "type": "number"
+        },
+        "clear": {
+          "title": "Clear",
+          "description": "With above or below: once true, the term turns false only at or past this level, which lies on the off side of the level (at or below it for above, at or above it for below).",
+          "type": "number"
+        },
+        "max_age": {
+          "title": "Max age",
+          "description": "A sample older than this many seconds can't be judged, 0.1 to 60. Left out, the bound is three times the signal's pace, from 3 s up to 180 s.",
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 60
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["above"] },
+        { "required": ["below"] },
+        { "required": ["equals"] },
+        { "required": ["differs"] }
+      ],
+      "dependentRequired": {
+        "above": ["unit"],
+        "below": ["unit"]
+      },
+      "dependentSchemas": {
+        "clear": {
+          "anyOf": [
+            { "required": ["above"] },
+            { "required": ["below"] }
+          ]
+        }
+      }
+    },
+    "linkTerm": {
+      "title": "Link term",
+      "description": "True while the session's link is in the state named.",
+      "type": "object",
+      "required": ["link"],
+      "properties": {
+        "link": {
+          "title": "Link",
+          "description": "not_ok is any state but OK; timeout, request_failed and hard_failure each name one.",
+          "enum": ["not_ok", "timeout", "request_failed", "hard_failure"]
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "checkTerm": {
+      "title": "Check term",
+      "description": "True while a finding of this kind is under way on the live frames.",
+      "type": "object",
+      "required": ["check"],
+      "properties": {
+        "check": {
+          "title": "Check",
+          "description": "One of the frames check's rules.",
+          "enum": ["gap", "rate_drop", "late_id", "overflow", "isotp"]
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "alert": {
+      "title": "Alert",
+      "description": "Tells the driver while the condition is ON. A front end colors the signal's value at this level, and sounds or shows a banner when asked.",
+      "type": "object",
+      "required": ["level"],
+      "properties": {
+        "level": {
+          "title": "Level",
+          "enum": ["warning", "danger"]
+        },
+        "sound": {
+          "title": "Sound",
+          "description": "A tone at each firing. The default is false.",
+          "type": "boolean"
+        },
+        "banner": {
+          "title": "Banner",
+          "description": "A banner while ON. The default is false.",
+          "type": "boolean"
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "record": {
+      "title": "Record",
+      "description": "An armed recorder writes while the condition is ON, from before seconds ahead of it to after seconds past it.",
+      "type": "object",
+      "properties": {
+        "before": {
+          "title": "Before",
+          "description": "Seconds kept from before the firing, 0 to 60. The default is 0.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 60
+        },
+        "after": {
+          "title": "After",
+          "description": "Seconds written after the condition turns OFF, 0 to 600. The default is 0.",
+          "$ref": "#/$defs/seconds600"
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    }
+  }
+}

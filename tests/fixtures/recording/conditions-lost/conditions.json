@@ -1,0 +1,1 @@
+{"havne_conditions":1,"name":"Fixture","conditions":[{"key":"coolant_high","name":"Coolant high","alert":{"level":"warning"},"when":{"signal":["obd2.coolant"],"unit":"°C","above":110,"clear":105}},{"key":"rpm_high","name":"Engine speed high","mark":true,"when":{"signal":["obd2.rpm"],"unit":"RPM","above":5000}}]}

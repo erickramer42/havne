@@ -811,6 +811,31 @@ TestCase {
         compare(labels(DashboardBook.removeCell(book(), 0, 1), 0), ["IAT"])
     }
 
+    // Several cells in one write, at the page's end; a list that would
+    // pass the page's room, or holds a cell that isn't plain, is refused
+    // whole, an empty one changes nothing, and the input is never changed
+    function test_cellsAreAddedSeveralAtOnceOrNotAtAll() {
+        const d = book()
+        const before = DashboardBook.serialize(d)
+        const added = DashboardBook.addCells(d, 0, [cell("Boost"), cell("MAP")])
+        compare(labels(added, 0), ["IAT", "Oil", "Boost", "MAP"])
+        compare(DashboardBook.serialize(DashboardBook.parse(DashboardBook.serialize(added), "desktop").doc),
+                DashboardBook.serialize(added), "reads back as written")
+        compare(DashboardBook.serialize(d), before, "the input is unchanged")
+        for (const refused of [[], null, [cell("A"), { kind: "digital", w: 1, h: 1, refs: [],
+                                                       options: { from: Date } }]])
+            compare(DashboardBook.serialize(DashboardBook.addCells(d, 0, refused)), before)
+        compare(DashboardBook.serialize(DashboardBook.addCells(d, 5, [cell("A")])), before, "no such page")
+
+        const full = pageOf(DashboardBook.maxCells - 1)
+        const fullBefore = DashboardBook.serialize(full)
+        compare(labels(DashboardBook.addCells(full, 0, [cell("last")]), 0).length, DashboardBook.maxCells,
+                "up to the page's room")
+        compare(DashboardBook.serialize(DashboardBook.addCells(full, 0, [cell("A"), cell("B")])),
+                fullBefore, "one past it refuses both")
+        compare(DashboardBook.serialize(full), fullBefore)
+    }
+
     function test_setOptionsMergesAndNullRemoves() {
         const d = DashboardBook.setOptions(book(), 0, 0, { warnFrom: 55, from: -40, flash: true })
         compare(d.pages[0].cells[0].options, { from: -40, to: 120, warnFrom: 55, flash: true })
@@ -1391,6 +1416,50 @@ TestCase {
         compare(DashboardBook.neededFiles(doc, vehicle)[0], { name: "Boost.json", sha256: sha },
                 "its name and sha256 only")
         compare(DashboardBook.neededFiles(doc, []), [])
+    }
+
+    // A file's name is cut to its bound in code points, a variant's part
+    // whole, and a needed file is named so
+    function test_aFilesNameIsCutToItsBoundWithItsVariantWhole() {
+        const most = DashboardBook.maxFileName
+        const variant = ": " + "v".repeat(24)
+        compare(DashboardBook.fittedFileName("Boost"), "Boost")
+        compare(DashboardBook.fittedFileName("n".repeat(most)), "n".repeat(most), "a name at the bound is whole")
+        compare(DashboardBook.fittedFileName("n".repeat(most + 1)), "n".repeat(most - 3) + "...")
+        compare(DashboardBook.fittedFileName("n".repeat(63) + variant), "n".repeat(most - 29) + "..." + variant,
+                "the plugin's name gives way, the variant stays whole")
+        compare(DashboardBook.fittedFileName("a: " + "n".repeat(60) + variant),
+                "a: " + "n".repeat(most - 32) + "..." + variant, "the last \": \" is the variant's")
+        const wide = String.fromCodePoint(0x1F600)
+        compare(DashboardBook.fittedFileName(wide.repeat(most)), wide.repeat(most), "counted in code points")
+        compare(DashboardBook.fittedFileName(wide.repeat(most + 1)), wide.repeat(most - 3) + "...",
+                "and cut between them")
+        compare(DashboardBook.fittedFileName("a: " + "v".repeat(most)), "a: " + "v".repeat(most - 6) + "...",
+                "a part after \": \" too long to keep is cut with the rest")
+
+        const doc = { format: DashboardBook.format, pages: [
+            { name: "A", cells: [cell("a", { refs: ["key:boost"] })] }] }
+        const needed = DashboardBook.neededFiles(
+            doc, [{ name: "n".repeat(63) + variant, sha256: sha, refs: ["key:boost"] }])
+        compare(needed, [{ name: "n".repeat(most - 29) + "..." + variant, sha256: sha }])
+        verify(DashboardBook.exportText(doc, "desktop", needed) !== "", "so the layout can be written")
+    }
+
+    // A missing file a pick is named as is a pick that changed, not one
+    // the vehicle lacks
+    function test_aMissingFileNamedAsAPickIsAChangedPick() {
+        const variant = ": " + "v".repeat(24)
+        const long = "n".repeat(63) + variant
+        const picks = [{ name: "Boosty" }, { name: "Shared: base" }, { name: long }]
+        const missing = names => names.map(n => ({ name: n, sha256: sha }))
+        const changed = names => DashboardBook.changedFiles(missing(names), picks).map(f => f.name)
+        compare(changed(["Boosty"]), ["Boosty"], "the pick's own name")
+        compare(changed(["Shared"]), ["Shared"], "the plugin's name, where the pick names its variant too")
+        compare(changed([DashboardBook.fittedFileName(long)]), [DashboardBook.fittedFileName(long)],
+                "a name the layout cut")
+        compare(changed(["Boost", "Shared: other", "Share", "Else"]), [], "no other name")
+        compare(changed(["Else", "Boosty"]), ["Boosty"])
+        compare(DashboardBook.changedFiles(missing(["Boosty"]), []), [])
     }
 
     function test_anExportPastTheFilesBoundIsRefused() {

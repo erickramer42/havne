@@ -14,6 +14,9 @@ find_package(Qt6 6.12 REQUIRED COMPONENTS Quick QuickControls2 Network)
 
 qt_standard_project_setup(REQUIRES 6.12)
 
+# APP_BRIDGE_SOURCES: the bridge's own sources, which tests/ compiles too
+include(${CMAKE_CURRENT_SOURCE_DIR}/bridge_sources.cmake)
+
 # The App QML module and the bridge it binds live in a static library
 # of their own, so test_qml (tests/CMakeLists.txt) loads the same module
 # the app does. Whatever links it also links app_uiplugin and imports
@@ -46,6 +49,14 @@ qt_add_library(app_ui STATIC
     pluginstore.h
     signalstore.cpp
     signalstore.h
+    alerttone.cpp
+    alerttone.h
+    conditionmodel.cpp
+    conditionmodel.h
+    conditionstore.cpp
+    conditionstore.h
+    storemigration.cpp
+    storemigration.h
     recordingimport.cpp
     recordingimport.h
     recordingexport.cpp
@@ -54,8 +65,7 @@ qt_add_library(app_ui STATIC
     recordingframes.h
     recordingview.cpp
     recordingview.h
-    sessionbridge.cpp
-    sessionbridge.h
+    ${APP_BRIDGE_SOURCES}
     signalfilter.cpp
     signalfilter.h
     latencystats.h
@@ -67,7 +77,8 @@ qt_add_library(app_ui STATIC
 )
 
 set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml
-                            qml/DashboardBook.qml qml/SignalForm.qml qml/Immersive.qml PROPERTIES
+                            qml/DashboardBook.qml qml/SignalForm.qml qml/Immersive.qml
+                            qml/ConditionBook.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -88,11 +99,31 @@ qt_add_qml_module(app_ui
         qml/SegmentRow.qml
         qml/CsvGuessPreview.qml
         qml/DocumentOpenDialog.qml
+        qml/DocumentSaveDialog.qml
         qml/RecordingExportPanel.qml
         qml/RecordingJumpRow.qml
         qml/StretchesPanel.qml
+        qml/ConditionsPanel.qml
+        qml/RecordingSpanStats.qml
+        qml/RecordingFindings.qml
+        qml/RecordingZoomRow.qml
+        qml/RecordingSignalRows.qml
+        qml/RecordingFramesView.qml
+        qml/RecordingAbout.qml
+        qml/RecordingList.qml
+        qml/RecordingImportPanel.qml
+        qml/RecordingChart.qml
+        qml/ViewHead.qml
         qml/PageHeader.qml
         qml/DashboardPage.qml
+        qml/DashCell.qml
+        qml/DashCellPanel.qml
+        qml/DashAddPanel.qml
+        qml/DashSignalPanel.qml
+        qml/DashDriveStatus.qml
+        qml/DashDriveSheet.qml
+        qml/DashTopBar.qml
+        qml/LogNotice.qml
         qml/ConnectList.qml
         qml/DashPageStrip.qml
         qml/LogPage.qml
@@ -112,10 +143,14 @@ qt_add_qml_module(app_ui
         qml/SettingsConnect.qml
         qml/SettingsDisplay.qml
         qml/SettingsOwnSignals.qml
-        qml/SettingsPlugins.qml
+        qml/RemoveQuestion.qml
         qml/SettingsProfile.qml
         qml/SettingsRecording.qml
-        qml/SettingsSignalFiles.qml
+        qml/SettingsSignals.qml
+        qml/SettingsAlerts.qml
+        qml/SettingsAlertEditor.qml
+        qml/AlertSignalPicker.qml
+        qml/ConditionBook.qml
         qml/SettingsVehiclePicker.qml
         qml/SettingsVinLookup.qml
         qml/NavButton.qml
@@ -129,6 +164,7 @@ qt_add_qml_module(app_ui
         qml/SignalForm.qml
         qml/SignalHub.qml
         qml/GaugeBase.qml
+        qml/AlertBand.qml
         qml/DangerMark.qml
         qml/NightSwitch.qml
         qml/SegmentGauge.qml

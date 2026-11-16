@@ -64,7 +64,7 @@ GaugeBase {
         "5": "acdfg", "6": "acdefg", "7": "abc", "8": "abcdefg", "9": "abcdfg",
         "-": "g", " ": ""
     })
-    readonly property color digitColor: hasValue ? zoneColor(value, accent) : Theme.textDim
+    readonly property color digitColor: valueColorWith(accent)
 
     // The unit's box: always there, its size from the card
     readonly property real unitPx: Math.max(11, Math.min(16, height * 0.16))
@@ -184,10 +184,11 @@ GaugeBase {
             font.pixelSize: gauge.unitPx
             color: Theme.textDim
         }
-        // Past dangerFrom, beside the unit; its slot stays
+        // Past dangerFrom or at a danger alert, beside the unit; a danger zone
+        // keeps its slot
         DangerMark {
-            visible: gauge.hasDangerZone
-            opacity: gauge.inDanger ? 1 : 0
+            visible: gauge.dangerSlot
+            opacity: gauge.showsDanger ? 1 : 0
             size: gauge.markPx
         }
     }

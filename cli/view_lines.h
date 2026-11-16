@@ -17,6 +17,7 @@
 
 #include "jsonl.h"
 
+#include "ecuio/conditions.h"
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
 
@@ -272,14 +273,20 @@ inline void signed_us(Line& l, int64_t us)
 
 // What a recording holds: {"type":"opened", recording, format,
 // duration_us, utc_start_us|null, signals, markers, summary, rows_torn,
-// records_dropped, notes_dropped, signal_file}; signal_file is null when
-// the header names none and the folder holds none, else {sha256 (the
-// header's, or null), present, matches} (ADR-0051 section 4); and with
-// view --frames, frames: the profile its frames decoded through, or
-// "signals.json" for the recording's own file
+// records_dropped, notes_dropped, signal_file, conditions}; signal_file
+// is null when the header names none and the folder holds none, else
+// {sha256 (the header's, or null), present, matches} (ADR-0051 section
+// 4); conditions is null when the header names no set, the folder holds
+// none and events.log has no cond line, else {sha256|null, present,
+// matches, events (every cond line that parses), lines_skipped, cut (more
+// than the reader keeps), events_lost (the events the recorder had no
+// room for and never wrote)} (ADR-0063 section 8); and with view --frames,
+// frames: the profile its frames decoded through, or "signals.json" for
+// the recording's own file
 inline void opened_line(Line& l, uint32_t recording,
                         const ecuio_recording_info_t& i,
                         const ecuio_recording_signals_t& sf,
+                        const ecuio_recording_conditions_t& cs,
                         const char* frames = nullptr)
 {
     l.raw("{\"type\":\"opened\"");
@@ -324,6 +331,35 @@ inline void opened_line(Line& l, uint32_t recording,
         l.key("matches");
         l.raw((sf.flags & ECUIO_RECORDING_SIGNALS_MATCH) != 0 ? "true"
                                                               : "false");
+        l.ch('}');
+    }
+    l.key("conditions");
+    if (cs.flags == 0 && i.condition_events == 0 && cs.lines_skipped == 0 &&
+        cs.events_lost == 0) {
+        l.raw("null");
+    } else {
+        l.ch('{');
+        l.key("sha256");
+        if ((cs.flags & ECUIO_RECORDING_CONDITIONS_NAMED) != 0) {
+            l.string(cs.sha256, sizeof cs.sha256);
+        } else {
+            l.raw("null");
+        }
+        l.key("present");
+        l.raw((cs.flags & ECUIO_RECORDING_CONDITIONS_PRESENT) != 0 ? "true"
+                                                                   : "false");
+        l.key("matches");
+        l.raw((cs.flags & ECUIO_RECORDING_CONDITIONS_MATCH) != 0 ? "true"
+                                                                 : "false");
+        l.key("events");
+        l.u64(i.condition_events);
+        l.key("lines_skipped");
+        l.u64(cs.lines_skipped);
+        l.key("cut");
+        l.raw((i.flags & ECUIO_RECORDING_INFO_CONDITIONS_CUT) != 0 ? "true"
+                                                                   : "false");
+        l.key("events_lost");
+        l.u64(cs.events_lost);
         l.ch('}');
     }
     if (frames != nullptr) {
@@ -447,6 +483,40 @@ inline void marker_line(Line& l, uint32_t recording, uint32_t index,
     l.u64(m.host_us);
     l.key("label");
     l.string(m.label_utf8, m.label_length);
+    l.ch('}');
+}
+
+// One cond line of a recording: {"type":"condition", recording, host_us,
+// t_us, key, state (on|off), fired, stale, held, value, term}: stream's
+// condition line with the recording's time and held added. Fits a buffer
+// of kRecordedConditionLineBytes.
+constexpr size_t kRecordedConditionLineBytes =
+    320 + 6 * sizeof(ecuio_recording_condition_event_t{}.key);
+
+inline void recorded_condition_line(Line& l, uint32_t recording,
+                                    const ecuio_recording_condition_event_t& e)
+{
+    l.raw("{\"type\":\"condition\"");
+    l.key("recording");
+    l.u64(recording);
+    l.key("host_us");
+    l.u64(e.host_us);
+    l.key("t_us");
+    l.u64(e.timestamp_us);
+    l.key("key");
+    l.string(e.key, sizeof e.key);
+    l.key("state");
+    l.raw(e.state == ECUIO_CONDITION_ON ? "\"on\"" : "\"off\"");
+    l.key("fired");
+    l.raw((e.flags & ECUIO_CONDITION_FIRED) != 0 ? "true" : "false");
+    l.key("stale");
+    l.raw((e.flags & ECUIO_CONDITION_STALE) != 0 ? "true" : "false");
+    l.key("held");
+    l.raw((e.flags & ECUIO_CONDITION_HELD) != 0 ? "true" : "false");
+    l.key("value");
+    l.number(e.value);
+    l.key("term");
+    l.u64(e.term);
     l.ch('}');
 }
 

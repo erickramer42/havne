@@ -5,9 +5,9 @@ section is the steps for one task. The address you connect with, and
 every option it takes, is in [addresses.md](addresses.md).
 
 The desktop's pages are in the sidebar: Home, Dashboard, Live,
-Diagnostics, Log, Recordings and Settings. A phone has five tabs: Dash
+Diagnostics, Activity, Recordings and Settings. A phone has five tabs: Dash
 (the Dashboard), Live, Codes (Diagnostics), Recs (Recordings) and
-Settings; the Log opens from the status at the top. Below, a page is
+Settings; Activity opens from the status at the top. Below, a page is
 named as the desktop names it, with the phone's tab beside it where it
 differs.
 
@@ -24,7 +24,7 @@ Read [DISCLAIMER.md](../DISCLAIMER.md) before connecting to a car.
    list above the gauges.
 3. The status at the top reads "Session active" with the address once
    the adapter answers. A connect that fails says why under the list;
-   **Show log** has the rest.
+   **Show activity** has the rest.
 
 Addresses that connected before are listed first, under **Recent**, so
 the next time is one press.
@@ -33,7 +33,7 @@ To choose what's read (a profile), or for an adapter the list doesn't
 show, connect from **Settings, Connection** instead: pick the adapter
 from its list (or type an address in the field), pick a **Profile**
 (Default reads OBD-II on an adapter; **raw (log only)** reads frames and
-decodes nothing, and they are on the Log page's **Frames** view;
+decodes nothing, and they are on the Activity page's **Frames** view;
 **uds-generic (DIDs)** reads the DIDs you list), then **Connect**. Under
 uds-generic, **Extended session (10 03)** enters the extended diagnostic
 session before the reads, over an adapter or a CAN interface; the other
@@ -182,6 +182,48 @@ recording. While it records, Start log isn't offered: the recording
 already holds every signal, and **Settings, Recording** says so. **Open folder** on the same page shows
 where recordings are kept.
 
+**Armed:** an **Armed** button beside Start log (and in the drive
+view's controls) keeps a recorder waiting. It records nothing until a
+condition set to record fires (see [Alerts](#alerts-and-conditions)),
+then writes a recording of its own for each window, from the
+condition's **Before** seconds ahead of its firing to its **After**
+seconds past the last condition turning off. The button is off, with its
+reason, while no condition records, and its label says whether it waits
+or is recording a window. Press it again to stop.
+
+## Alerts and conditions
+
+An alert is a condition on the session's signals or its link, judged
+as the frames arrive. **Settings, Alerts** lists them.
+
+1. Press **Add** and fill in the editor: **Name**, **What it watches**
+   (**A signal**, **The link**: not OK, not responding, requests
+   failing or adapter lost, or a recording's frames check finding) and
+   **Alert** as **Warning** or **Danger**. For a signal give **Above** or
+   **Below**, the **Level** (in your units) and a **Clears above** or
+   **Clears below** level so it doesn't flicker, and **On after** and
+   **off after** seconds. **Add a term** and **All of these** or **Any
+   of these** combine several.
+2. **Banner** shows the alert as a band under the header on every page,
+   and over the gauges in the drive view: the highest alert first (a
+   danger above a warning, then the newest), with the value it fired at.
+   It stays at least 3 seconds and says when nothing new has been read
+   for it. A gauge or Live value that the alert reads takes its color.
+   **Sound** plays a short tone on Android: one beep for a warning, two
+   for a danger, at most once in 5 seconds for each alert, at the alarm
+   volume.
+3. **Record** (with **Before** and **After** seconds) makes the
+   condition start an armed recording, and **Mark the recording** adds a
+   marker when it fires.
+4. **Add from a signal's levels** makes alerts from the danger and
+   warning levels a gauge was given; a gauge's own panel has the same
+   in its **Alert** button.
+5. **Import...** and **Export...** read and write a condition file
+   ([condition-files.md](condition-files.md)); an import replaces the
+   saved alerts with the file's. With a condition file saved
+   that doesn't load, the page says why and **Start again** replaces it
+   (the unreadable file is kept beside it).
+
 ## View and export a recording
 
 1. Open **Recordings** (Recs). **All recordings** lists them, newest
@@ -232,6 +274,12 @@ off. **Stretches...** opens the levels the finder uses; an empty field, or
 numbers in Compare follow these levels; `havne-cli`'s `--align-on` counts
 by core's defaults unless it is given levels.
 
+A recording that holds conditions draws each time one was ON as a bar
+along the chart's foot (an alert's in its level's color, under the
+others), and each stretch where nothing fresh was read dashed.
+**Conditions...** beside **Stretches...** lists them with their start and
+length; a row moves the view there.
+
 **Save report...** writes a health report of the recording: its codes,
 readiness and key values. **Import** on the list brings in a candump log
 or another logger's CSV as a recording, with an optional **Label**; the
@@ -280,33 +328,23 @@ fail an emissions inspection until some driving completes them.
 
 ![Diagnostics: the inspection verdict, ECU 0x7E8's codes with their titles, and the readiness monitors](images/desktop-diagnostics.png)
 
-## Add a vehicle and import signals
+## Add a vehicle and pick its signals
 
-A vehicle keeps its own signal files, its last address and its plotted
-signals. Vehicles change only with no session connected: disconnect
-first (the page says so while a session runs).
+Signals beyond the built-in profiles come as **plugins**: a package someone made for a model, a signal file you wrote, or a set converted from [OBDb](https://github.com/OBDb). A plugin has one or more **variants** (a model year, a trim), and a vehicle **picks** the variants it reads. Vehicles and picks change only with no session connected: disconnect first (the page says so while a session runs).
 
-1. Open **Settings, Vehicle**. Type a label ("Daily driver"; left empty,
-   it's "Vehicle 1") and press **New**. The new vehicle is picked.
-   **Duplicate** copies the picked vehicle, and **More** has Rename and
-   Forget.
-2. Open **Settings, Signals**:
-   - **Import a signal file** adds a file of your own signals
-     ([signal-files.md](signal-files.md) says how to write one);
-   - **Import an OBDb set** converts a set from
-     [OBDb](https://github.com/OBDb), a community list of a model's
-     signals, downloaded first and saved on the device, for the
-     vehicle. **OBDb model year** beside it is the year to convert for;
-     a VIN looked up on the Vehicle page fills it in. The report shows
-     what converted and what was left out; **Keep** adds it,
-     **Discard** doesn't;
-   - **Add a signal**, under **Your own signals**, writes one signal at
-     a time.
-3. Each file is then a profile of its own on **Settings, Connection**,
-   under **Profile**. Pick it and connect.
+1. Open **Settings, Vehicle**. Type a label ("Daily driver"; left empty, it's "Vehicle 1") and press **New**. The new vehicle is picked. **Duplicate** copies the picked vehicle with its picks, and **More** has Rename and Forget.
+2. Open **Settings, Signals** and press **Import...**. It takes three kinds of file:
+   - a plugin package (`<id>.havne-plugin.json`) goes in as it is;
+   - a signal file ([signal-files.md](signal-files.md) says how to write one) asks where it goes: **As a new plugin**, or **Into** one of your own plugins as another variant;
+   - an OBDb set, downloaded first and saved on the device, shows a report of what converted and what was left out. **OBDb model year** is the year to convert for (a VIN looked up on the Vehicle page fills it in); **Keep** makes it a plugin of your own, **Discard** doesn't.
+3. Every plugin is listed with a row for each variant. The plugins for this car come first: those the vehicle picks from, those imported for it and those its VIN matches. Press a row to pick it for the picked vehicle; press it again to undo the pick. An import that gives a single variant is picked at once.
+4. Each pick is a profile on **Settings, Connection**, under **Profile**. On an adapter, the first pick that also reads the OBD-II signals stands where Default does ("obd2 + Daily driver extras"). Home's and the Dashboard's connect lists read that pick without a visit to Settings.
 
-**Look up a VIN** on the Vehicle page decodes a VIN's model year and
-make on the device; the VIN isn't saved.
+**More** on a row has the rest: **Save as a signal file...**, **Export plugin...** (a package another Havne imports), **Copy to my plugin** for a variant of someone else's plugin you want to change, **Replace...** and **Remove this variant** for your own, **Mine** to mark an imported plugin as yours (a newer export of it then updates it in place), and **Remove**. Removing a plugin of your own asks first: no other copy exists.
+
+**Add a signal**, under **Your own signals**, writes one signal at a time into the vehicle's own plugin ("Daily driver signals"). **Edit** changes a saved one; a new name keeps every gauge that shows the signal bound to it.
+
+**Look up a VIN** on the Vehicle page decodes a VIN's model year and make on the device, and marks the variants that VIN matches; the VIN isn't saved.
 
 ## The drive view
 
@@ -315,12 +353,12 @@ hidden, and keeps the screen on.
 
 1. Connect, open Dash and press **Drive**.
 2. Tap the gauges to bring the controls up from the bottom: Start log or
-   Stop log, Mark while Record sessions records or a log runs,
+   Stop log, Armed, Mark while Record sessions records or a log runs,
    Disconnect, Reset peaks,
    Night and **Exit drive**. They slide away again by themselves.
 3. Press **Exit drive** to leave the view.
 
-The status line at the top stays: the link's state, the address, and a
+An alert whose condition has a banner shows over the gauges. The status line at the top stays: the link's state, the address, and a
 running log's time. Havne remembers the view: left on, it comes back by
 itself at the next connect made from Dash. In **Settings, Display**,
 **Hide the drive view's bars after** sets how long the controls stay

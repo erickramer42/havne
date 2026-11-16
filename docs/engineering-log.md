@@ -169,6 +169,11 @@ Dates are commit dates.
 | 2026-11-08 | Settings as a list of pages (`daa57d9`), the phone's tab bar at touch size (`727f6db`), the CSV map guessed from the header and edited in the Import panel (`923930b`), the Log page's ID mask, length and time filters, and the viewer's Frames view (`98c20cb`) |
 | 2026-11-12 | v0.7.4's follow-ups: a Dashboard layout exported and loaded, with `havne-cli layout check` reading one corpus with the app ([ADR-0057](adr/0057-dashboards.md)'s appendix on the layout file; `7fc156be`, `092bc6f2`); the viewer's difference trace (`6b42ad61`); the demo car answering OBD-II (`e9ae67ff`); a cancel for the reader's searches in core, `havne-cli view` and Python (`e53d4dab`, `51dfb407`, `90e0e382`); SocketCAN's close waiting for a request still out (`33f3b46c`); a provider's document opened through Android's content resolver and its descriptor kept to the write's close (`ad8f1cd9`, `0db1ac6b`); CI's Qt kits kept as one cached copy each (`1765e312`) |
 | 2026-11-13 | The open dialogs through Android's own document picker (`cda389c5`, `d179d85e`, `cfbca201`), a picked document closed before its error is asked (`754ba1eb`), and five more gauge colors with a custom one (`a5065b7a`) |
+| 2026-11-11 | The computed grammar ([ADR-0062](adr/0062-computed-grammar.md)): format 2 signal files compile functions, comparisons and a conditional, give a stale input as no value and chain computed signals up to 8 deep (`4f5065bf`, `750be175`) |
+| 2026-11-12 | Conditions ([ADR-0063](adr/0063-conditions.md)): the loader and `havne-cli conditions check` (`dea7176f`), signal terms judged in a session (`371320f6`), the focus keeping a condition's signals asked (`a4fa15ad`), and the request budget raised to 1024 (`b6982228`) |
+| 2026-11-13 | A recording keeps its session's conditions (`04b07303`, `7a4dfd14`), core wraps a signal file into a plugin (`090dea32`), and the VIN is flagged as soon as it is in (`fc88f87b`) |
+| 2026-11-14 | The armed recorder writes a window for each firing (`d2429ae5`), link terms are judged where the transport publishes link health (`80e05d46`), every import is a plugin in one store ([ADR-0064](adr/0064-one-store.md); `4e1882bc`), and the vehicles' signal files move into it at the first start (`3afbe243`) |
+| 2026-11-15 | The app's alerts: the Alerts page and a gauge's Alert (`b6d97e63`), the banner and colored values (`53d5e774`, `e4031b57`), Armed (`ea626eec`), the viewer's condition bars (`180422a8`), and the one Signals list (`676fa2de`); the review's fixes merged into `dev` |
 
 ## Lessons learned
 
@@ -1367,3 +1372,5 @@ queuing the task. The close emptied the queue before the pool had
 taken the work, so the case passed with nothing running, and two
 mutants of the code it guards survived. The case waits until the task
 has taken its work (a hold the task reports), then closes.
+
+**2026-11-15: a cost cut is not a crash fix:** a change to the Dashboard's bindings cut the script wrappers that hold a container from 36,092 to 36 a second, and at a 1 ms collector time limit the crash in Qt 6.12's incremental collector came more often, not less. Counts at the default setting didn't tell the two apart; a harness that raised the collector's rate did. Havne has Qt collect in one go (`QV4_GC_TIMELIMIT=0`) and keeps that until a Qt fixes the sweep.

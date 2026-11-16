@@ -124,9 +124,14 @@ ecuio_status_t ecuio_profile_register(const char* name,
     }
     /* Validated here, once, so the transport and the bridge can trust
      * every set they're handed (ADR-0013's plugin surface). */
-    if (signal_set != nullptr &&
-        ecuio_validate_signal_set(signal_set, out) != ECUIO_VALIDATE_OK) {
-        return ECUIO_ERR_INVALID_ARGUMENT;
+    if (signal_set != nullptr) {
+        const int code = ecuio_validate_signal_set(signal_set, out);
+        if (code == ECUIO_VALIDATE_ERR_OUT_OF_MEMORY) {
+            return ECUIO_ERR_OUT_OF_MEMORY;
+        }
+        if (code != ECUIO_VALIDATE_OK) {
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
     }
     /* Every derived request must fit the engine's table, or the rest would
      * silently never be asked. Counted on the set's own channels: a

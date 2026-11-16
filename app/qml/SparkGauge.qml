@@ -66,7 +66,7 @@ GaugeBase {
         text: gauge.label
         font.pixelSize: 12
         font.weight: Font.DemiBold
-        color: Theme.textDim
+        color: gauge.titleColor
         elide: Text.ElideRight
         width: Math.max(0, Math.min(implicitWidth, gauge.width - readout.width - 8))
         visible: !gauge.noteAlone
@@ -103,11 +103,11 @@ GaugeBase {
             font.weight: Font.Bold
             font.family: Theme.valueFamily
             font.features: Theme.valueFeatures
-            color: gauge.hasValue ? gauge.zoneColor(gauge.value, gauge.readoutColor) : Theme.textDim
+            color: gauge.valueColor
         }
         DangerMark {
-            visible: gauge.hasDangerZone
-            opacity: gauge.inDanger ? 1 : 0
+            visible: gauge.dangerSlot
+            opacity: gauge.showsDanger ? 1 : 0
             size: 18
             anchors.verticalCenter: valueLabel.verticalCenter
         }

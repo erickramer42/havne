@@ -207,14 +207,15 @@ ColumnLayout {
         onTriggered: panel.askSizes()
     }
 
-    FileDialog {
+    DocumentSaveDialog {
         id: saveDialog
+        objectName: "exportSaveDialog"
         title: qsTr("Export the recording")
-        fileMode: FileDialog.SaveFile
         defaultSuffix: panel.format === "pcapng" ? "pcapng" : "csv"
         nameFilters: panel.format === "pcapng" ? [qsTr("pcapng (*.pcapng)")] : [qsTr("CSV (*.csv)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         onAccepted: panel.exportTo(saveDialog.selectedFile)
+        onFailed: words => { panel.failed = true; panel.note = qsTr("Not exported: %1").arg(words) }
     }
     FolderDialog {
         id: folderDialog

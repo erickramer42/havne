@@ -135,6 +135,10 @@ The VIN itself stays where ADR-0021 put it, in the activity log and
 > is complete and hashes what it returns, so a program on the C ABI
 > reads the same VIN.
 
+> **Amended 2026-11-13:** the bridge takes the VIN as soon as core
+> flags it in (`ECUIO_IDENTITY_VIN`), not once the identity is
+> complete: the appendix "the VIN before the identity is complete".
+
 ### 4. The VIN settles which vehicle it is
 
 When the key arrives:
@@ -263,3 +267,33 @@ vehicle's label for an adapter's session only (section 1), and writes
 it into `events.log`'s header as a `caller` line (`vehicle  <label>`),
 so the header names the car even when the VIN never settles it.
 `vehicleLabel` is what the bridge hands `ecuio_recorder_open`.
+
+## Appendix: the VIN before the identity is complete (2026-11-13)
+
+Section 3 read the VIN once the first channel's identity was
+complete. The list's items are asked one at a time, each waiting
+out its own timeout, a `7F xx 78` stretching one to about 5 s, so a session
+could run long with the VIN answered and the vehicle unnamed, and one
+that ended before the last item settled never recognized its car,
+kept no plugin match and gave the inspection no model year.
+
+The VIN now has a flag of its own in the identity report,
+`ECUIO_IDENTITY_VIN` (`core.h`, 0x2, beside `ECUIO_IDENTITY_COMPLETE`):
+set when `09 02` has answered with a VIN, or when `22 F190` has and
+`09 02` has an outcome (refused, unanswered, or an answer that isn't
+one), since an unasked `09 02` could still answer a VIN of its own,
+which comes first. It is the same rule as `ecuio_identity_vin`'s
+(`core/src/request_engine.h`'s `ecuio_identity_vin_of`, which both
+use), so the flag never names a VIN the call wouldn't give. The VIN
+holds until a recovery asks `09 02` again, which may answer a
+different VIN; the bridge then takes the new one, once.
+
+- The bridge takes channel 0's VIN when the flag is set and the VIN is
+  new to the session: `m_vin`, the `VIN:` line, `vehicleIdentified()`,
+  so section 4's recognition, the plugin pick's VIN matches and the
+  inspection's model year follow at once. The identity line is still
+  written once per complete read (ADR-0021), now after the `VIN:` line.
+- `havne-cli stream` writes a `vehicle` line (`rx` and the VIN with
+  its decode, as the identity line's `vin`) once per new VIN, when the
+  flag is set, ahead of the identity line.
+- Python's `Session.vin()` is "" until the flag is set.

@@ -1,0 +1,7 @@
+{"schema": 1, "type": "start"}
+{"base": 0, "ecus": [{"rx": "0x7E8", "tx": "0x7E0"}], "format": 2, "name": "Chained extras", "profile": "user.chained-extras", "signals": 5, "type": "signal_file"}
+{"bits": 8, "byte": 0, "decimals": 0, "group": "Engine", "id": 30000, "kind": "number", "name": "Coolant", "offset": -40, "order": "be", "rank": 0, "read": {"number": "05", "service": "01"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "\u00b0C"}
+{"bits": 8, "byte": 0, "decimals": 0, "group": "Engine", "id": 30001, "kind": "number", "name": "Oil", "offset": -40, "order": "be", "rank": 0, "read": {"number": "F40D", "service": "22"}, "rx": "0x7E8", "scale": 1, "signed": false, "type": "signal_def", "unit": "\u00b0C"}
+{"decimals": 0, "expr": "max(coolant, oil)", "group": "Engine", "id": 30002, "inputs": [{"id": 30000, "max_age_us": 3000000}, {"id": 30001, "max_age_us": 3000000}], "kind": "computed", "name": "Hottest", "rank": 0, "type": "signal_def", "unit": "\u00b0C"}
+{"decimals": 0, "expr": "clamp(130 - hottest, 0, 130)", "group": "Engine", "id": 30003, "inputs": [{"computed": true, "id": 30002, "max_age_us": null}], "kind": "computed", "name": "Margin to 130", "rank": 0, "type": "signal_def", "unit": "\u00b0C"}
+{"decimals": 0, "expr": "if(margin < 20, 1, 0)", "group": "Engine", "id": 30004, "inputs": [{"computed": true, "id": 30003, "max_age_us": null}], "kind": "computed", "name": "Running Hot", "rank": 0, "type": "signal_def", "unit": ""}

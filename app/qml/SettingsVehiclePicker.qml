@@ -21,9 +21,20 @@ ColumnLayout {
     // ---- Vehicle (ADR-0027): picked before a connect, its
     // connection filling the field; every change to the list is
     // made here. Locked while a session is up or in flight ----
+    // A later Havne's vehicle list is never written over: nothing here
+    // changes it
+    enabled: !root.host.bookLater
+    Label {
+        objectName: "vehicleBookLater"
+        visible: root.host.bookLater
+        text: qsTr("This vehicle list was saved by a later Havne and is left as it is.")
+        color: Theme.warning
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+    }
     Label {
         objectName: "vehicleNote"
-        text: qsTr("A vehicle keeps its own signal files, its last address and its plotted signals.")
+        text: qsTr("A vehicle keeps its picked plugins, its own signals, its last address and its plotted signals.")
         color: Theme.textDim
         wrapMode: Text.Wrap
         Layout.fillWidth: true
@@ -217,18 +228,15 @@ ColumnLayout {
         color: Theme.warning
     }
 
-    // A removal asks once, in place
+    // Forget asks once, in place
     Flow {
-        visible: root.host.confirming !== ""
+        visible: root.host.confirming === "forget" || root.host.confirming === "forgetAll"
         Layout.fillWidth: true
         spacing: Theme.spacing
 
         Label {
             objectName: "vehicleConfirmText"
             text: root.host.confirming === "forgetAll" ? qsTr("Forget all vehicles?")
-                : root.host.confirmingFile() !== null
-                  ? qsTr("Remove %1? It was written here, and no other copy exists")
-                        .arg(root.host.confirmingFile().name)
                 : root.host.pickedVehicle !== null ? qsTr("Forget %1?").arg(root.host.pickedVehicle.label)
                 : ""
             color: Theme.text
@@ -237,16 +245,10 @@ ColumnLayout {
         }
         ThemedButton {
             objectName: "vehicleConfirm"
-            text: root.host.confirmingFile() !== null ? qsTr("Remove") : qsTr("Forget")
+            text: qsTr("Forget")
             highlighted: true
             enabled: root.host.idle
-            onClicked: {
-                const file = root.host.confirmingFile()
-                if (file !== null)
-                    root.host.dropSignalFile(file.sha256)
-                else
-                    root.host.forgetVehicles(root.host.confirming === "forgetAll")
-            }
+            onClicked: root.host.forgetVehicles(root.host.confirming === "forgetAll")
         }
         ThemedButton {
             objectName: "vehicleCancel"

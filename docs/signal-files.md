@@ -148,7 +148,7 @@ fills the block as above, and a file you share keeps it
 it, so one session shows both. Without it the file is a set of its own,
 and a session on it reads only your signals. A signal of yours named as one
 of `obd2`'s (`Boost`, say) replaces it: the session shows yours, in its
-place, and a gauge or layout that named `obd2`'s signal reads yours. So does a computed signal of `obd2`'s: name yours `Intake Manifold Pressure` or `Barometric Pressure` and Boost is worked out from it, in its unit, so keep it kPa. A signal a computed one reads is a number or an enum; the loader refuses a text in its place, naming the computed signal.
+place, and a gauge or layout that named `obd2`'s signal reads yours. So does a computed signal of `obd2`'s: name yours `Intake Manifold Pressure` or `Barometric Pressure` and Boost is worked out from it, in its unit, so keep it kPa. A signal a computed one reads is a number or an enum, or in a format 2 file a computed signal: the loader refuses a text in its place, a computed one in a format 1 file, and a computed one that `obd2`'s Boost reads with its 30 s bound (baro: a computed input's ages are its own inputs'), each naming the computed signal that reads it. A computed replacement joins the file's chains, so a circle through it, or a chain past 8 deep (`obd2`'s Boost counted), is refused too.
 
 ### `ecus`
 
@@ -348,6 +348,15 @@ and a 3 s bound on it would blank boost between its reads. Live still
 dims a stale input as it does any signal; the computed value goes quiet
 only when an input passes its own bound.
 
+The bound also has to cover the time between two inputs' reads. Asked
+once a sweep, two inputs arrive about a sweep apart at worst; with the
+whole of a large set asked, a sweep can take longer than 3 s, and a
+signal computed from two of its inputs then never has a value ("waiting
+for data", in none of the unsupported, absent or unasked lists). A
+`max_age` near the sweep's length on the input read least often (Live's
+Delivery line and the support report give the sweep, and a `max_age` is
+at most 60 s), or asking fewer signals, fixes it.
+
 ### Units
 
 A unit is shown exactly as written. These convert when the imperial
@@ -415,7 +424,7 @@ files use `gauge` and its `requires.core` names an older version.
 | A file | 1 MiB, UTF-8 |
 | Signals | 1024 a file |
 | Modules | 4, the base set's counted |
-| A session's requests | 256, the base set's counted (`obd2` alone asks over 90) |
+| A session's requests | 1024, the base set's counted (`obd2` alone asks over 90) |
 | `name` | 1 to 31 bytes |
 | `unit` | 0 to 15 bytes |
 | `decimals` | 0 to 3 |
@@ -462,8 +471,8 @@ A file is refused for:
   connection carries one width (a J2534 or ELM327 session refuses the
   mix before it opens the adapter), and `obd2`'s modules are 11-bit, so
   a file that extends it takes 11-bit modules only.
-- **Its size:** more signals than fit a session's 256 requests with the
-  base set's.
+- **Its size:** more signals than fit a session's 1024 requests with
+  the base set's.
 
 Every refusal names the line and column of what it refuses, then why:
 

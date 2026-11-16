@@ -3,17 +3,22 @@
 
 // The exports and the health report over a recording folder
 // (ADR-0054): fuzz_recording's input, 'F' or '3' then events.log,
-// signals.csv, markers.csv and frames.csv cut at 0x1E bytes, written to
-// a scratch folder, then exported as a folder, CSV and pcapng, scrubbed
-// and raw, whole and over a range, and reported as JSON and text, whole
-// and over a range. The CSV is also written long, as a wide grid of
-// several row intervals in both unit systems and with picked columns,
-// and each wide export's size is checked against ecuio_export_estimate's
-// exact answer. A baseline recording is read for the health report.
+// signals.csv, markers.csv, frames.csv and conditions.json cut at 0x1E
+// bytes, written to a scratch folder, then exported as a folder, CSV and
+// pcapng, scrubbed and raw, whole and over a range, and reported as JSON
+// and text, whole and over a range. The CSV is also written long, as a
+// wide grid of several row intervals in both unit systems and with
+// picked columns, and each wide export's size is checked against
+// ecuio_export_estimate's exact answer. A folder export also runs from a
+// start the input's last byte picks, and every cond line in a scrubbed
+// copy must be what the recorder writes for its fields (ADR-0063
+// section 8). A baseline recording is read for the health report.
 
 #include <ecuio/core.h>
 #include <ecuio/recording.h>
 #include <ecuio/signals.h>
+
+#include "recording_rows.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -34,6 +39,7 @@
 #endif
 
 namespace fs = std::filesystem;
+namespace rows = ecuio_recording_rows;
 
 namespace {
 
@@ -177,6 +183,49 @@ struct result {
     std::string bytes;
 };
 
+/* A scrubbed copy writes each cond line again from its fields: every one
+ * parses and is what append_cond_text writes for them */
+void cond_lines_rewritten(const std::string& events)
+{
+    FILE* f = fopen(events.c_str(), "rb");
+    if (f == nullptr) {
+        return; /* a copy with no events.log */
+    }
+    std::string text;
+    char buf[65536];
+    size_t n = 0;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) {
+        text.append(buf, n);
+    }
+    fclose(f);
+    size_t at = text.find("\n\n");
+    while (at != std::string::npos && at < text.size()) {
+        const size_t start = at + 1;
+        size_t end = text.find('\n', start);
+        if (end == std::string::npos) {
+            end = text.size();
+        }
+        rows::event_line e;
+        const char* body = nullptr;
+        size_t body_len = 0;
+        size_t kind_len = 0;
+        if (rows::parse_event_line(text.data() + start, end - start, &e) &&
+            rows::split_kind(e.rest, e.rest_len, &body, &body_len, &kind_len) &&
+            std::string(e.rest, kind_len) == "cond") {
+            rows::cond_line c;
+            if (!rows::parse_cond_line(body, body_len, &c)) {
+                abort();
+            }
+            std::string again;
+            rows::append_cond_text(again, c);
+            if (again != std::string(body, body_len)) {
+                abort();
+            }
+        }
+        at = end;
+    }
+}
+
 /* One export; a wide CSV's size and rows are then checked against the
  * estimate's, which promises the file's exact size */
 result export_with(ecuio_export_options_t o, bool may_be_invalid = false)
@@ -192,6 +241,10 @@ result export_with(ecuio_export_options_t o, bool may_be_invalid = false)
     judge(r.rc, report.failed_class, out, may_be_invalid);
     if (r.rc == ECUIO_OK) {
         r.bytes = read_tree(fs::u8path(out));
+        if (o.format == ECUIO_EXPORT_FOLDER &&
+            (o.flags & ECUIO_EXPORT_RAW) == 0) {
+            cond_lines_rewritten(out + "/events.log");
+        }
         if (o.format == ECUIO_EXPORT_CSV && o.layout == ECUIO_CSV_WIDE) {
             ecuio_export_estimate_t est{};
             const uint32_t ms = o.row_ms;
@@ -322,11 +375,11 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     if (size < 2 || size > 65536 || (data[0] != 'F' && data[0] != '3')) {
         return 0;
     }
-    const uint8_t* parts[4] = {};
-    size_t lens[4] = {};
+    const uint8_t* parts[5] = {};
+    size_t lens[5] = {};
     size_t count = 0;
     size_t start = 1;
-    for (size_t i = 1; i <= size && count < 4; ++i) {
+    for (size_t i = 1; i <= size && count < 5; ++i) {
         if (i == size || data[i] == 0x1E) {
             parts[count] = data + start;
             lens[count] = i - start;
@@ -336,7 +389,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     }
     std::string events;
     if (data[0] == '3' && count > 0) {
-        events = std::string("ecuio session recording, format 3\n") +
+        events = std::string(rows::kFormat3) + "\n" +
                  std::string(reinterpret_cast<const char*>(parts[0]), lens[0]);
         parts[0] = reinterpret_cast<const uint8_t*>(events.data());
         lens[0] = events.size();
@@ -345,6 +398,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     write_file("signals.csv", parts[1], lens[1], count > 1);
     write_file("markers.csv", parts[2], lens[2], count > 2);
     write_file("frames.csv", parts[3], lens[3], count > 3);
+    write_file("conditions.json", parts[4], lens[4], count > 4);
     for (const uint32_t format :
          {ECUIO_EXPORT_FOLDER, ECUIO_EXPORT_CSV, ECUIO_EXPORT_PCAPNG}) {
         for (const uint32_t flags : {0U, ECUIO_EXPORT_RAW}) {
@@ -352,6 +406,13 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
                  export_once(format, flags, 0, 0));
             export_once(format, flags, 1000000, 2000000);
         }
+    }
+    /* A folder from a start the input picks, 0.5 s steps to 3.5 s: a
+     * range opening after cond lines gives held lines */
+    const uint64_t from = uint64_t{data[size - 1]} % 8 * 500000;
+    for (const uint32_t flags : {0U, ECUIO_EXPORT_RAW}) {
+        same(export_once(ECUIO_EXPORT_FOLDER, flags, from, 0),
+             export_once(ECUIO_EXPORT_FOLDER, flags, from, 0));
     }
     csv_shapes(parts[1], lens[1], count > 1);
     for (const uint32_t format : {ECUIO_HEALTH_JSON, ECUIO_HEALTH_TEXT}) {

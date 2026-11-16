@@ -1,6 +1,8 @@
 // File/layer: core/include/ecuio/recording.h | C ABI, public interface
 // Testing: HARNESS: RecorderTest (test_core): the writer against the mock
-//          and the replay fixture, the seams in internal.h; UNIT
+//          and the replay fixture, the seams in internal.h; UNIT:
+//          RecordingTest, ConditionRecordingTest, ArmedRecorderTest
+//          (test_core); c_abi
 //          (test_c_abi): the header as strict C and the structs' layout
 #ifndef ECUIO_RECORDING_H
 #define ECUIO_RECORDING_H
@@ -21,6 +23,17 @@ extern "C" {
  * latency.csv when the session times requests, markers.csv once marked.
  * A full ring drops records and counts them; it never blocks the worker.
  *
+ * A session with a set of conditions attached (ecuio/conditions.h,
+ * ADR-0063) gives its recording the set and its events: conditions.json
+ * (the set's bytes) and a "conditions" header line with their SHA-256 in
+ * events.log, a "cond" line for each event (key, state, flags, value,
+ * term, host_us, t_us), a "held" line for each condition already ON when
+ * a recording begins after the set has judged frames, and a markers.csv
+ * row at each firing of a condition with mark. A frame the ring has no
+ * room for leaves its events in a carry of 256 that goes in ahead of the
+ * next record; events past it are counted (conditions_lost) and said in a
+ * drop line.
+ *
  * The recorder outlives its session: ecuio_session_destroy detaches it,
  * and notes and marks are taken until ecuio_recorder_close, so a
  * recording brackets the caller's whole teardown.
@@ -28,13 +41,36 @@ extern "C" {
 
 typedef struct ecuio_recorder ecuio_recorder_t; /* opaque */
 
+/*
+ * ecuio_record_options_t.flags: an armed recorder (ADR-0063 section 7).
+ * It writes nothing until a condition with record turns ON: the ring
+ * holds every record as its pre-roll and lets go of those older than the
+ * longest before among the set's conditions, or its oldest once it is
+ * three quarters full (a shorter pre-roll, counted in preroll_short, as
+ * is a window it let go whole before its firing was read).
+ * Each window is a folder of its own, a whole recording with its zero
+ * at its first record, from the firing condition's before ahead of it to
+ * after past the last record condition turning OFF or STALE; a firing
+ * inside that time carries the window on, and a window's start never
+ * moves back once its folder is made. Its header is a recording begun
+ * mid-session's (the focus and the link's state at the window's start),
+ * with "trigger  <key>,<before> ms" for the condition that opened it,
+ * and its first lines are a held cond line for each condition ON there.
+ * A window's folder is named as a recording's, but the later windows
+ * of one second take -000002, -000003 and on, so the names sort as the
+ * windows opened. Notes and marks go into the window their time falls
+ * in, and nowhere outside one. A condition reads STALE as OFF here, so a signal that
+ * stops answering never holds a window open.
+ */
+#define ECUIO_RECORD_ARMED 0x1u
+
 /* Options for ecuio_recorder_open. Pointers last (as ecuio_value_t has
  * them), so every other offset is the same on every pointer width. */
 typedef struct ecuio_record_options {
     uint32_t ring_bytes; /* 0 for the default, 4 MiB */
     uint32_t note_lines; /* 0 for the default, 256 */
     uint32_t header_line_count;
-    uint32_t flags;                  /* zero */
+    uint32_t flags;                  /* ECUIO_RECORD_ARMED or zero */
     uint64_t reserved[4];            /* zero; ABI growth space */
     const char* root_utf8;           /* the folder recordings go in */
     const char* label_utf8;          /* NULL or "" for none */
@@ -57,27 +93,55 @@ _Static_assert(offsetof(ecuio_record_options_t, root_utf8) == 48,
 #define ECUIO_RECORDING_ACTIVE   1u /* writing */
 #define ECUIO_RECORDING_DETACHED 2u /* its session destroyed; notes go on */
 #define ECUIO_RECORDING_FAILED   3u /* a write failed; reason says why */
+#define ECUIO_RECORDING_ARMED    4u /* armed and between windows: nothing
+                                       being written (ACTIVE while one is) */
 
 #define ECUIO_RECORDING_REASON_LEN 128
 
+/* ecuio_recorder_state_t.flags; append-only */
+#define ECUIO_RECORDER_DRAINED 0x1u /* its session detached and the writer
+                                       has taken every record it put: the
+                                       counts are final but for the close's
+                                       own lines */
+
 typedef struct ecuio_recorder_state {
     uint32_t state;                          /* ECUIO_RECORDING_* */
-    uint32_t flags;                          /* zero */
+    uint32_t flags;                          /* ECUIO_RECORDER_DRAINED */
     uint64_t frame_rows;                     /* rows written to frames.csv */
     uint64_t value_rows;                     /* rows written to signals.csv */
     uint64_t records_dropped;                /* the ring was full */
     uint64_t notes_dropped;                  /* the note queue was full */
     char reason[ECUIO_RECORDING_REASON_LEN]; /* the OS's reason for
                                                       FAILED, no path */
-    uint64_t reserved[4];                    /* zero; ABI growth space */
+    uint64_t conditions_lost;                /* condition events the ring
+                                                and its carry had no room
+                                                for (a drop line says so);
+                                                0 without a set */
+    uint32_t windows;                        /* an armed recorder's windows
+                                                opened so far */
+    uint32_t preroll_short;                  /* windows whose pre-roll a
+                                                full ring cut, and those it
+                                                let go whole (no folder) */
+    uint64_t frames_passed;                  /* an armed recorder's frames
+                                                read and let go outside
+                                                every window */
+    uint64_t reserved[1];                    /* zero; ABI growth space */
 } ecuio_recorder_state_t;
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_recorder_state_t) == 200,
               "ecuio_recorder_state_t size is ABI");
+static_assert(offsetof(ecuio_recorder_state_t, windows) == 176,
+              "recorder state windows offset is ABI");
+static_assert(offsetof(ecuio_recorder_state_t, frames_passed) == 184,
+              "recorder state frames_passed offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_recorder_state_t) == 200,
                "ecuio_recorder_state_t size is ABI");
+_Static_assert(offsetof(ecuio_recorder_state_t, windows) == 176,
+               "recorder state windows offset is ABI");
+_Static_assert(offsetof(ecuio_recorder_state_t, frames_passed) == 184,
+               "recorder state frames_passed offset is ABI");
 #endif
 
 /*
@@ -87,11 +151,14 @@ _Static_assert(sizeof(ecuio_recorder_state_t) == 200,
  * space at its end, which Windows refuses; the next -n when the name is
  * taken, never checked first), creates frames.csv, signals.csv and
  * events.log in it and starts the writer thread. Nothing is written
- * into them until a session attaches. *out is
+ * into them until a session attaches. With ECUIO_RECORD_ARMED it creates
+ * only the root: each window's folder takes the same name from the
+ * window's start, made when the window opens. *out is
  * NULL on every failure. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL
- * options, root or out; ECUIO_ERR_INVALID_ARGUMENT for nonzero flags or
- * reserved; ECUIO_ERR_RECORDING_FAILED when the folder can't be created,
- * with ecuio_last_error_detail naming the cause, never the path.
+ * options, root or out; ECUIO_ERR_INVALID_ARGUMENT for a flag other than
+ * ECUIO_RECORD_ARMED or nonzero reserved; ECUIO_ERR_RECORDING_FAILED
+ * when the folder can't be created, with ecuio_last_error_detail naming
+ * the cause, never the path.
  */
 ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
                                    ecuio_recorder_t** out);
@@ -116,16 +183,27 @@ ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
  * call. The recording holds the frames from then on; a started
  * session's header says what the link's state was ("link": "healthy"
  * for one that is OK with no episode) and which signals its focus held
- * ("focus", when one is set). Reply timing's counts in latency.csv are
+ * ("focus", or "pick" for a default pick, when one is set: as many lines
+ * as the names take, each under 4 KiB of them, which a reader appends).
+ * A focus set or ended while the recorder takes frames is an activity
+ * line of that kind word: "N signals: " and the names as the header
+ * writes them (", at least M ms between sweeps" after the count when the
+ * session asks requests and has a minimum), "more: " and the rest on
+ * further lines of the same time, or "none: every signal asked"; a call
+ * that changes none of the picks, the kind or the minimum writes no
+ * line. Reply timing's counts in latency.csv are
  * the session's, cumulative since it started, so a recording begun
  * mid-session finds them already counted up. A session takes one
  * recorder at a time: once that one is closed, another can attach, and
- * a refused recorder is left as it was for a later try.
+ * a refused recorder is left as it was for a later try. An armed
+ * recorder needs the session's set of conditions to hold an enabled
+ * condition with record, or nothing could ever open a window.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL session or recorder;
  * ECUIO_ERR_SESSION_CLOSED for a closed session;
- * ECUIO_ERR_INVALID_ARGUMENT for a recorder that has had a session, or a
- * session that has a recorder; ECUIO_ERR_OUT_OF_MEMORY when the defs'
- * copy can't be made.
+ * ECUIO_ERR_INVALID_ARGUMENT for a recorder that has had a session, a
+ * session that has a recorder, or an armed recorder with no condition
+ * that records (the detail starts "no condition records");
+ * ECUIO_ERR_OUT_OF_MEMORY when the defs' copy can't be made.
  */
 ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                                     ecuio_recorder_t* recorder);
@@ -151,8 +229,10 @@ ecuio_status_t ecuio_recorder_get_state(const ecuio_recorder_t* recorder,
                                         ecuio_recorder_state_t* out);
 
 /* The folder, UTF-8 and absolute, copied terminated and cut to capacity;
- * *out_len is its full length, so a caller spots a cut by comparing.
- * Safe from any thread until close. */
+ * *out_len is its full length, so a caller spots a cut by comparing. An
+ * armed recorder's is its newest window's, given once its files and
+ * header are written, and "" before the first. Safe from any thread
+ * until close. */
 ecuio_status_t ecuio_recorder_get_folder(const ecuio_recorder_t* recorder,
                                          char* utf8, uint32_t capacity,
                                          uint32_t* out_len);
@@ -162,6 +242,8 @@ ecuio_status_t ecuio_recorder_get_folder(const ecuio_recorder_t* recorder,
  * a line as a note's) and the files' last rows, closes them, stops the
  * writer and frees the handle, whatever it returns: ECUIO_OK when every
  * file ended whole, ECUIO_ERR_RECORDING_FAILED when a write had failed.
+ * An armed recorder writes a window still open to its end and summary,
+ * and one that never fired leaves nothing on disk but its root.
  * NULL is a safe no-op returning ECUIO_OK.
  */
 ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
@@ -173,7 +255,10 @@ ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
  * builds, per signal, its range and a summary for each second it has
  * samples in, beside each second's byte offset in the file; queries
  * answer from those and, zoomed in closer than a second a column, from
- * the raw rows of just the seconds they need. Once open, every call but
+ * the raw rows of just the seconds they need. The same pass keeps
+ * events.log's cond lines, a session's condition events (ADR-0063
+ * section 8; ecuio_recording_get_condition_event), and checks the copies
+ * beside the recording against their hashes. Once open, every call but
  * close is safe from several threads at once on one handle.
  */
 
@@ -193,6 +278,15 @@ typedef struct ecuio_recording ecuio_recording_t; /* opaque */
                                                 frames.csv at the open
                                                 (ecuio_recording_open_frames),
                                                 not read from signals.csv */
+#define ECUIO_RECORDING_INFO_CONDITIONS_CUT                                    \
+    0x4u /* events.log holds more cond lines than
+            ECUIO_RECORDING_MAX_CONDITION_EVENTS: the first that many are
+            kept, and condition_events counts them all */
+
+/* The most cond lines the reader keeps (40 bytes each, so about 40 MiB,
+ * beside a table of at most ECUIO_CONDITION_MAX_CONDITIONS keys): a
+ * condition that flaps through a long recording */
+#define ECUIO_RECORDING_MAX_CONDITION_EVENTS 1048576u
 
 /* ecuio_recording_info_t.format: events.log's header */
 #define ECUIO_RECORDING_FORMAT_UNKNOWN 0u /* none, or a first line the
@@ -215,15 +309,23 @@ typedef struct ecuio_recording_info {
     uint64_t rows_torn;       /* last rows dropped for having no newline */
     uint64_t records_dropped; /* the writer's, from the summary */
     uint64_t notes_dropped;
-    uint64_t reserved[5];     /* zero; ABI growth space */
+    uint64_t condition_events; /* events.log's cond lines that parse
+                                  (ADR-0063 section 8; format 3), every
+                                  one counted;
+                                  ecuio_recording_get_condition_event */
+    uint64_t reserved[4];      /* zero; ABI growth space */
 } ecuio_recording_info_t;
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_recording_info_t) == 96,
               "ecuio_recording_info_t size is ABI");
+static_assert(offsetof(ecuio_recording_info_t, condition_events) == 56,
+              "recording info condition_events offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_recording_info_t) == 96,
                "ecuio_recording_info_t size is ABI");
+_Static_assert(offsetof(ecuio_recording_info_t, condition_events) == 56,
+               "recording info condition_events offset is ABI");
 #endif
 
 /* ecuio_recording_signal_t.flags */
@@ -374,8 +476,9 @@ _Static_assert(sizeof(ecuio_recording_stats_t) == 96,
 #define ECUIO_RECORDING_STEP_FORWARD  1u
 #define ECUIO_RECORDING_STEP_BACKWARD 2u
 
-/* Called on the opening thread every few megabytes; a nonzero return
- * cancels the open */
+/* Called on the opening thread every few megabytes: of events.log first,
+ * bytes_read then 0 and bytes_total the data file's, then of the data
+ * file; a nonzero return cancels the open */
 typedef int (*ecuio_open_progress_t)(uint64_t bytes_read,
                                      uint64_t bytes_total, void* user_data);
 
@@ -413,6 +516,73 @@ _Static_assert(sizeof(ecuio_recording_signals_t) == 128,
                "ecuio_recording_signals_t size is ABI");
 _Static_assert(offsetof(ecuio_recording_signals_t, sha256) == 16,
                "recording signals sha256 offset is ABI");
+#endif
+
+/* ecuio_recording_conditions_t.flags, as the signal file's: NAMED,
+ * events.log's header names conditions.json and its SHA-256 (format 3);
+ * PRESENT, conditions.json is in the folder; MATCH, named and present,
+ * and its SHA-256 the header's */
+#define ECUIO_RECORDING_CONDITIONS_NAMED   0x1u
+#define ECUIO_RECORDING_CONDITIONS_PRESENT 0x2u
+#define ECUIO_RECORDING_CONDITIONS_MATCH   0x4u
+
+/* The set of conditions a recording's session judged (ADR-0063 section
+ * 8): copied into its folder as conditions.json, its hash on events.log's
+ * header, so ecuio_condition_set_load can load it again when MATCH */
+typedef struct ecuio_recording_conditions {
+    uint32_t flags;         /* ECUIO_RECORDING_CONDITIONS_* */
+    uint32_t lines_skipped; /* cond lines that don't parse, passed by */
+    uint64_t length;        /* conditions.json's bytes; 0 when it's absent */
+    char sha256[72];        /* the header's, 64 lowercase hex digits; ""
+                               when it names none */
+    uint64_t events_lost;   /* condition events the recorder lost: the sum
+                               of its drop lines that count them (format
+                               3), which stops at UINT64_MAX */
+    uint64_t reserved[4];   /* zero; ABI growth space */
+} ecuio_recording_conditions_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_recording_conditions_t) == 128,
+              "ecuio_recording_conditions_t size is ABI");
+static_assert(offsetof(ecuio_recording_conditions_t, sha256) == 16,
+              "recording conditions sha256 offset is ABI");
+static_assert(offsetof(ecuio_recording_conditions_t, events_lost) == 88,
+              "recording conditions events_lost offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_recording_conditions_t) == 128,
+               "ecuio_recording_conditions_t size is ABI");
+_Static_assert(offsetof(ecuio_recording_conditions_t, sha256) == 16,
+               "recording conditions sha256 offset is ABI");
+_Static_assert(offsetof(ecuio_recording_conditions_t, events_lost) == 88,
+               "recording conditions events_lost offset is ABI");
+#endif
+
+/* One cond line: an event of the recording's set, as the session gave it
+ * (ecuio_condition_event_t), by its condition's key, since the reader
+ * never loads conditions.json. No pointer, so every offset is the same
+ * on every pointer width. */
+typedef struct ecuio_recording_condition_event {
+    uint64_t host_us;      /* the recording's time of the event */
+    uint64_t timestamp_us; /* the session's, exact */
+    double value;          /* the settling term's sample */
+    uint32_t state;        /* ECUIO_CONDITION_OFF or _ON */
+    uint32_t flags;        /* ECUIO_CONDITION_STALE, _FIRED, _HELD */
+    uint32_t term;         /* the settling term's index */
+    uint32_t reserved0;    /* zero */
+    char key[32];          /* the condition's key, terminated */
+    uint64_t reserved[2];  /* zero; ABI growth space */
+} ecuio_recording_condition_event_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_recording_condition_event_t) == 88,
+              "ecuio_recording_condition_event_t size is ABI");
+static_assert(offsetof(ecuio_recording_condition_event_t, key) == 40,
+              "recording condition event key offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_recording_condition_event_t) == 88,
+               "ecuio_recording_condition_event_t size is ABI");
+_Static_assert(offsetof(ecuio_recording_condition_event_t, key) == 40,
+               "recording condition event key offset is ABI");
 #endif
 
 /*
@@ -453,7 +623,8 @@ ecuio_status_t ecuio_recording_open(const char* folder_utf8,
  * second with frames, 24 for each computed signal's input in each such
  * second, and 256 each time a packed reply's lengths change.
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL folder, set or out;
- * ECUIO_ERR_INVALID_ARGUMENT for a set ecuio_validate_signal_set refuses;
+ * ECUIO_ERR_INVALID_ARGUMENT for a set ecuio_validate_signal_set refuses
+ * (ECUIO_ERR_OUT_OF_MEMORY when it had no room to check the chains);
  * ECUIO_ERR_LOAD_FAILED for a folder with no frames.csv or a file the
  * reader refuses ("frames.csv line 12: ...", never the path);
  * ECUIO_ERR_CANCELED and ECUIO_ERR_OUT_OF_MEMORY as for
@@ -477,9 +648,35 @@ ecuio_status_t ecuio_recording_get_info(const ecuio_recording_t* r,
 /* The signal file it was decoded with, as the open found it: signals.json
  * is hashed then, so MATCH says the bytes there now are the ones that
  * decoded it (a caller reads them from <folder>/signals.json, and a
- * caller that finds them changed since sees the hash differ) */
+ * caller that finds them changed since sees the hash differ). A
+ * signals.json past ECUIO_SIGNAL_FILE_MAX_BYTES, which
+ * ecuio_signal_file_load refuses, is present but never MATCH. */
 ecuio_status_t ecuio_recording_get_signals(const ecuio_recording_t* r,
                                            ecuio_recording_signals_t* out);
+/* The set of conditions it was judged by, as the open found it, and as
+ * ecuio_recording_get_signals answers for the signal file. A conditions
+ * line that isn't conditions.json and its SHA-256 names none; the open
+ * goes on. A conditions.json past ECUIO_CONDITION_FILE_MAX_BYTES, which
+ * ecuio_condition_set_load refuses, is present but never MATCH.
+ * events_lost counts the events the recorder had no room for and never
+ * wrote (its drop lines "the recording lost N condition events"): above
+ * zero, a condition's cond lines may miss a firing or a turn OFF. */
+ecuio_status_t
+ecuio_recording_get_conditions(const ecuio_recording_t* r,
+                               ecuio_recording_conditions_t* out);
+/* The index-th cond line in events.log's order, which the recorder writes
+ * in time order. A cond line is a format 3 activity line whose kind is
+ * cond; one that doesn't parse (a torn last line or one past the longest
+ * row among them), or names a key past the ECUIO_CONDITION_MAX_CONDITIONS
+ * a set holds, is left out and counted in lines_skipped; an eighth field
+ * and after are passed by, and a flag word the reader doesn't know is
+ * left out of flags. A line whose time doesn't read is no activity line,
+ * of any kind. index runs below
+ * info.condition_events and below ECUIO_RECORDING_MAX_CONDITION_EVENTS;
+ * past it ECUIO_ERR_INVALID_ARGUMENT, out untouched. */
+ecuio_status_t
+ecuio_recording_get_condition_event(const ecuio_recording_t* r, uint64_t index,
+                                    ecuio_recording_condition_event_t* out);
 ecuio_status_t ecuio_recording_get_signal(const ecuio_recording_t* r,
                                           uint32_t index,
                                           ecuio_recording_signal_t* out);
@@ -1090,11 +1287,17 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * folder (the caller names it; the source's name, which may hold the
  * vehicle's label, is never carried): frames.csv's kept rows as
  * recorded, signals.csv by the CSV's classes, events.log's header and
- * its link, drop, asleep and end lines (the URI's authority as
- * <path>, <address> or <label>, the vehicle's label as <vehicle>, the
- * caller's notes left out), markers.csv with its labels as typed,
- * latency.csv and signals.json, each file through the check; a file it
- * doesn't know is left out and counted (files_left_out).
+ * its link, drop, asleep, cond, focus, pick and end lines (the URI's
+ * authority as <path>, <address> or <label>, the vehicle's label as
+ * <vehicle>, the caller's notes left out, a format 3 cond line by its
+ * own host_us and written again from its fields, one that doesn't parse
+ * left out; a range opens with the last focus or pick change before it,
+ * at its start), markers.csv with its labels as typed, latency.csv,
+ * signals.json and conditions.json, each file through the check; a file
+ * it doesn't know is left out and counted (files_left_out). A range
+ * starting after a cond line opens with a held cond line for each
+ * condition ON there, from the lines before it, so its events read true
+ * alone.
  * Deterministic: the same recording and options give the same bytes.
  * report may be NULL; on any failure it holds zeros but failed_class.
  * ECUIO_OK;

@@ -1,21 +1,33 @@
 // File/layer: core/src/recorder.cpp | C++17, Qt-free; the recorder
-//             (ADR-0049 sections 1 to 4)
-// Testing: UNIT: RecorderTest (test_core); BRIDGE: BridgeTest (test_bridge);
+//             (ADR-0049 sections 1 to 4), armed too (ADR-0063)
+// Testing: UNIT: RecorderTest, ConditionRecordingTest,
+//          ArmedRecorderTest (test_core);
+//          BRIDGE: BridgeTest (test_bridge);
 //          HARNESS: Elm327SessionTest (test_elm327)
 //
 // The worker copies each frame and its values, its link transitions and
 // its reply timing into a byte ring (single producer, single consumer);
 // a writer thread of the recorder's own drains it into frames.csv,
-// signals.csv, events.log's link lines and latency.csv in ADR-0017's
-// rows, and the caller's notes and marks, which come through a queue of
-// their own, into events.log and markers.csv. The writer
-// never holds the session: what it writes reached it through the ring
-// or the queue, or was copied at attach.
+// signals.csv, events.log's link and cond lines, markers.csv and
+// latency.csv in ADR-0017's rows, and the caller's notes and marks, which
+// come through a queue of their own, into events.log and markers.csv. A
+// frame's condition events ride in its record; a frame that doesn't fit
+// leaves them in a carry of 256 that goes in ahead of the next record, and
+// past it they are counted and said in a drop line (ADR-0063 section 8).
+// The writer never holds the session: what it writes reached it through
+// the ring or the queue, or was copied at attach.
+//
+// This file holds the worker's puts, the ABI and the test seams; the
+// class is in recorder_impl.h, its writer in recorder_writer.cpp and
+// recorder_armed.cpp, the text helpers in recorder_text.cpp.
 
 #include "recorder.h"
 
+#include "condition_eval.h"
 #include "error_detail.h"
-#include "recording_lines.h" /* csv_quoted, signal_line */
+#include "recorder_impl.h"
+#include "recorder_text.h"
+#include "recording_lines.h" /* signal_line */
 #include "recording_rows.h" /* kFormat3, the first line */
 #include "session.h"
 #include "sha256.h"
@@ -25,1110 +37,60 @@
 #include "ecuio/signals.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
-#include <clocale>
-#include <condition_variable>
 #include <cstdio>
 #include <cstring>
-#include <ctime>
-#include <deque>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
 
-#ifdef _WIN32
-#include "win_utf8.h"
-#include <io.h>
-#include <share.h>
-#else
-#include <climits>
-#include <cstdlib>
-#include <sys/stat.h>
-#include <unistd.h>
-#endif
-
-namespace {
+namespace ecuio_rec {
 
 constexpr uint32_t kDefaultRingBytes = 4u * 1024u * 1024u;
-constexpr uint32_t kDefaultNoteLines = 256;
-constexpr size_t kLineMax = 1024;
-constexpr size_t kLabelMax = 40;
-constexpr auto kBusyWake = std::chrono::milliseconds(10);
-constexpr auto kIdleWake = std::chrono::milliseconds(100);
-constexpr auto kFlushEvery = std::chrono::milliseconds(100);
-constexpr auto kSyncEvery = std::chrono::seconds(2);
-
-constexpr uint64_t kTimingEveryUs = 10000000;
-constexpr uint64_t kSleepLineUs = 1000000;
+/* "conditions  conditions.json,<64 hex>\n" and its NUL */
+constexpr size_t kConditionsLineMax = 96;
 constexpr auto kFinalTimingWait = std::chrono::seconds(1);
 constexpr auto kFinalTimingRetry = std::chrono::milliseconds(10);
 
-/* A record in the ring: this head, then its body, which starts with its
- * host_us. A frame's is frame_body, the used bytes, then each value as
- * value_head and its double or text; a link transition's link_body; reply
- * timing's timing_body and its rows. */
-struct record_head {
-    uint32_t size; /* the whole record, head included */
-    uint32_t type;
-    uint64_t dropped_before; /* frames the ring had no room for */
-};
-constexpr uint32_t kRecordFrame = 1;
-constexpr uint32_t kRecordLink = 2;
-constexpr uint32_t kRecordTiming = 3;
+/* ecuio_recorder_test_set_clock's (internal.h) */
+std::atomic<bool> g_test_clock_on{false};
+std::atomic<uint64_t> g_test_clock_us{0};
 
-struct link_body {
-    uint64_t host_us;
-    int32_t state;
-    uint32_t episodes;
-};
-
-struct timing_body {
-    uint64_t host_us;
-    ecuio_session_timing_t timing;
-    uint32_t rows;
-    uint32_t pad;
-};
-
-struct frame_body {
-    uint64_t host_us;
-    uint64_t timestamp_us;
-    uint32_t id;
-    uint32_t flags;
-    uint16_t length;
-    uint16_t values;
-    uint32_t pad;
-};
-
-struct value_head {
-    uint16_t signal_id;
-    uint8_t kind;
-    uint8_t pad;
-    uint32_t text_len; /* text's bytes follow; else a double */
-};
-
-struct def_entry {
-    uint16_t id;
-    bool text;
-    std::string name; /* CSV-quoted as signals.csv writes it */
-    std::string unit;
-};
-
-/* What the caller's threads hand the writer */
-enum class item_kind { begin, note, mark };
-struct item {
-    item_kind kind;
-    uint64_t host_us;
-    std::string text;
-    std::string bytes; /* begin's: signals.json, empty for none */
-};
-
-bool is_text_kind(uint8_t kind)
+/* The session's focus; the caller holds focus_mutex */
+focus_named focus_now(const ecuio_session_t* session)
 {
-    return kind == ECUIO_VALUE_TEXT || kind == ECUIO_VALUE_HEX;
+    focus_named f;
+    f.ids = session->focus_ids;
+    f.pick = (session->focus_flags & ECUIO_FOCUS_DEFAULT_PICK) != 0;
+    /* Only a session that asks has one: the others take it and change
+     * nothing */
+    f.min_sweep_ms = session->focus_requests ? session->focus_min_sweep_ms : 0;
+    return f;
 }
 
-/* recording_lines.h's, which the CSV import writes with too */
-using ecuio_recording_lines::csv_quoted;
+} // namespace ecuio_rec
 
-void append_u64(std::string& out, uint64_t v)
+void ecuio_recorder::copy_in(uint64_t pos, const void* src, size_t n)
 {
-    char buf[24];
-    const int n = std::snprintf(buf, sizeof buf, "%llu",
-                                static_cast<unsigned long long>(v));
-    out.append(buf, static_cast<size_t>(n));
-}
-
-void append_hex(std::string& out, uint32_t v)
-{
-    char buf[16];
-    const int n = std::snprintf(buf, sizeof buf, "0x%X", v);
-    out.append(buf, static_cast<size_t>(n));
-}
-
-/* Seconds since the start to the millisecond, rounded, as "+1.234" */
-void append_seconds(std::string& out, uint64_t host_us)
-{
-    const uint64_t ms = (host_us + 500) / 1000;
-    char buf[32];
-    const int n = std::snprintf(buf, sizeof buf, "+%llu.%03llu",
-                                static_cast<unsigned long long>(ms / 1000),
-                                static_cast<unsigned long long>(ms % 1000));
-    out.append(buf, static_cast<size_t>(n));
-}
-
-std::tm local_tm(std::time_t t)
-{
-    std::tm tm{};
-#ifdef _WIN32
-    localtime_s(&tm, &t);
-#else
-    localtime_r(&t, &tm);
-#endif
-    return tm;
-}
-
-std::tm utc_tm(std::time_t t)
-{
-    std::tm tm{};
-#ifdef _WIN32
-    gmtime_s(&tm, &t);
-#else
-    gmtime_r(&t, &tm);
-#endif
-    return tm;
-}
-
-/* A line safe for events.log or markers.csv: carriage returns and
- * newlines as spaces, cut at 1 KB on a character's start */
-std::string one_line(const char* text)
-{
-    std::string s(text, strnlen(text, kLineMax + 4));
-    if (s.size() > kLineMax) {
-        size_t cut = kLineMax;
-        while (cut > 0 && (static_cast<unsigned char>(s[cut]) & 0xC0) == 0x80) {
-            --cut;
-        }
-        s.resize(cut);
-    }
-    for (char& c : s) {
-        if (c == '\r' || c == '\n') {
-            c = ' ';
-        }
-    }
-    return s;
-}
-
-/*
- * An enum def's label lines for events.log's header (format 3): "label
- * <name>,<raw>,<label>" per entry, raw values ascending as the set holds
- * them. The name and the label are CSV-quoted, so a comma or a quote in
- * either reads back, and a line break is a space, keeping the label
- * within its 27 bytes. A label can't start a formula: the set's
- * validator refuses one that would (ADR-0049 section 8), so none reaches
- * a file. name is the CSV-quoted name.
- */
-std::string label_lines(const ecuio_signal_set_t* set,
-                        const ecuio_signal_def_t& d, const std::string& name)
-{
-    if (d.kind != ECUIO_VALUE_ENUM || set->enums == nullptr ||
-        uint32_t{d.table_first} + d.table_count > set->enum_count) {
-        return {};
-    }
-    std::string lines;
-    for (uint32_t k = 0; k < d.table_count; ++k) {
-        const ecuio_enum_entry_t& e = set->enums[d.table_first + k];
-        const std::string label(e.label, strnlen(e.label, sizeof e.label));
-        lines += "label  " + name + "," + std::to_string(e.raw) + "," +
-                 csv_quoted(label.data(), label.size()) + "\n";
-    }
-    return lines;
-}
-
-/* ADR-0027 section 2's rule, in core: ASCII letters and digits, space,
- * '-', '_', '.', and every character past ASCII kept whole; runs of
- * spaces made one; at most 40 characters; no dot or space at the end */
-std::string reduce_label(const char* label)
-{
-    std::string out;
-    size_t chars = 0;
-    const unsigned char* p = reinterpret_cast<const unsigned char*>(label);
-    while (*p != 0 && chars < kLabelMax) {
-        const unsigned char c = *p;
-        if (c < 0x80) {
-            const bool keep = (c >= 'A' && c <= 'Z') ||
-                              (c >= 'a' && c <= 'z') ||
-                              (c >= '0' && c <= '9') || c == '-' || c == '_' ||
-                              c == '.' || c == ' ';
-            if (keep && !(c == ' ' && (out.empty() || out.back() == ' '))) {
-                out += static_cast<char>(c);
-                ++chars;
-            }
-            ++p;
-            continue;
-        }
-        /* A character past ASCII: its lead byte and continuation bytes,
-         * kept only when whole */
-        size_t n = (c & 0xE0) == 0xC0   ? 2
-                   : (c & 0xF0) == 0xE0 ? 3
-                   : (c & 0xF8) == 0xF0 ? 4
-                                        : 0;
-        bool whole = n != 0;
-        for (size_t i = 1; whole && i < n; ++i) {
-            whole = (p[i] & 0xC0) == 0x80;
-        }
-        if (whole) {
-            out.append(reinterpret_cast<const char*>(p), n);
-            ++chars;
-            p += n;
-        } else {
-            ++p;
-        }
-    }
-    while (!out.empty() && (out.back() == '.' || out.back() == ' ')) {
-        out.pop_back();
-    }
-    return out;
-}
-
-/* The C library's words for errno */
-std::string errno_text(int err)
-{
-#ifdef _WIN32
-    char buf[128];
-    return strerror_s(buf, sizeof buf, err) == 0 ? std::string(buf)
-                                                 : "the write failed";
-#else
-    const char* s = std::strerror(err);
-    return s != nullptr ? std::string(s) : "the write failed";
-#endif
-}
-
-/* The OS's words for a failed write, never the path */
-std::string write_reason(int err)
-{
-    switch (err) {
-    case ENOSPC:
-        return "the disk is full";
-    case EFBIG:
-        return "the file reached the file system's size limit";
-    case EIO:
-        return "the storage stopped answering";
-    default:
-        return errno_text(err);
+    const size_t at = static_cast<size_t>(pos % cap);
+    const size_t first = (std::min)(n, cap - at);
+    std::memcpy(ring.get() + at, src, first);
+    if (n > first) {
+        std::memcpy(ring.get(), static_cast<const uint8_t*>(src) + first,
+                    n - first);
     }
 }
 
-#ifdef _WIN32
-std::wstring wide(const std::string& utf8)
+uint64_t ecuio_record_clock_us()
 {
-    std::wstring w(utf8.size() + 1, L'\0');
-    if (!ecuio_utf8_to_wide(utf8.c_str(), &w[0], w.size())) {
-        return std::wstring();
-    }
-    w.resize(wcslen(w.c_str()));
-    return w;
+    return g_test_clock_on.load(std::memory_order_acquire)
+               ? g_test_clock_us.load(std::memory_order_acquire)
+               : ecuio_clock_us();
 }
-
-std::string os_reason(DWORD code)
-{
-    wchar_t* text = nullptr;
-    const DWORD n = FormatMessageW(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-            FORMAT_MESSAGE_IGNORE_INSERTS,
-        nullptr, code, 0, reinterpret_cast<LPWSTR>(&text), 0, nullptr);
-    std::string out;
-    if (n > 0 && text != nullptr) {
-        char buf[512];
-        if (ecuio_wide_to_utf8(text, buf, sizeof buf)) {
-            out = buf;
-        }
-    }
-    if (text != nullptr) {
-        LocalFree(text);
-    }
-    while (!out.empty() && (out.back() == '\n' || out.back() == '\r' ||
-                            out.back() == ' ' || out.back() == '.')) {
-        out.pop_back();
-    }
-    if (out.empty()) {
-        out = "Windows error " + std::to_string(code);
-    }
-    return out;
-}
-
-FILE* open_file(const std::string& path)
-{
-    const std::wstring w = wide(path);
-    /* Text mode, as the app writes them (CRLF on Windows), and shared
-     * for reading, so the reader can open a recording being written */
-    return w.empty() ? nullptr : _wfsopen(w.c_str(), L"w", _SH_DENYWR);
-}
-#else
-FILE* open_file(const std::string& path)
-{
-    return std::fopen(path.c_str(), "w");
-}
-#endif
-
-/* Writes bytes to path as they are (binary, so its hash holds on every
- * platform); false with errno set on a failure */
-bool write_bytes(const std::string& path, const std::string& bytes)
-{
-#ifdef _WIN32
-    const std::wstring w = wide(path);
-    FILE* f = w.empty() ? nullptr : _wfsopen(w.c_str(), L"wb", _SH_DENYWR);
-#else
-    FILE* f = std::fopen(path.c_str(), "wb");
-#endif
-    if (f == nullptr) {
-        return false;
-    }
-    const bool wrote =
-        std::fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size();
-    const int e = errno;
-    const bool closed = std::fclose(f) == 0;
-    if (!wrote) {
-        errno = e;
-    }
-    return wrote && closed;
-}
-
-/* Creates every missing folder of root; false with the OS's reason */
-bool make_root(const std::string& root, std::string* why)
-{
-    for (size_t i = 1; i <= root.size(); ++i) {
-        if (i < root.size() && root[i] != '/' && root[i] != '\\') {
-            continue;
-        }
-        const std::string prefix = root.substr(0, i);
-        if (prefix.empty() || prefix.back() == ':') {
-            continue;
-        }
-#ifdef _WIN32
-        const std::wstring w = wide(prefix);
-        if (w.empty()) {
-            *why = "the folder's name isn't valid UTF-8";
-            return false;
-        }
-        if (!CreateDirectoryW(w.c_str(), nullptr)) {
-            const DWORD e = GetLastError();
-            if (e != ERROR_ALREADY_EXISTS && e != ERROR_ACCESS_DENIED) {
-                *why = os_reason(e);
-                return false;
-            }
-        }
-#else
-        if (mkdir(prefix.c_str(), 0777) != 0 && errno != EEXIST) {
-            *why = errno_text(errno);
-            return false;
-        }
-#endif
-    }
-    return true;
-}
-
-/* Creates the leaf: true when this call made it, false with gone set
- * when the name is taken, false with why when it can't be made */
-bool make_leaf(const std::string& path, bool* taken, std::string* why)
-{
-    *taken = false;
-#ifdef _WIN32
-    const std::wstring w = wide(path);
-    if (w.empty()) {
-        *why = "the folder's name isn't valid UTF-8";
-        return false;
-    }
-    if (CreateDirectoryW(w.c_str(), nullptr)) {
-        return true;
-    }
-    const DWORD e = GetLastError();
-    if (e == ERROR_ALREADY_EXISTS) {
-        *taken = true;
-    } else {
-        *why = os_reason(e);
-    }
-#else
-    if (mkdir(path.c_str(), 0777) == 0)
-        return true;
-    if (errno == EEXIST) {
-        *taken = true;
-    } else {
-        *why = errno_text(errno);
-    }
-#endif
-    return false;
-}
-
-std::string absolute(const std::string& path)
-{
-#ifdef _WIN32
-    const std::wstring w = wide(path);
-    wchar_t buf[4096];
-    const DWORD n = GetFullPathNameW(w.c_str(), 4096, buf, nullptr);
-    if (n == 0 || n >= 4096) {
-        return path;
-    }
-    for (DWORD i = 0; i < n; ++i) {
-        if (buf[i] == L'\\') {
-            buf[i] = L'/';
-        }
-    }
-    char out[4096 * 3];
-    return ecuio_wide_to_utf8(buf, out, sizeof out) ? std::string(out) : path;
-#else
-    /* As the caller spelled it, links kept: realpath would turn macOS's
-     * /var into /private/var, or an iOS container's into another spelling
-     * than the caller shows relative to. A relative path joins the working
-     * directory; ".", ".." and repeated separators go */
-    std::string full = path;
-    if (full.empty() || full[0] != '/') {
-        char cwd[PATH_MAX];
-        if (getcwd(cwd, sizeof cwd) == nullptr) {
-            return path;
-        }
-        full = std::string(cwd) + "/" + full;
-    }
-    std::vector<std::string> parts;
-    size_t start = 0;
-    while (start <= full.size()) {
-        size_t end = full.find('/', start);
-        if (end == std::string::npos) {
-            end = full.size();
-        }
-        const std::string part = full.substr(start, end - start);
-        if (part == "..") {
-            if (!parts.empty()) {
-                parts.pop_back();
-            }
-        } else if (!part.empty() && part != ".") {
-            parts.push_back(part);
-        }
-        start = end + 1;
-    }
-    std::string out;
-    for (const std::string& part : parts) {
-        out += '/';
-        out += part;
-    }
-    return out.empty() ? std::string("/") : out;
-#endif
-}
-
-/* A link state in the words the reader and a person both take:
- * "adapter fault (state 9, 3 episodes)" */
-std::string link_text(int32_t state, uint32_t episodes)
-{
-    std::string s;
-    switch (state) {
-    case ECUIO_OK:
-        s = "recovered";
-        break;
-    case ECUIO_ERR_VEHICLE_TIMEOUT:
-        s = "vehicle not responding";
-        break;
-    case ECUIO_ERR_REQUEST_FAILED:
-        s = "requests failing";
-        break;
-    case ECUIO_ERR_TRANSPORT_HARD_FAILURE:
-        s = "adapter fault";
-        break;
-    case ECUIO_ERR_RECORDING_CHANGED:
-        s = "replay stopped: its recording changed after it was opened";
-        break;
-    default:
-        s = ecuio_status_string(static_cast<ecuio_status_t>(state));
-        break;
-    }
-    return s + " (state " + std::to_string(state) + ", " +
-           std::to_string(episodes) +
-           (episodes == 1 ? " episode)" : " episodes)");
-}
-
-/* The interval's clock as havne-cli's timing lines name it */
-const char* clock_name(uint32_t clock)
-{
-    switch (clock) {
-    case ECUIO_TIMING_CLOCK_HOST:
-        return "host";
-    case ECUIO_TIMING_CLOCK_ADAPTER:
-        return "adapter";
-    case ECUIO_TIMING_CLOCK_KERNEL:
-        return "kernel";
-    default:
-        return "none";
-    }
-}
-
-/* A quantile, or nothing when it has too few samples */
-void append_quantile(std::string& out, uint32_t us, bool has)
-{
-    if (has) {
-        append_u64(out, us);
-    }
-}
-
-bool sync_file(FILE* f)
-{
-    if (f == nullptr) {
-        return true;
-    }
-    if (std::fflush(f) != 0) {
-        return false;
-    }
-#ifdef _WIN32
-    return _commit(_fileno(f)) == 0;
-#else
-    return fsync(fileno(f)) == 0;
-#endif
-}
-
-} // namespace
-
-/* One per recording, its members grouped by who uses them: the padding
- * the analyzer would save is some 40 bytes */
-// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
-struct ecuio_recorder {
-    std::string folder; /* UTF-8, absolute, '/' separated */
-    FILE* frames = nullptr;
-    FILE* signals = nullptr;
-    FILE* events = nullptr;
-    FILE* markers = nullptr;
-    FILE* latency = nullptr;
-
-    /* The ring: the worker advances head, the writer tail; both only
-     * grow, so head - tail is what's queued */
-    std::unique_ptr<uint8_t[]> ring;
-    uint32_t cap = 0;
-    std::atomic<uint64_t> head{0};
-    std::atomic<uint64_t> tail{0};
-    std::atomic<uint64_t> records_dropped{0};
-
-    /* The worker's alone: frames dropped since the last record, a link
-     * transition still to go in, the next timing snapshot's session time */
-    uint64_t pending_dropped = 0;
-    bool link_pending = false;
-    link_body pending_link{};
-    uint64_t timing_next_us = kTimingEveryUs;
-
-    /* The signal file decoding the session to come, set before attach
-     * (ecuio_recorder_signal_file): the set it must be, its bytes and
-     * their SHA-256 */
-    const ecuio_signal_set_t* signals_set = nullptr;
-    std::string signals_json;
-    std::string signals_sha;
-    std::string signals_plugin; /* "<id>,<version>,<variant>" or "" */
-
-    /* Fixed at attach; zero_us is this recording's, which the link's
-     * stops being once a later recorder attaches */
-    std::shared_ptr<ecuio_record_link> link;
-    uint64_t zero_us = 0;
-    std::vector<def_entry> defs; /* sorted by id */
-    uint32_t rx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    uint32_t channels = 0;
-    std::chrono::system_clock::time_point start_wall{};
-    std::atomic<bool> attached{false};
-    std::atomic<bool> detached{false};
-
-    std::mutex note_m;
-    std::deque<item> items;
-    uint32_t note_cap = kDefaultNoteLines;
-    std::atomic<uint64_t> notes_dropped{0};
-
-    std::thread writer;
-    std::mutex wake_m;
-    std::condition_variable wake_cv;
-    bool stop = false; /* under wake_m */
-
-    std::atomic<uint32_t> state{ECUIO_RECORDING_ACTIVE};
-    mutable std::mutex reason_m;
-    std::string reason;
-    std::atomic<uint64_t> frame_rows{0};
-    std::atomic<uint64_t> value_rows{0};
-
-    /* The test seams (internal.h) */
-    std::atomic<bool> hold{false};
-    std::atomic<bool> fail_next{false};
-    std::atomic<uint64_t> syncs{0};
-    std::atomic<uint64_t> wakes{0};
-    std::atomic<uint64_t> slept_added{0};
-
-    /* The machine's slept count at attach, written before attached; the
-     * writer's own after that */
-    uint64_t slept_at_attach = 0;
-    bool sleep_armed = false;
-    uint64_t slept_seen = 0;
-
-    /* The writer's own */
-    std::vector<uint8_t> scratch;
-    std::string frame_out, value_out, event_out, marker_out, latency_out;
-    /* Each request's answers, refusals and timeouts at its last row, so
-     * latency.csv gets only the rows that changed */
-    uint64_t timing_totals[ECUIO_PROFILE_MAX_REQUESTS] = {};
-
-    bool failed() const
-    {
-        return state.load(std::memory_order_acquire) == ECUIO_RECORDING_FAILED;
-    }
-
-    void fail(int err)
-    {
-        {
-            std::lock_guard<std::mutex> g(reason_m);
-            if (failed()) {
-                return;
-            }
-            reason = write_reason(err);
-        }
-        state.store(ECUIO_RECORDING_FAILED, std::memory_order_release);
-    }
-
-    /* Writes and clears out; on a failed write the recording stops
-     * writing, and what follows is dropped */
-    void write(FILE* f, std::string& out)
-    {
-        if (out.empty() || f == nullptr) {
-            out.clear();
-            return;
-        }
-        if (!failed()) {
-            if (fail_next.exchange(false)) {
-                fail(ENOSPC);
-            } else if (std::fwrite(out.data(), 1, out.size(), f) !=
-                       out.size()) {
-                fail(errno != 0 ? errno : EIO);
-            }
-        }
-        out.clear();
-    }
-
-    void copy_out(uint64_t pos, void* dst, size_t n) const
-    {
-        const size_t at = static_cast<size_t>(pos % cap);
-        const size_t first = (std::min)(n, cap - at);
-        std::memcpy(dst, ring.get() + at, first);
-        if (n > first) {
-            std::memcpy(static_cast<uint8_t*>(dst) + first, ring.get(),
-                        n - first);
-        }
-    }
-
-    void copy_in(uint64_t pos, const void* src, size_t n)
-    {
-        const size_t at = static_cast<size_t>(pos % cap);
-        const size_t first = (std::min)(n, cap - at);
-        std::memcpy(ring.get() + at, src, first);
-        if (n > first) {
-            std::memcpy(ring.get(), static_cast<const uint8_t*>(src) + first,
-                        n - first);
-        }
-    }
-
-    const def_entry* def(uint16_t id) const
-    {
-        auto it = std::lower_bound(
-            defs.begin(), defs.end(), id,
-            [](const def_entry& d, uint16_t v) { return d.id < v; });
-        return (it != defs.end() && it->id == id) ? &*it : nullptr;
-    }
-
-    /* "HH:mm:ss.zzz  +S.sss  <kind>  <text>" at host_us */
-    void event_line(uint64_t host_us, const char* kind, const std::string& text)
-    {
-        const auto at = start_wall + std::chrono::microseconds(host_us);
-        const std::time_t t = std::chrono::system_clock::to_time_t(at);
-        const long long ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                at.time_since_epoch())
-                .count() %
-            1000;
-        const std::tm tm = local_tm(t);
-        char stamp[32];
-        std::snprintf(stamp, sizeof stamp, "%02d:%02d:%02d.%03lld", tm.tm_hour,
-                      tm.tm_min, tm.tm_sec, ms < 0 ? ms + 1000 : ms);
-        event_out += stamp;
-        event_out += "  ";
-        append_seconds(event_out, host_us);
-        event_out += "  ";
-        event_out += kind;
-        event_out += "  ";
-        event_out += text;
-        event_out += '\n';
-    }
-
-    void drop_line(uint64_t host_us, uint64_t dropped)
-    {
-        event_line(host_us, "drop",
-                   "the recording dropped " + std::to_string(dropped) +
-                       (dropped == 1 ? " frame" : " frames") +
-                       ": the disk fell behind");
-    }
-
-    void take_link(const uint8_t* body, size_t size)
-    {
-        if (size < sizeof(link_body)) {
-            return;
-        }
-        link_body lb;
-        std::memcpy(&lb, body, sizeof lb);
-        event_line(lb.host_us, "link", link_text(lb.state, lb.episodes));
-    }
-
-    /* latency.csv's rows whose counts changed since their last row
-     * (ADR-0017's appendix of 2026-10-31), the file made with the first */
-    void take_timing(const uint8_t* body, size_t size)
-    {
-        if (size < sizeof(timing_body)) {
-            return;
-        }
-        timing_body tb;
-        std::memcpy(&tb, body, sizeof tb);
-        /* t_s on the recording's clock, as every other file's time: the
-         * snapshot's session time is the session's, older than the
-         * recording when the recorder attached after start */
-        const uint64_t ms = (tb.host_us + 500) / 1000;
-        char at[32];
-        std::snprintf(at, sizeof at, "%llu.%03llu",
-                      static_cast<unsigned long long>(ms / 1000),
-                      static_cast<unsigned long long>(ms % 1000));
-        static const char kHex[] = "0123456789ABCDEF";
-        for (uint32_t i = 0; i < tb.rows && i < ECUIO_PROFILE_MAX_REQUESTS;
-             ++i) {
-            const size_t off = sizeof tb + i * sizeof(ecuio_request_timing_t);
-            if (off + sizeof(ecuio_request_timing_t) > size) {
-                break;
-            }
-            ecuio_request_timing_t r;
-            std::memcpy(&r, body + off, sizeof r);
-            const uint64_t total =
-                uint64_t{r.answered} + r.refused + r.timeouts;
-            if (total == timing_totals[i]) {
-                continue;
-            }
-            timing_totals[i] = total;
-            const bool latency_has = r.answered + r.refused > 0;
-            const bool interval_has = r.intervals > 0;
-            latency_out += at;
-            latency_out += ',';
-            append_hex(latency_out,
-                       r.channel < channels ? rx_ids[r.channel] : 0);
-            latency_out += ',';
-            for (uint8_t k = 0; k < r.length && k < 3; ++k) {
-                if (k > 0) {
-                    latency_out += ' ';
-                }
-                latency_out += kHex[r.request[k] >> 4];
-                latency_out += kHex[r.request[k] & 0x0F];
-            }
-            for (uint32_t n : {r.answered, r.refused, r.timeouts, r.packed}) {
-                latency_out += ',';
-                append_u64(latency_out, n);
-            }
-            latency_out += ',';
-            append_quantile(latency_out, r.latency_p50_us, latency_has);
-            latency_out += ',';
-            append_quantile(latency_out, r.latency_p99_us,
-                            (r.flags & ECUIO_TIMING_LATENCY_P99) != 0);
-            latency_out += ',';
-            append_quantile(latency_out, r.latency_p999_us,
-                            (r.flags & ECUIO_TIMING_LATENCY_P999) != 0);
-            latency_out += ',';
-            append_quantile(latency_out, r.latency_max_us, latency_has);
-            latency_out += ',';
-            append_u64(latency_out, r.intervals);
-            latency_out += ',';
-            append_u64(latency_out, r.intervals_mixed);
-            latency_out += ',';
-            append_quantile(latency_out, r.interval_p50_us, interval_has);
-            latency_out += ',';
-            append_quantile(latency_out, r.interval_p99_us,
-                            (r.flags & ECUIO_TIMING_INTERVAL_P99) != 0);
-            latency_out += ',';
-            append_quantile(latency_out, r.interval_p999_us,
-                            (r.flags & ECUIO_TIMING_INTERVAL_P999) != 0);
-            latency_out += ',';
-            append_quantile(latency_out, r.interval_max_us, interval_has);
-            latency_out += ',';
-            latency_out += clock_name(tb.timing.interval_clock);
-            latency_out += '\n';
-        }
-        if (!latency_out.empty() && latency == nullptr && !failed()) {
-            latency = open_file(folder + "/latency.csv");
-            if (latency == nullptr) {
-                fail(errno != 0 ? errno : EIO);
-                return;
-            }
-            latency_out.insert(0, ECUIO_TIMING_COLUMNS "\n");
-        }
-    }
-
-    void take_frame(const uint8_t* body, size_t size)
-    {
-        if (size < sizeof(frame_body)) {
-            return;
-        }
-        frame_body fb;
-        std::memcpy(&fb, body, sizeof fb);
-        size_t at = sizeof fb;
-        if (at + fb.length > size) {
-            return;
-        }
-        append_u64(frame_out, fb.host_us);
-        frame_out += ',';
-        append_u64(frame_out, fb.timestamp_us);
-        frame_out += ',';
-        append_hex(frame_out, fb.id);
-        frame_out += ',';
-        append_hex(frame_out, fb.flags);
-        frame_out += ',';
-        static const char kHex[] = "0123456789ABCDEF";
-        for (uint16_t i = 0; i < fb.length; ++i) {
-            if (i > 0) {
-                frame_out += ' ';
-            }
-            const uint8_t b = body[at + i];
-            frame_out += kHex[b >> 4];
-            frame_out += kHex[b & 0x0F];
-        }
-        frame_out += '\n';
-        at += fb.length;
-        frame_rows.fetch_add(1, std::memory_order_relaxed);
-
-        for (uint16_t v = 0; v < fb.values; ++v) {
-            if (at + sizeof(value_head) > size) {
-                return;
-            }
-            value_head vh;
-            std::memcpy(&vh, body + at, sizeof vh);
-            at += sizeof vh;
-            const def_entry* d = def(vh.signal_id);
-            const bool text = is_text_kind(vh.kind);
-            const size_t len = text ? vh.text_len : sizeof(double);
-            if (at + len > size) {
-                return;
-            }
-            if (d != nullptr) {
-                append_u64(value_out, fb.host_us);
-                value_out += ',';
-                value_out += d->name;
-                value_out += ',';
-                if (text) {
-                    value_out += csv_quoted(
-                        reinterpret_cast<const char*>(body + at), len);
-                } else {
-                    double x;
-                    std::memcpy(&x, body + at, sizeof x);
-                    ecuio_recording_rows::append_value(value_out, x);
-                }
-                value_out += ',';
-                value_out += d->unit;
-                value_out += '\n';
-                value_rows.fetch_add(1, std::memory_order_relaxed);
-            }
-            at += len;
-        }
-    }
-
-    /* Everything the worker has queued; true when there was any */
-    bool drain_ring()
-    {
-        bool any = false;
-        uint64_t t = tail.load(std::memory_order_relaxed);
-        const uint64_t h = head.load(std::memory_order_acquire);
-        while (h - t >= sizeof(record_head)) {
-            record_head rh;
-            copy_out(t, &rh, sizeof rh);
-            if (rh.size < sizeof rh || rh.size > h - t) {
-                break;
-            }
-            const size_t body = rh.size - sizeof rh;
-            if (scratch.size() < body) {
-                scratch.resize(body);
-            }
-            copy_out(t + sizeof rh, scratch.data(), body);
-            if (rh.dropped_before > 0 && body >= sizeof(uint64_t)) {
-                uint64_t host_us;
-                std::memcpy(&host_us, scratch.data(), sizeof host_us);
-                drop_line(host_us, rh.dropped_before);
-            }
-            switch (rh.type) {
-            case kRecordFrame:
-                take_frame(scratch.data(), body);
-                break;
-            case kRecordLink:
-                take_link(scratch.data(), body);
-                break;
-            case kRecordTiming:
-                take_timing(scratch.data(), body);
-                break;
-            default:
-                break;
-            }
-            t += rh.size;
-            any = true;
-        }
-        tail.store(t, std::memory_order_release);
-        write(frames, frame_out);
-        write(signals, value_out);
-        write(events, event_out);
-        write(latency, latency_out);
-        return any;
-    }
-
-    bool drain_items()
-    {
-        std::deque<item> taken;
-        {
-            std::lock_guard<std::mutex> g(note_m);
-            taken.swap(items);
-        }
-        for (const item& it : taken) {
-            switch (it.kind) {
-            case item_kind::begin:
-                /* The file before the header line naming its hash */
-                if (!it.bytes.empty() && !failed()) {
-                    errno = 0;
-                    if (fail_next.exchange(false)) {
-                        fail(ENOSPC);
-                    } else if (!write_bytes(
-                                   folder + "/" +
-                                       ecuio_recording_rows::kSignalFileName,
-                                   it.bytes)) {
-                        fail(errno != 0 ? errno : EIO);
-                    }
-                }
-                event_out += it.text;
-                frame_out += "host_us,timestamp_us,id,flags,data\n";
-                /* A byte-order mark, so a spreadsheet reads the units'
-                 * UTF-8 as UTF-8 (ADR-0017) */
-                value_out += "\xEF\xBB\xBFhost_us,signal,value,unit\n";
-                break;
-            case item_kind::note:
-                event_line(it.host_us, "note", it.text);
-                break;
-            case item_kind::mark:
-                if (markers == nullptr && !failed()) {
-                    markers = open_file(folder + "/markers.csv");
-                    if (markers == nullptr) {
-                        fail(errno != 0 ? errno : EIO);
-                        break;
-                    }
-                    marker_out += "host_us,label\n";
-                }
-                append_u64(marker_out, it.host_us);
-                marker_out += ',';
-                marker_out += csv_quoted(it.text.data(), it.text.size());
-                marker_out += '\n';
-                break;
-            }
-        }
-        write(frames, frame_out);
-        write(signals, value_out);
-        write(events, event_out);
-        write(markers, marker_out);
-        return !taken.empty();
-    }
-
-    void flush_all()
-    {
-        for (FILE* f : {frames, signals, events, markers, latency}) {
-            if (f != nullptr && !failed() && std::fflush(f) != 0) {
-                fail(errno != 0 ? errno : EIO);
-            }
-        }
-    }
-
-    void sync_all()
-    {
-        for (FILE* f : {frames, signals, events, markers, latency}) {
-            if (f != nullptr && !failed() && !sync_file(f)) {
-                fail(errno != 0 ? errno : EIO);
-            }
-        }
-        syncs.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    /* An asleep line when the machine's slept count rose a second or more
-     * since the last wake (ADR-0049 section 2): stamped as the writer
-     * woke, its N s the N s before. Smaller rises are taken in without a
-     * line, as the app's tick takes them. */
-    void check_sleep()
-    {
-        if (!attached.load(std::memory_order_acquire)) {
-            return;
-        }
-        const uint64_t now = ecuio_clock_slept_us() +
-                             slept_added.load(std::memory_order_relaxed);
-        if (!sleep_armed) {
-            sleep_armed = true;
-            slept_seen = slept_at_attach;
-        }
-        const uint64_t rise = now > slept_seen ? now - slept_seen : 0;
-        slept_seen = (std::max)(now, slept_seen);
-        if (rise < kSleepLineUs) {
-            return;
-        }
-        const uint64_t tenths = (rise + 50000) / 100000;
-        event_line(host_us_of(ecuio_clock_us()), "asleep",
-                   "Asleep for " + std::to_string(tenths / 10) + "." +
-                       std::to_string(tenths % 10) +
-                       " s: nothing was read meanwhile");
-    }
-
-    uint64_t host_us_of(uint64_t clock_us) const
-    {
-        return clock_us > zero_us ? clock_us - zero_us : 0;
-    }
-
-    void run()
-    {
-        auto last_flush = std::chrono::steady_clock::now();
-        auto last_sync = last_flush;
-        bool busy = false;
-        for (;;) {
-            bool stopping;
-            {
-                std::unique_lock<std::mutex> lk(wake_m);
-                wake_cv.wait_for(lk, busy ? kBusyWake : kIdleWake,
-                                 [this] { return stop; });
-                stopping = stop;
-            }
-            wakes.fetch_add(1, std::memory_order_relaxed);
-            if (hold.load(std::memory_order_acquire) && !stopping) {
-                continue;
-            }
-            /* Nothing until a session attaches: it completes the header
-             * item open queued; one closed unattached leaves its files empty */
-            if (!attached.load(std::memory_order_acquire)) {
-                if (stopping) {
-                    return;
-                }
-                continue;
-            }
-            /* The items first: the header comes ahead of any row */
-            const bool notes = drain_items();
-            check_sleep();
-            const bool frames_taken = drain_ring();
-            busy = notes || frames_taken;
-            const auto now = std::chrono::steady_clock::now();
-            if (now - last_flush >= kFlushEvery) {
-                flush_all();
-                last_flush = now;
-            }
-            if (now - last_sync >= kSyncEvery) {
-                sync_all();
-                last_sync = now;
-            }
-            if (stopping) {
-                return;
-            }
-        }
-    }
-
-    void close_files()
-    {
-        for (FILE** f : {&frames, &signals, &events, &markers, &latency}) {
-            if (*f != nullptr) {
-                if (std::fclose(*f) != 0 && !failed()) {
-                    fail(errno != 0 ? errno : EIO);
-                }
-                *f = nullptr;
-            }
-        }
-    }
-
-    /* Files still open only when open failed part way, which reported
-     * its own failure: closed, nothing more recorded */
-    ~ecuio_recorder()
-    {
-        for (FILE* f : {frames, signals, events, markers, latency}) {
-            if (f != nullptr) {
-                (void)std::fclose(f);
-            }
-        }
-    }
-};
 
 void ecuio_record_detach(ecuio_record_link& link, ecuio_recorder_t* only)
 {
@@ -1177,12 +139,72 @@ bool put_pending_link(ecuio_recorder_t* r)
     r->copy_in(h + sizeof rh, &r->pending_link, sizeof r->pending_link);
     r->head.store(h + size, std::memory_order_release);
     r->link_pending = false;
+    /* No event put after the link line is placed before it */
+    r->put_host_us = (std::max)(r->put_host_us, r->pending_link.host_us);
     return true;
 }
 
+/* The worker's: carried events into the ring ahead of anything else, as
+ * many as fit; false while some still wait. A run's lost count goes once. */
+bool put_pending_conditions(ecuio_recorder_t* r)
+{
+    constexpr uint64_t kHead = sizeof(record_head) + sizeof(conditions_body);
+    while (r->carry_count > 0) {
+        const uint64_t h = r->head.load(std::memory_order_relaxed);
+        const uint64_t t = r->tail.load(std::memory_order_acquire);
+        const uint64_t room = r->cap - (h - t);
+        if (room < kHead + sizeof(event_body)) {
+            return false;
+        }
+        const uint32_t n = static_cast<uint32_t>(
+            (std::min)(uint64_t{r->carry_count},
+                       (room - kHead) / sizeof(event_body)));
+        const uint64_t size = kHead + uint64_t{n} * sizeof(event_body);
+        const event_body* first = r->carry + r->carry_start;
+        const record_head rh{static_cast<uint32_t>(size), kRecordConditions, 0};
+        const conditions_body cb{first->host_us, n, 0, r->carry_lost,
+                                 r->carry_lost_us};
+        r->copy_in(h, &rh, sizeof rh);
+        r->copy_in(h + sizeof rh, &cb, sizeof cb);
+        r->copy_in(h + kHead, first, n * sizeof(event_body));
+        r->head.store(h + size, std::memory_order_release);
+        r->carry_lost = 0; /* a loss after this is a run of its own */
+        r->carry_start += n;
+        r->carry_count -= n;
+        if (r->carry_count == 0) {
+            r->carry_start = 0;
+        }
+    }
+    return true;
+}
+
+/* The worker's: an event whose frame found no room waits in the carry;
+ * past it, the event is counted lost */
+void carry_event(ecuio_recorder_t* r, const event_body& e)
+{
+    if (r->carry_count == kCarryEvents) {
+        if (r->carry_lost == 0) {
+            r->carry_lost_us = e.host_us;
+        }
+        ++r->carry_lost;
+        r->conditions_lost.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    if (r->carry_start + r->carry_count == kCarryEvents) {
+        std::memmove(r->carry, r->carry + r->carry_start,
+                     r->carry_count * sizeof(event_body));
+        r->carry_start = 0;
+    }
+    r->carry[r->carry_start + r->carry_count++] = e;
+}
+
+/* ecuio_session_test_before_record_attach's (internal.h) */
+std::atomic<void (*)(void*)> g_before_record_attach{nullptr};
+std::atomic<void*> g_before_record_attach_user{nullptr};
+
 uint64_t host_us_now(const ecuio_record_link& link)
 {
-    const uint64_t now = ecuio_clock_us();
+    const uint64_t now = ecuio_record_clock_us();
     const uint64_t zero = link.zero_us.load(std::memory_order_relaxed);
     return now > zero ? now - zero : 0;
 }
@@ -1190,7 +212,7 @@ uint64_t host_us_now(const ecuio_record_link& link)
 } // namespace
 
 void ecuio_record_link_state(ecuio_record_link* link, int32_t state,
-                             uint32_t episodes)
+                             uint32_t episodes, uint64_t t_us)
 {
     if (link == nullptr) {
         return;
@@ -1201,9 +223,11 @@ void ecuio_record_link_state(ecuio_record_link* link, int32_t state,
     }
     /* A transition still carried gives way to this one: the latest state
      * and count are what a reader needs */
-    r->pending_link = link_body{host_us_now(*link), state, episodes};
+    r->pending_link = link_body{host_us_now(*link), state, episodes, t_us};
     r->link_pending = true;
-    put_pending_link(r);
+    if (put_pending_conditions(r)) {
+        put_pending_link(r);
+    }
     ecuio_record_unpin(*link);
 }
 
@@ -1236,7 +260,8 @@ void ecuio_record_timing(ecuio_record_link* link,
             at = host_us_now(*link);
             stamped = true;
         }
-        if (put_pending_link(r) && ring_has_room(r, size)) {
+        if (put_pending_conditions(r) && put_pending_link(r) &&
+            ring_has_room(r, size)) {
             const uint64_t h = r->head.load(std::memory_order_relaxed);
             const record_head rh{static_cast<uint32_t>(size), kRecordTiming,
                                  r->pending_dropped};
@@ -1266,26 +291,103 @@ void ecuio_record_timing(ecuio_record_link* link,
     }
 }
 
+void ecuio_recorder_hold_states(ecuio_recorder_t* r,
+                                const ecuio_condition_eval& conditions)
+{
+    if (r->held_taken || r->conditions == nullptr ||
+        conditions.generation != r->conditions_generation) {
+        return;
+    }
+    r->held_taken = true;
+    uint32_t n = 0;
+    for (uint32_t i = 0;
+         i < conditions.conditions.size() && n < ECUIO_CONDITION_MAX_CONDITIONS;
+         ++i) {
+        const ecuio_condition_eval::condition& c = conditions.conditions[i];
+        if (c.state != ECUIO_CONDITION_ON) {
+            continue;
+        }
+        event_body& e = r->held[n++];
+        e = event_body{};
+        e.value = c.value;
+        e.condition = i;
+        e.term = c.changed_term;
+        e.state = ECUIO_CONDITION_ON;
+        e.flags = static_cast<uint8_t>(
+            ECUIO_CONDITION_HELD | (c.stale != 0 ? ECUIO_CONDITION_STALE : 0u));
+    }
+    r->held_count = n;
+}
+
 void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
                               const ecuio_frame_t* frame,
-                              const ecuio_value_t* values, uint32_t count)
+                              const ecuio_value_t* values, uint32_t count,
+                              const ecuio_condition_event_t* events,
+                              uint32_t event_count, uint32_t generation)
 {
     const uint16_t length = frame->data_length <= ECUIO_FRAME_DATA_MAX
                                 ? frame->data_length
                                 : static_cast<uint16_t>(ECUIO_FRAME_DATA_MAX);
     const uint16_t nvalues =
         count > 0xFFFFu ? 0xFFFFu : static_cast<uint16_t>(count);
-    uint64_t size = sizeof(record_head) + sizeof(frame_body) + length;
+    /* The recording's own set's events alone, its held states first (an
+     * older set's frame under way at the attach gives none) */
+    const bool own = r->conditions != nullptr &&
+                     generation == r->conditions_generation &&
+                     (events != nullptr || event_count == 0);
+    const uint32_t held = own ? r->held_count : 0;
+    const uint32_t settled = own ? event_count : 0;
+    r->held_count = 0;
+    const uint32_t nevents = held + settled;
+    /* A held state stands before anything this frame settles */
+    const uint64_t held_us =
+        settled > 0 && events[0].timestamp_us < frame->timestamp_us
+            ? events[0].timestamp_us
+            : frame->timestamp_us;
+    /* An event's recording time: the frame's, less how far its own time
+     * lies before the frame's, never before the frame put before it */
+    const uint64_t floor_us = (std::min)(r->put_host_us, host_us);
+    const auto host_of = [&](uint64_t t_us) {
+        if (t_us >= frame->timestamp_us) {
+            return host_us;
+        }
+        const uint64_t back = frame->timestamp_us - t_us;
+        return back < host_us - floor_us ? host_us - back : floor_us;
+    };
+    const auto event_at = [&](uint32_t k) {
+        event_body e{};
+        if (k < held) {
+            e = r->held[k];
+            e.t_us = held_us;
+        } else {
+            const ecuio_condition_event_t& c = events[k - held];
+            e.t_us = c.timestamp_us;
+            e.value = c.value;
+            e.condition = c.condition;
+            e.term = c.term;
+            e.state = static_cast<uint8_t>(c.state);
+            e.flags = static_cast<uint8_t>(c.flags);
+        }
+        e.host_us = host_of(e.t_us);
+        return e;
+    };
+
+    uint64_t size = sizeof(record_head) + sizeof(frame_body) + length +
+                    uint64_t{nevents} * sizeof(event_body);
     for (uint16_t i = 0; i < nvalues; ++i) {
         size += sizeof(value_head) + (is_text_kind(values[i].kind)
                                           ? values[i].text_len
                                           : sizeof(double));
     }
-    /* A carried link transition goes first, or the frame waits behind
-     * it, dropped */
-    if (!put_pending_link(r) || !ring_has_room(r, size)) {
+    /* What was carried goes first, or the frame waits behind it, dropped;
+     * its events are carried, never dropped with it */
+    if (!put_pending_conditions(r) || !put_pending_link(r) ||
+        !ring_has_room(r, size)) {
         ++r->pending_dropped;
         r->records_dropped.fetch_add(1, std::memory_order_relaxed);
+        for (uint32_t k = 0; k < nevents; ++k) {
+            carry_event(r, event_at(k));
+        }
         return;
     }
     const uint64_t h = r->head.load(std::memory_order_relaxed);
@@ -1298,7 +400,7 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
                   frame->flags,
                   length,
                   nvalues,
-                  0};
+                  nevents};
     uint64_t at = h;
     r->copy_in(at, &rh, sizeof rh);
     at += sizeof rh;
@@ -1320,7 +422,60 @@ void ecuio_recorder_put_frame(ecuio_recorder_t* r, uint64_t host_us,
             at += sizeof v.value;
         }
     }
+    for (uint32_t k = 0; k < nevents; ++k) {
+        const event_body e = event_at(k);
+        r->copy_in(at, &e, sizeof e);
+        at += sizeof e;
+    }
     r->head.store(h + size, std::memory_order_release);
+    r->put_host_us = host_us;
+}
+
+void ecuio_recorder_put_events(ecuio_recorder_t* r, uint64_t host_us,
+                               uint64_t time_us,
+                               const ecuio_condition_event_t* events,
+                               uint32_t event_count, uint32_t generation)
+{
+    const bool own = r->conditions != nullptr &&
+                     generation == r->conditions_generation &&
+                     (events != nullptr || event_count == 0);
+    const uint32_t held = own ? r->held_count : 0;
+    const uint32_t settled = own ? event_count : 0;
+    r->held_count = 0;
+    if (held + settled == 0) {
+        return;
+    }
+    const uint64_t held_us = settled > 0 && events[0].timestamp_us < time_us
+                                 ? events[0].timestamp_us
+                                 : time_us;
+    /* As a frame's: a deadline's event earlier by its distance before
+     * time_us, never before the record put before it */
+    const uint64_t floor_us = (std::min)(r->put_host_us, host_us);
+    /* What was carried, and the link line before these, go in first */
+    const bool behind = !put_pending_conditions(r) || !put_pending_link(r);
+    for (uint32_t k = 0; k < held + settled; ++k) {
+        event_body e{};
+        if (k < held) {
+            e = r->held[k];
+            e.t_us = held_us;
+        } else {
+            const ecuio_condition_event_t& c = events[k - held];
+            e.t_us = c.timestamp_us;
+            e.value = c.value;
+            e.condition = c.condition;
+            e.term = c.term;
+            e.state = static_cast<uint8_t>(c.state);
+            e.flags = static_cast<uint8_t>(c.flags);
+        }
+        const uint64_t back = time_us - (std::min)(e.t_us, time_us);
+        e.host_us = back < host_us - floor_us ? host_us - back : floor_us;
+        carry_event(r, e);
+    }
+    /* In a full ring they wait in the carry, which goes in ahead of a link
+     * state still carried */
+    if (!behind && put_pending_conditions(r)) {
+        r->put_host_us = host_us;
+    }
 }
 
 ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,
@@ -1364,9 +519,10 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
         (options->header_line_count > 0 && options->header_lines == nullptr)) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    if (options->flags != 0 || options->reserved[0] != 0 ||
-        options->reserved[1] != 0 || options->reserved[2] != 0 ||
-        options->reserved[3] != 0 || options->root_utf8[0] == '\0') {
+    if ((options->flags & ~ECUIO_RECORD_ARMED) != 0 ||
+        options->reserved[0] != 0 || options->reserved[1] != 0 ||
+        options->reserved[2] != 0 || options->reserved[3] != 0 ||
+        options->root_utf8[0] == '\0') {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
 
@@ -1393,48 +549,36 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
         return ECUIO_ERR_RECORDING_FAILED;
     }
 
-    const std::time_t now = std::time(nullptr);
-    const std::tm tm = local_tm(now);
-    char stamp[32];
-    std::snprintf(stamp, sizeof stamp, "%04d%02d%02d-%02d%02d%02d",
-                  tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour,
-                  tm.tm_min, tm.tm_sec);
     const std::string label =
         options->label_utf8 != nullptr ? reduce_label(options->label_utf8) : "";
     const std::string tail = label.empty() ? "" : " " + label;
-    std::string leaf;
-    for (int n = 1;; ++n) {
-        std::string path = root;
-        path += '/';
-        path += stamp;
-        if (n > 1) {
-            path += '-';
-            path += std::to_string(n);
-        }
-        path += tail;
-        bool taken = false;
-        if (make_leaf(path, &taken, &why)) {
-            leaf = path;
-            break;
-        }
-        if (!taken || n >= 1000) {
+    if ((options->flags & ECUIO_RECORD_ARMED) != 0) {
+        /* Each window makes its own folder, under the same name's rule */
+        r->armed = true;
+        r->root = root;
+        r->label_tail = tail;
+    } else {
+        std::string leaf;
+        if (!make_recording_folder(root, std::time(nullptr), tail, &leaf,
+                                   &why)) {
             ecuio_detail_set("can't create the recording's folder: %s",
-                             taken ? "every name for this second is taken"
-                                   : why.c_str());
+                             why.c_str());
             return ECUIO_ERR_RECORDING_FAILED;
         }
-    }
-    r->folder = absolute(leaf);
+        r->folder = absolute(leaf);
+        r->published = r->folder;
 
-    r->frames = open_file(leaf + "/frames.csv");
-    r->signals = open_file(leaf + "/signals.csv");
-    r->events = open_file(leaf + "/events.log");
-    if (r->frames == nullptr || r->signals == nullptr || r->events == nullptr) {
-        const int e = errno;
-        ecuio_detail_set("can't create the recording's files: %s",
-                         e != 0 ? errno_text(e).c_str()
-                                : "the folder refused them");
-        return ECUIO_ERR_RECORDING_FAILED;
+        r->frames = open_file(leaf + "/frames.csv");
+        r->signals = open_file(leaf + "/signals.csv");
+        r->events = open_file(leaf + "/events.log");
+        if (r->frames == nullptr || r->signals == nullptr ||
+            r->events == nullptr) {
+            const int e = errno;
+            ecuio_detail_set("can't create the recording's files: %s",
+                             e != 0 ? errno_text(e).c_str()
+                                    : "the folder refused them");
+            return ECUIO_ERR_RECORDING_FAILED;
+        }
     }
 
     /* The caller's header lines, under one key, written at attach */
@@ -1444,7 +588,10 @@ ecuio_status_t ecuio_recorder_open(const ecuio_record_options_t* options,
             caller += "caller  " + one_line(options->header_lines[i]) + "\n";
         }
     }
-    r->items.push_back(item{item_kind::begin, 0, caller, {}});
+    r->items.push_back(item{item_kind::begin, 0, caller, {}, {}});
+    if (r->armed) {
+        r->armed_caller = caller;
+    }
 
     try {
         r->writer = std::thread([rec = r.get()] { rec->run(); });
@@ -1493,8 +640,21 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
     const std::shared_ptr<ecuio_record_link> link = session->record_link;
     std::vector<def_entry> defs;
     std::string header;
+    size_t conditions_at = 0;
+    int32_t link_state = ECUIO_OK;
+    uint32_t link_episodes = 0;
+    /* An armed recorder's: a window's header lines from core to frame
+     * flags (the conditions line's place in them) and the signal lines,
+     * and room for a state per condition */
+    std::string armed_core;
+    size_t armed_conditions_at = 0;
+    std::string armed_signals;
+    std::vector<uint8_t> armed_cond;
+    std::vector<ecuio_recorder::tail_state> armed_tail;
+    focus_named armed_focus;
     uint64_t zero_us = 0;
     uint64_t slept_at_attach = 0;
+    focus_named named_focus;
     std::chrono::system_clock::time_point start_wall{};
     try {
         const ecuio_signal_set_t* set = session->active_signal_set;
@@ -1513,30 +673,12 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
             [](const def_entry& a, const def_entry& b) { return a.id < b.id; });
 
         /* The zero and the wall clock read back to back */
-        zero_us = ecuio_clock_us();
+        zero_us = ecuio_record_clock_us();
         slept_at_attach = ecuio_clock_slept_us() + recorder->slept_added.load();
         start_wall = std::chrono::system_clock::now();
 
-        const std::time_t t = std::chrono::system_clock::to_time_t(start_wall);
-        const long long ms =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                start_wall.time_since_epoch())
-                .count() %
-            1000;
-        const std::tm lt = local_tm(t);
-        const std::tm ut = utc_tm(t);
-        char buf[96];
-        std::snprintf(
-            buf, sizeof buf,
-            "started  %04d-%02d-%02d %02d:%02d:%02d.%03lld (local time)\n",
-            lt.tm_year + 1900, lt.tm_mon + 1, lt.tm_mday, lt.tm_hour, lt.tm_min,
-            lt.tm_sec, ms);
-        header += buf;
-        std::snprintf(buf, sizeof buf,
-                      "utc  %04d-%02d-%02dT%02d:%02d:%02d.%03lldZ\n",
-                      ut.tm_year + 1900, ut.tm_mon + 1, ut.tm_mday, ut.tm_hour,
-                      ut.tm_min, ut.tm_sec, ms);
-        header += buf;
+        header += started_lines(start_wall);
+        const size_t core_at = header.size();
         header += std::string("core  ") + ecuio_version_string() + "\n";
         header += "uri  " + one_line(session->uri.c_str()) + "\n";
         header += std::string("profile  ") + session->info.profile + "\n";
@@ -1549,6 +691,9 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
             header += std::string(ecuio_recording_rows::kPluginKey) +
                       recorder->signals_plugin + "\n";
         }
+        /* The conditions line goes here once the set is read under the
+         * locks, into room kept now */
+        conditions_at = header.size();
         /* A replay's frames carry its source's flags, so it writes its
          * source's line, which a recording from before ADR-0049 lacks */
         header += "frame flags  ";
@@ -1557,50 +702,34 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                       ? "from an older recording"
                       : session->source_frame_flags.c_str();
         header += "\n";
+        /* A window's header has these lines from the copy, the conditions
+         * line put in where the full header takes it */
+        if (recorder->armed) {
+            armed_core = header.substr(core_at);
+            armed_core.reserve(armed_core.size() + kConditionsLineMax);
+            armed_conditions_at = conditions_at - core_at;
+        }
         /* A session attached to after start (ADR-0056 section 3) says what
          * it had come to: its focus in pick order (none: no line) and, once
          * started, the link's state and episodes in the link lines' words,
          * so a reader needn't wait for a transition */
         {
             std::lock_guard<std::mutex> f(session->focus_mutex);
-            std::string focus;
-            for (uint16_t id : session->focus_ids) {
-                for (uint32_t i = 0;
-                     set != nullptr && set->defs != nullptr && i < set->count;
-                     ++i) {
-                    const ecuio_signal_def_t& d = set->defs[i];
-                    if (d.id == id) {
-                        focus += focus.empty() ? "" : ",";
-                        focus +=
-                            csv_quoted(d.name, strnlen(d.name, sizeof d.name));
-                        break;
-                    }
-                }
-            }
-            if (!focus.empty()) {
-                header += "focus  " + focus + "\n";
-                /* Only a session that asks has one: the others take the
-                 * call and change nothing */
-                if (session->focus_requests &&
-                    session->focus_min_sweep_ms != 0) {
-                    header += "min sweep  " +
-                              std::to_string(session->focus_min_sweep_ms) +
-                              " ms\n";
-                }
-            }
+            named_focus = focus_now(session);
+        }
+        size_t named = 0;
+        /* As many lines as the names take; a reader appends them */
+        const std::vector<std::string> parts =
+            focus_parts(set, named_focus.ids, &named);
+        header += focus_header(parts, named, named_focus);
+        if (recorder->armed) {
+            armed_focus = named_focus;
         }
         if (session->started) {
-            int32_t state = ECUIO_OK;
-            uint32_t episodes = 0;
-            ecuio_session_get_error_state(session, &state, &episodes);
-            /* A link that is OK with no episode is healthy here, where the
-             * event lines' "recovered" would say a fault had passed */
-            header += "link  ";
-            header += state == ECUIO_OK && episodes == 0
-                          ? "healthy (state 0, 0 episodes)"
-                          : link_text(state, episodes);
-            header += "\n";
+            ecuio_session_get_error_state(session, &link_state, &link_episodes);
+            header += header_link(link_state, link_episodes);
         }
+        const size_t signals_at = header.size();
         for (uint32_t i = 0;
              set != nullptr && set->defs != nullptr && i < set->count; ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
@@ -1616,13 +745,66 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
                 d.decimal_places, d.plot_rank, d.group);
             header += label_lines(set, d, name);
         }
+        header.reserve(header.size() + kConditionsLineMax);
+        if (recorder->armed) {
+            armed_signals = header.substr(signals_at);
+            armed_cond.reserve(ECUIO_CONDITION_MAX_CONDITIONS);
+            armed_tail.reserve(ECUIO_CONDITION_MAX_CONDITIONS);
+        }
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
 
+    /* The set the session judges by, read under the link's mutex and
+     * callback_mutex, so it is the one the recording keeps */
+    std::shared_ptr<const ecuio_condition_record> conditions;
+    uint32_t generation = 0;
+
     /* The recorder takes what was made, under the link's mutex */
     const auto commit = [&] {
-        {
+        if (conditions != nullptr) {
+            char line[kConditionsLineMax];
+            const int n = std::snprintf(line, sizeof line, "%s%s,%s\n",
+                                        ecuio_recording_rows::kConditionsKey,
+                                        ecuio_recording_rows::kConditionsName,
+                                        conditions->sha256.c_str());
+            const size_t len = n < 0 ? 0
+                               : static_cast<size_t>(n) < sizeof line
+                                   ? static_cast<size_t>(n)
+                                   : sizeof line - 1;
+            header.insert(conditions_at, line, len);
+            if (recorder->armed) {
+                armed_core.insert(armed_conditions_at, line, len);
+            }
+        }
+        if (recorder->armed) {
+            /* Room for each state was kept before the lock, so these sizes
+             * take no allocation; conditions is not NULL (the check) */
+            const size_t n = conditions->conditions.size();
+            armed_cond.resize(n);
+            armed_tail.resize(n);
+            for (const ecuio_condition_record::entry& c :
+                 conditions->conditions) {
+                if (c.record) {
+                    recorder->longest_before =
+                        (std::max)(recorder->longest_before,
+                                   uint64_t{c.before_us});
+                }
+            }
+            recorder->scan_on.swap(armed_cond);
+            recorder->tail_cond.swap(armed_tail);
+            recorder->armed_core.swap(armed_core);
+            recorder->armed_signals.swap(armed_signals);
+            recorder->window_json.swap(recorder->signals_json);
+            recorder->win_link_state = link_state;
+            recorder->win_link_episodes = link_episodes;
+            recorder->win_focus.ids.swap(armed_focus.ids);
+            recorder->win_focus.pick = armed_focus.pick;
+            recorder->win_focus.min_sweep_ms = armed_focus.min_sweep_ms;
+        }
+        recorder->conditions = std::move(conditions);
+        recorder->conditions_generation = generation;
+        if (!recorder->armed) {
             std::lock_guard<std::mutex> n(recorder->note_m);
             /* The caller's lines open() queued, then the columns */
             item& begin = recorder->items.front();
@@ -1643,6 +825,8 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         recorder->zero_us = zero_us;
         recorder->slept_at_attach = slept_at_attach;
         recorder->start_wall = start_wall;
+        recorder->wall_base = start_wall;
+        recorder->named_focus = std::move(named_focus);
     };
     {
         /* Under the mutex that orders detaches, so a closing recorder or a
@@ -1654,13 +838,120 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         if (link->active.load(std::memory_order_seq_cst) != nullptr) {
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
+        {
+            std::lock_guard<std::mutex> c(session->callback_mutex);
+            conditions = session->conditions_record;
+            generation = session->conditions_generation;
+        }
+        /* An armed recorder that nothing could open a window for is
+         * refused, so the caller learns it now (ADR-0063 section 7) */
+        if (recorder->armed) {
+            bool records = false;
+            for (size_t i = 0; conditions != nullptr &&
+                               i < conditions->conditions.size() && !records;
+                 ++i) {
+                records = conditions->conditions[i].record;
+            }
+            if (!records) {
+                ecuio_detail_set(
+                    conditions == nullptr
+                        ? "no condition records: the session has no set of "
+                          "conditions attached"
+                        : "no condition records: no enabled condition in the "
+                          "set has record");
+                return ECUIO_ERR_INVALID_ARGUMENT;
+            }
+        }
+        if (const auto hook = g_before_record_attach.load()) {
+            hook(g_before_record_attach_user.load());
+        }
         commit();
         link->zero_us.store(zero_us, std::memory_order_relaxed);
         link->active.store(recorder, std::memory_order_release);
     }
     recorder->attached.store(true, std::memory_order_release);
+    /* A focus set since the header's read may have found no recorder to
+     * pin; the compare keeps it from being written twice */
+    ecuio_record_focus(session);
     return ECUIO_OK;
 }
+
+} // extern "C"
+
+namespace {
+
+/* The focus's activity lines into the pinned recorder's note queue: the
+ * count, the minimum when there is one, then the names */
+void push_focus(ecuio_recorder_t* r, const ecuio_signal_set_t* set,
+                const focus_named& f)
+{
+    size_t named = 0;
+    const std::vector<std::string> parts = focus_parts(set, f.ids, &named);
+    std::string lines;
+    if (parts.empty()) {
+        lines = "none: every signal asked";
+    }
+    for (size_t k = 0; k < parts.size(); ++k) {
+        if (k == 0) {
+            lines +=
+                std::to_string(named) + (named == 1 ? " signal" : " signals");
+            if (f.min_sweep_ms != 0) {
+                lines += ", at least " + std::to_string(f.min_sweep_ms) +
+                         " ms between sweeps";
+            }
+            lines += ": ";
+        } else {
+            lines += std::string(1, '\0') + "more: ";
+        }
+        lines += parts[k];
+    }
+    const uint64_t now = ecuio_record_clock_us();
+    const uint64_t host_us = now > r->zero_us ? now - r->zero_us : 0;
+    std::lock_guard<std::mutex> g(r->note_m);
+    if (r->items.size() >= r->note_cap) {
+        r->notes_dropped.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        r->items.push_back(item{item_kind::focus, host_us,
+                                f.pick ? "pick" : "focus", std::move(lines),
+                                f});
+    }
+}
+
+} // namespace
+
+void ecuio_record_focus(ecuio_session_t* session)
+{
+    ecuio_record_link& link = *session->record_link;
+    ecuio_recorder_t* r = nullptr;
+    {
+        std::lock_guard<std::mutex> g(link.m);
+        r = ecuio_record_pin(link);
+    }
+    if (r == nullptr) {
+        return;
+    }
+    try {
+        focus_named f;
+        bool changed = false;
+        {
+            std::lock_guard<std::mutex> g(session->focus_mutex);
+            f = focus_now(session);
+            changed = !(f == r->named_focus);
+            if (changed) {
+                r->named_focus = f;
+            }
+        }
+        if (changed) {
+            push_focus(r, session->active_signal_set, f);
+        }
+    } catch (...) {
+        /* The focus stands; its line is lost, counted as a note */
+        r->notes_dropped.fetch_add(1, std::memory_order_relaxed);
+    }
+    ecuio_record_unpin(link);
+}
+
+extern "C" {
 
 ecuio_status_t ecuio_recorder_note(ecuio_recorder_t* recorder,
                                    const char* utf8_line)
@@ -1674,7 +965,7 @@ ecuio_status_t ecuio_recorder_note(ecuio_recorder_t* recorder,
     if (recorder->failed()) {
         return ECUIO_ERR_RECORDING_FAILED;
     }
-    const uint64_t now = ecuio_clock_us();
+    const uint64_t now = ecuio_record_clock_us();
     const uint64_t host_us =
         now > recorder->zero_us ? now - recorder->zero_us : 0;
     try {
@@ -1685,7 +976,7 @@ ecuio_status_t ecuio_recorder_note(ecuio_recorder_t* recorder,
             return ECUIO_OK;
         }
         recorder->items.push_back(
-            item{item_kind::note, host_us, std::move(line), {}});
+            item{item_kind::note, host_us, std::move(line), {}, {}});
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -1704,7 +995,7 @@ ecuio_status_t ecuio_recorder_mark(ecuio_recorder_t* recorder,
     if (recorder->failed()) {
         return ECUIO_ERR_RECORDING_FAILED;
     }
-    const uint64_t now = ecuio_clock_us();
+    const uint64_t now = ecuio_record_clock_us();
     const uint64_t host_us =
         now > recorder->zero_us ? now - recorder->zero_us : 0;
     try {
@@ -1715,7 +1006,7 @@ ecuio_status_t ecuio_recorder_mark(ecuio_recorder_t* recorder,
             return ECUIO_OK;
         }
         recorder->items.push_back(
-            item{item_kind::mark, host_us, std::move(label), {}});
+            item{item_kind::mark, host_us, std::move(label), {}, {}});
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -1729,10 +1020,16 @@ ecuio_status_t ecuio_recorder_get_state(const ecuio_recorder_t* recorder,
         return ECUIO_ERR_NULL_ARGUMENT;
     }
     std::memset(out, 0, sizeof *out);
+    if (recorder->drained.load(std::memory_order_acquire)) {
+        out->flags |= ECUIO_RECORDER_DRAINED;
+    }
     const uint32_t state = recorder->state.load(std::memory_order_acquire);
     out->state = state == ECUIO_RECORDING_FAILED ? ECUIO_RECORDING_FAILED
                  : recorder->detached.load(std::memory_order_acquire)
                      ? ECUIO_RECORDING_DETACHED
+                 : recorder->armed &&
+                         !recorder->window_open.load(std::memory_order_acquire)
+                     ? ECUIO_RECORDING_ARMED
                      : ECUIO_RECORDING_ACTIVE;
     out->frame_rows = recorder->frame_rows.load(std::memory_order_relaxed);
     out->value_rows = recorder->value_rows.load(std::memory_order_relaxed);
@@ -1740,6 +1037,13 @@ ecuio_status_t ecuio_recorder_get_state(const ecuio_recorder_t* recorder,
         recorder->records_dropped.load(std::memory_order_relaxed);
     out->notes_dropped =
         recorder->notes_dropped.load(std::memory_order_relaxed);
+    out->conditions_lost =
+        recorder->conditions_lost.load(std::memory_order_relaxed);
+    out->windows = recorder->windows_opened.load(std::memory_order_acquire);
+    out->preroll_short =
+        recorder->prerolls_short.load(std::memory_order_relaxed);
+    out->frames_passed =
+        recorder->frames_passed.load(std::memory_order_relaxed);
     if (state == ECUIO_RECORDING_FAILED) {
         std::lock_guard<std::mutex> g(recorder->reason_m);
         const size_t n =
@@ -1757,7 +1061,8 @@ ecuio_status_t ecuio_recorder_get_folder(const ecuio_recorder_t* recorder,
         (utf8 == nullptr && capacity > 0)) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
-    const std::string& f = recorder->folder;
+    std::lock_guard<std::mutex> g(recorder->folder_m);
+    const std::string& f = recorder->published;
     *out_len = static_cast<uint32_t>(f.size());
     if (capacity > 0) {
         const size_t n =
@@ -1787,12 +1092,54 @@ ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
         r->writer.join();
     }
     /* The writer has drained everything; the summary is the last line */
-    if (r->attached.load()) {
+    if (r->attached.load() && r->armed) {
+        /* The window still open, if one is: what the worker carried, then
+         * its end, at the close while a record condition is ON */
+        if (r->in_window && !r->windows_q.empty()) {
+            const ecuio_recorder::window w = r->windows_q.front();
+            const uint64_t now = ecuio_record_clock_us();
+            const uint64_t host_us = now > r->zero_us ? now - r->zero_us : 0;
+            /* A window whose conditions cleared ends at its last record,
+             * one still ON at the close; the carry goes in up to its end */
+            uint64_t end_host = w.open_end ? host_us : r->win_last_host;
+            for (uint32_t k = 0; k < r->carry_count; ++k) {
+                const event_body& e = r->carry[r->carry_start + k];
+                if (w.open_end || e.t_us <= w.end_us) {
+                    r->take_event(e);
+                    end_host = (std::max)(end_host, e.host_us);
+                }
+            }
+            if (w.open_end) {
+                if (r->carry_lost > 0) {
+                    r->lost_line(r->carry_lost_us, r->carry_lost);
+                }
+                if (r->link_pending) {
+                    r->event_line(r->pending_link.host_us, "link",
+                                  link_text(r->pending_link.state,
+                                            r->pending_link.episodes));
+                }
+                if (r->pending_dropped > 0) {
+                    r->drop_line(end_host, r->pending_dropped);
+                    r->win_dropped += r->pending_dropped;
+                }
+            }
+            r->close_window(
+                end_host,
+                w.open_end ? one_line(utf8_why != nullptr ? utf8_why : "closed")
+                           : std::string(kWindowEnded));
+        }
+    } else if (r->attached.load()) {
         std::string why = one_line(utf8_why != nullptr ? utf8_why : "closed");
-        const uint64_t now = ecuio_clock_us();
+        const uint64_t now = ecuio_record_clock_us();
         const uint64_t host_us = now > r->zero_us ? now - r->zero_us : 0;
         /* What the worker couldn't queue before it let go: the detach
          * waited for it, so its fields are this thread's now */
+        for (uint32_t k = 0; k < r->carry_count; ++k) {
+            r->take_event(r->carry[r->carry_start + k]);
+        }
+        if (r->carry_lost > 0) {
+            r->lost_line(r->carry_lost_us, r->carry_lost);
+        }
         if (r->link_pending) {
             r->event_line(
                 r->pending_link.host_us, "link",
@@ -1810,10 +1157,22 @@ ecuio_status_t ecuio_recorder_close(ecuio_recorder_t* recorder,
                 " records dropped, " + std::to_string(r->notes_dropped.load()) +
                 " notes dropped");
         r->write(r->events, r->event_out);
+        r->write(r->markers, r->marker_out);
     }
     r->sync_all();
     r->close_files();
     return r->failed() ? ECUIO_ERR_RECORDING_FAILED : ECUIO_OK;
+}
+
+void ecuio_session_test_before_record_attach(void (*hook)(void* user),
+                                             void* user)
+{
+    /* The user before the hook, and a clear leaves the user: a reader
+     * that took the old hook still finds its own */
+    if (hook != nullptr) {
+        g_before_record_attach_user.store(user);
+    }
+    g_before_record_attach.store(hook);
 }
 
 void ecuio_recorder_test_hold(ecuio_recorder_t* recorder, int hold)
@@ -1835,6 +1194,12 @@ void ecuio_recorder_test_add_slept(ecuio_recorder_t* recorder, uint64_t us)
     if (recorder != nullptr) {
         recorder->slept_added.fetch_add(us, std::memory_order_relaxed);
     }
+}
+
+void ecuio_recorder_test_set_clock(int on, uint64_t now_us)
+{
+    g_test_clock_us.store(now_us, std::memory_order_release);
+    g_test_clock_on.store(on != 0, std::memory_order_release);
 }
 
 uint64_t ecuio_recorder_test_wakes(const ecuio_recorder_t* recorder)

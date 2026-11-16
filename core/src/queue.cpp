@@ -37,6 +37,7 @@ struct ecuio_queue {
     std::shared_ptr<ecuio_queue_link> link;
     std::unique_ptr<ecuio_frame_t[]> frames;
     std::unique_ptr<ecuio_queue_value_t[]> values;
+    std::unique_ptr<ecuio_condition_event_t[]> events;
 
     std::mutex m;
     std::condition_variable cv;
@@ -212,6 +213,17 @@ void ecuio_queue_end_all(ecuio_session_t* session)
     }
 }
 
+void ecuio_queue_put_conditions(ecuio_queue_t* q,
+                                const ecuio_condition_event_t* events,
+                                uint32_t count)
+{
+    std::unique_lock<std::mutex> lock(q->m);
+    for (uint32_t i = 0; i < count; ++i) {
+        q->events[q->take_slot()] = events[i];
+    }
+    q->wake_readers(lock);
+}
+
 extern "C" {
 
 ecuio_status_t ecuio_queue_open(ecuio_session_t* session, uint32_t kind,
@@ -226,10 +238,11 @@ ecuio_status_t ecuio_queue_open(ecuio_session_t* session, uint32_t kind,
     if (session->closed.load()) {
         return ECUIO_ERR_SESSION_CLOSED;
     }
-    const uint32_t ceiling = kind == ECUIO_QUEUE_FRAMES ? ECUIO_QUEUE_MAX_FRAMES
-                             : kind == ECUIO_QUEUE_VALUES
-                                 ? ECUIO_QUEUE_MAX_VALUES
-                                 : 0;
+    const uint32_t ceiling =
+        kind == ECUIO_QUEUE_FRAMES       ? ECUIO_QUEUE_MAX_FRAMES
+        : kind == ECUIO_QUEUE_VALUES     ? ECUIO_QUEUE_MAX_VALUES
+        : kind == ECUIO_QUEUE_CONDITIONS ? ECUIO_QUEUE_MAX_CONDITIONS
+                                         : 0;
     if (ceiling == 0 || capacity == 0 || capacity > ceiling ||
         session->started ||
         session->queue_count >= ECUIO_QUEUE_MAX_PER_SESSION) {
@@ -243,10 +256,12 @@ ecuio_status_t ecuio_queue_open(ecuio_session_t* session, uint32_t kind,
     q->capacity = capacity;
     if (kind == ECUIO_QUEUE_FRAMES) {
         q->frames.reset(new (std::nothrow) ecuio_frame_t[capacity]);
-    } else {
+    } else if (kind == ECUIO_QUEUE_VALUES) {
         q->values.reset(new (std::nothrow) ecuio_queue_value_t[capacity]);
+    } else {
+        q->events.reset(new (std::nothrow) ecuio_condition_event_t[capacity]);
     }
-    if (q->frames == nullptr && q->values == nullptr) {
+    if (q->frames == nullptr && q->values == nullptr && q->events == nullptr) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
     try {
@@ -299,6 +314,25 @@ ecuio_status_t ecuio_queue_read_values(ecuio_queue_t* queue,
     return read_queue(queue, capacity, kValueChunk, count, dropped, timeout_ms,
                       [queue, out](uint32_t slot, uint32_t at) {
                           out[at] = queue->values[slot];
+                      });
+}
+
+ecuio_status_t ecuio_queue_read_conditions(ecuio_queue_t* queue,
+                                           ecuio_condition_event_t* out,
+                                           uint32_t capacity, uint32_t* count,
+                                           uint64_t* dropped,
+                                           uint32_t timeout_ms)
+{
+    if (queue == nullptr || out == nullptr || count == nullptr ||
+        dropped == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (capacity == 0 || queue->kind != ECUIO_QUEUE_CONDITIONS) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    return read_queue(queue, capacity, kValueChunk, count, dropped, timeout_ms,
+                      [queue, out](uint32_t slot, uint32_t at) {
+                          out[at] = queue->events[slot];
                       });
 }
 

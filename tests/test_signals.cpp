@@ -655,6 +655,33 @@ TEST(SignalsTest, DisplayConvertMapsEachMetricUnitToImperial)
     }
 }
 
+TEST(SignalsTest, EveryImperialConversionIsAffine)
+{
+    /* The app turns a level typed in the display unit back into the def's
+     * from two points (SessionBridge::decodedValue), which holds only while
+     * each conversion is a factor and an offset. */
+    const char* const kUnits[] = {
+        "km/h", ("\xC2\xB0" "C"), "kPa", "bar", "g/s", "km", "Pa", "L/h", "N\xC2\xB7m",
+    };
+    const double kValues[] = {-8192.0, -40.0, -1.5, 0.25, 2.0, 101.325, 1000.0, 65535.0};
+    for (const char* unit : kUnits) {
+        ecuio_display_value_t at0;
+        ecuio_display_value_t at1;
+        ASSERT_EQ(ecuio_display_convert(unit, 0, 0.0, ECUIO_UNITS_IMPERIAL, &at0), ECUIO_DISPLAY_OK);
+        ASSERT_EQ(ecuio_display_convert(unit, 0, 1.0, ECUIO_UNITS_IMPERIAL, &at1), ECUIO_DISPLAY_OK);
+        ASSERT_EQ(at0.converted, 1) << unit;
+        ASSERT_NE(at1.value, at0.value) << unit;
+        for (double v : kValues) {
+            ecuio_display_value_t out;
+            ASSERT_EQ(ecuio_display_convert(unit, 0, v, ECUIO_UNITS_IMPERIAL, &out), ECUIO_DISPLAY_OK);
+            const double line = at0.value + v * (at1.value - at0.value);
+            EXPECT_NEAR(out.value, line, 1e-9 * (1.0 + std::fabs(line))) << unit << " at " << v;
+            EXPECT_NEAR((out.value - at0.value) / (at1.value - at0.value), v,
+                        1e-9 * (1.0 + std::fabs(v))) << unit << " at " << v;
+        }
+    }
+}
+
 TEST(SignalsTest, DisplayConvertPassesOtherUnitsAndMetricThrough)
 {
     /* Units with no imperial form, an empty unit, and every unit under

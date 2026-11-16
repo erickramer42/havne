@@ -1,0 +1,64 @@
+{
+  "havne_conditions": 1,
+  "name": "Desk conditions",
+  "notes": "Synthetic: written for Havne's tests, resolved against tests/fixtures/signals/extras.json",
+  "checks": { "gap": 2.5, "rate_drop": 4 },
+  "conditions": [
+    {
+      "key": "fast",
+      "name": "Fast",
+      "when": { "signal": ["key:road_speed"], "unit": "km/h", "above": 130, "clear": 120 },
+      "for": 3, "clear_for": 1,
+      "alert": { "level": "warning", "banner": true }
+    },
+    {
+      "key": "stopped_hot",
+      "name": "Stopped and hot",
+      "when": { "all": [
+        { "signal": ["key:standstill"], "equals": 0 },
+        { "signal": ["key:trans_temp", "obd2.coolant"], "unit": "°C", "above": 110, "max_age": 30 }
+      ] },
+      "alert": { "level": "danger", "sound": true, "banner": true },
+      "mark": true
+    },
+    {
+      "key": "revs",
+      "name": "High revs",
+      "when": { "any": [
+        { "signal": ["key:krpm"], "unit": "krpm", "above": 6.5 },
+        { "signal": ["id:1001", "obd2.rpm"], "unit": "RPM", "above": 6500 }
+      ] },
+      "record": { "before": 5, "after": 2.5 }
+    },
+    {
+      "key": "wrong_unit",
+      "name": "A level in another unit",
+      "when": { "signal": ["key:trans_temp"], "unit": "°F", "above": 230 }
+    },
+    {
+      "key": "text",
+      "name": "A text signal",
+      "when": { "signal": ["key:tcm_part"], "differs": 0 }
+    },
+    {
+      "key": "ordered_enum",
+      "name": "An enumeration above a level",
+      "when": { "signal": ["key:standstill"], "unit": "", "above": 0 }
+    },
+    {
+      "key": "elsewhere",
+      "name": "A signal of another file",
+      "when": { "all": [
+        { "link": "timeout" },
+        { "signal": ["key:boost", "id:13001"], "unit": "kPa", "above": 150 }
+      ] }
+    },
+    {
+      "key": "off",
+      "name": "Switched off",
+      "enabled": false,
+      "when": { "check": "gap" },
+      "mark": true
+    }
+  ]
+}
