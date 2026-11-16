@@ -323,6 +323,12 @@ if(TARGET havne-cli)
                --values)
         app_cli_golden(MockDriveCycle mock.jsonl --ignore t_us
             -- $<TARGET_FILE:havne-cli> stream mock://golden --values --count 40)
+        # A session of more modules than its info lists itself: the
+        # session line names each one (ADR-0065)
+        app_cli_golden(ASessionLineNamesEveryModule stream-modules.jsonl --ignore t_us
+            -- $<TARGET_FILE:havne-cli> stream
+               "mock://golden?profile=uds-generic&diagnose=0&did=7E8:D100:u8,7E9:D101:u8,7EA:D102:u8,7EB:D103:u8,7EC:D104:u8,7ED:D105:u8"
+               --count 8)
         # A typed VIN's decode (ADR-0043), made up around FAKE: the model
         # year a letter in position 7 places, the make by vPIC's code
         app_cli_golden(AVinIsDecoded vin.jsonl

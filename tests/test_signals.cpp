@@ -595,10 +595,14 @@ TEST(SignalsTest, SignalDefLayoutIsPinned)
     EXPECT_EQ(offsetof(ecuio_signal_def_t, reserved), 104u);
 
     /* Core reads layout_version before it knows anything else about a
-     * set. 4, so a set that carries an earlier layout's 1, 2 or 3 there
-     * is refused: layout 3's set ended where layout 4's tables start. */
+     * set. 5, so a set that carries an earlier layout's number there is
+     * refused: layout 4's channels are 8 bytes each, layout 5's 16. */
     EXPECT_EQ(offsetof(ecuio_signal_set_t, layout_version), 0u);
-    EXPECT_EQ(ECUIO_SIGNAL_SET_LAYOUT, 4u);
+    EXPECT_EQ(ECUIO_SIGNAL_SET_LAYOUT, 5u);
+    EXPECT_EQ(sizeof(ecuio_channel_decl_t), 16u);
+    EXPECT_EQ(offsetof(ecuio_channel_decl_t, tx_id), 4u);
+    EXPECT_EQ(offsetof(ecuio_channel_decl_t, flags), 8u);
+    EXPECT_EQ(offsetof(ecuio_channel_decl_t, reserved), 12u);
     EXPECT_EQ(offsetof(ecuio_signal_set_t, enum_count), 2 * sizeof(void*) + 16);
     EXPECT_EQ(offsetof(ecuio_signal_set_t, computed), 3 * sizeof(void*) + 24);
     EXPECT_EQ(sizeof(ecuio_signal_set_t), 4 * sizeof(void*) + 40);
@@ -1179,7 +1183,7 @@ TEST(SignalsTest, SetValidationChecksLayoutVersionFirst)
      * def. */
     ecuio_signal_def_t bad_def = four_byte_def(ECUIO_VALUE_UINT);
     bad_def.bit_length = 0;
-    for (uint32_t version : {0u, 1u, 2u, 3u, 5u}) {
+    for (uint32_t version : {0u, 1u, 2u, 3u, 4u, 6u}) {
         ecuio_signal_set_t set = {};
         set.layout_version = version;
         EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_ERR_LAYOUT) << version;
@@ -1255,7 +1259,7 @@ TEST(SignalsTest, SetValidationAcceptsAnEmptySet)
 {
     /* No defs: decodes nothing, may still declare channels (a filtered
      * log-only profile). count > 0 with no defs stays an error. */
-    static const ecuio_channel_decl_t kChan[] = {{0x7E8u, 0x7E0u}};
+    static const ecuio_channel_decl_t kChan[] = {{0x7E8u, 0x7E0u, 0, 0}};
     ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     EXPECT_EQ(ecuio_validate_signal_set(&set, nullptr), ECUIO_VALIDATE_OK);
@@ -1292,9 +1296,9 @@ TEST(SignalsTest, SetValidationNamesTheFailingElement)
     for (int i = 0; i < 3; ++i) {
         std::snprintf(defs[i].name, sizeof defs[i].name, "Signal %d", i);
     }
-    ecuio_channel_decl_t channels[3] = {{0x7E8u, 0x7E0u},
-                                        {0x7E9u, 0x7E1u},
-                                        {0x7EAu, 0x7E2u}};
+    ecuio_channel_decl_t channels[3] = {{0x7E8u, 0x7E0u, 0, 0},
+                                        {0x7E9u, 0x7E1u, 0, 0},
+                                        {0x7EAu, 0x7E2u, 0, 0}};
     ecuio_signal_set_t set = {};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 3;
@@ -1318,12 +1322,20 @@ TEST(SignalsTest, SetValidationNamesTheFailingElement)
     channels[2].rx_id = channels[1].rx_id;
     expect("duplicate rx", &set, ECUIO_VALIDATE_ERR_DUPLICATE_RX, 2u);
     channels[2].rx_id = 0x7EAu;
+    channels[1].flags = 1;
+    expect("channel flags", &set, ECUIO_VALIDATE_ERR_CHANNEL_RESERVED, 1u);
+    channels[1].flags = 0;
+    channels[2].reserved = 0x80000000u;
+    expect("channel reserved", &set, ECUIO_VALIDATE_ERR_CHANNEL_RESERVED, 2u);
+    channels[2].reserved = 0;
     expect("valid again", &set, ECUIO_VALIDATE_OK, UINT32_MAX);
 
     expect("NULL set", nullptr, ECUIO_VALIDATE_ERR_NULL, UINT32_MAX);
     ecuio_signal_set_t whole = set;
     whole.layout_version = 2;
     expect("layout", &whole, ECUIO_VALIDATE_ERR_LAYOUT, UINT32_MAX);
+    whole.layout_version = ECUIO_SIGNAL_SET_LAYOUT - 1; /* 8-byte channels */
+    expect("the layout before", &whole, ECUIO_VALIDATE_ERR_LAYOUT, UINT32_MAX);
     whole = set;
     whole.reserved[3] = 1;
     expect("set reserved", &whole, ECUIO_VALIDATE_ERR_SET_RESERVED, UINT32_MAX);

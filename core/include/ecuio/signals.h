@@ -146,18 +146,33 @@ _Static_assert(offsetof(ecuio_signal_def_t, table_count) == 102, "def table_coun
 _Static_assert(offsetof(ecuio_signal_def_t, reserved) == 104, "def reserved offset is ABI");
 #endif
 
-/* ADR-0013 section 4: a set's channels, one for each ECU it asks.
- * rx_id is the reply ID (each transport's receive filter and ISO-TP's
- * flow-control target); tx_id is the request's. A set that declares
- * none (raw, mock) asks nothing and filters nothing. Validated at
- * registration; read by the requesting transports (J2534, ELM327,
+/* ADR-0013 section 4: a set's channels, one for each ECU (module) it
+ * asks. rx_id is the reply ID (each transport's receive filter and
+ * ISO-TP's flow-control target); tx_id is the request's. A set that
+ * declares none (raw, mock) asks nothing and filters nothing. Validated
+ * at registration; read by the requesting transports (J2534, ELM327,
  * SocketCAN) and the simulated ECU. */
-#define ECUIO_MAX_CHANNELS 4
+#define ECUIO_MAX_CHANNELS 32 /* a whole car's modules (ADR-0065) */
 
+/* POD, 16 bytes; pinned by the assertions below */
 typedef struct ecuio_channel_decl {
-    uint32_t rx_id;   /* flow-control filter target */
-    uint32_t tx_id;   /* request destination */
+    uint32_t rx_id;    /* flow-control filter target */
+    uint32_t tx_id;    /* request destination */
+    uint32_t flags;    /* zero: none defined */
+    uint32_t reserved; /* zero; room for what a module is given later */
 } ecuio_channel_decl_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_channel_decl_t) == 16, "ecuio_channel_decl_t size is ABI");
+static_assert(offsetof(ecuio_channel_decl_t, tx_id) == 4, "decl tx_id offset is ABI");
+static_assert(offsetof(ecuio_channel_decl_t, flags) == 8, "decl flags offset is ABI");
+static_assert(offsetof(ecuio_channel_decl_t, reserved) == 12, "decl reserved offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_channel_decl_t) == 16, "ecuio_channel_decl_t size is ABI");
+_Static_assert(offsetof(ecuio_channel_decl_t, tx_id) == 4, "decl tx_id offset is ABI");
+_Static_assert(offsetof(ecuio_channel_decl_t, flags) == 8, "decl flags offset is ABI");
+_Static_assert(offsetof(ecuio_channel_decl_t, reserved) == 12, "decl reserved offset is ABI");
+#endif
 
 /* An enum def's labels (ADR-0051): its table_count entries from
  * table_first in the set's enums, raw values strictly ascending. A raw
@@ -281,7 +296,7 @@ _Static_assert(offsetof(ecuio_computed_t, reserved) == 192, "computed reserved o
 
 /* The set layout this core reads. ecuio_validate_signal_set refuses
  * any other layout_version; the next incompatible layout bumps it. */
-#define ECUIO_SIGNAL_SET_LAYOUT 4u
+#define ECUIO_SIGNAL_SET_LAYOUT 5u
 
 /* Fill a set member by member from a zeroed struct, never
  * positionally: reserved0 sits between channel_count and channels.
@@ -503,12 +518,16 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
                                                       empty one too: a
                                                       recording keys its
                                                       values by name */
+#define ECUIO_VALIDATE_ERR_CHANNEL_RESERVED (-26)  /* a channel's flags or
+                                                      reserved word not
+                                                      zero */
 
 /* Why a set failed validation, and where. index names the element the
  * code is about: the failing def; for a duplicate id or name, the
- * second def of the pair; for a bad channel id, the channel; for a
- * duplicate rx, the second channel of the pair; for too many requests,
- * the first def whose request didn't fit; for a table range, the def;
+ * second def of the pair; for a bad channel id or a channel's
+ * reserved fields, the channel; for a duplicate rx, the second channel
+ * of the pair; for too many requests, the first def whose request
+ * didn't fit; for a table range, the def;
  * for an enum entry, the entry; for a program or its input, the
  * program; for a chain, the first program in the table it couldn't
  * settle (on a circle, reading one, or past the depth). It is

@@ -107,6 +107,20 @@ std::string one(const std::string& signal, const std::string& ecus =
            R"("ecus":)" + ecus + R"(,"signals":[)" + signal + "]}";
 }
 
+/* n ECUs as an "ecus" list, each on IDs of its own */
+std::string ecus_of(unsigned n)
+{
+    std::string s = "[";
+    for (unsigned i = 0; i < n; ++i) {
+        char e[64];
+        std::snprintf(e, sizeof e,
+                      "%s{\"id\":\"e%u\",\"rx\":\"%03X\",\"tx\":\"%03X\"}",
+                      i > 0 ? "," : "", i, 0x700u + i, 0x600u + i);
+        s += e;
+    }
+    return s + "]";
+}
+
 const char* const kNumber =
     R"({"key":"a","name":"A","read":{"service":"22","number":"D100"},"field":{"byte":0}})";
 
@@ -663,9 +677,8 @@ TEST(SignalFileTest, EveryRefusalSaysWhereAndWhy)
         {one(kNumber, R"([{"id":"bcm","rx":"7B8","tx":"18DA40F1"}])"), "another width than its rx"},
         {one(kNumber, R"([{"id":"a","rx":"7E8"},{"id":"b","rx":"18DAF118"}])"),
          "29-bit beside 11-bit IDs"},
-        {one(kNumber, R"([{"id":"a","rx":"7E8"},{"id":"b","rx":"7E9"},{"id":"c","rx":"7EA"},)"
-                      R"({"id":"d","rx":"7EB"},{"id":"e","rx":"7EC"}])"),
-         "past the 4 ECUs"},
+        {one(kNumber, ecus_of(ECUIO_MAX_CHANNELS + 1)),
+         "ecu 'e32' is past the 32 ECUs one session reads"},
         {one(kNumber, R"([{"id":"a","rx":"7E8"},{"id":"a","rx":"7E9"}])"), "is given twice"},
         {one(kNumber, R"([{"id":"a","rx":"7E8"},{"id":"b","rx":"7E8"}])"), "shares its rx with ecu 'a'"},
         {one(kNumber, R"([{"id":"a","rx":"7G8"}])"), "isn't hex"},

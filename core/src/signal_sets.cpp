@@ -380,6 +380,10 @@ static int check_set(const ecuio_signal_set_t* set, uint32_t* index)
                 *index = i;
                 return ECUIO_VALIDATE_ERR_CHANNEL_ID;
             }
+            if (set->channels[i].flags != 0 || set->channels[i].reserved != 0) {
+                *index = i;
+                return ECUIO_VALIDATE_ERR_CHANNEL_RESERVED;
+            }
             for (uint32_t j = 0; j < i; ++j) {
                 if (set->channels[j].rx_id == rx) {
                     *index = i;   /* the second of the pair */

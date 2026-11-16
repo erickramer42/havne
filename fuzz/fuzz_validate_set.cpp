@@ -17,11 +17,11 @@
 
 namespace {
 
-/* Sized past the valid limits (8 defs over any count the input can
- * ask for, 8 channels over ECUIO_MAX_CHANNELS), so however the
- * validator walks them, it reads initialized memory. */
+/* Sized to the most the input can ask for (8 defs, and 8 channels
+ * over ECUIO_MAX_CHANNELS, so the count's refusal is reached), so
+ * however the validator walks them, it reads initialized memory. */
 constexpr uint32_t kMaxDefs = 8;
-constexpr uint32_t kMaxChannels = 8;
+constexpr uint32_t kMaxChannels = ECUIO_MAX_CHANNELS + 8;
 constexpr uint32_t kDefBytes = 6;
 constexpr uint32_t kChannelBytes = 4;
 constexpr size_t kHeadBytes = 5;
@@ -254,7 +254,8 @@ int validated(const uint8_t* data, size_t size)
         return chain_mode(data + kHeadBytes, size - kHeadBytes);
 
     const uint32_t count = data[0] % 9;                 /* 0..8 */
-    const uint32_t channel_count = data[3] % 6;         /* 0..5, incl. >4 */
+    /* 0 to kMaxChannels, past ECUIO_MAX_CHANNELS among them */
+    const uint32_t channel_count = data[3] % (kMaxChannels + 1);
     const bool channels_null = (data[4] & 1u) != 0;
     const bool defs_null = (data[4] & 2u) != 0;
 
@@ -296,6 +297,8 @@ int validated(const uint8_t* data, size_t size)
                             (((uint32_t)p[2] & 1u) << 29);  /* past 0x1FFFFFFF */
         channels[i].tx_id = (uint32_t)p[0] | ((uint32_t)p[3] << 8) |
                             (((uint32_t)p[2] & 2u) << 28);
+        if (p[2] & 4u) channels[i].flags = p[2];        /* reserved injection */
+        if (p[2] & 8u) channels[i].reserved = 1u;
         p += kChannelBytes;
     }
 
@@ -340,6 +343,7 @@ int validated(const uint8_t* data, size_t size)
 
     /* Names a channel */
     case ECUIO_VALIDATE_ERR_CHANNEL_ID:
+    case ECUIO_VALIDATE_ERR_CHANNEL_RESERVED:
     case ECUIO_VALIDATE_ERR_DUPLICATE_RX:
         if (v1.index >= channel_count) abort();
         break;
@@ -371,8 +375,9 @@ int validated(const uint8_t* data, size_t size)
     return rc1;
 }
 
-/* The harness still reaches a set of several defs that passes, and the
- * duplicate name's refusal through its repeat bit */
+/* The harness still reaches a set of several defs that passes, the
+ * duplicate name's refusal through its repeat bit, a channel's reserved
+ * fields through theirs, and one channel more than a set holds */
 bool reaches_several_defs()
 {
     if (validated(kTwoDefs, sizeof kTwoDefs) != ECUIO_VALIDATE_OK)
@@ -384,6 +389,29 @@ bool reaches_several_defs()
         ECUIO_VALIDATE_ERR_DUPLICATE_NAME) {
         abort();
     }
+    /* One channel, 0x7E8 and 0x6E8: taken plain, refused with either bit */
+    uint8_t channel[kHeadBytes + kChannelBytes] = {
+        0, ECUIO_SIGNAL_SET_LAYOUT, 0, 1, 0, 0xE8, 0x07, 0x00, 0x06};
+    if (validated(channel, sizeof channel) != ECUIO_VALIDATE_OK)
+        abort();
+    const uint8_t bits[] = {4, 8}; /* its flags, its reserved word */
+    for (const uint8_t bit : bits) {
+        channel[kHeadBytes + 2] = bit;
+        if (validated(channel, sizeof channel) !=
+            ECUIO_VALIDATE_ERR_CHANNEL_RESERVED) {
+            abort();
+        }
+    }
+    uint8_t crowd[kHeadBytes + (ECUIO_MAX_CHANNELS + 1) * kChannelBytes] = {
+        0, ECUIO_SIGNAL_SET_LAYOUT, 0, ECUIO_MAX_CHANNELS + 1, 0};
+    for (uint32_t i = 0; i <= ECUIO_MAX_CHANNELS; ++i) {
+        uint8_t* c = crowd + kHeadBytes + i * kChannelBytes;
+        c[0] = (uint8_t)(0x10 + i); /* an ID of its own for each */
+        c[1] = 0x07;
+        c[3] = 0x06;
+    }
+    if (validated(crowd, sizeof crowd) != ECUIO_VALIDATE_ERR_CHANNEL_COUNT)
+        abort();
     return true;
 }
 

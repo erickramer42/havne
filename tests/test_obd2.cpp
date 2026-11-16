@@ -266,15 +266,16 @@ TEST(Obd2SetTest, RejectsDuplicateAndIllegalChannelDecls) {
         return s;
     };
 
-    const ecuio_channel_decl_t dup[] = { {0x7E8u, 0x7E0u}, {0x7E8u, 0x7E2u} };
+    const ecuio_channel_decl_t dup[] = { {0x7E8u, 0x7E0u, 0, 0},
+                                         {0x7E8u, 0x7E2u, 0, 0} };
     const ecuio_signal_set_t s_dup = set_with(dup, 2u);
     EXPECT_EQ(ecuio_validate_signal_set(&s_dup, nullptr), ECUIO_VALIDATE_ERR_DUPLICATE_RX);
 
-    const ecuio_channel_decl_t zero_rx[] = { {0u, 0x7E0u} };
+    const ecuio_channel_decl_t zero_rx[] = { {0u, 0x7E0u, 0, 0} };
     const ecuio_signal_set_t s_zero = set_with(zero_rx, 1u);
     EXPECT_EQ(ecuio_validate_signal_set(&s_zero, nullptr), ECUIO_VALIDATE_ERR_CHANNEL_ID);
 
-    const ecuio_channel_decl_t legal[] = { {0x7E8u, 0x7E0u} };
+    const ecuio_channel_decl_t legal[] = { {0x7E8u, 0x7E0u, 0, 0} };
     const ecuio_signal_set_t s_ok = set_with(legal, 1u);
     EXPECT_EQ(ecuio_validate_signal_set(&s_ok, nullptr), ECUIO_VALIDATE_OK);
 }
@@ -514,6 +515,36 @@ TEST(RequestEngineTest, Obd2SetEnrolsItsPidsInDefOrder) {
                 << "index " << i;
         }
     }
+}
+
+/* ADR-0065: the engine holds a channel for each module of its set, one
+ * at least and ECUIO_MAX_CHANNELS at most, and a request goes out on the
+ * channel it was added to whichever that is */
+TEST(RequestEngineTest, TheEngineHoldsAChannelForEachModule) {
+    ecuio_request_engine e;
+    ecuio_engine_init(&e, 0);
+    EXPECT_EQ(e.chan_count, 1u);
+    EXPECT_EQ(e.chans.size(), 1u);
+    ecuio_engine_init(&e, ECUIO_MAX_CHANNELS + 8);
+    EXPECT_EQ(e.chan_count, uint32_t{ECUIO_MAX_CHANNELS});
+    EXPECT_EQ(e.chans.size(), size_t{ECUIO_MAX_CHANNELS});
+
+    ecuio_engine_init(&e, 6);
+    EXPECT_EQ(e.chan_count, 6u);
+    ASSERT_EQ(e.chans.size(), 6u);
+    const uint8_t did[3] = {0x22, 0xD1, 0x05};
+    EXPECT_EQ(ecuio_engine_add(&e, 6, did, 3), ecuio_engine_add_result::refused)
+        << "a channel past the engine's";
+    ASSERT_EQ(ecuio_engine_add(&e, 5, did, 3), ecuio_engine_add_result::added);
+    for (uint32_t c = 0; c < 5; ++c) {
+        EXPECT_EQ(ecuio_engine_due(&e, c, 1000), ECUIO_ENGINE_NONE) << c;
+    }
+    const int32_t r = ecuio_engine_due(&e, 5, 1000);
+    ASSERT_EQ(r, 0);
+    EXPECT_EQ(e.requests[r].channel, 5u);
+    ecuio_engine_sent(&e, 5, r, true, 1000);
+    EXPECT_EQ(e.chans[5].outstanding, 0);
+    EXPECT_EQ(e.chans[4].outstanding, ECUIO_ENGINE_NONE);
 }
 
 TEST(RequestEngineTest, MockAndNullSetsEnrolNothing) {
@@ -2542,6 +2573,14 @@ TEST(UdsGenericTest, RefusalsNameTheirCause) {
         "i32, not '";
     const char* const ecu =
         "?did= needs an ECU response ID of 9 to 7FF, or 29-bit 18DAxxyy, not '";
+    /* One ECU more than a set holds, each on a reply ID of its own */
+    std::string crowd = "did=";
+    for (unsigned i = 0; i <= ECUIO_MAX_CHANNELS; ++i) {
+        char item[16];
+        std::snprintf(item, sizeof item, "%s%03X:1E1C", i > 0 ? "," : "",
+                      0x700u + i);
+        crowd += item;
+    }
     const struct {
         const char* query;
         std::string detail;
@@ -2569,8 +2608,8 @@ TEST(UdsGenericTest, RefusalsNameTheirCause) {
         {"did=8:1E1C", std::string(ecu) + "8'"},
         {"did=:1E1C", std::string(ecu) + "'"},
         {"did=18DB1234:1E1C", std::string(ecu) + "18DB1234'"},
-        {"did=7E8:1E1C,7E9:1E1C,7EA:1E1C,7EB:1E1C,7EC:1E1C",
-         "?did= names 5 ECUs, more than the 4 channels a session has"},
+        {crowd.c_str(),
+         "?did= names 33 ECUs, more than the 32 channels a session has"},
         {"did=0000-0400", "?did= scans 1025 DIDs, more than the 1024 a session scans"},
         {"did=0000-FFFF", "?did= scans 65536 DIDs, more than the 1024 a session scans"},
         {"did=0000-03FF,0400-0400",
@@ -6187,7 +6226,7 @@ TEST(SimDidsTest, EachFieldDecodesToTheValueItWasGiven)
         did_def(5, 0x7E9, 0x1235, ECUIO_VALUE_TEXT, ECUIO_BYTE_ORDER_LE, 3, 0,
                 0, 1.0, 0.0, "TCM-Sim"),
     };
-    const std::vector<ecuio_channel_decl_t> channels = {{0x7E9, 0x7E1}};
+    const std::vector<ecuio_channel_decl_t> channels = {{0x7E9, 0x7E1, 0, 0}};
     const ecuio_signal_set_t set = set_of(defs, channels);
     ASSERT_EQ(ecuio_validate_signal_set(&set, nullptr), 0)
         << "defs a session would take";
@@ -6300,24 +6339,24 @@ TEST(SimDidsTest, TheModulesAreTheSetsChannels)
     ASSERT_TRUE(ecuio_sim_plan_modules(none, &plan, why, sizeof why));
     EXPECT_TRUE(plan.engine);
     EXPECT_EQ(plan.count, 0u);
-    const std::vector<ecuio_channel_decl_t> two = {{0x7E8, 0x7E0},
-                                                   {0x7EA, 0x7E2}};
+    const std::vector<ecuio_channel_decl_t> two = {{0x7E8, 0x7E0, 0, 0},
+                                                   {0x7EA, 0x7E2, 0, 0}};
     ASSERT_TRUE(
         ecuio_sim_plan_modules(set_of({}, two), &plan, why, sizeof why));
     EXPECT_TRUE(plan.engine);
     ASSERT_EQ(plan.count, 1u);
     EXPECT_EQ(plan.tx[0], 0x7E2u);
     EXPECT_EQ(plan.rx[0], 0x7EAu);
-    const std::vector<ecuio_channel_decl_t> module = {{0x7E9, 0x7E1}};
+    const std::vector<ecuio_channel_decl_t> module = {{0x7E9, 0x7E1, 0, 0}};
     ASSERT_TRUE(
         ecuio_sim_plan_modules(set_of({}, module), &plan, why, sizeof why));
     EXPECT_FALSE(plan.engine) << "the engine ECU answers no DID of the set";
     EXPECT_EQ(plan.count, 1u);
     for (const std::vector<ecuio_channel_decl_t>& bad :
-         {std::vector<ecuio_channel_decl_t>{{0x18DAF110, 0x18DA10F1}},
-          std::vector<ecuio_channel_decl_t>{{0x7E9, 0x7DF}},
-          std::vector<ecuio_channel_decl_t>{{0x7EA, 0x7E0}},
-          std::vector<ecuio_channel_decl_t>{{0x7E8, 0x7E2}}}) {
+         {std::vector<ecuio_channel_decl_t>{{0x18DAF110, 0x18DA10F1, 0, 0}},
+          std::vector<ecuio_channel_decl_t>{{0x7E9, 0x7DF, 0, 0}},
+          std::vector<ecuio_channel_decl_t>{{0x7EA, 0x7E0, 0, 0}},
+          std::vector<ecuio_channel_decl_t>{{0x7E8, 0x7E2, 0, 0}}}) {
         why[0] = '\0';
         EXPECT_FALSE(
             ecuio_sim_plan_modules(set_of({}, bad), &plan, why, sizeof why))
@@ -6995,6 +7034,94 @@ TEST(SimAskTest, ModulesAndAProfilesDids)
         EXPECT_EQ(reply_bytes(r[0]), (Bytes{0x62, 0x12, 0x34, 0x00, 0xC9}));
     }
     EXPECT_EQ(ecuio_profile_unregister("sim-ask-dids"), ECUIO_OK);
+}
+
+// ADR-0065: a set of as many modules as a set holds is as many nodes, each
+// answering its own request ID with its own value, and a functional
+// request every one of them answers fits the replies a caller sizes for
+TEST(SimAskTest, ASimAnswersAsEachOfASetsModules)
+{
+    /* The registry keeps the pointers: static storage */
+    static std::vector<ecuio_signal_def_t> defs;
+    static std::vector<ecuio_channel_decl_t> channels;
+    defs.clear();
+    channels.clear();
+    for (uint32_t m = 0; m < ECUIO_MAX_CHANNELS; ++m) {
+        ecuio_channel_decl_t c{};
+        c.rx_id = 0x740u + m;
+        c.tx_id = 0x700u + m;
+        channels.push_back(c);
+        char own[32];
+        char shared[32];
+        std::snprintf(own, sizeof own, "Own %u", m);
+        std::snprintf(shared, sizeof shared, "Shared %u", m);
+        defs.push_back(did_def(static_cast<uint16_t>(100 + m), c.rx_id,
+                               static_cast<uint16_t>(0x2000 + m),
+                               ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_BE, 3, 0, 8,
+                               1.0, 0.0, own));
+        defs.push_back(did_def(static_cast<uint16_t>(200 + m), c.rx_id, 0x1000,
+                               ECUIO_VALUE_UINT, ECUIO_BYTE_ORDER_BE, 3, 0, 8,
+                               1.0, 0.0, shared));
+    }
+    static ecuio_signal_set_t set;
+    set = set_of(defs, channels);
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("sim-ask-modules", &set, &why), ECUIO_OK)
+        << why.code << " at " << why.index;
+    {
+        Unbound u("mock://ask?profile=sim-ask-modules");
+        ASSERT_NE(u.sim, nullptr);
+        for (uint32_t m = 0; m < ECUIO_MAX_CHANNELS; ++m) {
+            ASSERT_EQ(ecuio_sim_set_value(u.sim, static_cast<uint16_t>(100 + m),
+                                          m + 1.0),
+                      ECUIO_OK)
+                << m;
+        }
+        for (uint32_t m = 0; m < ECUIO_MAX_CHANNELS; ++m) {
+            SCOPED_TRACE("module " + std::to_string(m));
+            const uint8_t lo = static_cast<uint8_t>(m);
+            std::vector<ecuio_sim_reply_t> r =
+                sim_ask(u.sim, 0x700u + m, {0x22, 0x20, lo});
+            ASSERT_EQ(r.size(), 1u);
+            EXPECT_EQ(r[0].reply_id, 0x740u + m);
+            EXPECT_EQ(reply_bytes(r[0]),
+                      (Bytes{0x62, 0x20, lo, static_cast<uint8_t>(m + 1)}));
+            /* Another module's DID is refused by the one asked */
+            const uint8_t other =
+                static_cast<uint8_t>((m + 1) % ECUIO_MAX_CHANNELS);
+            r = sim_ask(u.sim, 0x700u + m, {0x22, 0x20, other});
+            ASSERT_EQ(r.size(), 1u);
+            EXPECT_EQ(r[0].reply_id, 0x740u + m);
+            EXPECT_EQ(reply_bytes(r[0]), (Bytes{0x7F, 0x22, 0x31}));
+        }
+        const std::vector<ecuio_sim_reply_t> all =
+            sim_ask(u.sim, 0x7DF, {0x22, 0x10, 0x00});
+        ASSERT_EQ(all.size(), size_t{ECUIO_MAX_CHANNELS})
+            << "the engine ECU's refusal is suppressed";
+        std::set<uint32_t> ids;
+        for (const ecuio_sim_reply_t& r : all) {
+            ids.insert(r.reply_id);
+            EXPECT_EQ(reply_bytes(r), (Bytes{0x62, 0x10, 0x00, 0x00}));
+        }
+        EXPECT_EQ(ids.size(), size_t{ECUIO_MAX_CHANNELS});
+        EXPECT_EQ(*ids.begin(), 0x740u);
+        EXPECT_EQ(*ids.rbegin(), 0x740u + ECUIO_MAX_CHANNELS - 1);
+    }
+    {
+        /* Every reply put off behind a 7F 22 78: two entries a module */
+        Unbound u("mock://ask?profile=sim-ask-modules&faults=pending:1");
+        ASSERT_NE(u.sim, nullptr);
+        const std::vector<ecuio_sim_reply_t> all =
+            sim_ask(u.sim, 0x7DF, {0x22, 0x10, 0x00});
+        EXPECT_EQ(all.size(), size_t{2 * ECUIO_MAX_CHANNELS});
+        EXPECT_LE(all.size(), size_t{ECUIO_SIM_MAX_REPLIES});
+        size_t pending = 0;
+        for (const ecuio_sim_reply_t& r : all) {
+            pending += (r.flags & ECUIO_SIM_REPLY_PENDING) != 0;
+        }
+        EXPECT_EQ(pending, size_t{ECUIO_MAX_CHANNELS});
+    }
+    EXPECT_EQ(ecuio_profile_unregister("sim-ask-modules"), ECUIO_OK);
 }
 
 // A recording answers at the caller's time: the fixture's engine start

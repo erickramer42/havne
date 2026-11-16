@@ -37,6 +37,20 @@ def test_the_mock_answers_every_did_of_the_range():
     assert "7E8  found 16: the transport answers DIDs itself" in out
 
 
+def test_a_scan_of_six_ecus_completes_on_every_one():
+    """ADR-0065: the scan reads each module's report, past the four the
+    session info lists itself"""
+    ecus = range(0x7E8, 0x7EE)
+    args = [a for rx in ecus for a in ("--ecu", f"{rx:X}")]
+    rc, out, err = run_example("did_scan.py", "mock://scan", "--range", "D100-D101",
+                               "--seconds", "30", *args)
+    assert rc == 0, err
+    found = printed(out)
+    assert sorted(found) == [(rx, d) for rx in ecus for d in (0xD100, 0xD101)]
+    for rx in ecus:
+        assert f"{rx:X}  found 2: the transport answers DIDs itself" in out
+
+
 def test_a_stream_that_ends_ends_the_scan():
     # A replay answers no DID and ends after its last frame: the scan
     # stops with it, well inside --seconds

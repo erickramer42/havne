@@ -1789,7 +1789,9 @@ void build(const parts& in, ecuio_signal_file& f)
     for (size_t i = 0; i < f.channels.size() && i < ECUIO_MAX_CHANNELS; ++i) {
         rx_ids[i] = f.channels[i].rx_id;
     }
-    ecuio_engine_init(engine.get(), f.set.channel_count);
+    if (!ecuio_engine_init(engine.get(), f.set.channel_count)) {
+        throw std::bad_alloc();
+    }
     uint32_t overflow = UINT32_MAX;
     if (!ecuio_engine_derive(engine.get(), &f.set, rx_ids, f.set.channel_count,
                              &overflow)) {

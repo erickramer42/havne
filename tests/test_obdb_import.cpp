@@ -406,18 +406,21 @@ TEST(ObdbImportTest, AMissingReplyIdIsTheStandardsAndNoted)
                        "(OBDb takes any module's)");
 }
 
-// A session asks at most four modules, obd2's counted, and its requests,
-// obd2's counted: past either, the rest are left out and the file loads
+// A session asks at most ECUIO_MAX_CHANNELS modules, obd2's counted, and
+// its requests, obd2's counted: past either, the rest are left out and the
+// file loads
 TEST(ObdbImportTest, ModulesAndRequestsStopAtWhatASessionAsks)
 {
-    // Requests 7E1 to 7E5, replies 7E9 to 7ED: obd2's 7E8 and three fit
+    // One module more than a set holds, each on IDs of its own: obd2's
+    // 7E8 and all but two of them fit
+    const int modules = ECUIO_MAX_CHANNELS + 1;
     std::string fixed = "{\"commands\":[";
-    for (int i = 1; i <= 5; ++i) {
+    for (int i = 1; i <= modules; ++i) {
         char ids[64];
         std::snprintf(
             ids, sizeof ids,
             "{\"hdr\":\"%03X\",\"rax\":\"%03X\",\"cmd\":{\"22\":\"%04X\"}",
-            0x7E0 + i, 0x7E8 + i, 0x0100 + i);
+            0x600 + i, 0x680 + i, 0x0100 + i);
         fixed += std::string(i > 1 ? "," : "") + ids +
                  ",\"freq\":1,\"signals\":[" +
                  sig("M" + std::to_string(i), kByte) + "]}";
@@ -426,20 +429,23 @@ TEST(ObdbImportTest, ModulesAndRequestsStopAtWhatASessionAsks)
     Imported im;
     import(im, fixed);
     ASSERT_EQ(im.status, ECUIO_OK) << im.detail;
-    EXPECT_EQ(im.set().channel_count, 4u);
-    EXPECT_EQ(im.count(ECUIO_OBDB_NOTE_CONVERTED), 3u);
-    const Note* fourth = im.note("M4", ECUIO_OBDB_NOTE_SKIPPED);
-    ASSERT_NE(fourth, nullptr);
-    EXPECT_EQ(fourth->text,
-              "more modules than a session asks (4, obd2's counted)");
+    EXPECT_EQ(im.set().channel_count, uint32_t{ECUIO_MAX_CHANNELS});
+    EXPECT_EQ(im.count(ECUIO_OBDB_NOTE_CONVERTED),
+              size_t{ECUIO_MAX_CHANNELS} - 1);
+    EXPECT_NE(im.note("M31", ECUIO_OBDB_NOTE_CONVERTED), nullptr);
+    const Note* past_modules = im.note("M32", ECUIO_OBDB_NOTE_SKIPPED);
+    ASSERT_NE(past_modules, nullptr);
+    EXPECT_EQ(past_modules->text,
+              "more modules than a session asks (32, obd2's counted)");
 
     ecuio_obdb_options_t alone{};
     alone.flags = ECUIO_OBDB_ALONE;
     Imported own;
     import(own, fixed, &alone);
     ASSERT_EQ(own.status, ECUIO_OK);
-    EXPECT_EQ(own.count(ECUIO_OBDB_NOTE_CONVERTED), 4u) << "no obd2 to count";
-    EXPECT_EQ(own.set().count, 4u);
+    EXPECT_EQ(own.count(ECUIO_OBDB_NOTE_CONVERTED), size_t{ECUIO_MAX_CHANNELS})
+        << "no obd2 to count";
+    EXPECT_EQ(own.set().count, uint32_t{ECUIO_MAX_CHANNELS});
     EXPECT_EQ(own.json.find("\"extends\""), std::string::npos);
 
     const auto many = [&](int n) {

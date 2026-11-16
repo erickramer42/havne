@@ -131,7 +131,7 @@ int run_health_session(cli::HealthArgs& a, const char* uri)
     ecuio_session_info_t info;
     std::memset(&info, 0, sizeof info);
     ecuio_session_get_info(session, &info);
-    write_session(out, info);
+    write_session(out, session, info);
     out.flush();
     ecuio_register_values_callback(session, on_health_values, values.get());
     install_handlers();
@@ -142,10 +142,7 @@ int run_health_session(cli::HealthArgs& a, const char* uri)
         ecuio_session_destroy(session);
         return ended(out, kExitConnect);
     }
-    const uint32_t channels =
-        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
-            ? info.channel_count
-            : ECUIO_SESSION_INFO_MAX_CHANNELS;
+    const uint32_t channels = module_count(info);
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     const auto settled_now = [&]() {
         bool all = true;
@@ -171,7 +168,7 @@ int run_health_session(cli::HealthArgs& a, const char* uri)
     };
     // The shown defs still owed a first value: PIDs the bitmaps list
     const auto owed_now = [&]() {
-        ecuio_channel_support_t supports[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
+        ecuio_channel_support_t supports[ECUIO_MAX_CHANNELS]{};
         for (uint32_t c = 0; c < channels; ++c) {
             (void)ecuio_session_get_channel_support(session, c, &supports[c]);
         }

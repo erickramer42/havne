@@ -217,7 +217,7 @@ struct ecuio_recorder {
     std::shared_ptr<ecuio_record_link> link;
     uint64_t zero_us = 0;
     std::vector<def_entry> defs; /* sorted by id */
-    uint32_t rx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    std::vector<uint32_t> rx_ids; /* each module's reply ID */
     uint32_t channels = 0;
     std::chrono::system_clock::time_point start_wall{};
     std::atomic<bool> attached{false};

@@ -20,6 +20,7 @@
 
 #include <cstring>
 #include <stdint.h>
+#include <vector>
 
 /* The request engine (ADR-0015): what to request, derived from the
  * defs, and when, paced by the replies. It does no I/O and reads no
@@ -446,7 +447,8 @@ struct ecuio_engine_channel {
 struct ecuio_request_engine {
     ecuio_request requests[ECUIO_PROFILE_MAX_REQUESTS] = {};
     uint32_t count = 0;
-    ecuio_engine_channel chans[ECUIO_MAX_CHANNELS] = {};
+    /* One for each channel, sized by ecuio_engine_init and never after */
+    std::vector<ecuio_engine_channel> chans;
     uint32_t chan_count = 0;
     bool probe = false;         /* section 4 on: walks run, explicit answers drop */
     int64_t walk_until_us = 0;  /* the walk's budget ends */
@@ -653,13 +655,22 @@ inline bool ecuio_engine_request_for_def(const ecuio_signal_def_t* d,
 
 /* An empty table over chan_count channels, at least one: a set that
  * declares none still counts its requests on channel 0. The probe is
- * off until ecuio_engine_probe. */
-inline void ecuio_engine_init(ecuio_request_engine* e, uint32_t chan_count)
+ * off until ecuio_engine_probe. Allocates the channels, so it is
+ * attach's to call, never a worker's; false, with no channel and
+ * nothing thrown, when they don't allocate. */
+inline bool ecuio_engine_init(ecuio_request_engine* e, uint32_t chan_count)
 {
     *e = ecuio_request_engine{};
-    e->chan_count = (chan_count == 0) ? 1
-                  : (chan_count > ECUIO_MAX_CHANNELS) ? ECUIO_MAX_CHANNELS
-                  : chan_count;
+    const uint32_t count = (chan_count == 0) ? 1
+                         : (chan_count > ECUIO_MAX_CHANNELS) ? ECUIO_MAX_CHANNELS
+                         : chan_count;
+    try {
+        e->chans.resize(count);
+    } catch (...) {
+        return false;
+    }
+    e->chan_count = count;
+    return true;
 }
 
 /* Adds a request to channel's rotation, after the ones already there.

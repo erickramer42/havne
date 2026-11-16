@@ -1722,8 +1722,8 @@ const char* register_did_profile()
         vcan_did(4, 0x7EA, 0xD201, ECUIO_VALUE_TEXT, ECUIO_BYTE_ORDER_LE, 3, 0,
                  1.0, 0.0, "MODULE-HavneSim"),
     };
-    static const ecuio_channel_decl_t channels[] = {{0x7E8, 0x7E0},
-                                                    {0x7EA, 0x7E2}};
+    static const ecuio_channel_decl_t channels[] = {{0x7E8, 0x7E0, 0, 0},
+                                                    {0x7EA, 0x7E2, 0, 0}};
     static ecuio_signal_set_t set{};
     set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     set.count = 4;
@@ -1786,6 +1786,81 @@ TEST_F(SimBusTest, ASessionReadsTheValuesTheProfilesDidsWereGiven)
     ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
     EXPECT_EQ(e, ECUIO_OK);
     EXPECT_EQ(ecuio_profile_unregister(profile.c_str()), ECUIO_OK);
+}
+
+/* ADR-0065: a set of six modules is six nodes on the bus and six channels
+ * of the session, which names the two past the info's four and reads
+ * each module's own value */
+TEST_F(SimBusTest, ASessionReadsSixModulesEachItsOwnValue)
+{
+    /* The registry keeps the pointers: static storage */
+    static ecuio_signal_def_t defs[6];
+    static ecuio_channel_decl_t channels[6];
+    for (uint32_t m = 0; m < 6; ++m) {
+        char name[32];
+        std::snprintf(name, sizeof name, "Module %u", m);
+        defs[m] = vcan_did(static_cast<uint16_t>(1 + m), 0x7E8u + m,
+                           static_cast<uint16_t>(0xD300 + m), ECUIO_VALUE_UINT,
+                           ECUIO_BYTE_ORDER_BE, 3, 8, 1.0, 0.0, name);
+        channels[m] = ecuio_channel_decl_t{};
+        channels[m].rx_id = 0x7E8u + m;
+        channels[m].tx_id = 0x7E0u + m;
+    }
+    static ecuio_signal_set_t set{};
+    set.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
+    set.count = 6;
+    set.defs = defs;
+    set.channel_count = 6;
+    set.channels = channels;
+    ecuio_validation_t why{};
+    ASSERT_EQ(ecuio_profile_register("sim-six", &set, &why), ECUIO_OK)
+        << "code " << why.code << " at " << why.index;
+    {
+        Sim sim("mock://sim?profile=sim-six");
+        ASSERT_EQ(sim.status(), ECUIO_OK) << sim.detail();
+        for (uint16_t m = 0; m < 6; ++m) {
+            ASSERT_EQ(ecuio_sim_set_value(sim.get(),
+                                          static_cast<uint16_t>(1 + m),
+                                          10.0 + m),
+                      ECUIO_OK)
+                << m;
+        }
+        Values values;
+        Session s("?profile=sim-six");
+        ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+        ecuio_session_info_t info{};
+        ASSERT_EQ(ecuio_session_get_info(s.get(), &info), ECUIO_OK);
+        EXPECT_EQ(info.module_count, 6u);
+        EXPECT_EQ(info.channel_count,
+                  uint32_t{ECUIO_SESSION_INFO_MAX_CHANNELS});
+        ecuio_channel_decl_t sixth{};
+        ASSERT_EQ(ecuio_session_get_module(s.get(), 5, &sixth), ECUIO_OK);
+        EXPECT_EQ(sixth.rx_id, 0x7EDu);
+        EXPECT_EQ(sixth.tx_id, 0x7E5u);
+        values.listen(s.get());
+        ASSERT_TRUE(wait_for(
+            [&] {
+                for (uint16_t m = 0; m < 6; ++m) {
+                    if (!values.has(static_cast<uint16_t>(1 + m))) {
+                        return false;
+                    }
+                }
+                return true;
+            },
+            10000ms))
+            << "requests " << sim.stats().requests << ", replies "
+            << sim.stats().replies;
+        for (uint16_t m = 0; m < 6; ++m) {
+            EXPECT_EQ(values.number_of(static_cast<uint16_t>(1 + m)), 10.0 + m)
+                << m;
+        }
+        EXPECT_EQ(sim.stats().flags, 0u);
+        int32_t e = 0;
+        uint32_t n = 0;
+        ASSERT_EQ(ecuio_session_get_error_state(s.get(), &e, &n), ECUIO_OK);
+        EXPECT_EQ(e, ECUIO_OK);
+    }
+    EXPECT_EQ(ecuio_profile_unregister("sim-six"), ECUIO_OK);
 }
 
 /* Without profile= a sim answers no set's DIDs, and takes no value */

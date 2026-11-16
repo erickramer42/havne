@@ -184,6 +184,19 @@ def main(argv):
     write(out, "fuzz_validate_set", "two_defs", two)
     write(out, "fuzz_validate_set", "two_defs_one_name",
           two[:15] + b"\x80" + two[16:])
+    # Four bytes for each channel after the defs: one channel (0x7E8 and
+    # 0x6E8), the same with its flags set, then one more than a set holds
+    most = int(re.search(rb"#define ECUIO_MAX_CHANNELS (\d+)",
+                         read("core/include/ecuio/signals.h")).group(1))
+    head = bytes([0, layout, 0])
+    write(out, "fuzz_validate_set", "one_channel",
+          head + bytes([1, 0, 0xE8, 0x07, 0x00, 0x06]))
+    write(out, "fuzz_validate_set", "one_channel_flags",
+          head + bytes([1, 0, 0xE8, 0x07, 0x04, 0x06]))
+    write(out, "fuzz_validate_set", "a_channel_too_many",
+          head + bytes([most + 1, 0]) +
+          b"".join(bytes([0x10 + i, 0x07, 0x00, 0x06])
+                   for i in range(most + 1)))
 
     # The plugin loader: the folder (an odd first byte; the manifest, its
     # files in turn, then a value fixture) and the packed form (an even

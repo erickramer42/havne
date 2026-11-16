@@ -117,8 +117,9 @@ struct ecuio_sim {
     std::unique_ptr<std::atomic<double>[]> values;
     ecuio_sim_recording recording; /* replay://: the ECU's replies */
     ecuio_sim_ecu ecu;
-    /* the engine ECU, then modules=2's module or the profile's */
-    sim_node nodes[1 + ECUIO_MAX_CHANNELS];
+    /* the engine ECU, then modules=2's module or the profile's: as many
+     * as answer, sized by build_sim and never after */
+    std::unique_ptr<sim_node[]> nodes;
     int node_count = 1;
     /* ecuio_sim_create_unbound: no bus; ecuio_sim_ask answers, ticking
      * the clock to the time it's given (its ticks never go back) */
@@ -631,6 +632,13 @@ ecuio_status_t build_sim(sim_plan& p, std::unique_ptr<ecuio_sim>* out)
     config.path = nullptr; /* the URI's, gone after create */
     config.path_len = 0;
     s->ecu.config = config;
+    const uint32_t nodes = set != nullptr         ? 1 + p.modules.count
+                           : config.second_module ? 2u
+                                                  : 1u;
+    s->nodes.reset(new (std::nothrow) sim_node[nodes]);
+    if (s->nodes == nullptr) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
     s->nodes[0].rx.timed = true;
     if (config.second_module) {
         sim_node& m = s->nodes[1];
@@ -823,7 +831,7 @@ ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
         ecuio_detail_set("%s", refusal);
         return ECUIO_ERR_LOAD_FAILED;
     }
-    s->fd = open_socket(link.index, s->nodes, s->node_count);
+    s->fd = open_socket(link.index, s->nodes.get(), s->node_count);
     s->stop_fd = s->fd >= 0 ? eventfd(0, EFD_CLOEXEC) : -1;
     if (s->fd < 0 || s->stop_fd < 0) {
         ecuio_detail_set("%s: the socket wouldn't open (%s)", ifname,

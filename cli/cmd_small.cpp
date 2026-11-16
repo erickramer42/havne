@@ -64,7 +64,7 @@ int run_clear_command(const char* uri, uint32_t flags)
     ecuio_session_info_t info;
     std::memset(&info, 0, sizeof info);
     ecuio_session_get_info(session, &info);
-    write_session(out, info);
+    write_session(out, session, info);
     out.flush();
     install_handlers();
     st = ecuio_session_start(session);
@@ -74,10 +74,7 @@ int run_clear_command(const char* uri, uint32_t flags)
         ecuio_session_destroy(session);
         return kExitConnect;
     }
-    const uint32_t channels =
-        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
-            ? info.channel_count
-            : ECUIO_SESSION_INFO_MAX_CHANNELS;
+    const uint32_t channels = module_count(info);
     cli::ClearIo io;
     io.write = [&out](cli::Line& l) { write_line(out, l); };
     io.flush = [&out] {

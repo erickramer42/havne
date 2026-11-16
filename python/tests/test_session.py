@@ -233,6 +233,33 @@ def test_the_info_says_the_mock():
         assert s.diagnostics(0).flags & c.ECUIO_DIAG_COMPLETE
 
 
+def test_a_session_lists_every_module_past_the_infos_four(monkeypatch):
+    dids = ",".join("%03X:D1%02X:u8" % (0x7E8 + i, i) for i in range(6))
+    with havne.Session("mock://py?profile=uds-generic&diagnose=0&did=" + dids) as s:
+        assert s.info.module_count == 6
+        assert s.info.channel_count == c.ECUIO_SESSION_INFO_MAX_CHANNELS
+        assert s.modules == [(0x7E8 + i, 0x7E0 + i) for i in range(6)]
+        assert s.support(5).rx_id == 0x7ED
+        with pytest.raises(havne.Error) as e:
+            s.support(6)
+        assert e.value.name == "INVALID_ARGUMENT"
+        # reports_settled reads every module's reports, the sixth's too
+        assert s.reports_settled() is True
+        real = s.diagnostics
+        asked = []
+
+        def sixth_asking(channel=0):
+            asked.append(channel)
+            d = real(channel)
+            if channel == 5:
+                d.flags = (d.flags | c.ECUIO_DIAG_ASKED) & ~c.ECUIO_DIAG_COMPLETE
+            return d
+
+        monkeypatch.setattr(s, "diagnostics", sixth_asking)
+        assert s.reports_settled() is False
+        assert asked == [0, 1, 2, 3, 4, 5]
+
+
 def test_the_vin_waits_for_core_to_have_it_in(monkeypatch):
     # The report stood in for (the mock identifies nothing): F190's VIN
     # beside a 09 02 still out is core's pick but not in yet

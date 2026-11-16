@@ -1669,8 +1669,7 @@ ecuio_health_export_with(const ecuio_health_options_t* options,
         if (ecuio_session_get_info(o.session, &info) != ECUIO_OK) {
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
-        const uint32_t channels = std::min<uint32_t>(
-            info.channel_count, ECUIO_SESSION_INFO_MAX_CHANNELS);
+        const uint32_t channels = info.module_count;
         std::vector<ecuio_channel_diagnostics_t> diags(channels);
         std::vector<ecuio_channel_identity_t> ids(channels);
         for (uint32_t c = 0; c < channels; ++c) {

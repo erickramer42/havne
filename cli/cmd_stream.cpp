@@ -308,7 +308,7 @@ int run_stream(const StreamArgs& args)
     stream->wait = replay;
     const bool replay_ends =
         replay && !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
-    write_session(out, info);
+    write_session(out, session, info);
     ShownConditions shown;
     if (conditions != nullptr) {
         if (!attach_conditions(out, session, conditions, conditions_source,
@@ -355,18 +355,15 @@ int run_stream(const StreamArgs& args)
     }
     // A read that completed at create (the mock's) comes first; the rest
     // as they complete
-    const uint32_t channels =
-        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
-            ? info.channel_count
-            : ECUIO_SESSION_INFO_MAX_CHANNELS;
-    uint32_t diag_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    uint32_t identity_generations[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    const uint32_t channels = module_count(info);
+    uint32_t diag_generations[ECUIO_MAX_CHANNELS] = {};
+    uint32_t identity_generations[ECUIO_MAX_CHANNELS] = {};
     char vehicle_vin[ECUIO_VIN_TEXT_LEN] = "";
     poll_identity(out, session, channels, identity_generations, vehicle_vin);
     poll_diagnostics(out, session, channels, diag_generations);
-    cli::ScanSeen scan_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    cli::SessionSeen session_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    ecuio_channel_support_t scan_reports[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    cli::ScanSeen scan_seen[ECUIO_MAX_CHANNELS] = {};
+    cli::SessionSeen session_seen[ECUIO_MAX_CHANNELS] = {};
+    ecuio_channel_support_t scan_reports[ECUIO_MAX_CHANNELS] = {};
     poll_scan(out, session, channels, scan_seen, session_seen, scan_reports);
     // Judged from the values core decodes, so only with --values
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
@@ -461,7 +458,7 @@ int run_stream(const StreamArgs& args)
             poll_refused(out, set, scan_reports, channels, refused_last,
                          refused_more_last);
         }
-        poll_timing(out, session, info, timing_snaps, timing_rows, false);
+        poll_timing(out, session, timing_snaps, timing_rows, false);
         poll_recording(out, recorder, marks.get(), &recording_failed);
         poll_conditions(out, session, &shown);
 
@@ -517,7 +514,7 @@ int run_stream(const StreamArgs& args)
     if (!out.failed) {
         poll_scan(out, session, channels, scan_seen, session_seen, scan_reports,
                   true);
-        poll_timing(out, session, info, timing_snaps, timing_rows, true);
+        poll_timing(out, session, timing_snaps, timing_rows, true);
         uint64_t covered = stream->covered.load();
         if (args.count && covered > args.count) {
             covered = args.count;

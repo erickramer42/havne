@@ -598,6 +598,20 @@ class Session:
               "ecuio_session_get_info")
         return out
 
+    @property
+    def modules(self):
+        """The session's modules, every one, as (rx, tx) CAN ID pairs in
+        the set's order: the index the channel reports take. The info's
+        own rx_ids and tx_ids hold only the first
+        ECUIO_SESSION_INFO_MAX_CHANNELS."""
+        pairs = []
+        for i in range(self.info.module_count):
+            m = e.ecuio_channel_decl_t()
+            check(lib.ecuio_session_get_module(self._handle(), i, ctypes.byref(m)),
+                  "ecuio_session_get_module")
+            pairs.append((m.rx_id, m.tx_id))
+        return pairs
+
     def support(self, channel=0):
         out = e.ecuio_channel_support_t()
         check(lib.ecuio_session_get_channel_support(self._handle(), channel, ctypes.byref(out)),
@@ -672,7 +686,7 @@ class Session:
         first half of what havne-cli health waits for, enough for a
         script's own loop. True for a session with no channels."""
         info = self.info
-        for c in range(min(info.channel_count, e.ECUIO_SESSION_INFO_MAX_CHANNELS)):
+        for c in range(info.module_count):
             d, ident = self.diagnostics(c), self.identity(c)
             diag = bool(d.flags & e.ECUIO_DIAG_COMPLETE) or not d.flags & e.ECUIO_DIAG_ASKED
             if not diag or not (ident.flags & e.ECUIO_IDENTITY_COMPLETE or ident.items == 0):

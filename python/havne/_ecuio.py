@@ -234,7 +234,7 @@ ECUIO_INSPECTION_YEAR_NEEDED = 4
 ECUIO_J2534_DLL_PATH_LEN = 0x100
 ECUIO_J2534_MAX_VENDORS = 16
 ECUIO_J2534_VENDOR_NAME_LEN = 64
-ECUIO_MAX_CHANNELS = 4
+ECUIO_MAX_CHANNELS = 32
 ECUIO_MONITOR_COMPLETE = 1
 ECUIO_MONITOR_CYCLE_COMPLETE = 4
 ECUIO_MONITOR_CYCLE_ENABLED = 2
@@ -346,10 +346,10 @@ ECUIO_SIGNAL_GROUP_FUEL = 3
 ECUIO_SIGNAL_GROUP_OTHER = 0
 ECUIO_SIGNAL_GROUP_OXYGEN = 4
 ECUIO_SIGNAL_GROUP_VEHICLE = 6
-ECUIO_SIGNAL_SET_LAYOUT = 4
+ECUIO_SIGNAL_SET_LAYOUT = 5
 ECUIO_SIM_ALLOW_DESK_BUS = 1
 ECUIO_SIM_FAILED = 1
-ECUIO_SIM_MAX_REPLIES = 10
+ECUIO_SIM_MAX_REPLIES = 66
 ECUIO_SIM_NOW = -1
 ECUIO_SIM_REPLY_BAD_SEQUENCE = 4
 ECUIO_SIM_REPLY_LATE = 2
@@ -413,6 +413,7 @@ ECUIO_VALIDATE_ERR_BYTE_ORDER = 16
 ECUIO_VALIDATE_ERR_CHANNELS_NULL = -10
 ECUIO_VALIDATE_ERR_CHANNEL_COUNT = -11
 ECUIO_VALIDATE_ERR_CHANNEL_ID = -12
+ECUIO_VALIDATE_ERR_CHANNEL_RESERVED = -26
 ECUIO_VALIDATE_ERR_COMPUTED = 20
 ECUIO_VALIDATE_ERR_COMPUTED_CHAIN = -23
 ECUIO_VALIDATE_ERR_COMPUTED_INPUT = -22
@@ -745,6 +746,8 @@ ecuio_can_interface_t._fields_ = [
 ecuio_channel_decl_t._fields_ = [
     ('rx_id', c_uint32),
     ('tx_id', c_uint32),
+    ('flags', c_uint32),
+    ('reserved', c_uint32),
 ]
 ecuio_dtc_list_t._fields_ = [
     ('outcome', c_uint8),
@@ -1317,7 +1320,8 @@ ecuio_session_info_t._fields_ = [
     ('replay_span_ms', c_uint32),
     ('replay_speed_milli', c_uint32),
     ('replay_rows_torn', c_uint32),
-    ('reserved', (c_uint32 * 12)),
+    ('module_count', c_uint32),
+    ('reserved', (c_uint32 * 11)),
 ]
 ecuio_session_timing_t._fields_ = [
     ('snapshot_us', c_uint64),
@@ -1590,6 +1594,7 @@ FUNCTIONS = {
     'ecuio_session_get_condition_states': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_condition_state_t), c_uint32, POINTER(c_uint32)]),  # conditions.h
     'ecuio_session_get_error_state': (c_int, [POINTER(ecuio_session_t), POINTER(c_int32), POINTER(c_uint32)]),  # core.h
     'ecuio_session_get_info': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_session_info_t)]),  # core.h
+    'ecuio_session_get_module': (c_int, [POINTER(ecuio_session_t), c_uint32, POINTER(ecuio_channel_decl_t)]),  # profile.h
     'ecuio_session_get_replay_faults': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_replay_faults_t)]),  # core.h
     'ecuio_session_get_timing': (c_int, [POINTER(ecuio_session_t), POINTER(ecuio_session_timing_t), POINTER(ecuio_request_timing_t), c_uint32, POINTER(c_uint32)]),  # profile.h
     'ecuio_session_get_unasked_signals': (c_int, [POINTER(ecuio_session_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # profile.h

@@ -322,8 +322,8 @@ QString SessionBridge::clearDiagnostics()
     if (!m_connected.load(std::memory_order_acquire) || m_session == nullptr) {
         return {};
     }
-    ecuio_channel_diagnostics_t reports[ECUIO_SESSION_INFO_MAX_CHANNELS];
-    uint32_t channels[ECUIO_SESSION_INFO_MAX_CHANNELS];
+    ecuio_channel_diagnostics_t reports[ECUIO_MAX_CHANNELS];
+    uint32_t channels[ECUIO_MAX_CHANNELS];
     uint32_t n = 0;
     for (uint32_t c = 0; c < m_channelCount; ++c) {
         ecuio_channel_diagnostics_t s{};
