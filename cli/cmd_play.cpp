@@ -178,7 +178,7 @@ int run_play(const PlayArgs& args)
     const bool replay = info.backend == ECUIO_BACKEND_REPLAY;
     const bool replay_ends =
         replay && !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
-    write_session(out, info);
+    write_session(out, session, info);
     {
         char buf[256];
         cli::Line l(buf, sizeof buf);

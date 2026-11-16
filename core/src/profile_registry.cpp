@@ -79,26 +79,30 @@ bool is_valid_name(const char* name)
     return n > 0;
 }
 
-/* Whether a validated set's requests fit the engine's table; out, when
- * not NULL, gets ECUIO_VALIDATE_ERR_REQUEST_COUNT and the first def
- * that didn't. */
-bool fits_request_table(const ecuio_signal_set_t* set, ecuio_validation_t* out)
+/* Whether a validated set's requests fit the engine's table: OK,
+ * INVALID_ARGUMENT (out, when not NULL, gets
+ * ECUIO_VALIDATE_ERR_REQUEST_COUNT and the first def that didn't), or
+ * OUT_OF_MEMORY when the table to count in doesn't allocate. */
+ecuio_status_t fits_request_table(const ecuio_signal_set_t* set,
+                                  ecuio_validation_t* out)
 {
     uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
     for (uint32_t i = 0; i < set->channel_count; ++i) {
         rx_ids[i] = set->channels[i].rx_id;
     }
     ecuio_request_engine e;
-    ecuio_engine_init(&e, set->channel_count);
+    if (!ecuio_engine_init(&e, set->channel_count)) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
     uint32_t overflow = UINT32_MAX;
     if (ecuio_engine_derive(&e, set, rx_ids, set->channel_count, &overflow)) {
-        return true;
+        return ECUIO_OK;
     }
     if (out != nullptr) {
         out->code = ECUIO_VALIDATE_ERR_REQUEST_COUNT;
         out->index = overflow;
     }
-    return false;
+    return ECUIO_ERR_INVALID_ARGUMENT;
 }
 
 } // namespace
@@ -136,8 +140,11 @@ ecuio_status_t ecuio_profile_register(const char* name,
     /* Every derived request must fit the engine's table, or the rest would
      * silently never be asked. Counted on the set's own channels: a
      * ?filter= override merges them, which can only dedupe more. */
-    if (signal_set != nullptr && !fits_request_table(signal_set, out)) {
-        return ECUIO_ERR_INVALID_ARGUMENT;
+    if (signal_set != nullptr) {
+        const ecuio_status_t fits = fits_request_table(signal_set, out);
+        if (fits != ECUIO_OK) {
+            return fits;
+        }
     }
     try {
         std::lock_guard<std::mutex> lock(registry_mutex());

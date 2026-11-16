@@ -678,3 +678,53 @@ TEST_F(SocketCanBusTest, TwoRecordingsOfOneBusLineUpOnTheirUtcStarts)
     EXPECT_LE(worst, 20000) << "worst " << worst << " us";
     std::filesystem::remove_all(root);
 }
+
+/* Out of memory at each of create's allocations in turn, for a session
+ * that asks six modules on the bus: OK or OUT_OF_MEMORY, nothing thrown,
+ * a session handed back only with OK, every module in it */
+TEST_F(SocketCanBusTest,
+       OutOfMemoryAnywhereInARequestingCreateIsAnsweredNotThrown)
+{
+    const std::string uri =
+        std::string("socketcan://") + vcan_bus::interface_name() +
+        "?profile=uds-generic&did=7E8:D100:u8,7E9:D101:u8,7EA:D102:u8,"
+        "7EB:D103:u8,7EC:D104:u8,7ED:D105:u8";
+    const uint32_t modules = 6;
+    ecuio_session_t* s = nullptr;
+    const unsigned long before = new_counter::on_this_thread();
+    ASSERT_EQ(ecuio_session_create(uri.c_str(), &s), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const unsigned long news = new_counter::on_this_thread() - before;
+    ecuio_session_destroy(s);
+    ASSERT_GT(news, 5u);
+    unsigned long refused = 0;
+    for (unsigned long n = 1; n <= news; ++n) {
+        s = nullptr;
+        ecuio_status_t rc = ECUIO_OK;
+        bool threw = false;
+        new_counter::fail_new(n);
+        try {
+            rc = ecuio_session_create(uri.c_str(), &s);
+        } catch (...) {
+            threw = true;
+        }
+        new_counter::fail_new(0);
+        ASSERT_FALSE(threw) << "create threw at allocation " << n;
+        if (rc == ECUIO_OK) {
+            ASSERT_NE(s, nullptr) << "at " << n;
+            ecuio_session_info_t info{};
+            EXPECT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+            EXPECT_EQ(info.module_count, modules) << "at " << n;
+            ecuio_channel_support_t last{};
+            EXPECT_EQ(ecuio_session_get_channel_support(s, modules - 1, &last),
+                      ECUIO_OK)
+                << "at " << n;
+            ecuio_session_destroy(s);
+        } else {
+            ++refused;
+            EXPECT_EQ(rc, ECUIO_ERR_OUT_OF_MEMORY) << "at " << n;
+            EXPECT_EQ(s, nullptr) << "at " << n;
+        }
+    }
+    EXPECT_GT(refused, 0u);
+}

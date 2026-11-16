@@ -9,3 +9,8 @@
 # [suppress_type]
 #   # v0.4.0 widens ecuio_frame.flags to 64 bits (CHANGELOG.md)
 #   name = ecuio_frame
+
+[suppress_type]
+  # v0.9.0 gives a set's channel flags and a reserved word, 8 to 16
+  # bytes, under set layout 5 (ADR-0065, CHANGELOG.md)
+  name = ecuio_channel_decl

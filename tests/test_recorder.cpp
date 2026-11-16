@@ -34,6 +34,10 @@
 #include "sha256.h"      /* core/src: the file's hash */
 #include "temp_name.h"
 
+/* test_core.cpp's, around tests/new_counter.h (included there alone) */
+unsigned long news_on_this_thread();
+void fail_new_on_this_thread(unsigned long n);
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -1751,6 +1755,92 @@ TEST(RecorderTest, ASecondRecorderAttachesOnceTheFirstHasClosed)
     EXPECT_EQ(count("\nsignal file  "), 1u) << events;
     EXPECT_EQ(count("\ncaller  app  the second\n"), 1u) << events;
     EXPECT_EQ(read_text(fs::u8path(folder) / "signals.json"), file);
+}
+
+/* Out of memory at each of an attach's allocations in turn, on a
+ * session of six modules: the attach answers OK or OUT_OF_MEMORY and
+ * throws nothing, and a refused recorder attaches at the next try with
+ * the header a recorder never refused writes */
+TEST(RecorderTest, OutOfMemoryAnywhereInAnAttachIsAnsweredNotThrown)
+{
+    Root root;
+    const std::string keep = root.utf8();
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create(
+                  "mock://x?profile=uds-generic&did=7E8:D100:u8,7E9:D101:u8,"
+                  "7EA:D102:u8,7EB:D103:u8,7EC:D104:u8,7ED:D105:u8",
+                  &s),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    /* Caller's lines long enough together that joining the header to
+     * them under the attach's lock has to allocate */
+    const std::string long_line(100, 'x');
+    const char* caller[16];
+    for (const char*& line : caller) {
+        line = long_line.c_str();
+    }
+    ecuio_record_options_t o{};
+    o.root_utf8 = keep.c_str();
+    o.header_lines = caller;
+    o.header_line_count = 16;
+    const auto opened = [&] {
+        ecuio_recorder_t* rec = nullptr;
+        EXPECT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK)
+            << ecuio_last_error_detail();
+        return rec;
+    };
+    ecuio_recorder_t* rec = opened();
+    ASSERT_NE(rec, nullptr);
+    const unsigned long before = news_on_this_thread();
+    ASSERT_EQ(ecuio_session_record(s, rec), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const unsigned long news = news_on_this_thread() - before;
+    EXPECT_EQ(ecuio_recorder_close(rec, "counted"), ECUIO_OK);
+    ASSERT_GT(news, 3u);
+    unsigned long refused = 0;
+    for (unsigned long n = 1; n <= news; ++n) {
+        rec = opened();
+        ASSERT_NE(rec, nullptr);
+        ecuio_status_t rc = ECUIO_OK;
+        bool threw = false;
+        fail_new_on_this_thread(n);
+        try {
+            rc = ecuio_session_record(s, rec);
+        } catch (...) {
+            threw = true;
+        }
+        fail_new_on_this_thread(0);
+        ASSERT_FALSE(threw) << "the attach threw at allocation " << n;
+        if (rc != ECUIO_OK) {
+            ++refused;
+            EXPECT_EQ(rc, ECUIO_ERR_OUT_OF_MEMORY) << "at " << n;
+            EXPECT_EQ(ecuio_session_record(s, rec), ECUIO_OK)
+                << "at " << n << ": " << ecuio_last_error_detail();
+        }
+        char folder[1024] = {};
+        uint32_t len = 0;
+        ASSERT_EQ(ecuio_recorder_get_folder(rec, folder, sizeof folder, &len),
+                  ECUIO_OK);
+        EXPECT_EQ(ecuio_recorder_close(rec, "the test's turn"), ECUIO_OK);
+        /* The header is written once, whatever was refused before it */
+        size_t profiles = 0;
+        size_t columns = 0;
+        size_t signals = 0;
+        size_t callers = 0;
+        for (const std::string& line :
+             lines_of(read_text(fs::u8path(folder) / "events.log"))) {
+            callers += line == "caller  " + long_line;
+            profiles += line.rfind("profile  ", 0) == 0;
+            columns += line.rfind("columns  ", 0) == 0;
+            signals += line.rfind("signal  ", 0) == 0;
+        }
+        EXPECT_EQ(profiles, 1u) << "at " << n;
+        EXPECT_EQ(columns, 1u) << "at " << n;
+        EXPECT_EQ(signals, 6u) << "at " << n;
+        EXPECT_EQ(callers, 16u) << "at " << n;
+    }
+    EXPECT_GT(refused, 0u);
+    ecuio_session_destroy(s);
 }
 
 /* Recorders attach and close one after another while the session

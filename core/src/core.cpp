@@ -337,7 +337,7 @@ ecuio_status_t ecuio_session_get_unsupported_signals(
         return ECUIO_OK;
     }
     std::lock_guard<std::mutex> lock(session->support_mutex);
-    *count = ecuio_unsupported_signals(*set, session->support,
+    *count = ecuio_unsupported_signals(*set, session->support.data(),
                                        session->support_count, ids, capacity);
     return ECUIO_OK;
 }
@@ -394,6 +394,22 @@ ecuio_status_t ecuio_session_get_timing(const ecuio_session_t* session,
     for (uint32_t i = 0; i < capacity && i < session->timing.rows; ++i) {
         rows[i] = session->timing_rows[i];
     }
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_session_get_module(const ecuio_session_t* session,
+                                        uint32_t index,
+                                        ecuio_channel_decl_t* out)
+{
+    if (session == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (index >= session->info.module_count) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *out = ecuio_channel_decl_t{};
+    out->rx_id = session->module_rx[index];
+    out->tx_id = session->module_tx[index];
     return ECUIO_OK;
 }
 
@@ -920,6 +936,9 @@ ecuio_status_t ecuio_session_create(
      * changes after this */
     try {
         s->decoder.prepare(profile_set, true);
+        /* Before attach: nothing after it allocates, so no refusal
+         * frees a session with a transport attached */
+        s->uri = transport_uri;
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -957,11 +976,6 @@ ecuio_status_t ecuio_session_create(
     const size_t n = strlen(chosen);
     memcpy(profile, chosen, n);
     profile[n] = '\0';
-    try {
-        s->uri = transport_uri;
-    } catch (...) {
-        return ECUIO_ERR_OUT_OF_MEMORY;
-    }
     *out_session = s.release();
     return ECUIO_OK;
 }

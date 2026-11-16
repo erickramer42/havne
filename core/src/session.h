@@ -124,14 +124,20 @@ struct ecuio_session {
      * create, before create returns; read-only afterwards, so
      * ecuio_session_get_info needs no lock. */
     ecuio_session_info_t info{};
-    /* Each channel's support, identity (ADR-0021) and diagnostics
-     * (ADR-0037): the count and rx_ids set by attach, the rest by the
-     * worker, all under the mutex (ecuio_session_get_channel_support,
-     * _identity, _diagnostics). */
+    /* The session's modules, every one (the info lists the first
+     * ECUIO_SESSION_INFO_MAX_CHANNELS): set by attach through
+     * ecuio_session_set_modules before create returns, read-only
+     * afterwards (ecuio_session_get_module) */
+    std::vector<uint32_t> module_rx;
+    std::vector<uint32_t> module_tx;
+    /* Each module's support, identity (ADR-0021) and diagnostics
+     * (ADR-0037), sized with the modules: the count and rx_ids set by
+     * attach, the rest by the worker, all under the mutex
+     * (ecuio_session_get_channel_support, _identity, _diagnostics). */
     mutable std::mutex support_mutex;
-    ecuio_channel_support_t support[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
-    ecuio_channel_identity_t identity[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
-    ecuio_channel_diagnostics_t diagnostics[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
+    std::vector<ecuio_channel_support_t> support;
+    std::vector<ecuio_channel_identity_t> identity;
+    std::vector<ecuio_channel_diagnostics_t> diagnostics;
     uint32_t support_count = 0;
     /* ecuio_session_read_diagnostics's count, from any thread; a worker
      * that reads diagnostics asks again when it moves
@@ -141,9 +147,9 @@ struct ecuio_session {
      * thread: the generation the caller saved, then the count moved on;
      * a worker that reads diagnostics takes each new one
      * (ecuio_take_clear_requests) */
-    std::atomic<uint32_t> clear_generation[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
-    std::atomic<uint32_t> clear_flags[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
-    std::atomic<uint32_t> clear_requests[ECUIO_SESSION_INFO_MAX_CHANNELS]{};
+    std::unique_ptr<std::atomic<uint32_t>[]> clear_generation;
+    std::unique_ptr<std::atomic<uint32_t>[]> clear_flags;
+    std::unique_ptr<std::atomic<uint32_t>[]> clear_requests;
     /* ecuio_session_set_focus's picks (ADR-0056 section 2): the ids in the
      * caller's order and one byte per def (1 picked), under the mutex;
      * focus_generation moves with each call and a requesting worker takes

@@ -867,9 +867,6 @@ void j2534_detach(ecuio_session_t* session, void* impl)
  * failing the connect: its flag stays clear, and the session log (on
  * the surrogate) has the vendor's status. Both are device calls, made
  * once here; nothing reads the battery again while the session runs. */
-static_assert(ECUIO_MAX_CHANNELS <= ECUIO_SESSION_INFO_MAX_CHANNELS,
-              "the session info lists every channel");
-
 void describe_session(const ecuio_j2534_transport* t, unsigned long baud,
                       unsigned long connect_flags, ecuio_session_info_t* info)
 {
@@ -881,11 +878,6 @@ void describe_session(const ecuio_j2534_transport* t, unsigned long baud,
     info->baud = static_cast<uint32_t>(
         (baud != 0) ? baud : ECUIO_PT_BAUD_ISO15765_500K);
     info->connect_flags = static_cast<uint32_t>(connect_flags);
-    info->channel_count = t->chan_count;
-    for (uint32_t i = 0; i < t->chan_count; ++i) {
-        info->rx_ids[i] = t->chans[i].rx_id;
-        info->tx_ids[i] = t->chans[i].tx_id;
-    }
 
     uint8_t mv[4] = {};
     uint32_t mv_len = 0;
@@ -1011,6 +1003,17 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
     t->handle = handle;
     t->channel = channel;
     describe_session(t.get(), params.baud, connect_flags, &session->info);
+    uint32_t tx_ids[ECUIO_MAX_CHANNELS] = {};
+    for (uint32_t i = 0; i < t->chan_count; ++i) {
+        tx_ids[i] = t->chans[i].tx_id;
+    }
+    st = ecuio_session_set_modules(session, rx_ids, tx_ids, t->chan_count);
+    if (st != ECUIO_OK) {
+        delete wrap;
+        ecuio_j2534_disconnect_channel(handle, channel);
+        ecuio_j2534_close(handle);
+        return st;
+    }
     ecuio_seed_reports(session, t->engine, rx_ids, t->chan_count);
     t->epoch = host_clock::now();   /* as mock: end of attach */
     session->judges_link = true;

@@ -105,7 +105,7 @@ def complete(session, ecus, found, size):
 
 def channels(session, ecus):
     """The support of each channel whose ECU is one of ecus"""
-    count = session.info.channel_count
+    count = session.info.module_count
     return [sup for sup in (session.support(i) for i in range(count)) if sup.rx_id in ecus]
 
 

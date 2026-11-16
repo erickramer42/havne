@@ -389,6 +389,23 @@ ecuio_status_t ecuio_session_get_timing(
     uint32_t* count
 );
 
+/*
+ * Copies module `index` of the session into *out: its reply and request
+ * IDs, flags and reserved zero. The modules are the channels the
+ * session resolved from its set and its URI (a ?filter= or ?txid= in
+ * the set's place, mock's engine ECU first), the info's module_count
+ * of them (core.h); the info's own rx_ids and tx_ids hold only the
+ * first ECUIO_SESSION_INFO_MAX_CHANNELS. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for
+ * a NULL session or out; ECUIO_ERR_INVALID_ARGUMENT for an index at or
+ * past module_count, out untouched. Readable at any time and after
+ * close.
+ */
+ecuio_status_t ecuio_session_get_module(
+    const ecuio_session_t* session,
+    uint32_t index,
+    ecuio_channel_decl_t* out
+);
+
 #ifdef __cplusplus
 }
 #endif

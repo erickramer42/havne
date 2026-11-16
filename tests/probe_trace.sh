@@ -12,11 +12,17 @@
 # "@name: N"; the stream's JSON lines never start with "@".
 set -eu
 cli=$(readlink -f "$1")
-out=$(bpftrace -e "
-usdt:$cli:ecuio:session_start { @start = count(); }
-usdt:$cli:ecuio:session_close { @close = count(); }
-usdt:$cli:ecuio:frame { @frames = count(); }
-" -c "$cli stream mock://probes --count 100")
+err=$(mktemp)
+trap 'rm -f "$err"' EXIT
+# bpftrace 0.25 asserts printing a warning on the hosted runner, so no warnings;
+# stderr is shown only when bpftrace fails.
+prog="usdt:$cli:ecuio:session_start { @start = count(); } usdt:$cli:ecuio:session_close { @close = count(); } usdt:$cli:ecuio:frame { @frames = count(); }"
+out=$(bpftrace --no-warnings -e "$prog" \
+    -c "$cli stream mock://probes --count 100" 2>"$err") || {
+    echo "probe_trace: bpftrace failed:" >&2
+    cat "$err" >&2
+    exit 1
+}
 count() {
     printf '%s\n' "$out" | sed -n "s/^@$1: //p"
 }

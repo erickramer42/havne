@@ -195,8 +195,9 @@ ecuio_status_t ecuio_sim_create_unbound(const char* uri, uint32_t options,
 #define ECUIO_SIM_NOW (-1)
 
 /* The most replies one request gets: each ECU's (the engine ECU and up
- * to four modules), each with a 7F <service> 78 ahead of it */
-#define ECUIO_SIM_MAX_REPLIES 10u
+ * to signals.h's ECUIO_MAX_CHANNELS modules), each with a
+ * 7F <service> 78 ahead of it */
+#define ECUIO_SIM_MAX_REPLIES 66u
 
 /* ecuio_sim_reply_t flags */
 #define ECUIO_SIM_REPLY_PENDING      0x00000001u /* 7F <service> 78: the

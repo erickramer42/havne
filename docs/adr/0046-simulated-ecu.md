@@ -393,3 +393,5 @@ through the same ECU under a profile that reads PIDs
 this date), so the demo car and the sim give one car's values.
 `SimEcuTest.DriveValuesAreTheDriveCyclesThroughTheObd2Defs`,
 `.TheKeyOnWithTheEngineStopped`, `.TheBitmapsListWhatEachModeAnswers`.
+
+Note of 2026-11-16: the nodes are as many as the set's modules, sized at create, and `ECUIO_SIM_MAX_REPLIES` is 66 ([ADR-0065](0065-car-sized-profile.md)). Faults for each module are a later step's.

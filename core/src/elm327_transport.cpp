@@ -682,11 +682,6 @@ void describe_session(transport* t, const char* reset_version,
     info->backend = ECUIO_BACKEND_ELM327;
     info->protocol_id = static_cast<uint32_t>(ECUIO_PT_PROTOCOL_ISO15765);
     info->baud = static_cast<uint32_t>(t->can_baud);
-    info->channel_count = t->chan_count;
-    for (uint32_t i = 0; i < t->chan_count; ++i) {
-        info->rx_ids[i] = t->rx_ids[i];
-        info->tx_ids[i] = t->tx_ids[i];
-    }
 
     char version[ELM327_LINE_MAX + 1] = {};
     if (!reading(t, "ATI\r", version, sizeof(version),
@@ -1727,6 +1722,13 @@ ecuio_status_t elm327_attach(ecuio_session_t* session, const char* uri,
     wrap->ops = &kElm327Ops;
     t->session = session;
     describe_session(t.get(), version, &session->info);
+    st =
+        ecuio_session_set_modules(session, t->rx_ids, t->tx_ids, t->chan_count);
+    if (st != ECUIO_OK) {
+        delete wrap;
+        close_port(t.get());
+        return st;
+    }
     ecuio_seed_reports(session, t->engine, t->rx_ids, t->chan_count);
     t->epoch = host_clock::now(); /* as mock: end of attach */
     session->judges_link = true;

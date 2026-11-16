@@ -684,6 +684,38 @@ TEST(HealthTest, TheExportWritesAMockSessionsReport)
     ecuio_session_destroy(s);
 }
 
+/* ADR-0065: a session's report lists every module of the session, those
+ * past the four the session info names itself too */
+TEST(HealthTest, ASessionsReportListsEveryModule)
+{
+    Folder f;
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create(
+                  "mock://x?profile=uds-generic&did=7E8:D100:u8,7E9:D101:u8,"
+                  "7EA:D102:u8,7EB:D103:u8,7EC:D104:u8,7ED:D105:u8",
+                  &s),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const std::string out = f.utf8("health.json");
+    ecuio_health_options_t o{};
+    o.format = ECUIO_HEALTH_JSON;
+    o.session = s;
+    o.out_path_utf8 = out.c_str();
+    o.utc_us = kUtc;
+    ecuio_health_report_t r{};
+    ASSERT_EQ(ecuio_health_export(&o, &r), ECUIO_OK)
+        << ecuio_last_error_detail();
+    EXPECT_EQ(r.ecus, 6u);
+    const ecuio_json::Value v = parsed(read_file(f.path / "health.json"));
+    const char* const ids[] = {"0x7E8", "0x7E9", "0x7EA",
+                               "0x7EB", "0x7EC", "0x7ED"};
+    ASSERT_EQ(v.find("ecus")->items.size(), 6u);
+    for (size_t c = 0; c < 6; ++c) {
+        EXPECT_EQ(v.find("ecus")->items[c].find("ecu")->text, ids[c]) << c;
+    }
+    ecuio_session_destroy(s);
+}
+
 TEST(HealthTest, ArgumentsAreCheckedBeforeAnythingIsRead)
 {
     /* a folder of its own: an argument let through writes nothing a

@@ -188,12 +188,9 @@ int run_log(const cli::LogArgs& args)
     ecuio_session_get_info(session, &info);
     const bool replay_ends = info.backend == ECUIO_BACKEND_REPLAY &&
                              !(info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP);
-    write_session(out, info);
-    const uint32_t channels =
-        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
-            ? info.channel_count
-            : ECUIO_SESSION_INFO_MAX_CHANNELS;
-    cli::SessionSeen session_seen[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    write_session(out, session, info);
+    const uint32_t channels = module_count(info);
+    cli::SessionSeen session_seen[ECUIO_MAX_CHANNELS] = {};
     ShownConditions shown;
     if (conditions != nullptr &&
         !attach_conditions(out, session, conditions, "file", &shown)) {
