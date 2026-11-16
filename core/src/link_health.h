@@ -167,6 +167,18 @@ inline void link_count_quiet(link_health& h)
     }
 }
 
+/* An idle pass of a session that asks only its picks, with nothing
+ * picked (ecuio_engine_unpicked): nothing is asked, so no read is a
+ * quiet one, and a VEHICLE_TIMEOUT left by picks since taken away ends.
+ * A hard failure or failing writes are the adapter's, and stay. */
+inline void link_on_unpicked(link_health& h)
+{
+    h.quiet_runs = 0;
+    if (h.state == ECUIO_ERR_VEHICLE_TIMEOUT) {
+        link_set_state(h, ECUIO_OK);
+    }
+}
+
 /* Read-side link health. A read is a hard failure (the adapter or the
  * connection to it failed), a matched reply (a frame from an ECU we talk
  * to), or anything else (empty, or a frame for no channel of ours).

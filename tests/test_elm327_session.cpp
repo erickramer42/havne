@@ -17,6 +17,7 @@
 #include "elm327_tcp.h"  /* core/src */
 #include "elm327_stream.h" /* core/src */
 #include "ecuio/stream.h"
+#include "car_sized_set.h"
 #include "fake_diagnostics.h"
 #include "fake_elm327.h"
 #include "new_counter.h"
@@ -4983,4 +4984,164 @@ TEST_F(Elm327SessionTest, TheWorkerAllocatesNothingAcrossTheLinkChangesItJudges)
         << "the first judgment, then ON and OFF for each condition";
     EXPECT_EQ(w.at_to.load() - w.at_from.load(), 0u)
         << "operator new on the worker across the link's changes";
+}
+
+/* ADR-0065 section 3: a session on a set that derives more requests than
+ * a rotation holds says so in its info, asks nothing until a focus
+ * picks, then the picks alone, keeps a reply-timing row for each request
+ * it has asked, and asks nothing again once the focus ends */
+TEST_F(Elm327SessionTest, ASetPastARotationIsAskedOnlyItsPicks)
+{
+    using car_sized::id_of;
+    using car_sized::kMost;
+    struct Modules {
+        Modules()
+        {
+            EXPECT_TRUE(fake_ecu::set_module_dids(
+                "7E8:1002=07;7E8:1007=2A;7E9:1003=11"));
+        }
+        ~Modules() { fake_ecu::set_module_dids(nullptr); }
+    } modules;
+    struct Profile {
+        Profile()
+        {
+            EXPECT_EQ(
+                ecuio_profile_register("elm327-car", car_sized::set(), nullptr),
+                ECUIO_OK);
+        }
+        ~Profile()
+        {
+            EXPECT_EQ(ecuio_profile_unregister("elm327-car"), ECUIO_OK);
+        }
+    } profile; /* before the session, which holds the set */
+    Session s;
+    /* The probe stays on: with it a refused request leaves the rotation */
+    ASSERT_EQ(s.create(uri("?profile=elm327-car&identify=0&diagnose=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+    EXPECT_EQ(info.module_count, 2u);
+    EXPECT_NE(info.flags & ECUIO_SESSION_INFO_REQUESTS, 0u);
+    EXPECT_NE(info.flags & ECUIO_SESSION_INFO_PICK_ONLY, 0u);
+    uint32_t unasked = 0;
+    ASSERT_EQ(ecuio_session_get_unasked_signals(s.s, nullptr, 0, &unasked),
+              ECUIO_OK);
+    EXPECT_EQ(unasked, car_sized::kDefs) << "before the start, every signal";
+
+    /* The Service 22 requests the adapter saw */
+    const auto asked = [] {
+        std::vector<std::string> out;
+        for (const std::string& cmd : fake_commands()) {
+            if (cmd.size() >= 6 && cmd.compare(0, 2, "22") == 0) {
+                out.push_back(cmd.substr(0, 6));
+            }
+        }
+        return out;
+    };
+    s.start();
+    /* Twice the quiet run a link takes to say an ECU isn't answering */
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    EXPECT_TRUE(asked().empty()) << "nothing is asked before a pick";
+    EXPECT_EQ(s.state(), ECUIO_OK)
+        << "a session asking nothing isn't one an ECU doesn't answer";
+
+    /* Two of the engine ECU's signals and one of the other module's */
+    const uint16_t picks[] = {id_of(7), id_of(kMost + 3), id_of(2)};
+    ASSERT_EQ(ecuio_session_set_focus(s.s, picks, 3), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_TRUE(wait_for([&] { return asked().size() >= 9; }, 5000));
+    std::vector<std::string> seen = asked();
+    for (const std::string& r : seen) {
+        EXPECT_TRUE(r == "221002" || r == "221007" || r == "221003") << r;
+    }
+    for (const char* r : {"221002", "221007", "221003"}) {
+        EXPECT_NE(std::count(seen.begin(), seen.end(), r), 0) << r;
+    }
+    const std::vector<uint8_t> engine = {0x62, 0x10, 0x07, 0x2A};
+    const std::vector<uint8_t> other = {0x62, 0x10, 0x03, 0x11};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            bool a = false;
+            bool b = false;
+            for (const Capture::Frame& f : s.cap.frames) {
+                a = a || (f.id == 0x7E8u && f.data == engine);
+                b = b || (f.id == 0x7E9u && f.data == other);
+            }
+            return a && b;
+        },
+        5000))
+        << "each module's own reply";
+    ASSERT_EQ(ecuio_session_get_unasked_signals(s.s, nullptr, 0, &unasked),
+              ECUIO_OK);
+    EXPECT_EQ(unasked, car_sized::kDefs - 3);
+
+    /* A row for each request asked, in the order the worker took them
+     * (the table's), and none for the 2045 it never asked */
+    ecuio_session_timing_t t{};
+    std::vector<ecuio_request_timing_t> rows(ECUIO_PROFILE_MAX_REQUESTS);
+    uint32_t count = 0;
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_timing(s.s, &t, rows.data(),
+                                            static_cast<uint32_t>(rows.size()),
+                                            &count) == ECUIO_OK &&
+                   count == 3 && rows[0].answered > 0 && rows[1].answered > 0 &&
+                   rows[2].answered > 0;
+        },
+        10000))
+        << count << " rows";
+    EXPECT_EQ(t.rows, 3u);
+    EXPECT_EQ(t.untimed, 0u);
+    const uint8_t want[3][4] = {
+        {0, 0x22, 0x10, 0x02}, {0, 0x22, 0x10, 0x07}, {1, 0x22, 0x10, 0x03}};
+    for (uint32_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(rows[i].channel, want[i][0]) << i;
+        EXPECT_EQ(rows[i].length, 3u) << i;
+        EXPECT_EQ(std::memcmp(rows[i].request, &want[i][1], 3), 0) << i;
+        EXPECT_EQ(rows[i].refused, 0u) << i;
+    }
+
+    /* The focus ended: nothing more, but a request already out */
+    ASSERT_EQ(ecuio_session_set_focus(s.s, nullptr, 0), ECUIO_OK);
+    ASSERT_TRUE(wait_for(
+        [&] {
+            uint32_t n = 0;
+            return ecuio_session_get_unasked_signals(s.s, nullptr, 0, &n) ==
+                       ECUIO_OK &&
+                   n == car_sized::kDefs;
+        },
+        5000))
+        << "the worker took the focus's end";
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    const uint32_t at_end =
+        on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.requests; });
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    EXPECT_EQ(
+        on_fake<uint32_t>([](fake_elm327::adapter& a) { return a.requests; }),
+        at_end)
+        << "nothing is asked with no pick";
+    EXPECT_EQ(s.state(), ECUIO_OK);
+
+    /* A pick the ECU refuses is dropped, but it was asked: the silence
+     * after it counts as any table's does. With the pick taken away
+     * nothing is asked, and the timeout it left ends */
+    const uint16_t refused = id_of(9);
+    ASSERT_EQ(ecuio_session_set_focus(s.s, &refused, 1), ECUIO_OK);
+    ASSERT_TRUE(wait_for(
+        [&] {
+            ecuio_channel_support_t engine_ecu{};
+            return ecuio_session_get_channel_support(s.s, 0, &engine_ecu) ==
+                       ECUIO_OK &&
+                   engine_ecu.dropped == 1;
+        },
+        5000))
+        << "the refused request left the rotation";
+    ASSERT_TRUE(
+        wait_for([&] { return s.state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 5000))
+        << "picks that were all dropped still time out";
+    ASSERT_EQ(ecuio_session_set_focus(s.s, nullptr, 0), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] { return s.state() == ECUIO_OK; }, 5000))
+        << "nothing asked: nothing fails to answer";
 }

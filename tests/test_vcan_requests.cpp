@@ -8,6 +8,7 @@
 #include "ecuio/profile.h"
 #include "ecuio/signal_sets.h"
 #include "ecuio/sim.h"
+#include "car_sized_set.h"
 #include "fake_diagnostics.h"
 #include "fake_ecu.h"
 #include "vcan_bus.h"
@@ -367,6 +368,115 @@ TEST_F(SocketCanRequestTest, TwoEcusInOneSessionAnswerEachItsOwn)
             << "a reply on 0x" << std::hex << r.first;
     }
     EXPECT_GT(second.answered(), 0u);
+}
+
+/* ADR-0065 section 3: a session on a set that derives more requests than
+ * a rotation holds says so, puts nothing on the bus until a focus picks
+ * and stays out of "not responding" meanwhile, then asks the picks
+ * alone; a pick the ECU refuses still times the link out, and the
+ * timeout ends when the pick is taken away */
+TEST_F(SocketCanRequestTest, ASetPastARotationIsAskedOnlyItsPicks)
+{
+    using car_sized::id_of;
+    using car_sized::kMost;
+    struct Module {
+        Module()
+        {
+            EXPECT_TRUE(fake_ecu::set_module_dids("7E8:1007=2A;7E9:1003=11"));
+        }
+        ~Module() { fake_ecu::set_module_dids(nullptr); }
+    } module;
+    struct Profile {
+        Profile()
+        {
+            EXPECT_EQ(ecuio_profile_register("socketcan-car", car_sized::set(),
+                                             nullptr),
+                      ECUIO_OK);
+        }
+        ~Profile()
+        {
+            EXPECT_EQ(ecuio_profile_unregister("socketcan-car"), ECUIO_OK);
+        }
+    } profile; /* before the session, which holds the set */
+    struct Replies {
+        std::mutex mutex;
+        std::vector<std::pair<uint32_t, std::vector<uint8_t>>> got;
+        static void cb(const ecuio_frame_t* f, void* user)
+        {
+            auto* r = static_cast<Replies*>(user);
+            std::lock_guard<std::mutex> lock(r->mutex);
+            r->got.emplace_back(
+                f->arbitration_id,
+                std::vector<uint8_t>(f->data, f->data + f->data_length));
+        }
+    } replies;
+    vcan_bus::Ecu engine;
+    vcan_bus::Ecu second(-1, vcan_bus::interface_name(), 0x7E1, 0x7E9);
+    ASSERT_TRUE(engine.ok() && second.ok());
+    /* The probe stays on: with it a refused request leaves the rotation */
+    Session s("?profile=socketcan-car&identify=0&diagnose=0", Replies::cb,
+              &replies);
+    ASSERT_EQ(s.status(), ECUIO_OK) << s.detail();
+    const auto state = [&] {
+        int32_t last = -1;
+        uint32_t episodes = 0;
+        EXPECT_EQ(ecuio_session_get_error_state(s.get(), &last, &episodes),
+                  ECUIO_OK);
+        return last;
+    };
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.get(), &info), ECUIO_OK);
+    EXPECT_EQ(info.module_count, 2u);
+    EXPECT_NE(info.flags & ECUIO_SESSION_INFO_REQUESTS, 0u);
+    EXPECT_NE(info.flags & ECUIO_SESSION_INFO_PICK_ONLY, 0u);
+
+    /* Twice the quiet run a link takes to say an ECU isn't answering */
+    std::this_thread::sleep_for(2000ms);
+    EXPECT_EQ(engine.answered(), 0u) << "nothing is asked before a pick";
+    EXPECT_EQ(second.answered(), 0u);
+    EXPECT_EQ(state(), ECUIO_OK)
+        << "a session asking nothing isn't one an ECU doesn't answer";
+
+    /* One signal of each module */
+    const uint16_t picks[] = {id_of(kMost + 3), id_of(7)};
+    ASSERT_EQ(ecuio_session_set_focus(s.get(), picks, 2), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const std::vector<uint8_t> want_engine = {0x62, 0x10, 0x07, 0x2A};
+    const std::vector<uint8_t> want_other = {0x62, 0x10, 0x03, 0x11};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> lock(replies.mutex);
+            int a = 0;
+            int b = 0;
+            for (const auto& r : replies.got) {
+                a += r.first == 0x7E8u && r.second == want_engine;
+                b += r.first == 0x7E9u && r.second == want_other;
+            }
+            return a >= 3 && b >= 3;
+        },
+        5000ms))
+        << "three of each module's pick";
+    {
+        std::lock_guard<std::mutex> lock(replies.mutex);
+        for (const auto& r : replies.got) {
+            EXPECT_TRUE((r.first == 0x7E8u && r.second == want_engine) ||
+                        (r.first == 0x7E9u && r.second == want_other))
+                << "a reply on 0x" << std::hex << r.first;
+        }
+    }
+    EXPECT_EQ(state(), ECUIO_OK);
+
+    /* A pick the ECU refuses is dropped, but it was asked: the silence
+     * after it counts as any table's does */
+    const uint16_t refused = id_of(9);
+    ASSERT_EQ(ecuio_session_set_focus(s.get(), &refused, 1), ECUIO_OK);
+    ASSERT_TRUE(
+        wait_for([&] { return state() == ECUIO_ERR_VEHICLE_TIMEOUT; }, 5000ms))
+        << "picks that were all dropped still time out";
+    /* The pick taken away: nothing is asked, and its timeout ends */
+    ASSERT_EQ(ecuio_session_set_focus(s.get(), nullptr, 0), ECUIO_OK);
+    ASSERT_TRUE(wait_for([&] { return state() == ECUIO_OK; }, 5000ms))
+        << "nothing asked: nothing fails to answer";
 }
 
 /* A frame of up to 8 bytes onto the bus from a raw socket */

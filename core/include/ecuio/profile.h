@@ -44,28 +44,37 @@ extern "C" {
 /* The longest profile name: what a ?profile= value can carry. */
 #define ECUIO_PROFILE_NAME_MAX 63
 
-/* The most requests a set's defs may derive (ADR-0015 section 2): one per
- * distinct request and channel, so defs read from one reply count
- * once. */
+/* The most requests a session has in its rotation at one time
+ * (ADR-0065 section 3), and the reply-timing rows it keeps
+ * (ecuio_session_get_timing). It doesn't bound what a set defines: a
+ * session whose set derives more asks only what is picked
+ * (ecuio_session_set_focus; ECUIO_SESSION_INFO_PICK_ONLY, core.h). */
 #define ECUIO_PROFILE_MAX_REQUESTS 1024
+
+/* The most requests the defs of one module (a channel the set declares;
+ * a set that declares none counts as one) may derive (ADR-0015
+ * section 2): one for each distinct request, so defs read from one reply
+ * count once. A guard against a bad file, far above any module met. */
+#define ECUIO_MODULE_MAX_REQUESTS 1024
 
 /* Register a name for a signal set, replacing a non-built-in profile of
  * the same name (last wins). The name is 1..ECUIO_PROFILE_NAME_MAX
  * characters of [a-z0-9._-], so a URI can select it. A non-NULL set
  * must pass ecuio_validate_signal_set and derive at most
- * ECUIO_PROFILE_MAX_REQUESTS requests; NULL registers a log-only
- * profile, like "raw". Returns ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for
- * a NULL name; ECUIO_ERR_INVALID_ARGUMENT for a malformed or built-in
- * name, an invalid set or one with too many requests, leaving the
- * registry unchanged; ECUIO_ERR_OUT_OF_MEMORY when the validator had
- * no room to check the set's chains (ECUIO_VALIDATE_ERR_OUT_OF_MEMORY).
+ * ECUIO_MODULE_MAX_REQUESTS requests for each module; NULL registers a
+ * log-only profile, like "raw". Returns ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT
+ * for a NULL name; ECUIO_ERR_INVALID_ARGUMENT for a malformed or built-in
+ * name, an invalid set or one with too many requests on a module, leaving
+ * the registry unchanged; ECUIO_ERR_OUT_OF_MEMORY when the validator had
+ * no room to check the set's chains (ECUIO_VALIDATE_ERR_OUT_OF_MEMORY),
+ * or there was none to count its requests.
  *
  * out may be NULL. Otherwise it receives the validator's result when
  * the set was checked: which check failed, and on which def or
  * channel; ECUIO_VALIDATE_ERR_REQUEST_COUNT names the first def whose
- * request didn't fit. When it wasn't (a NULL set, or a name refused
- * first) out holds code 0 and index UINT32_MAX, so a refusal with code
- * 0 is the name's. */
+ * request is past its module's ECUIO_MODULE_MAX_REQUESTS. When it wasn't
+ * (a NULL set, or a name refused first) out holds code 0 and index
+ * UINT32_MAX, so a refusal with code 0 is the name's. */
 ecuio_status_t ecuio_profile_register(const char* name,
                                       const ecuio_signal_set_t* signal_set,
                                       ecuio_validation_t* out);
@@ -248,7 +257,10 @@ ecuio_status_t ecuio_session_get_unsupported_signals(
  * report counts every drop but names only its first
  * ECUIO_SUPPORT_MAX_DROPPED, so a refused DID past those is a count
  * alone), nor a DID the scan hasn't found. Empty with no focus, and on a
- * session that asks nothing (ECUIO_SESSION_INFO_REQUESTS clear). Judged by the
+ * session that asks nothing (ECUIO_SESSION_INFO_REQUESTS clear); a
+ * session that asks only its picks (ECUIO_SESSION_INFO_PICK_ONLY) lists
+ * with no focus every signal it could ask except an attached
+ * condition's. Judged by the
  * worker as it takes each focus and whenever its table changes, so it
  * follows a focus call between two requests; a focus set before start is
  * listed once the worker has begun.
@@ -283,8 +295,9 @@ ecuio_status_t ecuio_session_get_unsplit_replies(
 );
 
 /*
- * Reply timing per request (ADR-0042): for each request in a session's
- * rotation (a PID, or a DID under uds-generic), its outcomes, its reply
+ * Reply timing per request (ADR-0042): for each request a session has
+ * had in its rotation (a PID, or a DID under uds-generic), its outcomes,
+ * its reply
  * latency (the request's write to the reply that completes it, on the
  * host's clock) and its refresh interval (one answer to the next, on
  * the frames' own stamps: interval_clock says whose). Quantiles read at
@@ -334,7 +347,10 @@ typedef struct ecuio_session_timing {
     uint32_t isotp_completed;    /* messages finished, single frames too */
     uint32_t isotp_dropped;      /* begun and never finished */
     uint32_t isotp_malformed;    /* frames no message could use */
-    uint32_t reserved[7];
+    uint32_t untimed;            /* requests asked that have no row: every
+                                    row was taken before they were first
+                                    picked */
+    uint32_t reserved[6];
 } ecuio_session_timing_t;
 
 typedef struct ecuio_request_timing {
@@ -363,20 +379,32 @@ typedef struct ecuio_request_timing {
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_session_timing_t) == 64, "ecuio_session_timing_t size is ABI");
+static_assert(offsetof(ecuio_session_timing_t, untimed) == 36, "timing untimed offset is ABI");
+static_assert(offsetof(ecuio_session_timing_t, reserved) == 40, "timing reserved offset is ABI");
 static_assert(sizeof(ecuio_request_timing_t) == 80, "ecuio_request_timing_t size is ABI");
 static_assert(offsetof(ecuio_request_timing_t, flags) == 8, "timing flags offset is ABI");
 static_assert(offsetof(ecuio_request_timing_t, intervals) == 44, "intervals offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_session_timing_t) == 64, "ecuio_session_timing_t size is ABI");
+_Static_assert(offsetof(ecuio_session_timing_t, untimed) == 36, "timing untimed offset is ABI");
+_Static_assert(offsetof(ecuio_session_timing_t, reserved) == 40, "timing reserved offset is ABI");
 _Static_assert(sizeof(ecuio_request_timing_t) == 80, "ecuio_request_timing_t size is ABI");
 _Static_assert(offsetof(ecuio_request_timing_t, flags) == 8, "timing flags offset is ABI");
 _Static_assert(offsetof(ecuio_request_timing_t, intervals) == 44, "intervals offset is ABI");
 #endif
 
 /*
- * Copies the session's timing report and up to capacity rows, in the
- * engine's table order, and sets *count to how many rows there are;
- * capacity 0 (rows may be NULL) asks the count. A session with no
+ * Copies the session's timing report and up to capacity rows, and sets
+ * *count to how many rows there are, ECUIO_PROFILE_MAX_REQUESTS at
+ * most; capacity 0 (rows may be NULL) asks the count. A request keeps
+ * its row, at the same index, whether or not a focus parks it later; the
+ * rows are in the order taken. A session without
+ * ECUIO_SESSION_INFO_PICK_ONLY has every request's row from create, in
+ * the set's order, then each DID its scan finds. One with it gives a
+ * request its row when a focus or an attached condition first picks it,
+ * while rows are left: a request first picked after the last row went is
+ * asked all the same, has no row, and is counted in the report's
+ * untimed. A session with no
  * rotation (mock, replay) has none. ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for
  * a NULL session, timing or count, or NULL rows with a capacity.
  * Readable at any time and after close.

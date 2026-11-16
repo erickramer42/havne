@@ -1,5 +1,5 @@
 // File/layer: core/src/core.cpp | C++17, Qt-free, CI-validated headless build
-// Testing: UNIT: CoreTest, DefIndexTest, ConditionSessionTest,
+// Testing: UNIT: CoreTest, PickOnlyTest, DefIndexTest, ConditionSessionTest,
 //          RecorderTest, ConditionRecordingTest (test_core); PidSupportTest,
 //          DiagnosticsTest, InspectionTest (test_obd2); ProbeNotesTest
 //          (ctest); c_abi; HARNESS: Elm327SessionTest (test_elm327)
@@ -217,6 +217,43 @@ void ecuio_detail_set_vendor(const char* call, long status,
                          static_cast<unsigned long>(status), name);
     }
 }
+
+namespace {
+
+/* The session's table rows, when a rotation could pass its most
+ * (ECUIO_PROFILE_MAX_REQUESTS): 0 for a table that fits one whole, which
+ * needs no count. The size of rotation_rows' marks. */
+size_t rotation_table(const ecuio_session_t* session)
+{
+    std::lock_guard<std::mutex> lock(session->focus_mutex);
+    return session->focus_table > ECUIO_PROFILE_MAX_REQUESTS
+               ? session->focus_table
+               : 0;
+}
+
+/* The requests a rotation of these defs holds: the table rows of a's and
+ * b's marked defs (one byte for each def; either may be short or empty)
+ * through the session's def-to-row map, each row once. marks holds one
+ * zeroed byte for each table row. Under focus_mutex. */
+uint32_t rotation_rows(const ecuio_session_t* session,
+                       const std::vector<uint8_t>& a,
+                       const std::vector<uint8_t>& b,
+                       std::vector<uint8_t>& marks)
+{
+    uint32_t rows = 0;
+    for (size_t i = 0; i < session->focus_rows.size(); ++i) {
+        const uint32_t row = session->focus_rows[i];
+        const bool marked =
+            (i < a.size() && a[i] != 0) || (i < b.size() && b[i] != 0);
+        if (marked && row < marks.size() && marks[row] == 0) {
+            marks[row] = 1;
+            ++rows;
+        }
+    }
+    return rows;
+}
+
+} // namespace
 
 extern "C" {
 
@@ -545,6 +582,7 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
         (set != nullptr && set->defs != nullptr) ? set->count : 0;
     std::vector<uint16_t> ids;
     std::vector<uint8_t> picked;
+    std::vector<uint8_t> marks; /* rotation_rows' */
     try {
         /* Each pick once, at its first place: the recording names it once */
         std::vector<uint8_t> seen(count > 0 ? 65536u : 0u, 0);
@@ -555,6 +593,7 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
             }
         }
         picked.assign(defs, 0);
+        marks.assign(count > 0 ? rotation_table(session) : 0, 0);
     } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
@@ -593,6 +632,20 @@ ecuio_status_t ecuio_session_set_focus_with(ecuio_session_t* session,
                 ecuio_detail_set("the focus leaves nothing to request: none "
                                  "of the picked signals is asked on this "
                                  "session");
+                return ECUIO_ERR_INVALID_ARGUMENT;
+            }
+        }
+        /* The picks' rotation, the conditions' signals in it (ADR-0065
+         * section 3) */
+        if (!marks.empty()) {
+            const uint32_t rows =
+                rotation_rows(session, picked, session->condition_defs, marks);
+            if (rows > ECUIO_PROFILE_MAX_REQUESTS) {
+                ecuio_detail_set(
+                    "the picked signals, with the attached conditions', ask "
+                    "%u requests: a session asks %u at a time",
+                    static_cast<unsigned>(rows),
+                    static_cast<unsigned>(ECUIO_PROFILE_MAX_REQUESTS));
                 return ECUIO_ERR_INVALID_ARGUMENT;
             }
         }
@@ -970,6 +1023,9 @@ ecuio_status_t ecuio_session_create(
     if (s->focus_requests) {
         s->info.flags |= ECUIO_SESSION_INFO_REQUESTS;
     }
+    if (s->focus_requests && s->focus_pick_only) {
+        s->info.flags |= ECUIO_SESSION_INFO_PICK_ONLY;
+    }
     static_assert(ECUIO_PROFILE_NAME_MAX < ECUIO_SESSION_INFO_PROFILE_LEN,
                   "the session info holds any profile name");
     char* profile = s->info.profile;
@@ -1224,6 +1280,27 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
                 ecuio_computed_mark_leaves(signals, watched.data());
             }
         }
+        /* The rotation with these signals in it (ADR-0065 section 3):
+         * judged before anything is handed over, the focus's picks
+         * counted while a focus is on. The session's one caller makes
+         * no focus call meanwhile. */
+        std::vector<uint8_t> marks(rotation_table(session), 0);
+        if (!marks.empty()) {
+            std::lock_guard<std::mutex> lock(session->focus_mutex);
+            static const std::vector<uint8_t> none;
+            const uint32_t rows = rotation_rows(
+                session,
+                session->focus_ids.empty() ? none : session->focus_defs,
+                watched, marks);
+            if (rows > ECUIO_PROFILE_MAX_REQUESTS) {
+                ecuio_detail_set(
+                    "the conditions' signals, with the focus's, ask %u "
+                    "requests: a session asks %u at a time",
+                    static_cast<unsigned>(rows),
+                    static_cast<unsigned>(ECUIO_PROFILE_MAX_REQUESTS));
+                return ECUIO_ERR_INVALID_ARGUMENT;
+            }
+        }
     } catch (const std::bad_alloc&) {
         ecuio_detail_set("out of memory");
         return ECUIO_ERR_OUT_OF_MEMORY;
@@ -1267,13 +1344,16 @@ ecuio_status_t ecuio_session_set_conditions(ecuio_session_t* session,
         session->conditions_waiting.store(true);
     }
     {
-        /* A focus keeps the conditions' signals asked (ADR-0063 section 7).
-         * A new generation restarts every sweep, so only a changed map under
-         * a focus moves it; with none, the next focus call moves it. */
+        /* A focus keeps the conditions' signals asked (ADR-0063 section 7),
+         * and a session that asks only its picks asks them with no focus
+         * (ADR-0065 section 8). A new generation restarts every sweep, so
+         * only a changed map moves it, under a focus or on such a session;
+         * otherwise the next focus call moves it. */
         std::lock_guard<std::mutex> lock(session->focus_mutex);
         const bool moved = watched != session->condition_defs;
         session->condition_defs.swap(watched);
-        if (moved && !session->focus_ids.empty()) {
+        if (moved &&
+            (!session->focus_ids.empty() || session->focus_pick_only)) {
             session->focus_generation.fetch_add(1);
         }
     }

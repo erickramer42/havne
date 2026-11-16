@@ -160,6 +160,16 @@ typedef char abi_value_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_t) =
 typedef char abi_batch_values_check[(offsetof(ecuio_value_batch_t, values) == 24) ? 1 : -1];
 typedef char abi_batch_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_batch_t) == 32) ? 1 : -1];
 typedef char abi_session_timing_size_check[(sizeof(ecuio_session_timing_t) == 64) ? 1 : -1];
+typedef char abi_session_timing_untimed_check[(offsetof(ecuio_session_timing_t, untimed) == 36) ? 1 : -1];
+typedef char abi_session_timing_reserved_check[(offsetof(ecuio_session_timing_t, reserved) == 40) ? 1 : -1];
+typedef char abi_rotation_check[(ECUIO_PROFILE_MAX_REQUESTS == 1024) ? 1 : -1];
+typedef char abi_module_requests_check[(ECUIO_MODULE_MAX_REQUESTS == 1024) ? 1 : -1];
+typedef char abi_file_signals_check[(ECUIO_SIGNAL_FILE_MAX_SIGNALS == 1024u) ? 1 : -1];
+typedef char abi_file_bytes_check[(ECUIO_SIGNAL_FILE_MAX_BYTES == 1048576u) ? 1 : -1];
+typedef char abi_set_signals_check[(ECUIO_SIGNAL_SET_MAX_SIGNALS == 16384u) ? 1 : -1];
+typedef char abi_set_bytes_check[(ECUIO_SIGNAL_SET_MAX_BYTES == 4194304u) ? 1 : -1];
+typedef char abi_load_set_check[(ECUIO_SIGNAL_FILE_LOAD_SET == 0x1u) ? 1 : -1];
+typedef char abi_pick_only_check[(ECUIO_SESSION_INFO_PICK_ONLY == 0x80u) ? 1 : -1];
 typedef char abi_request_timing_size_check[(sizeof(ecuio_request_timing_t) == 80) ? 1 : -1];
 typedef char abi_request_timing_intervals_check[(offsetof(ecuio_request_timing_t, intervals) == 44) ? 1 : -1];
 typedef char abi_serial_size_check[(sizeof(ecuio_serial_port_t) == 288) ? 1 : -1];
@@ -500,6 +510,11 @@ int main(void)
         sizeof(ECUIO_TIMING_COLUMNS) < 2u ||
         (ECUIO_SESSION_INFO_REPLAY_FAULTS & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0u ||
         (ECUIO_SESSION_INFO_REQUESTS & ECUIO_SESSION_INFO_REPLAY_FAULTS) != 0u ||
+        (ECUIO_SESSION_INFO_PICK_ONLY &
+         (ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_VERSIONS |
+          ECUIO_SESSION_INFO_REPLAY_LOOP | ECUIO_SESSION_INFO_PENDING_OFF |
+          ECUIO_SESSION_INFO_LISTEN_ONLY | ECUIO_SESSION_INFO_REPLAY_FAULTS |
+          ECUIO_SESSION_INFO_REQUESTS)) != 0u ||
         ECUIO_ABSENT_AFTER_FRAMES != 3u) {
         return 1;
     }
@@ -571,6 +586,18 @@ int main(void)
         uint16_t major = 1;
         uint16_t minor = 1;
         uint16_t patch = 1;
+        /* A flag the load doesn't know is refused; a set's written copy
+         * is read as any file is */
+        if (ecuio_signal_file_load_with(kGauged, sizeof kGauged - 1, 0x2u,
+                                        &file) != ECUIO_ERR_INVALID_ARGUMENT ||
+            file != NULL ||
+            ecuio_signal_file_load_with(kGauged, sizeof kGauged - 1,
+                                        ECUIO_SIGNAL_FILE_LOAD_SET,
+                                        &file) != ECUIO_OK) {
+            return 1;
+        }
+        ecuio_signal_file_free(file);
+        file = NULL;
         if (ecuio_signal_file_load(kGauged, sizeof kGauged - 1, &file) !=
             ECUIO_OK) {
             return 1;

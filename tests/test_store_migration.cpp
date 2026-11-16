@@ -108,14 +108,14 @@ QByteArray signalFile(const QString& name,
 }
 
 // A file the loader takes and a wrap refuses: written out two spaces a
-// level, its one signal is past a signal file's bound
+// level, its one signal is past a set's bytes
 QByteArray heavyFile(const QString& name)
 {
-    QByteArray padding = "[1";
+    QByteArray padding = "[[[[[[[[[[[[[[[[[[[[[1";
     for (int i = 1; i < 150000; ++i) {
         padding += ",1";
     }
-    padding += "]";
+    padding += "]]]]]]]]]]]]]]]]]]]]]";
     return QStringLiteral(
                R"({"havne_signals":1,"name":"%1","source":{"name":"t"},)"
                R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"

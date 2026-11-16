@@ -515,13 +515,14 @@ void RecordingView::openFrames(const QString& folder, const QString& profile)
     std::shared_ptr<FrameSet> frames;
     if (source.own_file) {
         QFile file(QDir(folder).filePath(QStringLiteral("signals.json")));
+        // A byte past the bound, so a longer copy is refused, never cut
         const QByteArray bytes = file.open(QIODevice::ReadOnly)
-                                     ? file.read(ECUIO_SIGNAL_FILE_MAX_BYTES)
+                                     ? file.read(ECUIO_SIGNAL_SET_MAX_BYTES + 1)
                                      : QByteArray();
         ecuio_signal_file_t* loaded = nullptr;
-        if (ecuio_signal_file_load(bytes.constData(),
-                                   static_cast<size_t>(bytes.size()),
-                                   &loaded) != ECUIO_OK) {
+        if (ecuio_signal_file_load_with(
+                bytes.constData(), static_cast<size_t>(bytes.size()),
+                ECUIO_SIGNAL_FILE_LOAD_SET, &loaded) != ECUIO_OK) {
             fail(folder,
                  QStringLiteral("its signals.json doesn't load: %1")
                      .arg(QString::fromUtf8(ecuio_last_error_detail())));
@@ -623,7 +624,7 @@ void RecordingView::readHeader(const QString& folder)
     if (recorded.names_file()) {
         QFile own(QDir(folder).filePath(QStringLiteral("signals.json")));
         if (own.open(QIODevice::ReadOnly) &&
-            own.size() <= static_cast<qint64>(ECUIO_SIGNAL_FILE_MAX_BYTES)) {
+            own.size() <= static_cast<qint64>(ECUIO_SIGNAL_SET_MAX_BYTES)) {
             m_ownSignalFile = QCryptographicHash::hash(
                                   own.readAll(), QCryptographicHash::Sha256)
                                   .toHex() == m_recordedSha.toLatin1();

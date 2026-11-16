@@ -235,6 +235,7 @@ ECUIO_J2534_DLL_PATH_LEN = 0x100
 ECUIO_J2534_MAX_VENDORS = 16
 ECUIO_J2534_VENDOR_NAME_LEN = 64
 ECUIO_MAX_CHANNELS = 32
+ECUIO_MODULE_MAX_REQUESTS = 0x400
 ECUIO_MONITOR_COMPLETE = 1
 ECUIO_MONITOR_CYCLE_COMPLETE = 4
 ECUIO_MONITOR_CYCLE_ENABLED = 2
@@ -317,6 +318,7 @@ ECUIO_SERIAL_NAME_LEN = 128
 ECUIO_SESSION_INFO_LISTEN_ONLY = 16
 ECUIO_SESSION_INFO_MAX_CHANNELS = 4
 ECUIO_SESSION_INFO_PENDING_OFF = 8
+ECUIO_SESSION_INFO_PICK_ONLY = 128
 ECUIO_SESSION_INFO_PROFILE_LEN = 64
 ECUIO_SESSION_INFO_REPLAY_FAULTS = 32
 ECUIO_SESSION_INFO_REPLAY_LOOP = 4
@@ -335,6 +337,7 @@ ECUIO_SESSION_STATE_UNANSWERED = 4
 ECUIO_SET_MAX_TABLE = 0x10000
 ECUIO_SIGNAL_FILE_FORMAT = 2
 ECUIO_SIGNAL_FILE_FORMAT_OLDEST = 1
+ECUIO_SIGNAL_FILE_LOAD_SET = 1
 ECUIO_SIGNAL_FILE_MAX_BYTES = 0x100000
 ECUIO_SIGNAL_FILE_MAX_SIGNALS = 0x400
 ECUIO_SIGNAL_GROUP_AIR = 2
@@ -347,6 +350,8 @@ ECUIO_SIGNAL_GROUP_OTHER = 0
 ECUIO_SIGNAL_GROUP_OXYGEN = 4
 ECUIO_SIGNAL_GROUP_VEHICLE = 6
 ECUIO_SIGNAL_SET_LAYOUT = 5
+ECUIO_SIGNAL_SET_MAX_BYTES = 0x400000
+ECUIO_SIGNAL_SET_MAX_SIGNALS = 0x4000
 ECUIO_SIM_ALLOW_DESK_BUS = 1
 ECUIO_SIM_FAILED = 1
 ECUIO_SIM_MAX_REPLIES = 66
@@ -1332,7 +1337,8 @@ ecuio_session_timing_t._fields_ = [
     ('isotp_completed', c_uint32),
     ('isotp_dropped', c_uint32),
     ('isotp_malformed', c_uint32),
-    ('reserved', (c_uint32 * 7)),
+    ('untimed', c_uint32),
+    ('reserved', (c_uint32 * 6)),
 ]
 ecuio_signal_def_t._fields_ = [
     ('id', c_uint16),
@@ -1618,6 +1624,7 @@ FUNCTIONS = {
     'ecuio_signal_file_gauge': (POINTER(ecuio_signal_gauge_t), [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_key': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_load': (c_int, [c_char_p, c_size_t, POINTER(POINTER(ecuio_signal_file_t))]),  # signals.h
+    'ecuio_signal_file_load_with': (c_int, [c_char_p, c_size_t, c_uint32, POINTER(POINTER(ecuio_signal_file_t))]),  # signals.h
     'ecuio_signal_file_name': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_profile': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_signal_file_t)]),  # signals.h

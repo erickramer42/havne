@@ -32,6 +32,7 @@
 #include <string>
 #include <thread>
 
+#include "car_sized_set.h" /* tests: a set past a rotation's most */
 #include "fake_control.h"  /* tests: the fake's control page */
 #include "fake_diagnostics.h" /* tests: the fake ECU's report */
 #include "new_counter.h"   /* tests: operator new counted per thread */
@@ -2787,6 +2788,95 @@ TEST_F(J2534AdoptionTest, AFocusAsksOnlyThePickedPids)
     EXPECT_GT(pids.size(), 2u) << "the whole set is asked again";
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
+}
+
+/* ADR-0065 section 3: a session on a set that derives more requests than
+ * a rotation holds says so, writes nothing until a focus picks and stays
+ * out of "not responding" meanwhile, then asks the picks alone; a pick
+ * the ECU refuses still times the link out, and the timeout ends when
+ * the pick is taken away */
+TEST_F(J2534AdoptionTest, ASetPastARotationIsAskedOnlyItsPicks)
+{
+    using car_sized::id_of;
+    using car_sized::kMost;
+    KnobGuard module("ECUIO_FAKE_MODULE_DIDS", "7E8:1007=2A;7E9:1003=11");
+    ASSERT_EQ(ecuio_profile_register("j2534-car", car_sized::set(), nullptr),
+              ECUIO_OK);
+    char uri[700];
+    /* The probe stays on: with it a refused request leaves the rotation */
+    snprintf(uri, sizeof(uri),
+             "j2534://%s?profile=j2534-car&identify=0&diagnose=0",
+             FAKE_J2534_DLL_PATH);
+    ecuio_session_t* session = nullptr;
+    ASSERT_EQ(ecuio_session_create(uri, &session), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const auto state = [&] {
+        int32_t last = -1;
+        uint32_t episodes = 0;
+        EXPECT_EQ(ecuio_session_get_error_state(session, &last, &episodes),
+                  ECUIO_OK);
+        return last;
+    };
+    const auto reaches = [&](int32_t want) {
+        const auto end =
+            std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (state() != want && std::chrono::steady_clock::now() < end) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return state() == want;
+    };
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
+    EXPECT_EQ(info.module_count, 2u);
+    EXPECT_NE(info.flags & ECUIO_SESSION_INFO_REQUESTS, 0u);
+    EXPECT_NE(info.flags & ECUIO_SESSION_INFO_PICK_ONLY, 0u);
+    ASSERT_EQ(ecuio_session_start(session), ECUIO_OK);
+
+    /* Twice the quiet run a link takes to say an ECU isn't answering */
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    unsigned long written = 77;
+    get_write_count(&written);
+    EXPECT_EQ(written, 0u) << "nothing is asked before a pick";
+    EXPECT_EQ(state(), ECUIO_OK)
+        << "a session asking nothing isn't one an ECU doesn't answer";
+
+    /* One signal of each module */
+    const uint16_t picks[] = {id_of(kMost + 3), id_of(7)};
+    ASSERT_EQ(ecuio_session_set_focus(session, picks, 2), ECUIO_OK)
+        << ecuio_last_error_detail();
+    wait_for_writes(get_write_count, 8, 250);
+    bool engine = false;
+    bool other = false;
+    for (unsigned long i = 0; i < 8; ++i) {
+        unsigned char wbuf[64] = {};
+        unsigned long wlen = 0, wflags = 0;
+        get_recorded_write(i, wbuf, &wlen, &wflags);
+        ASSERT_EQ(wlen, 7u) << "write " << i;
+        const unsigned char to_engine[7] = {0, 0, 0x07, 0xE0, 0x22, 0x10, 0x07};
+        const unsigned char to_other[7] = {0, 0, 0x07, 0xE1, 0x22, 0x10, 0x03};
+        const bool a = memcmp(wbuf, to_engine, 7) == 0;
+        const bool b = memcmp(wbuf, to_other, 7) == 0;
+        EXPECT_TRUE(a || b) << "write " << i << " asks " << int(wbuf[5])
+                            << int(wbuf[6]) << " of " << int(wbuf[3]);
+        engine = engine || a;
+        other = other || b;
+    }
+    EXPECT_TRUE(engine && other) << "each module's pick";
+    EXPECT_EQ(state(), ECUIO_OK);
+
+    /* A pick the ECU refuses is dropped, but it was asked: the silence
+     * after it counts as any table's does */
+    const uint16_t refused = id_of(9);
+    ASSERT_EQ(ecuio_session_set_focus(session, &refused, 1), ECUIO_OK);
+    ASSERT_TRUE(reaches(ECUIO_ERR_VEHICLE_TIMEOUT))
+        << "picks that were all dropped still time out";
+    /* The pick taken away: nothing is asked, and its timeout ends */
+    ASSERT_EQ(ecuio_session_set_focus(session, nullptr, 0), ECUIO_OK);
+    ASSERT_TRUE(reaches(ECUIO_OK)) << "nothing asked: nothing fails to answer";
+
+    EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
+    ecuio_session_destroy(session);
+    EXPECT_EQ(ecuio_profile_unregister("j2534-car"), ECUIO_OK);
 }
 
 /* ADR-0051's appendix of 2026-11-10: a focus on obd2's computed Boost alone

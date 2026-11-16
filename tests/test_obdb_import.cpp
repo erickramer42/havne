@@ -406,10 +406,10 @@ TEST(ObdbImportTest, AMissingReplyIdIsTheStandardsAndNoted)
                        "(OBDb takes any module's)");
 }
 
-// A session asks at most ECUIO_MAX_CHANNELS modules, obd2's counted, and
-// its requests, obd2's counted: past either, the rest are left out and the
-// file loads
-TEST(ObdbImportTest, ModulesAndRequestsStopAtWhatASessionAsks)
+// A set holds at most ECUIO_MAX_CHANNELS modules, obd2's counted, and a
+// module ECUIO_MODULE_MAX_REQUESTS requests, obd2's counted on its ECU:
+// past either, the rest are left out and the file loads
+TEST(ObdbImportTest, ModulesAndRequestsStopAtWhatASetHolds)
 {
     // One module more than a set holds, each on IDs of its own: obd2's
     // 7E8 and all but two of them fit
@@ -465,27 +465,46 @@ TEST(ObdbImportTest, ModulesAndRequestsStopAtWhatASessionAsks)
     EXPECT_EQ(kept.count(ECUIO_OBDB_NOTE_CONVERTED), 300u);
     EXPECT_EQ(kept.count(ECUIO_OBDB_NOTE_SKIPPED), 0u);
 
-    /* Past the cap: one DID for each request the table has room for
-     * beside obd2's, counted by the engine a session derives with */
+    /* Past a module's most: one DID for each request the engine ECU has
+     * room for beside obd2's, counted as a session derives them. Another
+     * module's requests are its own count, which obd2 adds nothing to. */
     const ecuio_signal_set_t* obd2 = nullptr;
     ASSERT_EQ(ecuio_profile_lookup("obd2", &obd2), ECUIO_OK);
-    auto engine = std::make_unique<ecuio_request_engine>();
-    ecuio_engine_init(engine.get(), 1);
+    ecuio_derived base;
     const uint32_t rx = ECUIO_OBD2_ECU_ARB_ID;
-    ASSERT_TRUE(ecuio_engine_derive(engine.get(), obd2, &rx, 1, nullptr));
-    const int n = static_cast<int>(ECUIO_PROFILE_MAX_REQUESTS) + 100;
+    ASSERT_EQ(ecuio_engine_plan(obd2, &rx, 1, nullptr, &base),
+              ecuio_plan_result::ok);
+    ASSERT_GT(base.total, 0u);
+    const int n = static_cast<int>(ECUIO_MODULE_MAX_REQUESTS) + 100;
+    Imported other;
+    import(other, many(n));
+    ASSERT_EQ(other.status, ECUIO_OK) << other.detail;
+    EXPECT_EQ(other.count(ECUIO_OBDB_NOTE_CONVERTED),
+              size_t{ECUIO_MODULE_MAX_REQUESTS})
+        << "7E9 is asked nothing by obd2";
+
+    std::string engine = "{\"commands\":[";
+    for (int i = 0; i < n; ++i) {
+        char did[9];
+        std::snprintf(did, sizeof did, "%04X", 0x2000 + i);
+        engine += std::string(i > 0 ? "," : "") +
+                  "{\"hdr\":\"7E0\",\"rax\":\"7E8\",\"cmd\":{\"22\":\"" + did +
+                  "\"},\"freq\":1,\"signals\":[" +
+                  sig("D" + std::to_string(i), kByte) + "]}";
+    }
+    engine += "]}";
     Imported full;
-    import(full, many(n));
+    import(full, engine);
     ASSERT_EQ(full.status, ECUIO_OK) << full.detail;
     const size_t converted = full.count(ECUIO_OBDB_NOTE_CONVERTED);
-    EXPECT_EQ(converted, size_t{ECUIO_PROFILE_MAX_REQUESTS} - engine->count);
+    EXPECT_EQ(converted, size_t{ECUIO_MODULE_MAX_REQUESTS} - base.total);
     EXPECT_EQ(converted + full.count(ECUIO_OBDB_NOTE_SKIPPED), size_t(n));
     const Note* past =
         full.note("D" + std::to_string(n - 1), ECUIO_OBDB_NOTE_SKIPPED);
     ASSERT_NE(past, nullptr);
     EXPECT_EQ(past->text, "past the " +
-                              std::to_string(ECUIO_PROFILE_MAX_REQUESTS) +
-                              " requests a session asks, obd2's counted");
+                              std::to_string(ECUIO_MODULE_MAX_REQUESTS) +
+                              " requests one module is asked, obd2's counted");
 }
 
 // Input that isn't an OBDb set, or holds nothing Havne reads, is refused

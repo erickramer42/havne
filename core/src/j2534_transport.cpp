@@ -581,7 +581,11 @@ void j2534_worker(ecuio_j2534_transport* t)
                 (void)ecuio_engine_on_frame(&e, o.chan, o.payload, o.len,
                                             engine_now_us(t), nullptr);
             }
-            update_health(h, o, !asking);
+            const bool unpicked = !asking && ecuio_engine_unpicked(&e);
+            update_health(h, o, !asking && !unpicked);
+            if (unpicked) {
+                link_on_unpicked(h);
+            }
         }
         if (h.recovered) {
             h.recovered = false;

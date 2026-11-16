@@ -509,7 +509,11 @@ void request_worker(ecuio_socketcan_transport* t)
         }
         if (ready == 0) {
             if (!asking && !pending.active) {
-                link_on_read(h, false, false, true); /* a quiet window */
+                if (ecuio_engine_unpicked(&e)) {
+                    link_on_unpicked(h);
+                } else {
+                    link_on_read(h, false, false, true); /* a quiet window */
+                }
             }
         }
 

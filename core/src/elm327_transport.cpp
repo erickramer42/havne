@@ -1469,7 +1469,11 @@ void elm327_worker(transport* t)
                     io = drain(t, wait);
                 }
                 if (io == elm327_io::prompt && !asking) {
-                    link_on_read(h, false, false, true);
+                    if (ecuio_engine_unpicked(&e)) {
+                        link_on_unpicked(h);
+                    } else {
+                        link_on_read(h, false, false, true);
+                    }
                 }
             }
             if (io == elm327_io::stopped) {

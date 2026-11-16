@@ -351,6 +351,11 @@ ecuio_status_t ecuio_session_get_error_state(
                                                           reads: a focus's
                                                           minimum time between
                                                           sweeps applies */
+/* The set derives more requests than ECUIO_PROFILE_MAX_REQUESTS
+ * (profile.h): the session asks only what a focus or an attached
+ * condition picks, and nothing until one does (ADR-0065 section 2). Set
+ * at create, and only with ECUIO_SESSION_INFO_REQUESTS. */
+#define ECUIO_SESSION_INFO_PICK_ONLY     0x00000080u
 
 /* POD, 432 bytes, no hidden padding on any supported platform; pinned
  * by the assertions below. New fields take the reserved room. */
@@ -1073,10 +1078,10 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
 
 /*
  * The analysis log's focus (ADR-0056 section 2): asks only the requests
- * that carry these signals, until called again; count 0 asks the whole
- * set again. The picked requests run in the fast class, so the rotation
- * is as short as the picks allow; the rest are parked: kept in the
- * table, not refused, asked again on a count of 0. The probe, the DID
+ * that carry these signals, until called again; count 0 ends the focus
+ * and asks the whole set again. The picked requests run in the fast
+ * class, so the rotation is as short as the picks allow; the rest are
+ * parked: kept in the table, not refused, asked again on a count of 0. The probe, the DID
  * scan, identification and diagnostics are untouched, and a request the
  * probe dropped stays dropped. A DID the scan finds while a focus is on
  * is asked when the focus picks it, parked otherwise. The signals an
@@ -1090,6 +1095,14 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
  * when the call is made: a pick dropped later (by the probe's walk, an
  * NRC, or the first walk after a focus set before start) can leave a
  * requesting session asking nothing until the focus changes or ends.
+ * A session that asks only its picks (ECUIO_SESSION_INFO_PICK_ONLY: its
+ * set derives more than ECUIO_PROFILE_MAX_REQUESTS requests, profile.h)
+ * asks nothing with no focus but an attached condition's signals: there
+ * a count of 0 is taken as on any session and parks every request a
+ * condition doesn't read, and a focus whose requests, with the attached
+ * conditions', number more than ECUIO_PROFILE_MAX_REQUESTS is refused,
+ * the counts in the detail. On a session without the flag the whole set
+ * fits a rotation, so that refusal never comes.
  * Takes effect on the worker between two requests, never inside an
  * exchange; before start it applies from the first pass. mock://,
  * replay:// and a listening session ask nothing, so they accept any
@@ -1102,8 +1115,9 @@ ecuio_status_t ecuio_session_clear_diagnostics_with(
  * The detail (ecuio_last_error_detail) is cleared on entry.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL session, or NULL ids with a count;
  * ECUIO_ERR_INVALID_ARGUMENT, nothing changed and the reason in the
- * detail, for an id the session's set lacks or a focus that leaves
- * nothing to request; ECUIO_ERR_SESSION_CLOSED after close.
+ * detail, for an id the session's set lacks, a focus that leaves
+ * nothing to request or one of more requests than a rotation holds;
+ * ECUIO_ERR_SESSION_CLOSED after close.
  */
 ecuio_status_t ecuio_session_set_focus(
     ecuio_session_t* session,
@@ -1143,7 +1157,8 @@ ecuio_status_t ecuio_session_set_focus(
  * detail, for any other flag, a time past ECUIO_FOCUS_MIN_SWEEP_MAX_MS, a
  * time with no signals picked, ECUIO_FOCUS_DEFAULT_PICK with no signals
  * picked (a front end whose pick is empty sets no focus, and the whole set
- * is asked), and whatever ecuio_session_set_focus refuses.
+ * is asked, or nothing on a session that asks only its picks), and
+ * whatever ecuio_session_set_focus refuses.
  */
 ecuio_status_t ecuio_session_set_focus_with(
     ecuio_session_t* session,

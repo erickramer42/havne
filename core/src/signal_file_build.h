@@ -75,6 +75,9 @@ struct parts {
      * the own list's at format */
     uint32_t format = ECUIO_SIGNAL_FILE_FORMAT_OLDEST;
     std::vector<uint32_t> formats;
+    /* The most signals of its own the set holds: a data file's, or a
+     * set's for several files merged and for a recording's copy */
+    size_t max_signals = ECUIO_SIGNAL_FILE_MAX_SIGNALS;
 };
 
 /* A file's "havne_signals", checked first: its first key, a format this
@@ -83,6 +86,11 @@ uint32_t format_of(const ecuio_json::Value& root, const char* what);
 
 /* The set from in into f, or a refused thrown (std::bad_alloc too) */
 void build(const parts& in, ecuio_signal_file& f);
+
+/* A signal file's bytes into *out, read to max_bytes and max_signals:
+ * ecuio_signal_file_load's inside, its statuses and detail */
+ecuio_status_t load(const char* bytes, size_t length, size_t max_bytes,
+                    size_t max_signals, ecuio_signal_file** out);
 
 /* A "source" block's rules */
 void read_source(const ecuio_json::Value& source);

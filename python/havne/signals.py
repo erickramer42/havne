@@ -88,9 +88,11 @@ def _expr(file, key):
 
 class SignalFile:
     """A signal file (ADR-0051), from its text or a path; registered as
-    its profile ("user.<slug>") on load"""
+    its profile ("user.<slug>") on load. recorded=True reads a recording's
+    signals.json: a session's whole set, which may hold more signals and
+    bytes than a file a user writes (ADR-0065 section 3)."""
 
-    def __init__(self, text_or_bytes=None, path=None):
+    def __init__(self, text_or_bytes=None, path=None, recorded=False):
         if (text_or_bytes is None) == (path is None):
             raise ValueError("a signal file's text or its path, one of them")
         if path is not None:
@@ -99,8 +101,11 @@ class SignalFile:
         else:
             data = utf8(text_or_bytes)
         self._handle = ctypes.POINTER(e.ecuio_signal_file_t)()
-        check(lib.ecuio_signal_file_load(data, len(data), ctypes.byref(self._handle)),
-              "ecuio_signal_file_load")
+        check(lib.ecuio_signal_file_load_with(
+                  data, len(data),
+                  e.ECUIO_SIGNAL_FILE_LOAD_SET if recorded else 0,
+                  ctypes.byref(self._handle)),
+              "ecuio_signal_file_load_with")
         self.name = text(lib.ecuio_signal_file_name(self._handle))
         self.profile = text(lib.ecuio_signal_file_profile(self._handle))
         self.extends = text(lib.ecuio_signal_file_extends(self._handle))

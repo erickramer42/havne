@@ -111,10 +111,27 @@ bool take_channels(ecuio_mock_transport* t, const ecuio_signal_set_t* set)
 bool walk_pids(ecuio_mock_transport* t, ecuio_request_engine* probe)
 {
     const ecuio_signal_set_t* set = t->session->active_signal_set;
-    if (!ecuio_engine_init(probe, t->channels)) {
+    /* The table sized from the set, as a requesting attach sizes its own
+     * (ecuio_build_requests); one past a rotation's most only counts, so
+     * its rows need no pool row */
+    std::vector<uint32_t> rows;
+    ecuio_derived derived;
+    try {
+        rows.assign(set != nullptr && set->defs != nullptr ? set->count : 0,
+                    ECUIO_ROW_NONE);
+    } catch (...) {
         return false;
     }
-    (void)ecuio_engine_derive(probe, set, t->rx_ids, t->channels, nullptr);
+    if (ecuio_engine_plan(set, t->rx_ids, t->channels, rows.data(), &derived) !=
+            ecuio_plan_result::ok ||
+        !ecuio_engine_init(probe, t->channels, derived.total)) {
+        return false;
+    }
+    if (derived.total > ECUIO_PROFILE_MAX_REQUESTS) {
+        ecuio_engine_pick_only(probe);
+    }
+    (void)ecuio_engine_derive_planned(probe, set, t->rx_ids, t->channels,
+                                      rows.data());
     int64_t now_us = 0;
     ecuio_engine_probe(probe, now_us);
     ecuio_mock_pid_walk(

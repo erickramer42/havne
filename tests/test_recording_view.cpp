@@ -2090,6 +2090,36 @@ TEST(RecordingViewTest, ItsOwnSignalFileDecodesItWhileItMatches)
               QStringLiteral("the profile user.frames-view isn't loaded"));
 }
 
+// A copy past a written file's megabyte, a session's whole set (ADR-0065
+// section 3), is read whole and decodes its recording
+TEST(RecordingViewTest, ItsOwnSignalFilePastAWrittenFilesBytesDecodesIt)
+{
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    QByteArray big = kOneDid.trimmed();
+    ASSERT_TRUE(big.endsWith('}'));
+    big.insert(big.size() - 1, QByteArray(ECUIO_SIGNAL_FILE_MAX_BYTES, ' '));
+    ASSERT_GT(big.size(), static_cast<qsizetype>(ECUIO_SIGNAL_FILE_MAX_BYTES));
+    const QByteArray sha =
+        QCryptographicHash::hash(big, QCryptographicHash::Sha256).toHex();
+    writeFile(dir.filePath(QStringLiteral("signals.json")), big);
+    writeFile(dir.filePath(QStringLiteral("events.log")),
+              "ecuio session recording, format 3 (ADR-0049)\n"
+              "profile  user.frames-view\n"
+              "signal file  signals.json," +
+                  sha + "\n\n");
+    writeFile(dir.filePath(QStringLiteral("frames.csv")), kOneDidFrames);
+    RecordingView v;
+    v.open(dir.path());
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_TRUE(v.ownSignalFile());
+    EXPECT_EQ(v.decodedWith(), QStringLiteral("signals.json"));
+    EXPECT_EQ(
+        signalNamed(v, "Input A").value(QStringLiteral("samples")).toDouble(),
+        3.0);
+}
+
 // ---- The health report, the viewer's Save report (ADR-0054's appendix
 // "the health report as built") ----------------------------------------
 

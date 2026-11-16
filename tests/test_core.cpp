@@ -3005,48 +3005,73 @@ TEST(CoreTest, ProfileRegisterReportsTheValidatorResult) {
     EXPECT_EQ(ecuio_profile_unregister("test-why"), ECUIO_OK);
 }
 
-TEST(CoreTest, ProfileRegisterRefusesMoreRequestsThanTheEngineHolds) {
-    /* A set may derive at most ECUIO_PROFILE_MAX_REQUESTS requests
-     * (ADR-0015 section 2), so a session never leaves one unasked with nothing
-     * to say why. Defs read from one reply count once: def 1 reads DID
-     * 0x1000's reply, as def 0 does. One past the limit is refused, naming
-     * the first def that didn't fit, and leaves nothing registered.
-     * Service 22 DIDs, since the limit is more than Service 01's PIDs. */
+TEST(CoreTest, ProfileRegisterRefusesMoreRequestsThanAModuleIsAsked)
+{
+    /* A set may derive at most ECUIO_MODULE_MAX_REQUESTS requests of one
+     * module (ADR-0065 section 3), each module counted by itself: two
+     * modules asked their most register, twice what a rotation holds. Defs
+     * read from one reply count once: def 1 reads DID 0x1000's reply, as
+     * def 0 does. One past a module's most is refused, naming the first
+     * def that didn't fit, and leaves nothing registered. Service 22 DIDs,
+     * since the limit is more than Service 01's PIDs. */
     const ecuio_signal_set_t* obd2 = ecuio_obd2_signal_set();
-    static ecuio_signal_def_t defs[ECUIO_PROFILE_MAX_REQUESTS + 2];
-    for (uint32_t i = 0; i < ECUIO_PROFILE_MAX_REQUESTS + 2; ++i) {
+    constexpr uint32_t kMost = ECUIO_MODULE_MAX_REQUESTS;
+    static ecuio_channel_decl_t two[2] = {{0x7E8, 0x7E0, 0, 0},
+                                          {0x7E9, 0x7E1, 0, 0}};
+    /* Module A's kMost + 1 defs (kMost requests), then B's kMost, then
+     * one more of B's */
+    static ecuio_signal_def_t defs[2 * kMost + 2];
+    for (uint32_t i = 0; i < 2 * kMost + 2; ++i) {
+        const bool a = i <= kMost;
+        const uint32_t n = a ? i : i - (kMost + 1);
         defs[i] = obd2->defs[0];
         defs[i].id = static_cast<uint16_t>(100 + i);
+        defs[i].message_id = two[a ? 0 : 1].rx_id;
         defs[i].byte_order = ECUIO_BYTE_ORDER_BE;
         defs[i].start_byte = 3;
         defs[i].bit_length = 8;
         defs[i].mux_length = 3;
-        defs[i].mux_key = 0x620000u | (0x1000u + ((i == 1) ? 0u : i));
+        defs[i].mux_key = 0x620000u | (0x1000u + ((a && n == 1) ? 0u : n));
         std::snprintf(defs[i].name, sizeof defs[i].name, "Signal %u", i);
     }
     static ecuio_signal_set_t fits = {};
     fits.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
-    fits.count = ECUIO_PROFILE_MAX_REQUESTS + 1;
+    fits.count = 2 * kMost + 1;
     fits.defs = defs;
-    fits.channel_count = obd2->channel_count;
-    fits.channels = obd2->channels;
+    fits.channel_count = 2;
+    fits.channels = two;
     ecuio_signal_set_t over = fits;
-    over.count = ECUIO_PROFILE_MAX_REQUESTS + 2;
+    over.count = 2 * kMost + 2;
+    /* Module A alone, one request past its most */
+    static ecuio_signal_def_t one_module[kMost + 2];
+    for (uint32_t i = 0; i < kMost + 2; ++i) {
+        one_module[i] = defs[i];
+        one_module[i].message_id = two[0].rx_id;
+        one_module[i].mux_key = 0x620000u | (0x1000u + ((i == 1) ? 0u : i));
+    }
+    ecuio_signal_set_t over_one = fits;
+    over_one.count = kMost + 2;
+    over_one.defs = one_module;
+    over_one.channel_count = 1;
 
     ecuio_validation_t v;
-    EXPECT_EQ(ecuio_profile_register("test-requests", &fits, &v), ECUIO_OK);
+    EXPECT_EQ(ecuio_profile_register("test-requests", &fits, &v), ECUIO_OK)
+        << v.code << " at " << v.index;
     EXPECT_EQ(v.code, ECUIO_VALIDATE_OK);
     EXPECT_EQ(ecuio_profile_unregister("test-requests"), ECUIO_OK);
 
-    std::memset(&v, 0xAB, sizeof v);
-    EXPECT_EQ(ecuio_profile_register("test-requests", &over, &v),
-              ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_REQUEST_COUNT);
-    EXPECT_EQ(v.index, ECUIO_PROFILE_MAX_REQUESTS + 1);
-    EXPECT_EQ(v.reserved[0], 0u);
-    EXPECT_EQ(v.reserved[1], 0u);
     const ecuio_signal_set_t* got = nullptr;
-    EXPECT_EQ(ecuio_profile_lookup("test-requests", &got), ECUIO_ERR_UNKNOWN_PROFILE);
+    for (const ecuio_signal_set_t* set : {&over, &over_one}) {
+        std::memset(&v, 0xAB, sizeof v);
+        EXPECT_EQ(ecuio_profile_register("test-requests", set, &v),
+                  ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_EQ(v.code, ECUIO_VALIDATE_ERR_REQUEST_COUNT);
+        EXPECT_EQ(v.index, set->count - 1) << "the first def past the most";
+        EXPECT_EQ(v.reserved[0], 0u);
+        EXPECT_EQ(v.reserved[1], 0u);
+        EXPECT_EQ(ecuio_profile_lookup("test-requests", &got),
+                  ECUIO_ERR_UNKNOWN_PROFILE);
+    }
 
     /* Out of memory while its requests are counted never lets it in */
     const unsigned long before = news_on_this_thread();
@@ -7124,6 +7149,52 @@ TEST(CoreTest, LinkQuietRunGoesQuietWithoutAnEpisode)
     link_on_request_timeout(h);
     EXPECT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
     EXPECT_EQ(episodes.load(), 0u) << "quiet isn't a failure";
+}
+
+/* An idle pass of a session that asks only its picks, with nothing
+ * picked, is no quiet read: the run a quiet read was counting starts
+ * over, and a timeout its picks left ends. A hard failure or failing
+ * writes are the adapter's and stay. */
+TEST(CoreTest, LinkAnUnpickedPassCountsNoQuietAndEndsATimeout)
+{
+    std::atomic<int32_t> published{ECUIO_OK};
+    std::atomic<uint32_t> episodes{0};
+    link_health h(published, episodes);
+
+    for (uint32_t i = 0; i < 3 * LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_unpicked(h);
+    }
+    EXPECT_EQ(published.load(), ECUIO_OK);
+    for (uint32_t i = 0; i + 1 < LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_request_timeout(h);
+    }
+    link_on_unpicked(h);
+    EXPECT_EQ(h.quiet_runs, 0u) << "the run starts over";
+    link_on_request_timeout(h);
+    EXPECT_EQ(published.load(), ECUIO_OK) << "one timeout after it is no run";
+
+    for (uint32_t i = 0; i < LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_request_timeout(h);
+    }
+    ASSERT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+    link_on_unpicked(h);
+    EXPECT_EQ(published.load(), ECUIO_OK)
+        << "nothing asked, nothing unanswered";
+    EXPECT_EQ(episodes.load(), 0u);
+
+    link_on_read(h, true, false, false);
+    ASSERT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    link_on_unpicked(h);
+    EXPECT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_EQ(episodes.load(), 1u);
+
+    std::atomic<int32_t> published2{ECUIO_OK};
+    std::atomic<uint32_t> episodes2{0};
+    link_health w(published2, episodes2);
+    link_on_write(w, false);
+    ASSERT_EQ(published2.load(), ECUIO_ERR_REQUEST_FAILED);
+    link_on_unpicked(w);
+    EXPECT_EQ(published2.load(), ECUIO_ERR_REQUEST_FAILED);
 }
 
 /* A failed write latches REQUESTS_FAILED as one episode with a backoff.

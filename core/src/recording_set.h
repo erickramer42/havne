@@ -125,7 +125,7 @@ public:
     /* The recording's own signals.json, else uds-generic's set from the
      * URI's did= list, else the profile by name; NULL for none (a raw
      * recording, or a profile this core doesn't have). A signals.json
-     * there that doesn't load, or is past ECUIO_SIGNAL_FILE_MAX_BYTES,
+     * there that doesn't load, or is past ECUIO_SIGNAL_SET_MAX_BYTES,
      * sets own_refused, with its words. */
     const ecuio_signal_set_t* load(const std::string& folder, const header& h)
     {
@@ -141,17 +141,19 @@ public:
         }
         if (f) {
             /* A byte past the bound: a longer file is refused whole, never
-             * loaded from its first MiB */
-            std::string bytes(ECUIO_SIGNAL_FILE_MAX_BYTES + 1, '\0');
+             * loaded from its first part. The copy is a session's whole
+             * set, so the bound is a set's. */
+            std::string bytes(ECUIO_SIGNAL_SET_MAX_BYTES + 1, '\0');
             bytes.resize(std::fread(&bytes[0], 1, bytes.size(), f.get()));
             ecuio_signal_file_t* loaded = nullptr;
-            if (bytes.size() > ECUIO_SIGNAL_FILE_MAX_BYTES) {
+            if (bytes.size() > ECUIO_SIGNAL_SET_MAX_BYTES) {
                 own_refused_ = true;
-                own_why_ = "it is past a signal file's limit of " +
-                           std::to_string(ECUIO_SIGNAL_FILE_MAX_BYTES) +
-                           " bytes";
-            } else if (ecuio_signal_file_load(bytes.data(), bytes.size(),
-                                              &loaded) == ECUIO_OK) {
+                own_why_ = "it is past a recording's limit of " +
+                           std::to_string(ECUIO_SIGNAL_SET_MAX_BYTES) +
+                           " bytes for it";
+            } else if (ecuio_signal_file_load_with(bytes.data(), bytes.size(),
+                                                   ECUIO_SIGNAL_FILE_LOAD_SET,
+                                                   &loaded) == ECUIO_OK) {
                 file_.reset(loaded);
                 set_ = ecuio_signal_file_set(loaded);
             } else {
