@@ -168,4 +168,4 @@ session, the recorders on a car, a second listener):
 - **Every item for any other adapter.** Each CONFIRMED above is the
   VX's. A second adapter, x64 or another vendor's, walks the whole
   list again; the x64 surrogate it would load in has met only the fake
-  ([testing.md](../testing.md#gaps-not-verified)).
+  ([testing.md](../testing-inventory.md#gaps-in-detail)).
