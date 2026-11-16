@@ -883,7 +883,8 @@ jobs:
     name: linux-build (${{ matrix.shard }}/2)
     needs: scope
     if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
-    runs-on: ubuntu-latest
+    # 24.04's bpftrace runs tests/probe_trace.sh; 26.04's 0.25 aborts in it
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Two runners, each with its own build, run alternate halves of ctest
     # (-I k,,2: every case once across the two); the steps after the tests
