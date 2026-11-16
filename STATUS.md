@@ -224,9 +224,9 @@ less, **M** a few days, **L** a week or more or an ADR first.
 - **`FrameListModel` inserts a row per frame (S):** one
   `beginInsertRows` for each frame of a delivery; a batch insert would
   signal the view once. Measure first
-  ([docs/testing.md](docs/testing.md#performance)).
+  ([docs/testing.md](docs/performance.md)).
 - **Full signal sets at full rate (L):** left is the bridge's 4 KB copy
-  per frame ([docs/testing.md](docs/testing.md#performance)).
+  per frame ([docs/testing.md](docs/performance.md)).
 
 ### Toolchain
 

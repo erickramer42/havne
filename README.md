@@ -17,7 +17,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 ## Engineering highlights
 
 - **Vendor drivers run out of process.** Each J2534 DLL runs in a surrogate of its own architecture, so a crashing driver ends its process, not the app ([ADR-0025](docs/adr/0025-one-j2534-backend.md)).
-- **Fast paths, measured.** Decoding allocates nothing per frame; a recorded engine start replays at over 300,000 frames a second on the dev machine, and CI reruns it ([load test](docs/testing.md#load-test-the-replay-fixture-through-the-bridge)).
+- **Fast paths, measured.** Decoding allocates nothing per frame; a recorded engine start replays at over 300,000 frames a second on the dev machine, and CI reruns it ([load test](docs/performance.md#load-test-the-replay-fixture-through-the-bridge)).
 - **Measured on a real car.** A second controller on its bus showed Havne's adapter read adding 52 ms; fixing it cut latency from 65.5-73.7 ms to 16.4 ms ([session sheet](docs/bench-sessions/2026-11-05-two-ecu-car-rerun.md)).
 - **Protocol logic with no I/O, fuzzed.** The request engine, ISO-TP and the ELM327 layer take no I/O or clock, so rules are unit tests; parsers run fuzzed in CI ([ADR-0015](docs/adr/0015-request-engine.md)).
 - **A user's signals are data.** Signal files are JSON that core reads from bytes and refuses at load with line and column, so every platform loads them alike ([ADR-0051](docs/adr/0051-signal-files.md)).

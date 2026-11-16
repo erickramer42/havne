@@ -81,7 +81,7 @@ add_test(NAME NoticesTest.EachBundledFontIsNamed
 
 # --- The reader's open, timed (ADR-0049 section 9): a measurement, not in
 # ctest. Qt-free, so an NDK tree builds it alone for the test phone
-# (docs/testing.md "Performance") ---
+# (docs/performance.md) ---
 add_executable(bench_recording bench_recording.cpp)
 target_include_directories(bench_recording PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_link_libraries(bench_recording PRIVATE ecuio-core)
@@ -1874,7 +1874,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
     gtest_discover_tests(test_bridge DISCOVERY_TIMEOUT 60)
 
     # The GUI thread's cost per frame by profile size, a measurement for
-    # docs/testing.md; built with the tests, never run by ctest
+    # docs/performance.md; built with the tests, never run by ctest
     add_executable(bench_bridge
         bench_bridge.cpp
         ${APP_BRIDGE_SOURCES}
@@ -2331,7 +2331,7 @@ if(WIN32)
 endif()
 
 # Reply timing against the fakes' ECU through each transport this
-# platform has (ADR-0042 section 4), a measurement for docs/testing.md;
+# platform has (ADR-0042 section 4), a measurement for docs/performance.md;
 # built with the tests, never run by ctest
 find_package(Threads REQUIRED)
 add_executable(bench_timing bench_timing.cpp)
