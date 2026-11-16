@@ -46,8 +46,18 @@ Page {
     readonly property real hairlineWidth: Math.max(1, Math.round(1 / pixel)) * pixel
     function snap(v) { return Math.round(v / pixel) * pixel }
 
-    // The platform's form, never the window's width (section 4)
-    property string form: Theme.mobile ? "phone" : "desktop"
+    // The platform's form, never the window's width (section 4). A desktop's
+    // edit mode may show the phone's: phoneEdit
+    property string form: Theme.mobile || phoneEdit ? "phone" : "desktop"
+    // The desktop edits the phone form's document in a frame of the phone's
+    // width (the grid holds its six columns at any phone width); only while
+    // editing, and not stored: Done is back to the desktop's
+    property bool phoneEdit: false
+    readonly property real phoneFrameWidth: 384
+    // Never on a phone; where the frame fits the page (the switch stays
+    // while the page is the frame itself)
+    readonly property bool phoneSwitchShown: !Theme.mobile && editing
+                                             && (phoneEdit || width >= phoneFrameWidth + 48)
 
     SignalHub { id: hub }
     // The hub, for the page's parts
@@ -396,9 +406,33 @@ Page {
     function startEditing() {
         editing = true
     }
+    // The desktop's edit mode in the phone form's frame, or back. The history,
+    // the selection, the panel and any question belong to the form they were
+    // made in, and the page last shown is the new form's own
+    function setPhoneEdit(on) {
+        if (on === phoneEdit || (on && !phoneSwitchShown))
+            return
+        commitTyping()
+        cancelHold()
+        restored = false
+        phoneEdit = on
+        showStoredLayout()
+        selected = -1
+        panel = ""
+        addKind = ""
+        confirmReset = false
+        confirmRemovePage = false
+        presetList = ""
+        confirmReplaceKey = ""
+        noteLayout("")
+        clearHistory()
+        goTo(form === "phone" ? store.phonePage : store.desktopPage)
+        restored = true
+    }
     function stopEditing() {
         commitTyping()
         cancelHold()
+        setPhoneEdit(false)
         editing = false
         selected = -1
         panel = ""
@@ -679,7 +713,7 @@ Page {
     function isReplay(uri) { return uri.toLowerCase().startsWith("replay://") }
 
     function enterDrive() {
-        if (driving || !phoneForm || !Bridge.connected || editing)
+        if (driving || !phoneForm || !Bridge.connected || editing || phoneEdit)
             return
         closePanel()
         cancelHold()

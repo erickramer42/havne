@@ -1641,8 +1641,8 @@ TestCase {
 
     // The selection follows its cell through another cell's drag
     function test_aDragKeepsTheSelectionOnItsCell() {
-        // Tall enough that the cell panel, with its zone fields, leaves cell C on screen
-        const page = pageOf({ height: 1000 }, docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
+        // Tall enough that the cell panel, with its zone fields, leaves cell C on screen (the switch row sits above the grid)
+        const page = pageOf({ height: 1100 }, docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
         page.startEditing()
         press(find(page, "dashCell_0_0"))
         compare(page.selected, 0)
@@ -4356,5 +4356,190 @@ TestCase {
         click(page, "preset_cancel")
         verify(find(page, "dashMoreRow").visible, "and comes back")
     }
-}
 
+    // ---- The desktop edits the phone's layout (B1)
+    function bothFormsPage(props) {
+        const phoneDoc = DashboardBook.builtIn("phone")
+        phoneDoc.pages = [{ name: "P", cells: [cellOf("PhoneCell")] }]
+        const page = pageOf(props || {}, docOf([cellOf("DesktopCell")]))
+        const store = find(page, "dashStore")
+        store.desktop = DashboardBook.serialize(docOf([cellOf("DesktopCell")]))
+        store.phone = DashboardBook.serialize(phoneDoc)
+        return page
+    }
+    function phoneSwitchOn(page) {
+        page.startEditing()
+        page.showStoredLayout()
+        verify(page.phoneSwitchShown)
+        click(page, "dashPhoneSwitch")
+        verify(page.phoneEdit)
+    }
+
+    function test_thePhoneSwitchShowsOnlyOnAWideEnoughDesktopInEditMode() {
+        const page = bothFormsPage()
+        verify(!find(page, "dashPhoneRow").visible, "not outside edit mode")
+        page.startEditing()
+        verify(find(page, "dashPhoneRow").visible)
+        page.width = 431
+        verify(!page.phoneSwitchShown, "too narrow for the frame")
+        page.width = 432
+        verify(page.phoneSwitchShown)
+        page.stopEditing()
+        verify(!page.phoneSwitchShown)
+        const phone = bothFormsPage({ form: "phone" })
+        phone.startEditing()
+        verify(phone.phoneSwitchShown, "a test's phone form on a desktop still has it")
+    }
+
+    function test_theSwitchShowsThePhoneDocumentAndOffReturnsTheDesktopsUntouched() {
+        const page = bothFormsPage()
+        page.startEditing()
+        page.showStoredLayout()
+        const desktopText = find(page, "dashStore").desktop
+        compare(labels(page), ["DesktopCell"])
+        phoneSwitchOn(page)
+        compare(page.form, "phone")
+        compare(labels(page), ["PhoneCell"])
+        click(page, "dashPhoneSwitch")
+        verify(!page.phoneEdit)
+        compare(page.form, "desktop")
+        compare(labels(page), ["DesktopCell"])
+        compare(find(page, "dashStore").desktop, desktopText)
+    }
+
+    function test_anEditInTheFrameWritesThePhonesStoreAlone() {
+        const page = bothFormsPage()
+        phoneSwitchOn(page)
+        const store = find(page, "dashStore")
+        const desktopText = store.desktop
+        const phoneText = store.phone
+        page.renamePage("Renamed")
+        verify(store.phone !== phoneText, "the phone's text changed")
+        compare(store.desktop, desktopText)
+    }
+
+    function test_doneLeavesTheFrameAndEditStartsOnTheDesktop() {
+        const page = bothFormsPage()
+        phoneSwitchOn(page)
+        page.stopEditing()
+        verify(!page.phoneEdit)
+        compare(page.form, "desktop")
+        compare(labels(page), ["DesktopCell"])
+        page.startEditing()
+        verify(!page.phoneEdit)
+        compare(page.form, "desktop")
+    }
+
+    function test_switchingDropsTheHistoryTheSelectionTheListAndTheQuestions() {
+        const page = bothFormsPage()
+        page.startEditing()
+        page.showStoredLayout()
+        page.renamePage("Changed")
+        verify(page.canUndo)
+        page.selected = 0
+        page.panel = "cell"
+        page.confirmReset = true
+        click(page, "dashPhoneSwitch")
+        verify(!page.canUndo, "the history is the form's own")
+        compare(page.selected, -1)
+        compare(page.panel, "")
+        verify(!page.confirmReset)
+        page.openPresets("add")
+        click(page, "dashPhoneSwitch")
+        compare(page.presetList, "")
+    }
+
+    function test_thePhonesPageIndexIsKeptAcrossTheSwitch() {
+        const page = bothFormsPage()
+        const store = find(page, "dashStore")
+        const phoneDoc = DashboardBook.builtIn("phone")
+        phoneDoc.pages = [{ name: "A", cells: [cellOf("a")] }, { name: "B", cells: [cellOf("b")] }]
+        store.phone = DashboardBook.serialize(phoneDoc)
+        store.phonePage = 1
+        page.startEditing()
+        click(page, "dashPhoneSwitch")
+        compare(page.pageIndex, 1)
+        click(page, "dashPhoneSwitch")
+        compare(page.pageIndex, 0)
+        compare(store.phonePage, 1, "the desktop's page didn't overwrite the phone's")
+    }
+
+    // A page index the new form's document can't hold is clamped while the
+    // form already is the new one: the clamp must not become its remembered page
+    function test_aPageIndexTheOtherFormCantHoldIsNotWrittenAsItsOwn() {
+        const page = bothFormsPage()
+        const store = find(page, "dashStore")
+        const desktopDoc = docOf([cellOf("a")])
+        desktopDoc.pages = [{ name: "A", cells: [cellOf("a")] }, { name: "B", cells: [cellOf("b")] },
+                            { name: "C", cells: [cellOf("c")] }]
+        store.desktop = DashboardBook.serialize(desktopDoc)
+        const phoneDoc = DashboardBook.builtIn("phone")
+        phoneDoc.pages = [{ name: "A", cells: [cellOf("a")] }, { name: "B", cells: [cellOf("b")] }]
+        store.phone = DashboardBook.serialize(phoneDoc)
+        store.phonePage = 0
+        page.startEditing()
+        page.showStoredLayout()
+        page.goTo(2)
+        compare(page.pageIndex, 2)
+        click(page, "dashPhoneSwitch")
+        compare(page.pageIndex, 0)
+        compare(store.phonePage, 0)
+        click(page, "dashPhoneSwitch")
+        compare(page.pageIndex, 2)
+        compare(store.desktopPage, 2)
+    }
+
+    function test_theExportInTheFrameIsAPhoneFileAndALoadRefusesADesktopOne() {
+        const page = bothFormsPage()
+        phoneSwitchOn(page)
+        click(page, "dashMore")
+        const url = layoutUrl("layout-frame-phone.json")
+        verify(page.exportLayoutTo(url), page.layoutNote)
+        verify(page.layoutNote.indexOf("It's a phone layout") >= 0, page.layoutNote)
+        const text = Bridge.layoutFileText(url).text
+        compare(JSON.parse(text).form, "phone")
+        page.renamePage("Other")
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        const desktopUrl = layoutUrl("layout-frame-desktop.json")
+        const other = bothFormsPage()
+        other.startEditing()
+        verify(other.exportLayoutTo(desktopUrl))
+        other.destroy()
+        verify(!page.loadLayoutFrom(desktopUrl))
+        verify(page.layoutNote.indexOf("is a desktop layout") >= 0, page.layoutNote)
+    }
+
+    function test_aConnectedDesktopInTheFrameNeverEntersTheDriveView() {
+        const page = bothFormsPage()
+        page.startEditing()
+        click(page, "dashPhoneSwitch")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => Bridge.connected, 5000)
+        wait(100)
+        page.enterDrive()
+        verify(!page.driving, "editing is an editor")
+        // The gate's own term: the frame still on with editing already off
+        page.editing = false
+        verify(page.phoneEdit)
+        page.enterDrive()
+        verify(!page.driving, "the frame is an editor")
+        page.editing = true
+        page.stopEditing()
+    }
+
+    function test_theSwitchSaysWhatItDoes() {
+        const page = bothFormsPage()
+        page.startEditing()
+        const sw = find(page, "dashPhoneSwitch")
+        compare(sw.text, "Phone layout")
+        compare(sw.Accessible.name, "Edit the phone's layout in a phone-sized frame")
+        verify(sw.Accessible.description.indexOf("undo history") >= 0)
+        for (const w of [720, 1100]) {
+            page.width = w
+            verify(waitForPolish(page))
+            const row = find(page, "dashPhoneRow")
+            verify(sw.mapToItem(page, sw.width, 0).x <= page.width, "the switch fits at " + w)
+            verify(row.width <= page.width)
+        }
+    }
+}
