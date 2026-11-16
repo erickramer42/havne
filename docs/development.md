@@ -82,7 +82,7 @@ Havne: [linux.md](linux.md).
 The table in Start here has Qt, the compiler and CMake. CMake 3.21+ is
 required for `qt_standard_project_setup()`; the compiler minimums are
 Qt 6.12's (a core-only build needs just C++17 and no Qt); the app needs
-Qt's Core, Gui and Quick. The rest:
+Qt's Core, Gui and Quick, under the LGPL. The rest:
 
 | Component | Version | Notes |
 |---|---|---|
