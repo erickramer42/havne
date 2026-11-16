@@ -327,23 +327,32 @@ int run_stream(const StreamArgs& args)
     // pick; as in the app, a refused pick leaves the whole set asked
     if (args.pick_ranked) {
         const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
-        const std::vector<uint16_t> ids = cli::default_pick(set, {});
+        const bool pick_only = session_pick_only(session);
+        const std::vector<uint16_t> ids = cli::default_pick(set, {}, pick_only);
         if (!session_asks(session)) {
             std::fprintf(stderr, "havne-cli: the session asks no signal: "
                                  "--pick ranked picks none\n");
         } else if (ids.empty()) {
-            std::fprintf(stderr, "havne-cli: the profile ranks no signal: "
-                                 "--pick ranked asks every one\n");
+            std::fprintf(stderr,
+                         pick_only ? "havne-cli: the profile ranks no signal "
+                                     "and is asked only what is picked: "
+                                     "--pick ranked asks none\n"
+                                   : "havne-cli: the profile ranks no signal: "
+                                     "--pick ranked asks every one\n");
         } else if (ecuio_session_set_focus_with(
                        session, ids.data(), static_cast<uint32_t>(ids.size()),
                        0, ECUIO_FOCUS_DEFAULT_PICK) != ECUIO_OK) {
-            std::fprintf(stderr, "havne-cli: asking every signal: %s\n",
-                         ecuio_last_error_detail());
+            std::fprintf(stderr, "havne-cli: asking %s signal: %s\n",
+                         pick_only ? "no" : "every", ecuio_last_error_detail());
         } else {
             BigLine b(cli::focus_line_bytes(ids.size()));
             cli::focus_line(b.line, set, ids, 0, true);
             write_line(out, b.line);
         }
+    } else if (session_pick_only(session)) {
+        std::fprintf(stderr, "havne-cli: the profile is asked only what is "
+                             "picked: nothing is asked (--pick ranked, or log "
+                             "--signal)\n");
     }
     ecuio_recorder_t* recorder = nullptr;
     bool recording_failed = false;

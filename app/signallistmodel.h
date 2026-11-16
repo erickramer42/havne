@@ -139,8 +139,11 @@ public:
     QHash<int, QByteArray> roleNames() const override;
     // file: the signal file whose set it is (SessionBridge::fileOfSet),
     // for the rows' refs; nullptr for a built-in set or none
+    // pickOnly: the session asks only its picks, so no row is plotted
+    // until ticked (a set that ranks none otherwise plots every row)
     void setSignalSet(const ecuio_signal_set_t* set,
-                      const ecuio_signal_file_t* file = nullptr);
+                      const ecuio_signal_file_t* file = nullptr,
+                      bool pickOnly = false);
     // A def's fixed facts beyond the def itself, the same for a row and
     // for SessionBridge::profileSignals: its ref (RefRole), whether it
     // is an enum, and its decoded range in the def's unit, NaN for none
@@ -372,6 +375,7 @@ private:
     int m_hiddenCount = 0;
     int m_unaskedCount = 0;
     bool m_ranked = false;      // the set ranks a def (plot_rank)
+    bool m_pickOnly = false;    // the session is asked only its picks
     uint32_t m_units = ECUIO_UNITS_METRIC;
     HostElapsedTimer m_clock;   // fallback stamps; restarted in setSignalSet
 };

@@ -169,6 +169,10 @@ void write_session(Output& out, const ecuio_session_t* session,
         l.key("listen_only");
         l.raw("true");
     }
+    if (info.flags & ECUIO_SESSION_INFO_PICK_ONLY) {
+        l.key("pick_only");
+        l.raw("true");
+    }
     if (info.backend == ECUIO_BACKEND_REPLAY) {
         l.key("replay");
         l.ch('{');
@@ -702,6 +706,16 @@ bool session_asks(ecuio_session_t* session)
     std::memset(&info, 0, sizeof info);
     return ecuio_session_get_info(session, &info) == ECUIO_OK &&
            (info.flags & ECUIO_SESSION_INFO_REQUESTS) != 0;
+}
+
+// Whether a session is asked only what is picked (a car-sized set): with
+// no focus it asks nothing
+bool session_pick_only(ecuio_session_t* session)
+{
+    ecuio_session_info_t info;
+    std::memset(&info, 0, sizeof info);
+    return ecuio_session_get_info(session, &info) == ECUIO_OK &&
+           (info.flags & ECUIO_SESSION_INFO_PICK_ONLY) != 0;
 }
 
 // A replay that doesn't loop has ended when every row is read and every

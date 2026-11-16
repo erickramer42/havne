@@ -663,6 +663,13 @@ if(TARGET havne-cli)
                 $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliLogRunTest.PickRankedAsksTheRankedSignals
             PROPERTIES TIMEOUT 120)
+        # A set past a rotation is asked only its picks (ADR-0065): the
+        # session line, stream's and log's words and log's refusal
+        add_test(NAME CliLogRunTest.APickOnlySessionSaysNothingIsAsked
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} pick-only
+                $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliLogRunTest.APickOnlySessionSaysNothingIsAsked
+            PROPERTIES TIMEOUT 120)
         add_test(NAME CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} fails $<TARGET_FILE:havne-cli>)
         add_test(NAME CliLogRunTest.AReplayEndsTheLogAtItsLastFrame

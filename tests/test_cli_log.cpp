@@ -182,6 +182,27 @@ TEST(CliPickTest, ThePickIsTheRankedDefsAndTheAddedInTheSetsOrder)
     EXPECT_TRUE(cli::default_pick(nullptr, {10}).empty());
 }
 
+/* On a pick-only session an unranked set's pick is the added defs alone,
+ * and with none added nothing; the flag changes nothing on a set that
+ * ranks, and its default (false) keeps the whole-set rule */
+TEST(CliPickTest, APickOnlySessionPicksTheAddedDefsOfAnUnrankedSet)
+{
+    Set s;
+    ASSERT_FALSE(cli::set_ranks(&s.set));
+    EXPECT_TRUE(cli::default_pick(&s.set, {11, 13}, false).empty());
+    EXPECT_EQ(cli::default_pick(&s.set, {13, 99, 10, 10}, true),
+              (std::vector<uint16_t>{10, 13}));
+    EXPECT_TRUE(cli::default_pick(&s.set, {}, true).empty());
+    EXPECT_TRUE(cli::default_pick(&s.set, {99}, true).empty());
+    EXPECT_TRUE(cli::default_pick(nullptr, {10}, true).empty());
+
+    s.defs[2].plot_rank = 2;
+    EXPECT_EQ(cli::default_pick(&s.set, {13}, true),
+              cli::default_pick(&s.set, {13}, false));
+    EXPECT_EQ(cli::default_pick(&s.set, {13}, true),
+              (std::vector<uint16_t>{12, 13}));
+}
+
 /* obd2's pick with nothing added is obd2's ranked signals */
 TEST(CliPickTest, Obd2sPickIsItsRankedSignals)
 {
