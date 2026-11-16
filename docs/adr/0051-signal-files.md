@@ -838,3 +838,5 @@ before and after (`scripts/bench_ab.py`, five runs each alternated, on
 a desktop running other work) put every figure inside both builds'
 spread, the decode at 1.00 to 1.02 of the base, the bridge's load at
 0.91 to 0.98, reply timing at 1.00 over J2534.
+
+Note of 2026-11-16: section 6's "`ECUIO_MAX_CHANNELS` stays 4 until a real car needs more" is answered by [ADR-0065](0065-car-sized-profile.md): it is 32.

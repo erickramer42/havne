@@ -59,6 +59,9 @@ entry := [<ecu>:]<DID>[-<DID>][:<type>]
   `ECUIO_PROFILE_MAX_REQUESTS` DIDs to poll,
   `ECUIO_ENGINE_SCAN_MAX` (1024) to scan, `ECUIO_MAX_CHANNELS` (4) ECUs.
   A DID listed twice is kept once.
+  *Note of 2026-11-16:* [ADR-0065](0065-car-sized-profile.md): a set may
+  declare up to 32 modules, so the ECU limit is `ECUIO_MAX_CHANNELS`
+  (32).
 
 ### 2. A set of the session's own
 
