@@ -912,6 +912,13 @@ requests and quiet states
 
 ## Gaps (not verified)
 
+- **A plugin has not met a car, and the analysis log has run on a car
+  over ELM327 only.** Plugins' data tier is checked against the
+  simulated car; `havne-cli log` and the app's Start log have read the
+  test car through the MX+ and the VX over ELM327, and not through J2534
+  or SocketCAN ([ADR-0056](adr/0056-analysis-log.md)'s appendix "the log
+  on a car, over ELM327").
+
 - **What the scrub can't see, and what it can refuse.** A scrubbed
   export, the Activity page's Export CSV and the health report find the
   car's identity by the values its identification replies and text

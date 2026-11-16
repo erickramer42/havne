@@ -535,7 +535,9 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   list with its Import, and the viewer, with a vehicle's baseline, a
   health report and a Values | Frames switch), **Settings**
   (a list of pages: Connection, Vehicle, Signals, Recording, Display
-  with the theme, and Advanced with developer mode's extra readouts and tools). The phone has no
+  with the theme, and Advanced with developer mode's extra readouts and tools:
+  a frame-rate badge, the viewer's frame test, Export's raw frames and the
+  adapter relay). The phone has no
   Home: it opens on the Dashboard, whose list of recent addresses
   connects with no session, and its tab bar lists five pages. Live and the
   Recordings page share one signal filter (`SignalFilterBar.qml`, its
@@ -591,7 +593,10 @@ The bridge polls it on its 100 ms tick and maps it for the UI
   so a signal that stops arriving dims even when nothing else changes.
 - **Preferences** are Qt's `QSettings` under the product's name (the
   registry on Windows); `HAVNE_SETTINGS_DIR` gives one instance an ini
-  file of its own, which the test driver uses. At launch the earlier
+  file of its own, which the test driver uses. They keep the look, zoom,
+  units, the last address that connected, the Record sessions switch, the
+  splitters' shares and each device's versions as last seen at a connect
+  (shown on its row in Settings, since the list opens no adapter). At launch the earlier
   name's preferences are copied once into an empty store, and the
   recent recordings read the earlier name's folder beside the current
   one ([ADR-0001](adr/0001-qt-free-core-c-abi.md)'s appendix of
