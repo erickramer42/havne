@@ -6,12 +6,15 @@
 #
 # A live stream whose reader stops reading drops lines, and a condition
 # event whose line is dropped is counted on the end line. mock://demo
-# idles fast from about 17 s to 34 s, its engine speed hunting a few rpm
-# on each tick; 64 conditions on it, levels 0.75 rpm apart across the
-# idle's band, give many events a second. The line ring is at its floor
+# holds the rev limiter from about 50.9 s to 55.9 s in its first loop,
+# its engine speed sawing between about 6860 and 7000 rpm on each tick;
+# 64 conditions on it, levels 2.5 rpm apart across that band, cross
+# several dozen levels on every tick, so the events come with the
+# session's ticks (a few hundred a second at the least), not with the
+# machine's speed. The line ring is at its floor
 # (HAVNE_CLI_RING_BYTES) and the stream records: the recorder's ring is
 # its own, so the recording's cond lines are every event the session
-# gave. Read to 17 s of session time, then stop reading until the stream
+# gave. Read to 50 s of session time, then stop reading until the stream
 # must be dropping, whatever the system's buffers hold and however
 # loaded the machine is:
 # - the bytes the kernel holds for the reader stop growing, so the
@@ -45,8 +48,8 @@ try:
 except ImportError:
     fcntl = termios = None
 
-SECONDS = 33
-STALL_FROM_US = 17 * 1000 * 1000
+SECONDS = 60
+STALL_FROM_US = 50 * 1000 * 1000
 STALL_MAX_S = 25.0
 STILL_S = 0.5
 POLL_S = 0.05
@@ -54,10 +57,13 @@ FILL_BYTES = 2 * (32 * 1024 + 256)
 LEAST_COND_BYTES = 60
 PAST_FULL = 3
 LEVELS = 64
-# A long key (the limit is 31 bytes) makes each cond line longer, so fewer
-# events fill the pipe and the ring: the idle gives the recording about 800
-# events from 17 s on, whatever the machine, and the fill must stay well
-# under that
+# The limiter crosses the band's levels about 110 times in each three
+# ticks, and holds it for 5 s: thousands of events a loop, where the fill
+# is about 600 (the pipe's and the ring's bytes over a cond line's). A long
+# key (the limit is 31 bytes) makes each cond line longer, so fewer events
+# fill them
+LEVEL_FROM_RPM = 6855.0
+LEVEL_STEP_RPM = 2.5
 KEY_PREFIX = "idle_level_at_rpm_threshold_"
 
 
@@ -68,7 +74,7 @@ def condition_file(folder):
             "key": KEY_PREFIX + "%02d" % k,
             "name": "Idle %02d" % k,
             "when": {"signal": ["id:1001"], "unit": "RPM",
-                     "above": 1405.875 + 0.75 * k},
+                     "above": LEVEL_FROM_RPM + LEVEL_STEP_RPM * k},
         })
     path = os.path.join(folder, "idle.json")
     with open(path, "w", encoding="utf-8") as f:
@@ -220,7 +226,9 @@ def main():
         print(f"      {len(got)} condition lines received, "
               f"conditions_dropped {dropped}, {len(truth)} cond lines "
               f"recorded; dropped_frames {end.get('dropped_frames')}, "
-              f"dropped_values {end.get('dropped_values')}")
+              f"dropped_values {end.get('dropped_values')}; "
+              f"{len([e for e in truth if e[4] >= STALL_FROM_US])} recorded "
+              f"from {STALL_FROM_US // 1000000} s on")
         if dropped is None:
             print("FAIL  the end line has no conditions_dropped")
             ok = False
