@@ -700,11 +700,13 @@ Each a branch, core first; a step's public header change regenerates
 the Python declarations in its commit, and each step runs the cross-arch
 suite.
 
-1. **The constants and the layout** (`feat!`): section 6's constants,
-   layout 5, the info's `module_count` and the getter, the reports and
-   a module's state sized from the set, every caller's arrays moved to
-   the count (the app, `havne-cli`, Python), the loaders' and the
-   importer's words.
+1. **The constants and the layout** (`feat!`): section 6's constants
+   but `ECUIO_MODULE_MAX_REQUESTS`, `ECUIO_SIGNAL_SET_MAX_SIGNALS` and
+   `ECUIO_SIGNAL_SET_MAX_BYTES`, which step 2 brings with their
+   refusals; layout 5, the info's `module_count` and the getter, the
+   reports and a module's state sized from the set, every caller's
+   arrays moved to the count (the app, `havne-cli`, Python), the
+   loaders' and the importer's words.
 2. **Tables from the set:** the engine's table and the focus's marks
    from the set; timing rows taken at first ask; the ceilings for each
    module and each set and their refusals; a set's bounds for a merged
