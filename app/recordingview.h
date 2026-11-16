@@ -105,6 +105,9 @@ class RecordingView : public QObject
     // cruiseFloor (km/h, or mph under imperial units) }
     Q_PROPERTY(QVariantMap stretchDefaults READ stretchDefaults NOTIFY
                    unitSystemChanged)
+    // Each rule's name by key, the words a refusal uses and the Stretches
+    // panel's fields carry: one table, so the two never part
+    Q_PROPERTY(QVariantMap stretchRuleNames READ stretchRuleNames CONSTANT)
     // Why the last stretches() was refused, naming the rule ("Pull throttle
     // must be a number from 0 to 100"); empty once an ask is taken
     Q_PROPERTY(QString stretchesProblem READ stretchesProblem NOTIFY
@@ -143,6 +146,7 @@ public:
     bool hasFrames() const { return m_hasFrames; }
     bool reporting() const { return m_reporting; }
     QVariantMap stretchDefaults() const;
+    QVariantMap stretchRuleNames() const;
     QString stretchesProblem() const { return m_stretchesProblem; }
 
     // The log viewer's Save report (ADR-0054's appendix "the health report

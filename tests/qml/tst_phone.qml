@@ -730,6 +730,49 @@ TestCase {
                "the filter ends at " + panelRight + " of " + scroll.width)
     }
 
+    // A plotted signal's Pane button is a touch's size and stays inside its
+    // row on the narrowest phone, and its menu lists the choices
+    function test_theViewersPaneButtonIsATouchsSizeAndFits_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+
+    function test_theViewersPaneButtonIsATouchsSizeAndFits(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 832
+        const page = find(main.contentItem, "recordingsPage")
+        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
+                    folder: Harness.recordingFixtures + "/findings", profile: "raw" })
+        tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
+        verify(waitForPolish(main), "laid out")
+        const rows = find(page, "signalRows")
+        let button = null
+        let at = -1
+        tryVerify(() => {
+            for (let i = 0; i < rows.count; ++i) {
+                const item = rows.itemAtIndex(i)
+                const b = item ? findChild(item, "paneButton") : null
+                if (b && b.visible) {
+                    button = b
+                    at = i
+                    return true
+                }
+            }
+            return false
+        }, 5000, "a plotted signal's row has the button")
+        verify(button.height >= Theme.touchTarget - 0.5, "a touch's height: " + button.height)
+        verify(button.width >= 40, "wide enough to hit: " + button.width)
+        const row = rows.itemAtIndex(at)
+        const right = button.mapToItem(row, button.width, 0).x
+        verify(right <= row.width + 0.5, "inside its row: " + right + " of " + row.width)
+        verify(button.Accessible.name.indexOf("Pane of ") === 0, button.Accessible.name)
+        page.openPaneMenu(row.signalIndex, button)
+        verify(page.paneMenuItems.length >= 3, "by unit, a pane, a new one")
+        compare(page.paneMenuItems[page.paneMenuItems.length - 1].text, "New pane")
+    }
+
     function test_theViewerReachesAllOfItselfOnAPhone_data() {
         return [{ tag: "upright", w: 384, h: 800 }, { tag: "on its side", w: 800, h: 384 }]
     }

@@ -82,6 +82,7 @@ Rectangle {
             axisH: root.host.phoneShape && root.host.hasCursor ? ChartLayout.axisHCursor : ChartLayout.axisH,
             panes: { max: root.host.paneLimit, minH: ChartLayout.paneMinH,
                      shares: root.host.paneShares, ranges: root.host.paneRanges,
+                     assign: root.host.assignRows(),
                      mixedLabel: qsTr("mixed") } })
         onDrawnChanged: root.host.notePanes(drawn)
         // Findings as bars along the plot's foot and the conditions in two
@@ -331,6 +332,13 @@ Rectangle {
         }
         onLongPressed: {
             const at = chartTap.point.position
+            // A press on a value label offers its signal's pane, on any form
+            const labeled = root.host.labelRowAt(at.x - chart.x, at.y - chart.y)
+            if (labeled >= 0) {
+                held = true
+                root.host.openPaneMenu(labeled, chart)
+                return
+            }
             if (!root.host.phoneShape || at.x - chart.x < root.host.plotLeft())
                 return
             held = true

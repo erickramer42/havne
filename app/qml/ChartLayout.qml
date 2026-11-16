@@ -93,7 +93,10 @@ QtObject {
     // comes (a trace's own pane key first, then assign's for its row when
     // given, in place of the unit's), folded past the limit: [{ key, units
     // (what the pane's label lists: each trace's paneLabel, else its unit),
-    // axis, traces }]
+    // axis, traces, pinned }]. A pane holding a pinned trace (a difference)
+    // is never folded into the mixed pane while one ordinary pane stays: the
+    // ordinary panes give way first, then the pinned ones past limit - 2
+    // share one axis-less pane of their own
     function paneGroups(traces, room, p) {
         const groups = []
         const byKey = {}
@@ -103,9 +106,11 @@ QtObject {
             const key = given !== undefined ? String(given) : paneKey(tr.unit)
             let g = byKey[key]
             if (!g) {
-                g = byKey[key] = { key: key, units: [], axis: true, traces: [] }
+                g = byKey[key] = { key: key, units: [], axis: true, traces: [], pinned: false }
                 groups.push(g)
             }
+            if (tr.pinned === true)
+                g.pinned = true
             const word = tr.paneLabel !== undefined ? tr.paneLabel : tr.unit
             if (g.units.indexOf(word) < 0)
                 g.units.push(word)
@@ -116,6 +121,28 @@ QtObject {
                                panesThatFit(room, p.minH > 0 ? p.minH : paneMinH))
         if (groups.length <= limit)
             return groups
+        const pinned = groups.filter(g => g.pinned)
+        const ordinary = groups.filter(g => !g.pinned)
+        if (pinned.length === 0 || ordinary.length === 0 || limit < 3)
+            return foldInto(groups, traces, limit, "mixed")
+        // Pinned panes first take their places, but one slot stays for the
+        // ordinary ones and, past it, one for the pinned panes that don't fit
+        const slots = limit - 1
+        const pinnedKept = pinned.length <= slots ? pinned : pinned.slice(0, slots - 1)
+        const pinnedFolded = pinned.slice(pinnedKept.length)
+        const ordinarySlots = limit - pinnedKept.length - (pinnedFolded.length > 0 ? 1 : 0)
+        const ordinaryKept = ordinary.length <= ordinarySlots ? ordinary : ordinary.slice(0, ordinarySlots - 1)
+        const ordinaryFolded = ordinary.slice(ordinaryKept.length)
+        const out = groups.filter(g => pinnedKept.indexOf(g) >= 0 || ordinaryKept.indexOf(g) >= 0)
+        if (pinnedFolded.length > 0)
+            out.push(mergedGroup(pinnedFolded, "difference"))
+        if (ordinaryFolded.length > 0)
+            out.push(mergedGroup(ordinaryFolded, "mixed"))
+        return out
+    }
+
+    // Groups past the limit folded into one axis-less pane at its end
+    function foldInto(groups, traces, limit, key) {
         const kept = groups.slice(0, limit - 1)
         const keys = kept.map(g => g.key)
         const folded = traces.filter(tr => keys.indexOf(tr.paneKey) < 0)
@@ -125,8 +152,24 @@ QtObject {
             if (word !== "" && units.indexOf(word) < 0)
                 units.push(word)
         }
-        kept.push({ key: "mixed", units: units, axis: false, traces: folded })
+        kept.push({ key: key, units: units, axis: false, traces: folded,
+                    pinned: folded.some(tr => tr.pinned === true) })
         return kept
+    }
+
+    // The traces of several groups in one axis-less pane
+    function mergedGroup(list, key) {
+        const traces = []
+        const units = []
+        for (const g of list) {
+            for (const tr of g.traces) {
+                traces.push(tr)
+                const word = tr.paneLabel !== undefined ? tr.paneLabel : tr.unit
+                if (word !== "" && units.indexOf(word) < 0)
+                    units.push(word)
+            }
+        }
+        return { key: key, units: units, axis: false, traces: traces, pinned: key === "difference" }
     }
 
     // n panes' heights in room px: the shares (any positive numbers, one
@@ -687,7 +730,7 @@ QtObject {
             traces.push({ sp: sp, cols: cols, row: s.row, slot: s.slot !== undefined ? s.slot : s.row, vMin: range.vMin, vMax: range.vMax,
                           flat: range.flat, label: label, value: value, decimals: s.decimals,
                           unit: s.unit, scaleKey: s.scaleKey, dash: s.dash, labelMs: s.labelMs,
-                          ownPane: s.pane, paneLabel: s.paneLabel })
+                          ownPane: s.pane, paneLabel: s.paneLabel, pinned: s.pinned === true })
         }
         if (traces.length === 0)
             return null
@@ -972,5 +1015,106 @@ QtObject {
                  traces: placed, labelX: left + plotW + 6, panes: panes, seams: seams,
                  axisH: axisRoom,
                  held: { key: key, labelW: labelW, dense: denseNow, ranges: rangesNow } }
+    }
+
+    // The pane arrangements the viewer keeps for each recording, as the
+    // settings hold them: { "<recording's folder name>": { used (ms since
+    // the epoch, stamped at each write and each open of a kept one),
+    // assign: { <signal name>: <pane key> }, shares: { <pane count>:
+    // [share per pane] } } }. A damaged or oversized text reads as none, a
+    // damaged entry is left out and the rest kept; past viewsMax entries
+    // the least recently used go first.
+    readonly property int viewsMax: 100
+    readonly property int viewsMaxSignals: 64
+    readonly property int viewsMaxText: 262144
+    readonly property int viewsMaxPanes: 8
+
+    function viewEntry(e) {
+        if (e === null || typeof e !== "object" || Array.isArray(e))
+            return null
+        const out = { used: isFinite(e.used) ? Number(e.used) : 0, assign: {}, shares: {} }
+        if (e.assign !== undefined) {
+            if (e.assign === null || typeof e.assign !== "object" || Array.isArray(e.assign))
+                return null
+            const names = Object.keys(e.assign)
+            if (names.length > viewsMaxSignals)
+                return null
+            for (const n of names) {
+                const k = e.assign[n]
+                if (n.length === 0 || n.length > 200 || typeof k !== "string" || k.length === 0 || k.length > 40)
+                    return null
+                out.assign[n] = k
+            }
+        }
+        if (e.shares !== undefined) {
+            if (e.shares === null || typeof e.shares !== "object" || Array.isArray(e.shares))
+                return null
+            for (const c of Object.keys(e.shares)) {
+                const n = Number(c)
+                const v = e.shares[c]
+                if (!Number.isInteger(n) || n < 2 || n > viewsMaxPanes || !Array.isArray(v) || v.length !== n
+                        || !v.every(x => typeof x === "number" && isFinite(x) && x > 0))
+                    return null
+                out.shares[c] = v
+            }
+        }
+        return out
+    }
+
+    function viewsParse(text) {
+        if (typeof text !== "string" || text.length > viewsMaxText)
+            return {}
+        let doc
+        try {
+            doc = JSON.parse(text)
+        } catch (e) {
+            return {}
+        }
+        if (doc === null || typeof doc !== "object" || Array.isArray(doc))
+            return {}
+        const out = {}
+        for (const name of Object.keys(doc)) {
+            if (name.length === 0 || name.length > 300)
+                continue
+            const e = viewEntry(doc[name])
+            if (e !== null)
+                out[name] = e
+        }
+        return out
+    }
+
+    // The views with one recording's entry changed by patch ({ assign } and/or
+    // { shares }; a field left out stays) and stamped used at `now`; an entry
+    // left with nothing in it goes, and the least recently used past viewsMax
+    function viewsWith(views, name, patch, now) {
+        const next = Object.assign({}, views)
+        const before = views[name] !== undefined ? views[name] : { assign: {}, shares: {} }
+        const e = { used: now, assign: patch.assign !== undefined ? patch.assign : before.assign,
+                    shares: patch.shares !== undefined ? patch.shares : before.shares }
+        if (Object.keys(e.assign).length === 0 && Object.keys(e.shares).length === 0)
+            delete next[name]
+        else
+            next[name] = e
+        return viewsTrim(next)
+    }
+
+    // Stamped used at `now`, when the recording has an entry
+    function viewsTouched(views, name, now) {
+        if (views[name] === undefined)
+            return views
+        const next = Object.assign({}, views)
+        next[name] = Object.assign({}, views[name], { used: now })
+        return next
+    }
+
+    function viewsTrim(views) {
+        const names = Object.keys(views)
+        if (names.length <= viewsMax)
+            return views
+        names.sort((a, b) => views[b].used - views[a].used)
+        const next = {}
+        for (const n of names.slice(0, viewsMax))
+            next[n] = views[n]
+        return next
     }
 }

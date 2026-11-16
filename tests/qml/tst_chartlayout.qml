@@ -852,6 +852,115 @@ TestCase {
         compare(folded.panes[1].label, "% \u00b7 D rpm")
     }
 
+
+    // A pinned pane (a comparison's difference) is never folded into the
+    // mixed pane while one ordinary pane stays: the ordinary panes give way,
+    // then the pinned panes past the last but one share a pane of their own
+    function pinnedRamp(row, unit, lo, hi) {
+        return Object.assign(ramp(row, unit, lo, hi), { pane: "difference " + unit, paneLabel: "D " + unit,
+                                                        pinned: true })
+    }
+    function test_pinnedPanesStayWhenTheOrdinaryOnesFold_data() {
+        return [ { tag: "3 panes, two differences", max: 3, three: false, keys: "difference rpm|difference %|mixed" },
+                 { tag: "4 panes", max: 4, three: false, keys: "unit rpm|difference rpm|difference %|mixed" },
+                 { tag: "3 panes, three differences", max: 3, three: true, keys: "difference rpm|difference|mixed" } ]
+    }
+    function test_pinnedPanesStayWhenTheOrdinaryOnesFold(data) {
+        const list = [ramp(0, "rpm", 800, 6000), ramp(1, "%", 0, 100), ramp(2, "km/h", 0, 120),
+                      pinnedRamp(3, "rpm", -40, 25), pinnedRamp(4, "%", -5, 60)]
+        if (data.three)
+            list.push(pinnedRamp(5, "km/h", -3, 3))
+        const l = paned(list, 900, { max: data.max, mixedLabel: "mixed" })
+        compare(l.panes.map(p => p.key).join("|"), data.keys)
+        compare(l.panes.length, data.max)
+        // The difference traces sit where they were put, never in "mixed"
+        const mixed = l.panes.findIndex(p => p.key === "mixed")
+        for (const r of [3, 4])
+            verify(inPane(l, r) !== mixed, "row " + r + " is in a pane of its own")
+        verify(l.traces.filter(t => t.pane === mixed).every(t => t.row < 3), "mixed holds the signals only")
+    }
+
+    // With no ordinary pane to keep, or no room for two, the old fold stands
+    function test_aSingleOrdinaryPaneAndPinnedOnesNeedNoFold() {
+        const l = paned([ramp(0, "rpm", 800, 6000), pinnedRamp(1, "rpm", -40, 25)], 600, { max: 3 })
+        compare(l.panes.map(p => p.key).join("|"), "unit rpm|difference rpm")
+    }
+
+    // A difference ignores the assignment of its signal's row
+    function test_aMovedSignalLeavesItsDifferenceWhereItIs() {
+        const l = paned([ramp(0, "rpm", 800, 6000), pinnedRamp(0, "rpm", -40, 25), ramp(1, "%", 0, 100)],
+                        600, { assign: { 0: "own:1" } })
+        compare(l.panes.map(p => p.key).join("|"), "own:1|difference rpm|unit %")
+    }
+
+    // An assignment moves a signal to a pane of its own and the pane it left
+    // goes when nothing is in it
+    function test_aSignalMovedToANewPaneLeavesNoEmptyPaneBehind() {
+        const list = [ramp(0, "rpm", 800, 6000), ramp(1, "km/h", 0, 120), ramp(2, "%", 0, 100)]
+        const apart = paned(list, 600, { assign: { 1: "own:1" } })
+        compare(apart.panes.map(p => p.key).join("|"), "unit rpm|own:1|unit %")
+        const alone = paned(list, 600, { assign: { 0: "unit %" } })
+        compare(alone.panes.map(p => p.key).join("|"), "unit %|speed")
+        compare(inPane(alone, 0), 0)
+        compare(inPane(alone, 2), 0)
+    }
+
+    // The views the viewer keeps for each recording
+    function test_theViewsTextIsReadWithWhatIsDamagedLeftOut() {
+        compare(JSON.stringify(ChartLayout.viewsParse("")), "{}")
+        compare(JSON.stringify(ChartLayout.viewsParse("{ not json")), "{}")
+        compare(JSON.stringify(ChartLayout.viewsParse("[1, 2]")), "{}")
+        compare(JSON.stringify(ChartLayout.viewsParse(null)), "{}")
+        const many = {}
+        for (let i = 0; i < 65; ++i)
+            many["s" + i] = "own:1"
+        const good = { used: 5, assign: { "Engine speed": "own:1" }, shares: { "3": [1, 2, 1] } }
+        const text = JSON.stringify({
+            a: good,
+            badAssign: { used: 1, assign: { x: 5 } },
+            badShares: { used: 1, shares: { "3": [1, 2] } },
+            zeroShare: { used: 1, shares: { "2": [1, 0] } },
+            notAnObject: 7,
+            tooMany: { used: 1, assign: many },
+            fine: { used: 9 }
+        })
+        const got = ChartLayout.viewsParse(text)
+        compare(Object.keys(got).sort().join(","), "a,fine")
+        compare(JSON.stringify(got.a), JSON.stringify(good))
+        compare(JSON.stringify(got.fine.assign), "{}")
+        // A text past the bound is none at all
+        compare(JSON.stringify(ChartLayout.viewsParse(" ".repeat(ChartLayout.viewsMaxText + 1))), "{}")
+    }
+
+    function test_aRecordingsEntryIsWrittenStampedAndGoesWhenEmpty() {
+        let v = ChartLayout.viewsWith({}, "r1", { assign: { RPM: "own:1" } }, 100)
+        compare(v.r1.used, 100)
+        compare(v.r1.assign.RPM, "own:1")
+        v = ChartLayout.viewsWith(v, "r1", { shares: { "3": [1, 1, 1] } }, 200)
+        compare(v.r1.used, 200)
+        compare(v.r1.assign.RPM, "own:1", "a field left out stays")
+        v = ChartLayout.viewsTouched(v, "r1", 300)
+        compare(v.r1.used, 300)
+        compare(JSON.stringify(ChartLayout.viewsTouched(v, "other", 400)), JSON.stringify(v), "no entry, no stamp")
+        v = ChartLayout.viewsWith(v, "r1", { assign: {} }, 500)
+        verify(v.r1 !== undefined, "the heights still hold it")
+        v = ChartLayout.viewsWith(v, "r1", { shares: {} }, 600)
+        compare(v.r1, undefined, "nothing left, no entry")
+    }
+
+    function test_theLeastRecentlyUsedViewsGoPastTheCap() {
+        let v = {}
+        for (let i = 0; i < ChartLayout.viewsMax; ++i)
+            v = ChartLayout.viewsWith(v, "r" + i, { assign: { RPM: "own:1" } }, 1000 + i)
+        compare(Object.keys(v).length, ChartLayout.viewsMax)
+        // r0 is the oldest: touched, it is the newest, and r1 goes first
+        v = ChartLayout.viewsTouched(v, "r0", 5000)
+        v = ChartLayout.viewsWith(v, "new", { assign: { RPM: "own:1" } }, 6000)
+        compare(Object.keys(v).length, ChartLayout.viewsMax)
+        verify(v.r0 !== undefined && v.new !== undefined, "the used and the new stay")
+        compare(v.r1, undefined, "the least recently used went")
+    }
+
     // Past the limit, the last units fold into one mixed pane: no axis, its
     // traces each on its own scale as without panes, named at its axis
     function test_pastTheLimitTheLastUnitsFoldIntoAMixedPane_data() {
