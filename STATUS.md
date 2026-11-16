@@ -21,7 +21,7 @@ This file is the present state: what works, how far it's verified, what's planne
 
 **Verified:** 2711 tests on Windows and the cross-arch subset (111) at v0.8.0, CI on Windows, macOS and Linux with sanitizers and fuzzing ([testing.md](docs/testing.md)). On hardware: three adapters (the VX over J2534 and as an ELM327, the MX+ over Bluetooth, a USB2CAN on SocketCAN) and one car; the phone app on one phone. Not yet: 29-bit addressing, a real 64-bit J2534 driver, other vendors and cars ([bench-prep.md](docs/bench-sessions/bench-prep.md)).
 
-**Next, v0.9.0:** a profile sized for a whole car (up to 32 modules a session) and a vehicle's plugins read together; sessions a plugin declares; the viewer's panes chosen by hand, the Dashboard's presets and computed signals you write; then the conversation tier: security access, and the safety gates a later write path needs. [Roadmap](#roadmap).
+**Next, v0.9.0:** a profile sized for a whole car (up to 32 modules a session) and a vehicle's plugins read together; sessions a plugin declares; the viewer's panes chosen by hand, the Dashboard's presets and computed signals you write; then the conversation tier: security access, the safety gates, and the write mechanics behind them ([ADR-0066](docs/adr/0066-conversation-tier-and-write-gates.md)). [Roadmap](#roadmap).
 
 ---
 
@@ -149,7 +149,7 @@ an issue is resolved it is removed, and its number is not reused.
 | v0.7.3 | The analysis viewer: the log's navigation aids, chart panes with two cursors, a recording's statistics, Live's pause, and the phone pass's fixes | Released |
 | v0.7.4 | Follow-ups on v0.7.3's theme: a Dashboard layout exported and loaded, more gauge colors, every plugin variant offered for a vehicle, the viewer's difference trace, the demo car under obd2, and Android's own document picker | Released |
 | v0.8.0 | Conditions: a condition file judged in a session, alerts in the app (banner, tone, colors, the Alerts page), armed recording, one plugin store for every import, a fuller grammar for computed signals, and a request budget of 1024 | Released |
-| v0.9.0-v0.11.0 | v0.9.0, the whole car through plugins: what v0.8.0 left out, a profile sized for every module, a vehicle's plugins read together in one session (a signal set of your own, an OBDb import and `obd2`), sessions a plugin declares, and the simulated ECU answering as many modules; then the conversation tier, a plugin's own conversation with a module (security access to unlock reads among it), built behind safety gates before any write mechanics: a sandbox for that access, and gates for an original copy of the calibration, write-flow safety and a legal record. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
+| v0.9.0-v0.11.0 | v0.9.0, the whole car through plugins: what v0.8.0 left out, a profile sized for every module, a vehicle's plugins read together in one session (a signal set of your own, an OBDb import and `obd2`), sessions a plugin declares, and the simulated ECU answering as many modules; then the conversation tier, a plugin's own conversation with a module (security access to unlock reads among it), built behind safety gates before any write mechanics: a sandbox for that access, and gates for an original copy of the calibration, write-flow safety and a legal record; then the write mechanics behind those gates, proven on the simulated ECU, whether a public build carries them decided once the gates are built. v0.10.0, discovery: listening to the whole bus, and the rest of a plugin's conversation. v0.11.0, the scan tool, the last feature release | Planned |
 | 1.0.0 | The finished reader: the features above frozen and hardened, full featured on Windows, Linux and Android | Planned |
 
 Versions follow semantic versioning
@@ -194,8 +194,9 @@ hour-long runs on every transport. 1.0.0 follows once those runs are
 filed and the 0.11.x releases have gone a stated stretch with no
 high-severity issue: full featured on Windows, Linux and Android, as
 much macOS and iOS as is manageable, with a signed Windows executable
-and an installer that checks for updates. Writing to a car (unlocking
-a module for writes, flashing) is 2.0.
+and an installer that checks for updates. The write mechanics (security access, a dump, the
+flash) come in v0.9.0 behind their gates (ADR-0066); the public write
+product (map definitions, editors, tune management) is 2.0.
 
 ## Backlog
 
