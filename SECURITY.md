@@ -90,7 +90,7 @@ Out of scope:
   deploy to, and whose certificate fingerprint is pinned in the
   repository and given in each release's notes
   ([ADR-0030](docs/adr/0030-signed-android-releases.md),
-  [docs/development.md](docs/development.md#releases)).
+  [docs/packaging.md](docs/packaging.md#releases)).
 - **Android:** the app asks only for the permissions its features use
   (Bluetooth declared "never for location", notifications, a
   connected-device foreground service and a wake lock for background

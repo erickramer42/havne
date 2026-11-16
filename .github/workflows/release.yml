@@ -215,7 +215,7 @@ jobs:
         shell: bash   # -eo pipefail
     timeout-minutes: 25
     # The release key's secrets live in this environment, which only
-    # release tags and main may deploy to (docs/development.md,
+    # release tags and main may deploy to (docs/packaging.md,
     # "The Android release key")
     environment: release
     env:

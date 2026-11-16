@@ -1,6 +1,6 @@
 # File/layer: packaging/windows/stage.ps1 | release packaging, Windows x64
 # Testing: run by .github/workflows/release.yml on every release tag, and
-#          by hand against a local build (docs/development.md, "Releases").
+#          by hand against a local build (docs/packaging.md, "Releases").
 #
 # Stages the Windows release from a built tree, checks it, and zips it:
 #   dist/havne-<version>-windows-x64/       the folder a user unzips

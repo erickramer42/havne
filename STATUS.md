@@ -235,7 +235,7 @@ less, **M** a few days, **L** a week or more or an ADR first.
   `qt_import_plugins(havne EXCLUDE_BY_TYPE qmltooling)`; needs a CI run
   and an Apple kit.
 - **The next type2-runtime pin (S):** the steps are in
-  [docs/development.md](docs/development.md) ("A new runtime pin"); the
+  [docs/packaging.md](docs/packaging.md) ("A new runtime pin"); the
   newer runtime would take the release that unpacks into a 0700 folder.
 
 - **C++20 baseline (M, an ADR first):** `std::span` and `std::format`

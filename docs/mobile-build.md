@@ -31,7 +31,7 @@ Leave `CMAKE_BUILD_TYPE` unset, as CI does: the build is then Debug,
 and Gradle signs the APK with the machine's debug key. A Release build
 makes an unsigned APK that a phone won't install until
 `packaging/android/sign-apk.sh` signs it, as the release job does
-([Releases](development.md#releases)); it isn't debuggable, so `run-as` can't read
+([Releases](packaging.md#releases)); it isn't debuggable, so `run-as` can't read
 its wire logs, and phone runs use a Debug build. For an emulator on
 an x86-64 PC, use the `android_x86_64` kit. Since
 Qt 6.7, Qt publishes Android kits under the `all_os` host (the name
