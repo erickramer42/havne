@@ -94,6 +94,15 @@ Then launch it from the simulator's home screen. The CI job's launch
 step shows how to read the bundle ID from `Info.plist`, launch the
 app, and send its Qt log output to a file.
 
+## The phone in the background
+
+([ADR-0029](adr/0029-android-background-sessions.md).) Qt's GUI loop
+keeps running in the background, and while an adapter session is up a
+`connectedDevice` foreground service holds a partial wake lock and shows
+a notification. `main.cpp` drops drawing events while the app isn't
+active: Qt 6.12's Android plugin otherwise waits forever for a surface
+after the screen turns off.
+
 ## The app icon
 
 `packaging/icons/make_icons.py` draws it from one
