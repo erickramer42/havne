@@ -14,14 +14,41 @@ releases. `codeql.yml` follows the same PRs and pushes. A manual run
 leaves out the iOS simulator
 smoke unless asked: `-f ios_smoke=true` adds it to the whole run, and
 `-f smoke_only=true` runs it with `core-and-tests` alone.
+
+**A change to docs alone runs only the `scope` job.** `scope` diffs a
+pull request from its merge-base, and a push from the commit it
+replaced, and asks `scripts/docs_only.py` whether every changed path is
+on its closed list: the top-level `README.md`, `STATUS.md`,
+`CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md` and
+`CODE_OF_CONDUCT.md`; Markdown anywhere under `docs/` (the release notes
+in `docs/releases/` included); and png, gif or jpg files under
+`docs/images/`. Nothing else is docs: not `DISCLAIMER.md` (the Windows
+zip ships it), a `.md` under `tests/`, `schema/`, `plugins/` or
+`packaging/`, a fixture, a log or recording under `docs/`, code, CMake,
+a script or a workflow. The path and its mode decide, never a commit
+message: a symlink, an executable, a submodule or a type change is not
+docs, and neither is an empty diff, a diff git can't give (a forced
+push's old tip is gone), a manual run or a commit whose message asks
+for the iOS smoke. The list is narrower than `scripts/verify_scope.py`'s
+table for `verify.sh --changed`, which also takes any `.md` outside
+`tests/` and all of `docs/`; `DocsOnlyTest.SelfTest` holds everything
+`docs_only.py` accepts inside that table. When the diff is docs alone,
+`scope` also checks that every relative link in the docs resolves (no
+committed docs lint runs in CI: the full checker is local), and every
+other job is skipped by its `if`, so the run ends green: a skipped job
+reports as passed to branch protection, which requires no check today.
+A job that is a matrix and is skipped appears under its unexpanded name
+(`win-build (${{ matrix.shard }}/2)`), so a rule that requires a shard
+by name would wait forever on a docs-only run; require `scope` instead,
+or add a job that always runs.
 `-f macos_repeat='<ctest regex>'` (and
 `-f macos_repeat_count=<n>`, 200 by default) has `macos-build` run the
 matching tests again until one fails, for a failure seen once on macOS
-(its timeout is then 60 minutes). No job waits for another but
-`android-build`, which starts when `core-and-tests` ends, whatever its
-result: a manual run has more jobs than the account's concurrent
-runners, and the short job frees its runner first. So a run takes as
-long as its longest job. The long suites are shared between runners,
+(its timeout is then 60 minutes). Every job waits for `scope` (a few
+seconds), and beyond that none waits for another but `android-build`,
+which starts when `core-and-tests` ends, whatever its result: a manual
+run has more jobs than the account's concurrent runners, and the short
+job frees its runner first. So a run takes as long as its longest job. The long suites are shared between runners,
 each with a build of its own: `win-build`, `macos-build` and
 `linux-build` run alternate halves of ctest (`-I k,,2`, every case once
 across the two), `clang-tidy` three shares of the files, and
@@ -58,6 +85,7 @@ Every job has a `timeout-minutes` of roughly 3-5x its usual duration:
 
 | Job | Runner | Does |
 |---|---|---|
+| `scope` | Ubuntu | Judges whether the change is docs alone (above), and when it is checks the docs' relative links. Every other job needs it and skips on a docs-only change. |
 | `core-and-tests` | Ubuntu, GCC, no Qt | Builds core and the Qt-free tests, then runs ctest (jsonschema and pytest from the hash-pinned `.github/*-requirements.txt` in a venv, the tests' Python, so `SchemaFixturesTest` and `PythonTest.*` run, not skip). `WheelTest.Installed` builds a wheel from the tree's library and installs it in a venv. This enforces "core never links Qt." Then, whatever the tests did, it installs libabigail and runs `scripts/abi-check.sh` against the newest release tag ([The C ABI check](#the-c-abi-check)); the result goes to the run's summary. |
 | `core-sanitizers` | Ubuntu, GCC, no Qt | The same build and tests in Debug under AddressSanitizer and UndefinedBehaviorSanitizer. LeakSanitizer runs too, so a test that closes a session without destroying it fails here. It brings up `vcan0` as `linux-build` does and requires the vcan suites (`ECUIO_VCAN_REQUIRED`), so the SocketCAN worker runs under the sanitizers, the interface's down-and-up case as root. Blocking since its first green run (2026-10-20). |
 | `fuzz` | Ubuntu, Clang, no Qt | Installs the image's clang with its `libclang-rt` runtimes, checks that `-fsanitize=fuzzer` links, builds `fuzz/` (`-DECUIO_BUILD_FUZZERS=ON`, RelWithDebInfo), runs each harness for 60 s from its folder of `fuzz/seeds.py`'s seeds (built from the committed fixtures for the harnesses that read a structured format: JSON, signal files, plugins, OBDb sets, recordings and exports, candump logs, CSV imports and the ELM327 emulator's hosts; empty for the rest), as many at once as the runner has cores, each log in a group of its own, and uploads any crashing input with the logs ([fuzz/README.md](../fuzz/README.md)) |

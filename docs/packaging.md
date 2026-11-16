@@ -182,7 +182,11 @@ provenance over every file.
    platform wants, since the release's own list is flat and sorted by
    name. Say what's new, and what's verified at which tier
    ([testing.md](testing.md)), including what hasn't run on hardware,
-   and give the release key's certificate fingerprint.
+   and give the release key's certificate fingerprint. The notes name
+   what the release candidate still has to prove (its APK installed on a
+   phone and run, the AppImage on the distributions) as steps the final
+   tag waits on, so no line needs a second commit once the dry run has
+   run; its result goes in the release page's text.
 2. Make that commit on `dev`, after the review's fixes and the docs,
    and push it; open the PR from `dev` to `main` (or push to the open
    one). Once the PR's CI run passes, merge it with a merge commit, and
@@ -191,6 +195,13 @@ provenance over every file.
    at its CI gate; once CI on the commit passes, rerun the failed job
    (`gh run rerun <run id>`), which keeps the tag's ref and so the
    provenance's signer.
+   A correction to the notes (or to any docs) after that merge is a
+   commit of docs alone: it goes through a `hotfix/*` PR whose CI run
+   is the `scope` job's link check, and the release job's gate takes
+   it ([The release job's CI gate](#the-release-jobs-ci-gate)). The
+   release page's own text is `gh release edit <tag> --notes-file
+   docs/releases/<tag>.md`; the repo's copy reaches `main` with the
+   next release's PR.
    For a dry run, tag that commit `vX.Y.Z-rc1` and push the tag. The
    workflow publishes a pre-release. Download its zip, run it on a PC
    without Visual Studio if one is available, install its APK on a
@@ -210,10 +221,12 @@ provenance over every file.
   same notes.
 - **`gate`: CI.** ci.yml never runs on tags, so the job reads the newest
   `push` run of ci.yml on the tagged commit (`gh run list --commit`),
-  the merge's run on `main`,
-  and fails unless it has completed with `success`: a tag pushed
-  before CI finished, or on a commit whose CI failed, publishes
-  nothing.
+  the merge's run on `main`, and fails unless it has completed with
+  `success` and its `core-and-tests` job passed: a tag pushed before CI
+  finished, or on a commit whose CI failed, publishes nothing. A run
+  that skipped the tests (a docs-only change) doesn't count as testing
+  the commit, and the gate then falls back to the commit's ancestors
+  ([The release job's CI gate](#the-release-jobs-ci-gate)).
 - **`windows`: build.** Qt 6.12.0 is installed as `win-build` does it,
   then `build-win32` (the surrogate only) and `build` (the app only),
   both with `BUILD_TESTING=OFF`, in the usual order so the app's build
@@ -312,6 +325,28 @@ provenance over every file.
 
 The exe isn't code-signed, so SmartScreen warns on first run; the
 zip's `README.txt` and the release notes say how to get past it.
+
+### The release job's CI gate
+
+A commit passes the gate in one of two ways:
+
+1. Its own `push` run of ci.yml completed with `success` and ran the
+   tests (its `core-and-tests` job passed).
+2. Its tree differs by docs alone from the newest first-parent ancestor
+   whose `push` run did both. The gate looks at the last 50 first-parent
+   commits and the last 100 green push runs on `main`, takes the newest
+   commit of the first that has a tested run, and asks that commit's own
+   `scripts/docs_only.py` whether the diff to the tagged commit is docs
+   alone ([ci.md](ci.md) has the list). The commit's own run, when it has
+   one, must still be `success`: a failed or unfinished run fails the
+   gate however small the diff.
+
+The gate fails on any doubt: no tested ancestor within the bound, no
+`scripts/docs_only.py` there, an empty diff, a path outside the list, a
+mode that isn't a plain file, a git or API error. Renaming
+`core-and-tests` fails every commit until the gate's name is changed with
+it. The tag's input reaches no `run:` line except through `env`.
+
 
 ### The Android release key
 
