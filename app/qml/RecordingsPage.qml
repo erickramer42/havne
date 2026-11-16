@@ -2373,7 +2373,7 @@ Page {
             canNextCruise: root.nextStretch("cruise") >= 0
             bandsShown: root.bandsShown
             stretchesOpen: root.stretchesOpen
-            conditionsShown: root.conditionList.length > 0
+            conditionsShown: root.conditionList.length > 0 || recording.info.conditionEventsLost > 0
             conditionsOpen: root.conditionsOpen
             onJumpRequested: (kind, direction) => root.jump(kind, direction)
             onBandsToggled: root.bandsShown = !root.bandsShown

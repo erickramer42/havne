@@ -105,7 +105,7 @@ class RecordingView : public QObject
     // cruiseFloor (km/h, or mph under imperial units) }
     Q_PROPERTY(QVariantMap stretchDefaults READ stretchDefaults NOTIFY
                    unitSystemChanged)
-    // Why the last stretches() was refused, naming the rule ("Pull level
+    // Why the last stretches() was refused, naming the rule ("Pull throttle
     // must be a number from 0 to 100"); empty once an ask is taken
     Q_PROPERTY(QString stretchesProblem READ stretchesProblem NOTIFY
                    stretchesProblemChanged)

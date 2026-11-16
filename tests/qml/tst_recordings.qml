@@ -3286,6 +3286,12 @@ profile  raw
                   "the defaults find the two again")
     }
 
+    // The name the Stretches panel gives a rule: core's refusal and the panel's own
+    // words say the rule by it
+    function fieldName(page, key) {
+        return find(page, "stretchesPanel").fields.find(f => f.key === key).name
+    }
+
     // A refused level says why under the fields and leaves the earlier answer;
     // text that is no number is said at once, with no ask
     function test_aRefusedLevelSaysWhyAndLeavesTheListAlone() {
@@ -3299,7 +3305,7 @@ profile  raw
         verify(!problem.visible, "no words before a refusal")
         find(page, "rule_pullLevel").text = "150"
         find(page, "stretchesApply").clicked()
-        compare(problem.text, "Pull level must be a number from 0 to 100")
+        compare(problem.text, fieldName(page, "pullLevel") + " must be a number from 0 to 100")
         verify(problem.visible)
         compare(page.stretchesOf("pull").length, 2, "the earlier answer stands")
         compare(page.stretchRules.pullLevel, undefined, "and nothing was kept")
@@ -3320,10 +3326,11 @@ profile  raw
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
         compare(page.stretchesOf("pull").length, 2, "the defaults found them")
         verify(!page.stretchFailed, "not a failed read")
-        compare(page.rulesProblem, "Pull level must be a number from 0 to 100")
+        compare(page.rulesProblem, fieldName(page, "pullLevel") + " must be a number from 0 to 100")
         find(page, "jumpStretches").clicked()
         verify(waitForPolish(page.Window.window), "laid out")
-        compare(find(page, "stretchesProblem").text, "Pull level must be a number from 0 to 100")
+        compare(find(page, "stretchesProblem").text,
+                fieldName(page, "pullLevel") + " must be a number from 0 to 100")
         setStoredRules("not json")
         compare(page.readRules("not json").pullLevel, undefined, "damaged text is no levels")
     }
@@ -4412,6 +4419,24 @@ profile  raw
                 + "2 condition events were" + lost)
         panel.info = { conditionEventsLost: 0 }
         verify(!line.visible, "no loss, no line")
+    }
+
+    // A recording whose every condition event was lost has no entry to list,
+    // and its panel still says the loss
+    function test_aRecordingWhoseConditionEventsAreAllLostSaysSo() {
+        const row = { title: "2026-11-13 09:00:00 · All lost", uri: "replay://x?profile=obd2",
+                      folder: Harness.recordingFixtures + "/conditions-all-lost", source: "", profile: "obd2" }
+        const page = createPage()
+        page.recordings = [row]
+        openRow(page, row)
+        compare(page.conditionList.length, 0, "no entry survived")
+        const button = find(page, "jumpConditions")
+        verify(button.visible, "the loss is offered")
+        button.clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        const line = find(page, "conditionsCut")
+        verify(line.visible, "the panel says the loss")
+        verify(line.text.indexOf("3 condition events were lost") === 0, line.text)
     }
 
     // A recording with no conditions offers no panel

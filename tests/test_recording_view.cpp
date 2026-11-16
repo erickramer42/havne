@@ -1234,7 +1234,7 @@ TEST(RecordingViewTest, AStretchesRuleOutOfRangeIsRefusedWithWords)
     // Not open: bad rules are still named, good ones leave no words
     EXPECT_EQ(v.stretches(true, false, rule("pullLevel", 101)), 0);
     EXPECT_EQ(v.stretchesProblem(),
-              QStringLiteral("Pull level must be a number from 0 to 100"));
+              QStringLiteral("Pull throttle must be a number from 0 to 100"));
     EXPECT_EQ(v.stretches(true, false, rule("pullLevel", 90)), 0);
     EXPECT_EQ(v.stretchesProblem(), QString());
     EXPECT_EQ(changes, 2);
@@ -1251,22 +1251,22 @@ TEST(RecordingViewTest, AStretchesRuleOutOfRangeIsRefusedWithWords)
         QVariant value;
         const char* words;
     } refused[] = {
-        {"pullLevel", 100.5, "Pull level must be a number from 0 to 100"},
-        {"pullLevel", -1, "Pull level must be a number from 0 to 100"},
+        {"pullLevel", 100.5, "Pull throttle must be a number from 0 to 100"},
+        {"pullLevel", -1, "Pull throttle must be a number from 0 to 100"},
         {"pullLoadLevel", nan,
-         "Pull load level must be a number from 0 to 100"},
+         "Pull load, with no throttle must be a number from 0 to 100"},
         {"cruiseThrottleBand", 101,
-         "Cruise throttle band must be a number from 0 to 100"},
-        {"pullHoldS", 3600.5, "Pull hold must be a number from 0 to 3600 s"},
-        {"pullGapS", inf, "Pull gap must be a number from 0 to 3600 s"},
-        {"cruiseHoldS", -0.1, "Cruise hold must be a number from 0 to 3600 s"},
-        {"pullRise", -1, "Pull rise must be a number, 0 or more"},
-        {"pullRise", inf, "Pull rise must be a number, 0 or more"},
-        {"pullGain", 1000.5, "Pull gain must be a number from 0 to 1000 km/h"},
+         "Throttle within must be a number from 0 to 100"},
+        {"pullHoldS", 3600.5, "Pull at least must be a number from 0 to 3600 s"},
+        {"pullGapS", inf, "A dip shorter than must be a number from 0 to 3600 s"},
+        {"cruiseHoldS", -0.1, "Cruise at least must be a number from 0 to 3600 s"},
+        {"pullRise", -1, "Engine speed rises must be a number, 0 or more"},
+        {"pullRise", inf, "Engine speed rises must be a number, 0 or more"},
+        {"pullGain", 1000.5, "Speed gains, no rpm must be a number from 0 to 1000 km/h"},
         {"cruiseSpeedBand", QStringLiteral("wide"),
-         "Cruise speed band must be a number from 0 to 1000 km/h"},
+         "Speed within must be a number from 0 to 1000 km/h"},
         {"cruiseFloor", true,
-         "Cruise floor must be a number from 0 to 1000 km/h"},
+         "Cruise above must be a number from 0 to 1000 km/h"},
         {"pullSpeed", 1, "'pullSpeed' isn't a stretch rule"},
     };
     changes = 0;
@@ -1298,7 +1298,7 @@ TEST(RecordingViewTest, AStretchesRuleOutOfRangeIsRefusedWithWords)
     EXPECT_EQ(v.stretches(true, false, rule("cruiseFloor", 622)), 0);
     EXPECT_EQ(
         v.stretchesProblem(),
-        QStringLiteral("Cruise floor must be a number from 0 to 621 mph"));
+        QStringLiteral("Cruise above must be a number from 0 to 621 mph"));
     v.setUnitSystem(ECUIO_UNITS_METRIC);
 
     // A refused ask leaves the one before it to answer

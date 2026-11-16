@@ -26,7 +26,8 @@ Flow {
     property bool canNextCruise: false
     property bool bandsShown: true
     property bool stretchesOpen: false
-    // The Conditions panel's switch, shown for a recording with entries
+    // The Conditions panel's switch, shown for a recording with entries or
+    // with condition events lost (the panel says the loss)
     property bool conditionsShown: false
     property bool conditionsOpen: false
     signal jumpRequested(string kind, int direction)

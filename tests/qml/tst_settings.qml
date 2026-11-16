@@ -4395,6 +4395,32 @@ TestCase {
         compare(page.picks, [own])
     }
 
+    // The last signal's Remove of a plugin with several variants asks as
+    // well, and drops that variant alone once answered
+    function test_theLastSignalsRemoveAsksWhereThePluginHasSeveralVariants() {
+        const page = createPage()
+        press(page, "vehicleNew")
+        typeSignal(page, "Trans Temp", "1E1C", "16")
+        press(page, "formSave")
+        const own = page.pickedVehicle.own
+        const url = Harness.writeScratchFile("second.json", signalFileText("Second", "D105"))
+        verify(page.importFile(url))
+        verify(page.keepPending(page.ownPlace.plugin.sha256, "second"))
+        compare(page.ownPlace.plugin.variants.length, 2, "a second variant")
+        press(page, "ownRemove_0")
+        compare(page.pickedVehicle.own, own, "asked first, nothing removed")
+        const question = find(page, "ownConfirm")
+        verify(question.words !== "", "asked under the own signals")
+        verify(find(question, "signalsConfirmText").text.startsWith("Remove the variant "),
+               find(question, "signalsConfirmText").text)
+        find(question, "signalsConfirmCancel").clicked()
+        compare(page.pickedVehicle.own, own, "Cancel keeps it")
+        press(page, "ownRemove_0")
+        find(find(page, "ownConfirm"), "signalsConfirmRemove").clicked()
+        compare(page.pickedVehicle.own, "", "the variant went once asked")
+        compare(Harness.storedPlugins().length, 1, "the plugin stayed with its other variant")
+    }
+
     function test_theFormShowsTheLoadersWords() {
         const page = createPage()
         press(page, "vehicleNew")
