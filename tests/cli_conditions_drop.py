@@ -51,20 +51,21 @@ STALL_MAX_S = 25.0
 STILL_S = 0.5
 POLL_S = 0.05
 FILL_BYTES = 2 * (32 * 1024 + 256)
-# More than the kernel holds for the reader on any platform (a page of
-# pipe on Linux, 4 KiB socket buffers on macOS, Windows' small default):
-# a stall seen before the child's writes blocked is covered
-HELD_MAX_BYTES = 16 * 1024
 LEAST_COND_BYTES = 60
 PAST_FULL = 3
 LEVELS = 64
+# A long key (the limit is 31 bytes) makes each cond line longer, so fewer
+# events fill the pipe and the ring: the idle gives the recording about 800
+# events from 17 s on, whatever the machine, and the fill must stay well
+# under that
+KEY_PREFIX = "idle_level_at_rpm_threshold_"
 
 
 def condition_file(folder):
     conditions = []
     for k in range(LEVELS):
         conditions.append({
-            "key": "idle_%02d" % k,
+            "key": KEY_PREFIX + "%02d" % k,
             "name": "Idle %02d" % k,
             "when": {"signal": ["id:1001"], "unit": "RPM",
                      "above": 1405.875 + 0.75 * k},
@@ -120,9 +121,10 @@ def stall(fd, root, stall_us, cond_bytes):
         now = held_bytes(fd)
         if now != held:
             held, still_since = now, time.monotonic()
-    # Cond lines alone, each at least cond_bytes, outweigh the kernel's
-    # buffer and the ring, so the events after them are dropped lines
-    full = -(-(HELD_MAX_BYTES + FILL_BYTES) // cond_bytes)
+    # Cond lines alone, each at least cond_bytes, outweigh the bytes the
+    # kernel holds (steady for STILL_S: the child's writes are blocked) and
+    # the ring, so the events after them are dropped lines
+    full = -(-(held + FILL_BYTES) // cond_bytes)
     while True:
         folders = os.listdir(root)
         after = 0
@@ -133,9 +135,12 @@ def stall(fd, root, stall_us, cond_bytes):
         if after >= full + PAST_FULL:
             return full, held, ""
         if time.monotonic() > deadline:
+            spent = time.monotonic() - begun
             return full, held, (f"{after} events recorded from "
                                 f"{stall_us / 1e6:.1f} s, {full + PAST_FULL} "
-                                f"needed")
+                                f"needed, in {spent:.1f} s of waiting "
+                                f"({after / spent:.0f} events a second), "
+                                f"cond lines of {cond_bytes} B")
         time.sleep(POLL_S)
 
 
