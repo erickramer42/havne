@@ -363,8 +363,8 @@ Signals beyond the built-in profiles come as **plugins**: a package someone made
 ## The Activity page, Settings and developer mode
 
 **Activity** has the activity log and, in its **Frames** view, the raw
-frames, filtered by ID, mask, length and time and exported as CSV with
-the car's identity left out. It opens from the status in the top bar, on
+frames, filtered by ID, data bytes, length, time, direction and flag,
+and exported as CSV with the car's identity left out. It opens from the status in the top bar, on
 a phone from the Activity row at the end of Settings' list, and from a
 failed connect's **Show activity**.
 
