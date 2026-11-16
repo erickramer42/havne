@@ -4414,6 +4414,24 @@ profile  raw
         verify(!line.visible, "no loss, no line")
     }
 
+    // A recording whose every condition event was lost has no entry to list,
+    // and its panel still says the loss
+    function test_aRecordingWhoseConditionEventsAreAllLostSaysSo() {
+        const row = { title: "2026-11-13 09:00:00 · All lost", uri: "replay://x?profile=obd2",
+                      folder: Harness.recordingFixtures + "/conditions-all-lost", source: "", profile: "obd2" }
+        const page = createPage()
+        page.recordings = [row]
+        openRow(page, row)
+        compare(page.conditionList.length, 0, "no entry survived")
+        const button = find(page, "jumpConditions")
+        verify(button.visible, "the loss is offered")
+        button.clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        const line = find(page, "conditionsCut")
+        verify(line.visible, "the panel says the loss")
+        verify(line.text.indexOf("3 condition events were lost") === 0, line.text)
+    }
+
     // A recording with no conditions offers no panel
     function test_aRecordingWithoutConditionsHasNoConditionsButton() {
         const page = openFindings()
