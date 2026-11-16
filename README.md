@@ -137,7 +137,7 @@ v0.8.0, conditions and alerts, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.9.0-v0.11.0 | The whole car through plugins; discovery of the whole bus; the scan tool |
+| v0.9.0-v0.11.0 | The whole car through plugins, then the conversation tier behind safety gates; discovery of the whole bus; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known issues and the roadmap; [CHANGELOG.md](CHANGELOG.md) what each release changed.
