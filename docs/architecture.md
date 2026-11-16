@@ -436,10 +436,10 @@ converts a unit or picks a precision: core hands over final display
 values. Each part links to the doc that holds its detail.
 
 - **The bridge** (`SessionBridge`, `app/sessionbridge.h`) sits between
-  core and QML. Two of its functions run on the worker thread: the frame
+  core and QML. Its callbacks run on the worker thread: the frame
   callback touches only atomics and posts a copy of the frame, and the
-  values callback stages each value under one short lock, which the
-  100 ms tick swaps out. Everything else runs on the GUI thread. It
+  values and conditions callbacks stage what they get under a short
+  lock, which the 100 ms tick swaps out. Everything else runs on the GUI thread. It
   links QtCore, Gui and Network (no QML), so `test_bridge` exercises it
   headless, with the stores beside it (`app/signalstore.h`,
   `app/pluginstore.h`). The bounds and the coalescing:
@@ -454,7 +454,8 @@ values. Each part links to the doc that holds its detail.
   registered in `app/bridgesingleton.h` so the bridge stays QtCore-only
   and qmllint checks every binding ([development.md](development.md#everyday-tools)).
   It exposes a frame model (the newest 10k frames), a signal model
-  (value, `hasValue`, `ageMs`, `decimals`, a 360-point history), the unit
+  (value, `hasValue`, `ageMs`, `decimals`, and a history of each
+  window's lowest, highest and newest values for the charts), the unit
   system, device discovery and the link state ([Link health](#link-health)).
   A value never received shows "—", never a made-up 0, and an old one
   dims ([user-guide.md](user-guide.md#read-live-values)).
@@ -495,9 +496,11 @@ values. Each part links to the doc that holds its detail.
   name, or an ini file under `HAVNE_SETTINGS_DIR`
   ([development.md](development.md#everyday-tools)). A named vehicle is
   recognized by a salted hash of its VIN
-  ([ADR-0027](adr/0027-vehicle-profiles.md)); its signal files and
-  plugins are copies kept by their SHA-256
-  ([signal-files.md](signal-files.md), [ADR-0064](adr/0064-one-store.md)).
+  ([ADR-0027](adr/0027-vehicle-profiles.md)) and names the plugin
+  variant picked for it. Every import (a plugin, a signal file, an OBDb
+  set) is kept as a plugin in the app's one store, a copy named by its
+  SHA-256 ([plugins/README.md](../plugins/README.md#in-the-app),
+  [ADR-0064](adr/0064-one-store.md)).
 - **On a phone,** a session keeps running in the background
   ([mobile-build.md](mobile-build.md#the-phone-in-the-background),
   [ADR-0029](adr/0029-android-background-sessions.md)), and the phone's
