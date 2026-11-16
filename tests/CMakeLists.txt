@@ -231,6 +231,9 @@ if(Python3_Interpreter_FOUND)
     # scripts/verify_scope.py, which steps verify.sh --changed takes
     add_test(NAME VerifyScopeTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/verify_scope.py selftest)
+    # scripts/docs_only.py, which diffs CI runs and the release gate takes as docs alone
+    add_test(NAME DocsOnlyTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/docs_only.py selftest)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
