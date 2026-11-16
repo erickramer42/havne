@@ -1569,6 +1569,12 @@ Page {
         jumpKind = kind
         jumpIndex = i
     }
+    // What the row says for no pull: a recording with neither a throttle nor
+    // an engine-load signal has nothing a pull is judged by, whatever the
+    // levels, and the row says so
+    readonly property string noPullText: recording.pullsLackSignals
+        ? qsTr("No pull found (no throttle or load signal)")
+        : qsTr("No pull found")
     // The Jump row's line: where the last jump went while the cursor is
     // still at its start, else how many of each were found
     readonly property string jumpStatus: {
@@ -1583,7 +1589,7 @@ Page {
                        .arg(jumpIndex + 1).arg(list.length).arg(timeText(at.fromMs, true))
         const pulls = stretchesOf("pull").length
         const cruises = stretchesOf("cruise").length
-        return (pulls === 0 ? qsTr("No pull found")
+        return (pulls === 0 ? noPullText
                             : pulls === 1 ? qsTr("1 pull") : qsTr("%1 pulls").arg(pulls)) + " · "
                + (cruises === 0 ? qsTr("No cruise found")
                                 : cruises === 1 ? qsTr("1 cruise") : qsTr("%1 cruises").arg(cruises))

@@ -1101,6 +1101,43 @@ TEST(RecordingViewTest, AStretchesAskOnAChangedFileSaysItFailed)
     EXPECT_TRUE(v.stale());
 }
 
+// A recording holding neither a throttle nor an engine-load signal has no
+// pull to find whatever the levels: the page says so in the Jump row
+TEST(RecordingViewTest, PullsLackSignalsWhenNeitherThrottleNorLoadIsRecorded)
+{
+    RecordingView v;
+    EXPECT_FALSE(v.pullsLackSignals()) << "not open";
+    v.open(fixture("pull-twice"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_FALSE(v.pullsLackSignals()) << "a throttle";
+
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    v.open(copiedFixture(dir, "pull-twice", [](QByteArray& line) {
+        line.replace("Throttle", "Engine Load");
+        return true;
+    }));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_FALSE(v.pullsLackSignals()) << "an engine load alone is enough";
+
+    QTemporaryDir bare;
+    ASSERT_TRUE(bare.isValid());
+    v.open(copiedFixture(bare, "pull-twice", [](QByteArray& line) {
+        return !line.contains(",Throttle,") &&
+               !line.startsWith("signal  Throttle,");
+    }));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_TRUE(v.pullsLackSignals());
+    EXPECT_EQ(found(v, true, false, {}), 0) << "and so it finds no pull";
+    EXPECT_EQ(found(v, false, true, {}), 0);
+
+    v.close();
+    EXPECT_FALSE(v.pullsLackSignals()) << "closed";
+}
+
 // Each level a page sets reaches core's rule of that name: pull-twice
 // (two pulls, a stab that climbs 180 rpm, a part-throttle rise at 45 %,
 // pulls 7 s and 4 s long at 96 % and 97 %, a 925 ms lift), copies of it

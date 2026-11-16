@@ -95,6 +95,10 @@ class RecordingView : public QObject
     // Whether the folder holds a frames.csv: a CSV import holds values
     // alone, so it has no frames to check, decode or replay
     Q_PROPERTY(bool hasFrames READ hasFrames NOTIFY stateChanged)
+    // Open, and core finds neither a throttle nor an engine-load signal
+    // (ecuio_recording_role_signal): a pull has nothing to be judged by,
+    // so a search finds none whatever the levels
+    Q_PROPERTY(bool pullsLackSignals READ pullsLackSignals NOTIFY stateChanged)
     // A health report being written (saveHealthReport), until its thread
     // ends, whether or not the viewer closed meanwhile
     Q_PROPERTY(bool reporting READ reporting NOTIFY reportingChanged)
@@ -144,6 +148,7 @@ public:
     QString recordedProfile() const { return m_recordedProfile; }
     bool ownSignalFile() const { return m_ownSignalFile; }
     bool hasFrames() const { return m_hasFrames; }
+    bool pullsLackSignals() const;
     bool reporting() const { return m_reporting; }
     QVariantMap stretchDefaults() const;
     QVariantMap stretchRuleNames() const;

@@ -3257,6 +3257,20 @@ profile  raw
         compare(status.text, "2 pulls · No cruise found")
     }
 
+    // A recording with neither a throttle nor an engine-load signal has no
+    // pull to find at any level, and the Jump row says that, not just "No pull
+    // found" (the findings fixture holds an engine speed alone)
+    function test_theJumpRowSaysWhyARecordingWithNoThrottleOrLoadHasNoPull() {
+        const page = createPage()
+        page.recordings = [findingsRow]
+        openRow(page, findingsRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        verify(page.recording.pullsLackSignals, "core finds no throttle or load")
+        compare(page.stretchesOf("pull").length, 0)
+        compare(find(page, "jumpStatus").text,
+                "No pull found (no throttle or load signal) · No cruise found")
+    }
+
     // The Stretches panel asks again with its levels, shows core's defaults in
     // its fields, and goes back to them
     function test_theStretchesPanelReasksWithItsLevels() {
