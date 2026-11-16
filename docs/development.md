@@ -557,6 +557,23 @@ instance's preferences in an ini file under that folder instead, so a
 scripted run neither reads nor changes the user's; `test_qml` keeps
 its own in a scratch folder the same way.
 
+The preferences also keep the look, the last address that connected,
+the splitters' shares and each device's versions as last seen at a
+connect (shown on its row in Settings, since the list opens no
+adapter). The vehicles are one JSON document among them.
+
+**Live's chart:** each trace's color is keyed to its list row, so the
+row's swatch is the legend and a trace keeps its color when another
+signal is unsubscribed. The ticks choose what's plotted and nothing
+else. Each trace scales on its own, so its value is printed at its
+right-hand end; its range is at least a few displayed digits, so a
+one-count step stays small, and a gap longer than the stale threshold
+breaks the trace instead of drawing a ramp. The layout is arithmetic in
+the `ChartLayout` singleton, which the tests run with synthetic series;
+the Canvas only strokes what it returns. A Canvas paints an image at its
+own size, so this one is sized up by the zoom and scaled back down,
+which keeps it as sharp as the rest.
+
 **QML lint:** run qmllint over the rsp the app build writes, alone:
 `C:/Qt/6.12.0/msvc2022_64/bin/qmllint.exe @build/app/.rcc/qmllint/app_ui.rsp --json lint.json`
 (it lists every file of the module by its absolute path; build the
