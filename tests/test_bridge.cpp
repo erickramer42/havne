@@ -626,6 +626,7 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     vx.protocol_id = 6;
     vx.baud = 500000;
     vx.channel_count = 2;
+    vx.module_count = 2;
     vx.rx_ids[0] = 0x7E8;
     vx.tx_ids[0] = 0x7E0;
     vx.rx_ids[1] = 0x7E9;
@@ -642,6 +643,20 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
               "battery 12.6 V; firmware 1.2.3, DLL 4.5, API 04.04");
     EXPECT_EQ(SessionBridge::versionsText(vx).toStdString(),
               "firmware 1.2.3, DLL 4.5, API 04.04");
+
+    /* More modules than the info lists itself: its four, and how many more */
+    ecuio_session_info_t car = vx;
+    car.module_count = 6;
+    car.channel_count = ECUIO_SESSION_INFO_MAX_CHANNELS;
+    car.rx_ids[2] = 0x7EA;
+    car.tx_ids[2] = 0x7E2;
+    car.rx_ids[3] = 0x7EB;
+    car.tx_ids[3] = 0x7E3;
+    EXPECT_EQ(SessionBridge::sessionInfoText(car).toStdString(),
+              "Session: x86 DLL, through the surrogate; ISO 15765 at 500000 "
+              "baud; profile obd2, channels 0x7E8/0x7E0, 0x7E9/0x7E1, "
+              "0x7EA/0x7E2, 0x7EB/0x7E3 and 2 more (rx/tx); "
+              "battery 12.6 V; firmware 1.2.3, DLL 4.5, API 04.04");
     EXPECT_TRUE(SessionBridge::versionsText(mock).isEmpty());
 
     ecuio_session_info_t bare{};
@@ -651,6 +666,7 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     bare.baud = 250000;
     bare.connect_flags = 0x100;
     bare.channel_count = 1;
+    bare.module_count = 1;
     bare.rx_ids[0] = 0x18DAF110;
     bare.tx_ids[0] = 0x18DA10F1;
     qstrncpy(bare.profile, "raw", sizeof(bare.profile));
@@ -666,6 +682,7 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     elm.protocol_id = 6;
     elm.baud = 500000;
     elm.channel_count = 1;
+    elm.module_count = 1;
     elm.rx_ids[0] = 0x7E8;
     elm.tx_ids[0] = 0x7E0;
     elm.flags = ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_VERSIONS;
@@ -709,12 +726,14 @@ TEST(BridgeTest, SessionInfoTextNamesTheAdapter)
     EXPECT_TRUE(SessionBridge::versionsText(can).isEmpty());
     can.baud = 500000;
     can.channel_count = 2;
+    can.module_count = 2;
     qstrncpy(can.profile, "obd2", sizeof(can.profile));
     EXPECT_EQ(SessionBridge::sessionInfoText(can).toStdString(),
               "Session: SocketCAN, a CAN controller at 500000 bit/s, "
               "requesting on 2 channels; profile obd2");
     can.baud = 0;
     can.channel_count = 1;
+    can.module_count = 1;
     qstrncpy(can.profile, "user.sim-car-own", sizeof(can.profile));
     EXPECT_EQ(SessionBridge::sessionInfoText(can).toStdString(),
               "Session: SocketCAN, a virtual CAN bus, requesting on 1 "

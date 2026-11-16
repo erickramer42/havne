@@ -1281,19 +1281,27 @@ TEST(PluginWrapTest, APutThePluginCantHoldSuggestsAPluginOfItsOwn)
     const std::string advice = "; the file can be a plugin of its own";
 
     /* One ECU past what a session reads */
-    const std::string full = ok(wrap(
-        file("Full", "S",
-             R"({"id": "e1", "rx": "7E8"}, {"id": "e2", "rx": "7E9"}, )"
-             R"({"id": "e3", "rx": "7EA"}, {"id": "e4", "rx": "7EB"})",
-             sig("oil", "F40D", "e1") + ", " + sig("a2", "F40E", "e2") + ", " +
-                 sig("a3", "F40F", "e3") + ", " + sig("a4", "F410", "e4"))));
-    const std::string fifth =
+    std::string ecus;
+    std::string signals;
+    for (unsigned i = 1; i <= ECUIO_MAX_CHANNELS; ++i) {
+        char ecu[80];
+        std::snprintf(ecu, sizeof ecu,
+                      "%s{\"id\": \"e%u\", \"rx\": \"%03X\", \"tx\": \"%03X\"}",
+                      i > 1 ? ", " : "", i, 0x700u + i, 0x600u + i);
+        ecus += ecu;
+        char did[8];
+        std::snprintf(did, sizeof did, "%04X", 0xF400u + i);
+        signals += std::string(i > 1 ? ", " : "") +
+                   sig("a" + std::to_string(i), did, "e" + std::to_string(i));
+    }
+    const std::string full = ok(wrap(file("Full", "S", ecus, signals)));
+    const std::string past =
         refused(put(full, "v",
-                    file("V", "S", R"({"id": "e5", "rx": "7EC"})",
-                         sig("egt", "F40E", "e5"))));
-    EXPECT_EQ(fifth, "ecu 'e5' is past the 4 ECUs one session reads, the "
-                     "base's counted" +
-                         advice);
+                    file("V", "S", R"({"id": "e33", "rx": "7EC"})",
+                         sig("egt", "F40E", "e33"))));
+    EXPECT_EQ(past, "ecu 'e33' is past the 32 ECUs one session reads, the "
+                    "base's counted" +
+                        advice);
 
     /* Two ID widths */
     const std::string wide =

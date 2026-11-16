@@ -639,6 +639,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
      * taken, so a refused attach leaves it ready for the next try */
     const std::shared_ptr<ecuio_record_link> link = session->record_link;
     std::vector<def_entry> defs;
+    std::vector<uint32_t> rx_ids; /* each module's reply ID */
     std::string header;
     size_t conditions_at = 0;
     int32_t link_state = ECUIO_OK;
@@ -658,6 +659,7 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
     std::chrono::system_clock::time_point start_wall{};
     try {
         const ecuio_signal_set_t* set = session->active_signal_set;
+        rx_ids = session->module_rx; /* fixed since create */
         header = std::string(ecuio_recording_rows::kFormat3) + "\n";
         for (uint32_t i = 0;
              set != nullptr && set->defs != nullptr && i < set->count; ++i) {
@@ -760,7 +762,9 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
     std::shared_ptr<const ecuio_condition_record> conditions;
     uint32_t generation = 0;
 
-    /* The recorder takes what was made, under the link's mutex */
+    /* The recorder takes what was made, under the link's mutex. Its one
+     * allocation, the header's text joined, comes before any change, so a
+     * throw leaves the recorder ready for the next try. */
     const auto commit = [&] {
         if (conditions != nullptr) {
             char line[kConditionsLineMax];
@@ -776,6 +780,19 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
             if (recorder->armed) {
                 armed_core.insert(armed_conditions_at, line, len);
             }
+        }
+        if (!recorder->armed) {
+            static const char kColumns[] =
+                "columns  local time, seconds since the recording started "
+                "(host_us / 1e6 in the CSV files), kind, text\n\n";
+            std::lock_guard<std::mutex> n(recorder->note_m);
+            /* The caller's lines open() queued, then the columns */
+            item& begin = recorder->items.front();
+            header.reserve(header.size() + begin.text.size() + sizeof kColumns);
+            header += begin.text;
+            header += kColumns;
+            begin.text.swap(header);
+            begin.bytes = std::move(recorder->signals_json);
         }
         if (recorder->armed) {
             /* Room for each state was kept before the lock, so these sizes
@@ -804,23 +821,9 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         }
         recorder->conditions = std::move(conditions);
         recorder->conditions_generation = generation;
-        if (!recorder->armed) {
-            std::lock_guard<std::mutex> n(recorder->note_m);
-            /* The caller's lines open() queued, then the columns */
-            item& begin = recorder->items.front();
-            begin.bytes = std::move(recorder->signals_json);
-            begin.text =
-                header + begin.text +
-                "columns  local time, seconds since the recording started "
-                "(host_us / 1e6 in the CSV files), kind, text\n\n";
-        }
         recorder->defs = std::move(defs);
-        recorder->channels =
-            (std::min)(session->info.channel_count,
-                       uint32_t{ECUIO_SESSION_INFO_MAX_CHANNELS});
-        for (uint32_t i = 0; i < recorder->channels; ++i) {
-            recorder->rx_ids[i] = session->info.rx_ids[i];
-        }
+        recorder->rx_ids.swap(rx_ids);
+        recorder->channels = static_cast<uint32_t>(recorder->rx_ids.size());
         recorder->link = link;
         recorder->zero_us = zero_us;
         recorder->slept_at_attach = slept_at_attach;
@@ -865,7 +868,11 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
         if (const auto hook = g_before_record_attach.load()) {
             hook(g_before_record_attach_user.load());
         }
-        commit();
+        try {
+            commit();
+        } catch (...) {
+            return ECUIO_ERR_OUT_OF_MEMORY;
+        }
         link->zero_us.store(zero_us, std::memory_order_relaxed);
         link->active.store(recorder, std::memory_order_release);
     }

@@ -115,7 +115,15 @@ typedef char abi_info_text_check[(offsetof(ecuio_session_info_t, firmware_versio
 typedef char abi_info_profile_check[(offsetof(ecuio_session_info_t, profile) == 304) ? 1 : -1];
 typedef char abi_info_replay_check[(offsetof(ecuio_session_info_t, replay_frames) == 368) ? 1 : -1];
 typedef char abi_info_torn_check[(offsetof(ecuio_session_info_t, replay_rows_torn) == 380) ? 1 : -1];
-typedef char abi_info_reserved_check[(offsetof(ecuio_session_info_t, reserved) == 384) ? 1 : -1];
+typedef char abi_info_modules_check[(offsetof(ecuio_session_info_t, module_count) == 384) ? 1 : -1];
+typedef char abi_info_reserved_check[(offsetof(ecuio_session_info_t, reserved) == 388) ? 1 : -1];
+typedef char abi_info_listed_check[(ECUIO_SESSION_INFO_MAX_CHANNELS == 4) ? 1 : -1];
+typedef char abi_channels_check[(ECUIO_MAX_CHANNELS == 32) ? 1 : -1];
+typedef char abi_decl_size_check[(sizeof(ecuio_channel_decl_t) == 16) ? 1 : -1];
+typedef char abi_decl_tx_check[(offsetof(ecuio_channel_decl_t, tx_id) == 4) ? 1 : -1];
+typedef char abi_decl_flags_check[(offsetof(ecuio_channel_decl_t, flags) == 8) ? 1 : -1];
+typedef char abi_decl_reserved_check[(offsetof(ecuio_channel_decl_t, reserved) == 12) ? 1 : -1];
+typedef char abi_layout_check[(ECUIO_SIGNAL_SET_LAYOUT == 5u) ? 1 : -1];
 typedef char abi_dropped_size_check[(sizeof(ecuio_dropped_request_t) == 8) ? 1 : -1];
 typedef char abi_support_size_check[(sizeof(ecuio_channel_support_t) == 152) ? 1 : -1];
 typedef char abi_support_bitmap_check[(offsetof(ecuio_channel_support_t, pid_bitmap) == 24) ? 1 : -1];
@@ -487,6 +495,8 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_session_get_timing(NULL, NULL, NULL, 0, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_session_get_module(NULL, 0, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ECUIO_VALIDATE_ERR_CHANNEL_RESERVED != -26 ||
         sizeof(ECUIO_TIMING_COLUMNS) < 2u ||
         (ECUIO_SESSION_INFO_REPLAY_FAULTS & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0u ||
         (ECUIO_SESSION_INFO_REQUESTS & ECUIO_SESSION_INFO_REPLAY_FAULTS) != 0u ||
@@ -772,7 +782,7 @@ int main(void)
     if (ecuio_sim_create_unbound(NULL, 0, &sim) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_sim_ask(NULL, 0x7E0u, NULL, 0, ECUIO_SIM_NOW, NULL, 0, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||
-        sim != NULL || ECUIO_SIM_MAX_REPLIES != 10u ||
+        sim != NULL || ECUIO_SIM_MAX_REPLIES != 66u ||
         ECUIO_SIM_REPLY_PENDING != 1u || ECUIO_SIM_REPLY_LATE != 2u ||
         ECUIO_SIM_REPLY_BAD_SEQUENCE != 4u || ECUIO_SIM_REPLY_STALLED != 8u) {
         return 1;

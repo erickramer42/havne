@@ -1198,10 +1198,9 @@ private:
     // What each channel's ECU said it supports, logged once per update
     void pollChannelSupport();
     uint32_t m_channelCount = 0;
-    uint32_t m_supportGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    uint32_t m_supportGeneration[ECUIO_MAX_CHANNELS] = {};
     // Each channel's last report, for the signals their ECUs refused
-    ecuio_channel_support_t m_supportReports[ECUIO_SESSION_INFO_MAX_CHANNELS] =
-        {};
+    ecuio_channel_support_t m_supportReports[ECUIO_MAX_CHANNELS] = {};
     // What each channel's session line last said (cli::session_due's rule)
     struct SessionWritten {
         uint8_t state = 0;
@@ -1210,7 +1209,7 @@ private:
         uint16_t lost = 0;
         bool written = false;
     };
-    SessionWritten m_sessionWritten[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    SessionWritten m_sessionWritten[ECUIO_MAX_CHANNELS] = {};
     QString m_refusedUnnamed;
     // The signals core reports their ECU doesn't support, read into
     // m_unsupportedRead (sized at connect) when a report changes
@@ -1248,23 +1247,23 @@ private:
     void takeVin(const ecuio_channel_identity_t& s);
     void pollReplayEnd();   // the tick: "Replay finished" once, at the end of the file
     void pollSleep();       // the tick: "Asleep for N s" after a sleep
-    uint32_t m_identityGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    uint32_t m_identityGeneration[ECUIO_MAX_CHANNELS] = {};
     // What each channel's ECU reported of its diagnostics (ADR-0037),
     // logged once per completed read
     void pollChannelDiagnostics();
-    uint32_t m_diagnosticsGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    uint32_t m_diagnosticsGeneration[ECUIO_MAX_CHANNELS] = {};
     // A clear asked of each channel, its outcome not yet logged
-    bool m_clearAsked[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    bool m_clearAsked[ECUIO_MAX_CHANNELS] = {};
     // A clear that stopped at the vehicle speed, waiting for the word on
     // a moving vehicle: the generation it ended on, the speed it read
     // (UINT32_MAX: none)
-    bool m_clearWaiting[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    uint32_t m_clearWaitGeneration[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
-    uint32_t m_clearWaitKmh[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    bool m_clearWaiting[ECUIO_MAX_CHANNELS] = {};
+    uint32_t m_clearWaitGeneration[ECUIO_MAX_CHANNELS] = {};
+    uint32_t m_clearWaitKmh[ECUIO_MAX_CHANNELS] = {};
     // The file the last clear saved its reports to, as shown
     QString m_clearSavedTo;
     // The reports the page shows, as last read, and their entries
-    ecuio_channel_diagnostics_t m_diagnosticsShown[ECUIO_SESSION_INFO_MAX_CHANNELS] = {};
+    ecuio_channel_diagnostics_t m_diagnosticsShown[ECUIO_MAX_CHANNELS] = {};
     uint32_t m_diagnosticsShownCount = 0;
     QVariantList m_diagnostics;
     void rebuildDiagnostics();

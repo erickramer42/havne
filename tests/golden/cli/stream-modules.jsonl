@@ -1,0 +1,11 @@
+{"schema": 1, "type": "start"}
+{"backend": "mock", "baud": 0, "channels": [{"rx": "0x7E8", "tx": "0x7E0"}, {"rx": "0x7E9", "tx": "0x7E1"}, {"rx": "0x7EA", "tx": "0x7E2"}, {"rx": "0x7EB", "tx": "0x7E3"}, {"rx": "0x7EC", "tx": "0x7E4"}, {"rx": "0x7ED", "tx": "0x7E5"}], "profile": "uds-generic", "protocol_id": 0, "type": "session"}
+{"ch": 0, "data": "00 00 3C 00 25 3C 00 00 00 3C B8 FE 65 65 A7 30", "flags": 5, "id": "0x18FF0C00", "type": "frame"}
+{"ch": 0, "data": "62 D1 00 01", "flags": 0, "id": "0x7E8", "type": "frame"}
+{"ch": 0, "data": "62 D1 01 01", "flags": 0, "id": "0x7E9", "type": "frame"}
+{"ch": 0, "data": "62 D1 02 01", "flags": 0, "id": "0x7EA", "type": "frame"}
+{"ch": 0, "data": "62 D1 03 01", "flags": 0, "id": "0x7EB", "type": "frame"}
+{"ch": 0, "data": "62 D1 04 01", "flags": 0, "id": "0x7EC", "type": "frame"}
+{"ch": 0, "data": "62 D1 05 01", "flags": 0, "id": "0x7ED", "type": "frame"}
+{"ch": 0, "data": "00 00 3C 00 25 3C 00 00 00 3C B8 FE 65 65 A9 30", "flags": 4, "id": "0xC0", "type": "frame"}
+{"dropped_frames": 0, "dropped_values": 0, "frames": 8, "reason": "count", "type": "end"}

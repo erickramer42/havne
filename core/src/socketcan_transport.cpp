@@ -994,6 +994,11 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
                 return st;
             }
             ecuio_attach_timing(r.engine, r.timing, ECUIO_TIMING_CLOCK_KERNEL);
+            const ecuio_status_t tables = ecuio_session_set_modules(
+                session, r.rx_ids, r.tx_ids, r.chan_count);
+            if (tables != ECUIO_OK) {
+                return tables;
+            }
             r.isotp.reset(new isotp_rx());
             r.isotp->timed = true;
             r.sender.reset(new isotp_tx());
@@ -1033,11 +1038,6 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
             session->transport->impl);
         session->info.protocol_id =
             static_cast<uint32_t>(ECUIO_PT_PROTOCOL_ISO15765);
-        session->info.channel_count = t->chan_count;
-        for (uint32_t c = 0; c < t->chan_count; ++c) {
-            session->info.rx_ids[c] = t->rx_ids[c];
-            session->info.tx_ids[c] = t->tx_ids[c];
-        }
         ecuio_seed_reports(session, t->engine, t->rx_ids, t->chan_count);
     }
     return ECUIO_OK;

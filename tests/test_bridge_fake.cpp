@@ -335,6 +335,36 @@ TEST(BridgeTest, WithoutASessionNoSessionIsNamed)
     EXPECT_FALSE(all.contains(QStringLiteral("returning to the default")));
 }
 
+/* A session of six modules: the session line lists the info's four and
+ * counts the rest, and the modules past them get their ECU lines too */
+TEST(BridgeTest, ASessionOfSixModulesNamesTheRestAndReportsEachOne)
+{
+    SessionBridge bridge;
+    QStringList log;
+    QObject::connect(&bridge, &SessionBridge::logMessage,
+                     [&log](const QString& line) { log << line; });
+    const QString uri =
+        QStringLiteral("j2534://%1?profile=uds-generic&did=1E1C,7E9:D800-D801,"
+                       "7EA:D800-D801,7EB:D800-D801,7EC:D800-D801,"
+                       "7ED:D800-D801&identify=0&diagnose=0")
+            .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
+    ASSERT_TRUE(bridge.connectSession(uri).isEmpty());
+    const QStringList session = log.filter(QStringLiteral("Session: "));
+    ASSERT_EQ(session.size(), 1) << log.join('\n').toStdString();
+    EXPECT_TRUE(session.first().contains(QStringLiteral(
+        "channels 0x7E8/0x7E0, 0x7E9/0x7E1, 0x7EA/0x7E2, 0x7EB/0x7E3 "
+        "and 2 more (rx/tx)")))
+        << session.first().toStdString();
+    ASSERT_TRUE(spinUntil(
+        [&]() {
+            return !log.filter(QStringLiteral("ECU 0x7EC: ")).isEmpty() &&
+                   !log.filter(QStringLiteral("ECU 0x7ED: ")).isEmpty();
+        },
+        10000))
+        << log.join('\n').toStdString();
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 /* A second connect from the same bridge names the session again: what was
  * written is per connect */
 TEST(BridgeTest, AReconnectNamesTheSessionAgain)

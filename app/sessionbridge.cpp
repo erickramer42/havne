@@ -343,8 +343,8 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_channelCount = 0;
     if (haveInfo) {
         emit logMessage(sessionInfoText(info));
-        m_channelCount = std::min<uint32_t>(info.channel_count,
-                                            ECUIO_SESSION_INFO_MAX_CHANNELS);
+        m_channelCount =
+            std::min<uint32_t>(info.module_count, ECUIO_MAX_CHANNELS);
     }
     if (m_pickLinePending) {
         m_pickLinePending = false;

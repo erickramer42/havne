@@ -118,9 +118,10 @@ const char* backend_name(uint32_t backend)
 
 } // namespace
 
-void write_session(Output& out, const ecuio_session_info_t& info)
+void write_session(Output& out, const ecuio_session_t* session,
+                   const ecuio_session_info_t& info)
 {
-    char buf[2048];
+    char buf[4096];
     cli::Line l(buf, sizeof buf);
     l.raw("{\"type\":\"session\"");
     l.key("backend");
@@ -133,19 +134,18 @@ void write_session(Output& out, const ecuio_session_info_t& info)
     l.u64(info.baud);
     l.key("channels");
     l.ch('[');
-    const uint32_t channels =
-        info.channel_count < ECUIO_SESSION_INFO_MAX_CHANNELS
-            ? info.channel_count
-            : ECUIO_SESSION_INFO_MAX_CHANNELS;
+    const uint32_t channels = module_count(info);
     for (uint32_t i = 0; i < channels; ++i) {
+        ecuio_channel_decl_t m{};
+        (void)ecuio_session_get_module(session, i, &m);
         if (i) {
             l.ch(',');
         }
         l.ch('{');
         l.key("rx");
-        l.hex_id(info.rx_ids[i]);
+        l.hex_id(m.rx_id);
         l.key("tx");
-        l.hex_id(info.tx_ids[i]);
+        l.hex_id(m.tx_id);
         l.ch('}');
     }
     l.ch(']');
@@ -363,7 +363,7 @@ void poll_diagnostics(Output& out, ecuio_session_t* session, uint32_t channels,
 // time, and once at the end (final), a timing line for each request whose
 // counts changed since the last; rows is sized before the session starts
 void poll_timing(Output& out, ecuio_session_t* session,
-                 const ecuio_session_info_t& info, cli::TimingSnapshots& snaps,
+                 cli::TimingSnapshots& snaps,
                  std::vector<ecuio_request_timing_t>& rows, bool final)
 {
     ecuio_session_timing_t t;
@@ -382,9 +382,9 @@ void poll_timing(Output& out, ecuio_session_t* session,
         if (!snaps.changed(i, rows[i])) {
             continue;
         }
-        const uint32_t rx = rows[i].channel < ECUIO_SESSION_INFO_MAX_CHANNELS
-                                ? info.rx_ids[rows[i].channel]
-                                : 0;
+        ecuio_channel_decl_t m{}; /* rx 0 for a channel the session lacks */
+        (void)ecuio_session_get_module(session, rows[i].channel, &m);
+        const uint32_t rx = m.rx_id;
         char buf[1024];
         cli::Line l(buf, sizeof buf);
         cli::timing_line(l, t.snapshot_us, rx, rows[i], t.interval_clock);

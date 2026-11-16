@@ -293,6 +293,193 @@ TEST(CoreTest, MockSessionHasOneQuietChannel)
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_session_get_channel_support(nullptr, 0, &support),
               ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(info.module_count, 1u);
+    ecuio_channel_decl_t module{};
+    ASSERT_EQ(ecuio_session_get_module(s, 0, &module), ECUIO_OK);
+    EXPECT_EQ(module.rx_id, 0x7E8u);
+    EXPECT_EQ(module.tx_id, 0x7E0u);
+    EXPECT_EQ(ecuio_session_get_module(s, 1, &module),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    ecuio_session_destroy(s);
+}
+
+/* Out of memory at each of create's allocations in turn, for a session
+ * of one module, one that walks its PIDs and one of six modules: the call
+ * answers OK or OUT_OF_MEMORY, throws nothing, and hands a session back
+ * only with OK, every module in it */
+TEST(CoreTest, OutOfMemoryAnywhereInCreateIsAnsweredNotThrown)
+{
+    const char* const six_modules =
+        "mock://x?profile=uds-generic&did=7E8:D100:u8,7E9:D101:u8,"
+        "7EA:D102:u8,7EB:D103:u8,7EC:D104:u8,7ED:D105:u8";
+    const char* const uris[] = {
+        "mock://demo",
+        "mock://x?profile=obd2",
+        six_modules,
+    };
+    for (const char* uri : uris) {
+        SCOPED_TRACE(uri);
+        ecuio_session_t* s = nullptr;
+        const unsigned long before = news_on_this_thread();
+        ASSERT_EQ(ecuio_session_create(uri, &s), ECUIO_OK)
+            << ecuio_last_error_detail();
+        const unsigned long news = news_on_this_thread() - before;
+        ecuio_session_info_t whole{};
+        ASSERT_EQ(ecuio_session_get_info(s, &whole), ECUIO_OK);
+        ecuio_session_destroy(s);
+        ASSERT_GT(news, 5u);
+        unsigned long refused = 0;
+        for (unsigned long n = 1; n <= news; ++n) {
+            s = nullptr;
+            ecuio_status_t rc = ECUIO_OK;
+            bool threw = false;
+            fail_new_on_this_thread(n);
+            try {
+                rc = ecuio_session_create(uri, &s);
+            } catch (...) {
+                threw = true;
+            }
+            fail_new_on_this_thread(0);
+            ASSERT_FALSE(threw) << "create threw at allocation " << n;
+            if (rc == ECUIO_OK) {
+                ASSERT_NE(s, nullptr) << "at " << n;
+                ecuio_session_info_t info{};
+                EXPECT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+                EXPECT_EQ(info.module_count, whole.module_count) << "at " << n;
+                ecuio_channel_support_t last{};
+                EXPECT_EQ(ecuio_session_get_channel_support(
+                              s, whole.module_count - 1, &last),
+                          ECUIO_OK)
+                    << "at " << n;
+                ecuio_session_destroy(s);
+            } else {
+                ++refused;
+                EXPECT_EQ(rc, ECUIO_ERR_OUT_OF_MEMORY) << "at " << n;
+                EXPECT_EQ(s, nullptr) << "at " << n;
+            }
+        }
+        EXPECT_GT(refused, 0u);
+    }
+}
+
+/* The same over ecuio_profile_register, for a set that declares a
+ * channel: registered or OUT_OF_MEMORY, nothing thrown, and a refused
+ * name isn't in the registry */
+TEST(CoreTest, OutOfMemoryAnywhereInRegisterIsAnsweredNotThrown)
+{
+    const char* const name = "test-register-oom";
+    const ecuio_signal_set_t* set = ecuio_obd2_signal_set();
+    const unsigned long before = news_on_this_thread();
+    ASSERT_EQ(ecuio_profile_register(name, set, nullptr), ECUIO_OK);
+    const unsigned long news = news_on_this_thread() - before;
+    ASSERT_EQ(ecuio_profile_unregister(name), ECUIO_OK);
+    ASSERT_GT(news, 1u) << "the engine's channels, the registry's entry";
+    unsigned long refused = 0;
+    for (unsigned long n = 1; n <= news; ++n) {
+        ecuio_status_t rc = ECUIO_OK;
+        bool threw = false;
+        fail_new_on_this_thread(n);
+        try {
+            rc = ecuio_profile_register(name, set, nullptr);
+        } catch (...) {
+            threw = true;
+        }
+        fail_new_on_this_thread(0);
+        ASSERT_FALSE(threw) << "register threw at allocation " << n;
+        const ecuio_signal_set_t* found = nullptr;
+        if (rc == ECUIO_OK) {
+            EXPECT_EQ(ecuio_profile_lookup(name, &found), ECUIO_OK);
+            EXPECT_EQ(ecuio_profile_unregister(name), ECUIO_OK);
+        } else {
+            ++refused;
+            EXPECT_EQ(rc, ECUIO_ERR_OUT_OF_MEMORY) << "at " << n;
+            EXPECT_EQ(ecuio_profile_lookup(name, &found),
+                      ECUIO_ERR_UNKNOWN_PROFILE)
+                << "at " << n;
+        }
+    }
+    EXPECT_GT(refused, 0u);
+}
+
+/* ADR-0065: the mock lists every module its set declares, past the four
+ * the info holds itself, with a report for each, and answers each one's
+ * DID; the modules are still there after the close */
+TEST(CoreTest, AMockSessionListsEveryModuleItsSetDeclares)
+{
+    ecuio_session_t* s = nullptr;
+    ASSERT_EQ(ecuio_session_create(
+                  "mock://x?profile=uds-generic&did=7E8:D100:u8,7E9:D101:u8,"
+                  "7EA:D102:u8,7EB:D103:u8,7EC:D104:u8,7ED:D105:u8,7EE:D106:u8"
+                  "&diagnose=0",
+                  &s),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+    EXPECT_EQ(info.module_count, 7u);
+    EXPECT_EQ(info.channel_count, uint32_t{ECUIO_SESSION_INFO_MAX_CHANNELS});
+    const auto check = [&] {
+        for (uint32_t c = 0; c < 7; ++c) {
+            ecuio_channel_decl_t m{};
+            ASSERT_EQ(ecuio_session_get_module(s, c, &m), ECUIO_OK) << c;
+            EXPECT_EQ(m.rx_id, 0x7E8u + c);
+            EXPECT_EQ(m.tx_id, 0x7E0u + c);
+            ecuio_channel_support_t support{};
+            ecuio_channel_identity_t identity{};
+            ecuio_channel_diagnostics_t diagnostics{};
+            ASSERT_EQ(ecuio_session_get_channel_support(s, c, &support),
+                      ECUIO_OK);
+            ASSERT_EQ(ecuio_session_get_channel_identity(s, c, &identity),
+                      ECUIO_OK);
+            ASSERT_EQ(ecuio_session_get_channel_diagnostics(s, c, &diagnostics),
+                      ECUIO_OK);
+            EXPECT_EQ(support.rx_id, m.rx_id);
+            EXPECT_EQ(identity.rx_id, m.rx_id);
+            EXPECT_EQ(diagnostics.rx_id, m.rx_id);
+        }
+        ecuio_channel_decl_t past{};
+        EXPECT_EQ(ecuio_session_get_module(s, 7, &past),
+                  ECUIO_ERR_INVALID_ARGUMENT);
+        ecuio_channel_diagnostics_t none{};
+        EXPECT_EQ(ecuio_session_get_channel_diagnostics(s, 7, &none),
+                  ECUIO_ERR_INVALID_ARGUMENT);
+    };
+    ASSERT_NO_FATAL_FAILURE(check());
+
+    /* Each module's DID is answered on its own reply ID */
+    struct Seen {
+        std::mutex m;
+        int frames[7] = {};
+    } seen;
+    ASSERT_EQ(ecuio_register_frame_callback(
+                  s,
+                  [](const ecuio_frame_t* f, void* user) {
+                      auto* got = static_cast<Seen*>(user);
+                      std::lock_guard<std::mutex> lock(got->m);
+                      if (f->arbitration_id >= 0x7E8u &&
+                          f->arbitration_id <= 0x7EEu && f->data_length >= 3 &&
+                          f->data[0] == 0x62 && f->data[1] == 0xD1 &&
+                          f->data[2] == f->arbitration_id - 0x7E8u) {
+                          ++got->frames[f->arbitration_id - 0x7E8u];
+                      }
+                  },
+                  &seen),
+              ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(s), ECUIO_OK);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    bool all = false;
+    while (!all && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        std::lock_guard<std::mutex> lock(seen.m);
+        all = true;
+        for (int n : seen.frames) {
+            all = all && n >= 2;
+        }
+    }
+    EXPECT_TRUE(all) << "two replies from each of the seven modules";
+    ASSERT_EQ(ecuio_session_close(s), ECUIO_OK);
+    ASSERT_NO_FATAL_FAILURE(check());
     ecuio_session_destroy(s);
 }
 
@@ -2860,6 +3047,25 @@ TEST(CoreTest, ProfileRegisterRefusesMoreRequestsThanTheEngineHolds) {
     EXPECT_EQ(v.reserved[1], 0u);
     const ecuio_signal_set_t* got = nullptr;
     EXPECT_EQ(ecuio_profile_lookup("test-requests", &got), ECUIO_ERR_UNKNOWN_PROFILE);
+
+    /* Out of memory while its requests are counted never lets it in */
+    const unsigned long before = news_on_this_thread();
+    ASSERT_EQ(ecuio_profile_register("test-requests", &over, nullptr),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    const unsigned long news = news_on_this_thread() - before;
+    ASSERT_GT(news, 0u) << "the table its requests are counted in";
+    for (unsigned long n = 1; n <= news; ++n) {
+        fail_new_on_this_thread(n);
+        const ecuio_status_t rc =
+            ecuio_profile_register("test-requests", &over, nullptr);
+        fail_new_on_this_thread(0);
+        EXPECT_TRUE(rc == ECUIO_ERR_OUT_OF_MEMORY ||
+                    rc == ECUIO_ERR_INVALID_ARGUMENT)
+            << "at " << n << ": " << rc;
+        EXPECT_EQ(ecuio_profile_lookup("test-requests", &got),
+                  ECUIO_ERR_UNKNOWN_PROFILE)
+            << "at " << n;
+    }
 }
 
 TEST(CoreTest, ProfileBuiltInsCannotBeReplacedOrRemoved) {
@@ -6044,8 +6250,8 @@ void see_frames(const ecuio_frame_t* frame, void* user)
 /* A set that declares another ECU: the mock declares its channel after
  * the engine ECU's, and that ECU answers the supported-PID walk with
  * bitmaps listing no data PID, so a Service 01 signal read there is listed
- * as not sent while the same PID on the engine ECU is sent. A set's
- * channels past ECUIO_MAX_CHANNELS, the engine ECU's first, are left out. */
+ * as not sent while the same PID on the engine ECU is sent. A set whose
+ * ECUs, with the engine ECU's first, pass ECUIO_MAX_CHANNELS is refused. */
 TEST(CoreTest, TheMockDeclaresTheSetsOtherEcusWhichSupportNoPid)
 {
     static const char kTwoEcus[] =
@@ -6129,20 +6335,45 @@ TEST(CoreTest, TheMockDeclaresTheSetsOtherEcusWhichSupportNoPid)
         ecuio_session_destroy(session);
     }
 
-    /* Four other ECUs: the engine ECU's channel and the first three */
-    ASSERT_EQ(ecuio_session_create("mock://a?diagnose=0&profile=uds-generic&"
-                                   "did=7E9:D100,7EA:D100,7EB:D100,7EC:D100",
+    /* As many other ECUs as a set holds: with the engine ECU's channel
+     * they are one too many, said in words; one fewer and each has its
+     * channel after the engine ECU's */
+    const auto others = [](uint32_t n) {
+        std::string uri = "mock://a?diagnose=0&profile=uds-generic&did=";
+        for (uint32_t i = 0; i < n; ++i) {
+            char item[16];
+            std::snprintf(item, sizeof item, "%s%03X:D100", i > 0 ? "," : "",
+                          0x700u + i);
+            uri += item;
+        }
+        return uri;
+    };
+    session = nullptr;
+    EXPECT_EQ(ecuio_session_create(others(ECUIO_MAX_CHANNELS).c_str(),
                                    &session),
-              ECUIO_OK)
+              ECUIO_ERR_BAD_URI);
+    EXPECT_EQ(session, nullptr);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              "the profile declares 32 ECUs and none is the mock's engine "
+              "ECU (0x7E8): with it they are one more than the 32 a session "
+              "reads");
+    const std::string full = others(ECUIO_MAX_CHANNELS - 1);
+    ASSERT_EQ(ecuio_session_create(full.c_str(), &session), ECUIO_OK)
         << ecuio_last_error_detail();
     ASSERT_EQ(ecuio_session_get_info(session, &info), ECUIO_OK);
-    ASSERT_EQ(info.channel_count, ECUIO_MAX_CHANNELS);
-    const uint32_t want[] = {0x7E8u, 0x7E9u, 0x7EAu, 0x7EBu};
+    ASSERT_EQ(info.module_count, uint32_t{ECUIO_MAX_CHANNELS});
+    ASSERT_EQ(info.channel_count, uint32_t{ECUIO_SESSION_INFO_MAX_CHANNELS});
     for (uint32_t c = 0; c < ECUIO_MAX_CHANNELS; ++c) {
-        EXPECT_EQ(info.rx_ids[c], want[c]) << c;
+        const uint32_t want = c == 0 ? 0x7E8u : 0x700u + c - 1;
+        ecuio_channel_decl_t m{};
+        ASSERT_EQ(ecuio_session_get_module(session, c, &m), ECUIO_OK) << c;
+        EXPECT_EQ(m.rx_id, want) << c;
+        if (c < ECUIO_SESSION_INFO_MAX_CHANNELS) {
+            EXPECT_EQ(info.rx_ids[c], want) << c;
+        }
         ecuio_channel_support_t s{};
         ASSERT_EQ(ecuio_session_get_channel_support(session, c, &s), ECUIO_OK);
-        EXPECT_EQ(s.rx_id, want[c]);
+        EXPECT_EQ(s.rx_id, want);
         EXPECT_EQ(s.generation, 0u) << "no PID to walk for";
     }
     ecuio_session_destroy(session);
@@ -7751,7 +7982,8 @@ TEST(CoreTest, TheUnaskedSignalsAreWhatTheFocusParks)
     }
     defs[0].mux_key = 0x410C;
     defs[2].mux_key = 0x410D;
-    static ecuio_channel_decl_t channel[1] = {{ECUIO_OBD2_ECU_ARB_ID, 0x7E0}};
+    static ecuio_channel_decl_t channel[1] = {
+        {ECUIO_OBD2_ECU_ARB_ID, 0x7E0, 0, 0}};
     static ecuio_signal_set_t passive{};
     passive.layout_version = ECUIO_SIGNAL_SET_LAYOUT;
     passive.defs = defs;

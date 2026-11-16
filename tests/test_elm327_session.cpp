@@ -1154,6 +1154,71 @@ TEST_F(Elm327SessionTest, ARecordingHoldsTheLinksTransitionsAndReplyTiming)
     fs::remove_all(root, ec);
 }
 
+/* Five modules beside the engine ECU, each answering a DID of its own */
+struct SixModules {
+    SixModules()
+    {
+        EXPECT_TRUE(fake_ecu::set_module_dids(
+            "7E9:D801=00 11;7EA:D802=00 12;7EB:D803=00 13;"
+            "7EC:D804=00 14;7ED:D805=00 15"));
+    }
+    ~SixModules() { fake_ecu::set_module_dids(nullptr); }
+    SixModules(const SixModules&) = delete;
+    SixModules& operator=(const SixModules&) = delete;
+};
+const char kSixModulesQuery[] =
+    "?profile=uds-generic&did=1E1C,7E9:D801,7EA:D802,7EB:D803,7EC:D804,"
+    "7ED:D805&identify=0&diagnose=0";
+
+/* ADR-0065: a recording's reply timing names the module a row is for,
+ * one past the four the session info lists too */
+TEST_F(Elm327SessionTest, ARecordingsReplyTimingNamesAModulePastTheFourth)
+{
+    SixModules modules;
+    const fs::path root =
+        fs::temp_directory_path() / temp_name("ecuio-elm327-six-modules");
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    Session s;
+    ASSERT_EQ(s.create(uri(kSixModulesQuery)), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const std::string root8 = root.generic_u8string();
+    ecuio_record_options_t o{};
+    o.root_utf8 = root8.c_str();
+    ecuio_recorder_t* rec = nullptr;
+    ASSERT_EQ(ecuio_recorder_open(&o, &rec), ECUIO_OK)
+        << ecuio_last_error_detail();
+    char buf[1024];
+    uint32_t len = 0;
+    ASSERT_EQ(ecuio_recorder_get_folder(rec, buf, sizeof buf, &len), ECUIO_OK);
+    const fs::path folder = fs::u8path(buf);
+    ASSERT_EQ(ecuio_session_record(s.s, rec), ECUIO_OK);
+    s.start();
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            int sixth = 0;
+            for (const Capture::Frame& f : s.cap.frames) {
+                sixth += f.id == 0x7EDu;
+            }
+            return sixth >= 3;
+        },
+        10000))
+        << "three replies from the sixth module";
+    ecuio_session_destroy(s.s);
+    s.s = nullptr;
+    EXPECT_EQ(ecuio_recorder_close(rec, "the test ended"), ECUIO_OK);
+
+    std::ifstream f(folder / "latency.csv", std::ios::binary);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    const std::string latency = ss.str();
+    EXPECT_NE(latency.find(",0x7E8,22 1E 1C,"), std::string::npos) << latency;
+    EXPECT_NE(latency.find(",0x7EC,22 D8 04,"), std::string::npos) << latency;
+    EXPECT_NE(latency.find(",0x7ED,22 D8 05,"), std::string::npos) << latency;
+    fs::remove_all(root, ec);
+}
+
 /* Identification's replies span frames (the VIN's 20 bytes: a First
  * Frame and two Consecutive Frames), are reassembled and reach the
  * identity report; Service 09 carries no count digit, and a 0x22 item's,
@@ -1333,6 +1398,102 @@ TEST_F(Elm327SessionTest, AClearSends04OnlyWithTheEngineStopped)
     fake_ecu::reset_diagnostics();
 }
 
+/* Out of memory at each of create's allocations in turn, for a session
+ * of six modules on the adapter: OK or OUT_OF_MEMORY, nothing thrown,
+ * a session handed back only with OK, every module in it, and no
+ * refused create's wire log left open. Each create
+ * finds the log folder empty: a wire log's open lists it, so logs left
+ * there would move every later allocation's place. */
+TEST_F(Elm327SessionTest, OutOfMemoryAnywhereInCreateIsAnsweredNotThrown)
+{
+    SixModules modules;
+    LogDir logs("oom-create");
+    const auto emptied = [&] {
+        for (const std::string& name : logs.names()) {
+            fs::remove(logs.path() / name);
+        }
+    };
+    const std::string u = uri(kSixModulesQuery);
+    ecuio_session_t* s = nullptr;
+    emptied();
+    const unsigned long before = new_counter::on_this_thread();
+    ASSERT_EQ(ecuio_session_create(u.c_str(), &s), ECUIO_OK)
+        << ecuio_last_error_detail();
+    const unsigned long news = new_counter::on_this_thread() - before;
+    ecuio_session_destroy(s);
+    ASSERT_GT(news, 5u);
+    const uint32_t count = 6; /* SixModules, the engine ECU among them */
+    const unsigned long handles = open_handles();
+    unsigned long refused = 0;
+    for (unsigned long n = 1; n <= news; ++n) {
+        s = nullptr;
+        ecuio_status_t rc = ECUIO_OK;
+        bool threw = false;
+        emptied();
+        new_counter::fail_new(n);
+        try {
+            rc = ecuio_session_create(u.c_str(), &s);
+        } catch (...) {
+            threw = true;
+        }
+        new_counter::fail_new(0);
+        ASSERT_FALSE(threw) << "create threw at allocation " << n;
+        if (rc == ECUIO_OK) {
+            ASSERT_NE(s, nullptr) << "at " << n;
+            ecuio_session_info_t info{};
+            EXPECT_EQ(ecuio_session_get_info(s, &info), ECUIO_OK);
+            EXPECT_EQ(info.module_count, count) << "at " << n;
+            ecuio_channel_support_t last{};
+            EXPECT_EQ(ecuio_session_get_channel_support(s, count - 1, &last),
+                      ECUIO_OK)
+                << "at " << n;
+            ecuio_session_destroy(s);
+        } else {
+            ++refused;
+            EXPECT_EQ(rc, ECUIO_ERR_OUT_OF_MEMORY) << "at " << n;
+            EXPECT_EQ(s, nullptr) << "at " << n;
+        }
+    }
+    EXPECT_GT(refused, 0u);
+    EXPECT_EQ(open_handles(), handles) << "a refused create left a file open";
+}
+
+/* ADR-0065: a clear asked of a module past the fourth reaches the
+ * worker: the module answers no engine speed, so the clear ends there
+ * with nothing cleared */
+TEST_F(Elm327SessionTest, AClearReachesAModulePastTheFourth)
+{
+    SixModules modules;
+    fake_ecu::reset_diagnostics();
+    Session s;
+    ASSERT_EQ(s.create(uri("?profile=uds-generic&did=1E1C,7E9:D801,7EA:D802,"
+                           "7EB:D803,7EC:D804,7ED:D805&identify=0")),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    ecuio_channel_diagnostics_t d{};
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_diagnostics(s.s, 5, &d) ==
+                       ECUIO_OK &&
+                   (d.flags & ECUIO_DIAG_COMPLETE) != 0;
+        },
+        15000));
+    EXPECT_EQ(d.rx_id, 0x7EDu);
+    ASSERT_EQ(ecuio_session_clear_diagnostics(s.s, 5, d.generation), ECUIO_OK);
+    ASSERT_TRUE(wait_for(
+        [&] {
+            return ecuio_session_get_channel_diagnostics(s.s, 5, &d) ==
+                       ECUIO_OK &&
+                   d.clear != ECUIO_CLEAR_NONE &&
+                   (d.flags & ECUIO_DIAG_CLEARING) == 0;
+        },
+        8000));
+    EXPECT_EQ(d.clear, ECUIO_CLEAR_NO_ENGINE_SPEED);
+    EXPECT_EQ(fake_ecu::diagnostics().clears, 0u);
+    fake_ecu::reset_diagnostics();
+}
+
 /* ?diagnose=0: no diagnostics request goes out, Read again included,
  * and the report says none is asked. Diagnostics would take every other
  * turn, so a count of Service 01 requests shows it, whatever the set's
@@ -1451,6 +1612,132 @@ TEST_F(Elm327SessionTest, TwoEcusInOneSessionAnswerEachItsOwn)
                     (f.id == 0x7E9u && f.data == mod))
             << "a reply on 0x" << std::hex << f.id << " of " << std::dec
             << f.data.size() << " bytes";
+    }
+}
+
+/* ADR-0065: a session of more modules than the info lists itself names
+ * each through ecuio_session_get_module, keeps a report for each, reads
+ * each, and a focus finds a signal on a module past the fourth */
+TEST_F(Elm327SessionTest, ASessionOfSixModulesNamesReadsAndFocusesEachOne)
+{
+    SixModules modules;
+    Session s;
+    ASSERT_EQ(s.create(uri(kSixModulesQuery)), ECUIO_OK)
+        << ecuio_last_error_detail();
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(s.s, &info), ECUIO_OK);
+    EXPECT_EQ(info.module_count, 6u);
+    EXPECT_EQ(info.channel_count, uint32_t{ECUIO_SESSION_INFO_MAX_CHANNELS});
+    for (uint32_t c = 0; c < 6; ++c) {
+        ecuio_channel_decl_t m{};
+        m.flags = 7;
+        m.reserved = 7;
+        ASSERT_EQ(ecuio_session_get_module(s.s, c, &m), ECUIO_OK) << c;
+        EXPECT_EQ(m.rx_id, 0x7E8u + c);
+        EXPECT_EQ(m.tx_id, 0x7E0u + c);
+        EXPECT_EQ(m.flags, 0u);
+        EXPECT_EQ(m.reserved, 0u);
+        if (c < ECUIO_SESSION_INFO_MAX_CHANNELS) {
+            EXPECT_EQ(info.rx_ids[c], m.rx_id);
+            EXPECT_EQ(info.tx_ids[c], m.tx_id);
+        }
+        ecuio_channel_support_t support{};
+        ecuio_channel_identity_t identity{};
+        ecuio_channel_diagnostics_t diagnostics{};
+        ASSERT_EQ(ecuio_session_get_channel_support(s.s, c, &support),
+                  ECUIO_OK);
+        ASSERT_EQ(ecuio_session_get_channel_identity(s.s, c, &identity),
+                  ECUIO_OK);
+        ASSERT_EQ(ecuio_session_get_channel_diagnostics(s.s, c, &diagnostics),
+                  ECUIO_OK);
+        EXPECT_EQ(support.rx_id, m.rx_id);
+        EXPECT_EQ(identity.rx_id, m.rx_id);
+        EXPECT_EQ(diagnostics.rx_id, m.rx_id);
+    }
+    ecuio_channel_decl_t past{};
+    past.rx_id = 0x123u;
+    EXPECT_EQ(ecuio_session_get_module(s.s, 6, &past),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(past.rx_id, 0x123u) << "out untouched";
+    EXPECT_EQ(ecuio_session_get_module(nullptr, 0, &past),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_session_get_module(s.s, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    ecuio_channel_support_t none{};
+    EXPECT_EQ(ecuio_session_get_channel_support(s.s, 6, &none),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    /* A clear names a module by the same index: the sixth's report isn't
+     * read under diagnose=0, a seventh isn't there */
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s.s, 5, 0),
+              ECUIO_ERR_REPORT_CHANGED);
+    EXPECT_EQ(ecuio_session_clear_diagnostics(s.s, 6, 0),
+              ECUIO_ERR_INVALID_ARGUMENT);
+
+    /* A focus on the sixth module's signal asks its DID alone */
+    const ecuio_signal_set_t* set = ecuio_session_signal_set(s.s);
+    ASSERT_NE(set, nullptr);
+    ASSERT_EQ(set->count, 6u);
+    ASSERT_EQ(set->defs[5].message_id, 0x7EDu);
+    const uint16_t sixth = set->defs[5].id;
+    ASSERT_EQ(ecuio_session_set_focus(s.s, &sixth, 1), ECUIO_OK)
+        << ecuio_last_error_detail();
+    s.start();
+    const auto dids = [] {
+        std::vector<std::string> out;
+        for (const std::string& cmd : fake_commands()) {
+            if (cmd.size() >= 6 && cmd.compare(0, 2, "22") == 0) {
+                out.push_back(cmd.substr(0, 6));
+            }
+        }
+        return out;
+    };
+    ASSERT_TRUE(wait_for([&] { return dids().size() >= 6; }, 5000));
+    const std::vector<std::string> focused = dids();
+    /* From the second: the first may go out before the worker's first take */
+    for (size_t k = 1; k < focused.size(); ++k) {
+        EXPECT_EQ(focused[k], "22D805") << k;
+    }
+
+    /* With the focus ended every module is read again, each its own DID */
+    size_t from = 0;
+    {
+        std::lock_guard<std::mutex> g(s.cap.m);
+        from = s.cap.frames.size();
+    }
+    ASSERT_EQ(ecuio_session_set_focus(s.s, nullptr, 0), ECUIO_OK);
+    ASSERT_TRUE(wait_for(
+        [&] {
+            std::lock_guard<std::mutex> g(s.cap.m);
+            int seen[6] = {};
+            for (size_t k = from; k < s.cap.frames.size(); ++k) {
+                const Capture::Frame& f = s.cap.frames[k];
+                if (f.id >= 0x7E8u && f.id <= 0x7EDu) {
+                    ++seen[f.id - 0x7E8u];
+                }
+            }
+            for (int n : seen) {
+                if (n < 2) {
+                    return false;
+                }
+            }
+            return true;
+        },
+        10000))
+        << "two replies from each of the six modules";
+    std::lock_guard<std::mutex> g(s.cap.m);
+    for (size_t k = from; k < s.cap.frames.size(); ++k) {
+        const Capture::Frame& f = s.cap.frames[k];
+        if (f.id == 0x7E8u) {
+            EXPECT_EQ(f.data,
+                      (std::vector<uint8_t>{0x62, 0x1E, 0x1C, 0x12, 0x34}));
+            continue;
+        }
+        ASSERT_TRUE(f.id >= 0x7E9u && f.id <= 0x7EDu) << std::hex << f.id;
+        const uint8_t n = static_cast<uint8_t>(f.id - 0x7E8u);
+        EXPECT_EQ(f.data,
+                  (std::vector<uint8_t>{0x62, 0xD8, n, 0x00,
+                                        static_cast<uint8_t>(0x10 + n)}))
+            << std::hex << f.id;
     }
 }
 
@@ -1917,7 +2204,7 @@ namespace {
 void register_run_time(const char* name, ecuio_signal_def_t* def,
                        ecuio_signal_set_t* set, uint16_t start_byte)
 {
-    static const ecuio_channel_decl_t kEngine[] = {{0x7E8u, 0x7E0u}};
+    static const ecuio_channel_decl_t kEngine[] = {{0x7E8u, 0x7E0u, 0, 0}};
     *def = ecuio_signal_def_t{};
     def->id = 1;
     def->message_id = 0x7E8u;

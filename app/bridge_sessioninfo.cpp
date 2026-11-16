@@ -167,11 +167,11 @@ QString SessionBridge::sessionInfoText(const ecuio_session_info_t& info)
                 ? QStringLiteral("a CAN controller at %1 bit/s").arg(info.baud)
                 : QStringLiteral("a virtual CAN bus");
         const QString mode =
-            info.channel_count > 0
-                ? (info.channel_count == 1
+            info.module_count > 0
+                ? (info.module_count == 1
                        ? QStringLiteral("requesting on 1 channel")
                        : QStringLiteral("requesting on %1 channels")
-                             .arg(info.channel_count))
+                             .arg(info.module_count))
                 : QStringLiteral("listening");
         return QStringLiteral("Session: SocketCAN, %1, %2; ").arg(bus, mode) +
                profile;
@@ -206,20 +206,27 @@ QString SessionBridge::sessionInfoText(const ecuio_session_info_t& info)
     }
     parts << link;
 
-    const uint32_t channels = std::min<uint32_t>(info.channel_count,
-                                                 ECUIO_SESSION_INFO_MAX_CHANNELS);
+    // The info lists its first channels itself; past them the line says
+    // how many more the session has
+    const uint32_t channels = info.module_count;
+    const uint32_t listed =
+        std::min<uint32_t>(info.channel_count, ECUIO_SESSION_INFO_MAX_CHANNELS);
     if (channels == 0) {
         parts << profile + QStringLiteral(", no channels (passive)");
     } else {
         QStringList pairs;
-        for (uint32_t i = 0; i < channels; ++i) {
+        for (uint32_t i = 0; i < listed; ++i) {
             pairs << hexId(info.rx_ids[i]) + QLatin1Char('/') + hexId(info.tx_ids[i]);
+        }
+        QString list = pairs.join(QStringLiteral(", "));
+        if (channels > listed) {
+            list += QStringLiteral(" and %1 more").arg(channels - listed);
         }
         parts << QStringLiteral("%1, %2 %3 (rx/tx)")
                      .arg(profile,
                           channels == 1 ? QStringLiteral("channel")
                                         : QStringLiteral("channels"),
-                          pairs.join(QStringLiteral(", ")));
+                          list);
     }
 
     parts << ((info.flags & ECUIO_SESSION_INFO_VBATT)

@@ -411,7 +411,9 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                      uint32_t chan_count, ecuio_request_engine* e, bool* probe,
                      bool* identify)
 {
-    ecuio_engine_init(e, chan_count);
+    if (!ecuio_engine_init(e, chan_count)) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
     if (params.gap_us >= 0) {
         e->gap_us = params.gap_us;
     }
@@ -524,7 +526,9 @@ inline void ecuio_publish_support(ecuio_session_t* session,
     ecuio_engine_support(&e, c, &s);
     s.rx_id = rx_id;
     std::lock_guard<std::mutex> lock(session->support_mutex);
-    session->support[c] = s;
+    if (c < session->support.size()) {
+        session->support[c] = s;
+    }
 }
 
 /* Reply timing (ADR-0042) for a requesting session's rotation: the
@@ -607,7 +611,9 @@ inline void ecuio_publish_identity(ecuio_session_t* session,
     ecuio_engine_identity(&e, c, &s);
     s.rx_id = rx_id;
     std::lock_guard<std::mutex> lock(session->support_mutex);
-    session->identity[c] = s;
+    if (c < session->identity.size()) {
+        session->identity[c] = s;
+    }
 }
 
 /* Hands what channel c's ECU has reported of its diagnostics to the
@@ -625,7 +631,9 @@ inline void ecuio_publish_diagnostics(ecuio_session_t* session,
     ecuio_engine_diagnostics(&e, c, &s);
     s.rx_id = rx_id;
     std::lock_guard<std::mutex> lock(session->support_mutex);
-    session->diagnostics[c] = s;
+    if (c < session->diagnostics.size()) {
+        session->diagnostics[c] = s;
+    }
 }
 
 /* Starts the diagnostics over (ecuio_engine_diagnose_again) when
@@ -649,8 +657,8 @@ inline void ecuio_take_diag_request(ecuio_session_t* session,
 inline void ecuio_take_clear_requests(ecuio_session_t* session,
                                       ecuio_request_engine* e, uint32_t* seen)
 {
-    for (uint32_t c = 0;
-         c < e->chan_count && c < ECUIO_SESSION_INFO_MAX_CHANNELS; ++c) {
+    for (uint32_t c = 0; c < e->chan_count && c < session->info.module_count;
+         ++c) {
         const uint32_t asked = session->clear_requests[c].load();
         if (asked != seen[c]) {
             seen[c] = asked;
@@ -695,19 +703,19 @@ inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
                              ecuio_focus_seen& seen)
 {
     const auto unasked = [&] {
-        ecuio_focus_unasked(session->active_signal_set, *e,
-                            session->info.rx_ids, session->info.channel_count,
-                            session->focus_unasked.data(),
-                            session->focus_unasked.size());
+        ecuio_focus_unasked(
+            session->active_signal_set, *e, session->module_rx.data(),
+            session->info.module_count, session->focus_unasked.data(),
+            session->focus_unasked.size());
     };
     const uint64_t table = ecuio_focus_table_stamp(*e);
     if (table != seen.table) {
         seen.table = table;
         std::lock_guard<std::mutex> lock(session->focus_mutex);
-        ecuio_focus_askable(session->active_signal_set, *e,
-                            session->info.rx_ids, session->info.channel_count,
-                            session->focus_askable.data(),
-                            session->focus_askable.size());
+        ecuio_focus_askable(
+            session->active_signal_set, *e, session->module_rx.data(),
+            session->info.module_count, session->focus_askable.data(),
+            session->focus_askable.size());
         if (e->focused) {
             unasked();
         }
@@ -740,9 +748,9 @@ inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
             if (!ecuio_engine_request_for_def(&set->defs[i], req, &len)) {
                 continue;
             }
-            const uint32_t c =
-                ecuio_engine_channel_for(&set->defs[i], session->info.rx_ids,
-                                         session->info.channel_count);
+            const uint32_t c = ecuio_engine_channel_for(
+                &set->defs[i], session->module_rx.data(),
+                session->info.module_count);
             for (uint32_t k = 0; k < e->count; ++k) {
                 if (ecuio_focus_row_is(e->requests[k], c, req, len)) {
                     keep[k] = 1;
@@ -765,16 +773,78 @@ inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
     }
 }
 
+/* The session's modules as attach resolved them: every one's IDs, the
+ * info's count and its first ECUIO_SESSION_INFO_MAX_CHANNELS, and room
+ * for each one's reports and clear requests, each report naming its
+ * ECU. Before create returns; nothing sizes them afterwards. Out of
+ * memory is ECUIO_ERR_OUT_OF_MEMORY, the session unchanged. */
+inline ecuio_status_t ecuio_session_set_modules(ecuio_session_t* session,
+                                                const uint32_t* rx_ids,
+                                                const uint32_t* tx_ids,
+                                                uint32_t count)
+{
+    /* Made whole first, then handed over: a table that doesn't
+     * allocate leaves the session as it was */
+    std::vector<uint32_t> rx;
+    std::vector<uint32_t> tx;
+    std::vector<ecuio_channel_support_t> support;
+    std::vector<ecuio_channel_identity_t> identity;
+    std::vector<ecuio_channel_diagnostics_t> diagnostics;
+    std::unique_ptr<std::atomic<uint32_t>[]> generation;
+    std::unique_ptr<std::atomic<uint32_t>[]> flags;
+    std::unique_ptr<std::atomic<uint32_t>[]> requests;
+    try {
+        rx.assign(rx_ids, rx_ids + count);
+        tx.assign(tx_ids, tx_ids + count);
+        support.assign(count, ecuio_channel_support_t{});
+        identity.assign(count, ecuio_channel_identity_t{});
+        diagnostics.assign(count, ecuio_channel_diagnostics_t{});
+        generation.reset(new std::atomic<uint32_t>[count]());
+        flags.reset(new std::atomic<uint32_t>[count]());
+        requests.reset(new std::atomic<uint32_t>[count]());
+    } catch (...) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    std::lock_guard<std::mutex> lock(session->support_mutex);
+    session->module_rx.swap(rx);
+    session->module_tx.swap(tx);
+    session->support.swap(support);
+    session->identity.swap(identity);
+    session->diagnostics.swap(diagnostics);
+    session->clear_generation = std::move(generation);
+    session->clear_flags = std::move(flags);
+    session->clear_requests = std::move(requests);
+    session->support_count = count;
+    session->info.module_count = count;
+    session->info.channel_count =
+        count < ECUIO_SESSION_INFO_MAX_CHANNELS
+            ? count
+            : uint32_t{ECUIO_SESSION_INFO_MAX_CHANNELS};
+    for (uint32_t c = 0; c < count; ++c) {
+        if (c < ECUIO_SESSION_INFO_MAX_CHANNELS) {
+            session->info.rx_ids[c] = rx_ids[c];
+            session->info.tx_ids[c] = tx_ids[c];
+        }
+        session->support[c].rx_id = rx_ids[c];
+        session->identity[c].rx_id = rx_ids[c];
+        session->diagnostics[c].rx_id = rx_ids[c];
+    }
+    return ECUIO_OK;
+}
+
 /* Each channel's ECU, its requests, its identification and diagnostics
  * items, nothing learned yet: what attach hands the session before the
- * worker runs. */
+ * worker runs, after ecuio_session_set_modules, whose modules are the
+ * only ones seeded. */
 inline void ecuio_seed_reports(ecuio_session_t* session,
                                const ecuio_request_engine& e,
                                const uint32_t* rx_ids, uint32_t chan_count)
 {
     std::lock_guard<std::mutex> lock(session->support_mutex);
-    session->support_count = chan_count;
-    for (uint32_t c = 0; c < chan_count; ++c) {
+    const uint32_t modules = static_cast<uint32_t>(session->support.size());
+    const uint32_t count = chan_count < modules ? chan_count : modules;
+    session->support_count = count;
+    for (uint32_t c = 0; c < count; ++c) {
         ecuio_engine_support(&e, c, &session->support[c]);
         session->support[c].rx_id = rx_ids[c];
         ecuio_engine_identity(&e, c, &session->identity[c]);

@@ -376,7 +376,7 @@ ecuio_status_t ecuio_uds_build(const ecuio_uri_query& query,
             if (!known) {
                 uint32_t tx = 0;
                 (void)ecuio_uds_tx_for_rx(it.rx, &tx);   /* parse checked it */
-                out->channels.push_back(ecuio_channel_decl_t{it.rx, tx});
+                out->channels.push_back(ecuio_channel_decl_t{it.rx, tx, 0, 0});
             }
         }
         if (out->channels.size() > ECUIO_MAX_CHANNELS) {

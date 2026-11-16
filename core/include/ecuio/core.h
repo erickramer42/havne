@@ -298,8 +298,10 @@ ecuio_status_t ecuio_session_get_error_state(
  * values below are append-only, like the status codes. */
 #define ECUIO_SESSION_INFO_TEXT_LEN      80   /* PassThruReadVersion's
                                                  buffers (J2534-1 v04.04) */
-#define ECUIO_SESSION_INFO_MAX_CHANNELS  4    /* signals.h's
-                                                 ECUIO_MAX_CHANNELS */
+#define ECUIO_SESSION_INFO_MAX_CHANNELS  4    /* the modules the info
+                                                 lists itself; the rest
+                                                 by profile.h's
+                                                 ecuio_session_get_module */
 #define ECUIO_SESSION_INFO_PROFILE_LEN   64   /* profile.h's
                                                  ECUIO_PROFILE_NAME_MAX + 1 */
 
@@ -365,9 +367,10 @@ typedef struct ecuio_session_info {
     uint32_t vbatt_mv;        /* battery voltage at connect, millivolts
                                  (READ_VBATT; an ELM327's STVR or AT RV);
                                  with ECUIO_SESSION_INFO_VBATT */
-    uint32_t channel_count;   /* CAN channels the session filters and
-                                 requests on; 0 for a passive session,
-                                 1 for mock (its simulated engine ECU) */
+    uint32_t channel_count;   /* how many of the session's modules rx_ids
+                                 and tx_ids list: module_count, or
+                                 ECUIO_SESSION_INFO_MAX_CHANNELS when
+                                 there are more */
     uint32_t rx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* each one's
                                                            receive ID */
     uint32_t tx_ids[ECUIO_SESSION_INFO_MAX_CHANNELS];   /* and transmit ID */
@@ -391,19 +394,27 @@ typedef struct ecuio_session_info {
     /* 1 when the recording's last row had no newline and was left out (a
      * write cut short, ADR-0049 section 7); 0 otherwise */
     uint32_t replay_rows_torn;
-    uint32_t reserved[12];    /* zero; ABI growth space */
+    uint32_t module_count;    /* CAN channels (modules) the session filters
+                                 and requests on, up to signals.h's
+                                 ECUIO_MAX_CHANNELS; 0 for a passive
+                                 session, 1 for mock (its simulated engine
+                                 ECU). The reports below are read by an
+                                 index under it */
+    uint32_t reserved[11];    /* zero; ABI growth space */
 } ecuio_session_info_t;
 
 #if defined(__cplusplus)
 static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is ABI");
 static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
 static_assert(offsetof(ecuio_session_info_t, replay_frames) == 368, "session info replay offset is ABI");
-static_assert(offsetof(ecuio_session_info_t, reserved) == 384, "session info reserved offset is ABI");
+static_assert(offsetof(ecuio_session_info_t, module_count) == 384, "session info module_count offset is ABI");
+static_assert(offsetof(ecuio_session_info_t, reserved) == 388, "session info reserved offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_session_info_t) == 432, "ecuio_session_info_t size is ABI");
 _Static_assert(offsetof(ecuio_session_info_t, firmware_version) == 64, "session info text offset is ABI");
 _Static_assert(offsetof(ecuio_session_info_t, replay_frames) == 368, "session info replay offset is ABI");
-_Static_assert(offsetof(ecuio_session_info_t, reserved) == 384, "session info reserved offset is ABI");
+_Static_assert(offsetof(ecuio_session_info_t, module_count) == 384, "session info module_count offset is ABI");
+_Static_assert(offsetof(ecuio_session_info_t, reserved) == 388, "session info reserved offset is ABI");
 #endif
 
 /* Copies what the session runs on into *out_info. Filled once, while
@@ -583,7 +594,7 @@ _Static_assert(offsetof(ecuio_channel_support_t, reserved) == 144, "support rese
 #endif
 
 /* Copies what channel `channel` has learned into *out_support: an index
- * into the session info's channels, below its channel_count, so a
+ * into the session's modules, below the info's module_count, so a
  * passive session has none (ECUIO_ERR_INVALID_ARGUMENT); the mock's one
  * channel learns nothing. Callable from any thread until destroy; after
  * close it keeps the last update. */
@@ -664,7 +675,7 @@ _Static_assert(offsetof(ecuio_channel_identity_t, list) == 32, "identity list of
 
 /* Copies what channel `channel` has learned of its ECU into
  * *out_identity, under the same rules as the support report: the channel
- * is an index below the session info's channel_count
+ * is an index below the session info's module_count
  * (ECUIO_ERR_INVALID_ARGUMENT otherwise), callable from any thread until
  * destroy, and after close it keeps the last update. */
 ecuio_status_t ecuio_session_get_channel_identity(
@@ -1006,7 +1017,7 @@ ecuio_status_t ecuio_diag_inspect(
 
 /* Copies what channel `channel`'s ECU has reported of its diagnostics
  * (ADR-0037) into *out_diagnostics, under the identity report's rules:
- * the channel is an index below the session info's channel_count
+ * the channel is an index below the session info's module_count
  * (ECUIO_ERR_INVALID_ARGUMENT otherwise), callable from any thread until
  * destroy, and after close it keeps the last update. */
 ecuio_status_t ecuio_session_get_channel_diagnostics(
@@ -1035,8 +1046,8 @@ ecuio_status_t ecuio_session_read_diagnostics(ecuio_session_t* session);
  * (01 0C); 04 goes out only at 0 rpm. The report's clear field says
  * what became of it (ECUIO_CLEAR_*), and after a clear the report is
  * read again. Returns at once, from any thread.
- * ECUIO_ERR_INVALID_ARGUMENT for a channel past the session info's
- * channel_count, ECUIO_ERR_SESSION_CLOSED after close. The same as
+ * ECUIO_ERR_INVALID_ARGUMENT for a channel at or past the session info's
+ * module_count, ECUIO_ERR_SESSION_CLOSED after close. The same as
  * ecuio_session_clear_diagnostics_with and flags 0. */
 ecuio_status_t ecuio_session_clear_diagnostics(
     ecuio_session_t* session,
