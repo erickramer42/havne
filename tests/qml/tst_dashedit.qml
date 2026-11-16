@@ -4198,7 +4198,7 @@ TestCase {
     // The list's buttons wrap inside the narrowest phone
     function test_thePresetListFitsTheNarrowestPhone_data() {
         // 280 stands in for a wider font on 320 (CI's Linux and macOS)
-        return [{ tag: "320", width: 320 }, { tag: "280", width: 280 }]
+        return [{ tag: "320", width: 320 }, { tag: "280", width: 280 }, { tag: "240", width: 240 }]
     }
     function test_thePresetListFitsTheNarrowestPhone(data) {
         const page = pageOf({ form: "phone", width: data.width, height: 640 }, docOf([cellOf("A")]))

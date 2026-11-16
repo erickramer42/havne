@@ -385,6 +385,10 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.minimumWidth: 0
         Layout.preferredWidth: 1
+        // The bar's own width: a column narrower than its widest row's
+        // minimum still lays its children out at that minimum, and the
+        // list would follow it past a narrow page's edge
+        Layout.maximumWidth: topBar.width
         visible: topBar.host.editing && topBar.host.presetList !== ""
         spacing: 8
         ThemedButton {
