@@ -162,6 +162,23 @@ QVariantMap SessionBridge::layoutFileText(const QUrl& url)
             {QStringLiteral("text"), text}};
 }
 
+QString SessionBridge::presetLayoutText(const QString& name,
+                                        const QString& form) const
+{
+    static const QStringList kNames = {QStringLiteral("standard"),
+                                       QStringLiteral("temperatures"),
+                                       QStringLiteral("showcase")};
+    if (!kNames.contains(name) ||
+        (form != QStringLiteral("phone") && form != QStringLiteral("desktop"))) {
+        return {};
+    }
+    QFile file(QStringLiteral(":/qt/qml/App/layouts/%1/%2.json").arg(form, name));
+    if (!file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+    return QString::fromUtf8(file.readAll());
+}
+
 QVariantMap SessionBridge::exportFrames(const QUrl& url)
 {
     const FrameListModel::ScrubbedCsv csv = m_frameLog->scrubbedCsv();

@@ -187,6 +187,13 @@ qt_add_qml_module(app_ui
         fonts/Barlow-SemiBold.ttf
         fonts/Barlow-Bold.ttf
         fonts/BarlowSemiCondensed-Bold.ttf
+        # The Dashboard's presets (DashboardBook.presetText reads them)
+        layouts/desktop/standard.json
+        layouts/desktop/temperatures.json
+        layouts/desktop/showcase.json
+        layouts/phone/standard.json
+        layouts/phone/temperatures.json
+        layouts/phone/showcase.json
 )
 
 target_include_directories(app_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

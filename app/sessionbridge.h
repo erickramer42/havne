@@ -261,6 +261,11 @@ public:
     // made goes by the same rule
     Q_INVOKABLE void dropPicked(const QUrl& url);
     Q_INVOKABLE QVariantMap layoutFileText(const QUrl& url);
+    // A Dashboard preset's layout file from the app's resources
+    // (app/layouts/<form>/<name>.json), "" for a name or form that isn't one
+    // of the six: XMLHttpRequest refuses a resource unless file reads are on
+    Q_INVOKABLE QString presetLayoutText(const QString& name,
+                                         const QString& form) const;
     static constexpr qint64 layoutFileMaxBytes = 66016 + 16384;
     static int layoutFileBound()
     {

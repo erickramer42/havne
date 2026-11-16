@@ -731,6 +731,20 @@ if(TARGET havne-cli)
             -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/page-dropped.json)
         app_cli_golden(LayoutCheckNamesAMissingFile layout-check-missing.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> layout check ${_cli_layouts}/none.json)
+        # The Dashboard's presets (app/layouts, compiled into the app): each
+        # file reads whole for its form, nothing dropped, no plugin's file
+        foreach(_form phone desktop)
+            foreach(_preset standard temperatures showcase)
+                add_test(NAME CliLayoutPresetTest.${_form}_${_preset}
+                    COMMAND havne-cli layout check
+                            ${CMAKE_SOURCE_DIR}/app/layouts/${_form}/${_preset}.json
+                            --form ${_form})
+                set_tests_properties(CliLayoutPresetTest.${_form}_${_preset} PROPERTIES
+                    TIMEOUT 60
+                    PASS_REGULAR_EXPRESSION
+                        "\"ok\":true.*\"dropped\":.\"pages\":0,\"cells\":0..*\"needs_files\":..,")
+            endforeach()
+        endforeach()
         # The app's read before any rule: a file of exactly the bound, its BOM
         # counted as the app counts it, reads; one byte more is refused, and
         # so is a file in Latin-1
