@@ -11,7 +11,13 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ## [Unreleased]
 
+### Added
+
+- The Dashboard has three presets for each form: Standard (the built-in page), Temperatures (coolant, oil, intake air, outside air, catalyst, battery, boost and MAF as numbers, a color for each row) and Showcase (one gauge of each kind, with zones and peak hold). The "+" tab and a phone's Page > Add page open a list (Blank page, Standard, Temperatures, Showcase, From a file...) that adds the choice as a new page after the shown one. The Page row's "Replace this page with..." puts a preset's gauges on the shown page and keeps its name; it asks first only when the page holds gauges that are none of the presets'. Each is one undo step. A gauge whose signal the car doesn't send (outside air and catalyst temperature are the likely ones) says so.
+
 ### Changed
+
+- Reset in the Page row reads "Reset all pages": a single page can now be put back with "Replace this page with...".
 
 - **A set may declare 32 modules** (`ECUIO_MAX_CHANNELS`, 4 before), so a signal file, a plugin, an OBDb import and `uds-generic`'s `?did=` take up to 32 ECUs. Every declared module is still opened when the session connects. (ADR-0065)
 - **C API, breaking:** the set's layout is 5 (`ECUIO_SIGNAL_SET_LAYOUT`): `ecuio_channel_decl_t` is 16 bytes (`flags` and `reserved` after `rx_id` and `tx_id`, both zero; a set with either set is refused, `ECUIO_VALIDATE_ERR_CHANNEL_RESERVED`). A set built by hand is rebuilt against the header.
