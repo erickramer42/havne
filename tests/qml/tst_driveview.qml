@@ -361,10 +361,10 @@ TestCase {
     }
 
     function test_theStatusLineNamesTheStateAndTheAddress() {
-        const s = driven()
+        const s = driven("mock://demo?profile=mock")
         enterOn(s)
         tryCompare(Bridge, "linkState", "ok", 3000)
-        compare(statusWords(s), Theme.linkShortLabel("ok") + "|· " + Bridge.uriLabel)
+        compare(statusWords(s), Theme.linkShortLabel("ok") + "|· " + "mock://demo")
         compare(find(s.dash, "driveStatusDot").color, Theme.linkColor("ok"))
         verify(!find(s.dash, "driveStatusRun").visible, "nothing runs, so it never says No log")
     }
