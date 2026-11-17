@@ -514,6 +514,7 @@ void j2534_worker(ecuio_j2534_transport* t)
     link_health h(t->session->last_error, t->session->error_count,
                   t->session->record_link.get(), t->session, t->epoch,
                   &t->clock.last_us, &t->clock.last_host_us);
+    ecuio_unpicked_check unpicked_check;
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
@@ -535,7 +536,7 @@ void j2534_worker(ecuio_j2534_transport* t)
             const int64_t now = engine_now_us(t);
             for (uint32_t c = 0; c < e.chan_count; ++c) {
                 if (ecuio_engine_expire(&e, c, now)) {
-                    link_on_request_timeout(h);
+                    ecuio_request_timed_out(e, h);
                 }
                 const int32_t r = ecuio_engine_due(&e, c, now);
                 if (r != ECUIO_ENGINE_NONE) {
@@ -587,7 +588,7 @@ void j2534_worker(ecuio_j2534_transport* t)
             const bool unpicked = !asking && ecuio_engine_unpicked(&e);
             update_health(h, o, !asking && !unpicked);
             if (unpicked && !hard_read(o)) {
-                link_on_unpicked(h);
+                ecuio_unpicked_pass(&e, h, unpicked_check, engine_now_us(t));
             }
         }
         if (h.recovered) {

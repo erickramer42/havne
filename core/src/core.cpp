@@ -11,6 +11,7 @@
 #include "session.h"
 #include "uds_generic.h"
 #include "request_engine.h"   /* ECUIO_IDENT_REQUESTS, the names and the VIN */
+#include "request_setup.h"    /* the unpicked check's interval */
 #include "diagnostics.h"      /* the trouble codes' and monitors' words */
 #include "pid_support.h"     /* the signals their ECU doesn't support */
 #include "computed.h"        /* a computed pick's leaves, for a focus */
@@ -1383,6 +1384,12 @@ void ecuio_session_test_after_dispatch_takes(void (*hook)(void* user),
         g_after_dispatch_takes_user.store(user);
     }
     g_after_dispatch_takes.store(hook);
+}
+
+void ecuio_set_unpicked_check_ms(uint32_t ms)
+{
+    ecuio_unpicked_check_us().store(ms == 0 ? ECUIO_UNPICKED_CHECK_US
+                                            : static_cast<int64_t>(ms) * 1000);
 }
 
 ecuio_status_t

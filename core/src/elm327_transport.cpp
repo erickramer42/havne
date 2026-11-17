@@ -1355,6 +1355,7 @@ void elm327_worker(transport* t)
     ecuio_request_engine& e = t->engine;
     link_health h(t->session->last_error, t->session->error_count,
                   t->session->record_link.get(), t->session, t->epoch);
+    ecuio_unpicked_check unpicked_check;
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_identity[ECUIO_MAX_CHANNELS] = {};
     uint32_t published_diagnostics[ECUIO_MAX_CHANNELS] = {};
@@ -1379,7 +1380,7 @@ void elm327_worker(transport* t)
         const int64_t now = now_us(t);
         for (uint32_t c = 0; c < e.chan_count; ++c) {
             if (ecuio_engine_expire(&e, c, now)) {
-                link_on_request_timeout(h);
+                ecuio_request_timed_out(e, h);
             }
         }
 
@@ -1470,7 +1471,7 @@ void elm327_worker(transport* t)
                 }
                 if (io == elm327_io::prompt && !asking) {
                     if (ecuio_engine_unpicked(&e)) {
-                        link_on_unpicked(h);
+                        ecuio_unpicked_pass(&e, h, unpicked_check, now_us(t));
                     } else {
                         link_on_read(h, false, false, true);
                     }

@@ -189,6 +189,13 @@ void ecuio_elm327_set_timeouts_ms(uint32_t prompt_ms,
 void ecuio_elm327_get_timeouts_ms(uint32_t* prompt_ms,
                                   uint32_t* monitor_check_ms);
 
+/* TEST-ONLY: how often a session that asks only its picks, with nothing
+ * picked and its link down, asks one request to see whether an ECU
+ * answers (ms; request_setup.h's ecuio_unpicked_pass); 0 restores 5 s.
+ * A worker reads it on every such pass, so a running session takes it
+ * at once. */
+void ecuio_set_unpicked_check_ms(uint32_t ms);
+
 /* TEST-ONLY, Linux only (ECUIO_HAVE_SOCKETCAN): requesting sessions on
  * vcan created after this call start with the rate unproven, as on a
  * real controller, and an error frame within quiet_us of the first echo

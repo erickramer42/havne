@@ -525,3 +525,165 @@ TEST(RequestTableTest, PastThePoolAKeptRequestIsAskedUntimed)
     keep_rows(e.get(), {kMost, kMost + 20});
     EXPECT_EQ(e->untimed, 11u);
 }
+
+/* The engine keeps which channels' ECUs answer: a frame from one sets
+ * its bit, a wait that runs out on it clears it. With nothing picked, a
+ * wait running out counts toward no timeout while another module
+ * answers. */
+TEST(RequestTableTest, AnAnsweringBitEndsOnlyAtATableRequestsSilence)
+{
+    const std::vector<ecuio_signal_def_t> defs = two_full_modules();
+    auto e = std::make_unique<ecuio_request_engine>();
+    ASSERT_NO_FATAL_FAILURE(pick_only_table(e.get(), defs));
+    EXPECT_EQ(e->answering, 0u);
+    EXPECT_FALSE(ecuio_engine_unpicked_answering(e.get()))
+        << "nothing picked, and nothing heard";
+
+    int64_t now = 0;
+    keep_rows(e.get(), {5, kMost + 2});
+    EXPECT_EQ(ask(e.get(), 0, now), 5);
+    EXPECT_EQ(e->answering, 1u);
+    EXPECT_EQ(ask(e.get(), 1, now), static_cast<int32_t>(kMost + 2));
+    EXPECT_EQ(e->answering, 3u);
+    EXPECT_FALSE(ecuio_engine_unpicked_answering(e.get()))
+        << "with picks every timeout counts";
+    EXPECT_EQ(ask(e.get(), 1, now, false), static_cast<int32_t>(kMost + 2));
+    EXPECT_EQ(e->answering, 1u) << "module B's wait ran out";
+
+    ecuio_engine_unfocus(e.get());
+    EXPECT_TRUE(ecuio_engine_unpicked_answering(e.get()))
+        << "module A's last request was answered";
+
+    /* A frame that answers nothing still shows its ECU there */
+    const uint8_t stray[3] = {0x7F, 0x22, 0x31};
+    EXPECT_EQ(
+        ecuio_engine_on_frame(e.get(), 1, stray, sizeof stray, now, nullptr),
+        ecuio_reply::none);
+    EXPECT_EQ(e->answering, 3u);
+
+    /* Each module's check unanswered: no module answers */
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 1));
+    EXPECT_EQ(ask(e.get(), 0, now, false), 0);
+    EXPECT_TRUE(ecuio_engine_unpicked_answering(e.get())) << "module B still";
+    EXPECT_EQ(ask(e.get(), 1, now, false), static_cast<int32_t>(kMost + 3))
+        << "past the pick module B left unanswered";
+    EXPECT_EQ(e->answering, 0u);
+    EXPECT_FALSE(ecuio_engine_unpicked_answering(e.get()));
+
+    /* An identification item's wait running out says nothing of its
+     * ECU, which may not serve the item: the bit stays */
+    (void)ecuio_engine_on_frame(e.get(), 0, stray, sizeof stray, now, nullptr);
+    ASSERT_EQ(e->answering, 1u);
+    ecuio_engine_identify(e.get());
+    for (int item = 0; item < 3; ++item) {
+        ASSERT_EQ(ecuio_engine_due(e.get(), 0, now), ECUIO_ENGINE_ONCE);
+        ecuio_engine_sent(e.get(), 0, ECUIO_ENGINE_ONCE, true, now);
+        now += ECUIO_ENGINE_WAIT_US;
+        ASSERT_TRUE(ecuio_engine_expire(e.get(), 0, now));
+        EXPECT_EQ(e->answering, 1u) << "item " << item;
+    }
+    EXPECT_TRUE(ecuio_engine_unpicked_answering(e.get()));
+}
+
+/* A check asks one of a channel's requests that aren't dropped once,
+ * parked or not, moving on past one left unanswered, and is no part of
+ * the rotation: no sweep counts it, no row is kept or takes a pool row
+ * for it, and nothing follows it. A pick or a recovery before it goes
+ * out withdraws it. */
+TEST(RequestTableTest, ACheckAsksAParkedRequestOnceOutsideTheRotation)
+{
+    const std::vector<ecuio_signal_def_t> defs = two_full_modules();
+    auto e = std::make_unique<ecuio_request_engine>();
+    ASSERT_NO_FATAL_FAILURE(pick_only_table(e.get(), defs));
+    int64_t now = 0;
+    ASSERT_EQ(ecuio_engine_due(e.get(), 0, now), ECUIO_ENGINE_NONE);
+
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    EXPECT_EQ(ecuio_engine_due(e.get(), 1, now), ECUIO_ENGINE_NONE)
+        << "the other channel has none";
+    EXPECT_EQ(ask(e.get(), 0, now), 0) << "the channel's first request";
+    EXPECT_EQ(ecuio_engine_due(e.get(), 0, now), ECUIO_ENGINE_NONE) << "once";
+    EXPECT_TRUE(ecuio_engine_unpicked(e.get()));
+    EXPECT_EQ(e->kept, 0u);
+    EXPECT_EQ(in_rotation(*e), 0u);
+    EXPECT_EQ(e->chans[0].requests, 0u);
+    EXPECT_EQ(e->chans[0].sweep_asked, 0u);
+    EXPECT_EQ(e->timing_taken, 0u) << "a check is timed nowhere";
+    EXPECT_EQ(e->requests[0].parked, 1u);
+    EXPECT_EQ(e->answering, 1u);
+
+    /* Module B's first is its own; a dropped request is passed by */
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 1));
+    EXPECT_EQ(ask(e.get(), 1, now), static_cast<int32_t>(kMost));
+    ecuio_engine_drop(e.get(), 0, ECUIO_DROP_NOT_SUPPORTED, 0x31);
+    ecuio_engine_drop(e.get(), 1, ECUIO_DROP_NOT_SUPPORTED, 0x31);
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    EXPECT_EQ(ask(e.get(), 0, now), 2);
+
+    /* Asked for twice before it goes out, it goes out once: the request
+     * the last check had answered. Its wait run out, the next check asks
+     * the one after it, so a request the ECU is silent on isn't the only
+     * one ever tried */
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    EXPECT_EQ(ask(e.get(), 0, now, false), 2);
+    EXPECT_EQ(ecuio_engine_due(e.get(), 0, now), ECUIO_ENGINE_NONE);
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    EXPECT_EQ(ask(e.get(), 0, now, false), 3);
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    EXPECT_EQ(ask(e.get(), 0, now), 4);
+
+    /* A check the driver took back (a failed write, a reply an adapter
+     * cut short) is the next check's again */
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    ASSERT_EQ(ecuio_engine_due(e.get(), 0, now), 4);
+    ecuio_engine_sent(e.get(), 0, 4, false, now);
+    now += ECUIO_ENGINE_GAP_US;
+    EXPECT_EQ(ecuio_engine_due(e.get(), 0, now), ECUIO_ENGINE_NONE)
+        << "taken back, it waits for the next check";
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    EXPECT_EQ(ask(e.get(), 0, now, false), 4);
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    EXPECT_EQ(ask(e.get(), 0, now), 5);
+
+    /* Past the channel's last request the turn starts over */
+    e->chans[1].check_from = e->count - 1;
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 1));
+    EXPECT_EQ(ask(e.get(), 1, now, false), static_cast<int32_t>(e->count - 1));
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 1));
+    EXPECT_EQ(ask(e.get(), 1, now), static_cast<int32_t>(kMost));
+
+    /* A pick taken before a check goes out withdraws it: the rotation
+     * alone is asked, and the check doesn't come back with the pick gone */
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    keep_rows(e.get(), {7, 9});
+    EXPECT_EQ(ask(e.get(), 0, now), 7);
+    EXPECT_FALSE(e->chans[0].check_due);
+    EXPECT_EQ(ask(e.get(), 0, now), 9);
+    EXPECT_EQ(ask(e.get(), 0, now), 7);
+    ecuio_engine_unfocus(e.get());
+    EXPECT_EQ(ecuio_engine_due(e.get(), 0, now), ECUIO_ENGINE_NONE);
+
+    /* So does the link's recovery (the worker's rescan) */
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 0));
+    ASSERT_TRUE(ecuio_engine_ask_check(e.get(), 1));
+    ecuio_engine_rescan(e.get());
+    EXPECT_FALSE(e->chans[0].check_due);
+    EXPECT_FALSE(e->chans[1].check_due);
+    EXPECT_EQ(ecuio_engine_due(e.get(), 0, now), ECUIO_ENGINE_NONE);
+    EXPECT_EQ(ecuio_engine_due(e.get(), 1, now), ECUIO_ENGINE_NONE);
+
+    /* No channel, or none of its requests left: nothing to ask */
+    EXPECT_FALSE(ecuio_engine_ask_check(e.get(), 2));
+    auto one = std::make_unique<ecuio_request_engine>();
+    ASSERT_TRUE(ecuio_engine_init(one.get(), 2, 4));
+    const uint8_t req[3] = {0x22, 0x10, 0x00};
+    ASSERT_EQ(ecuio_engine_add(one.get(), 0, req, 3),
+              ecuio_engine_add_result::added);
+    EXPECT_FALSE(ecuio_engine_ask_check(one.get(), 1)) << "a channel with none";
+    ecuio_engine_drop(one.get(), 0, ECUIO_DROP_NOT_SUPPORTED, 0x31);
+    EXPECT_FALSE(ecuio_engine_ask_check(one.get(), 0))
+        << "its only one dropped";
+    EXPECT_FALSE(one->chans[0].check_due);
+}

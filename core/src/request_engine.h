@@ -384,6 +384,8 @@ struct ecuio_engine_channel {
     /* The DID scan: the one-shot carries a scan entry while scanning. */
     bool scanning = false;      /* the one-shot is a scanned DID */
     bool scan_turn = false;     /* the scan sends next, not the rotation */
+    bool check_due = false;     /* ecuio_engine_ask_check: one row, once */
+    uint32_t check_from = 0;    /* the row after its last that timed out */
     uint32_t scan_cursor = 0;   /* where the scan looks for its next entry */
     uint32_t scan_index = 0;    /* the entry out, while scanning */
     uint32_t scan_pending = 0;  /* this channel's unasked entries */
@@ -476,6 +478,11 @@ struct ecuio_request_engine {
     uint32_t untimed = 0;
     /* The rows the focus keeps, a dropped one too (0 with none on) */
     uint32_t kept = 0;
+    /* A bit for each channel whose ECU answers: set by a frame from it,
+     * cleared when a wait on one of its table's requests runs out. A
+     * one-shot's silence leaves it: an ECU answers nothing to an item it
+     * doesn't serve. */
+    uint32_t answering = 0;
     /* One for each channel, sized by ecuio_engine_init and never after */
     std::vector<ecuio_engine_channel> chans;
     uint32_t chan_count = 0;
@@ -734,6 +741,48 @@ inline void ecuio_engine_pick_only(ecuio_request_engine* e)
 inline bool ecuio_engine_unpicked(const ecuio_request_engine* e)
 {
     return e->pick_only && e->kept == 0;
+}
+
+/* Such a table while some ECU answers: a wait that ran out then says
+ * its own module is silent (absent from this car, or asleep), not the
+ * vehicle, and the driver counts it toward no timeout. With a rotation
+ * the other modules' replies between two timeouts say the same. */
+inline bool ecuio_engine_unpicked_answering(const ecuio_request_engine* e)
+{
+    return ecuio_engine_unpicked(e) && e->answering != 0;
+}
+static_assert(ECUIO_MAX_CHANNELS <= 32, "answering has a bit for each channel");
+
+/* The request channel c's next check asks: its first that isn't
+ * dropped from check_from on, around the table once. check_from is the
+ * row after the channel's last whose wait ran out (ecuio_engine_expire):
+ * a request the ECU is silent on isn't the only one ever tried, and one
+ * answered, never sent or taken back is asked again. ECUIO_ENGINE_NONE
+ * with none. */
+inline int32_t ecuio_engine_check_row(const ecuio_request_engine* e, uint32_t c)
+{
+    for (uint32_t k = 0; k < e->count; ++k) {
+        const uint32_t i = (e->chans[c].check_from + k) % e->count;
+        if (e->requests[i].channel == c && e->requests[i].dropped == 0) {
+            return static_cast<int32_t>(i);
+        }
+    }
+    return ECUIO_ENGINE_NONE;
+}
+
+/* Has channel c ask one request once (ecuio_engine_check_row), parked
+ * or not and outside the rotation: the driver's check that an ECU
+ * answers, for a table that asks nothing (ecuio_engine_unpicked) while
+ * the link is down. Its reply is the request's own, timed and decoded
+ * as any. A pick or the link's recovery before it goes out withdraws
+ * it. False, nothing changed, for a channel with no such request. */
+inline bool ecuio_engine_ask_check(ecuio_request_engine* e, uint32_t c)
+{
+    if (c >= e->chan_count || ecuio_engine_check_row(e, c) < 0) {
+        return false;
+    }
+    e->chans[c].check_due = true;
+    return true;
 }
 
 /* Table row i's pool row, taken as the row first enters the rotation;
@@ -1224,6 +1273,7 @@ inline void ecuio_engine_rescan(ecuio_request_engine* e)
     }
     for (uint32_t c = 0; c < e->chan_count; ++c) {
         ecuio_engine_channel& ch = e->chans[c];
+        ch.check_due = false; /* the link is back: no check is owed */
         if (ch.unpacked) {
             ch.unpacked = false;
             ch.pack_failures = 0;
@@ -2411,6 +2461,17 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
         ch.scan_pending = 0;   /* the count had drifted; nothing is unasked */
     }
     ch.scan_turn = true;
+    if (ch.check_due) {
+        /* The driver's check (ecuio_engine_ask_check): no sweep counts
+         * it, and a pick taken since it fell due withdraws it */
+        ch.check_due = false;
+        const int32_t row = ecuio_engine_unpicked(e)
+                                ? ecuio_engine_check_row(e, c)
+                                : ECUIO_ENGINE_NONE;
+        if (row >= 0) {
+            return row;
+        }
+    }
     if (ch.requests == 0) {
         return ECUIO_ENGINE_NONE;
     }
@@ -2501,6 +2562,9 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     const bool pack = out == ECUIO_ENGINE_PACK;
     ch.outstanding = ECUIO_ENGINE_NONE;
     ch.in_step = false;
+    if (!once) {
+        e->answering &= ~(1u << c); /* a table's request: the ECU's silence */
+    }
     const auto timed_out = [e](uint32_t row) {
         if (e->timing != nullptr && row < e->count &&
             e->timing_of[row] < ECUIO_TIMING_SPENT) {
@@ -2509,6 +2573,7 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     };
     if (out >= 0) {
         timed_out(static_cast<uint32_t>(out));
+        ch.check_from = static_cast<uint32_t>(out) + 1; /* a check's next row */
     } else if (pack) {
         for (uint32_t k = 0; k < ch.pack_count; ++k) {
             timed_out(ch.pack_rows[k]);
@@ -2657,9 +2722,9 @@ inline void ecuio_engine_time_pack(ecuio_request_engine* e, uint32_t c,
  * a one-byte request (03, 07, 0A) has no key, so its service's reply
  * alone answers it. *out_nrc (when not NULL) gets the code of a negative
  * or pending reply. */
-inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
-                                         const uint8_t* data, uint16_t len,
-                                         int64_t now_us, uint8_t* out_nrc)
+inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
+                                           const uint8_t* data, uint16_t len,
+                                           int64_t now_us, uint8_t* out_nrc)
 {
     ecuio_engine_channel& ch = e->chans[c];
     if (ch.outstanding == ECUIO_ENGINE_NONE || len == 0) {
@@ -2780,6 +2845,17 @@ inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
         ecuio_engine_end_walk(e, c);
     }
     return ecuio_reply::negative;
+}
+
+/* The driver's call for a frame received on channel c:
+ * ecuio_engine_take_frame, and the channel's ECU is answering, whatever
+ * the frame answered. */
+inline ecuio_reply ecuio_engine_on_frame(ecuio_request_engine* e, uint32_t c,
+                                         const uint8_t* data, uint16_t len,
+                                         int64_t now_us, uint8_t* out_nrc)
+{
+    e->answering |= 1u << c;
+    return ecuio_engine_take_frame(e, c, data, len, now_us, out_nrc);
 }
 
 /* Whether channel c has anything to send but its rotation: what a
