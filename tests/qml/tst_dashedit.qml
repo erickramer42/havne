@@ -125,7 +125,18 @@ TestCase {
         // and the page put back after the press
         let scrolled = null
         let was = 0
+        let inSide = false
+        // The side column scrolls by itself: bring the item into its view
         for (let up = item.parent; up; up = up.parent) {
+            if (up.objectName === "dashSidePanel" && up.visible) {
+                inSide = true
+                const at = item.mapToItem(up, item.width / 2, item.height / 2)
+                if (at.y > up.height - 24 || at.y < 24)
+                    up.contentY = Math.max(0, Math.min(up.contentHeight - up.height,
+                                                       up.contentY + at.y - up.height / 2))
+            }
+        }
+        for (let up = item.parent; up && !inSide; up = up.parent) {
             if (up.objectName.startsWith("dashPage_")) {
                 const at = item.mapToItem(up, item.width / 2, item.height / 2)
                 if (at.y > up.height - 24) {
@@ -4611,4 +4622,3 @@ TestCase {
         verify(find(page, "dashMoreRow").visible, "and comes back")
     }
 }
-

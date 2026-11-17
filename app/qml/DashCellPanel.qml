@@ -35,6 +35,8 @@ GaugeCard {
                                        ? cell.options.decimals
                                        : entry ? entry.decimals : listedDecimals
     readonly property bool phone: panelCard.host.form === "phone"
+    // Two columns of fields on a phone and in the page's side column
+    readonly property bool narrow: phone || width < 480
     // Any of the zone levels is set
     readonly property bool hasZoneLevel: {
         const o = cell && cell.options ? cell.options : null
@@ -141,7 +143,7 @@ GaugeCard {
 
         GridLayout {
             Layout.fillWidth: true
-            columns: panelCard.phone ? 2 : 4
+            columns: panelCard.narrow ? 2 : 4
             columnSpacing: 8
             rowSpacing: 8
 
@@ -183,7 +185,7 @@ GaugeCard {
                 objectName: "panelSignalName"
                 visible: panelCard.hasSignal && panelCard.entry !== null
                 Layout.fillWidth: true
-                Layout.columnSpan: panelCard.phone ? 2 : 4
+                Layout.columnSpan: panelCard.narrow ? 2 : 4
                 Layout.preferredWidth: 0
                 elide: Text.ElideRight
                 text: panelCard.entry ? qsTr("Signal: %1").arg(panelCard.entry.name) : ""
@@ -220,7 +222,7 @@ GaugeCard {
                 objectName: "panelShiftHint"
                 visible: panelCard.kind === "shift-light"
                 Layout.fillWidth: true
-                Layout.columnSpan: panelCard.phone ? 2 : 4
+                Layout.columnSpan: panelCard.narrow ? 2 : 4
                 Layout.preferredWidth: 0
                 wrapMode: Text.WordWrap
                 text: qsTr("The lights fill green, amber, red between the two and flash at the shift point.")
@@ -283,7 +285,7 @@ GaugeCard {
             // A checkbox, as every other yes-or-no in the app
             ThemedCheckBox {
                 objectName: "panelPeak"
-                Layout.columnSpan: panelCard.phone ? 2 : 4
+                Layout.columnSpan: panelCard.narrow ? 2 : 4
                 text: qsTr("Peak hold")
                 Accessible.name: qsTr("Peak hold")
                 visible: panelCard.host.peakKinds.indexOf(panelCard.kind) >= 0
@@ -629,7 +631,7 @@ GaugeCard {
         // The order: both forms' grids follow it
         GridLayout {
             Layout.fillWidth: true
-            columns: panelCard.phone ? 2 : 4
+            columns: panelCard.narrow ? 2 : 4
             columnSpacing: 8
             rowSpacing: 8
             ThemedButton {
