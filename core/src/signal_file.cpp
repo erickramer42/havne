@@ -1175,7 +1175,7 @@ void build(const parts& in, ecuio_signal_file& f)
                        std::to_string(ECUIO_MODULE_MAX_REQUESTS) +
                        " requests, the base's counted");
     }
-    if (engine->count > ecuio_least::kRequestsBefore) {
+    if (derived.total > ecuio_least::kRequestsBefore) {
         ecuio_least::raise(f.least, ecuio_least::kRequests);
     }
 }
