@@ -926,3 +926,120 @@ Each choice of sections 2, 6 and 9, 2026-11-15:
 - **`needs` and signal-file format 3** are v0.9.0's, with the merge.
 - **An unranked set past the pool** is asked for nothing until a signal
   is picked. Not its first 1024 requests.
+
+## Appendix: step 2 as built (2026-11-16)
+
+The body stays as accepted. This says what step 2 built differently from
+sections 2, 3, 6 and 8, each with its reason:
+
+- **The cap is the rotation's, not a life's count (section 3).** The body
+  has `ECUIO_PROFILE_MAX_REQUESTS` as "the most requests a session has in
+  rotation over its life" with a pick past the pool refused. As built it
+  is the most at one time: a pick (with the attached conditions' signals)
+  is refused only when its own rotation would number more than 1024
+  requests. A request first picked once all 1024 timing rows are taken is
+  asked with no row, and counted in `ecuio_session_timing_t`'s `untimed`.
+  Reason: a lifetime count would refuse the 1025th signal a user ever
+  ticked in one session, however short each pick, which is no guard
+  against a long rotation.
+- **`ECUIO_SESSION_INFO_PICK_ONLY` (section 2's new case).** A set that
+  derives more than 1024 requests makes a session that asks only its
+  picks, whatever it ranks: every request starts parked, a focus of count
+  0 parks them all, and the info flag says so from create (only with
+  `ECUIO_SESSION_INFO_REQUESTS`). `ecuio_session_get_unasked_signals`
+  lists every signal but an attached condition's from create.
+- **A condition's signals on such a session (section 8).** They are
+  always asked, focus or none, since core owns rule 4.
+  `ecuio_session_set_conditions` is refused, with nothing changed, when
+  its signals' requests with the focus's would number more than 1024.
+- **`ecuio_signal_file_load_with` in place of a wider
+  `ecuio_signal_file_load` (section 3's last bullet).** The body has
+  `ecuio_signal_file_load` read to a set's bounds. As built the plain load
+  keeps a data file's bounds and a reader of a set's written copy says so
+  with `ECUIO_SIGNAL_FILE_LOAD_SET`. Reason: every import path and every
+  front end's own file read calls the plain load, and widening it would
+  have widened each of them without a word.
+- **Link health on such a session.** While nothing is picked, a worker's
+  idle pass counts no quiet read, so the session's own silence never
+  reads as "not responding". What it did ask still counts:
+  identification, diagnostics and the PID walk run with nothing picked,
+  and a vehicle that answers none of them reads "not responding". Three
+  rules follow from nothing being asked after that:
+  - **One module's silence is its own.** While any module answers, a wait
+    that runs out on another counts toward no timeout (the engine keeps a
+    bit for each module: set by a frame from it, cleared when a wait on
+    one of its table's requests runs out, a pick's or a check's). An
+    identification or diagnostics item that goes unanswered leaves the
+    bit: an ECU answers nothing to an item it doesn't serve, and that says
+    nothing of the ECU. A whole-car profile on a trim that lacks a module
+    reads OK, at connect and after a recovery asks the unanswered items
+    again. With a rotation the other modules' replies between two
+    timeouts say the same. What follows from it: once a module has
+    answered, such a session reads "not responding" again only after a
+    pick's request or a check times out; "Read again" on a vehicle
+    switched off since leaves the link OK with its items unanswered.
+  - **The check.** While the link isn't OK, the worker asks one request
+    every 5 s (the failure backoff's cap), the first a whole interval
+    after the link was found down: one request of the next module that
+    isn't dropped, each module in turn, and for a module the request
+    after its last that went unanswered (so one request an ECU is silent
+    on isn't the only one ever tried, and one that never went out is
+    asked again). A pick, or the link's recovery, before a check goes out
+    withdraws it. Its reply is a frame like any (recorded, logged, timed,
+    decoded) and brings the recovery every session has: the walk and the
+    unanswered identification and diagnostics are asked again. Its
+    silence changes nothing, so the state never flaps. With the link OK,
+    or with anything picked, no check is asked. It is traffic on a session
+    with nothing picked, as the walk and identification already are; it is
+    the one way such a session sees an ECU wake after a connect with the
+    ignition off.
+  - **A hard failure ends on clean reads.** Once the adapter has read
+    cleanly for a quiet run's passes (ten), a hard failure steps down: to
+    OK when nothing went unanswered, else to "not responding", where the
+    check settles it.
+
+  Picks that were all dropped (refused by the ECU) still count quiet, as
+  any table's do, and that "not responding" ends when the picks are taken
+  away.
+- **`havne-cli --signals`** holds a lone file to a data file's bounds, as
+  the wrap does; only a recording's own `signals.json` reads past them.
+- **The least core (ADR-0064 Q1, 2026-11-17).** Three things a set may
+  hold are refused by a core before 0.9.0, and each raises a file's or a
+  plugin's least core to 0.9.0 at the gate that reads it
+  (`core/src/least_core.h`'s `kSetRequests`, `kSetSignals`, `kSetBytes`):
+  more than 1024 requests in all, a variant's files' signals together past
+  one file's 1024, and a variant's written copy past one file's 1 MiB.
+
+## Appendix: step 3 as built (2026-11-17)
+
+- **The address key's text (section 9 left it to the build).**
+  `<id>:<key>[@<offset>]:<byte>.<bit>:<bits>` for a number or an enum,
+  `<id>:<key>[@<offset>]:<byte>:t<bytes>` for a text or hex field:
+  `message_id` in upper-case hex (3 digits up to 0x7FF, 8 above), the mux
+  key's `mux_length` bytes in upper-case hex (empty with no mux) with
+  `@<mux_offset>` only when that isn't 0, then `start_byte`, `bit_offset`
+  and `bit_length` in decimal, or `start_byte` and `t<byte_length>`. The
+  key bytes are the reply's as the def holds them, so a broadcast frame's
+  signal has a key too (`1A0::0.4:12`). Byte order, kind, scale and offset
+  are no part of it. It holds a `:` and upper-case hex, so it is never an
+  author's key (`[a-z0-9_]`) nor `id:<n>`; it has no comma, quote, space
+  or line break and starts with a hex digit, so it needs no CSV quoting
+  and starts no formula; it is at most 31 bytes, the room a name and an
+  author's key take.
+- **A def with no room for its text (an addition to the approved calls,
+  which named no failure but a NULL).** A def the validator refuses may
+  make an address key's text past 31 bytes (fields past a frame's).
+  `ecuio_signal_address_key` then answers `ECUIO_ERR_INVALID_ARGUMENT`
+  with the key empty, since a refusal beats a cut key, and
+  `ecuio_signal_set_keys` keeps such a def under its author's key or
+  `id:<n>`. A def the validator takes always has room.
+- **A set's keys are a filled array, not a handle.** The caller owns one
+  allocation of 32-byte keys in set order, by the serial ports' contract,
+  built once (a sort by address). The file is a parameter because the
+  registry keeps only a file's set: with no file a computed signal goes by
+  `id:<n>`. `ecuio_signal_set_keys` gives a computed signal and the later
+  of two defs at one address the author's key from the file, else
+  `id:<n>`.
+- **One find rule in core.** `ecuio_signal_set_find` is the rule for a
+  key or a name a person types: a key first, then a name one signal has; a
+  repeated name is refused with the first 8 of its keys and "and N more".

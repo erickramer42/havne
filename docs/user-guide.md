@@ -94,7 +94,9 @@ open, and SocketCAN interfaces.
 1. Connect, then open **Live**.
 2. Each signal the session reads has a row with its value, updated ten
    times a second. A signal the ECU doesn't send is hidden, and a line
-   under the list counts them.
+   under the list counts them. On a profile too large to ask whole,
+   no row is ticked at first and nothing is asked until you tick
+   signals or place gauges.
 3. Tick a row to plot it on the chart below; untick it to take it off.
    **Find a signal** narrows the list by name or unit, and **Filter**
    by the part of the car a signal reads, or to the plotted rows
@@ -170,6 +172,17 @@ Units follow **Settings, Display, Units** (metric or imperial).
    or pages in a file that cannot be read are left out and counted.
    `havne-cli layout check <file>` reads a layout file as Load layout
    would, with no app.
+
+   **Phone layout** (a computer only, beside Undo and Redo in edit mode):
+   shows the phone's layout in a frame as wide as a phone (384 px) and
+   edits it there. **Export layout** then writes a file for the phone, and
+   **Load layout** reads a phone's file; a desktop file is refused in the
+   frame, as it is on a phone. The frame is a picture of the phone's
+   six-column grid, not a touch simulation: its buttons keep the mouse's
+   size, and a phone narrower or wider than the frame keeps the columns.
+   Switching drops the undo history, and **Done** returns to the
+   computer's own layout. The switch shows only where the frame fits the
+   window (432 px or more).
 7. **Undo** and **Redo** step back and forth through the changes made
    since **Edit**; on the desktop, Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y)
    do the same, in edit mode or out of it. A change made from a panel
@@ -295,6 +308,12 @@ off. **Stretches...** opens the levels the finder uses; an empty field, or
 0, takes the default shown in it, and **Apply** finds them again. The pull
 numbers in Compare follow these levels; `havne-cli`'s `--align-on` counts
 by core's defaults unless it is given levels.
+
+**A pull ends** chooses where: **At the throttle's lift** (the default)
+keeps a pull run onto the limiter whole, its fuel cut included; **At top
+speed** ends it where speed stops rising, which leaves the fuel cut out of
+its statistics. `havne-cli view --stretches --pull-end top-speed` and
+Python's `pull_end="top-speed"` read it the same way.
 
 A recording that holds conditions draws each time one was ON as a bar
 along the chart's foot (an alert's in its level's color, under the

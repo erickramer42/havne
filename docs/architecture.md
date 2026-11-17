@@ -428,6 +428,8 @@ The bridge polls it on its 100 ms tick and maps it for the UI
 - **When reads recover but writes don't,** the state steps down from
   `fault` to `requests`: the adapter answers again, so what fails is
   the requests.
+- **A set too large to ask whole.** A session on it asks nothing until
+  something is picked, and reports no fault for that silence.
 
 ## The UI layer
 

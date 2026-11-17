@@ -155,9 +155,11 @@ void ecuio_plugin_text_free(char* text);
   today): a variant added from a file with its own `source` keeps that
   file's attribution in every recording, so an OBDb file's CC BY-SA
   block can't be lost by sharing a plugin with a hand-written one.
-- **`requires.core`** is the running core's version: what the wrap
-  writes is what this core reads, and an older core refuses it with
-  words rather than half-reading it (Q6).
+- **`requires.core`** is the least core version that reads the
+  plugin's format and what its file uses, 0.8.0 at least (the
+  `lineage` the wrap writes): the same input wraps to the same bytes
+  under any core, so the store finds its copy again, and an older core
+  refuses the plugin with words rather than half-reading it (Q6).
 - **`lineage`**, a new optional manifest key (ADR-0052 section 2): 32
   hex digits, the start of the SHA-256 of the bytes the plugin was
   first made from (the wrapped signal file). The wrap writes it;
@@ -936,6 +938,35 @@ what Q1, Q2 and Q4 left to the build:
   variant named, the id is the file's name as a slug cut to 24 bytes.
   The data file is `data/<variant>.json`, or `data/<variant>-2.json`
   and on while a file that stays has that path.
+
+  *Note (2026-11-16): `requires.core` is not the running core's
+  version. The wrap writes the least core that reads the plugin it made;
+  a put writes the higher of the plugin's own and the least core that
+  reads it with the file put in, so a value its author set above that is
+  kept; a drop leaves it. The loaders work the least out at the gates
+  that read each feature (`core/src/least_core.h`: one row for each
+  format and each feature an older core refuses or reads to another
+  meaning, with its release), and a row of a release still to come is
+  cut to the running core's version, so a build before that release
+  takes what it wrote. A put brings a data file with a source of its
+  own, which raises it to 0.8.0 unless that source is the manifest's;
+  so a put into a hand-written package with no `lineage` writes less
+  than 0.8.0 only when the file's source is the manifest's, and a wrap
+  always writes 0.8.0 or more. `PluginWrapTest.EachRowsInputNeedsItsCore`,
+  `.AWrapRequiresTheLeastCoreThatReadsIt`,
+  `.APutKeepsAHigherRequiresAndRaisesALowerOne`.*
+
+  *Note (2026-11-17): a drop judges its result as a put does. The line
+  above has a drop leave `requires.core`, "since it adds nothing to
+  read". It does add something: the raised version is in each variant's
+  written copy (its notes), so a version one digit longer ("1.9.0" to
+  "1.10.0") can carry a copy at one file's 1 MiB past it, which a core
+  before 0.9.0 refuses (ADR-0065, `least_core.h`'s `kSetBytes`). And a
+  stated value below what the plugin needs stayed below it through a
+  drop, which is what Q1's least core exists to prevent.
+  `ecuio_plugin_drop_variant` ends as `_put_variant` does: `requires.core`
+  is the higher of the stated value and the least core that reads the
+  result, never past this core's own version.*
 - **A data file's own `source`:** the wrap moves the file's to the
   manifest; a put keeps the file's in its data file, and the loader
   writes a variant's signal file with the source of the first of its

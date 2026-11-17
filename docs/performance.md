@@ -405,3 +405,19 @@ after a build reads up to 89 ms, the exe's file not yet cached. A real
 adapter's `PassThruOpen` adds its own time on top. Reads cost a pipe
 round trip each, negligible at the transport's read cap
 ([ADR-0014](adr/0014-single-threaded-surrogate.md)).
+
+### The sandbox's worst case
+
+Result: a call at the default budget takes at most 3.9 ms on x64 and 11.1
+ms on the x86 core; one `br_table` walk past the budget takes under a
+millisecond.
+
+2026-11-17, Windows 11 desktop, MSVC Release, the default budget of
+1,000,000 units ([ADR-0066](adr/0066-conversation-tier-and-write-gates.md)'s
+notes, items 18 and 23). The dearest module after the metering of work
+beyond dispatch (a plain loop) takes 3.9 ms on x64 and 11.1 ms on the x86
+core; without that metering one call ran 101 s. The longest single step is
+one `br_table` walking every cached record a module can hold under the 8
+MiB making bound: 0.52 ms at 180,000 records on x64, 0.63 ms at 220,000 on
+the x86 core. That is how far past its budget a call can run. The phone's
+figures are owed when a front end reaches the sandbox.
