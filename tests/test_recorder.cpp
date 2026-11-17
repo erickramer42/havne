@@ -2510,9 +2510,10 @@ TEST(RecorderTest, AFileIsTakenOnlyForTheSessionItDecodes)
               ECUIO_ERR_NULL_ARGUMENT);
     EXPECT_EQ(ecuio_recorder_take_signals(r, f.set(), nullptr, 1),
               ECUIO_ERR_NULL_ARGUMENT);
-    const std::string big(ECUIO_SIGNAL_FILE_MAX_BYTES + 1, ' ');
+    const std::string big(ECUIO_SIGNAL_SET_MAX_BYTES + 1, ' ');
     EXPECT_EQ(ecuio_recorder_take_signals(r, f.set(), big.data(), big.size()),
-              ECUIO_ERR_INVALID_ARGUMENT);
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "a byte past a set's written copy";
     EXPECT_EQ(ecuio_recorder_signal_file(r, f.file), ECUIO_OK);
     EXPECT_EQ(ecuio_recorder_signal_file(r, f.file),
               ECUIO_ERR_INVALID_ARGUMENT);

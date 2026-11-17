@@ -128,7 +128,7 @@ ecuio_status_t open_viewed(const ViewArgs& args, const char* folder,
     const ecuio_signal_set_t* set = nullptr;
     if (source.own_file) {
         const ecuio_status_t st = load_signal_file(
-            (std::string(folder) + "/signals.json").c_str(), &file, why);
+            (std::string(folder) + "/signals.json").c_str(), &file, why, true);
         if (st != ECUIO_OK) {
             return st;
         }

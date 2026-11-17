@@ -749,7 +749,7 @@ uint32_t format_of(const Value& root, const char* what)
     return static_cast<uint32_t>(version.whole);
 }
 
-void read_file(const Value& root, ecuio_signal_file& f)
+void read_file(const Value& root, ecuio_signal_file& f, size_t max_signals)
 {
     expect(root, Type::object, "the file");
     const uint32_t format = format_of(root, "a signal file");
@@ -786,6 +786,7 @@ void read_file(const Value& root, ecuio_signal_file& f)
     p.signals_at = root.find("signals");
     p.own_list = true;
     p.format = format;
+    p.max_signals = max_signals;
     build(p, f);
 }
 
@@ -852,9 +853,9 @@ void build(const parts& in, ecuio_signal_file& f)
     if (list.empty()) {
         refuse(*signals, "\"signals\" lists none");
     }
-    if (list.size() > ECUIO_SIGNAL_FILE_MAX_SIGNALS) {
+    if (list.size() > in.max_signals) {
         refuse(*signals, "\"signals\" lists " + std::to_string(list.size()) +
-                             ", more than 1024");
+                             ", more than " + std::to_string(in.max_signals));
     }
 
     /* First every signal's key and kind, so an expression can read a
@@ -1141,25 +1142,37 @@ void build(const parts& in, ecuio_signal_file& f)
                            std::to_string(why.code) + ")");
     }
 
-    /* Every request must fit the engine's table, as registration checks */
-    std::unique_ptr<ecuio_request_engine> engine(new ecuio_request_engine());
+    /* Each ECU's requests within a module's most, as registration checks */
     uint32_t rx_ids[ECUIO_MAX_CHANNELS] = {};
     for (size_t i = 0; i < f.channels.size() && i < ECUIO_MAX_CHANNELS; ++i) {
         rx_ids[i] = f.channels[i].rx_id;
     }
-    if (!ecuio_engine_init(engine.get(), f.set.channel_count)) {
+    ecuio_derived derived;
+    const ecuio_plan_result fits = ecuio_engine_plan(
+        &f.set, rx_ids, f.set.channel_count, nullptr, &derived);
+    if (fits == ecuio_plan_result::out_of_memory) {
         throw std::bad_alloc();
     }
-    uint32_t overflow = UINT32_MAX;
-    if (!ecuio_engine_derive(engine.get(), &f.set, rx_ids, f.set.channel_count,
-                             &overflow)) {
+    if (fits == ecuio_plan_result::module_full) {
         const size_t first = first_own;
-        const Value& at = (overflow != UINT32_MAX && overflow >= first &&
-                           overflow - first < entries.size())
-                              ? *entries[overflow - first].v
-                              : *signals;
-        refuse(at, "the signals ask more than " +
-                       std::to_string(ECUIO_PROFILE_MAX_REQUESTS) +
+        const uint32_t overflow = derived.overflow_def;
+        const Value& at =
+            (overflow >= first && overflow - first < entries.size())
+                ? *entries[overflow - first].v
+                : *signals;
+        /* The ECU by its id, the base's by its reply ID */
+        const uint32_t rx =
+            overflow < f.defs.size() ? f.defs[overflow].message_id : 0;
+        char hex[16];
+        std::snprintf(hex, sizeof hex, "%X", static_cast<unsigned>(rx));
+        std::string ecu = std::string("the ECU at ") + hex;
+        for (const auto& known : ecus) {
+            if (known.second == rx) {
+                ecu = "ecu " + q(known.first);
+            }
+        }
+        refuse(at, "the signals ask " + ecu + " more than " +
+                       std::to_string(ECUIO_MODULE_MAX_REQUESTS) +
                        " requests, the base's counted");
     }
     if (engine->count > ecuio_least::kRequestsBefore) {
@@ -1167,28 +1180,14 @@ void build(const parts& in, ecuio_signal_file& f)
     }
 }
 
-} // namespace ecuio_sf
-
-using ecuio_sf::refused;
-
-extern "C" {
-
-ecuio_status_t ecuio_signal_file_load(const char* bytes, size_t length,
-                                      ecuio_signal_file_t** out)
+ecuio_status_t load(const char* bytes, size_t length, size_t max_bytes,
+                    size_t max_signals, ecuio_signal_file** out)
 {
-    ecuio_detail_clear();
-    if (out == nullptr) {
-        return ECUIO_ERR_NULL_ARGUMENT;
-    }
-    *out = nullptr;
-    if (bytes == nullptr && length > 0) {
-        return ECUIO_ERR_NULL_ARGUMENT;
-    }
     try {
         ecuio_json::Value root;
         ecuio_json::Error error;
         ecuio_json::Limits limits;
-        limits.max_bytes = ECUIO_SIGNAL_FILE_MAX_BYTES;
+        limits.max_bytes = max_bytes;
         if (!ecuio_json::parse(bytes != nullptr ? bytes : "", length, &root,
                                &error, limits)) {
             ecuio_detail_set("%s", error.to_string().c_str());
@@ -1196,7 +1195,7 @@ ecuio_status_t ecuio_signal_file_load(const char* bytes, size_t length,
                                                    : ECUIO_ERR_INVALID_ARGUMENT;
         }
         std::unique_ptr<ecuio_signal_file> f(new ecuio_signal_file());
-        ecuio_sf::read_file(root, *f);
+        read_file(root, *f, max_signals);
         if (length > 0) {
             f->bytes.assign(bytes, length);
         }
@@ -1213,6 +1212,42 @@ ecuio_status_t ecuio_signal_file_load(const char* bytes, size_t length,
         ecuio_detail_set("the file couldn't be read");
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
+}
+
+} // namespace ecuio_sf
+
+extern "C" {
+
+ecuio_status_t ecuio_signal_file_load(const char* bytes, size_t length,
+                                      ecuio_signal_file_t** out)
+{
+    return ecuio_signal_file_load_with(bytes, length, 0, out);
+}
+
+ecuio_status_t ecuio_signal_file_load_with(const char* bytes, size_t length,
+                                           uint32_t flags,
+                                           ecuio_signal_file_t** out)
+{
+    ecuio_detail_clear();
+    if (out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    *out = nullptr;
+    if (bytes == nullptr && length > 0) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if ((flags & ~ECUIO_SIGNAL_FILE_LOAD_SET) != 0) {
+        ecuio_detail_set(
+            "a signal file's load takes no flag 0x%x",
+            static_cast<unsigned>(flags & ~ECUIO_SIGNAL_FILE_LOAD_SET));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const bool set = (flags & ECUIO_SIGNAL_FILE_LOAD_SET) != 0;
+    return ecuio_sf::load(
+        bytes, length,
+        set ? ECUIO_SIGNAL_SET_MAX_BYTES : ECUIO_SIGNAL_FILE_MAX_BYTES,
+        set ? ECUIO_SIGNAL_SET_MAX_SIGNALS : ECUIO_SIGNAL_FILE_MAX_SIGNALS,
+        out);
 }
 
 const ecuio_signal_set_t* ecuio_signal_file_set(const ecuio_signal_file_t* file)

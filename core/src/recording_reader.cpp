@@ -558,7 +558,7 @@ void read_copy(const std::string& path, uint64_t most, const char* sha256,
 
 void ecuio_recording::read_copies(const std::string& folder)
 {
-    read_copy(folder + "/" + rows::kSignalFileName, ECUIO_SIGNAL_FILE_MAX_BYTES,
+    read_copy(folder + "/" + rows::kSignalFileName, ECUIO_SIGNAL_SET_MAX_BYTES,
               signal_file.sha256, &signal_file.flags, &signal_file.length);
     read_copy(folder + "/" + rows::kConditionsName,
               ECUIO_CONDITION_FILE_MAX_BYTES, conditions.sha256,

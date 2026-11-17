@@ -642,6 +642,13 @@ private:
             refuse(root, "a data file needs \"signals\"");
         }
         expect(*signals, Type::array, "\"signals\"");
+        /* A data file's own bound; the variant's merged list has a set's */
+        if (signals->items.size() > ECUIO_SIGNAL_FILE_MAX_SIGNALS) {
+            refuse(*signals, "\"signals\" lists " +
+                                 std::to_string(signals->items.size()) +
+                                 ", more than " +
+                                 std::to_string(ECUIO_SIGNAL_FILE_MAX_SIGNALS));
+        }
     }
 
     /* The variant's files' signals merged by key, a later file's
@@ -655,6 +662,7 @@ private:
         parts.profile = out.profile;
         parts.ecus = manifest_.find("ecus");
         parts.signals_at = &at;
+        parts.max_signals = ECUIO_SIGNAL_SET_MAX_SIGNALS;
         /* The first of the variant's files that has a source of its own
          * names where the variant comes from, else the manifest's does */
         const Value* source = manifest_.find("source");
@@ -777,8 +785,9 @@ private:
         std::string json = ecuio_json::write(doc);
 
         ecuio_signal_file_t* back = nullptr;
-        const bool read =
-            ecuio_signal_file_load(json.data(), json.size(), &back) == ECUIO_OK;
+        const bool read = ecuio_signal_file_load_with(
+                              json.data(), json.size(),
+                              ECUIO_SIGNAL_FILE_LOAD_SET, &back) == ECUIO_OK;
         const bool same = read && same_set(back->set, v.file->set);
         if (!read) {
             /* The loader's words, past the place in the written text */

@@ -373,6 +373,7 @@ void request_worker(ecuio_socketcan_transport* t)
     socketcan_clock clock;
     link_health h(s->last_error, s->error_count, s->record_link.get(), s,
                   t->epoch, &clock.last_out_us, &clock.last_host_us);
+    ecuio_unpicked_check unpicked_check;
     uint32_t drops = 0;
     bool overflow_pending = false;
     uint32_t published[ECUIO_MAX_CHANNELS] = {};
@@ -434,7 +435,7 @@ void request_worker(ecuio_socketcan_transport* t)
         int64_t now = now_us(t);
         for (uint32_t c = 0; c < e.chan_count; ++c) {
             if (ecuio_engine_expire(&e, c, now)) {
-                link_on_request_timeout(h);
+                ecuio_request_timed_out(e, h);
             }
         }
         if (pending.active && now - pending.at_us > ECUIO_ISOTP_N_AS_US) {
@@ -509,7 +510,13 @@ void request_worker(ecuio_socketcan_transport* t)
         }
         if (ready == 0) {
             if (!asking && !pending.active) {
-                link_on_read(h, false, false, true); /* a quiet window */
+                if (ecuio_engine_unpicked(&e)) {
+                    if (!t->proof.halted) { /* a halt's failure stays */
+                        ecuio_unpicked_pass(&e, h, unpicked_check, now_us(t));
+                    }
+                } else {
+                    link_on_read(h, false, false, true); /* a quiet window */
+                }
             }
         }
 
