@@ -1753,6 +1753,7 @@ TestCase {
     }
 
     Component { id: spyComponent; SignalSpy {} }
+    Component { id: metricsComponent; TextMetrics {} }
 
     // The desktop's link state drops the address where its row leaves it
     // no room (a narrow window): the header carries the address. Under 60
@@ -1783,6 +1784,57 @@ TestCase {
         page.width = 1000
         tryCompare(label, "text", "Live · mock://demo", 3000)
         compare(label.opacity, 1)
+    }
+
+    // A plugin's session adds the vehicle's and plugin's names after the
+    // address, eliding them before the address; no room for the address
+    // whole, none added
+    function test_theLinkStateNamesTheVehicleAndPluginAfterTheAddress() {
+        const page = pageOf({ form: "desktop", width: 1000, height: 600,
+                              profileNames: { "mock": "Daily driver extras" } }, null, true)
+        Bridge.vehicleLabel = "Project car"
+        connect("mock://demo?profile=mock")
+        tryVerify(() => findChild(page, "linkInRow").item, 3000, "the link state")
+        const label = findChild(page, "linkLabel")
+        tryCompare(label, "text", "Live · mock://demo · Project car · Daily driver extras", 5000)
+        compare(label.elide, Text.ElideRight)
+        // Narrower: the names elide, the address stays
+        let w = 1000
+        do {
+            page.width = (w -= 20)
+            wait(50)
+        } while (w > 400 && !label.truncated)
+        verify(label.truncated, "the names run out of room at " + w)
+        verify(label.text.startsWith("Live · mock://demo · "), label.text)
+        // Wide again: whole; without a vehicle, the plugin alone
+        page.width = 1000
+        tryCompare(label, "text", "Live · mock://demo · Project car · Daily driver extras", 3000)
+        Bridge.vehicleLabel = ""
+        tryCompare(label, "text", "Live · mock://demo · Daily driver extras", 3000)
+    }
+
+    // An address that doesn't fit whole in a row past the room for one
+    // takes no names
+    function test_theLinkStateAddsNoNamesWhereTheAddressIsCut() {
+        const page = pageOf({ form: "desktop", width: 1000, height: 600,
+                              profileNames: { "mock": "Daily driver extras" } }, null, true)
+        Bridge.vehicleLabel = "Project car"
+        connect("mock://averyveryveryverylongdemohostnameforthistest?profile=mock")
+        tryVerify(() => findChild(page, "linkInRow").item, 3000, "the link state")
+        const label = findChild(page, "linkLabel")
+        tryVerify(() => label.text.endsWith("Daily driver extras"), 5000, label.text)
+        const metrics = createTemporaryObject(metricsComponent, testCase,
+                                              { font: label.font, text: label.withAddress })
+        let w = 1000, cut = false
+        do {
+            page.width = (w -= 10)
+            wait(50)
+            cut = label.roomForAddress && label.width < metrics.advanceWidth
+        } while (w > 400 && !cut)
+        verify(cut, "the address is cut at " + w)
+        verify(!label.text.includes("Project car"), "no names beside a cut address: " + label.text)
+        page.width = 1000
+        Bridge.vehicleLabel = ""
     }
 
     function settleToolRow(row) {

@@ -1,6 +1,7 @@
 // File/layer: tests/qml/tst_sessionlabel.qml | Qt Quick Test, QML tier
 // Testing: SessionLabel.address drops only the profile= pair from a
-//          session's address and keeps the other keys. No session.
+//          session's address and keeps the other keys; reads names the
+//          vehicle and plugin a session reads. No session.
 
 import QtQuick
 import QtTest
@@ -32,5 +33,22 @@ TestCase {
 
     function test_aKeyThatOnlyEndsInProfileStays() {
         compare(SessionLabel.address("mock://?subprofile=1"), "mock://?subprofile=1")
+    }
+
+    readonly property var names: ({ "plugin.daily.base": "Daily driver extras" })
+
+    function test_aPluginsSessionReadsVehicleThenPlugin() {
+        compare(SessionLabel.reads("plugin.daily.base", names, "Project car"),
+                "Project car · Daily driver extras")
+    }
+
+    function test_noVehicleReadsThePluginAlone() {
+        compare(SessionLabel.reads("plugin.daily.base", names, ""), "Daily driver extras")
+    }
+
+    function test_aBuiltInOrUnknownProfileReadsNothing() {
+        compare(SessionLabel.reads("obd2", names, "Project car"), "")
+        compare(SessionLabel.reads("plugin.gone.base", names, "Project car"), "")
+        compare(SessionLabel.reads("", names, ""), "")
     }
 }
