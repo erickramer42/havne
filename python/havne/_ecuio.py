@@ -185,6 +185,11 @@ ECUIO_ENGINE_START_RPM = 0x1f4
 ECUIO_ENGINE_STOPPED_RPM = 100
 ECUIO_ENUM_LABEL_MAX = 27
 ECUIO_ENUM_MAX_ENTRIES = 0x100
+ECUIO_EVAL_VALUE = 1
+ECUIO_EVAL_WHY_MISSING = 1
+ECUIO_EVAL_WHY_NONE = 0
+ECUIO_EVAL_WHY_NO_NUMBER = 3
+ECUIO_EVAL_WHY_STALE = 2
 ECUIO_EXPORT_CSV = 2
 ECUIO_EXPORT_FOLDER = 1
 ECUIO_EXPORT_LEFT_OUT_ACTIVITY = 3
@@ -543,6 +548,12 @@ class ecuio_dtc_list_t(Structure):
     pass
 
 class ecuio_enum_entry_t(Structure):
+    pass
+
+class ecuio_eval_input_t(Structure):
+    pass
+
+class ecuio_eval_result_t(Structure):
     pass
 
 class ecuio_export_estimate_t(Structure):
@@ -962,6 +973,23 @@ ecuio_display_value_t._fields_ = [
 ecuio_enum_entry_t._fields_ = [
     ('raw', c_uint32),
     ('label', (c_char * 28)),
+]
+ecuio_eval_input_t._fields_ = [
+    ('value', c_double),
+    ('age_us', c_uint64),
+    ('def_id', c_uint16),
+    ('reserved0', c_uint16),
+    ('flags', c_uint32),
+]
+ecuio_eval_result_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('value', c_double),
+    ('why', c_uint32),
+    ('leaf', c_uint16),
+    ('reserved0', c_uint16),
+    ('bound_us', c_uint64),
+    ('reserved', (c_uint32 * 4)),
 ]
 ecuio_export_estimate_t._fields_ = [
     ('rows', c_uint64),
@@ -1625,7 +1653,9 @@ FUNCTIONS = {
     'ecuio_session_start': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_shutdown': (None, []),  # core.h
     'ecuio_signal_file_check_expr': (c_int, [POINTER(ecuio_signal_file_t), c_char_p, c_char_p, c_size_t, POINTER(ecuio_expr_check_t)]),  # signals.h
+    'ecuio_signal_file_evaluate': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_computed_t), POINTER(ecuio_eval_input_t), c_uint32, POINTER(ecuio_eval_result_t)]),  # signals.h
     'ecuio_signal_file_expr': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
+    'ecuio_signal_file_expr_leaves': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_computed_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # signals.h
     'ecuio_signal_file_expr_ref': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t), c_char_p, c_size_t]),  # signals.h
     'ecuio_signal_file_extends': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_find': (POINTER(ecuio_signal_def_t), [POINTER(ecuio_signal_file_t), c_char_p]),  # signals.h

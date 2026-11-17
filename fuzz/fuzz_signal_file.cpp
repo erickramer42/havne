@@ -544,11 +544,40 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
             }
             ref.take(at, x.value);
         }
+        /* What an evaluation is given: every number def seen so far, its
+         * newest value and its age at this frame */
+        static ecuio_eval_input_t given[kRefDefs];
+        uint32_t givens = 0;
+        for (uint32_t g = 0; g < set->count; ++g) {
+            if ((set->defs[g].flags & ECUIO_DEF_FLAG_COMPUTED) == 0 &&
+                ref.leaf_seen[g]) {
+                given[givens] = ecuio_eval_input_t{};
+                given[givens].def_id = set->defs[g].id;
+                given[givens].value = ref.leaf_value[g];
+                given[givens].age_us = ref.now - ref.leaf_us[g];
+                ++givens;
+            }
+        }
         for (uint32_t c = 0; c < set->count; ++c) {
             if ((set->defs[c].flags & ECUIO_DEF_FLAG_COMPUTED) == 0) {
                 continue;
             }
             ref.walk(c);
+            if (ref.fed[c]) {
+                /* The same def worked out apart from any session
+                 * (ecuio_signal_file_evaluate): the reference's value to
+                 * the bit, or none where it has none */
+                ecuio_eval_result_t worked{};
+                worked.struct_size = sizeof worked;
+                check(ecuio_signal_file_evaluate(
+                          a, &set->computed[set->defs[c].table_first], given,
+                          givens, &worked) == ECUIO_OK);
+                const bool has = (worked.flags & ECUIO_EVAL_VALUE) != 0;
+                check(has == !std::isnan(ref.value[c]));
+                check(has ? memcmp(&worked.value, &ref.value[c],
+                                   sizeof worked.value) == 0
+                          : worked.why != ECUIO_EVAL_WHY_NONE);
+            }
             if (!ref.fed[c] || std::isnan(ref.value[c])) {
                 continue;
             }

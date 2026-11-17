@@ -2,18 +2,24 @@
 // Testing: UNIT: SignalExprTest (test_signals); FUZZ: fuzz_signal_file
 //
 // An expression against a loaded signal file (signals.h, ADR-0062): the
-// check an editor runs before the file is written, and the name an
-// expression reads a def by. The compiler and the chain rules are the
-// loader's (signal_expr.h), so a check and a load judge alike.
+// check an editor runs before the file is written, the name an
+// expression reads a def by, and a program worked out from given values.
+// The compiler and the chain rules are the loader's (signal_expr.h), so a
+// check and a load judge alike; the machine and the age rule are the
+// frame decoder's (computed.h), so a preview and a session give one value.
 
 #include "ecuio/signal_sets.h"
 #include "ecuio/signals.h"
+#include "computed.h"
 #include "error_detail.h"
 #include "signal_expr.h"
 #include "signal_file_build.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <new>
 #include <string>
 #include <vector>
@@ -301,6 +307,168 @@ void check(const ecuio_signal_file& f, const std::string& key,
     out.program = program;
 }
 
+/* The def of f with that ID: its index, or kNone */
+size_t def_by_id(const ecuio_signal_file& f, uint16_t id)
+{
+    for (size_t i = 0; i < f.defs.size(); ++i) {
+        if (f.defs[i].id == id) {
+            return i;
+        }
+    }
+    return kNone;
+}
+
+/* How deep the computed def at i sits (1 reading no computed def), kept
+ * in depth once known. A loaded set has no circle and nothing past the
+ * bound; level stops a walk that met one anyway. */
+uint32_t depth_of(const ecuio_signal_file& f, size_t i,
+                  std::vector<uint32_t>& depth, uint32_t level)
+{
+    if (depth[i] != 0) {
+        return depth[i];
+    }
+    if (level > ECUIO_COMPUTED_MAX_DEPTH) {
+        return ECUIO_COMPUTED_MAX_DEPTH + 1;
+    }
+    uint32_t d = 1;
+    const ecuio_computed_t& p = f.computed[f.defs[i].table_first];
+    for (uint32_t k = 0; k < p.input_count && k < ECUIO_COMPUTED_MAX_INPUTS;
+         ++k) {
+        const size_t j = def_by_id(f, p.input_ids[k]);
+        if (j != kNone && is_computed(f.defs[j])) {
+            d = std::max(d, depth_of(f, j, depth, level + 1) + 1);
+        }
+    }
+    depth[i] = d;
+    return d;
+}
+
+/* Why program can't be worked out over f's set, "" when it can: what
+ * the set's validator would refuse of it were it one of the set's own */
+std::string program_fault(const ecuio_signal_file& f,
+                          const ecuio_computed_t& program)
+{
+    if (!ecuio_computed_check(program)) {
+        return "the program fails the validator's check of its counts, "
+               "steps, constants and age bounds";
+    }
+    std::vector<uint32_t> depth(f.defs.size(), 0);
+    uint32_t deep = 1;
+    for (uint32_t k = 0; k < program.input_count; ++k) {
+        const size_t j = def_by_id(f, program.input_ids[k]);
+        if (j == kNone) {
+            return "the program reads ID " +
+                   std::to_string(program.input_ids[k]) +
+                   ", which no def of the file's set has";
+        }
+        const ecuio_signal_def_t& d = f.defs[j];
+        if (is_computed(d)) {
+            if (program.max_age_us[k] != 0) {
+                return "the program keeps an age bound on " + q(d.name) +
+                       ", a computed signal: its own inputs carry their ages";
+            }
+            deep = std::max(deep, depth_of(f, j, depth, 1) + 1);
+        } else if (d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX) {
+            return "the program reads " + q(d.name) + ", which is text";
+        }
+    }
+    if (deep > ECUIO_COMPUTED_MAX_DEPTH) {
+        return "the program sits " + std::to_string(deep) +
+               " computed signals deep: a chain goes " +
+               std::to_string(ECUIO_COMPUTED_MAX_DEPTH) + " deep at most";
+    }
+    return std::string();
+}
+
+/* The number defs under program, each once, in the order it and the
+ * programs of its computed inputs first read them. seen is a byte per
+ * def. A program program_fault passed goes no deeper than the bound. */
+void leaves_under(const ecuio_signal_file& f, const ecuio_computed_t& program,
+                  std::vector<uint8_t>& seen, std::vector<uint16_t>& out)
+{
+    for (uint32_t k = 0; k < program.input_count; ++k) {
+        const size_t j = def_by_id(f, program.input_ids[k]);
+        if (j == kNone || seen[j] != 0) {
+            continue;
+        }
+        seen[j] = 1;
+        const ecuio_signal_def_t& d = f.defs[j];
+        if (is_computed(d)) {
+            leaves_under(f, f.computed[d.table_first], seen, out);
+        } else {
+            out.push_back(d.id);
+        }
+    }
+}
+
+/* One evaluation: each computed def under the program worked out once,
+ * as the decoder works a chain out at a frame, and the first leaf read
+ * without a value kept for the answer */
+struct evaluation {
+    const ecuio_signal_file& f;
+    const ecuio_eval_input_t* inputs;
+    uint32_t count;
+    std::vector<uint8_t> done; /* a computed def is worked out */
+    std::vector<double> value; /* its value, NaN for none */
+    uint32_t why = ECUIO_EVAL_WHY_NONE;
+    uint16_t leaf = 0;
+    uint64_t bound_us = 0;
+
+    void lacks(uint32_t reason, uint16_t id, uint64_t bound)
+    {
+        if (why == ECUIO_EVAL_WHY_NONE) {
+            why = reason;
+            leaf = id;
+            bound_us = bound;
+        }
+    }
+
+    /* A number def's value as the program reading it within max_age_us
+     * sees it: the first given for it, no older than the bound */
+    double leaf_value(uint16_t id, uint32_t max_age_us)
+    {
+        const uint64_t bound = ecuio_computed_bound_us(max_age_us);
+        for (uint32_t i = 0; i < count; ++i) {
+            if (inputs[i].def_id != id) {
+                continue;
+            }
+            if (std::isnan(inputs[i].value)) {
+                break;
+            }
+            if (!ecuio_computed_fresh(inputs[i].age_us, bound)) {
+                lacks(ECUIO_EVAL_WHY_STALE, id, bound);
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            return inputs[i].value;
+        }
+        lacks(ECUIO_EVAL_WHY_MISSING, id, 0);
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    double run(const ecuio_computed_t& program)
+    {
+        double in[ECUIO_COMPUTED_MAX_INPUTS] = {};
+        for (uint32_t k = 0; k < program.input_count; ++k) {
+            const size_t j = def_by_id(f, program.input_ids[k]);
+            const ecuio_signal_def_t& d = f.defs[j];
+            if (!is_computed(d)) {
+                in[k] = leaf_value(d.id, program.max_age_us[k]);
+                continue;
+            }
+            if (done[j] == 0) {
+                const double under = run(f.computed[d.table_first]);
+                value[j] = under;
+                done[j] = 1;
+            }
+            in[k] = value[j];
+        }
+        double out = 0.0;
+        return ecuio_computed_run(program, in, &out)
+                   ? out
+                   : std::numeric_limits<double>::quiet_NaN();
+    }
+};
+
 } // namespace
 
 extern "C" {
@@ -414,6 +582,95 @@ ecuio_status_t ecuio_signal_file_expr_ref(const ecuio_signal_file_t* file,
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
         std::memcpy(out, name.c_str(), name.size() + 1);
+        return ECUIO_OK;
+    } catch (const std::bad_alloc&) {
+        ecuio_detail_set("out of memory");
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+}
+
+ecuio_status_t ecuio_signal_file_expr_leaves(const ecuio_signal_file_t* file,
+                                             const ecuio_computed_t* program,
+                                             uint16_t* ids, uint32_t capacity,
+                                             uint32_t* count)
+{
+    ecuio_detail_clear();
+    if (file == nullptr || program == nullptr || count == nullptr ||
+        (ids == nullptr && capacity != 0)) {
+        ecuio_detail_set("the leaves need a file, a program, a count and "
+                         "room for what the capacity says");
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    try {
+        const std::string fault = program_fault(*file, *program);
+        if (!fault.empty()) {
+            ecuio_detail_set("%s", fault.c_str());
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+        std::vector<uint8_t> seen(file->defs.size(), 0);
+        std::vector<uint16_t> leaves;
+        leaves_under(*file, *program, seen, leaves);
+        for (size_t i = 0; i < leaves.size() && i < capacity; ++i) {
+            ids[i] = leaves[i];
+        }
+        *count = static_cast<uint32_t>(leaves.size());
+        return ECUIO_OK;
+    } catch (const std::bad_alloc&) {
+        ecuio_detail_set("out of memory");
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+}
+
+ecuio_status_t ecuio_signal_file_evaluate(const ecuio_signal_file_t* file,
+                                          const ecuio_computed_t* program,
+                                          const ecuio_eval_input_t* inputs,
+                                          uint32_t count,
+                                          ecuio_eval_result_t* out)
+{
+    ecuio_detail_clear();
+    if (file == nullptr || program == nullptr || out == nullptr ||
+        (inputs == nullptr && count != 0)) {
+        ecuio_detail_set("the evaluation needs a file, a program, the inputs "
+                         "its count says and a struct to fill");
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (out->struct_size < sizeof(ecuio_eval_result_t)) {
+        ecuio_detail_set("the result's struct_size is %u, under its %u bytes",
+                         static_cast<unsigned>(out->struct_size),
+                         static_cast<unsigned>(sizeof(ecuio_eval_result_t)));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    for (uint32_t i = 0; i < count; ++i) {
+        if (inputs[i].flags != 0 || inputs[i].reserved0 != 0) {
+            ecuio_detail_set("the evaluation's input at index %u has a nonzero "
+                             "flags or reserved0: no flag is defined",
+                             static_cast<unsigned>(i));
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
+    try {
+        const std::string fault = program_fault(*file, *program);
+        if (!fault.empty()) {
+            ecuio_detail_set("%s", fault.c_str());
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+        evaluation e{*file, inputs, count,
+                     std::vector<uint8_t>(file->defs.size(), 0),
+                     std::vector<double>(file->defs.size(), 0.0)};
+        const double value = e.run(*program);
+        ecuio_eval_result_t filled{};
+        filled.struct_size = sizeof(ecuio_eval_result_t);
+        if (!std::isnan(value)) {
+            filled.flags = ECUIO_EVAL_VALUE;
+            filled.value = value;
+        } else if (e.why != ECUIO_EVAL_WHY_NONE) {
+            filled.why = e.why;
+            filled.leaf = e.leaf;
+            filled.bound_us = e.bound_us;
+        } else {
+            filled.why = ECUIO_EVAL_WHY_NO_NUMBER;
+        }
+        std::memcpy(out, &filled, sizeof filled);
         return ECUIO_OK;
     } catch (const std::bad_alloc&) {
         ecuio_detail_set("out of memory");

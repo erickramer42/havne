@@ -118,6 +118,29 @@ typedef char abi_source_license_check
     [(offsetof(ecuio_signal_source_t, license) == 1592) ? 1 : -1];
 typedef char abi_source_modified_check
     [(offsetof(ecuio_signal_source_t, modified) == 2112) ? 1 : -1];
+typedef char
+    abi_eval_input_size_check[(sizeof(ecuio_eval_input_t) == 24) ? 1 : -1];
+typedef char
+    abi_eval_input_age_check[(offsetof(ecuio_eval_input_t, age_us) == 8) ? 1
+                                                                         : -1];
+typedef char
+    abi_eval_input_id_check[(offsetof(ecuio_eval_input_t, def_id) == 16) ? 1
+                                                                         : -1];
+typedef char abi_eval_input_flags_check
+    [(offsetof(ecuio_eval_input_t, flags) == 20) ? 1 : -1];
+typedef char
+    abi_eval_result_size_check[(sizeof(ecuio_eval_result_t) == 48) ? 1 : -1];
+typedef char abi_eval_result_value_check
+    [(offsetof(ecuio_eval_result_t, value) == 8) ? 1 : -1];
+typedef char
+    abi_eval_result_why_check[(offsetof(ecuio_eval_result_t, why) == 16) ? 1
+                                                                         : -1];
+typedef char abi_eval_result_leaf_check
+    [(offsetof(ecuio_eval_result_t, leaf) == 20) ? 1 : -1];
+typedef char abi_eval_result_bound_check
+    [(offsetof(ecuio_eval_result_t, bound_us) == 24) ? 1 : -1];
+typedef char abi_eval_result_reserved_check
+    [(offsetof(ecuio_eval_result_t, reserved) == 32) ? 1 : -1];
 typedef char abi_validation_size_check[(sizeof(ecuio_validation_t) == 16) ? 1 : -1];
 typedef char abi_validation_index_check[(offsetof(ecuio_validation_t, index) == 4) ? 1 : -1];
 typedef char abi_validation_reserved_check[(offsetof(ecuio_validation_t, reserved) == 8) ? 1 : -1];
@@ -630,6 +653,42 @@ int main(void)
                     ECUIO_ERR_INVALID_ARGUMENT) {
                 ecuio_signal_file_free(file);
                 return 1;
+            }
+            {
+                /* And worked out from C: the checked program's one leaf,
+                 * its value from a fresh input and none from a stale one */
+                ecuio_eval_input_t input;
+                ecuio_eval_result_t result;
+                uint16_t leaf = 0;
+                uint32_t leaves = 0;
+                memset(&checked, 0, sizeof checked);
+                checked.struct_size = (uint32_t)sizeof checked;
+                memset(&input, 0, sizeof input);
+                input.def_id = volts->id;
+                input.value = 12.5;
+                memset(&result, 0, sizeof result);
+                result.struct_size = (uint32_t)sizeof result;
+                if (ecuio_signal_file_check_expr(file, NULL, "volts * 2", 9,
+                                                 &checked) != ECUIO_OK ||
+                    ecuio_signal_file_expr_leaves(file, &checked.program, &leaf,
+                                                  1, &leaves) != ECUIO_OK ||
+                    leaves != 1u || leaf != volts->id ||
+                    ecuio_signal_file_evaluate(file, &checked.program, &input,
+                                               1, &result) != ECUIO_OK ||
+                    result.flags != ECUIO_EVAL_VALUE || result.value != 25.0 ||
+                    result.why != ECUIO_EVAL_WHY_NONE) {
+                    ecuio_signal_file_free(file);
+                    return 1;
+                }
+                input.age_us = (uint64_t)ECUIO_VALUE_STALE_US + 1u;
+                if (ecuio_signal_file_evaluate(file, &checked.program, &input,
+                                               1, &result) != ECUIO_OK ||
+                    result.flags != 0u || result.why != ECUIO_EVAL_WHY_STALE ||
+                    result.leaf != volts->id ||
+                    result.bound_us != ECUIO_VALUE_STALE_US) {
+                    ecuio_signal_file_free(file);
+                    return 1;
+                }
             }
         }
         {
