@@ -4,7 +4,7 @@
   "name": "Example car",
   "version": "1.0.0",
   "requires": {
-    "core": "0.7.3"
+    "core": "0.8.0"
   },
   "lineage": "74de52b2c1f0b31524d2e1178da79c03",
   "source": {

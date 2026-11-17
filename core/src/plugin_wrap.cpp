@@ -12,6 +12,7 @@
 #include "ecuio/signal_sets.h"
 #include "error_detail.h"
 #include "json.h"
+#include "least_core.h"
 #include "plugin_rules.h"
 #include "sha256.h"
 #include "signal_file_build.h"
@@ -184,13 +185,25 @@ void check_id(const std::string& id, size_t most, const char* what)
     }
 }
 
-/* This core's X.Y.Z, what a manifest's requires.core is compared with */
-std::string core_text()
+/* doc's requires.core made the least core that reads doc and at least
+ * floor (least_core.h): the plugin loader works it out from doc as
+ * written. A doc it refuses keeps its value: the check after says why. */
+void set_least_core(Value& doc, ecuio_least::version floor)
 {
-    uint32_t v[3] = {0, 0, 0};
-    ecuio_plugin_rules::core_version(v);
-    return std::to_string(v[0]) + "." + std::to_string(v[1]) + "." +
-           std::to_string(v[2]);
+    const std::string text = ecuio_json::write(doc);
+    ecuio_plugin_t* p = nullptr;
+    const ecuio_status_t s =
+        ecuio_plugin_load(text.data(), text.size(), nullptr, nullptr, &p);
+    if (s == ECUIO_ERR_OUT_OF_MEMORY) {
+        throw std::bad_alloc();
+    }
+    if (s != ECUIO_OK) {
+        return;
+    }
+    ecuio_least::raise(floor, ecuio_least::of_plugin(p));
+    ecuio_plugin_free(p);
+    at(*at(doc, "requires"), "core")->text =
+        ecuio_least::text(ecuio_least::within_core(floor));
 }
 
 std::string wrapped(const char* file, size_t length,
@@ -239,7 +252,7 @@ std::string wrapped(const char* file, size_t length,
     add(doc, "name", text_value(name));
     add(doc, "version", text_value("1.0.0"));
     Value needs = empty_of(Type::object);
-    add(needs, "core", text_value(core_text()));
+    add(needs, "core", text_value("0.0.0")); /* set_least_core's */
     add(doc, "requires", std::move(needs));
     add(doc, "lineage",
         text_value(ecuio_sha256::hex_of(file, length)
@@ -286,6 +299,7 @@ std::string wrapped(const char* file, size_t length,
     Value files = empty_of(Type::object);
     add(files, path, std::move(in));
     add(doc, "files", std::move(files));
+    set_least_core(doc, ecuio_least::version{{0, 0, 0}});
     return ecuio_json::write(doc);
 }
 
@@ -648,7 +662,14 @@ std::string put(const char* packed, size_t length, const char* variant_given,
         p.variants().items.push_back(std::move(entry));
     }
     p.raise_version();
-    at(*at(p.doc, "requires"), "core")->text = core_text();
+    /* A stored value above what the contents need is kept: it is the
+     * author's word, and the output stays a function of the inputs */
+    ecuio_least::version stored = {{0, 0, 0}};
+    if (!ecuio_plugin_rules::parse_version(
+            at(*at(p.doc, "requires"), "core")->text, stored.v)) {
+        stored = ecuio_least::version{{0, 0, 0}};
+    }
+    set_least_core(p.doc, stored);
     return ecuio_json::write(p.doc);
 }
 

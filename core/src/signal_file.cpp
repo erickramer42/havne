@@ -1,5 +1,6 @@
 // File/layer: core/src/signal_file.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: SignalFileTest, PluginTest (test_signals); FUZZ: fuzz_signal_file
+// Testing: UNIT: SignalFileTest, PluginTest, PluginWrapTest (test_signals);
+//          FUZZ: fuzz_signal_file
 //
 // The signal-file loader (ADR-0051): a file's JSON (json.h) into a
 // signal set the validator passes, everything a file can get wrong
@@ -139,6 +140,7 @@ void read_gauge(const Value& s, const ecuio_signal_def_t& d, uint32_t def,
     if (v == nullptr) {
         return;
     }
+    ecuio_least::raise(f.least, ecuio_least::kGauge);
     const std::string gauge = what + "'s gauge";
     expect(*v, Type::object, gauge);
     only_keys(*v, {"min", "max", "warn_low", "warn_high"}, what + "'s gauge");
@@ -813,6 +815,9 @@ void build(const parts& in, ecuio_signal_file& f)
     f.name = in.name;
     f.profile = in.profile;
     f.format = in.format;
+    /* An older core refuses a format it doesn't know, whatever the file
+     * uses of it, so the format's row covers each gate inside it */
+    ecuio_least::raise(f.least, ecuio_least::kSignalFormatSince[in.format]);
     const ecuio_signal_set_t* base = nullptr;
     if (in.extends != nullptr) {
         const Value* extends = in.extends;
@@ -829,6 +834,9 @@ void build(const parts& in, ecuio_signal_file& f)
 
     std::vector<std::pair<std::string, uint32_t>> ecus;
     read_ecus(in.ecus, f, &ecus);
+    if (f.channels.size() > ecuio_least::kEcusBefore) {
+        ecuio_least::raise(f.least, ecuio_least::kEcus);
+    }
 
     const Value* signals = in.signals_at;
     if (signals == nullptr) {
@@ -908,6 +916,7 @@ void build(const parts& in, ecuio_signal_file& f)
             } else {
                 entries[by - entries.data()].id = d.id;
                 entries[by - entries.data()].replaces = true;
+                ecuio_least::raise(f.least, ecuio_least::kReplacesByName);
             }
         }
         f.computed.clear();
@@ -1152,6 +1161,9 @@ void build(const parts& in, ecuio_signal_file& f)
         refuse(at, "the signals ask more than " +
                        std::to_string(ECUIO_PROFILE_MAX_REQUESTS) +
                        " requests, the base's counted");
+    }
+    if (engine->count > ecuio_least::kRequestsBefore) {
+        ecuio_least::raise(f.least, ecuio_least::kRequests);
     }
 }
 
