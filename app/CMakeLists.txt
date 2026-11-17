@@ -45,6 +45,8 @@ qt_add_library(app_ui STATIC
     obdbimport.h
     readonce.cpp
     readonce.h
+    exprcheck.cpp
+    exprcheck.h
     pluginstore.cpp
     pluginstore.h
     signalstore.cpp
