@@ -483,7 +483,7 @@ TEST(PluginWrapTest, ADropTakesAVariantOutAndRaisesTheMinor)
     ASSERT_TRUE(other);
     EXPECT_EQ(variants_of(other.get()), Strings{"base"});
 
-    /* requires.core is the plugin's own: a drop adds nothing to read */
+    /* requires.core is raised to the least core that reads what is left */
     const std::string hand = packed(
         kPcm,
         R"({"id": "base", "files": ["a.json"]}, {"id": "v", "files": ["a.json", "b.json"]})",
@@ -493,7 +493,7 @@ TEST(PluginWrapTest, ADropTakesAVariantOutAndRaisesTheMinor)
     const std::string less = ok(drop(hand, "v"));
     Plugin h = load(less);
     ASSERT_TRUE(h);
-    EXPECT_EQ(requires_of(h.get()), "0.1.0");
+    EXPECT_EQ(requires_of(h.get()), "0.5.0");
     EXPECT_STREQ(info_of(h.get()).version, "3.1.0");
     EXPECT_EQ(files_of(less), Strings{"a.json"})
         << "the file base still lists stays";

@@ -221,6 +221,28 @@ def _expr(file, key):
     return found or None
 
 
+def _keys(file):
+    """The key each def of file's set is kept under, as core's array"""
+    sset = lib.ecuio_signal_file_set(file)
+    count = ctypes.c_uint32()
+    check(lib.ecuio_signal_set_keys(sset, file, None, 0, ctypes.byref(count)),
+          "ecuio_signal_set_keys")
+    keys = (e.ecuio_signal_key_t * count.value)()
+    check(lib.ecuio_signal_set_keys(sset, file, keys, count.value, ctypes.byref(count)),
+          "ecuio_signal_set_keys")
+    return keys
+
+
+def _key_of(file, name_or_key):
+    """The key of the signal of file's set that name_or_key names"""
+    keys = _keys(file)
+    index = ctypes.c_uint32()
+    check(lib.ecuio_signal_set_find(lib.ecuio_signal_file_set(file), keys, len(keys),
+                                    utf8(name_or_key), ctypes.byref(index)),
+          "ecuio_signal_set_find")
+    return text(keys[index.value].text)
+
+
 class SignalFile:
     """A signal file (ADR-0051), from its text or a path; registered as
     its profile ("user.<slug>") on load. recorded=True reads a recording's
@@ -298,6 +320,21 @@ class SignalFile:
     def source(self):
         """Where the file's signals come from: its "source" as a Source"""
         return _source(self._handle)
+
+    def keys(self):
+        """The key each signal of the file's set is kept under, in the
+        set's order (ADR-0065 section 9): its address key
+        ("7E8:410C:2.0:16"), or the author's key for a computed signal
+        and for the later of two at one address. The base's signals come
+        first in a file that extends one."""
+        return [text(k.text) for k in _keys(self._handle)]
+
+    def key_of(self, name_or_key):
+        """The key of the signal name_or_key names: the signal with that
+        key, else the one signal with that name. An Error with core's
+        words for text no signal has and for a name several have, which
+        lists their keys."""
+        return _key_of(self._handle, name_or_key)
 
     def __repr__(self):
         return f"SignalFile({self.name!r}, profile {self.profile!r})"
@@ -417,6 +454,19 @@ class Plugin:
         return _evaluate(
             lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)),
             expr, values, key)
+
+    def keys(self, variant=None):
+        """The key each signal of a variant's set is kept under (the first
+        variant when None), as SignalFile.keys"""
+        return [text(k.text) for k in _keys(
+            lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)))]
+
+    def key_of(self, name_or_key, variant=None):
+        """The key of the signal name_or_key names in a variant's set (the
+        first variant when None), as SignalFile.key_of"""
+        return _key_of(
+            lib.ecuio_plugin_variant_file(self._handle, self.variant_index(variant)),
+            name_or_key)
 
     def format(self, variant=None):
         """A variant's signal-file format (the first variant when None):

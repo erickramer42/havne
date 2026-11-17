@@ -731,6 +731,9 @@ private:
                            "recording copies: " +
                            why);
         }
+        if (out.file->bytes.size() > ECUIO_SIGNAL_FILE_MAX_BYTES) {
+            ecuio_least::raise(out.file->least, ecuio_least::kSetBytes);
+        }
     }
 
     /* The variant as one signal file, what a recording copies as

@@ -738,6 +738,55 @@ int main(void)
             ecuio_signal_file_free(file);
             return 1;
         }
+        {
+            /* ADR-0065's keys from C: a def's address, the set's keys by
+             * the serial ports' contract, and a def named by key or name */
+            const ecuio_signal_set_t* keyed = ecuio_signal_file_set(file);
+            ecuio_signal_key_t key;
+            ecuio_signal_key_t keys[3];
+            uint32_t count = 0;
+            uint32_t index = 99;
+            memset(&key, 0xAA, sizeof key);
+            memset(keys, 0xAA, sizeof keys);
+            if (sizeof(ecuio_signal_key_t) != 32u ||
+                ECUIO_SIGNAL_KEY_LEN != 32u || ECUIO_SIGNAL_KEY_MAX != 31u ||
+                ecuio_signal_address_key(NULL, &key) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_address_key(volts, NULL) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_address_key(volts, &key) != ECUIO_OK ||
+                strcmp(key.text, "7E8:4142:2.0:16") != 0 ||
+                key.text[ECUIO_SIGNAL_KEY_LEN - 1] != 0 ||
+                ecuio_signal_set_keys(keyed, file, NULL, 0, &count) !=
+                    ECUIO_OK ||
+                count != 3u ||
+                ecuio_signal_set_keys(keyed, file, NULL, 1, &count) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                count != 0u ||
+                ecuio_signal_set_keys(NULL, NULL, keys, 3, &count) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_set_keys(keyed, file, keys, 3, NULL) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_set_keys(keyed, file, keys, 3, &count) !=
+                    ECUIO_OK ||
+                count != 3u || strcmp(keys[0].text, key.text) != 0 ||
+                strcmp(keys[1].text, "7E8:4104:2.0:8") != 0 ||
+                strcmp(keys[2].text, "half") != 0 ||
+                ecuio_signal_set_find(keyed, keys, count, "half", &index) !=
+                    ECUIO_OK ||
+                index != 2u ||
+                ecuio_signal_set_find(keyed, keys, count, "Load Share",
+                                      &index) != ECUIO_OK ||
+                index != 1u ||
+                ecuio_signal_set_find(keyed, keys, count, "none", &index) !=
+                    ECUIO_ERR_INVALID_ARGUMENT ||
+                index != 1u ||
+                ecuio_signal_set_find(keyed, keys, count, NULL, &index) !=
+                    ECUIO_ERR_NULL_ARGUMENT) {
+                ecuio_signal_file_free(file);
+                return 1;
+            }
+        }
         ecuio_signal_file_free(file);
         if (ecuio_plugin_load(kPacked, sizeof kPacked - 1, NULL, NULL,
                               &plugin) != ECUIO_OK) {

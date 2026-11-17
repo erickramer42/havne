@@ -206,6 +206,19 @@ void set_least_core(Value& doc, ecuio_least::version floor)
         ecuio_least::text(ecuio_least::within_core(floor));
 }
 
+/* A changed doc's requires.core: the least core that reads it, or the
+ * value it had when that is higher, which is the author's word and
+ * keeps the output a function of the inputs */
+void keep_or_raise_core(Value& doc)
+{
+    ecuio_least::version stored = {{0, 0, 0}};
+    if (!ecuio_plugin_rules::parse_version(
+            at(*at(doc, "requires"), "core")->text, stored.v)) {
+        stored = ecuio_least::version{{0, 0, 0}};
+    }
+    set_least_core(doc, stored);
+}
+
 std::string wrapped(const char* file, size_t length,
                     const ecuio_plugin_wrap_options_t* options)
 {
@@ -662,14 +675,7 @@ std::string put(const char* packed, size_t length, const char* variant_given,
         p.variants().items.push_back(std::move(entry));
     }
     p.raise_version();
-    /* A stored value above what the contents need is kept: it is the
-     * author's word, and the output stays a function of the inputs */
-    ecuio_least::version stored = {{0, 0, 0}};
-    if (!ecuio_plugin_rules::parse_version(
-            at(*at(p.doc, "requires"), "core")->text, stored.v)) {
-        stored = ecuio_least::version{{0, 0, 0}};
-    }
-    set_least_core(p.doc, stored);
+    keep_or_raise_core(p.doc);
     return ecuio_json::write(p.doc);
 }
 
@@ -690,6 +696,9 @@ std::string dropped(const char* packed, size_t length, const char* variant)
     p.variants().items.erase(p.variants().items.begin() +
                              static_cast<std::ptrdiff_t>(index));
     p.raise_version();
+    /* The version is in each variant's written copy, so a longer one
+     * can carry a copy past a file's bytes */
+    keep_or_raise_core(p.doc);
     return ecuio_json::write(p.doc);
 }
 

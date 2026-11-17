@@ -1080,6 +1080,96 @@ const char* ecuio_signal_file_text(const ecuio_signal_file_t* file,
  * session using the set must be destroyed before this. */
 void ecuio_signal_file_free(ecuio_signal_file_t* file);
 
+/*
+ * A signal's key (ADR-0065 section 9): what identifies it wherever
+ * something is kept, a recording's values and a vehicle's ticks. A
+ * name is a label, and two signals of a set may share one.
+ *
+ * Most signals are kept under their address key, core's text for where
+ * the value is read:
+ *
+ *   <id>:<key>[@<offset>]:<byte>.<bit>:<bits>    a number or an enum
+ *   <id>:<key>[@<offset>]:<byte>:t<bytes>        a text or hex field
+ *
+ * <id> is message_id in upper-case hex, 3 digits up to 0x7FF and 8
+ * above it; <key> the mux key's mux_length bytes in upper-case hex,
+ * empty with no mux, and @<offset> its mux_offset when that isn't 0;
+ * then start_byte, bit_offset and bit_length in decimal, or for a text
+ * kind start_byte and byte_length (t0: to the payload's end).
+ * "7E8:410C:2.0:16" is two bytes of the engine ECU's PID 0C,
+ * "7E9:62F190:3:t17" seventeen bytes of a DID's reply. The byte order,
+ * the kind, the scale and the offset are no part of it: two defs over
+ * the same bits are one address, however each reads them.
+ *
+ * One address has one text in every set, so the key stands whatever
+ * the signal is called and whatever else is read with it. It is never
+ * an author's key (1 to 31 of a-z, 0-9 and _) nor "id:<n>", holds no
+ * comma, quote, space or line break, starts with a hex digit, and is
+ * at most ECUIO_SIGNAL_KEY_MAX bytes.
+ */
+#define ECUIO_SIGNAL_KEY_MAX 31u /* bytes, as an author's key */
+#define ECUIO_SIGNAL_KEY_LEN 32u /* its room: bytes, NUL, zeros after */
+
+typedef struct ecuio_signal_key {
+    char text[ECUIO_SIGNAL_KEY_LEN];
+} ecuio_signal_key_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_signal_key_t) == 32, "ecuio_signal_key_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_signal_key_t) == 32, "ecuio_signal_key_t size is ABI");
+#endif
+
+/* The def's address key, out zeroed past it. "" for a computed def
+ * (ECUIO_DEF_FLAG_COMPUTED), which reads no address.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL argument, out untouched;
+ * ECUIO_ERR_INVALID_ARGUMENT, out "", for a def whose text has no room:
+ * a def ecuio_validate_signal refuses may have none, one it takes
+ * always has. Reads the def alone, so any thread may call it. */
+ecuio_status_t ecuio_signal_address_key(const ecuio_signal_def_t* def,
+                                        ecuio_signal_key_t* out);
+
+/*
+ * The key each def of set is kept under, in the set's order, by the
+ * serial ports' contract (serial.h): *count is every def, the first
+ * capacity are copied, and a capacity of 0 with keys NULL asks for the
+ * count. A def's key is its address key, unless it has none of its own:
+ * a computed def, and a def at the address of one before it in the set,
+ * take the author's key file gives them (ecuio_signal_file_key), and
+ * "id:<n>", n the def's id in decimal, where it gives none. In a set
+ * ecuio_validate_signal_set takes, no two defs share a key.
+ *
+ * file is the signal file whose set this is, or NULL for a set that has
+ * none (a built-in set, one registered by hand): pass the file wherever
+ * there is one, or a computed signal is kept under an id that means
+ * nothing outside its set. ECUIO_ERR_NULL_ARGUMENT for a NULL set or
+ * count, or NULL keys with a capacity; ECUIO_ERR_INVALID_ARGUMENT for a
+ * file of another set; ECUIO_ERR_OUT_OF_MEMORY. On a failure nothing is
+ * written but *count, 0. Reads the set and the file alone.
+ */
+ecuio_status_t ecuio_signal_set_keys(const ecuio_signal_set_t* set,
+                                     const ecuio_signal_file_t* file,
+                                     ecuio_signal_key_t* keys,
+                                     uint32_t capacity, uint32_t* count);
+
+/*
+ * The def text_utf8 names, among set's first count defs and their keys
+ * (ecuio_signal_set_keys'): the def with that key, else the one def
+ * with that name. *index is its place in the set. One rule wherever a
+ * person names a signal (havne-cli's --signal, a tick kept by name).
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL argument;
+ * ECUIO_ERR_INVALID_ARGUMENT, *index untouched and the detail
+ * (ecuio_last_error_detail) saying why, for text no def has ("no signal
+ * with the key or name 'Boost'") and for a name several defs have,
+ * which lists their keys ("2 signals are named 'Battery voltage': name
+ * one by its key (7E8:6201A4:3.0:8, 7E9:6201A4:3.0:8)"; the first 8,
+ * then "and N more").
+ */
+ecuio_status_t ecuio_signal_set_find(const ecuio_signal_set_t* set,
+                                     const ecuio_signal_key_t* keys,
+                                     uint32_t count, const char* text_utf8,
+                                     uint32_t* index);
+
 /* A group's name ("Engine", "Oxygen sensors"; ECUIO_SIGNAL_GROUP_*),
  * static and never NULL: "" for a code this core doesn't know, which a
  * UI shows as Other (ADR-0050). */

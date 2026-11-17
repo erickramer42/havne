@@ -857,6 +857,9 @@ void build(const parts& in, ecuio_signal_file& f)
         refuse(*signals, "\"signals\" lists " + std::to_string(list.size()) +
                              ", more than " + std::to_string(in.max_signals));
     }
+    if (list.size() > ECUIO_SIGNAL_FILE_MAX_SIGNALS) {
+        ecuio_least::raise(f.least, ecuio_least::kSetSignals);
+    }
 
     /* First every signal's key and kind, so an expression can read a
      * signal listed after it */
@@ -1177,6 +1180,9 @@ void build(const parts& in, ecuio_signal_file& f)
     }
     if (derived.total > ecuio_least::kRequestsBefore) {
         ecuio_least::raise(f.least, ecuio_least::kRequests);
+    }
+    if (derived.total > ecuio_least::kSetRequestsBefore) {
+        ecuio_least::raise(f.least, ecuio_least::kSetRequests);
     }
 }
 
