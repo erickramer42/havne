@@ -773,7 +773,7 @@ TestCase {
         const wide = make(barC, { width: 400, to: 8000, scaleMarks: [0, 2000, 4000, 6000, 8000] })
         waitForRendering(wide)
         compare(marks(wide).length, 5, "room enough: every number")
-        const narrow = make(barC, { width: 150, to: 8000, scaleMarks: [0, 2000, 4000, 6000, 8000] })
+        const narrow = make(barC, { width: 110, to: 8000, scaleMarks: [0, 2000, 4000, 6000, 8000] })
         waitForRendering(narrow)
         const texts = marks(narrow).map(c => c.text)
         verify(texts.length < 5 && texts.length >= 2, "thinned: " + texts)

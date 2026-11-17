@@ -159,16 +159,29 @@ GaugeBase {
     }
 
     // A flat bar's marks keep every stride-th label (the ends always) when
-    // the bar is too short for them all at about 6.2 px a character
+    // the bar is too short for them all; the widest label is measured, as
+    // fonts differ in width by platform
+    readonly property string widestMark: {
+        let w = ""
+        for (const m of scaleMarks) {
+            const t = formatScale(m)
+            if (t.length > w.length)
+                w = t
+        }
+        return w
+    }
+    TextMetrics {
+        id: markMetrics
+        text: gauge.widestMark
+        font.pixelSize: 10
+        font.features: Theme.valueFeatures
+    }
     readonly property int markStride: {
         const n = scaleMarks.length
         if (vertical || n < 3)
             return 1
-        let chars = 0
-        for (const m of scaleMarks)
-            chars = Math.max(chars, formatScale(m).length)
         const pitch = bar.width / (n - 1)
-        return Math.max(1, Math.ceil((chars * 6.2 + 8) / Math.max(1, pitch)))
+        return Math.max(1, Math.ceil((markMetrics.advanceWidth + 8) / Math.max(1, pitch)))
     }
 
     Item {
