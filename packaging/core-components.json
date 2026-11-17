@@ -1,0 +1,13 @@
+{
+  "components": [
+    {
+      "name": "WAMR (WebAssembly Micro Runtime)",
+      "version": "2.4.5",
+      "supplier": "Organization: Bytecode Alliance",
+      "license": "Apache-2.0 WITH LLVM-exception",
+      "purl": "pkg:github/bytecodealliance/wasm-micro-runtime@WAMR-2.4.5",
+      "location": "https://github.com/bytecodealliance/wasm-micro-runtime/archive/refs/tags/WAMR-2.4.5.tar.gz",
+      "comment": "the classic interpreter, compiled into Havne's core library from third_party/wamr (commit 25bd7eb63e828e4bd242cc9b38d260b4b31c6605), the sandbox a plugin's code runs in"
+    }
+  ]
+}
