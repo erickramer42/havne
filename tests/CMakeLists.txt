@@ -171,10 +171,12 @@ gtest_discover_tests(test_elm327 DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
 # --- The sandbox: Qt-free, every platform (UNIT, ADR-0066 section 2) ---
 # test_wamr_build.cpp asks the vendored WAMR itself (third_party/wamr.cmake)
 # what core relies on; its header comes from WAMR_INCLUDE_DIR.
-# verify.sh's cross-arch step builds and runs it against the x86 core,
+# test_sandbox.cpp: core/src's wasm_check.h and wasm_sandbox.h, internal.
+# verify.sh's cross-arch step builds and runs both against the x86 core,
 # which CI never builds.
-add_executable(test_sandbox test_wamr_build.cpp)
-target_include_directories(test_sandbox PRIVATE ${WAMR_INCLUDE_DIR})
+add_executable(test_sandbox test_wamr_build.cpp test_sandbox.cpp)
+target_include_directories(test_sandbox PRIVATE ${WAMR_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/core/src)
 target_compile_definitions(test_sandbox PRIVATE ${WAMR_EMBED_DEFINITIONS})
 target_link_libraries(test_sandbox PRIVATE ecuio-core GTest::gtest_main)
 app_enable_warnings(test_sandbox)

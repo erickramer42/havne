@@ -403,7 +403,7 @@ if [ "$do_cross" = 1 ] && [ "$have_win32" = 1 ]; then
     cross_dur=$dur
     want=0
     pattern=''
-    for suite in ComputedTest WamrBuildTest; do
+    for suite in ComputedTest WamrBuildTest WasmCheckTest SandboxTest; do
         cases=$(ctest --test-dir build-win32 -C Release -N -R "^$suite\\." 2>/dev/null \
             | sed -n 's/^Total Tests: //p' | tr -d '\r')
         [ "${cases:-0}" -gt 0 ] || {

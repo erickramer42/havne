@@ -45,6 +45,7 @@ add_library(ecuio-core STATIC
     src/obd2_signal_sets.cpp
     src/uds_generic.cpp
     src/vin.cpp
+    src/wasm_sandbox.cpp
     src/j2534_surrogate_client.cpp
 )
 

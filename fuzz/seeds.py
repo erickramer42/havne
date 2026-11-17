@@ -20,6 +20,9 @@
 # fuzz_computed's are programs in the harness's built form (computed()),
 # where the format 1 machine and this one would part if they ever
 # differed: no coverage tells the fuzzer that a value went wrong.
+# fuzz_wasm_module's are WebAssembly modules written here byte by byte
+# (wasm_module()), with the exports the harness calls: from nothing the
+# fuzzer rarely gets a module past its header.
 #
 #   python3 fuzz/seeds.py corpus
 #   ./build-fuzz/fuzz/fuzz_signal_file corpus/fuzz_signal_file -max_total_time=60
@@ -480,6 +483,11 @@ def main(argv):
                           bytes([0x00, 0x01, 0x21]), *([0.0] * 16), 0, 0, 0, 0)
     write(out, "fuzz_computed", "struct-boost",
           b"\x01" + program + b"\x00" + b"".join(number_bytes(v) for v in (28.5, 25.0, 0, 0)))
+
+    # The sandbox: a budget of 1024 instructions and three argument picks
+    # (1, 2, 0x7F), then the module
+    for name, module in wasm_seeds().items():
+        write(out, "fuzz_wasm_module", name + ".wasm", b"\x0a\x01\x02\x03" + module)
     return 0
 
 
@@ -518,6 +526,147 @@ def computed(format1, steps, constants, inputs):
     for v in inputs:
         data += number_bytes(0.0 if v is None else v)
     return data
+
+
+def leb(v):
+    """An unsigned LEB128 number"""
+    out = b""
+    while True:
+        b = v & 0x7F
+        v >>= 7
+        if v == 0:
+            return out + bytes([b])
+        out += bytes([b | 0x80])
+
+
+def sleb(v):
+    """A signed LEB128 number"""
+    out = b""
+    while True:
+        b = v & 0x7F
+        v >>= 7
+        if (v == 0 and not b & 0x40) or (v == -1 and b & 0x40):
+            return out + bytes([b])
+        out += bytes([b | 0x80])
+
+
+def wasm_section(kind, content):
+    return bytes([kind]) + leb(len(content)) + content
+
+
+def wasm_name(text):
+    return leb(len(text)) + text.encode()
+
+
+def wasm_module(funcs, memory=b"\x01\x01\x01", table=b"", global_=b"", element=b"",
+                data=b"", imports=b"", start=None, tail=b""):
+    """A module's bytes. funcs: (export name or None, parameters, results,
+    body), the types as text of 'i' (i32); each function type is written
+    once. memory, table, global_, element, data and imports are a
+    section's entries after its count of one (memory's: its limits)"""
+    types = []
+    for _, params, results, _ in funcs:
+        if (params, results) not in types:
+            types.append((params, results))
+    out = b"\x00asm\x01\x00\x00\x00"
+    out += wasm_section(1, leb(len(types)) + b"".join(
+        b"\x60" + leb(len(p)) + b"\x7f" * len(p) + leb(len(r)) + b"\x7f" * len(r)
+        for p, r in types))
+    if imports:
+        out += wasm_section(2, b"\x01" + imports)
+    out += wasm_section(3, leb(len(funcs)) + b"".join(
+        leb(types.index((p, r))) for _, p, r, _ in funcs))
+    if table:
+        out += wasm_section(4, b"\x01" + table)
+    if memory:
+        out += wasm_section(5, b"\x01" + memory)
+    if global_:
+        out += wasm_section(6, b"\x01" + global_)
+    exports = [(name, i) for i, (name, _, _, _) in enumerate(funcs) if name]
+    out += wasm_section(7, leb(len(exports)) + b"".join(
+        wasm_name(name) + b"\x00" + leb(i) for name, i in exports))
+    if start is not None:
+        out += wasm_section(8, leb(start))
+    if element:
+        out += wasm_section(9, b"\x01" + element)
+    bodies = [b"\x00" + body + b"\x0b" for _, _, _, body in funcs]
+    out += wasm_section(10, leb(len(funcs)) + b"".join(leb(len(b)) + b for b in bodies))
+    if data:
+        out += wasm_section(11, b"\x01" + data)
+    return out + tail
+
+
+def wasm_seeds():
+    """fuzz_wasm_module's seeds by name: its five exports doing each thing
+    a module can do to the sandbox, and a module the check refuses of
+    each kind"""
+    const = lambda v: b"\x41" + sleb(v)   # i32.const
+    get = lambda i: bytes([0x20, i])      # local.get
+    load = b"\x28\x02\x00"                # i32.load, aligned, no offset
+    store = b"\x36\x02\x00"
+    add, drop, unreachable = b"\x6a", b"\x1a", b"\x00"
+    spin = b"\x03\x40\x0c\x00\x0b"       # loop, br 0, end
+    five = [("a", "", "", b""),
+            ("b", "", "i", const(42)),
+            ("c", "i", "i", get(0)),
+            ("d", "ii", "i", get(0) + get(1) + add),
+            ("e", "iiii", "i", get(0) + get(1) + add + get(2) + add + get(3) + add)]
+    nest = 64
+    seeds = {
+        "exports": wasm_module(five),
+        # One export that doesn't return in each: the first ends the instance
+        "spin": wasm_module(five[1:2] + [("c", "i", "i", spin + const(0))]),
+        "trap-unreachable": wasm_module(five[1:3] + [("a", "", "", unreachable)]),
+        "trap-outside": wasm_module([("b", "", "i", const(-1) + load)]),  # past the memory
+        "trap-divide": wasm_module([("c", "i", "i", get(0) + const(0) + b"\x6e")]),  # i32.div_u by 0
+        "trap-overflow": wasm_module([    # an f64 past an i32: f64.const, i32.trunc_f64_s
+            ("b", "", "i", b"\x44" + bytes(7) + b"\x7f" + b"\xaa")]),
+        "recurse": wasm_module([("a", "", "", b"\x10\x00")]),       # calls itself
+        "recurse-argument": wasm_module([("c", "i", "i", get(0) + b"\x10\x00")]),
+        "memory": wasm_module([
+            ("b", "", "i", const(65532) + load),                   # its last word
+            ("c", "i", "i", get(0) + get(0) + store + get(0) + load),
+            ("d", "ii", "i", get(0) + get(1) + b"\x3a\x00\x00" + b"\x3f\x00")],  # store8, size
+            memory=b"\x01\x01\x01"),
+        "memory-largest": wasm_module(five[:3], memory=b"\x01\x10\x10"),
+        "grow": wasm_module([
+            ("b", "", "i", const(1) + b"\x40\x00"),               # memory.grow
+            ("c", "i", "i", get(0) + b"\x40\x00" + b"\x3f\x00" + add)]),
+        "blocks": wasm_module([("a", "", "", b"\x02\x40" * nest + b"\x0b" * nest),
+                               ("b", "", "i", b"\x02\x7f" + const(1) + const(1) +
+                                b"\x0d\x00" + drop + const(2) + b"\x0b")]),  # br_if with a value
+        "table": wasm_module([
+            ("b", "", "i", const(7)),
+            (None, "", "i", const(9)),
+            ("c", "i", "i", get(0) + b"\x11\x00\x00")],           # call_indirect, type 0
+            table=b"\x70\x00\x02",                               # two function references
+            element=b"\x00" + const(0) + b"\x0b" + b"\x02\x00\x01"),
+        "globals": wasm_module([
+            ("b", "", "i", b"\x23\x00"),                          # global.get
+            ("c", "i", "i", get(0) + b"\x24\x00" + b"\x23\x00")],
+            global_=b"\x7f\x01" + const(5) + b"\x0b"),            # a mutable i32 of 5
+        "data": wasm_module([("b", "", "i", const(0) + load)],
+                            data=b"\x00" + const(0) + b"\x0b" + b"\x04\xde\xad\xbe\xef"),
+        "data-outside": wasm_module(five[:1],
+                                    data=b"\x00" + const(65534) + b"\x0b" + b"\x04abcd"),
+        "numbers": wasm_module([
+            ("c", "i", "i", get(0) + b"\xac" + b"\x42\x03" + b"\x7f" + b"\xa7"),  # i64: extend, div_s, wrap
+            ("d", "ii", "i", get(0) + b"\xc0" + get(1) + b"\x74")]),   # i32.extend8_s, shl
+        # What the check refuses, each of its kinds
+        "refused-start": wasm_module(five, start=0),
+        "refused-import": wasm_module(five[1:2], imports=wasm_name("env") + wasm_name("f") +
+                                      b"\x00\x00"),
+        "refused-no-maximum": wasm_module(five, memory=b"\x00\x01"),
+        "refused-grows": wasm_module(five, memory=b"\x01\x01\x02"),
+        "refused-large": wasm_module(five, memory=b"\x01\x11\x11"),
+        "refused-no-memory": wasm_module(five, memory=b""),
+        "refused-initialize": wasm_module(five + [("_initialize", "", "", spin)]),
+        "refused-kind": wasm_module(five, tail=wasm_section(12, b"\x00")),
+        "refused-two-exports": wasm_module(five, tail=wasm_section(7, b"\x00")),
+        # What only the runtime refuses: an add with nothing to add
+        "invalid-code": wasm_module([("b", "", "i", add)]),
+    }
+    return seeds
 
 
 if __name__ == "__main__":
