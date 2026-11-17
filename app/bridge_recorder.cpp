@@ -528,7 +528,8 @@ void SessionBridge::stopRecording(const QString& why, bool byUser,
     m_logElapsedMs = m_logClock.elapsed();
     m_logActive = false;
     // A session still running asks its default pick again (the whole set
-    // on one that ranks none); one torn down took its focus with it
+    // on one that ranks none, nothing on a pick-only one); one torn down
+    // took its focus with it
     if (m_session != nullptr && !applyDefaultPick(m_session, true, true)) {
         (void)ecuio_session_set_focus(m_session, nullptr, 0);
     }

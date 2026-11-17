@@ -215,8 +215,10 @@ SignalListModel::factsOf(const ecuio_signal_file_t* file, bool builtIn,
 }
 
 void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
-                                   const ecuio_signal_file_t* file)
+                                   const ecuio_signal_file_t* file,
+                                   bool pickOnly)
 {
+    m_pickOnly = pickOnly;
     // NULL/empty is valid (the raw profile): clear the model rather
     // than keep the previous session's rows.
     const bool hadHidden = m_hiddenCount != 0;
@@ -724,7 +726,8 @@ void SignalListModel::setPlotChoices(const QStringList& plotted, const QStringLi
 
 void SignalListModel::judgePlotted()
 {
-    // The default: every numeric row, or in a ranked set the
+    // The default: every numeric row (none on a pick-only session, which
+    // asks only what is ticked), or in a ranked set the
     // DefaultPlotted shown numeric rows of the lowest rank (a tie in the
     // set's order), so a row Live hides gives its place to the next. A
     // refused row never has a value to draw, so it is no default either;
@@ -744,7 +747,8 @@ void SignalListModel::judgePlotted()
         ranked.resize(static_cast<size_t>(DefaultPlotted));
     }
     for (Entry& e : m_entries) {
-        e.plotDefault = !m_ranked && !e.isText && e.refused.isEmpty();
+        e.plotDefault =
+            !m_ranked && !m_pickOnly && !e.isText && e.refused.isEmpty();
     }
     for (int row : ranked) {
         m_entries[static_cast<size_t>(row)].plotDefault = m_ranked;

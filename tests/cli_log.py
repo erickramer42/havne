@@ -11,6 +11,7 @@
 #   python tests/cli_log.py focus-refused <havne-cli> <fake_j2534.dll>   (Windows)
 #   python tests/cli_log.py pace <havne-cli>
 #   python tests/cli_log.py pick <havne-cli>
+#   python tests/cli_log.py pick-only <havne-cli>
 #   python tests/cli_log.py session <havne-cli> <fake_j2534.dll> <golden> [--update]   (Windows)
 #
 # demo: mock://demo logged for 2 s with two signals picked, the log line's
@@ -688,11 +689,153 @@ def pick_cases(cli, elm):
     return 0
 
 
+def car_plugin(folder, plugin_id, plot):
+    """A plugin folder whose one variant holds two data files of
+    ECUIO_SIGNAL_FILE_MAX_SIGNALS signals, each read by 22 <DID> on its own
+    ECU: a set past a rotation, so a session on it is asked only its picks
+    (ADR-0065). plot gives every signal that rank, 0 none."""
+    most = 1024
+    folder = Path(folder)
+    (folder / "data").mkdir(parents=True)
+    for n, (ecu, name) in enumerate((("a", "A"), ("b", "B"))):
+        sigs = []
+        for i in range(most):
+            s = {"key": f"{ecu}{i}", "name": f"Sig {name} {i}", "ecu": ecu,
+                 "read": {"service": "22", "number": f"{0x1000 + i:04X}"},
+                 "field": {"byte": 0}}
+            if plot:
+                s["plot"] = plot
+            sigs.append(s)
+        (folder / "data" / f"{ecu}.json").write_text(
+            json.dumps({"havne_signals": 1, "signals": sigs}), "utf-8")
+    (folder / "manifest.json").write_text(json.dumps({
+        "havne_plugin": 1, "id": plugin_id, "name": "Car sized",
+        "version": "1.0.0", "requires": {"core": "0.4.1"},
+        "source": {"name": "test"}, "tiers": ["data"],
+        "ecus": [{"id": "a", "rx": "7E8", "tx": "7E0"},
+                 {"id": "b", "rx": "7E9", "tx": "7E1"}],
+        "variants": [{"id": "base", "files": ["data/a.json", "data/b.json"]}],
+    }), "utf-8")
+
+
+def pick_only_cases(cli, elm):
+    """A set past a rotation is asked only its picks: the words say so"""
+    with tempfile.TemporaryDirectory(prefix="havne-cli-car-") as plugins:
+        car_plugin(Path(plugins) / "plain", "carplain", 0)
+        car_plugin(Path(plugins) / "ranked", "carranked", 1)
+        plain = ["--plugin", str(Path(plugins) / "plain")]
+        ranked = ["--plugin", str(Path(plugins) / "ranked")]
+        tail = "&identify=0&diagnose=0"
+        uri_plain = elm + "?profile=plugin.carplain.base" + tail
+        uri_ranked = elm + "?profile=plugin.carranked.base" + tail
+
+        info = [r for r in run(cli, ["stream", uri_plain, "--seconds", "1"]
+                               + plain)[1] if r.get("type") == "session"]
+        if len(info) != 1 or info[0].get("pick_only") is not True:
+            print(f"FAIL  the session line names no pick_only: {info}")
+            return 1
+
+        code, rows, err, _ = pick_run(cli, [
+            "stream", uri_plain, "--seconds", "1", "--pick", "ranked"] + plain)
+        if code != 0 or focus_of(rows) is not None or \
+                "the profile ranks no signal and is asked only what is " \
+                "picked: --pick ranked asks none" not in err or \
+                "every" in err:
+            print(f"FAIL  an unranked pick-only stream: exit {code}, {err!r}")
+            return 1
+
+        code, rows, err, _ = pick_run(cli, [
+            "stream", uri_ranked, "--seconds", "1", "--pick", "ranked"]
+            + ranked)
+        if code != 0 or focus_of(rows) is not None or \
+                "asking no signal: " not in err or \
+                "a session asks 1024 at a time" not in err or \
+                "every" in err:
+            print(f"FAIL  a refused pick-only pick: exit {code}, {err!r}")
+            return 1
+
+        code, rows, err, _ = pick_run(cli, [
+            "stream", uri_plain, "--seconds", "1"] + plain)
+        if code != 0 or focus_of(rows) is not None or \
+                "nothing is asked (--pick ranked, or log --signal)" not in err:
+            print(f"FAIL  a pick-only stream with no pick: exit {code}, "
+                  f"{err!r}")
+            return 1
+
+        with tempfile.TemporaryDirectory(prefix="havne-cli-car-log-") as root:
+            code, rows, err = run(cli, [
+                "log", uri_plain, root, "--seconds", "1"] + plain)
+            made = [p for p in Path(root).iterdir()]
+            errors = [r for r in rows if r.get("type") == "error"]
+            if code != 3 or made or len(errors) != 1 or \
+                    "name signals with --signal or attach conditions with " \
+                    "--conditions" not in err:
+                print(f"FAIL  a pick-only log with no names: exit {code}, "
+                      f"{err!r}, made {made}, {errors}")
+                return 1
+
+            # Attached conditions are asked by core: a log with no names
+            # but a condition file isn't refused
+            conds = Path(root) / "conditions.json"
+            conds.write_text(json.dumps({
+                "havne_conditions": 1, "name": "Car",
+                "conditions": [{"key": "hot", "name": "Hot",
+                                "when": {"signal": ["key:a7"], "unit": "",
+                                         "above": 1}}],
+            }), "utf-8")
+            code, rows, err = run(cli, [
+                "log", uri_plain, str(Path(root) / "out"), "--seconds", "1",
+                "--conditions", str(conds)] + plain)
+            ends = [r for r in rows if r.get("type") == "end"]
+            if code != 0 or "asked only what is picked" in err or \
+                    len(ends) != 1:
+                print(f"FAIL  a pick-only log with conditions: exit {code}, "
+                      f"{err!r}, {rows[-3:]}")
+                return 1
+
+        code, rows, err, header = pick_run(cli, [
+            "log", uri_plain, "<root>", "--seconds", "1", "--signal",
+            "Sig A 7"] + plain)
+        focus = focus_of(rows)
+        if code != 0 or focus is None or \
+                [s["name"] for s in focus["signals"]] != ["Sig A 7"] or \
+                "pick" in focus or len(header["focus"]) != 1:
+            print(f"FAIL  a pick-only log of one name: {focus}, exit {code}, "
+                  f"{err!r}, {header!r}")
+            return 1
+
+        code, rows, err, header = pick_run(cli, [
+            "log", uri_plain, "<root>", "--seconds", "1", "--pick",
+            "ranked", "--signal", "Sig A 7"] + plain)
+        focus = focus_of(rows)
+        if code != 0 or focus is None or focus.get("pick") != "ranked" or \
+                [s["name"] for s in focus["signals"]] != ["Sig A 7"] or \
+                "--pick ranked adds none" not in err or \
+                len(header["pick"]) != 1 or \
+                not header["pick"][0].startswith("pick  Sig A 7"):
+            print(f"FAIL  a pick-only log with --pick ranked: {focus}, "
+                  f"exit {code}, {err!r}, {header!r}")
+            return 1
+    print("ok    a pick-only session says nothing is asked and is asked "
+          "only its picks")
+    return 0
+
+
+def pick_only(cli):
+    emulator = Emulator(cli)
+    try:
+        return pick_only_cases(cli, f"elm327://127.0.0.1:{emulator.port}")
+    finally:
+        emulator.end()
+
+
 def main(argv):
     if len(argv) >= 3 and argv[1] == "demo":
         return demo(argv[2])
     if len(argv) >= 3 and argv[1] == "pick":
         return pick(argv[2])
+    if len(argv) >= 3 and argv[1] == "pick-only":
+        return pick_only(argv[2])
     if len(argv) >= 3 and argv[1] == "fails":
         return fails(argv[2])
     if len(argv) >= 4 and argv[1] == "replay":

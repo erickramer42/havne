@@ -388,7 +388,8 @@ bool SessionBridge::applyDefaultPick(ecuio_session_t* session, bool withTicks,
         const std::vector<uint16_t> ticked = m_signalModel->tickedIds();
         added.insert(added.end(), ticked.begin(), ticked.end());
     }
-    const std::vector<uint16_t> ids = cli::default_pick(set, added);
+    const bool pickOnly = (info.flags & ECUIO_SESSION_INFO_PICK_ONLY) != 0;
+    const std::vector<uint16_t> ids = cli::default_pick(set, added, pickOnly);
     if (m_pickSet && !again && ids == m_pickIds &&
         m_minSweepMs == m_pickMinSweepMs) {
         return true;
@@ -404,17 +405,25 @@ bool SessionBridge::applyDefaultPick(ecuio_session_t* session, bool withTicks,
     }
     QString line;
     bool picked = false;
-    const QString whole = m_pickPolled
-                              ? QStringLiteral("Asking every polled signal: ")
-                              : QStringLiteral("Asking every signal: ");
-    // Core takes a minimum only with a focus, so the whole set is unpaced
+    const QString whole =
+        pickOnly
+            ? QStringLiteral("Asking no signal: ")
+            : (m_pickPolled ? QStringLiteral("Asking every polled signal: ")
+                            : QStringLiteral("Asking every signal: "));
+    // Core takes a minimum only with a focus, so the whole set is unpaced;
+    // a pick-only session asks nothing without one, so none is in question
     const QString unpaced =
-        m_minSweepMs > 0
+        m_minSweepMs > 0 && !pickOnly
             ? QStringLiteral("; no minimum time between sweeps applies to it")
             : QString();
     if (ids.empty()) {
         (void)ecuio_session_set_focus(session, nullptr, 0);
-        line = whole + QStringLiteral("the profile ranks none") + unpaced;
+        line = whole +
+               (pickOnly ? QStringLiteral(
+                               "this profile is asked only what is picked. "
+                               "Tick signals on Live or place gauges")
+                         : QStringLiteral("the profile ranks none")) +
+               unpaced;
     } else {
         const ecuio_status_t rc = ecuio_session_set_focus_with(
             session, ids.data(), static_cast<uint32_t>(ids.size()),

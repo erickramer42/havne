@@ -324,8 +324,10 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_frameLog->clear();
     m_currentFrameCount = 0;
     notifyFrameCounts();
-    m_signalModel->setSignalSet(ecuio_session_signal_set(session),
-                                fileOfSet(ecuio_session_signal_set(session)));
+    m_signalModel->setSignalSet(
+        ecuio_session_signal_set(session),
+        fileOfSet(ecuio_session_signal_set(session)),
+        haveInfo && (info.flags & ECUIO_SESSION_INFO_PICK_ONLY) != 0);
     m_stagingBuffer.clear();   // previous session's batch must never
     m_stagingTexts.clear();    // bleed into this one's first
     m_linkErrorCode = ECUIO_OK;
