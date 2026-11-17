@@ -155,156 +155,216 @@ uint32_t chain_place(const chain_refused& r, const file_scope& scope,
     return 1;
 }
 
-/* text as key's "expr" in f: out filled, or a refusal thrown */
-void check(const ecuio_signal_file& f, const std::string& key,
-           const std::string& text, ecuio_expr_check_t& out)
-{
+/* One check: the file's own signals with the checked one among them as
+ * the file would hold it, the expression's program, and where each of
+ * its inputs is first written. Never copied: the checked signal points
+ * at program. */
+struct checking {
+    const ecuio_signal_file& f;
+    const std::string& key;
     file_scope scope;
-    scope.base = f.extends == "obd2" ? ecuio_obd2_signal_set() : nullptr;
-    scope.own.reserve(f.keys.size() + 1);
     /* Each def's place among the file's own, kNone for a base def */
-    std::vector<size_t> own_of(f.defs.size(), kNone);
+    std::vector<size_t> own_of;
     size_t checked = kNone;
-    for (const auto& k : f.keys) {
-        const ecuio_signal_def_t& d = f.defs[k.second];
-        own_signal s{&k.first, d.id, expr_kind::number, nullptr, k.second};
-        if (is_computed(d)) {
-            s.kind = expr_kind::computed;
-            s.program = &f.computed[d.table_first];
-        } else if (d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX) {
-            s.kind = expr_kind::text;
-        }
-        if (!key.empty() && k.first == key) {
-            checked = scope.own.size();
-        }
-        own_of[k.second] = scope.own.size();
-        scope.own.push_back(s);
-    }
-    /* A new signal takes the ID the loader gives the next in the list */
-    const auto next_id =
-        static_cast<uint16_t>(ECUIO_USER_SIG_ID_BASE + f.keys.size());
-    const bool was_computed =
-        checked != kNone && scope.own[checked].kind == expr_kind::computed;
-    if (checked != kNone) {
-        scope.own[checked].kind = expr_kind::computed;
-    } else if (!key.empty()) {
-        checked = scope.own.size();
-        scope.own.push_back(
-            own_signal{&key, next_id, expr_kind::computed, nullptr, kNone});
-    }
-
-    std::vector<std::string> names;
-    std::vector<size_t> places;
+    bool was_computed = false; /* the file holds the checked signal computed */
     ecuio_computed_t program{};
-    try {
-        program = ecuio_sf::compile_expr(text, scope, ECUIO_SIGNAL_FILE_FORMAT,
-                                         &names, &places);
-    } catch (const expr_refused& r) {
-        throw refusal{static_cast<uint32_t>(r.at + 1),
-                      "the expression " + r.words};
-    }
-    if (checked == kNone) {
-        checked = scope.own.size();
-        scope.own.push_back(
-            own_signal{nullptr, next_id, expr_kind::computed, nullptr, kNone});
-    }
-    own_signal& self = scope.own[checked];
-    self.program = &program;
-    const std::string reader =
-        self.def != kNone ? q(f.defs[self.def].name) : "the expression";
+    std::vector<size_t> places;
+    std::vector<uint32_t> depth; /* each own signal's, by the chain rules */
 
-    /* "signal 'k' replaces 'Name', which <reader> reads": a signal named
-     * as a base def stands in its place, read as "obd2.<key>" too */
-    const auto replaced = [&](const own_signal& s, const std::string& by) {
+    checking(const ecuio_signal_file& file, const std::string& its_key)
+        : f(file), key(its_key), own_of(file.defs.size(), kNone)
+    {
+        scope.base = f.extends == "obd2" ? ecuio_obd2_signal_set() : nullptr;
+        scope.own.reserve(f.keys.size() + 1);
+        for (const auto& k : f.keys) {
+            const ecuio_signal_def_t& d = f.defs[k.second];
+            own_signal s{&k.first, d.id, expr_kind::number, nullptr, k.second};
+            if (is_computed(d)) {
+                s.kind = expr_kind::computed;
+                s.program = &f.computed[d.table_first];
+            } else if (d.kind == ECUIO_VALUE_TEXT ||
+                       d.kind == ECUIO_VALUE_HEX) {
+                s.kind = expr_kind::text;
+            }
+            if (!key.empty() && k.first == key) {
+                checked = scope.own.size();
+            }
+            own_of[k.second] = scope.own.size();
+            scope.own.push_back(s);
+        }
+        was_computed =
+            checked != kNone && scope.own[checked].kind == expr_kind::computed;
+        if (checked != kNone) {
+            scope.own[checked].kind = expr_kind::computed;
+        } else if (!key.empty()) {
+            checked = scope.own.size();
+            scope.own.push_back(own_signal{&key, next_id(), expr_kind::computed,
+                                           nullptr, kNone});
+        }
+    }
+    checking(const checking&) = delete;
+    checking& operator=(const checking&) = delete;
+
+    /* A new signal takes the ID the loader gives the next in the list */
+    uint16_t next_id() const
+    {
+        return static_cast<uint16_t>(ECUIO_USER_SIG_ID_BASE + f.keys.size());
+    }
+
+    /* text compiled against the scope into program, which the checked
+     * signal then reads. With no key the expression is a signal of its
+     * own, after the file's. */
+    void compile(const std::string& text)
+    {
+        std::vector<std::string> names;
+        try {
+            program = ecuio_sf::compile_expr(
+                text, scope, ECUIO_SIGNAL_FILE_FORMAT, &names, &places);
+        } catch (const expr_refused& r) {
+            throw refusal{static_cast<uint32_t>(r.at + 1),
+                          "the expression " + r.words};
+        }
+        if (checked == kNone) {
+            checked = scope.own.size();
+            scope.own.push_back(own_signal{
+                nullptr, next_id(), expr_kind::computed, nullptr, kNone});
+        }
+        scope.own[checked].program = &program;
+    }
+
+    /* "signal 'k' replaces 'Name', which <by> reads": a signal named as
+     * a base def stands in its place, read as "obd2.<key>" too */
+    std::string replaced(const own_signal& s, const std::string& by) const
+    {
         return ecuio_sf::replaced_words(*s.key, f.defs[s.def].name, by);
-    };
-
-    bool format2 = false;
-    for (uint32_t k = 0; k < program.input_count; ++k) {
-        const size_t n = scope.by_id(program.input_ids[k]);
-        if (n == kNone) {
-            continue;
-        }
-        if (scope.own[n].kind == expr_kind::text) {
-            throw refusal{static_cast<uint32_t>(places[k] + 1),
-                          replaced(scope.own[n], reader) +
-                              ecuio_sf::kReplacedNotANumber};
-        }
-        format2 = format2 || scope.own[n].kind == expr_kind::computed;
     }
 
-    std::vector<chain_node> nodes(scope.own.size());
-    for (size_t i = 0; i < nodes.size(); ++i) {
-        const own_signal& s = scope.own[i];
-        nodes[i] = {s.key, s.id,
-                    s.kind == expr_kind::computed ? s.program : nullptr};
+    /* The program's inputs among the file's own: a text signal standing
+     * in for a base def refused. True when one is computed. */
+    bool reads_a_computed_signal() const
+    {
+        const own_signal& self = scope.own[checked];
+        const std::string reader =
+            self.def != kNone ? q(f.defs[self.def].name) : "the expression";
+        bool computed = false;
+        for (uint32_t k = 0; k < program.input_count; ++k) {
+            const size_t n = scope.by_id(program.input_ids[k]);
+            if (n == kNone) {
+                continue;
+            }
+            if (scope.own[n].kind == expr_kind::text) {
+                throw refusal{static_cast<uint32_t>(places[k] + 1),
+                              replaced(scope.own[n], reader) +
+                                  ecuio_sf::kReplacedNotANumber};
+            }
+            computed = computed || scope.own[n].kind == expr_kind::computed;
+        }
+        return computed;
     }
-    std::vector<uint32_t> depth;
-    try {
-        depth = ecuio_sf::chain_depths(nodes);
-    } catch (const chain_refused& r) {
-        throw refusal{chain_place(r, scope, checked, program, places), r.words};
+
+    /* Every own signal's depth by the loader's chain rules, a refusal
+     * placed at the input it comes through */
+    void settle_depths()
+    {
+        std::vector<chain_node> nodes(scope.own.size());
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            const own_signal& s = scope.own[i];
+            nodes[i] = {s.key, s.id,
+                        s.kind == expr_kind::computed ? s.program : nullptr};
+        }
+        try {
+            depth = ecuio_sf::chain_depths(nodes);
+        } catch (const chain_refused& r) {
+            throw refusal{chain_place(r, scope, checked, program, places),
+                          r.words};
+        }
     }
 
     /* What reads the checked signal today reads a computed one once the
      * file holds the expression: none may keep an age bound on it, and
-     * all of them need format 2 */
-    for (size_t i = 0; i < f.defs.size() && self.def != kNone; ++i) {
-        const ecuio_signal_def_t& d = f.defs[i];
-        if (!is_computed(d) || i == self.def) {
-            continue;
+     * all of them need format 2. True when a computed def reads it. */
+    bool read_by_a_computed_def() const
+    {
+        const own_signal& self = scope.own[checked];
+        bool read = false;
+        for (size_t i = 0; i < f.defs.size() && self.def != kNone; ++i) {
+            const ecuio_signal_def_t& d = f.defs[i];
+            if (!is_computed(d) || i == self.def) {
+                continue;
+            }
+            const ecuio_computed_t& p = f.computed[d.table_first];
+            if (!reads(p, self.id)) {
+                continue;
+            }
+            read = true;
+            if (was_computed || !reads(p, self.id, true)) {
+                continue;
+            }
+            const bool stands_in = self.id < ECUIO_USER_SIG_ID_BASE;
+            if (own_of[i] != kNone &&
+                (!stands_in || aged_by_key(f, scope, i, p, self.id, key))) {
+                throw refusal{1, ecuio_sf::aged_computed_words(
+                                     *scope.own[own_of[i]].key, key)};
+            }
+            throw refusal{1,
+                          replaced(self, q(d.name)) + ecuio_sf::kReplacedAged};
         }
-        const ecuio_computed_t& p = f.computed[d.table_first];
-        if (!reads(p, self.id)) {
-            continue;
-        }
-        format2 = true;
-        if (was_computed || !reads(p, self.id, true)) {
-            continue;
-        }
-        const bool stands_in = self.id < ECUIO_USER_SIG_ID_BASE;
-        if (own_of[i] != kNone &&
-            (!stands_in || aged_by_key(f, scope, i, p, self.id, key))) {
-            throw refusal{1, ecuio_sf::aged_computed_words(
-                                 *scope.own[own_of[i]].key, key)};
-        }
-        throw refusal{1, replaced(self, q(d.name)) + ecuio_sf::kReplacedAged};
+        return read;
     }
 
     /* A base program over a signal that stands in for its input sits one
-     * deeper than it */
-    for (size_t i = 0; i < f.defs.size(); ++i) {
-        const ecuio_signal_def_t& d = f.defs[i];
-        if (!is_computed(d) || own_of[i] != kNone) {
-            continue;
-        }
-        const ecuio_computed_t& p = f.computed[d.table_first];
-        for (uint32_t k = 0; k < p.input_count && k < ECUIO_COMPUTED_MAX_INPUTS;
-             ++k) {
-            const size_t n = scope.by_id(p.input_ids[k]);
-            if (n != kNone && scope.own[n].kind == expr_kind::computed &&
-                scope.own[n].def != kNone &&
-                depth[n] + 1 > ECUIO_COMPUTED_MAX_DEPTH) {
-                throw refusal{
-                    1, replaced(scope.own[n], q(d.name)) +
-                           ecuio_sf::too_deep_words(d.name, depth[n] + 1)};
+     * deeper than it: refused past the bound */
+    void base_programs_fit() const
+    {
+        for (size_t i = 0; i < f.defs.size(); ++i) {
+            const ecuio_signal_def_t& d = f.defs[i];
+            if (!is_computed(d) || own_of[i] != kNone) {
+                continue;
+            }
+            const ecuio_computed_t& p = f.computed[d.table_first];
+            for (uint32_t k = 0;
+                 k < p.input_count && k < ECUIO_COMPUTED_MAX_INPUTS; ++k) {
+                const size_t n = scope.by_id(p.input_ids[k]);
+                if (n != kNone && scope.own[n].kind == expr_kind::computed &&
+                    scope.own[n].def != kNone &&
+                    depth[n] + 1 > ECUIO_COMPUTED_MAX_DEPTH) {
+                    throw refusal{
+                        1, replaced(scope.own[n], q(d.name)) +
+                               ecuio_sf::too_deep_words(d.name, depth[n] + 1)};
+                }
             }
         }
     }
 
-    if (!format2) {
+    /* Whether the oldest format refuses the text the newest took */
+    bool oldest_format_refuses(const std::string& text) const
+    {
         try {
             std::vector<std::string> unused;
             ecuio_sf::compile_expr(text, scope, ECUIO_SIGNAL_FILE_FORMAT_OLDEST,
                                    &unused, nullptr);
         } catch (const expr_refused&) {
-            format2 = true;
+            return true;
         }
+        return false;
     }
+};
+
+/* text as key's "expr" in f: out filled, or a refusal thrown */
+void check(const ecuio_signal_file& f, const std::string& key,
+           const std::string& text, ecuio_expr_check_t& out)
+{
+    checking c(f, key);
+    c.compile(text);
+    bool format2 = c.reads_a_computed_signal();
+    c.settle_depths();
+    format2 = c.read_by_a_computed_def() || format2;
+    c.base_programs_fit();
+    format2 = format2 || c.oldest_format_refuses(text);
     out.format =
         format2 ? ECUIO_SIGNAL_FILE_FORMAT : ECUIO_SIGNAL_FILE_FORMAT_OLDEST;
-    out.depth = depth[checked];
-    out.program = program;
+    out.depth = c.depth[c.checked];
+    out.program = c.program;
 }
 
 /* The def of f with that ID: its index, or kNone */

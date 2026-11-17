@@ -703,14 +703,10 @@ std::string named(const chain_node& node)
                                : std::string("the expression");
 }
 
-} // namespace
-
-/* Computed signals reading each other (ADR-0062): no circle and no
- * chain past ECUIO_COMPUTED_MAX_DEPTH, refused at the first signal of
- * either in the nodes' order. Depths settle pass by pass; one left
- * unsettled is on a circle or reads one. An input is found by its ID, a
- * replacement's (the base def's) too. */
-std::vector<uint32_t> chain_depths(const std::vector<chain_node>& nodes)
+/* Each node's computed inputs, as node indexes. An input is found by its
+ * ID, a replacement's (the base def's) too. */
+std::vector<std::vector<size_t>>
+chain_reads(const std::vector<chain_node>& nodes)
 {
     const size_t n = nodes.size();
     /* The nodes by ID, to find an input's */
@@ -719,10 +715,7 @@ std::vector<uint32_t> chain_depths(const std::vector<chain_node>& nodes)
         by_id[i] = {nodes[i].id, i};
     }
     std::sort(by_id.begin(), by_id.end());
-    /* Each signal's computed inputs, as entry indexes */
     std::vector<std::vector<size_t>> reads(n);
-    std::vector<uint32_t> depth(n, 0);
-    bool chained = false;
     for (size_t i = 0; i < n; ++i) {
         if (nodes[i].program == nullptr) {
             continue;
@@ -736,16 +729,21 @@ std::vector<uint32_t> chain_depths(const std::vector<chain_node>& nodes)
             if (it != by_id.end() && it->first == c.input_ids[k] &&
                 nodes[it->second].program != nullptr) {
                 reads[i].push_back(it->second);
-                chained = true;
             }
         }
     }
-    if (!chained) {
-        for (size_t i = 0; i < n; ++i) {
-            depth[i] = nodes[i].program != nullptr ? 1 : 0;
-        }
-        return depth;
-    }
+    return reads;
+}
+
+/* Depths settled pass by pass: 1 for a node reading no computed node,
+ * else one more than the deepest it reads. One left at 0 is on a circle
+ * or reads one. */
+std::vector<uint32_t>
+settled_depths(const std::vector<chain_node>& nodes,
+               const std::vector<std::vector<size_t>>& reads)
+{
+    const size_t n = nodes.size();
+    std::vector<uint32_t> depth(n, 0);
     for (bool more = true; more;) {
         more = false;
         for (size_t i = 0; i < n; ++i) {
@@ -765,7 +763,67 @@ std::vector<uint32_t> chain_depths(const std::vector<chain_node>& nodes)
             }
         }
     }
-    for (size_t i = 0; i < n; ++i) {
+    return depth;
+}
+
+/* The shortest way from i back to it through what each node reads: i,
+ * then the nodes back from it. Empty when i is on no circle. */
+std::vector<size_t> way_round(const std::vector<std::vector<size_t>>& reads,
+                              size_t i)
+{
+    const size_t n = reads.size();
+    std::vector<size_t> from(n, n);
+    std::vector<size_t> queue(reads[i]);
+    for (const size_t j : reads[i]) {
+        from[j] = i;
+    }
+    for (size_t at = 0; at < queue.size() && from[i] == n; ++at) {
+        for (const size_t j : reads[queue[at]]) {
+            if (from[j] == n) {
+                from[j] = queue[at];
+                queue.push_back(j);
+            }
+        }
+    }
+    if (from[i] == n) {
+        return {};
+    }
+    std::vector<size_t> path{i};
+    for (size_t j = from[i]; j != i; j = from[j]) {
+        path.push_back(j);
+    }
+    return path;
+}
+
+/* The refusal of the circle way_round found from path's first node */
+chain_refused circle_refused(const std::vector<chain_node>& nodes,
+                             const std::vector<size_t>& path,
+                             const std::vector<uint32_t>& depth)
+{
+    const size_t i = path[0];
+    /* Only a signal with a key is read, so every node here has one */
+    std::string words = "signal " + q(*nodes[i].key);
+    std::vector<size_t> circle{i};
+    for (size_t k = path.size(); k-- > 1;) {
+        words += (k + 1 == path.size() ? " reads " : ", which reads ") +
+                 q(*nodes[path[k]].key);
+        circle.push_back(path[k]);
+    }
+    words += (path.size() == 1 ? " reads " : ", which reads ") +
+             q(*nodes[i].key) + ": computed signals can't read in a circle";
+    return chain_refused{i, words, circle, depth};
+}
+
+} // namespace
+
+/* Computed signals reading each other (ADR-0062): no circle and no
+ * chain past ECUIO_COMPUTED_MAX_DEPTH, refused at the first signal of
+ * either in the nodes' order */
+std::vector<uint32_t> chain_depths(const std::vector<chain_node>& nodes)
+{
+    const std::vector<std::vector<size_t>> reads = chain_reads(nodes);
+    std::vector<uint32_t> depth = settled_depths(nodes, reads);
+    for (size_t i = 0; i < nodes.size(); ++i) {
         if (nodes[i].program == nullptr) {
             continue;
         }
@@ -781,39 +839,12 @@ std::vector<uint32_t> chain_depths(const std::vector<chain_node>& nodes)
         if (depth[i] != 0) {
             continue;
         }
-        /* The shortest way back to i, if i is on a circle */
-        std::vector<size_t> from(n, n);
-        std::vector<size_t> queue(reads[i]);
-        for (const size_t j : reads[i]) {
-            from[j] = i;
+        /* One that only reads a circle is passed by: a later signal is
+         * on it */
+        const std::vector<size_t> path = way_round(reads, i);
+        if (!path.empty()) {
+            throw circle_refused(nodes, path, depth);
         }
-        for (size_t at = 0; at < queue.size() && from[i] == n; ++at) {
-            for (const size_t j : reads[queue[at]]) {
-                if (from[j] == n) {
-                    from[j] = queue[at];
-                    queue.push_back(j);
-                }
-            }
-        }
-        if (from[i] == n) {
-            continue; /* it reads a circle: a later signal is on it */
-        }
-        std::vector<size_t> path{i};
-        for (size_t j = from[i]; j != i; j = from[j]) {
-            path.push_back(j);
-        }
-        /* Only a signal with a key is read, so every node here has one */
-        std::string words = "signal " + q(*nodes[i].key);
-        std::vector<size_t> circle{i};
-        for (size_t k = path.size(); k-- > 1;) {
-            words += (k + 1 == path.size() ? " reads " : ", which reads ") +
-                     q(*nodes[path[k]].key);
-            circle.push_back(path[k]);
-        }
-        words += (path.size() == 1 ? " reads " : ", which reads ") +
-                 q(*nodes[i].key) +
-                 ": computed signals can't read in a circle";
-        throw chain_refused{i, words, circle, depth};
     }
     return depth;
 }
