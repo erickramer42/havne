@@ -1445,6 +1445,25 @@ TestCase {
         verify(DashboardBook.exportText(doc, "desktop", needed) !== "", "so the layout can be written")
     }
 
+    // A cell reading a "key:" signal no file of the vehicle gives is one a
+    // layout can't name a plugin for; one gauge counts once
+    function test_aKeyCellNoFileGivesIsCounted() {
+        const doc = { format: DashboardBook.format, pages: [
+            { name: "A", cells: [
+                cell("own", { refs: ["key:boost"] }),
+                cell("two keys", { refs: ["key:gone", "key:also_gone", "id:7001"] }),
+                cell("built in", { refs: ["id:7001"] }),
+                cell("blank", { refs: [] })] },
+            { name: "B", cells: [cell("again", { refs: ["key:gone"] })] }] }
+        const files = [{ name: "Plugin", sha256: sha, refs: ["key:boost", "id:7001"] }]
+        compare(DashboardBook.unboundKeyCells(doc, files), 2, "two cells, the one with two keys once")
+        compare(DashboardBook.unboundKeyCells(doc, []), 3, "no vehicle file: every key cell")
+        compare(DashboardBook.unboundKeyCells(doc, [{ name: "More", sha256: sha,
+                                                      refs: ["key:boost", "key:gone"] }]), 0,
+                "a key of any of a cell's refs is enough")
+        compare(DashboardBook.unboundKeyCells({ format: DashboardBook.format, pages: [] }, files), 0)
+    }
+
     // A missing file a pick is named as is a pick that changed, not one
     // the vehicle lacks
     function test_aMissingFileNamedAsAPickIsAChangedPick() {

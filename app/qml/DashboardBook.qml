@@ -227,6 +227,27 @@ QtObject {
         return out
     }
 
+    // How many cells of doc read a signal by a "key:" reference that no
+    // file of `vehicleFiles` gives, so a layout written now can't name the
+    // plugin they need (the vehicle picks none that has the key, or none
+    // is picked): a cell counts once however many keys it holds
+    function unboundKeyCells(doc, vehicleFiles) {
+        const given = {}
+        for (const f of vehicleFiles) {
+            for (const r of f.refs)
+                given[r] = true
+        }
+        let n = 0
+        for (const p of doc.pages) {
+            for (const c of p.cells) {
+                const keys = c.refs.filter(r => r.startsWith("key:"))
+                if (keys.length > 0 && !keys.some(r => given[r] === true))
+                    ++n
+            }
+        }
+        return n
+    }
+
     function fileFits(f) {
         return isObject(f) && typeof f.name === "string" && f.name.trim() !== ""
                && codePoints(f.name) <= maxFileName

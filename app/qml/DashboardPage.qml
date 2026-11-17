@@ -482,13 +482,15 @@ Page {
     }
     // Writes this form's layout, and the picks' files it needs by name,
     // to the file at url. A pick no plugin here has gives no references,
-    // so the layout can't say it needs it: the note names the pick
+    // so the layout can't say it needs it: the note names the pick, and
+    // counts the gauges no pick gives a key for
     function exportLayoutTo(url) {
         commitTyping()
         const files = vehicleFiles()
         const needed = DashboardBook.neededFiles(doc, files)
         const v = VehicleBook.picked(vehicles)
         const unloaded = (v ? v.picks : []).filter(p => !files.some(f => f.profile === p))
+        const unbound = DashboardBook.unboundKeyCells(doc, files)
         const text = DashboardBook.exportText(doc, form, needed)
         if (text === "") {
             Bridge.dropPicked(url)
@@ -509,6 +511,9 @@ Page {
                    + (unloaded.length === 0 ? ""
                       : qsTr(". The vehicle's picks %1 aren't in the store, so a gauge reading them isn't listed as needing them")
                             .arg(unloaded.join(", ")))
+                   + (unbound === 0 ? ""
+                      : (unbound === 1 ? qsTr(". 1 gauge reads a signal none of the vehicle's picked plugins has, so the file can't name a plugin for it")
+                                       : qsTr(". %1 gauges read signals none of the vehicle's picked plugins has, so the file can't name a plugin for them").arg(unbound)))
                    + ".")
         return true
     }
