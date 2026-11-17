@@ -239,8 +239,8 @@ QtObject {
         f.name = signal.name
         f.rx = ecu !== undefined ? String(ecu.rx) : ""
         f.tx = ecu !== undefined ? text(ecu.tx) : ""
-        f.service = signal.read.service
-        f.number = signal.read.number
+        f.service = signal.read !== undefined ? signal.read.service : f.service
+        f.number = signal.read !== undefined ? signal.read.number : ""
         f.byte = text(field.byte)
         f.bits = text(field.bits)
         f.bit = text(field.bit)
@@ -259,6 +259,8 @@ QtObject {
 
     // "22 D100 on 7E8": what a signal asks, and of which module
     function describe(file, signal) {
+        if (signal.read === undefined)
+            return qsTr("computed")
         const ecu = file.ecus.find(e => e.id === signal.ecu)
         return qsTr("%1 %2 on %3").arg(signal.read.service, signal.read.number,
                                        ecu !== undefined ? String(ecu.rx) : "?")
