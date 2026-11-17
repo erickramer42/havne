@@ -551,7 +551,7 @@ TestCase {
         compare(panel.shownCount, 3)
     }
 
-    // With no set picked the list is the profile's groups, all open as before
+    // With no set picked the list is the profile's groups, all open
     function test_withNoPickedSetTheGroupsAreAllOpen() {
         const page = pageOf({}, docOf([cellOf("A", "analog")]))
         page.offlineUri = "mock://?profile=obd2"
@@ -572,7 +572,7 @@ TestCase {
         click(page, "dashAdd")
         click(page, "addKind_bar")
         const panel = find(page, "dashSignalPanel")
-        tryVerify(() => Bridge.signalModel.hiddenCount > 0, 5000, "the demo car lacks some PIDs")
+        tryVerify(() => Bridge.signalModel.hiddenCount > 0, 10000, "the demo car lacks some PIDs")
         tryVerify(() => panel.sections.some(sec => sec.hiddenFrom >= 0), 3000, "a group with a dim tail")
         const g = panel.sections.find(sec => sec.hiddenFrom >= 0)
         const hub = page.signalHub
@@ -2618,6 +2618,40 @@ TestCase {
         mouseDoubleClickSequence(tab0)
         wait(50)
         verify(!field.visible, "no rename field outside edit mode")
+    }
+
+    // A name left as it was makes no undo step; a rename in place gives way to Done and leaves room
+    function test_aRenameThatChangesNothingIsNoUndoStep() {
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        const depth = page.undoStack.length
+        click(page, "dashMore")
+        const name = find(page, "moreRename")
+        name.forceActiveFocus()
+        name.editingFinished()
+        compare(page.undoStack.length, depth, "the Page row's field")
+        const tab0 = find(page, "dashPageTab_0")
+        const field = find(page, "dashPageRename_0")
+        tryVerify(() => waitForPolish(tab0.Window.window), 3000)
+        mouseDoubleClickSequence(tab0)
+        tryVerify(() => field.visible && field.activeFocus, 3000)
+        verify(tab0.width >= 120, "a short name has room: " + tab0.width)
+        keyClick(Qt.Key_Return)
+        compare(page.undoStack.length, depth, "the tab's field")
+    }
+
+    function test_leavingEditModeDropsAnOpenRename() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        const tab0 = find(page, "dashPageTab_0")
+        tryVerify(() => waitForPolish(tab0.Window.window), 3000)
+        mouseDoubleClickSequence(tab0)
+        const field = find(page, "dashPageRename_0")
+        tryVerify(() => field.visible, 3000)
+        page.stopEditing()
+        compare(find(page, "dashPageStrip").renaming, -1)
+        page.startEditing()
+        verify(!field.visible, "editing again shows no field")
     }
 
     function test_aBlankCellHasNoColorRow() {

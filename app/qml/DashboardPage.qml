@@ -614,7 +614,7 @@ Page {
         commitTyping()
         selected = i
         // The cell's panel takes its decimals from the listed rows with no session
-        if (!Bridge.connected)
+        if (!Bridge.connected && (profileRows.length === 0 || rowsFor !== offlineUri))
             refreshRows()
         panel = "cell"
     }
@@ -820,7 +820,10 @@ Page {
     // ---- Add: a kind, then a signal
 
     property var profileRows: []
+    // The address the rows were listed for with no session
+    property string rowsFor: ""
     function refreshRows() {
+        rowsFor = offlineUri
         profileRows = Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : offlineUri)
     }
     // The rows a gauge of `kind` can show: numbers with references, an

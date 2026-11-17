@@ -27,6 +27,10 @@ Item {
 
     // The tab being renamed in place (a double click in edit mode), -1 for none
     property int renaming: -1
+    onEditingChanged: {
+        if (!editing)
+            renaming = -1
+    }
 
     // The touch size where Theme.compact asks for it (qml.md's density rule)
     readonly property real tabHeight: Math.max(36, Theme.touchTarget)
@@ -125,7 +129,7 @@ Item {
                     checked: index === strip.current
                     text: strip.nameOf(index)
                     Accessible.name: text
-                    width: Math.max(64, Math.min(220, label.implicitWidth + 32))
+                    width: Math.max(strip.renaming === index ? 120 : 64, Math.min(220, label.implicitWidth + 32))
                     height: strip.tabHeight
                     leftPadding: 16
                     rightPadding: 16
@@ -139,7 +143,7 @@ Item {
                         id: renameField
                         objectName: "dashPageRename_" + tabButton.index
                         anchors.fill: parent
-                        visible: strip.renaming === tabButton.index
+                        visible: strip.editing && strip.renaming === tabButton.index
                         maximumLength: DashboardBook.maxLabel
                         Accessible.name: qsTr("This page's name")
                         property bool finished: false
