@@ -511,6 +511,10 @@ the grammar, the axis and each line (`CliViewTest`); the usage errors
 > `delta_from` on a recording after the first aligned one; the `roles` line
 > gains `pull_gain`.
 
+> 2026-11-16: `view` takes `--pull-end lift|top-speed` with `--stretches`
+> or `--align-on pull:` (ADR-0056's note of 2026-11-16); the `roles` line
+> gains `pull_end`.
+
 ## Appendix: 2026-11-03, info
 
 `havne-cli info <recording> [--gap S] [--rate-drop X] [--settle S]`

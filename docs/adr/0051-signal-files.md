@@ -840,3 +840,13 @@ spread, the decode at 1.00 to 1.02 of the base, the bridge's load at
 0.91 to 0.98, reply timing at 1.00 over J2534.
 
 Note of 2026-11-16: section 6's "`ECUIO_MAX_CHANNELS` stays 4 until a real car needs more" is answered by [ADR-0065](0065-car-sized-profile.md): it is 32.
+
+## Note: the bounds as they are (2026-11-16)
+
+| What | Bound |
+|---|---|
+| A file | 1024 signals and 1 MiB |
+| An ECU | 1024 requests, the base set's counted |
+| A variant's merged list | 16,384 signals, and 4 MiB written |
+
+The third row is a plugin variant's files read together (ADR-0065).
