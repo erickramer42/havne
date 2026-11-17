@@ -472,17 +472,18 @@ TEST(RecorderTest, ARecordingHoldsFramesValuesAndItsHeader)
     const std::vector<std::string> values = lines_of(rec.file("signals.csv"));
     ASSERT_EQ(values.size(), 3u);
     EXPECT_EQ(values[0], "\xEF\xBB\xBFhost_us,signal,value,unit");
-    EXPECT_NE(values[1].find(",Half,1.5,\xC2\xB0"
+    EXPECT_NE(values[1].find(",100::0.0:8,1.5,\xC2\xB0"
                              "C"),
               std::string::npos)
         << values[1];
-    EXPECT_NE(values[2].find(",Words,\"A,B \"\"q\"\"\","), std::string::npos)
+    EXPECT_NE(values[2].find(",101::0:t0,\"A,B \"\"q\"\"\","),
+              std::string::npos)
         << values[2];
 
     const std::string events = rec.file("events.log");
     const std::vector<std::string> ev = lines_of(events);
     ASSERT_GE(ev.size(), 10u) << events;
-    EXPECT_EQ(ev[0], "ecuio session recording, format 3 (ADR-0049)");
+    EXPECT_EQ(ev[0], "ecuio session recording, format 4 (ADR-0049)");
     EXPECT_EQ(ev[1].rfind("started  ", 0), 0u);
     EXPECT_EQ(ev[2].rfind("utc  ", 0), 0u);
     EXPECT_EQ(ev[2].back(), 'Z');
@@ -490,10 +491,11 @@ TEST(RecorderTest, ARecordingHoldsFramesValuesAndItsHeader)
               std::string::npos);
     EXPECT_NE(events.find("\nprofile  rec-test\n"), std::string::npos);
     EXPECT_NE(events.find("\nframe flags  complete\n"), std::string::npos);
-    EXPECT_NE(events.find("\nsignal  Half,number,\xC2\xB0"
+    EXPECT_NE(events.find("\nsignal  100::0.0:8,Half,number,\xC2\xB0"
                           "C,1,2,3\n"),
               std::string::npos);
-    EXPECT_NE(events.find("\nsignal  Words,text,,0,0,0\n"), std::string::npos);
+    EXPECT_NE(events.find("\nsignal  101::0:t0,Words,text,,0,0,0\n"),
+              std::string::npos);
     EXPECT_NE(events.find("\ncaller  surrogate frame logging  off\n"),
               std::string::npos);
     EXPECT_NE(events.find("\ncaller  two lines\n"), std::string::npos);
@@ -586,23 +588,22 @@ TEST(RecorderTest, AnEnumsNumberIsInTheRowsAndItsLabelsInTheHeader)
 
     const std::vector<std::string> values = lines_of(rec.file("signals.csv"));
     ASSERT_EQ(values.size(), 4u);
-    EXPECT_NE(values[1].find(",\"Fuel, System\",2,"), std::string::npos)
-        << values[1];
-    EXPECT_NE(values[2].find(",\"Fuel, System\",3,"), std::string::npos)
-        << values[2];
-    EXPECT_NE(values[3].find(",Count,7,"), std::string::npos) << values[3];
+    EXPECT_NE(values[1].find(",110::0.0:8,2,"), std::string::npos) << values[1];
+    EXPECT_NE(values[2].find(",110::0.0:8,3,"), std::string::npos) << values[2];
+    EXPECT_NE(values[3].find(",113::0.0:8,7,"), std::string::npos) << values[3];
 
     const std::string events = rec.file("events.log");
-    EXPECT_EQ(events.rfind("ecuio session recording, format 3 (ADR-0049)\n", 0),
+    EXPECT_EQ(events.rfind("ecuio session recording, format 4 (ADR-0049)\n", 0),
               0u);
-    EXPECT_NE(events.find("\nsignal  \"Fuel, System\",enum,,0,1,3\n"
-                          "label  \"Fuel, System\",1,\"Open loop, cold\"\n"
-                          "label  \"Fuel, System\",2,\"Closed \"\"loop\"\"\"\n"
-                          "label  \"Fuel, System\",4294967295,Two lines\n"
-                          "signal  \"Fuel, Spare\",enum,,0,0,0\n"
-                          "label  \"Fuel, Spare\",9,Other\n"
-                          "signal  Mode,enum,,0,0,0\n"
-                          "signal  Count,number,,0,0,0\n"),
+    /* Each signal's key, then its name; a label by its signal's key */
+    EXPECT_NE(events.find("\nsignal  110::0.0:8,\"Fuel, System\",enum,,0,1,3\n"
+                          "label  110::0.0:8,1,\"Open loop, cold\"\n"
+                          "label  110::0.0:8,2,\"Closed \"\"loop\"\"\"\n"
+                          "label  110::0.0:8,4294967295,Two lines\n"
+                          "signal  111::0.0:8,\"Fuel, Spare\",enum,,0,0,0\n"
+                          "label  111::0.0:8,9,Other\n"
+                          "signal  112::0.0:8,Mode,enum,,0,0,0\n"
+                          "signal  113::0.0:8,Count,number,,0,0,0\n"),
               std::string::npos)
         << events;
 
@@ -613,7 +614,7 @@ TEST(RecorderTest, AnEnumsNumberIsInTheRowsAndItsLabelsInTheHeader)
         << ecuio_last_error_detail();
     ecuio_recording_info_t info{};
     ASSERT_EQ(ecuio_recording_get_info(r, &info), ECUIO_OK);
-    EXPECT_EQ(info.format, ECUIO_RECORDING_FORMAT_ENUMS);
+    EXPECT_EQ(info.format, ECUIO_RECORDING_FORMAT_KEYS);
     ASSERT_EQ(info.signal_count, 4u);
     ecuio_recording_signal_t fuel{};
     ASSERT_EQ(ecuio_recording_get_signal(r, 0, &fuel), ECUIO_OK);
@@ -660,7 +661,8 @@ TEST(RecorderTest, ValuesKeepTheirDecimalPointUnderAnyLocale)
     dispatch(rec.session, kNumberId, std::string("\x07", 1));
     ASSERT_EQ(rec.finish(), ECUIO_OK);
     std::setlocale(LC_NUMERIC, saved.c_str());
-    EXPECT_NE(rec.file("signals.csv").find(",Half,3.5,"), std::string::npos)
+    EXPECT_NE(rec.file("signals.csv").find(",100::0.0:8,3.5,"),
+              std::string::npos)
         << rec.file("signals.csv");
 }
 
@@ -1347,7 +1349,7 @@ TEST(RecorderTest, TheHeaderHoldsTheFocusAndTheLinkAtTheAttach)
         ASSERT_EQ(rec.finish(), ECUIO_OK);
         const std::string events = rec.file("events.log");
         const size_t flags = events.find("\nframe flags  complete\n");
-        const size_t focus = events.find("\nfocus  Words,Half\n");
+        const size_t focus = events.find("\nfocus  101::0:t0,100::0.0:8\n");
         const size_t signal = events.find("\nsignal  ");
         EXPECT_NE(flags, std::string::npos) << events;
         EXPECT_NE(focus, std::string::npos) << events;
@@ -1371,7 +1373,7 @@ TEST(RecorderTest, TheHeaderHoldsTheFocusAndTheLinkAtTheAttach)
         ASSERT_EQ(rec.finish(), ECUIO_OK);
         const std::string events = rec.file("events.log");
         const size_t flags = events.find("\nframe flags  complete\n");
-        const size_t pick = events.find("\npick  Words,Half\n");
+        const size_t pick = events.find("\npick  101::0:t0,100::0.0:8\n");
         const size_t signal = events.find("\nsignal  ");
         EXPECT_NE(pick, std::string::npos) << events;
         EXPECT_TRUE(flags < pick && pick < signal) << events;
@@ -1387,7 +1389,8 @@ TEST(RecorderTest, TheHeaderHoldsTheFocusAndTheLinkAtTheAttach)
         rec.attach();
         ASSERT_EQ(rec.finish(), ECUIO_OK);
         const std::string events = rec.file("events.log");
-        EXPECT_NE(events.find("\nfocus  Half\n"), std::string::npos) << events;
+        EXPECT_NE(events.find("\nfocus  100::0.0:8\n"), std::string::npos)
+            << events;
         EXPECT_EQ(events.find("\nmin sweep  "), std::string::npos)
             << "the mock asks nothing, so nothing is paced: " << events;
     }
@@ -1401,7 +1404,7 @@ TEST(RecorderTest, TheHeaderHoldsTheFocusAndTheLinkAtTheAttach)
         rec.attach();
         ASSERT_EQ(rec.finish(), ECUIO_OK);
         const std::string events = rec.file("events.log");
-        const size_t focus = events.find("\nfocus  Half\n");
+        const size_t focus = events.find("\nfocus  100::0.0:8\n");
         const size_t link =
             events.find("\nlink  healthy (state 0, 0 episodes)\n");
         const size_t signal = events.find("\nsignal  ");
@@ -1469,13 +1472,16 @@ std::vector<uint16_t> wide_picks_twice()
     return ids;
 }
 
-std::vector<std::string> wide_names_last_first()
+/* The wide set's keys, last first: every def reads one address, so the
+ * first keeps it and each later one goes by its id */
+std::vector<std::string> wide_keys_last_first()
 {
-    std::vector<std::string> names;
+    std::vector<std::string> keys;
     for (uint32_t k = kWideDefs; k-- > 0;) {
-        names.push_back(wide_name(k));
+        keys.push_back(k == 0 ? std::string("300::0.0:8")
+                              : "id:" + std::to_string(1000 + k));
     }
-    return names;
+    return keys;
 }
 
 /* A focus line's names as the readers split them */
@@ -1534,7 +1540,7 @@ TEST(RecorderTest, AFocusPastALinesRoomTakesSeveralLinesAndEachPickOnce)
         }
     }
     EXPECT_GE(lines, 2u);
-    EXPECT_EQ(written, wide_names_last_first());
+    EXPECT_EQ(written, wide_keys_last_first());
 }
 
 /* A focus changed after the attach is an activity line at its time, of
@@ -1559,14 +1565,15 @@ TEST(RecorderTest, AFocusChangedAfterTheAttachIsAnActivityLine)
         ASSERT_EQ(rec.finish(), ECUIO_OK);
         const std::string events = rec.file("events.log");
         EXPECT_EQ(activity_of(events, "focus"),
-                  (std::vector<std::string>{"1 signal: Half",
+                  (std::vector<std::string>{"1 signal: 100::0.0:8",
                                             "none: every signal asked"}))
             << events;
         EXPECT_EQ(activity_of(events, "pick"),
-                  (std::vector<std::string>{"2 signals: Words,Half"}))
+                  (std::vector<std::string>{"2 signals: 101::0:t0,100::0.0:8"}))
             << events;
-        const size_t one = events.find("  focus  1 signal: Half\n");
-        const size_t two = events.find("  pick  2 signals: Words,Half\n");
+        const size_t one = events.find("  focus  1 signal: 100::0.0:8\n");
+        const size_t two =
+            events.find("  pick  2 signals: 101::0:t0,100::0.0:8\n");
         const size_t none = events.find("  focus  none: every signal asked\n");
         EXPECT_TRUE(one < two && two < none) << events;
         EXPECT_EQ(events.find("\nfocus  "), std::string::npos)
@@ -1593,7 +1600,7 @@ TEST(RecorderTest, AFocusChangedAfterTheAttachIsAnActivityLine)
             EXPECT_LE(lines[k].size(), 6u + 4096u);
             split_names(lines[k].substr(6), &names);
         }
-        EXPECT_EQ(names, wide_names_last_first());
+        EXPECT_EQ(names, wide_keys_last_first());
 
         const std::string copy = root.utf8() + "/copy";
         ecuio_export_options_t o{};
@@ -1638,9 +1645,10 @@ TEST(RecorderTest, AFocusLineComesOnlyOnAChange)
         ASSERT_EQ(ecuio_session_set_focus(rec.session, nullptr, 0), ECUIO_OK);
         ASSERT_EQ(rec.finish(), ECUIO_OK);
         const std::string events = rec.file("events.log");
-        EXPECT_NE(events.find("\nfocus  Half\n"), std::string::npos) << events;
+        EXPECT_NE(events.find("\nfocus  100::0.0:8\n"), std::string::npos)
+            << events;
         EXPECT_EQ(activity_of(events, "pick"),
-                  std::vector<std::string>{"1 signal: Half"})
+                  std::vector<std::string>{"1 signal: 100::0.0:8"})
             << events;
         EXPECT_EQ(activity_of(events, "focus"),
                   std::vector<std::string>{"none: every signal asked"})
@@ -1750,7 +1758,7 @@ TEST(RecorderTest, ASecondRecorderAttachesOnceTheFirstHasClosed)
             ++n;
         return n;
     };
-    EXPECT_EQ(count("ecuio session recording, format 3"), 1u) << events;
+    EXPECT_EQ(count("ecuio session recording, format 4"), 1u) << events;
     EXPECT_EQ(count("\ncolumns  "), 1u) << events;
     EXPECT_EQ(count("\nsignal file  "), 1u) << events;
     EXPECT_EQ(count("\ncaller  app  the second\n"), 1u) << events;
@@ -2126,7 +2134,7 @@ TEST(RecorderTest, NothingIsWrittenBeforeASessionAttaches)
             }
             continue;
         }
-        EXPECT_EQ(events.rfind("ecuio session recording, format 3", 0), 0u)
+        EXPECT_EQ(events.rfind("ecuio session recording, format 4", 0), 0u)
             << events;
         EXPECT_NE(events.find("\ncaller  app  Havne test\n"), std::string::npos)
             << events;
@@ -2188,7 +2196,7 @@ TEST(RecorderTest, ASleepIsAnAsleepLineWithItsLength)
     EXPECT_EQ(ecuio_recorder_close(rec, nullptr), ECUIO_OK);
 
     const std::string events = read_text(folder / "events.log");
-    EXPECT_EQ(events.rfind("ecuio session recording, format 3", 0), 0u)
+    EXPECT_EQ(events.rfind("ecuio session recording, format 4", 0), 0u)
         << "the header first, though attach came past the writer's wake";
     const std::vector<EventLine> sleeps = events_of(events, "asleep");
     ASSERT_EQ(sleeps.size(), 1u) << events;
@@ -2605,8 +2613,9 @@ TEST(RecorderTest, AReplayWithTheRecordingsFileDecodesTheSame)
     const std::vector<std::string> b =
         decoded_rows(fs::u8path(second) / "signals.csv");
     ASSERT_GT(a.size(), 100u);
-    EXPECT_NE(read_text(fs::u8path(first) / "signals.csv").find(",Road Speed,"),
-              std::string::npos);
+    EXPECT_NE(read_text(fs::u8path(first) / "signals.csv").find(",road_speed,"),
+              std::string::npos)
+        << "a signal at a base signal's address, under its author's key";
     ASSERT_EQ(a.size(), b.size());
     for (size_t i = 0; i < a.size(); ++i) {
         ASSERT_EQ(a[i], b[i]) << "row " << i + 1;
@@ -2725,7 +2734,7 @@ TEST(RecorderTest, APluginVariantsRecordingHoldsItsMergedFile)
         decoded_rows(fs::u8path(second) / "signals.csv");
     ASSERT_GE(a.size(), 40u);
     EXPECT_NE(read_text(fs::u8path(first) / "signals.csv")
-                  .find(",Trans Fluid Temp,40.01,"),
+                  .find(",7E9:62F410:3.0:16,40.01,"),
               std::string::npos)
         << "the later file's scale, 0.01";
     EXPECT_EQ(a, b);
@@ -2795,10 +2804,13 @@ TEST(RecorderTest, ANumberAndAnEnumOfOneNameAreRefusedAtLoad)
         R"({"key":"g1","name":"Gear","read":{"service":"22","number":"D100"},"field":{"byte":0}},)"
         R"({"key":"m","name":"Mode","read":{"service":"22","number":"D102"},"field":{"byte":0},)"
         R"("kind":"enum","values":{"1":"Eco"}})");
-    EXPECT_NE(events.find("\nsignal  Gear,number,"), std::string::npos)
+    EXPECT_NE(events.find("\nsignal  7E8:62D100:3.0:8,Gear,number,"),
+              std::string::npos)
         << events;
-    EXPECT_EQ(events.find("\nlabel  Gear,"), std::string::npos) << events;
-    EXPECT_NE(events.find("\nlabel  Mode,1,Eco\n"), std::string::npos)
+    EXPECT_EQ(events.find("\nlabel  7E8:62D100:3.0:8,"), std::string::npos)
+        << events;
+    EXPECT_NE(events.find("\nlabel  7E8:62D102:3.0:8,1,Eco\n"),
+              std::string::npos)
         << events;
 }
 
@@ -2809,6 +2821,7 @@ TEST(RecorderTest, ALineBreakInANameOrUnitIsASpace)
     const std::string events = recorded_header(
         "Recorder breaks",
         R"({"key":"g","name":"Gear\nX","unit":"k\r\nPa","read":{"service":"22","number":"D100"},"field":{"byte":0}})");
-    EXPECT_NE(events.find("\nsignal  Gear X,number,k  Pa,"), std::string::npos)
+    EXPECT_NE(events.find("\nsignal  7E8:62D100:3.0:8,Gear X,number,k  Pa,"),
+              std::string::npos)
         << events;
 }

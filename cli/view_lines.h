@@ -241,14 +241,15 @@ inline bool window_of(const Axis& a, int64_t offset_us, Window& out)
     return true;
 }
 
-// The opened line's format: core's for formats 2 and 3 alike (format 3
-// keeps format 2's shape, its enums seen on their signal lines), so schema
-// 1's word holds
+// The opened line's format: core's for formats 2, 3 and 4 alike (format 3
+// keeps format 2's shape, its enums seen on their signal lines, and format
+// 4 keeps a signal under its key), so schema 1's word holds
 inline const char* format_word(uint32_t format)
 {
     switch (format) {
     case ECUIO_RECORDING_FORMAT_CORE:
     case ECUIO_RECORDING_FORMAT_ENUMS:
+    case ECUIO_RECORDING_FORMAT_KEYS:
         return "core";
     case ECUIO_RECORDING_FORMAT_OLDER:
         return "older";

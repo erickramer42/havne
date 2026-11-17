@@ -28,7 +28,8 @@
 #include "recorder_impl.h"
 #include "recorder_text.h"
 #include "recording_lines.h" /* signal_line */
-#include "recording_rows.h" /* kFormat3, the first line */
+#include "recording_keys.h"  /* a set's keys */
+#include "recording_rows.h"  /* kFormat4, the first line */
 #include "session.h"
 #include "sha256.h"
 #include "signal_file_build.h" /* a loaded file's bytes */
@@ -608,9 +609,18 @@ ecuio_status_t ecuio_recorder_signal_file(ecuio_recorder_t* recorder,
     if (recorder == nullptr || file == nullptr) {
         return ECUIO_ERR_NULL_ARGUMENT;
     }
+    std::vector<ecuio_signal_key_t> keys;
+    ecuio_status_t s = ecuio_recording_keys::set_keys(&file->set, file, &keys);
+    if (s != ECUIO_OK) {
+        return s;
+    }
     const std::string& bytes = ecuio_sf::bytes_of(*file);
-    return ecuio_recorder_take_signals(recorder, &file->set, bytes.data(),
-                                       bytes.size(), file->plugin.c_str());
+    s = ecuio_recorder_take_signals(recorder, &file->set, bytes.data(),
+                                    bytes.size(), file->plugin.c_str());
+    if (s == ECUIO_OK) {
+        recorder->signal_keys = std::move(keys);
+    }
+    return s;
 }
 
 ecuio_status_t ecuio_session_record(ecuio_session_t* session,
@@ -660,15 +670,22 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
     try {
         const ecuio_signal_set_t* set = session->active_signal_set;
         rx_ids = session->module_rx; /* fixed since create */
-        header = std::string(ecuio_recording_rows::kFormat3) + "\n";
-        for (uint32_t i = 0;
-             set != nullptr && set->defs != nullptr && i < set->count; ++i) {
+        header = std::string(ecuio_recording_rows::kFormat4) + "\n";
+        /* The file's keys when it gave them, else the set's own */
+        std::vector<ecuio_signal_key_t> own_keys;
+        if (recorder->signal_keys.empty() &&
+            ecuio_recording_keys::set_keys(set, nullptr, &own_keys) !=
+                ECUIO_OK) {
+            return ECUIO_ERR_OUT_OF_MEMORY;
+        }
+        const std::vector<ecuio_signal_key_t>& keys =
+            recorder->signal_keys.empty() ? own_keys : recorder->signal_keys;
+        for (uint32_t i = 0; i < keys.size(); ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
-            const size_t nlen = strnlen(d.name, sizeof d.name);
             const size_t ulen = strnlen(d.unit, sizeof d.unit);
             const bool text = is_text_kind(d.kind);
-            defs.push_back(def_entry{d.id, text, csv_quoted(d.name, nlen),
-                                     csv_quoted(d.unit, ulen)});
+            defs.push_back(
+                def_entry{d.id, text, keys[i].text, csv_quoted(d.unit, ulen)});
         }
         std::sort(
             defs.begin(), defs.end(),
@@ -720,9 +737,9 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
             named_focus = focus_now(session);
         }
         size_t named = 0;
-        /* As many lines as the names take; a reader appends them */
+        /* As many lines as the keys take; a reader appends them */
         const std::vector<std::string> parts =
-            focus_parts(set, named_focus.ids, &named);
+            focus_parts(defs, named_focus.ids, &named);
         header += focus_header(parts, named, named_focus);
         if (recorder->armed) {
             armed_focus = named_focus;
@@ -732,20 +749,18 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
             header += header_link(link_state, link_episodes);
         }
         const size_t signals_at = header.size();
-        for (uint32_t i = 0;
-             set != nullptr && set->defs != nullptr && i < set->count; ++i) {
+        for (uint32_t i = 0; i < keys.size(); ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
             const bool enumeration = d.kind == ECUIO_VALUE_ENUM;
-            const std::string name =
-                csv_quoted(d.name, strnlen(d.name, sizeof d.name));
-            header += ecuio_recording_lines::signal_line(
-                name,
+            header += ecuio_recording_lines::keyed_signal_line(
+                keys[i].text,
+                csv_quoted(d.name, strnlen(d.name, sizeof d.name)),
                 is_text_kind(d.kind) ? "text"
                 : enumeration        ? "enum"
                                      : "number",
                 csv_quoted(d.unit, strnlen(d.unit, sizeof d.unit)),
                 d.decimal_places, d.plot_rank, d.group);
-            header += label_lines(set, d, name);
+            header += label_lines(set, d, keys[i].text);
         }
         header.reserve(header.size() + kConditionsLineMax);
         if (recorder->armed) {
@@ -888,12 +903,11 @@ ecuio_status_t ecuio_session_record(ecuio_session_t* session,
 namespace {
 
 /* The focus's activity lines into the pinned recorder's note queue: the
- * count, the minimum when there is one, then the names */
-void push_focus(ecuio_recorder_t* r, const ecuio_signal_set_t* set,
-                const focus_named& f)
+ * count, the minimum when there is one, then the keys */
+void push_focus(ecuio_recorder_t* r, const focus_named& f)
 {
     size_t named = 0;
-    const std::vector<std::string> parts = focus_parts(set, f.ids, &named);
+    const std::vector<std::string> parts = focus_parts(r->defs, f.ids, &named);
     std::string lines;
     if (parts.empty()) {
         lines = "none: every signal asked";
@@ -949,7 +963,7 @@ void ecuio_record_focus(ecuio_session_t* session)
             }
         }
         if (changed) {
-            push_focus(r, session->active_signal_set, f);
+            push_focus(r, f);
         }
     } catch (...) {
         /* The focus stands; its line is lost, counted as a note */

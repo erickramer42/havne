@@ -131,15 +131,18 @@ TEST(BridgeTest, RecordingWritesFramesValuesAndEvents)
     // signals.csv: a byte-order mark, the header row, decoded values
     const QByteArray signalsCsv = readFile(dir + QStringLiteral("/signals.csv"));
     EXPECT_TRUE(signalsCsv.startsWith("\xEF\xBB\xBFhost_us,signal,value,unit"));
-    EXPECT_TRUE(signalsCsv.contains(",RPM,")) << "no RPM value recorded";
+    // A value is kept under its signal's key: the mock's RPM is 0x0C0's
+    // first two bytes
+    EXPECT_TRUE(signalsCsv.contains(",0C0::0.0:16,"))
+        << "no RPM value recorded";
 
     // CRLF on Windows (ADR-0017 takes either)
     const QByteArray events =
         readFile(dir + QStringLiteral("/events.log")).replace("\r\n", "\n");
     for (const char* expected :
-         {"ecuio session recording, format 3 (ADR-0049)\n",
-          "\nuri  mock://rec\n", "\nsignal  RPM,", "\ncaller  Havne ",
-          "\ncaller  surrogate frame logging  ",
+         {"ecuio session recording, format 4 (ADR-0049)\n",
+          "\nuri  mock://rec\n", "\nsignal  0C0::0.0:16,RPM,",
+          "\ncaller  Havne ", "\ncaller  surrogate frame logging  ",
           "  note  Connected: mock://rec\n",
           "  note  Disconnecting: mock://rec\n", "  note  Delivery: ",
           "  note  Disconnected: mock://rec\n", "  end  disconnected: "}) {
@@ -663,7 +666,7 @@ TEST(BridgeTest, ALogRecordsTheRunningSessionUntilStopped)
     const QByteArray events =
         readFile(first + QStringLiteral("/events.log")).replace("\r\n", "\n");
     for (const QString& expected :
-         {QStringLiteral("\nfocus  ") + namesOf(model, picks).join(',') +
+         {QStringLiteral("\nfocus  ") + keysOf(bridge, model, picks).join(',') +
               QStringLiteral("\n"),
           QStringLiteral("  note  Log stopped: "),
           QStringLiteral("  end  Stop log: ")}) {
@@ -895,10 +898,10 @@ TEST(BridgeTest, ASleepWhileConnectedIsLoggedWithItsLength)
 
 namespace {
 
-/* What core's values callback delivers, as signals.csv rows: name and
+/* What core's values callback delivers, as signals.csv rows: key and
  * value, formatted as core's recorder writes them */
 struct CoreRows {
-    QHash<uint16_t, QByteArray> names;
+    QHash<uint16_t, QByteArray> keys;
     std::vector<std::pair<QByteArray, QByteArray>> rows;
     std::atomic<int> frames{0};
 };
@@ -913,7 +916,7 @@ void core_rows_values_cb(const ecuio_value_batch_t* batch, void* user_data)
     auto* c = static_cast<CoreRows*>(user_data);
     for (uint32_t i = 0; i < batch->count; ++i) {
         const ecuio_value_t& v = batch->values[i];
-        c->rows.emplace_back(c->names.value(v.signal_id),
+        c->rows.emplace_back(c->keys.value(v.signal_id),
                              v.text != nullptr
                                  ? QByteArray(v.text)
                                  : QByteArray::number(v.value, 'g', 12));
@@ -1073,11 +1076,14 @@ TEST(BridgeTest, RecordingHoldsEveryValueCoreDecodes)
     CoreRows core;
     const ecuio_signal_set_t* set = ecuio_session_signal_set(session);
     ASSERT_NE(set, nullptr);
+    std::vector<ecuio_signal_key_t> keys(set->count);
+    uint32_t keyCount = 0;
+    ASSERT_EQ(
+        ecuio_signal_set_keys(set, nullptr, keys.data(), set->count, &keyCount),
+        ECUIO_OK);
+    ASSERT_EQ(keyCount, set->count);
     for (uint32_t i = 0; i < set->count; ++i) {
-        core.names.insert(set->defs[i].id,
-                          QByteArray(set->defs[i].name,
-                                     qstrnlen(set->defs[i].name,
-                                              sizeof set->defs[i].name)));
+        core.keys.insert(set->defs[i].id, QByteArray(keys[i].text));
     }
     EXPECT_EQ(ecuio_register_frame_callback(session, core_rows_frame_cb, &core),
               ECUIO_OK);
@@ -1122,7 +1128,7 @@ QString writeRpmRows(const QString& folder, int n)
     return QStringLiteral("replay://%1?profile=obd2&speed=max").arg(folder);
 }
 
-/* signals.csv's RPM values, in order */
+/* signals.csv's RPM values, in order: obd2's RPM is kept under its key */
 std::vector<double> recordedRpm(const QString& root)
 {
     std::vector<double> out;
@@ -1133,7 +1139,7 @@ std::vector<double> recordedRpm(const QString& root)
                                     QStringLiteral("/signals.csv"));
     for (const QByteArray& line : csv.split('\n')) {
         const QList<QByteArray> cols = line.split(',');
-        if (cols.size() == 4 && cols[1] == "RPM")
+        if (cols.size() == 4 && cols[1] == "7E8:410C:2.0:16")
             out.push_back(cols[2].toDouble());
     }
     return out;

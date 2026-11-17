@@ -16,18 +16,23 @@
 #include "error_detail.h"
 #include "folder_files.h"
 #include "frames_csv.h" /* read_line */
+#include "recording_keys.h"
 #include "recording_rows.h"
+#include "signal_keys.h" /* the find rule, for a named column */
 #include "uds_generic.h"
 #include "uri_query.h"
 
 #include "ecuio/profile.h"
 #include "ecuio/signals.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace ecuio_recording_set {
@@ -37,13 +42,34 @@ struct header {
     uint64_t utc_us = 0; /* the recording's start; 0 none */
     std::string profile;
     std::string uri;
-    std::vector<std::string> text_names; /* signals declared text */
+    /* Format 4: rows, labels and picks name a signal by its key */
+    bool keyed = false;
+    /* Signals declared text, each as signals.csv names it (ids' form) */
+    std::vector<std::string> text_names;
     /* Every signal line as written, in its order (format 2 and later;
      * none in an older recording) */
     std::vector<ecuio_recording_rows::header_signal> signals;
+    /* What signals.csv's signal cell holds for each of signals: its key
+     * when keyed, else its name */
+    std::vector<std::string> ids;
     /* The focus line's names in their order (ADR-0056 section 3); none
      * without one */
     std::vector<std::string> focus;
+    /* Keyed: each signal line's key and name, sorted by key once read
+     * (a vector: a map's move may throw) */
+    std::vector<std::pair<std::string, std::string>> names;
+
+    /* A signal's name for what signals.csv names it by: its signal line's
+     * for a key (the first line's, as the reader keeps it), else the text
+     * itself (a name, or a key no line declares) */
+    const std::string& shown(const std::string& id) const
+    {
+        const auto it =
+            std::lower_bound(names.begin(), names.end(), id,
+                             [](const std::pair<std::string, std::string>& a,
+                                const std::string& b) { return a.first < b; });
+        return it == names.end() || it->first != id ? id : it->second;
+    }
 };
 
 namespace detail {
@@ -77,6 +103,7 @@ inline header read_header(const std::string& folder)
     }
     std::vector<char> buf(rows::kRowMax + 2);
     bool too_long = false;
+    bool first = true;
     while (ecuio_frames_csv::read_line(f.get(), buf, &too_long)) {
         if (too_long) {
             /* A line past a row (an older core's focus line): passed by
@@ -87,6 +114,13 @@ inline header read_header(const std::string& folder)
             continue;
         }
         const size_t n = std::strlen(buf.data());
+        if (first) {
+            first = false;
+            const size_t bom = rows::bom_length(buf.data(), n);
+            h.keyed =
+                ecuio_recording_keys::format_of(buf.data() + bom, n - bom) ==
+                ECUIO_RECORDING_FORMAT_KEYS;
+        }
         if (n == 0) {
             break;
         }
@@ -99,11 +133,19 @@ inline header read_header(const std::string& folder)
         } else if (rows::starts_with(buf.data(), n, "signal  ")) {
             rows::header_signal hs;
             const char* bad = nullptr;
-            if (rows::parse_header_signal(buf.data() + 8, n - 8, hs, &bad)) {
+            std::string id;
+            if (ecuio_recording_keys::parse_signal_line(
+                    h.keyed ? ECUIO_RECORDING_FORMAT_KEYS
+                            : ECUIO_RECORDING_FORMAT_ENUMS,
+                    buf.data() + 8, n - 8, &id, hs, &bad)) {
                 if (hs.text) {
-                    h.text_names.emplace_back(hs.name);
+                    h.text_names.emplace_back(id);
+                }
+                if (h.keyed) {
+                    h.names.emplace_back(id, hs.name);
                 }
                 h.signals.push_back(hs);
+                h.ids.push_back(id);
             }
         } else if (rows::starts_with(buf.data(), n, "focus  ")) {
             const char* p = buf.data() + 7;
@@ -115,6 +157,11 @@ inline header read_header(const std::string& folder)
             }
         }
     }
+    std::stable_sort(h.names.begin(), h.names.end(),
+                     [](const std::pair<std::string, std::string>& a,
+                        const std::pair<std::string, std::string>& b) {
+                         return a.first < b.first;
+                     });
     return h;
 }
 
@@ -181,6 +228,8 @@ public:
     }
 
     const ecuio_signal_set_t* set() const { return set_; }
+    /* The recording's own signals.json when it gave the set, else NULL */
+    const ecuio_signal_file_t* file() const { return file_.get(); }
     /* load found a signals.json it couldn't read or load */
     bool own_refused() const { return own_refused_; }
     const std::string& own_why() const { return own_why_; }
@@ -192,6 +241,61 @@ private:
     bool own_refused_ = false;
     std::string own_why_;
 };
+
+/* A column a caller named, as signals.csv names it: by the find rule
+ * over the header's signals (a key, or a name one signal has). A text no
+ * signal has stays as given, an empty column. False for a name several
+ * have, the detail the find's words. */
+inline bool column_id(const header& h, const char* text, std::string* id)
+{
+    uint32_t index = 0;
+    const ecuio_status_t found = ecuio_keys::find(
+        static_cast<uint32_t>(h.signals.size()),
+        [&h](uint32_t i) {
+            return h.keyed ? std::string_view(h.ids[i]) : std::string_view();
+        },
+        [&h](uint32_t i) { return std::string_view(h.signals[i].name); }, text,
+        &index);
+    if (found == ECUIO_OK) {
+        *id = h.ids[index];
+        return true;
+    }
+    size_t named = 0;
+    for (const ecuio_recording_rows::header_signal& hs : h.signals) {
+        named += hs.name == text ? 1u : 0u;
+    }
+    if (named > 1) {
+        return false;
+    }
+    ecuio_detail_clear();
+    *id = text;
+    return true;
+}
+
+/* What signals.csv's signal cell holds for each def of set, in the set's
+ * order: its key in a recording kept by key (file the set's signal file
+ * or NULL), its name before. Throws std::bad_alloc. */
+inline std::vector<std::string> def_ids(const ecuio_signal_set_t* set,
+                                        const ecuio_signal_file_t* file,
+                                        bool keyed)
+{
+    std::vector<std::string> ids;
+    if (set == nullptr || set->defs == nullptr) {
+        return ids;
+    }
+    std::vector<ecuio_signal_key_t> keys;
+    if (keyed && ecuio_recording_keys::set_keys(set, file, &keys) != ECUIO_OK) {
+        throw std::bad_alloc();
+    }
+    ids.reserve(set->count);
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        ids.emplace_back(
+            keyed ? std::string(keys[i].text)
+                  : std::string(d.name, strnlen(d.name, sizeof d.name)));
+    }
+    return ids;
+}
 
 } // namespace ecuio_recording_set
 

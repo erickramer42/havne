@@ -25,6 +25,7 @@ endif()
 add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_recorder.cpp test_recording.cpp test_recording_check.cpp
     test_recording_frames.cpp test_candump_import.cpp test_export.cpp
+    test_recording_keys.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
     test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_recording.cpp

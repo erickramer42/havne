@@ -28,7 +28,8 @@
 # exit 77 without vcan0 or can-utils unless ECUIO_VCAN_REQUIRED=1. csv: a
 # recording core wrote (the replay fixture under obd2) exported as CSV and
 # read back with the standard library's csv module after its comment line:
-# each row its signals.csv row, host_us as seconds; the same bytes twice;
+# each row its signals.csv row, host_us as seconds and the key named by
+# events.log's header, the key last; the same bytes twice;
 # a range its rows alone. folder: copies of the findings fixture (its
 # frames; raw, then scrubbed, which leaves its torn ISO-TP message out),
 # a recording of values alone and a mock's recording made with a label;
@@ -345,7 +346,7 @@ def csv_rows(path):
     with open(path, encoding="utf-8", newline="") as f:
         comment = f.readline()
         rows = list(csv.reader(f))
-    if rows[0] != ["time_s", "signal", "unit", "value"]:
+    if rows[0] != ["time_s", "signal", "unit", "value", "key"]:
         raise SystemExit(f"FAIL  the header reads {rows[0]}")
     return comment, rows[1:]
 
@@ -354,8 +355,15 @@ def csv_export(cli, recording):
     with open(os.path.join(recording, "signals.csv"), encoding="utf-8-sig",
               newline="") as f:
         recorded = list(csv.reader(f))[1:]
-    want = [[f"{int(t) // 1000000}.{int(t) % 1000000:06d}", name, unit, value]
-            for t, name, value, unit in recorded]
+    # signals.csv keeps each value under its key, which events.log's header
+    # names; the export writes the name and the key
+    with open(os.path.join(recording, "events.log"), encoding="utf-8") as f:
+        name_of = {cells[0]: cells[1] for cells in csv.reader(
+            l[len("signal  "):] for l in f.read().splitlines()
+            if l.startswith("signal  "))}
+    want = [[f"{int(t) // 1000000}.{int(t) % 1000000:06d}", name_of[key],
+             unit, value, key]
+            for t, key, value, unit in recorded]
     # --estimate's bytes are the wide file's, at a sweep and on a grid
     with tempfile.TemporaryDirectory() as d:
         sized = one(run(cli, ["export", recording, "--format", "csv",
@@ -378,7 +386,7 @@ def csv_export(cli, recording):
                                  "--layout", "long"]), "exported")
         if (exported["layout"], exported["row_ms"]) != ("long", 0):
             raise SystemExit(f"FAIL  exported {exported}")
-        names = {r[1] for r in want}
+        names = {r[4] for r in want}  # the signals, one per key
         if (exported["values"], exported["signals"], exported["frames"],
                 exported["scrubbed"]) != (len(want), len(names), 0, True):
             raise SystemExit(f"FAIL  exported {exported}")

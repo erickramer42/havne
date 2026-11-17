@@ -931,15 +931,17 @@ TEST_F(Elm327SessionTest, AFocusLineCarriesItsMinimumAndComesOnlyOnAChange)
     const ecuio_signal_set_t* set = ecuio_session_signal_set(s.s);
     ASSERT_NE(set, nullptr);
     uint16_t rpm = 0;
-    std::string name;
+    std::string key;
     for (uint32_t i = 0; i < set->count; ++i) {
         const ecuio_signal_def_t& d = set->defs[i];
         if (d.mux_offset == 0 && d.mux_length == 2 && d.mux_key == 0x410Cu) {
             rpm = d.id;
-            name.assign(d.name, strnlen(d.name, sizeof d.name));
+            ecuio_signal_key_t k{};
+            ASSERT_EQ(ecuio_signal_address_key(&d, &k), ECUIO_OK);
+            key = k.text;
         }
     }
-    ASSERT_FALSE(name.empty());
+    ASSERT_EQ(key, "7E8:410C:2.0:16");
     ASSERT_EQ(ecuio_session_set_focus_with(s.s, &rpm, 1, 250, 0), ECUIO_OK);
     const std::string root8 = root.generic_u8string();
     ecuio_record_options_t o{};
@@ -974,8 +976,8 @@ TEST_F(Elm327SessionTest, AFocusLineCarriesItsMinimumAndComesOnlyOnAChange)
         }
     }
     EXPECT_EQ(lines, (std::vector<std::string>{
-                         "1 signal, at least 500 ms between sweeps: " + name,
-                         "1 signal: " + name}))
+                         "1 signal, at least 500 ms between sweeps: " + key,
+                         "1 signal: " + key}))
         << ss.str();
     fs::remove_all(root, ec);
 }
