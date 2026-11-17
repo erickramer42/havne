@@ -2457,6 +2457,68 @@ TestCase {
         compare(load.Accessible.name, "Load a layout from a file: it replaces every page")
     }
 
+    // The "+" tab says what it adds, and a new page asks for its name at once
+    function test_aNewPageAsksForItsNameAndTheAddTabSaysPage() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        compare(find(page, "dashPageAdd").text, "+ Page")
+        click(page, "dashPageAdd")
+        click(page, "preset_blank")
+        const field = find(page, "moreRename")
+        tryVerify(() => field.activeFocus, 3000, "the name field has the focus")
+        compare(field.selectedText, "Page 2", "and its text is selected")
+        keyClick("T")
+        keyClick("o")
+        keyClick(Qt.Key_Return)
+        compare(page.doc.pages[1].name, "To", "typing replaced the default name")
+        // A preset page asks too
+        page.moreShown = false
+        click(page, "dashPageAdd")
+        click(page, "preset_standard")
+        tryVerify(() => field.activeFocus, 3000, "a preset's page, its name field focused")
+        verify(field.selectedText !== "" && field.selectedText === page.doc.pages[2].name, "and its name selected")
+    }
+
+    // A double click on a tab renames it in place; Escape and an empty name keep the old one
+    function test_aDoubleClickRenamesATabInPlace() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        click(page, "dashPageAdd")
+        click(page, "preset_blank")
+        keyClick(Qt.Key_Escape)
+        const tab0 = find(page, "dashPageTab_0")
+        const field = find(page, "dashPageRename_0")
+        verify(!field.visible, "no field before the double click")
+        tryVerify(() => waitForPolish(tab0.Window.window), 3000)
+        mouseDoubleClickSequence(tab0)
+        tryVerify(() => field.visible && field.activeFocus, 3000, "the tab's own field")
+        compare(field.selectedText, "Test")
+        compare(page.pageIndex, 0, "the page is the tab's")
+        keyClick("Z")
+        keyClick(Qt.Key_Return)
+        compare(page.doc.pages[0].name, "Z")
+        verify(!field.visible, "the field is gone")
+        // Escape keeps the old name
+        mouseDoubleClickSequence(tab0)
+        tryVerify(() => field.visible && field.activeFocus, 3000)
+        keyClick("Q")
+        keyClick(Qt.Key_Escape)
+        compare(page.doc.pages[0].name, "Z")
+        verify(!field.visible)
+        // An empty name is refused by the page's rule
+        mouseDoubleClickSequence(tab0)
+        tryVerify(() => field.visible && field.activeFocus, 3000)
+        keyClick(Qt.Key_Backspace)
+        keyClick(Qt.Key_Return)
+        compare(page.doc.pages[0].name, "Z")
+        // Outside edit mode a double click renames nothing
+        page.stopEditing()
+        tryVerify(() => waitForPolish(tab0.Window.window), 3000)
+        mouseDoubleClickSequence(tab0)
+        wait(50)
+        verify(!field.visible, "no rename field outside edit mode")
+    }
+
     function test_aBlankCellHasNoColorRow() {
         const page = pageOf({}, docOf([{ kind: "blank", w: 2, h: 4, refs: [] }]))
         page.startEditing()

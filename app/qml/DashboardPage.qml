@@ -180,6 +180,8 @@ Page {
     property string addKind: ""      // Add's kind; "" when changing a cell's signal
     property bool changingKind: false  // the kind list picks the selected cell's kind
     property bool moreShown: false
+    // A page was just added: the Page row's name field takes the focus
+    signal pageNameWanted()
     property bool confirmReset: false
     property bool confirmRemovePage: false
     // The preset list's purpose: "" shut, "add" (a new page after the shown
@@ -1059,8 +1061,15 @@ Page {
 
     function addPage() {
         if (edit(DashboardBook.addPage(doc, qsTr("Page %1").arg(pages.length + 1)),
-                 stepOf("", qsTr("added a page"), -1, -1, pages.length)))
+                 stepOf("", qsTr("added a page"), -1, -1, pages.length))) {
             goTo(pages.length - 1)
+            askForPageName()
+        }
+    }
+    // The new page's name is the first thing to type: the Page row opens on it
+    function askForPageName() {
+        moreShown = true
+        pageNameWanted()
     }
     // The preset list (the "+" tab, Add page, Replace this page with...)
     function openPresets(mode) {
@@ -1091,6 +1100,7 @@ Page {
                   stepOf("", qsTr("added the page %1").arg(page.name), -1, -1, after + 1)))
             return false
         goTo(after + 1)
+        askForPageName()
         return true
     }
     // True when the shown page's gauges are one preset's: replacing them
