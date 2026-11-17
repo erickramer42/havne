@@ -599,13 +599,13 @@ if(TARGET havne-cli)
             PROPERTIES TIMEOUT 60)
         # A live stream whose reader stalls drops condition lines, and the
         # end line counts each one: the lines received and the count are
-        # the recording's cond lines (about 30 s)
+        # the recording's cond lines (about 60 s: the rev limiter at 51-56 s)
         add_test(NAME CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/cli_conditions_drop.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
-            PROPERTIES TIMEOUT 90 COST 30)
+            PROPERTIES TIMEOUT 150 COST 70)
         # A replay reads with its recording's own signals.json (ADR-0051
         # section 4): no --signals, the copy's values; its hash broken, raw
         add_test(NAME CliReplayTest.AReplayReadsWithItsOwnSignalFile
@@ -1533,6 +1533,11 @@ if(TARGET havne-cli)
     app_cli_usage(ViewAPullGainOfWordsIsUsage
         "view|x|--align-on|pull:1|--stretch-level|pull-gain=some")
     app_cli_usage(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal")
+    app_cli_usage_says(ViewAPullEndThatIsntOneIsUsage
+        "view|x|--stretches|--pull-end|top" "--pull-end takes lift or top-speed")
+    app_cli_usage_says(ViewAPullEndWithoutStretchesIsUsage
+        "view|x|--pull-end|lift" "--pull-end and --units go with")
+    app_cli_usage(ViewAPullEndWithoutAWordIsUsage "view|x|--stretches|--pull-end")
     # pulls, cruises or all after --stretches is its word, never a folder
     app_cli_usage_says(ViewStretchesAndItsWordNameNoFolder "view|--stretches|all"
         "view needs a recording's folder")

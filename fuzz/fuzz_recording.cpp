@@ -1124,6 +1124,7 @@ void stretches(const uint8_t* data, size_t size)
                                     rule_value(data[7]), rule_value(data[8])};
     const bool trim = (switches & 1) != 0;
     const bool throttled = (switches & 2) != 0;
+    const bool top_speed_end = (switches & 32) != 0;
     const uint32_t flags_in =
         (switches & 8) != 0 ? ECUIO_RECORDING_STRETCH_BY_LOAD : 0u;
     const uint8_t range[2] = {data[11], data[12]};
@@ -1170,7 +1171,8 @@ void stretches(const uint8_t* data, size_t size)
     /* Pulls: as long as the hold, risen as the rules ask, from a run's
      * first sample, in time order, the flags as given */
     std::vector<aids::stretch> pulls;
-    aids::find_pulls(gate, measure, trim, engine_speed, pull, flags_in, pulls);
+    aids::find_pulls(gate, measure, trim, top_speed_end, engine_speed, pull,
+                     flags_in, pulls);
     for (size_t p = 0; p < pulls.size(); ++p) {
         const aids::stretch& x = pulls[p];
         if (x.kind != ECUIO_RECORDING_STRETCH_PULL || x.from_us > x.to_us ||
@@ -1179,11 +1181,20 @@ void stretches(const uint8_t* data, size_t size)
             (p > 0 && x.from_us < pulls[p - 1].from_us)) {
             abort();
         }
-        bool starts_a_run = false;
+        /* Runs may share a first time (a step of 0), so any run counts */
+        bool within_a_run = false;
+        bool ends_at_the_lift = false;
         for (const auto& run : runs) {
-            starts_a_run = starts_a_run || gate[run.first].us == x.from_us;
+            if (gate[run.first].us == x.from_us &&
+                x.to_us <= gate[run.second].us) {
+                within_a_run = true;
+                ends_at_the_lift =
+                    ends_at_the_lift || gate[run.second].us == x.to_us;
+            }
         }
-        if (!starts_a_run) {
+        /* The lift ends a pull unless top speed does, and then only with
+         * a speed measure, never past the lift */
+        if (!within_a_run || (!(top_speed_end && trim) && !ends_at_the_lift)) {
             abort();
         }
     }
@@ -1244,7 +1255,8 @@ void stretches(const uint8_t* data, size_t size)
 
     /* Pure: the same input, the same stretches */
     std::vector<aids::stretch> again;
-    aids::find_pulls(gate, measure, trim, engine_speed, pull, flags_in, again);
+    aids::find_pulls(gate, measure, trim, top_speed_end, engine_speed, pull,
+                     flags_in, again);
     aids::find_cruises(speed, throttled ? &gate : nullptr, cruise, flags_in,
                        again);
     aids::cut_to(again, from_us, to_us, pull, trim, engine_speed,

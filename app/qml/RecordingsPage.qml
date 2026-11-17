@@ -651,7 +651,12 @@ Page {
     function readRules(text) {
         try {
             const v = JSON.parse(text)
-            return v !== null && typeof v === "object" && !Array.isArray(v) ? v : ({})
+            if (v === null || typeof v !== "object" || Array.isArray(v))
+                return ({})
+            // A stored end that isn't top speed reads as the lift
+            if (v.pullEnd !== undefined && v.pullEnd !== "top-speed")
+                delete v.pullEnd
+            return v
         } catch (e) {
             return ({})
         }

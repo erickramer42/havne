@@ -82,7 +82,7 @@ TEST(RecordingAidsTest, APullMustRiseAndLastItsHold)
                            : 40.0 + (ms - 2000) * 0.015;
     });
     std::vector<aids::stretch> out;
-    aids::find_pulls(throttle, rising, true, nullptr, kPull, 0, out);
+    aids::find_pulls(throttle, rising, true, true, nullptr, kPull, 0, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].kind, ECUIO_RECORDING_STRETCH_PULL);
     EXPECT_EQ(out[0].from_us, 2000 * kMs);
@@ -94,7 +94,7 @@ TEST(RecordingAidsTest, APullMustRiseAndLastItsHold)
     out.clear();
     const aids::samples flat =
         every(0, 10000, 100, [](uint64_t) { return 60.0; });
-    aids::find_pulls(throttle, flat, true, nullptr, kPull, 0, out);
+    aids::find_pulls(throttle, flat, true, true, nullptr, kPull, 0, out);
     EXPECT_TRUE(out.empty());
 
     /* Shorter than the hold: no pull */
@@ -102,14 +102,14 @@ TEST(RecordingAidsTest, APullMustRiseAndLastItsHold)
     const aids::samples stab = every(0, 10000, 100, [](uint64_t ms) {
         return ms >= 2000 && ms < 2900 ? 95.0 : 5.0;
     });
-    aids::find_pulls(stab, rising, true, nullptr, kPull, 0, out);
+    aids::find_pulls(stab, rising, true, true, nullptr, kPull, 0, out);
     EXPECT_TRUE(out.empty());
 
     /* Exactly the hold: a pull */
     const aids::samples held = every(0, 10000, 100, [](uint64_t ms) {
         return ms >= 2000 && ms <= 3000 ? 95.0 : 5.0;
     });
-    aids::find_pulls(held, rising, true, nullptr, kPull, 0, out);
+    aids::find_pulls(held, rising, true, true, nullptr, kPull, 0, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].to_us - out[0].from_us, kPull.hold_us);
 }
@@ -164,7 +164,7 @@ TEST(RecordingAidsTest, APullClimbsItsRiseOrWithNoEngineSpeedGainsItsSpeed)
     const auto pulls = [&](const aids::samples& speed,
                            const aids::samples* rpm) {
         std::vector<aids::stretch> out;
-        aids::find_pulls(throttle, speed, true, rpm, kPull, 0, out);
+        aids::find_pulls(throttle, speed, true, true, rpm, kPull, 0, out);
         return out.size();
     };
 
@@ -213,13 +213,13 @@ TEST(RecordingAidsTest, APullClimbsItsRiseOrWithNoEngineSpeedGainsItsSpeed)
         return ms < 6000 ? 4600.0 + (ms - 4000) * 0.3 : 5200.0;
     });
     std::vector<aids::stretch> out;
-    aids::find_pulls(throttle, shifted, false, &shifted, kPull,
+    aids::find_pulls(throttle, shifted, false, false, &shifted, kPull,
                      ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_DOUBLE_EQ(out[0].start, 5500.0);
     EXPECT_LT(out[0].end, out[0].start);
     out.clear();
-    aids::find_pulls(throttle, stab_rpm, false, &stab_rpm, kPull,
+    aids::find_pulls(throttle, stab_rpm, false, false, &stab_rpm, kPull,
                      ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED, out);
     EXPECT_TRUE(out.empty());
 
@@ -227,11 +227,12 @@ TEST(RecordingAidsTest, APullClimbsItsRiseOrWithNoEngineSpeedGainsItsSpeed)
     const aids::samples late =
         every(3000, 10000, 100, [](uint64_t ms) { return 3000.0 + ms; });
     out.clear();
-    aids::find_pulls(throttle, late, false, &late, kPull, 0, out);
+    aids::find_pulls(throttle, late, false, false, &late, kPull, 0, out);
     EXPECT_TRUE(out.empty());
 }
 
-TEST(RecordingAidsTest, ASpeedMeasureEndsAPullAtItsHighestAndEngineSpeedDoesnt)
+TEST(RecordingAidsTest,
+     ASpeedMeasureEndsAPullAtItsHighestOnlyWhenAskedAndEngineSpeedDoesnt)
 {
     /* Full throttle 1 s to 9 s; speed rises to 5 s, then holds flat (the
      * limiter); engine speed rises, drops a third at 4 s (a shift), rises */
@@ -242,9 +243,18 @@ TEST(RecordingAidsTest, ASpeedMeasureEndsAPullAtItsHighestAndEngineSpeedDoesnt)
         return ms < 1000 ? 30.0 : ms < 5000 ? 30.0 + (ms - 1000) * 0.02 : 110.0;
     });
     std::vector<aids::stretch> out;
-    aids::find_pulls(throttle, speed, true, nullptr, kPull, 0, out);
+    aids::find_pulls(throttle, speed, true, true, nullptr, kPull, 0, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].to_us, 5000 * kMs) << "the flat speed ends it";
+    EXPECT_DOUBLE_EQ(out[0].end, 110.0);
+
+    /* Without the top-speed end the run's own end, the throttle's lift,
+     * ends it: the limiter's flat speed stays inside */
+    out.clear();
+    aids::find_pulls(throttle, speed, true, false, nullptr, kPull, 0, out);
+    ASSERT_EQ(out.size(), 1u);
+    EXPECT_EQ(out[0].from_us, 1000 * kMs);
+    EXPECT_EQ(out[0].to_us, 9000 * kMs) << "the lift ends it";
     EXPECT_DOUBLE_EQ(out[0].end, 110.0);
 
     const aids::samples rpm = every(0, 10000, 100, [](uint64_t ms) {
@@ -254,7 +264,7 @@ TEST(RecordingAidsTest, ASpeedMeasureEndsAPullAtItsHighestAndEngineSpeedDoesnt)
         return ms < 4000 ? 2000.0 + (ms - 1000) : 4000.0 + (ms - 4000) * 0.5;
     });
     out.clear();
-    aids::find_pulls(throttle, rpm, false, &rpm, kPull,
+    aids::find_pulls(throttle, rpm, false, false, &rpm, kPull,
                      ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].to_us, 9000 * kMs) << "the shift's drop keeps it whole";
@@ -270,13 +280,13 @@ TEST(RecordingAidsTest, ASpeedMeasureEndsAPullAtItsHighestAndEngineSpeedDoesnt)
                          : 110.0 + (ms - 5000) * 0.0001;
     });
     out.clear();
-    aids::find_pulls(throttle, creep, true, nullptr, kPull, 0, out);
+    aids::find_pulls(throttle, creep, true, true, nullptr, kPull, 0, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].to_us, 9000 * kMs) << "no tolerance: the creep's top";
     aids::pull_rules tolerant = kPull;
     tolerant.tolerance = 0.5;
     out.clear();
-    aids::find_pulls(throttle, creep, true, nullptr, tolerant, 0, out);
+    aids::find_pulls(throttle, creep, true, true, nullptr, tolerant, 0, out);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_EQ(out[0].to_us, 5000 * kMs);
 }
