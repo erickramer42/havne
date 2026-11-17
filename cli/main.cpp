@@ -12,7 +12,6 @@
 // Public headers only: what any program linking core can do.
 
 #include "condition_lines.h"
-#include "expr_lines.h"
 #include "frames_lines.h"
 #include "health_lines.h"
 #include "info_lines.h"
@@ -842,14 +841,7 @@ int run(int argc, char** argv)
             return run_signals_import(im);
         }
         if (word == "expr") {
-            cli::ExprArgs ex;
-            std::string why;
-            if (!cli::parse_signals_expr(argc - 3, argv + 3, &ex, &why)) {
-                std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
-                usage(stderr);
-                return kExitUsage;
-            }
-            return run_signals_expr(std::move(ex));
+            return run_signals_expr(argc - 3, argv + 3);
         }
         std::fprintf(stderr,
                      "havne-cli: signals takes check <file>, import obdb "

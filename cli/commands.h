@@ -8,7 +8,6 @@
 #define HAVNE_CLI_COMMANDS_H
 
 #include "condition_lines.h"
-#include "expr_lines.h"
 #include "frames_lines.h"
 #include "health_lines.h"
 #include "log_lines.h"
@@ -145,7 +144,7 @@ struct ImportArgs {
 };
 
 int run_signals_import(const ImportArgs& args);
-int run_signals_expr(cli::ExprArgs args);
+int run_signals_expr(int argc, char** argv);
 
 // cmd_check.cpp
 int run_conditions_check(const cli::ConditionsCheckArgs& args);
