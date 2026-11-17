@@ -138,6 +138,26 @@ def main(argv):
              "signals": leaves + [{"key": k, "name": k.upper(), "kind": "computed", "expr": e}
                                   for k, e in chain_exprs]}
     write(out, "fuzz_signal_file", "chain_format2.json", json.dumps(chain).encode())
+    # An expression checked against each (the harness's "x-expr", for the
+    # signal "x-key" names or a new one): one that passes, an edit that
+    # closes a circle, a format 1 file given a function, an edit refused
+    # for its own form, and one cut short
+    for n, (base, expr, key) in enumerate([
+            (chain, "max(top, a) - side", ""), (chain, "top + 1", "low"),
+            (dict(grammar, havne_signals=1, signals=leaves), "clamp(a, b, c)", ""),
+            (grammar, "if(a > b, c)", "e0"), (chain, "mid +", "")]):
+        checked = dict(base, **{"x-expr": expr, "x-key": key})
+        write(out, "fuzz_signal_file", "checked_expr_%d.json" % n, json.dumps(checked).encode())
+    # Keys an expression reads as numbers (a digit first), one of them in
+    # a base def's place, where it goes by obd2's name
+    digits = [("2nd", "Second"), ("9map", "Intake Manifold Pressure"), ("x9", "Later")]
+    digit_keys = {"havne_signals": 2, "name": "Digits", "source": {"name": "Havne's seeds"},
+                  "extends": "obd2", "ecus": [{"id": "pcm", "rx": "7E8"}],
+                  "signals": [{"key": k, "name": name, "field": {"byte": 0},
+                               "read": {"service": "22", "number": "D11%d" % n}}
+                              for n, (k, name) in enumerate(digits)],
+                  "x-expr": "obd2.map + x9"}
+    write(out, "fuzz_signal_file", "digit_keys.json", json.dumps(digit_keys).encode())
 
     # The condition-file loader (ADR-0063): each fixture alone, and again
     # before a signal file to resolve it against (cut at 0x1E). One of

@@ -708,6 +708,110 @@ uint32_t ecuio_signal_file_format(const ecuio_signal_file_t* file);
 const char* ecuio_signal_file_expr(const ecuio_signal_file_t* file,
                                    const ecuio_signal_def_t* def);
 
+/* ---- An expression against a file (ADR-0062) ----
+ * What an editor needs before a computed signal is written into a file:
+ * whether its expression compiles there, and the name an expression
+ * reads each signal by. */
+
+#define ECUIO_EXPR_MAX_BYTES 256u /* an expression's most bytes */
+/* Room for the name any def has in an expression, and its NUL */
+#define ECUIO_EXPR_REF_LEN 64u
+
+/* What ecuio_signal_file_check_expr found */
+typedef struct ecuio_expr_check {
+    uint32_t struct_size;     /* in: the caller's sizeof, at least this
+                                 one's; out: core's own, the bytes filled */
+    uint32_t flags;           /* zero */
+    uint32_t at;              /* refused: the character it is refused at,
+                                 from 1 (a byte and a character are one up
+                                 to there: the grammar is ASCII); 0 when
+                                 the expression compiles */
+    uint32_t format;          /* the oldest "havne_signals" whose loader
+                                 takes it, ECUIO_SIGNAL_FILE_FORMAT_OLDEST
+                                 to ECUIO_SIGNAL_FILE_FORMAT; 0 refused */
+    uint32_t depth;           /* its chain's levels: 1 reading no computed
+                                 signal, to ECUIO_COMPUTED_MAX_DEPTH; 0
+                                 refused */
+    uint32_t reserved[5];     /* zero */
+    ecuio_computed_t program; /* what it compiles to: its inputs are def
+                                 IDs of the file's set and every
+                                 max_age_us is 0; all zero when refused */
+} ecuio_expr_check_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_expr_check_t) == 248,
+              "ecuio_expr_check_t size is ABI");
+static_assert(offsetof(ecuio_expr_check_t, at) == 8, "check at offset is ABI");
+static_assert(offsetof(ecuio_expr_check_t, reserved) == 20,
+              "check reserved offset is ABI");
+static_assert(offsetof(ecuio_expr_check_t, program) == 40,
+              "check program offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_expr_check_t) == 248,
+               "ecuio_expr_check_t size is ABI");
+_Static_assert(offsetof(ecuio_expr_check_t, at) == 8, "check at offset is ABI");
+_Static_assert(offsetof(ecuio_expr_check_t, reserved) == 20,
+               "check reserved offset is ABI");
+_Static_assert(offsetof(ecuio_expr_check_t, program) == 40,
+               "check program offset is ABI");
+#endif
+
+/* Compiles expr (length bytes of UTF-8, no NUL needed) as the "expr" of
+ * a computed signal of file: the names the file's own expressions read
+ * (its keys, and "obd2.<key>" when it extends obd2), the loader's
+ * grammar at its newest format, its bounds (ECUIO_EXPR_MAX_BYTES, a
+ * program's inputs, constants and steps) and its chain rules. key names
+ * the signal the expression is for: one of the file's keys when the
+ * expression takes that signal's place (an edit), so a circle through
+ * it, and what reads it today, are judged; NULL, "" or a key the file
+ * lacks for a new signal.
+ *
+ * ECUIO_OK with out filled: the expression compiles, and a file holding
+ * it under key is not refused for it at out->format or newer. A plugin
+ * variant made of several files needs that format in each file whose
+ * signals read key, the one holding it among them.
+ * ECUIO_ERR_INVALID_ARGUMENT with out->at from 1, the rest of out zero
+ * and ecuio_last_error_detail() the reason in the loader's words ("the
+ * expression reads 'bost', which no signal is"): the expression is
+ * refused; a length past ECUIO_EXPR_MAX_BYTES at 1, with none of its
+ * bytes read. ECUIO_ERR_INVALID_ARGUMENT with out untouched: a struct_size
+ * under the struct's, or a key that is no key (1 to 31 of a-z, 0-9 and
+ * _). ECUIO_ERR_NULL_ARGUMENT, out untouched, for a NULL file or out, or
+ * a NULL expr with a length. ECUIO_ERR_OUT_OF_MEMORY. A caller zeroes
+ * out and sets struct_size first, so at tells the two refusals apart.
+ * A plugin variant's file (ecuio_plugin_variant_file) is checked the
+ * same.
+ *
+ * Not judged: the signal's other members (its name, which can put a new
+ * signal in a base def's place, its unit, gauge and max_age) and the
+ * file's own bounds (ECUIO_SIGNAL_FILE_MAX_SIGNALS, its bytes); the
+ * loader judges those when the file is read. Any thread may call it
+ * while the file lives: it only reads. */
+ecuio_status_t ecuio_signal_file_check_expr(const ecuio_signal_file_t* file,
+                                            const char* key, const char* expr,
+                                            size_t length,
+                                            ecuio_expr_check_t* out);
+
+/* The name file's expressions read def by, into out (cap bytes;
+ * ECUIO_EXPR_REF_LEN always fits): its key for a signal of the file's
+ * own ("boost"), "obd2.<key>" for a base def of a file that extends obd2
+ * (obd2's short name where it has one, "obd2.map", else "obd2.pid_14"
+ * for a PID's first field and "obd2.pid_14_1" for its second). Compiling
+ * the name reads that def. A text def has its name too, though no
+ * expression reads text, which ecuio_signal_file_check_expr says.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL argument;
+ * ECUIO_ERR_INVALID_ARGUMENT, out "" where cap allows, for a def no
+ * expression of the file can name (another set's, a copy of one, a base
+ * def that is no Service 01 field: obd2's computed Boost; a signal whose
+ * key starts with a digit, which an expression reads as a number, unless
+ * it stands in a base def's place and so has obd2's name) and for a cap
+ * under the name and its NUL, each with its line in
+ * ecuio_last_error_detail(). Any thread may call it while the file
+ * lives: it only reads. */
+ecuio_status_t ecuio_signal_file_expr_ref(const ecuio_signal_file_t* file,
+                                          const ecuio_signal_def_t* def,
+                                          char* out, size_t cap);
+
 /* A gauge's warning levels (ecuio_signal_gauge_t's flags). Values are
  * append-only. */
 #define ECUIO_GAUGE_WARN_LOW  0x1u  /* warn_low is given */

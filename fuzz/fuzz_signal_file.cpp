@@ -7,12 +7,14 @@
 
 #include "computed.h"      /* core/src: the reference's machine */
 #include "frame_decoder.h" /* core/src: the set's decode, chains and all */
+#include "json.h"          /* core/src: the file with an expression put in */
 
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -139,6 +141,232 @@ struct chain_ref {
     }
 };
 
+/* The defs at each end of a set whose names are compiled */
+const uint32_t kRefEnds = 64;
+
+/* Compiling the name a's expressions read d by reads d. A text def's is
+ * refused, and a computed def's at the chain's bound as one level too
+ * deep. */
+void check_ref_reads(const ecuio_signal_file_t* a, const ecuio_signal_def_t& d,
+                     const char* name)
+{
+    ecuio_expr_check_t read{};
+    read.struct_size = sizeof read;
+    const ecuio_status_t st =
+        ecuio_signal_file_check_expr(a, nullptr, name, strlen(name), &read);
+    if (st == ECUIO_ERR_OUT_OF_MEMORY) {
+        return;
+    }
+    const std::string why = ecuio_last_error_detail();
+    if (d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX) {
+        check(st == ECUIO_ERR_INVALID_ARGUMENT);
+        return;
+    }
+    if (st != ECUIO_OK) {
+        check((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0 &&
+              why.find("computed signals deep") != std::string::npos);
+        return;
+    }
+    check(read.program.input_count == 1 && read.program.input_ids[0] == d.id);
+}
+
+ecuio_json::Value text_value(const std::string& text)
+{
+    ecuio_json::Value v;
+    v.type = ecuio_json::Type::string;
+    v.text = text;
+    return v;
+}
+
+/* Whether text loads, its detail kept; *program the computed signal
+ * key's when it does */
+bool loads(const std::string& text, const std::string& key,
+           ecuio_computed_t* program, std::string* detail)
+{
+    ecuio_signal_file_t* f = nullptr;
+    const ecuio_status_t st =
+        ecuio_signal_file_load(text.data(), text.size(), &f);
+    *detail = ecuio_last_error_detail();
+    if (st != ECUIO_OK) {
+        check(st == ECUIO_ERR_INVALID_ARGUMENT ||
+              st == ECUIO_ERR_OUT_OF_MEMORY);
+        return false;
+    }
+    const ecuio_signal_def_t* def = ecuio_signal_file_find(f, key.c_str());
+    check(def != nullptr && (def->flags & ECUIO_DEF_FLAG_COMPUTED) != 0);
+    *program = ecuio_signal_file_set(f)->computed[def->table_first];
+    ecuio_signal_file_free(f);
+    return true;
+}
+
+/* An expression checked against the file, and the file loaded with the
+ * expression in it (ADR-0062): they must agree. The file's "x-expr" (a
+ * tool's own key, which the loader passes by) is the expression, and
+ * "x-key" the signal it is for: one of the file's keys puts it in that
+ * signal's place, anything else makes it a new signal's. A check that
+ * passes names the format the file loads at, and no older one, and its
+ * program is the loaded signal's; one that refuses is a file refused,
+ * for a new signal in the check's own words. */
+void check_expr_against_load(const ecuio_signal_file_t* a, const char* bytes,
+                             size_t size)
+{
+    using ecuio_json::Member;
+    using ecuio_json::Type;
+    using ecuio_json::Value;
+    Value root;
+    ecuio_json::Error error;
+    if (!ecuio_json::parse(bytes, size, &root, &error)) {
+        return;
+    }
+    const Value* x_expr = root.find("x-expr");
+    if (x_expr == nullptr || x_expr->type != Type::string) {
+        return;
+    }
+    const std::string expr = x_expr->text;
+    Value* signals = nullptr;
+    Value* version = nullptr;
+    for (Member& m : root.members) {
+        if (m.key == "signals") {
+            signals = &m.value;
+        } else if (m.key == "havne_signals") {
+            version = &m.value;
+        }
+    }
+    check(signals != nullptr && version != nullptr &&
+          signals->type == Type::array);
+    /* The text written again must still be the file, or nothing follows */
+    ecuio_computed_t program{};
+    std::string detail;
+    {
+        ecuio_signal_file_t* again = nullptr;
+        const std::string same = ecuio_json::write(root);
+        if (same.size() > ECUIO_SIGNAL_FILE_MAX_BYTES ||
+            ecuio_signal_file_load(same.data(), same.size(), &again) !=
+                ECUIO_OK) {
+            return;
+        }
+        ecuio_signal_file_free(again);
+    }
+
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(a);
+    const Value* x_key = root.find("x-key");
+    std::string key =
+        x_key != nullptr && x_key->type == Type::string ? x_key->text : "";
+    Value* edited = nullptr;
+    if (ecuio_signal_file_find(a, key.c_str()) != nullptr) {
+        for (Value& s : signals->items) {
+            const Value* k = s.find("key");
+            if (k != nullptr && k->text == key) {
+                edited = &s;
+            }
+        }
+        check(edited != nullptr);
+    }
+    Value signal;
+    signal.type = Type::object;
+    if (edited != nullptr) {
+        signal.members.push_back(Member{"key", 0, 0, text_value(key)});
+        signal.members.push_back(Member{"name", 0, 0, *edited->find("name")});
+    } else {
+        if (signals->items.size() >= ECUIO_SIGNAL_FILE_MAX_SIGNALS) {
+            return;
+        }
+        /* A key and a name no signal of the set has */
+        std::string name;
+        for (uint32_t n = 0;; ++n) {
+            key = "zz_check" + std::to_string(n);
+            name = "Zz check " + std::to_string(n);
+            bool taken = ecuio_signal_file_find(a, key.c_str()) != nullptr;
+            for (uint32_t i = 0; i < set->count && !taken; ++i) {
+                taken = name == set->defs[i].name;
+            }
+            if (!taken) {
+                break;
+            }
+        }
+        signal.members.push_back(Member{"key", 0, 0, text_value(key)});
+        signal.members.push_back(Member{"name", 0, 0, text_value(name)});
+    }
+    signal.members.push_back(Member{"kind", 0, 0, text_value("computed")});
+    signal.members.push_back(Member{"expr", 0, 0, text_value(expr)});
+
+    ecuio_expr_check_t out{};
+    out.struct_size = sizeof out;
+    const ecuio_status_t st = ecuio_signal_file_check_expr(
+        a, key.c_str(), expr.data(), expr.size(), &out);
+    const std::string words = ecuio_last_error_detail();
+    if (st == ECUIO_ERR_OUT_OF_MEMORY) {
+        return;
+    }
+    check(st == ECUIO_OK || st == ECUIO_ERR_INVALID_ARGUMENT);
+    check(out.struct_size == sizeof out && out.flags == 0);
+    check((st == ECUIO_OK) == (out.at == 0));
+    check((st == ECUIO_OK) == words.empty());
+    check(words.find('\n') == std::string::npos);
+
+    const bool appended = edited == nullptr;
+    if (appended) {
+        signals->items.push_back(signal);
+    } else {
+        *edited = signal;
+    }
+    const uint32_t format = ecuio_signal_file_format(a);
+    const auto at_format = [&](uint32_t f) {
+        version->type = Type::number;
+        version->integer = true;
+        version->in_int64 = true;
+        version->whole = f;
+        version->number = f;
+        return ecuio_json::write(root);
+    };
+    if (st != ECUIO_OK) {
+        const std::string with = at_format(ECUIO_SIGNAL_FILE_FORMAT);
+        if (with.size() > ECUIO_SIGNAL_FILE_MAX_BYTES) {
+            return;
+        }
+        check(!loads(with, key, &program, &detail));
+        if (detail == "out of memory" || !appended ||
+            words.find(" replaces ") != std::string::npos) {
+            return;
+        }
+        /* A new signal's refusal is the check's: the same words, and for
+         * the expression's own the same character */
+        const size_t place = detail.find(": ");
+        check(place != std::string::npos);
+        const std::string said = detail.substr(place + 2);
+        const std::string own = "the expression ";
+        if (words.compare(0, own.size(), own) == 0 &&
+            said.compare(0, 6, "expr '") == 0) {
+            const std::string tail = " " + words.substr(own.size()) +
+                                     " (at character " +
+                                     std::to_string(out.at) + ")";
+            check(said.size() > tail.size() &&
+                  said.compare(said.size() - tail.size(), tail.size(), tail) ==
+                      0);
+        } else {
+            check(said == words);
+        }
+        return;
+    }
+    check(out.format >= ECUIO_SIGNAL_FILE_FORMAT_OLDEST &&
+          out.format <= ECUIO_SIGNAL_FILE_FORMAT);
+    check(out.depth >= 1 && out.depth <= ECUIO_COMPUTED_MAX_DEPTH);
+    check(ecuio_computed_check(out.program));
+    const std::string with = at_format(std::max(format, out.format));
+    if (with.size() > ECUIO_SIGNAL_FILE_MAX_BYTES) {
+        return;
+    }
+    if (!loads(with, key, &program, &detail)) {
+        check(detail == "out of memory");
+        return;
+    }
+    check(memcmp(&program, &out.program, sizeof program) == 0);
+    if (out.format > format) {
+        const std::string older = at_format(format);
+        check(!loads(older, key, &program, &detail));
+    }
+}
+
 } // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
@@ -207,6 +435,31 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
                 check(set->defs[j].id != p.input_ids[k] ||
                       (set->defs[j].flags & ECUIO_DEF_FLAG_COMPUTED) == 0);
             }
+        }
+    }
+
+    check_expr_against_load(a, bytes, size);
+
+    /* Every def has the name an expression reads it by, or is one no
+     * expression names: a base set's def that is no Service 01 field, or
+     * a signal whose key starts with a digit */
+    for (uint32_t i = 0; i < set->count; ++i) {
+        const ecuio_signal_def_t& d = set->defs[i];
+        char name[ECUIO_EXPR_REF_LEN];
+        const ecuio_status_t named =
+            ecuio_signal_file_expr_ref(a, &d, name, sizeof name);
+        const char* key = ecuio_signal_file_key(a, &d);
+        /* A key that starts with a digit is a number to an expression */
+        const bool keyed = key[0] != '\0' && (key[0] < '0' || key[0] > '9');
+        if (named != ECUIO_OK) {
+            check(named == ECUIO_ERR_INVALID_ARGUMENT && !keyed &&
+                  name[0] == '\0');
+            continue;
+        }
+        check(memchr(name, '\0', sizeof name) != nullptr);
+        check(keyed ? strcmp(name, key) == 0 : strncmp(name, "obd2.", 5) == 0);
+        if (i < kRefEnds || i + kRefEnds >= set->count) {
+            check_ref_reads(a, d, name);
         }
     }
 

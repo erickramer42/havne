@@ -98,6 +98,18 @@ typedef char abi_gauge_warn_high_check[(offsetof(ecuio_signal_gauge_t, warn_high
 typedef char abi_gauge_flags_check[(offsetof(ecuio_signal_gauge_t, flags) == 32) ? 1 : -1];
 typedef char abi_gauge_reserved_check[(offsetof(ecuio_signal_gauge_t, reserved) == 36) ? 1 : -1];
 typedef char
+    abi_expr_check_size_check[(sizeof(ecuio_expr_check_t) == 248) ? 1 : -1];
+typedef char
+    abi_expr_check_at_check[(offsetof(ecuio_expr_check_t, at) == 8) ? 1 : -1];
+typedef char abi_expr_check_format_check
+    [(offsetof(ecuio_expr_check_t, format) == 12) ? 1 : -1];
+typedef char abi_expr_check_depth_check
+    [(offsetof(ecuio_expr_check_t, depth) == 16) ? 1 : -1];
+typedef char abi_expr_check_reserved_check
+    [(offsetof(ecuio_expr_check_t, reserved) == 20) ? 1 : -1];
+typedef char abi_expr_check_program_check
+    [(offsetof(ecuio_expr_check_t, program) == 40) ? 1 : -1];
+typedef char
     abi_source_size_check[(sizeof(ecuio_signal_source_t) == 2632) ? 1 : -1];
 typedef char abi_source_name_check[(offsetof(ecuio_signal_source_t, name) == 32)
                                        ? 1
@@ -594,6 +606,31 @@ int main(void)
                    "volts / 2") != 0) {
             ecuio_signal_file_free(file);
             return 1;
+        }
+        {
+            /* An expression checked from C: one that compiles, one refused
+             * at its character, and the name a def is read by */
+            ecuio_expr_check_t checked;
+            char name[ECUIO_EXPR_REF_LEN];
+            memset(&checked, 0, sizeof checked);
+            checked.struct_size = (uint32_t)sizeof checked;
+            if (ecuio_signal_file_check_expr(file, NULL, "volts * 2", 9,
+                                             &checked) != ECUIO_OK ||
+                checked.at != 0u || checked.format != 1u ||
+                checked.depth != 1u || checked.program.input_count != 1u ||
+                checked.program.input_ids[0] != volts->id ||
+                ecuio_signal_file_check_expr(file, "half", "volts +", 7,
+                                             &checked) !=
+                    ECUIO_ERR_INVALID_ARGUMENT ||
+                checked.at != 8u || checked.program.input_count != 0u ||
+                ecuio_signal_file_expr_ref(file, volts, name, sizeof name) !=
+                    ECUIO_OK ||
+                strcmp(name, "volts") != 0 ||
+                ecuio_signal_file_expr_ref(file, volts, name, 5) !=
+                    ECUIO_ERR_INVALID_ARGUMENT) {
+                ecuio_signal_file_free(file);
+                return 1;
+            }
         }
         {
             size_t length = 0;

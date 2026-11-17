@@ -36,6 +36,7 @@ add_library(ecuio-core STATIC
     src/signals.cpp
     src/signal_file.cpp
     src/signal_expr.cpp
+    src/signal_file_expr.cpp
     src/condition_file.cpp
     src/condition_eval.cpp
     src/plugin.cpp

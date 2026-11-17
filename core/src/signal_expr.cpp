@@ -1,5 +1,6 @@
 // File/layer: core/src/signal_expr.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: SignalFileTest, PluginTest (test_signals); FUZZ: fuzz_signal_file
+// Testing: UNIT: SignalFileTest, SignalExprTest, PluginTest (test_signals);
+//          FUZZ: fuzz_signal_file
 //
 // A computed signal's expression (signal_expr.h): the compiler, obd2's
 // keys as an expression names them, and the chain rules.
@@ -49,11 +50,12 @@ public:
     {
     }
 
-    ecuio_computed_t compile(std::vector<std::string>* names)
+    ecuio_computed_t compile(std::vector<std::string>* names,
+                             std::vector<size_t>* places)
     {
         p_ = {};
-        if (s_.size() > 256) {
-            fail(0, "is longer than 256 characters");
+        if (s_.size() > ECUIO_EXPR_MAX_BYTES) {
+            fail(0, too_long_words());
         }
         const part whole = comparison(0);
         skip();
@@ -74,6 +76,9 @@ public:
         }
         p_.step_count = static_cast<uint8_t>(steps_);
         *names = names_;
+        if (places != nullptr) {
+            *places = places_;
+        }
         return p_;
     }
 
@@ -176,6 +181,7 @@ private:
         }
         p_.input_ids[p_.input_count] = id;
         names_.push_back(name);
+        places_.push_back(at);
         step(static_cast<uint8_t>(ECUIO_COMPUTED_PUSH_INPUT | p_.input_count));
         ++p_.input_count;
     }
@@ -552,6 +558,7 @@ private:
     uint32_t format_;
     ecuio_computed_t p_{};
     std::vector<std::string> names_;
+    std::vector<size_t> places_; /* where each input is first read */
     size_t pos_ = 0;
     uint32_t steps_ = 0;
 };
@@ -606,11 +613,97 @@ long obd2_def(const ecuio_signal_set_t* base, const std::string& key)
     return -1;
 }
 
-ecuio_computed_t compile_expr(const std::string& text, const expr_scope& scope,
-                              uint32_t format, std::vector<std::string>* names)
+/* The key obd2's def at index is read by, the inverse of obd2_def: its
+ * short name, else "pid_XX" for a PID's first field and "pid_XX_N" for
+ * its next seven */
+std::string obd2_key_of(const ecuio_signal_set_t* base, uint32_t index)
 {
-    return compiler(text, scope, format).compile(names);
+    const ecuio_signal_def_t& d = base->defs[index];
+    if (d.mux_length != 2 || d.mux_offset != 0 ||
+        (d.mux_key & 0xFFFFFF00u) != 0x4100u) {
+        return std::string();
+    }
+    const auto pid = static_cast<uint8_t>(d.mux_key & 0xFFu);
+    unsigned field = 0;
+    for (uint32_t i = 0; i < index; ++i) {
+        const ecuio_signal_def_t& x = base->defs[i];
+        if (x.mux_length == 2 && x.mux_offset == 0 && x.mux_key == d.mux_key) {
+            ++field;
+        }
+    }
+    if (field > 7) {
+        return std::string();
+    }
+    if (field == 0) {
+        for (const alias& a : kObd2Aliases) {
+            if (a.pid == pid) {
+                return a.key;
+            }
+        }
+    }
+    static const char kHex[] = "0123456789abcdef";
+    std::string key = "pid_";
+    key += kHex[pid >> 4];
+    key += kHex[pid & 0xFu];
+    if (field != 0) {
+        key += '_';
+        key += static_cast<char>('0' + field);
+    }
+    return key;
 }
+
+ecuio_computed_t compile_expr(const std::string& text, const expr_scope& scope,
+                              uint32_t format, std::vector<std::string>* names,
+                              std::vector<size_t>* places)
+{
+    return compiler(text, scope, format).compile(names, places);
+}
+
+std::string too_long_words()
+{
+    return "is longer than " + std::to_string(ECUIO_EXPR_MAX_BYTES) +
+           " characters";
+}
+
+std::string aged_computed_words(const std::string& reader,
+                                const std::string& key)
+{
+    return "signal " + q(reader) + "'s max_age names " + q(key) +
+           ", a computed signal: its own inputs carry their ages";
+}
+
+std::string replaced_words(const std::string& key, const std::string& name,
+                           const std::string& reader)
+{
+    return "signal " + q(key) + " replaces " + q(name) + ", which " + reader +
+           " reads";
+}
+
+const char* const kReplacedNotANumber =
+    ": a computed signal reads a number, an enum or another computed signal";
+const char* const kReplacedFormat =
+    ": a computed signal read by another needs \"havne_signals\": 2";
+const char* const kReplacedAged =
+    " with an age bound: a computed input's ages are its own inputs'";
+
+std::string too_deep_words(const std::string& name, uint32_t depth)
+{
+    return ": that puts " + q(name) + " " + std::to_string(depth) +
+           " computed signals deep: a chain goes " +
+           std::to_string(ECUIO_COMPUTED_MAX_DEPTH) + " deep at most";
+}
+
+namespace {
+
+/* A node as a refusal names it: one with no key is the expression a
+ * check was given */
+std::string named(const chain_node& node)
+{
+    return node.key != nullptr ? "signal " + q(*node.key)
+                               : std::string("the expression");
+}
+
+} // namespace
 
 /* Computed signals reading each other (ADR-0062): no circle and no
  * chain past ECUIO_COMPUTED_MAX_DEPTH, refused at the first signal of
@@ -678,11 +771,12 @@ std::vector<uint32_t> chain_depths(const std::vector<chain_node>& nodes)
         }
         if (depth[i] > ECUIO_COMPUTED_MAX_DEPTH) {
             throw chain_refused{
-                i, "signal " + q(*nodes[i].key) + " sits " +
-                       std::to_string(depth[i]) +
-                       " computed signals deep: a chain goes " +
-                       std::to_string(ECUIO_COMPUTED_MAX_DEPTH) +
-                       " deep at most"};
+                i,
+                named(nodes[i]) + " sits " + std::to_string(depth[i]) +
+                    " computed signals deep: a chain goes " +
+                    std::to_string(ECUIO_COMPUTED_MAX_DEPTH) + " deep at most",
+                {},
+                depth};
         }
         if (depth[i] != 0) {
             continue;
@@ -708,15 +802,18 @@ std::vector<uint32_t> chain_depths(const std::vector<chain_node>& nodes)
         for (size_t j = from[i]; j != i; j = from[j]) {
             path.push_back(j);
         }
+        /* Only a signal with a key is read, so every node here has one */
         std::string words = "signal " + q(*nodes[i].key);
+        std::vector<size_t> circle{i};
         for (size_t k = path.size(); k-- > 1;) {
             words += (k + 1 == path.size() ? " reads " : ", which reads ") +
                      q(*nodes[path[k]].key);
+            circle.push_back(path[k]);
         }
         words += (path.size() == 1 ? " reads " : ", which reads ") +
                  q(*nodes[i].key) +
                  ": computed signals can't read in a circle";
-        throw chain_refused{i, words};
+        throw chain_refused{i, words, circle, depth};
     }
     return depth;
 }

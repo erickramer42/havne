@@ -195,6 +195,8 @@ ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE = 1
 ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED = 4
 ECUIO_EXPORT_PCAPNG = 3
 ECUIO_EXPORT_RAW = 1
+ECUIO_EXPR_MAX_BYTES = 0x100
+ECUIO_EXPR_REF_LEN = 64
 ECUIO_FOCUS_DEFAULT_PICK = 1
 ECUIO_FOCUS_MIN_SWEEP_MAX_MS = 0xea60
 ECUIO_FRAME_DATA_MAX = 0x1000
@@ -550,6 +552,9 @@ class ecuio_export_options_t(Structure):
     pass
 
 class ecuio_export_report_t(Structure):
+    pass
+
+class ecuio_expr_check_t(Structure):
     pass
 
 class ecuio_frame_t(Structure):
@@ -990,6 +995,15 @@ ecuio_export_report_t._fields_ = [
     ('files', c_uint32),
     ('files_left_out', c_uint32),
     ('rows', c_uint64),
+]
+ecuio_expr_check_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('at', c_uint32),
+    ('format', c_uint32),
+    ('depth', c_uint32),
+    ('reserved', (c_uint32 * 5)),
+    ('program', ecuio_computed_t),
 ]
 ecuio_frame_t._fields_ = [
     ('timestamp_us', c_uint64),
@@ -1610,7 +1624,9 @@ FUNCTIONS = {
     'ecuio_session_signal_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_session_t)]),  # profile.h
     'ecuio_session_start': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_shutdown': (None, []),  # core.h
+    'ecuio_signal_file_check_expr': (c_int, [POINTER(ecuio_signal_file_t), c_char_p, c_char_p, c_size_t, POINTER(ecuio_expr_check_t)]),  # signals.h
     'ecuio_signal_file_expr': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
+    'ecuio_signal_file_expr_ref': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t), c_char_p, c_size_t]),  # signals.h
     'ecuio_signal_file_extends': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_find': (POINTER(ecuio_signal_def_t), [POINTER(ecuio_signal_file_t), c_char_p]),  # signals.h
     'ecuio_signal_file_format': (c_uint32, [POINTER(ecuio_signal_file_t)]),  # signals.h

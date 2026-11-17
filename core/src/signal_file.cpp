@@ -328,10 +328,9 @@ struct entries_scope final : expr_scope {
             return false;
         }
         *id = e->id;
-        *kind = e->kind == "computed"
-                    ? expr_kind::computed
-                    : (e->kind == "text" || e->kind == "hex") ? expr_kind::text
-                                                              : expr_kind::number;
+        *kind = e->kind == "computed"                     ? expr_kind::computed
+                : (e->kind == "text" || e->kind == "hex") ? expr_kind::text
+                                                          : expr_kind::number;
         return true;
     }
 
@@ -1016,9 +1015,7 @@ void build(const parts& in, ecuio_signal_file& f)
                     }
                     for (const entry& x : entries) {
                         if (x.key == m.key && x.kind == "computed") {
-                            refuse(m, what + "'s max_age names " + q(m.key) +
-                                          ", a computed signal: its own "
-                                          "inputs carry their ages");
+                            refuse(m, aged_computed_words(e.key, m.key));
                         }
                     }
                     const double seconds = finite_of(m.value, what + "'s max_age");
@@ -1082,27 +1079,19 @@ void build(const parts& in, ecuio_signal_file& f)
                     e.kind == "number" || e.kind == "enum") {
                     continue;
                 }
-                const std::string reads = "signal " + q(e.key) + " replaces " +
-                                          q(e.name) + ", which " + q(d.name) +
-                                          " reads";
+                const std::string reads =
+                    replaced_words(e.key, e.name, q(d.name));
                 if (e.kind != "computed") {
-                    refuse(*e.v, reads + ": a computed signal reads a number, "
-                                         "an enum or another computed signal");
+                    refuse(*e.v, reads + kReplacedNotANumber);
                 }
                 if (format_of(base_program ? i : r - first_own) < 2) {
-                    refuse(*e.v, reads + ": a computed signal read by another "
-                                         "needs \"havne_signals\": 2");
+                    refuse(*e.v, reads + kReplacedFormat);
                 }
                 if (p.max_age_us[k] != 0) {
-                    refuse(*e.v, reads + " with an age bound: a computed "
-                                         "input's ages are its own inputs'");
+                    refuse(*e.v, reads + kReplacedAged);
                 }
                 if (base_program && depth[i] + 1 > ECUIO_COMPUTED_MAX_DEPTH) {
-                    refuse(*e.v, reads + ": that puts " + q(d.name) + " " +
-                                     std::to_string(depth[i] + 1) +
-                                     " computed signals deep: a chain goes " +
-                                     std::to_string(ECUIO_COMPUTED_MAX_DEPTH) +
-                                     " deep at most");
+                    refuse(*e.v, reads + too_deep_words(d.name, depth[i] + 1));
                 }
             }
         }
