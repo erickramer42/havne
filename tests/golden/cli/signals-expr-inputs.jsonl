@@ -1,0 +1,6 @@
+{"schema": 1, "type": "start"}
+{"id": 30000, "kind": "number", "name": "Coolant", "own": true, "ref": "coolant", "type": "input", "unit": "\u00b0C"}
+{"id": 30001, "kind": "number", "name": "Oil", "own": true, "ref": "oil", "type": "input", "unit": "\u00b0C"}
+{"id": 30002, "kind": "computed", "name": "Hottest", "own": true, "ref": "hottest", "type": "input", "unit": "\u00b0C"}
+{"id": 30003, "kind": "computed", "name": "Margin to 130", "own": true, "ref": "margin", "type": "input", "unit": "\u00b0C"}
+{"id": 30004, "kind": "computed", "name": "Running Hot", "own": true, "ref": "hot", "type": "input", "unit": ""}

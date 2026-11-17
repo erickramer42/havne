@@ -840,8 +840,13 @@ int run(int argc, char** argv)
             }
             return run_signals_import(im);
         }
-        std::fprintf(stderr, "havne-cli: signals takes check <file>, or import "
-                             "obdb <file> --out <file>\n");
+        if (word == "expr") {
+            return run_signals_expr(argc - 3, argv + 3);
+        }
+        std::fprintf(stderr,
+                     "havne-cli: signals takes check <file>, import obdb "
+                     "<file> --out <file>, or expr (--signals <file> | "
+                     "--plugin <pkg>) [<expr>]\n");
         usage(stderr);
         return kExitUsage;
     }

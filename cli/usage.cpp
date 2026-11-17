@@ -70,6 +70,9 @@ void usage(FILE* to)
         "                      [--name N] [--url U] [--commit C] [--alone]\n"
         "                      [--plugin [--wmi <codes> [--years "
         "<from>-<to>]]]\n"
+        "       havne-cli signals expr (--signals <file> | --plugin <pkg>\n"
+        "                      [--variant <id>]) [--key <key>] [<expr>\n"
+        "                      [--value <name>=<n>[@<age s>]]...]\n"
         "       havne-cli conditions check <file> [--signals <file> |\n"
         "                      --profile <name> | --plugin <pkg> "
         "[--variant <id>]]\n"
@@ -281,6 +284,18 @@ void usage(FILE* to)
         "         obd2 out of it. --plugin writes it as a plugin instead,\n"
         "         its variant my<year> with --year, else base; --wmi and\n"
         "         --years give it a match, never taken from a VIN.\n"
+        "         expr reads <expr> as a computed signal's expression in\n"
+        "         that file, or in a plugin's variant: what it reads and\n"
+        "         the file format it needs, or the character it is refused\n"
+        "         at and why. --key names the signal it is for, so an edit\n"
+        "         that would read itself is caught. --value gives a signal\n"
+        "         a value, by the name an expression reads it by, with its\n"
+        "         age in seconds after an @: the expression is then worked\n"
+        "         out from them as a session would. With no <expr> it\n"
+        "         lists those names. A computed signal's key is an\n"
+        "         expression too, one level deeper than the signal: one at\n"
+        "         the chain's bound is given by its own text, with --key.\n"
+        "         An expression that starts with -- goes in parentheses.\n"
         "conditions  check reads a condition file as a session would:\n"
         "         each condition it holds, or why it's refused. With\n"
         "         --signals, --profile or --plugin it also says which\n"
@@ -316,7 +331,8 @@ void usage(FILE* to)
         "Exit: 0 the stream ended, 1 the CLI or its recording failed, 2 "
         "usage,\n"
         "      3 the connect, a recording's open or its check failed, or a\n"
-        "        signal file, condition file or OBDb set was refused.\n");
+        "        signal file, condition file, expression or OBDb set was\n"
+        "        refused.\n");
 }
 
 } // namespace cmd
