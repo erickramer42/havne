@@ -3999,6 +3999,29 @@ TestCase {
         verify(plain.layoutNote.indexOf("aren't in the store") < 0, plain.layoutNote)
     }
 
+    // A gauge reading a plugin's signal the vehicle's picks don't give (no
+    // vehicle, or the plugin only the session's profile) leaves `files`
+    // empty: the export's note counts those gauges
+    function test_aGaugeNoPickGivesAKeyForIsCountedInTheExportsNote() {
+        const own = docOf([cellOf("A"), Object.assign(cellOf("Loose"), { refs: ["key:loose"] }),
+                           Object.assign(cellOf("Loose 2"), { refs: ["key:loose2"] })])
+        const none = storedPageOf({}, own)
+        verify(none.exportLayoutTo(layoutUrl("layout-unbound.json")), none.layoutNote)
+        verify(none.layoutNote.indexOf("2 gauges read signals none of the vehicle's picked plugins has") >= 0,
+               none.layoutNote)
+        verify(!none.layoutNoteBad, "a note, not a refusal")
+        const one = storedPageOf({}, docOf([cellOf("A"), Object.assign(cellOf("Loose"), { refs: ["key:loose"] })]))
+        verify(one.exportLayoutTo(layoutUrl("layout-unbound-one.json")), one.layoutNote)
+        verify(one.layoutNote.indexOf("1 gauge reads a signal none of") >= 0, one.layoutNote)
+        // A pick that gives the key says nothing of the kind
+        const good = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Good car"),
+                                          [keptPlugin("Loads", "loads", "D101").profiles[0]])
+        const bound = storedPageOf({ vehicles: good },
+                                   docOf([cellOf("A"), Object.assign(cellOf("Loads"), { refs: ["key:loads"] })]))
+        verify(bound.exportLayoutTo(layoutUrl("layout-bound.json")), bound.layoutNote)
+        verify(bound.layoutNote.indexOf("none of the vehicle's picked plugins") < 0, bound.layoutNote)
+    }
+
     function test_theLayoutButtonsAreInTheMoreRow() {
         const page = storedPageOf({}, docOf([cellOf("A")]))
         page.startEditing()
