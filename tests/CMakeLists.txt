@@ -170,6 +170,22 @@ endif()
 app_enable_warnings(test_elm327)
 gtest_discover_tests(test_elm327 DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
 
+# --- The sandbox: Qt-free, every platform (UNIT, ADR-0066 section 2) ---
+# test_wamr_build.cpp asks the vendored WAMR itself (third_party/wamr.cmake)
+# what core relies on; its header comes from WAMR_INCLUDE_DIR.
+# test_wasm_check.cpp, test_sandbox.cpp and test_sandbox_budget.cpp:
+# core/src's wasm_check.h and wasm_sandbox.h, internal. verify.sh's
+# cross-arch step builds and runs them all against the x86 core, which CI
+# never builds.
+add_executable(test_sandbox test_wamr_build.cpp test_wasm_check.cpp
+    test_sandbox.cpp test_sandbox_budget.cpp)
+target_include_directories(test_sandbox PRIVATE ${WAMR_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/core/src)
+target_compile_definitions(test_sandbox PRIVATE ${WAMR_EMBED_DEFINITIONS})
+target_link_libraries(test_sandbox PRIVATE ecuio-core GTest::gtest_main)
+app_enable_warnings(test_sandbox)
+gtest_discover_tests(test_sandbox DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 60)
+
 # --- SocketCAN's rules: Qt-free, every platform (UNIT, ADR-0032, ADR-0040) ---
 # socketcan_wire.h is internal and portable (the kernel's values mirrored),
 # so its rules test everywhere; the transport on a bus is test_vcan's.
@@ -240,6 +256,13 @@ if(Python3_Interpreter_FOUND)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
+    # scripts/vendored_check.py: third_party/wamr against its committed
+    # list of hashes, with no network. A change to that folder is a patch
+    # beside it, never an edit in it (third_party/README.md)
+    add_test(NAME VendoredTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/vendored_check.py selftest)
+    add_test(NAME VendoredTest.WamrIsItsListedBytes
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/vendored_check.py check)
     # packaging/python/make_wheel.py, the havne wheel (ADR-0053 section 6):
     # made-up PE, ELF and Mach-O files and a made-up package
     add_test(NAME WheelTest.SelfTest

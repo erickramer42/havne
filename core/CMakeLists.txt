@@ -46,8 +46,21 @@ add_library(ecuio-core STATIC
     src/obd2_signal_sets.cpp
     src/uds_generic.cpp
     src/vin.cpp
+    src/wasm_sandbox.cpp
     src/j2534_surrogate_client.cpp
 )
+
+# WAMR's objects join the archive (third_party/wamr.cmake), so core stays
+# one library to link and install. Only a source that embeds it includes
+# its header.
+app_wamr_objects(ecuio-wamr)
+target_sources(ecuio-core PRIVATE $<TARGET_OBJECTS:ecuio-wamr>)
+target_include_directories(ecuio-core PRIVATE ${WAMR_INCLUDE_DIR})
+target_compile_definitions(ecuio-core PRIVATE ${WAMR_EMBED_DEFINITIONS})
+# WAMR's Android port writes through the system log
+if(ANDROID)
+    target_link_libraries(ecuio-core PRIVATE log)
+endif()
 
 # The public headers: the C API an outside program compiles against.
 # One list for what's installed, what scripts/api_check.py compares
@@ -179,6 +192,9 @@ if(HAVNE_SHARED_CORE)
         # heap is safe, since every allocation has its release in core
         # (ExportsTest.EachAllocationHasItsRelease).
         get_target_property(_ecuio_core_sources ecuio-core SOURCES)
+        # WAMR's objects are /MD there; this library takes /MT ones
+        list(FILTER _ecuio_core_sources EXCLUDE REGEX "TARGET_OBJECTS")
+        app_wamr_objects(ecuio-wamr-mt STATIC_RUNTIME)
         add_library(ecuio-core-mt OBJECT ${_ecuio_core_sources})
         target_include_directories(ecuio-core-mt PRIVATE
             $<TARGET_PROPERTY:ecuio-core,INCLUDE_DIRECTORIES>)
@@ -187,7 +203,8 @@ if(HAVNE_SHARED_CORE)
         app_enable_warnings(ecuio-core-mt)
         set_target_properties(ecuio-core-mt ecuio PROPERTIES
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-        target_sources(ecuio PRIVATE ${_ecuio_gen}/ecuio.def $<TARGET_OBJECTS:ecuio-core-mt>)
+        target_sources(ecuio PRIVATE ${_ecuio_gen}/ecuio.def $<TARGET_OBJECTS:ecuio-core-mt>
+            $<TARGET_OBJECTS:ecuio-wamr-mt>)
         target_link_libraries(ecuio PRIVATE bcrypt ws2_32)
     elseif(APPLE)
         set_source_files_properties(${_ecuio_gen}/ecuio.exp PROPERTIES HEADER_FILE_ONLY ON)
