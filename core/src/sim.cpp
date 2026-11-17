@@ -176,8 +176,7 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
             out, ECUIO_SIM_REPLY_MAX);
     }
     if (n.module == 0) {
-        return ecuio_sim_answer(s->ecu, req, len, functional, out,
-                                n.session.extended);
+        return ecuio_sim_answer(s->ecu, n.session, req, len, functional, out);
     }
     return ecuio_sim_module_answer(req, len, functional, out);
 }

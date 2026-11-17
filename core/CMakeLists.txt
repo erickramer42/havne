@@ -32,6 +32,7 @@ add_library(ecuio-core STATIC
     src/serial_ports.cpp
     src/sim.cpp
     src/socketcan_interfaces.cpp
+    src/socketcan_request.cpp
     src/socketcan_transport.cpp
     src/signals.cpp
     src/signal_file.cpp

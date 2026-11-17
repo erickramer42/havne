@@ -11,8 +11,10 @@
 // gives and an ECU name. modules=2 adds a second module's answers, its
 // own made-up DIDs (the appendix of 2026-11-04). The engine ECU also has
 // an extended session (ADR-0060): 10 03 enters it, 3E 00 keeps it, S3 of
-// silence leaves it, and DIDs D200-D203 answer only in it. replay://: a
-// recording's replies at the ECU's time since it started
+// silence leaves it, and DIDs D200-D203 answer only in it. In that
+// session it has security access too (ADR-0066 section 2.7,
+// sim_security.h): 27 unlocks a level, and DID D210 answers once one is.
+// replay://: a recording's replies at the ECU's time since it started
 // (sim_recording.h). Faults break every Nth reply, as ADR-0041 section
 // 4's ECU does, and pending puts a reply off behind a 7F <service> 78.
 
@@ -27,6 +29,7 @@
 #include "sim_canned.h"
 #include "recording_stretch.h"
 #include "sim_recording.h"
+#include "sim_security.h"
 #include "uri_query.h"
 
 #include "absolute_path.h"
@@ -177,10 +180,13 @@ inline void ecuio_sim_tick(ecuio_sim_ecu& e)
 }
 
 /* One node's diagnostic session (ADR-0060): extended since a 10 03 and
- * until S3 of silence, or a 10 01; the ECU's own clock times it */
+ * until S3 of silence, or a 10 01; the ECU's own clock times it. Its
+ * security access (ADR-0066 section 2.7) is locked again by each of
+ * those and by a 10 03 that enters the session anew. */
 struct ecuio_sim_session {
     bool extended = false;
     int64_t heard_us = 0; /* the ECU's time of the last request heard */
+    ecuio_sim_security security;
 };
 
 namespace ecuio_sim_detail {
@@ -396,9 +402,12 @@ inline uint32_t refuse(uint8_t service, uint8_t nrc, uint8_t* out)
  * answered here (handled true; the length, 0 for none): 10 03 enters the
  * extended session when has_extended (else 7F 10 12), 10 01 leaves it,
  * any other 10 is 7F 10 12; 3E 00 is 7E 00, 3E 80 is silent, any other
- * 3E 7F 3E 12; a wrong length 7F <service> 13. Another service: handled
- * false, the caller's answer. A functional request never reaches this:
- * session control to 0x7DF goes unanswered and enters nothing. */
+ * 3E 7F 3E 12; a wrong length 7F <service> 13. A node with an extended
+ * session answers 27 here too (sim_security.h), and every session
+ * entered or left locks it. Another service: handled false, the
+ * caller's answer. A functional request never reaches this: session
+ * control and security access to 0x7DF go unanswered and change
+ * nothing. */
 inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
                                          bool has_extended, int64_t now_us,
                                          const uint8_t* req, uint32_t len,
@@ -407,8 +416,15 @@ inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
     using namespace ecuio_sim_detail;
     if (s.extended && now_us - s.heard_us >= ECUIO_SIM_S3_US) {
         s.extended = false;
+        ecuio_sim_security_lock(s.security);
     }
     s.heard_us = now_us;
+    if (has_extended && len > 0 && req[0] == 0x27) {
+        *handled = true;
+        return ecuio_sim_security_answer(s.security, s.extended,
+                                         ECUIO_SIM_SECURITY_DELAY_US, now_us,
+                                         req, len, out);
+    }
     *handled = len > 0 && (req[0] == 0x10 || req[0] == 0x3E);
     if (!*handled) {
         return 0;
@@ -429,6 +445,7 @@ inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
     }
     if (req[1] == 0x01 || (req[1] == 0x03 && has_extended)) {
         s.extended = req[1] == 0x03;
+        ecuio_sim_security_lock(s.security);
         /* the session, then P2 = 50 ms and P2* = 5 s in 10 ms units */
         const uint8_t ok[6] = {0x50, req[1], 0x00, 0x32, 0x01, 0xF4};
         std::memcpy(out, ok, sizeof ok);
@@ -441,11 +458,14 @@ inline uint32_t ecuio_sim_session_answer(ecuio_sim_session& s,
  * (ECUIO_SIM_REPLY_MAX bytes), its length; 0 for none. functional: the
  * request came on 0x7DF, where ISO 14229-1 has an ECU keep its negative
  * replies 11, 12 and 31 to itself. extended: the node is in the extended
- * session, where D200-D203 answer (else 7F 22 31). The mock's ECU clears
- * on a 04; a recording answers from its replies at the ECU's time. */
+ * session, where D200-D203 answer (else 7F 22 31), and D210 with them
+ * when security is the node's: 7F 22 33 until a level is unlocked. The
+ * mock's ECU clears on a 04; a recording answers from its replies at the
+ * ECU's time. */
 inline uint32_t ecuio_sim_answer(ecuio_sim_ecu& e, const uint8_t* req,
                                  uint32_t len, bool functional, uint8_t* out,
-                                 bool extended = false)
+                                 bool extended = false,
+                                 const ecuio_sim_security* security = nullptr)
 {
     using namespace ecuio_sim_detail;
     if (len == 0) {
@@ -520,6 +540,9 @@ inline uint32_t ecuio_sim_answer(ecuio_sim_ecu& e, const uint8_t* req,
         n = refuse(0x22, 0x31, out);
         if (extended && len == 3) {
             const uint16_t did = static_cast<uint16_t>((req[1] << 8) | req[2]);
+            if (did == ECUIO_SIM_GATED_DID && security != nullptr) {
+                n = ecuio_sim_security_did(*security, extended, out);
+            }
             for (const ecuio_sim_extended_did& d : ECUIO_SIM_EXTENDED_DIDS) {
                 if (d.did == did) {
                     out[0] = 0x62;
@@ -539,6 +562,16 @@ inline uint32_t ecuio_sim_answer(ecuio_sim_ecu& e, const uint8_t* req,
         return 0;
     }
     return n;
+}
+
+/* The engine ECU's reply as a node in session s gives it: its extended
+ * DIDs in the session, the gated one by its security access */
+inline uint32_t ecuio_sim_answer(ecuio_sim_ecu& e, const ecuio_sim_session& s,
+                                 const uint8_t* req, uint32_t len,
+                                 bool functional, uint8_t* out)
+{
+    return ecuio_sim_answer(e, req, len, functional, out, s.extended,
+                            &s.security);
 }
 
 /* The second module's reply (modules=2, on 0x7E1, answering on 0x7E9)
