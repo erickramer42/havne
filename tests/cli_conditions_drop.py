@@ -6,12 +6,19 @@
 #
 # A live stream whose reader stops reading drops lines, and a condition
 # event whose line is dropped is counted on the end line. mock://demo
-# idles fast from about 17 s to 34 s, its engine speed hunting a few rpm
-# on each tick; 64 conditions on it, levels 0.75 rpm apart across the
-# idle's band, give many events a second. The line ring is at its floor
+# holds the rev limiter from its 1018th tick to its 1118th (5 s of the
+# drive cycle, about 50.9 s to 55.9 s while the worker keeps 20 ticks a
+# second), its engine speed sawing between about 6860 and 7000 rpm on each
+# tick; 64 conditions on it, levels 2.5 rpm apart across that band, cross
+# several dozen levels on every tick, so the events come with the
+# session's ticks, not with the machine's speed. The drive cycle moves a
+# tick at a time and a worker that falls a whole interval behind starts
+# its schedule over (mock_transport.cpp), so on a loaded runner the cycle
+# runs behind the wall clock: the stall and the run's end are counted in
+# frames (ticks), never in seconds. The line ring is at its floor
 # (HAVNE_CLI_RING_BYTES) and the stream records: the recorder's ring is
 # its own, so the recording's cond lines are every event the session
-# gave. Read to 17 s of session time, then stop reading until the stream
+# gave. Read to STALL_AT_FRAMES frames, then stop reading until the stream
 # must be dropping, whatever the system's buffers hold and however
 # loaded the machine is:
 # - the bytes the kernel holds for the reader stop growing, so the
@@ -45,29 +52,36 @@ try:
 except ImportError:
     fcntl = termios = None
 
-SECONDS = 33
-STALL_FROM_US = 17 * 1000 * 1000
+# --count ends the run on the worker's ticks; --seconds is only the bound
+# for a run that has wedged
+COUNT = 1250
+SECONDS = 150
+STALL_AT_FRAMES = 1000
 STALL_MAX_S = 25.0
 STILL_S = 0.5
 POLL_S = 0.05
 FILL_BYTES = 2 * (32 * 1024 + 256)
-# More than the kernel holds for the reader on any platform (a page of
-# pipe on Linux, 4 KiB socket buffers on macOS, Windows' small default):
-# a stall seen before the child's writes blocked is covered
-HELD_MAX_BYTES = 16 * 1024
 LEAST_COND_BYTES = 60
 PAST_FULL = 3
 LEVELS = 64
+# The limiter crosses the band's levels about 110 times in each three
+# ticks, and holds it for 100 ticks: thousands of events a loop, where the fill
+# is about 600 (the pipe's and the ring's bytes over a cond line's). A long
+# key (the limit is 31 bytes) makes each cond line longer, so fewer events
+# fill them
+LEVEL_FROM_RPM = 6855.0
+LEVEL_STEP_RPM = 2.5
+KEY_PREFIX = "idle_level_at_rpm_threshold_"
 
 
 def condition_file(folder):
     conditions = []
     for k in range(LEVELS):
         conditions.append({
-            "key": "idle_%02d" % k,
+            "key": KEY_PREFIX + "%02d" % k,
             "name": "Idle %02d" % k,
             "when": {"signal": ["id:1001"], "unit": "RPM",
-                     "above": 1405.875 + 0.75 * k},
+                     "above": LEVEL_FROM_RPM + LEVEL_STEP_RPM * k},
         })
     path = os.path.join(folder, "idle.json")
     with open(path, "w", encoding="utf-8") as f:
@@ -120,9 +134,10 @@ def stall(fd, root, stall_us, cond_bytes):
         now = held_bytes(fd)
         if now != held:
             held, still_since = now, time.monotonic()
-    # Cond lines alone, each at least cond_bytes, outweigh the kernel's
-    # buffer and the ring, so the events after them are dropped lines
-    full = -(-(HELD_MAX_BYTES + FILL_BYTES) // cond_bytes)
+    # Cond lines alone, each at least cond_bytes, outweigh the bytes the
+    # kernel holds (steady for STILL_S: the child's writes are blocked) and
+    # the ring, so the events after them are dropped lines
+    full = -(-(held + FILL_BYTES) // cond_bytes)
     while True:
         folders = os.listdir(root)
         after = 0
@@ -133,9 +148,12 @@ def stall(fd, root, stall_us, cond_bytes):
         if after >= full + PAST_FULL:
             return full, held, ""
         if time.monotonic() > deadline:
+            spent = time.monotonic() - begun
             return full, held, (f"{after} events recorded from "
-                                f"{stall_us / 1e6:.1f} s, {full + PAST_FULL} "
-                                f"needed")
+                                f"{stall_us / 1e6:.1f} s of session time, {full + PAST_FULL} "
+                                f"needed, in {spent:.1f} s of waiting "
+                                f"({after / spent:.0f} events a second), "
+                                f"cond lines of {cond_bytes} B")
         time.sleep(POLL_S)
 
 
@@ -156,7 +174,8 @@ def main():
                 side.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
         proc = subprocess.Popen(
             [cli, "stream", "mock://demo", "--values", "--conditions", named,
-             "--record", root, "--seconds", str(SECONDS)],
+             "--record", root, "--count", str(COUNT), "--seconds",
+             str(SECONDS)],
             stdin=subprocess.DEVNULL,
             stdout=theirs.fileno() if theirs else subprocess.PIPE,
             stderr=subprocess.PIPE, env=env)
@@ -171,17 +190,26 @@ def main():
         lines = []
         stalled = None
         shortest = None
+        frames = 0
+        stall_us = 0
+        begun = time.monotonic()
         for raw in reader:
             line = json.loads(raw)
             lines.append(line)
             if line.get("type") == "condition":
                 shortest = min(shortest or len(raw), len(raw))
-            t = line.get("t_us")
-            if t is None:
+            if line.get("type") != "frame":
                 continue
-            if stalled is None and t >= STALL_FROM_US:
+            frames += 1
+            if stalled is None and frames >= STALL_AT_FRAMES:
+                stall_us = line["t_us"]
                 cond_bytes = max(int((shortest or 0) * 0.9), LEAST_COND_BYTES)
-                stalled = stall(held_fd, root, t, cond_bytes)
+                spent = time.monotonic() - begun
+                print(f"      {frames} frames in {spent:.1f} s of waiting, "
+                      f"session time {stall_us / 1e6:.1f} s: "
+                      f"{frames / max(stall_us / 1e6, 0.001):.1f} ticks a "
+                      f"second")
+                stalled = stall(held_fd, root, stall_us, cond_bytes)
                 print(f"      the stall: the kernel held {stalled[1]} B, "
                       f"{stalled[0]} cond lines of {cond_bytes} B or more "
                       f"fill the ring")
@@ -215,7 +243,9 @@ def main():
         print(f"      {len(got)} condition lines received, "
               f"conditions_dropped {dropped}, {len(truth)} cond lines "
               f"recorded; dropped_frames {end.get('dropped_frames')}, "
-              f"dropped_values {end.get('dropped_values')}")
+              f"dropped_values {end.get('dropped_values')}; "
+              f"{len([e for e in truth if e[4] >= stall_us])} recorded "
+              f"from {stall_us / 1e6:.1f} s on")
         if dropped is None:
             print("FAIL  the end line has no conditions_dropped")
             ok = False
