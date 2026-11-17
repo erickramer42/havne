@@ -1,9 +1,12 @@
-// File/layer: cli/cmd_signals.cpp | havne-cli, signals check and signals import
-// Testing: UNIT: CliGoldenTest, CliObdbImportTest, CliPluginMakeTest
-//          (ctest); CliSignalFileTest (test_cli)
+// File/layer: cli/cmd_signals.cpp | havne-cli, signals check, signals import
+//             and signals expr
+// Testing: UNIT: CliGoldenTest, CliUsageTest, CliObdbImportTest,
+//          CliPluginMakeTest (ctest); CliSignalFileTest, CliExprTest
+//          (test_cli)
 //
 // Public headers only: what any program linking core can do.
 
+#include "expr_lines.h"
 #include "jsonl.h"
 #include "plugin_lines.h"
 #include "signal_file_lines.h"
@@ -202,6 +205,178 @@ int run_signals_import(const ImportArgs& args)
         ecuio_signal_file_free(file);
     }
     out.flush();
+    return ended(out, kExitOk);
+}
+
+namespace {
+
+// What signals expr reads its expression against: a signal file of its
+// own, or a plugin's variant
+struct ExprFile {
+    ecuio_signal_file_t* own = nullptr;
+    ecuio_plugin_t* plugin = nullptr;
+    const ecuio_signal_file_t* file = nullptr;
+    ExprFile() = default;
+    ExprFile(const ExprFile&) = delete;
+    ExprFile& operator=(const ExprFile&) = delete;
+    ~ExprFile()
+    {
+        ecuio_signal_file_free(own);
+        ecuio_plugin_free(plugin);
+    }
+};
+
+} // namespace
+
+// signals expr (--signals <file> | --plugin <pkg> [--variant <id>])
+// [--key <key>] [<expr> [--value <name>=<n>[@<age s>]]...] (ADR-0062): an
+// expression read as a computed signal's "expr" would be in that file,
+// or in a plugin's variant (its only one, else --variant's; naming none
+// of several is usage, nothing written). With no expression: start and
+// an input line for each signal an expression can read. With one: start
+// and an expr line, what it reads and the format it needs, or where and
+// why it is refused (the words and a caret on standard error too, exit
+// 3); with --value a value line, the expression worked out from those
+// values. A --value whose name reads no number of the file is usage,
+// nothing written. A file or package unread or refused: start and an
+// error line, exit 3. No end line (a list, as signals check's)
+int run_signals_expr(cli::ExprArgs args)
+{
+    ExprFile held;
+    std::string why;
+    ecuio_status_t st = ECUIO_OK;
+    if (args.plugin != nullptr) {
+        st = load_package(args.plugin, &held.plugin, &why);
+        if (held.plugin != nullptr) {
+            const ecuio_plugin_info_t info = plugin_info(held.plugin);
+            std::string names;
+            for (uint32_t v = 0; v < info.variant_count; ++v) {
+                const std::string id = variant_of(held.plugin, v);
+                names += (v > 0 ? ", " : "") + id;
+                if (args.variant != nullptr ? id == args.variant
+                                            : info.variant_count == 1) {
+                    held.file = ecuio_plugin_variant_file(held.plugin, v);
+                }
+            }
+            if (held.file == nullptr) {
+                std::fprintf(stderr,
+                             "havne-cli: --plugin needs --variant to name one "
+                             "of its variants: %s\n",
+                             names.c_str());
+                return kExitUsage;
+            }
+        }
+    } else {
+        st = load_signal_file(args.signals, &held.own, &why);
+        held.file = held.own;
+    }
+    const ecuio_signal_file_t* file = held.file;
+    if (file != nullptr &&
+        !cli::resolve_expr_values(file, &args.values, &why)) {
+        std::fprintf(stderr, "havne-cli: %s\n", why.c_str());
+        return kExitUsage;
+    }
+    Output out;
+    write_start(out);
+    if (file == nullptr) {
+        write_error(out, st, why.c_str());
+        return ended(out, kExitConnect);
+    }
+    const ecuio_signal_set_t& set = *ecuio_signal_file_set(file);
+    if (args.expr == nullptr) {
+        for (uint32_t i = 0; i < set.count; ++i) {
+            if (cli::expr_reads(file, set.defs[i])) {
+                char buf[cli::kExprDefBytes + 64];
+                cli::Line l(buf, sizeof buf);
+                cli::input_line(l, file, set.defs[i]);
+                write_line(out, l);
+            }
+        }
+        return ended(out, kExitOk);
+    }
+    ecuio_expr_check_t checked;
+    std::memset(&checked, 0, sizeof checked);
+    checked.struct_size = sizeof checked;
+    st = ecuio_signal_file_check_expr(file, args.key, args.expr,
+                                      std::strlen(args.expr), &checked);
+    const std::string refused = st != ECUIO_OK ? ecuio_last_error_detail() : "";
+    if (st != ECUIO_OK && checked.at == 0) {
+        // Not the expression's refusal: the call's own
+        write_error(out, st, refused.c_str());
+        return ended(out, kExitConnect);
+    }
+    std::vector<uint16_t> leaves;
+    if (st == ECUIO_OK) {
+        uint32_t count = 0;
+        ecuio_status_t listed = ecuio_signal_file_expr_leaves(
+            file, &checked.program, nullptr, 0, &count);
+        if (listed == ECUIO_OK && count > 0) {
+            leaves.resize(count);
+            listed = ecuio_signal_file_expr_leaves(
+                file, &checked.program, leaves.data(), count, &count);
+        }
+        if (listed != ECUIO_OK) {
+            write_error(out, listed);
+            return ended(out, kExitConnect);
+        }
+    }
+    {
+        const auto leaf_count = static_cast<uint32_t>(leaves.size());
+        BigLine b(cli::expr_line_bytes(args.expr, args.key, refused.c_str(),
+                                       leaf_count));
+        cli::expr_line(b.line, file, args.expr, args.key, checked,
+                       st != ECUIO_OK ? refused.c_str() : nullptr,
+                       leaves.data(), leaf_count);
+        write_line(out, b.line);
+    }
+    if (st != ECUIO_OK) {
+        std::fprintf(stderr, "havne-cli: %s\n%s", refused.c_str(),
+                     cli::expr_caret(args.expr, checked.at).c_str());
+        return ended(out, kExitConnect);
+    }
+    const uint32_t file_format = ecuio_signal_file_format(file);
+    if (checked.format > file_format) {
+        std::fprintf(stderr,
+                     "havne-cli: the expression needs \"havne_signals\": %u, "
+                     "and the file is %u\n",
+                     static_cast<unsigned>(checked.format),
+                     static_cast<unsigned>(file_format));
+    }
+    if (args.values.empty()) {
+        return ended(out, kExitOk);
+    }
+    std::vector<ecuio_eval_input_t> inputs(args.values.size());
+    for (size_t i = 0; i < args.values.size(); ++i) {
+        const cli::ExprValue& v = args.values[i];
+        std::memset(&inputs[i], 0, sizeof inputs[i]);
+        inputs[i].value = v.value;
+        inputs[i].age_us = v.age_us;
+        inputs[i].def_id = v.def_id;
+        bool read = false;
+        for (const uint16_t leaf : leaves) {
+            read = read || leaf == v.def_id;
+        }
+        if (!read) {
+            std::fprintf(stderr,
+                         "havne-cli: the expression doesn't read '%s': its "
+                         "value is passed by\n",
+                         v.ref.c_str());
+        }
+    }
+    ecuio_eval_result_t result;
+    std::memset(&result, 0, sizeof result);
+    result.struct_size = sizeof result;
+    st = ecuio_signal_file_evaluate(file, &checked.program, inputs.data(),
+                                    static_cast<uint32_t>(inputs.size()),
+                                    &result);
+    if (st != ECUIO_OK) {
+        write_error(out, st);
+        return ended(out, kExitConnect);
+    }
+    char buf[cli::kValueLineBytes];
+    cli::Line l(buf, sizeof buf);
+    cli::value_line(l, file, result);
+    write_line(out, l);
     return ended(out, kExitOk);
 }
 

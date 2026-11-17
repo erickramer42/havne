@@ -1,0 +1,2 @@
+{"schema": 1, "type": "start"}
+{"at": 14, "depth": null, "detail": "the expression reads 'oli', which no signal is", "expr": "max(coolant, oli)", "file_format": 2, "format": null, "inputs": [], "key": null, "leaves": [], "ok": false, "type": "expr"}
