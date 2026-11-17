@@ -21,6 +21,7 @@ ColumnLayout {
     property var testTexts: ({})
     property var preview: ({ text: "", warn: false })
     property bool insertOpen: false
+    property string liveNote: ""
     property var nameRows: []
     property alias editor: exprEditorItem
     readonly property bool shown: root.host.formKind === "computed"
@@ -127,6 +128,42 @@ ColumnLayout {
                 return l.ref
         }
         return ""
+    }
+
+    // An Instantiator's object and a Repeater's item are a QObject and an Item
+    // to the linter, which doesn't see the delegate's own members
+    function untyped(item) {
+        return item
+    }
+
+    // Fills the test values from the session's rows of the same signals
+    // (matched by id: the model's ref is its own key). The rows are read
+    // once, as the button is pressed: an Instantiator left on would follow
+    // every value's change
+    function useLive() {
+        // The model shows values in the chosen unit system; a test value is
+        // in the decoded unit, which is the leaf's
+        const leafOf = {}
+        for (const l of root.checked.leaves)
+            leafOf[l.id] = l
+        liveRows.active = true
+        const found = {}
+        for (let i = 0; i < liveRows.count; ++i) {
+            const r = root.untyped(liveRows.objectAt(i))
+            const leaf = r !== null ? leafOf[r.id] : undefined
+            if (leaf !== undefined && r.hasValue && !r.isText)
+                found[leaf.ref] = Bridge.decodedValue(leaf.unit, r.value)
+        }
+        liveRows.active = false
+        let filled = 0
+        for (let i = 0; i < root.leafRefs.length; ++i) {
+            const v = found[root.leafRefs[i]]
+            if (v === undefined)
+                continue
+            root.untyped(testRepeater.itemAt(i)).field.text = String(Number(v.toPrecision(7)))
+            ++filled
+        }
+        root.liveNote = qsTr("Filled %1 of %2 from the session").arg(filled).arg(root.leafRefs.length)
     }
 
     function shownNumber(v) {
@@ -390,12 +427,42 @@ ColumnLayout {
         Layout.fillWidth: true
     }
 
+    Instantiator {
+        id: liveRows
+        active: false
+        model: Bridge.signalModel
+        delegate: QtObject {
+            required property int id
+            required property double value
+            required property bool hasValue
+            required property bool isText
+        }
+    }
+
+    ThemedButton {
+        objectName: "formUseLive"
+        visible: Bridge.connected && root.leafRefs.length > 0
+        text: qsTr("Use the session's values")
+        onClicked: root.useLive()
+    }
+
+    Label {
+        objectName: "formUseLiveNote"
+        visible: text !== "" && root.leafRefs.length > 0
+        text: root.liveNote
+        color: Theme.textDim
+        wrapMode: Text.Wrap
+        Layout.fillWidth: true
+    }
+
     Repeater {
+        id: testRepeater
         model: root.leafRefs
         RowLayout {
             id: testRow
             required property string modelData
             required property int index
+            property alias field: testField
             Layout.fillWidth: true
             spacing: Theme.spacing
             Label {
@@ -407,6 +474,7 @@ ColumnLayout {
                 Layout.preferredWidth: 0
             }
             ThemedTextField {
+                id: testField
                 objectName: "formTest_" + testRow.index
                 placeholderText: qsTr("Value")
                 Layout.preferredWidth: Theme.controlHeight * 3
