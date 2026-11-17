@@ -140,6 +140,7 @@ qt_add_qml_module(app_ui
         qml/SettingsAdapter.qml
         qml/SettingsAdvanced.qml
         qml/SettingsList.qml
+        qml/SettingsOwnComputed.qml
         qml/SettingsOwnForm.qml
         qml/SettingsSubpage.qml
         qml/SettingsConnect.qml

@@ -205,6 +205,17 @@ TestCase {
         compare(f.kind, "computed")
         compare(f.unit, "kPa")
         compare(f.number, "")
-        compare(SignalForm.describe(file, file.signals[1]), "computed")
+        compare(SignalForm.describe(file, file.signals[1]), "computed from a * 2")
+    }
+
+    // A renamed computed signal takes the place of the one it was, under the
+    // key it had; a new one goes at the end
+    function test_aComputedSaveReplacesTheKeyItWasEditedUnder() {
+        const file = { signals: [{ key: "user.a", name: "A", kind: "computed", expr: "1" },
+                                 { key: "user.b", name: "B", kind: "computed", expr: "2" }], ecus: [] }
+        const renamed = SignalForm.withComputed(file, { key: "user.c", name: "C", kind: "computed", expr: "3" }, "user.a")
+        compare(renamed.signals.map(s => s.key).join(), "user.c,user.b")
+        const added = SignalForm.withComputed(file, { key: "user.c", name: "C", kind: "computed", expr: "3" }, "")
+        compare(added.signals.map(s => s.key).join(), "user.a,user.b,user.c")
     }
 }

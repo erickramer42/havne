@@ -25,6 +25,8 @@ ColumnLayout {
     property alias formUnit: formUnit
     property alias formDecimals: formDecimals
     property alias formValues: formValues
+    property alias computedPart: computedPart
+    readonly property bool computed: root.host.formKind === "computed"
 
     objectName: "signalForm"
     visible: root.host.pickedVehicle !== null
@@ -45,6 +47,7 @@ ColumnLayout {
             }
         }
         Captioned {
+            visible: !root.computed
             caption: qsTr("Reply ID")
             ThemedTextField {
                 id: formRx
@@ -55,6 +58,7 @@ ColumnLayout {
             }
         }
         Captioned {
+            visible: !root.computed
             caption: qsTr("Request ID")
             ThemedTextField {
                 id: formTx
@@ -67,6 +71,7 @@ ColumnLayout {
 
     LabeledFlow {
         objectName: "formReadBy"
+        visible: !root.computed
         label: qsTr("Read by:")
         Repeater {
             model: [{ name: "01", label: qsTr("01 PID") }, { name: "22", label: qsTr("22 DID") }]
@@ -110,6 +115,7 @@ ColumnLayout {
     Flow {
         Layout.fillWidth: true
         spacing: Theme.spacing
+        visible: !root.computed
         Captioned {
             caption: qsTr("Byte")
             ThemedTextField {
@@ -177,11 +183,17 @@ ColumnLayout {
         }
     }
 
+    SettingsOwnComputed {
+        id: computedPart
+        host: root.host
+    }
+
     Flow {
         Layout.fillWidth: true
         spacing: Theme.spacing
-        visible: root.host.formKind === "number"
+        visible: root.host.formKind === "number" || root.computed
         Captioned {
+            visible: !root.computed
             caption: qsTr("Scale")
             ThemedTextField {
                 id: formScale
@@ -191,6 +203,7 @@ ColumnLayout {
             }
         }
         Captioned {
+            visible: !root.computed
             caption: qsTr("Offset")
             ThemedTextField {
                 id: formOffset
@@ -248,6 +261,7 @@ ColumnLayout {
         ThemedButton {
             objectName: "formReadOnce"
             text: Bridge.readingOnce ? qsTr("Reading...") : qsTr("Read once")
+            visible: !root.computed
             enabled: root.host.idle && !Bridge.readingOnce && root.host.confirming === ""
             onClicked: root.host.readOnceDraft()
         }

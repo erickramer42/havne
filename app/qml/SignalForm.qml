@@ -16,7 +16,7 @@ QtObject {
     // The groups a file names (ADR-0050), "" for none (Other)
     readonly property var groups: ["", "engine", "air", "fuel", "oxygen sensors", "emissions",
                                    "vehicle", "electrical", "diagnostics"]
-    readonly property var kinds: ["number", "enum", "text", "hex"]
+    readonly property var kinds: ["number", "enum", "text", "hex", "computed"]
 
     // A key from a name: lower case, every run of other characters one
     // "_", at most 31; "signal" for a name with none
@@ -70,7 +70,7 @@ QtObject {
     function emptyFields() {
         return { name: "", rx: "7E8", tx: "", service: "22", number: "", byte: "0", bits: "8",
                  bit: "", order: "be", signed: false, bytes: "", scale: "", offset: "",
-                 unit: "", decimals: "", group: "", kind: "number", values: "" }
+                 unit: "", decimals: "", group: "", kind: "number", values: "", expr: "" }
     }
 
     // A number typed, or the text as it is, so the loader names what's wrong
@@ -82,6 +82,8 @@ QtObject {
 
     // The fields as a signal: the keys its kind takes, a default left out
     function draft(f) {
+        if (f.kind === "computed")
+            return draftComputed(f)
         const s = { key: keyOf(f.name), name: String(f.name).trim(),
                     read: { service: f.service, number: String(f.number).trim().toUpperCase() },
                     field: { byte: numberOf(f.byte) } }
@@ -114,6 +116,26 @@ QtObject {
         if (f.group !== "")
             s.group = f.group
         return s
+    }
+
+    // A computed signal as a file holds it (docs/signal-files.md): no
+    // read, field, scale or offset, the expression as typed
+    function draftComputed(f) {
+        const s = { key: keyOf(f.name), name: String(f.name).trim(), kind: "computed",
+                    expr: String(f.expr).trim() }
+        if (String(f.unit) !== "")
+            s.unit = String(f.unit)
+        if (String(f.decimals).trim() !== "")
+            s.decimals = numberOf(f.decimals)
+        if (f.group !== "")
+            s.group = f.group
+        return s
+    }
+
+    // True for a key an expression can't read by its key: a leading digit
+    // is a number to the grammar
+    function startsWithDigit(key) {
+        return /^[0-9]/.test(String(key))
     }
 
     // The module as a file's ecus entry, its tx only when typed
@@ -224,6 +246,35 @@ QtObject {
         return trimEcus(d)
     }
 
+    // file with a computed signal, which reads no module: in the place of
+    // the one keyed replacing (an Edit that renamed it) or of its own key,
+    // else at the end
+    function withComputed(file, signal, replacing) {
+        const d = copy(file)
+        const old = replacedKey(signal, replacing)
+        const at = d.signals.findIndex(x => x.key === old)
+        if (at < 0)
+            d.signals.push(copy(signal))
+        else
+            d.signals[at] = copy(signal)
+        return trimEcus(d)
+    }
+
+    // file at format n at least: core never rewrites a file, so a Save that
+    // needs a newer format says so itself (a missing number reads as 1)
+    function withFormat(file, n) {
+        const d = copy(file)
+        d.havne_signals = Math.max(d.havne_signals === undefined ? 1 : d.havne_signals, n)
+        return d
+    }
+
+    // file reading obd2's signals too, so an expression can name them
+    function withExtends(file) {
+        const d = copy(file)
+        d.extends = "obd2"
+        return d
+    }
+
     function withoutSignal(file, key) {
         const d = copy(file)
         d.signals = d.signals.filter(s => s.key !== key)
@@ -239,6 +290,7 @@ QtObject {
         f.name = signal.name
         f.rx = ecu !== undefined ? String(ecu.rx) : ""
         f.tx = ecu !== undefined ? text(ecu.tx) : ""
+        f.expr = text(signal.expr)
         f.service = signal.read !== undefined ? signal.read.service : f.service
         f.number = signal.read !== undefined ? signal.read.number : ""
         f.byte = text(field.byte)
@@ -259,8 +311,10 @@ QtObject {
 
     // "22 D100 on 7E8": what a signal asks, and of which module
     function describe(file, signal) {
-        if (signal.read === undefined)
-            return qsTr("computed")
+        if (signal.read === undefined) {
+            const e = String(signal.expr === undefined ? "" : signal.expr)
+            return qsTr("computed from %1").arg(e.length > 40 ? e.substring(0, 37) + "..." : e)
+        }
         const ecu = file.ecus.find(e => e.id === signal.ecu)
         return qsTr("%1 %2 on %3").arg(signal.read.service, signal.read.number,
                                        ecu !== undefined ? String(ecu.rx) : "?")

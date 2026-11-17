@@ -37,6 +37,7 @@ Pane {
     property alias formUnit: settingsOwnForm.formUnit
     property alias formDecimals: settingsOwnForm.formDecimals
     property alias formValues: settingsOwnForm.formValues
+    property alias exprEditor: settingsOwnForm.computedPart
     property alias vinLookupField: settingsVinLookup.vinLookupField
     property alias didField: settingsProfile.didField
 
@@ -1020,7 +1021,7 @@ Pane {
                  bit: formBit.text, order: formOrder, signed: formSigned.checked,
                  bytes: formBytes.text, scale: formScale.text, offset: formOffset.text,
                  unit: formUnit.text, decimals: formDecimals.text, group: formGroup,
-                 kind: formKind, values: formValues.text }
+                 kind: formKind, values: formValues.text, expr: exprEditor.formExpr.text }
     }
 
     function fillForm(f) {
@@ -1042,6 +1043,7 @@ Pane {
         formGroup = f.group
         formKind = f.kind
         formValues.text = f.values
+        exprEditor.formExpr.text = f.expr
         formProblem = ""
         formNote = ""
         readResult = null
@@ -1126,6 +1128,7 @@ Pane {
         if (pickedVehicle === null)
             return false
         const f = readForm()
+        if (f.kind === "computed") return exprEditor.save(f)
         const signal = SignalForm.draft(f)
         const named = ownSignals.find(s => s.name === signal.name && s.key !== editingKey)
         if (editingKey !== "" && named !== undefined) {
