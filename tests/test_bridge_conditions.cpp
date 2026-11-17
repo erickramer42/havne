@@ -1956,13 +1956,25 @@ TEST(BridgeTest, ALateFiringOfTheSetBeforeKeepsItsKeysFiveSeconds)
 }
 
 // A late firing of a key the edit keeps sounds as the edit has it: at its
-// new level, not at all with its sound turned off, and with one turned on
+// new level, not at all with its sound or the condition turned off, and
+// with a sound turned on
 TEST(BridgeTest, ALateFiringOfAKeptKeySoundsAsTheSetAttachedHasIt)
 {
     ToneRun run;
     ASSERT_TRUE(run.start()) << run.log.join(u'\n').toStdString();
-    const uint32_t before = run.generation;
-    // Hot a warning, Warm without its sound, Quiet with one
+    // A fourth condition that sounds, for the edit to turn off
+    QByteArray four = toneConditions();
+    four.replace(R"(]})",
+                 R"(,{"key":"off","name":"Off","when":{"signal":["id:1001"],)"
+                 R"("unit":"RPM","above":17000},)"
+                 R"("alert":{"level":"danger","sound":true}}]})");
+    ASSERT_TRUE(run.bridge.saveConditions(QString::fromUtf8(four))
+                    .value(QStringLiteral("ok"))
+                    .toBool());
+    ASSERT_EQ(run.bridge.conditionModel()->rowCount(), 4);
+    const uint32_t before = run.bridge.conditionsGenerationForTesting();
+    // Hot a warning, Warm without its sound, Quiet with one, and Off turned
+    // off with its alert as it was
     const QByteArray edited(
         R"({"havne_conditions":1,"conditions":[)"
         R"({"key":"hot","name":"Hot","when":{"signal":["id:1001"],)"
@@ -1973,6 +1985,9 @@ TEST(BridgeTest, ALateFiringOfAKeptKeySoundsAsTheSetAttachedHasIt)
         R"("alert":{"level":"warning","banner":true}},)"
         R"({"key":"quiet","name":"Quiet","when":{"signal":["id:1001"],)"
         R"("unit":"RPM","above":18000},)"
+        R"("alert":{"level":"danger","sound":true}},)"
+        R"({"key":"off","name":"Off","enabled":false,)"
+        R"("when":{"signal":["id:1001"],"unit":"RPM","above":17000},)"
         R"("alert":{"level":"danger","sound":true}}]})");
     ASSERT_TRUE(run.bridge.saveConditions(QString::fromUtf8(edited))
                     .value(QStringLiteral("ok"))
@@ -1994,6 +2009,9 @@ TEST(BridgeTest, ALateFiringOfAKeptKeySoundsAsTheSetAttachedHasIt)
     EXPECT_EQ(run.warning(), 1u) << "its sound was turned off";
     ASSERT_TRUE(late(2, "Alert: Quiet, 20001 RPM"));
     EXPECT_EQ(run.danger(), 1u) << "its sound was turned on";
+    ASSERT_TRUE(late(3, "Alert: Off, 20001 RPM"));
+    EXPECT_EQ(run.danger(), 1u) << "the edit turned the condition off";
+    EXPECT_EQ(run.warning(), 1u);
     ASSERT_TRUE(disconnectAndWait(run.bridge));
 }
 

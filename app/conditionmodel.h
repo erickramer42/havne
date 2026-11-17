@@ -106,7 +106,8 @@ public:
     // A row's key, "" past the rows; the row of a key, -1 for none
     QString key(int row, Rows rows = Rows::Now) const;
     int rowOfKey(const QString& key) const;
-    // A row's level when its alert sounds, ECUIO_ALERT_NONE when not
+    // A row's level when its alert sounds, ECUIO_ALERT_NONE when not or
+    // when the condition is turned off
     uint32_t toneLevel(int row, Rows rows = Rows::Now) const;
     // Whether any row's alert sounds
     bool sounds() const;

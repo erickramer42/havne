@@ -1153,7 +1153,7 @@ private:
         int active = 0;
         uint32_t generation = 0; // the attach whose events it keeps
     };
-    std::mutex m_conditionsMutex; // guards both windows
+    std::mutex m_conditionsMutex; // guards the windows
     ConditionWindow m_conditionWindow;
     // The set before's: the worker's dispatch under way at an attach took
     // that set, and gives its events after core's call returns

@@ -448,6 +448,10 @@ uint32_t ConditionModel::toneLevel(int row, Rows rows) const
     if (at == nullptr) {
         return ECUIO_ALERT_NONE;
     }
+    // A condition turned off keeps its alert block in the set: it is silent
+    if ((at->flags & ECUIO_CONDITION_INFO_DISABLED) != 0) {
+        return ECUIO_ALERT_NONE;
+    }
     constexpr uint32_t kSounds =
         ECUIO_CONDITION_USE_ALERT | ECUIO_CONDITION_ALERT_SOUND;
     return (at->uses & kSounds) == kSounds ? at->level : ECUIO_ALERT_NONE;
