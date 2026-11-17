@@ -3271,16 +3271,19 @@ profile  raw
                 "No pull found (no throttle or load signal) · No cruise found")
     }
 
-    // On a phone the same reason is shorter, so the Jump row stays one line
-    function test_thePhonesJumpRowKeepsTheReasonShort() {
+    // On a phone the row keeps its plain words, so it stays one line at any
+    // font, and the reason is the label's spoken name
+    function test_thePhonesJumpRowKeepsItsPlainWordsAndSpeaksTheReason() {
         const page = createPage()
         page.recordings = [findingsRow]
         openRow(page, findingsRow)
         tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
         Theme.compact = true
         try {
-            compare(find(page, "jumpStatus").text,
-                    "No pull (no throttle or load) · No cruise found")
+            const status = find(page, "jumpStatus")
+            compare(status.text, "No pull found · No cruise found")
+            compare(status.Accessible.name,
+                    "No pull found (no throttle or load signal) · No cruise found")
         } finally {
             Theme.compact = false
         }
