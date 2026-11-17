@@ -1,6 +1,6 @@
 // File/layer: tests/wasm_builder.h | test helper: a WebAssembly module's bytes from its parts
-// Testing: used by test_wamr_build.cpp and test_sandbox.cpp; a wrong section
-//          fails WAMR's load there
+// Testing: used by test_wamr_build.cpp and the sandbox's test files; a wrong
+//          section fails WAMR's load there
 //
 // The sandbox tests need small modules, most of them hostile (an endless
 // loop, a start function, an import), on every platform and with no
