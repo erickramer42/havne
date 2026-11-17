@@ -6,15 +6,19 @@
 #
 # A live stream whose reader stops reading drops lines, and a condition
 # event whose line is dropped is counted on the end line. mock://demo
-# holds the rev limiter from about 50.9 s to 55.9 s in its first loop,
-# its engine speed sawing between about 6860 and 7000 rpm on each tick;
-# 64 conditions on it, levels 2.5 rpm apart across that band, cross
+# holds the rev limiter from its 1018th tick to its 1118th (5 s of the
+# drive cycle, about 50.9 s to 55.9 s while the worker keeps 20 ticks a
+# second), its engine speed sawing between about 6860 and 7000 rpm on each
+# tick; 64 conditions on it, levels 2.5 rpm apart across that band, cross
 # several dozen levels on every tick, so the events come with the
-# session's ticks (a few hundred a second at the least), not with the
-# machine's speed. The line ring is at its floor
+# session's ticks, not with the machine's speed. The drive cycle moves a
+# tick at a time and a worker that falls a whole interval behind starts
+# its schedule over (mock_transport.cpp), so on a loaded runner the cycle
+# runs behind the wall clock: the stall and the run's end are counted in
+# frames (ticks), never in seconds. The line ring is at its floor
 # (HAVNE_CLI_RING_BYTES) and the stream records: the recorder's ring is
 # its own, so the recording's cond lines are every event the session
-# gave. Read to 50 s of session time, then stop reading until the stream
+# gave. Read to STALL_AT_FRAMES frames, then stop reading until the stream
 # must be dropping, whatever the system's buffers hold and however
 # loaded the machine is:
 # - the bytes the kernel holds for the reader stop growing, so the
@@ -48,8 +52,11 @@ try:
 except ImportError:
     fcntl = termios = None
 
-SECONDS = 60
-STALL_FROM_US = 50 * 1000 * 1000
+# --count ends the run on the worker's ticks; --seconds is only the bound
+# for a run that has wedged
+COUNT = 1250
+SECONDS = 150
+STALL_AT_FRAMES = 1000
 STALL_MAX_S = 25.0
 STILL_S = 0.5
 POLL_S = 0.05
@@ -58,7 +65,7 @@ LEAST_COND_BYTES = 60
 PAST_FULL = 3
 LEVELS = 64
 # The limiter crosses the band's levels about 110 times in each three
-# ticks, and holds it for 5 s: thousands of events a loop, where the fill
+# ticks, and holds it for 100 ticks: thousands of events a loop, where the fill
 # is about 600 (the pipe's and the ring's bytes over a cond line's). A long
 # key (the limit is 31 bytes) makes each cond line longer, so fewer events
 # fill them
@@ -143,7 +150,7 @@ def stall(fd, root, stall_us, cond_bytes):
         if time.monotonic() > deadline:
             spent = time.monotonic() - begun
             return full, held, (f"{after} events recorded from "
-                                f"{stall_us / 1e6:.1f} s, {full + PAST_FULL} "
+                                f"{stall_us / 1e6:.1f} s of session time, {full + PAST_FULL} "
                                 f"needed, in {spent:.1f} s of waiting "
                                 f"({after / spent:.0f} events a second), "
                                 f"cond lines of {cond_bytes} B")
@@ -167,7 +174,8 @@ def main():
                 side.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
         proc = subprocess.Popen(
             [cli, "stream", "mock://demo", "--values", "--conditions", named,
-             "--record", root, "--seconds", str(SECONDS)],
+             "--record", root, "--count", str(COUNT), "--seconds",
+             str(SECONDS)],
             stdin=subprocess.DEVNULL,
             stdout=theirs.fileno() if theirs else subprocess.PIPE,
             stderr=subprocess.PIPE, env=env)
@@ -182,17 +190,26 @@ def main():
         lines = []
         stalled = None
         shortest = None
+        frames = 0
+        stall_us = 0
+        begun = time.monotonic()
         for raw in reader:
             line = json.loads(raw)
             lines.append(line)
             if line.get("type") == "condition":
                 shortest = min(shortest or len(raw), len(raw))
-            t = line.get("t_us")
-            if t is None:
+            if line.get("type") != "frame":
                 continue
-            if stalled is None and t >= STALL_FROM_US:
+            frames += 1
+            if stalled is None and frames >= STALL_AT_FRAMES:
+                stall_us = line["t_us"]
                 cond_bytes = max(int((shortest or 0) * 0.9), LEAST_COND_BYTES)
-                stalled = stall(held_fd, root, t, cond_bytes)
+                spent = time.monotonic() - begun
+                print(f"      {frames} frames in {spent:.1f} s of waiting, "
+                      f"session time {stall_us / 1e6:.1f} s: "
+                      f"{frames / max(stall_us / 1e6, 0.001):.1f} ticks a "
+                      f"second")
+                stalled = stall(held_fd, root, stall_us, cond_bytes)
                 print(f"      the stall: the kernel held {stalled[1]} B, "
                       f"{stalled[0]} cond lines of {cond_bytes} B or more "
                       f"fill the ring")
@@ -227,8 +244,8 @@ def main():
               f"conditions_dropped {dropped}, {len(truth)} cond lines "
               f"recorded; dropped_frames {end.get('dropped_frames')}, "
               f"dropped_values {end.get('dropped_values')}; "
-              f"{len([e for e in truth if e[4] >= STALL_FROM_US])} recorded "
-              f"from {STALL_FROM_US // 1000000} s on")
+              f"{len([e for e in truth if e[4] >= stall_us])} recorded "
+              f"from {stall_us / 1e6:.1f} s on")
         if dropped is None:
             print("FAIL  the end line has no conditions_dropped")
             ok = False
