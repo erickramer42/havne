@@ -52,6 +52,11 @@ TestCase {
     // The readouts group digits with the system locale, as Live and the gauges do.
     function grouped(n) { return Number(n).toLocaleString(Qt.locale(), 'f', 0) }
 
+    // A page's place in the StackLayout: the Dashboard sits in its dashFrame
+    function stackIndex(page) {
+        const item = page.parent.objectName === "dashFrame" ? page.parent : page
+        return Array.from(item.parent.children).indexOf(item)
+    }
     function find(within, name) {
         const item = findChild(within, name)
         verify(item, name + " is there")
@@ -122,7 +127,7 @@ TestCase {
         main.font.pixelSize = 16
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         const page = find(main.contentItem, "logPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         verify(waitForPolish(main), "laid out")
         verify(Theme.touchTarget >= 48, "the phone's target")
         page.view = "activity"
@@ -181,7 +186,7 @@ TestCase {
                    : viewer || importing ? "recordingsPage"
                    : dashPhone ? "dashboardPage" : data.tag
         const page = find(main.contentItem, name)
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         verify(page.visible, name + " is on screen")
         if (dashPhone) {
             page.form = "phone"
@@ -318,7 +323,7 @@ TestCase {
         const walked = []
         const over = []
         const walk = (page, what) => {
-            main.gotoPage(Array.from(page.parent.children).indexOf(page))
+            main.gotoPage(stackIndex(page))
             verify(page.visible, what + " is on screen")
             verify(waitForPolish(main), what + " laid out")
             const out = pastTheEdge(page, main.contentItem, [])
@@ -371,7 +376,7 @@ TestCase {
                        "recordingsPage", "settingsPage"]
         for (const name of pages) {
             const page = find(main.contentItem, name)
-            main.gotoPage(Array.from(page.parent.children).indexOf(page))
+            main.gotoPage(stackIndex(page))
             verify(waitForPolish(main), name + " laid out")
             verify(band.visible, "the band on " + name)
             const top = band.mapToItem(main.contentItem, 0, 0).y
@@ -425,7 +430,7 @@ TestCase {
                                                refs: ["id:2001"], unit: "°C",
                                                options: { from: 0, to: 150, dangerFrom: 115 } }] }]
         dash.doc = doc
-        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        main.gotoPage(stackIndex(dash))
         dash.select(0)
         find(dash, "panelAlert").clicked()
         verify(settings.visible, "Settings comes forward")
@@ -445,7 +450,7 @@ TestCase {
         walk("the editor")
 
         // A second Alert leaves the edit waiting and says why on Dash
-        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        main.gotoPage(stackIndex(dash))
         dash.select(0)
         find(dash, "panelAlert").clicked()
         verify(dash.visible, "Dash stays")
@@ -472,7 +477,7 @@ TestCase {
         main.font.pixelSize = 16
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         const page = find(main.contentItem, "livePage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         const list = find(page, "signalList")
         tryVerify(() => list.itemAtIndex(0) !== null && list.itemAtIndex(0).hasValue, 5000,
                   "a row has a value")
@@ -505,7 +510,7 @@ TestCase {
         main.font.pixelSize = 16
         Theme.zoom = data.zoom
         const page = find(main.contentItem, "settingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open("display")
         const display = find(page, "driveHideRow").parent
         wait(300)
@@ -649,7 +654,7 @@ TestCase {
         main.height = 832
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
@@ -700,7 +705,7 @@ TestCase {
         main.width = 384
         main.height = 832
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
@@ -784,7 +789,7 @@ TestCase {
         main.height = data.h
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
@@ -864,7 +869,7 @@ TestCase {
         main.height = 832
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         const kept = page.chartHeight
         page.chartHeight = -1
         page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
@@ -915,7 +920,7 @@ TestCase {
         main.height = 832
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "obd2" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
@@ -951,7 +956,7 @@ TestCase {
         main.height = 832
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open({ title: "Findings", uri: "replay://x?profile=obd2", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "obd2" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
@@ -987,7 +992,7 @@ TestCase {
         main.height = 832
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open({ title: "Conditions", uri: "replay://x?profile=obd2", source: "",
                     folder: Harness.recordingFixtures + "/conditions", profile: "obd2" })
         tryVerify(() => find(page, "chartFrame").visible, 10000, "the recording opens")
@@ -1079,7 +1084,7 @@ TestCase {
         main.height = 832
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.chartHeight = -1
         page.open(row)
         tryVerify(() => find(page, "signalRows").visible && find(page, "signalRows").itemAtIndex(0) !== null,
@@ -1376,7 +1381,7 @@ TestCase {
         main.width = 832
         main.height = 384
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         const chart = find(page, "chartFrame")
@@ -1418,7 +1423,7 @@ TestCase {
         main.height = 800
         main.font.pixelSize = 16
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         const chart = find(page, "chartFrame")
@@ -1459,7 +1464,7 @@ TestCase {
         main.height = 832
         tryCompare(Theme, "compact", true)
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.chooseImportFile(Harness.writeScratchFile("targets.csv", guessFile))
         tryVerify(() => !page.importGuessing && !Bridge.recordingImport.busy, 10000,
                   "the guess ends")
@@ -1823,7 +1828,7 @@ TestCase {
         main.width = 384
         main.height = 832
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         const chart = find(page, "chartFrame")
@@ -1873,7 +1878,7 @@ TestCase {
         main.width = 384
         main.height = 832
         const page = find(main.contentItem, "recordingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open({ title: "Findings", uri: "replay://x?profile=raw", source: "",
                     folder: Harness.recordingFixtures + "/findings", profile: "raw" })
         const chart = find(page, "chartFrame")
@@ -1922,7 +1927,7 @@ TestCase {
         main.width = 384
         main.height = 832
         const dash = find(main.contentItem, "dashboardPage")
-        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        main.gotoPage(stackIndex(dash))
         dash.form = "desktop"
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         tryVerify(() => dash.compact && Theme.dense, 3000, "the phone's density")
@@ -1971,7 +1976,7 @@ TestCase {
         main.width = data.w
         main.height = 832
         const dash = find(main.contentItem, "dashboardPage")
-        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        main.gotoPage(stackIndex(dash))
         dash.form = data.form
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         verify(waitForPolish(main), "laid out")
@@ -2005,7 +2010,7 @@ TestCase {
         main.width = data.w
         main.height = data.h
         const dash = find(main.contentItem, "dashboardPage")
-        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        main.gotoPage(stackIndex(dash))
         dash.form = "phone"
         if (data.session)
             compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
@@ -2041,7 +2046,7 @@ TestCase {
         main.width = 384
         main.height = 832
         const dash = find(main.contentItem, "dashboardPage")
-        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        main.gotoPage(stackIndex(dash))
         dash.form = "phone"
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         // Measured once the phone's density holds: before it, a button is
@@ -2107,7 +2112,7 @@ TestCase {
         main.width = data.w
         main.height = 800
         const dash = find(main.contentItem, "dashboardPage")
-        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        main.gotoPage(stackIndex(dash))
         dash.form = "phone"
         tryVerify(() => dash.compact && Theme.dense, 3000, "the phone's density")
         dash.startEditing()
@@ -2170,7 +2175,7 @@ TestCase {
         main.width = data.w
         main.height = data.h
         const dash = find(main.contentItem, "dashboardPage")
-        main.gotoPage(Array.from(dash.parent.children).indexOf(dash))
+        main.gotoPage(stackIndex(dash))
         dash.form = "phone"   // the platform's on a phone, so set here
         tryCompare(find(dash, "dashPage_0"), "columns", data.columns, 3000)
         const tach = find(dash, "dashCell_0_1")
@@ -3900,7 +3905,7 @@ TestCase {
         main.height = 800
         main.font.pixelSize = 16
         const page = find(main.contentItem, "settingsPage")
-        main.gotoPage(Array.from(page.parent.children).indexOf(page))
+        main.gotoPage(stackIndex(page))
         page.open("connection")   // the relay's box is in it
         compare(Relay.start("elm327://bt:00:11:22:33:44:55", 0), "", "the relay starts")
         const traffic = find(page, "relayTraffic")
@@ -3931,5 +3936,33 @@ TestCase {
         compare(Bridge.minSweepMs, 500, "the next run starts with it")
         Bridge.minSweepMs = 0
         tryVerify(() => storedUi("minSweepMs") === 0, 2000, "and Off is kept too")
+    }
+
+    // The desktop's phone-layout frame (B1): the page is 384 wide and
+    // centered while the switch is on, and fills its area again after Done
+    function test_theDesktopsPhoneFrameIsCenteredAndEndsWithDone() {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = 1100
+        main.height = 800
+        const dash = find(main.contentItem, "dashboardPage")
+        const frame = find(main.contentItem, "dashFrame")
+        main.gotoPage(1)
+        verify(waitForPolish(main), "laid out")
+        dash.startEditing()
+        verify(waitForPolish(main), "laid out")
+        compare(dash.width, frame.width)
+        const sw = find(dash, "dashPhoneSwitch")
+        verify(sw.visible)
+        mouseClick(sw)
+        verify(dash.phoneEdit, "the switch is on")
+        verify(waitForPolish(main), "laid out")
+        compare(dash.width, 384)
+        compare(dash.x, (frame.width - 384) / 2)
+        verify(find(frame, "dashFrameEdge").visible)
+        dash.stopEditing()
+        verify(waitForPolish(main), "laid out")
+        compare(dash.width, frame.width)
+        verify(!find(frame, "dashFrameEdge").visible)
     }
 }
