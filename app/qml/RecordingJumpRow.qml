@@ -20,6 +20,8 @@ Flow {
 
     // "Pull 2 of 5 · 12.9 s", "No cruise found", "Looking for stretches..."
     property string status: ""
+    // What a screen reader says in its place, when it holds more
+    property string statusSpoken: ""
     property bool canPreviousPull: false
     property bool canNextPull: false
     property bool canPreviousCruise: false
@@ -120,6 +122,7 @@ Flow {
         height: Theme.touchTarget
         verticalAlignment: Text.AlignVCenter
         text: row.status
+        Accessible.name: row.statusSpoken !== "" ? row.statusSpoken : row.status
         color: Theme.textDim
         font.pixelSize: Theme.fontCaption
         elide: Text.ElideRight
