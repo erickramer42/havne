@@ -3271,6 +3271,21 @@ profile  raw
                 "No pull found (no throttle or load signal) · No cruise found")
     }
 
+    // On a phone the same reason is shorter, so the Jump row stays one line
+    function test_thePhonesJumpRowKeepsTheReasonShort() {
+        const page = createPage()
+        page.recordings = [findingsRow]
+        openRow(page, findingsRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        Theme.compact = true
+        try {
+            compare(find(page, "jumpStatus").text,
+                    "No pull (no throttle or load) · No cruise found")
+        } finally {
+            Theme.compact = false
+        }
+    }
+
     // The Stretches panel asks again with its levels, shows core's defaults in
     // its fields, and goes back to them
     function test_theStretchesPanelReasksWithItsLevels() {

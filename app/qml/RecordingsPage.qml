@@ -1571,9 +1571,11 @@ Page {
     }
     // What the row says for no pull: a recording with neither a throttle nor
     // an engine-load signal has nothing a pull is judged by, whatever the
-    // levels, and the row says so
+    // levels, and the row says so; a phone's row must stay one line, so it
+    // keeps the shorter words
     readonly property string noPullText: recording.pullsLackSignals
-        ? qsTr("No pull found (no throttle or load signal)")
+        ? (Theme.compact ? qsTr("No pull (no throttle or load)")
+                         : qsTr("No pull found (no throttle or load signal)"))
         : qsTr("No pull found")
     // The Jump row's line: where the last jump went while the cursor is
     // still at its start, else how many of each were found
