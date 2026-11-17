@@ -44,6 +44,11 @@ TestCase {
     }
 
     function cleanup() {
+        if (Bridge.connected || Bridge.disconnecting) {
+            Bridge.disconnectSession()
+            tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000, "no session after a case")
+        }
+        Bridge.unitSystem = 0
         Theme.compact = false
         Theme.dense = false
         Bridge.vehicleLabel = ""
@@ -414,5 +419,64 @@ TestCase {
         find(page, "formExpr").text = "obd2.map - bost and a long refusal's words to wrap"
         waitForPolish(column)
         compare(pastTheEdge(form, column, []).join("; "), "", "nothing past the edge with a refusal")
+    }
+
+    // The session's values fill the test values: each signal's own value, in
+    // the decoded unit though the model shows the chosen system's. The demo's
+    // key-on phase holds its values still, so a row read beside the fill is
+    // the fill's value
+    Instantiator {
+        id: sessionRows
+        model: Bridge.signalModel
+        delegate: QtObject {
+            required property int id
+            required property double value
+            required property bool hasValue
+        }
+    }
+
+    function sessionValue(id) {
+        for (let i = 0; i < sessionRows.count; ++i) {
+            const r = sessionRows.objectAt(i)
+            if (r["id"] === id && r["hasValue"])
+                return r["value"]
+        }
+        return undefined
+    }
+
+    function test_useTheSessionsValuesFillsTheTestValues() {
+        Bridge.unitSystem = 1
+        const page = createPage()
+        press(page, "vehicleNew")
+        page.openOwnForm()
+        typeComputed(page, "Mixed", "obd2.coolant + obd2.baro")
+        verify(!find(page, "formUseLive").visible, "no session")
+        compare(Bridge.connectSession("mock://demo?profile=obd2"), "", "the demo connects")
+        tryVerify(() => Bridge.connected, 5000, "connected")
+        tryVerify(() => find(page, "formUseLive").visible, 5000, "the button shows")
+        const leaves = page.exprEditor.checked.leaves
+        compare(leaves.length, 2)
+        tryVerify(() => leaves.every(l => sessionValue(l.id) !== undefined), 10000, "the demo has both values")
+        find(page, "formUseLive").clicked()
+        compare(find(page, "formUseLiveNote").text, "Filled 2 of 2 from the session")
+        for (let i = 0; i < 2; ++i) {
+            const shown = sessionValue(leaves[i].id)
+            const decoded = Bridge.decodedValue(leaves[i].unit, shown)
+            verify(Math.abs(Number(find(page, "formTest_" + i).text) - decoded) < 1,
+                   leaves[i].ref + " is " + decoded + " decoded, field " + find(page, "formTest_" + i).text)
+        }
+        verify(find(page, "formPreview").text.indexOf("= ") === 0, find(page, "formPreview").text)
+        // A signal the car doesn't send has no value: its field stays empty
+        tryVerify(() => Bridge.signalModel.hiddenCount > 0, 10000, "the demo car lacks some PIDs")
+        const hidden = Bridge.signalModel.hiddenSignals().map(h => h.name)
+        const none = page.exprEditor.editor.names().find(r => r.usable && r.ref.startsWith("obd2.")
+                                                           && hidden.indexOf(r.name) >= 0)
+        verify(none !== undefined, "a PID the demo doesn't send is offered")
+        find(page, "formExpr").text = "obd2.coolant + " + none.ref
+        find(page, "formTest_0").text = ""
+        find(page, "formTest_1").text = ""
+        find(page, "formUseLive").clicked()
+        compare(find(page, "formUseLiveNote").text, "Filled 1 of 2 from the session")
+        compare(find(page, "formTest_1").text, "", none.name + " has no value")
     }
 }
