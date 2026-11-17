@@ -55,6 +55,16 @@ inline constexpr version kOwnSource = {{0, 8, 0}};
  * (v0.9.0, ADR-0065) */
 inline constexpr version kEcus = {{0, 9, 0}};
 inline constexpr uint32_t kEcusBefore = 4;
+/* More requests in all than kSetRequestsBefore, each module's within
+ * ECUIO_MODULE_MAX_REQUESTS (v0.9.0, ADR-0065) */
+inline constexpr version kSetRequests = {{0, 9, 0}};
+inline constexpr uint32_t kSetRequestsBefore = 1024;
+/* A variant's files' signals together past one file's
+ * ECUIO_SIGNAL_FILE_MAX_SIGNALS (v0.9.0, ADR-0065) */
+inline constexpr version kSetSignals = {{0, 9, 0}};
+/* A variant's written copy past one file's ECUIO_SIGNAL_FILE_MAX_BYTES
+ * (v0.9.0, ADR-0065) */
+inline constexpr version kSetBytes = {{0, 9, 0}};
 
 /* Each "havne_signals" by its number: [0] stands for none */
 inline constexpr version kSignalFormatSince[] = {kSignalFile, kSignalFile,
@@ -79,6 +89,10 @@ static_assert(ECUIO_SIGNAL_FILE_MAX_SIGNALS == 1024,
               "ECUIO_SIGNAL_FILE_MAX_SIGNALS moved: add a row for it");
 static_assert(ECUIO_SIGNAL_FILE_MAX_BYTES == 1048576,
               "ECUIO_SIGNAL_FILE_MAX_BYTES moved: add a row for it");
+static_assert(ECUIO_MODULE_MAX_REQUESTS == 1024 &&
+                  ECUIO_SIGNAL_SET_MAX_SIGNALS == 16384 &&
+                  ECUIO_SIGNAL_SET_MAX_BYTES == 4194304,
+              "a set's bound moved: add a row beside kSetRequests");
 static_assert(ECUIO_COMPUTED_MAX_INPUTS == 4 &&
                   ECUIO_COMPUTED_MAX_CONSTANTS == 16 &&
                   ECUIO_COMPUTED_MAX_STEPS == 33 &&

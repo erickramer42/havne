@@ -198,6 +198,17 @@ void check_requires_this_core(const plugin_view& v)
           v.needs[2] == core[2]);
 }
 
+/* Whether core version a is before b */
+bool older(const uint16_t a[3], const uint16_t b[3])
+{
+    for (int i = 0; i < 3; ++i) {
+        if (a[i] != b[i]) {
+            return a[i] < b[i];
+        }
+    }
+    return false;
+}
+
 /* "X.Y.Z" with the minor one higher and the patch 0 */
 std::string raised(const std::string& version)
 {
@@ -287,9 +298,8 @@ void put_and_drop(const std::string& packed, uint8_t switches,
         check(rest.variants.size() + 1 == whole.variants.size());
         check(rest.id == whole.id && rest.lineage == whole.lineage);
         check(rest.version == raised(whole.version));
-        check(rest.needs[0] == whole.needs[0] &&
-              rest.needs[1] == whole.needs[1] &&
-              rest.needs[2] == whole.needs[2]);
+        /* Raised where the plugin named less than the result needs */
+        check(!older(rest.needs, whole.needs));
         check(rest.find(gone.id) == nullptr);
         for (const tables& t : rest.variants) {
             const tables* old = whole.find(t.id);

@@ -338,10 +338,11 @@ ecuio_status_t ecuio_plugin_put_variant(const char* packed, size_t length,
 
 /* The packed plugin without variant `variant`: its data files left out
  * unless another variant lists them, the ECUs only they read with
- * them, and the version raised as a put raises it; "requires" and the
- * rest as they were. ECUIO_ERR_NULL_ARGUMENT for a NULL variant;
- * ECUIO_ERR_INVALID_ARGUMENT for a variant the plugin lacks, or its
- * only one. */
+ * them, and the version raised as a put raises it. "requires": the
+ * higher of the plugin's own and the least core that reads the result,
+ * as a put writes it. The rest as it was. ECUIO_ERR_NULL_ARGUMENT for
+ * a NULL variant; ECUIO_ERR_INVALID_ARGUMENT for a variant the plugin
+ * lacks, or its only one. */
 ecuio_status_t ecuio_plugin_drop_variant(const char* packed, size_t length,
                                          const char* variant, char** out,
                                          size_t* out_length);
