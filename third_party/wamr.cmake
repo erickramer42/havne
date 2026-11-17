@@ -178,6 +178,16 @@ function(app_wamr_objects target)
     else()
         target_compile_options(${target} PRIVATE -w -fno-sanitize=alignment)
     endif()
+    # WAMR finds how much native stack is left from the address of a local.
+    # GCC's AddressSanitizer keeps such a local in its fake stack on the
+    # heap (its stack-use-after-return detection), so every call into a
+    # module would end as "native stack overflow". The parameter keeps
+    # WAMR's locals on the real stack; it does nothing without ASan, and
+    # Clang's ASan leaves that local where it is.
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(${target} PRIVATE
+            --param=asan-use-after-return=0)
+    endif()
     if("STATIC_RUNTIME" IN_LIST ARGN)
         set_target_properties(${target} PROPERTIES
             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

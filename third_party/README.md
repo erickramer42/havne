@@ -38,6 +38,14 @@ patches) sits beside the folder, never in it.
   unaligned access; a 32-bit ARM target needs the fix first. **When
   moving the pin,** see whether the release carries the fix and, if it
   does, drop the flag from both files.
+- **Under GCC's AddressSanitizer, WAMR's locals stay on the real
+  stack** (`--param=asan-use-after-return=0` in `wamr.cmake`, for GCC
+  alone). WAMR's stack check compares the address of a local with the
+  thread's stack boundary; GCC's ASan keeps such a local in a fake stack
+  on the heap, to catch its use after a return, and every call into a
+  module then ends as "native stack overflow". Havne's own code keeps
+  that detection. Clang's ASan leaves the local in place, so Clang
+  builds, the fuzzers among them, take no flag for it.
 - **A fix upstream has not released** is a numbered patch in
   `wamr-patches/` (`0001-<what>.patch`, with the upstream issue or pull
   request in its first lines), which the script applies in name order
