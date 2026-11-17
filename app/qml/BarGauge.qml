@@ -158,6 +158,19 @@ GaugeBase {
         height: gauge.vertical ? 3 : bar.height + 6
     }
 
+    // A flat bar's marks keep every stride-th label (the ends always) when
+    // the bar is too short for them all at about 6.2 px a character
+    readonly property int markStride: {
+        const n = scaleMarks.length
+        if (vertical || n < 3)
+            return 1
+        let chars = 0
+        for (const m of scaleMarks)
+            chars = Math.max(chars, formatScale(m).length)
+        const pitch = bar.width / (n - 1)
+        return Math.max(1, Math.ceil((chars * 6.2 + 8) / Math.max(1, pitch)))
+    }
+
     Item {
         objectName: "scaleMarks"
         x: gauge.vertical ? bar.x + bar.width + 6 : bar.x
@@ -169,7 +182,11 @@ GaugeBase {
             model: gauge.scaleMarks
             delegate: Text {
                 required property real modelData
+                required property int index
                 Accessible.ignored: true
+                visible: index === 0 || index === gauge.scaleMarks.length - 1
+                         || (index % gauge.markStride === 0
+                             && gauge.scaleMarks.length - 1 - index >= gauge.markStride)
                 readonly property real f: gauge.fractionOf(modelData)
                 // End labels align to the bar's edges, the rest center; standing
                 // up the low end is at the bottom
