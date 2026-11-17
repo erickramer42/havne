@@ -91,6 +91,7 @@ qt_add_qml_module(app_ui
         qml/Main.qml
         qml/Immersive.qml
         qml/SessionLabel.qml
+        qml/HiddenSignals.qml
         qml/KeepAwake.qml
         qml/HomePage.qml
         qml/ThemedButton.qml

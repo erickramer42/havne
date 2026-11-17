@@ -517,6 +517,8 @@ TEST(BridgeTest, SignalRoleNamesMatchQmlBindings)
     EXPECT_EQ(roles.value(SignalListModel::RangeHighRole),
               QByteArray("rangeHigh"));
     EXPECT_EQ(roles.value(SignalListModel::IsEnumRole), QByteArray("isEnum"));
+    EXPECT_EQ(roles.value(SignalListModel::HiddenWhyRole),
+              QByteArray("hiddenWhy"));
 
     // A row answers only its roles, and only rows that exist answer
     ecuio_signal_def_t defs[2];
