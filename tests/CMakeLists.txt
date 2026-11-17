@@ -2322,6 +2322,11 @@ if(WIN32)
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
         SURROGATE_EXE_PATH="$<TARGET_FILE:ecuio-j2534-surrogate>"
     )
+    # core/src for surrogate_log_names.h: the out-of-memory loop seeds the
+    # session log's folder with the names the client prunes
+    target_include_directories(test_j2534_connect PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/src
+    )
     add_dependencies(test_j2534_connect fake_j2534)
     add_dependencies(test_j2534_connect fake_j2534_legacy)   # beside the fake
     app_deploy_surrogate(test_j2534_connect)
