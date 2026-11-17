@@ -28,7 +28,7 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
     test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_recording.cpp
-    test_armed_recorder.cpp)
+    test_armed_recorder.cpp test_pick_only.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -122,7 +122,8 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # The explicit core/src include is required because request_engine.h is
 # INTERNAL: ecuio-core's PUBLIC include dirs cover only core/include,
 # and the engine is deliberately not part of the public tree.
-add_executable(test_obd2 test_obd2.cpp test_session_control.cpp)
+add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
+    test_request_table.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -1907,6 +1908,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_obdb.cpp
         test_bridge_health.cpp
         test_bridge_replay.cpp
+        test_bridge_replay_end.cpp
         test_bridge_diagnostics.cpp
         test_bridge_signalfiles.cpp
         test_bridge_live.cpp
@@ -2422,6 +2424,11 @@ if(WIN32)
     target_compile_definitions(test_j2534_connect PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
         SURROGATE_EXE_PATH="$<TARGET_FILE:ecuio-j2534-surrogate>"
+    )
+    # core/src for surrogate_log_names.h: the out-of-memory loop seeds the
+    # session log's folder with the names the client prunes
+    target_include_directories(test_j2534_connect PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/src
     )
     add_dependencies(test_j2534_connect fake_j2534)
     add_dependencies(test_j2534_connect fake_j2534_legacy)   # beside the fake

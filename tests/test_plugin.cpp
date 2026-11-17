@@ -836,22 +836,170 @@ TEST(PluginTest, ANameThatMakesNoProfileIsRefused)
 }
 
 // A variant whose merged files a recording can't copy as one signal file
-// (past 1 MiB written out) is refused, never loaded with no copy
+// (past a set's bytes written out) is refused, never loaded with no copy;
+// one past a data file's 1 MiB and within a set's loads
 TEST(PluginTest, AVariantThatMakesNoOneSignalFileIsRefused)
 {
-    const std::string pad(600 * 1024, 'x');
+    const std::string pad(900 * 1024, 'x');
     const auto file = [&pad](const char* key, const char* did) {
         return std::string(R"({"havne_signals": 1, "signals": [{"key": ")") +
                key + R"(", "name": ")" + key + R"(", "ecu": "pcm", "x-pad": ")" + pad +
                R"(", "read": {"service": "22", "number": ")" + did +
                R"("}, "field": {"byte": 0}}]})";
     };
-    const std::string why = packed_refusal(
-        packed(kHead, file("one", "F40D"),
-               R"([{"id": "base", "files": ["a.json", "b.json"]}])",
-               ", \"b.json\": " + file("two", "F40E")));
+    static_assert(5 * 900 * 1024 > ECUIO_SIGNAL_SET_MAX_BYTES &&
+                      2 * 900 * 1024 > ECUIO_SIGNAL_FILE_MAX_BYTES &&
+                      2 * 901 * 1024 < ECUIO_SIGNAL_SET_MAX_BYTES,
+                  "five files pass a set's bytes, two only a data file's");
+    const std::string why = packed_refusal(packed(
+        kHead, file("one", "F40D"),
+        R"([{"id": "base", "files": ["a.json", "b.json", "c.json", "d.json", "e.json"]}])",
+        ", \"b.json\": " + file("two", "F40E") + ", \"c.json\": " +
+            file("three", "F40F") + ", \"d.json\": " + file("four", "F410") +
+            ", \"e.json\": " + file("five", "F411")));
     EXPECT_NE(why.find("variant 'base''s files don't make one signal file"),
               std::string::npos)
+        << why;
+
+    ecuio_status_t s = ECUIO_ERR_INVALID_ARGUMENT;
+    Plugin two =
+        load_packed(packed(kHead, file("one", "F40D"),
+                           R"([{"id": "base", "files": ["a.json", "b.json"]}])",
+                           ", \"b.json\": " + file("two", "F40E")),
+                    &s);
+    ASSERT_EQ(s, ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_signal_file_t* merged = ecuio_plugin_variant_file(two.get(), 0);
+    ASSERT_NE(merged, nullptr);
+    EXPECT_EQ(ecuio_signal_file_set(merged)->count, 2u);
+}
+
+// A variant's files together hold a car's signals (ADR-0065 section 6):
+// each data file keeps a data file's bound, the merged list a set's, each
+// ECU its module's requests, and the variant's one signal file reads back
+// only as a set's written copy
+TEST(PluginTest, AVariantHoldsMoreSignalsThanOneFileMay)
+{
+    /* n signals keyed <prefix><i>, each a DID of its own from first on,
+     * asked of ECU e<ecu> */
+    const auto file = [](const char* prefix, unsigned ecu, unsigned n,
+                         unsigned first = 0x1000) {
+        std::string s = R"({"havne_signals": 1, "signals": [)";
+        for (unsigned i = 0; i < n; ++i) {
+            char sig[200];
+            std::snprintf(
+                sig, sizeof sig,
+                R"(%s{"key": "%s%u", "name": "%s%u", "ecu": "e%u", "read": {"service": "22", "number": "%04X"}, "field": {"byte": 0}})",
+                i ? ", " : "", prefix, i, prefix, i, ecu, first + i);
+            s += sig;
+        }
+        return s + "]}";
+    };
+    /* A package of the given files, f0.json on, one variant of them all,
+     * with an ECU for each */
+    const auto package = [](const std::vector<std::string>& files) {
+        std::string ecus;
+        std::string names;
+        std::string bodies;
+        for (size_t i = 0; i < files.size(); ++i) {
+            char e[80];
+            std::snprintf(e, sizeof e,
+                          R"(%s{"id": "e%u", "rx": "%03X", "tx": "%03X"})",
+                          i ? ", " : "", static_cast<unsigned>(i),
+                          0x700u + static_cast<unsigned>(i),
+                          0x600u + static_cast<unsigned>(i));
+            ecus += e;
+            const std::string name = "f" + std::to_string(i) + ".json";
+            names += std::string(i ? ", " : "") + "\"" + name + "\"";
+            bodies +=
+                std::string(i ? ", " : "") + "\"" + name + "\": " + files[i];
+        }
+        return std::string(
+                   R"({"havne_plugin": 1, "id": "p", "name": "P", "version": "1.0.0",)"
+                   R"( "requires": {"core": "0.1.0"}, "source": {"name": "t"},)"
+                   R"( "tiers": ["data"], "ecus": [)") +
+               ecus + R"(], "variants": [{"id": "base", "files": [)" + names +
+               R"(]}], "files": {)" + bodies + "}}";
+    };
+    const unsigned most = ECUIO_MODULE_MAX_REQUESTS;
+    static_assert(ECUIO_SIGNAL_FILE_MAX_SIGNALS == ECUIO_MODULE_MAX_REQUESTS,
+                  "a full data file asks one module its most");
+
+    /* Two full files on two ECUs: twice a data file's signals */
+    ecuio_status_t s = ECUIO_ERR_INVALID_ARGUMENT;
+    Plugin two =
+        load_packed(package({file("a", 0, most), file("b", 1, most)}), &s);
+    ASSERT_EQ(s, ECUIO_OK) << ecuio_last_error_detail();
+    const ecuio_signal_file_t* merged = ecuio_plugin_variant_file(two.get(), 0);
+    ASSERT_NE(merged, nullptr);
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(merged);
+    EXPECT_EQ(set->count, 2 * most);
+    EXPECT_EQ(set->channel_count, 2u);
+    EXPECT_EQ(set, ecuio_plugin_variant_set(two.get(), 0));
+    const std::string& copy = ecuio_sf::bytes_of(*merged);
+    ASSERT_FALSE(copy.empty());
+    ecuio_signal_file_t* back = reinterpret_cast<ecuio_signal_file_t*>(1);
+    EXPECT_EQ(ecuio_signal_file_load(copy.data(), copy.size(), &back),
+              ECUIO_ERR_INVALID_ARGUMENT)
+        << "the copy is no data file";
+    EXPECT_EQ(back, nullptr);
+    EXPECT_NE(std::string(ecuio_last_error_detail())
+                  .find("\"signals\" lists 2048, more than 1024"),
+              std::string::npos)
+        << ecuio_last_error_detail();
+    ASSERT_EQ(ecuio_signal_file_load_with(copy.data(), copy.size(),
+                                          ECUIO_SIGNAL_FILE_LOAD_SET, &back),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    const ecuio_signal_set_t& read = *ecuio_signal_file_set(back);
+    ASSERT_EQ(read.count, set->count);
+    EXPECT_EQ(std::memcmp(read.defs, set->defs, sizeof *set->defs * set->count),
+              0);
+    ecuio_signal_file_free(back);
+
+    /* One data file a signal past its own bound, on two ECUs so no
+     * module is past its most: refused in the file, by its bound */
+    std::string long_file = file("a", 0, most);
+    long_file.insert(
+        long_file.size() - 2,
+        R"(, {"key": "z", "name": "Z", "ecu": "e1", "read": {"service": "22", "number": "1000"}, "field": {"byte": 0}})");
+    const std::string long_package = package({long_file, file("b", 1, 1)});
+    std::string why = packed_refusal(long_package);
+    EXPECT_NE(why.find("\"signals\" lists 1025, more than 1024"),
+              std::string::npos)
+        << why;
+    const size_t list =
+        long_package.find("\"signals\": [", long_package.find("\"f0.json\""));
+    ASSERT_NE(list, std::string::npos);
+    ASSERT_EQ(why.rfind("line 1, column ", 0), 0u) << why;
+    const size_t column = std::stoul(why.substr(15));
+    EXPECT_GT(column, list) << "in the first file's list: " << why;
+    EXPECT_LE(column, list + 13) << "at the list's start: " << why;
+
+    /* Two files asking one ECU more than its most between them */
+    why = packed_refusal(package(
+        {file("a", 0, most), file("b", 0, 1, 0x1000 + most), file("c", 2, 1)}));
+    EXPECT_NE(why.find("the signals ask ecu 'e0' more than 1024 requests"),
+              std::string::npos)
+        << why;
+    /* The same DIDs asked again cost no request: within the most */
+    Plugin shared =
+        load_packed(package({file("a", 0, most), file("b", 0, most)}), &s);
+    EXPECT_EQ(s, ECUIO_OK) << ecuio_last_error_detail();
+
+    /* A set's most signals, and a file's worth more */
+    const unsigned files_most =
+        ECUIO_SIGNAL_SET_MAX_SIGNALS / ECUIO_SIGNAL_FILE_MAX_SIGNALS;
+    std::vector<std::string> car;
+    for (unsigned i = 0; i < files_most; ++i) {
+        car.push_back(file(("s" + std::to_string(i) + "x").c_str(), i, most));
+    }
+    Plugin whole = load_packed(package(car), &s);
+    ASSERT_EQ(s, ECUIO_OK) << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_plugin_variant_set(whole.get(), 0)->count,
+              ECUIO_SIGNAL_SET_MAX_SIGNALS);
+    car.push_back(file("over", files_most, 1));
+    why = packed_refusal(package(car));
+    EXPECT_NE(why.find("lists 16385, more than 16384"), std::string::npos)
         << why;
 }
 

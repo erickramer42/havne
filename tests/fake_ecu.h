@@ -748,6 +748,18 @@ inline ModuleTable& module_table()
     return table;
 }
 
+/* An ECU that isn't on this car: the reply ID nothing answers on, 0 for
+ * none, kEveryEcuAbsent for a car that answers nothing at all (its
+ * ignition off). One per process: the fake DLL sets it from
+ * ECUIO_FAKE_ABSENT_ECU on each write, the in-process fakes' tests
+ * before a session starts. */
+constexpr uint32_t kEveryEcuAbsent = UINT32_MAX;
+inline std::atomic<uint32_t>& absent_ecu()
+{
+    static std::atomic<uint32_t> rx{0};
+    return rx;
+}
+
 inline int hex_digit(char c)
 {
     if (c >= '0' && c <= '9')
@@ -888,11 +900,15 @@ inline void reset_sessions()
  * keeps a module's codes (31 for a DID, 11 for a service), 0 answers
  * nothing, any other value is the code. 10 and 3E (two bytes) are the
  * session's: see above; 3E 00 is answered by every ECU, 3E 80 by none.
- * False when nothing answers. */
+ * False when nothing answers, as for every request to absent_ecu(). */
 inline bool answer_for(uint32_t rx, const unsigned char* req, size_t req_len,
                        long unsupported_nrc, unsigned char* out,
                        size_t* out_len)
 {
+    const uint32_t absent = absent_ecu().load(std::memory_order_acquire);
+    if (absent == kEveryEcuAbsent || (rx != 0 && rx == absent)) {
+        return false;
+    }
     const ModuleTable& t = module_table();
     const uint32_t n = t.count.load(std::memory_order_acquire);
     bool module = false;

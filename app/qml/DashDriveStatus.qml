@@ -43,7 +43,7 @@ Item {
             elide: Text.ElideRight
             font.pixelSize: Theme.fontCaption
             color: Theme.textDim
-            text: qsTr("· %1").arg(Bridge.uriLabel)
+            text: qsTr("· %1").arg(SessionLabel.address(Bridge.uriLabel))
         }
         Label {
             objectName: "driveStatusRun"

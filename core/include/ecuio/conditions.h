@@ -383,7 +383,9 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
  * signals the conditions it judges read, a computed one's inputs among
  * them, whether or not the focus picks them; a disabled or unavailable
  * condition keeps nothing asked. The focus's own picks, and the
- * recording's focus line, stay the caller's.
+ * recording's focus line, stay the caller's. A session that asks only
+ * its picks (ECUIO_SESSION_INFO_PICK_ONLY, core.h) asks those signals
+ * with no focus too.
  *
  * A recorder attached holds the set for the recording's length: the set
  * and every event it gives go into the recording (conditions.json, the
@@ -394,7 +396,10 @@ _Static_assert(offsetof(ecuio_condition_binding_t, reserved) == 48, "binding res
  *
  * ECUIO_OK; ECUIO_ERR_NULL_ARGUMENT for a NULL session;
  * ECUIO_ERR_SESSION_CLOSED after close; ECUIO_ERR_INVALID_ARGUMENT for a
- * file whose set isn't the session's; ECUIO_ERR_IN_USE while a recorder
+ * file whose set isn't the session's, or, on a session that asks only
+ * its picks, a set whose signals' requests, with the focus's, number
+ * more than ECUIO_PROFILE_MAX_REQUESTS (profile.h), the counts in the
+ * detail; ECUIO_ERR_IN_USE while a recorder
  * is attached, since a recording holds one set for its whole length
  * (ADR-0063 section 12's step 7 decides a change of set within one);
  * ECUIO_ERR_OUT_OF_MEMORY. Nothing changes on a failure, and

@@ -90,7 +90,7 @@ TestCase {
         const address = find(main.contentItem, "linkPillAddress")
         compare(address.visible, Bridge.connected, "header pill's address")
         if (Bridge.connected)
-            compare(address.text, "· " + shown, "header pill's address")
+            compare(address.text, "· " + SessionLabel.address(shown), "header pill's address")
 
         // Home's card shows a session; with none, Home is the connect list
         const home = showPage(main, "homePage")
@@ -105,7 +105,7 @@ TestCase {
         // The address only where the label's row leaves room for it
         const dashboardLabel = find(dashboard, "linkLabel")
         compare(dashboardLabel.text,
-                state === "ok" ? (dashboardLabel.roomForAddress ? "Live · " + shown : "Live") : label,
+                state === "ok" ? (dashboardLabel.roomForAddress ? "Live · " + SessionLabel.address(shown) : "Live") : label,
                 "Dashboard label")
         sameColor(dashboardLabel.color, tone, "Dashboard label")
 

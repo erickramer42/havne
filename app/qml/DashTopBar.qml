@@ -176,6 +176,17 @@ ColumnLayout {
         }
     }
 
+    // A page added: the name field, selected, so typing replaces "Page 2"
+    Connections {
+        target: topBar.host
+        function onPageNameWanted() {
+            Qt.callLater(() => {
+                pageName.forceActiveFocus()
+                pageName.selectAll()
+            })
+        }
+    }
+
     // The desktop's edit mode in the phone form's frame (B1)
     RowLayout {
         objectName: "dashPhoneRow"
@@ -299,7 +310,8 @@ ColumnLayout {
         ThemedButton {
             id: moreLoad
             objectName: "moreLoad"
-            text: qsTr("Load layout")
+            text: qsTr("Load layout (all pages)")
+            Accessible.name: qsTr("Load a layout from a file: it replaces every page")
             onClicked: {
                 topBar.host.noteLayout("")
                 topBar.host.fileAdds = false
@@ -571,6 +583,11 @@ ColumnLayout {
                 hairlineWidth: topBar.host.hairlineWidth
                 onPageChosen: (i) => topBar.host.goTo(i)
                 onAddRequested: topBar.host.openPresets("add")
+                onRenamed: (i, name) => {
+                    if (i !== topBar.host.pageIndex)
+                        topBar.host.goTo(i)
+                    topBar.host.renamePage(name)
+                }
             }
         }
     }
@@ -603,7 +620,7 @@ ColumnLayout {
                 // error codes) stays in LiveView's banner.
                 readonly property bool roomForAddress: width >= 150
                 text: Bridge.linkState === "ok"
-                      ? (roomForAddress ? qsTr("Live · %1").arg(Bridge.uriLabel) : qsTr("Live"))
+                      ? (roomForAddress ? qsTr("Live · %1").arg(SessionLabel.address(Bridge.uriLabel)) : qsTr("Live"))
                       : Theme.linkLabel(Bridge.linkState)
                 font.pixelSize: Theme.fontCaption
                 color: Theme.linkColor(Bridge.linkState)

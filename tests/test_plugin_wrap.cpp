@@ -557,12 +557,12 @@ TEST(PluginWrapTest, APutThePluginCantHoldSuggestsAPluginOfItsOwn)
     EXPECT_FALSE(ok(put(many, "v31", file_a())).empty());
 
     /* A file that a wrap refuses too gets no such advice: written out,
-     * its signals are past a signal file's 1 MiB */
-    std::string padding = "[";
+     * two spaces a level, its one signal is past a set's bytes */
+    std::string padding = "[[[[[[[[[[[[[[[[[[[[[";
     for (int i = 0; i < 150000; ++i) {
         padding += i == 0 ? "1" : ",1";
     }
-    padding += "]";
+    padding += "]]]]]]]]]]]]]]]]]]]]]";
     const std::string heavy = file(
         "Heavy", "S", kPcm,
         R"({"key": "oil", "name": "Oil", "ecu": "pcm", "x-pad": )" + padding +

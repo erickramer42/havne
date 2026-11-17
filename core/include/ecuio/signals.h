@@ -459,9 +459,10 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
                                                       ECUIO_SIGNAL_SET_LAYOUT */
 #define ECUIO_VALIDATE_ERR_SET_RESERVED     (-16)  /* a reserved field of
                                                       the set not zero */
-#define ECUIO_VALIDATE_ERR_REQUEST_COUNT    (-17)  /* the defs derive more
-                                                      requests than
-                                                      ECUIO_PROFILE_MAX_REQUESTS
+#define ECUIO_VALIDATE_ERR_REQUEST_COUNT    (-17)  /* one module's defs
+                                                      derive more requests
+                                                      than
+                                                      ECUIO_MODULE_MAX_REQUESTS
                                                       (profile.h); reported
                                                       by ecuio_profile_register */
 #define ECUIO_VALIDATE_ERR_TABLES_NULL      (-18)  /* enum_count or
@@ -643,9 +644,17 @@ int ecuio_display_convert(const char* unit, uint8_t decimal_places,
  * (Android's content:// URIs, iOS's sandbox). Everything a file gets
  * wrong is refused here, at load, not at the car. */
 
-/* A file's bounds */
+/* A data file's bounds: a file a user writes or imports, and each file
+ * of a plugin */
 #define ECUIO_SIGNAL_FILE_MAX_BYTES   1048576u   /* 1 MiB */
 #define ECUIO_SIGNAL_FILE_MAX_SIGNALS 1024u
+/* A set's bounds (ADR-0065 section 3): the signals of its own a set
+ * built from several data files holds (a plugin variant's files
+ * merged), and the bytes of that set written as one signal file, a
+ * recording's signals.json. ecuio_signal_file_load_with reads to these
+ * when asked. */
+#define ECUIO_SIGNAL_SET_MAX_BYTES    4194304u   /* 4 MiB */
+#define ECUIO_SIGNAL_SET_MAX_SIGNALS  16384u
 /* The formats this core reads, a file's "havne_signals": the newest and
  * the oldest. Format 2 adds the computed grammar's functions,
  * comparisons and conditional; a format 1 file is held to format 1. */
@@ -661,10 +670,27 @@ typedef struct ecuio_signal_file ecuio_signal_file_t;
  * ecuio_last_error_detail() saying where and why ("line 12, column 9:
  * unknown key 'scael'", never a path); ECUIO_ERR_OUT_OF_MEMORY. *out is
  * NULL on any failure. The file owns its set, defs, channels and
- * tables, and its set passes ecuio_validate_signal_set and fits
- * ECUIO_PROFILE_MAX_REQUESTS. Thread-safe: each call is its own. */
+ * tables, and its set passes ecuio_validate_signal_set and derives at
+ * most ECUIO_MODULE_MAX_REQUESTS requests for each ECU (profile.h).
+ * Read to a data file's bounds: more than ECUIO_SIGNAL_FILE_MAX_BYTES,
+ * or more than ECUIO_SIGNAL_FILE_MAX_SIGNALS signals of its own, is
+ * refused. Thread-safe: each call is its own. */
 ecuio_status_t ecuio_signal_file_load(const char* bytes, size_t length,
                                       ecuio_signal_file_t** out);
+
+/* ecuio_signal_file_load_with's flags. Values are append-only. */
+#define ECUIO_SIGNAL_FILE_LOAD_SET 0x1u /* read to a set's bounds */
+
+/* ecuio_signal_file_load, read to the bounds flags name: 0 a data
+ * file's, the same call; ECUIO_SIGNAL_FILE_LOAD_SET a set's
+ * (ECUIO_SIGNAL_SET_MAX_BYTES, ECUIO_SIGNAL_SET_MAX_SIGNALS). The flag
+ * is for the signals.json a recording holds, which is a session's whole
+ * set and may be one built from several data files; a file a user
+ * hands over is a data file. ECUIO_ERR_INVALID_ARGUMENT for any other
+ * flag, *out NULL. */
+ecuio_status_t ecuio_signal_file_load_with(const char* bytes, size_t length,
+                                           uint32_t flags,
+                                           ecuio_signal_file_t** out);
 
 /* The file's set, valid until ecuio_signal_file_free; NULL for NULL.
  * A session using it, through the profile it registers under, keeps

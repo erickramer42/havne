@@ -9,8 +9,10 @@
 # havne.Gauge, a level not given None, and None for a signal with no
 # gauge or no such signal; the file's format and each computed signal's
 # expression as written (a chain in a format 2 file, None for a number
-# signal or no such signal).
+# signal or no such signal); a file past a written file's signals read
+# only as a recording's copy.
 
+import json
 import os
 
 import pytest
@@ -48,6 +50,27 @@ def test_a_refused_file_says_where():
         havne.SignalFile('{"havne_signals": 1,\n "name": 7}')
     assert e.value.name == "INVALID_ARGUMENT"
     assert "line 2" in e.value.detail
+
+
+def test_a_recordings_copy_holds_more_signals_than_a_written_file():
+    # A session's whole set, as a recording keeps it: two ECUs, one
+    # signal more than a file a user writes may hold
+    most = havne.c.ECUIO_SIGNAL_FILE_MAX_SIGNALS
+    copy = json.dumps({
+        "havne_signals": 1, "name": "A whole car", "source": {"name": "t"},
+        "ecus": [{"id": "a", "rx": "7E8"}, {"id": "b", "rx": "7E9"}],
+        "signals": [{"key": f"s{i}", "name": f"S{i}", "ecu": "ab"[i // most],
+                     "read": {"service": "22", "number": f"{0x1000 + i % most:04X}"},
+                     "field": {"byte": 0}} for i in range(most + 1)]})
+    with pytest.raises(havne.Error) as e:
+        havne.SignalFile(copy)
+    assert e.value.name == "INVALID_ARGUMENT"
+    assert f"lists {most + 1}, more than {most}" in e.value.detail
+    car = havne.SignalFile(copy, recorded=True)
+    assert car.name == "A whole car"
+    # A written file reads the same either way
+    path = os.path.join(SIGNALS, "extras.json")
+    assert havne.SignalFile(path=path, recorded=True).profile ==         havne.SignalFile(path=path).profile
 
 
 def test_a_recording_opens_through_the_file_it_is_given():

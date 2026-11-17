@@ -1,6 +1,7 @@
 // File/layer: core/src/j2534_loader.cpp | C++17, Qt-free, CI-validated headless
 // Testing: HARNESS: J2534ConnectTest (test_j2534_connect); test_j2534_load;
-//          test_j2534_stream; test_j2534_routing
+//          test_j2534_stream; test_j2534_routing; J2534DiscoveryTest
+//          (test_j2534_discovery)
 // CI: non-Windows gets linking stubs only; core.cpp guards routing
 
 #include "ecuio/j2534.h"
@@ -16,6 +17,7 @@
 #include "win_utf8.h"
 
 #include <algorithm>
+#include <new>
 #include <vector>
 
 /* Backing type for the header's opaque ecuio_j2534_handle_t. Global scope,
@@ -216,40 +218,43 @@ ecuio_status_t ecuio_j2534_discover_devices(ecuio_j2534_device_t** devices_out,
     *devices_out = nullptr;
     *device_count = 0;
 
-    std::vector<ecuio_j2534_device_t> devices;
-    devices.reserve(4);
+    try {
+        std::vector<ecuio_j2534_device_t> devices;
+        /* Room for every device the sweeps list (enumerate_view stops at the
+         * cap), so no push_back allocates while a registry key is open */
+        devices.reserve(ECUIO_J2534_MAX_VENDORS);
 
-    /* Both root spellings x both WOW64 views = 4 sweeps; identical entries
-     * collapse in the dedupe below (dll_path + vendor name), and the OBDX
-     * Pro's one root in the 32-bit view is found by exactly one sweep. */
-    for (const wchar_t* root : kPassThruRoots) {
-        enumerate_view(root, KEY_WOW64_64KEY, devices);
-        enumerate_view(root, KEY_WOW64_32KEY, devices);
-    }
+        /* Both root spellings x both WOW64 views = 4 sweeps; identical
+         * entries collapse in the dedupe below (dll_path + vendor name), and
+         * the OBDX Pro's one root in the 32-bit view is found by exactly one
+         * sweep. */
+        for (const wchar_t* root : kPassThruRoots) {
+            enumerate_view(root, KEY_WOW64_64KEY, devices);
+            enumerate_view(root, KEY_WOW64_32KEY, devices);
+        }
 
-    std::vector<ecuio_j2534_device_t> unique;
-    for (const auto& d : devices) {
-        bool dup = false;
-        for (const auto& u : unique) {
-            if (_stricmp(d.dll_path, u.dll_path) == 0 &&
-                strcmp(d.vendor_name, u.vendor_name) == 0) {
-                dup = true;
-                break;
+        std::vector<ecuio_j2534_device_t> unique;
+        for (const auto& d : devices) {
+            bool dup = false;
+            for (const auto& u : unique) {
+                if (_stricmp(d.dll_path, u.dll_path) == 0 &&
+                    strcmp(d.vendor_name, u.vendor_name) == 0) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (!dup) {
+                unique.push_back(d);
             }
         }
-        if (!dup) {
-            unique.push_back(d);
+        for (auto& d : unique) {
+            d.vendor_id = static_cast<uint32_t>(&d - &unique[0]);
         }
-    }
-    for (auto& d : unique) {
-        d.vendor_id = static_cast<uint32_t>(&d - &unique[0]);
-    }
 
-    if (unique.empty()) {
-        return ECUIO_OK;
-    }
+        if (unique.empty()) {
+            return ECUIO_OK;
+        }
 
-    try {
         ecuio_j2534_device_t* copy = new ecuio_j2534_device_t[unique.size()];
         std::copy(unique.begin(), unique.end(), copy);
         *devices_out = copy;

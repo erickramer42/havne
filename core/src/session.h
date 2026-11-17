@@ -1,6 +1,6 @@
 // File/layer: core/src/session.h | internal, C++17, Qt-free; the session
 //             struct behind the opaque ecuio_session_t
-// Testing: UNIT: CoreTest, RecorderTest, ConditionSessionTest,
+// Testing: UNIT: CoreTest, PickOnlyTest, RecorderTest, ConditionSessionTest,
 //          ConditionRecordingTest (test_core)
 
 #ifndef ECUIO_SESSION_H
@@ -172,6 +172,14 @@ struct ecuio_session {
     std::atomic<uint32_t> focus_generation{0};
     bool focus_requests = false;
     std::vector<uint8_t> focus_askable;
+    /* Set with focus_askable by attach (ecuio_build_requests): each def's
+     * row in the worker's table (ECUIO_ROW_NONE: none), which the worker
+     * adds to as a scanned DID joins; whether the session asks only its
+     * picks (ADR-0065 section 2: the set derives more requests than a
+     * rotation holds) and that table's rows, which never grow */
+    std::vector<uint32_t> focus_rows;
+    bool focus_pick_only = false;
+    uint32_t focus_table = 0;
     /* One byte per def, sized with focus_askable: 1 for a def the focus the
      * worker took leaves unasked (ecuio_focus_unasked), under the mutex */
     std::vector<uint8_t> focus_unasked;

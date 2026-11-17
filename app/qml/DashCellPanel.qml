@@ -22,7 +22,32 @@ GaugeCard {
     readonly property var range: DashboardBook.defaultRange(cell ? cell.unit ?? "" : "")
     // The row the cell shows, whose decimals it uses until it has its own
     readonly property SignalHub.Entry entry: panelCard.host.signalHub.lookup(panelCard.host.lookupRefs(cell && cell.refs ? cell.refs : []))
+    // With no session the hub has no row: the listed profile's row gives the decimals
+    readonly property int listedDecimals: {
+        const refs = cell && Array.isArray(cell.refs) ? cell.refs : []
+        for (const r of panelCard.host.profileRows) {
+            if (refs.indexOf(r.ref) >= 0)
+                return r.decimals
+        }
+        return 0
+    }
+    readonly property int decimalsNow: cell && cell.options && cell.options.decimals !== undefined
+                                       ? cell.options.decimals
+                                       : entry ? entry.decimals : listedDecimals
     readonly property bool phone: panelCard.host.form === "phone"
+    // Two columns of fields on a phone and in the page's side column
+    readonly property bool narrow: phone || width < 480
+    // Any of the zone levels is set
+    readonly property bool hasZoneLevel: {
+        const o = cell && cell.options ? cell.options : null
+        if (o === null)
+            return false
+        for (const k of ["coldBelow", "warnBelow", "dangerBelow", "warnFrom", "dangerFrom"]) {
+            if (typeof o[k] === "number" && isFinite(o[k]))
+                return true
+        }
+        return false
+    }
     readonly property bool hasSignal: kind !== "blank"
     // Every kind but the shift lights draws the value's text and tone, which
     // the zones, the decimals and the color shape; the lights read only the range
@@ -118,7 +143,7 @@ GaugeCard {
 
         GridLayout {
             Layout.fillWidth: true
-            columns: panelCard.phone ? 2 : 4
+            columns: panelCard.narrow ? 2 : 4
             columnSpacing: 8
             rowSpacing: 8
 
@@ -160,7 +185,7 @@ GaugeCard {
                 objectName: "panelSignalName"
                 visible: panelCard.hasSignal && panelCard.entry !== null
                 Layout.fillWidth: true
-                Layout.columnSpan: panelCard.phone ? 2 : 4
+                Layout.columnSpan: panelCard.narrow ? 2 : 4
                 Layout.preferredWidth: 0
                 elide: Text.ElideRight
                 text: panelCard.entry ? qsTr("Signal: %1").arg(panelCard.entry.name) : ""
@@ -197,7 +222,7 @@ GaugeCard {
                 objectName: "panelShiftHint"
                 visible: panelCard.kind === "shift-light"
                 Layout.fillWidth: true
-                Layout.columnSpan: panelCard.phone ? 2 : 4
+                Layout.columnSpan: panelCard.narrow ? 2 : 4
                 Layout.preferredWidth: 0
                 wrapMode: Text.WordWrap
                 text: qsTr("The lights fill green, amber, red between the two and flash at the shift point.")
@@ -222,10 +247,7 @@ GaugeCard {
                 Layout.preferredHeight: Theme.touchTarget
                 from: 0
                 to: 6
-                value: panelCard.cell && panelCard.cell.options
-                       && panelCard.cell.options.decimals !== undefined
-                       ? panelCard.cell.options.decimals
-                       : panelCard.entry ? panelCard.entry.decimals : 0
+                value: panelCard.decimalsNow
                 onValueModified: panelCard.host.setOptions({ decimals: value })
             }
 
@@ -263,7 +285,7 @@ GaugeCard {
             // A checkbox, as every other yes-or-no in the app
             ThemedCheckBox {
                 objectName: "panelPeak"
-                Layout.columnSpan: panelCard.phone ? 2 : 4
+                Layout.columnSpan: panelCard.narrow ? 2 : 4
                 text: qsTr("Peak hold")
                 Accessible.name: qsTr("Peak hold")
                 visible: panelCard.host.peakKinds.indexOf(panelCard.kind) >= 0
@@ -595,10 +617,21 @@ GaugeCard {
             text: qsTr("Night draws every gauge in its own tint")
         }
 
+        // A zone's own color wins over the pick while its level is reached
+        Caption {
+            objectName: "panelColorZones"
+            Layout.fillWidth: true
+            visible: panelCard.drawsValue && !Theme.nightActive
+                     && (colorRow.current !== "" || colorRow.custom !== "")
+                     && panelCard.hasZoneLevel
+            wrapMode: Text.Wrap
+            text: qsTr("A zone's color replaces this one while its level is reached")
+        }
+
         // The order: both forms' grids follow it
         GridLayout {
             Layout.fillWidth: true
-            columns: panelCard.phone ? 2 : 4
+            columns: panelCard.narrow ? 2 : 4
             columnSpacing: 8
             rowSpacing: 8
             ThemedButton {
@@ -658,8 +691,7 @@ GaugeCard {
         // A converted end shows to the signal's decimals plus one (161.5565
         // mph at 1 decimal reads 161.56), 1 place with no row to take them from
         readonly property var entry: cell ? panelCard.host.signalHub.lookup(panelCard.host.lookupRefs(cell.refs ?? [])) : null
-        readonly property int places: (cell && cell.options && cell.options.decimals !== undefined
-                                       ? cell.options.decimals : entry ? entry.decimals : 0) + 1
+        readonly property int places: panelCard.decimalsNow + 1
         readonly property string shownText: cell === null ? ""
             : converted ? panelCard.host.fieldText(panelCard.host.shown(cell.unit ?? "", value), places)
                         : panelCard.host.fieldText(value)

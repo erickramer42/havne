@@ -1068,6 +1068,45 @@ TEST(BridgeTest, ReplayDecodesWithTheRecordingsOwnSignalFile)
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
+/* A recording's copy is a session's whole set, which may pass a written
+ * file's megabyte (ADR-0065 section 3): the replay reads it to a set's
+ * bound and decodes with it under its own name */
+TEST(BridgeTest, ReplayDecodesWithACopyPastAWrittenFilesBytes)
+{
+    SettingsDirScope dir;
+    ASSERT_TRUE(dir.valid());
+    QTemporaryDir root;
+    ASSERT_TRUE(root.isValid());
+    SessionBridge bridge;
+    const QByteArray v1 = signalFile(QStringLiteral("Recorded"));
+    const QString folder = recordWithSignalFile(bridge, root.path(), v1);
+    ASSERT_FALSE(folder.isEmpty());
+
+    /* The copy with a megabyte of spaces before its last brace, and the
+     * header naming its hash */
+    QByteArray big = v1.trimmed();
+    ASSERT_TRUE(big.endsWith('}'));
+    big.insert(big.size() - 1, QByteArray(ECUIO_SIGNAL_FILE_MAX_BYTES, ' '));
+    QByteArray events = readFile(folder + QStringLiteral("/events.log"));
+    ASSERT_TRUE(events.contains(sha256Of(v1).toLatin1()));
+    events.replace(sha256Of(v1).toLatin1(), sha256Of(big).toLatin1());
+    for (const auto& file :
+         {std::make_pair(QStringLiteral("/signals.json"), big),
+          std::make_pair(QStringLiteral("/events.log"), events)}) {
+        QFile f(folder + file.first);
+        ASSERT_TRUE(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        ASSERT_EQ(f.write(file.second), file.second.size());
+    }
+
+    const QString own = QStringLiteral("rec.") + sha256Of(big).left(16);
+    ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
+    EXPECT_TRUE(bridge.currentUri().endsWith(
+        QStringLiteral("?speed=max&profile=") + own))
+        << bridge.currentUri().toStdString();
+    EXPECT_TRUE(registered(own.toUtf8().constData()));
+    ASSERT_TRUE(disconnectAndWait(bridge));
+}
+
 /* A copy that no longer matches the hash its recording names isn't
  * loaded: the replay decodes with the profile as loaded now, and says so */
 TEST(BridgeTest, ReplayOfAChangedSignalFileCopyDecodesAsLoaded)
