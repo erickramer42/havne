@@ -416,12 +416,7 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
     }
     // The worker writes the other ones now. Each firing is a line, in the
     // order they fired; several of one condition's in a window, one line
-    struct Fired {
-        uint64_t at;
-        int row;
-        ConditionModel::Rows rows;
-    };
-    std::vector<Fired> fired;
+    std::vector<ConditionFiring> fired;
     // The model's value terms, applied once the slots are cleared: its
     // signal reaches handlers that may attach again, which reassign them
     std::vector<std::pair<int, uint32_t>> terms;
@@ -437,6 +432,53 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
             tone = std::max(tone, level);
         }
     };
+    gatherFiringsBefore(before, fired, ask);
+    for (size_t i = 0; i < full->size(); ++i) {
+        ConditionSlot& slot = (*full)[i];
+        if (!slot.has) {
+            continue;
+        }
+        terms.emplace_back(static_cast<int>(i), slot.newest.term);
+        if (slot.firings == 0) {
+            continue;
+        }
+        fired.push_back({slot.first.timestamp_us, static_cast<int>(i),
+                         ConditionModel::Rows::Now});
+        ask(m_conditionModel->toneLevel(static_cast<int>(i)),
+            i < m_toneAtUs.size() ? &m_toneAtUs[i] : nullptr);
+    }
+    if (tone != ECUIO_ALERT_NONE) {
+        m_tone.play(tone);
+    }
+    std::stable_sort(fired.begin(), fired.end(),
+                     [](const ConditionFiring& a, const ConditionFiring& b) {
+                         return a.at < b.at;
+                     });
+    // A handler of the lines may attach again: they go out once the slots
+    // and the model are done with
+    const QStringList lines = firingLines(fired, full, before);
+    for (std::vector<ConditionSlot>* buffer : {full, before}) {
+        for (ConditionSlot& slot : *buffer) {
+            slot = ConditionSlot{};
+        }
+    }
+    for (const auto& t : terms) {
+        if (m_conditionsGeneration != generation) {
+            break; // a handler attached again: the rows are another set's
+        }
+        m_conditionModel->applyTerm(t.first, t.second);
+    }
+    applyConditionStates(session);
+    for (const QString& line : lines) {
+        emit logMessage(line);
+    }
+}
+
+void SessionBridge::gatherFiringsBefore(
+    const std::vector<ConditionSlot>* before,
+    std::vector<ConditionFiring>& fired,
+    const std::function<void(uint32_t, uint64_t*)>& ask)
+{
     // The set before's firings, ahead of the attached set's at one time.
     // Its rows are gone from the model, so it gives lines and tones alone
     for (size_t i = 0; i < before->size(); ++i) {
@@ -458,30 +500,15 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
                 &m_toneBeforeAtUs[i]);
         }
     }
-    for (size_t i = 0; i < full->size(); ++i) {
-        ConditionSlot& slot = (*full)[i];
-        if (!slot.has) {
-            continue;
-        }
-        terms.emplace_back(static_cast<int>(i), slot.newest.term);
-        if (slot.firings == 0) {
-            continue;
-        }
-        fired.push_back({slot.first.timestamp_us, static_cast<int>(i),
-                         ConditionModel::Rows::Now});
-        ask(m_conditionModel->toneLevel(static_cast<int>(i)),
-            i < m_toneAtUs.size() ? &m_toneAtUs[i] : nullptr);
-    }
-    if (tone != ECUIO_ALERT_NONE) {
-        m_tone.play(tone);
-    }
-    std::stable_sort(
-        fired.begin(), fired.end(),
-        [](const Fired& a, const Fired& b) { return a.at < b.at; });
-    // A handler of the lines may attach again: they go out once the slots
-    // and the model are done with
+}
+
+QStringList
+SessionBridge::firingLines(const std::vector<ConditionFiring>& fired,
+                           const std::vector<ConditionSlot>* full,
+                           const std::vector<ConditionSlot>* before) const
+{
     QStringList lines;
-    for (const Fired& f : fired) {
+    for (const ConditionFiring& f : fired) {
         const std::vector<ConditionSlot>& of =
             f.rows == ConditionModel::Rows::Before ? *before : *full;
         const ConditionSlot& slot = of[static_cast<size_t>(f.row)];
@@ -491,17 +518,11 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
                       : m_conditionModel->firingsText(f.row, slot.firings,
                                                       f.rows));
     }
-    for (std::vector<ConditionSlot>* buffer : {full, before}) {
-        for (ConditionSlot& slot : *buffer) {
-            slot = ConditionSlot{};
-        }
-    }
-    for (const auto& t : terms) {
-        if (m_conditionsGeneration != generation) {
-            break; // a handler attached again: the rows are another set's
-        }
-        m_conditionModel->applyTerm(t.first, t.second);
-    }
+    return lines;
+}
+
+void SessionBridge::applyConditionStates(ecuio_session_t* session)
+{
     // The states core keeps: UNAVAILABLE and NOT_RECEIVED are the getter's
     // alone, and can change after the attach
     uint32_t n = 0;
@@ -517,7 +538,4 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
         [this](uint32_t defId) { return m_signalModel->readAtMs(defId); },
         m_signalModel->wallOffsetMs());
     judgeAlertLevels();
-    for (const QString& line : lines) {
-        emit logMessage(line);
-    }
 }

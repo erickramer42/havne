@@ -1161,6 +1161,22 @@ private:
     // The one before that, held only while core's call runs: a refusal
     // makes it the set before's again
     ConditionWindow m_conditionWindowOlder;
+    // One firing of a tick: when, its row, and which set's rows that is
+    struct ConditionFiring {
+        uint64_t at;
+        int row;
+        ConditionModel::Rows rows;
+    };
+    // flushConditions' parts: the set before's firings with each key's tone
+    // asked, a line for each firing, and the states core keeps into the model
+    void
+    gatherFiringsBefore(const std::vector<ConditionSlot>* before,
+                        std::vector<ConditionFiring>& fired,
+                        const std::function<void(uint32_t, uint64_t*)>& ask);
+    QStringList firingLines(const std::vector<ConditionFiring>& fired,
+                            const std::vector<ConditionSlot>* full,
+                            const std::vector<ConditionSlot>* before) const;
+    void applyConditionStates(ecuio_session_t* session);
     ConditionStore m_conditionStore;
     ConditionModel* m_conditionModel = nullptr;
     int m_failAttaches = 0; // failConditionsAttachesForTesting
