@@ -46,6 +46,7 @@
 #include "json.h" /* quoted */
 #include "pcapng.h"
 #include "recording_check.h" /* iso15765_id */
+#include "recording_keys.h"
 #include "recording_rows.h"
 #include "recording_set.h"
 #include "request_timing.h" /* timing_hist: a column's usual interval */
@@ -405,6 +406,8 @@ private:
                         set_.own_why());
         }
         if (set != nullptr) {
+            const std::vector<std::string> ids =
+                rs::def_ids(set, set_.file(), header_.keyed);
             for (uint32_t i = 0; i < set->count; ++i) {
                 const ecuio_signal_def_t& d = set->defs[i];
                 if ((d.flags & ECUIO_DEF_FLAG_COMPUTED) != 0) {
@@ -412,9 +415,9 @@ private:
                 }
                 if (d.kind == ECUIO_VALUE_TEXT || d.kind == ECUIO_VALUE_HEX) {
                     text_.push_back(&d);
-                    text_names_.insert(d.name);
+                    text_names_.insert(ids[i]);
                 } else if (identification_def(d)) {
-                    ident_names_.insert(d.name);
+                    ident_names_.insert(ids[i]);
                 }
             }
         }
@@ -966,12 +969,16 @@ private:
         return true;
     }
 
-    /* A name, a unit or a raw text value that a spreadsheet would run */
-    static bool check_formula(const rows::signal_row& row, bool number)
+    /* A name, a key, a unit or a raw text value that a spreadsheet would
+     * run */
+    bool check_formula(const rows::signal_row& row, bool number) const
     {
+        const std::string& name = header_.shown(row.name);
         const char* what = nullptr;
-        if (formula_start(row.name)) {
+        if (formula_start(name)) {
             what = "name";
+        } else if (formula_start(row.name)) {
+            what = "key";
         } else if (formula_start(row.unit)) {
             what = "unit";
         } else if (!number && formula_start(row.value)) {
@@ -983,7 +990,7 @@ private:
         ecuio_detail_set("the signal %s's %s starts as a spreadsheet formula "
                          "does (=, +, -, @, a tab or a carriage return): "
                          "nothing was written",
-                         ecuio_json::quoted(row.name).c_str(), what);
+                         ecuio_json::quoted(name).c_str(), what);
         return false;
     }
 
@@ -1018,11 +1025,16 @@ private:
     {
         buf_ += seconds(row.host_us);
         buf_ += ',';
-        put_field(row.name);
+        put_field(header_.shown(row.name));
         buf_ += ',';
         put_field(row.unit);
         buf_ += ',';
         put_field(row.value);
+        if (header_.keyed) {
+            /* Two signals of one name are told apart by this column */
+            buf_ += ',';
+            put_field(row.name);
+        }
         buf_ += '\n';
     }
 
@@ -1052,7 +1064,8 @@ private:
     {
         file_check_.reset(new scrub::check(values_));
         buf_ = csv_comment();
-        buf_ += "time_s,signal,unit,value\n";
+        buf_ += header_.keyed ? "time_s,signal,unit,value,key\n"
+                              : "time_s,signal,unit,value\n";
         if (!values(folder, true) || !flush(true)) {
             return false;
         }
@@ -1074,7 +1087,8 @@ private:
     // ---- The wide CSV (ADR-0056 sections 4 and 5) ----
 
     struct wide_column {
-        std::string name;
+        std::string name;     /* as signals.csv names it: a key, or a name */
+        std::string shown;    /* its name for the head cell */
         std::string unit;     /* the header's, else the first row's */
         std::string head;     /* "Name (unit)" in the export's units, a field */
         uint8_t decimals = 0; /* the header's; else the most its values show */
@@ -1232,9 +1246,12 @@ private:
     {
         wide_column c;
         c.name = name;
-        for (const rows::header_signal& hs : header_.signals) {
-            if (hs.name == name) {
+        c.shown = name;
+        for (size_t k = 0; k < header_.signals.size(); ++k) {
+            if (header_.ids[k] == name) {
+                const rows::header_signal& hs = header_.signals[k];
                 c.in_header = true;
+                c.shown = hs.name;
                 c.unit = hs.unit;
                 c.decimals = hs.decimal_places;
                 break;
@@ -1282,7 +1299,13 @@ private:
         std::vector<std::string> picked;
         picked.reserve(o_.column_count);
         for (uint32_t i = 0; i < o_.column_count; ++i) {
-            picked.emplace_back(o_.columns_utf8[i]);
+            std::string id;
+            if (!rs::column_id(header_, o_.columns_utf8[i], &id)) {
+                /* a name several signals have: the find's words stand */
+                status_ = ECUIO_ERR_INVALID_ARGUMENT;
+                return false;
+            }
+            picked.push_back(std::move(id));
         }
         /* The header's focus line is the recording's, so a pick it can't
          * give is a bad recording (LOAD_FAILED), not the caller's */
@@ -1298,29 +1321,30 @@ private:
         for (const std::string& name : picked) {
             if (index_.count(name) != 0) {
                 return reject("the column %s is named twice",
-                              ecuio_json::quoted(name));
+                              ecuio_json::quoted(header_.shown(name)));
             }
             if (!raw_ && text_names_.count(name) != 0) {
                 return reject("the signal %s is a text signal, never a column",
-                              ecuio_json::quoted(name));
+                              ecuio_json::quoted(header_.shown(name)));
             }
             if (!raw_ && ident_names_.count(name) != 0) {
                 return reject("the signal %s is an identification signal, "
                               "never a column",
-                              ecuio_json::quoted(name));
+                              ecuio_json::quoted(header_.shown(name)));
             }
             add_column(name);
         }
         if (!fixed_columns_) {
             /* The header's number signals first, in its order */
-            for (const rows::header_signal& hs : header_.signals) {
-                if (!hs.text && index_.count(hs.name) == 0 &&
-                    (raw_ || (text_names_.count(hs.name) == 0 &&
-                              ident_names_.count(hs.name) == 0))) {
+            for (size_t k = 0; k < header_.signals.size(); ++k) {
+                const std::string& id = header_.ids[k];
+                if (!header_.signals[k].text && index_.count(id) == 0 &&
+                    (raw_ || (text_names_.count(id) == 0 &&
+                              ident_names_.count(id) == 0))) {
                     if (columns_.size() >= kWideColumnsMax) {
                         return too_many_columns();
                     }
-                    add_column(hs.name);
+                    add_column(id);
                 }
             }
         }
@@ -1351,8 +1375,17 @@ private:
                                       &dv) == ECUIO_DISPLAY_OK) {
                 unit = dv.unit;
             }
-            c.head =
-                csv_field(unit.empty() ? c.name : c.name + " (" + unit + ")");
+            c.head = unit.empty() ? c.shown : c.shown + " (" + unit + ")";
+        }
+        /* A head cell that two columns share gains each one's key, so a
+         * spreadsheet tells them apart; a head cell of its own stays bare */
+        std::unordered_map<std::string, uint32_t> heads;
+        for (const wide_column& c : columns_) {
+            ++heads[c.head];
+        }
+        for (wide_column& c : columns_) {
+            const bool shared = header_.keyed && heads[c.head] > 1;
+            c.head = csv_field(shared ? c.head + " [" + c.name + "]" : c.head);
         }
         mark_sparse();
         r_.signal_count = columns_.size();
@@ -1590,14 +1623,15 @@ private:
             const std::string line = buf.data();
             if (first) {
                 first = false;
-                if (line != rows::kFormat2 && line != rows::kFormat3) {
+                if (line != rows::kFormat2 && line != rows::kFormat3 &&
+                    line != rows::kFormat4) {
                     /* Another format's log: a file the export doesn't
                      * know */
                     ++r_.files_left_out;
                     return true;
                 }
                 has_events_ = true;
-                format3_ = line == rows::kFormat3;
+                format3_ = line != rows::kFormat2;
                 events_head_.push_back(line);
                 continue;
             }
@@ -2310,7 +2344,7 @@ private:
     bool has_frames_ = false;
     bool has_values_ = false;
     bool has_events_ = false;
-    bool format3_ = false; /* cond lines are format 3's alone, as read */
+    bool format3_ = false; /* format 3 or later, which have cond lines */
     bool has_markers_ = false;
     bool has_latency_ = false;
     bool held_seen_ = false; /* a cond line before the range */

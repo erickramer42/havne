@@ -24,7 +24,9 @@
 #include "recording_aids.h"
 #include "isotp.h"
 #include "recording_check.h" /* iso15765_id */
+#include "recording_keys.h"
 #include "recording_rows.h"
+#include "signal_keys.h" /* the find rule */
 #include "sha256.h"
 
 #include "ecuio/conditions.h"
@@ -45,6 +47,7 @@
 #include <vector>
 
 namespace rows = ecuio_recording_rows;
+namespace keys = ecuio_recording_keys;
 using ecuio_frames_csv::file_size;
 using ecuio_frames_csv::seek_to;
 
@@ -396,6 +399,8 @@ struct ecuio_recording {
     ecuio_recording_signals_t signal_file{};
     ecuio_recording_conditions_t conditions{};
     std::vector<signal_entry> signals;
+    /* By what signals.csv's signal cell holds: the key in format 4, the
+     * name before */
     std::unordered_map<std::string, uint32_t> by_name;
     std::vector<index_entry> index;
     std::vector<marker_entry> markers;
@@ -436,14 +441,15 @@ struct ecuio_recording {
     void* open_user = nullptr;
     bool open_canceled = false;
 
-    uint32_t add_signal(const std::string& name);
+    uint32_t add_signal(const std::string& id, const std::string& name);
     bool read_label(const char* text, size_t n, const char** why);
     bool read_events(const std::string& folder);
     bool take_condition(const ecuio_recording_rows::cond_line& c);
     void read_copies(const std::string& folder);
     bool read_signals(ecuio_open_progress_t progress, void* user,
                       bool* canceled);
-    void take_set(const ecuio_signal_set_t& set);
+    void take_set(const ecuio_signal_set_t& set,
+                  const std::vector<ecuio_signal_key_t>& set_keys);
     bool read_frames(ecuio_open_progress_t progress, void* user,
                      bool* canceled);
     frame_mark mark(const frame_scan& s, uint64_t rescan);
@@ -464,19 +470,25 @@ struct ecuio_recording {
             std::shared_ptr<const std::vector<raw_row>>* out) const;
 };
 
-uint32_t ecuio_recording::add_signal(const std::string& name)
+/* The signal whose rows are under id, added with that name when new: a
+ * row with no signal line above it shows its id as its name */
+uint32_t ecuio_recording::add_signal(const std::string& id,
+                                     const std::string& name)
 {
-    auto it = by_name.find(name);
+    auto it = by_name.find(id);
     if (it != by_name.end()) {
         return it->second;
     }
     signal_entry s;
     std::memcpy(s.pub.name, name.data(), name.size());
+    if (info.format == ECUIO_RECORDING_FORMAT_KEYS) {
+        std::memcpy(s.pub.key, id.data(), id.size());
+    }
     s.pub.first_us = ECUIO_RECORDING_NONE;
     s.pub.last_us = ECUIO_RECORDING_NONE;
     signals.push_back(std::move(s));
     const auto i = static_cast<uint32_t>(signals.size() - 1);
-    by_name.emplace(name, i);
+    by_name.emplace(id, i);
     return i;
 }
 
@@ -625,7 +637,7 @@ bool ecuio_recording::read_events(const std::string& folder)
         const char* text = nullptr;
         size_t text_len = 0;
         size_t kind_len = 0;
-        return info.format == ECUIO_RECORDING_FORMAT_ENUMS && !in_header &&
+        return keys::has_enums(info.format) && !in_header &&
                rows::parse_event_line(l.data(), l.size(), &e) &&
                rows::split_kind(e.rest, e.rest_len, &text, &text_len,
                                 &kind_len) &&
@@ -666,13 +678,8 @@ bool ecuio_recording::read_events(const std::string& folder)
             p += bom;
             n -= bom;
             const size_t m = std::strlen(rows::kFormat1End);
-            if (rows::equals(p, n, rows::kFormat2)) {
-                info.format = ECUIO_RECORDING_FORMAT_CORE;
-                in_header = true;
-                continue;
-            }
-            if (rows::equals(p, n, rows::kFormat3)) {
-                info.format = ECUIO_RECORDING_FORMAT_ENUMS;
+            if (keys::format_of(p, n) != ECUIO_RECORDING_FORMAT_UNKNOWN) {
+                info.format = keys::format_of(p, n);
                 in_header = true;
                 continue;
             }
@@ -687,15 +694,14 @@ bool ecuio_recording::read_events(const std::string& folder)
                 in_header = false;
                 continue;
             }
-            if (info.format != ECUIO_RECORDING_FORMAT_CORE &&
-                info.format != ECUIO_RECORDING_FORMAT_ENUMS) {
+            if (!keys::has_header(info.format)) {
                 continue;
             }
             const char* why = nullptr;
             if (from_frames && (rows::starts_with(p, n, "label  ") ||
                                 rows::starts_with(p, n, "signal  "))) {
                 /* the caller's set names the signals */
-            } else if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
+            } else if (keys::has_enums(info.format) &&
                        rows::starts_with(p, n, "label  ")) {
                 if (!read_label(p + 7, n - 7, &why)) {
                     ecuio_detail_set("events.log line %llu: %s",
@@ -704,7 +710,9 @@ bool ecuio_recording::read_events(const std::string& folder)
                     return false;
                 }
             } else if (rows::starts_with(p, n, "signal  ")) {
-                bool ok = rows::parse_header_signal(p + 8, n - 8, hs, &why);
+                std::string id; /* what its rows are under */
+                bool ok = keys::parse_signal_line(info.format, p + 8, n - 8,
+                                                  &id, hs, &why);
                 if (ok && hs.enumeration &&
                     info.format == ECUIO_RECORDING_FORMAT_CORE) {
                     why = "format 2 has no enum signals";
@@ -716,8 +724,8 @@ bool ecuio_recording::read_events(const std::string& folder)
                                      why);
                     return false;
                 }
-                if (by_name.find(hs.name) == by_name.end()) {
-                    signal_entry& s = signals[add_signal(hs.name)];
+                if (by_name.find(id) == by_name.end()) {
+                    signal_entry& s = signals[add_signal(id, hs.name)];
                     std::memcpy(s.pub.unit, hs.unit.data(), hs.unit.size());
                     s.known_kind = true;
                     s.pub.flags = hs.text          ? ECUIO_RECORDING_SIGNAL_TEXT
@@ -727,7 +735,7 @@ bool ecuio_recording::read_events(const std::string& folder)
                     s.pub.plot_rank = hs.plot_rank;
                     s.pub.group = hs.group;
                 }
-            } else if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
+            } else if (keys::has_enums(info.format) &&
                        rows::starts_with(p, n, rows::kSignalFileKey)) {
                 const size_t key = std::strlen(rows::kSignalFileKey);
                 std::string hex;
@@ -741,7 +749,7 @@ bool ecuio_recording::read_events(const std::string& folder)
                 std::memcpy(signal_file.sha256, hex.data(), hex.size());
                 signal_file.sha256[hex.size()] = '\0';
                 signal_file.flags |= ECUIO_RECORDING_SIGNALS_NAMED;
-            } else if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
+            } else if (keys::has_enums(info.format) &&
                        rows::starts_with(p, n, rows::kConditionsKey)) {
                 /* Evidence beside the data: a line that isn't the copy's
                  * names none, and the open goes on */
@@ -793,12 +801,12 @@ bool ecuio_recording::read_events(const std::string& folder)
         } else if (rows::equals(e.rest, kind_len, "drop")) {
             if (rows::parse_drop(text, text_len, &count)) {
                 drop_frames += count;
-            } else if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
+            } else if (keys::has_enums(info.format) &&
                        rows::parse_lost(text, text_len, &count)) {
                 conditions.events_lost +=
                     (std::min)(count, UINT64_MAX - conditions.events_lost);
             }
-        } else if (info.format == ECUIO_RECORDING_FORMAT_ENUMS &&
+        } else if (keys::has_enums(info.format) &&
                    rows::equals(e.rest, kind_len, "cond")) {
             if (!(rows::parse_cond_line(text, text_len, &cond) &&
                   take_condition(cond))) {
@@ -867,7 +875,7 @@ bool ecuio_recording::read_signals(ecuio_open_progress_t progress, void* user,
         double v = 0.0;
         bool number = false;
         if (why == nullptr) {
-            s = &signals[add_signal(r.name)];
+            s = &signals[add_signal(r.name, r.name)];
             if (!s->known_kind && s->pub.unit[0] == '\0') {
                 std::memcpy(s->pub.unit, r.unit.data(), r.unit.size());
             }
@@ -945,7 +953,8 @@ bool ecuio_recording::read_signals(ecuio_open_progress_t progress, void* user,
 
 /* The set's defs as the signals, in its order, before frames.csv's pass:
  * each def's signal is its index until finish drops those with no sample */
-void ecuio_recording::take_set(const ecuio_signal_set_t& set)
+void ecuio_recording::take_set(const ecuio_signal_set_t& set,
+                               const std::vector<ecuio_signal_key_t>& set_keys)
 {
     frame_set.reset(new set_copy(set));
     const ecuio_signal_set_t& s = frame_set->set;
@@ -954,6 +963,9 @@ void ecuio_recording::take_set(const ecuio_signal_set_t& set)
         signal_entry e;
         std::memcpy(e.pub.name, d.name, strnlen(d.name, sizeof d.name));
         std::memcpy(e.pub.unit, d.unit, strnlen(d.unit, sizeof d.unit));
+        if (i < set_keys.size()) {
+            std::memcpy(e.pub.key, set_keys[i].text, sizeof e.pub.key);
+        }
         e.pub.first_us = ECUIO_RECORDING_NONE;
         e.pub.last_us = ECUIO_RECORDING_NONE;
         e.known_kind = true;
@@ -1754,11 +1766,24 @@ ecuio_status_t ecuio_recording_open(const char* folder_utf8,
     }
 }
 
-ecuio_status_t ecuio_recording_open_frames(const char* folder_utf8,
-                                           const ecuio_signal_set_t* signal_set,
-                                           ecuio_open_progress_t progress,
-                                           void* user_data,
-                                           ecuio_recording_t** out)
+ecuio_status_t ecuio_recording_find_signal(const ecuio_recording_t* r,
+                                           const char* text_utf8,
+                                           uint32_t* index)
+{
+    if (r == nullptr || text_utf8 == nullptr || index == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    return ecuio_keys::find(
+        static_cast<uint32_t>(r->signals.size()),
+        [r](uint32_t i) { return ecuio_keys::view_of(r->signals[i].pub.key); },
+        [r](uint32_t i) { return ecuio_keys::view_of(r->signals[i].pub.name); },
+        text_utf8, index);
+}
+
+ecuio_status_t ecuio_recording_open_frames_with(
+    const char* folder_utf8, const ecuio_signal_set_t* signal_set,
+    const ecuio_signal_file_t* file, ecuio_open_progress_t progress,
+    void* user_data, ecuio_recording_t** out)
 {
     if (out != nullptr) {
         *out = nullptr;
@@ -1774,6 +1799,11 @@ ecuio_status_t ecuio_recording_open_frames(const char* folder_utf8,
     if (valid != ECUIO_VALIDATE_OK) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
+    std::vector<ecuio_signal_key_t> set_keys;
+    const ecuio_status_t keyed = keys::set_keys(signal_set, file, &set_keys);
+    if (keyed != ECUIO_OK) {
+        return keyed;
+    }
     try {
         std::unique_ptr<ecuio_recording> r(new ecuio_recording);
         std::string folder = folder_utf8;
@@ -1784,7 +1814,7 @@ ecuio_status_t ecuio_recording_open_frames(const char* folder_utf8,
         r->from_frames = true;
         r->info.flags |= ECUIO_RECORDING_INFO_FRAMES;
         r->source_path = folder + "/frames.csv";
-        r->take_set(*signal_set);
+        r->take_set(*signal_set, set_keys);
         bool canceled = false;
         r->open_progress = progress;
         r->open_user = user_data;

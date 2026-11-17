@@ -407,7 +407,7 @@ void ecuio_recorder::take_frame(const uint8_t* body, size_t size)
         if (d != nullptr) {
             append_u64(value_out, host_us);
             value_out += ',';
-            value_out += d->name;
+            value_out += d->key;
             value_out += ',';
             if (text) {
                 value_out += csv_quoted(

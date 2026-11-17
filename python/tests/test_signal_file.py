@@ -84,6 +84,10 @@ def test_a_recording_opens_through_the_file_it_is_given():
     assert later.profile == first.profile
     with havne.Recording(REPLAY, signals=first) as r:
         names = [s.name for s in r.signals]
+        # Opened through the file, a computed signal goes by its author's key
+        road = r.signal("Road Speed")
+        assert road.key == "road_speed" and r.signal("road_speed") == road
+        assert r.signal("RPM").key == "7E8:410C:2.0:16"
     assert "RPM in Thousands" in names and "RPM in Kilos" not in names
     with havne.Recording(REPLAY, signals=later) as r:
         assert "RPM in Kilos" in [s.name for s in r.signals]

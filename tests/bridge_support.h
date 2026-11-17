@@ -176,6 +176,40 @@ inline QStringList namesOf(SignalListModel* model, const std::vector<uint16_t>& 
     return names;
 }
 
+/* The keys a recording of the bridge's connected session keeps the model's
+ * rows with these ids under, in the model's order: core's keys for the
+ * session's set, which has no signal file */
+inline QStringList keysOf(SessionBridge& bridge, SignalListModel* model,
+                          const std::vector<uint16_t>& ids)
+{
+    QStringList keys;
+    const ecuio_signal_set_t* set =
+        ecuio_session_signal_set(bridge.sessionForTesting());
+    EXPECT_NE(set, nullptr) << "keysOf needs a connected session";
+    if (set == nullptr) {
+        return keys;
+    }
+    std::vector<ecuio_signal_key_t> all(set->count);
+    uint32_t count = 0;
+    EXPECT_EQ(
+        ecuio_signal_set_keys(set, nullptr, all.data(), set->count, &count),
+        ECUIO_OK);
+    for (int r = 0; r < model->rowCount(); ++r) {
+        const auto id = static_cast<uint16_t>(
+            model->data(model->index(r), SignalListModel::IdRole).toUInt());
+        if (std::find(ids.begin(), ids.end(), id) == ids.end()) {
+            continue;
+        }
+        for (uint32_t i = 0; i < count; ++i) {
+            if (set->defs[i].id == id) {
+                keys << QString::fromUtf8(all[i].text);
+            }
+        }
+    }
+    EXPECT_EQ(keys.size(), static_cast<qsizetype>(ids.size()));
+    return keys;
+}
+
 /* Minimal two-signal set, built test-side. Plain assignments only:
    designated initializers are C++20, and MSVC accepts them where GCC
    rejects them. */

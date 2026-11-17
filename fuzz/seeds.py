@@ -11,7 +11,7 @@
 # made-up logger's map on one line before its file. Each seed is in the harness's own form (fuzz/README.md): the
 # JSON harness's first byte picks its bounds, the OBDb harness's its
 # options, the plugin harness's its form, the recording and export
-# harnesses' a folder ('F', or '3' for format 3's first line), with the
+# harnesses' a folder ('F', or '3' or '4' for that format's first line), with the
 # pieces cut at 0x1E bytes (a recording's conditions in a fifth), or the
 # stretches' rules ('S') over two fixtures' samples. Started from
 # these, a 60 s run reaches the loaders behind the JSON reader; from
@@ -336,6 +336,23 @@ def main(argv):
         b"2000000,2000000,0x7E8,0x100,41 0C 0F A0\n"
         b"3000000,3000000,0x7E8,0x100,41 0C 32 00\n",
         conditions))
+    # A recording kept by key ('4': format 4's first line): two signals
+    # of one name told apart by their keys, a label by its signal's key,
+    # a focus of keys, a row whose key no signal line declares
+    folder_seeds["keys"] = b"4" + SEP.join((
+        b"profile  obd2\nframe flags  complete\n"
+        b"focus  7E8:410C:2.0:16,7E9:410C:2.0:16\n"
+        b"signal  7E8:410C:2.0:16,RPM,number,RPM,0,1,1\n"
+        b"signal  7E9:410C:2.0:16,RPM,number,RPM,0,1,1\n"
+        b"signal  7E8:4103:2.0:8,Fuel System,enum,,0,0,3\n"
+        b"label  7E8:4103:2.0:8,2,Closed loop\n\n"
+        b"12:00:03.000  +3.000  end  done: 3 frames, 4 values, "
+        b"0 records dropped, 0 notes dropped\n",
+        b"host_us,signal,value,unit\n1000000,7E8:410C:2.0:16,3000,RPM\n"
+        b"1000000,7E9:410C:2.0:16,900,RPM\n"
+        b"2000000,7E8:4103:2.0:8,2,\n3000000,id:7,1.5,V\n",
+        b"host_us,label\n",
+        header + b"1000000,1000000,0x7E8,0x100,41 0C 2E E0\n"))
     # Its edges: a key past a set's 64, a cond line past the longest row
     # (32768 bytes) and a torn last one (a copy past the loader's 256 KiB
     # can't fit the harness's input, so RecordingTest has that one)

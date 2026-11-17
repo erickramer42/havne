@@ -480,10 +480,12 @@ TEST(BridgeTest, TextSignalsReachTheRowAndTheRecording)
     ASSERT_EQ(folders.size(), 1);
     const QByteArray signalsCsv =
         readFile(root.path() + QStringLiteral("/") + folders.first() + QStringLiteral("/signals.csv"));
+    // "Raw bytes" is kept under its key: two bytes of text from byte 0
     bool recorded = false;
     for (const QByteArray& line : signalsCsv.split('\n')) {
         const QList<QByteArray> cols = line.split(',');
-        if (cols.size() == 4 && cols[1] == "Raw bytes" && hexPair(QString::fromUtf8(cols[2]))) {
+        if (cols.size() == 4 && cols[1] == "0C0::0:t2" &&
+            hexPair(QString::fromUtf8(cols[2]))) {
             recorded = true;
             break;
         }
@@ -654,7 +656,9 @@ TEST(BridgeTest, UnitSystemShowsImperialAndRecordsDecodedUnits)
     ASSERT_EQ(folders.size(), 1);
     const QByteArray signalsCsv =
         readFile(root.path() + QStringLiteral("/") + folders.first() + QStringLiteral("/signals.csv"));
-    EXPECT_TRUE(signalsCsv.contains(",Vehicle Speed,")) << signalsCsv.left(400).toStdString();
+    // Vehicle Speed, kept under its key: 0x0C0's fourth byte
+    EXPECT_TRUE(signalsCsv.contains(",0C0::3.0:8,"))
+        << signalsCsv.left(400).toStdString();
     EXPECT_TRUE(signalsCsv.contains(",km/h")) << "the recording should keep km/h";
     EXPECT_FALSE(signalsCsv.contains("mph")) << "the recording followed the display";
 }

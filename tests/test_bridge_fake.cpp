@@ -1076,6 +1076,7 @@ TEST(BridgeTest, ALogAsksThePlottedPidsAlone)
     const std::vector<uint16_t> picks = {obd2IdOf(0x0C), obd2IdOf(0x0D)};
     plotOnly(model, picks);
     ASSERT_EQ(model->subscribedCount(), 2);
+    const QStringList pickKeys = keysOf(bridge, model, picks);
     // A session old enough that a recording timed from its start shows it
     ASSERT_TRUE(spinUntil([&]() { return age.elapsed() >= 2000; }, 10000));
     const std::vector<uint8_t> before = nextPids();
@@ -1125,7 +1126,7 @@ TEST(BridgeTest, ALogAsksThePlottedPidsAlone)
         << "timed from the connect, " << ageAtStartMs << " ms before Start";
     const QByteArray events = readFile(folder + QStringLiteral("/events.log"));
     EXPECT_TRUE(events.contains(
-        (QStringLiteral("focus  ") + namesOf(model, picks).join(',')).toUtf8()))
+        (QStringLiteral("focus  ") + pickKeys.join(',')).toUtf8()))
         << events.toStdString();
 }
 
@@ -1264,12 +1265,14 @@ TEST(BridgeTest, ASessionRecordingNamesItsPickAndIsNoLog)
     ASSERT_EQ(folders.size(), 1);
     const QString folder = root.path() + QLatin1Char('/') + folders[0];
     const QByteArray events = readFile(folder + QStringLiteral("/events.log"));
-    EXPECT_TRUE(events.contains("\npick  Engine Load,Coolant Temp,RPM,"))
+    // Picks go by key: Engine Load, Coolant Temp, RPM, then Fuel Level
+    EXPECT_TRUE(events.contains(
+        "\npick  7E8:4104:2.0:8,7E8:4105:2.0:8,7E8:410C:2.0:16,"))
         << events.toStdString();
     EXPECT_FALSE(events.contains("\nfocus  ")) << events.toStdString();
-    const int change = events.indexOf("  pick  15 signals: Engine Load,");
+    const int change = events.indexOf("  pick  15 signals: 7E8:4104:2.0:8,");
     ASSERT_GE(change, 0) << events.toStdString();
-    EXPECT_GT(events.indexOf("Fuel Level", change), change);
+    EXPECT_GT(events.indexOf("7E8:412F:2.0:8", change), change);
     EXPECT_FALSE(events.contains("note  Asking ")) << events.toStdString();
     EXPECT_FALSE(
         bridge.recordingRow(folder).value(QStringLiteral("log")).toBool());

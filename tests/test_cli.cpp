@@ -1813,6 +1813,8 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_ENUMS), "core")
         << "format 3 is core's, its enums on their signal lines";
     EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_CORE), "core");
+    EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_KEYS), "core")
+        << "format 4 is core's too, each signal under its key";
     EXPECT_STREQ(cli::format_word(99), "unknown");
 
     ecuio_recording_signal_t s{};

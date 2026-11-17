@@ -296,6 +296,10 @@ typedef struct ecuio_recording ecuio_recording_t; /* opaque */
 #define ECUIO_RECORDING_FORMAT_CORE    2u /* ADR-0049's */
 #define ECUIO_RECORDING_FORMAT_ENUMS   3u /* ADR-0049's with enum signals'
                                              labels (ADR-0051) */
+#define ECUIO_RECORDING_FORMAT_KEYS    4u /* format 3 with each signal's
+                                             values, labels and picks
+                                             under its key (ADR-0065
+                                             section 9) */
 
 typedef struct ecuio_recording_info {
     uint32_t flags;           /* ECUIO_RECORDING_INFO_* */
@@ -336,7 +340,9 @@ _Static_assert(offsetof(ecuio_recording_info_t, condition_events) == 56,
                                             ecuio_recording_get_labels */
 
 typedef struct ecuio_recording_signal {
-    char name[32];          /* as ecuio_signal_def_t holds them */
+    char name[32];          /* as ecuio_signal_def_t holds them; in a
+                               format 4 recording a signal no signal
+                               line declares shows its key here */
     char unit[16];
     uint32_t flags;         /* ECUIO_RECORDING_SIGNAL_* */
     uint8_t decimal_places; /* an older recording's: the most its values
@@ -350,7 +356,12 @@ typedef struct ecuio_recording_signal {
     double highest;
     uint64_t first_us;      /* host_us; ECUIO_RECORDING_NONE with none */
     uint64_t last_us;
-    uint64_t reserved[4];   /* zero; ABI growth space */
+    char key[32];           /* what its values are kept under: its key
+                               (ecuio_signal_key_t's text, ADR-0065
+                               section 9) in a format 4 recording and in
+                               one opened through its frames; "" in an
+                               older recording, whose signals go by
+                               name. Zero from its NUL on. */
 } ecuio_recording_signal_t;
 
 #if defined(__cplusplus)
@@ -360,6 +371,8 @@ static_assert(offsetof(ecuio_recording_signal_t, samples) == 56,
               "recording signal samples offset is ABI");
 static_assert(offsetof(ecuio_recording_signal_t, group) == 54,
               "recording signal group offset is ABI");
+static_assert(offsetof(ecuio_recording_signal_t, key) == 96,
+              "recording signal key offset is ABI");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(ecuio_recording_signal_t) == 128,
                "ecuio_recording_signal_t size is ABI");
@@ -367,6 +380,8 @@ _Static_assert(offsetof(ecuio_recording_signal_t, samples) == 56,
                "recording signal samples offset is ABI");
 _Static_assert(offsetof(ecuio_recording_signal_t, group) == 54,
                "recording signal group offset is ABI");
+_Static_assert(offsetof(ecuio_recording_signal_t, key) == 96,
+               "recording signal key offset is ABI");
 #endif
 
 /* A marker. Pointer last, as ecuio_value_t's: the label lives in the
@@ -635,6 +650,28 @@ ecuio_status_t ecuio_recording_open_frames(const char* folder_utf8,
                                            ecuio_open_progress_t progress,
                                            void* user_data,
                                            ecuio_recording_t** out);
+
+/* ecuio_recording_open_frames with the signal file the set is of (NULL
+ * for none), so each signal's key is the one a recording of that file
+ * is written under: a computed signal's is its author's key, where the
+ * set alone gives "id:<n>" (ecuio_signal_set_keys). The plain call is
+ * this with a NULL file. ECUIO_ERR_INVALID_ARGUMENT too for a file of
+ * another set. */
+ecuio_status_t ecuio_recording_open_frames_with(
+    const char* folder_utf8, const ecuio_signal_set_t* signal_set,
+    const ecuio_signal_file_t* file, ecuio_open_progress_t progress,
+    void* user_data, ecuio_recording_t** out);
+
+/* The signal text names, by ecuio_signal_set_find's rule over the
+ * recording's signals: the signal with that key, else the one signal
+ * with that name (a recording older than format 4 has names alone).
+ * *index is its place among the signals. ECUIO_ERR_NULL_ARGUMENT for a
+ * NULL argument; ECUIO_ERR_INVALID_ARGUMENT, *index untouched and the
+ * detail saying why, for text no signal has and for a name several
+ * have, which lists their keys. */
+ecuio_status_t ecuio_recording_find_signal(const ecuio_recording_t* r,
+                                           const char* text_utf8,
+                                           uint32_t* index);
 
 /*
  * The getters. Every reader call returns ECUIO_ERR_NULL_ARGUMENT for a
@@ -1192,7 +1229,8 @@ typedef struct ecuio_export_options {
     uint32_t column_count;           /* wide: the columns named below; 0 takes
                                   the header's focus line, else every
                                   number signal in the recording's order */
-    const char* const* columns_utf8; /* the columns by name, in order */
+    const char* const* columns_utf8; /* the columns in order, each by its
+                                  key or its name */
     uint64_t reserved[1];            /* zero; ABI growth space */
 } ecuio_export_options_t;
 
@@ -1280,17 +1318,22 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * the rule and its cells stay empty until its next sample; with
  * row_ms, a grid of that many ms from the zero instead, each row the
  * newest values at its time, a row with no new cell skipped. The
- * columns are columns_utf8's names in order (one the recording lacks
- * is an empty column), else the header's focus line's, else every
+ * columns are columns_utf8's signals in order, each named by its key
+ * or by a name one signal has (ecuio_recording_find_signal's rule
+ * over the header's signals; a text no signal has is an empty column,
+ * headed as given), else the header's focus line's, else every
  * number signal in the recording's order that has a sample in range;
  * more than 16384 columns, named or found, fail the export (the
  * survey refuses at the first one past, before any row is costed).
  * Each cell carries its signal's decimal places (the header's; an
  * older recording's the most its values show) in units
  * (ecuio_display_convert), the head cell "Name (unit)" in the unit
- * shown; CRLF, no comment line, RFC 4180 quotes only where needed.
+ * shown, with " [key]" after it where two columns of a format 4
+ * recording share that head cell; CRLF, no comment line, RFC 4180
+ * quotes only where needed.
  * ECUIO_CSV_LONG writes a row a value, a comment line of counts first
- * (pandas: skiprows=1), then time_s,signal,unit,value. In both, a text
+ * (pandas: skiprows=1), then time_s,signal,unit,value, and for a
+ * format 4 recording a last column, key, the signal's. In both, a text
  * or hex signal's values and a signal keyed as an identification reply
  * are left out unless RAW (never columns); a name, unit or raw text
  * value that starts as a spreadsheet formula does (=, +, -, @, a tab,
@@ -1319,8 +1362,10 @@ _Static_assert(offsetof(ecuio_export_report_t, files_left_out) == 108,
  * ECUIO_ERR_INVALID_ARGUMENT for an unknown format, layout or units, a
  * flag or reserved field this core doesn't know, a to_us other than 0
  * before from_us, a layout field set for another format or for
- * ECUIO_CSV_LONG, an empty column name, a column named twice, or a
- * column that names a text or identification signal;
+ * ECUIO_CSV_LONG, an empty column name, a column named twice (by its
+ * key and its name too), a column name several signals have (the
+ * detail lists their keys), or a column that names a text or
+ * identification signal;
  * ECUIO_ERR_NOT_IMPLEMENTED for a format not built;
  * ECUIO_ERR_LOAD_FAILED for a recording it can't read ("frames.csv line
  * 12: ...", never a path; for CSV, a folder with no signals.csv), a

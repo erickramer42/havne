@@ -372,7 +372,8 @@ result health_once(uint32_t format, uint64_t from_us, uint64_t to_us,
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
 {
-    if (size < 2 || size > 65536 || (data[0] != 'F' && data[0] != '3')) {
+    if (size < 2 || size > 65536 ||
+        (data[0] != 'F' && data[0] != '3' && data[0] != '4')) {
         return 0;
     }
     const uint8_t* parts[5] = {};
@@ -388,8 +389,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         }
     }
     std::string events;
-    if (data[0] == '3' && count > 0) {
-        events = std::string(rows::kFormat3) + "\n" +
+    if (data[0] != 'F' && count > 0) {
+        events = std::string(data[0] == '4' ? rows::kFormat4 : rows::kFormat3) +
+                 "\n" +
                  std::string(reinterpret_cast<const char*>(parts[0]), lens[0]);
         parts[0] = reinterpret_cast<const uint8_t*>(events.data());
         lens[0] = events.size();

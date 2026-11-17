@@ -580,7 +580,7 @@ TEST(ArmedRecorderTest, AFocusSetJustBeforeAWindowsFirstRecordIsInItsHeader)
     ASSERT_EQ(folders.size(), 1u);
     EXPECT_EQ(frame_rows(folders[0]).front().second, 2 * kS)
         << "the window's first record is the frame at 2.0 s";
-    EXPECT_EQ(header_line(folders[0], "focus"), "RPM");
+    EXPECT_EQ(header_line(folders[0], "focus"), "7E8:410C:2.0:16");
     EXPECT_TRUE(kind_lines(folders[0], "focus").empty())
         << "the focus is the header's alone";
 }

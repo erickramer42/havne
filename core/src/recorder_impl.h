@@ -116,7 +116,7 @@ struct value_head {
 struct def_entry {
     uint16_t id;
     bool text;
-    std::string name; /* CSV-quoted as signals.csv writes it */
+    std::string key; /* what signals.csv's signal cell holds */
     std::string unit;
 };
 
@@ -211,6 +211,9 @@ struct ecuio_recorder {
     std::string signals_json;
     std::string signals_sha;
     std::string signals_plugin; /* "<id>,<version>,<variant>" or "" */
+    /* The file's keys in its set's order (it names a computed signal),
+     * empty with no file: the set's own keys then */
+    std::vector<ecuio_signal_key_t> signal_keys;
 
     /* Fixed at attach; zero_us is this recording's, which the link's
      * stops being once a later recorder attaches */

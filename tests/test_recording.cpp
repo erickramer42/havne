@@ -611,7 +611,7 @@ TEST(RecordingTest, AFolderTheRecorderWroteOpensWithItsHeader)
     Reader r(folder);
     ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
     const ecuio_recording_info_t info = r.info();
-    EXPECT_EQ(info.format, ECUIO_RECORDING_FORMAT_ENUMS);
+    EXPECT_EQ(info.format, ECUIO_RECORDING_FORMAT_KEYS);
     EXPECT_EQ(info.flags, 0u) << "the summary is there";
     EXPECT_GT(info.utc_start_us, 1700000000000000ull);
     EXPECT_EQ(info.rows_torn, 0u);
