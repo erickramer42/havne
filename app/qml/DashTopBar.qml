@@ -267,7 +267,8 @@ ColumnLayout {
         ThemedButton {
             id: moreLoad
             objectName: "moreLoad"
-            text: qsTr("Load layout")
+            text: qsTr("Load layout (all pages)")
+            Accessible.name: qsTr("Load a layout from a file: it replaces every page")
             onClicked: {
                 topBar.host.noteLayout("")
                 topBar.host.fileAdds = false

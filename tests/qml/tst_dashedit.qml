@@ -2426,6 +2426,37 @@ TestCase {
         verify(!note.visible)
     }
 
+    // A zone's color wins over the pick, and the panel says so
+    function test_aZonedCellWithAPickedColorSaysTheZoneWins() {
+        const own = cellOf("A", "analog")
+        own.options.color = "teal"
+        const page = pageOf({}, docOf([own]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        const note = find(page, "panelColorZones")
+        verify(!note.visible, "a color and no zone: no note")
+        page.setOptions({ warnFrom: 90 })
+        verify(note.visible, "a color and a zone level")
+        compare(note.text, "A zone's color replaces this one while its level is reached")
+        click(page, "panelColor_default")
+        verify(!note.visible, "no picked color: no note")
+        click(page, "panelColor_teal")
+        verify(note.visible)
+        Theme.night = "on"
+        verify(!note.visible, "Night draws no pick, and has its own note")
+        Theme.night = "off"
+    }
+
+    // Load replaces every page, and its button says so
+    function test_loadLayoutSaysItReplacesEveryPage() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        page.moreShown = true
+        const load = find(page, "moreLoad")
+        compare(load.text, "Load layout (all pages)")
+        compare(load.Accessible.name, "Load a layout from a file: it replaces every page")
+    }
+
     function test_aBlankCellHasNoColorRow() {
         const page = pageOf({}, docOf([{ kind: "blank", w: 2, h: 4, refs: [] }]))
         page.startEditing()

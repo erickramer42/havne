@@ -35,6 +35,17 @@ GaugeCard {
                                        ? cell.options.decimals
                                        : entry ? entry.decimals : listedDecimals
     readonly property bool phone: panelCard.host.form === "phone"
+    // Any of the zone levels is set
+    readonly property bool hasZoneLevel: {
+        const o = cell && cell.options ? cell.options : null
+        if (o === null)
+            return false
+        for (const k of ["coldBelow", "warnBelow", "dangerBelow", "warnFrom", "dangerFrom"]) {
+            if (typeof o[k] === "number" && isFinite(o[k]))
+                return true
+        }
+        return false
+    }
     readonly property bool hasSignal: kind !== "blank"
     // Every kind but the shift lights draws the value's text and tone, which
     // the zones, the decimals and the color shape; the lights read only the range
@@ -602,6 +613,17 @@ GaugeCard {
             visible: panelCard.drawsValue && Theme.nightActive
             wrapMode: Text.Wrap
             text: qsTr("Night draws every gauge in its own tint")
+        }
+
+        // A zone's own color wins over the pick while its level is reached
+        Caption {
+            objectName: "panelColorZones"
+            Layout.fillWidth: true
+            visible: panelCard.drawsValue && !Theme.nightActive
+                     && (colorRow.current !== "" || colorRow.custom !== "")
+                     && panelCard.hasZoneLevel
+            wrapMode: Text.Wrap
+            text: qsTr("A zone's color replaces this one while its level is reached")
         }
 
         // The order: both forms' grids follow it
