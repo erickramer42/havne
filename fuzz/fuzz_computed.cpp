@@ -294,6 +294,31 @@ const ecuio_signal_file_t* the_file()
     return file;
 }
 
+/* A program reading numbers alone gives the machine's own answer over
+ * the values within their bounds */
+void same_as_the_machine(const ecuio_computed_t& p,
+                         const ecuio_eval_input_t* given,
+                         const ecuio_eval_result_t& out)
+{
+    double in[ECUIO_COMPUTED_MAX_INPUTS] = {};
+    for (uint32_t k = 0; k < p.input_count; ++k) {
+        in[k] = NAN;
+        for (uint32_t i = 0; i < 4; ++i) {
+            const uint64_t bound =
+                p.max_age_us[k] != 0 ? p.max_age_us[k] : ECUIO_VALUE_STALE_US;
+            if (given[i].def_id == p.input_ids[k] && given[i].age_us <= bound) {
+                in[k] = given[i].value;
+            }
+        }
+    }
+    double want = 0.0;
+    const bool ran = ecuio_computed_run(p, in, &want);
+    const bool has = (out.flags & ECUIO_EVAL_VALUE) != 0;
+    if (ran != has || (ran && !same_bits(want, out.value))) {
+        abort();
+    }
+}
+
 /* p over the file's set: see the file's opening comment */
 void over_a_file(ecuio_computed_t p, bool checked, Reader& r)
 {
@@ -355,26 +380,8 @@ void over_a_file(ecuio_computed_t p, bool checked, Reader& r)
                out.why > ECUIO_EVAL_WHY_NO_NUMBER)) {
         abort();
     }
-    if (!numbers) {
-        return;
-    }
-    /* Numbers alone: the machine's own answer over those within their
-     * bounds */
-    double in[ECUIO_COMPUTED_MAX_INPUTS] = {};
-    for (uint32_t k = 0; k < p.input_count; ++k) {
-        in[k] = NAN;
-        for (uint32_t i = 0; i < 4; ++i) {
-            const uint64_t bound =
-                p.max_age_us[k] != 0 ? p.max_age_us[k] : ECUIO_VALUE_STALE_US;
-            if (given[i].def_id == p.input_ids[k] && given[i].age_us <= bound) {
-                in[k] = given[i].value;
-            }
-        }
-    }
-    double want = 0.0;
-    const bool ran = ecuio_computed_run(p, in, &want);
-    if (ran != has || (ran && !same_bits(want, out.value))) {
-        abort();
+    if (numbers) {
+        same_as_the_machine(p, given, out);
     }
 }
 
