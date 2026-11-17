@@ -171,6 +171,14 @@ TestCase {
         compare(find(narrow, "lights").opacity, 1)
     }
 
+    // A one-column cell on a wide page is about 150 px: the strip stays inside it
+    function test_theShiftLightsFitAOneColumnCell() {
+        const g = make(shiftC, { width: 148, height: 60, hasValue: true, value: 50, ledSpacing: 10 })
+        const lights = find(g, "lights")
+        verify(lights.width <= g.width + 0.5, "the strip is " + lights.width + " in " + g.width)
+        verify(lights.mapToItem(g, 0, 0).x >= -0.5, "and starts inside")
+    }
+
     // ---- SegmentReadout's shape
 
     // A tall card stacks: the digits across its width, centered with the

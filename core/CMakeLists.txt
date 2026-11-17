@@ -35,6 +35,8 @@ add_library(ecuio-core STATIC
     src/socketcan_transport.cpp
     src/signals.cpp
     src/signal_file.cpp
+    src/signal_expr.cpp
+    src/signal_file_expr.cpp
     src/condition_file.cpp
     src/condition_eval.cpp
     src/plugin.cpp
@@ -88,6 +90,9 @@ target_link_libraries(ecuio-core PRIVATE Threads::Threads)
 # still reaches whatever links core.
 if(WIN32)
     target_link_libraries(ecuio-core PRIVATE bcrypt ws2_32)
+    # Windows only: elsewhere it compiles to nothing, which Apple's ranlib
+    # reports. Added before ecuio-core-mt reads the sources (below).
+    target_sources(ecuio-core PRIVATE src/j2534_surrogate_log.cpp)
 endif()
 
 # USDT probes (ADR-0034 section 4, core/src/probes.h): systemtap's header-only

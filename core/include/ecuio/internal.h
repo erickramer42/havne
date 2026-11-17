@@ -189,6 +189,13 @@ void ecuio_elm327_set_timeouts_ms(uint32_t prompt_ms,
 void ecuio_elm327_get_timeouts_ms(uint32_t* prompt_ms,
                                   uint32_t* monitor_check_ms);
 
+/* TEST-ONLY: how often a session that asks only its picks, with nothing
+ * picked and its link down, asks one request to see whether an ECU
+ * answers (ms; request_setup.h's ecuio_unpicked_pass); 0 restores 5 s.
+ * A worker reads it on every such pass, so a running session takes it
+ * at once. */
+void ecuio_set_unpicked_check_ms(uint32_t ms);
+
 /* TEST-ONLY, Linux only (ECUIO_HAVE_SOCKETCAN): requesting sessions on
  * vcan created after this call start with the rate unproven, as on a
  * real controller, and an error frame within quiet_us of the first echo
@@ -398,6 +405,13 @@ uint64_t ecuio_recorder_test_wakes(const ecuio_recorder_t* recorder);
  * makes it read now_us, as set by each call, so a case puts every frame
  * at a time of its choosing; 0 gives it back to ecuio_clock_us. */
 void ecuio_recorder_test_set_clock(int on, uint64_t now_us);
+
+/* Test-only (ADR-0064 Q1): the version a plugin's requires.core is
+ * compared with and a wrap's or a put's least core is cut to, for the
+ * whole process: major.minor.patch (each 0 to 65535) while on is
+ * nonzero, core's own when 0. A case plays a later core with it. */
+void ecuio_plugin_test_set_core_version(int on, uint32_t major, uint32_t minor,
+                                        uint32_t patch);
 
 /* Test-only, never in queue.h: the reads waiting on a queue for an
  * entry, so a test closes it only once a read on another thread waits

@@ -144,6 +144,7 @@ struct ImportArgs {
 };
 
 int run_signals_import(const ImportArgs& args);
+int run_signals_expr(int argc, char** argv);
 
 // cmd_check.cpp
 int run_conditions_check(const cli::ConditionsCheckArgs& args);

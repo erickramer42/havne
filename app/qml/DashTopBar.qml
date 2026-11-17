@@ -176,6 +176,49 @@ ColumnLayout {
         }
     }
 
+    // A page added: the name field, selected, so typing replaces "Page 2"
+    Connections {
+        target: topBar.host
+        function onPageNameWanted() {
+            Qt.callLater(() => {
+                pageName.forceActiveFocus()
+                pageName.selectAll()
+            })
+        }
+    }
+
+    // The desktop's edit mode in the phone form's frame (B1)
+    RowLayout {
+        objectName: "dashPhoneRow"
+        readonly property real touchMin: Theme.touchTarget
+        Layout.fillWidth: true
+        visible: topBar.host.phoneSwitchShown
+        spacing: 8
+        ThemedButton {
+            objectName: "dashPhoneSwitch"
+            compact: topBar.host.phoneForm
+            checkable: true
+            checked: topBar.host.phoneEdit
+            text: qsTr("Phone layout")
+            Accessible.name: qsTr("Edit the phone's layout in a phone-sized frame")
+            Accessible.description: qsTr("Switching drops the undo history")
+            onClicked: topBar.host.setPhoneEdit(!topBar.host.phoneEdit)
+        }
+        Label {
+            objectName: "dashPhoneNote"
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.preferredWidth: 0
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            font.pixelSize: Theme.fontCaption
+            text: topBar.host.phoneEdit
+                  ? qsTr("The phone's layout, %1 px wide. A phone may be narrower or wider: the columns hold either way.")
+                        .arg(topBar.host.phoneFrameWidth)
+                  : qsTr("Edit the phone's layout here, then Export layout writes a file for the phone")
+        }
+    }
+
     // How a gauge is reached, while no panel is open
     Label {
         objectName: "dashEditHint"
@@ -267,7 +310,8 @@ ColumnLayout {
         ThemedButton {
             id: moreLoad
             objectName: "moreLoad"
-            text: qsTr("Load layout")
+            text: qsTr("Load layout (all pages)")
+            Accessible.name: qsTr("Load a layout from a file: it replaces every page")
             onClicked: {
                 topBar.host.noteLayout("")
                 topBar.host.fileAdds = false
@@ -539,6 +583,11 @@ ColumnLayout {
                 hairlineWidth: topBar.host.hairlineWidth
                 onPageChosen: (i) => topBar.host.goTo(i)
                 onAddRequested: topBar.host.openPresets("add")
+                onRenamed: (i, name) => {
+                    if (i !== topBar.host.pageIndex)
+                        topBar.host.goTo(i)
+                    topBar.host.renamePage(name)
+                }
             }
         }
     }

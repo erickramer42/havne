@@ -383,6 +383,7 @@ struct importer {
     const Value* ecu_list = nullptr; /* the set's "ecu" */
     std::vector<module> modules;
     std::set<uint64_t> asked; /* (rx, request) a session asks */
+    std::map<uint32_t, uint32_t> asked_of; /* rx: its requests in asked */
     std::set<std::string> keys;
     std::set<std::string> names; /* the file's names and, extending, obd2's */
     std::set<std::string> ecu_ids;
@@ -449,8 +450,10 @@ struct importer {
         for (uint32_t i = 0; i < base->count; ++i) {
             uint8_t req[3] = {};
             uint8_t len = 0;
-            if (ecuio_engine_request_for_def(&base->defs[i], req, &len)) {
-                asked.insert(request_code(base->defs[i].message_id, req, len));
+            if (ecuio_engine_request_for_def(&base->defs[i], req, &len) &&
+                asked.insert(request_code(base->defs[i].message_id, req, len))
+                    .second) {
+                ++asked_of[base->defs[i].message_id];
             }
         }
     }
@@ -648,10 +651,10 @@ struct importer {
         const uint8_t req_len = service == "01" ? 2 : 3;
         const uint64_t code = request_code(rx, req, req_len);
         const bool new_request = asked.count(code) == 0;
-        if (new_request && asked.size() >= ECUIO_PROFILE_MAX_REQUESTS) {
+        if (new_request && asked_of[rx] >= ECUIO_MODULE_MAX_REQUESTS) {
             skip_signals(c, std::string("past the ") +
-                                std::to_string(ECUIO_PROFILE_MAX_REQUESTS) +
-                                " requests a session asks" +
+                                std::to_string(ECUIO_MODULE_MAX_REQUESTS) +
+                                " requests one module is asked" +
                                 (extends() ? ", obd2's counted" : ""));
             return;
         }
@@ -682,6 +685,7 @@ struct importer {
         ecu_ids.insert(module_id);
         if (new_request) {
             asked.insert(code);
+            ++asked_of[rx];
         }
     }
 

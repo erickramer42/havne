@@ -8,10 +8,12 @@
 // by the signal-file loader's own build (signal_file_build.h), so a
 // plugin's signals pass exactly the rules a signal file's do.
 
+#include "ecuio/internal.h"
 #include "ecuio/plugin.h"
 #include "ecuio/profile.h"
 #include "error_detail.h"
 #include "json.h"
+#include "least_core.h"
 #include "plugin_rules.h"
 #include "profile_hold.h"
 #include "signal_file_build.h"
@@ -84,6 +86,8 @@ struct ecuio_plugin {
     std::string name;
     std::string version;
     uint16_t requires_core[3] = {};
+    /* The least core that reads the manifest and every variant's files */
+    ecuio_least::version least = ecuio_least::kPackage;
     std::string lineage; /* "" for none */
     uint32_t tiers = 0;
     std::vector<match_rule> match;
@@ -145,6 +149,19 @@ year_range years_of(const Value& v, const std::string& what)
                       std::to_string(r.hi));
     }
     return r;
+}
+
+/* Whether a data file's own source says what the manifest's does, which
+ * an older core takes for the variant whatever the file holds */
+bool same_source(const Value& manifest, const ecuio_signal_source_t& own)
+{
+    ecuio_signal_source_t m{};
+    ecuio_sf::take_source(manifest, m);
+    return std::strcmp(m.name, own.name) == 0 &&
+           std::strcmp(m.url, own.url) == 0 &&
+           std::strcmp(m.commit, own.commit) == 0 &&
+           std::strcmp(m.license, own.license) == 0 &&
+           std::strcmp(m.modified, own.modified) == 0;
 }
 
 /* Whether v is at, or holds, target */
@@ -251,6 +268,9 @@ private:
                                                : std::string("?")) +
                                ", and this Havne reads format 1");
         }
+        ecuio_least::raise(
+            p.least,
+            ecuio_least::kPluginFormatSince[static_cast<size_t>(format.whole)]);
         only_keys(root,
                   {"havne_plugin", "id", "name", "version", "requires",
                    "lineage", "source", "tiers", "match", "ecus", "variants",
@@ -336,6 +356,7 @@ private:
                                      " takes 32 of 0-9 and a-f");
             }
             p.lineage = lineage->text;
+            ecuio_least::raise(p.least, ecuio_least::kLineage);
         }
 
         const Value* source = root.find("source");
@@ -485,6 +506,7 @@ private:
         }
         for (size_t i = 0; i < p.variants.size(); ++i) {
             build_variant(p, variants->items[i], lists[i], p.variants[i]);
+            ecuio_least::raise(p.least, p.variants[i].file->least);
         }
     }
 
@@ -620,6 +642,13 @@ private:
             refuse(root, "a data file needs \"signals\"");
         }
         expect(*signals, Type::array, "\"signals\"");
+        /* A data file's own bound; the variant's merged list has a set's */
+        if (signals->items.size() > ECUIO_SIGNAL_FILE_MAX_SIGNALS) {
+            refuse(*signals, "\"signals\" lists " +
+                                 std::to_string(signals->items.size()) +
+                                 ", more than " +
+                                 std::to_string(ECUIO_SIGNAL_FILE_MAX_SIGNALS));
+        }
     }
 
     /* The variant's files' signals merged by key, a later file's
@@ -633,6 +662,7 @@ private:
         parts.profile = out.profile;
         parts.ecus = manifest_.find("ecus");
         parts.signals_at = &at;
+        parts.max_signals = ECUIO_SIGNAL_SET_MAX_SIGNALS;
         /* The first of the variant's files that has a source of its own
          * names where the variant comes from, else the manifest's does */
         const Value* source = manifest_.find("source");
@@ -687,6 +717,10 @@ private:
         ecuio_sf::build(parts, *out.file);
         if (source != nullptr) {
             ecuio_sf::take_source(*source, out.file->source);
+        }
+        if (own_source &&
+            !same_source(*manifest_.find("source"), out.file->source)) {
+            ecuio_least::raise(out.file->least, ecuio_least::kOwnSource);
         }
         out.file->plugin = p.id + "," + p.version + "," + out.id;
         std::string why;
@@ -751,8 +785,9 @@ private:
         std::string json = ecuio_json::write(doc);
 
         ecuio_signal_file_t* back = nullptr;
-        const bool read =
-            ecuio_signal_file_load(json.data(), json.size(), &back) == ECUIO_OK;
+        const bool read = ecuio_signal_file_load_with(
+                              json.data(), json.size(),
+                              ECUIO_SIGNAL_FILE_LOAD_SET, &back) == ECUIO_OK;
         const bool same = read && same_set(back->set, v.file->set);
         if (!read) {
             /* The loader's words, past the place in the written text */
@@ -1165,3 +1200,21 @@ ecuio_status_t ecuio_plugin_free(ecuio_plugin_t* plugin)
 }
 
 } // extern "C"
+
+ecuio_least::version ecuio_least::of_plugin(const ecuio_plugin_t* plugin)
+{
+    return plugin->least;
+}
+
+std::atomic<uint64_t> ecuio_plugin_rules::g_test_core{0};
+
+extern "C" void ecuio_plugin_test_set_core_version(int on, uint32_t major,
+                                                   uint32_t minor,
+                                                   uint32_t patch)
+{
+    ecuio_plugin_rules::g_test_core.store(
+        on == 0 ? 0
+                : (uint64_t{1} << 48) | (uint64_t{major & 0xFFFF} << 32) |
+                      (uint64_t{minor & 0xFFFF} << 16) | (patch & 0xFFFF),
+        std::memory_order_relaxed);
+}

@@ -28,7 +28,7 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
     test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_recording.cpp
-    test_armed_recorder.cpp)
+    test_armed_recorder.cpp test_pick_only.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -91,9 +91,10 @@ target_compile_definitions(bench_recording PRIVATE
 app_enable_warnings(bench_recording)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
-add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp
+add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_expr.cpp test_signal_eval.cpp
     test_computed_grammar.cpp
-    test_plugin.cpp test_plugin_wrap.cpp
+    test_plugin.cpp test_plugin_wrap.cpp test_plugin_put.cpp
+    test_plugin_least_core.cpp
     test_condition_file.cpp test_condition_eval.cpp)
 
 # test_signal_tables.cpp and test_computed.cpp check computed.h, the
@@ -121,7 +122,8 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # The explicit core/src include is required because request_engine.h is
 # INTERNAL: ecuio-core's PUBLIC include dirs cover only core/include,
 # and the engine is deliberately not part of the public tree.
-add_executable(test_obd2 test_obd2.cpp test_session_control.cpp)
+add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
+    test_request_table.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -264,7 +266,8 @@ endif()
 if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
-        test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp)
+        test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
+        test_cli_expr.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -597,13 +600,13 @@ if(TARGET havne-cli)
             PROPERTIES TIMEOUT 60)
         # A live stream whose reader stalls drops condition lines, and the
         # end line counts each one: the lines received and the count are
-        # the recording's cond lines (about 30 s)
+        # the recording's cond lines (about 60 s: the rev limiter at 51-56 s)
         add_test(NAME CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/cli_conditions_drop.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
-            PROPERTIES TIMEOUT 90 COST 30)
+            PROPERTIES TIMEOUT 150 COST 70)
         # A replay reads with its recording's own signals.json (ADR-0051
         # section 4): no --signals, the copy's values; its hash broken, raw
         add_test(NAME CliReplayTest.AReplayReadsWithItsOwnSignalFile
@@ -785,6 +788,39 @@ if(TARGET havne-cli)
         app_cli_golden(SignalsCheckNamesTheComputedSignalAReplacementFeeds
             signals-replaces-refused.jsonl --exit 3
             -- $<TARGET_FILE:havne-cli> signals check ${_cli_signals}/replaces-text.json)
+        # An expression against a loaded file (ADR-0062): what it reads
+        # and its value from the values given; where and why one is
+        # refused, as a new signal and in a signal's place; why there is
+        # no value; the format a call needs in a format 1 file; the names
+        # an expression can read; a plugin variant's own signals; a file
+        # that isn't there
+        app_cli_golden(SignalsExprReadsAnExpressionAndWorksItOut signals-expr.jsonl
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/chain.json
+               "margin / 2 + oil" --value coolant=95 --value oil=110@1)
+        app_cli_golden(SignalsExprSaysWhereAnExpressionIsRefused
+            signals-expr-refused.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/chain.json
+               "max(coolant, oli)")
+        app_cli_golden(SignalsExprRefusesAnEditThatReadsItself
+            signals-expr-circle.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/chain.json
+               --key hottest "margin + 1")
+        app_cli_golden(SignalsExprSaysWhyThereIsNoValue signals-expr-stale.jsonl
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/chain.json
+               hot --value coolant=120@3.5 --value oil=90)
+        app_cli_golden(SignalsExprNamesTheFormatACallNeeds signals-expr-format.jsonl
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/extras.json
+               "max(obd2.rpm, road_speed) / 1000"
+               --value obd2.pid_0c=2500 --value road_speed=40)
+        app_cli_golden(SignalsExprListsTheNamesAnExpressionReads signals-expr-inputs.jsonl
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/chain.json)
+        app_cli_golden(SignalsExprReadsAPluginsVariant signals-expr-plugin.jsonl
+            -- $<TARGET_FILE:havne-cli> signals expr
+               --plugin ${CMAKE_SOURCE_DIR}/plugins/example-sim --variant my2019
+               "clutch_slip / obd2.rpm" --value clutch_slip=30 --value obd2.rpm=1500)
+        app_cli_golden(SignalsExprNamesAMissingFile signals-expr-missing.jsonl --exit 3
+            -- $<TARGET_FILE:havne-cli> signals expr --signals ${_cli_signals}/none.json
+               "a + b")
         # A condition file through the loader (ADR-0063): what it holds;
         # how its references meet obd2's set, the mock's and a signal
         # file's (a level in another unit, a text signal, an enumeration
@@ -1329,6 +1365,46 @@ if(TARGET havne-cli)
     app_cli_usage(SignalsWithoutCheckIsUsage "signals")
     app_cli_usage(SignalsAnUnknownWordIsUsage "signals|lint|x.json")
     app_cli_usage(SignalsCheckTwoFilesIsUsage "signals|check|a.json|b.json")
+    app_cli_usage_says(SignalsExprWithoutAFileIsUsage "signals|expr|a + b"
+        "signals expr takes --signals")
+    app_cli_usage_says(SignalsExprAFileAndAPluginIsUsage
+        "signals|expr|--signals|a.json|--plugin|p" "signals expr takes --signals")
+    app_cli_usage_says(SignalsExprTwoExpressionsIsUsage
+        "signals|expr|--signals|a.json|a|b" "signals expr takes one expression")
+    app_cli_usage_says(SignalsExprAKeyWithoutAnExpressionIsUsage
+        "signals|expr|--signals|a.json|--key|boost" "--key goes with an expression")
+    app_cli_usage_says(SignalsExprAKeyThatIsNoKeyIsUsage
+        "signals|expr|--signals|a.json|a|--key|Boost" "--key takes a signal's key")
+    app_cli_usage_says(SignalsExprAValueWithoutAnExpressionIsUsage
+        "signals|expr|--signals|a.json|--value|a=1" "--value goes with an expression")
+    app_cli_usage_says(SignalsExprAValueWithoutANumberIsUsage
+        "signals|expr|--signals|a.json|a|--value|a" "--value takes")
+    app_cli_usage_says(SignalsExprANameGivenTwoValuesIsUsage
+        "signals|expr|--signals|a.json|a|--value|a=1|--value|a=2"
+        "--value gives 'a' two values")
+    app_cli_usage_says(SignalsExprAVariantWithoutAPluginIsUsage
+        "signals|expr|--signals|a.json|--variant|base"
+        "--variant names a --plugin's variant")
+    app_cli_usage_says(SignalsExprAnUnknownOptionIsUsage
+        "signals|expr|--signals|a.json|--fast"
+        "unexpected '--fast': an expression that starts with -- goes in parentheses")
+    # A value's name is read in the file, so these load one
+    set(_cli_expr_chain "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/chain.json")
+    app_cli_usage_says(SignalsExprAValueForNoSignalIsUsage
+        "signals|expr|--signals|${_cli_expr_chain}|oil|--value|oli=1"
+        "--value oli: the expression reads 'oli', which no signal is")
+    app_cli_usage_says(SignalsExprAValueForAComputedSignalIsUsage
+        "signals|expr|--signals|${_cli_expr_chain}|hot|--value|margin=1"
+        "--value margin: the signal is computed")
+    app_cli_usage_says(SignalsExprOneSignalGivenTwoValuesIsUsage
+        "signals|expr|--signals|${CMAKE_CURRENT_SOURCE_DIR}/fixtures/signals/extras.json|obd2.rpm|--value|obd2.rpm=1|--value|obd2.pid_0c=2"
+        "--value gives one signal two values, as 'obd2.rpm' and 'obd2.pid_0c'")
+    app_cli_usage_says(SignalsExprAPluginOfSeveralVariantsNeedsOne
+        "signals|expr|--plugin|${CMAKE_SOURCE_DIR}/plugins/example-sim|oil_temp"
+        "--plugin needs --variant to name one of its variants: base, my2019")
+    app_cli_usage_says(SignalsExprAVariantThePluginLacksIsUsage
+        "signals|expr|--plugin|${CMAKE_SOURCE_DIR}/plugins/example-sim|--variant|my2020|oil_temp"
+        "--plugin needs --variant to name one of its variants: base, my2019")
     app_cli_usage(SignalsImportWithoutOutIsUsage "signals|import|obdb|a.json")
     app_cli_usage(SignalsImportFromAnotherFormatIsUsage
         "signals|import|dbc|a.json|--out|b.json")
@@ -1458,6 +1534,11 @@ if(TARGET havne-cli)
     app_cli_usage(ViewAPullGainOfWordsIsUsage
         "view|x|--align-on|pull:1|--stretch-level|pull-gain=some")
     app_cli_usage(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal")
+    app_cli_usage_says(ViewAPullEndThatIsntOneIsUsage
+        "view|x|--stretches|--pull-end|top" "--pull-end takes lift or top-speed")
+    app_cli_usage_says(ViewAPullEndWithoutStretchesIsUsage
+        "view|x|--pull-end|lift" "--pull-end and --units go with")
+    app_cli_usage(ViewAPullEndWithoutAWordIsUsage "view|x|--stretches|--pull-end")
     # pulls, cruises or all after --stretches is its word, never a folder
     app_cli_usage_says(ViewStretchesAndItsWordNameNoFolder "view|--stretches|all"
         "view needs a recording's folder")
@@ -2322,6 +2403,11 @@ if(WIN32)
     target_compile_definitions(test_j2534_connect PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
         SURROGATE_EXE_PATH="$<TARGET_FILE:ecuio-j2534-surrogate>"
+    )
+    # core/src for surrogate_log_names.h: the out-of-memory loop seeds the
+    # session log's folder with the names the client prunes
+    target_include_directories(test_j2534_connect PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/src
     )
     add_dependencies(test_j2534_connect fake_j2534)
     add_dependencies(test_j2534_connect fake_j2534_legacy)   # beside the fake

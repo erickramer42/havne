@@ -1,6 +1,6 @@
 // File/layer: core/src/request_setup.h | internal, C++17, Qt-free,
 //             header-only; no platform headers
-// Testing: UNIT: CoreTest, RecorderTest (test_core); HARNESS:
+// Testing: UNIT: CoreTest, PickOnlyTest, RecorderTest (test_core); HARNESS:
 //          J2534QueryParamTest, J2534AdoptionTest (test_j2534_stream);
 //          Elm327SessionTest (test_elm327); J2534HealthTest
 //          (test_j2534_health); SocketCanRequestTest (test_vcan)
@@ -20,12 +20,14 @@
 #include "ecuio/signals.h"
 #include "error_detail.h"
 #include "isotp.h"
+#include "link_health.h"
 #include "obd2_rates.h"
 #include "pid_support.h"
 #include "request_engine.h"
 #include "session.h"
 #include "uri_query.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -310,65 +312,71 @@ inline bool ecuio_focus_row_is(const ecuio_request& r, uint32_t c,
            r.bytes[1] == req[1] && (len < 3 || r.bytes[2] == req[2]);
 }
 
-/* Each def's byte in askable (n of them, in place: no allocation): 1
- * when its request is a row of e's table that isn't dropped, parked or
- * not, since a focus can unpark it; 0 for a def asked nowhere (a passive
- * def, Service 09's, a request the probe dropped, a DID the scan hasn't
- * found, a PID ?poll= doesn't ask). What ecuio_session_set_focus judges
- * a focus by (ADR-0056 section 2). */
-inline void ecuio_focus_askable(const ecuio_signal_set_t* set,
+/* The def-to-row map (rows, n of them, in place: no allocation): each
+ * def with no row yet whose request is a row of e's table from `from` on
+ * gets it. The rows before were resolved when they joined, so a DID the
+ * scan finds costs its own rows times the defs still without one, never
+ * the whole table. */
+inline void ecuio_focus_resolve(const ecuio_signal_set_t* set,
                                 const ecuio_request_engine& e,
                                 const uint32_t* rx_ids, uint32_t chan_count,
-                                uint8_t* askable, size_t n)
+                                uint32_t* rows, size_t n, uint32_t from)
 {
-    for (size_t i = 0; i < n; ++i) {
-        askable[i] = 0;
+    if (set == nullptr || set->defs == nullptr || from >= e.count) {
+        return;
+    }
+    for (size_t i = 0; i < n && i < set->count; ++i) {
         uint8_t req[3] = {};
         uint8_t len = 0;
-        if (set == nullptr || set->defs == nullptr || i >= set->count ||
+        if (rows[i] != ECUIO_ROW_NONE ||
             !ecuio_engine_request_for_def(&set->defs[i], req, &len)) {
             continue;
         }
         const uint32_t c =
             ecuio_engine_channel_for(&set->defs[i], rx_ids, chan_count);
-        for (uint32_t k = 0; k < e.count && askable[i] == 0; ++k) {
-            const ecuio_request& r = e.requests[k];
-            if (r.dropped == 0 && ecuio_focus_row_is(r, c, req, len)) {
-                askable[i] = 1;
+        for (uint32_t k = from; k < e.count; ++k) {
+            if (ecuio_focus_row_is(e.requests[k], c, req, len)) {
+                rows[i] = k;
+                break;
             }
         }
     }
 }
 
+/* Each def's byte in askable (n of them, in place: no allocation): 1
+ * when its request is a row of e's table (rows, the def-to-row map) that
+ * isn't dropped, parked or not, since a focus can unpark it; 0 for a def
+ * asked nowhere (a passive def, Service 09's, a request the probe
+ * dropped, a DID the scan hasn't found, a PID ?poll= doesn't ask). What
+ * ecuio_session_set_focus judges a focus by (ADR-0056 section 2). */
+inline void ecuio_focus_askable(const ecuio_request_engine& e,
+                                const uint32_t* rows, uint8_t* askable,
+                                size_t n)
+{
+    for (size_t i = 0; i < n; ++i) {
+        askable[i] =
+            rows[i] < e.count && e.requests[rows[i]].dropped == 0 ? 1 : 0;
+    }
+}
+
 /* Each def's byte in unasked (n of them, in place): 1 when a focus
- * parks its request (a row of e's table, parked and not dropped), or
- * when it is computed and an input is so, followed through its chain;
- * 0 for every def with no focus on (nothing is parked), and for a def
- * asked nowhere (a passive def, Service 09's, a dropped request, a DID
- * the scan hasn't found). A def that shares a picked def's reply shares
- * its row, so it is asked. What ecuio_session_get_unasked_signals
- * lists. */
+ * parks its request (its row of e's table by rows, parked and not
+ * dropped), or when it is computed and an input is so, followed through
+ * its chain; 0 for every def with no focus on (nothing is parked), and
+ * for a def asked nowhere (a passive def, Service 09's, a dropped
+ * request, a DID the scan hasn't found). A def that shares a picked
+ * def's reply shares its row, so it is asked. What
+ * ecuio_session_get_unasked_signals lists. */
 inline void ecuio_focus_unasked(const ecuio_signal_set_t* set,
                                 const ecuio_request_engine& e,
-                                const uint32_t* rx_ids, uint32_t chan_count,
-                                uint8_t* unasked, size_t n)
+                                const uint32_t* rows, uint8_t* unasked,
+                                size_t n)
 {
     for (size_t i = 0; i < n; ++i) {
         unasked[i] = 0;
-        uint8_t req[3] = {};
-        uint8_t len = 0;
-        if (set == nullptr || set->defs == nullptr || i >= set->count ||
-            !ecuio_engine_request_for_def(&set->defs[i], req, &len)) {
-            continue;
-        }
-        const uint32_t c =
-            ecuio_engine_channel_for(&set->defs[i], rx_ids, chan_count);
-        for (uint32_t k = 0; k < e.count; ++k) {
-            const ecuio_request& r = e.requests[k];
-            if (ecuio_focus_row_is(r, c, req, len)) {
-                unasked[i] = r.parked != 0 && r.dropped == 0 ? 1 : 0;
-                break;
-            }
+        if (rows[i] < e.count) {
+            const ecuio_request& r = e.requests[rows[i]];
+            unasked[i] = r.parked != 0 && r.dropped == 0 ? 1 : 0;
         }
     }
     for (size_t i = 0;
@@ -411,8 +419,56 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
                      uint32_t chan_count, ecuio_request_engine* e, bool* probe,
                      bool* identify)
 {
-    if (!ecuio_engine_init(e, chan_count)) {
+    /* The table's room (ADR-0065 section 3): what the set derives, each
+     * def's row with it, and each DID the scan can find */
+    const size_t defs = set != nullptr && set->defs != nullptr ? set->count : 0;
+    const ecuio_signal_set_t head = session->uds != nullptr
+                                        ? ecuio_uds_polled_set(*session->uds)
+                                        : ecuio_signal_set_t{};
+    const ecuio_signal_set_t* asked = params.has_poll           ? nullptr
+                                      : session->uds != nullptr ? &head
+                                                                : set;
+    std::vector<uint32_t> rows;
+    ecuio_derived derived;
+    try {
+        rows.assign(defs, ECUIO_ROW_NONE);
+    } catch (...) {
         return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    if (asked != nullptr && asked->count > defs) {
+        asked = nullptr; /* the head is the set's own first defs */
+    }
+    switch (
+        ecuio_engine_plan(asked, rx_ids, chan_count, rows.data(), &derived)) {
+    case ecuio_plan_result::out_of_memory:
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    case ecuio_plan_result::module_full:
+        /* Registration holds each of a set's modules to it; a ?filter=
+         * puts every signal on one, which is the URI's doing */
+        if (params.rx_id != 0) {
+            ecuio_detail_set("?filter= asks every signal of the profile of "
+                             "one ECU, and they ask more than %u requests",
+                             static_cast<unsigned>(ECUIO_MODULE_MAX_REQUESTS));
+            return ECUIO_ERR_BAD_URI;
+        }
+        ecuio_detail_set("the profile's signals ask more than %u requests of "
+                         "one ECU",
+                         static_cast<unsigned>(ECUIO_MODULE_MAX_REQUESTS));
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    case ecuio_plan_result::ok:
+        break;
+    }
+    const size_t scanned =
+        session->uds != nullptr ? session->uds->scan.size() : 0;
+    const size_t room = params.has_poll ? 1 : derived.total + scanned;
+    if (!ecuio_engine_init(e, chan_count, static_cast<uint32_t>(room))) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
+    /* More than a session asks: nothing until a focus picks (section 2) */
+    const bool pick_only =
+        session->uds == nullptr && derived.total > ECUIO_PROFILE_MAX_REQUESTS;
+    if (pick_only) {
+        ecuio_engine_pick_only(e);
     }
     if (params.gap_us >= 0) {
         e->gap_us = params.gap_us;
@@ -446,7 +502,8 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
             e, ecuio_poll_channel(set, req[1], rx_ids, chan_count), req,
             sizeof(req));
     } else if (session->uds == nullptr) {
-        (void)ecuio_engine_derive(e, set, rx_ids, chan_count, nullptr);
+        (void)ecuio_engine_derive_planned(e, set, rx_ids, chan_count,
+                                          rows.data());
         if (set == ecuio_obd2_signal_set()) {
             ecuio_engine_classify(e, ecuio_obd2_pid_fast); /* ADR-0039 */
             ecuio_engine_set_duplicates(
@@ -460,8 +517,8 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
          * the rule the rotation's requests follow (ecuio_engine_channel_for:
          * channel 0 under a ?filter= override). Create's limits keep both
          * within the engine's tables. */
-        const ecuio_signal_set_t head = ecuio_uds_polled_set(*session->uds);
-        (void)ecuio_engine_derive(e, &head, rx_ids, chan_count, nullptr);
+        (void)ecuio_engine_derive_planned(e, &head, rx_ids, chan_count,
+                                          rows.data());
         for (const ecuio_uds_scan_target& s : session->uds->scan) {
             uint32_t c = 0;
             for (uint32_t i = 0; i < chan_count; ++i) {
@@ -495,19 +552,31 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
         return ECUIO_ERR_BAD_URI;
     }
     /* What a focus is judged by (ADR-0056 section 2): whether the
-     * session asks anything, and which defs it can ask, sized here so
-     * the worker keeps the map in place (ecuio_take_focus) */
+     * session asks anything, each def's row and which defs it can ask,
+     * sized here so the worker keeps the maps in place (ecuio_take_focus).
+     * ?poll='s one request is no plan's, so its defs are found here. A
+     * session that asks only its picks lists every signal unasked from
+     * the start. Made whole first, then handed over. */
+    std::vector<uint8_t> askable;
+    std::vector<uint8_t> unasked;
     try {
-        std::lock_guard<std::mutex> lock(session->focus_mutex);
-        session->focus_requests = requests;
-        const size_t n = set != nullptr ? set->count : 0;
-        session->focus_askable.assign(n, 0);
-        ecuio_focus_askable(set, *e, rx_ids, chan_count,
-                            session->focus_askable.data(), n);
-        session->focus_unasked.assign(n, 0);
+        ecuio_focus_resolve(set, *e, rx_ids, chan_count, rows.data(), defs, 0);
+        askable.assign(defs, 0);
+        ecuio_focus_askable(*e, rows.data(), askable.data(), defs);
+        unasked.assign(defs, 0);
+        if (pick_only) {
+            ecuio_focus_unasked(set, *e, rows.data(), unasked.data(), defs);
+        }
     } catch (const std::bad_alloc&) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
+    std::lock_guard<std::mutex> lock(session->focus_mutex);
+    session->focus_requests = requests;
+    session->focus_pick_only = pick_only;
+    session->focus_rows.swap(rows);
+    session->focus_askable.swap(askable);
+    session->focus_unasked.swap(unasked);
+    session->focus_table = e->count;
     return ECUIO_OK;
 }
 
@@ -572,7 +641,10 @@ inline void ecuio_publish_timing(ecuio_session_t* session,
     ecuio_session_timing_t& t = session->timing;
     t.snapshot_us = now_us > 0 ? static_cast<uint64_t>(now_us) : 0;
     t.interval_clock = e.timing->interval_clock;
-    t.rows = e.count;
+    /* The pool's rows, in the order taken (ADR-0065 section 3) */
+    const uint32_t taken = e.timing_taken;
+    t.rows = taken;
+    t.untimed = e.untimed;
     if (iso != nullptr) {
         t.flags |= ECUIO_TIMING_ISOTP;
         t.isotp_first_frames = iso->first_frames;
@@ -580,8 +652,8 @@ inline void ecuio_publish_timing(ecuio_session_t* session,
         t.isotp_dropped = iso->dropped;
         t.isotp_malformed = iso->malformed;
     }
-    for (uint32_t i = 0; i < e.count; ++i) {
-        const ecuio_request& q = e.requests[i];
+    for (uint32_t i = 0; i < taken; ++i) {
+        const ecuio_request& q = e.requests[e.timing_rows[i]];
         ecuio_request_timing_t& row = session->timing_rows[i];
         row = timing_public(e.timing->rows[i]);
         row.channel = q.channel;
@@ -594,7 +666,7 @@ inline void ecuio_publish_timing(ecuio_session_t* session,
     /* The recording's copy (ADR-0049 section 1), unlocked: only this
      * worker writes the rows, and the final copy may wait for room */
     ecuio_record_timing(session->record_link.get(), t, session->timing_rows,
-                        e.count, final);
+                        taken, final);
 }
 
 /* Hands what channel c's ECU has said it is to the session, for
@@ -674,6 +746,7 @@ inline void ecuio_take_clear_requests(ecuio_session_t* session,
 struct ecuio_focus_seen {
     uint32_t generation = 0;
     uint64_t table = 0;
+    uint32_t rows = 0; /* the table rows the def-to-row map has seen */
 };
 
 /* A number that moves whenever the table's rows or their drops can have
@@ -692,30 +765,35 @@ inline uint64_t ecuio_focus_table_stamp(const ecuio_request_engine& e)
 /* Takes a focus (ecuio_session_set_focus, ADR-0056 section 2) the
  * worker hasn't taken, or resolves the stored picks again when a request
  * joined parked under it (focus_joined: a scanned DID found): under the
- * session's lock, each picked def's request on the channel of its
- * message_id (ecuio_focus_row_is) marks a table row kept, and so does
- * each attached condition's signal's (condition_defs); then the engine
- * parks the rest, or ends the focus on a count of 0. First, when the
- * table changed, the askable map is worked out again in place, and,
- * while a focus is on, the unasked map after it and after each focus
- * taken. A fixed table, no allocation on the worker. */
+ * session's lock, each picked def's row (focus_rows, the def-to-row map)
+ * is marked kept, and so is each attached condition's signal's
+ * (condition_defs); then the engine parks the rest, or ends the focus on
+ * a count of 0. A table that asks only its picks keeps the conditions'
+ * rows with no focus too (ADR-0065 section 8). First, when the table
+ * changed, the map takes the rows that joined and the askable map is
+ * worked out again in place, and, while a focus is on, the unasked map
+ * after it and after each focus taken. The marks are the engine's, sized
+ * with its table: no allocation on the worker. */
 inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
                              ecuio_focus_seen& seen)
 {
     const auto unasked = [&] {
         ecuio_focus_unasked(
-            session->active_signal_set, *e, session->module_rx.data(),
-            session->info.module_count, session->focus_unasked.data(),
-            session->focus_unasked.size());
+            session->active_signal_set, *e, session->focus_rows.data(),
+            session->focus_unasked.data(), session->focus_unasked.size());
     };
     const uint64_t table = ecuio_focus_table_stamp(*e);
     if (table != seen.table) {
         seen.table = table;
         std::lock_guard<std::mutex> lock(session->focus_mutex);
-        ecuio_focus_askable(
+        ecuio_focus_resolve(
             session->active_signal_set, *e, session->module_rx.data(),
-            session->info.module_count, session->focus_askable.data(),
-            session->focus_askable.size());
+            session->info.module_count, session->focus_rows.data(),
+            session->focus_rows.size(), seen.rows);
+        seen.rows = e->count;
+        ecuio_focus_askable(*e, session->focus_rows.data(),
+                            session->focus_askable.data(),
+                            session->focus_askable.size());
         if (e->focused) {
             unasked();
         }
@@ -726,35 +804,26 @@ inline void ecuio_take_focus(ecuio_session_t* session, ecuio_request_engine* e,
     }
     const bool asked_again = asked != seen.generation;
     seen.generation = asked;
-    uint8_t keep[ECUIO_PROFILE_MAX_REQUESTS] = {};
+    uint8_t* const keep = e->marks.data();
+    if (e->count > 0) {
+        std::memset(keep, 0, e->count);
+    }
     bool focused = false;
     int64_t min_sweep_us = 0;
     {
         std::lock_guard<std::mutex> lock(session->focus_mutex);
-        const ecuio_signal_set_t* set = session->active_signal_set;
-        focused = !session->focus_ids.empty();
+        const bool picks = !session->focus_ids.empty();
+        focused = picks || e->pick_only;
         min_sweep_us = int64_t{session->focus_min_sweep_ms} * 1000;
         const size_t defs = session->focus_defs.size();
         const size_t watched = session->condition_defs.size();
-        for (uint32_t i = 0; focused && set != nullptr &&
-                             set->defs != nullptr && i < set->count && i < defs;
-             ++i) {
-            if (session->focus_defs[i] == 0 &&
-                (i >= watched || session->condition_defs[i] == 0)) {
-                continue;
-            }
-            uint8_t req[3] = {};
-            uint8_t len = 0;
-            if (!ecuio_engine_request_for_def(&set->defs[i], req, &len)) {
-                continue;
-            }
-            const uint32_t c = ecuio_engine_channel_for(
-                &set->defs[i], session->module_rx.data(),
-                session->info.module_count);
-            for (uint32_t k = 0; k < e->count; ++k) {
-                if (ecuio_focus_row_is(e->requests[k], c, req, len)) {
-                    keep[k] = 1;
-                }
+        const size_t rows = session->focus_rows.size();
+        for (size_t i = 0; focused && i < rows; ++i) {
+            const bool kept =
+                (picks && i < defs && session->focus_defs[i] != 0) ||
+                (i < watched && session->condition_defs[i] != 0);
+            if (kept && session->focus_rows[i] < e->count) {
+                keep[session->focus_rows[i]] = 1;
             }
         }
     }
@@ -851,6 +920,72 @@ inline void ecuio_seed_reports(ecuio_session_t* session,
         session->identity[c].rx_id = rx_ids[c];
         ecuio_engine_diagnostics(&e, c, &session->diagnostics[c]);
         session->diagnostics[c].rx_id = rx_ids[c];
+    }
+}
+
+/* How often a session with nothing picked and its link down asks one
+ * request to see whether an ECU answers: the failure backoff's cap */
+constexpr int64_t ECUIO_UNPICKED_CHECK_US =
+    static_cast<int64_t>(LINK_BACKOFF_CAP_MS) * 1000;
+
+/* That interval as the workers read it: a test's own while one is set
+ * (ecuio_set_unpicked_check_ms, internal.h) */
+inline std::atomic<int64_t>& ecuio_unpicked_check_us()
+{
+    static std::atomic<int64_t> us{ECUIO_UNPICKED_CHECK_US};
+    return us;
+}
+
+/* A worker's place in those checks: when the next is due (0: none
+ * waited for) and the channel it starts looking at */
+struct ecuio_unpicked_check {
+    int64_t next_us = 0;
+    uint32_t channel = 0;
+};
+
+/* A wait on a request ran out (ecuio_engine_expire answered true): the
+ * link counts it, unless the session has nothing picked and another
+ * module answers (ecuio_engine_unpicked_answering), where the silence
+ * is one module's */
+inline void ecuio_request_timed_out(const ecuio_request_engine& e,
+                                    link_health& h)
+{
+    if (!ecuio_engine_unpicked_answering(&e)) {
+        link_on_request_timeout(h);
+    }
+}
+
+/* A worker's idle pass on a session that asks only its picks with
+ * nothing picked (ecuio_engine_unpicked), after a read that didn't
+ * fail: link_on_unpicked, and while the link then isn't OK one request
+ * every ecuio_unpicked_check_us(), the first an interval after the
+ * first such pass, each module in turn (ecuio_engine_ask_check).
+ * Nothing else is asked, so nothing else could show an ECU awake. Its
+ * reply is a matched frame like any; its silence changes nothing. */
+inline void ecuio_unpicked_pass(ecuio_request_engine* e, link_health& h,
+                                ecuio_unpicked_check& check, int64_t now_us)
+{
+    link_on_unpicked(h);
+    if (h.state == ECUIO_OK) {
+        check.next_us = 0;
+        return;
+    }
+    const int64_t every =
+        ecuio_unpicked_check_us().load(std::memory_order_relaxed);
+    if (check.next_us == 0) {
+        check.next_us = now_us + every;
+        return;
+    }
+    if (now_us < check.next_us) {
+        return;
+    }
+    check.next_us = now_us + every;
+    for (uint32_t k = 0; k < e->chan_count; ++k) {
+        const uint32_t c = (check.channel + k) % e->chan_count;
+        if (ecuio_engine_ask_check(e, c)) {
+            check.channel = (c + 1) % e->chan_count;
+            return;
+        }
     }
 }
 

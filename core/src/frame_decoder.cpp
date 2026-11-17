@@ -114,8 +114,8 @@ double leaf_value(const ecuio_frame_decoder& d, uint32_t def, uint64_t bound,
                   uint64_t frame_us)
 {
     const ecuio_frame_decoder::latest_value& l = d.latest[def];
-    const bool fresh =
-        l.decode != 0 && l.time_us <= frame_us && frame_us - l.time_us <= bound;
+    const bool fresh = l.decode != 0 && l.time_us <= frame_us &&
+                       ecuio_computed_fresh(frame_us - l.time_us, bound);
     return fresh ? l.value : std::numeric_limits<double>::quiet_NaN();
 }
 
@@ -208,7 +208,8 @@ void compute_values(ecuio_frame_decoder& d, const ecuio_frame_t* frame,
             fed = fed || l.decode == d.decodes;
             const bool fresh =
                 l.decode != 0 && l.time_us <= frame->timestamp_us &&
-                frame->timestamp_us - l.time_us <= c.max_age_us[k];
+                ecuio_computed_fresh(frame->timestamp_us - l.time_us,
+                                     c.max_age_us[k]);
             in[k] = fresh ? l.value : std::numeric_limits<double>::quiet_NaN();
         }
         ecuio_value_t v{};
@@ -253,8 +254,7 @@ void plan_computed(ecuio_frame_decoder& d, const ecuio_signal_set_t* set)
             }
             c.plan_of[k] = plan_of_def[c.inputs[k]];
             d.chained = d.chained || c.plan_of[k] != plan::kLeaf;
-            const uint32_t age = c.program->max_age_us[k];
-            c.max_age_us[k] = age != 0 ? age : ECUIO_VALUE_STALE_US;
+            c.max_age_us[k] = ecuio_computed_bound_us(c.program->max_age_us[k]);
         }
     }
     for (uint32_t pass = 0; pass < ECUIO_COMPUTED_MAX_DEPTH; ++pass) {

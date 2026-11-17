@@ -284,21 +284,22 @@ def main():
                         f"signal-file.schema.json#/$defs/group/enum's {sorted(spelled)}")
 
     # A schema's request bound ("at most N requests", N alone or after the
-    # define's name) is profile.h's; the signal-file schema states one
+    # define's name) is profile.h's for one module; the signal-file schema
+    # states one
     with open(os.path.join(root, "core/include/ecuio/profile.h"), encoding="utf-8") as f:
-        bound = re.search(r"#define ECUIO_PROFILE_MAX_REQUESTS (\d+)", f.read())
+        bound = re.search(r"#define ECUIO_MODULE_MAX_REQUESTS (\d+)", f.read())
     if bound is None:
-        failures.append("profile.h defines no ECUIO_PROFILE_MAX_REQUESTS: find it again")
+        failures.append("profile.h defines no ECUIO_MODULE_MAX_REQUESTS: find it again")
     else:
         stated = False
         for s in SCHEMAS:
             for text in strings_of(schemas[s]):
-                for n in re.findall(r"at most (?:ECUIO_PROFILE_MAX_REQUESTS "
+                for n in re.findall(r"at most (?:ECUIO_MODULE_MAX_REQUESTS "
                                     r"\(profile\.h, )?(\d+)\)? requests\b", text):
                     stated = stated or s == "signal-file"
                     if n != bound.group(1):
                         failures.append(f"{s}.schema.json says {n} requests, "
-                                        f"profile.h's ECUIO_PROFILE_MAX_REQUESTS "
+                                        f"profile.h's ECUIO_MODULE_MAX_REQUESTS "
                                         f"is {bound.group(1)}")
         if not stated:
             failures.append("signal-file.schema.json states no request bound "

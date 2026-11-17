@@ -515,13 +515,14 @@ void RecordingView::openFrames(const QString& folder, const QString& profile)
     std::shared_ptr<FrameSet> frames;
     if (source.own_file) {
         QFile file(QDir(folder).filePath(QStringLiteral("signals.json")));
+        // A byte past the bound, so a longer copy is refused, never cut
         const QByteArray bytes = file.open(QIODevice::ReadOnly)
-                                     ? file.read(ECUIO_SIGNAL_FILE_MAX_BYTES)
+                                     ? file.read(ECUIO_SIGNAL_SET_MAX_BYTES + 1)
                                      : QByteArray();
         ecuio_signal_file_t* loaded = nullptr;
-        if (ecuio_signal_file_load(bytes.constData(),
-                                   static_cast<size_t>(bytes.size()),
-                                   &loaded) != ECUIO_OK) {
+        if (ecuio_signal_file_load_with(
+                bytes.constData(), static_cast<size_t>(bytes.size()),
+                ECUIO_SIGNAL_FILE_LOAD_SET, &loaded) != ECUIO_OK) {
             fail(folder,
                  QStringLiteral("its signals.json doesn't load: %1")
                      .arg(QString::fromUtf8(ecuio_last_error_detail())));
@@ -623,7 +624,7 @@ void RecordingView::readHeader(const QString& folder)
     if (recorded.names_file()) {
         QFile own(QDir(folder).filePath(QStringLiteral("signals.json")));
         if (own.open(QIODevice::ReadOnly) &&
-            own.size() <= static_cast<qint64>(ECUIO_SIGNAL_FILE_MAX_BYTES)) {
+            own.size() <= static_cast<qint64>(ECUIO_SIGNAL_SET_MAX_BYTES)) {
             m_ownSignalFile = QCryptographicHash::hash(
                                   own.readAll(), QCryptographicHash::Sha256)
                                   .toHex() == m_recordedSha.toLatin1();
@@ -695,6 +696,22 @@ void RecordingView::stop()
         m_stale = false;
         emit staleChanged();
     }
+}
+
+bool RecordingView::pullsLackSignals() const
+{
+    if (m_state != Open || m_reader == nullptr) {
+        return false;
+    }
+    for (const uint32_t role : {ECUIO_RECORDING_ROLE_THROTTLE,
+                                ECUIO_RECORDING_ROLE_ENGINE_LOAD}) {
+        uint32_t index = UINT32_MAX;
+        if (ecuio_recording_role_signal(m_reader, role, &index) != ECUIO_OK ||
+            index != UINT32_MAX) {
+            return false;
+        }
+    }
+    return true;
 }
 
 bool RecordingView::saveHealthReport(const QUrl& url, int filterIndex,
@@ -1612,6 +1629,11 @@ bool isNumber(const QVariant& v)
     }
 }
 
+// Where a pull ends, the one rule that is a word: its key and words
+constexpr const char* kPullEndKey = "pullEnd";
+constexpr const char* kPullEndLift = "lift";
+constexpr const char* kPullEndTopSpeed = "top-speed";
+
 // A page's rules map as core's struct, its speeds from the unit system's
 // unit to km/h; false with the refusal's words, naming the rule
 bool stretchRulesOf(const QVariantMap& map, uint32_t units,
@@ -1620,6 +1642,21 @@ bool stretchRulesOf(const QVariantMap& map, uint32_t units,
     const double perKmh = speedPerKmh(units);
     const bool imperial = units == ECUIO_UNITS_IMPERIAL;
     for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
+        if (it.key() == QLatin1String(kPullEndKey)) {
+            const QString word = it.value().typeId() == QMetaType::QString
+                                     ? it.value().toString()
+                                     : QString();
+            if (word == QLatin1String(kPullEndTopSpeed)) {
+                out->flags |= ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED;
+            } else if (word == QLatin1String(kPullEndLift)) {
+                out->flags &= ~ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED;
+            } else {
+                *problem = QStringLiteral(
+                    "Where a pull ends must be lift or top-speed");
+                return false;
+            }
+            continue;
+        }
         const StretchRule* rule = nullptr;
         for (const StretchRule& r : kStretchRules) {
             if (it.key() == QLatin1String(r.key)) {
@@ -1677,6 +1714,7 @@ QVariantMap RecordingView::stretchDefaults() const
                                              ? r.fallback * perKmh
                                              : r.fallback);
     }
+    out.insert(QLatin1String(kPullEndKey), QLatin1String(kPullEndLift));
     return out;
 }
 

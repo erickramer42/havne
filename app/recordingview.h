@@ -95,6 +95,10 @@ class RecordingView : public QObject
     // Whether the folder holds a frames.csv: a CSV import holds values
     // alone, so it has no frames to check, decode or replay
     Q_PROPERTY(bool hasFrames READ hasFrames NOTIFY stateChanged)
+    // Open, and core finds neither a throttle nor an engine-load signal
+    // (ecuio_recording_role_signal): a pull has nothing to be judged by,
+    // so a search finds none whatever the levels
+    Q_PROPERTY(bool pullsLackSignals READ pullsLackSignals NOTIFY stateChanged)
     // A health report being written (saveHealthReport), until its thread
     // ends, whether or not the viewer closed meanwhile
     Q_PROPERTY(bool reporting READ reporting NOTIFY reportingChanged)
@@ -144,6 +148,7 @@ public:
     QString recordedProfile() const { return m_recordedProfile; }
     bool ownSignalFile() const { return m_ownSignalFile; }
     bool hasFrames() const { return m_hasFrames; }
+    bool pullsLackSignals() const;
     bool reporting() const { return m_reporting; }
     QVariantMap stretchDefaults() const;
     QVariantMap stretchRuleNames() const;
@@ -256,10 +261,12 @@ public:
     // over the whole recording, core's own pick of each role's signal),
     // off the GUI thread: the ask's number, or 0 with nothing asked (not
     // open, neither kind, rules refused). rules holds stretchDefaults'
-    // keys in display units, a key left out or 0 taking core's default. A
-    // key that isn't one, a value that isn't a finite number of 0 or
-    // more, a percentage past 100, a time past an hour or a speed past
-    // 1000 km/h refuses the ask here, on the caller's thread, with
+    // keys in display units, a key left out or 0 taking core's default;
+    // pullEnd is a word, "lift" (the default) or "top-speed"
+    // (ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED). A key that isn't one, a
+    // pullEnd that isn't one of its words, a value that isn't a finite
+    // number of 0 or more, a percentage past 100, a time past an hour or
+    // a speed past 1000 km/h refuses the ask here, on the caller's thread, with
     // stretchesProblem saying which. stretchesReady answers with
     // that number unless a later ask replaced it or the recording closed:
     // one map per stretch in time order, { kind ("pull" or "cruise"),

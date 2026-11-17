@@ -3707,14 +3707,16 @@ TEST(ExportTest, ASignalsJsonPastTheLoadersBoundRefusesAScrubbedExport)
         R"("signals": [{"key": "ecu_name", "name": "ECU name", "ecu": "pcm", )"
         R"("read": {"service": "22", "number": "D802"}, )"
         R"("field": {"byte": 0}, "kind": "text"}]})";
-    for (const size_t size : {static_cast<size_t>(ECUIO_SIGNAL_FILE_MAX_BYTES),
-                              ECUIO_SIGNAL_FILE_MAX_BYTES + size_t{1}}) {
+    for (const size_t size :
+         {static_cast<size_t>(ECUIO_SIGNAL_FILE_MAX_BYTES) + 1,
+          static_cast<size_t>(ECUIO_SIGNAL_SET_MAX_BYTES),
+          ECUIO_SIGNAL_SET_MAX_BYTES + size_t{1}}) {
         Folder f;
         whole_recording(f);
         f.write("rec/signals.json",
                 json + std::string(size - json.size(), ' '));
         FolderExported e(f);
-        if (size <= ECUIO_SIGNAL_FILE_MAX_BYTES) {
+        if (size <= ECUIO_SIGNAL_SET_MAX_BYTES) {
             EXPECT_EQ(e.rc, ECUIO_OK) << e.detail;
             EXPECT_EQ(e.files["signals.json"].size(), size);
             continue;
@@ -3722,8 +3724,8 @@ TEST(ExportTest, ASignalsJsonPastTheLoadersBoundRefusesAScrubbedExport)
         EXPECT_EQ(e.rc, ECUIO_ERR_LOAD_FAILED);
         EXPECT_EQ(e.detail,
                   "the recording's signals.json doesn't load (it is past a "
-                  "signal file's limit of 1048576 bytes): a scrubbed export "
-                  "can't tell which signals are text");
+                  "recording's limit of 4194304 bytes for it): a scrubbed "
+                  "export can't tell which signals are text");
         EXPECT_FALSE(fs::exists(f.path / "copy"));
     }
 }

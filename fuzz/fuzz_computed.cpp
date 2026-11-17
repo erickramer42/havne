@@ -13,6 +13,12 @@
 // its stack and two runs agree to the bit; a checked one gives no value
 // or a finite one; and a program of format 1's steps alone is judged
 // and run as the format 1 machine, kept here as the reference, does.
+// Last, the program over a file's set (ecuio_signal_file_evaluate and
+// ecuio_signal_file_expr_leaves, ADR-0062): its inputs named as the
+// file's signals by a byte, each number given a value and an age; the
+// two calls refuse alike, a refused program is never one the checker
+// passed with every input a number, and one reading numbers alone gives
+// what the machine gives over the values within their bounds.
 
 #include "computed.h"
 
@@ -257,6 +263,128 @@ bool same_bits(double a, double b)
     return memcmp(&a, &b, sizeof a) == 0;
 }
 
+/* Four numbers, a text, a computed signal over two of them and one over
+ * that: every kind a program's input can name */
+const ecuio_signal_file_t* the_file()
+{
+    static ecuio_signal_file_t* file = nullptr;
+    if (file == nullptr) {
+        static const char kText[] =
+            "{\"havne_signals\":2,\"name\":\"F\",\"source\":{\"name\":\"f\"},"
+            "\"ecus\":[{\"id\":\"pcm\",\"rx\":\"7E8\"}],\"signals\":["
+            "{\"key\":\"a\",\"name\":\"A\",\"read\":{\"service\":\"22\","
+            "\"number\":\"D100\"},\"field\":{\"byte\":0}},"
+            "{\"key\":\"b\",\"name\":\"B\",\"read\":{\"service\":\"22\","
+            "\"number\":\"D101\"},\"field\":{\"byte\":0}},"
+            "{\"key\":\"c\",\"name\":\"C\",\"read\":{\"service\":\"22\","
+            "\"number\":\"D102\"},\"field\":{\"byte\":0}},"
+            "{\"key\":\"d\",\"name\":\"D\",\"read\":{\"service\":\"22\","
+            "\"number\":\"D103\"},\"field\":{\"byte\":0}},"
+            "{\"key\":\"t\",\"name\":\"T\",\"kind\":\"text\",\"read\":"
+            "{\"service\":\"22\",\"number\":\"D104\"},\"field\":{\"byte\":0}},"
+            "{\"key\":\"e\",\"name\":\"E\",\"kind\":\"computed\","
+            "\"expr\":\"a / b\",\"max_age\":{\"b\":1}},"
+            "{\"key\":\"f\",\"name\":\"F\",\"kind\":\"computed\","
+            "\"expr\":\"if(e > c, e, d)\"}]}";
+        if (ecuio_signal_file_load(kText, sizeof kText - 1, &file) !=
+            ECUIO_OK) {
+            abort();
+        }
+    }
+    return file;
+}
+
+/* A program reading numbers alone gives the machine's own answer over
+ * the values within their bounds */
+void same_as_the_machine(const ecuio_computed_t& p,
+                         const ecuio_eval_input_t* given,
+                         const ecuio_eval_result_t& out)
+{
+    double in[ECUIO_COMPUTED_MAX_INPUTS] = {};
+    for (uint32_t k = 0; k < p.input_count; ++k) {
+        in[k] = NAN;
+        for (uint32_t i = 0; i < 4; ++i) {
+            const uint64_t bound =
+                p.max_age_us[k] != 0 ? p.max_age_us[k] : ECUIO_VALUE_STALE_US;
+            if (given[i].def_id == p.input_ids[k] && given[i].age_us <= bound) {
+                in[k] = given[i].value;
+            }
+        }
+    }
+    double want = 0.0;
+    const bool ran = ecuio_computed_run(p, in, &want);
+    const bool has = (out.flags & ECUIO_EVAL_VALUE) != 0;
+    if (ran != has || (ran && !same_bits(want, out.value))) {
+        abort();
+    }
+}
+
+/* p over the file's set: see the file's opening comment */
+void over_a_file(ecuio_computed_t p, bool checked, Reader& r)
+{
+    const ecuio_signal_file_t* file = the_file();
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(file);
+    /* The first four defs are the numbers; a set bit names any def */
+    const uint8_t any = r.byte();
+    for (uint32_t k = 0; k < ECUIO_COMPUTED_MAX_INPUTS; ++k) {
+        if (k >= p.input_count && (any & 0x80u) == 0) {
+            continue; /* past the count the IDs stay as they came */
+        }
+        const uint32_t at = ((any >> k) & 1u) != 0 ? r.byte() % set->count
+                                                   : (k + r.byte()) % 4u;
+        p.input_ids[k] = set->defs[at].id;
+    }
+    checked = ecuio_computed_check(p);
+    static const uint64_t kAges[] = {0,       99999,   100000,  1000000,
+                                     1000001, 3000000, 3000001, 60000001};
+    ecuio_eval_input_t given[4];
+    for (uint32_t i = 0; i < 4; ++i) {
+        given[i] = ecuio_eval_input_t{};
+        given[i].def_id = set->defs[i].id;
+        given[i].value = r.value();
+        given[i].age_us = kAges[r.byte() % (sizeof kAges / sizeof kAges[0])];
+    }
+    uint16_t leaves[8] = {};
+    uint32_t count = 0;
+    const ecuio_status_t listed =
+        ecuio_signal_file_expr_leaves(file, &p, leaves, 8, &count);
+    ecuio_eval_result_t out{};
+    out.struct_size = sizeof out;
+    const ecuio_status_t worked =
+        ecuio_signal_file_evaluate(file, &p, given, 4, &out);
+    if (listed != worked ||
+        (worked != ECUIO_OK && worked != ECUIO_ERR_INVALID_ARGUMENT)) {
+        abort();
+    }
+    bool numbers = true;
+    for (uint32_t k = 0; k < p.input_count && k < ECUIO_COMPUTED_MAX_INPUTS;
+         ++k) {
+        bool number = false;
+        for (uint32_t i = 0; i < 4; ++i) {
+            number = number || p.input_ids[k] == set->defs[i].id;
+        }
+        numbers = numbers && number;
+    }
+    if (worked != ECUIO_OK) {
+        if (checked && numbers) {
+            abort(); /* nothing left to refuse */
+        }
+        return;
+    }
+    if (!checked || count > 4 || out.struct_size != sizeof out) {
+        abort();
+    }
+    const bool has = (out.flags & ECUIO_EVAL_VALUE) != 0;
+    if (has ? (!isfinite(out.value) || out.why != ECUIO_EVAL_WHY_NONE)
+            : (out.why < ECUIO_EVAL_WHY_MISSING ||
+               out.why > ECUIO_EVAL_WHY_NO_NUMBER)) {
+        abort();
+    }
+    if (numbers) {
+        same_as_the_machine(p, given, out);
+    }
+}
+
 } // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
@@ -311,5 +439,6 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
             }
         }
     }
+    over_a_file(p, checked, r);
     return 0;
 }

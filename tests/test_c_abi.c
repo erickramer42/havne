@@ -98,6 +98,18 @@ typedef char abi_gauge_warn_high_check[(offsetof(ecuio_signal_gauge_t, warn_high
 typedef char abi_gauge_flags_check[(offsetof(ecuio_signal_gauge_t, flags) == 32) ? 1 : -1];
 typedef char abi_gauge_reserved_check[(offsetof(ecuio_signal_gauge_t, reserved) == 36) ? 1 : -1];
 typedef char
+    abi_expr_check_size_check[(sizeof(ecuio_expr_check_t) == 248) ? 1 : -1];
+typedef char
+    abi_expr_check_at_check[(offsetof(ecuio_expr_check_t, at) == 8) ? 1 : -1];
+typedef char abi_expr_check_format_check
+    [(offsetof(ecuio_expr_check_t, format) == 12) ? 1 : -1];
+typedef char abi_expr_check_depth_check
+    [(offsetof(ecuio_expr_check_t, depth) == 16) ? 1 : -1];
+typedef char abi_expr_check_reserved_check
+    [(offsetof(ecuio_expr_check_t, reserved) == 20) ? 1 : -1];
+typedef char abi_expr_check_program_check
+    [(offsetof(ecuio_expr_check_t, program) == 40) ? 1 : -1];
+typedef char
     abi_source_size_check[(sizeof(ecuio_signal_source_t) == 2632) ? 1 : -1];
 typedef char abi_source_name_check[(offsetof(ecuio_signal_source_t, name) == 32)
                                        ? 1
@@ -106,6 +118,29 @@ typedef char abi_source_license_check
     [(offsetof(ecuio_signal_source_t, license) == 1592) ? 1 : -1];
 typedef char abi_source_modified_check
     [(offsetof(ecuio_signal_source_t, modified) == 2112) ? 1 : -1];
+typedef char
+    abi_eval_input_size_check[(sizeof(ecuio_eval_input_t) == 24) ? 1 : -1];
+typedef char
+    abi_eval_input_age_check[(offsetof(ecuio_eval_input_t, age_us) == 8) ? 1
+                                                                         : -1];
+typedef char
+    abi_eval_input_id_check[(offsetof(ecuio_eval_input_t, def_id) == 16) ? 1
+                                                                         : -1];
+typedef char abi_eval_input_flags_check
+    [(offsetof(ecuio_eval_input_t, flags) == 20) ? 1 : -1];
+typedef char
+    abi_eval_result_size_check[(sizeof(ecuio_eval_result_t) == 48) ? 1 : -1];
+typedef char abi_eval_result_value_check
+    [(offsetof(ecuio_eval_result_t, value) == 8) ? 1 : -1];
+typedef char
+    abi_eval_result_why_check[(offsetof(ecuio_eval_result_t, why) == 16) ? 1
+                                                                         : -1];
+typedef char abi_eval_result_leaf_check
+    [(offsetof(ecuio_eval_result_t, leaf) == 20) ? 1 : -1];
+typedef char abi_eval_result_bound_check
+    [(offsetof(ecuio_eval_result_t, bound_us) == 24) ? 1 : -1];
+typedef char abi_eval_result_reserved_check
+    [(offsetof(ecuio_eval_result_t, reserved) == 32) ? 1 : -1];
 typedef char abi_validation_size_check[(sizeof(ecuio_validation_t) == 16) ? 1 : -1];
 typedef char abi_validation_index_check[(offsetof(ecuio_validation_t, index) == 4) ? 1 : -1];
 typedef char abi_validation_reserved_check[(offsetof(ecuio_validation_t, reserved) == 8) ? 1 : -1];
@@ -160,6 +195,16 @@ typedef char abi_value_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_t) =
 typedef char abi_batch_values_check[(offsetof(ecuio_value_batch_t, values) == 24) ? 1 : -1];
 typedef char abi_batch_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_batch_t) == 32) ? 1 : -1];
 typedef char abi_session_timing_size_check[(sizeof(ecuio_session_timing_t) == 64) ? 1 : -1];
+typedef char abi_session_timing_untimed_check[(offsetof(ecuio_session_timing_t, untimed) == 36) ? 1 : -1];
+typedef char abi_session_timing_reserved_check[(offsetof(ecuio_session_timing_t, reserved) == 40) ? 1 : -1];
+typedef char abi_rotation_check[(ECUIO_PROFILE_MAX_REQUESTS == 1024) ? 1 : -1];
+typedef char abi_module_requests_check[(ECUIO_MODULE_MAX_REQUESTS == 1024) ? 1 : -1];
+typedef char abi_file_signals_check[(ECUIO_SIGNAL_FILE_MAX_SIGNALS == 1024u) ? 1 : -1];
+typedef char abi_file_bytes_check[(ECUIO_SIGNAL_FILE_MAX_BYTES == 1048576u) ? 1 : -1];
+typedef char abi_set_signals_check[(ECUIO_SIGNAL_SET_MAX_SIGNALS == 16384u) ? 1 : -1];
+typedef char abi_set_bytes_check[(ECUIO_SIGNAL_SET_MAX_BYTES == 4194304u) ? 1 : -1];
+typedef char abi_load_set_check[(ECUIO_SIGNAL_FILE_LOAD_SET == 0x1u) ? 1 : -1];
+typedef char abi_pick_only_check[(ECUIO_SESSION_INFO_PICK_ONLY == 0x80u) ? 1 : -1];
 typedef char abi_request_timing_size_check[(sizeof(ecuio_request_timing_t) == 80) ? 1 : -1];
 typedef char abi_request_timing_intervals_check[(offsetof(ecuio_request_timing_t, intervals) == 44) ? 1 : -1];
 typedef char abi_serial_size_check[(sizeof(ecuio_serial_port_t) == 288) ? 1 : -1];
@@ -500,6 +545,11 @@ int main(void)
         sizeof(ECUIO_TIMING_COLUMNS) < 2u ||
         (ECUIO_SESSION_INFO_REPLAY_FAULTS & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0u ||
         (ECUIO_SESSION_INFO_REQUESTS & ECUIO_SESSION_INFO_REPLAY_FAULTS) != 0u ||
+        (ECUIO_SESSION_INFO_PICK_ONLY &
+         (ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_VERSIONS |
+          ECUIO_SESSION_INFO_REPLAY_LOOP | ECUIO_SESSION_INFO_PENDING_OFF |
+          ECUIO_SESSION_INFO_LISTEN_ONLY | ECUIO_SESSION_INFO_REPLAY_FAULTS |
+          ECUIO_SESSION_INFO_REQUESTS)) != 0u ||
         ECUIO_ABSENT_AFTER_FRAMES != 3u) {
         return 1;
     }
@@ -571,6 +621,18 @@ int main(void)
         uint16_t major = 1;
         uint16_t minor = 1;
         uint16_t patch = 1;
+        /* A flag the load doesn't know is refused; a set's written copy
+         * is read as any file is */
+        if (ecuio_signal_file_load_with(kGauged, sizeof kGauged - 1, 0x2u,
+                                        &file) != ECUIO_ERR_INVALID_ARGUMENT ||
+            file != NULL ||
+            ecuio_signal_file_load_with(kGauged, sizeof kGauged - 1,
+                                        ECUIO_SIGNAL_FILE_LOAD_SET,
+                                        &file) != ECUIO_OK) {
+            return 1;
+        }
+        ecuio_signal_file_free(file);
+        file = NULL;
         if (ecuio_signal_file_load(kGauged, sizeof kGauged - 1, &file) !=
             ECUIO_OK) {
             return 1;
@@ -594,6 +656,67 @@ int main(void)
                    "volts / 2") != 0) {
             ecuio_signal_file_free(file);
             return 1;
+        }
+        {
+            /* An expression checked from C: one that compiles, one refused
+             * at its character, and the name a def is read by */
+            ecuio_expr_check_t checked;
+            char name[ECUIO_EXPR_REF_LEN];
+            memset(&checked, 0, sizeof checked);
+            checked.struct_size = (uint32_t)sizeof checked;
+            if (ecuio_signal_file_check_expr(file, NULL, "volts * 2", 9,
+                                             &checked) != ECUIO_OK ||
+                checked.at != 0u || checked.format != 1u ||
+                checked.depth != 1u || checked.program.input_count != 1u ||
+                checked.program.input_ids[0] != volts->id ||
+                ecuio_signal_file_check_expr(file, "half", "volts +", 7,
+                                             &checked) !=
+                    ECUIO_ERR_INVALID_ARGUMENT ||
+                checked.at != 8u || checked.program.input_count != 0u ||
+                ecuio_signal_file_expr_ref(file, volts, name, sizeof name) !=
+                    ECUIO_OK ||
+                strcmp(name, "volts") != 0 ||
+                ecuio_signal_file_expr_ref(file, volts, name, 5) !=
+                    ECUIO_ERR_INVALID_ARGUMENT) {
+                ecuio_signal_file_free(file);
+                return 1;
+            }
+            {
+                /* And worked out from C: the checked program's one leaf,
+                 * its value from a fresh input and none from a stale one */
+                ecuio_eval_input_t input;
+                ecuio_eval_result_t result;
+                uint16_t leaf = 0;
+                uint32_t leaves = 0;
+                memset(&checked, 0, sizeof checked);
+                checked.struct_size = (uint32_t)sizeof checked;
+                memset(&input, 0, sizeof input);
+                input.def_id = volts->id;
+                input.value = 12.5;
+                memset(&result, 0, sizeof result);
+                result.struct_size = (uint32_t)sizeof result;
+                if (ecuio_signal_file_check_expr(file, NULL, "volts * 2", 9,
+                                                 &checked) != ECUIO_OK ||
+                    ecuio_signal_file_expr_leaves(file, &checked.program, &leaf,
+                                                  1, &leaves) != ECUIO_OK ||
+                    leaves != 1u || leaf != volts->id ||
+                    ecuio_signal_file_evaluate(file, &checked.program, &input,
+                                               1, &result) != ECUIO_OK ||
+                    result.flags != ECUIO_EVAL_VALUE || result.value != 25.0 ||
+                    result.why != ECUIO_EVAL_WHY_NONE) {
+                    ecuio_signal_file_free(file);
+                    return 1;
+                }
+                input.age_us = (uint64_t)ECUIO_VALUE_STALE_US + 1u;
+                if (ecuio_signal_file_evaluate(file, &checked.program, &input,
+                                               1, &result) != ECUIO_OK ||
+                    result.flags != 0u || result.why != ECUIO_EVAL_WHY_STALE ||
+                    result.leaf != volts->id ||
+                    result.bound_us != ECUIO_VALUE_STALE_US) {
+                    ecuio_signal_file_free(file);
+                    return 1;
+                }
+            }
         }
         {
             size_t length = 0;

@@ -924,6 +924,19 @@ inline ecuio_stretch_rules_t stretch_rules(uint32_t kinds)
     return r;
 }
 
+// --pull-end's word: lift (the default, the flag clear) or top-speed
+inline bool parse_pull_end(const char* word, uint32_t& flags)
+{
+    if (std::strcmp(word, "lift") == 0) {
+        flags &= ~ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED;
+    } else if (std::strcmp(word, "top-speed") == 0) {
+        flags |= ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 // --stretch-level <key>=<value>: pull-throttle and pull-load in %,
 // pull-hold, pull-gap and cruise-hold in seconds, pull-rise in rpm,
 // pull-gain, cruise-speed-band and cruise-floor in km/h (mph with
@@ -1016,7 +1029,8 @@ inline void name_or_null(Line& l, const ecuio_recording_signal_t* s)
 // Each role's signal for a recording, and the speeds the stretches were
 // sought with, in km/h: {"type":"roles", recording, throttle, engine_load,
 // vehicle_speed, engine_speed (names, or null for none), cruise_floor,
-// cruise_speed_band, pull_gain}. by_role holds the four in that order.
+// cruise_speed_band, pull_gain, pull_end lift|top-speed}. by_role holds
+// the four in that order.
 inline void roles_line(Line& l, uint32_t recording,
                        const ecuio_recording_signal_t* const by_role[4],
                        const ecuio_stretch_rules_t& r)
@@ -1042,6 +1056,10 @@ inline void roles_line(Line& l, uint32_t recording,
     l.key("pull_gain");
     l.number(r.pull_min_gain != 0 ? r.pull_min_gain
                                   : ECUIO_STRETCH_DEFAULT_PULL_GAIN);
+    l.key("pull_end");
+    l.raw((r.flags & ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED) != 0
+              ? "\"top-speed\""
+              : "\"lift\"");
     l.ch('}');
 }
 

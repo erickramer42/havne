@@ -1534,6 +1534,17 @@ TEST(CliViewTest, ARoleAndAKindAreOneOfTheirWords)
     ASSERT_TRUE(cli::parse_stretch_kinds("all", kinds));
     EXPECT_EQ(kinds, ECUIO_STRETCH_PULLS | ECUIO_STRETCH_CRUISES);
     EXPECT_FALSE(cli::parse_stretch_kinds("pull", kinds));
+
+    /* --pull-end sets or clears its flag alone */
+    uint32_t flags = 0x40;
+    ASSERT_TRUE(cli::parse_pull_end("top-speed", flags));
+    EXPECT_EQ(flags, 0x40u | ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED);
+    ASSERT_TRUE(cli::parse_pull_end("lift", flags));
+    EXPECT_EQ(flags, 0x40u);
+    for (const char* bad : {"", "Lift", "top", "top_speed", "speed"}) {
+        EXPECT_FALSE(cli::parse_pull_end(bad, flags)) << bad;
+    }
+    EXPECT_EQ(flags, 0x40u) << "a refused word changes nothing";
 }
 
 TEST(CliViewTest, TheRolesAndStretchLinesSayWhatWasFoundAndWith)
@@ -1551,14 +1562,21 @@ TEST(CliViewTest, TheRolesAndStretchLinesSayWhatWasFoundAndWith)
               "{\"type\":\"roles\",\"recording\":1,\"throttle\":null,"
               "\"engine_load\":null,\"vehicle_speed\":\"Vehicle Speed\","
               "\"engine_speed\":\"RPM\",\"cruise_floor\":56.32704,"
-              "\"cruise_speed_band\":2,\"pull_gain\":10}")
+              "\"cruise_speed_band\":2,\"pull_gain\":10,"
+              "\"pull_end\":\"lift\"}")
         << "the defaults core takes, in km/h";
     ecuio_stretch_rules_t set = cli::stretch_rules(ECUIO_STRETCH_PULLS);
     set.pull_min_gain = 8.04672;
     cli::Line gl(buf, sizeof buf);
     cli::roles_line(gl, 0, by_role, set);
-    EXPECT_NE(std::string(gl.data(), gl.size()).find("\"pull_gain\":8.04672}"),
+    EXPECT_NE(std::string(gl.data(), gl.size()).find("\"pull_gain\":8.04672,"),
               std::string::npos);
+    set.flags = ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED;
+    cli::Line tl(buf, sizeof buf);
+    cli::roles_line(tl, 0, by_role, set);
+    EXPECT_NE(
+        std::string(tl.data(), tl.size()).find("\"pull_end\":\"top-speed\"}"),
+        std::string::npos);
 
     ecuio_recording_stretch_t s{};
     s.kind = ECUIO_RECORDING_STRETCH_PULL;
