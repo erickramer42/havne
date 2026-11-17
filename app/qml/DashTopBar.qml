@@ -613,14 +613,23 @@ ColumnLayout {
                 objectName: "linkLabel"
                 Layout.fillWidth: true
                 opacity: width >= 60 ? 1 : 0
-                elide: Text.ElideMiddle
+                elide: reads !== "" ? Text.ElideRight : Text.ElideMiddle
                 // Short statuses come from Theme.linkLabel; "ok" adds the
                 // address where the row leaves room for it (the header
                 // shows it anyway). Long-form detail (episode counts,
                 // error codes) stays in LiveView's banner.
                 readonly property bool roomForAddress: width >= 150
+                readonly property string withAddress: qsTr("Live · %1").arg(SessionLabel.address(Bridge.uriLabel))
+                // The vehicle's and plugin's names follow the address when
+                // it shows whole, and elide before it does
+                readonly property string reads: roomForAddress && addressFit.advanceWidth <= width
+                    ? SessionLabel.reads(topBar.host.sessionProfile, topBar.host.profileNames,
+                                         Bridge.vehicleLabel) : ""
+                TextMetrics { id: addressFit; font: linkLabel.font; text: linkLabel.withAddress }
                 text: Bridge.linkState === "ok"
-                      ? (roomForAddress ? qsTr("Live · %1").arg(SessionLabel.address(Bridge.uriLabel)) : qsTr("Live"))
+                      ? (roomForAddress ? (reads !== "" ? qsTr("%1 · %2").arg(withAddress).arg(reads)
+                                                       : withAddress)
+                                        : qsTr("Live"))
                       : Theme.linkLabel(Bridge.linkState)
                 font.pixelSize: Theme.fontCaption
                 color: Theme.linkColor(Bridge.linkState)

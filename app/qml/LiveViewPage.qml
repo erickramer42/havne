@@ -621,7 +621,8 @@ Page {
                                    ? signalDelegate.refused
                                    : qsTr("Refused (%1)").arg(signalDelegate.refusedCode))
                               : signalDelegate.unasked ? qsTr("Not asked")
-                              : !signalDelegate.hasValue ? qsTr("—")
+                              : !signalDelegate.hasValue
+                                ? (Bridge.replayFinished ? qsTr("Not in this recording") : qsTr("—"))
                               : signalDelegate.isText ? signalDelegate.text
                               : signalDelegate.label !== "" ? signalDelegate.label
                               : root.valueText(signalDelegate.value, signalDelegate.decimals,

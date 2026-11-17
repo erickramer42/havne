@@ -43,6 +43,11 @@ Rectangle {
     }
     Component.onCompleted: if (Bridge.connected) connectedAt = new Date()
 
+    // The address's profile as written, "" with none
+    function profileKey(uri) {
+        const found = /[?&]profile=([^&]+)/.exec(uri)
+        return found ? decodeURIComponent(found[1]) : ""
+    }
     // The address's profile in words: profile=, a plugin's by its name,
     // or the default
     function profileOf(uri) {
@@ -371,8 +376,11 @@ Rectangle {
                         wrapMode: Text.WordWrap
                         font.pixelSize: Theme.fontCaption
                         color: Theme.textDim
-                        text: [qsTr("Profile %1").arg(home.profileOf(Bridge.currentUri))]
-                              .concat(Bridge.vehicleLabel !== "" ? [Bridge.vehicleLabel] : [])
+                        readonly property string reads: SessionLabel.reads(
+                            home.profileKey(Bridge.currentUri), home.profileNames, Bridge.vehicleLabel)
+                        text: (reads !== "" ? [reads]
+                               : [qsTr("Profile %1").arg(home.profileOf(Bridge.currentUri))]
+                                 .concat(Bridge.vehicleLabel !== "" ? [Bridge.vehicleLabel] : []))
                               .concat(home.connectedAt !== null
                                       ? [qsTr("since %1").arg(Qt.formatTime(home.connectedAt,
                                                                              Locale.ShortFormat))]
