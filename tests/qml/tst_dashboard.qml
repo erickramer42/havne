@@ -1759,7 +1759,7 @@ TestCase {
     // px the dot and the label fade rather than read "L...e"
     function test_theLinkStateDropsTheAddressInANarrowRow() {
         const page = pageOf({ form: "desktop", width: 1000, height: 600 }, null, true)
-        connect("mock://demo")
+        connect("mock://demo?profile=mock")
         const loader = findChild(page, "linkInRow")
         tryVerify(() => loader.item, 3000, "the link state")
         const label = findChild(page, "linkLabel")

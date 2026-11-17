@@ -620,7 +620,7 @@ ColumnLayout {
                 // error codes) stays in LiveView's banner.
                 readonly property bool roomForAddress: width >= 150
                 text: Bridge.linkState === "ok"
-                      ? (roomForAddress ? qsTr("Live · %1").arg(Bridge.uriLabel) : qsTr("Live"))
+                      ? (roomForAddress ? qsTr("Live · %1").arg(SessionLabel.address(Bridge.uriLabel)) : qsTr("Live"))
                       : Theme.linkLabel(Bridge.linkState)
                 font.pixelSize: Theme.fontCaption
                 color: Theme.linkColor(Bridge.linkState)

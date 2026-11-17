@@ -484,7 +484,7 @@ ApplicationWindow {
                               : root.isCompact || !headerTitle.visible
                                 ? root.shortStatusWord(Bridge.linkState)
                                 : Theme.linkLabel(Bridge.linkState)
-                            readonly property string address: Bridge.connected ? Bridge.uriLabel : ""
+                            readonly property string address: Bridge.connected ? SessionLabel.address(Bridge.uriLabel) : ""
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.preferredWidth: implicitWidth
