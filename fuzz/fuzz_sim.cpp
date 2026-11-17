@@ -12,18 +12,50 @@
 
 namespace {
 
-/* The ECU answering the requests in data: each a length byte (0-15)
- * then that many bytes, a tick of the car after each. Its replies'
- * bytes, run together, into out. */
+/* What the node's session and security access must hold after a reply
+ * to req: a key is accepted only when it is its level's own, in the
+ * extended session, and the gated DID answers only while unlocked */
+void check_security(const ecuio_sim_session& s, const uint8_t* req, size_t len,
+                    const uint8_t* reply, uint32_t n)
+{
+    if (n >= 2 && reply[0] == 0x67 && reply[1] % 2 == 0) {
+        const ecuio_sim_security_level* l =
+            ecuio_sim_security_find(static_cast<uint8_t>(reply[1] - 1));
+        uint8_t want[sizeof l->seed];
+        if (l == nullptr || !s.extended || len != 2u + l->bytes) {
+            abort();
+        }
+        ecuio_sim_security_key(l->seed, l->bytes, want);
+        if (memcmp(req + 2, want, l->bytes) != 0 ||
+            s.security.unlocked != l->level) {
+            abort();
+        }
+    }
+    if (n >= 3 && reply[0] == 0x62 && reply[1] == 0xD2 && reply[2] == 0x10 &&
+        (!s.extended || s.security.unlocked == 0)) {
+        abort();
+    }
+    if (s.security.unlocked != 0 && !s.extended) {
+        abort();
+    }
+}
+
+/* The ECU answering the requests in data as a node on a bus does: each
+ * a length byte (bits 0-3, and bit 5 for 16 more) then that many bytes,
+ * a tick of the car after each; with no recording the node has a
+ * session and its security access (sim.cpp's order: the session's
+ * services, then the ECU's). Its replies' bytes, run together, into
+ * out. */
 void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
          const uint8_t* data, size_t size, std::string* out)
 {
     ecuio_sim_ecu e;
     e.config = config;
     e.recording = rec;
+    ecuio_sim_session session;
     size_t at = 0;
     while (at < size) {
-        const size_t len = data[at] & 0x0F;
+        const size_t len = (data[at] & 0x0F) + ((data[at] & 0x20) ? 16u : 0u);
         const bool functional = (data[at] & 0x10) != 0;
         ++at;
         if (len > size - at) {
@@ -31,10 +63,22 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
         }
         uint8_t reply[ECUIO_SIM_REPLY_MAX + 16];
         memset(reply, 0xEE, sizeof reply);
-        const uint32_t n = ecuio_sim_answer(
-            e, data + at, static_cast<uint32_t>(len), functional, reply);
+        uint32_t n = 0;
+        bool handled = false;
+        if (!functional && rec == nullptr) {
+            n = ecuio_sim_session_answer(session, true, e.time_us, data + at,
+                                         static_cast<uint32_t>(len), reply,
+                                         &handled);
+        }
+        if (!handled) {
+            n = ecuio_sim_answer(e, session, data + at,
+                                 static_cast<uint32_t>(len), functional, reply);
+        }
         if (n > ECUIO_SIM_REPLY_MAX || reply[ECUIO_SIM_REPLY_MAX] != 0xEE) {
             abort();
+        }
+        if (rec == nullptr) {
+            check_security(session, data + at, len, reply, n);
         }
         if (n > 0) {
             const bool negative = reply[0] == 0x7F;

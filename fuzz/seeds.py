@@ -23,6 +23,9 @@
 # fuzz_wasm_module's are WebAssembly modules written here byte by byte
 # (wasm_module()), with the exports the harness calls: from nothing the
 # fuzzer rarely gets a module past its header.
+# fuzz_sim's are runs of requests that enter the simulated ECU's extended
+# session and unlock it (sim_run()): the key is 4 or 16 bytes the fuzzer
+# would have to guess.
 #
 #   python3 fuzz/seeds.py corpus
 #   ./build-fuzz/fuzz/fuzz_signal_file corpus/fuzz_signal_file -max_total_time=60
@@ -488,7 +491,49 @@ def main(argv):
     # (1, 2, 0x7F), then the module
     for name, module in wasm_seeds().items():
         write(out, "fuzz_wasm_module", name + ".wasm", b"\x0a\x01\x02\x03" + module)
+
+    # The simulated ECU's session and security access (sim_security.h),
+    # the canned car with no faults
+    enter, did = b"\x10\x03", b"\x22\xD2\x10"
+    for name, requests in {
+        "unlock-level-01": [enter, did, b"\x27\x01", sim_key(0x01), did],
+        "unlock-level-03": [enter, b"\x27\x03", sim_key(0x03), did],
+        "lockout": [enter] + [b"\x27\x01", sim_key(0x01, wrong=True)] * 3 + [b"\x27\x01"],
+        "locked-by-the-session": [enter, b"\x27\x01", sim_key(0x01), b"\x10\x01", did,
+                                  enter, did],
+        "default-session": [b"\x27\x01", did, b"\x3E\x00", b"\x27"],
+        "a-key-with-no-seed": [enter, sim_key(0x01), b"\x27\x01", sim_key(0x03)],
+    }.items():
+        write(out, "fuzz_sim", name, sim_run(0x02, requests))
     return 0
+
+
+# sim_security.h's levels: the seed request's sub-function and its seed
+SIM_SEEDS = {
+    0x01: bytes([0x5A, 0x17, 0xC3, 0x08]),
+    0x03: bytes([0x11, 0x92, 0x23, 0xA4, 0x35, 0xB6, 0x47, 0xC8, 0x59, 0xDA, 0x6B, 0xEC,
+                 0x7D, 0xFE, 0x8F, 0x10]),
+}
+
+
+def sim_key(level, wrong=False):
+    """A level's key request: 27, the next sub-function, then the seed's
+    bytes in reverse, each XORed with a letter of HAVNE"""
+    seed = SIM_SEEDS[level]
+    key = bytes(seed[len(seed) - 1 - i] ^ b"HAVNE"[i % 5] for i in range(len(seed)))
+    if wrong:
+        key = key[:-1] + bytes([key[-1] ^ 0x01])
+    return bytes([0x27, level + 1]) + key
+
+
+def sim_run(config, requests):
+    """fuzz_sim's form: the ECU's byte (even), then each request behind
+    its length byte: bits 0 to 3, and bit 5 for 16 more"""
+    out = bytes([config])
+    for r in requests:
+        assert len(r) < 32
+        out += bytes([(len(r) - 16) | 0x20 if len(r) >= 16 else len(r)]) + r
+    return out
 
 
 # fuzz_computed's edges, in its kEdges' order (the last, NaN, left out)

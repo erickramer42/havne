@@ -124,7 +124,7 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # INTERNAL: ecuio-core's PUBLIC include dirs cover only core/include,
 # and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
-    test_request_table.cpp test_tier2_ceiling.cpp)
+    test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -2255,8 +2255,11 @@ if(WIN32)
         TEST_HOOKS_ENABLED
     )
 
+    # core/src: sim_security.h, the simulated ECU's security access that
+    # the fakes' ECU answers with (fake_ecus.h)
     target_include_directories(fake_j2534 PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
+        ${CMAKE_SOURCE_DIR}/core/src
     )
 
     set_target_properties(fake_j2534 PROPERTIES
@@ -2283,6 +2286,7 @@ if(WIN32)
 
     target_include_directories(fake_j2534_legacy PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
+        ${CMAKE_SOURCE_DIR}/core/src
     )
 
     set_target_properties(fake_j2534_legacy PROPERTIES
@@ -2470,6 +2474,8 @@ endif()
 find_package(Threads REQUIRED)
 add_executable(bench_timing bench_timing.cpp)
 target_link_libraries(bench_timing PRIVATE ecuio-core Threads::Threads)
+# core/src: fake_ecus.h's sim_security.h
+target_include_directories(bench_timing PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 app_enable_warnings(bench_timing)
 if(WIN32)
     target_compile_definitions(bench_timing PRIVATE
