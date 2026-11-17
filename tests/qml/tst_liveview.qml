@@ -646,6 +646,37 @@ TestCase {
         Bridge.disconnectSession()
     }
 
+    // A row the recording never holds keeps its dash while the replay plays
+    // and reads "Not in this recording" once the last frame has played
+    function test_aRowTheRecordingNeverHoldsSaysSoAtTheReplaysEnd() {
+        const r = Bridge.importSignalText(JSON.stringify({
+            havne_signals: 1, name: "Never recorded", source: { name: "t" }, extends: "obd2",
+            ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [{ key: "never", name: "Never", read: { service: "22", number: "F1FE" },
+                        field: { byte: 0, bits: 8 } }]
+        }))
+        verify(r.ok, r.words)
+        Bridge.useSignalFiles([r.sha256])
+        const page = createTemporaryObject(pageComponent, testCase.Window.window.contentItem)
+        const list = findChild(page, "signalList")
+        const valueOf = name => {
+            for (let i = 0; i < list.count; ++i) {
+                list.positionViewAtIndex(i, ListView.Contain)
+                const row = list.itemAtIndex(i)
+                if (row && row.name === name)
+                    return findChild(row, "valueLabel").text
+            }
+            return "no row " + name
+        }
+        compare(Bridge.connectSession("replay://" + Harness.replayFixtures
+                                      + "/2026-10-25-engine-start?profile=" + r.profile
+                                      + "&speed=max"), "", "the replay connects")
+        tryCompare(Bridge, "replayFinished", true, 10000)
+        tryCompare({ get v() { return valueOf("Never") } }, "v", "Not in this recording", 5000)
+        Bridge.disconnectSession()
+        tryCompare(Bridge, "replayFinished", false, 5000)
+    }
+
     // ADR-0051 section 3: a DID the ECU refuses says so on its row, the
     // code by name, and one it answers shows its value
     function test_aRefusedDidSaysSo() {
