@@ -586,9 +586,14 @@ ecuio_status_t ecuio_j2534_sur_open(const char* dll_path, uint32_t dll_arch,
      * only until the spawn: the child gets it as stdout/stderr, and the
      * client keeps its own copy for SUR_LOG. */
     SECURITY_ATTRIBUTES inherit_sa = { sizeof(inherit_sa), nullptr, TRUE };
-    h->log = ecuio_sur_log::open_session_log(seq, &inherit_sa, h->log_path,
-                                             sizeof(h->log_path));
+    bool log_out_of_memory = false;
+    h->log = ecuio_sur_log::open_session_log(
+        seq, &inherit_sa, h->log_path, sizeof(h->log_path), &log_out_of_memory);
     const DWORD log_err = (h->log == INVALID_HANDLE_VALUE) ? GetLastError() : 0;
+    if (log_out_of_memory) {
+        ecuio_j2534_sur_close(h);
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    }
 
     const SurrogateExe& sur = surrogate_for(dll_arch);
     wchar_t exe[MAX_PATH] = {};

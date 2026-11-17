@@ -1,7 +1,8 @@
 // File/layer: core/src/j2534_surrogate_log.cpp | C++17, Qt-free,
 //             Win32-guarded
 // Testing: HARNESS: J2534SurrogateTest.EarlierSessionLogIsKept,
-//          .ClientAndChildLinesShareTheSessionLog; Cross-arch
+//          .ClientAndChildLinesShareTheSessionLog; J2534ConnectTest (the
+//          prune out of memory); Cross-arch
 //
 // The surrogate's session log (surrogate.md): the file each spawn opens
 // for the child's output and the client's lines, the earlier logs it keeps
@@ -12,6 +13,7 @@
 #ifdef _WIN32
 
 #include <cwchar>
+#include <new>
 
 #include "surrogate_log_names.h"
 #include "win_utf8.h"
@@ -53,31 +55,44 @@ void prune_kept_logs(const wchar_t* prefix)
 
 /* Deletes the oldest per-spawn logs past SUR_LOG_KEEP, by last write (their
  * names don't sort by time). One still held is skipped; a later spawn takes
- * it. */
-void prune_per_spawn_logs(const wchar_t* prefix)
+ * it. False, with nothing deleted, when the names don't fit in memory. */
+bool prune_per_spawn_logs(const wchar_t* prefix)
 {
     wchar_t pattern[MAX_PATH + 64];
     swprintf(pattern, _countof(pattern), L"%lsecuio-surrogate-*.log", prefix);
     WIN32_FIND_DATAW fd;
     HANDLE find = FindFirstFileW(pattern, &fd);
     if (find == INVALID_HANDLE_VALUE) {
-        return;
+        return true;
     }
-    std::vector<SurLogFile> logs;
-    do {
-        if (!sur_log_is_per_spawn_name(fd.cFileName)) {
-            continue;
+    std::vector<std::wstring> excess;
+    try {
+        std::vector<SurLogFile> logs;
+        do {
+            if (!sur_log_is_per_spawn_name(fd.cFileName)) {
+                continue;
+            }
+            const uint64_t written =
+                (static_cast<uint64_t>(fd.ftLastWriteTime.dwHighDateTime)
+                 << 32) |
+                fd.ftLastWriteTime.dwLowDateTime;
+            logs.push_back(SurLogFile{fd.cFileName, written});
+        } while (FindNextFileW(find, &fd));
+        FindClose(find);
+        find = INVALID_HANDLE_VALUE;
+        excess = sur_log_excess(std::move(logs), SUR_LOG_KEEP);
+    } catch (const std::bad_alloc&) {
+        if (find != INVALID_HANDLE_VALUE) {
+            FindClose(find);
         }
-        const uint64_t written =
-            (static_cast<uint64_t>(fd.ftLastWriteTime.dwHighDateTime) << 32) |
-            fd.ftLastWriteTime.dwLowDateTime;
-        logs.push_back(SurLogFile{fd.cFileName, written});
-    } while (FindNextFileW(find, &fd));
-    FindClose(find);
-    for (const std::wstring& name :
-         sur_log_excess(std::move(logs), SUR_LOG_KEEP)) {
-        (void)DeleteFileW((std::wstring(prefix) + name).c_str());
+        return false;
     }
+    for (const std::wstring& name : excess) {
+        wchar_t victim[MAX_PATH + 64];
+        swprintf(victim, _countof(victim), L"%ls%ls", prefix, name.c_str());
+        (void)DeleteFileW(victim);
+    }
+    return true;
 }
 
 /* Keeps the previous session's log: the file at the fixed name is renamed
@@ -112,9 +127,10 @@ void keep_previous_log(const wchar_t* prefix)
  * session (the log it replaces is kept); a concurrent session finds it held
  * and gets a per-spawn name, so no child runs without a log. path receives
  * UTF-8 (TEMP can hold a non-ASCII name). Returns INVALID_HANDLE_VALUE, with
- * path empty, if neither name opens. */
-HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
-                        char* path, size_t cap)
+ * path empty, if neither name opens, or with *out_of_memory set and nothing
+ * opened when the prune ran out of memory. */
+HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa, char* path,
+                        size_t cap, bool* out_of_memory)
 {
     wchar_t dir[MAX_PATH] = {};
     const DWORD tn = GetTempPathW(MAX_PATH, dir);
@@ -122,7 +138,11 @@ HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
     const wchar_t* prefix = (tn == 0 || tn >= MAX_PATH) ? L"." : dir;
 
     keep_previous_log(prefix);
-    prune_per_spawn_logs(prefix);
+    *out_of_memory = !prune_per_spawn_logs(prefix);
+    if (*out_of_memory) {
+        path[0] = '\0';
+        return INVALID_HANDLE_VALUE;
+    }
     wchar_t wpath[MAX_PATH + 64];
     swprintf(wpath, _countof(wpath), L"%lsecuio-surrogate.log", prefix);
     HANDLE f = CreateFileW(wpath, GENERIC_WRITE, FILE_SHARE_READ, sa,

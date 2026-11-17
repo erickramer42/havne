@@ -17,9 +17,10 @@
 namespace ecuio_sur_log {
 
 /* The log a spawn writes, its earlier one kept and the old ones pruned
- * first (the definition says how) */
-HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa,
-                        char* path, size_t cap);
+ * first (the definition says how); *out_of_memory when the prune couldn't
+ * run */
+HANDLE open_session_log(LONG seq, SECURITY_ATTRIBUTES* sa, char* path,
+                        size_t cap, bool* out_of_memory);
 
 } // namespace ecuio_sur_log
 
