@@ -13,7 +13,8 @@
 # the core it requires. A signal file wraps to a packed plugin, a variant
 # goes in and comes out (ADR-0064), each as havne-cli writes it, the
 # lineage kept and an ECU's rename said; each variant names its source,
-# and its text reads back as its set.
+# and its text reads back as its set. A variant says the key each of its
+# signals is kept under (ADR-0065 section 9).
 
 import json
 import os
@@ -178,6 +179,22 @@ def test_a_folder_with_no_plugin_is_refused(tmp_path):
         havne.Plugin(str(tmp_path))
     assert e.value.name == "INVALID_ARGUMENT"
     assert "manifest.json" in e.value.detail
+
+
+def test_a_plugin_says_the_key_each_signal_of_a_variant_is_kept_under():
+    p = havne.Plugin(os.path.join(PLUGINS, "example-sim"))
+    base = p.keys()
+    assert base[0] == "7E8:4104:2.0:8", "obd2's first signal: the variant extends it"
+    assert base[-2:] == ["7E9:62F411:3.0:8", "boost"], (
+        "a DID by its address, a computed signal by its author's key")
+    assert len(set(base)) == len(base)
+    newer = p.keys("my2019")
+    assert "7E9:62F412:3.0:16" in newer and "7E9:62F412:3.0:16" not in base
+    assert p.key_of("Oil Temp") == "7E8:62F40D:3.0:8"
+    assert p.key_of("Clutch Slip", "my2019") == "7E9:62F412:3.0:16"
+    assert p.key_of("7E9:62F412:3.0:16", "my2019") == "7E9:62F412:3.0:16"
+    with pytest.raises(havne.Error, match="no signal with the key or name 'Clutch Slip'"):
+        p.key_of("Clutch Slip", "base")
 
 
 def test_a_plugin_says_a_variant_s_gauge(tmp_path):
