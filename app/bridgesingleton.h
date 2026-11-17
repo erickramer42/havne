@@ -10,6 +10,7 @@
 #include <QtQml/qqmlregistration.h>
 
 #include "adapterrelay.h"
+#include "exprcheck.h"
 #include "recordingexport.h"
 #include "recordingframes.h"
 #include "recordingview.h"
@@ -78,6 +79,13 @@ struct RecordingFramesForeign {
     Q_GADGET
     QML_FOREIGN(RecordingFrames)
     QML_NAMED_ELEMENT(RecordingFrames)
+};
+
+// The signal form's computed-signal editor: each form makes its own
+struct ExprEditorForeign {
+    Q_GADGET
+    QML_FOREIGN(ExprEditor)
+    QML_NAMED_ELEMENT(ExprEditor)
 };
 
 // The viewer's Export (ADR-0056 section 7): each page makes its own

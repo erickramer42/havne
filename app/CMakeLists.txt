@@ -45,6 +45,8 @@ qt_add_library(app_ui STATIC
     obdbimport.h
     readonce.cpp
     readonce.h
+    exprcheck.cpp
+    exprcheck.h
     pluginstore.cpp
     pluginstore.h
     signalstore.cpp
@@ -140,6 +142,7 @@ qt_add_qml_module(app_ui
         qml/SettingsAdapter.qml
         qml/SettingsAdvanced.qml
         qml/SettingsList.qml
+        qml/SettingsOwnComputed.qml
         qml/SettingsOwnForm.qml
         qml/SettingsSubpage.qml
         qml/SettingsConnect.qml

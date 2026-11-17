@@ -1915,6 +1915,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_bluetooth.cpp
         test_bridge_frames.cpp
         test_bridge_readonce.cpp
+        test_bridge_expr.cpp
         test_bridge_obdb.cpp
         test_bridge_health.cpp
         test_bridge_replay.cpp
@@ -1941,6 +1942,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/framefilter.cpp
         ../app/obdbimport.cpp
         ../app/readonce.cpp
+        ../app/exprcheck.cpp
         ../app/pluginstore.cpp
         ../app/signalstore.cpp
         ../app/alerttone.cpp
