@@ -40,6 +40,12 @@ Page {
     readonly property real gridTop: stripMeetsPanel ? 0 : topGap
     // The panel's distance from the page's sides; none in the drive view
     readonly property real panelMargin: driving ? 0 : margin
+    // The edit panel's side column: on the desktop form the open panel stands
+    // right of the grid, this wide, in a column that scrolls by itself, while
+    // the cells it leaves are at least this wide (the cells narrow, the
+    // columns' count stays); with less room the panel stays above the grid
+    readonly property real sideColumnWidth: 340
+    property real sideCellMinWidth: 140
     // One pixel of the display in the layout's units, and a hairline
     // that many whole pixels wide, so every line draws the same width
     readonly property real pixel: 1 / ((Screen.devicePixelRatio || 1) * Theme.zoom)
@@ -85,7 +91,7 @@ Page {
     property var vehicles: VehicleBook.empty()
     // Settings' URI and profile, whose signals Add offers with no session
     property string offlineUri: ""
-    onOfflineUriChanged: if (panel === "signal") refreshRows()
+    onOfflineUriChanged: if (panel === "signal" || panel === "cell") refreshRows()
     // Settings' picked vehicle's sets ([{ profile, name, variant }], its
     // plugin first) and the names of the profiles it knows (profile: name)
     property var pickedSets: []
@@ -190,6 +196,8 @@ Page {
     property string addKind: ""      // Add's kind; "" when changing a cell's signal
     property bool changingKind: false  // the kind list picks the selected cell's kind
     property bool moreShown: false
+    // A page was just added: the Page row's name field takes the focus
+    signal pageNameWanted()
     property bool confirmReset: false
     property bool confirmRemovePage: false
     // The preset list's purpose: "" shut, "add" (a new page after the shown
@@ -650,6 +658,9 @@ Page {
     function select(i) {
         commitTyping()
         selected = i
+        // The cell's panel takes its decimals from the listed rows with no session
+        if (!Bridge.connected && (profileRows.length === 0 || rowsFor !== offlineUri))
+            refreshRows()
         panel = "cell"
     }
 
@@ -854,13 +865,33 @@ Page {
     // ---- Add: a kind, then a signal
 
     property var profileRows: []
+    // The address the rows were listed for with no session
+    property string rowsFor: ""
     function refreshRows() {
+        rowsFor = offlineUri
         profileRows = Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : offlineUri)
     }
     // The rows a gauge of `kind` can show: numbers with references, an
     // enumeration only on a digital tile
     function pickable(kind) {
         return profileRows.filter(r => r.ref !== "" && !r.isText && (!r.isEnum || kind === "digital"))
+    }
+    // The picked sets' own signals a gauge of `kind` can show, one entry for
+    // each set that has any ([{ title, rows }], the plugin first): offered
+    // with or without a session, whatever profile the session reads
+    function pickedOwnRows(kind) {
+        const out = []
+        for (const s of pickedSets) {
+            const rows = Bridge.profileSignals("mock://?profile=" + s.profile)
+                .filter(r => r.ref.startsWith("key:") && !r.isText && (!r.isEnum || kind === "digital"))
+            if (rows.length === 0)
+                continue
+            // A plugin with several variants picked is told apart by its variant
+            const twin = pickedSets.some(o => o !== s && o.name === s.name)
+            out.push({ title: twin && s.variant ? qsTr("%1: %2").arg(s.name).arg(s.variant) : s.name,
+                       rows: rows })
+        }
+        return out
     }
     function startAdd() {
         if (!DashboardBook.canAddCell(doc, pageIndex))
@@ -1095,8 +1126,15 @@ Page {
 
     function addPage() {
         if (edit(DashboardBook.addPage(doc, qsTr("Page %1").arg(pages.length + 1)),
-                 stepOf("", qsTr("added a page"), -1, -1, pages.length)))
+                 stepOf("", qsTr("added a page"), -1, -1, pages.length))) {
             goTo(pages.length - 1)
+            askForPageName()
+        }
+    }
+    // The new page's name is the first thing to type: the Page row opens on it
+    function askForPageName() {
+        moreShown = true
+        pageNameWanted()
     }
     // The preset list (the "+" tab, Add page, Replace this page with...)
     function openPresets(mode) {
@@ -1127,6 +1165,7 @@ Page {
                   stepOf("", qsTr("added the page %1").arg(page.name), -1, -1, after + 1)))
             return false
         goTo(after + 1)
+        askForPageName()
         return true
     }
     // True when the shown page's gauges are one preset's: replacing them
@@ -1574,10 +1613,16 @@ Page {
 
                 // The grid (section 4): the phone's 6 columns upright and
                 // 12 on its side, the desktop's one per 220 px from 2 to 12
-                readonly property real gridWidth: Math.max(0, width - 2 * root.panelMargin)
+                readonly property real fullGridWidth: Math.max(0, width - 2 * root.panelMargin)
+                // Counted on the full width, so opening a panel narrows the cells and moves none
                 readonly property int columns: root.form === "phone"
                     ? (root.width > root.height ? 12 : 6)
-                    : Math.max(2, Math.min(12, Math.round(gridWidth / 220)))
+                    : Math.max(2, Math.min(12, Math.round(fullGridWidth / 220)))
+                readonly property real sideGridWidth:
+                    Math.max(0, fullGridWidth - root.sideColumnWidth - root.panelMargin)
+                readonly property bool sideColumn: !root.phoneForm && !root.driving && panelHost.active
+                    && (sideGridWidth - (columns - 1) * root.cellGap) / columns >= root.sideCellMinWidth
+                readonly property real gridWidth: sideColumn ? sideGridWidth : fullGridWidth
                 readonly property real columnWidth: Math.max(0, (gridWidth - (columns - 1)
                                                                  * root.cellGap) / columns)
                 readonly property bool shown: index === root.pageIndex
@@ -1708,18 +1753,40 @@ Page {
                 }
 
                 // The edit panel, in the page above its grid (never a Popup)
+                // The side column: the panel in a column of its own, as high as
+                // the page's view and held there while the grid scrolls
+                Flickable {
+                    id: sideHost
+                    objectName: "dashSidePanel"
+                    visible: pageView.sideColumn
+                    x: pageView.width - root.panelMargin - root.sideColumnWidth
+                    y: pageView.contentY
+                    z: 1
+                    width: root.sideColumnWidth
+                    height: pageView.height
+                    clip: true
+                    contentWidth: width
+                    contentHeight: panelHost.item
+                        ? root.gridTop + (panelHost.item as Item).height + root.panelMargin : 0
+                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                }
+
                 Loader {
                     id: panelHost
                     objectName: "dashPanel"
-                    x: (pageView.width - width) / 2
+                    parent: pageView.sideColumn ? sideHost.contentItem : pageView.contentItem
+                    x: pageView.sideColumn ? 0 : (pageView.width - width) / 2
                     y: root.gridTop
-                    width: pageView.gridWidth
+                    width: pageView.sideColumn ? root.sideColumnWidth : pageView.fullGridWidth
                     active: (pageView.shown && root.panel !== "") || root.connectShown
                     sourceComponent: root.panel === "cell" ? cellPanel
                                    : root.panel === "add" ? addPanel
                                    : root.panel === "signal" ? signalPanel
                                    : root.connectShown ? connectPanel : null
-                    onLoaded: pageView.contentY = 0
+                    onLoaded: {
+                        pageView.contentY = 0
+                        sideHost.contentY = 0
+                    }
                 }
 
                 Label {
@@ -1736,8 +1803,9 @@ Page {
                 Item {
                     id: grid
                     // On whole pixels of the display, so the seams snapped inside it are
-                    x: root.snap((pageView.width - width) / 2)
-                    y: root.snap(swipe.y + root.gridTop + (panelHost.item ? (panelHost.item as Item).height + root.gap : 0)) - swipe.y
+                    x: root.snap(pageView.sideColumn ? root.panelMargin : (pageView.width - width) / 2)
+                    y: root.snap(swipe.y + root.gridTop + (panelHost.item && !pageView.sideColumn
+                        ? (panelHost.item as Item).height + root.gap : 0)) - swipe.y
                     width: pageView.gridWidth
                     height: Math.max(0, pageView.rows * pageView.pitch - root.cellGap)
 
