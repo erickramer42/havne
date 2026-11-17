@@ -13,6 +13,8 @@
 #include <QtGlobal>
 
 #include <algorithm>
+#include <initializer_list>
+#include <utility>
 
 using namespace bridgetext;
 
@@ -40,16 +42,26 @@ void SessionBridge::onConditions(const ecuio_condition_event_t* events,
         return;
     }
     std::lock_guard<std::mutex> lock(self->m_conditionsMutex);
-    std::vector<ConditionSlot>& window =
-        self->m_conditionStaging[self->m_activeConditions];
     for (uint32_t i = 0; i < count; ++i) {
         const ecuio_condition_event_t& e = events[i];
-        // A set since replaced: its index means another condition now
-        if (e.generation != self->m_stagingGeneration ||
-            e.condition >= window.size()) {
+        // The set before has slots of its own (its index means another
+        // condition now), as has the one before it while core is attaching
+        ConditionWindow* window = nullptr;
+        if (e.generation == self->m_conditionWindow.generation) {
+            window = &self->m_conditionWindow;
+        } else if (e.generation == self->m_conditionWindowBefore.generation) {
+            window = &self->m_conditionWindowBefore;
+        } else if (e.generation == self->m_conditionWindowOlder.generation) {
+            window = &self->m_conditionWindowOlder;
+        } else {
+            // Lost: two attaches came within one of the worker's dispatches
             continue;
         }
-        ConditionSlot& slot = window[e.condition];
+        std::vector<ConditionSlot>& buffer = window->staging[window->active];
+        if (e.condition >= buffer.size()) {
+            continue;
+        }
+        ConditionSlot& slot = buffer[e.condition];
         if ((e.flags & ECUIO_CONDITION_FIRED) != 0 && slot.firings++ == 0) {
             slot.first = e;
         }
@@ -58,43 +70,62 @@ void SessionBridge::onConditions(const ecuio_condition_event_t* events,
     }
 }
 
-void SessionBridge::prepareConditionStaging(uint32_t count, uint32_t generation)
+void SessionBridge::clearConditionStaging()
 {
+    ConditionWindow now;
+    ConditionWindow before;
     std::lock_guard<std::mutex> lock(m_conditionsMutex);
-    for (std::vector<ConditionSlot>& window : m_conditionStaging) {
-        window.assign(count, ConditionSlot{});
-    }
-    m_activeConditions = 0;
-    m_stagingGeneration = generation;
+    std::swap(m_conditionWindow, now);
+    std::swap(m_conditionWindowBefore, before);
 }
 
 bool SessionBridge::attachConditions(ecuio_session_t* session,
                                      const ecuio_condition_set_t* set,
                                      QString* why)
 {
-    if (m_conditionsGeneration != 0) {
-        flushConditions(session);
-    }
-    size_t staged = 0;
-    {
-        std::lock_guard<std::mutex> lock(m_conditionsMutex);
-        staged = m_conditionStaging[0].size();
-    }
     // The slots first, under the generation core is about to begin: a
     // first judgment can come before the call returns
     const uint32_t count = ecuio_condition_set_count(set);
     const uint32_t next = m_conditionsGeneration + 1;
-    prepareConditionStaging(count, next);
+    ConditionWindow spare;
+    for (std::vector<ConditionSlot>& buffer : spare.staging) {
+        buffer.assign(count, ConditionSlot{});
+    }
+    spare.generation = next;
+    // The set judged keeps its window, whole, as the set before's: its
+    // events come until the worker's dispatch under way has ended
+    {
+        std::lock_guard<std::mutex> lock(m_conditionsMutex);
+        std::swap(m_conditionWindowOlder, m_conditionWindowBefore);
+        std::swap(m_conditionWindowBefore, m_conditionWindow);
+        std::swap(m_conditionWindow, spare);
+    }
     const ecuio_signal_set_t* signalSet = ecuio_session_signal_set(session);
     const ecuio_signal_file_t* file = fileOfSet(signalSet);
+    const auto refusedForTesting = [this]() {
+        --m_failAttaches;
+        if (m_duringFailedAttach) {
+            m_duringFailedAttach();
+        }
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    };
     const ecuio_status_t rc =
-        m_failAttaches > 0 ? (--m_failAttaches, ECUIO_ERR_OUT_OF_MEMORY)
+        m_failAttaches > 0 ? refusedForTesting()
                            : ecuio_session_set_conditions(session, set, file);
+    // The window no longer heard, freed once the lock is let go
+    ConditionWindow dropped;
     if (rc != ECUIO_OK) {
         *why = detailOr(rc);
-        prepareConditionStaging(static_cast<uint32_t>(staged),
-                                m_conditionsGeneration);
+        // Each window back in its place, with what it gathered meanwhile
+        std::lock_guard<std::mutex> lock(m_conditionsMutex);
+        std::swap(m_conditionWindow, m_conditionWindowBefore);
+        std::swap(m_conditionWindowBefore, m_conditionWindowOlder);
+        std::swap(m_conditionWindowOlder, dropped);
         return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_conditionsMutex);
+        std::swap(m_conditionWindowOlder, dropped);
     }
     m_conditionsGeneration = next;
     m_conditionStates.assign(count, ecuio_condition_state_t{});
@@ -107,7 +138,9 @@ bool SessionBridge::attachConditions(ecuio_session_t* session,
                                m_toneAtUs[i]);
         }
     }
+    m_conditionModel->keepRowsBefore();
     m_conditionModel->setConditions(set, signalSet, file);
+    m_toneBeforeAtUs.swap(m_toneAtUs);
     m_toneAtUs.assign(count, NoTone);
     for (const auto& [key, at] : toned) {
         const int row = m_conditionModel->rowOfKey(key);
@@ -129,7 +162,7 @@ void SessionBridge::attachSessionConditions(ecuio_session_t* session,
     m_conditionsPending.clear();
     m_conditionsFromRecording = false;
     m_conditionsLines.clear();
-    prepareConditionStaging(0, 0);
+    clearConditionStaging();
     // ADR-0063 decision 12: a replay is judged by its recording's own copy
     QString unused;
     const ConditionSetPtr own = recordingConditions(uri, &unused);
@@ -214,6 +247,13 @@ void SessionBridge::applySavedConditions()
         showSavedConditions();
         return;
     }
+    // The window's firings first, by the rows of the set that gave them. A
+    // handler of their lines that saves has attached the store's set itself
+    const uint32_t generation = m_conditionsGeneration;
+    flushConditions(m_session);
+    if (m_conditionsGeneration != generation) {
+        return;
+    }
     QString why;
     const ecuio_condition_set_t* set = m_conditionStore.set();
     const uint32_t count = ecuio_condition_set_count(set);
@@ -228,9 +268,11 @@ void SessionBridge::applySavedConditions()
 void SessionBridge::endSessionConditions()
 {
     m_conditionsGeneration = 0;
-    prepareConditionStaging(0, 0);
+    clearConditionStaging();
     m_conditionStates.clear();
     m_toneAtUs.clear();
+    m_toneBeforeAtUs.clear();
+    m_conditionModel->dropRowsBefore();
     m_conditionsPending.clear();
     m_conditionsFromRecording = false;
     m_conditionsLines.clear();
@@ -363,16 +405,21 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
         return;
     }
     std::vector<ConditionSlot>* full = nullptr;
+    std::vector<ConditionSlot>* before = nullptr;
     {
         std::lock_guard<std::mutex> lock(m_conditionsMutex);
-        full = &m_conditionStaging[m_activeConditions];
-        m_activeConditions ^= 1;
+        full = &m_conditionWindow.staging[m_conditionWindow.active];
+        m_conditionWindow.active ^= 1;
+        before =
+            &m_conditionWindowBefore.staging[m_conditionWindowBefore.active];
+        m_conditionWindowBefore.active ^= 1;
     }
-    // The worker writes the other one now. Each firing is a line, in the
+    // The worker writes the other ones now. Each firing is a line, in the
     // order they fired; several of one condition's in a window, one line
     struct Fired {
         uint64_t at;
         int row;
+        ConditionModel::Rows rows;
     };
     std::vector<Fired> fired;
     // The model's value terms, applied once the slots are cleared: its
@@ -383,6 +430,34 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
     // heard or not: one the player drops (stale, a failed generator) too
     const uint64_t now = ecuio_clock_us() + m_toneTimeAddedForTesting;
     uint32_t tone = ECUIO_ALERT_NONE;
+    const auto ask = [&tone, now](uint32_t level, uint64_t* at) {
+        if (level != ECUIO_ALERT_NONE && at != nullptr &&
+            (*at == NoTone || now - *at >= ToneGapUs)) {
+            *at = now;
+            tone = std::max(tone, level);
+        }
+    };
+    // The set before's firings, ahead of the attached set's at one time.
+    // Its rows are gone from the model, so it gives lines and tones alone
+    for (size_t i = 0; i < before->size(); ++i) {
+        if ((*before)[i].firings == 0) {
+            continue;
+        }
+        const int row = static_cast<int>(i);
+        fired.push_back({(*before)[i].first.timestamp_us, row,
+                         ConditionModel::Rows::Before});
+        // Its tone is its key's: the row that keeps the key gives the level
+        // and the 5 s, a key the edit dropped keeps its own
+        const int kept = m_conditionModel->rowOfKey(
+            m_conditionModel->key(row, ConditionModel::Rows::Before));
+        if (kept >= 0 && static_cast<size_t>(kept) < m_toneAtUs.size()) {
+            ask(m_conditionModel->toneLevel(kept),
+                &m_toneAtUs[static_cast<size_t>(kept)]);
+        } else if (i < m_toneBeforeAtUs.size()) {
+            ask(m_conditionModel->toneLevel(row, ConditionModel::Rows::Before),
+                &m_toneBeforeAtUs[i]);
+        }
+    }
     for (size_t i = 0; i < full->size(); ++i) {
         ConditionSlot& slot = (*full)[i];
         if (!slot.has) {
@@ -392,13 +467,10 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
         if (slot.firings == 0) {
             continue;
         }
-        fired.push_back({slot.first.timestamp_us, static_cast<int>(i)});
-        const uint32_t level = m_conditionModel->toneLevel(static_cast<int>(i));
-        if (level != ECUIO_ALERT_NONE && i < m_toneAtUs.size() &&
-            (m_toneAtUs[i] == NoTone || now - m_toneAtUs[i] >= ToneGapUs)) {
-            m_toneAtUs[i] = now;
-            tone = std::max(tone, level);
-        }
+        fired.push_back({slot.first.timestamp_us, static_cast<int>(i),
+                         ConditionModel::Rows::Now});
+        ask(m_conditionModel->toneLevel(static_cast<int>(i)),
+            i < m_toneAtUs.size() ? &m_toneAtUs[i] : nullptr);
     }
     if (tone != ECUIO_ALERT_NONE) {
         m_tone.play(tone);
@@ -410,14 +482,19 @@ void SessionBridge::flushConditions(ecuio_session_t* session)
     // and the model are done with
     QStringList lines;
     for (const Fired& f : fired) {
-        const ConditionSlot& slot = (*full)[static_cast<size_t>(f.row)];
+        const std::vector<ConditionSlot>& of =
+            f.rows == ConditionModel::Rows::Before ? *before : *full;
+        const ConditionSlot& slot = of[static_cast<size_t>(f.row)];
         lines << (slot.firings == 1
                       ? m_conditionModel->firingText(f.row, slot.first.value,
-                                                     slot.first.term)
-                      : m_conditionModel->firingsText(f.row, slot.firings));
+                                                     slot.first.term, f.rows)
+                      : m_conditionModel->firingsText(f.row, slot.firings,
+                                                      f.rows));
     }
-    for (ConditionSlot& slot : *full) {
-        slot = ConditionSlot{};
+    for (std::vector<ConditionSlot>* buffer : {full, before}) {
+        for (ConditionSlot& slot : *buffer) {
+            slot = ConditionSlot{};
+        }
     }
     for (const auto& t : terms) {
         if (m_conditionsGeneration != generation) {

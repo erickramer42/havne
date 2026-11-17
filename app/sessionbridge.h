@@ -520,8 +520,14 @@ public:
     {
         return m_conditionsGeneration;
     }
-    // The next n attaches refused where core's call is made
-    void failConditionsAttachesForTesting(int n) { m_failAttaches = n; }
+    // The next n attaches refused where core's call is made; during, when
+    // given, runs there first, as the worker's callback can meanwhile
+    void failConditionsAttachesForTesting(int n,
+                                          std::function<void()> during = {})
+    {
+        m_failAttaches = n;
+        m_duringFailedAttach = std::move(during);
+    }
     // The alert tones asked, and a later time for the tone's 5 s
     const AlertTone& alertToneForTesting() const { return m_tone; }
     void addToneTimeForTesting(uint64_t us) { m_toneTimeAddedForTesting += us; }
@@ -946,13 +952,13 @@ private:
     // event into its condition's slot under m_conditionsMutex
     static void onConditions(const ecuio_condition_event_t* events,
                              uint32_t count, void* user_data);
-    // GUI thread: count slots for the attach of this generation, the
-    // events of any other passed by
-    void prepareConditionStaging(uint32_t count, uint32_t generation);
+    // GUI thread: no slots for any attach, every event passed by
+    void clearConditionStaging();
     // GUI thread: set (nullptr: none) attached to session, judged with its
     // signal file, and the model's rows; false with *why core's words,
-    // nothing changed. Core copies the set. The window's events of the set
-    // before are flushed first.
+    // nothing changed. Core copies the set. The set before keeps its slots
+    // and its rows' copy, so its firings that arrive later are still lines.
+    // The caller flushes the window first (applySavedConditions).
     bool attachConditions(ecuio_session_t* session,
                           const ecuio_condition_set_t* set, QString* why);
     // GUI thread, before the start: the replay's own copy, else the saved set
@@ -1140,13 +1146,25 @@ private:
         ecuio_condition_event_t newest{};
         ecuio_condition_event_t first{}; // the window's first firing
     };
-    std::mutex m_conditionsMutex; // guards the staging and its generation
-    std::vector<ConditionSlot> m_conditionStaging[2];
-    int m_activeConditions = 0;       // the one onConditions writes
-    uint32_t m_stagingGeneration = 0; // the attach whose events are kept
+    // One attach's slots, twice: the worker writes staging[active] and the
+    // tick swaps them to read the other
+    struct ConditionWindow {
+        std::vector<ConditionSlot> staging[2];
+        int active = 0;
+        uint32_t generation = 0; // the attach whose events it keeps
+    };
+    std::mutex m_conditionsMutex; // guards both windows
+    ConditionWindow m_conditionWindow;
+    // The set before's: the worker's dispatch under way at an attach took
+    // that set, and gives its events after core's call returns
+    ConditionWindow m_conditionWindowBefore;
+    // The one before that, held only while core's call runs: a refusal
+    // makes it the set before's again
+    ConditionWindow m_conditionWindowOlder;
     ConditionStore m_conditionStore;
     ConditionModel* m_conditionModel = nullptr;
     int m_failAttaches = 0; // failConditionsAttachesForTesting
+    std::function<void()> m_duringFailedAttach;
     uint32_t m_conditionsGeneration =
         0; // this session's attaches, core's count
     std::vector<ecuio_condition_state_t> m_conditionStates; // the tick's read
@@ -1160,6 +1178,8 @@ private:
     static constexpr uint64_t NoTone = UINT64_MAX;
     AlertTone m_tone;
     std::vector<uint64_t> m_toneAtUs;
+    // The set before's stamps, for a key the set attached dropped
+    std::vector<uint64_t> m_toneBeforeAtUs;
     uint64_t m_toneTimeAddedForTesting = 0;
 
     SignalListModel* m_signalModel = nullptr;

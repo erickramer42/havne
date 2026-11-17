@@ -86,18 +86,28 @@ public:
     // ECUIO_UNITS_*; the value roles of every row are notified
     void setUnitSystem(uint32_t units);
 
+    // Which rows a firing's words are read from: the model's, or the copy
+    // keepRowsBefore made of the set since replaced
+    enum class Rows { Now, Before };
+    // Copies the rows as they are, for the firings of the set they show
+    // that arrive once setConditions has replaced it
+    void keepRowsBefore();
+    // The copy let go: the session whose sets they were has ended
+    void dropRowsBefore();
+
     // A firing's activity line: "Alert: <name>, <value> <unit>" for a
     // condition with an alert, "Condition: <name>, ..." for one without
-    QString firingText(int row, double value, uint32_t term) const;
+    QString firingText(int row, double value, uint32_t term,
+                       Rows rows = Rows::Now) const;
     // "Alert: <name> fired N times", or "Condition: ..."
-    QString firingsText(int row, uint64_t firings) const;
+    QString firingsText(int row, uint64_t firings, Rows rows = Rows::Now) const;
     // For each def an alert ON reads, its highest level (ECUIO_ALERT_*)
     std::map<uint32_t, int> alertLevels() const;
     // A row's key, "" past the rows; the row of a key, -1 for none
-    QString key(int row) const;
+    QString key(int row, Rows rows = Rows::Now) const;
     int rowOfKey(const QString& key) const;
     // A row's level when its alert sounds, ECUIO_ALERT_NONE when not
-    uint32_t toneLevel(int row) const;
+    uint32_t toneLevel(int row, Rows rows = Rows::Now) const;
     // Whether any row's alert sounds
     bool sounds() const;
 
@@ -134,7 +144,10 @@ private:
     ecuio_display_value_t shown(const Row& r, double value,
                                 uint32_t term) const;
     QString prefix(const Row& r) const;
+    // The row of either list, nullptr past it
+    const Row* rowOf(int row, Rows rows) const;
 
     std::vector<Row> m_rows;
+    std::vector<Row> m_rowsBefore; // keepRowsBefore's copy
     uint32_t m_units = ECUIO_UNITS_METRIC;
 };
