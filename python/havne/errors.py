@@ -1,10 +1,11 @@
 # File/layer: python/havne/errors.py | Python 3.11+, the havne package
-# Testing: PythonTest.test_session, test_version, test_export
+# Testing: PythonTest.test_session, test_version, test_export, test_expr
 #
 # What the package raises: core's refusals as Error, carrying the status's
 # number, its name (ECUIO_ERR_BAD_URI is "BAD_URI") and core's detail text,
-# a failed scrub check as CheckFailed (an Error naming the class), and the
-# two ways the library itself can fail to load.
+# a failed scrub check as CheckFailed (an Error naming the class), a
+# refused expression as ExprRefused (an Error with its place), and the two
+# ways the library itself can fail to load.
 
 from . import _ecuio
 
@@ -44,6 +45,17 @@ class CheckFailed(Error):
     def __init__(self, status, words, detail="", call="", failed_class="unknown"):
         super().__init__(status, words, detail, call)
         self.failed_class = failed_class
+
+
+class ExprRefused(Error):
+    """An expression core refuses as a computed signal's (check_expr,
+    evaluate): at is the character it is refused at, counted from 1, and
+    detail core's words, "the expression reads 'bost', which no signal
+    is"."""
+
+    def __init__(self, status, words, detail="", call="", at=0):
+        super().__init__(status, words, detail, call)
+        self.at = at
 
 
 class LibraryNotFound(ImportError):

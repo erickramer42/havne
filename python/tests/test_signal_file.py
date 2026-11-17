@@ -10,7 +10,8 @@
 # gauge or no such signal; the file's format and each computed signal's
 # expression as written (a chain in a format 2 file, None for a number
 # signal or no such signal); a file past a written file's signals read
-# only as a recording's copy.
+# only as a recording's copy; the key each signal is kept under
+# (ADR-0065 section 9), and a signal named by its key or its name.
 
 import json
 import os
@@ -129,6 +130,22 @@ def test_a_signal_file_says_its_format_and_each_expression():
     assert chain.expr("margin") == "clamp(130 - hottest, 0, 130)", "reads a computed signal"
     assert chain.expr("hot") == "if(margin < 20, 1, 0)"
     assert chain.expr("coolant") is None
+
+
+def test_a_signal_file_says_the_key_each_signal_is_kept_under():
+    extras = havne.SignalFile(path=os.path.join(SIGNALS, "extras.json"))
+    keys = extras.keys()
+    assert keys[0] == "7E8:4104:2.0:8", "obd2's first signal, by its address"
+    assert keys[-6:] == ["road_speed", "standstill", "pedal", "7E9:621E1C:3.0:16",
+                         "7E9:62F187:3:t0", "krpm"], (
+        "a signal at a base signal's address and a computed one go by the author's key")
+    assert len(set(keys)) == len(keys), "no two signals share a key"
+    assert extras.key_of("Trans Temp") == "7E9:621E1C:3.0:16", "by a name one signal has"
+    assert extras.key_of("7E9:621E1C:3.0:16") == "7E9:621E1C:3.0:16", "by its key"
+    assert extras.key_of("krpm") == "krpm"
+    assert extras.key_of("Road Speed") == "road_speed"
+    with pytest.raises(havne.Error, match="no signal with the key or name 'Nothing'"):
+        extras.key_of("Nothing")
 
 
 def test_a_call_in_a_format_1_file_is_refused_naming_the_fix():

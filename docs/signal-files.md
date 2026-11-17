@@ -423,7 +423,7 @@ files use `gauge` and its `requires.core` names an older version.
 |---|---|
 | A file | 1 MiB, UTF-8 |
 | Signals | 1024 a file |
-| Modules | 4, the base set's counted |
+| Modules | 32, the base set's counted |
 | A session's requests | 1024, the base set's counted (`obd2` alone asks over 90) |
 | `name` | 1 to 31 bytes |
 | `unit` | 0 to 15 bytes |
@@ -632,7 +632,7 @@ What converts:
 - **Commands:** Service 01 and 22 on 11-bit IDs. `hdr` is the module's
   request ID and `rax` its reply's; with no `rax`, a request ID from
   7E0 to 7E7 takes the reply ID the standard gives it, 8 above, and
-  any other is left out. At most four modules, `obd2`'s counted unless
+  any other is left out. At most 32 modules, `obd2`'s counted unless
   `--alone` leaves `obd2` out. A command's `filter` takes the model years
   it names: give `--year` for those, or they're left out.
 - **Fields:** OBDb counts bits from the top of the first byte after the

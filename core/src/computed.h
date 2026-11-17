@@ -8,7 +8,9 @@
 // step is exact or correctly rounded under IEEE 754, so a program gives
 // the same bits on every platform; min and max are comparisons here,
 // never fmin and fmax, whose answer for -0 against +0 is the library's.
-// And the walk from a computed def to the number defs under it.
+// And the walk from a computed def to the number defs under it, and the
+// age a number input is read within, which the decoder and
+// ecuio_signal_file_evaluate share.
 
 #ifndef ECUIO_COMPUTED_H
 #define ECUIO_COMPUTED_H
@@ -315,6 +317,18 @@ inline bool ecuio_computed_lacks(const ecuio_computed_t& program, uint8_t gone)
         stack[depth++] = lacks;
     }
     return depth == 1 ? stack[0] : any_gone;
+}
+
+/* The bound a number input's age is held to: its own, or the default */
+inline uint64_t ecuio_computed_bound_us(uint32_t max_age_us)
+{
+    return max_age_us != 0 ? max_age_us : ECUIO_VALUE_STALE_US;
+}
+
+/* Whether a value that old still counts: one at its bound does */
+inline bool ecuio_computed_fresh(uint64_t age_us, uint64_t bound_us)
+{
+    return age_us <= bound_us;
 }
 
 /* Marks in place (a byte per def of set) the defs each marked computed

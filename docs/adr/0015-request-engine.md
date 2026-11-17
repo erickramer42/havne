@@ -518,3 +518,5 @@ The table above keeps the number as decided.
 
 Note of 2026-11-13: v0.8.0 raises it to 1024
 ([ADR-0051](0051-signal-files.md)'s appendix "1024 requests").
+
+Note of 2026-11-16: a set's channels are 32 ([ADR-0065](0065-car-sized-profile.md) section 3). The engine holds one channel state for each module of its set, sized when it is made.

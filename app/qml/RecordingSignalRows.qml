@@ -142,6 +142,20 @@ ListView {
                 font.family: Theme.valueFamily
                 font.features: Theme.valueFeatures
             }
+            // Which pane the signal is drawn in
+            ThemedButton {
+                id: paneButton
+                objectName: "paneButton"
+                visible: root.host.plotted[signalRow.signalIndex] === true && !signalRow.modelData.isText
+                flat: true
+                compact: true
+                text: qsTr("Pane")
+                Layout.preferredHeight: Theme.touchTarget
+                Layout.alignment: Qt.AlignVCenter
+                Accessible.name: qsTr("Pane of %1: %2").arg(signalRow.modelData.name)
+                                     .arg(root.host.paneLabelOf(signalRow.signalIndex))
+                onClicked: root.host.openPaneMenu(signalRow.signalIndex, paneButton)
+            }
             // The compared recording's, at the cursor
             Label {
                 objectName: "compareValue"

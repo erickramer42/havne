@@ -4,7 +4,7 @@
   "name": "Desk extras",
   "version": "1.2.0",
   "requires": {
-    "core": "0.7.3"
+    "core": "0.8.0"
   },
   "lineage": "8c52c402d1bba2cdab9b0209b616bcd5",
   "source": {

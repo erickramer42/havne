@@ -1,6 +1,6 @@
 // File/layer: core/src/signal_file_build.h | C++17, Qt-free, every platform
-// Testing: UNIT: SignalFileTest, PluginTest, ConditionFileTest (test_signals);
-//          RecorderTest (test_core)
+// Testing: UNIT: SignalFileTest, PluginTest, PluginWrapTest,
+//          ConditionFileTest (test_signals); RecorderTest (test_core)
 //
 // The signal-file loader's inside (ADR-0051), shared with the plugin
 // loader (ADR-0052): a set built from parts, so a signal file and a
@@ -13,6 +13,7 @@
 
 #include "ecuio/signals.h"
 #include "json.h"
+#include "least_core.h"
 
 #include <cstdint>
 #include <initializer_list>
@@ -33,6 +34,9 @@ struct ecuio_signal_file {
         gauges; /* def index */
     std::vector<std::pair<uint32_t, std::string>> exprs; /* def index */
     uint32_t format = ECUIO_SIGNAL_FILE_FORMAT_OLDEST;
+    /* The least core that reads the file's format and what it uses
+     * (least_core.h), raised by build at each gate */
+    ecuio_least::version least = ecuio_least::kSignalFile;
     ecuio_signal_set_t set{};
     /* The bytes a recording copies as signals.json (ADR-0051 section 4):
      * those ecuio_signal_file_load read, or a plugin variant's files

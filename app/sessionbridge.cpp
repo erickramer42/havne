@@ -77,7 +77,6 @@ SessionBridge::SessionBridge(QObject* parent)
         pollUnaskedSignals();
         pollChannelIdentity();
         pollChannelDiagnostics();
-        pollReplayEnd();
         pollSleep();
         // Fires even when nothing arrived this window: dimming exists for
         // rows that stopped updating. 100 ms is well inside the 3 s dim
@@ -87,6 +86,7 @@ SessionBridge::SessionBridge(QObject* parent)
         // queues a report as it drops (at most one pending).
         notifyDropped();
         flushValues();
+        pollReplayEnd();  // after the flush: the settle reads the model
         flushConditions(
             m_session); // after the values: a firing's value is shown
         pollRecording();
@@ -359,6 +359,10 @@ void SessionBridge::applyConnectedState(ecuio_session_t* session, const QString&
     m_sleptUs = sleptUs();
     m_replayEndLogged = info.backend != ECUIO_BACKEND_REPLAY ||
                         (info.flags & ECUIO_SESSION_INFO_REPLAY_LOOP) != 0;
+    m_replaySettling = false;
+    if (std::exchange(m_replayFinished, false)) {
+        emit replayFinishedChanged();
+    }
     for (uint32_t& g : m_supportGeneration) {
         g = 0;
     }
@@ -543,12 +547,17 @@ void SessionBridge::disconnectSession()
     m_vin.clear();
     m_linkErrorCode = ECUIO_OK;           // the properties must not
     m_errorEpisodes = 0;              // outlive the session
+    m_replaySettling = false;
+    const bool replayWasFinished = std::exchange(m_replayFinished, false);
 
     emit disconnectingChanged();
     if (!uri.isEmpty()) {
         emit currentUriChanged();
     }
     emit connectedChanged(false);
+    if (replayWasFinished) {
+        emit replayFinishedChanged();
+    }
     emit linkStateChanged();          // "fault"/"quiet" -> "disconnected"
     setLogPaused(false);
 
@@ -1044,6 +1053,16 @@ void SessionBridge::pollLinkHealth()
  * (ADR-0041) has reached onFrame, taken or dropped */
 void SessionBridge::pollReplayEnd()
 {
+    if (m_replaySettling && m_session != nullptr) {
+        m_replaySettling = false;
+        m_replayFinished = true;
+        emit replayFinishedChanged();
+        if (m_signalModel->rowCount() > 0 && !m_signalModel->anyValue()) {
+            emit logMessage(QStringLiteral(
+                "Replay: none of the profile's signals is in this recording"));
+        }
+        return;
+    }
     if (m_replayEndLogged || m_session == nullptr) {
         return;
     }
@@ -1056,6 +1075,7 @@ void SessionBridge::pollReplayEnd()
         return;
     }
     m_replayEndLogged = true;
+    m_replaySettling = true;
     if (f.dropped + f.overflowed + f.corrupted + f.truncated + f.stalled ==
         0) {
         emit logMessage(

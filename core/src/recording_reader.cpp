@@ -2606,7 +2606,8 @@ ecuio_status_t ecuio_recording_stretches_with(
     }
     const uint32_t known = ECUIO_STRETCH_PULLS | ECUIO_STRETCH_CRUISES;
     if (rules->kinds == 0 || (rules->kinds & ~known) != 0 ||
-        rules->flags != 0 || from_us >= to_us) {
+        (rules->flags & ~ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED) != 0 ||
+        from_us >= to_us) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     for (uint64_t v : rules->reserved) {
@@ -2690,8 +2691,10 @@ ecuio_status_t ecuio_recording_stretches_with(
             const uint32_t flags =
                 (has_throttle ? 0u : ECUIO_RECORDING_STRETCH_BY_LOAD) |
                 (has_speed ? 0u : ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED);
-            ecuio_aids::find_pulls(s[gate], s[measure], has_speed, engine_speed,
-                                   pull, flags, found);
+            ecuio_aids::find_pulls(
+                s[gate], s[measure], has_speed,
+                (rules->flags & ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED) != 0,
+                engine_speed, pull, flags, found);
         }
         if ((rules->kinds & ECUIO_STRETCH_CRUISES) != 0 && has_speed) {
             const ecuio_aids::cruise_rules cruise{

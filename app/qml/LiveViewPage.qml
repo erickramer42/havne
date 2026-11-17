@@ -674,20 +674,12 @@ Page {
             }
         }
 
-        // What the list leaves out, and why: rows an ECU's supported-PID
-        // bitmaps mark unsupported, and fields its replies come without
-        // (core's absent signals). The Dashboard keeps them.
-        Label {
+        // What the list leaves out, and why (HiddenSignals)
+        HiddenSignals {
             id: hiddenNote
-            objectName: "hiddenNote"
             visible: Bridge.signalModel.hiddenCount > 0 && !root.chartMaximized
             Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            color: Theme.textDim
-            text: Bridge.signalModel.hiddenCount === 1
-                  ? qsTr("1 signal hidden: the ECU doesn't send it")
-                  : qsTr("%1 signals hidden: the ECU doesn't send them")
-                        .arg(Bridge.signalModel.hiddenCount)
+            rowHeight: root.rowHeight
         }
         // What the focus leaves unasked (ADR-0056 section 2): a tick asks a
         // row, except under a log, whose signals stay as it started

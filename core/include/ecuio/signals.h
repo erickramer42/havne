@@ -734,6 +734,239 @@ uint32_t ecuio_signal_file_format(const ecuio_signal_file_t* file);
 const char* ecuio_signal_file_expr(const ecuio_signal_file_t* file,
                                    const ecuio_signal_def_t* def);
 
+/* ---- An expression against a file (ADR-0062) ----
+ * What an editor needs before a computed signal is written into a file:
+ * whether its expression compiles there, and the name an expression
+ * reads each signal by. */
+
+#define ECUIO_EXPR_MAX_BYTES 256u /* an expression's most bytes */
+/* Room for the name any def has in an expression, and its NUL */
+#define ECUIO_EXPR_REF_LEN 64u
+
+/* What ecuio_signal_file_check_expr found */
+typedef struct ecuio_expr_check {
+    uint32_t struct_size;     /* in: the caller's sizeof, at least this
+                                 one's; out: core's own, the bytes filled */
+    uint32_t flags;           /* zero */
+    uint32_t at;              /* refused: the character it is refused at,
+                                 from 1 (a byte and a character are one up
+                                 to there: the grammar is ASCII); 0 when
+                                 the expression compiles */
+    uint32_t format;          /* the oldest "havne_signals" whose loader
+                                 takes it, ECUIO_SIGNAL_FILE_FORMAT_OLDEST
+                                 to ECUIO_SIGNAL_FILE_FORMAT; 0 refused */
+    uint32_t depth;           /* its chain's levels: 1 reading no computed
+                                 signal, to ECUIO_COMPUTED_MAX_DEPTH; 0
+                                 refused */
+    uint32_t reserved[5];     /* zero */
+    ecuio_computed_t program; /* what it compiles to: its inputs are def
+                                 IDs of the file's set and every
+                                 max_age_us is 0; all zero when refused */
+} ecuio_expr_check_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_expr_check_t) == 248,
+              "ecuio_expr_check_t size is ABI");
+static_assert(offsetof(ecuio_expr_check_t, at) == 8, "check at offset is ABI");
+static_assert(offsetof(ecuio_expr_check_t, reserved) == 20,
+              "check reserved offset is ABI");
+static_assert(offsetof(ecuio_expr_check_t, program) == 40,
+              "check program offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_expr_check_t) == 248,
+               "ecuio_expr_check_t size is ABI");
+_Static_assert(offsetof(ecuio_expr_check_t, at) == 8, "check at offset is ABI");
+_Static_assert(offsetof(ecuio_expr_check_t, reserved) == 20,
+               "check reserved offset is ABI");
+_Static_assert(offsetof(ecuio_expr_check_t, program) == 40,
+               "check program offset is ABI");
+#endif
+
+/* Compiles expr (length bytes of UTF-8, no NUL needed) as the "expr" of
+ * a computed signal of file: the names the file's own expressions read
+ * (its keys, and "obd2.<key>" when it extends obd2), the loader's
+ * grammar at its newest format, its bounds (ECUIO_EXPR_MAX_BYTES, a
+ * program's inputs, constants and steps) and its chain rules. key names
+ * the signal the expression is for: one of the file's keys when the
+ * expression takes that signal's place (an edit), so a circle through
+ * it, and what reads it today, are judged; NULL, "" or a key the file
+ * lacks for a new signal.
+ *
+ * ECUIO_OK with out filled: the expression compiles, and a file holding
+ * it under key is not refused for it at out->format or newer. A plugin
+ * variant made of several files needs that format in each file whose
+ * signals read key, the one holding it among them.
+ * ECUIO_ERR_INVALID_ARGUMENT with out->at from 1, the rest of out zero
+ * and ecuio_last_error_detail() the reason in the loader's words ("the
+ * expression reads 'bost', which no signal is"): the expression is
+ * refused; a length past ECUIO_EXPR_MAX_BYTES at 1, with none of its
+ * bytes read. ECUIO_ERR_INVALID_ARGUMENT with out untouched: a struct_size
+ * under the struct's, or a key that is no key (1 to 31 of a-z, 0-9 and
+ * _). ECUIO_ERR_NULL_ARGUMENT, out untouched, for a NULL file or out, or
+ * a NULL expr with a length. ECUIO_ERR_OUT_OF_MEMORY. A caller zeroes
+ * out and sets struct_size first, so at tells the two refusals apart.
+ * A plugin variant's file (ecuio_plugin_variant_file) is checked the
+ * same.
+ *
+ * Not judged: the signal's other members (its name, which can put a new
+ * signal in a base def's place, its unit, gauge and max_age) and the
+ * file's own bounds (ECUIO_SIGNAL_FILE_MAX_SIGNALS, its bytes); the
+ * loader judges those when the file is read. Any thread may call it
+ * while the file lives: it only reads. */
+ecuio_status_t ecuio_signal_file_check_expr(const ecuio_signal_file_t* file,
+                                            const char* key, const char* expr,
+                                            size_t length,
+                                            ecuio_expr_check_t* out);
+
+/* The name file's expressions read def by, into out (cap bytes;
+ * ECUIO_EXPR_REF_LEN always fits): its key for a signal of the file's
+ * own ("boost"), "obd2.<key>" for a base def of a file that extends obd2
+ * (obd2's short name where it has one, "obd2.map", else "obd2.pid_14"
+ * for a PID's first field and "obd2.pid_14_1" for its second). Compiling
+ * the name reads that def. A text def has its name too, though no
+ * expression reads text, which ecuio_signal_file_check_expr says.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL argument;
+ * ECUIO_ERR_INVALID_ARGUMENT, out "" where cap allows, for a def no
+ * expression of the file can name (another set's, a copy of one, a base
+ * def that is no Service 01 field: obd2's computed Boost; a signal whose
+ * key starts with a digit, which an expression reads as a number, unless
+ * it stands in a base def's place and so has obd2's name) and for a cap
+ * under the name and its NUL, each with its line in
+ * ecuio_last_error_detail(). Any thread may call it while the file
+ * lives: it only reads. */
+ecuio_status_t ecuio_signal_file_expr_ref(const ecuio_signal_file_t* file,
+                                          const ecuio_signal_def_t* def,
+                                          char* out, size_t cap);
+
+/* The number defs under program, through any chain of computed defs:
+ * what ecuio_signal_file_evaluate takes a value for. Their IDs, each
+ * once, in the order the program and the programs of its computed
+ * inputs first read them (the serial ports' contract: *count all of
+ * them, the first capacity copied, capacity 0 with ids NULL for the
+ * count). program is one of the set's own
+ * (set->computed[def->table_first]), a check's, or a caller's:
+ * ECUIO_ERR_INVALID_ARGUMENT, *count untouched and a line in
+ * ecuio_last_error_detail(), for one the set's validator would refuse
+ * as the set's own (its counts, steps, constants or age bounds; an input
+ * that is no number, enum or computed def of the set; an age bound on a
+ * computed input; a chain past ECUIO_COMPUTED_MAX_DEPTH).
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL file, program or count, or NULL ids
+ * with a capacity; ECUIO_ERR_OUT_OF_MEMORY. Any thread may call it while
+ * the file lives: it only reads. */
+ecuio_status_t ecuio_signal_file_expr_leaves(const ecuio_signal_file_t* file,
+                                             const ecuio_computed_t* program,
+                                             uint16_t* ids, uint32_t capacity,
+                                             uint32_t* count);
+
+/* One number def's value for ecuio_signal_file_evaluate */
+typedef struct ecuio_eval_input {
+    double value;       /* as decoded, in the def's own unit (an enum's
+                           raw number); a NaN is no value */
+    uint64_t age_us;    /* how long ago it was decoded */
+    uint16_t def_id;    /* the number def it is a value of */
+    uint16_t reserved0; /* zero */
+    uint32_t flags;     /* zero */
+} ecuio_eval_input_t;
+
+/* ecuio_eval_result_t's flags. Values are append-only. */
+#define ECUIO_EVAL_VALUE 0x1u /* value holds the result */
+
+/* Why an evaluation has no value. Values are append-only. */
+#define ECUIO_EVAL_WHY_NONE 0u
+/* A leaf was given no value */
+#define ECUIO_EVAL_WHY_MISSING 1u
+/* A leaf's value is older than the bound it is read within */
+#define ECUIO_EVAL_WHY_STALE 2u
+/* No leaf lacked a value and the steps still gave none: a division by
+ * zero, a square root below zero, a result past a double */
+#define ECUIO_EVAL_WHY_NO_NUMBER 3u
+
+typedef struct ecuio_eval_result {
+    uint32_t struct_size; /* in: the caller's sizeof, at least this one's;
+                             out: core's own, the bytes filled */
+    uint32_t flags;       /* ECUIO_EVAL_*; any other bit zero */
+    double value;         /* with ECUIO_EVAL_VALUE, else 0 */
+    uint32_t why;         /* ECUIO_EVAL_WHY_*; NONE with a value */
+    uint16_t leaf;        /* MISSING, STALE: the leaf of the first read
+                             without a value, its def ID; else 0 */
+    uint16_t reserved0;   /* zero */
+    uint64_t bound_us;    /* STALE: the bound that leaf is past; else 0 */
+    uint32_t reserved[4]; /* zero */
+} ecuio_eval_result_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_eval_input_t) == 24,
+              "ecuio_eval_input_t size is ABI");
+static_assert(offsetof(ecuio_eval_input_t, age_us) == 8,
+              "eval input age_us offset is ABI");
+static_assert(offsetof(ecuio_eval_input_t, def_id) == 16,
+              "eval input def_id offset is ABI");
+static_assert(offsetof(ecuio_eval_input_t, flags) == 20,
+              "eval input flags offset is ABI");
+static_assert(sizeof(ecuio_eval_result_t) == 48,
+              "ecuio_eval_result_t size is ABI");
+static_assert(offsetof(ecuio_eval_result_t, value) == 8,
+              "eval result value offset is ABI");
+static_assert(offsetof(ecuio_eval_result_t, why) == 16,
+              "eval result why offset is ABI");
+static_assert(offsetof(ecuio_eval_result_t, leaf) == 20,
+              "eval result leaf offset is ABI");
+static_assert(offsetof(ecuio_eval_result_t, bound_us) == 24,
+              "eval result bound_us offset is ABI");
+static_assert(offsetof(ecuio_eval_result_t, reserved) == 32,
+              "eval result reserved offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_eval_input_t) == 24,
+               "ecuio_eval_input_t size is ABI");
+_Static_assert(offsetof(ecuio_eval_input_t, age_us) == 8,
+               "eval input age_us offset is ABI");
+_Static_assert(offsetof(ecuio_eval_input_t, def_id) == 16,
+               "eval input def_id offset is ABI");
+_Static_assert(offsetof(ecuio_eval_input_t, flags) == 20,
+               "eval input flags offset is ABI");
+_Static_assert(sizeof(ecuio_eval_result_t) == 48,
+               "ecuio_eval_result_t size is ABI");
+_Static_assert(offsetof(ecuio_eval_result_t, value) == 8,
+               "eval result value offset is ABI");
+_Static_assert(offsetof(ecuio_eval_result_t, why) == 16,
+               "eval result why offset is ABI");
+_Static_assert(offsetof(ecuio_eval_result_t, leaf) == 20,
+               "eval result leaf offset is ABI");
+_Static_assert(offsetof(ecuio_eval_result_t, bound_us) == 24,
+               "eval result bound_us offset is ABI");
+_Static_assert(offsetof(ecuio_eval_result_t, reserved) == 32,
+               "eval result reserved offset is ABI");
+#endif
+
+/* Works program out over file's set from count inputs, as a session's
+ * decoder does at a frame that feeds it: a leaf's value counts while its
+ * age is no more than the bound of the program reading it (that input's
+ * max_age_us, or ECUIO_VALUE_STALE_US for 0; a value at its bound
+ * counts), a computed input is worked out from the leaves under it, a
+ * step with no number gives no value, and an if's branch not taken
+ * changes nothing. Nothing is kept and no session is touched. An input
+ * for a def the program doesn't read is passed by, so a caller may give
+ * every value it has; of two for one def the first counts. program as
+ * ecuio_signal_file_expr_leaves takes it, refused the same with out
+ * untouched.
+ *
+ * ECUIO_OK with out filled, with a value or without: with none, why is
+ * MISSING or STALE and leaf the leaf of the first read without a value,
+ * in the order the program and the programs of its computed inputs read
+ * (a leaf an if's untaken branch alone reads among them; one read within
+ * two bounds can be fresh at one read and stale at a later one), and
+ * NO_NUMBER only when no leaf lacked one. ECUIO_ERR_INVALID_ARGUMENT, out
+ * untouched, for a struct_size under the struct's, or an input whose
+ * flags or reserved0 is not zero (no flag is defined);
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL file, program or out, or
+ * NULL inputs with a count; ECUIO_ERR_OUT_OF_MEMORY. Any thread may call
+ * it while the file lives: it only reads. */
+ecuio_status_t ecuio_signal_file_evaluate(const ecuio_signal_file_t* file,
+                                          const ecuio_computed_t* program,
+                                          const ecuio_eval_input_t* inputs,
+                                          uint32_t count,
+                                          ecuio_eval_result_t* out);
+
 /* A gauge's warning levels (ecuio_signal_gauge_t's flags). Values are
  * append-only. */
 #define ECUIO_GAUGE_WARN_LOW  0x1u  /* warn_low is given */
@@ -846,6 +1079,96 @@ const char* ecuio_signal_file_text(const ecuio_signal_file_t* file,
 /* Frees a file; NULL is a no-op. Unregister its profile first: a
  * session using the set must be destroyed before this. */
 void ecuio_signal_file_free(ecuio_signal_file_t* file);
+
+/*
+ * A signal's key (ADR-0065 section 9): what identifies it wherever
+ * something is kept, a recording's values and a vehicle's ticks. A
+ * name is a label, and two signals of a set may share one.
+ *
+ * Most signals are kept under their address key, core's text for where
+ * the value is read:
+ *
+ *   <id>:<key>[@<offset>]:<byte>.<bit>:<bits>    a number or an enum
+ *   <id>:<key>[@<offset>]:<byte>:t<bytes>        a text or hex field
+ *
+ * <id> is message_id in upper-case hex, 3 digits up to 0x7FF and 8
+ * above it; <key> the mux key's mux_length bytes in upper-case hex,
+ * empty with no mux, and @<offset> its mux_offset when that isn't 0;
+ * then start_byte, bit_offset and bit_length in decimal, or for a text
+ * kind start_byte and byte_length (t0: to the payload's end).
+ * "7E8:410C:2.0:16" is two bytes of the engine ECU's PID 0C,
+ * "7E9:62F190:3:t17" seventeen bytes of a DID's reply. The byte order,
+ * the kind, the scale and the offset are no part of it: two defs over
+ * the same bits are one address, however each reads them.
+ *
+ * One address has one text in every set, so the key stands whatever
+ * the signal is called and whatever else is read with it. It is never
+ * an author's key (1 to 31 of a-z, 0-9 and _) nor "id:<n>", holds no
+ * comma, quote, space or line break, starts with a hex digit, and is
+ * at most ECUIO_SIGNAL_KEY_MAX bytes.
+ */
+#define ECUIO_SIGNAL_KEY_MAX 31u /* bytes, as an author's key */
+#define ECUIO_SIGNAL_KEY_LEN 32u /* its room: bytes, NUL, zeros after */
+
+typedef struct ecuio_signal_key {
+    char text[ECUIO_SIGNAL_KEY_LEN];
+} ecuio_signal_key_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_signal_key_t) == 32, "ecuio_signal_key_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_signal_key_t) == 32, "ecuio_signal_key_t size is ABI");
+#endif
+
+/* The def's address key, out zeroed past it. "" for a computed def
+ * (ECUIO_DEF_FLAG_COMPUTED), which reads no address.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL argument, out untouched;
+ * ECUIO_ERR_INVALID_ARGUMENT, out "", for a def whose text has no room:
+ * a def ecuio_validate_signal refuses may have none, one it takes
+ * always has. Reads the def alone, so any thread may call it. */
+ecuio_status_t ecuio_signal_address_key(const ecuio_signal_def_t* def,
+                                        ecuio_signal_key_t* out);
+
+/*
+ * The key each def of set is kept under, in the set's order, by the
+ * serial ports' contract (serial.h): *count is every def, the first
+ * capacity are copied, and a capacity of 0 with keys NULL asks for the
+ * count. A def's key is its address key, unless it has none of its own:
+ * a computed def, and a def at the address of one before it in the set,
+ * take the author's key file gives them (ecuio_signal_file_key), and
+ * "id:<n>", n the def's id in decimal, where it gives none. In a set
+ * ecuio_validate_signal_set takes, no two defs share a key.
+ *
+ * file is the signal file whose set this is, or NULL for a set that has
+ * none (a built-in set, one registered by hand): pass the file wherever
+ * there is one, or a computed signal is kept under an id that means
+ * nothing outside its set. ECUIO_ERR_NULL_ARGUMENT for a NULL set or
+ * count, or NULL keys with a capacity; ECUIO_ERR_INVALID_ARGUMENT for a
+ * file of another set; ECUIO_ERR_OUT_OF_MEMORY. On a failure nothing is
+ * written but *count, 0. Reads the set and the file alone.
+ */
+ecuio_status_t ecuio_signal_set_keys(const ecuio_signal_set_t* set,
+                                     const ecuio_signal_file_t* file,
+                                     ecuio_signal_key_t* keys,
+                                     uint32_t capacity, uint32_t* count);
+
+/*
+ * The def text_utf8 names, among set's first count defs and their keys
+ * (ecuio_signal_set_keys'): the def with that key, else the one def
+ * with that name. *index is its place in the set. One rule wherever a
+ * person names a signal (havne-cli's --signal, a tick kept by name).
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL argument;
+ * ECUIO_ERR_INVALID_ARGUMENT, *index untouched and the detail
+ * (ecuio_last_error_detail) saying why, for text no def has ("no signal
+ * with the key or name 'Boost'") and for a name several defs have,
+ * which lists their keys ("2 signals are named 'Battery voltage': name
+ * one by its key (7E8:6201A4:3.0:8, 7E9:6201A4:3.0:8)"; the first 8,
+ * then "and N more").
+ */
+ecuio_status_t ecuio_signal_set_find(const ecuio_signal_set_t* set,
+                                     const ecuio_signal_key_t* keys,
+                                     uint32_t count, const char* text_utf8,
+                                     uint32_t* index);
 
 /* A group's name ("Engine", "Oxygen sensors"; ECUIO_SIGNAL_GROUP_*),
  * static and never NULL: "" for a code this core doesn't know, which a

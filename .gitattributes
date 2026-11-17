@@ -21,3 +21,11 @@ tests/data/vehiclebook/signals/* -text
 # Layout files are read byte for byte, so a checkout never rewrites their line endings
 tests/data/layouts/* -text
 tests/fixtures/layouts/* -text
+
+# Another project's files, kept byte for byte as it published them and
+# the patches beside them change them (scripts/vendor_wamr.sh --check
+# compares them)
+third_party/wamr/** -text
+# The patches the script applies to them: git apply needs their line
+# ends as written
+third_party/wamr-patches/** -text

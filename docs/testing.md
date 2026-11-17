@@ -78,7 +78,10 @@ changes, and `--suite` runs named suites, to shorten the edit-and-check
 loop. Neither counts as verification: the table in
 `scripts/verify_scope.py` is conservative, but only the plain
 `scripts/verify.sh` runs every tier the change could reach.
-`VerifyScopeTest.SelfTest` pins that table.
+`VerifyScopeTest.SelfTest` pins that table. `scripts/docs_only.py`'s
+shorter list, which decides that CI runs no tests for a change
+([ci.md](ci.md)), has its own `DocsOnlyTest.SelfTest`, which also holds
+it inside that table.
 
 ## Suites
 

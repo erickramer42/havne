@@ -1445,6 +1445,25 @@ TestCase {
         verify(DashboardBook.exportText(doc, "desktop", needed) !== "", "so the layout can be written")
     }
 
+    // A cell reading a "key:" signal no file of the vehicle gives is one a
+    // layout can't name a plugin for; one gauge counts once
+    function test_aKeyCellNoFileGivesIsCounted() {
+        const doc = { format: DashboardBook.format, pages: [
+            { name: "A", cells: [
+                cell("own", { refs: ["key:boost"] }),
+                cell("two keys", { refs: ["key:gone", "key:also_gone", "id:7001"] }),
+                cell("built in", { refs: ["id:7001"] }),
+                cell("blank", { refs: [] })] },
+            { name: "B", cells: [cell("again", { refs: ["key:gone"] })] }] }
+        const files = [{ name: "Plugin", sha256: sha, refs: ["key:boost", "id:7001"] }]
+        compare(DashboardBook.unboundKeyCells(doc, files), 2, "two cells, the one with two keys once")
+        compare(DashboardBook.unboundKeyCells(doc, []), 3, "no vehicle file: every key cell")
+        compare(DashboardBook.unboundKeyCells(doc, [{ name: "More", sha256: sha,
+                                                      refs: ["key:boost", "key:gone"] }]), 0,
+                "a key of any of a cell's refs is enough")
+        compare(DashboardBook.unboundKeyCells({ format: DashboardBook.format, pages: [] }, files), 0)
+    }
+
     // A missing file a pick is named as is a pick that changed, not one
     // the vehicle lacks
     function test_aMissingFileNamedAsAPickIsAChangedPick() {
@@ -1518,5 +1537,134 @@ TestCase {
             if (run.missing !== undefined)
                 compare(r.missing.map(f => f.name), run.missing, where + ": missing")
         }
+    }
+
+    // ---- Presets (the Dashboard's Standard, Temperatures and Showcase)
+
+    function canon(v) {
+        return DashboardBook.canonical(v)
+    }
+
+    // Each form's three files read, hold one page of their own name and
+    // fit the form's bounds, and Standard is the built-in page's cells
+    function test_eachPresetFileReadsAsOnePage_data() {
+        const rows = []
+        for (const form of ["phone", "desktop"]) {
+            for (const p of DashboardBook.presets)
+                rows.push({ tag: form + " " + p.key, form: form, key: p.key, label: p.label })
+        }
+        return rows
+    }
+    function test_eachPresetFileReadsAsOnePage(data) {
+        const text = DashboardBook.presetText(data.key, data.form)
+        verify(text !== "", "the file is in the resources")
+        const r = DashboardBook.importProblem(text, data.form, [])
+        compare(r.problem, "", "reads whole, nothing dropped")
+        compare(r.form, data.form)
+        compare(r.files, [], "needs no plugin's file")
+        compare(r.doc.pages.length, 1)
+        compare(r.doc.pages[0].name, data.label)
+        compare(DashboardBook.documentProblem(r.doc), "")
+        verify(DashboardBook.presetPage(data.key, data.form) !== null)
+    }
+    function test_theStandardPresetIsTheBuiltInPage_data() {
+        return [{ tag: "phone", form: "phone" }, { tag: "desktop", form: "desktop" }]
+    }
+    function test_theStandardPresetIsTheBuiltInPage(data) {
+        compare(canon(DashboardBook.presetPage("standard", data.form).cells),
+                canon(DashboardBook.builtIn(data.form).pages[0].cells))
+    }
+    function test_aPresetNamesNoPluginsSignal() {
+        for (const form of ["phone", "desktop"]) {
+            for (const p of DashboardBook.presets) {
+                for (const c of DashboardBook.presetPage(p.key, form).cells)
+                    verify(c.refs.every(r => /^id:[0-9]+$/.test(r)), p.key + ": " + c.refs)
+            }
+        }
+    }
+    function test_theTemperaturesPresetHasOutsideAirAndCatalyst() {
+        for (const form of ["phone", "desktop"]) {
+            const labels = DashboardBook.presetPage("temperatures", form).cells.map(c => c.label)
+            verify(labels.indexOf("Outside air") >= 0 && labels.indexOf("Catalyst") >= 0, form)
+        }
+    }
+    function test_theShowcaseShowsEveryDrawingOnce() {
+        for (const form of ["phone", "desktop"]) {
+            const kinds = DashboardBook.presetPage("showcase", form).cells.map(c => c.kind)
+            for (const k of ["shift-light", "analog", "ring", "bar", "segments", "sparkline",
+                             "seven-segment", "digital"])
+                verify(kinds.indexOf(k) >= 0, form + " has " + k)
+        }
+    }
+    function test_aPresetThatIsntOneReadsNull() {
+        compare(DashboardBook.presetText("nope", "phone"), "")
+        compare(DashboardBook.presetText("standard", "tablet"), "")
+        compare(DashboardBook.presetPage("../standard", "phone"), null)
+    }
+
+    function test_insertPagesPutsThemAfterThePlace() {
+        const d = book()
+        const page = { name: "New", cells: [cell("N")] }
+        compare(DashboardBook.insertPages(d, 0, [page]).pages.map(p => p.name), ["Engine", "New", "Track"])
+        compare(DashboardBook.insertPages(d, 1, [page]).pages.map(p => p.name), ["Engine", "Track", "New"])
+        compare(DashboardBook.insertPages(d, -1, [page]).pages.map(p => p.name), ["New", "Engine", "Track"])
+        compare(d.pages.length, 2, "the argument is untouched")
+    }
+    function test_insertPagesIsRefusedWholeOrNotAtAll() {
+        const d = book()
+        const page = { name: "New", cells: [] }
+        compare(DashboardBook.insertPages(d, 2, [page]), d, "no such place")
+        compare(DashboardBook.insertPages(d, 0, []), d, "no pages")
+        compare(DashboardBook.insertPages(d, 0, [{ name: "", cells: [] }]), d, "a page that doesn't read back")
+        let full = d
+        while (full.pages.length < DashboardBook.maxPages)
+            full = DashboardBook.addPage(full, "P" + full.pages.length)
+        compare(DashboardBook.insertPages(full, 0, [page]), full, "past the form's pages")
+        compare(DashboardBook.insertPages(d, 0, [page, page]).pages.length, 4, "several at once")
+    }
+    function test_replacePageKeepsItsNameAndTakesTheCells() {
+        const d = book()
+        const out = DashboardBook.replacePage(d, 1, { name: "Other", cells: [cell("Z")] })
+        compare(out.pages[1].name, "Track")
+        compare(out.pages[1].cells.map(c => c.label), ["Z"])
+        compare(out.pages[0], d.pages[0])
+        compare(DashboardBook.replacePage(d, 5, { name: "x", cells: [] }), d)
+        compare(DashboardBook.replacePage(d, 0, { name: "x" }), d)
+    }
+    function test_aPageMatchesAPresetByItsCellsAlone() {
+        for (const form of ["phone", "desktop"]) {
+            for (const p of DashboardBook.presets) {
+                const page = DashboardBook.presetPage(p.key, form)
+                verify(DashboardBook.matchesPreset(page, form), p.key)
+                page.name = "Mine"
+                verify(DashboardBook.matchesPreset(page, form), "a rename doesn't matter")
+                page.cells[0].label = "Edited"
+                verify(!DashboardBook.matchesPreset(page, form), "an edited gauge does")
+            }
+            verify(!DashboardBook.matchesPreset({ name: "x", cells: [] }, form))
+            verify(!DashboardBook.matchesPreset(null, form))
+        }
+    }
+    function test_aPresetOfTheOtherFormIsNotThisFormsPage() {
+        verify(!DashboardBook.matchesPreset(DashboardBook.presetPage("standard", "phone"), "desktop"))
+    }
+
+    function test_anEmptyPageLosesNothingToAPreset() {
+        for (const form of ["phone", "desktop"]) {
+            verify(DashboardBook.losesNothing({ name: "x", cells: [] }, form))
+            verify(DashboardBook.losesNothing(DashboardBook.presetPage("showcase", form), form))
+            verify(!DashboardBook.losesNothing({ name: "x", cells: [cell("A")] }, form))
+        }
+        verify(!DashboardBook.losesNothing(null, "phone"))
+    }
+
+    // The presets come from the app's resources through the bridge (an
+    // XMLHttpRequest on qrc: is refused without QML_XHR_ALLOW_FILE_READ):
+    // only the six files, never a path
+    function test_thePresetsComeFromTheResourcesAndOnlyThose() {
+        verify(Bridge.presetLayoutText("standard", "phone").length > 0)
+        for (const [name, form] of [["../standard", "phone"], ["standard", "../phone"], ["nope", "phone"],
+                                    ["standard", "tablet"], ["../desktop/standard", "phone"], ["", ""], ["standard.json", "desktop"]])
+            compare(Bridge.presetLayoutText(name, form), "", name + " " + form)
     }
 }

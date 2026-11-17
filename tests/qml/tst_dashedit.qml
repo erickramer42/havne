@@ -125,7 +125,18 @@ TestCase {
         // and the page put back after the press
         let scrolled = null
         let was = 0
+        let inSide = false
+        // The side column scrolls by itself: bring the item into its view
         for (let up = item.parent; up; up = up.parent) {
+            if (up.objectName === "dashSidePanel" && up.visible) {
+                inSide = true
+                const at = item.mapToItem(up, item.width / 2, item.height / 2)
+                if (at.y > up.height - 24 || at.y < 24)
+                    up.contentY = Math.max(0, Math.min(up.contentHeight - up.height,
+                                                       up.contentY + at.y - up.height / 2))
+            }
+        }
+        for (let up = item.parent; up && !inSide; up = up.parent) {
             if (up.objectName.startsWith("dashPage_")) {
                 const at = item.mapToItem(up, item.width / 2, item.height / 2)
                 if (at.y > up.height - 24) {
@@ -478,6 +489,107 @@ TestCase {
         compare(page.doc.pages[0].cells[1].kind, "ring")
         compare(page.doc.pages[0].cells[1].unit, "km/h")
         compare(page.doc.pages[0].cells[1].options.to, 260)
+    }
+
+    // The vehicle's picked sets come first, as sections, with or without a
+    // session; the listed profile's rows follow by group, folded while a set leads
+    function test_theSignalListLeadsWithThePickedSetsOwnSignals() {
+        const profile = threeSignalFile()
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.pickedSets = [{ profile: profile, name: "Three", variant: "" }]
+        page.offlineUri = "mock://?profile=obd2"
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_bar")
+        const panel = find(page, "dashSignalPanel")
+        tryVerify(() => panel.sections.length > 1, 3000, "the sections")
+        compare(panel.sections[0].key, "set0", "the set's own first")
+        compare(panel.sections[0].title, "Three")
+        compare(panel.sections[0].rows.map(r => r.ref), ["key:a", "key:b", "key:c"])
+        compare(find(page, "signalSection_set0").text, "Three (3)")
+        verify(find(page, "pickSignal_key:a").visible, "its signals are shown")
+        const groups = panel.sections.filter(sec => sec.key.startsWith("group"))
+        verify(groups.length > 0, "obd2's groups follow")
+        verify(groups.every(sec => !sec.open), "folded while a set leads")
+        const speed = "pickSignal_" + Bridge.gaugeSignals["speed"][1]
+        verify(findChild(page, speed) === null, "no wall of chips")
+        // A word in the filter opens every group that has a match
+        type(find(page, "filterText"), "speed")
+        tryVerify(() => findChild(page, speed) !== null, 3000, "a typed word shows the match")
+        type(find(page, "filterText"), "")
+        tryVerify(() => findChild(page, speed) === null, 3000, "and the groups fold again")
+        // A header opens its group
+        click(page, "signalSection_" + groups[0].key)
+        tryVerify(() => panel.sections.find(sec => sec.key === groups[0].key).open, 3000, "opened")
+        tryVerify(() => findChild(page, "pickSignal_" + groups[0].rows[0].ref) !== null, 3000, "its chips show")
+        // The set's own header folds and opens it
+        click(page, "signalSection_set0")
+        tryVerify(() => findChild(page, "pickSignal_key:a") === null, 3000, "folded by its header")
+        click(page, "signalSection_set0")
+        tryVerify(() => findChild(page, "pickSignal_key:a") !== null, 3000, "and opened again")
+        // The set's signal makes the gauge
+        click(page, "pickSignal_key:b")
+        compare(page.doc.pages[0].cells[1].refs[0], "key:b")
+    }
+
+    // No session and no address: the picked set is still offered
+    function test_thePickedSetIsOfferedWithNoSessionAndNoAddress() {
+        const profile = threeSignalFile()
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.pickedSets = [{ profile: profile, name: "Three", variant: "" }]
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_digital")
+        const panel = find(page, "dashSignalPanel")
+        tryVerify(() => panel.sections.length === 1, 3000, "the set alone")
+        verify(!find(page, "signalNone").visible, "not 'No signals'")
+        click(page, "pickSignal_key:a")
+        compare(page.doc.pages[0].cells[1].refs[0], "key:a")
+    }
+
+    // The session reads the set itself: its rows are the set's section alone, never listed twice
+    function test_aSetTheSessionReadsIsListedOnce() {
+        const profile = threeSignalFile()
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.pickedSets = [{ profile: profile, name: "Three", variant: "" }]
+        page.offlineUri = "mock://?profile=" + profile
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_bar")
+        const panel = find(page, "dashSignalPanel")
+        tryVerify(() => panel.sections.length > 0, 3000)
+        compare(panel.sections.map(sec => sec.key), ["set0"], "the set once, no group of its own rows")
+        compare(panel.shownCount, 3)
+    }
+
+    // With no set picked the list is the profile's groups, all open
+    function test_withNoPickedSetTheGroupsAreAllOpen() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.offlineUri = "mock://?profile=obd2"
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_bar")
+        const panel = find(page, "dashSignalPanel")
+        tryVerify(() => panel.sections.length > 0, 3000, "the groups")
+        verify(panel.sections.every(sec => sec.key.startsWith("group") && sec.open))
+        verify(findChild(page, "pickSignal_" + Bridge.gaugeSignals["speed"][1]) !== null)
+    }
+
+    // A group lists the signals the ECU doesn't send last, dim
+    function test_theSignalsTheEcuDoesntSendComeLastInTheirGroup() {
+        compare(Bridge.connectSession("mock://demo?profile=obd2"), "", "the demo connects")
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_bar")
+        const panel = find(page, "dashSignalPanel")
+        tryVerify(() => Bridge.signalModel.hiddenCount > 0, 10000, "the demo car lacks some PIDs")
+        tryVerify(() => panel.sections.some(sec => sec.hiddenFrom >= 0), 3000, "a group with a dim tail")
+        const g = panel.sections.find(sec => sec.hiddenFrom >= 0)
+        const hub = page.signalHub
+        verify(g.rows.slice(0, g.hiddenFrom).every(r => hub.lookup([r.ref]).hidden !== true), "sent ones first")
+        verify(g.rows.slice(g.hiddenFrom).every(r => hub.lookup([r.ref]).hidden === true), "the rest last")
+        compare(find(page, "pickSignal_" + g.rows[g.rows.length - 1].ref).opacity, 0.5, "and dim")
     }
 
     // Add's every signal of a set: the listed file's own signals the page
@@ -914,6 +1026,7 @@ TestCase {
         verify(!find(page, "moreAddPage").visible, "the desktop's row has no Add page")
         verify(!find(page, "moreRemovePage").enabled, "never the last page")
         click(page, "dashPageAdd")
+        click(page, "preset_blank")
         compare(page.doc.pages.length, 2)
         compare(page.doc.pages[1].name, "Page 2")
         compare(page.pageIndex, 1, "the new page shows")
@@ -951,6 +1064,7 @@ TestCase {
         compare(storedText(page), DashboardBook.serialize(page.doc))
         // A page change drops the selection
         click(page, "dashPageAdd")
+        click(page, "preset_blank")
         page.goTo(0)
         press(find(page, "dashCell_0_0"))
         compare(page.selected, 0)
@@ -1215,6 +1329,32 @@ TestCase {
         compare(box.value, 0)
     }
 
+    // With no session the stepper reads the listed row's decimals, not 0
+    function test_theDecimalsStepperStartsAtTheListedRowsWithNoSession() {
+        // A session under raw leaves the hub with no rows, whatever an earlier case read
+        compare(Bridge.connectSession("mock://demo?profile=raw"), "", "raw connects")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting && !Bridge.connected, 5000, "disconnected")
+        const maf = cellOf("MAF")
+        maf.refs = Array.from(Bridge.gaugeSignals["maf"])
+        maf.unit = "g/s"
+        maf.options = { from: 0, to: 300 }
+        const page = pageOf({}, docOf([maf]))
+        page.offlineUri = "mock://?profile=obd2"
+        page.startEditing()
+        const rows = Bridge.profileSignals("mock://?profile=obd2")
+        const row = rows.find(r => maf.refs.indexOf(r.ref) >= 0)
+        verify(row !== undefined && row.decimals > 0, "the listed row has decimals")
+        press(find(page, "dashCell_0_0"))
+        const box = find(page, "panelDecimals")
+        verify(find(page, "dashCellPanel").entry === null, "no session, no hub row")
+        compare(box.value, row.decimals)
+        verify(page.doc.pages[0].cells[0].options.decimals === undefined, "nothing stored")
+        // A stored value wins
+        spin(box, 0)
+        compare(box.value, 0)
+    }
+
     // A profile with no number to show says so, not "connect"
     function test_aProfileWithNothingToPickSaysSo() {
         compare(Bridge.connectSession("mock://demo?profile=raw"), "", "raw connects")
@@ -1249,6 +1389,7 @@ TestCase {
         first.startEditing()
         click(first, "dashMore")
         click(first, "dashPageAdd")
+        click(first, "preset_blank")
         type(find(first, "moreRename"), "Built")
         click(first, "dashMore")
         compare(first.pageIndex, 1, "the new page shows")
@@ -1638,8 +1779,8 @@ TestCase {
 
     // The selection follows its cell through another cell's drag
     function test_aDragKeepsTheSelectionOnItsCell() {
-        // Tall enough that the cell panel, with its zone fields, leaves cell C on screen
-        const page = pageOf({ height: 1000 }, docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
+        // Tall enough that the cell panel, with its zone fields, leaves cell C on screen (the switch row sits above the grid)
+        const page = pageOf({ height: 1100 }, docOf([cellOf("A"), cellOf("B"), cellOf("C")]))
         page.startEditing()
         press(find(page, "dashCell_0_0"))
         compare(page.selected, 0)
@@ -2397,6 +2538,133 @@ TestCase {
         verify(!note.visible)
     }
 
+    // A zone's color wins over the pick, and the panel says so
+    function test_aZonedCellWithAPickedColorSaysTheZoneWins() {
+        const own = cellOf("A", "analog")
+        own.options.color = "teal"
+        const page = pageOf({}, docOf([own]))
+        page.startEditing()
+        press(find(page, "dashCell_0_0"))
+        const note = find(page, "panelColorZones")
+        verify(!note.visible, "a color and no zone: no note")
+        page.setOptions({ warnFrom: 90 })
+        verify(note.visible, "a color and a zone level")
+        compare(note.text, "A zone's color replaces this one while its level is reached")
+        click(page, "panelColor_default")
+        verify(!note.visible, "no picked color: no note")
+        click(page, "panelColor_teal")
+        verify(note.visible)
+        Theme.night = "on"
+        verify(!note.visible, "Night draws no pick, and has its own note")
+        Theme.night = "off"
+    }
+
+    // Load replaces every page, and its button says so
+    function test_loadLayoutSaysItReplacesEveryPage() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        page.moreShown = true
+        const load = find(page, "moreLoad")
+        compare(load.text, "Load layout (all pages)")
+        compare(load.Accessible.name, "Load a layout from a file: it replaces every page")
+    }
+
+    // The "+" tab says what it adds, and a new page asks for its name at once
+    function test_aNewPageAsksForItsNameAndTheAddTabSaysPage() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        compare(find(page, "dashPageAdd").text, "+ Page")
+        click(page, "dashPageAdd")
+        click(page, "preset_blank")
+        const field = find(page, "moreRename")
+        tryVerify(() => field.activeFocus, 3000, "the name field has the focus")
+        compare(field.selectedText, "Page 2", "and its text is selected")
+        keyClick("T")
+        keyClick("o")
+        keyClick(Qt.Key_Return)
+        compare(page.doc.pages[1].name, "To", "typing replaced the default name")
+        // A preset page asks too
+        page.moreShown = false
+        click(page, "dashPageAdd")
+        click(page, "preset_standard")
+        tryVerify(() => field.activeFocus, 3000, "a preset's page, its name field focused")
+        verify(field.selectedText !== "" && field.selectedText === page.doc.pages[2].name, "and its name selected")
+    }
+
+    // A double click on a tab renames it in place; Escape and an empty name keep the old one
+    function test_aDoubleClickRenamesATabInPlace() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        click(page, "dashPageAdd")
+        click(page, "preset_blank")
+        keyClick(Qt.Key_Escape)
+        const tab0 = find(page, "dashPageTab_0")
+        const field = find(page, "dashPageRename_0")
+        verify(!field.visible, "no field before the double click")
+        tryVerify(() => waitForPolish(tab0.Window.window), 3000)
+        mouseDoubleClickSequence(tab0)
+        tryVerify(() => field.visible && field.activeFocus, 3000, "the tab's own field")
+        compare(field.selectedText, "Test")
+        compare(page.pageIndex, 0, "the page is the tab's")
+        keyClick("Z")
+        keyClick(Qt.Key_Return)
+        compare(page.doc.pages[0].name, "Z")
+        verify(!field.visible, "the field is gone")
+        // Escape keeps the old name
+        mouseDoubleClickSequence(tab0)
+        tryVerify(() => field.visible && field.activeFocus, 3000)
+        keyClick("Q")
+        keyClick(Qt.Key_Escape)
+        compare(page.doc.pages[0].name, "Z")
+        verify(!field.visible)
+        // An empty name is refused by the page's rule
+        mouseDoubleClickSequence(tab0)
+        tryVerify(() => field.visible && field.activeFocus, 3000)
+        keyClick(Qt.Key_Backspace)
+        keyClick(Qt.Key_Return)
+        compare(page.doc.pages[0].name, "Z")
+        // Outside edit mode a double click renames nothing
+        page.stopEditing()
+        tryVerify(() => waitForPolish(tab0.Window.window), 3000)
+        mouseDoubleClickSequence(tab0)
+        wait(50)
+        verify(!field.visible, "no rename field outside edit mode")
+    }
+
+    // A name left as it was makes no undo step; a rename in place gives way to Done and leaves room
+    function test_aRenameThatChangesNothingIsNoUndoStep() {
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        const depth = page.undoStack.length
+        click(page, "dashMore")
+        const name = find(page, "moreRename")
+        name.forceActiveFocus()
+        name.editingFinished()
+        compare(page.undoStack.length, depth, "the Page row's field")
+        const tab0 = find(page, "dashPageTab_0")
+        const field = find(page, "dashPageRename_0")
+        tryVerify(() => waitForPolish(tab0.Window.window), 3000)
+        mouseDoubleClickSequence(tab0)
+        tryVerify(() => field.visible && field.activeFocus, 3000)
+        verify(tab0.width >= 120, "a short name has room: " + tab0.width)
+        keyClick(Qt.Key_Return)
+        compare(page.undoStack.length, depth, "the tab's field")
+    }
+
+    function test_leavingEditModeDropsAnOpenRename() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        const tab0 = find(page, "dashPageTab_0")
+        tryVerify(() => waitForPolish(tab0.Window.window), 3000)
+        mouseDoubleClickSequence(tab0)
+        const field = find(page, "dashPageRename_0")
+        tryVerify(() => field.visible, 3000)
+        page.stopEditing()
+        compare(find(page, "dashPageStrip").renaming, -1)
+        page.startEditing()
+        verify(!field.visible, "editing again shows no field")
+    }
+
     function test_aBlankCellHasNoColorRow() {
         const page = pageOf({}, docOf([{ kind: "blank", w: 2, h: 4, refs: [] }]))
         page.startEditing()
@@ -2954,8 +3222,11 @@ TestCase {
     // The Pages row: Reset quiet and apart at its end (wide), or the last
     // of the wrapped controls after a short gap (a phone); the move
     // buttons only with pages to move among
+    // The wide page is 1200: under DejaVu (CI's Linux and macOS) the five
+    // controls take 856 px of a 968 px row, which leaves Reset no room to
+    // stand apart, so it would wrap to a row of its own
     function test_resetStandsApartAndMoveHidesWithOnePage_data() {
-        return [{ tag: "wide", form: "desktop", width: 1000, height: 800 },
+        return [{ tag: "wide", form: "desktop", width: 1200, height: 800 },
                 { tag: "a phone", form: "phone", width: 384, height: 832 }]
     }
     function test_resetStandsApartAndMoveHidesWithOnePage(data) {
@@ -2968,7 +3239,7 @@ TestCase {
         verify(row.visible)
         verify(!find(page, "moreLeft").visible && !find(page, "moreRight").visible, "nothing to move")
         verify(reset.quiet, "Reset is quiet")
-        compare(reset.Accessible.name, "Reset: replace this form's pages with the built-in layout")
+        compare(reset.Accessible.name, "Reset all pages: replace this form's pages with the built-in layout")
         // The row is laid out at the layouts' next polish, after it shows
         tryVerify(() => Math.abs(row.width - (page.width - 2 * page.margin)) < 1, 3000,
                   "the row has the page's width: " + row.width + " of " + page.width + "; its parent "
@@ -2999,6 +3270,7 @@ TestCase {
         }
         verify(reset.mapToItem(page, reset.width, 0).x <= page.width + 0.5, "inside the page")
         click(page, data.form === "phone" ? "moreAddPage" : "dashPageAdd")
+        click(page, "preset_blank")
         verify(find(page, "moreLeft").visible && find(page, "moreRight").visible,
                "two pages: the move buttons show")
     }
@@ -3111,6 +3383,7 @@ TestCase {
         click(page, "dashMore")
         verify(find(page, "moreAddPage").visible, "Add page in the row")
         click(page, "moreAddPage")
+        click(page, "preset_blank")
         compare(page.doc.pages.length, 2)
         compare(page.pageIndex, 1, "the new page shows")
     }
@@ -3994,6 +4267,29 @@ TestCase {
         verify(plain.layoutNote.indexOf("aren't in the store") < 0, plain.layoutNote)
     }
 
+    // A gauge reading a plugin's signal the vehicle's picks don't give (no
+    // vehicle, or the plugin only the session's profile) leaves `files`
+    // empty: the export's note counts those gauges
+    function test_aGaugeNoPickGivesAKeyForIsCountedInTheExportsNote() {
+        const own = docOf([cellOf("A"), Object.assign(cellOf("Loose"), { refs: ["key:loose"] }),
+                           Object.assign(cellOf("Loose 2"), { refs: ["key:loose2"] })])
+        const none = storedPageOf({}, own)
+        verify(none.exportLayoutTo(layoutUrl("layout-unbound.json")), none.layoutNote)
+        verify(none.layoutNote.indexOf("2 gauges read signals none of the vehicle's picked plugins has") >= 0,
+               none.layoutNote)
+        verify(!none.layoutNoteBad, "a note, not a refusal")
+        const one = storedPageOf({}, docOf([cellOf("A"), Object.assign(cellOf("Loose"), { refs: ["key:loose"] })]))
+        verify(one.exportLayoutTo(layoutUrl("layout-unbound-one.json")), one.layoutNote)
+        verify(one.layoutNote.indexOf("1 gauge reads a signal none of") >= 0, one.layoutNote)
+        // A pick that gives the key says nothing of the kind
+        const good = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Good car"),
+                                          [keptPlugin("Loads", "loads", "D101").profiles[0]])
+        const bound = storedPageOf({ vehicles: good },
+                                   docOf([cellOf("A"), Object.assign(cellOf("Loads"), { refs: ["key:loads"] })]))
+        verify(bound.exportLayoutTo(layoutUrl("layout-bound.json")), bound.layoutNote)
+        verify(bound.layoutNote.indexOf("none of the vehicle's picked plugins") < 0, bound.layoutNote)
+    }
+
     function test_theLayoutButtonsAreInTheMoreRow() {
         const page = storedPageOf({}, docOf([cellOf("A")]))
         page.startEditing()
@@ -4003,5 +4299,543 @@ TestCase {
         verify(find(page, "dashLayoutNote").visible)
         page.stopEditing()
         compare(page.layoutNote, "", "the note goes with edit mode")
+    }
+
+    // ---- Presets: the "+" tab and Add page's list, Replace this page with...
+
+    function openPresetList(page) {
+        if (page.form === "phone") {
+            click(page, "dashMore")
+            click(page, "moreAddPage")
+        } else {
+            click(page, "dashPageAdd")
+        }
+        verify(find(page, "dashPresetList").visible, "the list opens")
+    }
+
+    function test_aPresetIsAddedAfterTheShownPageAsOneUndoStep_data() {
+        return [{ tag: "desktop", props: {} },
+                { tag: "phone", props: { form: "phone", width: 384, height: 832 } }]
+    }
+    function test_aPresetIsAddedAfterTheShownPageAsOneUndoStep(data) {
+        const first = docOf([cellOf("A")])
+        first.pages.push({ name: "Last", cells: [cellOf("B")] })
+        const page = storedPageOf(data.props, first)
+        page.startEditing()
+        openPresetList(page)
+        verify(find(page, "preset_blank").visible)
+        verify(find(page, "preset_file").visible)
+        click(page, "preset_temperatures")
+        verify(!find(page, "dashPresetList").visible, "the list shuts")
+        compare(page.doc.pages.map(p => p.name), ["Test", "Temperatures", "Last"], "after the shown page")
+        compare(page.pageIndex, 1, "the new page shows")
+        compare(DashboardBook.canonical(page.doc.pages[1].cells),
+                DashboardBook.canonical(DashboardBook.presetPage("temperatures", page.form).cells))
+        compare(storedText(page), DashboardBook.serialize(page.doc))
+        compare(page.undoWords, "added the page Temperatures")
+        page.undo()
+        compare(page.doc.pages.map(p => p.name), ["Test", "Last"], "one Undo takes the page back")
+        verify(!page.canUndo, "and it was one step")
+    }
+    function test_aBlankPageStillComesFromTheList() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        openPresetList(page)
+        click(page, "preset_blank")
+        compare(page.doc.pages.length, 2)
+        compare(page.doc.pages[1].cells.length, 0)
+    }
+    function test_theListCancelsAndGoesWithThePageChange() {
+        const first = docOf([cellOf("A")])
+        first.pages.push({ name: "Two", cells: [] })
+        const page = pageOf({}, first)
+        page.startEditing()
+        openPresetList(page)
+        click(page, "preset_cancel")
+        verify(!find(page, "dashPresetList").visible)
+        compare(page.doc.pages.length, 2, "nothing added")
+        openPresetList(page)
+        page.goTo(1)
+        verify(!find(page, "dashPresetList").visible, "a page change shuts it")
+    }
+    function test_theListCantAddPastTheFormsPages() {
+        let d = docOf([cellOf("A")])
+        while (d.pages.length < DashboardBook.maxPages)
+            d = DashboardBook.addPage(d, "P" + d.pages.length)
+        const page = pageOf({}, d)
+        page.startEditing()
+        verify(!find(page, "dashPageAdd").enabled, "the + tab is off")
+    }
+    function test_thePresetButtonsSayWhatTheyDo() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        openPresetList(page)
+        compare(find(page, "preset_standard").Accessible.name, "Add the Standard preset as a new page")
+        compare(find(page, "preset_blank").Accessible.name, "Add a blank page")
+        click(page, "preset_cancel")
+        click(page, "dashMore")
+        click(page, "moreReplace")
+        compare(find(page, "preset_showcase").Accessible.name, "Replace this page with the Showcase preset")
+        verify(!find(page, "preset_blank").visible, "Replace has no blank")
+        verify(!find(page, "preset_file").visible, "and no file")
+    }
+
+    function test_replacingAPageThatMatchesNoPresetAsksFirst() {
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        click(page, "dashMore")
+        click(page, "moreReplace")
+        click(page, "preset_standard")
+        verify(find(page, "dashReplaceConfirm").visible, "asks")
+        verify(find(page, "replaceQuestion").text.indexOf("Test") >= 0, "names the page")
+        verify(find(page, "replaceQuestion").text.indexOf("Standard") >= 0, "and the preset")
+        compare(labels(page), ["A"], "nothing yet")
+        click(page, "replaceKeep")
+        verify(!find(page, "dashReplaceConfirm").visible)
+        compare(labels(page), ["A"], "kept")
+        click(page, "moreReplace")
+        click(page, "preset_standard")
+        click(page, "replaceConfirm")
+        compare(page.doc.pages.length, 1)
+        compare(page.doc.pages[0].name, "Test", "the page keeps its name")
+        compare(DashboardBook.canonical(page.doc.pages[0].cells),
+                DashboardBook.canonical(DashboardBook.presetPage("standard", "desktop").cells))
+        compare(storedText(page), DashboardBook.serialize(page.doc))
+        compare(page.undoWords, "replaced the page with Standard")
+        page.undo()
+        compare(labels(page), ["A"], "one Undo takes it back")
+        verify(!page.canUndo)
+    }
+    function test_replacingAPresetPageAsksNothing() {
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        page.replaceWithPreset("standard")
+        click(page, "dashMore")
+        click(page, "moreReplace")
+        click(page, "preset_showcase")
+        verify(!find(page, "dashReplaceConfirm").visible, "no question over a preset")
+        compare(DashboardBook.canonical(page.doc.pages[0].cells),
+                DashboardBook.canonical(DashboardBook.presetPage("showcase", "desktop").cells))
+    }
+    function test_theUndoLineShowsAReplaceOutsideEditMode() {
+        const page = storedPageOf({ undoLineMs: 60000 }, docOf([cellOf("A")]))
+        page.replaceWithPreset("standard")
+        compare(page.undoLine, "Replaced the page with Standard")
+        verify(find(page, "dashUndoLine").visible, "the line shows with edit mode off")
+    }
+    function test_replaceOnlyChangesTheShownPage() {
+        const d = docOf([cellOf("A")])
+        d.pages.push({ name: "Two", cells: [cellOf("B")] })
+        const page = pageOf({}, d)
+        page.goTo(1)
+        page.replaceWithPreset("temperatures")
+        compare(page.doc.pages[0].cells.map(c => c.label), ["A"])
+        compare(page.doc.pages[1].cells[0].label, "Coolant")
+        compare(page.pageIndex, 1)
+    }
+    function test_replaceIsNotOfferedOverAnOpenQuestion() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        click(page, "dashMore")
+        click(page, "moreReplace")
+        click(page, "preset_standard")
+        verify(!find(page, "dashMoreRow").visible, "the row waits for the answer")
+        verify(!page.loadLayoutFrom(layoutUrl("never.json")), "a load waits too")
+        compare(page.layoutNote, "Answer the question first")
+    }
+
+    function test_resetReadsAllPages() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        click(page, "dashMore")
+        compare(find(page, "moreReset").text, "Reset all pages")
+        click(page, "moreReset")
+        verify(find(page, "dashResetConfirm").visible)
+        compare(find(page, "resetConfirm").text, "Reset all")
+    }
+
+    // A file's pages are added after the shown page, one undo step
+    function test_aFilesPagesAreAddedAfterTheShownPage() {
+        const src = storedPageOf({}, docOf([cellOf("X")]))
+        const url = layoutUrl("layout-add-pages.json")
+        verify(src.exportLayoutTo(url), src.layoutNote)
+        src.destroy()
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        verify(page.loadLayoutFrom(url, true), page.layoutNote)
+        compare(page.doc.pages.length, 2)
+        compare(page.doc.pages[0].cells.map(c => c.label), ["A"], "the page stays")
+        compare(page.doc.pages[1].cells.map(c => c.label), ["X"])
+        compare(page.pageIndex, 1)
+        compare(page.undoWords, "added pages from a file")
+        page.undo()
+        compare(page.doc.pages.length, 1)
+        verify(!page.canUndo)
+    }
+    function test_aFileIsNotAddedPastTheFormsPages() {
+        const src = storedPageOf({}, docOf([cellOf("X")]))
+        const url = layoutUrl("layout-add-full.json")
+        verify(src.exportLayoutTo(url), src.layoutNote)
+        src.destroy()
+        let d = docOf([cellOf("A")])
+        while (d.pages.length < DashboardBook.maxPages)
+            d = DashboardBook.addPage(d, "P" + d.pages.length)
+        const page = storedPageOf({}, d)
+        verify(!page.loadLayoutFrom(url, true))
+        verify(page.layoutNote.indexOf("Not added") === 0, page.layoutNote)
+        compare(page.doc.pages.length, DashboardBook.maxPages)
+    }
+
+    // The list's buttons wrap inside the narrowest phone
+    function test_thePresetListFitsTheNarrowestPhone_data() {
+        // 280 stands in for a wider font on 320 (CI's Linux and macOS)
+        return [{ tag: "320", width: 320 }, { tag: "280", width: 280 }, { tag: "240", width: 240 }]
+    }
+    function test_thePresetListFitsTheNarrowestPhone(data) {
+        const page = pageOf({ form: "phone", width: data.width, height: 640 }, docOf([cellOf("A")]))
+        page.startEditing()
+        openPresetList(page)
+        const flow = find(page, "dashPresetList")
+        verify(waitForPolish(page.Window.window), "laid out")
+        verify(flow.width <= flow.parent.width + 0.5, "the list is no wider than its bar: " + flow.width + " in " + flow.parent.width)
+        for (const n of ["preset_blank", "preset_standard", "preset_temperatures", "preset_showcase",
+                         "preset_file", "preset_cancel"]) {
+            const b = find(page, n)
+            const at = b.mapToItem(flow, 0, 0)
+            verify(at.x >= 0 && at.x + b.width <= flow.width + 0.5, n + " is inside its flow: " + at.x + " + " + b.width + " of " + flow.width)
+            verify(b.height >= Theme.touchTarget - 0.5, n + " is a touch's size")
+        }
+    }
+
+    // ---- Presets: the review's cases
+
+    function test_replacingAnEmptyPageAsksNothing() {
+        const page = storedPageOf({}, docOf([]))
+        page.startEditing()
+        click(page, "dashMore")
+        click(page, "moreReplace")
+        click(page, "preset_standard")
+        verify(!find(page, "dashReplaceConfirm").visible, "nothing to lose, nothing to ask")
+        compare(page.doc.pages[0].cells.length, DashboardBook.presetPage("standard", "desktop").cells.length)
+    }
+
+    function test_aPresetThatCantBeReadIsSaidAndChangesNothing() {
+        const page = storedPageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        openPresetList(page)
+        verify(!page.addPresetPage("nope"))
+        verify(!find(page, "dashPresetList").visible, "the list shuts")
+        compare(page.layoutNote, "The preset couldn't be read")
+        verify(page.layoutNoteBad)
+        verify(find(page, "dashLayoutNote").visible, "said in the page, with the More row shut")
+        compare(page.doc.pages.length, 1)
+        page.noteLayout("")
+        verify(!page.replaceWithPreset("nope"))
+        compare(page.layoutNote, "The preset couldn't be read")
+        page.noteLayout("")
+        page.replaceChosen("nope")
+        compare(page.layoutNote, "The preset couldn't be read")
+        verify(page.confirmReplaceKey === "", "no question over a preset that isn't there")
+        compare(labels(page), ["A"])
+    }
+
+    function test_aFileThatDoesntFitSaysSoAlone() {
+        const src = storedPageOf({}, docOf([cellOf("X")]))
+        const url = layoutUrl("layout-add-note.json")
+        verify(src.exportLayoutTo(url), src.layoutNote)
+        src.destroy()
+        let d = docOf([cellOf("A")])
+        while (d.pages.length < DashboardBook.maxPages)
+            d = DashboardBook.addPage(d, "P" + d.pages.length)
+        const page = storedPageOf({}, d)
+        verify(!page.loadLayoutFrom(url, true))
+        compare(page.layoutNote, "Not added: a form holds 10 pages at most")
+        verify(page.layoutNoteBad)
+    }
+
+    function test_theFilePickIsForgottenWhenItIsCancelled() {
+        const page = pageOf({}, docOf([cellOf("A")]))
+        page.startEditing()
+        openPresetList(page)
+        // Through the picker seam: a real FileDialog would stay open and
+        // take the window's focus from every later case
+        const dialog = find(page, "layoutOpenDialog")
+        dialog.usePicker = true
+        DocumentPicker.setPickerForTesting(true)
+        click(page, "preset_file")
+        verify(page.fileAdds, "the file's pages are what the pick adds")
+        DocumentPicker.deliver(dialog.request, 0, "", "")
+        verify(!page.fileAdds, "a cancel forgets it")
+    }
+
+    function test_theListClosesTheOtherQuestions() {
+        const first = docOf([cellOf("A")])
+        first.pages.push({ name: "Two", cells: [] })
+        const page = pageOf({}, first)
+        page.startEditing()
+        click(page, "dashMore")
+        click(page, "moreReset")
+        verify(find(page, "dashResetConfirm").visible)
+        page.openPresets("add")
+        verify(!find(page, "dashResetConfirm").visible, "Reset's question goes")
+        verify(find(page, "dashPresetList").visible)
+        page.confirmRemovePage = true
+        page.openPresets("replace")
+        verify(!page.confirmRemovePage, "so does Remove's")
+    }
+
+    function test_thePresetButtonsAreOffAtThePageLimit() {
+        let d = docOf([cellOf("A")])
+        while (d.pages.length < DashboardBook.maxPages)
+            d = DashboardBook.addPage(d, "P" + d.pages.length)
+        const page = pageOf({}, d)
+        page.startEditing()
+        page.openPresets("add")
+        for (const n of ["preset_blank", "preset_standard", "preset_temperatures", "preset_showcase", "preset_file"])
+            verify(!find(page, n).enabled, n + " is off with " + DashboardBook.maxPages + " pages")
+        page.openPresets("replace")
+        verify(find(page, "preset_standard").enabled, "a replace adds no page")
+    }
+
+    // ---- Presets: the phone pass's findings
+
+    // A ring draws a square face: its box is at least one (the phone's row is
+    // a quarter of a column), so its value and caption have the room a ring
+    // of 2 by 6 lacked; the desktop's ring is the Standard page's own
+    function test_aShowcaseRingIsAtLeastASquare() {
+        for (const c of DashboardBook.presetPage("showcase", "phone").cells.filter(x => x.kind === "ring"))
+            verify(Number(DashboardBook.heightInColumns(c.h)) >= c.w, c.label + " is " + c.w + " by " + c.h)
+        const std = DashboardBook.presetPage("standard", "desktop").cells.filter(x => x.kind === "ring")[0]
+        for (const c of DashboardBook.presetPage("showcase", "desktop").cells.filter(x => x.kind === "ring"))
+            verify(c.w === std.w && c.h === std.h, c.label + " is " + c.w + " by " + c.h)
+    }
+
+    // A Temperatures cell for a signal the car lacks says why in a whole
+    // note, not "not in ...": at the phone's width and at 320, which stands
+    // in for a wider font
+    function test_theTemperaturesUnavailableNotesFitTheirCells_data() {
+        return [{ tag: "384", width: 384 }, { tag: "320", width: 320 }]
+    }
+    function test_theTemperaturesUnavailableNotesFitTheirCells(data) {
+        compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
+        const d = DashboardBook.builtIn("phone")
+        d.pages = [DashboardBook.presetPage("temperatures", "phone")]
+        const page = pageOf({ form: "phone", width: data.width, height: 832 }, d)
+        const cells = d.pages[0].cells
+        let seen = 0
+        for (let i = 0; i < cells.length; ++i) {
+            if (cells[i].label !== "Outside air" && cells[i].label !== "Catalyst")
+                continue
+            const cell = find(page, "dashCell_0_" + i)
+            const note = find(cell, "gaugeNote")
+            tryVerify(() => cell.width > 0 && note.visible, 5000, cells[i].label + " says why")
+            verify(!note.truncated, cells[i].label + " is whole: " + note.text + " in " + note.width)
+            const right = note.mapToItem(cell, note.width, 0).x
+            verify(right <= cell.width + 0.5, "inside its cell: " + right + " of " + cell.width)
+            ++seen
+        }
+        compare(seen, 2)
+    }
+
+    // The list takes the Page row's place on the phone, so the gauges keep
+    // the height the row would have held
+    function test_theListTakesThePageRowsPlaceOnAPhone() {
+        const first = docOf([cellOf("A")])
+        first.pages.push({ name: "Two", cells: [cellOf("B")] }, { name: "Three", cells: [] })
+        const page = pageOf({ form: "phone", width: 384, height: 832 }, first)
+        page.startEditing()
+        click(page, "dashMore")
+        verify(find(page, "dashMoreRow").visible)
+        click(page, "moreAddPage")
+        verify(find(page, "dashPresetList").visible)
+        verify(!find(page, "dashMoreRow").visible, "the row gives way to the list")
+        click(page, "preset_cancel")
+        verify(find(page, "dashMoreRow").visible, "and comes back")
+    }
+
+    // ---- The desktop edits the phone's layout (B1)
+    function bothFormsPage(props) {
+        const phoneDoc = DashboardBook.builtIn("phone")
+        phoneDoc.pages = [{ name: "P", cells: [cellOf("PhoneCell")] }]
+        const page = pageOf(props || {}, docOf([cellOf("DesktopCell")]))
+        const store = find(page, "dashStore")
+        store.desktop = DashboardBook.serialize(docOf([cellOf("DesktopCell")]))
+        store.phone = DashboardBook.serialize(phoneDoc)
+        return page
+    }
+    function phoneSwitchOn(page) {
+        page.startEditing()
+        page.showStoredLayout()
+        verify(page.phoneSwitchShown)
+        click(page, "dashPhoneSwitch")
+        verify(page.phoneEdit)
+    }
+
+    function test_thePhoneSwitchShowsOnlyOnAWideEnoughDesktopInEditMode() {
+        const page = bothFormsPage()
+        verify(!find(page, "dashPhoneRow").visible, "not outside edit mode")
+        page.startEditing()
+        verify(find(page, "dashPhoneRow").visible)
+        page.width = 431
+        verify(!page.phoneSwitchShown, "too narrow for the frame")
+        page.width = 432
+        verify(page.phoneSwitchShown)
+        page.stopEditing()
+        verify(!page.phoneSwitchShown)
+        const phone = bothFormsPage({ form: "phone" })
+        phone.startEditing()
+        verify(phone.phoneSwitchShown, "a test's phone form on a desktop still has it")
+    }
+
+    function test_theSwitchShowsThePhoneDocumentAndOffReturnsTheDesktopsUntouched() {
+        const page = bothFormsPage()
+        page.startEditing()
+        page.showStoredLayout()
+        const desktopText = find(page, "dashStore").desktop
+        compare(labels(page), ["DesktopCell"])
+        phoneSwitchOn(page)
+        compare(page.form, "phone")
+        compare(labels(page), ["PhoneCell"])
+        click(page, "dashPhoneSwitch")
+        verify(!page.phoneEdit)
+        compare(page.form, "desktop")
+        compare(labels(page), ["DesktopCell"])
+        compare(find(page, "dashStore").desktop, desktopText)
+    }
+
+    function test_anEditInTheFrameWritesThePhonesStoreAlone() {
+        const page = bothFormsPage()
+        phoneSwitchOn(page)
+        const store = find(page, "dashStore")
+        const desktopText = store.desktop
+        const phoneText = store.phone
+        page.renamePage("Renamed")
+        verify(store.phone !== phoneText, "the phone's text changed")
+        compare(store.desktop, desktopText)
+    }
+
+    function test_doneLeavesTheFrameAndEditStartsOnTheDesktop() {
+        const page = bothFormsPage()
+        phoneSwitchOn(page)
+        page.stopEditing()
+        verify(!page.phoneEdit)
+        compare(page.form, "desktop")
+        compare(labels(page), ["DesktopCell"])
+        page.startEditing()
+        verify(!page.phoneEdit)
+        compare(page.form, "desktop")
+    }
+
+    function test_switchingDropsTheHistoryTheSelectionTheListAndTheQuestions() {
+        const page = bothFormsPage()
+        page.startEditing()
+        page.showStoredLayout()
+        page.renamePage("Changed")
+        verify(page.canUndo)
+        page.selected = 0
+        page.panel = "cell"
+        page.confirmReset = true
+        click(page, "dashPhoneSwitch")
+        verify(!page.canUndo, "the history is the form's own")
+        compare(page.selected, -1)
+        compare(page.panel, "")
+        verify(!page.confirmReset)
+        page.openPresets("add")
+        click(page, "dashPhoneSwitch")
+        compare(page.presetList, "")
+    }
+
+    function test_thePhonesPageIndexIsKeptAcrossTheSwitch() {
+        const page = bothFormsPage()
+        const store = find(page, "dashStore")
+        const phoneDoc = DashboardBook.builtIn("phone")
+        phoneDoc.pages = [{ name: "A", cells: [cellOf("a")] }, { name: "B", cells: [cellOf("b")] }]
+        store.phone = DashboardBook.serialize(phoneDoc)
+        store.phonePage = 1
+        page.startEditing()
+        click(page, "dashPhoneSwitch")
+        compare(page.pageIndex, 1)
+        click(page, "dashPhoneSwitch")
+        compare(page.pageIndex, 0)
+        compare(store.phonePage, 1, "the desktop's page didn't overwrite the phone's")
+    }
+
+    // A page index the new form's document can't hold is clamped while the
+    // form already is the new one: the clamp must not become its remembered page
+    function test_aPageIndexTheOtherFormCantHoldIsNotWrittenAsItsOwn() {
+        const page = bothFormsPage()
+        const store = find(page, "dashStore")
+        const desktopDoc = docOf([cellOf("a")])
+        desktopDoc.pages = [{ name: "A", cells: [cellOf("a")] }, { name: "B", cells: [cellOf("b")] },
+                            { name: "C", cells: [cellOf("c")] }]
+        store.desktop = DashboardBook.serialize(desktopDoc)
+        const phoneDoc = DashboardBook.builtIn("phone")
+        phoneDoc.pages = [{ name: "A", cells: [cellOf("a")] }, { name: "B", cells: [cellOf("b")] }]
+        store.phone = DashboardBook.serialize(phoneDoc)
+        store.phonePage = 0
+        page.startEditing()
+        page.showStoredLayout()
+        page.goTo(2)
+        compare(page.pageIndex, 2)
+        click(page, "dashPhoneSwitch")
+        compare(page.pageIndex, 0)
+        compare(store.phonePage, 0)
+        click(page, "dashPhoneSwitch")
+        compare(page.pageIndex, 2)
+        compare(store.desktopPage, 2)
+    }
+
+    function test_theExportInTheFrameIsAPhoneFileAndALoadRefusesADesktopOne() {
+        const page = bothFormsPage()
+        phoneSwitchOn(page)
+        click(page, "dashMore")
+        const url = layoutUrl("layout-frame-phone.json")
+        verify(page.exportLayoutTo(url), page.layoutNote)
+        verify(page.layoutNote.indexOf("It's a phone layout") >= 0, page.layoutNote)
+        const text = Bridge.layoutFileText(url).text
+        compare(JSON.parse(text).form, "phone")
+        page.renamePage("Other")
+        verify(page.loadLayoutFrom(url), page.layoutNote)
+        const desktopUrl = layoutUrl("layout-frame-desktop.json")
+        const other = bothFormsPage()
+        other.startEditing()
+        verify(other.exportLayoutTo(desktopUrl))
+        other.destroy()
+        verify(!page.loadLayoutFrom(desktopUrl))
+        verify(page.layoutNote.indexOf("is a desktop layout") >= 0, page.layoutNote)
+    }
+
+    function test_aConnectedDesktopInTheFrameNeverEntersTheDriveView() {
+        const page = bothFormsPage()
+        page.startEditing()
+        click(page, "dashPhoneSwitch")
+        compare(Bridge.connectSession("mock://demo"), "")
+        tryVerify(() => Bridge.connected, 5000)
+        wait(100)
+        page.enterDrive()
+        verify(!page.driving, "editing is an editor")
+        // The gate's own term: the frame still on with editing already off
+        page.editing = false
+        verify(page.phoneEdit)
+        page.enterDrive()
+        verify(!page.driving, "the frame is an editor")
+        page.editing = true
+        page.stopEditing()
+    }
+
+    function test_theSwitchSaysWhatItDoes() {
+        const page = bothFormsPage()
+        page.startEditing()
+        const sw = find(page, "dashPhoneSwitch")
+        compare(sw.text, "Phone layout")
+        compare(sw.Accessible.name, "Edit the phone's layout in a phone-sized frame")
+        verify(sw.Accessible.description.indexOf("undo history") >= 0)
+        for (const w of [720, 1100]) {
+            page.width = w
+            verify(waitForPolish(page))
+            const row = find(page, "dashPhoneRow")
+            verify(sw.mapToItem(page, sw.width, 0).x <= page.width, "the switch fits at " + w)
+            verify(row.width <= page.width)
+        }
     }
 }

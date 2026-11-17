@@ -13,6 +13,9 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "new_counter.h"
+#include "open_handles.h"
+
 namespace {
 
 /* The devices the machine is declared to have, from
@@ -100,6 +103,49 @@ TEST(J2534DiscoveryTest, DiscoveryReturnsValidVendorNames) {
 #else
     GTEST_SKIP() << "Skipping J2534 discovery test on non-Windows platform";
 #endif
+}
+
+/* Out of memory at each of discovery's allocations in turn (tests.md's
+ * out-of-memory loops): the clean call's devices or OUT_OF_MEMORY with
+ * none handed out, nothing thrown, no registry key left open. A machine
+ * with no adapter allocates once, for the sweeps' room. */
+TEST(J2534DiscoveryTest, OutOfMemoryAnywhereInDiscoveryIsAnsweredNotThrown) {
+    ecuio_j2534_device_t* devices = nullptr;
+    uint32_t count = 0;
+    const unsigned long before = new_counter::on_this_thread();
+    ASSERT_EQ(ecuio_j2534_discover_devices(&devices, &count), ECUIO_OK);
+    const unsigned long news = new_counter::on_this_thread() - before;
+    ecuio_j2534_free_devices(devices);
+    const uint32_t whole = count;
+    ASSERT_GT(news, 0u);
+    const unsigned long handles = open_handles();
+    unsigned long refused = 0;
+    for (unsigned long n = 1; n <= news; ++n) {
+        devices = nullptr;
+        count = 0;
+        ecuio_status_t rc = ECUIO_OK;
+        bool threw = false;
+        new_counter::fail_new(n);
+        try {
+            rc = ecuio_j2534_discover_devices(&devices, &count);
+        } catch (...) {
+            threw = true;
+        }
+        new_counter::fail_new(0);
+        ASSERT_FALSE(threw) << "discovery threw at allocation " << n;
+        if (rc == ECUIO_OK) {
+            EXPECT_EQ(count, whole) << "at " << n;
+            ecuio_j2534_free_devices(devices);
+        } else {
+            ++refused;
+            EXPECT_EQ(rc, ECUIO_ERR_OUT_OF_MEMORY) << "at " << n;
+            EXPECT_EQ(devices, nullptr) << "at " << n;
+            EXPECT_EQ(count, 0u) << "at " << n;
+        }
+    }
+    EXPECT_GT(refused, 0u);
+    EXPECT_EQ(open_handles(), handles)
+        << "a refused discovery left a registry key open";
 }
 
 } // namespace

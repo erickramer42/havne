@@ -1,6 +1,7 @@
 # File/layer: fuzz/CMakeLists.txt | libFuzzer harnesses
-# ECUIO_BUILD_FUZZERS=ON instruments ecuio-core and the harnesses
-# itself: coverage and ASan on both (UBSan too under Clang), and
+# ECUIO_BUILD_FUZZERS=ON instruments ecuio-core, the WAMR objects in it
+# (fuzz_wasm_module fuzzes that loader) and the harnesses
+# itself: coverage and ASan on all (UBSan too under Clang), and
 # libFuzzer's main() linked into the harnesses only, so no other
 # executable in the tree can pick it up. Two toolchains:
 #   - Clang (clang/clang++, the CI 'fuzz' job on Linux);
@@ -27,7 +28,7 @@ set(_ecuio_fuzzers fuzz_decode_signal fuzz_validate_set fuzz_uds_query
     fuzz_isotp fuzz_vin fuzz_dtc fuzz_sim fuzz_elm327_emulator
     fuzz_recording fuzz_candump fuzz_request_bus fuzz_json fuzz_signal_file
     fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import fuzz_export
-    fuzz_computed fuzz_condition_file fuzz_plugin_wrap)
+    fuzz_computed fuzz_condition_file fuzz_plugin_wrap fuzz_wasm_module)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
    NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -36,6 +37,13 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
         -fno-sanitize-recover=undefined
         -fno-omit-frame-pointer)
     target_compile_options(ecuio-core PRIVATE ${_ecuio_fuzz_instrument})
+    # UBSan's alignment check is left out for WAMR's objects, as WAMR's
+    # own config_common.cmake sets it, until a release carries upstream's
+    # pull request 5062 (third_party/wamr.cmake has the why). Named again
+    # here after -fsanitize=undefined, which would put the check back;
+    # SHELL: keeps CMake from dropping the repeat.
+    target_compile_options(ecuio-wamr PRIVATE ${_ecuio_fuzz_instrument}
+        "SHELL:-fno-sanitize=alignment")
     foreach(_t ${_ecuio_fuzzers})
         add_executable(${_t} ${_t}.cpp)
         target_link_libraries(${_t} PRIVATE ecuio-core)
@@ -46,8 +54,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND
         # recording's rows, fuzz_candump a candump log's lines,
         # fuzz_json the JSON reader, fuzz_csv_import a CSV and its
         # column map, fuzz_computed a computed program's machine,
-        # fuzz_validate_set and fuzz_signal_file the frame decoder, all
-        # internal
+        # fuzz_validate_set and fuzz_signal_file the frame decoder,
+        # fuzz_wasm_module the sandbox, all internal
         # (the tests' precedent)
         target_include_directories(${_t} PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
         target_compile_options(${_t} PRIVATE ${_ecuio_fuzz_instrument})
@@ -58,12 +66,14 @@ elseif(MSVC)
     # The /fsanitize-coverage options are what /fsanitize=fuzzer implies,
     # without the libFuzzer link: core gets them, and only a harness
     # compiled with /fsanitize=fuzzer pulls in libFuzzer's main().
-    target_compile_options(ecuio-core PRIVATE
-        /fsanitize=address
-        /fsanitize-coverage=inline-8bit-counters
-        /fsanitize-coverage=edge
-        /fsanitize-coverage=trace-cmp
-        /fsanitize-coverage=trace-div)
+    foreach(_t ecuio-core ecuio-wamr)
+        target_compile_options(${_t} PRIVATE
+            /fsanitize=address
+            /fsanitize-coverage=inline-8bit-counters
+            /fsanitize-coverage=edge
+            /fsanitize-coverage=trace-cmp
+            /fsanitize-coverage=trace-div)
+    endforeach()
     get_filename_component(_ecuio_msvc_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
     foreach(_t ${_ecuio_fuzzers})
         add_executable(${_t} ${_t}.cpp)

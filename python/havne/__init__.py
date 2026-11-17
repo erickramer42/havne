@@ -17,7 +17,8 @@
 
 from ._version import __version__
 from ._lib import path as library_path, version as core_version
-from .errors import CheckFailed, Error, LibraryNotFound, LibraryVersionError, status_name
+from .errors import (CheckFailed, Error, ExprRefused, LibraryNotFound, LibraryVersionError,
+                     status_name)
 from .session import Frame, Recorder, RecorderState, Session, Stream, Value
 from .recording import (Column, GuessedMap, Imported, Marker, RecordedConditionEvent,
                         RecordedConditions, RecordedFrame, Recording, Signal, Stats, Stretch,
@@ -27,14 +28,15 @@ from .export import (Estimate, EstimatedSize, Exported, LeftOut, estimate_csv, e
 from .health import HealthReport, health_report
 from .lookup import DtcTitle, VinInfo, decode_vin, dtc_title
 from .sim import Reply, Sim
-from .signals import Gauge, Plugin, PutVariant, SignalFile, Source
+from .signals import Evaluation, ExprCheck, Gauge, Plugin, PutVariant, SignalFile, Source
 from .conditions import (Alert, Binding, Checks, Condition, ConditionEvent, ConditionSet,
                          ConditionState, Record, Resolved, Term)
 from . import _ecuio as c
 
 __all__ = [
     "__version__", "library_path", "core_version", "c",
-    "Error", "CheckFailed", "LibraryNotFound", "LibraryVersionError", "status_name",
+    "Error", "CheckFailed", "ExprRefused", "LibraryNotFound", "LibraryVersionError",
+    "status_name",
     "Session", "Stream", "Frame", "Value", "Recorder", "RecorderState",
     "Recording", "Signal", "Marker", "Column", "Stats", "Stretch",
     "RecordedConditions", "RecordedConditionEvent",
@@ -44,6 +46,7 @@ __all__ = [
     "estimate_csv", "Estimate", "EstimatedSize", "health_report", "HealthReport",
     "decode_vin", "VinInfo", "dtc_title", "DtcTitle",
     "Sim", "Reply", "SignalFile", "Plugin", "Gauge", "Source", "PutVariant",
+    "ExprCheck", "Evaluation",
     "ConditionSet", "Condition", "Term", "Alert", "Record", "Checks", "Binding", "Resolved",
     "ConditionEvent", "ConditionState",
 ]

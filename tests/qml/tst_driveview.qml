@@ -361,10 +361,10 @@ TestCase {
     }
 
     function test_theStatusLineNamesTheStateAndTheAddress() {
-        const s = driven()
+        const s = driven("mock://demo?profile=mock")
         enterOn(s)
         tryCompare(Bridge, "linkState", "ok", 3000)
-        compare(statusWords(s), Theme.linkShortLabel("ok") + "|· " + Bridge.uriLabel)
+        compare(statusWords(s), Theme.linkShortLabel("ok") + "|· " + "mock://demo")
         compare(find(s.dash, "driveStatusDot").color, Theme.linkColor("ok"))
         verify(!find(s.dash, "driveStatusRun").visible, "nothing runs, so it never says No log")
     }
@@ -378,7 +378,9 @@ TestCase {
         verify(waitForPolish(s.main))
         compare(find(s.dash, "driveStatusRun").text, qsTr("Log"))
         verify(find(s.dash, "driveStatusTime").visible, "the elapsed time")
-        compare(find(s.dash, "driveStatusTime").text, s.main.logTimeText(Bridge.logElapsedMs))
+        // logElapsedMs reads the clock live; the label follows its once-a-second notify
+        tryVerify(() => find(s.dash, "driveStatusTime").text === s.main.logTimeText(Bridge.logElapsedMs),
+                  2500, "the label agrees with the elapsed time")
         // The size as the header gives it, none under 0.1 MB
         const detail = find(s.dash, "driveStatusDetail")
         compare(detail.detail, s.main.logSizeText(Bridge.logBytes))

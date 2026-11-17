@@ -105,7 +105,9 @@ GaugeCard {
         else if (entry.hidden) words = qsTr("not sent by this ECU")
         else if (entry.refusedCode !== "") words = qsTr("refused (%1)").arg(entry.refusedCode)
         else if (entry.unasked) words = qsTr("not asked")
-        else if (!entry.hasValue) words = qsTr("waiting for data")
+        // A replay that has played its last frame will send nothing more
+        else if (!entry.hasValue) words = Bridge.replayFinished ? qsTr("not in this recording")
+                                                                : qsTr("waiting for data")
         return words !== "" && mismatch ? qsTr("%1 (expected %2)").arg(words).arg(expectedUnit)
                                         : words
     }

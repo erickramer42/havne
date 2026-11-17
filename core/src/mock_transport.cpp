@@ -107,8 +107,11 @@ bool take_channels(ecuio_mock_transport* t, const ecuio_signal_set_t* set)
  * ECU answers, which the worker sends: core lists the set's other
  * Service 01 signals as unsupported (ADR-0039 section 6), so a front end
  * says they aren't sent rather than waiting for them. The engine is the
- * caller's to drop after: nothing is asked again. */
-bool walk_pids(ecuio_mock_transport* t, ecuio_request_engine* probe)
+ * caller's to drop after: nothing is asked again. BAD_URI, with its
+ * detail, for a set that asks the engine ECU more than a module's most:
+ * the signals of no declared ECU are the engine ECU's here, and the
+ * first declared ECU's where registration counted them. */
+ecuio_status_t walk_pids(ecuio_mock_transport* t, ecuio_request_engine* probe)
 {
     const ecuio_signal_set_t* set = t->session->active_signal_set;
     /* The table sized from the set, as a requesting attach sizes its own
@@ -120,12 +123,24 @@ bool walk_pids(ecuio_mock_transport* t, ecuio_request_engine* probe)
         rows.assign(set != nullptr && set->defs != nullptr ? set->count : 0,
                     ECUIO_ROW_NONE);
     } catch (...) {
-        return false;
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    if (ecuio_engine_plan(set, t->rx_ids, t->channels, rows.data(), &derived) !=
-            ecuio_plan_result::ok ||
-        !ecuio_engine_init(probe, t->channels, derived.total)) {
-        return false;
+    switch (
+        ecuio_engine_plan(set, t->rx_ids, t->channels, rows.data(), &derived)) {
+    case ecuio_plan_result::out_of_memory:
+        return ECUIO_ERR_OUT_OF_MEMORY;
+    case ecuio_plan_result::module_full:
+        ecuio_detail_set("the profile asks the mock's engine ECU (0x%03X) "
+                         "more than %u requests: the mock reads the signals "
+                         "of no declared ECU as the engine ECU's",
+                         static_cast<unsigned>(t->rx_ids[0]),
+                         static_cast<unsigned>(ECUIO_MODULE_MAX_REQUESTS));
+        return ECUIO_ERR_BAD_URI;
+    case ecuio_plan_result::ok:
+        break;
+    }
+    if (!ecuio_engine_init(probe, t->channels, derived.total)) {
+        return ECUIO_ERR_OUT_OF_MEMORY;
     }
     if (derived.total > ECUIO_PROFILE_MAX_REQUESTS) {
         ecuio_engine_pick_only(probe);
@@ -148,7 +163,7 @@ bool walk_pids(ecuio_mock_transport* t, ecuio_request_engine* probe)
         ecuio_publish_support(t->session, *probe, c, t->rx_ids[c], published);
     }
     ecuio_mock_pids_of(set, t->car, &t->pids);
-    return true;
+    return ECUIO_OK;
 }
 
 /* Reads the simulated ECU's diagnostics to their end and hands the
@@ -379,8 +394,11 @@ ecuio_status_t ecuio_mock_transport_attach(ecuio_session_t* session,
                                   impl->channels) != ECUIO_OK) {
         return ECUIO_ERR_OUT_OF_MEMORY;
     }
-    if (probe && !walk_pids(impl, probe.get())) {
-        return ECUIO_ERR_OUT_OF_MEMORY;
+    if (probe) {
+        const ecuio_status_t walked = walk_pids(impl, probe.get());
+        if (walked != ECUIO_OK) {
+            return walked;
+        }
     }
     if (impl->diag) {
         impl->ecu.engine = &impl->car.car;

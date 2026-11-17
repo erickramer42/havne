@@ -227,6 +227,27 @@ QtObject {
         return out
     }
 
+    // How many cells of doc read a signal by a "key:" reference that no
+    // file of `vehicleFiles` gives, so a layout written now can't name the
+    // plugin they need (the vehicle picks none that has the key, or none
+    // is picked): a cell counts once however many keys it holds
+    function unboundKeyCells(doc, vehicleFiles) {
+        const given = {}
+        for (const f of vehicleFiles) {
+            for (const r of f.refs)
+                given[r] = true
+        }
+        let n = 0
+        for (const p of doc.pages) {
+            for (const c of p.cells) {
+                const keys = c.refs.filter(r => r.startsWith("key:"))
+                if (keys.length > 0 && !keys.some(r => given[r] === true))
+                    ++n
+            }
+        }
+        return n
+    }
+
     function fileFits(f) {
         return isObject(f) && typeof f.name === "string" && f.name.trim() !== ""
                && codePoints(f.name) <= maxFileName
@@ -519,6 +540,80 @@ QtObject {
 
     function reset(form) {
         return builtIn(form)
+    }
+
+    // ---- Presets: layout files (format 2) of one page each, compiled into
+    // the app as app/layouts/<form>/<key>.json and held valid by `havne-cli
+    // layout check` in CI. Standard is the built-in page's cells
+
+    readonly property var presets: [
+        { key: "standard", label: qsTr("Standard") },
+        { key: "temperatures", label: qsTr("Temperatures") },
+        { key: "showcase", label: qsTr("Showcase") }
+    ]
+
+    function presetText(key, form) {
+        if (!presets.some(p => p.key === key))
+            return ""
+        return Bridge.presetLayoutText(key, form)
+    }
+
+    // The preset's page ({ name, cells }), null when the file can't be read
+    function presetPage(key, form) {
+        const r = importProblem(presetText(key, form), form, [])
+        return r.problem === "" && r.doc.pages.length === 1 ? r.doc.pages[0] : null
+    }
+
+    // A value as text with object keys in order, so two cells compare
+    // whatever order their keys were written in
+    function canonical(v) {
+        if (Array.isArray(v))
+            return "[" + v.map(canonical).join(",") + "]"
+        if (isObject(v))
+            return "{" + Object.keys(v).sort().filter(k => v[k] !== undefined)
+                       .map(k => JSON.stringify(k) + ":" + canonical(v[k])).join(",") + "}"
+        return JSON.stringify(v)
+    }
+
+    // Whether the page's cells are one preset's, whatever its name
+    function matchesPreset(page, form) {
+        if (!isObject(page) || !Array.isArray(page.cells))
+            return false
+        const mine = canonical(page.cells)
+        return presets.some(p => {
+            const q = presetPage(p.key, form)
+            return q !== null && canonical(q.cells) === mine
+        })
+    }
+
+    // Whether replacing the page's gauges with a preset's loses nothing a
+    // preset doesn't give back: a page holding none, or one that is a preset
+    function losesNothing(page, form) {
+        return isObject(page) && Array.isArray(page.cells)
+               && (page.cells.length === 0 || matchesPreset(page, form))
+    }
+
+    // pages added after place `after` (-1 the start), in order; refused
+    // whole past the form's room
+    function insertPages(doc, after, pages) {
+        return write(doc, d => {
+            if (!Number.isInteger(after) || after < -1 || after >= d.pages.length
+                    || !Array.isArray(pages) || pages.length === 0 || !plain(pages))
+                return false
+            d.pages.splice(after + 1, 0, ...copy(pages))
+            return true
+        })
+    }
+
+    // The page's gauges replaced by a page's, its name kept
+    function replacePage(doc, page, with_) {
+        return write(doc, d => {
+            if (!hasPage(d, page) || !isObject(with_) || !Array.isArray(with_.cells)
+                    || !plain(with_.cells))
+                return false
+            d.pages[page].cells = copy(with_.cells)
+            return true
+        })
     }
 
     // ---- Placement (section 4)

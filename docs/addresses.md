@@ -272,7 +272,7 @@ entry := [<ecu>:]<DID>[-<DID>][:<type>]
   `u8`, `u16`, `u24`, `u32`, `i8`, `i16`, `i24` or `i32` (big-endian, no
   scaling).
 - Several `did=` keys add up. A DID listed twice is kept once. At most
-  256 DIDs to poll, 1024 to scan and 4 ECUs.
+  256 DIDs to poll, 1024 to scan and 32 ECUs.
 
 ```
 elm327://COM5?profile=uds-generic&did=1E1C,1E1D:u16

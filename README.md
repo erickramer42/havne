@@ -31,7 +31,7 @@ Havne reads a car through J2534, ELM327 or SocketCAN adapters on Windows, Linux 
 - **Adapters:** J2534 on Windows; ELM327 over serial, Bluetooth or WiFi, kept running in the background on Android; SocketCAN on Linux, asking so far on a virtual bus ([docs/linux.md](docs/linux.md)).
 - **Diagnose:** each ECU's stored, pending and permanent codes with titles, readiness, the freeze frame and an inspection verdict; a clear asks first and saves the report ([ADR-0037](docs/adr/0037-reading-trouble-codes.md)).
 - **Profiles, chosen by the URI:** `obd2` polls every Service 01 reading the car supports, `uds-generic` the identifiers you name, `raw` logs frames ([ADR-0039](docs/adr/0039-full-service01-coverage.md)).
-- **Your own signals:** signal files and plugins for Service 01 PIDs and Service 22 DIDs on up to four modules, written in Settings or imported from an OBDb set, all kept as plugins in one list ([signal-files.md](docs/signal-files.md)).
+- **Your own signals:** signal files and plugins for Service 01 PIDs and Service 22 DIDs on up to 32 modules, written in Settings or imported from an OBDb set, all kept as plugins in one list ([signal-files.md](docs/signal-files.md)).
 - **Alerts and armed recording:** a condition file names a test of a signal or the link; the app shows an alert as a band, and an armed recorder records around each firing ([condition-files.md](docs/condition-files.md), [ADR-0063](docs/adr/0063-conditions.md)).
 - **Record and review:** every frame and value of a session; the Recordings page pans, zooms, overlays a second run and shows the frames; `replay://` plays one back ([ADR-0049](docs/adr/0049-recordings-in-core.md)).
 - **Analysis log:** Start log records the picked signals at the bus's own rate, and `havne-cli export` writes them as a wide CSV, a row a sweep ([ADR-0056](docs/adr/0056-analysis-log.md)).
@@ -137,7 +137,7 @@ v0.8.0, conditions and alerts, is the latest release. Next:
 
 | Version | Plan |
 |---|---|
-| v0.9.0-v0.11.0 | The whole car through plugins, then the conversation tier behind safety gates; discovery of the whole bus; the scan tool |
+| v0.9.0-v0.11.0 | The whole car through plugins, then the conversation tier behind safety gates; writes over more transports (v0.9.1); discovery of the whole bus; the scan tool |
 | 1.0.0 | The finished reader: frozen and hardened, full featured on Windows, Linux and Android |
 
 [STATUS.md](STATUS.md) holds what works, what's verified, the known issues and the roadmap; [CHANGELOG.md](CHANGELOG.md) what each release changed.

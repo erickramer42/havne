@@ -40,14 +40,30 @@ Page {
     readonly property real gridTop: stripMeetsPanel ? 0 : topGap
     // The panel's distance from the page's sides; none in the drive view
     readonly property real panelMargin: driving ? 0 : margin
+    // The edit panel's side column: on the desktop form the open panel stands
+    // right of the grid, this wide, in a column that scrolls by itself, while
+    // the cells it leaves are at least this wide (the cells narrow, the
+    // columns' count stays); with less room the panel stays above the grid
+    readonly property real sideColumnWidth: 340
+    property real sideCellMinWidth: 140
     // One pixel of the display in the layout's units, and a hairline
     // that many whole pixels wide, so every line draws the same width
     readonly property real pixel: 1 / ((Screen.devicePixelRatio || 1) * Theme.zoom)
     readonly property real hairlineWidth: Math.max(1, Math.round(1 / pixel)) * pixel
     function snap(v) { return Math.round(v / pixel) * pixel }
 
-    // The platform's form, never the window's width (section 4)
-    property string form: Theme.mobile ? "phone" : "desktop"
+    // The platform's form, never the window's width (section 4). A desktop's
+    // edit mode may show the phone's: phoneEdit
+    property string form: Theme.mobile || phoneEdit ? "phone" : "desktop"
+    // The desktop edits the phone form's document in a frame of the phone's
+    // width (the grid holds its six columns at any phone width); only while
+    // editing, and not stored: Done is back to the desktop's
+    property bool phoneEdit: false
+    readonly property real phoneFrameWidth: 384
+    // Never on a phone; where the frame fits the page (the switch stays
+    // while the page is the frame itself)
+    readonly property bool phoneSwitchShown: !Theme.mobile && editing
+                                             && (phoneEdit || width >= phoneFrameWidth + 48)
 
     SignalHub { id: hub }
     // The hub, for the page's parts
@@ -75,7 +91,7 @@ Page {
     property var vehicles: VehicleBook.empty()
     // Settings' URI and profile, whose signals Add offers with no session
     property string offlineUri: ""
-    onOfflineUriChanged: if (panel === "signal") refreshRows()
+    onOfflineUriChanged: if (panel === "signal" || panel === "cell") refreshRows()
     // Settings' picked vehicle's sets ([{ profile, name, variant }], its
     // plugin first) and the names of the profiles it knows (profile: name)
     property var pickedSets: []
@@ -180,8 +196,18 @@ Page {
     property string addKind: ""      // Add's kind; "" when changing a cell's signal
     property bool changingKind: false  // the kind list picks the selected cell's kind
     property bool moreShown: false
+    // A page was just added: the Page row's name field takes the focus
+    signal pageNameWanted()
     property bool confirmReset: false
     property bool confirmRemovePage: false
+    // The preset list's purpose: "" shut, "add" (a new page after the shown
+    // one) or "replace" (the shown page's gauges); confirmReplaceKey is the
+    // preset a replace waits to be sure of
+    property string presetList: ""
+    property string confirmReplaceKey: ""
+    // Whether the layout file the open dialog picks adds its pages (the
+    // preset list's From a file) or replaces every page (Load layout)
+    property bool fileAdds: false
 
     // ---- The gesture (section 4): hold, then release or drag
 
@@ -388,15 +414,41 @@ Page {
     function startEditing() {
         editing = true
     }
+    // The desktop's edit mode in the phone form's frame, or back. The history,
+    // the selection, the panel and any question belong to the form they were
+    // made in, and the page last shown is the new form's own
+    function setPhoneEdit(on) {
+        if (on === phoneEdit || (on && !phoneSwitchShown))
+            return
+        commitTyping()
+        cancelHold()
+        restored = false
+        phoneEdit = on
+        showStoredLayout()
+        selected = -1
+        panel = ""
+        addKind = ""
+        confirmReset = false
+        confirmRemovePage = false
+        presetList = ""
+        confirmReplaceKey = ""
+        noteLayout("")
+        clearHistory()
+        goTo(form === "phone" ? store.phonePage : store.desktopPage)
+        restored = true
+    }
     function stopEditing() {
         commitTyping()
         cancelHold()
+        setPhoneEdit(false)
         editing = false
         selected = -1
         panel = ""
         moreShown = false
         confirmReset = false
         confirmRemovePage = false
+        presetList = ""
+        confirmReplaceKey = ""
         noteLayout("")
         clearHistory()
     }
@@ -472,13 +524,15 @@ Page {
     }
     // Writes this form's layout, and the picks' files it needs by name,
     // to the file at url. A pick no plugin here has gives no references,
-    // so the layout can't say it needs it: the note names the pick
+    // so the layout can't say it needs it: the note names the pick, and
+    // counts the gauges no pick gives a key for
     function exportLayoutTo(url) {
         commitTyping()
         const files = vehicleFiles()
         const needed = DashboardBook.neededFiles(doc, files)
         const v = VehicleBook.picked(vehicles)
         const unloaded = (v ? v.picks : []).filter(p => !files.some(f => f.profile === p))
+        const unbound = DashboardBook.unboundKeyCells(doc, files)
         const text = DashboardBook.exportText(doc, form, needed)
         if (text === "") {
             Bridge.dropPicked(url)
@@ -499,14 +553,17 @@ Page {
                    + (unloaded.length === 0 ? ""
                       : qsTr(". The vehicle's picks %1 aren't in the store, so a gauge reading them isn't listed as needing them")
                             .arg(unloaded.join(", ")))
+                   + (unbound === 0 ? ""
+                      : (unbound === 1 ? qsTr(". 1 gauge reads a signal none of the vehicle's picked plugins has, so the file can't name a plugin for it")
+                                       : qsTr(". %1 gauges read signals none of the vehicle's picked plugins has, so the file can't name a plugin for them").arg(unbound)))
                    + ".")
         return true
     }
     // Loads a layout file as this form's layout, one undo step. Refused in
     // words for a file that can't be read, a newer one and one of the other
     // form; never while Reset's or Remove's question is open
-    function loadLayoutFrom(url) {
-        if (confirmReset || confirmRemovePage) {
+    function loadLayoutFrom(url, adding) {
+        if (confirmReset || confirmRemovePage || confirmReplaceKey !== "") {
             noteLayout(qsTr("Answer the question first"), true)
             return false
         }
@@ -540,7 +597,7 @@ Page {
             cancelHold()
             selected = -1
             panel = ""
-            const words = [qsTr("Loaded the layout")]
+            const words = [adding === true ? qsTr("Added the file's pages") : qsTr("Loaded the layout")]
             if (read.problem === "dropped")
                 words.push(qsTr("%1 left out because they couldn't be read").arg(droppedText(read.dropped)))
             if (read.notes.indexOf("no-form") >= 0)
@@ -557,11 +614,24 @@ Page {
                 words.push(qsTr("it needs plugins this vehicle doesn't pick: %1. Import or pick them under "
                                 + "Signals; until then those gauges read not in profile")
                            .arg(absent.map(f => f.name).join(", ")))
-            const changed = edit(read.doc, stepOf("", qsTr("load a layout"), -1, -1, 0))
-            if (!changed)
-                words[0] = qsTr("The file holds the layout already shown")
-            else
-                goTo(0)
+            let changed
+            if (adding === true) {
+                presetList = ""
+                const after = pageIndex
+                changed = edit(DashboardBook.insertPages(doc, after, read.doc.pages),
+                               stepOf("", qsTr("added pages from a file"), -1, -1, after + 1))
+                if (!changed) {
+                    noteLayout(qsTr("Not added: a form holds %1 pages at most").arg(DashboardBook.maxPages), true)
+                    return false
+                }
+                goTo(after + 1)
+            } else {
+                changed = edit(read.doc, stepOf("", qsTr("load a layout"), -1, -1, 0))
+                if (!changed)
+                    words[0] = qsTr("The file holds the layout already shown")
+                else
+                    goTo(0)
+            }
             noteLayout(words.join(". "))
             return changed
         }
@@ -588,6 +658,9 @@ Page {
     function select(i) {
         commitTyping()
         selected = i
+        // The cell's panel takes its decimals from the listed rows with no session
+        if (!Bridge.connected && (profileRows.length === 0 || rowsFor !== offlineUri))
+            refreshRows()
         panel = "cell"
     }
 
@@ -656,7 +729,7 @@ Page {
     function isReplay(uri) { return uri.toLowerCase().startsWith("replay://") }
 
     function enterDrive() {
-        if (driving || !phoneForm || !Bridge.connected || editing)
+        if (driving || !phoneForm || !Bridge.connected || editing || phoneEdit)
             return
         closePanel()
         cancelHold()
@@ -792,13 +865,33 @@ Page {
     // ---- Add: a kind, then a signal
 
     property var profileRows: []
+    // The address the rows were listed for with no session
+    property string rowsFor: ""
     function refreshRows() {
+        rowsFor = offlineUri
         profileRows = Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : offlineUri)
     }
     // The rows a gauge of `kind` can show: numbers with references, an
     // enumeration only on a digital tile
     function pickable(kind) {
         return profileRows.filter(r => r.ref !== "" && !r.isText && (!r.isEnum || kind === "digital"))
+    }
+    // The picked sets' own signals a gauge of `kind` can show, one entry for
+    // each set that has any ([{ title, rows }], the plugin first): offered
+    // with or without a session, whatever profile the session reads
+    function pickedOwnRows(kind) {
+        const out = []
+        for (const s of pickedSets) {
+            const rows = Bridge.profileSignals("mock://?profile=" + s.profile)
+                .filter(r => r.ref.startsWith("key:") && !r.isText && (!r.isEnum || kind === "digital"))
+            if (rows.length === 0)
+                continue
+            // A plugin with several variants picked is told apart by its variant
+            const twin = pickedSets.some(o => o !== s && o.name === s.name)
+            out.push({ title: twin && s.variant ? qsTr("%1: %2").arg(s.name).arg(s.variant) : s.name,
+                       rows: rows })
+        }
+        return out
     }
     function startAdd() {
         if (!DashboardBook.canAddCell(doc, pageIndex))
@@ -1033,8 +1126,79 @@ Page {
 
     function addPage() {
         if (edit(DashboardBook.addPage(doc, qsTr("Page %1").arg(pages.length + 1)),
-                 stepOf("", qsTr("added a page"), -1, -1, pages.length)))
+                 stepOf("", qsTr("added a page"), -1, -1, pages.length))) {
             goTo(pages.length - 1)
+            askForPageName()
+        }
+    }
+    // The new page's name is the first thing to type: the Page row opens on it
+    function askForPageName() {
+        moreShown = true
+        pageNameWanted()
+    }
+    // The preset list (the "+" tab, Add page, Replace this page with...)
+    function openPresets(mode) {
+        commitTyping()
+        confirmReset = false
+        confirmRemovePage = false
+        confirmReplaceKey = ""
+        presetList = mode
+    }
+    function closePresets() {
+        presetList = ""
+        confirmReplaceKey = ""
+    }
+    function addBlankPage() {
+        presetList = ""
+        addPage()
+    }
+    // A preset as a new page after the shown one; one undo step
+    function addPresetPage(key) {
+        const page = DashboardBook.presetPage(key, formKey)
+        presetList = ""
+        if (page === null) {
+            noteLayout(qsTr("The preset couldn't be read"), true)
+            return false
+        }
+        const after = pageIndex
+        if (!edit(DashboardBook.insertPages(doc, after, [page]),
+                  stepOf("", qsTr("added the page %1").arg(page.name), -1, -1, after + 1)))
+            return false
+        goTo(after + 1)
+        askForPageName()
+        return true
+    }
+    // True when the shown page's gauges are one preset's: replacing them
+    // loses nothing a preset doesn't give back
+    function shownPageIsPreset() {
+        return DashboardBook.losesNothing(pages[pageIndex], formKey)
+    }
+    function replaceChosen(key) {
+        presetList = ""
+        if (DashboardBook.presetPage(key, formKey) === null)
+            noteLayout(qsTr("The preset couldn't be read"), true)
+        else if (shownPageIsPreset())
+            replaceWithPreset(key)
+        else
+            confirmReplaceKey = key
+    }
+    function replaceWithPreset(key) {
+        confirmReplaceKey = ""
+        presetList = ""
+        const page = DashboardBook.presetPage(key, formKey)
+        if (page === null) {
+            noteLayout(qsTr("The preset couldn't be read"), true)
+            return false
+        }
+        selected = -1
+        panel = ""
+        addKind = ""
+        return edit(DashboardBook.replacePage(doc, pageIndex, page),
+                    stepOf("", qsTr("replaced the page with %1").arg(page.name), -1, -1))
+    }
+    function presetLabel(key) {
+        const p = DashboardBook.presets.find(q => q.key === key)
+        return p ? p.label : key
     }
     function movePage(by) {
         const to = pageIndex + by
@@ -1071,6 +1235,7 @@ Page {
     onPagesChanged: goTo(pageIndex)
     // A page change closes whatever panel was open
     onPageIndexChanged: {
+        closePresets()
         cancelHold()
         selected = -1
         panel = ""
@@ -1448,10 +1613,16 @@ Page {
 
                 // The grid (section 4): the phone's 6 columns upright and
                 // 12 on its side, the desktop's one per 220 px from 2 to 12
-                readonly property real gridWidth: Math.max(0, width - 2 * root.panelMargin)
+                readonly property real fullGridWidth: Math.max(0, width - 2 * root.panelMargin)
+                // Counted on the full width, so opening a panel narrows the cells and moves none
                 readonly property int columns: root.form === "phone"
                     ? (root.width > root.height ? 12 : 6)
-                    : Math.max(2, Math.min(12, Math.round(gridWidth / 220)))
+                    : Math.max(2, Math.min(12, Math.round(fullGridWidth / 220)))
+                readonly property real sideGridWidth:
+                    Math.max(0, fullGridWidth - root.sideColumnWidth - root.panelMargin)
+                readonly property bool sideColumn: !root.phoneForm && !root.driving && panelHost.active
+                    && (sideGridWidth - (columns - 1) * root.cellGap) / columns >= root.sideCellMinWidth
+                readonly property real gridWidth: sideColumn ? sideGridWidth : fullGridWidth
                 readonly property real columnWidth: Math.max(0, (gridWidth - (columns - 1)
                                                                  * root.cellGap) / columns)
                 readonly property bool shown: index === root.pageIndex
@@ -1582,18 +1753,40 @@ Page {
                 }
 
                 // The edit panel, in the page above its grid (never a Popup)
+                // The side column: the panel in a column of its own, as high as
+                // the page's view and held there while the grid scrolls
+                Flickable {
+                    id: sideHost
+                    objectName: "dashSidePanel"
+                    visible: pageView.sideColumn
+                    x: pageView.width - root.panelMargin - root.sideColumnWidth
+                    y: pageView.contentY
+                    z: 1
+                    width: root.sideColumnWidth
+                    height: pageView.height
+                    clip: true
+                    contentWidth: width
+                    contentHeight: panelHost.item
+                        ? root.gridTop + (panelHost.item as Item).height + root.panelMargin : 0
+                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+                }
+
                 Loader {
                     id: panelHost
                     objectName: "dashPanel"
-                    x: (pageView.width - width) / 2
+                    parent: pageView.sideColumn ? sideHost.contentItem : pageView.contentItem
+                    x: pageView.sideColumn ? 0 : (pageView.width - width) / 2
                     y: root.gridTop
-                    width: pageView.gridWidth
+                    width: pageView.sideColumn ? root.sideColumnWidth : pageView.fullGridWidth
                     active: (pageView.shown && root.panel !== "") || root.connectShown
                     sourceComponent: root.panel === "cell" ? cellPanel
                                    : root.panel === "add" ? addPanel
                                    : root.panel === "signal" ? signalPanel
                                    : root.connectShown ? connectPanel : null
-                    onLoaded: pageView.contentY = 0
+                    onLoaded: {
+                        pageView.contentY = 0
+                        sideHost.contentY = 0
+                    }
                 }
 
                 Label {
@@ -1610,8 +1803,9 @@ Page {
                 Item {
                     id: grid
                     // On whole pixels of the display, so the seams snapped inside it are
-                    x: root.snap((pageView.width - width) / 2)
-                    y: root.snap(swipe.y + root.gridTop + (panelHost.item ? (panelHost.item as Item).height + root.gap : 0)) - swipe.y
+                    x: root.snap(pageView.sideColumn ? root.panelMargin : (pageView.width - width) / 2)
+                    y: root.snap(swipe.y + root.gridTop + (panelHost.item && !pageView.sideColumn
+                        ? (panelHost.item as Item).height + root.gap : 0)) - swipe.y
                     width: pageView.gridWidth
                     height: Math.max(0, pageView.rows * pageView.pitch - root.cellGap)
 

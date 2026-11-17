@@ -98,6 +98,18 @@ typedef char abi_gauge_warn_high_check[(offsetof(ecuio_signal_gauge_t, warn_high
 typedef char abi_gauge_flags_check[(offsetof(ecuio_signal_gauge_t, flags) == 32) ? 1 : -1];
 typedef char abi_gauge_reserved_check[(offsetof(ecuio_signal_gauge_t, reserved) == 36) ? 1 : -1];
 typedef char
+    abi_expr_check_size_check[(sizeof(ecuio_expr_check_t) == 248) ? 1 : -1];
+typedef char
+    abi_expr_check_at_check[(offsetof(ecuio_expr_check_t, at) == 8) ? 1 : -1];
+typedef char abi_expr_check_format_check
+    [(offsetof(ecuio_expr_check_t, format) == 12) ? 1 : -1];
+typedef char abi_expr_check_depth_check
+    [(offsetof(ecuio_expr_check_t, depth) == 16) ? 1 : -1];
+typedef char abi_expr_check_reserved_check
+    [(offsetof(ecuio_expr_check_t, reserved) == 20) ? 1 : -1];
+typedef char abi_expr_check_program_check
+    [(offsetof(ecuio_expr_check_t, program) == 40) ? 1 : -1];
+typedef char
     abi_source_size_check[(sizeof(ecuio_signal_source_t) == 2632) ? 1 : -1];
 typedef char abi_source_name_check[(offsetof(ecuio_signal_source_t, name) == 32)
                                        ? 1
@@ -106,6 +118,29 @@ typedef char abi_source_license_check
     [(offsetof(ecuio_signal_source_t, license) == 1592) ? 1 : -1];
 typedef char abi_source_modified_check
     [(offsetof(ecuio_signal_source_t, modified) == 2112) ? 1 : -1];
+typedef char
+    abi_eval_input_size_check[(sizeof(ecuio_eval_input_t) == 24) ? 1 : -1];
+typedef char
+    abi_eval_input_age_check[(offsetof(ecuio_eval_input_t, age_us) == 8) ? 1
+                                                                         : -1];
+typedef char
+    abi_eval_input_id_check[(offsetof(ecuio_eval_input_t, def_id) == 16) ? 1
+                                                                         : -1];
+typedef char abi_eval_input_flags_check
+    [(offsetof(ecuio_eval_input_t, flags) == 20) ? 1 : -1];
+typedef char
+    abi_eval_result_size_check[(sizeof(ecuio_eval_result_t) == 48) ? 1 : -1];
+typedef char abi_eval_result_value_check
+    [(offsetof(ecuio_eval_result_t, value) == 8) ? 1 : -1];
+typedef char
+    abi_eval_result_why_check[(offsetof(ecuio_eval_result_t, why) == 16) ? 1
+                                                                         : -1];
+typedef char abi_eval_result_leaf_check
+    [(offsetof(ecuio_eval_result_t, leaf) == 20) ? 1 : -1];
+typedef char abi_eval_result_bound_check
+    [(offsetof(ecuio_eval_result_t, bound_us) == 24) ? 1 : -1];
+typedef char abi_eval_result_reserved_check
+    [(offsetof(ecuio_eval_result_t, reserved) == 32) ? 1 : -1];
 typedef char abi_validation_size_check[(sizeof(ecuio_validation_t) == 16) ? 1 : -1];
 typedef char abi_validation_index_check[(offsetof(ecuio_validation_t, index) == 4) ? 1 : -1];
 typedef char abi_validation_reserved_check[(offsetof(ecuio_validation_t, reserved) == 8) ? 1 : -1];
@@ -623,6 +658,67 @@ int main(void)
             return 1;
         }
         {
+            /* An expression checked from C: one that compiles, one refused
+             * at its character, and the name a def is read by */
+            ecuio_expr_check_t checked;
+            char name[ECUIO_EXPR_REF_LEN];
+            memset(&checked, 0, sizeof checked);
+            checked.struct_size = (uint32_t)sizeof checked;
+            if (ecuio_signal_file_check_expr(file, NULL, "volts * 2", 9,
+                                             &checked) != ECUIO_OK ||
+                checked.at != 0u || checked.format != 1u ||
+                checked.depth != 1u || checked.program.input_count != 1u ||
+                checked.program.input_ids[0] != volts->id ||
+                ecuio_signal_file_check_expr(file, "half", "volts +", 7,
+                                             &checked) !=
+                    ECUIO_ERR_INVALID_ARGUMENT ||
+                checked.at != 8u || checked.program.input_count != 0u ||
+                ecuio_signal_file_expr_ref(file, volts, name, sizeof name) !=
+                    ECUIO_OK ||
+                strcmp(name, "volts") != 0 ||
+                ecuio_signal_file_expr_ref(file, volts, name, 5) !=
+                    ECUIO_ERR_INVALID_ARGUMENT) {
+                ecuio_signal_file_free(file);
+                return 1;
+            }
+            {
+                /* And worked out from C: the checked program's one leaf,
+                 * its value from a fresh input and none from a stale one */
+                ecuio_eval_input_t input;
+                ecuio_eval_result_t result;
+                uint16_t leaf = 0;
+                uint32_t leaves = 0;
+                memset(&checked, 0, sizeof checked);
+                checked.struct_size = (uint32_t)sizeof checked;
+                memset(&input, 0, sizeof input);
+                input.def_id = volts->id;
+                input.value = 12.5;
+                memset(&result, 0, sizeof result);
+                result.struct_size = (uint32_t)sizeof result;
+                if (ecuio_signal_file_check_expr(file, NULL, "volts * 2", 9,
+                                                 &checked) != ECUIO_OK ||
+                    ecuio_signal_file_expr_leaves(file, &checked.program, &leaf,
+                                                  1, &leaves) != ECUIO_OK ||
+                    leaves != 1u || leaf != volts->id ||
+                    ecuio_signal_file_evaluate(file, &checked.program, &input,
+                                               1, &result) != ECUIO_OK ||
+                    result.flags != ECUIO_EVAL_VALUE || result.value != 25.0 ||
+                    result.why != ECUIO_EVAL_WHY_NONE) {
+                    ecuio_signal_file_free(file);
+                    return 1;
+                }
+                input.age_us = (uint64_t)ECUIO_VALUE_STALE_US + 1u;
+                if (ecuio_signal_file_evaluate(file, &checked.program, &input,
+                                               1, &result) != ECUIO_OK ||
+                    result.flags != 0u || result.why != ECUIO_EVAL_WHY_STALE ||
+                    result.leaf != volts->id ||
+                    result.bound_us != ECUIO_VALUE_STALE_US) {
+                    ecuio_signal_file_free(file);
+                    return 1;
+                }
+            }
+        }
+        {
             size_t length = 0;
             const char* text = ecuio_signal_file_text(file, &length);
             if (length != sizeof kGauged - 1 || strcmp(text, kGauged) != 0) {
@@ -641,6 +737,55 @@ int main(void)
             source->modified[ECUIO_SOURCE_TEXT_LEN - 1] != 0) {
             ecuio_signal_file_free(file);
             return 1;
+        }
+        {
+            /* ADR-0065's keys from C: a def's address, the set's keys by
+             * the serial ports' contract, and a def named by key or name */
+            const ecuio_signal_set_t* keyed = ecuio_signal_file_set(file);
+            ecuio_signal_key_t key;
+            ecuio_signal_key_t keys[3];
+            uint32_t count = 0;
+            uint32_t index = 99;
+            memset(&key, 0xAA, sizeof key);
+            memset(keys, 0xAA, sizeof keys);
+            if (sizeof(ecuio_signal_key_t) != 32u ||
+                ECUIO_SIGNAL_KEY_LEN != 32u || ECUIO_SIGNAL_KEY_MAX != 31u ||
+                ecuio_signal_address_key(NULL, &key) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_address_key(volts, NULL) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_address_key(volts, &key) != ECUIO_OK ||
+                strcmp(key.text, "7E8:4142:2.0:16") != 0 ||
+                key.text[ECUIO_SIGNAL_KEY_LEN - 1] != 0 ||
+                ecuio_signal_set_keys(keyed, file, NULL, 0, &count) !=
+                    ECUIO_OK ||
+                count != 3u ||
+                ecuio_signal_set_keys(keyed, file, NULL, 1, &count) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                count != 0u ||
+                ecuio_signal_set_keys(NULL, NULL, keys, 3, &count) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_set_keys(keyed, file, keys, 3, NULL) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_set_keys(keyed, file, keys, 3, &count) !=
+                    ECUIO_OK ||
+                count != 3u || strcmp(keys[0].text, key.text) != 0 ||
+                strcmp(keys[1].text, "7E8:4104:2.0:8") != 0 ||
+                strcmp(keys[2].text, "half") != 0 ||
+                ecuio_signal_set_find(keyed, keys, count, "half", &index) !=
+                    ECUIO_OK ||
+                index != 2u ||
+                ecuio_signal_set_find(keyed, keys, count, "Load Share",
+                                      &index) != ECUIO_OK ||
+                index != 1u ||
+                ecuio_signal_set_find(keyed, keys, count, "none", &index) !=
+                    ECUIO_ERR_INVALID_ARGUMENT ||
+                index != 1u ||
+                ecuio_signal_set_find(keyed, keys, count, NULL, &index) !=
+                    ECUIO_ERR_NULL_ARGUMENT) {
+                ecuio_signal_file_free(file);
+                return 1;
+            }
         }
         ecuio_signal_file_free(file);
         if (ecuio_plugin_load(kPacked, sizeof kPacked - 1, NULL, NULL,

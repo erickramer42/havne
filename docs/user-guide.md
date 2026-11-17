@@ -146,9 +146,17 @@ Units follow **Settings, Display, Units** (metric or imperial).
 4. **Move a gauge:** hold it and drag it to its new place.
 5. **Remove a gauge:** press the **x** in its corner, or **Remove** in
    its panel.
-6. **Pages:** the tabs above the gauges are the pages; **+** adds one.
-   **Page** holds the shown page's name and **Remove page**, and
-   **Reset**, which replaces every page with the built-in layout.
+6. **Pages:** the tabs above the gauges are the pages. **+** (on a
+   phone, **Add page** in the **Page** row) opens a list: a blank page,
+   one of the presets (Standard, Temperatures, Showcase) or the pages of
+   a layout file. The page is added after the one shown, and Undo takes
+   it back. **Page** holds the shown page's name, **Replace this page
+   with...**, **Remove page** and **Reset all pages**. **Replace this
+   page with...** puts a preset's gauges on the shown page and keeps its
+   name; it asks first when the page's gauges are none of the presets',
+   since they are not kept. **Reset all pages** replaces every page with
+   the built-in layout. The presets read obd2's signals: a car that does
+   not send one shows "not sent by this ECU" in that gauge.
 
    **Export layout** writes this form's layout to a `.json` file, and
    **Load layout** reads one back. A file names the form it came from

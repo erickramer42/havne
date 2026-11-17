@@ -7,6 +7,7 @@
 #include "ecuio/j2534.h"
 #include "ecuio/conditions.h"
 #include "ecuio/core.h"
+#include "ecuio/internal.h" /* ecuio_set_unpicked_check_ms */
 #include "ecuio/j2534_ptypes.h"
 #include "ecuio/profile.h"
 #include "ecuio/recording.h"
@@ -2877,6 +2878,341 @@ TEST_F(J2534AdoptionTest, ASetPastARotationIsAskedOnlyItsPicks)
     EXPECT_EQ(ecuio_session_close(session), ECUIO_OK);
     ecuio_session_destroy(session);
     EXPECT_EQ(ecuio_profile_unregister("j2534-car"), ECUIO_OK);
+}
+
+namespace {
+
+/* A session on the car-sized set, which asks only its picks, registered
+ * under a name of the case's own; closed and freed with the case, the
+ * profile after it */
+struct CarSession {
+    const char* profile;
+    ecuio_session_t* s = nullptr;
+    explicit CarSession(const char* name) : profile(name)
+    {
+        EXPECT_EQ(ecuio_profile_register(name, car_sized::set(), nullptr),
+                  ECUIO_OK);
+        char uri[700];
+        snprintf(uri, sizeof(uri), "j2534://%s?profile=%s", FAKE_J2534_DLL_PATH,
+                 name);
+        EXPECT_EQ(ecuio_session_create(uri, &s), ECUIO_OK)
+            << ecuio_last_error_detail();
+    }
+    ~CarSession()
+    {
+        if (s != nullptr) {
+            EXPECT_EQ(ecuio_session_close(s), ECUIO_OK);
+            ecuio_session_destroy(s);
+        }
+        EXPECT_EQ(ecuio_profile_unregister(profile), ECUIO_OK);
+    }
+    CarSession(const CarSession&) = delete;
+    CarSession& operator=(const CarSession&) = delete;
+
+    int32_t state(uint32_t* episodes = nullptr) const
+    {
+        int32_t last = -1;
+        uint32_t count = 0;
+        EXPECT_EQ(ecuio_session_get_error_state(s, &last, &count), ECUIO_OK);
+        if (episodes != nullptr) {
+            *episodes = count;
+        }
+        return last;
+    }
+    /* Whether both modules' identification and diagnostics have an
+     * outcome for every item */
+    bool settled() const
+    {
+        for (uint32_t c = 0; c < 2; ++c) {
+            ecuio_channel_identity_t id{};
+            ecuio_channel_diagnostics_t diag{};
+            if (ecuio_session_get_channel_identity(s, c, &id) != ECUIO_OK ||
+                ecuio_session_get_channel_diagnostics(s, c, &diag) !=
+                    ECUIO_OK ||
+                (id.flags & ECUIO_IDENTITY_COMPLETE) == 0 ||
+                (diag.flags & ECUIO_DIAG_COMPLETE) == 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
+
+/* An unpicked session's checks at an interval of the case's own, the
+ * shipped one given back after (PickOnlyTest pins that one) */
+struct CheckEvery {
+    explicit CheckEvery(int64_t ms)
+    {
+        ecuio_set_unpicked_check_ms(static_cast<uint32_t>(ms));
+    }
+    ~CheckEvery() { ecuio_set_unpicked_check_ms(0); }
+    CheckEvery(const CheckEvery&) = delete;
+    CheckEvery& operator=(const CheckEvery&) = delete;
+};
+constexpr int64_t kCheckMs = 2000;
+
+bool within(int ms, const std::function<bool()>& done)
+{
+    const auto end =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    while (!done() && std::chrono::steady_clock::now() < end) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return done();
+}
+
+/* Whether count() stops changing for quiet_ms, within limit_ms. A
+ * recovery's reports read complete before its last request is out (a
+ * report keeps its earlier outcomes until an item asked again settles),
+ * so "nothing more is asked" is judged by the requests themselves. */
+template <typename Count>
+bool goes_quiet(Count count, int64_t quiet_ms, int64_t limit_ms)
+{
+    const auto end =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(limit_ms);
+    auto last = count();
+    auto since = std::chrono::steady_clock::now();
+    while (std::chrono::steady_clock::now() < end) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        const auto seen = count();
+        const auto now = std::chrono::steady_clock::now();
+        if (seen != last) {
+            last = seen;
+            since = now;
+        } else if (now - since >= std::chrono::milliseconds(quiet_ms)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+unsigned long writes_now()
+{
+    unsigned long n = 0;
+    page_write_count(&n);
+    return n;
+}
+
+} // namespace
+
+/* Such a session with nothing picked still asks identification and
+ * diagnostics, each module's. One module of two answers nothing at all,
+ * and the other nothing to what it doesn't serve (the fake's refusals
+ * as silence): the silence is one module's and an item's, never the
+ * vehicle's. The link is OK through the unanswered items, and after the
+ * adapter failed and read again, when they are all asked again with no
+ * reply among them. */
+TEST_F(J2534AdoptionTest, AnUnpickedSessionWithOneSilentModuleStaysOk)
+{
+    KnobGuard absent("ECUIO_FAKE_ABSENT_ECU", "7E9");
+    KnobGuard silent("ECUIO_FAKE_UNSUPPORTED_NRC", "0");
+    CarSession car("j2534-one-module-car");
+    ASSERT_NE(car.s, nullptr);
+    ecuio_session_info_t info{};
+    ASSERT_EQ(ecuio_session_get_info(car.s, &info), ECUIO_OK);
+    ASSERT_NE(info.flags & ECUIO_SESSION_INFO_PICK_ONLY, 0u);
+    ASSERT_EQ(ecuio_session_start(car.s), ECUIO_OK);
+    /* The state is read all the while, so a timeout fails in its words */
+    const auto settle_by =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(12000);
+    while (!car.settled()) {
+        ASSERT_EQ(car.state(), ECUIO_OK)
+            << "one module's silence was taken for the vehicle's";
+        ASSERT_LT(std::chrono::steady_clock::now(), settle_by)
+            << "identification and diagnostics never settled";
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ecuio_channel_identity_t engine_ecu{};
+    ASSERT_EQ(ecuio_session_get_channel_identity(car.s, 0, &engine_ecu),
+              ECUIO_OK);
+    EXPECT_NE(engine_ecu.flags & ECUIO_IDENTITY_VIN, 0u);
+    uint32_t silent_items = 0;
+    for (uint32_t i = 0; i < engine_ecu.items; ++i) {
+        silent_items +=
+            engine_ecu.list[i].outcome == ECUIO_IDENTITY_UNANSWERED ? 1u : 0u;
+    }
+    EXPECT_GE(silent_items, 1u)
+        << "the case needs an item the live ECU leaves unanswered";
+    ecuio_channel_identity_t module{};
+    ASSERT_EQ(ecuio_session_get_channel_identity(car.s, 1, &module), ECUIO_OK);
+    for (uint32_t i = 0; i < module.items; ++i) {
+        EXPECT_EQ(module.list[i].outcome, ECUIO_IDENTITY_UNANSWERED) << i;
+    }
+    uint32_t episodes = 0;
+    EXPECT_EQ(car.state(&episodes), ECUIO_OK);
+    EXPECT_EQ(episodes, 0u);
+
+    /* The adapter fails and reads again: the recovery asks every
+     * unanswered item again, the live ECU's too, and none is answered */
+    ASSERT_TRUE(goes_quiet(writes_now, 200, 5000));
+    const unsigned long before = writes_now();
+    {
+        KnobGuard dead("ECUIO_FAKE_READ_STATUS", "7");
+        ASSERT_TRUE(within(5000, [&] {
+            return car.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+        }));
+    }
+    ASSERT_TRUE(within(10000, [&] { return car.state() == ECUIO_OK; }));
+    /* OK until the writes have stopped for 2 s. The check keeps its 5 s
+     * here: one falling due before the failure ends would ask the engine
+     * ECU a request it is silent on */
+    unsigned long last = writes_now();
+    auto since = std::chrono::steady_clock::now();
+    const auto give_up = since + std::chrono::milliseconds(20000);
+    while (std::chrono::steady_clock::now() - since <
+           std::chrono::milliseconds(2000)) {
+        ASSERT_EQ(car.state(), ECUIO_OK)
+            << "the unanswered items asked again took the link down";
+        ASSERT_LT(std::chrono::steady_clock::now(), give_up)
+            << "the writes never stopped";
+        const unsigned long seen = writes_now();
+        if (seen != last) {
+            last = seen;
+            since = std::chrono::steady_clock::now();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_GT(last, before) << "the recovery asked the unanswered items again";
+    EXPECT_EQ(car.state(&episodes), ECUIO_OK);
+    EXPECT_EQ(episodes, 1u) << "the adapter's failure, and nothing since";
+}
+
+/* A vehicle that answers none of it (its ignition off) isn't
+ * responding, and the link says so for as long as nothing answers: an
+ * idle pass never turns that into OK. While it is down the worker
+ * writes one request an interval (here kCheckMs), a module in turn, the
+ * first a whole interval after the items settled. The first answered
+ * ends the timeout, the identification is read after all, and the
+ * checks end. */
+TEST_F(J2534AdoptionTest,
+       AnUnpickedSessionOnASilentVehicleChecksItAndFindsItAwake)
+{
+    const CheckEvery checks(kCheckMs);
+    const char* const kEveryEcu = "FFFFFFFF";
+    KnobGuard absent("ECUIO_FAKE_ABSENT_ECU", kEveryEcu);
+    CarSession car("j2534-quiet-car");
+    ASSERT_NE(car.s, nullptr);
+    StreamCapture cap;
+    ASSERT_EQ(ecuio_register_frame_callback(car.s, capture_cb, &cap), ECUIO_OK);
+    ASSERT_EQ(ecuio_session_start(car.s), ECUIO_OK);
+    ASSERT_TRUE(within(10000, [&] {
+        return car.state() == ECUIO_ERR_VEHICLE_TIMEOUT;
+    })) << "what it asked went unanswered";
+    const auto settle_by =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(12000);
+    while (!car.settled()) {
+        ASSERT_EQ(car.state(), ECUIO_ERR_VEHICLE_TIMEOUT)
+            << "the timeout ended with nothing answered";
+        ASSERT_LT(std::chrono::steady_clock::now(), settle_by)
+            << "identification and diagnostics never settled";
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const auto settled_at = std::chrono::steady_clock::now();
+    EXPECT_GT(writes_now(), 0u);
+    /* The page keeps its first writes: count the checks from here. Its
+     * reset clears the knob with them. */
+    fake_control::reset(fake_page());
+    ASSERT_TRUE(
+        fake_control::set(fake_page(), "ECUIO_FAKE_ABSENT_ECU", kEveryEcu));
+
+    /* The first check, an interval on, and the timeout through it */
+    const auto first_by = settled_at + std::chrono::milliseconds(8000);
+    while (writes_now() == 0) {
+        ASSERT_EQ(car.state(), ECUIO_ERR_VEHICLE_TIMEOUT)
+            << "an idle pass with nothing picked ended the timeout";
+        ASSERT_LT(std::chrono::steady_clock::now(), first_by)
+            << "no check within 8 s";
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - settled_at);
+    /* Half an interval is the bound: this thread may read the clock
+     * late; PickOnlyTest pins the interval to the microsecond */
+    EXPECT_GE(waited.count(), kCheckMs / 2)
+        << "nothing is asked again before an interval has passed";
+    unsigned char wbuf[64] = {};
+    unsigned long wlen = 0, wflags = 0;
+    get_recorded_write(0, wbuf, &wlen, &wflags);
+    const unsigned char engine_first[7] = {0, 0, 0x07, 0xE0, 0x22, 0x10, 0x00};
+    ASSERT_EQ(wlen, 7u);
+    EXPECT_EQ(memcmp(wbuf, engine_first, 7), 0)
+        << "the engine ECU's first request";
+    std::this_thread::sleep_for(std::chrono::milliseconds(kCheckMs / 4));
+    EXPECT_EQ(writes_now(), 1u) << "one request, once";
+    EXPECT_EQ(car.state(), ECUIO_ERR_VEHICLE_TIMEOUT)
+        << "its silence changes nothing";
+    EXPECT_EQ(cap.count.load(), 0);
+
+    /* The ignition on: the next check, the other module's, is answered
+     * (0x7E9 a module with the car's first DID) */
+    KnobGuard module("ECUIO_FAKE_MODULE_DIDS", "7E9:1000=11");
+    ASSERT_TRUE(
+        fake_control::set(fake_page(), "ECUIO_FAKE_ABSENT_ECU", nullptr));
+    ASSERT_TRUE(within(8000, [&] { return car.state() == ECUIO_OK; }))
+        << "no check found the vehicle awake";
+    get_recorded_write(1, wbuf, &wlen, &wflags);
+    const unsigned char module_first[7] = {0, 0, 0x07, 0xE1, 0x22, 0x10, 0x00};
+    ASSERT_EQ(wlen, 7u);
+    EXPECT_EQ(memcmp(wbuf, module_first, 7), 0) << "the next module's";
+    /* Its reply is a frame like any, the first this session got */
+    ASSERT_GE(cap.count.load(), 1);
+    EXPECT_EQ(cap.arbitration_ids[0], 0x7E9u);
+    const unsigned char answer[4] = {0x62, 0x10, 0x00, 0x11};
+    ASSERT_EQ(cap.payload_lens[0], 4u);
+    EXPECT_EQ(memcmp(cap.payloads[0], answer, 4), 0);
+    /* The recovery: what went unanswered is asked again, and the engine
+     * ECU's VIN is in */
+    ASSERT_TRUE(within(10000, [&] {
+        ecuio_channel_identity_t id{};
+        return ecuio_session_get_channel_identity(car.s, 0, &id) == ECUIO_OK &&
+               (id.flags & ECUIO_IDENTITY_VIN) != 0 && car.settled();
+    })) << "the identification was never read";
+    /* Longer than an interval with no write: the checks ended */
+    EXPECT_TRUE(goes_quiet(writes_now, kCheckMs * 3 / 2, 10000))
+        << "with the link OK nothing is asked";
+    uint32_t episodes = 0;
+    EXPECT_EQ(car.state(&episodes), ECUIO_OK);
+    EXPECT_EQ(episodes, 0u) << "a vehicle not responding is no episode";
+}
+
+/* An adapter whose reads fail and then read again while nothing is
+ * picked: the hard failure ends on the adapter's clean reads, with
+ * nothing asked that a reply could answer. */
+TEST_F(J2534AdoptionTest,
+       AnUnpickedSessionLeavesAHardFailureOnceTheAdapterReads)
+{
+    CarSession car("j2534-failing-car");
+    ASSERT_NE(car.s, nullptr);
+    ASSERT_EQ(ecuio_session_start(car.s), ECUIO_OK);
+    ASSERT_TRUE(within(12000, [&] { return car.settled(); }));
+    ASSERT_EQ(car.state(), ECUIO_OK);
+    ASSERT_TRUE(goes_quiet(writes_now, 200, 5000));
+    const unsigned long before = writes_now();
+    {
+        /* STATUS_FAILED on every read */
+        KnobGuard dead("ECUIO_FAKE_READ_STATUS", "7");
+        ASSERT_TRUE(within(5000, [&] {
+            return car.state() == ECUIO_ERR_TRANSPORT_HARD_FAILURE;
+        }));
+        /* Past a quiet run's passes at the backoff's base: a failing
+         * read is no clean pass, so the failure stays and the backoff
+         * grows (at its base the adapter is read 20 times in 2 s) */
+        const uint32_t reads = fake_control::reads(fake_page());
+        const auto end =
+            std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
+        while (std::chrono::steady_clock::now() < end) {
+            ASSERT_EQ(car.state(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        EXPECT_LE(fake_control::reads(fake_page()) - reads, 10u)
+            << "a dead adapter was read at the backoff's base throughout";
+    }
+    ASSERT_TRUE(within(10000, [&] { return car.state() == ECUIO_OK; }))
+        << "the adapter reads again and the state never left the failure";
+    uint32_t episodes = 0;
+    EXPECT_EQ(car.state(&episodes), ECUIO_OK);
+    EXPECT_EQ(episodes, 1u);
+    EXPECT_EQ(writes_now(), before) << "nothing was asked to end it";
 }
 
 /* ADR-0051's appendix of 2026-11-10: a focus on obd2's computed Boost alone

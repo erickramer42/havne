@@ -3,6 +3,8 @@
 # tree with Qt, with .clang-tidy's checks, one summary line; each file's
 # output goes to Testing/tidy/<file>.log, and on a warning the warnings
 # are printed and the script exits 1. CI's clang-tidy job runs it.
+# The size checks' lines (a function past 80 lines or complexity 40) are
+# only counted, in the summary and in Testing/tidy/size.txt.
 #
 # Usage: scripts/tidy.sh [<tree>]               (default build-tidy)
 #        scripts/tidy.sh --qt <kit> [<tree>]    (default build-tidy-qt)
@@ -121,10 +123,11 @@ rm -f "$LOGDIR"/*.log
 root=$(pwd -W 2>/dev/null || pwd)
 # C and C++ sources in the source tree only (app/ in a tree with Qt): the database also lists
 # generated files, such as the version resource in the tree's own
-# surrogate/ folder, which clang-tidy can't read
+# surrogate/ folder, which clang-tidy can't read. third_party/ is another
+# project's code (WAMR's own tree has a core/ folder): never checked.
 files=$(grep -oE '"file": *"[^"]*"' "$DB" | sed -E 's/"file": *"(.*)"/\1/' |
     tr '\\' '/' | grep -E "/(core|surrogate|cli|app)/" | grep -E '\.(c|cc|cpp|cxx)$' |
-    grep -vF "/$TREE/" | sort -u)
+    grep -vF "/$TREE/" | grep -vF "/third_party/" | sort -u)
 if [ -z "$files" ]; then
     echo "no core/, surrogate/, cli/ or app/ sources in $DB" >&2
     exit 2
@@ -153,8 +156,13 @@ rc=$?
 dur=$((SECONDS - start))
 
 # A header's warning repeats in every file that includes it: print once.
-found=$(cat "$LOGDIR"/*.log | grep -E '(warning|error): ' | tr '\\' '/' |
+# The size checks never fail the run: counted apart, listed in size.txt.
+all=$(cat "$LOGDIR"/*.log | grep -E '(warning|error): ' | tr '\\' '/' |
     sed "s#^$root/##" | sort -u)
+sized=$(printf '%s\n' "$all" | grep -E '\[readability-function-(size|cognitive-complexity)\]$')
+found=$(printf '%s\n' "$all" | grep -vE '\[readability-function-(size|cognitive-complexity)\]$' | grep .)
+printf '%s\n' "$sized" | grep . > "$LOGDIR/size.txt"
+nsized=$(grep -c . "$LOGDIR/size.txt")
 if [ -n "$found" ]; then
     n=$(printf '%s\n' "$found" | wc -l | tr -d ' ')
     what=warnings
@@ -170,5 +178,5 @@ if [ "$rc" != 0 ]; then
         "$dur" "$rc" "$LOGDIR"
     exit 1
 fi
-printf 'tidy        ok    %4s s  %s files, no warnings (%s)\n' \
-    "$dur" "$count" "$version"
+printf 'tidy        ok    %4s s  %s files, no warnings; %s functions past the size thresholds, see %s/size.txt (%s)\n' \
+    "$dur" "$count" "$nsized" "$LOGDIR" "$version"

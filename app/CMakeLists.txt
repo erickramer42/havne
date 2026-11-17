@@ -78,7 +78,7 @@ qt_add_library(app_ui STATIC
 
 set_source_files_properties(qml/Theme.qml qml/ChartLayout.qml qml/VehicleBook.qml
                             qml/DashboardBook.qml qml/SignalForm.qml qml/Immersive.qml
-                            qml/ConditionBook.qml PROPERTIES
+                            qml/ConditionBook.qml qml/SessionLabel.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE
 )
 
@@ -90,6 +90,8 @@ qt_add_qml_module(app_ui
     QML_FILES
         qml/Main.qml
         qml/Immersive.qml
+        qml/SessionLabel.qml
+        qml/HiddenSignals.qml
         qml/KeepAwake.qml
         qml/HomePage.qml
         qml/ThemedButton.qml
@@ -187,6 +189,13 @@ qt_add_qml_module(app_ui
         fonts/Barlow-SemiBold.ttf
         fonts/Barlow-Bold.ttf
         fonts/BarlowSemiCondensed-Bold.ttf
+        # The Dashboard's presets (DashboardBook.presetText reads them)
+        layouts/desktop/standard.json
+        layouts/desktop/temperatures.json
+        layouts/desktop/showcase.json
+        layouts/phone/standard.json
+        layouts/phone/temperatures.json
+        layouts/phone/showcase.json
 )
 
 target_include_directories(app_ui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

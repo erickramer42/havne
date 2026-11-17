@@ -20,12 +20,14 @@
 #include "ecuio/signals.h"
 #include "error_detail.h"
 #include "isotp.h"
+#include "link_health.h"
 #include "obd2_rates.h"
 #include "pid_support.h"
 #include "request_engine.h"
 #include "session.h"
 #include "uri_query.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -442,7 +444,13 @@ ecuio_build_requests(ecuio_session_t* session, const ecuio_signal_set_t* set,
         return ECUIO_ERR_OUT_OF_MEMORY;
     case ecuio_plan_result::module_full:
         /* Registration holds each of a set's modules to it; a ?filter=
-         * puts every signal on one */
+         * puts every signal on one, which is the URI's doing */
+        if (params.rx_id != 0) {
+            ecuio_detail_set("?filter= asks every signal of the profile of "
+                             "one ECU, and they ask more than %u requests",
+                             static_cast<unsigned>(ECUIO_MODULE_MAX_REQUESTS));
+            return ECUIO_ERR_BAD_URI;
+        }
         ecuio_detail_set("the profile's signals ask more than %u requests of "
                          "one ECU",
                          static_cast<unsigned>(ECUIO_MODULE_MAX_REQUESTS));
@@ -912,6 +920,72 @@ inline void ecuio_seed_reports(ecuio_session_t* session,
         session->identity[c].rx_id = rx_ids[c];
         ecuio_engine_diagnostics(&e, c, &session->diagnostics[c]);
         session->diagnostics[c].rx_id = rx_ids[c];
+    }
+}
+
+/* How often a session with nothing picked and its link down asks one
+ * request to see whether an ECU answers: the failure backoff's cap */
+constexpr int64_t ECUIO_UNPICKED_CHECK_US =
+    static_cast<int64_t>(LINK_BACKOFF_CAP_MS) * 1000;
+
+/* That interval as the workers read it: a test's own while one is set
+ * (ecuio_set_unpicked_check_ms, internal.h) */
+inline std::atomic<int64_t>& ecuio_unpicked_check_us()
+{
+    static std::atomic<int64_t> us{ECUIO_UNPICKED_CHECK_US};
+    return us;
+}
+
+/* A worker's place in those checks: when the next is due (0: none
+ * waited for) and the channel it starts looking at */
+struct ecuio_unpicked_check {
+    int64_t next_us = 0;
+    uint32_t channel = 0;
+};
+
+/* A wait on a request ran out (ecuio_engine_expire answered true): the
+ * link counts it, unless the session has nothing picked and another
+ * module answers (ecuio_engine_unpicked_answering), where the silence
+ * is one module's */
+inline void ecuio_request_timed_out(const ecuio_request_engine& e,
+                                    link_health& h)
+{
+    if (!ecuio_engine_unpicked_answering(&e)) {
+        link_on_request_timeout(h);
+    }
+}
+
+/* A worker's idle pass on a session that asks only its picks with
+ * nothing picked (ecuio_engine_unpicked), after a read that didn't
+ * fail: link_on_unpicked, and while the link then isn't OK one request
+ * every ecuio_unpicked_check_us(), the first an interval after the
+ * first such pass, each module in turn (ecuio_engine_ask_check).
+ * Nothing else is asked, so nothing else could show an ECU awake. Its
+ * reply is a matched frame like any; its silence changes nothing. */
+inline void ecuio_unpicked_pass(ecuio_request_engine* e, link_health& h,
+                                ecuio_unpicked_check& check, int64_t now_us)
+{
+    link_on_unpicked(h);
+    if (h.state == ECUIO_OK) {
+        check.next_us = 0;
+        return;
+    }
+    const int64_t every =
+        ecuio_unpicked_check_us().load(std::memory_order_relaxed);
+    if (check.next_us == 0) {
+        check.next_us = now_us + every;
+        return;
+    }
+    if (now_us < check.next_us) {
+        return;
+    }
+    check.next_us = now_us + every;
+    for (uint32_t k = 0; k < e->chan_count; ++k) {
+        const uint32_t c = (check.channel + k) % e->chan_count;
+        if (ecuio_engine_ask_check(e, c)) {
+            check.channel = (c + 1) % e->chan_count;
+            return;
+        }
     }
 }
 

@@ -2882,10 +2882,14 @@ double drive_rpm(uint64_t ms)
     return 1000.0 + drive_speed(ms) * 40.0;
 }
 
+/* Both kinds, the pull ending at top speed, which the drive fixture's
+ * expectations below assume (AFlagClearEndsAPullAtTheLiftAndTheFlagAtTopSpeed
+ * reads both ends) */
 ecuio_stretch_rules_t both_kinds()
 {
     ecuio_stretch_rules_t r{};
     r.kinds = ECUIO_STRETCH_PULLS | ECUIO_STRETCH_CRUISES;
+    r.flags = ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED;
     r.throttle = UINT32_MAX;
     r.engine_load = UINT32_MAX;
     r.vehicle_speed = UINT32_MAX;
@@ -3165,6 +3169,61 @@ TEST(RecordingStretchesTest, ADrivesPullAndCruiseAreFoundInTimeOrder)
     EXPECT_EQ(stretches_of(r, rules, 0, 60000000).size(), 1u);
 }
 
+/* Where a pull ends: the drive's pull runs onto the limiter, its speed flat
+ * from 10 s while the throttle stays down to 12 s */
+TEST(RecordingStretchesTest, AFlagClearEndsAPullAtTheLiftAndTheFlagAtTopSpeed)
+{
+    Folder f;
+    write_drive(f,
+                {{"Throttle Position", "%", 0, drive_throttle},
+                 {"Vehicle Speed", "km/h", 0, drive_speed},
+                 {"RPM", "rpm", 0, drive_rpm}},
+                60000);
+    Reader r(f.utf8());
+    ASSERT_EQ(r.rc, ECUIO_OK) << ecuio_last_error_detail();
+    ecuio_stretch_rules_t lift = both_kinds();
+    lift.kinds = ECUIO_STRETCH_PULLS;
+    lift.flags = 0;
+    ecuio_stretch_rules_t top = lift;
+    top.flags = ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED;
+
+    const auto at_lift = stretches_of(r, lift, 0, 60000000);
+    ASSERT_EQ(at_lift.size(), 1u);
+    EXPECT_EQ(at_lift[0].from_us, 5000000u);
+    EXPECT_EQ(at_lift[0].to_us, 11900000u) << "the last sample at the level";
+    EXPECT_EQ(at_lift[0].start, 40.0);
+    EXPECT_EQ(at_lift[0].end, 110.0);
+    const auto at_top = stretches_of(r, top, 0, 60000000);
+    ASSERT_EQ(at_top.size(), 1u);
+    EXPECT_EQ(at_top[0].from_us, 5000000u);
+    EXPECT_EQ(at_top[0].to_us, 10000000u) << "the first sample at the top";
+
+    /* A range ending inside the limiter cuts either end there and says so */
+    const auto cut_lift = stretches_of(r, lift, 0, 11000000);
+    ASSERT_EQ(cut_lift.size(), 1u);
+    EXPECT_EQ(cut_lift[0].to_us, 11000000u);
+    EXPECT_EQ(cut_lift[0].flags, ECUIO_RECORDING_STRETCH_CUT_END);
+    const auto cut_top = stretches_of(r, top, 0, 11000000);
+    ASSERT_EQ(cut_top.size(), 1u);
+    EXPECT_EQ(cut_top[0].to_us, 10000000u);
+    EXPECT_EQ(cut_top[0].flags, 0u) << "inside the range: not cut";
+
+    /* A recording with no speed signal has only the lift to end a pull */
+    Folder g;
+    write_drive(g,
+                {{"Throttle Position", "%", 0, drive_throttle},
+                 {"RPM", "rpm", 0, drive_rpm}},
+                60000);
+    Reader q(g.utf8());
+    ASSERT_EQ(q.rc, ECUIO_OK) << ecuio_last_error_detail();
+    const auto by_rpm_lift = stretches_of(q, lift, 0, 60000000);
+    const auto by_rpm_top = stretches_of(q, top, 0, 60000000);
+    ASSERT_EQ(by_rpm_lift.size(), 1u);
+    ASSERT_EQ(by_rpm_top.size(), 1u);
+    EXPECT_EQ(by_rpm_lift[0].to_us, by_rpm_top[0].to_us);
+    EXPECT_EQ(by_rpm_lift[0].flags, ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED);
+}
+
 namespace {
 
 /* A cancel that stops at its nth ask (0: never), counting its asks */
@@ -3404,7 +3463,9 @@ TEST(RecordingStretchesTest, StretchesRefuseRulesTheyCantRun)
     };
     refused([](ecuio_stretch_rules_t& b) { b.kinds = 0; }, "no kind");
     refused([](ecuio_stretch_rules_t& b) { b.kinds = 0x4; }, "unknown kind");
-    refused([](ecuio_stretch_rules_t& b) { b.flags = 1; }, "a flag");
+    refused([](ecuio_stretch_rules_t& b) { b.flags = 0x2; }, "an unknown flag");
+    refused([](ecuio_stretch_rules_t& b) { b.flags |= 0x80000000u; },
+            "an unknown flag beside the known one");
     refused([](ecuio_stretch_rules_t& b) { b.reserved[0] = 1; }, "reserved");
     refused([](ecuio_stretch_rules_t& b) { b.reserved[1] = 1; }, "reserved");
     refused([](ecuio_stretch_rules_t& b) { b.pull_min_rise = -1; },

@@ -24,6 +24,7 @@ TestCase {
     function init() {
         failOnWarning(/^qrc:\/qt\/qml\/App\//)
         setStoredRules("{}")
+        setStoredViews("{}")
         setHintSeen(false)
     }
 
@@ -2951,8 +2952,8 @@ profile  raw
             fuzzyCompare(chart.drawn.panes[1].h, before[1] - 30, 0.5, "the lower one shorter")
             fuzzyCompare(chart.drawn.panes[2].h, before[2], 0.5, "the third untouched")
             const store = Qt.createQmlObject("import QtCore; Settings { category: \"recordings\" }", testCase)
-            tryVerify(() => { store.sync(); return String(store.value("paneShares", "")).indexOf("\"3\"") >= 0 },
-                      3000, "written to the store")
+            tryVerify(() => { store.sync(); return String(store.value("views", "")).indexOf("\"3\"") >= 0 },
+                      3000, "written to the store, with the recording")
             store.destroy()
 
             const evenAt = seam.mapToItem(frame, seam.width / 2, seam.height / 2)
@@ -3256,6 +3257,38 @@ profile  raw
         compare(status.text, "2 pulls · No cruise found")
     }
 
+    // A recording with neither a throttle nor an engine-load signal has no
+    // pull to find at any level, and the Jump row says that, not just "No pull
+    // found" (the findings fixture holds an engine speed alone)
+    function test_theJumpRowSaysWhyARecordingWithNoThrottleOrLoadHasNoPull() {
+        const page = createPage()
+        page.recordings = [findingsRow]
+        openRow(page, findingsRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        verify(page.recording.pullsLackSignals, "core finds no throttle or load")
+        compare(page.stretchesOf("pull").length, 0)
+        compare(find(page, "jumpStatus").text,
+                "No pull found (no throttle or load signal) · No cruise found")
+    }
+
+    // On a phone the row keeps its plain words, so it stays one line at any
+    // font, and the reason is the label's spoken name
+    function test_thePhonesJumpRowKeepsItsPlainWordsAndSpeaksTheReason() {
+        const page = createPage()
+        page.recordings = [findingsRow]
+        openRow(page, findingsRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        Theme.compact = true
+        try {
+            const status = find(page, "jumpStatus")
+            compare(status.text, "No pull found · No cruise found")
+            compare(status.Accessible.name,
+                    "No pull found (no throttle or load signal) · No cruise found")
+        } finally {
+            Theme.compact = false
+        }
+    }
+
     // The Stretches panel asks again with its levels, shows core's defaults in
     // its fields, and goes back to them
     function test_theStretchesPanelReasksWithItsLevels() {
@@ -3286,6 +3319,55 @@ profile  raw
                   "the defaults find the two again")
     }
 
+    // Where a pull ends: at the throttle's lift unless the panel's choice
+    // says top speed, asked at its tap, kept with the levels, and Defaults
+    // puts the lift back. pull-twice's throttle lifts 2 ms after speed tops
+    function test_thePanelChoosesWhereAPullEnds() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        compare(page.stretchesOf("pull").map(s => s.toMs), [25002, 35002], "the lift")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        const lift = find(page, "pullEnd_lift")
+        const top = find(page, "pullEnd_topSpeed")
+        verify(lift.selected && !top.selected, "the lift is the default")
+        top.clicked()
+        verify(top.selected && !lift.selected)
+        tryVerify(() => page.stretchList !== null, 10000, "asked again at the tap")
+        compare(page.stretchesOf("pull").map(s => s.toMs), [25000, 35000], "top speed")
+        compare(page.stretchRules.pullEnd, "top-speed", "kept with the levels")
+        find(page, "stretchesReset").clicked()
+        verify(lift.selected, "Defaults puts the lift back")
+        tryVerify(() => page.stretchList !== null
+                  && page.stretchesOf("pull").map(s => s.toMs).join() === "25002,35002", 10000,
+                  "the lift's ends again")
+        compare(page.stretchRules.pullEnd, undefined)
+    }
+
+    // A stored end that is no word of the choice reads as the lift, with no
+    // refusal; a stored top speed opens selected
+    function test_aStoredPullEndIsReadAsTheLiftUnlessItIsTopSpeed() {
+        setStoredRules("{\"pullEnd\": \"sideways\"}")
+        let page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        compare(page.rulesProblem, "", "no refusal")
+        compare(page.stretchesOf("pull").map(s => s.toMs), [25002, 35002])
+        page.destroy()
+        setStoredRules("{\"pullEnd\": \"top-speed\"}")
+        page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        compare(page.stretchesOf("pull").map(s => s.toMs), [25000, 35000])
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        verify(find(page, "pullEnd_topSpeed").selected, "the panel shows the stored end")
+    }
+
     // The name the Stretches panel gives a rule: core's refusal and the panel's own
     // words say the rule by it
     function fieldName(page, key) {
@@ -3314,6 +3396,198 @@ profile  raw
         find(page, "stretchesApply").clicked()
         compare(problem.text, "Engine speed rises must be a number")
         verify(page.stretchList !== null, "no ask was made")
+    }
+
+
+    // The viewer's kept pane arrangements (Settings recordings/views), set
+    // or read between cases
+    function setStoredViews(text) {
+        const store = Qt.createQmlObject("import QtCore; Settings { category: \"recordings\" }", testCase)
+        store.setValue("views", text)
+        store.sync()
+        store.destroy()
+    }
+    function storedViews() {
+        const store = Qt.createQmlObject("import QtCore; Settings { category: \"recordings\" }", testCase)
+        store.sync()
+        const text = String(store.value("views", "{}"))
+        store.destroy()
+        return text
+    }
+    function nameOfRow(page, row) {
+        return page.recording.signalList.find(s => s.index === row).name
+    }
+
+    // A plotted signal can be moved to a pane of its own from its row or its
+    // label; the arrangement is kept with the recording, another recording
+    // opens with the panes its units make, and By unit puts the signal back
+    function test_aSignalMovedToANewPaneIsKeptWithItsRecording() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const chart = panedChart(page)
+            const row = chart.drawn.traces[0].row
+            const name = nameOfRow(page, row)
+            page.openPaneMenu(row, chart)
+            compare(page.paneMenuItems.length, 5, "by unit, three panes, a new one")
+            compare(page.paneMenuItems[0].key, "")
+            compare(page.paneMenuItems[0].text, "By unit")
+            verify(page.paneMenuItems[0].checked, "by unit is in force")
+            compare(page.paneMenuItems[4].key, "new")
+            compare(page.paneMenuItems[4].text, "New pane")
+            const mine = chart.drawn.panes[chart.drawn.traces[0].pane].key
+            page.choosePane("new")
+            // The signal was alone in its pane: the pane it left goes
+            tryVerify(() => chart.drawn.panes.some(p => p.key === "own:1"), 5000, "a pane of its own")
+            compare(chart.drawn.panes.length, 3)
+            verify(!chart.drawn.panes.some(p => p.key === mine), "its old pane is gone")
+            compare(page.viewAssign[name], "own:1")
+            tryVerify(() => storedViews().indexOf("own:1") >= 0, 3000, "kept in the settings")
+
+            // Closed and opened again: the arrangement is back
+            page.backToList()
+            page.open(earlyRow)
+            tryVerify(() => find(page, "signalRows").visible, 10000, "the recording opens")
+            tryVerify(() => chart.drawn && chart.drawn.panes.some(p => p.key === "own:1"), 5000, "the pane again")
+            compare(page.viewAssign[name], "own:1")
+
+            // Another recording opens with the default panes
+            page.backToList()
+            page.open(lateRow)
+            tryVerify(() => find(page, "signalRows").visible, 10000, "the other recording opens")
+            tryVerify(() => chart.drawn && chart.drawn.panes.length === 3, 5000, "three panes")
+            verify(!chart.drawn.panes.some(p => p.key === "own:1"), "the units' panes")
+            compare(Object.keys(page.viewAssign).length, 0)
+
+            // By unit puts the signal back
+            page.backToList()
+            page.open(earlyRow)
+            tryVerify(() => find(page, "signalRows").visible, 10000, "the first opens again")
+            tryVerify(() => chart.drawn && chart.drawn.panes.some(p => p.key === "own:1"), 5000)
+            page.openPaneMenu(row, chart)
+            page.choosePane("")
+            tryVerify(() => chart.drawn.panes.some(p => p.key === mine), 5000, "its unit's pane is back")
+            verify(!chart.drawn.panes.some(p => p.key === "own:1"))
+            compare(page.viewAssign[name], undefined)
+        } finally {
+            restore()
+        }
+    }
+
+    // A signal joins another's pane by its key
+    function test_aSignalCanJoinAnotherPane() {
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            const chart = panedChart(page)
+            const first = chart.drawn.traces[0]
+            page.openPaneMenu(first.row, chart)
+            const mine = chart.drawn.panes[first.pane].key
+            const target = page.paneMenuItems.find(i => i.key !== "" && i.key !== "new" && i.key !== mine)
+            verify(target !== undefined, "another pane is offered")
+            verify(target.text.indexOf("With ") === 0)
+            page.choosePane(target.key)
+            tryVerify(() => chart.drawn.panes.length === 2, 5000, "two panes")
+        } finally {
+            restore()
+        }
+    }
+
+    // A damaged text, an entry with a bad share and a name the recording
+    // lacks leave the panes the units make
+    function test_aDamagedViewsTextOrAMissingNameLeavesTheDefaultPanes_data() {
+        return [ { tag: "not json", text: "not json" },
+                 { tag: "a bad share", text: JSON.stringify({ "pull-early": { used: 1, shares: { "3": [1, 2] } } }) },
+                 { tag: "a name the recording lacks",
+                   text: JSON.stringify({ "pull-early": { used: 1, assign: { "No such signal": "own:1" } } }) } ]
+    }
+    function test_aDamagedViewsTextOrAMissingNameLeavesTheDefaultPanes(data) {
+        setStoredViews(data.text)
+        const page = openEarly()
+        const restore = growWindow(page)
+        try {
+            panedChart(page)
+        } finally {
+            restore()
+        }
+    }
+
+    // An open of a recording with a kept arrangement stamps it used; a
+    // recording with none writes nothing
+    function test_openingARecordingStampsItsKeptViewOnly() {
+        setStoredViews(JSON.stringify({ "pull-early": { used: 1, assign: { RPM: "own:1" } } }))
+        const page = openEarly()
+        verify(page.viewEntry !== undefined)
+        tryVerify(() => page.viewEntry.used > 1000000000000, 3000, "stamped now: " + page.viewEntry.used)
+        page.backToList()
+        const before = storedViews()
+        page.open(lateRow)
+        tryVerify(() => find(page, "signalRows").visible, 10000, "the other opens")
+        compare(storedViews(), before, "no entry, no write")
+    }
+
+    // The note says when panes are folded, and a value label is found by a point
+    function test_foldedPanesAreSaidAndALabelIsFoundByItsPoint() {
+        const page = openEarly()
+        const note = find(page, "paneFoldNote")
+        const chart = find(page, "chart")
+        tryVerify(() => chart.drawn !== null, 5000, "drawn")
+        if (chart.drawn.panes.length < 3) {
+            verify(note.visible, "folded panes are said")
+            verify(page.paneFoldNote.indexOf("folded") >= 0)
+        }
+        const restore = growWindow(page)
+        try {
+            panedChart(page)
+            tryVerify(() => page.paneFoldNote === "", 5000, "nothing folded, nothing said")
+            verify(!note.visible)
+            const l = chart.drawn
+            const tr = l.traces.find(t => t.labeled)
+            verify(tr !== undefined, "a labeled trace")
+            compare(page.labelRowAt(l.labelX + 2, tr.labelY), tr.row)
+            compare(page.labelRowAt(l.left + 5, tr.labelY), -1, "the plot is no label")
+        } finally {
+            restore()
+        }
+    }
+
+    // A comparison's difference traces are pinned, so no fold takes their pane
+    function test_aDifferenceTraceIsPinned() {
+        const page = swingCompared("pinned-differences")
+        page.series(400)
+        find(page, "compareDifference").toggled()
+        differenceRead(page)
+        const all = page.series(400)
+        const diffs = all.filter(s => s.pane !== undefined)
+        verify(diffs.length > 0, "a difference trace")
+        verify(diffs.every(s => s.pinned === true))
+        verify(all.filter(s => s.pane === undefined).every(s => s.pinned !== true))
+    }
+
+    // Every rule's refusal names the field the panel shows: one table gives
+    // both the words and the field's name
+    function test_eachRulesRefusalNamesItsField() {
+        const page = createPage()
+        page.recordings = [twiceRow]
+        openRow(page, twiceRow)
+        tryVerify(() => page.stretchList !== null, 10000, "the stretches arrive")
+        find(page, "jumpStretches").clicked()
+        verify(waitForPolish(page.Window.window), "laid out")
+        const panel = find(page, "stretchesPanel")
+        const problem = find(page, "stretchesProblem")
+        compare(panel.fields.length, 10)
+        for (const f of panel.fields) {
+            for (const other of panel.fields)
+                find(page, "rule_" + other.key).text = ""
+            const field = find(page, "rule_" + f.key)
+            compare(field.Accessible.name, f.name, f.key + "'s field")
+            verify(f.name !== undefined && f.name !== "", f.key + " has a name")
+            field.text = "-1"
+            find(page, "stretchesApply").clicked()
+            verify(problem.visible, f.key + " refused")
+            verify(problem.text.indexOf(f.name + " must be a number") === 0,
+                   f.key + ": " + problem.text)
+        }
     }
 
     // A stored level that is none today reads as the defaults, the words

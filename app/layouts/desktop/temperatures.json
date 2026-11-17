@@ -1,0 +1,141 @@
+{
+ "format": 2,
+ "form": "desktop",
+ "files": [],
+ "pages": [
+  {
+   "name": "Temperatures",
+   "cells": [
+    {
+     "kind": "digital",
+     "w": 3,
+     "h": 3,
+     "label": "Coolant",
+     "refs": [
+      "id:2001",
+      "id:7002"
+     ],
+     "unit": "°C",
+     "options": {
+      "from": 0,
+      "to": 130,
+      "color": "red"
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 3,
+     "h": 3,
+     "label": "Oil temp",
+     "refs": [
+      "id:9001",
+      "id:7010"
+     ],
+     "unit": "°C",
+     "options": {
+      "from": 0,
+      "to": 160,
+      "color": "red"
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 2,
+     "h": 3,
+     "label": "Intake air",
+     "refs": [
+      "id:5001",
+      "id:7005"
+     ],
+     "unit": "°C",
+     "options": {
+      "from": -20,
+      "to": 120,
+      "color": "cyan"
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 2,
+     "h": 3,
+     "label": "Outside air",
+     "refs": [
+      "id:11560"
+     ],
+     "unit": "°C",
+     "options": {
+      "from": -40,
+      "to": 60,
+      "color": "cyan",
+      "description": "Outside air temperature"
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 2,
+     "h": 3,
+     "label": "Catalyst",
+     "refs": [
+      "id:11480"
+     ],
+     "unit": "°C",
+     "options": {
+      "from": 0,
+      "to": 900,
+      "color": "cyan",
+      "description": "Catalyst temperature"
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 2,
+     "h": 3,
+     "label": "Battery",
+     "refs": [
+      "id:14001",
+      "id:7008"
+     ],
+     "unit": "V",
+     "options": {
+      "from": 10,
+      "to": 16,
+      "color": "lime"
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 2,
+     "h": 3,
+     "label": "Boost",
+     "refs": [
+      "id:13001",
+      "id:7011"
+     ],
+     "unit": "kPa",
+     "options": {
+      "from": -100,
+      "to": 200,
+      "color": "lime"
+     }
+    },
+    {
+     "kind": "digital",
+     "w": 2,
+     "h": 3,
+     "label": "MAF",
+     "refs": [
+      "id:8001",
+      "id:7009"
+     ],
+     "unit": "g/s",
+     "options": {
+      "from": 0,
+      "to": 500,
+      "color": "lime",
+      "description": "Mass air flow"
+     }
+    }
+   ]
+  }
+ ]
+}

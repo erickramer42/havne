@@ -5,6 +5,9 @@ name: CI
 # job's CI gate reads (and the only one that saves the iOS kit's cache).
 # Pushes to dev and feature branches get no run of their own: they are
 # checked locally, and a manual run on dev checks one between releases.
+# A change to docs alone (scripts/docs_only.py's closed list of paths,
+# judged from the diff) runs only the scope job, which checks the docs'
+# links; every other job is skipped and the run still ends green.
 on:
   push:
     branches: [main]
@@ -70,11 +73,66 @@ env:
 
 # Every job sets timeout-minutes at roughly 3-5x its usual duration, so a
 # hung download, build or simulator fails within minutes instead of
-# holding a runner for GitHub's 6 h default. No job waits for another but
-# android-build (for a runner slot): each starts at once, so a run takes as
-# long as its longest job.
+# holding a runner for GitHub's 6 h default. Every job waits for scope (a
+# few seconds); beyond that none waits for another but android-build (for
+# a runner slot): each starts at once, so a run takes as long as its
+# longest job.
 jobs:
+  # Whether the change is docs alone. A pull request is judged on its diff
+  # from the base's merge-base, a push on the diff from the commit it
+  # replaced; a manual run, a push whose diff git can't give (a forced
+  # push's old tip is gone) and an [ios-smoke] request are never docs-only.
+  # Every other job needs this one and skips on docs_only == 'true'
+  # (release.yml's gate tells such a run from a full one by
+  # core-and-tests, which it reads as having run).
+  scope:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.scope.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # both ends of the diff
+
+      - name: Judge the diff, and check the docs when it is docs alone
+        id: scope
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          docs_only=false
+          reason='a manual run runs everything'
+          range=()
+          case "$EVENT" in
+            pull_request) range=("$BASE_SHA...$HEAD_SHA") ;;
+            push) range=("$BEFORE" "$AFTER") ;;
+          esac
+          if [[ "$MESSAGE" == *'[ios-smoke]'* ]]; then
+            reason='the commit asks for the iOS smoke'
+          elif [ "${#range[@]}" -gt 0 ]; then
+            status=0
+            result=$(python3 -P scripts/docs_only.py diff --lint "${range[@]}") || status=$?
+            echo "$result"
+            if [ "$status" != 0 ]; then
+              echo "::error::the docs check failed"
+              exit 1
+            fi
+            docs_only=$(sed -n 's/^docs_only=//p' <<< "$result")
+            reason=$(sed -n 's/^reason=//p' <<< "$result")
+            [ "$docs_only" = true ] || docs_only=false
+          fi
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "docs_only=$docs_only: $reason" >> "$GITHUB_STEP_SUMMARY"
+
   core-and-tests:
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -141,7 +199,8 @@ jobs:
   # a session a test forgets to destroy fails here. The J2534 suites are
   # Windows-only, so this covers core, signals, obd2 and the C ABI check.
   core-sanitizers:
-    if: ${{ !inputs.smoke_only }}
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -200,7 +259,8 @@ jobs:
   # fuzz/seeds.py builds from the committed fixtures: from nothing, 60 s
   # barely leaves the JSON reader. The others start empty.
   fuzz:
-    if: ${{ !inputs.smoke_only }}
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -210,7 +270,7 @@ jobs:
         fuzz_vin fuzz_dtc fuzz_sim fuzz_elm327_emulator fuzz_recording
         fuzz_candump fuzz_request_bus fuzz_json fuzz_signal_file
         fuzz_plugin_manifest fuzz_obdb_import fuzz_csv_import fuzz_export
-        fuzz_computed fuzz_condition_file fuzz_plugin_wrap
+        fuzz_computed fuzz_condition_file fuzz_plugin_wrap fuzz_wasm_module
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -283,7 +343,8 @@ jobs:
   # .github/clang-tidy-requirements.txt, bumped by hand.
   clang-tidy:
     name: clang-tidy (${{ matrix.shard }}/3)
-    if: ${{ !inputs.smoke_only }}
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: windows-latest
     timeout-minutes: 25
     # Three runners each check a third of the files (round robin by name,
@@ -339,7 +400,8 @@ jobs:
 
   win-build:
     name: win-build (${{ matrix.shard }}/2)
-    if: ${{ !inputs.smoke_only }}
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: windows-latest
     timeout-minutes: 60
     # Two runners, each with its own build, run alternate halves of ctest
@@ -510,7 +572,8 @@ jobs:
   # under the tool lowers the number. The job fails only when a binary
   # leaves no report, or none was made.
   win-coverage:
-    if: ${{ !inputs.smoke_only && github.event_name != 'pull_request' }}
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only && github.event_name != 'pull_request' }}
     runs-on: windows-latest
     timeout-minutes: 30
     # Three runners share the run, each with its own build: the gtest
@@ -684,7 +747,8 @@ jobs:
 
   macos-build:
     name: macos-build (${{ matrix.shard }}/2)
-    if: ${{ !inputs.smoke_only }}
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: macos-latest
     # The repeat runs a test hundreds of times: 60 minutes then
     timeout-minutes: ${{ inputs.macos_repeat != '' && 60 || 15 }}
@@ -817,9 +881,9 @@ jobs:
 
   linux-build:
     name: linux-build (${{ matrix.shard }}/2)
-    if: ${{ !inputs.smoke_only }}
-    # 24.04's bpftrace runs tests/probe_trace.sh; 26.04's 0.25 aborts in it
-    runs-on: ubuntu-24.04
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     # Two runners, each with its own build, run alternate halves of ctest
     # (-I k,,2: every case once across the two); the steps after the tests
@@ -982,7 +1046,8 @@ jobs:
   # build machine's. One per architecture: x86_64, and aarch64 on
   # GitHub's ARM runner
   linux-appimage:
-    if: ${{ !inputs.smoke_only }}
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     name: linux-appimage (${{ matrix.arch }})
     strategy:
       fail-fast: false
@@ -1101,7 +1166,8 @@ jobs:
   # accounts on the runner. Then installed and used as a user would.
   # One per architecture, as linux-appimage.
   linux-packages:
-    if: ${{ !inputs.smoke_only }}
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     name: linux-packages (${{ matrix.arch }})
     strategy:
       fail-fast: false
@@ -1169,8 +1235,8 @@ jobs:
   # manual run has more jobs than the account's 20 concurrent runners, and this
   # one starts in that slot, whatever core-and-tests did
   android-build:
-    needs: core-and-tests
-    if: ${{ (success() || failure()) && !inputs.smoke_only }}
+    needs: [scope, core-and-tests]
+    if: ${{ needs.scope.result == 'success' && needs.scope.outputs.docs_only != 'true' && (success() || failure()) && !inputs.smoke_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -1360,7 +1426,8 @@ jobs:
           retention-days: 14
 
   ios-build:
-    if: ${{ !inputs.smoke_only }}
+    needs: scope
+    if: ${{ needs.scope.outputs.docs_only != 'true' && !inputs.smoke_only }}
     runs-on: macos-latest
     timeout-minutes: 35
     steps:
@@ -1485,11 +1552,13 @@ jobs:
   # with "[ios-smoke]" in the pushed commit's message. A re-run replays
   # the original event, so re-running a skipped smoke skips it again.
   ios-simulator-smoke:
+    needs: scope
     if: >-
-      (github.event_name == 'workflow_dispatch' &&
+      needs.scope.outputs.docs_only != 'true' &&
+      ((github.event_name == 'workflow_dispatch' &&
       (inputs.ios_smoke || inputs.smoke_only)) ||
       (github.event_name == 'push' &&
-      contains(github.event.head_commit.message, '[ios-smoke]'))
+      contains(github.event.head_commit.message, '[ios-smoke]')))
     runs-on: macos-15-intel
     # Runs have taken 19.5-24 min on the Intel runner.
     timeout-minutes: 45

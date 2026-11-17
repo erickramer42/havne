@@ -96,6 +96,7 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
         case WindowLowRole: return shown(e, e.windowLow).value;
         case RowRole: return index.row();
         case HiddenRole: return e.hidden;
+        case HiddenWhyRole: return QString::fromLatin1(whyWords(e.why));
         case GroupRole:
             return static_cast<int>(e.group);
         case LabelRole:
@@ -142,7 +143,37 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {RangeLowRole, "rangeLow"},
             {RangeHighRole, "rangeHigh"},
             {IsEnumRole, "isEnum"},
-            {UnaskedRole, "unasked"}};
+            {UnaskedRole, "unasked"},
+            {HiddenWhyRole, "hiddenWhy"}};
+}
+
+const char* SignalListModel::whyWords(Entry::Why why)
+{
+    return why == Entry::Why::Unsupported ? "unsupported"
+         : why == Entry::Why::Absent      ? "absent"
+                                          : "";
+}
+
+QVariantList SignalListModel::hiddenSignals() const
+{
+    QVariantList rows;
+    for (const Entry& e : m_entries) {
+        if (e.hidden) {
+            rows.append(QVariantMap{{QStringLiteral("name"), QString::fromUtf8(e.name)},
+                                    {QStringLiteral("why"), QString::fromLatin1(whyWords(e.why))}});
+        }
+    }
+    return rows;
+}
+
+bool SignalListModel::anyValue() const
+{
+    for (const Entry& e : m_entries) {
+        if (e.histCount > 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool SignalListModel::isBuiltIn(const ecuio_signal_set_t* set)
@@ -848,8 +879,11 @@ void SignalListModel::rejudgeHidden()
     for (size_t row = 0; row < m_entries.size(); ++row) {
         Entry& e = m_entries[row];
         const bool hide = e.unsupported || e.absent;
-        if (hide != e.hidden) {
+        const Entry::Why why = e.unsupported ? Entry::Why::Unsupported
+                               : e.absent ? Entry::Why::Absent : Entry::Why::None;
+        if (hide != e.hidden || why != e.why) {
             e.hidden = hide;
+            e.why = why;
             if (first < 0) first = static_cast<int>(row);
             last = static_cast<int>(row);
         }
@@ -859,7 +893,7 @@ void SignalListModel::rejudgeHidden()
         return;
     }
     // Live's filtered view re-judges the rows HiddenRole changed in
-    emit dataChanged(index(first), index(last), {HiddenRole});
+    emit dataChanged(index(first), index(last), {HiddenRole, HiddenWhyRole});
     m_hiddenCount = hidden;
     emit hiddenCountChanged();
     recountUnasked();

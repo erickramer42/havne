@@ -573,3 +573,120 @@ TEST(PickOnlyTest, OutOfMemoryInAFocusOrAnAttachChangesNothing)
     }
     ecuio_condition_set_free(set);
 }
+
+/* With nothing picked and the link down, a worker's idle passes ask one
+ * request every ECUIO_UNPICKED_CHECK_US, a module in turn, the first a
+ * whole interval after the link was found down; with the link OK they
+ * ask nothing. A wait that runs out counts toward a timeout only while
+ * no module answers. */
+TEST(PickOnlyTest, AnUnpickedSessionWithItsLinkDownChecksAModuleEachInterval)
+{
+    Car car;
+    ASSERT_NE(car.s, nullptr);
+    ecuio_request_engine* e = car.e.get();
+    car.take();
+    ASSERT_TRUE(ecuio_engine_unpicked(e));
+    std::atomic<int32_t> published{ECUIO_OK};
+    std::atomic<uint32_t> episodes{0};
+    link_health h(published, episodes);
+    ecuio_unpicked_check check;
+    const int64_t every = ECUIO_UNPICKED_CHECK_US;
+    EXPECT_EQ(every, 5000000) << "the failure backoff's cap";
+    ASSERT_EQ(ecuio_unpicked_check_us().load(), every)
+        << "a case before this one left its own interval set";
+    const auto due = [&] {
+        return (e->chans[0].check_due ? 1u : 0u) |
+               (e->chans[1].check_due ? 2u : 0u);
+    };
+
+    /* The link OK: pass after pass, nothing is asked */
+    int64_t now = 1000;
+    for (int i = 0; i < 100; ++i) {
+        ecuio_unpicked_pass(e, h, check, now);
+        now += every;
+    }
+    EXPECT_EQ(due(), 0u);
+    EXPECT_EQ(check.next_us, 0);
+    EXPECT_EQ(published.load(), ECUIO_OK);
+
+    /* Ten waits run out with no module answering: not responding */
+    for (uint32_t i = 0; i < LINK_HEALTH_QUIET_RUN; ++i) {
+        ecuio_request_timed_out(*e, h);
+    }
+    ASSERT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+    ecuio_unpicked_pass(e, h, check, now);
+    EXPECT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+    EXPECT_EQ(due(), 0u) << "the first check waits a whole interval";
+    EXPECT_EQ(check.next_us, now + every);
+    ecuio_unpicked_pass(e, h, check, now + every - 1);
+    EXPECT_EQ(due(), 0u);
+    ecuio_unpicked_pass(e, h, check, now + every);
+    EXPECT_EQ(due(), 1u) << "module A's";
+    ecuio_unpicked_pass(e, h, check, now + every + 1);
+    EXPECT_EQ(due(), 1u) << "one an interval";
+    e->chans[0].check_due = false; /* sent, and unanswered */
+    ecuio_unpicked_pass(e, h, check, now + 2 * every);
+    EXPECT_EQ(due(), 2u) << "then module B's";
+    e->chans[1].check_due = false;
+    ecuio_unpicked_pass(e, h, check, now + 3 * every);
+    EXPECT_EQ(due(), 1u) << "and around";
+    e->chans[0].check_due = false;
+
+    /* A module whose requests are all dropped is passed by */
+    for (uint32_t i = 0; i < kMost; ++i) {
+        ecuio_engine_drop(e, kMost + i, ECUIO_DROP_NOT_SUPPORTED, 0x31);
+    }
+    ecuio_unpicked_pass(e, h, check, now + 4 * every);
+    EXPECT_EQ(due(), 1u) << "module B has nothing to ask";
+    e->chans[0].check_due = false;
+
+    /* A reply: the link is OK, and the checks end */
+    link_on_read(h, false, true, false);
+    ecuio_unpicked_pass(e, h, check, now + 5 * every);
+    EXPECT_EQ(due(), 0u);
+    EXPECT_EQ(check.next_us, 0);
+
+    /* A test's own interval (internal.h) holds until it is given back */
+    {
+        struct Short {
+            Short() { ecuio_set_unpicked_check_ms(250); }
+            ~Short() { ecuio_set_unpicked_check_ms(0); }
+        } own;
+        for (uint32_t i = 0; i < LINK_HEALTH_QUIET_RUN; ++i) {
+            ecuio_request_timed_out(*e, h);
+        }
+        ASSERT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+        const int64_t at = now + 6 * every;
+        ecuio_unpicked_pass(e, h, check, at);
+        EXPECT_EQ(check.next_us, at + 250000);
+        ecuio_unpicked_pass(e, h, check, at + 249999);
+        EXPECT_EQ(due(), 0u);
+        ecuio_unpicked_pass(e, h, check, at + 250000);
+        EXPECT_EQ(due(), 1u);
+        EXPECT_EQ(check.next_us, at + 500000);
+        e->chans[0].check_due = false;
+        link_on_read(h, false, true, false);
+        ecuio_unpicked_pass(e, h, check, at + 250001);
+        EXPECT_EQ(check.next_us, 0);
+    }
+    EXPECT_EQ(ecuio_unpicked_check_us().load(), every) << "0 gives it back";
+
+    /* While a module answers, another's silence is its own */
+    const uint8_t reply[4] = {0x62, 0x10, 0x00, 0x2A};
+    (void)ecuio_engine_on_frame(e, 0, reply, sizeof reply, now, nullptr);
+    ASSERT_TRUE(ecuio_engine_unpicked_answering(e));
+    for (uint32_t i = 0; i < 3 * LINK_HEALTH_QUIET_RUN; ++i) {
+        ecuio_request_timed_out(*e, h);
+    }
+    EXPECT_EQ(published.load(), ECUIO_OK);
+    EXPECT_FALSE(h.unanswered);
+
+    /* With a pick every wait that runs out counts, as on any session */
+    ASSERT_EQ(car.focus({id_of(7)}), ECUIO_OK) << ecuio_last_error_detail();
+    car.take();
+    ASSERT_FALSE(ecuio_engine_unpicked(e));
+    for (uint32_t i = 0; i < LINK_HEALTH_QUIET_RUN; ++i) {
+        ecuio_request_timed_out(*e, h);
+    }
+    EXPECT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+}

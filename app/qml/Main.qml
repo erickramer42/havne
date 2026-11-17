@@ -484,7 +484,7 @@ ApplicationWindow {
                               : root.isCompact || !headerTitle.visible
                                 ? root.shortStatusWord(Bridge.linkState)
                                 : Theme.linkLabel(Bridge.linkState)
-                            readonly property string address: Bridge.connected ? Bridge.uriLabel : ""
+                            readonly property string address: Bridge.connected ? SessionLabel.address(Bridge.uriLabel) : ""
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.preferredWidth: implicitWidth
@@ -792,9 +792,28 @@ ApplicationWindow {
                         onListShown: root.listAdapters()
                         onDashboardRequested: root.gotoPage(root.dashboardPage)
                     }
+                    Item {
+                    id: dashFrame
+                    objectName: "dashFrame"
+                    // The desktop's edit mode in the phone form (B1): the page
+                    // is the phone's width, centered, with its edge drawn
+                    Rectangle {
+                        objectName: "dashFrameEdge"
+                        visible: dashboardView.phoneEdit
+                        x: dashboardView.x - 1
+                        width: dashboardView.width + 2
+                        height: parent.height
+                        color: "transparent"
+                        border.color: Theme.outline
+                        border.width: 1
+                        radius: Theme.radiusCard
+                    }
                     DashboardPage {
                         id: dashboardView
                         objectName: "dashboardPage"
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: phoneEdit ? phoneFrameWidth : dashFrame.width
+                        height: dashFrame.height
                         // The gauges join the session's default pick
                         Binding {
                             target: Bridge
@@ -821,6 +840,7 @@ ApplicationWindow {
                         driveInsetBottom: zoomRoot.insetBottom
                         driveLogTime: root.logTimeText(Bridge.logElapsedMs)
                         driveLogSize: root.logSizeText(Bridge.logBytes)
+                    }
                     }
                     LiveViewPage {
                         objectName: "livePage"
