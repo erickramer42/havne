@@ -91,8 +91,13 @@ std::vector<std::string> keys_of(const ecuio_signal_set_t* set,
     EXPECT_EQ(again, count);
     std::vector<std::string> out;
     for (const ecuio_signal_key_t& k : keys) {
-        EXPECT_LT(strnlen(k.text, sizeof k.text), sizeof k.text);
-        out.emplace_back(k.text);
+        /* Terminated, and zero from the NUL to the end */
+        const size_t n = strnlen(k.text, sizeof k.text);
+        EXPECT_LT(n, sizeof k.text);
+        for (size_t i = n; i < sizeof k.text; ++i) {
+            EXPECT_EQ(k.text[i], '\0') << k.text << ", byte " << i;
+        }
+        out.emplace_back(k.text, n);
     }
     return out;
 }
@@ -471,6 +476,18 @@ TEST(SignalKeysTest, FindTakesAKeyThenANameOneSignalHas)
     EXPECT_STREQ(ecuio_last_error_detail(),
                  "no signal with the key or name 'Battery voltage x'")
         << "one line";
+    /* A text past the 96 bytes a refusal shows ends before a character
+     * the cut would split: 95 bytes, then one of two */
+    const std::string long_name = std::string(95, 'a') + "\xC3\xA9" + "tail";
+    EXPECT_EQ(find(long_name.c_str()), UINT32_MAX);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              "no signal with the key or name '" + std::string(95, 'a') + "'");
+    const std::string fits = std::string(94, 'a') + "\xC3\xA9" + "tail";
+    EXPECT_EQ(find(fits.c_str()), UINT32_MAX);
+    EXPECT_EQ(std::string(ecuio_last_error_detail()),
+              "no signal with the key or name '" + std::string(94, 'a') +
+                  "\xC3\xA9" + "'")
+        << "a character that ends at the cut stays";
 
     /* Only the defs the keys cover */
     EXPECT_EQ(find("Battery voltage", 1), 0u);

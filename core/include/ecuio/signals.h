@@ -1123,10 +1123,9 @@ _Static_assert(sizeof(ecuio_signal_key_t) == 32, "ecuio_signal_key_t size is ABI
 /* The def's address key, out zeroed past it. "" for a computed def
  * (ECUIO_DEF_FLAG_COMPUTED), which reads no address.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL argument, out untouched;
- * ECUIO_ERR_INVALID_ARGUMENT, out "", for a def whose text has no room,
- * which only one ecuio_validate_signal refuses can be (a mux_length
- * over 3, a text field longer than a frame). Reads the def alone, so
- * any thread may call it. */
+ * ECUIO_ERR_INVALID_ARGUMENT, out "", for a def whose text has no room:
+ * a def ecuio_validate_signal refuses may have none, one it takes
+ * always has. Reads the def alone, so any thread may call it. */
 ecuio_status_t ecuio_signal_address_key(const ecuio_signal_def_t* def,
                                         ecuio_signal_key_t* out);
 

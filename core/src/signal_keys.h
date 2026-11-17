@@ -23,6 +23,24 @@ namespace ecuio_keys {
 /* The most keys a repeated name's refusal lists */
 constexpr uint32_t kListed = 8;
 
+/* text's first bytes for a detail, on one line: at most 96, ended
+ * before a UTF-8 character the cut would split */
+inline void shown_text(const char* text, char (&out)[97])
+{
+    size_t n = 0;
+    while (n < sizeof out - 1 && text[n] != '\0') {
+        ++n;
+    }
+    if (text[n] != '\0') {
+        while (n > 0 && (static_cast<unsigned char>(text[n]) & 0xC0) == 0x80) {
+            --n;
+        }
+    }
+    std::memcpy(out, text, n);
+    out[n] = '\0';
+    ecuio_text_one_line(out);
+}
+
 /* text among count signals, key_of(i) and name_of(i) each one's as a
  * string_view: the signal with that key, else the one signal with that
  * name. A signal with no key ("") goes by its name alone.
@@ -35,8 +53,7 @@ ecuio_status_t find(uint32_t count, KeyOf key_of, NameOf name_of,
 {
     const std::string_view want(text);
     char shown[97];
-    std::snprintf(shown, sizeof shown, "%.96s", text);
-    ecuio_text_one_line(shown);
+    shown_text(text, shown);
     if (want.empty()) {
         ecuio_detail_set("a signal's key or name is empty");
         return ECUIO_ERR_INVALID_ARGUMENT;
