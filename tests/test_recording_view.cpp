@@ -819,7 +819,8 @@ TEST(RecordingViewTest, AStretchesAskFindsThePullsAndCruises)
     EXPECT_EQ(first.value(QStringLiteral("kind")).toString(),
               QStringLiteral("pull"));
     EXPECT_EQ(first.value(QStringLiteral("fromMs")).toDouble(), 18002.0);
-    EXPECT_EQ(first.value(QStringLiteral("toMs")).toDouble(), 25000.0);
+    EXPECT_EQ(first.value(QStringLiteral("toMs")).toDouble(), 25002.0)
+        << "the throttle's lift, its sample 2 ms after speed's";
     EXPECT_EQ(first.value(QStringLiteral("start")).toDouble(), 70.0);
     EXPECT_EQ(first.value(QStringLiteral("end")).toDouble(), 128.0);
     EXPECT_EQ(first.value(QStringLiteral("unit")).toString(),
@@ -828,7 +829,16 @@ TEST(RecordingViewTest, AStretchesAskFindsThePullsAndCruises)
     EXPECT_EQ(first.value(QStringLiteral("signal")).toInt(), speed);
     const QVariantMap second = pulls[1].toMap();
     EXPECT_EQ(second.value(QStringLiteral("fromMs")).toDouble(), 31002.0);
-    EXPECT_EQ(second.value(QStringLiteral("toMs")).toDouble(), 35000.0);
+    EXPECT_EQ(second.value(QStringLiteral("toMs")).toDouble(), 35002.0);
+    // Asked to end at top speed: speed's first sample at its highest
+    const QVariantList atTop = askedStretches(
+        v, true, false,
+        {{QStringLiteral("pullEnd"), QStringLiteral("top-speed")}});
+    ASSERT_EQ(atTop.size(), 2);
+    EXPECT_EQ(atTop[0].toMap().value(QStringLiteral("toMs")).toDouble(),
+              25000.0);
+    EXPECT_EQ(atTop[1].toMap().value(QStringLiteral("toMs")).toDouble(),
+              35000.0);
     EXPECT_TRUE(askedStretches(v, false, true).isEmpty())
         << "cruises alone: the log has none";
 
@@ -1101,6 +1111,43 @@ TEST(RecordingViewTest, AStretchesAskOnAChangedFileSaysItFailed)
     EXPECT_TRUE(v.stale());
 }
 
+// A recording holding neither a throttle nor an engine-load signal has no
+// pull to find whatever the levels: the page says so in the Jump row
+TEST(RecordingViewTest, PullsLackSignalsWhenNeitherThrottleNorLoadIsRecorded)
+{
+    RecordingView v;
+    EXPECT_FALSE(v.pullsLackSignals()) << "not open";
+    v.open(fixture("pull-twice"));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_FALSE(v.pullsLackSignals()) << "a throttle";
+
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    v.open(copiedFixture(dir, "pull-twice", [](QByteArray& line) {
+        line.replace("Throttle", "Engine Load");
+        return true;
+    }));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_FALSE(v.pullsLackSignals()) << "an engine load alone is enough";
+
+    QTemporaryDir bare;
+    ASSERT_TRUE(bare.isValid());
+    v.open(copiedFixture(bare, "pull-twice", [](QByteArray& line) {
+        return !line.contains(",Throttle,") &&
+               !line.startsWith("signal  Throttle,");
+    }));
+    ASSERT_TRUE(waitFor([&] { return settled(v); }));
+    ASSERT_EQ(v.state(), RecordingView::Open) << v.error().toStdString();
+    EXPECT_TRUE(v.pullsLackSignals());
+    EXPECT_EQ(found(v, true, false, {}), 0) << "and so it finds no pull";
+    EXPECT_EQ(found(v, false, true, {}), 0);
+
+    v.close();
+    EXPECT_FALSE(v.pullsLackSignals()) << "closed";
+}
+
 // Each level a page sets reaches core's rule of that name: pull-twice
 // (two pulls, a stab that climbs 180 rpm, a part-throttle rise at 45 %,
 // pulls 7 s and 4 s long at 96 % and 97 %, a 925 ms lift), copies of it
@@ -1267,6 +1314,9 @@ TEST(RecordingViewTest, AStretchesRuleOutOfRangeIsRefusedWithWords)
          "Speed within must be a number from 0 to 1000 km/h"},
         {"cruiseFloor", true,
          "Cruise above must be a number from 0 to 1000 km/h"},
+        {"pullEnd", QStringLiteral("top"),
+         "Where a pull ends must be lift or top-speed"},
+        {"pullEnd", 1, "Where a pull ends must be lift or top-speed"},
         {"pullSpeed", 1, "'pullSpeed' isn't a stretch rule"},
     };
     changes = 0;
@@ -1274,8 +1324,8 @@ TEST(RecordingViewTest, AStretchesRuleOutOfRangeIsRefusedWithWords)
         EXPECT_EQ(v.stretches(true, true, rule(r.key, r.value)), 0) << r.key;
         EXPECT_EQ(v.stretchesProblem(), QLatin1String(r.words)) << r.key;
     }
-    EXPECT_EQ(changes, 11) << "a change for each new wording, none for the "
-                              "two refusals that repeat the one before";
+    EXPECT_EQ(changes, 12) << "a change for each new wording, none for the "
+                              "three refusals that repeat the one before";
     // One bad rule among good ones refuses the ask
     EXPECT_EQ(v.stretches(true, true,
                           {{QStringLiteral("pullLevel"), 90},
@@ -1327,12 +1377,18 @@ TEST(RecordingViewTest, TheDefaultsAreCoresOwn)
         EXPECT_TRUE(d.contains(QLatin1String(key))) << key;
         return d.value(QLatin1String(key)).toDouble();
     };
-    EXPECT_EQ(v.stretchDefaults().size(), 10);
-    // Every rule has the name a refusal and the panel's field use
+    EXPECT_EQ(v.stretchDefaults().size(), 11);
+    EXPECT_EQ(v.stretchDefaults().value(QStringLiteral("pullEnd")),
+              QVariant(QStringLiteral("lift")))
+        << "a pull ends at the lift unless asked";
+    // Every number rule has the name a refusal and the panel's field use;
+    // pullEnd, a word with its own switch, has none
     const QVariantMap names = v.stretchRuleNames();
     const QVariantMap defaults = v.stretchDefaults();
-    EXPECT_EQ(names.size(), defaults.size());
+    EXPECT_EQ(names.size(), defaults.size() - 1);
     for (auto it = defaults.constBegin(); it != defaults.constEnd(); ++it) {
+        if (it.key() == QLatin1String("pullEnd"))
+            continue;
         EXPECT_TRUE(names.contains(it.key())) << it.key().toStdString();
         EXPECT_FALSE(names.value(it.key()).toString().isEmpty());
     }

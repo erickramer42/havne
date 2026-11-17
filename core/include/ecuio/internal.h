@@ -399,6 +399,13 @@ uint64_t ecuio_recorder_test_wakes(const ecuio_recorder_t* recorder);
  * at a time of its choosing; 0 gives it back to ecuio_clock_us. */
 void ecuio_recorder_test_set_clock(int on, uint64_t now_us);
 
+/* Test-only (ADR-0064 Q1): the version a plugin's requires.core is
+ * compared with and a wrap's or a put's least core is cut to, for the
+ * whole process: major.minor.patch (each 0 to 65535) while on is
+ * nonzero, core's own when 0. A case plays a later core with it. */
+void ecuio_plugin_test_set_core_version(int on, uint32_t major, uint32_t minor,
+                                        uint32_t patch);
+
 /* Test-only, never in queue.h: the reads waiting on a queue for an
  * entry, so a test closes it only once a read on another thread waits
  * (a read begun after ecuio_queue_close is undefined) */

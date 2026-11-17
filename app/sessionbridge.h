@@ -114,6 +114,10 @@ class SessionBridge : public QObject
     // recorder slot Record sessions uses (recordingActive holds while it
     // runs): one recorder a session.
     Q_PROPERTY(bool logActive READ logActive NOTIFY logStateChanged)
+    // A replay without loop has played its last frame and its values have
+    // reached the model: a row with no value by then is one the
+    // recording doesn't hold ("not in this recording"), not one to wait for
+    Q_PROPERTY(bool replayFinished READ replayFinished NOTIFY replayFinishedChanged)
     // The log's time so far and its folder's size in bytes, counted once
     // a second; the last log's once it ends
     Q_PROPERTY(qint64 logElapsedMs READ logElapsedMs NOTIFY logProgressChanged)
@@ -520,8 +524,14 @@ public:
     {
         return m_conditionsGeneration;
     }
-    // The next n attaches refused where core's call is made
-    void failConditionsAttachesForTesting(int n) { m_failAttaches = n; }
+    // The next n attaches refused where core's call is made; during, when
+    // given, runs there first, as the worker's callback can meanwhile
+    void failConditionsAttachesForTesting(int n,
+                                          std::function<void()> during = {})
+    {
+        m_failAttaches = n;
+        m_duringFailedAttach = std::move(during);
+    }
     // The alert tones asked, and a later time for the tone's 5 s
     const AlertTone& alertToneForTesting() const { return m_tone; }
     void addToneTimeForTesting(uint64_t us) { m_toneTimeAddedForTesting += us; }
@@ -682,6 +692,7 @@ public:
     // with no recording, or one core refused it (a write failed).
     Q_INVOKABLE bool mark(const QString& label = QString());
     bool logActive() const { return m_logActive; }
+    bool replayFinished() const { return m_replayFinished; }
     qint64 logElapsedMs() const;
     qint64 logBytes() const { return m_logBytes; }
     QString logNotice() const { return m_logNotice; }
@@ -909,6 +920,7 @@ signals:
     void vehicleIdentified();
     void vehicleLabelChanged();
     void linkStateChanged();
+    void replayFinishedChanged();
     void logPausedChanged();
     void recordingChanged();
     void recordingStateChanged();
@@ -946,13 +958,13 @@ private:
     // event into its condition's slot under m_conditionsMutex
     static void onConditions(const ecuio_condition_event_t* events,
                              uint32_t count, void* user_data);
-    // GUI thread: count slots for the attach of this generation, the
-    // events of any other passed by
-    void prepareConditionStaging(uint32_t count, uint32_t generation);
+    // GUI thread: no slots for any attach, every event passed by
+    void clearConditionStaging();
     // GUI thread: set (nullptr: none) attached to session, judged with its
     // signal file, and the model's rows; false with *why core's words,
-    // nothing changed. Core copies the set. The window's events of the set
-    // before are flushed first.
+    // nothing changed. Core copies the set. The set before keeps its slots
+    // and its rows' copy, so its firings that arrive later are still lines.
+    // The caller flushes the window first (applySavedConditions).
     bool attachConditions(ecuio_session_t* session,
                           const ecuio_condition_set_t* set, QString* why);
     // GUI thread, before the start: the replay's own copy, else the saved set
@@ -1064,6 +1076,10 @@ private:
     // A replay without loop: its frames, and whether its end is logged
     uint32_t m_replayFrames = 0;
     bool m_replayEndLogged = true;
+    // The tick after the end is seen: pollReplayEnd runs after flushValues,
+    // so the last frames' values, queued behind their frames, are in by then
+    bool m_replaySettling = false;
+    bool m_replayFinished = false;
     // The machine's slept count at the last tick (ADR-0033 section 6), and the
     // test seam's addition to it
     uint64_t m_sleptUs = 0;
@@ -1140,13 +1156,41 @@ private:
         ecuio_condition_event_t newest{};
         ecuio_condition_event_t first{}; // the window's first firing
     };
-    std::mutex m_conditionsMutex; // guards the staging and its generation
-    std::vector<ConditionSlot> m_conditionStaging[2];
-    int m_activeConditions = 0;       // the one onConditions writes
-    uint32_t m_stagingGeneration = 0; // the attach whose events are kept
+    // One attach's slots, twice: the worker writes staging[active] and the
+    // tick swaps them to read the other
+    struct ConditionWindow {
+        std::vector<ConditionSlot> staging[2];
+        int active = 0;
+        uint32_t generation = 0; // the attach whose events it keeps
+    };
+    std::mutex m_conditionsMutex; // guards the windows
+    ConditionWindow m_conditionWindow;
+    // The set before's: the worker's dispatch under way at an attach took
+    // that set, and gives its events after core's call returns
+    ConditionWindow m_conditionWindowBefore;
+    // The one before that, held only while core's call runs: a refusal
+    // makes it the set before's again
+    ConditionWindow m_conditionWindowOlder;
+    // One firing of a tick: when, its row, and which set's rows that is
+    struct ConditionFiring {
+        uint64_t at;
+        int row;
+        ConditionModel::Rows rows;
+    };
+    // flushConditions' parts: the set before's firings with each key's tone
+    // asked, a line for each firing, and the states core keeps into the model
+    void
+    gatherFiringsBefore(const std::vector<ConditionSlot>* before,
+                        std::vector<ConditionFiring>& fired,
+                        const std::function<void(uint32_t, uint64_t*)>& ask);
+    QStringList firingLines(const std::vector<ConditionFiring>& fired,
+                            const std::vector<ConditionSlot>* full,
+                            const std::vector<ConditionSlot>* before) const;
+    void applyConditionStates(ecuio_session_t* session);
     ConditionStore m_conditionStore;
     ConditionModel* m_conditionModel = nullptr;
     int m_failAttaches = 0; // failConditionsAttachesForTesting
+    std::function<void()> m_duringFailedAttach;
     uint32_t m_conditionsGeneration =
         0; // this session's attaches, core's count
     std::vector<ecuio_condition_state_t> m_conditionStates; // the tick's read
@@ -1160,6 +1204,8 @@ private:
     static constexpr uint64_t NoTone = UINT64_MAX;
     AlertTone m_tone;
     std::vector<uint64_t> m_toneAtUs;
+    // The set before's stamps, for a key the set attached dropped
+    std::vector<uint64_t> m_toneBeforeAtUs;
     uint64_t m_toneTimeAddedForTesting = 0;
 
     SignalListModel* m_signalModel = nullptr;

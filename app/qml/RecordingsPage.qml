@@ -651,7 +651,12 @@ Page {
     function readRules(text) {
         try {
             const v = JSON.parse(text)
-            return v !== null && typeof v === "object" && !Array.isArray(v) ? v : ({})
+            if (v === null || typeof v !== "object" || Array.isArray(v))
+                return ({})
+            // A stored end that isn't top speed reads as the lift
+            if (v.pullEnd !== undefined && v.pullEnd !== "top-speed")
+                delete v.pullEnd
+            return v
         } catch (e) {
             return ({})
         }
@@ -1569,6 +1574,14 @@ Page {
         jumpKind = kind
         jumpIndex = i
     }
+    // What the row says for no pull: a recording with neither a throttle nor
+    // an engine-load signal has nothing a pull is judged by, whatever the
+    // levels, and the row says so. A phone's row must stay one line at any
+    // font, so it keeps the plain words and the reason is the label's spoken
+    // name (jumpStatusSpoken)
+    readonly property string noPullWhy: recording.pullsLackSignals
+        ? qsTr("No pull found (no throttle or load signal)") : qsTr("No pull found")
+    readonly property string noPullText: Theme.compact ? qsTr("No pull found") : noPullWhy
     // The Jump row's line: where the last jump went while the cursor is
     // still at its start, else how many of each were found
     readonly property string jumpStatus: {
@@ -1583,11 +1596,13 @@ Page {
                        .arg(jumpIndex + 1).arg(list.length).arg(timeText(at.fromMs, true))
         const pulls = stretchesOf("pull").length
         const cruises = stretchesOf("cruise").length
-        return (pulls === 0 ? qsTr("No pull found")
+        return (pulls === 0 ? noPullText
                             : pulls === 1 ? qsTr("1 pull") : qsTr("%1 pulls").arg(pulls)) + " · "
                + (cruises === 0 ? qsTr("No cruise found")
                                 : cruises === 1 ? qsTr("1 cruise") : qsTr("%1 cruises").arg(cruises))
     }
+    // What a screen reader says for the status: the reason in full
+    readonly property string jumpStatusSpoken: jumpStatus.replace(noPullText, noPullWhy)
     // A recording's pulls as the choices' rows: its number, start and length
     function pullRows(pulls, here) {
         return (pulls || []).map((p, i) =>
@@ -2494,6 +2509,7 @@ Page {
             visible: chartFrame.visible
             Layout.fillWidth: true
             status: root.jumpStatus
+            statusSpoken: root.jumpStatusSpoken
             canPreviousPull: root.previousStretch("pull") >= 0
             canNextPull: root.nextStretch("pull") >= 0
             canPreviousCruise: root.previousStretch("cruise") >= 0

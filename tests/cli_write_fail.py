@@ -69,6 +69,15 @@ def main():
             "conditions-no-profile": lambda n: [
                 "conditions", "check", os.path.join(CONDITIONS, "example.json"),
                 "--profile", "none-such"],
+            "expr": lambda n: [
+                "signals", "expr", "--signals", os.path.join(SIGNALS, "chain.json"),
+                "margin / 2", "--value", "coolant=95", "--value", "oil=110"],
+            "expr-names": lambda n: [
+                "signals", "expr", "--signals", os.path.join(SIGNALS, "chain.json")],
+            "expr-refused": lambda n: [
+                "signals", "expr", "--signals", os.path.join(SIGNALS, "chain.json"),
+                "max(coolant, oli)"],
+            "expr-unread": lambda n: ["signals", "expr", "--signals", missing, "a"],
             "wrap": lambda n: ["plugins", "wrap",
                                os.path.join(SIGNALS, "extras.json"),
                                "--out", os.path.join(tmp, n + ".json")],
@@ -103,6 +112,7 @@ def main():
         # A run into a writable file ends with this exit
         exits = {"layout-refused": 3, "conditions-refused": 3,
                  "conditions-unread": 3, "conditions-no-profile": 3,
+                 "expr-refused": 3, "expr-unread": 3,
                  "wrap-refused": 3, "wrap-unread": 3, "put-unread": 3,
                  "drop-unread": 3, "match-unread": 3, "check-unread": 3,
                  "log-unread": 3, "log-bad-uri": 3, "log-unrecorded": 1,

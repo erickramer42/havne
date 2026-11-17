@@ -187,6 +187,38 @@ ColumnLayout {
         }
     }
 
+    // The desktop's edit mode in the phone form's frame (B1)
+    RowLayout {
+        objectName: "dashPhoneRow"
+        readonly property real touchMin: Theme.touchTarget
+        Layout.fillWidth: true
+        visible: topBar.host.phoneSwitchShown
+        spacing: 8
+        ThemedButton {
+            objectName: "dashPhoneSwitch"
+            compact: topBar.host.phoneForm
+            checkable: true
+            checked: topBar.host.phoneEdit
+            text: qsTr("Phone layout")
+            Accessible.name: qsTr("Edit the phone's layout in a phone-sized frame")
+            Accessible.description: qsTr("Switching drops the undo history")
+            onClicked: topBar.host.setPhoneEdit(!topBar.host.phoneEdit)
+        }
+        Label {
+            objectName: "dashPhoneNote"
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            Layout.preferredWidth: 0
+            wrapMode: Text.WordWrap
+            color: Theme.textDim
+            font.pixelSize: Theme.fontCaption
+            text: topBar.host.phoneEdit
+                  ? qsTr("The phone's layout, %1 px wide. A phone may be narrower or wider: the columns hold either way.")
+                        .arg(topBar.host.phoneFrameWidth)
+                  : qsTr("Edit the phone's layout here, then Export layout writes a file for the phone")
+        }
+    }
+
     // How a gauge is reached, while no panel is open
     Label {
         objectName: "dashEditHint"

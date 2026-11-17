@@ -497,9 +497,15 @@ TEST(ConditionSessionTest, ASetSwappedUnderTheWorkersFramesKeepsItsGenerations)
               ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(s.s), ECUIO_OK);
     uint32_t generation = 0;
-    const auto until =
-        std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (std::chrono::steady_clock::now() < until) {
+    /* Swaps run until the worker has judged enough of them, not for a time
+     * a slow runner can spend with the worker starved; a long bound only
+     * ends a hang */
+    const auto started = std::chrono::steady_clock::now();
+    const auto least = started + std::chrono::seconds(2);
+    const auto bound = started + std::chrono::seconds(60);
+    while (std::chrono::steady_clock::now() < bound &&
+           (std::chrono::steady_clock::now() < least ||
+            watch.events.load() <= 10u)) {
         const uint32_t kind = (generation + 1) % 3;
         ASSERT_EQ(kind == 1 ? attach(s.s, three)
                   : kind == 2

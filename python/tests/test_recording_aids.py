@@ -8,7 +8,8 @@
 # cruise fixture with core's rules, a level of the caller's, a range cut
 # at its edge and a role named; a road log's two pulls, the same ones
 # havne-cli view --stretches lists, with a rise and a gap of the
-# caller's; then the refusals. A cancel over the three searches
+# caller's; a pull onto the limiter ended at the lift and at top speed;
+# then the refusals. A cancel over the three searches
 # (stretches, find_threshold, find_marker): stretches is asked once for
 # each second of a recording about thirty seconds long, the two finds once
 # (core's summaries pass a second by, so a find reads none here); a cancel
@@ -123,10 +124,11 @@ def test_the_pull_is_found_by_engine_speed_without_a_speed_signal():
 def test_a_road_logs_pulls_are_its_two_and_not_its_stab():
     with havne.Recording(TWICE) as r:
         pulls = r.stretches("pulls")
-        # Through an upshift whose lift is 925 ms, then in top gear
+        # Through an upshift whose lift is 925 ms, then in top gear; each
+        # ends at the throttle's lift, its sample 2 ms after speed's
         assert [(s.kind, s.signal, s.from_us, s.to_us, s.start, s.end) for s in pulls] == [
-            ("pull", "Vehicle Speed", 18_002_000, 25_000_000, 70.0, 128.0),
-            ("pull", "Vehicle Speed", 31_002_000, 35_000_000, 140.0, 155.0)]
+            ("pull", "Vehicle Speed", 18_002_000, 25_002_000, 70.0, 128.0),
+            ("pull", "Vehicle Speed", 31_002_000, 35_002_000, 140.0, 155.0)]
         assert all(s.flags == 0 for s in pulls)
 
         # The stab at 12 s climbs 180 rpm in all: a rise of 100 lets it in,
@@ -159,6 +161,44 @@ def test_the_pulls_are_the_ones_havne_cli_lists():
                 "--columns", 1)
     (align,) = [x for x in lines if x["type"] == "align"]
     assert (align["found"], align["host_us"]) == (True, 18_002_000)
+
+
+def limiter_log(tmp_path):
+    """A pull onto the limiter, sampled every 100 ms: full throttle from
+    5 s to 11.9 s, speed 40 to 110 km/h by 10 s, then flat"""
+    rows = ["time (s),Throttle (%),Vehicle Speed (km/h),Engine speed (rpm)"]
+    for n in range(201):
+        ms = n * 100
+        throttle = 95 if 5000 <= ms < 12000 else 10
+        speed = 40 if ms < 5000 else 40 + (ms - 5000) * 0.014 if ms < 10000 else 110
+        if ms >= 12000:
+            speed = 30
+        rows.append(f"{ms / 1000:.1f},{throttle},{speed:g},{1000 + speed * 40:g}")
+    log = tmp_path / "limiter.csv"
+    log.write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\n")
+    folder = tmp_path / "limiter"
+    havne.import_csv(log, folder)
+    return folder
+
+
+def test_a_pull_ends_at_the_lift_unless_top_speed_is_asked(tmp_path):
+    folder = limiter_log(tmp_path)
+    with havne.Recording(folder) as r:
+        (lift,) = r.stretches("pulls")
+        (also,) = r.stretches("pulls", pull_end="lift")
+        (top,) = r.stretches("pulls", pull_end="top-speed")
+        with pytest.raises(ValueError):
+            r.stretches("pulls", pull_end="top")
+    assert lift == also, "the lift is the default"
+    assert (lift.from_us, lift.to_us, lift.start, lift.end) == (5_000_000, 11_900_000, 40.0, 110.0)
+    assert (top.from_us, top.to_us, top.start, top.end) == (5_000_000, 10_000_000, 40.0, 110.0)
+    # havne-cli's --pull-end gives the same two, and says which on its
+    # roles line
+    for word, pull in (("lift", lift), ("top-speed", top)):
+        lines = cli("view", folder, "--stretches", "pulls", "--pull-end", word, "--columns", 1)
+        assert [(x["from_us"], x["to_us"]) for x in lines if x["type"] == "stretch"] == [
+            (pull.from_us, pull.to_us)]
+        assert [x["pull_end"] for x in lines if x["type"] == "roles"] == [word]
 
 
 def test_a_recording_with_no_duration_has_no_stretches(tmp_path):

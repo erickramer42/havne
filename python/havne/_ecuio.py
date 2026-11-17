@@ -185,6 +185,11 @@ ECUIO_ENGINE_START_RPM = 0x1f4
 ECUIO_ENGINE_STOPPED_RPM = 100
 ECUIO_ENUM_LABEL_MAX = 27
 ECUIO_ENUM_MAX_ENTRIES = 0x100
+ECUIO_EVAL_VALUE = 1
+ECUIO_EVAL_WHY_MISSING = 1
+ECUIO_EVAL_WHY_NONE = 0
+ECUIO_EVAL_WHY_NO_NUMBER = 3
+ECUIO_EVAL_WHY_STALE = 2
 ECUIO_EXPORT_CSV = 2
 ECUIO_EXPORT_FOLDER = 1
 ECUIO_EXPORT_LEFT_OUT_ACTIVITY = 3
@@ -195,6 +200,8 @@ ECUIO_EXPORT_LEFT_OUT_UNATTRIBUTABLE = 1
 ECUIO_EXPORT_LEFT_OUT_VIN_SHAPED = 4
 ECUIO_EXPORT_PCAPNG = 3
 ECUIO_EXPORT_RAW = 1
+ECUIO_EXPR_MAX_BYTES = 0x100
+ECUIO_EXPR_REF_LEN = 64
 ECUIO_FOCUS_DEFAULT_PICK = 1
 ECUIO_FOCUS_MIN_SWEEP_MAX_MS = 0xea60
 ECUIO_FRAME_DATA_MAX = 0x1000
@@ -371,6 +378,7 @@ ECUIO_STRETCH_DEFAULT_PULL_LEVEL = 80.0
 ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL = 80.0
 ECUIO_STRETCH_DEFAULT_PULL_RISE = 750.0
 ECUIO_STRETCH_PULLS = 1
+ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED = 1
 ECUIO_SUPPORT_COMPLETE = 2
 ECUIO_SUPPORT_EXTENDED = 32
 ECUIO_SUPPORT_MAX_DROPPED = 8
@@ -543,6 +551,12 @@ class ecuio_dtc_list_t(Structure):
 class ecuio_enum_entry_t(Structure):
     pass
 
+class ecuio_eval_input_t(Structure):
+    pass
+
+class ecuio_eval_result_t(Structure):
+    pass
+
 class ecuio_export_estimate_t(Structure):
     pass
 
@@ -550,6 +564,9 @@ class ecuio_export_options_t(Structure):
     pass
 
 class ecuio_export_report_t(Structure):
+    pass
+
+class ecuio_expr_check_t(Structure):
     pass
 
 class ecuio_frame_t(Structure):
@@ -958,6 +975,23 @@ ecuio_enum_entry_t._fields_ = [
     ('raw', c_uint32),
     ('label', (c_char * 28)),
 ]
+ecuio_eval_input_t._fields_ = [
+    ('value', c_double),
+    ('age_us', c_uint64),
+    ('def_id', c_uint16),
+    ('reserved0', c_uint16),
+    ('flags', c_uint32),
+]
+ecuio_eval_result_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('value', c_double),
+    ('why', c_uint32),
+    ('leaf', c_uint16),
+    ('reserved0', c_uint16),
+    ('bound_us', c_uint64),
+    ('reserved', (c_uint32 * 4)),
+]
 ecuio_export_estimate_t._fields_ = [
     ('rows', c_uint64),
     ('bytes', c_uint64),
@@ -990,6 +1024,15 @@ ecuio_export_report_t._fields_ = [
     ('files', c_uint32),
     ('files_left_out', c_uint32),
     ('rows', c_uint64),
+]
+ecuio_expr_check_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('flags', c_uint32),
+    ('at', c_uint32),
+    ('format', c_uint32),
+    ('depth', c_uint32),
+    ('reserved', (c_uint32 * 5)),
+    ('program', ecuio_computed_t),
 ]
 ecuio_frame_t._fields_ = [
     ('timestamp_us', c_uint64),
@@ -1610,7 +1653,11 @@ FUNCTIONS = {
     'ecuio_session_signal_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_session_t)]),  # profile.h
     'ecuio_session_start': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_shutdown': (None, []),  # core.h
+    'ecuio_signal_file_check_expr': (c_int, [POINTER(ecuio_signal_file_t), c_char_p, c_char_p, c_size_t, POINTER(ecuio_expr_check_t)]),  # signals.h
+    'ecuio_signal_file_evaluate': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_computed_t), POINTER(ecuio_eval_input_t), c_uint32, POINTER(ecuio_eval_result_t)]),  # signals.h
     'ecuio_signal_file_expr': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
+    'ecuio_signal_file_expr_leaves': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_computed_t), POINTER(c_uint16), c_uint32, POINTER(c_uint32)]),  # signals.h
+    'ecuio_signal_file_expr_ref': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t), c_char_p, c_size_t]),  # signals.h
     'ecuio_signal_file_extends': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_find': (POINTER(ecuio_signal_def_t), [POINTER(ecuio_signal_file_t), c_char_p]),  # signals.h
     'ecuio_signal_file_format': (c_uint32, [POINTER(ecuio_signal_file_t)]),  # signals.h
