@@ -66,8 +66,10 @@ class instance;
  * ECUIO_ERR_LOAD_FAILED with why (REFUSAL_MAX bytes) saying what the
  * check or the runtime refused; ECUIO_ERR_OUT_OF_MEMORY when its making
  * passed INSTANCE_BYTES_MAX or the runtime RUNTIME_BYTES_MAX, or the
- * process had none. Nothing is thrown. Any thread, one maker at a time
- * inside. */
+ * process had none; ECUIO_ERR_INVALID_ARGUMENT for a wanted type a call
+ * can't carry (i32 parameters, at most ARGS_MAX, and no result or one
+ * i32), whatever the module. Nothing is thrown. Any thread, one maker at
+ * a time inside. */
 ecuio_status_t make_instance(const uint8_t* bytes, size_t n,
                              const wanted_export* wants, size_t want_count,
                              instance** out, char* why) noexcept;

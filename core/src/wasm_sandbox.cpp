@@ -38,6 +38,12 @@ thread_local bool t_refused = false;
  * heap used before would show the guest the host's bytes. */
 void* take(mem_alloc_usage_t usage, unsigned int n)
 {
+    /* Judged before the head is added: on a 32-bit core the sum wraps, and
+     * WAMR's loader asks for nearly 4 GiB for a function that declares it */
+    if (n > RUNTIME_BYTES_MAX) {
+        t_refused = true;
+        return nullptr;
+    }
     const size_t total = static_cast<size_t>(n) + kHead;
     if (t_scoped && total > t_scope_left) {
         t_refused = true;
@@ -198,6 +204,23 @@ void unmake(instance* i)
     delete i;
 }
 
+/* Whether a call can carry a wanted type: i32 parameters, at most
+ * ARGS_MAX, and no result or one i32. The runtime writes a call's
+ * results over its argument cells, as many as the type has. */
+bool callable(const char* type)
+{
+    const char* colon = type != nullptr ? std::strchr(type, ':') : nullptr;
+    if (colon == nullptr || static_cast<size_t>(colon - type) > ARGS_MAX) {
+        return false;
+    }
+    for (const char* p = type; p != colon; ++p) {
+        if (*p != 'i') {
+            return false;
+        }
+    }
+    return colon[1] == '\0' || (colon[1] == 'i' && colon[2] == '\0');
+}
+
 /* The wanted exports as the runtime's functions, with each one's
  * argument count and whether it returns a value */
 bool find_exports(instance* i, const wanted_export* wants, size_t want_count)
@@ -205,8 +228,7 @@ bool find_exports(instance* i, const wanted_export* wants, size_t want_count)
     for (size_t k = 0; k < want_count; ++k) {
         i->funcs[k] = wasm_runtime_lookup_function(i->inst, wants[k].name);
         const char* colon = std::strchr(wants[k].type, ':');
-        if (i->funcs[k] == nullptr || colon == nullptr ||
-            static_cast<size_t>(colon - wants[k].type) > ARGS_MAX) {
+        if (i->funcs[k] == nullptr) {
             return false;
         }
         i->params[k] = static_cast<uint8_t>(colon - wants[k].type);
@@ -270,6 +292,14 @@ ecuio_status_t make_instance(const uint8_t* bytes, size_t n,
     }
     *out = nullptr;
     why[0] = '\0';
+    for (size_t k = 0; wants != nullptr && k < want_count && k < WANTED_MAX;
+         ++k) {
+        if (!callable(wants[k].type)) {
+            std::snprintf(why, REFUSAL_MAX,
+                          "wanted export %zu has a type a call can't carry", k);
+            return ECUIO_ERR_INVALID_ARGUMENT;
+        }
+    }
     const check_result checked = check_module(bytes, n, wants, want_count);
     if (!checked.ok) {
         std::snprintf(why, REFUSAL_MAX, "%s", checked.why);

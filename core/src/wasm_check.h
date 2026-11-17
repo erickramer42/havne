@@ -11,7 +11,9 @@
 // - one memory of a stated, fixed size (its maximum equal to its
 //   minimum, at most MEMORY_MAX_PAGES), so the worker that calls the
 //   module never allocates and the cap is the module's own number;
-// - each export the caller wants, a function of the type it wants.
+// - each export the caller wants, once, a function of the type it wants;
+// - nothing that makes the runtime's own load slow: at most TYPES_MAX
+//   function types (it compares each with every one before it).
 //
 // Every section is judged wherever it stands and however often, so a
 // repeated or misplaced one hides nothing from this check whatever the
@@ -33,6 +35,7 @@ constexpr size_t MODULE_MAX_BYTES = 1u << 20; /* ADR-0066 section 2.8 */
 constexpr uint32_t MEMORY_MAX_PAGES = 16;     /* of 64 KiB: 1 MiB */
 constexpr size_t REFUSAL_MAX = 160; /* a refusal's words, NUL included */
 constexpr size_t WANTED_MAX = 32;   /* exports a caller may ask for */
+constexpr uint32_t TYPES_MAX = 1024; /* function types a module may state */
 
 /* An export the module must have: a function whose parameters, then ':',
  * then results are each 'i' (i32), 'I' (i64), 'f' (f32) or 'F' (f64):
@@ -232,7 +235,8 @@ inline bool type_of_function(cursor funcs, uint32_t index, uint32_t* type)
     if (funcs.bad || index >= count) {
         return false;
     }
-    for (uint32_t i = 0; i < index; ++i) {
+    /* Stopped where the section ends: count is the module's own claim */
+    for (uint32_t i = 0; i < index && !funcs.bad; ++i) {
         funcs.u32();
     }
     *type = funcs.u32();
@@ -329,13 +333,21 @@ inline void type_words(const char* want, char* out, size_t cap)
 constexpr const char* RESERVED_EXPORTS[] = {"__post_instantiate",
                                             "__wasm_call_ctors", "_initialize"};
 
-/* One export: refused when its name is reserved, or when it is a wanted
- * one of another kind or type; found[i] set for wanted export i */
+/* One export: refused when its name holds a NUL or is reserved, or when
+ * it is a wanted one of another kind or type, or a second of its name;
+ * found[i] set for wanted export i */
 inline check_result judge_export(const cursor& name, uint8_t kind,
                                  uint32_t index, const shape& s,
                                  const wanted_export* wants, size_t want_count,
                                  bool* found)
 {
+    /* The runtime finds an export by its name as a C string, so one
+     * holding a NUL could pass for the name before it */
+    if (name.at != name.end &&
+        std::memchr(name.at, 0, static_cast<size_t>(name.end - name.at)) !=
+            nullptr) {
+        return refused("the module exports a name that holds a NUL");
+    }
     for (const char* reserved : RESERVED_EXPORTS) {
         if (name_is(name, reserved)) {
             return refused(
@@ -347,6 +359,9 @@ inline check_result judge_export(const cursor& name, uint8_t kind,
     for (size_t i = 0; i < want_count; ++i) {
         if (!name_is(name, wants[i].name)) {
             continue;
+        }
+        if (found[i]) {
+            return refused("the module exports %s twice", wants[i].name);
         }
         char words[64];
         type_words(wants[i].type, words, sizeof words);
@@ -407,8 +422,19 @@ inline check_result judge_section(uint8_t id, const cursor& body, shape& s)
         return passed();
     };
     switch (id) {
-    case 1:
+    case 1: {
+        cursor head = body;
+        const uint32_t count = head.u32();
+        if (head.bad) {
+            return cut_short();
+        }
+        if (count > TYPES_MAX) {
+            return refused("the module states %u function types: %u are "
+                           "the most",
+                           count, TYPES_MAX);
+        }
         return keep(s.types, s.has_types, "type");
+    }
     case 2:
         return judge_imports(body);
     case 3:

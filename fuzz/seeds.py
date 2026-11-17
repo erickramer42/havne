@@ -663,6 +663,10 @@ def wasm_seeds():
         "refused-initialize": wasm_module(five + [("_initialize", "", "", spin)]),
         "refused-kind": wasm_module(five, tail=wasm_section(12, b"\x00")),
         "refused-two-exports": wasm_module(five, tail=wasm_section(7, b"\x00")),
+        "refused-nul-name": wasm_module(five + [("b\x00c", "", "", b"")]),
+        "refused-twice": wasm_module(five + [("b", "", "i", const(7))]),
+        "refused-types": wasm_module(five[:1], tail=wasm_section(
+            1, leb(1025) + b"\x60\x00\x00" * 1025)),
         # What only the runtime refuses: an add with nothing to add
         "invalid-code": wasm_module([("b", "", "i", add)]),
     }

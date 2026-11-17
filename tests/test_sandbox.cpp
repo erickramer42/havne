@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -234,6 +235,86 @@ TEST(WasmCheckTest, AModuleCutAnywhereIsJudgedWithinItsBytes)
     EXPECT_EQ(passed, 1u)
         << "the cut before the code section, which the check never reads";
     EXPECT_EQ(refusal(whole), "");
+}
+
+/* The runtime looks an export up by its name as a C string, so a name
+ * with a NUL in it could pass for the name before the NUL */
+TEST(WasmCheckTest, AnExportNameHoldingANulIsRefused)
+{
+    for (const std::string& text :
+         {std::string("__post_instantiate\0x", 20), std::string("add\0", 4),
+          std::string("\0", 1)}) {
+        module m = good();
+        m.funcs.push_back(store_func(text, 7));
+        EXPECT_EQ(refusal(m), "the module exports a name that holds a NUL");
+    }
+}
+
+TEST(WasmCheckTest, AWantedExportIsExportedOnce)
+{
+    module twice = good();
+    twice.funcs.push_back(add_func("add"));
+    EXPECT_EQ(refusal(twice), "the module exports add twice");
+
+    module other = good();
+    other.funcs.push_back(add_func("sum"));
+    other.funcs.push_back(add_func("sum"));
+    EXPECT_EQ(refusal(other), "")
+        << "an unwanted name is the runtime's to judge";
+}
+
+/* The runtime compares each function type with every one before it */
+TEST(WasmCheckTest, TheFunctionTypesAreCounted)
+{
+    auto types = [](uint32_t count) {
+        bytes code = {0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00};
+        bytes content;
+        leb(content, count);
+        for (uint32_t k = 0; k < count; ++k) {
+            content.insert(content.end(), {0x60, 0x00, 0x00});
+        }
+        section(code, 1, content);
+        return code;
+    };
+    EXPECT_EQ(refusal(types(ecuio_wasm::TYPES_MAX + 1)),
+              "the module states 1025 function types: 1024 are the most");
+    EXPECT_EQ(refusal(types(ecuio_wasm::TYPES_MAX)),
+              "the module has 0 memories: it needs exactly one")
+        << "the cap itself is allowed";
+
+    bytes claimed = {0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00};
+    bytes count_only;
+    leb(count_only, 0xFFFFFFFFu);
+    section(claimed, 1, count_only);
+    EXPECT_EQ(refusal(claimed),
+              "the module states 4294967295 function types: 1024 are the "
+              "most")
+        << "the count is the module's claim, judged before any type";
+}
+
+/* A count is the module's own claim: a function section that claims 2^32
+ * entries and holds none is walked to its end, not to the claim */
+TEST(WasmCheckTest, ACountPastItsSectionCostsNoMoreThanTheSection)
+{
+    bytes code = {0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00};
+    section(code, 1, {0x01, 0x60, 0x02, I32, I32, 0x01, I32});
+    bytes claim;
+    leb(claim, 0xFFFFFFFFu);
+    section(code, 3, claim);
+    section(code, 5, {0x01, 0x01, 0x01, 0x01});
+    bytes exports = {0x01};
+    name(exports, "add");
+    exports.push_back(0x00);
+    leb(exports, 0xFFFFFFFEu);
+    section(code, 7, exports);
+
+    const auto began = std::chrono::steady_clock::now();
+    const std::string why = refusal(code);
+    const auto took = std::chrono::steady_clock::now() - began;
+    EXPECT_EQ(why, "the module's export add isn't a function of type "
+                   "(i32, i32) -> i32");
+    EXPECT_LT(took, std::chrono::seconds(1))
+        << "walking to the claimed index is over four thousand million steps";
 }
 
 /* ---- The sandbox ---- */
@@ -602,6 +683,68 @@ TEST(SandboxTest, AModuleTooCostlyToMakeIsOutOfMemory)
     EXPECT_EQ(ecuio_wasm::runtime_bytes_in_use(), before);
 }
 
+/* A function may declare nearly 2^32 locals, and the runtime asks for a
+ * block that large: refused whole, on a core whose sizes are 32 bits too,
+ * where the block's size plus its head wraps to a few bytes. Which count
+ * lands on the wrap depends on the runtime's own record, so each of the
+ * last 1,024 is tried. */
+TEST(SandboxTest, AFunctionDeclaringFourGibOfLocalsIsOutOfMemory)
+{
+    warm();
+    const size_t before = ecuio_wasm::runtime_bytes_in_use();
+    size_t starved = 0;
+    for (uint32_t locals = 0xFFFFFC00u; locals != 0; ++locals) {
+        module m = good();
+        m.funcs[0].i32_locals = locals;
+        const bytes code = m.build();
+        ASSERT_EQ(refusal(code), "") << "the check never reads a function";
+        Made refused(m, kAdd, 1);
+        ASSERT_EQ(refused.i, nullptr) << locals;
+        ASSERT_TRUE(refused.status == ECUIO_ERR_OUT_OF_MEMORY ||
+                    refused.status == ECUIO_ERR_LOAD_FAILED)
+            << locals << ": " << refused.status;
+        starved += refused.status == ECUIO_ERR_OUT_OF_MEMORY ? 1 : 0;
+    }
+    EXPECT_GE(starved, 512u) << "most reach the allocator, which refuses";
+    EXPECT_EQ(ecuio_wasm::runtime_bytes_in_use(), before);
+}
+
+/* The runtime writes a call's results over its argument cells, as many as
+ * the export's type has, so a want is held to what a call carries */
+TEST(SandboxTest, AWantedTypeACallCantCarryIsRefused)
+{
+    warm();
+    const uint64_t before = ecuio_wasm::runtime_allocations();
+    for (const char* type :
+         {":ii", ":I", "I:", "f:", "ii:F", "iiiii:", "ii", ":iiiii", "iI:i"}) {
+        const wanted_export wants[] = {{"add", type}};
+        Made refused(good(), wants, 1);
+        EXPECT_EQ(refused.status, ECUIO_ERR_INVALID_ARGUMENT) << type;
+        EXPECT_EQ(refused.i, nullptr) << type;
+        EXPECT_STREQ(refused.why,
+                     "wanted export 0 has a type a call can't carry")
+            << type;
+    }
+    const wanted_export second[] = {{"add", "ii:i"}, {"add", ":ii"}};
+    Made refused(good(), second, 2);
+    EXPECT_EQ(refused.status, ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_STREQ(refused.why, "wanted export 1 has a type a call can't carry");
+    EXPECT_EQ(ecuio_wasm::runtime_allocations(), before)
+        << "judged before the module";
+
+    module four = good();
+    func wide;
+    wide.params = {I32, I32, I32, I32};
+    wide.results = {I32};
+    wide.body = {LOCAL_GET, 3};
+    wide.exported = "last";
+    four.funcs.push_back(wide);
+    const wanted_export most[] = {{"last", "iiii:i"}};
+    Made made(four, most, 1);
+    ASSERT_EQ(made.status, ECUIO_OK) << made.why;
+    EXPECT_EQ(made.call(0, {1, 2, 3, 4}).value, 4u) << "ARGS_MAX is allowed";
+}
+
 /* Two ECUs of one plugin are two instances of the same bytes: what ends
  * one leaves the other as it was */
 TEST(SandboxTest, ADeadInstanceLeavesAnotherOfItsModuleAnswering)
@@ -654,23 +797,26 @@ TEST(SandboxTest, AnExportedMallocAndFreeAreNeverRun)
 
 /* The runtime writes its warnings to standard output. None reaches it:
  * a front end's output is its own (havne-cli's is lines of JSON). The
- * first module's export has a NUL in its name, which the runtime warns
- * of and refuses. */
+ * first module has a custom section with a NUL in its name: the check
+ * reads no custom section, and the runtime warns of the name and
+ * refuses it. */
 TEST(SandboxTest, NothingAModuleDoesPrints)
 {
     warm();
     module named = good();
-    named.funcs.push_back(plain_func(std::string("a\0b", 3), {I32_CONST, 1}));
+    named.tail = raw_section(0, {0x03, 'a', 0x00, 'b'});
     const module too_costly = costly();
 
     testing::internal::CaptureStdout();
     testing::internal::CaptureStderr();
     ecuio_status_t named_status = ECUIO_OK;
+    std::string named_why;
     ecuio_status_t costly_status = ECUIO_OK;
     call_end ends[4] = {};
     {
         Made refused(named, kAdd, 1);
         named_status = refused.status;
+        named_why = refused.why;
         Made starved(too_costly, kAdd, 1);
         costly_status = starved.status;
         size_t n = 0;
@@ -684,8 +830,9 @@ TEST(SandboxTest, NothingAModuleDoesPrints)
 
     EXPECT_EQ(out, "");
     EXPECT_EQ(err, "");
-    EXPECT_EQ(named_status, ECUIO_ERR_LOAD_FAILED)
-        << "the runtime refuses the name";
+    EXPECT_EQ(named_status, ECUIO_ERR_LOAD_FAILED);
+    EXPECT_EQ(named_why.rfind("the runtime refused the module: ", 0), 0u)
+        << "the runtime, not the check, met the name: " << named_why;
     EXPECT_EQ(costly_status, ECUIO_ERR_OUT_OF_MEMORY);
     EXPECT_EQ(ends[0], call_end::budget);
     EXPECT_EQ(ends[1], call_end::trapped);
