@@ -303,11 +303,14 @@ read_outcome pump_one(ecuio_j2534_transport* t, uint32_t timeout_ms)
  * thing: it had nothing; the VX answers every empty read
  * ERR_BUFFER_EMPTY, which the read paths map to an empty ECUIO_OK), or
  * a frame for another ID. */
+bool hard_read(const read_outcome& o)
+{
+    return o.status != ECUIO_OK && o.status != ECUIO_ERR_VEHICLE_TIMEOUT;
+}
+
 void update_health(link_health& h, const read_outcome& o, bool reads_count)
 {
-    const bool hard =
-        o.status != ECUIO_OK && o.status != ECUIO_ERR_VEHICLE_TIMEOUT;
-    link_on_read(h, hard, o.got && o.matched, reads_count);
+    link_on_read(h, hard_read(o), o.got && o.matched, reads_count);
 }
 
 /* Writes a request to its channel's tx ID: [4-byte tx ID][service][key],
@@ -583,7 +586,7 @@ void j2534_worker(ecuio_j2534_transport* t)
             }
             const bool unpicked = !asking && ecuio_engine_unpicked(&e);
             update_health(h, o, !asking && !unpicked);
-            if (unpicked) {
+            if (unpicked && !hard_read(o)) {
                 link_on_unpicked(h);
             }
         }

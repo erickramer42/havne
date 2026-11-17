@@ -170,22 +170,6 @@ inline void link_count_quiet(link_health& h)
     }
 }
 
-/* An idle pass of a session that asks only its picks, with nothing
- * picked (ecuio_engine_unpicked): nothing is asked, so no read is a
- * quiet one, and a VEHICLE_TIMEOUT that quiet reads alone made (picks
- * all dropped, since taken away) ends. One a request's wait ran out for
- * stays until a reply: the walk, identification and diagnostics ask on
- * such a session too, and OK here would have the worker ask them again
- * and time out again, for as long as the ECU is silent. A hard failure
- * or failing writes are the adapter's, and stay. */
-inline void link_on_unpicked(link_health& h)
-{
-    h.quiet_runs = 0;
-    if (h.state == ECUIO_ERR_VEHICLE_TIMEOUT && !h.unanswered) {
-        link_set_state(h, ECUIO_OK);
-    }
-}
-
 /* Read-side link health. A read is a hard failure (the adapter or the
  * connection to it failed), a matched reply (a frame from an ECU we talk
  * to), or anything else (empty, or a frame for no channel of ours).
@@ -220,6 +204,9 @@ inline void link_on_read(link_health& h, bool hard_failure, bool matched,
         return;
     }
 
+    if (matched) {
+        h.unanswered = false; /* whatever the writes' latch says below */
+    }
     if (h.write_failed) {
         if (h.state == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
             link_set_state(h, ECUIO_ERR_REQUEST_FAILED);
@@ -231,7 +218,6 @@ inline void link_on_read(link_health& h, bool hard_failure, bool matched,
         link_set_state(h, ECUIO_OK);
         h.backoff_ms = 0;
         h.quiet_runs = 0;
-        h.unanswered = false;
         return;
     }
 
@@ -241,6 +227,27 @@ inline void link_on_read(link_health& h, bool hard_failure, bool matched,
     h.backoff_ms = 0;
     if (reads_count) {
         link_count_quiet(h);
+    }
+}
+
+/* An idle pass of a session that asks only its picks, with nothing
+ * picked (ecuio_engine_unpicked): a clean read that counts no quiet,
+ * since nothing is asked. A timeout stays while a request went
+ * unanswered since the last reply, and ends otherwise (quiet reads
+ * alone made it). A hard failure steps down the same way after a quiet
+ * run's clean passes. Never OK while requests went unanswered: the
+ * worker would ask them all again and the link would flap. */
+inline void link_on_unpicked(link_health& h)
+{
+    link_on_read(h, false, false, false);
+    if (h.state == ECUIO_ERR_TRANSPORT_HARD_FAILURE &&
+        ++h.quiet_runs < LINK_HEALTH_QUIET_RUN) {
+        return; /* the adapter's clean reads, counted in the run's place */
+    }
+    h.quiet_runs = 0;
+    if (h.state == ECUIO_ERR_VEHICLE_TIMEOUT ||
+        h.state == ECUIO_ERR_TRANSPORT_HARD_FAILURE) {
+        link_set_state(h, h.unanswered ? ECUIO_ERR_VEHICLE_TIMEOUT : ECUIO_OK);
     }
 }
 

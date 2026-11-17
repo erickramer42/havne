@@ -7285,12 +7285,6 @@ TEST(CoreTest, LinkAnUnpickedPassCountsNoQuietAndEndsOnlyAQuietReadsTimeout)
     EXPECT_EQ(published.load(), ECUIO_OK);
     EXPECT_EQ(episodes.load(), 0u);
 
-    link_on_read(h, true, false, false);
-    ASSERT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
-    link_on_unpicked(h);
-    EXPECT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
-    EXPECT_EQ(episodes.load(), 1u);
-
     std::atomic<int32_t> published2{ECUIO_OK};
     std::atomic<uint32_t> episodes2{0};
     link_health w(published2, episodes2);
@@ -7300,8 +7294,106 @@ TEST(CoreTest, LinkAnUnpickedPassCountsNoQuietAndEndsOnlyAQuietReadsTimeout)
         link_on_request_timeout(w);
     }
     EXPECT_FALSE(w.unanswered) << "the state is the writes'";
-    link_on_unpicked(w);
-    EXPECT_EQ(published2.load(), ECUIO_ERR_REQUEST_FAILED);
+    for (uint32_t i = 0; i < 3 * LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_unpicked(w);
+    }
+    EXPECT_EQ(published2.load(), ECUIO_ERR_REQUEST_FAILED)
+        << "only a sent write ends it";
+    EXPECT_EQ(w.backoff_ms, LINK_BACKOFF_BASE_MS)
+        << "the backoff is the writes'";
+}
+
+/* An unpicked pass is a clean read. A hard failure ends once a quiet
+ * run's worth of them came in a row, as any session's does after its
+ * adapter is back: to OK when nothing went unanswered since the last
+ * reply, to a timeout when something did. A hard read between them
+ * starts the count over in the same episode, and under failing writes
+ * the first steps down to the writes' state. */
+TEST(CoreTest, LinkAnUnpickedPassEndsAHardFailureOnceTheAdapterReads)
+{
+    std::atomic<int32_t> published{ECUIO_OK};
+    std::atomic<uint32_t> episodes{0};
+    link_health h(published, episodes);
+
+    link_on_read(h, true, false, false);
+    ASSERT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    EXPECT_EQ(h.backoff_ms, LINK_BACKOFF_BASE_MS);
+    link_on_unpicked(h);
+    EXPECT_EQ(h.backoff_ms, 0u) << "the adapter read";
+    for (uint32_t i = 1; i + 1 < LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_unpicked(h);
+        ASSERT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE)
+            << "pass " << i + 1;
+    }
+    /* A hard read: the count starts over, the episode stands */
+    link_on_read(h, true, false, false);
+    for (uint32_t i = 0; i + 1 < LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_unpicked(h);
+        ASSERT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE)
+            << "pass " << i + 1 << " after the hard read";
+    }
+    h.recovered = false;
+    link_on_unpicked(h);
+    EXPECT_EQ(published.load(), ECUIO_OK) << "nothing had gone unanswered";
+    EXPECT_TRUE(h.recovered) << "the walk and the rescan follow";
+    EXPECT_EQ(episodes.load(), 1u);
+
+    /* The same with a request unanswered before the adapter failed */
+    link_on_request_timeout(h);
+    link_on_read(h, true, false, false);
+    ASSERT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    h.recovered = false;
+    for (uint32_t i = 0; i < LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_unpicked(h);
+    }
+    EXPECT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+    EXPECT_FALSE(h.recovered);
+    EXPECT_EQ(episodes.load(), 2u);
+    for (uint32_t i = 0; i < 3 * LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_unpicked(h);
+    }
+    EXPECT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT) << "until a reply";
+    link_on_read(h, false, true, false);
+    EXPECT_EQ(published.load(), ECUIO_OK);
+
+    /* Writes failing under the hard failure: the adapter reads, so the
+     * state is the writes', at the first clean pass */
+    link_on_read(h, true, false, false);
+    link_on_write(h, false);
+    ASSERT_EQ(published.load(), ECUIO_ERR_TRANSPORT_HARD_FAILURE);
+    link_on_unpicked(h);
+    EXPECT_EQ(published.load(), ECUIO_ERR_REQUEST_FAILED);
+    EXPECT_EQ(episodes.load(), 3u) << "no new episode for the step down";
+    link_on_write(h, true);
+    EXPECT_EQ(published.load(), ECUIO_OK);
+}
+
+/* A reply while the write latch is set changes no state, but it is a
+ * reply: what timed out before it no longer stands behind a timeout */
+TEST(CoreTest, LinkAReplyUnderTheWriteLatchStillAnswers)
+{
+    std::atomic<int32_t> published{ECUIO_OK};
+    std::atomic<uint32_t> episodes{0};
+    link_health h(published, episodes);
+
+    link_on_request_timeout(h);
+    ASSERT_TRUE(h.unanswered);
+    link_on_write(h, false);
+    ASSERT_EQ(published.load(), ECUIO_ERR_REQUEST_FAILED);
+    link_on_read(h, false, true, false);
+    EXPECT_EQ(published.load(), ECUIO_ERR_REQUEST_FAILED)
+        << "the latch is the writes'";
+    EXPECT_FALSE(h.unanswered);
+    link_on_write(h, true);
+    ASSERT_EQ(published.load(), ECUIO_OK);
+
+    /* So a timeout quiet reads alone then make ends with the picks */
+    for (uint32_t i = 0; i < LINK_HEALTH_QUIET_RUN; ++i) {
+        link_on_read(h, false, false, true);
+    }
+    ASSERT_EQ(published.load(), ECUIO_ERR_VEHICLE_TIMEOUT);
+    link_on_unpicked(h);
+    EXPECT_EQ(published.load(), ECUIO_OK);
 }
 
 /* A failed write latches REQUESTS_FAILED as one episode with a backoff.
