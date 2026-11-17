@@ -13,7 +13,7 @@
 #ifndef ECUIO_TESTS_VCAN_BUS_H
 #define ECUIO_TESTS_VCAN_BUS_H
 
-#include "fake_ecu.h"
+#include "fake_ecus.h"
 
 #include <linux/can.h>
 #include <linux/can/isotp.h>
