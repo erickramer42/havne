@@ -4557,9 +4557,14 @@ TestCase {
         const page = pageOf({}, docOf([cellOf("A")]))
         page.startEditing()
         openPresetList(page)
+        // Through the picker seam: a real FileDialog would stay open and
+        // take the window's focus from every later case
+        const dialog = find(page, "layoutOpenDialog")
+        dialog.usePicker = true
+        DocumentPicker.setPickerForTesting(true)
         click(page, "preset_file")
         verify(page.fileAdds, "the file's pages are what the pick adds")
-        find(page, "layoutOpenDialog").rejected()
+        DocumentPicker.deliver(dialog.request, 0, "", "")
         verify(!page.fileAdds, "a cancel forgets it")
     }
 

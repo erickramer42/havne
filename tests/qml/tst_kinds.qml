@@ -774,6 +774,24 @@ TestCase {
         verify(!find(g, "scaleMarks").visible, "left out")
     }
 
+    // The scale's numbers never run into each other: a short flat bar
+    // drops alternate interior ones and keeps both ends
+    function test_aShortBarThinsItsScaleNumbers() {
+        const marks = (g) => find(g, "scaleMarks").children.filter(c => c.text !== undefined && c.visible)
+        const wide = make(barC, { width: 400, to: 8000, scaleMarks: [0, 2000, 4000, 6000, 8000] })
+        waitForRendering(wide)
+        compare(marks(wide).length, 5, "room enough: every number")
+        const narrow = make(barC, { width: 110, to: 8000, scaleMarks: [0, 2000, 4000, 6000, 8000] })
+        waitForRendering(narrow)
+        const texts = marks(narrow).map(c => c.text)
+        verify(texts.length < 5 && texts.length >= 2, "thinned: " + texts)
+        compare(texts[0], Number(0).toLocaleString(Qt.locale(), 'f', 0), "the low end stays")
+        compare(texts[texts.length - 1], Number(8000).toLocaleString(Qt.locale(), 'f', 0), "the high end stays")
+        const m = marks(narrow)
+        for (let i = 1; i < m.length; ++i)
+            verify(m[i].x >= m[i - 1].x + m[i - 1].width, "no overlap: " + texts)
+    }
+
     function test_thePeakShowsOnTheBarAndTheRing_data() {
         return [{ tag: "bar", c: barC }, { tag: "ring", c: ringC }]
     }
