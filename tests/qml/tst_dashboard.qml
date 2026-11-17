@@ -1102,6 +1102,28 @@ TestCase {
         tryVerify(() => !tach.stale && !tach.hasValue, 5000, "no session, no value")
     }
 
+    // A row the recording never holds reads "not in this recording" once
+    // the replay's last frame has played
+    function test_aRowTheRecordingNeverHoldsSaysSoAtTheReplaysEnd() {
+        const r = Bridge.importSignalText(JSON.stringify({
+            havne_signals: 1, name: "Never recorded", source: { name: "t" }, extends: "obd2",
+            ecus: [{ id: "pcm", rx: "7E8" }],
+            signals: [{ key: "never", name: "Never", read: { service: "22", number: "F1FE" },
+                        field: { byte: 0, bits: 8 } }]
+        }))
+        verify(r.ok, r.words)
+        Bridge.useSignalFiles([r.sha256])
+        const page = pageOf({}, docOf([{ kind: "digital", w: 2, h: 4, label: "Never", refs: ["key:never"] }]), true)
+        const never = gaugeOf(findChild(page, "dashCell_0_0"))
+        compare(never.note, "no session")
+        connect("replay://" + Harness.replayFixtures
+                + "/2026-10-25-engine-start?profile=" + r.profile + "&speed=max")
+        tryCompare(Bridge, "replayFinished", true, 10000)
+        tryCompare(never, "note", "not in this recording", 5000)
+        Bridge.disconnectSession()
+        tryCompare(Bridge, "replayFinished", false, 5000)
+    }
+
     // The ECU's own answers: a PID its bitmaps leave out, and a DID it
     // refuses (the fake ECU, through the fake J2534 DLL)
     function test_theEcusAnswersAreTheNotes() {

@@ -114,6 +114,10 @@ class SessionBridge : public QObject
     // recorder slot Record sessions uses (recordingActive holds while it
     // runs): one recorder a session.
     Q_PROPERTY(bool logActive READ logActive NOTIFY logStateChanged)
+    // A replay without loop has played its last frame and its values have
+    // reached the model: a row with no value by then is one the
+    // recording doesn't hold ("not in this recording"), not one to wait for
+    Q_PROPERTY(bool replayFinished READ replayFinished NOTIFY replayFinishedChanged)
     // The log's time so far and its folder's size in bytes, counted once
     // a second; the last log's once it ends
     Q_PROPERTY(qint64 logElapsedMs READ logElapsedMs NOTIFY logProgressChanged)
@@ -688,6 +692,7 @@ public:
     // with no recording, or one core refused it (a write failed).
     Q_INVOKABLE bool mark(const QString& label = QString());
     bool logActive() const { return m_logActive; }
+    bool replayFinished() const { return m_replayFinished; }
     qint64 logElapsedMs() const;
     qint64 logBytes() const { return m_logBytes; }
     QString logNotice() const { return m_logNotice; }
@@ -915,6 +920,7 @@ signals:
     void vehicleIdentified();
     void vehicleLabelChanged();
     void linkStateChanged();
+    void replayFinishedChanged();
     void logPausedChanged();
     void recordingChanged();
     void recordingStateChanged();
@@ -1070,6 +1076,10 @@ private:
     // A replay without loop: its frames, and whether its end is logged
     uint32_t m_replayFrames = 0;
     bool m_replayEndLogged = true;
+    // The tick after the end is seen: pollReplayEnd runs after flushValues,
+    // so the last frames' values, queued behind their frames, are in by then
+    bool m_replaySettling = false;
+    bool m_replayFinished = false;
     // The machine's slept count at the last tick (ADR-0033 section 6), and the
     // test seam's addition to it
     uint64_t m_sleptUs = 0;

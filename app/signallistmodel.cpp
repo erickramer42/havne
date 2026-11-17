@@ -145,6 +145,16 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {UnaskedRole, "unasked"}};
 }
 
+bool SignalListModel::anyValue() const
+{
+    for (const Entry& e : m_entries) {
+        if (e.histCount > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool SignalListModel::isBuiltIn(const ecuio_signal_set_t* set)
 {
     // The registry's sets, so the rule is the profile's whatever binds it

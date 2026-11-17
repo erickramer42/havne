@@ -174,6 +174,8 @@ public:
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
     int tickedCount() const { return m_tickedCount; }
     int hiddenCount() const { return m_hiddenCount; }
+    // Whether any row has taken a value since the set loaded
+    bool anyValue() const;
     // The ids of the ticked rows Live shows, in the model's order: the
     // rows the chart plots (subscribedCount of them) and the ticked text
     // rows, the focus Start log asks
