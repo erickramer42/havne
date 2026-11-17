@@ -469,22 +469,27 @@ TEST(ConditionSessionTest, ASetSwappedUnderTheWorkersFramesKeepsItsGenerations)
 {
     struct Watch {
         std::atomic<uint32_t> newest{0};
-        std::atomic<uint32_t> events{0};
+        std::atomic<uint32_t> sets{0};
+        std::atomic<uint32_t> threes{0};
         std::atomic<bool> wrong{false};
     } watch;
     const auto on_events = [](const ecuio_condition_event_t* events,
                               uint32_t count, void* user) {
         Watch* w = static_cast<Watch*>(user);
         for (uint32_t i = 0; i < count; ++i) {
-            /* Generation g holds three conditions when g % 3 == 1, one
-             * when g % 3 == 2, and none when it is a removal */
+            /* Generation g holds one condition when g % 3 == 1, three
+             * when g % 3 == 2, and none when it is a removal: a set of
+             * three judged as the one before names conditions it lacks */
             const uint32_t g = events[i].generation;
-            const uint32_t size = g % 3 == 1 ? 3u : g % 3 == 2 ? 1u : 0u;
+            const uint32_t size = g % 3 == 1 ? 1u : g % 3 == 2 ? 3u : 0u;
             if (events[i].condition >= size || g < w->newest.load()) {
                 w->wrong.store(true);
             }
+            if (g > w->newest.load()) {
+                w->sets.fetch_add(1);
+                w->threes.fetch_add(size == 3u ? 1u : 0u);
+            }
             w->newest.store(g);
-            w->events.fetch_add(1);
         }
     };
     const std::string below =
@@ -497,24 +502,27 @@ TEST(ConditionSessionTest, ASetSwappedUnderTheWorkersFramesKeepsItsGenerations)
               ECUIO_OK);
     ASSERT_EQ(ecuio_session_start(s.s), ECUIO_OK);
     uint32_t generation = 0;
-    /* Swaps run until the worker has judged enough of them, not for a time
-     * a slow runner can spend with the worker starved; a long bound only
-     * ends a hang */
-    const auto started = std::chrono::steady_clock::now();
-    const auto least = started + std::chrono::seconds(2);
-    const auto bound = started + std::chrono::seconds(60);
-    while (std::chrono::steady_clock::now() < bound &&
-           (std::chrono::steady_clock::now() < least ||
-            watch.events.load() <= 10u)) {
+    /* Counts, not a time: a slow runner swaps for longer, and the bound
+     * only ends a stalled worker's run */
+    const uint32_t swaps = 60;
+    const uint32_t sets = 8;
+    const uint32_t threes = 3;
+    const auto enough = [&] {
+        return generation >= swaps && watch.sets.load() >= sets &&
+               watch.threes.load() >= threes;
+    };
+    const auto bound =
+        std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (!enough() && std::chrono::steady_clock::now() < bound) {
         const uint32_t kind = (generation + 1) % 3;
-        ASSERT_EQ(kind == 1 ? attach(s.s, three)
+        ASSERT_EQ(kind == 1 ? attach(s.s, condition(0, below))
                   : kind == 2
-                      ? attach(s.s, condition(0, below))
+                      ? attach(s.s, three)
                       : ecuio_session_set_conditions(s.s, nullptr, nullptr),
                   ECUIO_OK);
         ++generation;
         const std::vector<ecuio_condition_state_t> st = states_of(s.s);
-        ASSERT_EQ(st.size(), size_t{kind == 1 ? 3u : kind == 2 ? 1u : 0u});
+        ASSERT_EQ(st.size(), size_t{kind == 1 ? 1u : kind == 2 ? 3u : 0u});
         for (const ecuio_condition_state_t& one : st) {
             ASSERT_EQ(one.generation, generation);
         }
@@ -523,9 +531,16 @@ TEST(ConditionSessionTest, ASetSwappedUnderTheWorkersFramesKeepsItsGenerations)
         std::this_thread::sleep_for(
             std::chrono::milliseconds(generation % 4 * 20));
     }
+    const bool judged = enough();
     EXPECT_EQ(ecuio_session_close(s.s), ECUIO_OK);
-    EXPECT_FALSE(watch.wrong.load());
-    EXPECT_GT(watch.events.load(), 10u) << "the worker judged many of the sets";
+    EXPECT_FALSE(watch.wrong.load())
+        << "an event named a condition its generation's set lacks, or an "
+           "older generation than one before it";
+    EXPECT_TRUE(judged) << "after " << generation << " swaps in 30 s the "
+                        << "worker had judged " << watch.sets.load()
+                        << " sets (" << watch.threes.load() << " of three "
+                        << "conditions), wanting " << sets << " (" << threes
+                        << "): the worker stalled";
     EXPECT_LE(watch.newest.load(), generation);
 }
 
