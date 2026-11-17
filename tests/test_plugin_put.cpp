@@ -18,7 +18,7 @@
 using namespace plugin_wrap_test;
 
 // A put adds a variant after the others; the version's minor rises and
-// its patch goes to 0, requires.core becomes this core's, and the id,
+// its patch goes to 0, requires.core rises to what reads it, and the id,
 // the name, the lineage and the source stay
 TEST(PluginWrapTest, APutAddsAVariantAndRaisesTheMinor)
 {
@@ -58,8 +58,8 @@ TEST(PluginWrapTest, APutAddsAVariantAndRaisesTheMinor)
     Plugin g = load(grown);
     ASSERT_TRUE(g);
     EXPECT_STREQ(info_of(g.get()).version, "2.6.0");
-    EXPECT_EQ(requires_of(g.get()), core_version());
-    EXPECT_NE(core_version(), "0.1.0");
+    EXPECT_EQ(requires_of(g.get()), "0.8.0")
+        << "the least core: the file put in keeps its own source";
     EXPECT_EQ(lineage_of(g.get()), "");
     EXPECT_EQ(parsed(grown).find("lineage"), nullptr);
     EXPECT_EQ(files_of(grown), (Strings{"a.json", "data/track.json"}));

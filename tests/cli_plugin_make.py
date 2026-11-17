@@ -10,10 +10,11 @@
 # golden: a run of each command on copies of the fixtures with LF line
 # ends (a lineage is the hash of the bytes read, and a Windows checkout
 # gives CRLF): each command's lines against <golden dir>/cli/<name>.jsonl
-# ("core" and the written line's "bytes" ignored: both follow the core's
-# version; "bytes" is checked against the file written instead) and the
-# packages written against <golden dir>/plugins/, their
-# "requires" core taken as one value. A put of a file whose ECU the
+# (the start line's "core" ignored: the CLI's version; the written line's
+# "bytes" checked against the file written too) and the packages written
+# against <golden dir>/plugins/ byte for byte: a package's requires.core
+# is the least core that reads it, so the same input writes the same
+# bytes under any core (ADR-0064 Q1). A put of a file whose ECU the
 # plugin has at other addresses names the rename; an OBDb set imported
 # with no --year is the variant "base" with no match. --update rewrites
 # the goldens from the run.
@@ -38,7 +39,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True  # no __pycache__ beside the tests
 import golden  # noqa: E402
 
-IGNORED = {"core", "bytes"}
+IGNORED = {"core"}
 OBDB = ["--name", "Example car", "--url", "https://example.org/obdb/Example-Car",
         "--commit", "0000000"]
 
@@ -54,13 +55,6 @@ def lf_copies(signals, root, names):
     for name in names:
         data = (Path(signals) / name).read_bytes().replace(b"\r\n", b"\n")
         (Path(root) / name).write_bytes(data)
-
-
-def same_core(text):
-    """A package's JSON with its "requires" core taken as one value"""
-    doc = json.loads(text)
-    doc["requires"]["core"] = "<core>"
-    return doc
 
 
 def check_step(name, rows, written, gold, rewrite):
@@ -83,7 +77,7 @@ def check_step(name, rows, written, gold, rewrite):
             print(f"FAIL  {name}: the package holds a CR")
             return False
         kept = package.read_bytes().replace(b"\r\n", b"\n")
-        if same_core(written) != same_core(kept):
+        if written != kept:
             print(f"FAIL  {name}: the package differs from {package} "
                   "(rewrite it from this run with --update)")
             return False
@@ -130,8 +124,7 @@ def golden_run(cli, signals, obdb, gold, rewrite):
             if not check_step(name, rows, written if kept else None, gold,
                               rewrite):
                 failed = True
-            # "bytes" follows the core's version, so it's checked here, not
-            # in the golden: the written line's size is the file's
+            # The written line's size is the file's (the golden holds it too)
             said = [row["bytes"] for row in rows if row.get("type") == "written"]
             if said != [len(written)]:
                 print(f"FAIL  {name}: the written line says {said} bytes, "

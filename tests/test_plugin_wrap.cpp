@@ -40,7 +40,7 @@ TEST(PluginWrapTest, AFileWrapsToAPluginThatDecodesAsTheFileAlone)
     EXPECT_STREQ(info.name, "Daily driver extras");
     EXPECT_STREQ(info.version, "1.0.0");
     EXPECT_EQ(variants_of(p.get()), Strings{"base"});
-    EXPECT_EQ(requires_of(p.get()), core_version());
+    EXPECT_EQ(requires_of(p.get()), "0.8.0") << "the least core: lineage";
 
     ecuio_signal_file_t* alone = nullptr;
     ASSERT_EQ(ecuio_signal_file_load(bytes.data(), bytes.size(), &alone),
@@ -93,9 +93,7 @@ TEST(PluginWrapTest, AWrapsBytesAreTheSameEverywhere)
         "  \"name\": \"Caf\xC3\xA9 \xC3\xA9 \\\"daily\\\"\",\n"
         "  \"version\": \"1.0.0\",\n"
         "  \"requires\": {\n"
-        "    \"core\": \"" +
-        core_version() +
-        "\"\n"
+        "    \"core\": \"0.8.0\"\n"
         "  },\n"
         "  \"lineage\": \"@LINEAGE@\",\n"
         "  \"source\": {\n"

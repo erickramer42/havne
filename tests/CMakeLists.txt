@@ -94,6 +94,7 @@ app_enable_warnings(bench_recording)
 add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp
     test_computed_grammar.cpp
     test_plugin.cpp test_plugin_wrap.cpp test_plugin_put.cpp
+    test_plugin_least_core.cpp
     test_condition_file.cpp test_condition_eval.cpp)
 
 # test_signal_tables.cpp and test_computed.cpp check computed.h, the
