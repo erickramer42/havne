@@ -81,7 +81,7 @@
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
-#include "fake_ecu.h"
+#include "fake_ecus.h"
 
 #include <chrono>
 #include <condition_variable>

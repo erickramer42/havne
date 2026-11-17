@@ -10,7 +10,7 @@
 #include "ecuio/sim.h"
 #include "car_sized_set.h"
 #include "fake_diagnostics.h"
-#include "fake_ecu.h"
+#include "fake_ecus.h"
 #include "vcan_bus.h"
 #include "vcan_recording_ecu.h"
 

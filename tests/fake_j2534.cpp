@@ -120,7 +120,7 @@
 
 #include "ecuio/j2534_ptypes.h"
 #include "fake_control.h"
-#include "fake_ecu.h"
+#include "fake_ecus.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -913,7 +913,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         }
     }
     {
-        /* Modules of the fake's own: "7E9:D801=00 12;..." (fake_ecu.h's
+        /* Modules of the fake's own: "7E9:D801=00 12;..." (fake_ecus.h's
          * set_module_dids); unset or malformed, none */
         char spec[512] = {};
         if (!fake_j2534::read_knob("ECUIO_FAKE_MODULE_DIDS", spec,
@@ -921,7 +921,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             !fake_ecu::set_module_dids(spec)) {
             fake_ecu::set_module_dids(nullptr);
         }
-        /* An ECU that isn't there: its reply ID in hex (fake_ecu.h's
+        /* An ECU that isn't there: its reply ID in hex (fake_ecus.h's
          * absent_ecu); unset, none */
         char absent[32] = {};
         fake_ecu::absent_ecu().store(
