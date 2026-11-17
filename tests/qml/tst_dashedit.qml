@@ -3222,8 +3222,11 @@ TestCase {
     // The Pages row: Reset quiet and apart at its end (wide), or the last
     // of the wrapped controls after a short gap (a phone); the move
     // buttons only with pages to move among
+    // The wide page is 1200: under DejaVu (CI's Linux and macOS) the five
+    // controls take 856 px of a 968 px row, which leaves Reset no room to
+    // stand apart, so it would wrap to a row of its own
     function test_resetStandsApartAndMoveHidesWithOnePage_data() {
-        return [{ tag: "wide", form: "desktop", width: 1000, height: 800 },
+        return [{ tag: "wide", form: "desktop", width: 1200, height: 800 },
                 { tag: "a phone", form: "phone", width: 384, height: 832 }]
     }
     function test_resetStandsApartAndMoveHidesWithOnePage(data) {
