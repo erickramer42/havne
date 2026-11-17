@@ -610,6 +610,42 @@ TestCase {
         }
     }
 
+    // The note counts what Live leaves out; its Show opens the rows inline,
+    // each with the reason, and Hide closes them. The mock under obd2
+    // sends the demo car's PIDs and the bitmaps rule out the rest.
+    function test_theHiddenNoteOpensTheRowsWithTheirReasons() {
+        const page = createTemporaryObject(pageComponent, testCase.Window.window.contentItem)
+        const note = findChild(page, "hiddenNote")
+        const toggle = findChild(page, "hiddenToggle")
+        const list = findChild(page, "hiddenList")
+        const part = findChild(page, "hiddenSignals")
+        compare(Bridge.connectSession("mock://demo?profile=obd2"), "", "connects")
+        tryVerify(() => note.visible && Bridge.signalModel.hiddenCount > 1, 5000, "the note shows")
+        verify(!list.visible, "closed to start with")
+        compare(toggle.text, "Show")
+        mouseClick(toggle)
+        tryVerify(() => list.visible, 2000, "the list opens")
+        compare(toggle.text, "Hide")
+        // One row for each hidden signal, and no other
+        tryVerify(() => list.count === Bridge.signalModel.hiddenCount, 2000,
+                  "the list holds the hidden rows: " + list.count + " of " + Bridge.signalModel.hiddenCount)
+        list.positionViewAtBeginning()
+        tryVerify(() => list.itemAtIndex(0) !== null, 2000, "the first row is drawn: " + list.height)
+        const first = list.itemAtIndex(0)
+        verify(findChild(first, "hiddenName").text !== "")
+        compare(findChild(first, "hiddenWhy").text, "the ECU's supported-PID list leaves it out",
+                "the demo car's missing PIDs are the bitmaps' doing")
+        // The reason's words follow the model's: only "absent" reads as absent
+        compare(part.reasonText("unsupported"), "the ECU's supported-PID list leaves it out")
+        compare(part.reasonText("absent"), "its replies come without this field")
+        compare(part.reasonText(""), "")
+        compare(part.reasonText("other"), "")
+        mouseClick(toggle)
+        tryVerify(() => !list.visible, 2000, "the list closes")
+        compare(toggle.text, "Show")
+        Bridge.disconnectSession()
+    }
+
     // ADR-0051 section 3: a DID the ECU refuses says so on its row, the
     // code by name, and one it answers shows its value
     function test_aRefusedDidSaysSo() {

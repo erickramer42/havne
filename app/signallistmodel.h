@@ -128,10 +128,16 @@ public:
                          * stores an end as is. Notified with UnitRole. */
         RangeHighRole,
         IsEnumRole, /* the def's kind is ENUM. Fixed per signal set. */
-        UnaskedRole /* the session's focus leaves it unasked
-                     * (applyUnasked, ecuio_session_get_unasked_signals):
-                     * Live and the Dashboard say "not asked" in place of
-                     * a value */
+        UnaskedRole, /* the session's focus leaves it unasked
+                      * (applyUnasked, ecuio_session_get_unasked_signals):
+                      * Live and the Dashboard say "not asked" in place of
+                      * a value */
+        HiddenWhyRole /* why a hidden row is hidden: "unsupported" (its
+                       * ECU's supported-PID list leaves it out) or
+                       * "absent" (its replies come without the field),
+                       * unsupported first when both hold; "" for a shown
+                       * row. Notified with HiddenRole, including when the
+                       * reason changes under a row that stays hidden. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -246,6 +252,9 @@ public:
     // unticked from it, and setting both, which leaves every other row to
     // its default. A name in both lists is unplotted; a text row is never
     // unplotted, its default being unticked.
+    // The hidden rows as { name, why } in set order, for Live's list of
+    // them; a binding that reads hiddenCount re-runs it on every judgment
+    Q_INVOKABLE QVariantList hiddenSignals() const;
     Q_INVOKABLE QStringList plottedNames() const;
     Q_INVOKABLE QStringList unplottedNames() const;
     Q_INVOKABLE void setPlotChoices(const QStringList& plotted, const QStringList& unplotted);
@@ -315,6 +324,8 @@ private:
         bool unsupported = false; // core: its ECU doesn't support it
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
+        enum class Why : unsigned char { None, Unsupported, Absent };
+        Why why = Why::None;      // the reason it's hidden, unsupported first
         bool unasked = false;     // core: the focus leaves it unasked
         QString refused;          // its ECU's refusal in words, or ""
         QString refusedCode;      // its reply's bytes, or ""
@@ -351,6 +362,7 @@ private:
     // rows, choices.
     void judgePlotted();
     static void pushSample(Entry& e, qint64 stamp, double value);
+    static const char* whyWords(Entry::Why why);
     // An enum row's label for its newest value, "" when it has none
     static QString labelOf(const Entry& e);
     static void pushWindow(Entry& e, const WindowValue& w);

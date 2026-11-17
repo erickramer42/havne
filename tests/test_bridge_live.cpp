@@ -13,6 +13,7 @@
 
 #include <cstring>
 #include <initializer_list>
+#include <utility>
 #include <vector>
 
 #include "sessionbridge.h"   // SessionBridge + FrameListModel
@@ -577,6 +578,63 @@ TEST(BridgeTest, LiveHidesTheFieldsCoreReportsAbsent)
     model.applyAbsent({ECUIO_OBD2_PID_SIG_ID(0x55, 1)});
     model.setSignalSet(ecuio_obd2_signal_set());
     EXPECT_EQ(model.hiddenCount(), 0) << "a new set shows every row";
+}
+
+/* A hidden row says why: its ECU's supported-PID list leaves it out
+ * ("unsupported", first when both hold) or its replies come without the
+ * field ("absent"); a shown row says nothing. A reason that changes under
+ * a row that stays hidden is notified, since Live's list shows it. */
+TEST(BridgeTest, AHiddenRowSaysWhy)
+{
+    SignalListModel model;
+    model.setSignalSet(ecuio_obd2_signal_set());
+    const int b3 = obd2RowOf(ECUIO_OBD2_PID_SIG_ID(0x55, 1));
+    const int coolant = obd2RowOf(ECUIO_OBD2_SIG_COOLANT_TEMP_ID);
+    const int rpm = obd2RowOf(ECUIO_OBD2_SIG_RPM_ID);
+    ASSERT_GE(b3, 0);
+    ASSERT_GE(coolant, 0);
+    ASSERT_GE(rpm, 0);
+    const auto why = [&model](int row) {
+        return model.data(model.index(row), SignalListModel::HiddenWhyRole)
+            .toString();
+    };
+    EXPECT_EQ(why(b3), QString()) << "a shown row says nothing";
+
+    model.applyAbsent({ECUIO_OBD2_PID_SIG_ID(0x55, 1),
+                       ECUIO_OBD2_SIG_COOLANT_TEMP_ID});
+    EXPECT_EQ(why(b3), QStringLiteral("absent"));
+    EXPECT_EQ(why(coolant), QStringLiteral("absent"));
+
+    /* A car that supports every PID in 0x01-0x20 but 0x05: only the coolant
+     * row's reason changes (absent, then unsupported, first), and it stays
+     * hidden, so what is notified is that one row and nothing wider */
+    std::vector<std::pair<int, int>> spans;
+    QObject::connect(&model, &SignalListModel::dataChanged, &model,
+                     [&](const QModelIndex& from, const QModelIndex& to,
+                         const QList<int>& roles) {
+                         if (roles.contains(SignalListModel::HiddenWhyRole)) {
+                             spans.emplace_back(from.row(), to.row());
+                         }
+                     });
+    ecuio_channel_support_t car{};
+    car.flags = ECUIO_SUPPORT_PROBED;
+    car.rx_id = 0x7E8;
+    car.generation = 1;
+    car.ranges = 0x1; /* 0x01-0x20 */
+    std::memset(car.pid_bitmap, 0xFF, 4);
+    car.pid_bitmap[(0x05 - 1) / 8] &= static_cast<uint8_t>(~(0x80u >> ((0x05 - 1) % 8)));
+    model.applyUnsupported(unsupportedIds(&car, 1));
+    EXPECT_EQ(why(coolant), QStringLiteral("unsupported"))
+        << "the bitmaps' reason comes first";
+    EXPECT_EQ(why(b3), QStringLiteral("absent")) << "the bitmaps say nothing of 0x55";
+    EXPECT_EQ(why(rpm), QString()) << "a PID the bitmaps list is shown";
+    ASSERT_EQ(spans.size(), 1u) << "one judgment, one notification";
+    EXPECT_EQ(spans[0], std::make_pair(coolant, coolant))
+        << "the range is the one row whose reason changed";
+
+    model.applyAbsent({});
+    EXPECT_EQ(why(b3), QString());
+    EXPECT_EQ(why(coolant), QStringLiteral("unsupported"));
 }
 
 /* The bridge reads core's absent signals on its tick: a replay of the

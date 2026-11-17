@@ -1528,6 +1528,56 @@ TestCase {
         compare(names.length, 0, "past the row's edge: " + names.join(", "))
     }
 
+    // Live's hidden-signals list: Show is a touch's size and inside the
+    // width, and each opened row's words end inside it
+    function test_theHiddenListFitsAPhone_data() {
+        return [{ tag: "384", w: 384 }, { tag: "320", w: 320 }]
+    }
+    function test_theHiddenListFitsAPhone(data) {
+        const main = createTemporaryObject(mainComponent, testCase)
+        verify(main, "Main loads")
+        main.width = data.w
+        main.height = 832
+        tryCompare(Theme, "compact", true)
+        compare(Bridge.connectSession("mock://demo?profile=obd2"), "", "connects")
+        const live = find(main.contentItem, "livePage")
+        main.gotoPage(Array.from(live.parent.children).indexOf(live))
+        verify(waitForPolish(main), "laid out")
+        tryVerify(() => find(live, "hiddenNote").visible && Bridge.signalModel.hiddenCount > 1, 5000)
+        const toggle = find(live, "hiddenToggle")
+        const inside = item => item.mapToItem(main.contentItem, item.width, 0).x <= main.width + 0.5
+                               && item.mapToItem(main.contentItem, 0, 0).x >= -0.5
+        verify(waitForPolish(main), "laid out with the note")
+        tryVerify(() => toggle.height >= Theme.touchTarget - 0.5, 2000,
+                  "Show is a touch target tall")
+        verify(inside(toggle), "Show is inside the width")
+        mouseClick(toggle)
+        const list = find(live, "hiddenList")
+        tryVerify(() => list.visible, 2000, "the list opens")
+        verify(waitForPolish(main), "laid out again")
+        verify(inside(list), "the list is inside the width")
+        let drawn = 0
+        for (let r = 0; r < list.count; ++r) {
+            list.positionViewAtIndex(r, ListView.Contain)
+            const row = list.itemAtIndex(r)
+            if (!row)
+                continue
+            ++drawn
+            const name = find(row, "hiddenName")
+            const why = find(row, "hiddenWhy")
+            verify(inside(name) && inside(why), "the row is inside the width")
+            // The reason wraps whole: its lines are all there, none cut
+            verify(why.width > 100, "the reason keeps its width: " + why.width)
+            verify(why.contentHeight <= why.height + 0.5, "the reason is whole: " + why.text)
+            verify(why.contentWidth <= why.width + 0.5, "and fits its width: " + why.text)
+            verify(!why.truncated, "not elided: " + why.text)
+        }
+        verify(drawn > 0, "rows are drawn")
+        verify(inside(toggle), "Hide stays reachable")
+        mouseClick(toggle)
+        tryVerify(() => !list.visible, 2000, "the list closes")
+    }
+
     // A phone's density: upright (narrower than 720) and on its side
     // (shorter than 480), and not in a desktop's window
     function test_densityFollowsThePhonesShape_data() {
