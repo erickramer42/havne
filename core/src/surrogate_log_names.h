@@ -1,5 +1,6 @@
 // File/layer: core/src/surrogate_log_names.h | internal, not ABI-exported;
-//             included by j2534_surrogate_client.cpp (its only consumer)
+//             included by j2534_surrogate_log.cpp, test_core.cpp and
+//             test_j2534_connect.cpp
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: CoreTest.SurrogateLog* (test_core); the client's use of
 //     it is HARNESS (J2534SurrogateTest.EarlierSessionLogIsKept)
@@ -14,7 +15,7 @@
 #include <string>
 #include <vector>
 
-/* The surrogate's session logs in TEMP (j2534_surrogate_client.cpp):
+/* The surrogate's session logs in TEMP (j2534_surrogate_log.cpp):
  *   - "ecuio-surrogate.log", the current session's;
  *   - "ecuio-surrogate.YYYYMMDD-HHMMSS-mmm.log", an earlier session's,
  *     kept under its last write's local time, so the names sort by time;
