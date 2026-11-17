@@ -68,3 +68,5 @@ CheckOptions:
   readability-function-cognitive-complexity.Threshold: 40
   readability-function-cognitive-complexity.IgnoreMacros: true
 HeaderFilterRegex: '.*[/\\](core|surrogate|cli|app)[/\\].*'
+# Another project's headers (WAMR's own tree has a core/ folder)
+ExcludeHeaderFilterRegex: '.*[/\\]third_party[/\\].*'

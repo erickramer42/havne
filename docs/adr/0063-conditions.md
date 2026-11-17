@@ -1769,3 +1769,9 @@ Section 12's step 7 in the app (the bridge's judging, the tone, the banner, Arme
 **What the focus line holds (2026-11-15).** The signals a condition adds to a focus are swept and written to `signals.csv`, but a recording's `focus` line holds the caller's picks alone, and the default wide export's columns follow it: the export stays the caller's picks, and a condition's signal is a column only when the caller picked it.
 
 **No v0.8.1 (2026-11-15).** The work this ADR places in v0.8.1 is v0.9.0's, the release after v0.8.0: the desktop's sound and Android's background notification, the live checks and `ecuio_recording_evaluate`.
+
+## Note: a rotation past its most (2026-11-16)
+
+Attaching a set of conditions is refused, with nothing changed, when its
+signals' requests, with a focus's picks, would put more than
+`ECUIO_PROFILE_MAX_REQUESTS` requests in the rotation (ADR-0065).

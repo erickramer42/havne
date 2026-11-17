@@ -126,7 +126,7 @@ QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
     if (!copy.open(QIODevice::ReadOnly)) {
         return as_loaded(QStringLiteral("is missing"));
     }
-    const QByteArray bytes = copy.read(ECUIO_SIGNAL_FILE_MAX_BYTES + 1);
+    const QByteArray bytes = copy.read(ECUIO_SIGNAL_SET_MAX_BYTES + 1);
     const QString sha = QString::fromLatin1(
         QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
     if (sha.toStdString() != recorded.sha256) {
@@ -144,9 +144,9 @@ QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
     auto held = m_replayFiles.find(sha);
     if (held == m_replayFiles.end()) {
         ecuio_signal_file_t* file = nullptr;
-        if (ecuio_signal_file_load(bytes.constData(),
-                                   static_cast<size_t>(bytes.size()),
-                                   &file) != ECUIO_OK) {
+        if (ecuio_signal_file_load_with(
+                bytes.constData(), static_cast<size_t>(bytes.size()),
+                ECUIO_SIGNAL_FILE_LOAD_SET, &file) != ECUIO_OK) {
             return as_loaded(
                 QStringLiteral("doesn't load (%1)")
                     .arg(QString::fromUtf8(ecuio_last_error_detail())));
@@ -207,7 +207,7 @@ QVariantMap recordingRowOf(const QFileInfo& info)
         // "columns" line is read no further than that many lines at 150
         constexpr qint64 kHeaderBytes =
             static_cast<qint64>(ECUIO_SET_MAX_TABLE +
-                                ECUIO_SIGNAL_FILE_MAX_SIGNALS) *
+                                ECUIO_SIGNAL_SET_MAX_SIGNALS) *
             150;
         // A line longer than a read (a "focus" line names every pick) comes in
         // parts, and only the part that starts it is judged

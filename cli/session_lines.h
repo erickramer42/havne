@@ -81,6 +81,9 @@ void close_recording(Output& out, ecuio_recorder_t** recorder, const char* why,
 void poll_health(Output& out, ecuio_session_t* session, int32_t* last_error,
                  uint32_t* episodes);
 bool session_asks(ecuio_session_t* session);
+
+// Whether a session is asked only what is picked: no focus asks nothing
+bool session_pick_only(ecuio_session_t* session);
 bool replay_done(const ecuio_session_t* session,
                  const ecuio_session_info_t& info, uint64_t covered);
 

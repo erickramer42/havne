@@ -28,7 +28,7 @@ add_executable(test_core test_core.cpp test_json.cpp test_obdb_import.cpp
     test_sha256.cpp test_queue.cpp test_health.cpp test_csv_import.cpp
     test_frames_read.cpp test_csv_guess.cpp test_recording_aids.cpp
     test_condition_session.cpp test_condition_recording.cpp
-    test_armed_recorder.cpp)
+    test_armed_recorder.cpp test_pick_only.cpp)
 
 # core/src for mock_drive_cycle.h and link_health.h, which are internal
 # (test_obd2 precedent).
@@ -92,8 +92,10 @@ app_enable_warnings(bench_recording)
 
 # --- Signals tests: MUST stay Qt-free (Ubuntu CI job has no Qt installed) ---
 add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_computed.cpp test_signal_file.cpp test_signal_expr.cpp test_signal_eval.cpp
+    test_signal_keys.cpp
     test_computed_grammar.cpp
-    test_plugin.cpp test_plugin_wrap.cpp
+    test_plugin.cpp test_plugin_wrap.cpp test_plugin_put.cpp
+    test_plugin_least_core.cpp
     test_condition_file.cpp test_condition_eval.cpp)
 
 # test_signal_tables.cpp and test_computed.cpp check computed.h, the
@@ -121,7 +123,8 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # The explicit core/src include is required because request_engine.h is
 # INTERNAL: ecuio-core's PUBLIC include dirs cover only core/include,
 # and the engine is deliberately not part of the public tree.
-add_executable(test_obd2 test_obd2.cpp test_session_control.cpp)
+add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
+    test_request_table.cpp test_tier2_ceiling.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -166,6 +169,22 @@ if(WIN32)
 endif()
 app_enable_warnings(test_elm327)
 gtest_discover_tests(test_elm327 DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
+
+# --- The sandbox: Qt-free, every platform (UNIT, ADR-0066 section 2) ---
+# test_wamr_build.cpp asks the vendored WAMR itself (third_party/wamr.cmake)
+# what core relies on; its header comes from WAMR_INCLUDE_DIR.
+# test_wasm_check.cpp, test_sandbox.cpp and test_sandbox_budget.cpp:
+# core/src's wasm_check.h and wasm_sandbox.h, internal. verify.sh's
+# cross-arch step builds and runs them all against the x86 core, which CI
+# never builds.
+add_executable(test_sandbox test_wamr_build.cpp test_wasm_check.cpp
+    test_sandbox.cpp test_sandbox_budget.cpp)
+target_include_directories(test_sandbox PRIVATE ${WAMR_INCLUDE_DIR}
+    ${CMAKE_SOURCE_DIR}/core/src)
+target_compile_definitions(test_sandbox PRIVATE ${WAMR_EMBED_DEFINITIONS})
+target_link_libraries(test_sandbox PRIVATE ecuio-core GTest::gtest_main)
+app_enable_warnings(test_sandbox)
+gtest_discover_tests(test_sandbox DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 60)
 
 # --- SocketCAN's rules: Qt-free, every platform (UNIT, ADR-0032, ADR-0040) ---
 # socketcan_wire.h is internal and portable (the kernel's values mirrored),
@@ -237,6 +256,13 @@ if(Python3_Interpreter_FOUND)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
+    # scripts/vendored_check.py: third_party/wamr against its committed
+    # list of hashes, with no network. A change to that folder is a patch
+    # beside it, never an edit in it (third_party/README.md)
+    add_test(NAME VendoredTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/vendored_check.py selftest)
+    add_test(NAME VendoredTest.WamrIsItsListedBytes
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/vendored_check.py check)
     # packaging/python/make_wheel.py, the havne wheel (ADR-0053 section 6):
     # made-up PE, ELF and Mach-O files and a made-up package
     add_test(NAME WheelTest.SelfTest
@@ -598,13 +624,13 @@ if(TARGET havne-cli)
             PROPERTIES TIMEOUT 60)
         # A live stream whose reader stalls drops condition lines, and the
         # end line counts each one: the lines received and the count are
-        # the recording's cond lines (about 30 s)
+        # the recording's cond lines (about 60 s: the rev limiter at 51-56 s)
         add_test(NAME CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
             COMMAND ${Python3_EXECUTABLE}
                     ${CMAKE_CURRENT_SOURCE_DIR}/cli_conditions_drop.py
                     $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliConditionsRunTest.ADroppedEventIsCountedOnTheEndLine
-            PROPERTIES TIMEOUT 90 COST 30)
+            PROPERTIES TIMEOUT 150 COST 70)
         # A replay reads with its recording's own signals.json (ADR-0051
         # section 4): no --signals, the copy's values; its hash broken, raw
         add_test(NAME CliReplayTest.AReplayReadsWithItsOwnSignalFile
@@ -665,6 +691,13 @@ if(TARGET havne-cli)
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} pick
                 $<TARGET_FILE:havne-cli>)
         set_tests_properties(CliLogRunTest.PickRankedAsksTheRankedSignals
+            PROPERTIES TIMEOUT 120)
+        # A set past a rotation is asked only its picks (ADR-0065): the
+        # session line, stream's and log's words and log's refusal
+        add_test(NAME CliLogRunTest.APickOnlySessionSaysNothingIsAsked
+            COMMAND ${Python3_EXECUTABLE} ${_cli_log} pick-only
+                $<TARGET_FILE:havne-cli>)
+        set_tests_properties(CliLogRunTest.APickOnlySessionSaysNothingIsAsked
             PROPERTIES TIMEOUT 120)
         add_test(NAME CliLogRunTest.AFolderThatCantBeMadeEndsTheLog
             COMMAND ${Python3_EXECUTABLE} ${_cli_log} fails $<TARGET_FILE:havne-cli>)
@@ -1532,6 +1565,11 @@ if(TARGET havne-cli)
     app_cli_usage(ViewAPullGainOfWordsIsUsage
         "view|x|--align-on|pull:1|--stretch-level|pull-gain=some")
     app_cli_usage(ViewAnUnknownRoleIsUsage "view|x|--stretches|--role|brake=Pedal")
+    app_cli_usage_says(ViewAPullEndThatIsntOneIsUsage
+        "view|x|--stretches|--pull-end|top" "--pull-end takes lift or top-speed")
+    app_cli_usage_says(ViewAPullEndWithoutStretchesIsUsage
+        "view|x|--pull-end|lift" "--pull-end and --units go with")
+    app_cli_usage(ViewAPullEndWithoutAWordIsUsage "view|x|--stretches|--pull-end")
     # pulls, cruises or all after --stretches is its word, never a folder
     app_cli_usage_says(ViewStretchesAndItsWordNameNoFolder "view|--stretches|all"
         "view needs a recording's folder")
@@ -1881,6 +1919,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_obdb.cpp
         test_bridge_health.cpp
         test_bridge_replay.cpp
+        test_bridge_replay_end.cpp
         test_bridge_diagnostics.cpp
         test_bridge_signalfiles.cpp
         test_bridge_live.cpp
@@ -2397,6 +2436,11 @@ if(WIN32)
     target_compile_definitions(test_j2534_connect PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"
         SURROGATE_EXE_PATH="$<TARGET_FILE:ecuio-j2534-surrogate>"
+    )
+    # core/src for surrogate_log_names.h: the out-of-memory loop seeds the
+    # session log's folder with the names the client prunes
+    target_include_directories(test_j2534_connect PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/src
     )
     add_dependencies(test_j2534_connect fake_j2534)
     add_dependencies(test_j2534_connect fake_j2534_legacy)   # beside the fake

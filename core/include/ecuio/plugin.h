@@ -271,8 +271,12 @@ _Static_assert(offsetof(ecuio_plugin_wrap_options_t, id) == 40,
  *   case letters and digits, every other run one '-'), cut to
  *   ECUIO_PLUGIN_ID_MAX bytes with no '-' left at its end. A caller
  *   whose store holds that id already asks again with an id of its own.
- * - "name": the file's. "version": "1.0.0". "requires": this core's
- *   X.Y.Z, so an older core refuses the plugin in words.
+ * - "name": the file's. "version": "1.0.0". "requires": the least core
+ *   X.Y.Z that reads the plugin's format and what its file uses (0.8.0
+ *   at least, which reads "lineage"), so the same file wraps to the
+ *   same bytes under any core and an older one refuses it in words;
+ *   never past this core's own version, which a build ahead of a
+ *   release writes instead.
  * - "lineage": the first ECUIO_PLUGIN_LINEAGE_LEN hex digits of the
  *   SHA-256 of the length bytes at file.
  * - "source" and "ecus": the file's, moved to the manifest. "match":
@@ -301,8 +305,10 @@ ecuio_status_t ecuio_plugin_wrap(const char* file, size_t length,
  * variant lists them). variant NULL is the file's name as a slug, cut
  * to ECUIO_PLUGIN_VARIANT_ID_MAX bytes.
  * - "version": the minor one higher and the patch 0 ("1.2.3" gives
- *   "1.3.0"); refused when the minor is 65535. "requires": this core's
- *   X.Y.Z. "id", "name", "lineage", "source", "match" and every other
+ *   "1.3.0"); refused when the minor is 65535. "requires": the higher
+ *   of the plugin's own and the least core that reads it with the file
+ *   put in, that least never past this core's own version. "id",
+ *   "name", "lineage", "source", "match" and every other
  *   variant: as they were.
  * - The data file is "data/<variant>.json" ("data/<variant>-2.json"
  *   and on while a file that stays has the path): the signal file
@@ -332,10 +338,11 @@ ecuio_status_t ecuio_plugin_put_variant(const char* packed, size_t length,
 
 /* The packed plugin without variant `variant`: its data files left out
  * unless another variant lists them, the ECUs only they read with
- * them, and the version raised as a put raises it; "requires" and the
- * rest as they were. ECUIO_ERR_NULL_ARGUMENT for a NULL variant;
- * ECUIO_ERR_INVALID_ARGUMENT for a variant the plugin lacks, or its
- * only one. */
+ * them, and the version raised as a put raises it. "requires": the
+ * higher of the plugin's own and the least core that reads the result,
+ * as a put writes it. The rest as it was. ECUIO_ERR_NULL_ARGUMENT for
+ * a NULL variant; ECUIO_ERR_INVALID_ARGUMENT for a variant the plugin
+ * lacks, or its only one. */
 ecuio_status_t ecuio_plugin_drop_variant(const char* packed, size_t length,
                                          const char* variant, char** out,
                                          size_t* out_length);

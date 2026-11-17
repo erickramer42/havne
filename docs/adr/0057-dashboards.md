@@ -1608,3 +1608,14 @@ runs early), the longest window a sparkline takes. The Add tile's
 sparkline still draws a made-up trace and reads nothing.
 
 **Appendix, 2026-11-14: the words of a gauge without its signal.** State 2 reads "needs <name>" when a set the picked vehicle has (its plugin or a signal file), other than the one the session reads, has one of the cell's refs ("needs variant <id>" when the session reads another variant of the same plugin), and "not in <name>" otherwise, the name the user knows the session's profile by (a plugin's or a file's name, else the profile's own: "mock", "obd2", "raw"). The cell's label is no longer repeated: the card's title shows it. The dashboard UX review found the old words named neither profile and read the same for a pick the session didn't use and a signal the plugin lacks.
+
+## Note: the desktop edits the phone form (2026-11-16)
+
+Edit mode on a desktop has a Phone layout switch: it shows the phone
+form's document in a frame of the phone's width (384 px) and edits it
+there, so a layout for the phone is built at the desk and carried by the
+layout file (`form: "phone"`). Nothing is scaled between the forms: the
+frame shows the phone's own document, and the format, the two stored
+documents and the file rules are unchanged. The state is the page's,
+false at every start and after Done. The frame is one width; the grid's
+six columns hold at any phone width, and the switch says so.

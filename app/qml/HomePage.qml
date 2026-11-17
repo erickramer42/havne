@@ -363,7 +363,7 @@ Rectangle {
                         Layout.fillWidth: true
                         elide: Text.ElideMiddle
                         color: Theme.text
-                        text: Bridge.uriLabel
+                        text: SessionLabel.address(Bridge.uriLabel)
                     }
                     Label {
                         objectName: "homeSessionDetail"

@@ -1308,3 +1308,299 @@ taken only when the user runs them. This record does not build them.
   session, writable flash and a fault-and-recovery model, which is a
   large fixture to build and maintain; and the write path is complex
   even behind the gates, so the phase is long and sequenced strictly.
+
+## Notes
+
+- **2026-11-17, the block length from `34`'s reply (section 7).**
+  `maxNumberOfBlockLength` in the `0x74` reply counts the `0x36` service
+  id and the block-sequence-counter byte, so usable transfer data per
+  block is that value minus 2, not the whole value. Each `0x36` block is
+  sized to the reply value minus 2 and the simulated ECU states the reply
+  the same way, so a plan that reads the field as a raw data size does not
+  overrun by two bytes. From ISO 14229 and a real-vehicle capture (reply
+  1026, 1024 bytes of data).
+
+### Step 1 as built: the runtime and the sandbox (2026-11-17)
+
+What step 1 built, and what building it found that sections 2.1 and 2.2
+don't say:
+
+1. **The classic interpreter, not the fast one.** At WAMR 2.4.5 the fast
+   interpreter's switch dispatch (the one MSVC builds) never checks the
+   instruction limit (upstream issue 5140, fixed after the tag). The
+   classic interpreter checks it at every instruction under either
+   dispatch, and labels-as-values is off so every compiler builds the
+   dispatch MSVC builds: the metering tested on Windows is the phone's.
+   `WamrBuildTest.TheLimitCountsEveryInstruction` pins that ten more turns
+   of a loop cost exactly ten turns' instructions.
+2. **Instantiate runs guest code with no limit** (upstream issue 4047): a
+   start function, and the exports `__post_instantiate`,
+   `__wasm_call_ctors` and `_initialize`. Core's check
+   (`core/src/wasm_check.h`) refuses a module that has any of them before
+   the runtime sees a byte.
+   `WamrBuildTest.AStartFunctionRunsAtInstantiateBeforeAnyLimitIsSet` pins
+   the behavior the check exists for.
+3. **A call that doesn't return ends the instance.** After a spent budget
+   or any trap the instance is never called again (calling one again after
+   a limit trap is upstream issue 4410).
+4. **A module's memory is one fixed size:** its maximum equal to its
+   minimum, 1 to 16 pages. This is inside section 2.2's "a fixed cap (1
+   MiB) a plugin declares within" and stricter than its "bounded
+   memory-grow": every allocation is at attach and none on the worker,
+   `memory.grow` answers -1 and the call goes on, and allowing a grow
+   later admits more modules without breaking one. A plugin links with
+   `--initial-memory` equal to `--max-memory`; the refusal says so with
+   the pages it found.
+5. **Each instance has a module of its own.** The plugin's bytes are read
+   and checked once; the runtime's load repeats for each ECU the plugin
+   opens. Two instances then share no runtime state by construction (with
+   the thread manager off, nothing upstream tests two threads calling
+   instances of one module). Sharing a module later is internal: no ABI
+   and no plugin changes.
+6. **No `memory` export is required, and exported `malloc` and `free` are
+   not refused.** The host reads the memory through the instance. WAMR
+   runs a module's exported `malloc` and `free` (with no limit) only when
+   the host asks it to allocate in the guest, which core never does: there
+   is no app heap and no libc.
+   `SandboxTest.AnExportedMallocAndFreeAreNeverRun` attaches a module
+   whose two never return.
+7. **The module's memory comes through core's allocator.** As upstream
+   builds it, WAMR maps a module's memory itself, past the embedder's
+   allocator, so neither of core's bounds would count it.
+   `WASM_MEM_ALLOC_WITH_USAGE` routes it through the allocator; WAMR then
+   leaves it as the allocator gave it, so core zeroes it (a block the heap
+   used before would show a guest the host's bytes).
+   `WamrBuildTest.AModulesMemoryComesFromTheAllocatorAsGiven`,
+   `SandboxTest.AnInstancesMemoryStartsZeroed`.
+8. **The bounds, measured.** Making one instance may take 8 MiB from the
+   allocator and every instance alive 64 MiB together. An instance of a
+   one-page module takes about 136 KB on x64 and 134 KB on x86 (its page,
+   its 64 KiB stack and about 4 KB of the runtime's), a 16-page one about
+   1.12 MB on either. Each function a module defines costs the runtime
+   about 149 bytes on x64 and 101 on x86, so the 8 MiB bound admits a
+   module of about 55,000 functions on a 64-bit build and about 80,000 on
+   a 32-bit one: what a making costs differs by pointer width. A session's
+   32 ECUs of 16 pages each fit the 64 MiB.
+9. **Nothing a module does prints.** WAMR writes its warnings to standard
+   output whatever `WASM_ENABLE_LOG` says (to the system log on Android),
+   so core sets its log level to fatal at the runtime's start, and the
+   runtime's words in a refusal are made printable ASCII.
+   `SandboxTest.NothingAModuleDoesPrints`.
+10. **Building it.** WAMR's headers mark its API `dllexport` on MSVC,
+    which would export `wasm_runtime_*` from every program and library
+    that links core: its objects are compiled with `/U_MSC_BUILD` and an
+    embedding source defines `WASM_RUNTIME_API_EXTERN=`. Hardware bound
+    checks are off (they install signal and exception handlers in the host
+    process). Two headers of the AOT side are vendored because a kept
+    source includes them; no AOT source is. On Android the port writes
+    through the system log, so core links `log` there.
+11. **Size.** WAMR's objects for arm64 (NDK 27.3 Clang, as
+    `third_party/wamr.cmake` builds them) hold 133,500 bytes of code at
+    `-O3` and 112,860 at `-Os`; linked with unused sections dropped into a
+    program that loads, instantiates and calls a module, 97,454. Against
+    the 300 KiB budget for `libhavne.so`. The runtime's own change to the
+    library is nothing: no code reaches the sandbox yet, so the linker
+    takes none of it. The APK's before and after is recorded in
+    `docs/performance.md` when a front end reaches the sandbox.
+
+12. **UBSan's alignment check is left out for WAMR's objects, and only
+    that check, only there.** Under Clang's UndefinedBehaviorSanitizer the
+    classic interpreter fails at `wasm_interp_classic.c:6835`, "member
+    access within misaligned address ... for type 'WASMBranchBlock', which
+    requires 8 byte alignment": a frame's label stack, which holds
+    pointers, starts where its operand stack of 4-byte cells ends, so on a
+    64-bit build it sits 4 bytes off whenever the frame's cell count is
+    odd. In a sanitizer build 12 of the 32 sandbox cases failed on it and
+    the fuzzer stopped at its first input. The pick:
+    `-fno-sanitize=alignment` on WAMR's objects alone
+    (`third_party/wamr.cmake`, and again in `fuzz/CMakeLists.txt` after
+    its `-fsanitize=undefined`), which is the setting of WAMR's own UBSan
+    build (`build-scripts/config_common.cmake` at the tag:
+    `-fsanitize=undefined -fno-sanitize-recover=all
+    -fno-sanitize=alignment`); core's own code keeps the check, and every
+    other UBSan check and AddressSanitizer stay on WAMR's. With it, under
+    Clang ASan and UBSan in WSL on 2026-11-17: the sandbox suites 32/32,
+    and `fuzz_wasm_module` 14.1 million runs in 301 s with nothing found
+    (two more rounds of 301 s the same day, 16.1 and 13.5 million runs,
+    the same), so alignment is the only finding in upstream's code. The
+    flag sits on the object library `ecuio-wamr` and on no other target:
+    in the sanitizer tree and the fuzz tree, 35 objects carry it (WAMR's
+    34 sources and `third_party/wamr_port.c`, three empty stubs) and no
+    object of `ecuio-core` does. The alternative not taken: carrying
+    upstream's open pull request 5062 ("classic-interp: align branch
+    control stack") as a patch, an unmerged change to the interpreter's
+    frame layout. **This holds only while every target is x86, x64 or
+    64-bit ARM,** which all take an unaligned access: Android is arm64-v8a
+    alone and there is no 32-bit ARM build. A 32-bit ARM target needs
+    upstream's fix, or that patch, first. The flag goes when a WAMR
+    release carries the fix (the note is in `third_party/README.md`, where
+    the next pin move will meet it).
+
+13. **GCC's AddressSanitizer and WAMR's stack check.** WAMR finds how much
+    native stack is left by comparing the address of a local with the
+    thread's stack boundary (`wasm_runtime_detect_native_stack_overflow`).
+    GCC's ASan keeps an address-taken local in a fake stack on the heap,
+    to catch its use after a return, so under it every call into a module
+    ended as "native stack overflow": CI's `core-sanitizers` job (GCC,
+    Debug, ASan and UBSan) failed 19 sandbox cases on the first commits
+    while a Clang ASan and UBSan run passed all of them, since Clang's
+    ASan leaves that local on the real stack. The fix is a build setting,
+    `--param=asan-use-after-return=0` on WAMR's objects for GCC alone
+    (`third_party/wamr.cmake`); Havne's own code keeps the detection, and
+    nothing ships with ASan. Evidence (2026-11-17, WSL, GCC 15.2, CI's
+    flags): the committed tree 18 of 32 failing, the same tree with the
+    setting 32/32.
+
+14. **The allocator judges a size before it adds its head.** On a core
+    with 32-bit sizes `n + 16` wrapped: WAMR's loader asks for
+    `sizeof(WASMFunction) + local_count` bytes for a function, up to just
+    under 2^32, and zeroes what it gets, so a module of about 40 bytes
+    that declares that many locals got a block of a few bytes and 4 GiB of
+    zeroes over the heap. `take()` refuses any size past
+    `RUNTIME_BYTES_MAX` first.
+    `SandboxTest.AFunctionDeclaringFourGibOfLocalsIsOutOfMemory` tries the
+    last 1,024 local counts (which one lands on the wrap depends on the
+    runtime's own record); without the guard the x86 core's run of it dies
+    with a heap corruption (0xc0000374). On a 64-bit core the guard
+    changes nothing, so its mutant is judged on the x86 core.
+
+15. **The check bounds its own work and the loader's.** A count in a
+    module is the module's claim: the walk to a function's type stops
+    where the section ends (a function section claiming 2^32 entries cost
+    over four thousand million steps on the caller's thread). A wanted
+    name may be exported once (a second is refused, so a name exported a
+    hundred thousand times is judged once). A module states at most 1,024
+    function types (`TYPES_MAX`): WAMR compares each type with every one
+    before it, and about 80,000 distinct types fit in 1 MiB.
+
+16. **An export name holding a NUL is refused.** WAMR looks an export up
+    by its name as a C string, so `__post_instantiate\0x` would pass the
+    reserved-name refusal and match the lookup. WAMR itself refuses such a
+    name today; the check no longer leans on that.
+
+17. **A want is held to what a call carries.** `make_instance` answers
+    `ECUIO_ERR_INVALID_ARGUMENT` for a wanted type that isn't i32
+    parameters (at most four) and no result or one i32: WAMR writes a
+    call's results over its argument cells, as many as the type has, and
+    the call passes four cells. The host chooses its wants, so this was
+    latent.
+
+18. **A budget bounds work, not only instructions.** WAMR's metering takes
+    one unit off the limit for each instruction it dispatches, and in the
+    classic interpreter one instruction can do far more than its dispatch.
+    Every such place in `wasm_interp_call_func_bytecode` that Havne's
+    switches compile in (no bulk memory, reference types, GC or
+    exceptions):
+    - `if`, and a branch to a block whose end isn't in the block address
+      cache, scan the block's code for its end
+      (`wasm_loader_find_block_addr`). The cache has 64 sets of two; three
+      blocks whose addresses agree mod 64 miss on every turn of a loop.
+    - a `br_table` with a depth past 255 (`EXT_OP_BR_TABLE_CACHE`) walks a
+      list holding one record for each such `br_table` in the module.
+    - a call zeroes the callee's locals and copies its parameters; a
+      branch or a return copies the values it carries (multi-value: up to
+      the stack's size).
+
+    Measured before the patch (2026-11-17, x64 MSVC Release, the default
+    budget of 1,000,000): a plain loop 2.7 to 4.2 ms; three `if`s each
+    skipping 339,963 bytes of code 101 s; the same through `br` out of a
+    `block` 77 s; a loop calling a function of 8,000 locals 0.08 to 0.14
+    s.
+
+    `third_party/wamr-patches/0001-meter-work-beyond-dispatch.patch` adds
+    `CHARGE_INSTRUCTIONS(n)`, which takes n more units off the limit: one
+    for each byte scanned and each record walked, one for each 16 stack
+    cells zeroed or copied. The count stops at zero, where WAMR's own
+    check raises "instruction limit exceeded" at that instruction's end.
+    The patch is in one file, about 45 lines, all under
+    `WASM_ENABLE_INSTRUCTION_METERING`, and written so it could be offered
+    upstream (not offered upstream).
+
+    Measured after it (same machine, the default budget): a plain loop 3.9
+    ms on x64 and 11.1 ms on the x86 core; the largest scanner the check
+    admits 1.5 ms; calls with 1,000 or 8,000 locals under 1 ms (1.4 ms on
+    x86); 3,000 cached `br_table`s 2.2 ms (2.9 ms). No unit costs more
+    than a plain instruction, so a call takes no longer than a loop of its
+    budget's instructions.
+
+    What a call is charged is the same on every machine: the cache lives
+    in the exec env (`WASMExecEnv::block_addr_cache`), each instance has
+    its own, and its set is the code address mod 64, so two blocks share a
+    set exactly when their offsets in the module agree mod 64, wherever
+    the module's bytes sit. No alignment of the module's bytes is needed.
+    The pins show it: `SandboxTest`'s cases compare the least budget a
+    module's call returns under with that of the same module less the work
+    (a block of n more bytes costs n more; 8,000 locals 500 more; and so
+    on), the same numbers on x64, x86 and Linux.
+
+19. **A function's code is at most 64 KiB** (`BODY_MAX_BYTES`, read from
+    the code section's sizes, never from an instruction): the most one
+    instruction can make the runtime scan, a second line behind the
+    charge. The module that ran 101 s is refused by it (its function is 1
+    MiB).
+
+20. **The vendored folder is changed only by numbered patches, and every
+    build checks it.** `third_party/wamr.sha256` lists each file's
+    SHA-256; `scripts/vendor_wamr.sh` writes it with the folder, and
+    `VendoredTest.WamrIsItsListedBytes` compares the two with no network.
+    The patched file carries a line saying it is changed (Apache-2.0
+    section 4b), and the notices and the SBOM's component say WAMR's
+    source is modified by the patches in `third_party/wamr-patches`. A
+    lesson from the first patch: on Windows `git apply` outside a
+    repository follows `core.autocrlf` and wrote the patched file as CRLF;
+    the script passes `-c core.autocrlf=false` to the apply as it does to
+    the clone.
+
+21. **A branch is charged only for a block it scans.**
+    `wasm_loader_find_block_addr` answers from the block address cache
+    when the block is there, and scans only on a miss. The patch's first
+    form charged the block's bytes at every branch to a block whose end
+    wasn't known when it was entered, hit or miss: a function that calls
+    itself inside a block enters the block at every level before any level
+    leaves it, so each level's branch paid the bytes though only the
+    deepest scanned. The patch reads the block's cache set first (both
+    places) and charges a miss.
+    `SandboxTest.ABranchToABlockAlreadyFoundCostsNothing` pins it at 10
+    levels: 1,000 more bytes in the block cost 1,000 more units, once,
+    with the block at an even and an odd address and in its set's first
+    and second place.
+
+22. **The metering is tied to the switches it relies on.** Patch 0001
+    charges the work of the instructions `third_party/wamr.cmake` builds.
+    Bulk memory (`memory.fill`, `memory.copy`, `memory.init`), reference
+    types (the table instructions), tail calls, exception handling and GC
+    add instructions that do work a module sizes and that nothing charges.
+    `third_party/wamr_port.c` (Havne's file in WAMR's target) reads WAMR's
+    `config.h` and fails the build with an `#error` when metering is on
+    beside any of them, so turning one on needs its charges first.
+    `SandboxTest.AnInstructionTheBudgetCantCountIsRefused` shows the
+    runtime refusing `memory.fill`, `memory.copy`, `ref.null` and
+    `return_call`. Shown by hand (2026-11-17, WSL, Clang): each of the
+    five switches set to 1 stops the build at the `#error`; with the
+    `#error` taken out, the case fails for bulk memory, reference types
+    and tail calls, and exception handling and GC don't compile from the
+    kept sources at all.
+
+23. **The longest single step is a `br_table`'s walk, and the making bound
+    caps it.** The budget is read between instructions, so a call runs
+    past it by one instruction's work at most. The longest such is the
+    walk of the `br_table` cache list (one record for each `br_table` in
+    the module with a depth past 255; a new record goes to the head, so
+    the first one loaded is found last). How many records a module can
+    hold is capped by what an instance's making may take (8 MiB), not by
+    the check. Measured 2026-11-17, MSVC Release, one call whose
+    `br_table` is the last record: x64, 180,000 records load (200,000 is
+    out of memory) and the walk takes 0.52 ms; the x86 core, 220,000 load
+    (250,000 is out of memory), 0.63 ms. Under a millisecond, so the check
+    takes no cap on them. The phone's figure is owed when a front end reaches the sandbox.
+
+24. **`git apply` inside a work tree skips paths outside it, with exit
+    0.** `scripts/vendor_wamr.sh` clones into a temp folder; with `TMPDIR`
+    under a checkout, the apply took the patch as that repository's,
+    patched nothing and reported success (`--check` then failed on the
+    diff, and a write would have vendored WAMR unpatched while the hash
+    list was rewritten to match). The apply runs under
+    `GIT_CEILING_DIRECTORIES`, and after each patch a reverse dry run
+    (`apply --check -R`) proves it took. Each half was shown alone: with
+    the ceiling the patch applies; with the ceiling taken out the dry run
+    stops the script.

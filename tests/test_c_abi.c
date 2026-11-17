@@ -195,6 +195,16 @@ typedef char abi_value_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_t) =
 typedef char abi_batch_values_check[(offsetof(ecuio_value_batch_t, values) == 24) ? 1 : -1];
 typedef char abi_batch_size_check[(sizeof(void*) != 8 || sizeof(ecuio_value_batch_t) == 32) ? 1 : -1];
 typedef char abi_session_timing_size_check[(sizeof(ecuio_session_timing_t) == 64) ? 1 : -1];
+typedef char abi_session_timing_untimed_check[(offsetof(ecuio_session_timing_t, untimed) == 36) ? 1 : -1];
+typedef char abi_session_timing_reserved_check[(offsetof(ecuio_session_timing_t, reserved) == 40) ? 1 : -1];
+typedef char abi_rotation_check[(ECUIO_PROFILE_MAX_REQUESTS == 1024) ? 1 : -1];
+typedef char abi_module_requests_check[(ECUIO_MODULE_MAX_REQUESTS == 1024) ? 1 : -1];
+typedef char abi_file_signals_check[(ECUIO_SIGNAL_FILE_MAX_SIGNALS == 1024u) ? 1 : -1];
+typedef char abi_file_bytes_check[(ECUIO_SIGNAL_FILE_MAX_BYTES == 1048576u) ? 1 : -1];
+typedef char abi_set_signals_check[(ECUIO_SIGNAL_SET_MAX_SIGNALS == 16384u) ? 1 : -1];
+typedef char abi_set_bytes_check[(ECUIO_SIGNAL_SET_MAX_BYTES == 4194304u) ? 1 : -1];
+typedef char abi_load_set_check[(ECUIO_SIGNAL_FILE_LOAD_SET == 0x1u) ? 1 : -1];
+typedef char abi_pick_only_check[(ECUIO_SESSION_INFO_PICK_ONLY == 0x80u) ? 1 : -1];
 typedef char abi_request_timing_size_check[(sizeof(ecuio_request_timing_t) == 80) ? 1 : -1];
 typedef char abi_request_timing_intervals_check[(offsetof(ecuio_request_timing_t, intervals) == 44) ? 1 : -1];
 typedef char abi_serial_size_check[(sizeof(ecuio_serial_port_t) == 288) ? 1 : -1];
@@ -535,6 +545,11 @@ int main(void)
         sizeof(ECUIO_TIMING_COLUMNS) < 2u ||
         (ECUIO_SESSION_INFO_REPLAY_FAULTS & ECUIO_SESSION_INFO_LISTEN_ONLY) != 0u ||
         (ECUIO_SESSION_INFO_REQUESTS & ECUIO_SESSION_INFO_REPLAY_FAULTS) != 0u ||
+        (ECUIO_SESSION_INFO_PICK_ONLY &
+         (ECUIO_SESSION_INFO_VBATT | ECUIO_SESSION_INFO_VERSIONS |
+          ECUIO_SESSION_INFO_REPLAY_LOOP | ECUIO_SESSION_INFO_PENDING_OFF |
+          ECUIO_SESSION_INFO_LISTEN_ONLY | ECUIO_SESSION_INFO_REPLAY_FAULTS |
+          ECUIO_SESSION_INFO_REQUESTS)) != 0u ||
         ECUIO_ABSENT_AFTER_FRAMES != 3u) {
         return 1;
     }
@@ -606,6 +621,18 @@ int main(void)
         uint16_t major = 1;
         uint16_t minor = 1;
         uint16_t patch = 1;
+        /* A flag the load doesn't know is refused; a set's written copy
+         * is read as any file is */
+        if (ecuio_signal_file_load_with(kGauged, sizeof kGauged - 1, 0x2u,
+                                        &file) != ECUIO_ERR_INVALID_ARGUMENT ||
+            file != NULL ||
+            ecuio_signal_file_load_with(kGauged, sizeof kGauged - 1,
+                                        ECUIO_SIGNAL_FILE_LOAD_SET,
+                                        &file) != ECUIO_OK) {
+            return 1;
+        }
+        ecuio_signal_file_free(file);
+        file = NULL;
         if (ecuio_signal_file_load(kGauged, sizeof kGauged - 1, &file) !=
             ECUIO_OK) {
             return 1;
@@ -710,6 +737,55 @@ int main(void)
             source->modified[ECUIO_SOURCE_TEXT_LEN - 1] != 0) {
             ecuio_signal_file_free(file);
             return 1;
+        }
+        {
+            /* ADR-0065's keys from C: a def's address, the set's keys by
+             * the serial ports' contract, and a def named by key or name */
+            const ecuio_signal_set_t* keyed = ecuio_signal_file_set(file);
+            ecuio_signal_key_t key;
+            ecuio_signal_key_t keys[3];
+            uint32_t count = 0;
+            uint32_t index = 99;
+            memset(&key, 0xAA, sizeof key);
+            memset(keys, 0xAA, sizeof keys);
+            if (sizeof(ecuio_signal_key_t) != 32u ||
+                ECUIO_SIGNAL_KEY_LEN != 32u || ECUIO_SIGNAL_KEY_MAX != 31u ||
+                ecuio_signal_address_key(NULL, &key) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_address_key(volts, NULL) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_address_key(volts, &key) != ECUIO_OK ||
+                strcmp(key.text, "7E8:4142:2.0:16") != 0 ||
+                key.text[ECUIO_SIGNAL_KEY_LEN - 1] != 0 ||
+                ecuio_signal_set_keys(keyed, file, NULL, 0, &count) !=
+                    ECUIO_OK ||
+                count != 3u ||
+                ecuio_signal_set_keys(keyed, file, NULL, 1, &count) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                count != 0u ||
+                ecuio_signal_set_keys(NULL, NULL, keys, 3, &count) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_set_keys(keyed, file, keys, 3, NULL) !=
+                    ECUIO_ERR_NULL_ARGUMENT ||
+                ecuio_signal_set_keys(keyed, file, keys, 3, &count) !=
+                    ECUIO_OK ||
+                count != 3u || strcmp(keys[0].text, key.text) != 0 ||
+                strcmp(keys[1].text, "7E8:4104:2.0:8") != 0 ||
+                strcmp(keys[2].text, "half") != 0 ||
+                ecuio_signal_set_find(keyed, keys, count, "half", &index) !=
+                    ECUIO_OK ||
+                index != 2u ||
+                ecuio_signal_set_find(keyed, keys, count, "Load Share",
+                                      &index) != ECUIO_OK ||
+                index != 1u ||
+                ecuio_signal_set_find(keyed, keys, count, "none", &index) !=
+                    ECUIO_ERR_INVALID_ARGUMENT ||
+                index != 1u ||
+                ecuio_signal_set_find(keyed, keys, count, NULL, &index) !=
+                    ECUIO_ERR_NULL_ARGUMENT) {
+                ecuio_signal_file_free(file);
+                return 1;
+            }
         }
         ecuio_signal_file_free(file);
         if (ecuio_plugin_load(kPacked, sizeof kPacked - 1, NULL, NULL,

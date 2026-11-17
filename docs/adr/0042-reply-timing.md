@@ -307,3 +307,10 @@ section 3): the session's time would put a mid-session log's reply
 timing ahead of its frames. The snapshot's cadence and the columns are
 unchanged; [ADR-0017](0017-session-recording.md)'s appendix of
 2026-11-07 has what an older recording holds.
+
+## Note: the timing rows are a pool (2026-11-16)
+
+The rows are a pool of `ECUIO_PROFILE_MAX_REQUESTS`: one is taken when a
+request first enters the rotation and kept, and the public rows are in the
+order taken. A request first kept once the pool is spent is asked with no
+row and counted in `untimed` (ADR-0065).

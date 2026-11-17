@@ -357,6 +357,18 @@ for data", in none of the unsupported, absent or unasked lists). A
 Delivery line and the support report give the sweep, and a `max_age` is
 at most 60 s), or asking fewer signals, fixes it.
 
+**Trying an expression.** `havne-cli signals expr --signals my.json
+"max(coolant, oil) - 40"` reads the expression as a computed signal of
+that file would be read: what it reads, or the character it is refused at
+and why. Add `--value coolant=95 --value oil=110@1.5` (a value, and
+optionally its age in seconds after an `@`) to work it out from those
+values; with no value the line says which signal is missing or too old.
+`--key hottest` checks it as an edit of that signal, which catches an
+expression that would read itself. With no expression the command lists
+the name each signal is read by: a file's own key, or `obd2.rpm` and its
+kin in a file that extends `obd2`. A plugin's variant is checked the same
+with `--plugin <pkg> --variant <id>`.
+
 ### Units
 
 A unit is shown exactly as written. These convert when the imperial
@@ -422,9 +434,10 @@ files use `gauge` and its `requires.core` names an older version.
 | What | Bound |
 |---|---|
 | A file | 1 MiB, UTF-8 |
-| Signals | 1024 a file |
+| Signals | 1024 for each file |
 | Modules | 32, the base set's counted |
-| A session's requests | 1024, the base set's counted (`obd2` alone asks over 90) |
+| An ECU's requests | 1024, the base set's counted (`obd2` alone asks over 90 of the engine ECU) |
+| A variant's files together | 16,384 signals; its one written file 4 MiB |
 | `name` | 1 to 31 bytes |
 | `unit` | 0 to 15 bytes |
 | `decimals` | 0 to 3 |
@@ -471,8 +484,8 @@ A file is refused for:
   connection carries one width (a J2534 or ELM327 session refuses the
   mix before it opens the adapter), and `obd2`'s modules are 11-bit, so
   a file that extends it takes 11-bit modules only.
-- **Its size:** more signals than fit a session's 1024 requests with
-  the base set's.
+- **Its size:** more signals than one ECU's 1024 requests
+  hold with the base set's.
 
 Every refusal names the line and column of what it refuses, then why:
 

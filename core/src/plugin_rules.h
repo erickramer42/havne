@@ -1,7 +1,7 @@
 // File/layer: core/src/plugin_rules.h | internal, C++17, Qt-free, header-only
 // Testing: UNIT: PluginTest, PluginWrapTest (test_signals)
 //
-// A manifest's rules that the plugin loader (plugin.cpp) and the calls
+// A manifest's rules that the plugin loader (plugin_manifest.cpp) and the calls
 // that write a manifest (plugin_wrap.cpp) share, so what one writes the
 // other reads: an id's alphabet, a version's X.Y.Z, a manufacturer
 // code, and core's own version as requires.core is compared with it.
@@ -11,6 +11,7 @@
 
 #include "ecuio/core.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -62,9 +63,20 @@ inline bool parse_version(const std::string& s, uint32_t out[3])
     return i == s.size();
 }
 
+/* ecuio_plugin_test_set_core_version's (internal.h, plugin.cpp): 0 for
+ * none, else 1 << 48 and the three parts 16 bits each */
+extern std::atomic<uint64_t> g_test_core;
+
 /* The leading X.Y.Z of core's own version (a suffix after it ignored) */
 inline void core_version(uint32_t out[3])
 {
+    const uint64_t test = g_test_core.load(std::memory_order_relaxed);
+    if (test != 0) {
+        out[0] = static_cast<uint32_t>((test >> 32) & 0xFFFF);
+        out[1] = static_cast<uint32_t>((test >> 16) & 0xFFFF);
+        out[2] = static_cast<uint32_t>(test & 0xFFFF);
+        return;
+    }
     const std::string v = ecuio_version_string();
     size_t end = 0;
     int dots = 0;

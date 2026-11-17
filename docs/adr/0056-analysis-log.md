@@ -1278,3 +1278,33 @@ Log page and no longer noted in the recording, since core's line says
 the same; the lines that say why the whole set is asked ("Asking every
 signal: the profile ranks none", or core's refusal) are still notes,
 since core's `focus  none` line doesn't say why.
+
+## Note: where a pull ends (2026-11-16)
+
+## Note: where a pull ends (2026-11-16)
+
+A pull ends at the throttle's lift: the run's last sample at or above the
+level, a dip under the gap kept inside it. A pull run onto the limiter
+then holds the limiter's bounce and its fuel cut, where the rule of
+"What a stretch is" ended it at vehicle speed's first sample at its
+highest. The owner's phone run of 2026-11-15 read the band stopping where
+the fuel cut starts while the throttle stayed down, and expected it to run
+to the lift. The earlier end leaves the fuel cut out of a pull's statistics
+and of a compared pull's alignment, which a lambda or boost mean wants, so
+it stays as a choice: `ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED` in
+`ecuio_stretch_rules_t.flags` (`flags` was zero and refused otherwise; the
+struct's layout is unchanged). The flag changes nothing with no
+vehicle-speed signal, where the run was the pull already. With a speed
+signal, speed must still end above its start over the pull as ended.
+`havne-cli view --pull-end lift|top-speed` (the `roles` line's
+`pull_end`), Python's `pull_end=` and the viewer's Stretches panel (kept
+in `recordings/stretchRules` as `pullEnd`) carry the choice.
+
+## Note: a session asking only its picks (2026-11-16)
+
+On a session that asks only its picks (ADR-0065), a focus of count 0
+leaves nothing asked but an attached condition's signals. A focus that
+would put more than `ECUIO_PROFILE_MAX_REQUESTS` requests in the rotation,
+with the attached conditions', is refused with nothing changed. Core maps
+each def to its table row once at attach (`focus_rows`), so judging a
+focus is linear in the defs.

@@ -459,9 +459,10 @@ int ecuio_def_range(const ecuio_signal_def_t* def, double* lo, double* hi);
                                                       ECUIO_SIGNAL_SET_LAYOUT */
 #define ECUIO_VALIDATE_ERR_SET_RESERVED     (-16)  /* a reserved field of
                                                       the set not zero */
-#define ECUIO_VALIDATE_ERR_REQUEST_COUNT    (-17)  /* the defs derive more
-                                                      requests than
-                                                      ECUIO_PROFILE_MAX_REQUESTS
+#define ECUIO_VALIDATE_ERR_REQUEST_COUNT    (-17)  /* one module's defs
+                                                      derive more requests
+                                                      than
+                                                      ECUIO_MODULE_MAX_REQUESTS
                                                       (profile.h); reported
                                                       by ecuio_profile_register */
 #define ECUIO_VALIDATE_ERR_TABLES_NULL      (-18)  /* enum_count or
@@ -643,9 +644,17 @@ int ecuio_display_convert(const char* unit, uint8_t decimal_places,
  * (Android's content:// URIs, iOS's sandbox). Everything a file gets
  * wrong is refused here, at load, not at the car. */
 
-/* A file's bounds */
+/* A data file's bounds: a file a user writes or imports, and each file
+ * of a plugin */
 #define ECUIO_SIGNAL_FILE_MAX_BYTES   1048576u   /* 1 MiB */
 #define ECUIO_SIGNAL_FILE_MAX_SIGNALS 1024u
+/* A set's bounds (ADR-0065 section 3): the signals of its own a set
+ * built from several data files holds (a plugin variant's files
+ * merged), and the bytes of that set written as one signal file, a
+ * recording's signals.json. ecuio_signal_file_load_with reads to these
+ * when asked. */
+#define ECUIO_SIGNAL_SET_MAX_BYTES    4194304u   /* 4 MiB */
+#define ECUIO_SIGNAL_SET_MAX_SIGNALS  16384u
 /* The formats this core reads, a file's "havne_signals": the newest and
  * the oldest. Format 2 adds the computed grammar's functions,
  * comparisons and conditional; a format 1 file is held to format 1. */
@@ -661,10 +670,27 @@ typedef struct ecuio_signal_file ecuio_signal_file_t;
  * ecuio_last_error_detail() saying where and why ("line 12, column 9:
  * unknown key 'scael'", never a path); ECUIO_ERR_OUT_OF_MEMORY. *out is
  * NULL on any failure. The file owns its set, defs, channels and
- * tables, and its set passes ecuio_validate_signal_set and fits
- * ECUIO_PROFILE_MAX_REQUESTS. Thread-safe: each call is its own. */
+ * tables, and its set passes ecuio_validate_signal_set and derives at
+ * most ECUIO_MODULE_MAX_REQUESTS requests for each ECU (profile.h).
+ * Read to a data file's bounds: more than ECUIO_SIGNAL_FILE_MAX_BYTES,
+ * or more than ECUIO_SIGNAL_FILE_MAX_SIGNALS signals of its own, is
+ * refused. Thread-safe: each call is its own. */
 ecuio_status_t ecuio_signal_file_load(const char* bytes, size_t length,
                                       ecuio_signal_file_t** out);
+
+/* ecuio_signal_file_load_with's flags. Values are append-only. */
+#define ECUIO_SIGNAL_FILE_LOAD_SET 0x1u /* read to a set's bounds */
+
+/* ecuio_signal_file_load, read to the bounds flags name: 0 a data
+ * file's, the same call; ECUIO_SIGNAL_FILE_LOAD_SET a set's
+ * (ECUIO_SIGNAL_SET_MAX_BYTES, ECUIO_SIGNAL_SET_MAX_SIGNALS). The flag
+ * is for the signals.json a recording holds, which is a session's whole
+ * set and may be one built from several data files; a file a user
+ * hands over is a data file. ECUIO_ERR_INVALID_ARGUMENT for any other
+ * flag, *out NULL. */
+ecuio_status_t ecuio_signal_file_load_with(const char* bytes, size_t length,
+                                           uint32_t flags,
+                                           ecuio_signal_file_t** out);
 
 /* The file's set, valid until ecuio_signal_file_free; NULL for NULL.
  * A session using it, through the profile it registers under, keeps
@@ -1053,6 +1079,96 @@ const char* ecuio_signal_file_text(const ecuio_signal_file_t* file,
 /* Frees a file; NULL is a no-op. Unregister its profile first: a
  * session using the set must be destroyed before this. */
 void ecuio_signal_file_free(ecuio_signal_file_t* file);
+
+/*
+ * A signal's key (ADR-0065 section 9): what identifies it wherever
+ * something is kept, a recording's values and a vehicle's ticks. A
+ * name is a label, and two signals of a set may share one.
+ *
+ * Most signals are kept under their address key, core's text for where
+ * the value is read:
+ *
+ *   <id>:<key>[@<offset>]:<byte>.<bit>:<bits>    a number or an enum
+ *   <id>:<key>[@<offset>]:<byte>:t<bytes>        a text or hex field
+ *
+ * <id> is message_id in upper-case hex, 3 digits up to 0x7FF and 8
+ * above it; <key> the mux key's mux_length bytes in upper-case hex,
+ * empty with no mux, and @<offset> its mux_offset when that isn't 0;
+ * then start_byte, bit_offset and bit_length in decimal, or for a text
+ * kind start_byte and byte_length (t0: to the payload's end).
+ * "7E8:410C:2.0:16" is two bytes of the engine ECU's PID 0C,
+ * "7E9:62F190:3:t17" seventeen bytes of a DID's reply. The byte order,
+ * the kind, the scale and the offset are no part of it: two defs over
+ * the same bits are one address, however each reads them.
+ *
+ * One address has one text in every set, so the key stands whatever
+ * the signal is called and whatever else is read with it. It is never
+ * an author's key (1 to 31 of a-z, 0-9 and _) nor "id:<n>", holds no
+ * comma, quote, space or line break, starts with a hex digit, and is
+ * at most ECUIO_SIGNAL_KEY_MAX bytes.
+ */
+#define ECUIO_SIGNAL_KEY_MAX 31u /* bytes, as an author's key */
+#define ECUIO_SIGNAL_KEY_LEN 32u /* its room: bytes, NUL, zeros after */
+
+typedef struct ecuio_signal_key {
+    char text[ECUIO_SIGNAL_KEY_LEN];
+} ecuio_signal_key_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_signal_key_t) == 32, "ecuio_signal_key_t size is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_signal_key_t) == 32, "ecuio_signal_key_t size is ABI");
+#endif
+
+/* The def's address key, out zeroed past it. "" for a computed def
+ * (ECUIO_DEF_FLAG_COMPUTED), which reads no address.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL argument, out untouched;
+ * ECUIO_ERR_INVALID_ARGUMENT, out "", for a def whose text has no room:
+ * a def ecuio_validate_signal refuses may have none, one it takes
+ * always has. Reads the def alone, so any thread may call it. */
+ecuio_status_t ecuio_signal_address_key(const ecuio_signal_def_t* def,
+                                        ecuio_signal_key_t* out);
+
+/*
+ * The key each def of set is kept under, in the set's order, by the
+ * serial ports' contract (serial.h): *count is every def, the first
+ * capacity are copied, and a capacity of 0 with keys NULL asks for the
+ * count. A def's key is its address key, unless it has none of its own:
+ * a computed def, and a def at the address of one before it in the set,
+ * take the author's key file gives them (ecuio_signal_file_key), and
+ * "id:<n>", n the def's id in decimal, where it gives none. In a set
+ * ecuio_validate_signal_set takes, no two defs share a key.
+ *
+ * file is the signal file whose set this is, or NULL for a set that has
+ * none (a built-in set, one registered by hand): pass the file wherever
+ * there is one, or a computed signal is kept under an id that means
+ * nothing outside its set. ECUIO_ERR_NULL_ARGUMENT for a NULL set or
+ * count, or NULL keys with a capacity; ECUIO_ERR_INVALID_ARGUMENT for a
+ * file of another set; ECUIO_ERR_OUT_OF_MEMORY. On a failure nothing is
+ * written but *count, 0. Reads the set and the file alone.
+ */
+ecuio_status_t ecuio_signal_set_keys(const ecuio_signal_set_t* set,
+                                     const ecuio_signal_file_t* file,
+                                     ecuio_signal_key_t* keys,
+                                     uint32_t capacity, uint32_t* count);
+
+/*
+ * The def text_utf8 names, among set's first count defs and their keys
+ * (ecuio_signal_set_keys'): the def with that key, else the one def
+ * with that name. *index is its place in the set. One rule wherever a
+ * person names a signal (havne-cli's --signal, a tick kept by name).
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL argument;
+ * ECUIO_ERR_INVALID_ARGUMENT, *index untouched and the detail
+ * (ecuio_last_error_detail) saying why, for text no def has ("no signal
+ * with the key or name 'Boost'") and for a name several defs have,
+ * which lists their keys ("2 signals are named 'Battery voltage': name
+ * one by its key (7E8:6201A4:3.0:8, 7E9:6201A4:3.0:8)"; the first 8,
+ * then "and N more").
+ */
+ecuio_status_t ecuio_signal_set_find(const ecuio_signal_set_t* set,
+                                     const ecuio_signal_key_t* keys,
+                                     uint32_t count, const char* text_utf8,
+                                     uint32_t* index);
 
 /* A group's name ("Engine", "Oxygen sensors"; ECUIO_SIGNAL_GROUP_*),
  * static and never NULL: "" for a code this core doesn't know, which a

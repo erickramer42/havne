@@ -6,6 +6,7 @@
 #include <ecuio/signals.h>
 #include <ecuio/signal_sets.h>
 #include "computed.h"
+#include "request_engine.h" /* core/src: obd2's request count */
 
 #include <cctype>
 #include <clocale>
@@ -752,12 +753,13 @@ TEST(SignalFileTest, EveryRefusalSaysWhereAndWhy)
     EXPECT_NE(refusal("\xEF\xBB\xBF{}").find("line 1"), std::string::npos) << "a BOM";
 }
 
-TEST(SignalFileTest, TheRequestsMustFitTheEngine)
+TEST(SignalFileTest, EachEcusRequestsMustFitAModule)
 {
-    /* One DID a signal: a file alone fits the cap with every signal it
-     * may hold; on obd2, whose requests count, it passes the cap */
-    static_assert(ECUIO_SIGNAL_FILE_MAX_SIGNALS >= ECUIO_PROFILE_MAX_REQUESTS,
-                  "one file can hold a full request table");
+    /* One DID for each signal: a file alone fits a module's most with
+     * every signal it may hold; on obd2, whose requests count on its ECU,
+     * it passes it */
+    static_assert(ECUIO_SIGNAL_FILE_MAX_SIGNALS >= ECUIO_MODULE_MAX_REQUESTS,
+                  "one file can ask a module its most");
     const auto file = [](unsigned n, bool on_obd2) {
         std::string s;
         for (unsigned i = 0; i < n; ++i) {
@@ -773,16 +775,39 @@ TEST(SignalFileTest, TheRequestsMustFitTheEngine)
         }
         return json;
     };
-    File fits = load(file(ECUIO_PROFILE_MAX_REQUESTS, false));
+    File fits = load(file(ECUIO_MODULE_MAX_REQUESTS, false));
     ASSERT_NE(fits, nullptr) << ecuio_last_error_detail();
     EXPECT_EQ(ecuio_signal_file_set(fits.get())->count,
-              ECUIO_PROFILE_MAX_REQUESTS);
-    const std::string past = refusal(file(ECUIO_PROFILE_MAX_REQUESTS, true));
-    EXPECT_NE(past.find("the signals ask more than " +
-                        std::to_string(ECUIO_PROFILE_MAX_REQUESTS) +
+              ECUIO_MODULE_MAX_REQUESTS);
+    const std::string past = refusal(file(ECUIO_MODULE_MAX_REQUESTS, true));
+    EXPECT_NE(past.find("the signals ask ecu 'pcm' more than " +
+                        std::to_string(ECUIO_MODULE_MAX_REQUESTS) +
                         " requests, the base's counted"),
               std::string::npos)
         << past;
+
+    /* The first signal past the module's most is the one named: obd2's
+     * requests and the file's first ones fill it */
+    const ecuio_signal_set_t* obd2 = nullptr;
+    ASSERT_EQ(ecuio_profile_lookup("obd2", &obd2), ECUIO_OK);
+    ecuio_derived base;
+    const uint32_t rx = ECUIO_OBD2_ECU_ARB_ID;
+    ASSERT_EQ(ecuio_engine_plan(obd2, &rx, 1, nullptr, &base),
+              ecuio_plan_result::ok);
+    ASSERT_LT(base.total, ECUIO_MODULE_MAX_REQUESTS);
+    const unsigned room = ECUIO_MODULE_MAX_REQUESTS - base.total;
+    File full = load(file(room, true));
+    EXPECT_NE(full, nullptr) << ecuio_last_error_detail();
+    const std::string one_more = refusal(file(room + 1, true));
+    EXPECT_NE(one_more.find("the signals ask ecu 'pcm' more than"),
+              std::string::npos)
+        << one_more;
+    const std::string json = file(room + 1, true);
+    const size_t at = json.find("\"key\":\"s" + std::to_string(room) + "\"");
+    ASSERT_NE(at, std::string::npos);
+    EXPECT_NE(one_more.find("column " + std::to_string(at)), std::string::npos)
+        << "the signal past the module's most, at its opening brace: "
+        << one_more;
 }
 
 TEST(SignalFileTest, NullsAndTheLoadersBounds)
@@ -807,6 +832,133 @@ TEST(SignalFileTest, NullsAndTheLoadersBounds)
     File g = load(one(R"({"key":"a","name":"A","notes":"n","x-tool":{"any":[1,2]},)"
                       R"("read":{"service":"22","number":"D100"},"field":{"byte":0}})"));
     EXPECT_NE(g, nullptr) << ecuio_last_error_detail();
+}
+
+/* A file of n signals, a module's most for each ECU in turn, each a DID of
+ * its own on its ECU */
+std::string car_file(unsigned n)
+{
+    std::string s;
+    s.reserve(n * size_t{100});
+    for (unsigned i = 0; i < n; ++i) {
+        char sig[160];
+        std::snprintf(
+            sig, sizeof sig,
+            R"(%s{"key":"s%u","name":"S%u","ecu":"e%u","read":{"service":"22","number":"%04X"},"field":{"byte":0}})",
+            i ? "," : "", i, i, i / ECUIO_MODULE_MAX_REQUESTS,
+            0x1000 + i % ECUIO_MODULE_MAX_REQUESTS);
+        s += sig;
+    }
+    return one(s, ecus_of((n + ECUIO_MODULE_MAX_REQUESTS - 1) /
+                          ECUIO_MODULE_MAX_REQUESTS));
+}
+
+/* The file with spaces before its last brace, size bytes in all */
+std::string padded_to(std::string json, size_t size)
+{
+    EXPECT_LE(json.size(), size);
+    json.insert(json.size() - 1, std::string(size - json.size(), ' '));
+    return json;
+}
+
+File load_set(const std::string& json, ecuio_status_t* status = nullptr)
+{
+    ecuio_signal_file_t* f = reinterpret_cast<ecuio_signal_file_t*>(1);
+    const ecuio_status_t s = ecuio_signal_file_load_with(
+        json.data(), json.size(), ECUIO_SIGNAL_FILE_LOAD_SET, &f);
+    if (status != nullptr) {
+        *status = s;
+    }
+    if (s != ECUIO_OK) {
+        EXPECT_EQ(f, nullptr) << "out is NULL on a failure";
+    }
+    return File(f);
+}
+
+std::string set_refusal(const std::string& json)
+{
+    ecuio_status_t s = ECUIO_OK;
+    File f = load_set(json, &s);
+    EXPECT_EQ(s, ECUIO_ERR_INVALID_ARGUMENT);
+    return ecuio_last_error_detail();
+}
+
+/* A file is held to a data file's bounds unless its reader says it is a
+ * set's written copy (ADR-0065 section 6): then a set's bounds hold, and
+ * nothing else about the load differs */
+TEST(SignalFileTest, ASetsWrittenCopyLoadsOnlyWhenTheCallerSaysItIsOne)
+{
+    /* The call's own refusals */
+    ecuio_signal_file_t* f = reinterpret_cast<ecuio_signal_file_t*>(1);
+    EXPECT_EQ(ecuio_signal_file_load_with("{}", 2, 0, nullptr),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(ecuio_signal_file_load_with(nullptr, 2, 0, &f),
+              ECUIO_ERR_NULL_ARGUMENT);
+    EXPECT_EQ(f, nullptr);
+    const std::string small = one(kNumber);
+    f = reinterpret_cast<ecuio_signal_file_t*>(1);
+    EXPECT_EQ(ecuio_signal_file_load_with(small.data(), small.size(), 0x2, &f),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(f, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "a signal file's load takes no flag 0x2");
+    f = reinterpret_cast<ecuio_signal_file_t*>(1);
+    EXPECT_EQ(ecuio_signal_file_load_with(
+                  small.data(), small.size(),
+                  ECUIO_SIGNAL_FILE_LOAD_SET | 0x80000000u, &f),
+              ECUIO_ERR_INVALID_ARGUMENT);
+    EXPECT_EQ(f, nullptr);
+    EXPECT_STREQ(ecuio_last_error_detail(),
+                 "a signal file's load takes no flag 0x80000000");
+    f = nullptr;
+    ASSERT_EQ(ecuio_signal_file_load_with(small.data(), small.size(), 0, &f),
+              ECUIO_OK);
+    ecuio_signal_file_free(f);
+    EXPECT_NE(load_set(small), nullptr) << "a small file is a set's too";
+
+    /* Signals: one past a data file's most */
+    const unsigned file_most = ECUIO_SIGNAL_FILE_MAX_SIGNALS;
+    const unsigned set_most = ECUIO_SIGNAL_SET_MAX_SIGNALS;
+    EXPECT_NE(load(car_file(file_most)), nullptr) << ecuio_last_error_detail();
+    const std::string past_file = car_file(file_most + 1);
+    EXPECT_TRUE(
+        has(refusal(past_file), R"("signals" lists 1025, more than 1024)"))
+        << ecuio_last_error_detail();
+    File copy = load_set(past_file);
+    ASSERT_NE(copy, nullptr) << ecuio_last_error_detail();
+    EXPECT_EQ(ecuio_signal_file_set(copy.get())->count, file_most + 1);
+
+    /* A set's most, and one past it */
+    const std::string whole = car_file(set_most);
+    ASSERT_GT(whole.size(), size_t{ECUIO_SIGNAL_FILE_MAX_BYTES});
+    ASSERT_LT(whole.size(), size_t{ECUIO_SIGNAL_SET_MAX_BYTES});
+    File car = load_set(whole);
+    ASSERT_NE(car, nullptr) << ecuio_last_error_detail();
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(car.get());
+    EXPECT_EQ(set->count, set_most);
+    EXPECT_EQ(set->channel_count, set_most / ECUIO_MODULE_MAX_REQUESTS);
+    EXPECT_EQ(ecuio_validate_signal_set(set, nullptr), ECUIO_VALIDATE_OK);
+    EXPECT_STREQ(set->defs[set_most - 1].name,
+                 ("S" + std::to_string(set_most - 1)).c_str());
+    EXPECT_EQ(set->defs[set_most - 1].message_id,
+              0x700u + set_most / ECUIO_MODULE_MAX_REQUESTS - 1);
+    EXPECT_TRUE(has(set_refusal(car_file(set_most + 1)),
+                    R"("signals" lists 16385, more than 16384)"))
+        << ecuio_last_error_detail();
+
+    /* Bytes: a data file's most and a byte more, a set's most and a byte
+     * more */
+    EXPECT_NE(load(padded_to(small, ECUIO_SIGNAL_FILE_MAX_BYTES)), nullptr)
+        << ecuio_last_error_detail();
+    const std::string a_byte_more =
+        padded_to(small, ECUIO_SIGNAL_FILE_MAX_BYTES + size_t{1});
+    EXPECT_FALSE(refusal(a_byte_more).empty());
+    EXPECT_NE(load_set(a_byte_more), nullptr) << ecuio_last_error_detail();
+    EXPECT_NE(load_set(padded_to(whole, ECUIO_SIGNAL_SET_MAX_BYTES)), nullptr)
+        << ecuio_last_error_detail();
+    EXPECT_FALSE(
+        set_refusal(padded_to(whole, ECUIO_SIGNAL_SET_MAX_BYTES + size_t{1}))
+            .empty());
 }
 
 // An expression reads a signal listed after it: its inputs are the ids

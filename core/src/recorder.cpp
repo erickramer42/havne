@@ -489,7 +489,7 @@ ecuio_status_t ecuio_recorder_take_signals(ecuio_recorder_t* recorder,
     }
     if (recorder->attached.load(std::memory_order_acquire) ||
         recorder->signals_set != nullptr ||
-        length > ECUIO_SIGNAL_FILE_MAX_BYTES) {
+        length > ECUIO_SIGNAL_SET_MAX_BYTES) {
         return ECUIO_ERR_INVALID_ARGUMENT;
     }
     try {

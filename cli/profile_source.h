@@ -22,7 +22,7 @@ namespace cmd {
 extern ecuio_signal_file_t* g_signal_file;
 
 ecuio_status_t load_signal_file(const char* path, ecuio_signal_file_t** file,
-                                std::string* why);
+                                std::string* why, bool recorded = false);
 int use_signal_file(const char* path, const char* uri, std::string* opened);
 cli::RecordedSignals recorded_signals(const std::string& folder);
 int use_recording_signals(const char* uri, std::string* opened);

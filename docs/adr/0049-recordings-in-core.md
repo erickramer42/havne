@@ -1652,3 +1652,8 @@ room that came), `.OpenAndAttachRefuseWhatTheyMust`,
 `.RecordersComeAndGoWhileTheSessionStreams` (attach and close in a loop
 under the mock's frames, for the sanitizers);
 `PythonTest.test_session`'s recorder opened after `start()`.
+
+## Note: the bound of `signals.json` (2026-11-16)
+
+A recording's `signals.json` is bounded by `ECUIO_SIGNAL_SET_MAX_BYTES`,
+and its readers load it with `ECUIO_SIGNAL_FILE_LOAD_SET` (ADR-0065).

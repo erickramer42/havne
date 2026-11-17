@@ -47,6 +47,9 @@
 //    ECUIO_FAKE_HELD_SERVICE=<service, hex> answers each request of that
 //    service with 7F <service> 78 alone: its answer never comes, so each
 //    stays out for the engine's pending wait.
+//    ECUIO_FAKE_ABSENT_ECU=<reply ID, hex> leaves every request to that
+//    ECU with no answer: a module this car lacks. FFFFFFFF leaves every
+//    ECU's: a car with its ignition off.
 //    ECUIO_FAKE_UNSUPPORTED_NRC sets the code of the negative reply to
 //    an unsupported PID or DID (hex or decimal), or 0 for no reply at
 //    all. The supported-PID bitmaps (PIDs 0x00, 0x20, 0x40) mark the
@@ -117,7 +120,7 @@
 
 #include "ecuio/j2534_ptypes.h"
 #include "fake_control.h"
-#include "fake_ecu.h"
+#include "fake_ecus.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -910,7 +913,7 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
         }
     }
     {
-        /* Modules of the fake's own: "7E9:D801=00 12;..." (fake_ecu.h's
+        /* Modules of the fake's own: "7E9:D801=00 12;..." (fake_ecus.h's
          * set_module_dids); unset or malformed, none */
         char spec[512] = {};
         if (!fake_j2534::read_knob("ECUIO_FAKE_MODULE_DIDS", spec,
@@ -918,6 +921,15 @@ long __stdcall PassThruWriteMsgs(unsigned long ChannelID,
             !fake_ecu::set_module_dids(spec)) {
             fake_ecu::set_module_dids(nullptr);
         }
+        /* An ECU that isn't there: its reply ID in hex (fake_ecus.h's
+         * absent_ecu); unset, none */
+        char absent[32] = {};
+        fake_ecu::absent_ecu().store(
+            fake_j2534::read_knob("ECUIO_FAKE_ABSENT_ECU", absent,
+                                  sizeof(absent))
+                ? static_cast<uint32_t>(strtoul(absent, nullptr, 16))
+                : 0u,
+            std::memory_order_release);
         /* The code a module's 7F 10 carries (0, the default, is 0x12) */
         char code[32] = {};
         fake_ecu::session_nrc() =

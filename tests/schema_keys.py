@@ -19,7 +19,8 @@ import os
 import re
 import sys
 
-LOADERS = ("core/src/signal_file.cpp", "core/src/plugin.cpp", "core/src/condition_file.cpp")
+LOADERS = ("core/src/signal_file.cpp", "core/src/plugin_manifest.cpp", "core/src/plugin.cpp",
+           "core/src/condition_file.cpp")
 SCHEMAS = ("signal-file", "plugin-manifest", "plugin-fixtures", "condition-file")
 
 # (loader, the call's context argument as written, its place among the
@@ -39,11 +40,11 @@ CALLS = {
     ("signal_file.cpp", "what", 2): ("signal-file", "/$defs/textSignal"),
     ("signal_file.cpp", "what", 3): ("signal-file", "/$defs/enumSignal"),
     ("signal_file.cpp", "what", 4): ("signal-file", "/$defs/numberSignal"),
-    ("plugin.cpp", '"the manifest"', 1): ("plugin-manifest", ""),
-    ("plugin.cpp", '"\\"requires\\""', 1): ("plugin-manifest", "/properties/requires"),
-    ("plugin.cpp", '"a variant"', 1): ("plugin-manifest", "/$defs/variant"),
-    ("plugin.cpp", '"a match"', 1): ("plugin-manifest", "/$defs/match"),
-    ("plugin.cpp", '"a data file"', 1): ("plugin-manifest", "/$defs/dataFile"),
+    ("plugin_manifest.cpp", '"the manifest"', 1): ("plugin-manifest", ""),
+    ("plugin_manifest.cpp", '"\\"requires\\""', 1): ("plugin-manifest", "/properties/requires"),
+    ("plugin_manifest.cpp", '"a variant"', 1): ("plugin-manifest", "/$defs/variant"),
+    ("plugin_manifest.cpp", '"a match"', 1): ("plugin-manifest", "/$defs/match"),
+    ("plugin_manifest.cpp", '"a data file"', 1): ("plugin-manifest", "/$defs/dataFile"),
     ("plugin.cpp", '"a fixture file"', 1): ("plugin-fixtures", ""),
     ("plugin.cpp", '"a value fixture"', 1): ("plugin-fixtures", "/$defs/value"),
     ("condition_file.cpp", '"the file"', 1): ("condition-file", ""),
@@ -69,7 +70,7 @@ WORDS = [
      ("signal-file", "/$defs/order/enum")),
     ("core/src/signal_file.cpp", r'extends->text != "([a-z0-9]+)"',
      ("signal-file", "/$defs/extends/enum")),
-    ("core/src/plugin.cpp", r't\.text != "([a-z]+)"',
+    ("core/src/plugin_manifest.cpp", r't\.text != "([a-z]+)"',
      ("plugin-manifest", "/properties/tiers/items/const")),
 ]
 
@@ -284,21 +285,22 @@ def main():
                         f"signal-file.schema.json#/$defs/group/enum's {sorted(spelled)}")
 
     # A schema's request bound ("at most N requests", N alone or after the
-    # define's name) is profile.h's; the signal-file schema states one
+    # define's name) is profile.h's for one module; the signal-file schema
+    # states one
     with open(os.path.join(root, "core/include/ecuio/profile.h"), encoding="utf-8") as f:
-        bound = re.search(r"#define ECUIO_PROFILE_MAX_REQUESTS (\d+)", f.read())
+        bound = re.search(r"#define ECUIO_MODULE_MAX_REQUESTS (\d+)", f.read())
     if bound is None:
-        failures.append("profile.h defines no ECUIO_PROFILE_MAX_REQUESTS: find it again")
+        failures.append("profile.h defines no ECUIO_MODULE_MAX_REQUESTS: find it again")
     else:
         stated = False
         for s in SCHEMAS:
             for text in strings_of(schemas[s]):
-                for n in re.findall(r"at most (?:ECUIO_PROFILE_MAX_REQUESTS "
+                for n in re.findall(r"at most (?:ECUIO_MODULE_MAX_REQUESTS "
                                     r"\(profile\.h, )?(\d+)\)? requests\b", text):
                     stated = stated or s == "signal-file"
                     if n != bound.group(1):
                         failures.append(f"{s}.schema.json says {n} requests, "
-                                        f"profile.h's ECUIO_PROFILE_MAX_REQUESTS "
+                                        f"profile.h's ECUIO_MODULE_MAX_REQUESTS "
                                         f"is {bound.group(1)}")
         if not stated:
             failures.append("signal-file.schema.json states no request bound "

@@ -202,8 +202,10 @@ int run_log(const cli::LogArgs& args)
     // pick; with no pick to make, the names alone are the focus
     uint32_t flags = 0;
     uint32_t min_sweep_ms = args.min_sweep_ms;
+    const bool pick_only = session_pick_only(session);
     if (args.pick_ranked) {
-        const std::vector<uint16_t> picked = cli::default_pick(set, ids);
+        const std::vector<uint16_t> picked =
+            cli::default_pick(set, ids, pick_only);
         if (!session_asks(session)) {
             std::fprintf(stderr, "havne-cli: the session asks no signal: "
                                  "--pick ranked adds none\n");
@@ -211,9 +213,27 @@ int run_log(const cli::LogArgs& args)
             std::fprintf(stderr, "havne-cli: the profile ranks no signal: "
                                  "--pick ranked adds none\n");
         } else {
+            if (pick_only && !cli::set_ranks(set)) {
+                std::fprintf(stderr, "havne-cli: the profile ranks no signal: "
+                                     "--pick ranked adds none\n");
+            }
             ids = picked;
             flags = ECUIO_FOCUS_DEFAULT_PICK;
         }
+    }
+    if (ids.empty() && pick_only && conditions == nullptr) {
+        // Nothing is asked without a pick or a condition (core asks an
+        // attached condition's signals): refuse before a recording of
+        // nothing opens
+        static const char kWhy[] = "the profile is asked only what is "
+                                   "picked: name signals with --signal or "
+                                   "attach conditions with --conditions";
+        write_error(out, ECUIO_ERR_INVALID_ARGUMENT, kWhy);
+        out.flush();
+        std::fprintf(stderr, "havne-cli: %s\n", kWhy);
+        ecuio_condition_set_free(conditions);
+        ecuio_session_destroy(session);
+        return ended(out, kExitConnect);
     }
     if (ids.empty()) {
         min_sweep_ms = 0; // no focus: the whole set, which takes no minimum

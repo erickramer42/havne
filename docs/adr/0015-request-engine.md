@@ -520,3 +520,10 @@ Note of 2026-11-13: v0.8.0 raises it to 1024
 ([ADR-0051](0051-signal-files.md)'s appendix "1024 requests").
 
 Note of 2026-11-16: a set's channels are 32 ([ADR-0065](0065-car-sized-profile.md) section 3). The engine holds one channel state for each module of its set, sized when it is made.
+
+## Note: the table sized from the set (2026-11-16)
+
+The request table is sized from the set at attach (its derived requests
+and each DID a scan can find) and never grows. Registration counts each
+module's requests with no table built (`ecuio_engine_plan`), and refuses
+the first def past a module's `ECUIO_MODULE_MAX_REQUESTS` (ADR-0065).

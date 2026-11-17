@@ -242,6 +242,7 @@ ECUIO_J2534_DLL_PATH_LEN = 0x100
 ECUIO_J2534_MAX_VENDORS = 16
 ECUIO_J2534_VENDOR_NAME_LEN = 64
 ECUIO_MAX_CHANNELS = 32
+ECUIO_MODULE_MAX_REQUESTS = 0x400
 ECUIO_MONITOR_COMPLETE = 1
 ECUIO_MONITOR_CYCLE_COMPLETE = 4
 ECUIO_MONITOR_CYCLE_ENABLED = 2
@@ -324,6 +325,7 @@ ECUIO_SERIAL_NAME_LEN = 128
 ECUIO_SESSION_INFO_LISTEN_ONLY = 16
 ECUIO_SESSION_INFO_MAX_CHANNELS = 4
 ECUIO_SESSION_INFO_PENDING_OFF = 8
+ECUIO_SESSION_INFO_PICK_ONLY = 128
 ECUIO_SESSION_INFO_PROFILE_LEN = 64
 ECUIO_SESSION_INFO_REPLAY_FAULTS = 32
 ECUIO_SESSION_INFO_REPLAY_LOOP = 4
@@ -342,6 +344,7 @@ ECUIO_SESSION_STATE_UNANSWERED = 4
 ECUIO_SET_MAX_TABLE = 0x10000
 ECUIO_SIGNAL_FILE_FORMAT = 2
 ECUIO_SIGNAL_FILE_FORMAT_OLDEST = 1
+ECUIO_SIGNAL_FILE_LOAD_SET = 1
 ECUIO_SIGNAL_FILE_MAX_BYTES = 0x100000
 ECUIO_SIGNAL_FILE_MAX_SIGNALS = 0x400
 ECUIO_SIGNAL_GROUP_AIR = 2
@@ -353,7 +356,11 @@ ECUIO_SIGNAL_GROUP_FUEL = 3
 ECUIO_SIGNAL_GROUP_OTHER = 0
 ECUIO_SIGNAL_GROUP_OXYGEN = 4
 ECUIO_SIGNAL_GROUP_VEHICLE = 6
+ECUIO_SIGNAL_KEY_LEN = 32
+ECUIO_SIGNAL_KEY_MAX = 31
 ECUIO_SIGNAL_SET_LAYOUT = 5
+ECUIO_SIGNAL_SET_MAX_BYTES = 0x400000
+ECUIO_SIGNAL_SET_MAX_SIGNALS = 0x4000
 ECUIO_SIM_ALLOW_DESK_BUS = 1
 ECUIO_SIM_FAILED = 1
 ECUIO_SIM_MAX_REPLIES = 66
@@ -378,6 +385,7 @@ ECUIO_STRETCH_DEFAULT_PULL_LEVEL = 80.0
 ECUIO_STRETCH_DEFAULT_PULL_LOAD_LEVEL = 80.0
 ECUIO_STRETCH_DEFAULT_PULL_RISE = 750.0
 ECUIO_STRETCH_PULLS = 1
+ECUIO_STRETCH_PULL_ENDS_AT_TOP_SPEED = 1
 ECUIO_SUPPORT_COMPLETE = 2
 ECUIO_SUPPORT_EXTENDED = 32
 ECUIO_SUPPORT_MAX_DROPPED = 8
@@ -698,6 +706,9 @@ class ecuio_signal_file_t(Structure):
     pass
 
 class ecuio_signal_gauge_t(Structure):
+    pass
+
+class ecuio_signal_key_t(Structure):
     pass
 
 class ecuio_signal_set_t(Structure):
@@ -1374,7 +1385,8 @@ ecuio_session_timing_t._fields_ = [
     ('isotp_completed', c_uint32),
     ('isotp_dropped', c_uint32),
     ('isotp_malformed', c_uint32),
-    ('reserved', (c_uint32 * 7)),
+    ('untimed', c_uint32),
+    ('reserved', (c_uint32 * 6)),
 ]
 ecuio_signal_def_t._fields_ = [
     ('id', c_uint16),
@@ -1411,6 +1423,9 @@ ecuio_signal_gauge_t._fields_ = [
     ('warn_high', c_double),
     ('flags', c_uint32),
     ('reserved', (c_uint32 * 3)),
+]
+ecuio_signal_key_t._fields_ = [
+    ('text', (c_char * 32)),
 ]
 ecuio_signal_set_t._fields_ = [
     ('layout_version', c_uint32),
@@ -1652,6 +1667,7 @@ FUNCTIONS = {
     'ecuio_session_signal_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_session_t)]),  # profile.h
     'ecuio_session_start': (c_int, [POINTER(ecuio_session_t)]),  # core.h
     'ecuio_shutdown': (None, []),  # core.h
+    'ecuio_signal_address_key': (c_int, [POINTER(ecuio_signal_def_t), POINTER(ecuio_signal_key_t)]),  # signals.h
     'ecuio_signal_file_check_expr': (c_int, [POINTER(ecuio_signal_file_t), c_char_p, c_char_p, c_size_t, POINTER(ecuio_expr_check_t)]),  # signals.h
     'ecuio_signal_file_evaluate': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_computed_t), POINTER(ecuio_eval_input_t), c_uint32, POINTER(ecuio_eval_result_t)]),  # signals.h
     'ecuio_signal_file_expr': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
@@ -1664,12 +1680,15 @@ FUNCTIONS = {
     'ecuio_signal_file_gauge': (POINTER(ecuio_signal_gauge_t), [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_key': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_def_t)]),  # signals.h
     'ecuio_signal_file_load': (c_int, [c_char_p, c_size_t, POINTER(POINTER(ecuio_signal_file_t))]),  # signals.h
+    'ecuio_signal_file_load_with': (c_int, [c_char_p, c_size_t, c_uint32, POINTER(POINTER(ecuio_signal_file_t))]),  # signals.h
     'ecuio_signal_file_name': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_profile': (c_char_p, [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_set': (POINTER(ecuio_signal_set_t), [POINTER(ecuio_signal_file_t)]),  # signals.h
     'ecuio_signal_file_source': (c_int, [POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_source_t)]),  # signals.h
     'ecuio_signal_file_text': (c_char_p, [POINTER(ecuio_signal_file_t), POINTER(c_size_t)]),  # signals.h
     'ecuio_signal_group_name': (c_char_p, [c_uint32]),  # signals.h
+    'ecuio_signal_set_find': (c_int, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_key_t), c_uint32, c_char_p, POINTER(c_uint32)]),  # signals.h
+    'ecuio_signal_set_keys': (c_int, [POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_file_t), POINTER(ecuio_signal_key_t), c_uint32, POINTER(c_uint32)]),  # signals.h
     'ecuio_sim_ask': (c_int, [POINTER(ecuio_sim_t), c_uint32, POINTER(c_uint8), c_uint32, c_int64, POINTER(ecuio_sim_reply_t), c_uint32, POINTER(c_uint32)]),  # sim.h
     'ecuio_sim_create': (c_int, [c_char_p, c_char_p, POINTER(POINTER(ecuio_sim_t))]),  # sim.h
     'ecuio_sim_create_unbound': (c_int, [c_char_p, c_uint32, POINTER(POINTER(ecuio_sim_t))]),  # sim.h

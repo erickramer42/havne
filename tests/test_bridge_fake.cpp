@@ -40,6 +40,7 @@
 #include "fake_control.h"   // the fake J2534 DLL's control page
 #endif
 #include "bridge_support.h"
+#include "car_sized_set.h"
 
 #ifdef _WIN32
 
@@ -897,7 +898,156 @@ QString fakeObd2PickUri()
         .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH));
 }
 
+/* A set past a rotation (tests/car_sized_set.h), asked only its picks
+ * (ADR-0065): unranked, and a copy that ranks every def */
+const char* const kCarSet = "bridge-car";
+const char* const kCarRanked = "bridge-car-ranked";
+
+const ecuio_signal_set_t* rankedCarSet()
+{
+    static std::vector<ecuio_signal_def_t> defs;
+    static ecuio_signal_set_t made = {};
+    if (made.count == 0) {
+        const ecuio_signal_set_t* base = car_sized::set();
+        defs.assign(base->defs, base->defs + base->count);
+        for (ecuio_signal_def_t& d : defs) {
+            d.plot_rank = 1;
+        }
+        made = *base;
+        made.defs = defs.data();
+    }
+    return &made;
+}
+
+QString carUri(const char* profile)
+{
+    return QStringLiteral("j2534://%1?profile=%2&identify=0&diagnose=0")
+        .arg(QString::fromUtf8(FAKE_J2534_DLL_PATH),
+             QString::fromUtf8(profile));
+}
+
+const QString kNoneToPick = QStringLiteral(
+    "Asking no signal: this profile is asked only what is picked. Tick "
+    "signals on Live or place gauges");
+
+bool anyAskedEvery(const QStringList& log)
+{
+    return std::any_of(log.begin(), log.end(), [](const QString& l) {
+        return l.startsWith(QStringLiteral("Asking every"));
+    });
+}
+
 } // namespace
+
+/* ADR-0065: on a session read by its picks nothing is asked until a row
+ * is ticked, and the pick line says so rather than "every signal"; a
+ * ticked row is asked even though the set ranks none, and unticked, the
+ * asking stops; Start log and Stop log leave it asking nothing */
+TEST(BridgeTest, APickOnlySessionAsksNothingUntilARowIsTicked)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    FakeEnvArm module("ECUIO_FAKE_MODULE_DIDS", "7E8:1007=2A;7E9:1003=11");
+    ASSERT_EQ(ecuio_profile_register(kCarSet, car_sized::set(), nullptr),
+              ECUIO_OK);
+    {
+        QTemporaryDir root;
+        ASSERT_TRUE(root.isValid());
+        SessionBridge bridge;
+        bridge.setRecordingsRootForTesting(root.path());
+        QStringList log;
+        QObject::connect(&bridge, &SessionBridge::logMessage,
+                         [&log](const QString& line) { log << line; });
+        ASSERT_TRUE(bridge.connectSession(carUri(kCarSet)).isEmpty());
+        EXPECT_TRUE(log.contains(kNoneToPick)) << log.join('\n').toStdString();
+        EXPECT_FALSE(anyAskedEvery(log)) << log.join('\n').toStdString();
+        const auto writes = [] { return fake_control::writes(fakePage()); };
+        QElapsedTimer quiet;
+        quiet.start();
+        ASSERT_TRUE(spinUntil([&]() { return quiet.elapsed() >= 400; }, 5000));
+        EXPECT_EQ(writes(), 0u) << "nothing is asked before a pick";
+
+        SignalListModel* model = bridge.signalModel();
+        const uint16_t picked = car_sized::id_of(7);
+        model->toggleSubscribed(modelRowOf(model, picked));
+        ASSERT_TRUE(spinUntil(
+            [&]() {
+                return lineStarting(log, QStringLiteral("Asking 1 signal: "
+                                                        "Signal 7")) >= 0;
+            },
+            5000))
+            << log.join('\n').toStdString();
+        ASSERT_TRUE(spinUntil([&]() { return writes() >= 4; }, 5000))
+            << "the ticked row is asked";
+        fake_control::Write w{};
+        ASSERT_TRUE(fake_control::recorded_write(fakePage(), 0, &w));
+        EXPECT_EQ(w.size, 7u);
+        EXPECT_EQ(w.data[5], 0x10);
+        EXPECT_EQ(w.data[6], 0x07);
+
+        model->toggleSubscribed(modelRowOf(model, picked));
+        ASSERT_TRUE(
+            spinUntil([&]() { return log.count(kNoneToPick) == 2; }, 5000))
+            << log.join('\n').toStdString();
+        QElapsedTimer settle;
+        settle.start();
+        ASSERT_TRUE(spinUntil([&]() { return settle.elapsed() >= 300; }, 5000));
+        const auto after = writes();
+        settle.restart();
+        ASSERT_TRUE(spinUntil([&]() { return settle.elapsed() >= 400; }, 5000));
+        EXPECT_EQ(writes(), after) << "unticked: the asking stops";
+
+        // A log of nothing isn't started; a log of a ticked row, its row
+        // unticked meanwhile, ends asking nothing and says so
+        EXPECT_FALSE(bridge.startLog());
+        model->toggleSubscribed(modelRowOf(model, picked));
+        ASSERT_TRUE(
+            spinUntil([&]() { return model->tickedCount() == 1; }, 5000));
+        ASSERT_TRUE(bridge.startLog());
+        model->toggleSubscribed(modelRowOf(model, picked));
+        log.clear();
+        bridge.stopLog();
+        EXPECT_TRUE(log.contains(kNoneToPick)) << log.join('\n').toStdString();
+        EXPECT_FALSE(anyAskedEvery(log)) << log.join('\n').toStdString();
+        const auto afterLog = writes();
+        settle.restart();
+        ASSERT_TRUE(spinUntil([&]() { return settle.elapsed() >= 400; }, 5000));
+        EXPECT_EQ(writes(), afterLog);
+        ASSERT_TRUE(disconnectAndWait(bridge));
+    }
+    EXPECT_EQ(ecuio_profile_unregister(kCarSet), ECUIO_OK);
+}
+
+/* A default pick core refuses (every def ranked: 2048 requests) leaves a
+ * pick-only session asking nothing, with core's words; never "every
+ * signal" */
+TEST(BridgeTest, APickOnlyPickCoreRefusesAsksNothing)
+{
+    FakeHooks hooks;
+    ASSERT_TRUE(hooks.load());
+    FakeEnvArm module("ECUIO_FAKE_MODULE_DIDS", "7E8:1007=2A;7E9:1003=11");
+    ASSERT_EQ(ecuio_profile_register(kCarRanked, rankedCarSet(), nullptr),
+              ECUIO_OK);
+    {
+        SessionBridge bridge;
+        QStringList log;
+        QObject::connect(&bridge, &SessionBridge::logMessage,
+                         [&log](const QString& line) { log << line; });
+        ASSERT_TRUE(bridge.connectSession(carUri(kCarRanked)).isEmpty());
+        const int at = lineStarting(log, QStringLiteral("Asking no signal: "));
+        ASSERT_GE(at, 0) << log.join('\n').toStdString();
+        EXPECT_TRUE(log[at].contains(
+            QStringLiteral("ask 2048 requests: a session asks 1024 at a time")))
+            << log[at].toStdString();
+        EXPECT_FALSE(anyAskedEvery(log)) << log.join('\n').toStdString();
+        QElapsedTimer quiet;
+        quiet.start();
+        ASSERT_TRUE(spinUntil([&]() { return quiet.elapsed() >= 400; }, 5000));
+        EXPECT_EQ(fake_control::writes(fakePage()), 0u);
+        ASSERT_TRUE(disconnectAndWait(bridge));
+    }
+    EXPECT_EQ(ecuio_profile_unregister(kCarRanked), ECUIO_OK);
+}
 
 /* Start log over the fake ECU (ADR-0056 sections 2 and 3): the session
  * asks the plotted PIDs alone, ticks on Live meanwhile leave that so,

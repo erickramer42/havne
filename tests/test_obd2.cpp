@@ -20,7 +20,7 @@
 #include "ecuio/profile.h"
 #include "ecuio/sim.h"
 #include "fake_diagnostics.h"
-#include "fake_ecu.h"
+#include "fake_ecus.h"
 #include "temp_name.h"
 
 #include <chrono>

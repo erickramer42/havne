@@ -128,10 +128,16 @@ public:
                          * stores an end as is. Notified with UnitRole. */
         RangeHighRole,
         IsEnumRole, /* the def's kind is ENUM. Fixed per signal set. */
-        UnaskedRole /* the session's focus leaves it unasked
-                     * (applyUnasked, ecuio_session_get_unasked_signals):
-                     * Live and the Dashboard say "not asked" in place of
-                     * a value */
+        UnaskedRole, /* the session's focus leaves it unasked
+                      * (applyUnasked, ecuio_session_get_unasked_signals):
+                      * Live and the Dashboard say "not asked" in place of
+                      * a value */
+        HiddenWhyRole /* why a hidden row is hidden: "unsupported" (its
+                       * ECU's supported-PID list leaves it out) or
+                       * "absent" (its replies come without the field),
+                       * unsupported first when both hold; "" for a shown
+                       * row. Notified with HiddenRole, including when the
+                       * reason changes under a row that stays hidden. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -139,8 +145,11 @@ public:
     QHash<int, QByteArray> roleNames() const override;
     // file: the signal file whose set it is (SessionBridge::fileOfSet),
     // for the rows' refs; nullptr for a built-in set or none
+    // pickOnly: the session asks only its picks, so no row is plotted
+    // until ticked (a set that ranks none otherwise plots every row)
     void setSignalSet(const ecuio_signal_set_t* set,
-                      const ecuio_signal_file_t* file = nullptr);
+                      const ecuio_signal_file_t* file = nullptr,
+                      bool pickOnly = false);
     // A def's fixed facts beyond the def itself, the same for a row and
     // for SessionBridge::profileSignals: its ref (RefRole), whether it
     // is an enum, and its decoded range in the def's unit, NaN for none
@@ -174,6 +183,8 @@ public:
     int subscribedCount() const { return static_cast<int>(m_subscribedCount); }
     int tickedCount() const { return m_tickedCount; }
     int hiddenCount() const { return m_hiddenCount; }
+    // Whether any row has taken a value since the set loaded
+    bool anyValue() const;
     // The ids of the ticked rows Live shows, in the model's order: the
     // rows the chart plots (subscribedCount of them) and the ticked text
     // rows, the focus Start log asks
@@ -244,6 +255,9 @@ public:
     // unticked from it, and setting both, which leaves every other row to
     // its default. A name in both lists is unplotted; a text row is never
     // unplotted, its default being unticked.
+    // The hidden rows as { name, why } in set order, for Live's list of
+    // them; a binding that reads hiddenCount re-runs it on every judgment
+    Q_INVOKABLE QVariantList hiddenSignals() const;
     Q_INVOKABLE QStringList plottedNames() const;
     Q_INVOKABLE QStringList unplottedNames() const;
     Q_INVOKABLE void setPlotChoices(const QStringList& plotted, const QStringList& unplotted);
@@ -313,6 +327,8 @@ private:
         bool unsupported = false; // core: its ECU doesn't support it
         bool absent = false;      // core: its frames come without it
         bool hidden = false;      // either: Live leaves the row out
+        enum class Why : unsigned char { None, Unsupported, Absent };
+        Why why = Why::None;      // the reason it's hidden, unsupported first
         bool unasked = false;     // core: the focus leaves it unasked
         QString refused;          // its ECU's refusal in words, or ""
         QString refusedCode;      // its reply's bytes, or ""
@@ -349,6 +365,7 @@ private:
     // rows, choices.
     void judgePlotted();
     static void pushSample(Entry& e, qint64 stamp, double value);
+    static const char* whyWords(Entry::Why why);
     // An enum row's label for its newest value, "" when it has none
     static QString labelOf(const Entry& e);
     static void pushWindow(Entry& e, const WindowValue& w);
@@ -372,6 +389,7 @@ private:
     int m_hiddenCount = 0;
     int m_unaskedCount = 0;
     bool m_ranked = false;      // the set ranks a def (plot_rank)
+    bool m_pickOnly = false;    // the session is asked only its picks
     uint32_t m_units = ECUIO_UNITS_METRIC;
     HostElapsedTimer m_clock;   // fallback stamps; restarted in setSignalSet
 };
