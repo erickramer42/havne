@@ -24,7 +24,8 @@ ColumnLayout {
     // The hidden rows, { name, why }; reading hiddenCount makes a judgment
     // of the model (a reason that moved too) run this again
     // A plain JS copy, made once per change: a delegate never reads a C++ map
-    readonly property var rows: part.open ? JSON.parse(JSON.stringify((part.hiddenCount, Bridge.signalModel.hiddenSignals()))) : []
+    readonly property var rows: part.open && part.hiddenCount >= 0
+        ? JSON.parse(JSON.stringify(Bridge.signalModel.hiddenSignals())) : []
 
     function reasonText(why) {
         return why === "unsupported" ? qsTr("the ECU's supported-PID list leaves it out")
