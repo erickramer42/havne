@@ -652,6 +652,14 @@ def wasm_seeds():
         "numbers": wasm_module([
             ("c", "i", "i", get(0) + b"\xac" + b"\x42\x03" + b"\x7f" + b"\xa7"),  # i64: extend, div_s, wrap
             ("d", "ii", "i", get(0) + b"\xc0" + get(1) + b"\x74")]),   # i32.extend8_s, shl
+        # Work the budget counts beyond instructions: blocks scanned for
+        # their ends on every turn of a loop, a block left by a branch,
+        # br_tables the runtime keeps in its list (a depth past 255)
+        "scan-if": wasm_module([("a", "", "", b"\x03\x40" + (
+            b"\x41\x00\x04\x40" + b"\x01" * 2043 + b"\x0b") * 3 + b"\x0c\x00\x0b")]),
+        "scan-block": wasm_module([("a", "", "", b"\x02\x40\x0c\x00" + b"\x01" * 2000 + b"\x0b")]),
+        "table-list": wasm_module([("a", "", "", b"\x02\x40" * 256 + (
+            b"\x02\x40\x41\x01\x0e\x01\x80\x02\x00\x0b") * 8 + b"\x0b" * 256)]),
         # What the check refuses, each of its kinds
         "refused-start": wasm_module(five, start=0),
         "refused-import": wasm_module(five[1:2], imports=wasm_name("env") + wasm_name("f") +
@@ -667,6 +675,7 @@ def wasm_seeds():
         "refused-twice": wasm_module(five + [("b", "", "i", const(7))]),
         "refused-types": wasm_module(five[:1], tail=wasm_section(
             1, leb(1025) + b"\x60\x00\x00" * 1025)),
+        "refused-body": wasm_module(five[:1] + [("b", "", "i", b"\x01" * 65536 + const(1))]),
         # What only the runtime refuses: an add with nothing to add
         "invalid-code": wasm_module([("b", "", "i", add)]),
     }

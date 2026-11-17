@@ -8,9 +8,14 @@
 // - A module is judged by wasm_check.h, then by the runtime, when the
 //   instance is made, on the caller's thread: a refusal or a lack of
 //   memory is an answer there, never on a worker.
-// - A call runs one export under an instruction budget. It allocates
-//   nothing: the memory is a fixed size and the stacks were made with
-//   the instance.
+// - A call runs one export under a budget of work: one unit for each
+//   instruction, and for what an instruction makes the runtime do beyond
+//   it (each byte of a block scanned for its end, each record walked for
+//   a br_table, each 16 stack cells zeroed or copied for a call, a return
+//   or a branch: third_party/wamr-patches/0001). No unit costs more than
+//   a plain instruction, so the budget bounds a call's time whatever the
+//   module does. A call allocates nothing: the memory is a fixed size and
+//   the stacks were made with the instance.
 // - A call that doesn't return (the budget ran out, a trap) ends the
 //   instance: every later call answers `dead` without running anything.
 //   WAMR's state after a stopped call is not one to call into again.
@@ -32,9 +37,10 @@
 
 namespace ecuio_wasm {
 
-/* Instructions one call may run unless the caller asks for fewer
- * (ADR-0066 section 2.2): room for a key computation many times over,
- * and well under a tenth of a second on a slow phone */
+/* Units of work one call may spend unless the caller asks for fewer
+ * (ADR-0066 section 2.2): room for a key computation many times over. A
+ * call takes no longer than a loop of this many instructions, which is
+ * milliseconds on a desktop core. */
 constexpr uint32_t BUDGET_DEFAULT = 1000000;
 /* A module's operand and call stack, made with the instance */
 constexpr uint32_t STACK_BYTES = 64 * 1024;
@@ -47,7 +53,7 @@ constexpr uint32_t ARGS_MAX = 4;
 
 enum class call_end : uint8_t {
     returned,    /* value holds the result, 0 for a function with none */
-    budget,      /* the instruction budget ran out: the instance is dead */
+    budget,      /* the budget ran out: the instance is dead */
     trapped,     /* a trap (out of bounds, unreachable, a stack overflow):
                     the instance is dead */
     dead,        /* an earlier call ended the instance: nothing ran */
@@ -78,8 +84,8 @@ ecuio_status_t make_instance(const uint8_t* bytes, size_t n,
 void free_instance(instance* i) noexcept;
 
 /* Calls wanted export `index` (its place in make_instance's wants) with
- * arg_count i32 arguments (at most ARGS_MAX) under `budget` instructions
- * (at least 1). Allocates nothing. */
+ * arg_count i32 arguments (at most ARGS_MAX) under `budget` units of
+ * work (at least 1). Allocates nothing. */
 call_result call_instance(instance* i, size_t index, const uint32_t* args,
                           uint32_t arg_count, uint32_t budget) noexcept;
 

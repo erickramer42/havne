@@ -97,7 +97,8 @@ for d in "${drop[@]}"; do
 done
 for p in "$root"/third_party/wamr-patches/*.patch; do
     [ -f "$p" ] || continue
-    git -C "$work/out" apply --whitespace=nowarn "$p"
+    # autocrlf off again: a Windows Git would write the patched file as CRLF
+    git -c core.autocrlf=false -C "$work/out" apply --whitespace=nowarn "$p"
 done
 
 if [ $check = 1 ]; then

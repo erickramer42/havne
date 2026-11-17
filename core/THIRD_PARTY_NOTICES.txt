@@ -55,9 +55,10 @@ WAMR, the WebAssembly Micro Runtime
 A plugin's code runs inside Havne's core in an interpreter built from
 the WebAssembly Micro Runtime (WAMR), version 2.4.5,
 https://github.com/bytecodealliance/wasm-micro-runtime, a Bytecode
-Alliance project. Its source files are compiled unmodified; the ones
-used and the commit they come from are in Havne's source
-(third_party/wamr, scripts/vendor_wamr.sh). Copyright (C) 2019 Intel
+Alliance project. Its source files are modified by the patches listed
+in Havne's source (third_party/wamr-patches); the files used and the
+commit they come from are there too (third_party/wamr,
+scripts/vendor_wamr.sh). Copyright (C) 2019 Intel
 Corporation and the project's other contributors (Amazon, Midokura,
 Tencent), under the Apache License, version 2.0, with LLVM Exceptions:
 

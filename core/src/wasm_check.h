@@ -13,7 +13,10 @@
 //   module never allocates and the cap is the module's own number;
 // - each export the caller wants, once, a function of the type it wants;
 // - nothing that makes the runtime's own load slow: at most TYPES_MAX
-//   function types (it compares each with every one before it).
+//   function types (it compares each with every one before it);
+// - no function whose code is past BODY_MAX_BYTES: the runtime scans a
+//   block's code for its end the first time a branch needs it, so a
+//   function's size is the most one instruction can make it read.
 //
 // Every section is judged wherever it stands and however often, so a
 // repeated or misplaced one hides nothing from this check whatever the
@@ -36,6 +39,7 @@ constexpr uint32_t MEMORY_MAX_PAGES = 16;     /* of 64 KiB: 1 MiB */
 constexpr size_t REFUSAL_MAX = 160; /* a refusal's words, NUL included */
 constexpr size_t WANTED_MAX = 32;   /* exports a caller may ask for */
 constexpr uint32_t TYPES_MAX = 1024; /* function types a module may state */
+constexpr uint32_t BODY_MAX_BYTES = 64 * 1024; /* one function's code */
 
 /* An export the module must have: a function whose parameters, then ':',
  * then results are each 'i' (i32), 'I' (i64), 'f' (f32) or 'F' (f64):
@@ -226,6 +230,22 @@ inline check_result judge_memory(cursor body, shape& s)
             most, MEMORY_MAX_PAGES);
     }
     return passed();
+}
+
+/* The code section: each function's code within the cap. Only the sizes
+ * are read, never an instruction. */
+inline check_result judge_code(cursor body)
+{
+    const uint32_t count = body.u32();
+    for (uint32_t i = 0; i < count && !body.bad; ++i) {
+        const uint32_t size = body.u32();
+        if (!body.bad && size > BODY_MAX_BYTES) {
+            return refused("function %u's code is %u bytes: 64 KiB is the most",
+                           i, size);
+        }
+        body.take(size);
+    }
+    return body.bad ? cut_short() : passed();
 }
 
 /* The type index of function `index`, from the function section */
@@ -447,11 +467,12 @@ inline check_result judge_section(uint8_t id, const cursor& body, shape& s)
         return refused(
             "the module has a start function, which would run before any "
             "limit is set");
+    case 10:
+        return judge_code(body);
     case 0:  /* custom: names, producers */
     case 4:  /* tables */
     case 6:  /* globals */
     case 9:  /* elements */
-    case 10: /* code */
     case 11: /* data */
         return passed();
     default:
@@ -466,8 +487,9 @@ inline check_result judge_section(uint8_t id, const cursor& body, shape& s)
 
 /* Whether a plugin's module of n bytes has a shape core can bound, with
  * each of the want_count exports (at most WANTED_MAX); the words say why
- * not. It reads the sections' frames, the imports, the memory and the
- * exports, never a function's code: validity is the runtime's to judge. */
+ * not. It reads the sections' frames, the imports, the memory, the
+ * exports and each function's size, never an instruction: validity is the
+ * runtime's to judge. */
 inline check_result check_module(const uint8_t* bytes, size_t n,
                                  const wanted_export* wants, size_t want_count)
 {

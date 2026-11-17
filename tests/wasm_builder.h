@@ -24,6 +24,10 @@ using bytes = std::vector<uint8_t>;
 /* Value types and the instructions the tests write */
 constexpr uint8_t I32 = 0x7F;
 constexpr uint8_t UNREACHABLE = 0x00;
+constexpr uint8_t NOP = 0x01;
+constexpr uint8_t IF = 0x04;
+constexpr uint8_t BR_TABLE = 0x0E;
+constexpr uint8_t RETURN = 0x0F;
 constexpr uint8_t DROP = 0x1A;
 constexpr uint8_t BLOCK = 0x02;
 constexpr uint8_t LOOP = 0x03;

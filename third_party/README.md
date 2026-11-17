@@ -1,9 +1,10 @@
 # Third-party source
 
 Code from other projects that Havne compiles into its core. Each folder
-is one project at one pinned version, its files byte for byte as that
-project published them; what Havne adds (the build lists, a port file,
-patches) sits beside the folder, never in it.
+is one project at one pinned version, its files as that project
+published them but for the numbered patches beside it; what Havne adds
+(the build lists, a port file, the patches) sits beside the folder,
+never in it.
 
 | Folder | Project | Version | License | Used for |
 |---|---|---|---|---|
@@ -52,10 +53,20 @@ patches) sits beside the folder, never in it.
   module then ends as "native stack overflow". Havne's own code keeps
   that detection. Clang's ASan leaves the local in place, so Clang
   builds, the fuzzers among them, take no flag for it.
-- **A fix upstream has not released** is a numbered patch in
-  `wamr-patches/` (`0001-<what>.patch`, with the upstream issue or pull
-  request in its first lines), which the script applies in name order
-  and `--check` expects. There is none while `wamr-patches/` is absent.
+- **A change to WAMR's code** is a numbered patch in `wamr-patches/`
+  (`0001-<what>.patch`; its first lines say what it changes, why, and
+  where it stands upstream), which the script applies in name order and
+  which `--check` and the list expect. A patched file carries a line
+  saying it is changed, as its license asks, and the notices and the
+  SBOM's component say the source is modified by these patches.
+  - `0001-meter-work-beyond-dispatch.patch`: instruction metering also
+    counts the work one instruction does beyond its dispatch (a block's
+    code scanned for its end, the br_table list walked, stack cells
+    zeroed or copied), so a call's budget bounds its time
+    (`core/src/wasm_sandbox.h`). Not offered upstream yet. **When moving
+    the pin,** the script fails if the patch no longer applies; read the
+    interpreter's loop again for work a newer release does in one
+    instruction.
 
 Tools that read Havne's own sources skip `third_party/`: clang-tidy,
 CodeQL, the docs lint, and the compiler's warnings (it is built with

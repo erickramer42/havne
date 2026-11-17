@@ -3,6 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
  */
 
+/*
+ * Changed from WAMR-2.4.5 as published: instruction metering also counts
+ * the work one instruction does beyond its dispatch (CHARGE_INSTRUCTIONS).
+ */
+
 #include "wasm_interp.h"
 #include "bh_log.h"
 #include "wasm_runtime.h"
@@ -602,6 +607,8 @@ wasm_interp_get_frame_ref(WASMInterpFrame *frame)
         frame_sp = (frame_csp - 1)->frame_sp;                          \
         cell_num_to_copy = (frame_csp - 1)->cell_num;                  \
         if (cell_num_to_copy > 0) {                                    \
+            CHARGE_INSTRUCTIONS(cell_num_to_copy                       \
+                                / METERED_CELLS_PER_INSTRUCTION);      \
             word_copy(frame_sp, frame_sp_old - cell_num_to_copy,       \
                       cell_num_to_copy);                               \
             frame_ref_copy(FRAME_REF(frame_sp),                        \
@@ -1554,8 +1561,31 @@ get_global_addr(uint8 *global_data, WASMGlobalInstance *global)
     }                                                             \
     else if (instructions_left > 0)                               \
         instructions_left--;
+
+/* One instruction can do work far beyond its own dispatch: scan a
+   block's code for its end, walk the br_table cache list, zero a
+   callee's locals, copy the values a branch or a return carries. Left
+   uncounted, a module can make a small instruction limit run for
+   minutes. This takes n units off the limit for such work, one unit
+   standing for about what one instruction costs. The count stops at
+   zero, where the next CHECK_INSTRUCTION_LIMIT() raises the exception;
+   a negative count is no limit and stays so. */
+#define CHARGE_INSTRUCTIONS(n)                             \
+    do {                                                   \
+        if (instructions_left > 0) {                       \
+            uint64 units_to_charge = (uint64)(n);          \
+            if (units_to_charge >= (uint64)instructions_left) \
+                instructions_left = 0;                     \
+            else                                           \
+                instructions_left -= (int)units_to_charge; \
+        }                                                  \
+    } while (0)
+
+/* Stack cells zeroed or copied for one unit of the limit */
+#define METERED_CELLS_PER_INSTRUCTION 16
 #else
 #define CHECK_INSTRUCTION_LIMIT() (void)0
+#define CHARGE_INSTRUCTIONS(n) (void)0
 #endif
 
 static void
@@ -2165,6 +2195,10 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                     wasm_set_exception(module, "find block address failed");
                     goto got_exception;
                 }
+                else {
+                    /* not in the cache: the block's code was scanned */
+                    CHARGE_INSTRUCTIONS(end_addr - frame_ip);
+                }
 
                 cond = (uint32)POP_I32();
 
@@ -2199,6 +2233,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                     POP_CSP();
                 }
                 else { /* end of function, treat as WASM_OP_RETURN */
+                    CHARGE_INSTRUCTIONS(cur_func->ret_cell_num
+                                        / METERED_CELLS_PER_INSTRUCTION);
                     frame_sp -= cur_func->ret_cell_num;
                     for (i = 0; i < cur_func->ret_cell_num; i++) {
 #if WASM_ENABLE_GC != 0
@@ -2232,6 +2268,9 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         wasm_set_exception(module, "find block address failed");
                         goto got_exception;
                     }
+                    /* the block's code was scanned */
+                    CHARGE_INSTRUCTIONS(end_addr
+                                        - (frame_csp - 1)->begin_addr);
                     frame_ip = end_addr;
                 }
                 HANDLE_OP_END();
@@ -2274,6 +2313,7 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 lidx = POP_I32();
 
                 while (node_cache) {
+                    CHARGE_INSTRUCTIONS(1);
                     node_next = bh_list_elem_next(node_cache);
                     if (node_cache->br_table_op_addr == frame_ip - 1) {
                         if (lidx > node_cache->br_count)
@@ -2289,6 +2329,8 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 
             HANDLE_OP(WASM_OP_RETURN)
             {
+                CHARGE_INSTRUCTIONS(cur_func->ret_cell_num
+                                    / METERED_CELLS_PER_INSTRUCTION);
                 frame_sp -= cur_func->ret_cell_num;
                 for (i = 0; i < cur_func->ret_cell_num; i++) {
 #if WASM_ENABLE_GC != 0
@@ -6814,6 +6856,9 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
 #endif
 
             /* Initialize the local variables */
+            CHARGE_INSTRUCTIONS(
+                ((uint32)cur_func->param_cell_num + cur_func->local_cell_num)
+                / METERED_CELLS_PER_INSTRUCTION);
             memset(frame_lp + cur_func->param_cell_num, 0,
                    (uint32)(cur_func->local_cell_num * 4));
 
