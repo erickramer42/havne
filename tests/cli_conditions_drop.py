@@ -21,14 +21,14 @@
 # gave. Read to STALL_AT_FRAMES frames, then stop reading until the stream
 # must be dropping, whatever the system's buffers hold and however
 # loaded the machine is:
-# - the bytes the kernel holds for the reader stop growing, so the
-#   child's writes wait;
-# - the ring (and the batch the writer took from it) is full once the
-#   cond lines alone, at the least a line of them takes, outweigh what
-#   the pipe and the ring hold: counted in events of the recording,
-#   never in time, which load stretches;
-# - the recording, written live, holds PAST_FULL events past those,
-#   and each of them is a dropped line.
+# - the cond lines since the stall go to the reader's buffer, the pipe,
+#   the ring (and the batch the writer took from it), or are dropped;
+# - the recording, written live, counts them, and the bytes the kernel
+#   holds, read after each count, bound the pipe's share: they only grow
+#   while nothing reads, so a child starved or blocked reads the same;
+# - once the cond lines, at the least a line of them takes, outweigh all
+#   those bytes by PAST_FULL lines, each of those is a dropped line:
+#   counted in events, never in time, which load stretches.
 # Read to the end; then the lines received plus conditions_dropped are
 # the cond lines, at least PAST_FULL dropped, and each line received is
 # one of them. Linux's pipe is cut to a page, and on macOS (whose pipe
@@ -37,6 +37,7 @@
 
 import collections
 import ctypes
+import io
 import json
 import os
 import shutil
@@ -58,9 +59,11 @@ COUNT = 1250
 SECONDS = 150
 STALL_AT_FRAMES = 1000
 STALL_MAX_S = 25.0
-STILL_S = 0.5
 POLL_S = 0.05
+# The ring at its floor and the batch the writer took from it
 FILL_BYTES = 2 * (32 * 1024 + 256)
+# The lines the reader's buffer took past the stall's frame, received later
+READ_AHEAD_BYTES = io.DEFAULT_BUFFER_SIZE
 LEAST_COND_BYTES = 60
 PAST_FULL = 3
 LEVELS = 64
@@ -121,23 +124,10 @@ def held_bytes(fd):
 
 def stall(fd, root, stall_us, cond_bytes):
     """Holds the reading until the recording has PAST_FULL events past
-    the ones that fill the pipe and the ring: (events needed, held bytes,
-    words why not)"""
+    the ones that fill the reader's buffer, the pipe and the ring:
+    (events needed, held bytes, words why not)"""
     begun = time.monotonic()
     deadline = begun + STALL_MAX_S
-    held = held_bytes(fd)
-    still_since = time.monotonic()
-    while time.monotonic() - still_since < STILL_S:
-        if time.monotonic() > deadline:
-            return 0, held, "the kernel's buffer never stopped growing"
-        time.sleep(POLL_S)
-        now = held_bytes(fd)
-        if now != held:
-            held, still_since = now, time.monotonic()
-    # Cond lines alone, each at least cond_bytes, outweigh the bytes the
-    # kernel holds (steady for STILL_S: the child's writes are blocked) and
-    # the ring, so the events after them are dropped lines
-    full = -(-(held + FILL_BYTES) // cond_bytes)
     while True:
         folders = os.listdir(root)
         after = 0
@@ -145,6 +135,10 @@ def stall(fd, root, stall_us, cond_bytes):
             log = os.path.join(root, folders[0], "events.log")
             if os.path.exists(log):
                 after = len([e for e in cond_events(log) if e[4] >= stall_us])
+        # Read after the count: with nothing read, the held bytes only grow,
+        # so these are at least the ones held when the counted events came
+        held = held_bytes(fd)
+        full = -(-(held + FILL_BYTES + READ_AHEAD_BYTES) // cond_bytes)
         if after >= full + PAST_FULL:
             return full, held, ""
         if time.monotonic() > deadline:
