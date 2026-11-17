@@ -40,7 +40,7 @@ struct ecuio_signal_file {
     ecuio_signal_set_t set{};
     /* The bytes a recording copies as signals.json (ADR-0051 section 4):
      * those ecuio_signal_file_load read, or a plugin variant's files
-     * merged and written as one file (plugin.cpp); empty when that text
+     * merged and written as one file (plugin_merge.cpp); empty when that text
      * doesn't read back to this set */
     std::string bytes;
     /* A plugin variant's "<id>,<version>,<variant>", a recording's plugin

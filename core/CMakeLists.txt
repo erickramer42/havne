@@ -41,6 +41,8 @@ add_library(ecuio-core STATIC
     src/condition_file.cpp
     src/condition_eval.cpp
     src/plugin.cpp
+    src/plugin_manifest.cpp
+    src/plugin_merge.cpp
     src/plugin_wrap.cpp
     src/signal_sets.cpp
     src/obd2_signal_sets.cpp

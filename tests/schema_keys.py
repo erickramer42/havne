@@ -19,7 +19,8 @@ import os
 import re
 import sys
 
-LOADERS = ("core/src/signal_file.cpp", "core/src/plugin.cpp", "core/src/condition_file.cpp")
+LOADERS = ("core/src/signal_file.cpp", "core/src/plugin_manifest.cpp", "core/src/plugin.cpp",
+           "core/src/condition_file.cpp")
 SCHEMAS = ("signal-file", "plugin-manifest", "plugin-fixtures", "condition-file")
 
 # (loader, the call's context argument as written, its place among the
@@ -39,11 +40,11 @@ CALLS = {
     ("signal_file.cpp", "what", 2): ("signal-file", "/$defs/textSignal"),
     ("signal_file.cpp", "what", 3): ("signal-file", "/$defs/enumSignal"),
     ("signal_file.cpp", "what", 4): ("signal-file", "/$defs/numberSignal"),
-    ("plugin.cpp", '"the manifest"', 1): ("plugin-manifest", ""),
-    ("plugin.cpp", '"\\"requires\\""', 1): ("plugin-manifest", "/properties/requires"),
-    ("plugin.cpp", '"a variant"', 1): ("plugin-manifest", "/$defs/variant"),
-    ("plugin.cpp", '"a match"', 1): ("plugin-manifest", "/$defs/match"),
-    ("plugin.cpp", '"a data file"', 1): ("plugin-manifest", "/$defs/dataFile"),
+    ("plugin_manifest.cpp", '"the manifest"', 1): ("plugin-manifest", ""),
+    ("plugin_manifest.cpp", '"\\"requires\\""', 1): ("plugin-manifest", "/properties/requires"),
+    ("plugin_manifest.cpp", '"a variant"', 1): ("plugin-manifest", "/$defs/variant"),
+    ("plugin_manifest.cpp", '"a match"', 1): ("plugin-manifest", "/$defs/match"),
+    ("plugin_manifest.cpp", '"a data file"', 1): ("plugin-manifest", "/$defs/dataFile"),
     ("plugin.cpp", '"a fixture file"', 1): ("plugin-fixtures", ""),
     ("plugin.cpp", '"a value fixture"', 1): ("plugin-fixtures", "/$defs/value"),
     ("condition_file.cpp", '"the file"', 1): ("condition-file", ""),
@@ -69,7 +70,7 @@ WORDS = [
      ("signal-file", "/$defs/order/enum")),
     ("core/src/signal_file.cpp", r'extends->text != "([a-z0-9]+)"',
      ("signal-file", "/$defs/extends/enum")),
-    ("core/src/plugin.cpp", r't\.text != "([a-z]+)"',
+    ("core/src/plugin_manifest.cpp", r't\.text != "([a-z]+)"',
      ("plugin-manifest", "/properties/tiers/items/const")),
 ]
 
