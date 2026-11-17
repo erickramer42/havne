@@ -252,6 +252,13 @@ if(Python3_Interpreter_FOUND)
     # packaging/sbom.py, the release's SBOM (ADR-0035 section 5)
     add_test(NAME SbomTest.SelfTest
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/sbom.py selftest)
+    # scripts/vendored_check.py: third_party/wamr against its committed
+    # list of hashes, with no network. A change to that folder is a patch
+    # beside it, never an edit in it (third_party/README.md)
+    add_test(NAME VendoredTest.SelfTest
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/vendored_check.py selftest)
+    add_test(NAME VendoredTest.WamrIsItsListedBytes
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/vendored_check.py check)
     # packaging/python/make_wheel.py, the havne wheel (ADR-0053 section 6):
     # made-up PE, ELF and Mach-O files and a made-up package
     add_test(NAME WheelTest.SelfTest

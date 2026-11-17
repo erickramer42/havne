@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 # File/layer: scripts/vendor_wamr.sh | Git Bash or Linux, local tooling
-# Testing: none (git and diff; --check is run by hand after a pin moves)
+# Testing: none (git and diff; --check is run by hand after a pin moves);
+#          ctest's VendoredTest checks the folder against the list it writes
 #
 # third_party/wamr from WAMR's repository at the pinned tag: the files
 # Havne compiles and the headers beside them, byte for byte, then the
 # patches in third_party/wamr-patches in name order. The folder holds
-# nothing of Havne's own, so --check can compare it whole.
+# nothing of Havne's own, so --check can compare it whole. Each file's
+# hash goes into third_party/wamr.sha256 (scripts/vendored_check.py), which
+# a test compares with the folder in every build, with no network.
 #
-#   scripts/vendor_wamr.sh            writes third_party/wamr
-#   scripts/vendor_wamr.sh --check    exits 1 when the folder differs
+#   scripts/vendor_wamr.sh            writes third_party/wamr and the list
+#   scripts/vendor_wamr.sh --check    exits 1 when the folder differs from
+#                                     the tag with its patches, or the list
+#                                     from the folder
 #
 # Moving the pin: change tag and commit below, run it, build, and update
 # the version in third_party/README.md, the notices and the SBOM's
@@ -68,6 +73,10 @@ drop=(
 check=0
 [ "${1:-}" = "--check" ] && check=1
 root=$(cd "$(dirname "$0")/.." && pwd)
+python=$(command -v python3 || command -v python) || {
+    echo "vendor_wamr.sh: needs Python 3 for the list of hashes" >&2
+    exit 1
+}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
@@ -92,15 +101,17 @@ for p in "$root"/third_party/wamr-patches/*.patch; do
 done
 
 if [ $check = 1 ]; then
-    if diff -r "$work/out" "$root/third_party/wamr" > "$work/diff.txt"; then
-        echo "ok    third_party/wamr is $tag ($commit) with its patches"
-        exit 0
+    if ! diff -r "$work/out" "$root/third_party/wamr" > "$work/diff.txt"; then
+        head -40 "$work/diff.txt"
+        echo "FAIL  third_party/wamr differs from $tag with its patches" >&2
+        exit 1
     fi
-    head -40 "$work/diff.txt"
-    echo "FAIL  third_party/wamr differs from $tag" >&2
-    exit 1
+    echo "ok    third_party/wamr is $tag ($commit) with its patches"
+    "$python" "$root/scripts/vendored_check.py" check
+    exit $?
 fi
 rm -rf "$root/third_party/wamr"
 mkdir -p "$root/third_party"
 mv "$work/out" "$root/third_party/wamr"
 echo "ok    third_party/wamr written from $tag ($commit): $(find "$root/third_party/wamr" -type f | wc -l) files"
+"$python" "$root/scripts/vendored_check.py" write

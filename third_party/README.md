@@ -21,6 +21,12 @@ patches) sits beside the folder, never in it.
   name in files that are left out.
 - **Checking it:** `scripts/vendor_wamr.sh --check` clones the tag,
   confirms its commit, and compares the folder with it file by file.
+  That needs the network and is run by hand. Every build checks the
+  folder without it: `wamr.sha256` lists each file's SHA-256 (the script
+  writes it with the folder), and ctest's
+  `VendoredTest.WamrIsItsListedBytes` (`scripts/vendored_check.py`)
+  fails on a file changed, added or gone. So an edit inside `wamr/` fails
+  the suite; a change there is a patch beside it (below).
 - **Moving the pin:** change the tag and commit in the script, run it,
   build every tree, and change the version in this table, in the
   notices and in the SBOM's component.
