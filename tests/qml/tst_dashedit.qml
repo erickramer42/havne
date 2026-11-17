@@ -1217,6 +1217,32 @@ TestCase {
         compare(box.value, 0)
     }
 
+    // With no session the stepper reads the listed row's decimals, not 0
+    function test_theDecimalsStepperStartsAtTheListedRowsWithNoSession() {
+        // A session under raw leaves the hub with no rows, whatever an earlier case read
+        compare(Bridge.connectSession("mock://demo?profile=raw"), "", "raw connects")
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting && !Bridge.connected, 5000, "disconnected")
+        const maf = cellOf("MAF")
+        maf.refs = Array.from(Bridge.gaugeSignals["maf"])
+        maf.unit = "g/s"
+        maf.options = { from: 0, to: 300 }
+        const page = pageOf({}, docOf([maf]))
+        page.offlineUri = "mock://?profile=obd2"
+        page.startEditing()
+        const rows = Bridge.profileSignals("mock://?profile=obd2")
+        const row = rows.find(r => maf.refs.indexOf(r.ref) >= 0)
+        verify(row !== undefined && row.decimals > 0, "the listed row has decimals")
+        press(find(page, "dashCell_0_0"))
+        const box = find(page, "panelDecimals")
+        verify(find(page, "dashCellPanel").entry === null, "no session, no hub row")
+        compare(box.value, row.decimals)
+        verify(page.doc.pages[0].cells[0].options.decimals === undefined, "nothing stored")
+        // A stored value wins
+        spin(box, 0)
+        compare(box.value, 0)
+    }
+
     // A profile with no number to show says so, not "connect"
     function test_aProfileWithNothingToPickSaysSo() {
         compare(Bridge.connectSession("mock://demo?profile=raw"), "", "raw connects")

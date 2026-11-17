@@ -22,6 +22,18 @@ GaugeCard {
     readonly property var range: DashboardBook.defaultRange(cell ? cell.unit ?? "" : "")
     // The row the cell shows, whose decimals it uses until it has its own
     readonly property SignalHub.Entry entry: panelCard.host.signalHub.lookup(panelCard.host.lookupRefs(cell && cell.refs ? cell.refs : []))
+    // With no session the hub has no row: the listed profile's row gives the decimals
+    readonly property int listedDecimals: {
+        const refs = cell && Array.isArray(cell.refs) ? cell.refs : []
+        for (const r of panelCard.host.profileRows) {
+            if (refs.indexOf(r.ref) >= 0)
+                return r.decimals
+        }
+        return 0
+    }
+    readonly property int decimalsNow: cell && cell.options && cell.options.decimals !== undefined
+                                       ? cell.options.decimals
+                                       : entry ? entry.decimals : listedDecimals
     readonly property bool phone: panelCard.host.form === "phone"
     readonly property bool hasSignal: kind !== "blank"
     // Every kind but the shift lights draws the value's text and tone, which
@@ -222,10 +234,7 @@ GaugeCard {
                 Layout.preferredHeight: Theme.touchTarget
                 from: 0
                 to: 6
-                value: panelCard.cell && panelCard.cell.options
-                       && panelCard.cell.options.decimals !== undefined
-                       ? panelCard.cell.options.decimals
-                       : panelCard.entry ? panelCard.entry.decimals : 0
+                value: panelCard.decimalsNow
                 onValueModified: panelCard.host.setOptions({ decimals: value })
             }
 
@@ -658,8 +667,7 @@ GaugeCard {
         // A converted end shows to the signal's decimals plus one (161.5565
         // mph at 1 decimal reads 161.56), 1 place with no row to take them from
         readonly property var entry: cell ? panelCard.host.signalHub.lookup(panelCard.host.lookupRefs(cell.refs ?? [])) : null
-        readonly property int places: (cell && cell.options && cell.options.decimals !== undefined
-                                       ? cell.options.decimals : entry ? entry.decimals : 0) + 1
+        readonly property int places: panelCard.decimalsNow + 1
         readonly property string shownText: cell === null ? ""
             : converted ? panelCard.host.fieldText(panelCard.host.shown(cell.unit ?? "", value), places)
                         : panelCard.host.fieldText(value)

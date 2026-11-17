@@ -75,7 +75,7 @@ Page {
     property var vehicles: VehicleBook.empty()
     // Settings' URI and profile, whose signals Add offers with no session
     property string offlineUri: ""
-    onOfflineUriChanged: if (panel === "signal") refreshRows()
+    onOfflineUriChanged: if (panel === "signal" || panel === "cell") refreshRows()
     // Settings' picked vehicle's sets ([{ profile, name, variant }], its
     // plugin first) and the names of the profiles it knows (profile: name)
     property var pickedSets: []
@@ -611,6 +611,9 @@ Page {
     function select(i) {
         commitTyping()
         selected = i
+        // The cell's panel takes its decimals from the listed rows with no session
+        if (!Bridge.connected)
+            refreshRows()
         panel = "cell"
     }
 
