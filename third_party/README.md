@@ -19,7 +19,10 @@ never in it.
 - **What is compiled:** `wamr.cmake` lists each source and each switch.
   WAMR's own build scripts are not used and not kept.
 - **`wamr_port.c`** is Havne's: the few functions WAMR's kept sources
-  name in files that are left out.
+  name in files that are left out. It also refuses a build with
+  instruction metering and bulk memory, reference types, tail calls,
+  exception handling or GC together: those features' instructions do
+  work a module sizes, which patch 0001 does not count.
 - **Checking it:** `scripts/vendor_wamr.sh --check` clones the tag,
   confirms its commit, and compares the folder with it file by file.
   That needs the network and is run by hand. Every build checks the
@@ -63,10 +66,11 @@ never in it.
     counts the work one instruction does beyond its dispatch (a block's
     code scanned for its end, the br_table list walked, stack cells
     zeroed or copied), so a call's budget bounds its time
-    (`core/src/wasm_sandbox.h`). Not offered upstream yet. **When moving
-    the pin,** the script fails if the patch no longer applies; read the
-    interpreter's loop again for work a newer release does in one
-    instruction.
+    (`core/src/wasm_sandbox.h`). It covers the instructions `wamr.cmake`
+    builds; a feature switched on there needs its own charges. Not
+    offered upstream yet. **When moving the pin,** the script fails if
+    the patch no longer applies; read the interpreter's loop again for
+    work a newer release does in one instruction.
 
 Tools that read Havne's own sources skip `third_party/`: clang-tidy,
 CodeQL, the docs lint, and the compiler's warnings (it is built with

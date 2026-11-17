@@ -4,8 +4,9 @@
  */
 
 /*
- * Changed from WAMR-2.4.5 as published: instruction metering also counts
- * the work one instruction does beyond its dispatch (CHARGE_INSTRUCTIONS).
+ * Changed by the Havne project from WAMR-2.4.5 as published: instruction
+ * metering also counts the work one instruction does beyond its dispatch
+ * (CHARGE_INSTRUCTIONS).
  */
 
 #include "wasm_interp.h"
@@ -2261,6 +2262,17 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
             label_pop_csp_n:
                 POP_CSP_N(depth);
                 if (!frame_ip) { /* must be label pushed by WASM_OP_BLOCK */
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+                    /* a block already in the cache is found without a scan */
+                    BlockAddr *block_cache = exec_env->block_addr_cache[(
+                        (uintptr_t)(frame_csp - 1)->begin_addr)
+                        & (uintptr_t)(BLOCK_ADDR_CACHE_SIZE - 1)];
+                    bool block_scanned =
+                        block_cache[0].start_addr
+                            != (frame_csp - 1)->begin_addr
+                        && block_cache[1].start_addr
+                               != (frame_csp - 1)->begin_addr;
+#endif
                     if (!wasm_loader_find_block_addr(
                             exec_env, (BlockAddr *)exec_env->block_addr_cache,
                             (frame_csp - 1)->begin_addr, (uint8 *)-1,
@@ -2268,9 +2280,12 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                         wasm_set_exception(module, "find block address failed");
                         goto got_exception;
                     }
-                    /* the block's code was scanned */
-                    CHARGE_INSTRUCTIONS(end_addr
-                                        - (frame_csp - 1)->begin_addr);
+#if WASM_ENABLE_INSTRUCTION_METERING != 0
+                    if (block_scanned) {
+                        CHARGE_INSTRUCTIONS(end_addr
+                                            - (frame_csp - 1)->begin_addr);
+                    }
+#endif
                     frame_ip = end_addr;
                 }
                 HANDLE_OP_END();

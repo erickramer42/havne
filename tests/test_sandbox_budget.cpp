@@ -203,6 +203,83 @@ TEST(SandboxTest, ValuesAReturnOrABranchCarriesCostTheirCells)
               plain + 2 * 4000 + 2 * 4000 + 4000 / 16);
 }
 
+/* A branch to a block the runtime already has in its cache finds the end
+ * without a scan, and costs nothing. run's function calls itself `depth`
+ * deep inside a block, so every level enters the block before any has
+ * left it: the deepest scans it, and each level above finds it. The cache
+ * keeps two blocks for each of its 64 sets, by the block's address. */
+TEST(SandboxTest, ABranchToABlockAlreadyFoundCostsNothing)
+{
+    /* `lead` nops move the block by a byte; with `second`, a block 64
+     * bytes before it is scanned first and takes their set's first place */
+    auto nested = [](uint32_t skipped, uint32_t lead, bool second) {
+        const uint8_t depth = 10;
+        module m = running({I32_CONST, depth, CALL, 1});
+        func again; /* (left: i32) -> () */
+        again.params = {I32};
+        again.body.assign(lead, NOP);
+        if (second) {
+            again.body.insert(again.body.end(),
+                              {BLOCK, VOID_BLOCK, BR, 0, END});
+            again.body.insert(again.body.end(), 59, NOP);
+        }
+        again.body.insert(again.body.end(),
+                          {BLOCK, VOID_BLOCK, LOCAL_GET, 0, IF, VOID_BLOCK,
+                           LOCAL_GET, 0, I32_CONST, 1, I32_SUB, CALL, 1, END,
+                           BR, 0});
+        again.body.insert(again.body.end(), skipped, NOP);
+        again.body.push_back(END);
+        m.funcs.push_back(again);
+        return m;
+    };
+    for (bool second : {false, true}) {
+        for (uint32_t lead : {0u, 1u}) {
+            const uint32_t plain = least_budget(nested(0, lead, second));
+            ASSERT_NE(plain, 0u);
+            EXPECT_EQ(least_budget(nested(1000, lead, second)), plain + 1000)
+                << "one scan, not one for each level: lead " << lead
+                << ", second " << second;
+        }
+    }
+}
+
+/* The budget counts the work of the instructions this build of the
+ * runtime knows. Those of the features left out do work a module sizes
+ * that nothing counts (a memory.fill of the whole memory is one
+ * instruction), so the runtime must refuse each: third_party/wamr_port.c
+ * fails a build that turns one on beside metering. Each body here is
+ * valid with its feature on, so a switch turned on fails this case.
+ * Exception handling and GC need sources that are not kept: no switch
+ * alone builds them. */
+TEST(SandboxTest, AnInstructionTheBudgetCantCountIsRefused)
+{
+    const struct {
+        const char* what;
+        bytes body;
+    } uncounted[] = {
+        {"memory.fill",
+         {I32_CONST, 0, I32_CONST, 0, I32_CONST, 0, 0xFC, 0x0B, 0x00}},
+        {"memory.copy",
+         {I32_CONST, 0, I32_CONST, 0, I32_CONST, 0, 0xFC, 0x0A, 0x00, 0x00}},
+        /* reference types: the table instructions need a table, which
+         * no module here has; ref.null stands for the feature */
+        {"ref.null", {0xD0, 0x70, DROP}},
+        {"return_call", {0x12, 0x00}},
+    };
+    for (const auto& u : uncounted) {
+        const module m = running(u.body);
+        ASSERT_EQ(refusal(m.build(), kRun, 1), "")
+            << u.what << ": the check judges no instruction";
+        Made made(m, kRun, 1);
+        EXPECT_EQ(made.status, ECUIO_ERR_LOAD_FAILED) << u.what;
+        EXPECT_EQ(made.i, nullptr) << u.what;
+        EXPECT_EQ(
+            std::string(made.why).rfind("the runtime refused the module: ", 0),
+            0u)
+            << u.what << ": " << made.why;
+    }
+}
+
 /* A br_table with a depth past 255 is kept in a list the runtime walks
  * each time one runs: one unit for each record looked at. With `tables`
  * of them run once each, the walks are 1, 2, ... records long. */

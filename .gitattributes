@@ -22,8 +22,9 @@ tests/data/vehiclebook/signals/* -text
 tests/data/layouts/* -text
 tests/fixtures/layouts/* -text
 
-# Another project's files, kept byte for byte as it published them
-# (scripts/vendor_wamr.sh --check compares them)
+# Another project's files, kept byte for byte as it published them and
+# the patches beside them change them (scripts/vendor_wamr.sh --check
+# compares them)
 third_party/wamr/** -text
 # The patches the script applies to them: git apply needs their line
 # ends as written

@@ -13,9 +13,13 @@
 //   it (each byte of a block scanned for its end, each record walked for
 //   a br_table, each 16 stack cells zeroed or copied for a call, a return
 //   or a branch: third_party/wamr-patches/0001). No unit costs more than
-//   a plain instruction, so the budget bounds a call's time whatever the
-//   module does. A call allocates nothing: the memory is a fixed size and
-//   the stacks were made with the instance.
+//   a small multiple of a plain instruction, so the budget bounds a
+//   call's time whatever the module does. The budget is read between
+//   instructions, so a call runs past it by one instruction's work at
+//   most. The longest is a br_table's walk of every such record in the
+//   module, and an instance's making bound caps how many a module holds:
+//   under a millisecond on a desktop core. A call allocates nothing: the
+//   memory is a fixed size and the stacks were made with the instance.
 // - A call that doesn't return (the budget ran out, a trap) ends the
 //   instance: every later call answers `dead` without running anything.
 //   WAMR's state after a stopped call is not one to call into again.
@@ -39,8 +43,8 @@ namespace ecuio_wasm {
 
 /* Units of work one call may spend unless the caller asks for fewer
  * (ADR-0066 section 2.2): room for a key computation many times over. A
- * call takes no longer than a loop of this many instructions, which is
- * milliseconds on a desktop core. */
+ * call takes no longer than a small multiple of a loop of this many
+ * instructions, which is milliseconds on a desktop core. */
 constexpr uint32_t BUDGET_DEFAULT = 1000000;
 /* A module's operand and call stack, made with the instance */
 constexpr uint32_t STACK_BYTES = 64 * 1024;

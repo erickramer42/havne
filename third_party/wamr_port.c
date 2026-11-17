@@ -10,6 +10,20 @@
 
 #include <stddef.h>
 
+#include "wamr/core/config.h"
+
+/* Instruction metering bounds a call's time only while each instruction's
+ * work is counted. wamr-patches/0001 counts it for the instructions built
+ * here; those of the features below do work a module sizes (memory.fill
+ * and memory.copy, the table instructions, return_call, try, the GC's
+ * arrays) that nothing counts. Turning one on needs its charges first. */
+#if WASM_ENABLE_INSTRUCTION_METERING != 0 &&                                   \
+    (WASM_ENABLE_BULK_MEMORY != 0 || WASM_ENABLE_REF_TYPES != 0 ||             \
+     WASM_ENABLE_TAIL_CALL != 0 || WASM_ENABLE_EXCE_HANDLING != 0 ||           \
+     WASM_ENABLE_GC != 0)
+#error "wamr-patches/0001 charges nothing for these features' instructions"
+#endif
+
 struct wasm_trap_t;
 
 #if defined(_WIN32)

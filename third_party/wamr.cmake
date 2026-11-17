@@ -88,6 +88,9 @@ set(_wamr_definitions
     # No libc from the host: each would be a native a module calls unmetered
     WASM_ENABLE_LIBC_BUILTIN=0
     WASM_ENABLE_LIBC_WASI=0
+    # Bulk memory, reference types, tail calls, exception handling and GC
+    # stay off while metering is on: their instructions do work the budget
+    # does not count (wamr_port.c refuses the build otherwise)
     WASM_ENABLE_BULK_MEMORY=0
     WASM_ENABLE_REF_TYPES=0
     WASM_ENABLE_SIMD=0

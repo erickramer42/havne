@@ -95,10 +95,23 @@ find "$work/out" -type f \( -name SConscript -o -name '*.cmake' \) -delete
 for d in "${drop[@]}"; do
     rm -rf "$work/out"/$d   # unquoted: an entry may hold a wildcard
 done
+# Inside any work tree (a temp folder under a checkout), git apply takes a
+# patch as that repository's and skips every path outside it, with exit 0:
+# the ceiling keeps git from finding a repository above the copy. autocrlf
+# off again: a Windows Git would write the patched file as CRLF.
+apply() {
+    GIT_CEILING_DIRECTORIES="$work" git -c core.autocrlf=false -C "$work/out" \
+        apply --whitespace=nowarn "$@"
+}
 for p in "$root"/third_party/wamr-patches/*.patch; do
     [ -f "$p" ] || continue
-    # autocrlf off again: a Windows Git would write the patched file as CRLF
-    git -c core.autocrlf=false -C "$work/out" apply --whitespace=nowarn "$p"
+    apply "$p"
+    # Undone in a dry run, a patch that is in applies; one that was skipped
+    # does not
+    apply --check -R "$p" || {
+        echo "vendor_wamr.sh: $(basename "$p") did not take" >&2
+        exit 1
+    }
 done
 
 if [ $check = 1 ]; then
