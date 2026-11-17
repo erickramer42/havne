@@ -828,6 +828,23 @@ Page {
     function pickable(kind) {
         return profileRows.filter(r => r.ref !== "" && !r.isText && (!r.isEnum || kind === "digital"))
     }
+    // The picked sets' own signals a gauge of `kind` can show, one entry for
+    // each set that has any ([{ title, rows }], the plugin first): offered
+    // with or without a session, whatever profile the session reads
+    function pickedOwnRows(kind) {
+        const out = []
+        for (const s of pickedSets) {
+            const rows = Bridge.profileSignals("mock://?profile=" + s.profile)
+                .filter(r => r.ref.startsWith("key:") && !r.isText && (!r.isEnum || kind === "digital"))
+            if (rows.length === 0)
+                continue
+            // A plugin with several variants picked is told apart by its variant
+            const twin = pickedSets.some(o => o !== s && o.name === s.name)
+            out.push({ title: twin && s.variant ? qsTr("%1: %2").arg(s.name).arg(s.variant) : s.name,
+                       rows: rows })
+        }
+        return out
+    }
     function startAdd() {
         if (!DashboardBook.canAddCell(doc, pageIndex))
             return

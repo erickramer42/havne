@@ -480,6 +480,107 @@ TestCase {
         compare(page.doc.pages[0].cells[1].options.to, 260)
     }
 
+    // The vehicle's picked sets come first, as sections, with or without a
+    // session; the listed profile's rows follow by group, folded while a set leads
+    function test_theSignalListLeadsWithThePickedSetsOwnSignals() {
+        const profile = threeSignalFile()
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.pickedSets = [{ profile: profile, name: "Three", variant: "" }]
+        page.offlineUri = "mock://?profile=obd2"
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_bar")
+        const panel = find(page, "dashSignalPanel")
+        tryVerify(() => panel.sections.length > 1, 3000, "the sections")
+        compare(panel.sections[0].key, "set0", "the set's own first")
+        compare(panel.sections[0].title, "Three")
+        compare(panel.sections[0].rows.map(r => r.ref), ["key:a", "key:b", "key:c"])
+        compare(find(page, "signalSection_set0").text, "Three (3)")
+        verify(find(page, "pickSignal_key:a").visible, "its signals are shown")
+        const groups = panel.sections.filter(sec => sec.key.startsWith("group"))
+        verify(groups.length > 0, "obd2's groups follow")
+        verify(groups.every(sec => !sec.open), "folded while a set leads")
+        const speed = "pickSignal_" + Bridge.gaugeSignals["speed"][1]
+        verify(findChild(page, speed) === null, "no wall of chips")
+        // A word in the filter opens every group that has a match
+        type(find(page, "filterText"), "speed")
+        tryVerify(() => findChild(page, speed) !== null, 3000, "a typed word shows the match")
+        type(find(page, "filterText"), "")
+        tryVerify(() => findChild(page, speed) === null, 3000, "and the groups fold again")
+        // A header opens its group
+        click(page, "signalSection_" + groups[0].key)
+        tryVerify(() => panel.sections.find(sec => sec.key === groups[0].key).open, 3000, "opened")
+        tryVerify(() => findChild(page, "pickSignal_" + groups[0].rows[0].ref) !== null, 3000, "its chips show")
+        // The set's own header folds and opens it
+        click(page, "signalSection_set0")
+        tryVerify(() => findChild(page, "pickSignal_key:a") === null, 3000, "folded by its header")
+        click(page, "signalSection_set0")
+        tryVerify(() => findChild(page, "pickSignal_key:a") !== null, 3000, "and opened again")
+        // The set's signal makes the gauge
+        click(page, "pickSignal_key:b")
+        compare(page.doc.pages[0].cells[1].refs[0], "key:b")
+    }
+
+    // No session and no address: the picked set is still offered
+    function test_thePickedSetIsOfferedWithNoSessionAndNoAddress() {
+        const profile = threeSignalFile()
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.pickedSets = [{ profile: profile, name: "Three", variant: "" }]
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_digital")
+        const panel = find(page, "dashSignalPanel")
+        tryVerify(() => panel.sections.length === 1, 3000, "the set alone")
+        verify(!find(page, "signalNone").visible, "not 'No signals'")
+        click(page, "pickSignal_key:a")
+        compare(page.doc.pages[0].cells[1].refs[0], "key:a")
+    }
+
+    // The session reads the set itself: its rows are the set's section alone, never listed twice
+    function test_aSetTheSessionReadsIsListedOnce() {
+        const profile = threeSignalFile()
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.pickedSets = [{ profile: profile, name: "Three", variant: "" }]
+        page.offlineUri = "mock://?profile=" + profile
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_bar")
+        const panel = find(page, "dashSignalPanel")
+        tryVerify(() => panel.sections.length > 0, 3000)
+        compare(panel.sections.map(sec => sec.key), ["set0"], "the set once, no group of its own rows")
+        compare(panel.shownCount, 3)
+    }
+
+    // With no set picked the list is the profile's groups, all open as before
+    function test_withNoPickedSetTheGroupsAreAllOpen() {
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.offlineUri = "mock://?profile=obd2"
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_bar")
+        const panel = find(page, "dashSignalPanel")
+        tryVerify(() => panel.sections.length > 0, 3000, "the groups")
+        verify(panel.sections.every(sec => sec.key.startsWith("group") && sec.open))
+        verify(findChild(page, "pickSignal_" + Bridge.gaugeSignals["speed"][1]) !== null)
+    }
+
+    // A group lists the signals the ECU doesn't send last, dim
+    function test_theSignalsTheEcuDoesntSendComeLastInTheirGroup() {
+        compare(Bridge.connectSession("mock://demo?profile=obd2"), "", "the demo connects")
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_bar")
+        const panel = find(page, "dashSignalPanel")
+        tryVerify(() => Bridge.signalModel.hiddenCount > 0, 5000, "the demo car lacks some PIDs")
+        tryVerify(() => panel.sections.some(sec => sec.hiddenFrom >= 0), 3000, "a group with a dim tail")
+        const g = panel.sections.find(sec => sec.hiddenFrom >= 0)
+        const hub = page.signalHub
+        verify(g.rows.slice(0, g.hiddenFrom).every(r => hub.lookup([r.ref]).hidden !== true), "sent ones first")
+        verify(g.rows.slice(g.hiddenFrom).every(r => hub.lookup([r.ref]).hidden === true), "the rest last")
+        compare(find(page, "pickSignal_" + g.rows[g.rows.length - 1].ref).opacity, 0.5, "and dim")
+    }
+
     // Add's every signal of a set: the listed file's own signals the page
     // doesn't show, in Add's kind, as one undo step; then only what is
     // left, as many as the page has room for
