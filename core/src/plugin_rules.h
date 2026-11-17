@@ -1,7 +1,7 @@
 // File/layer: core/src/plugin_rules.h | internal, C++17, Qt-free, header-only
 // Testing: UNIT: PluginTest, PluginWrapTest (test_signals)
 //
-// A manifest's rules that the plugin loader (plugin.cpp) and the calls
+// A manifest's rules that the plugin loader (plugin_manifest.cpp) and the calls
 // that write a manifest (plugin_wrap.cpp) share, so what one writes the
 // other reads: an id's alphabet, a version's X.Y.Z, a manufacturer
 // code, and core's own version as requires.core is compared with it.
