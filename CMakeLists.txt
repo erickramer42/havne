@@ -165,6 +165,10 @@ function(app_add_version_resource target name description)
     target_sources(${target} PRIVATE "${rc}")
 endfunction()
 
+# WAMR, the sandbox a conversation plugin's code runs in (ADR-0066
+# section 2.1): app_wamr_objects and WAMR_INCLUDE_DIR, for core and the tests
+include(third_party/wamr.cmake)
+
 add_subdirectory(core)
 add_subdirectory(surrogate)
 

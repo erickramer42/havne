@@ -168,6 +168,18 @@ endif()
 app_enable_warnings(test_elm327)
 gtest_discover_tests(test_elm327 DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
 
+# --- The sandbox: Qt-free, every platform (UNIT, ADR-0066 section 2) ---
+# test_wamr_build.cpp asks the vendored WAMR itself (third_party/wamr.cmake)
+# what core relies on; its header comes from WAMR_INCLUDE_DIR.
+# verify.sh's cross-arch step builds and runs it against the x86 core,
+# which CI never builds.
+add_executable(test_sandbox test_wamr_build.cpp)
+target_include_directories(test_sandbox PRIVATE ${WAMR_INCLUDE_DIR})
+target_compile_definitions(test_sandbox PRIVATE ${WAMR_EMBED_DEFINITIONS})
+target_link_libraries(test_sandbox PRIVATE ecuio-core GTest::gtest_main)
+app_enable_warnings(test_sandbox)
+gtest_discover_tests(test_sandbox DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 60)
+
 # --- SocketCAN's rules: Qt-free, every platform (UNIT, ADR-0032, ADR-0040) ---
 # socketcan_wire.h is internal and portable (the kernel's values mirrored),
 # so its rules test everywhere; the transport on a bus is test_vcan's.
