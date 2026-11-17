@@ -13,6 +13,8 @@
 #include <ecuio/plugin.h>
 #include <ecuio/signals.h>
 
+#include "least_core.h" /* core/src: the loaders' least core */
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -134,6 +136,8 @@ struct plugin_view {
     std::string version;
     std::string lineage;
     uint16_t needs[3] = {};
+    /* The least core the loader works out for it, cut to this core's */
+    ecuio_least::version least = {{0, 0, 0}};
     std::vector<tables> variants;
 
     const tables* find(const std::string& variant) const
@@ -165,6 +169,7 @@ plugin_view view_of(const std::string& packed)
     v.lineage = lineage;
     check(ecuio_plugin_requires_core(p, &v.needs[0], &v.needs[1],
                                      &v.needs[2]) == ECUIO_OK);
+    v.least = ecuio_least::within_core(ecuio_least::of_plugin(p));
     for (uint32_t i = 0; i < info.variant_count; ++i) {
         char id[ECUIO_PLUGIN_VARIANT_ID_MAX + 1];
         check(ecuio_plugin_variant(p, i, id, sizeof id) == ECUIO_OK);
@@ -190,23 +195,18 @@ plugin_view view_of(const std::string& packed)
     return v;
 }
 
-void check_requires_this_core(const plugin_view& v)
+/* What a wrap, a put and a drop write as requires.core: the least core
+ * that reads the result, never past this core's version, or the value
+ * the plugin stated when that is later (NULL for a wrap, which has none) */
+void check_requires(const plugin_view& made, const uint16_t* stated)
 {
-    uint32_t core[3] = {};
-    check(ecuio_version(&core[0], &core[1], &core[2]) == ECUIO_OK);
-    check(v.needs[0] == core[0] && v.needs[1] == core[1] &&
-          v.needs[2] == core[2]);
-}
-
-/* Whether core version a is before b */
-bool older(const uint16_t a[3], const uint16_t b[3])
-{
-    for (int i = 0; i < 3; ++i) {
-        if (a[i] != b[i]) {
-            return a[i] < b[i];
-        }
+    ecuio_least::version want = made.least;
+    if (stated != nullptr) {
+        ecuio_least::raise(
+            want, ecuio_least::version{{stated[0], stated[1], stated[2]}});
     }
-    return false;
+    check(made.needs[0] == want.v[0] && made.needs[1] == want.v[1] &&
+          made.needs[2] == want.v[2]);
 }
 
 /* "X.Y.Z" with the minor one higher and the patch 0 */
@@ -241,7 +241,7 @@ void put_and_drop(const std::string& packed, uint8_t switches,
         check(now.id == before.id && now.name == before.name &&
               now.lineage == before.lineage);
         check(now.version == raised(before.version));
-        check_requires_this_core(now);
+        check_requires(now, before.needs);
         /* One variant is the file's, decoding as the file alone does;
          * every other is as it was, in its place */
         const tables want = tables_of(ecuio_signal_file_set(alone));
@@ -298,8 +298,7 @@ void put_and_drop(const std::string& packed, uint8_t switches,
         check(rest.variants.size() + 1 == whole.variants.size());
         check(rest.id == whole.id && rest.lineage == whole.lineage);
         check(rest.version == raised(whole.version));
-        /* Raised where the plugin named less than the result needs */
-        check(!older(rest.needs, whole.needs));
+        check_requires(rest, whole.needs);
         check(rest.find(gone.id) == nullptr);
         for (const tables& t : rest.variants) {
             const tables* old = whole.find(t.id);
@@ -381,7 +380,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     check(v.name == ecuio_signal_file_name(alone));
     check(v.version == "1.0.0" && v.lineage.size() == ECUIO_PLUGIN_LINEAGE_LEN);
     check((switches & kId) == 0 || v.id == "fuzz-id");
-    check_requires_this_core(v);
+    check_requires(v, nullptr);
     /* The variant is the file: every table, the channels too */
     {
         ecuio_plugin_t* p = nullptr;
