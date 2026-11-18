@@ -175,6 +175,17 @@ For people who want a log or a warning to start from the car's own state. A feat
 - **Verified:** the Windows suite and the cross-arch subset on `dev`'s tip; the app on the test phone with the mock (the store's migration, the one list, the looks), not on a car. Conditions have run against the simulated car and recordings only.
 - **Left for v0.9.0:** the live checks as terms and `ecuio_recording_evaluate` (ADR-0063), a recording whose every condition event was lost saying so, a dial's caption over a numeral, the long-files limits, and a choice of where a pull ends (at the throttle's lift, the limiter included, or at top speed).
 
+### v0.9.0: the whole car (in progress)
+
+A feature release: the C ABI grows, append-only except the recording format and the signal set's layout, which break ([CHANGELOG.md](CHANGELOG.md) "Unreleased" lists each).
+- **Built on `dev`:**
+  - a profile sized for a whole car: up to 32 modules a session, a plugin variant's files read together, and a session that asks only the signals picked when a set derives more than 1024 requests ([ADR-0065](docs/adr/0065-car-sized-profile.md));
+  - a signal's key, so two signals of one name stay two: recording format 4, `--signal` and the viewer, a vehicle's ticks and Compare's pairs by key, and a validator that takes a repeated name;
+  - computed signals written in the signal form, and `havne-cli signals expr`;
+  - the conversation tier's first part ([ADR-0066](docs/adr/0066-conversation-tier-and-write-gates.md)): the sandbox that runs a plugin's module, tier 2's service ceiling, a request longer than a frame on SocketCAN and J2534, the simulated ECU's security access, and the manifest's format 2 read at load. Core reads such a plugin's manifest and module; nothing runs the module yet, and the app's store takes the plugin and shows nothing of the tier.
+- **Verified:** the Windows suite and the cross-arch subset, and CI's other jobs, against the simulated ECU and the fakes; no car or adapter has run any of it.
+- **Left:** the conversation tier's session, its consent gate and its front ends; the simulated car with several modules; and a car run of the request engine's turns.
+
 ### Waiting on a tester: an iPhone download
 
 No version until a tester has run CI's unsigned `.ipa` on an iPhone

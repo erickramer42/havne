@@ -610,3 +610,9 @@ The tables above name a signal by its name on the `signals`, `focus`,
   still compares with one made after. Once two signals of a recording may
   share a name, a pair should go by key where both recordings have one:
   a follow-up.
+
+*Amended 2026-11-18 (delta by key):* `view`'s `delta` pairs a signal across
+recordings by the rule in ADR-0065's appendix "step 3 as built" (its key,
+else a name each recording has once), in the same unit, its case aside; a
+recording made before format 4 still compares by name with one made after.
+This replaces the "Not changed" bullet above.
