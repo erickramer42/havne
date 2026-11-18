@@ -303,7 +303,7 @@ if(TARGET havne-cli)
     add_executable(test_cli test_cli.cpp test_cli_transfer.cpp
         test_cli_health.cpp test_cli_partial.cpp test_cli_frames.cpp
         test_cli_log.cpp test_cli_layout.cpp test_cli_conditions.cpp
-        test_cli_expr.cpp)
+        test_cli_expr.cpp test_cli_pages.cpp)
     target_include_directories(test_cli PRIVATE ${CMAKE_SOURCE_DIR}/cli)
     # The layout corpus havne-cli's check and the app's DashboardBook both read
     target_compile_definitions(test_cli PRIVATE
@@ -995,6 +995,16 @@ if(TARGET havne-cli)
         app_cli_golden(PluginsCheckWarnsOfAFormat2FileOnAnOlderCore
             plugins-check-format2.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/format2)
+        # A plugin's Dashboard pages (ADR-0052's appendix on pages): a page
+        # line for each, through the layout check, and the requires_core
+        # line its older requires.core earns
+        app_cli_golden(PluginsCheckJudgesAPluginsPages plugins-check-pages.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/pages)
+        # A key no variant has, a cell the layout check drops and a second
+        # page of one name: each page fails, so the check does
+        app_cli_golden(PluginsCheckFailsAPageThatWontRead plugins-check-pages-bad.jsonl
+            --exit 1
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/pages-bad.json)
         # A format 2 plugin with the conversation tier (ADR-0066): what its
         # manifest lets its module cause to be sent, after the plugin line;
         # then the same plugin as a folder with its module a file, a

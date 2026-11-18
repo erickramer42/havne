@@ -500,7 +500,8 @@ PACKED_PAGE = changed(PACKED, ["pages"], ["p/phone.json"])
 PACKED_PAGE["files"]["p/phone.json"] = PAGE
 PG = ["files", "p/phone.json"]
 SEVENTEEN = changed(PACKED, ["pages"], [f"p/{n}.json" for n in range(17)])
-SEVENTEEN["files"].update({f"p/{n}.json": PAGE for n in range(17)})
+SEVENTEEN["files"].update({f"p/{n}.json": changed(PAGE, ["pages", 0, "name"], f"Engine {n}")
+                           for n in range(17)})
 PAGES = [
     ("a page", PACKED_PAGE, [], None, True),
     ("a page for the desktop", PACKED_PAGE, PG + ["form"], "desktop", True),

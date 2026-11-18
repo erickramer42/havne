@@ -6,6 +6,7 @@
 //
 // Public headers only: what any program linking core can do.
 
+#include "page_lines.h"
 #include "plugin_lines.h"
 #include "signal_file_lines.h"
 
@@ -436,10 +437,27 @@ void write_fixture_lines(Output& out, const ecuio_plugin_t* p,
     }
 }
 
-// A requires_core line for each thing the variants use that the
-// manifest's requires.core is too old to read
+// A page line for each of the plugin's pages; false when one fails
+bool write_page_lines(Output& out, const ecuio_plugin_t* p,
+                      const ecuio_plugin_info_t& info)
+{
+    bool all = true;
+    std::vector<std::pair<std::string, std::string>> seen;
+    for (uint32_t i = 0; i < info.page_count; ++i) {
+        const cli::PageCheck c =
+            cli::check_page(p, info.variant_count, i, &seen);
+        all = all && c.words.empty();
+        BigLine b(cli::page_line_bytes(c));
+        cli::page_line(b.line, c);
+        write_line(out, b.line);
+    }
+    return all;
+}
+
+// A requires_core line for each thing the plugin uses (its variants' and
+// its pages) that the manifest's requires.core is too old to read
 void write_requires_core_lines(Output& out, const ecuio_plugin_t* p,
-                               const VariantUses& uses)
+                               const VariantUses& uses, uint32_t page_count)
 {
     uint16_t declared[3] = {};
     if (ecuio_plugin_requires_core(p, &declared[0], &declared[1],
@@ -455,6 +473,11 @@ void write_requires_core_lines(Output& out, const ecuio_plugin_t* p,
                                     "\"havne_signals\": 2");
             write_line(out, b.line);
         }
+        if (cli::pages_need_newer_core(declared, page_count)) {
+            BigLine b(1024);
+            cli::pages_core_line(b.line, declared);
+            write_line(out, b.line);
+        }
     }
 }
 
@@ -465,12 +488,13 @@ void write_requires_core_lines(Output& out, const ecuio_plugin_t* p,
 // plugin, a conversation line for a plugin with the tier, for each
 // variant a variant line (its source's license), a
 // share_alike line when that license is share-alike, and its own signals'
-// signal_def lines, a fixture_refused line for each fixture file that
-// can't be read or that core refused, a fixture line for each entry (with
-// --on, run through the simulated ECU on that interface, Linux's vcan;
-// else not run), then checked. A package refused is start and an error
-// line, exit 3, as is a sim or session that won't start; a fixture failed
-// or a file refused, exit 1. No end line
+// signal_def lines, a page line for each Dashboard page, a fixture_refused
+// line for each fixture file that can't be read or that core refused, a
+// fixture line for each entry (with --on, run through the simulated ECU on
+// that interface, Linux's vcan; else not run), then checked. A package
+// refused is start and an error line, exit 3, as is a sim or session that
+// won't start; a fixture failed, a file refused or a page failed, exit 1.
+// No end line
 int run_plugins_check(const char* path, const char* on)
 {
     Output out;
@@ -490,6 +514,7 @@ int run_plugins_check(const char* path, const char* on)
     }
     write_conversation(out, 0, p);
     const VariantUses uses = write_variant_lines(out, p, info);
+    const bool pages_ok = write_page_lines(out, p, info);
 
     cli::FixtureCounts counts;
     std::vector<FixtureRun> runs =
@@ -503,7 +528,7 @@ int run_plugins_check(const char* path, const char* on)
         }
     }
     write_fixture_lines(out, p, runs, counts);
-    write_requires_core_lines(out, p, uses);
+    write_requires_core_lines(out, p, uses, info.page_count);
     {
         BigLine b(512 + (on != nullptr ? std::strlen(on) * 6 : 0));
         cli::checked_line(b.line, counts, on, info.fixture_count);
@@ -514,8 +539,9 @@ int run_plugins_check(const char* path, const char* on)
     if (!out.ok()) {
         return kExitFailed;
     }
-    return counts.failed > 0 || counts.files_refused > 0 ? kExitFailed
-                                                         : kExitOk;
+    return counts.failed > 0 || counts.files_refused > 0 || !pages_ok
+               ? kExitFailed
+               : kExitOk;
 }
 
 MadeText made_text(ecuio_status_t status, char* text, size_t length)
