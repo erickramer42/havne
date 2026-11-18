@@ -116,6 +116,162 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
     return true;
 }
 
+/* A PID's own reply to request r: its length, for packing */
+inline void ecuio_engine_learn_pid_len(ecuio_engine_channel& ch,
+                                       const ecuio_request& r, uint16_t len)
+{
+    const uint32_t bytes = len - 2u;
+    const uint32_t table = ECUIO_OBD2_PID_BYTES[r.bytes[1]];
+    ch.pid_len[r.bytes[1]] = bytes == 0       ? 0
+                             : bytes <= table ? static_cast<uint8_t>(bytes)
+                                              : ECUIO_ENGINE_PID_LONG;
+}
+
+/* The one-shot channel c had out, answered by the frame: the item it
+ * held is settled, or the walk takes the bitmap */
+inline void ecuio_engine_once_answered(ecuio_request_engine* e, uint32_t c,
+                                       const uint8_t* data, uint16_t len,
+                                       int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.clearing) {
+        ecuio_engine_clear_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len);
+    } else if (ch.identifying) {
+        ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_ANSWERED, 0, data, len);
+    } else if (ch.diagnosing) {
+        ecuio_engine_diag_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len);
+    } else if (ch.scanning) {
+        ecuio_engine_scan_settle(e, c, ECUIO_SCAN_FOUND, 0);
+    } else if (ch.talk.out) {
+        ecuio_talk_settle(ch.talk, ecuio_talk_end::answered, 0);
+    } else if (len >= ECUIO_BITMAP_REPLY_LEN) {
+        ecuio_engine_take_bitmap(e, c, data, now_us);
+    } else {
+        ecuio_engine_end_walk(e, c);
+    }
+}
+
+/* The positive reply to request r, out on channel c: it completes the
+ * request and puts the channel back in step */
+inline ecuio_reply ecuio_engine_take_positive(ecuio_request_engine* e,
+                                              uint32_t c, int32_t out,
+                                              const ecuio_request& r,
+                                              const uint8_t* data, uint16_t len,
+                                              int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ch.outstanding = ECUIO_ENGINE_NONE;
+    ch.in_step = true;
+    if (out >= 0) {
+        ecuio_engine_time_reply(e, c, static_cast<uint32_t>(out), true, false,
+                                now_us);
+    }
+    if (out >= 0 && r.len == 2 && r.bytes[0] == 0x01) {
+        ecuio_engine_learn_pid_len(ch, r, len);
+    }
+    if (out == ECUIO_ENGINE_ONCE && ch.sessioning) {
+        ecuio_engine_session_settle(e, c, ECUIO_DIAG_ANSWERED, 0, now_us);
+        return ecuio_reply::positive;
+    }
+    ch.session_fresh = false;
+    if (ecuio_engine_same_request(ch.session_refused, r)) {
+        ch.session_refused = ecuio_request{}; /* the loss was real */
+    }
+    if (out == ECUIO_ENGINE_ONCE) {
+        ecuio_engine_once_answered(e, c, data, len, now_us);
+    }
+    return ecuio_reply::positive;
+}
+
+/* While the walk's bitmap is out, a reply of its service that isn't the
+ * bitmap's: another PID's answer, so a silence may be asked once more */
+inline void ecuio_engine_mark_stray(ecuio_engine_channel& ch, int32_t out,
+                                    const ecuio_request& r, const uint8_t* data,
+                                    uint16_t len)
+{
+    if (out == ECUIO_ENGINE_ONCE && ch.walking && !ch.identifying &&
+        !ch.diagnosing && !ch.scanning && !ch.clearing && !ch.sessioning &&
+        !ch.talk.out && len >= 2 &&
+        data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40)) {
+        ch.walk_stray = true; /* another PID's answer, not the bitmap's */
+    }
+}
+
+/* While the probe is on and channel c in step, what a refusal of
+ * request out (service, code) drops: its request, or for 0x11 every
+ * request of its service on the channel; a talk drops nothing */
+inline void ecuio_engine_drop_refused(ecuio_request_engine* e, uint32_t c,
+                                      int32_t out, uint8_t service,
+                                      uint8_t code, bool talk)
+{
+    const ecuio_engine_channel& ch = e->chans[c];
+    const uint8_t reason =
+        (e->probe && ch.in_step && !talk) ? ecuio_engine_drop_reason(code) : 0;
+    if (reason == ECUIO_DROP_SERVICE) {
+        for (uint32_t i = 0; i < e->count; ++i) {
+            if (e->requests[i].channel == c &&
+                e->requests[i].bytes[0] == service) {
+                ecuio_engine_drop(e, i, reason, code);
+            }
+        }
+    } else if (reason != 0 && out != ECUIO_ENGINE_ONCE) {
+        ecuio_engine_drop(e, static_cast<uint32_t>(out), reason, code);
+    }
+}
+
+/* The one-shot channel c had out, refused with code: the item it held
+ * is settled, or the walk ends */
+inline void ecuio_engine_once_refused(ecuio_request_engine* e, uint32_t c,
+                                      uint8_t code, bool talk)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (ch.clearing) {
+        ecuio_engine_clear_settle(e, c, ECUIO_DIAG_REFUSED, code, nullptr, 0);
+    } else if (ch.identifying) {
+        ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_REFUSED, code, nullptr,
+                                  0);
+    } else if (ch.diagnosing) {
+        ecuio_engine_diag_settle(e, c, ECUIO_DIAG_REFUSED, code, nullptr, 0);
+    } else if (ch.scanning) {
+        ecuio_engine_scan_settle(e, c, ECUIO_SCAN_REFUSED, code);
+    } else if (talk) {
+        ecuio_talk_settle(ch.talk, ecuio_talk_end::refused, code);
+    } else {
+        ecuio_engine_end_walk(e, c);
+    }
+}
+
+/* The negative reply (code, not pending) to request r, out on channel
+ * c: the session's own, a loss that enters the session again, or a
+ * refusal that completes the request */
+inline ecuio_reply ecuio_engine_take_negative(ecuio_request_engine* e,
+                                              uint32_t c, int32_t out,
+                                              const ecuio_request& r,
+                                              uint8_t code, int64_t now_us)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    if (out == ECUIO_ENGINE_ONCE && ch.sessioning) {
+        ch.outstanding = ECUIO_ENGINE_NONE;
+        ecuio_engine_session_settle(e, c, ECUIO_DIAG_REFUSED, code, now_us);
+        return ecuio_reply::negative;
+    }
+    if (ch.in_step && ecuio_engine_session_reenter(e, c, out, code, now_us)) {
+        return ecuio_reply::negative;
+    }
+    ch.outstanding = ECUIO_ENGINE_NONE;
+    if (out >= 0) {
+        ecuio_engine_time_reply(e, c, static_cast<uint32_t>(out), false, false,
+                                now_us);
+    }
+    const uint8_t service = r.bytes[0];
+    const bool talk = out == ECUIO_ENGINE_ONCE && ch.talk.out;
+    ecuio_engine_drop_refused(e, c, out, service, code, talk);
+    if (out == ECUIO_ENGINE_ONCE) {
+        ecuio_engine_once_refused(e, c, code, talk);
+    }
+    return ecuio_reply::negative;
+}
+
 /* A frame received on channel c, its payload after the CAN ID (at most
  * the first six bytes are read, except that an identification reply's
  * data becomes the item's text). A positive or negative reply completes
@@ -159,55 +315,9 @@ inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
     if (len >= r.len && data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40) &&
         (r.len < 2 || data[1] == r.bytes[1]) &&
         (r.len < 3 || data[2] == r.bytes[2])) {
-        ch.outstanding = ECUIO_ENGINE_NONE;
-        ch.in_step = true;
-        if (out >= 0) {
-            ecuio_engine_time_reply(e, c, static_cast<uint32_t>(out), true,
-                                    false, now_us);
-        }
-        if (out >= 0 && r.len == 2 && r.bytes[0] == 0x01) {
-            /* A PID's own reply: its length, for packing */
-            const uint32_t bytes = len - 2u;
-            const uint32_t table = ECUIO_OBD2_PID_BYTES[r.bytes[1]];
-            ch.pid_len[r.bytes[1]] =
-                bytes == 0       ? 0
-                : bytes <= table ? static_cast<uint8_t>(bytes)
-                                 : ECUIO_ENGINE_PID_LONG;
-        }
-        if (out == ECUIO_ENGINE_ONCE && ch.sessioning) {
-            ecuio_engine_session_settle(e, c, ECUIO_DIAG_ANSWERED, 0, now_us);
-            return ecuio_reply::positive;
-        }
-        ch.session_fresh = false;
-        if (ecuio_engine_same_request(ch.session_refused, r)) {
-            ch.session_refused = ecuio_request{}; /* the loss was real */
-        }
-        if (out == ECUIO_ENGINE_ONCE && ch.clearing) {
-            ecuio_engine_clear_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len);
-        } else if (out == ECUIO_ENGINE_ONCE && ch.identifying) {
-            ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_ANSWERED, 0,
-                                      data, len);
-        } else if (out == ECUIO_ENGINE_ONCE && ch.diagnosing) {
-            ecuio_engine_diag_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len);
-        } else if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
-            ecuio_engine_scan_settle(e, c, ECUIO_SCAN_FOUND, 0);
-        } else if (out == ECUIO_ENGINE_ONCE && ch.talk.out) {
-            ecuio_talk_settle(ch.talk, ecuio_talk_end::answered, 0);
-        } else if (out == ECUIO_ENGINE_ONCE) {
-            if (len >= ECUIO_BITMAP_REPLY_LEN) {
-                ecuio_engine_take_bitmap(e, c, data, now_us);
-            } else {
-                ecuio_engine_end_walk(e, c);
-            }
-        }
-        return ecuio_reply::positive;
+        return ecuio_engine_take_positive(e, c, out, r, data, len, now_us);
     }
-    if (out == ECUIO_ENGINE_ONCE && ch.walking && !ch.identifying &&
-        !ch.diagnosing && !ch.scanning && !ch.clearing && !ch.sessioning &&
-        !ch.talk.out && len >= 2 &&
-        data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40)) {
-        ch.walk_stray = true; /* another PID's answer, not the bitmap's */
-    }
+    ecuio_engine_mark_stray(ch, out, r, data, len);
     if (ecuio_engine_scan_late(e, c, data, len)) {
         return ecuio_reply::none;
     }
@@ -223,48 +333,7 @@ inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
         ch.deadline_us = now_us + ECUIO_ENGINE_PENDING_WAIT_US;
         return ecuio_reply::pending;
     }
-    if (out == ECUIO_ENGINE_ONCE && ch.sessioning) {
-        ch.outstanding = ECUIO_ENGINE_NONE;
-        ecuio_engine_session_settle(e, c, ECUIO_DIAG_REFUSED, code, now_us);
-        return ecuio_reply::negative;
-    }
-    if (ch.in_step && ecuio_engine_session_reenter(e, c, out, code, now_us)) {
-        return ecuio_reply::negative;
-    }
-    ch.outstanding = ECUIO_ENGINE_NONE;
-    if (out >= 0) {
-        ecuio_engine_time_reply(e, c, static_cast<uint32_t>(out), false, false,
-                                now_us);
-    }
-    const uint8_t service = r.bytes[0];
-    const bool talk = out == ECUIO_ENGINE_ONCE && ch.talk.out;
-    const uint8_t reason =
-        (e->probe && ch.in_step && !talk) ? ecuio_engine_drop_reason(code) : 0;
-    if (reason == ECUIO_DROP_SERVICE) {
-        for (uint32_t i = 0; i < e->count; ++i) {
-            if (e->requests[i].channel == c &&
-                e->requests[i].bytes[0] == service) {
-                ecuio_engine_drop(e, i, reason, code);
-            }
-        }
-    } else if (reason != 0 && out != ECUIO_ENGINE_ONCE) {
-        ecuio_engine_drop(e, static_cast<uint32_t>(out), reason, code);
-    }
-    if (out == ECUIO_ENGINE_ONCE && ch.clearing) {
-        ecuio_engine_clear_settle(e, c, ECUIO_DIAG_REFUSED, code, nullptr, 0);
-    } else if (out == ECUIO_ENGINE_ONCE && ch.identifying) {
-        ecuio_engine_ident_settle(e, c, ECUIO_IDENTITY_REFUSED, code,
-                                  nullptr, 0);
-    } else if (out == ECUIO_ENGINE_ONCE && ch.diagnosing) {
-        ecuio_engine_diag_settle(e, c, ECUIO_DIAG_REFUSED, code, nullptr, 0);
-    } else if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
-        ecuio_engine_scan_settle(e, c, ECUIO_SCAN_REFUSED, code);
-    } else if (talk) {
-        ecuio_talk_settle(ch.talk, ecuio_talk_end::refused, code);
-    } else if (out == ECUIO_ENGINE_ONCE) {
-        ecuio_engine_end_walk(e, c);
-    }
-    return ecuio_reply::negative;
+    return ecuio_engine_take_negative(e, c, out, r, code, now_us);
 }
 
 /* The driver's call for a frame received on channel c:

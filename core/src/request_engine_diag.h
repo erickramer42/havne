@@ -92,6 +92,85 @@ inline void ecuio_engine_diag_take_value(const ecuio_request_engine* e,
     }
 }
 
+/* Service 01's items settled into report d: readiness (01 01) or the
+ * drive cycle's (01 41) */
+inline void ecuio_engine_diag_take_status(ecuio_channel_diagnostics_t& d,
+                                          const ecuio_diag_item& it,
+                                          uint8_t outcome, uint8_t nrc,
+                                          const uint8_t* data, uint16_t len)
+{
+    const bool answered = outcome == ECUIO_DIAG_ANSWERED;
+    if (it.request[1] == 0x41) {
+        d.cycle = outcome;
+        if (answered && len >= 6) {
+            ecuio_diag_take_cycle(data + 2, &d);
+        }
+    } else {
+        d.readiness = outcome;
+        d.readiness_nrc = nrc;
+        if (answered && len >= 6) {
+            ecuio_diag_take_readiness(data + 2, &d);
+        }
+    }
+}
+
+/* A code list's item (03, 07, 0A) settled into report d */
+inline void ecuio_engine_diag_take_list(ecuio_channel_diagnostics_t& d,
+                                        const ecuio_diag_item& it,
+                                        uint8_t outcome, uint8_t nrc,
+                                        const uint8_t* data, uint16_t len)
+{
+    const bool answered = outcome == ECUIO_DIAG_ANSWERED;
+    ecuio_dtc_list_t& l =
+        d.lists[it.request[0] == 0x03   ? ECUIO_DIAG_STORED
+                : it.request[0] == 0x07 ? ECUIO_DIAG_PENDING
+                                        : ECUIO_DIAG_PERMANENT];
+    l.outcome = outcome;
+    l.nrc = nrc;
+    if (answered) {
+        ecuio_diag_take_codes(data, len, &l);
+    }
+}
+
+/* A freeze frame's item (02) settled into channel c's report: its PIDs,
+ * its code or a value; the answers list what comes next */
+inline void ecuio_engine_diag_take_freeze(ecuio_request_engine* e, uint32_t c,
+                                          const ecuio_diag_item& it,
+                                          uint8_t outcome, uint8_t nrc,
+                                          const uint8_t* data, uint16_t len)
+{
+    ecuio_engine_channel& ch = e->chans[c];
+    ecuio_channel_diagnostics_t& d = ch.diag;
+    const bool answered = outcome == ECUIO_DIAG_ANSWERED;
+    if (it.request[1] == 0x00) {
+        /* The freeze frame's PIDs: its code next, if listed, else
+         * straight to its values */
+        d.freeze = outcome;
+        d.freeze_nrc = nrc;
+        if (answered && len >= 7) {
+            for (uint32_t b = 0; b < 4; ++b) {
+                ch.freeze_bits[b] = data[3 + b];
+            }
+            if (ecuio_engine_pid_bit(ch.freeze_bits, 0x02)) {
+                ecuio_engine_diag_push(ch, 0x02, 0x02, 0x00, 3);
+            } else {
+                ecuio_engine_diag_push_values(e, ch);
+            }
+        }
+    } else if (it.request[1] == 0x02) {
+        /* 00 00: no freeze frame is stored, so no values to ask */
+        if (answered && len >= 5) {
+            d.freeze_dtc = static_cast<uint16_t>((data[3] << 8) | data[4]);
+            if (d.freeze_dtc != 0) {
+                d.flags |= ECUIO_DIAG_FREEZE_FRAME;
+                ecuio_engine_diag_push_values(e, ch);
+            }
+        }
+    } else if (answered && len >= 3) {
+        ecuio_engine_diag_take_value(e, d, data, len);
+    }
+}
+
 /* Settles the item channel c has out: answered, with the reply (the
  * whole frame), refused with its code, or unanswered; the report takes
  * what it says, and the freeze frame's answers list what comes next */
@@ -108,64 +187,17 @@ inline void ecuio_engine_diag_settle(ecuio_request_engine* e, uint32_t c,
     if (ch.diag_pending > 0) {
         --ch.diag_pending;
     }
-    const bool answered = outcome == ECUIO_DIAG_ANSWERED;
     switch (it.request[0]) {
     case 0x01:
-        if (it.request[1] == 0x41) {
-            d.cycle = outcome;
-            if (answered && len >= 6) {
-                ecuio_diag_take_cycle(data + 2, &d);
-            }
-        } else {
-            d.readiness = outcome;
-            d.readiness_nrc = nrc;
-            if (answered && len >= 6) {
-                ecuio_diag_take_readiness(data + 2, &d);
-            }
-        }
+        ecuio_engine_diag_take_status(d, it, outcome, nrc, data, len);
         break;
     case 0x03:
     case 0x07:
-    case 0x0A: {
-        ecuio_dtc_list_t& l =
-            d.lists[it.request[0] == 0x03   ? ECUIO_DIAG_STORED
-                    : it.request[0] == 0x07 ? ECUIO_DIAG_PENDING
-                                            : ECUIO_DIAG_PERMANENT];
-        l.outcome = outcome;
-        l.nrc = nrc;
-        if (answered) {
-            ecuio_diag_take_codes(data, len, &l);
-        }
+    case 0x0A:
+        ecuio_engine_diag_take_list(d, it, outcome, nrc, data, len);
         break;
-    }
     case 0x02:
-        if (it.request[1] == 0x00) {
-            /* The freeze frame's PIDs: its code next, if listed, else
-             * straight to its values */
-            d.freeze = outcome;
-            d.freeze_nrc = nrc;
-            if (answered && len >= 7) {
-                for (uint32_t b = 0; b < 4; ++b) {
-                    ch.freeze_bits[b] = data[3 + b];
-                }
-                if (ecuio_engine_pid_bit(ch.freeze_bits, 0x02)) {
-                    ecuio_engine_diag_push(ch, 0x02, 0x02, 0x00, 3);
-                } else {
-                    ecuio_engine_diag_push_values(e, ch);
-                }
-            }
-        } else if (it.request[1] == 0x02) {
-            /* 00 00: no freeze frame is stored, so no values to ask */
-            if (answered && len >= 5) {
-                d.freeze_dtc = static_cast<uint16_t>((data[3] << 8) | data[4]);
-                if (d.freeze_dtc != 0) {
-                    d.flags |= ECUIO_DIAG_FREEZE_FRAME;
-                    ecuio_engine_diag_push_values(e, ch);
-                }
-            }
-        } else if (answered && len >= 3) {
-            ecuio_engine_diag_take_value(e, d, data, len);
-        }
+        ecuio_engine_diag_take_freeze(e, c, it, outcome, nrc, data, len);
         break;
     default:
         break;
