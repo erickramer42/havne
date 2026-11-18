@@ -475,8 +475,8 @@ TestCase {
         compare(Bridge.signalModel.subscribedCount, plotted, "a text row plots nothing")
         compare(Bridge.signalModel.tickedCount, ticked + 1, "a log counts it")
         compare(findChild(textRow, "swatch").color, Qt.rgba(0, 0, 0, 0), "no trace to fill")
-        verify(Bridge.signalModel.plottedNames().indexOf(textRow.name) >= 0,
-               "the vehicle keeps the text row's tick")
+        compare(Bridge.signalModel.plottedKeys().length, 1,
+                "the vehicle keeps the text row's tick")
         const filter = Bridge.liveSignalModel.filter
         filter.plottedOnly = true
         tryCompare(list, "count", 1, 1000, "Plotted only leaves the text row out")

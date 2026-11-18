@@ -1604,3 +1604,53 @@ don't say:
     (`apply --check -R`) proves it took. Each half was shown alone: with
     the ceiling the patch applies; with the ceiling taken out the dry run
     stops the script.
+
+25. **The ceiling as built** (`core/src/tier2_ceiling.h`). Section 1 lists
+    the services; the build fixes what it left open. Security access
+    admits sub-functions 01 to 7E, less 5F and 60 (ISO 26021's end-of-life
+    activation of pyrotechnic devices, no reader's business), and never
+    one with bit 7, which suppresses the positive reply core counts an
+    attempt by. `3E` is 00 only, for the same reason: core reads the reply
+    to know the session stands. `19`, `22` and `2A` take any second byte.
+    The default session's `10 01` is outside the ceiling though core sends
+    it at a close: the close and the keep-alive are the engine's own
+    requests (ADR-0060), built by core for itself, and the ceiling is what
+    a plugin's code may cause. A plugin's own request (`next_request`) is
+    narrower than the ceiling: `19`, `22`, `2C 01` and `2C 03`.
+
+26. **The simulated ECU's security access as built**
+    (`core/src/sim_security.h`). Section 2.7 asks for a level; the build
+    has two, 01 with 4 bytes and 03 with 16, so that a key's request
+    longer than one CAN frame exists to test the multi-frame send (section
+    2.4) with no car. The transform is the seed's bytes in reverse, each
+    XORed with a letter of "HAVNE". The lockout is the third wrong key
+    (`7F 27 36`), the delay 10 s on the ECU's clock (`7F 27 37` to every
+    27 with a level of the ECU's), and after it the count stands one short
+    of the lockout, so one more wrong key locks again and only a right key
+    zeroes it; the two levels share one count. The unlock belongs to the
+    session: `10 03` entered anew, `10 01` and S3's lapse each lock, while
+    the count and a delay outlast them. The gated DID is D210. The
+    refusals follow ISO 14229-1's general order (the service in the active
+    session before the request's length), and only the seed asked for last
+    is out. The fakes' ECU answers from the same header, with a knob for
+    the delay.
+
+27. **The talk as built** (`core/src/request_talk.h`, section 2.4). A talk
+    is one request of 1 to 60 bytes (what one J2534 write holds after its
+    CAN ID) with an echo length of 1 to 3, sent through the request
+    engine's one-shot, one at a time for each channel. The offer copies
+    the request into the talk's state, so the bytes the door judged are
+    the bytes a transport sends. The engine's door refuses anything
+    outside tier 2's ceiling whatever the caller checked. A talk ends
+    once: answered, refused (with the code), unanswered or unsent, where
+    unsent means not confirmed on the bus, whole or part. Core never
+    sends it again, since a key must not go out twice for one seed; a
+    session lost under it ends it refused. Offered first it goes ahead of
+    the keep-alive and every list, behind only a due session entry, so
+    nothing comes between a seed and its key; otherwise it takes turns
+    with the DID scan. SocketCAN segments it (First Frame, Flow Control,
+    Consecutive Frames at the ECU's pace, each after its echo, nothing
+    else sent meanwhile; N_Bs 75 ms); a J2534 adapter is handed it whole;
+    an ELM327 sends a single frame, so there a talk is 7 bytes at most and
+    a longer one is refused as too long before anything is typed. Until
+    the conversation tier exists the only caller is a test seam.

@@ -129,6 +129,12 @@ qt_add_qml_module(app_ui
         qml/DashDriveStatus.qml
         qml/DashDriveSheet.qml
         qml/DashTopBar.qml
+        qml/DashHistory.qml
+        qml/DashLayoutFile.qml
+        qml/DashAddFlow.qml
+        qml/DashEdits.qml
+        qml/DashDrive.qml
+        qml/DashPages.qml
         qml/LogNotice.qml
         qml/ConnectList.qml
         qml/DashPageStrip.qml
@@ -150,6 +156,12 @@ qt_add_qml_module(app_ui
         qml/SettingsConnect.qml
         qml/SettingsDisplay.qml
         qml/SettingsOwnSignals.qml
+        qml/SettingsUri.qml
+        qml/SettingsConnectFrom.qml
+        qml/SettingsPicks.qml
+        qml/SettingsImport.qml
+        qml/SettingsRowActions.qml
+        qml/SettingsOwn.qml
         qml/RemoveQuestion.qml
         qml/SettingsProfile.qml
         qml/SettingsRecording.qml

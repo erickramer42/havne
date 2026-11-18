@@ -326,7 +326,10 @@ TEST(BridgeTest, TextRowsShowTheirTextAndNeverPlot)
     EXPECT_EQ(model.tickedCount(), 2) << "a log counts the ticked text row";
     const QString textName =
         model.data(row1, SignalListModel::NameRole).toString();
-    EXPECT_EQ(model.plottedNames(), QStringList{textName});
+    const QString textKey =
+        model.data(row1, SignalListModel::KeyRole).toString();
+    ASSERT_FALSE(textKey.isEmpty());
+    EXPECT_EQ(model.plottedKeys(), QStringList{textKey});
     EXPECT_EQ(model.tickedIds(), std::vector<uint16_t>{2001});
     EXPECT_EQ(model.plottedIds(), (std::vector<uint16_t>{1001, 2001}));
     EXPECT_FALSE(model.data(row1, SignalListModel::HasValueRole).toBool());
@@ -361,8 +364,8 @@ TEST(BridgeTest, TextRowsShowTheirTextAndNeverPlot)
     EXPECT_TRUE(model.data(row1, SignalListModel::SubscribedRole).toBool());
     model.setPlotChoices({}, {textName});
     EXPECT_FALSE(model.data(row1, SignalListModel::SubscribedRole).toBool());
-    EXPECT_TRUE(model.unplottedNames().isEmpty());
-    // A name in both lists is unplotted, a text row's never: it stays ticked
+    EXPECT_TRUE(model.unplottedKeys().isEmpty());
+    // A row in both lists is unplotted, a text row never: it stays ticked
     model.setPlotChoices({textName}, {textName});
     EXPECT_TRUE(model.data(row1, SignalListModel::SubscribedRole).toBool());
     EXPECT_EQ(model.tickedCount(), 2);
@@ -1146,7 +1149,7 @@ TEST(BridgeTest, AValueThatIsntANumberHidesNoSlicesExtremes)
         << "the slice's low, its high and the newest";
 }
 
-TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
+TEST(BridgeTest, UnplottedKeysReadAndSetTheChartsRows)
 {
     SessionBridge bridge;
     SignalListModel* m = bridge.signalModel();
@@ -1156,37 +1159,40 @@ TEST(BridgeTest, UnplottedNamesReadAndSetTheChartsRows)
     ASSERT_TRUE(bridge.connectSession(QStringLiteral("mock://demo")).isEmpty());
     EXPECT_GE(countNotified, 1) << "a new set's count is notified";
     ASSERT_GE(m->rowCount(), 4);
-    const auto name = [m](int row) {
-        return m->data(m->index(row), SignalListModel::NameRole).toString();
+    const auto key = [m](int row) {
+        return m->data(m->index(row), SignalListModel::KeyRole).toString();
     };
     const auto plotted = [m](int row) {
         return m->data(m->index(row), SignalListModel::SubscribedRole).toBool();
     };
     const int all = m->subscribedCount();
-    EXPECT_TRUE(m->unplottedNames().isEmpty())
+    ASSERT_FALSE(key(0).isEmpty()) << "the session's rows have keys";
+    EXPECT_TRUE(m->unplottedKeys().isEmpty())
         << "every numeric row starts plotted";
-    EXPECT_TRUE(m->plottedNames().isEmpty()) << "and none past its default";
+    EXPECT_TRUE(m->plottedKeys().isEmpty()) << "and none past its default";
 
-    m->setPlotChoices({name(1)},
-                      {name(0), name(2), name(1), QStringLiteral("Not a signal")});
-    EXPECT_EQ(m->unplottedNames(), (QStringList{name(0), name(1), name(2)}))
-        << "a name in both lists is unplotted";
-    EXPECT_TRUE(m->plottedNames().isEmpty());
+    m->setPlotChoices({key(1)},
+                      {key(0), key(2), key(1), QStringLiteral("Not a signal")});
+    EXPECT_EQ(m->unplottedKeys(), (QStringList{key(0), key(1), key(2),
+                                               QStringLiteral("Not a signal")}))
+        << "a row in both lists is unplotted, and a text no row answers "
+           "is carried after the rows";
+    EXPECT_TRUE(m->plottedKeys().isEmpty());
     EXPECT_EQ(m->subscribedCount(), all - 3);
     EXPECT_FALSE(plotted(0));
     EXPECT_TRUE(plotted(3));
 
     m->setPlotChoices({}, {});
-    EXPECT_TRUE(m->unplottedNames().isEmpty());
+    EXPECT_TRUE(m->unplottedKeys().isEmpty());
     EXPECT_EQ(m->subscribedCount(), all);
 
     m->toggleSubscribed(1);
-    EXPECT_EQ(m->unplottedNames(), QStringList{name(1)})
+    EXPECT_EQ(m->unplottedKeys(), QStringList{key(1)})
         << "a click is read back";
     m->toggleSubscribed(1);
-    EXPECT_TRUE(m->unplottedNames().isEmpty())
+    EXPECT_TRUE(m->unplottedKeys().isEmpty())
         << "a click back to the default clears the choice";
-    EXPECT_TRUE(m->plottedNames().isEmpty()) << "rather than turning it over";
+    EXPECT_TRUE(m->plottedKeys().isEmpty()) << "rather than turning it over";
     ASSERT_TRUE(disconnectAndWait(bridge));
 }
 
@@ -1339,8 +1345,12 @@ TEST(BridgeTest, APlotChoiceOutlivesTheDefaultsMoving)
     model.toggleSubscribed(load);
     EXPECT_FALSE(plotted(rpm));
     EXPECT_TRUE(plotted(load));
-    EXPECT_EQ(model.unplottedNames(), QStringList{QStringLiteral("RPM")});
-    EXPECT_EQ(model.plottedNames(), QStringList{QStringLiteral("Engine Load")});
+    const auto key = [&model](int row) {
+        return model.data(model.index(row), SignalListModel::KeyRole)
+            .toString();
+    };
+    EXPECT_EQ(model.unplottedKeys(), QStringList{key(rpm)});
+    EXPECT_EQ(model.plottedKeys(), QStringList{key(load)});
     EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted);
 
     /* Load's default turns on and RPM's stays on: neither choice moves */
@@ -1352,20 +1362,20 @@ TEST(BridgeTest, APlotChoiceOutlivesTheDefaultsMoving)
     EXPECT_EQ(model.subscribedCount(), SignalListModel::DefaultPlotted - 1);
 
     model.toggleSubscribed(rpm);
-    EXPECT_TRUE(model.unplottedNames().isEmpty()) << "back to its default";
-    EXPECT_EQ(model.plottedNames(), QStringList{QStringLiteral("Engine Load")})
+    EXPECT_TRUE(model.unplottedKeys().isEmpty()) << "back to its default";
+    EXPECT_EQ(model.plottedKeys(), QStringList{key(load)})
         << "with no choice of its own";
 
     /* A vehicle's lists, applied whole: every other row to its default */
     model.setPlotChoices({QStringLiteral("Accelerator Pedal D")}, {});
     EXPECT_TRUE(plotted(pedal));
     EXPECT_TRUE(plotted(load)) << "its default now, with no choice";
-    EXPECT_TRUE(model.unplottedNames().isEmpty());
-    EXPECT_EQ(model.plottedNames(),
-              QStringList{QStringLiteral("Accelerator Pedal D")});
+    EXPECT_TRUE(model.unplottedKeys().isEmpty());
+    EXPECT_EQ(model.plottedKeys(), QStringList{key(pedal)});
 
     model.setSignalSet(ecuio_obd2_signal_set());
-    EXPECT_TRUE(model.plottedNames().isEmpty()) << "a new set starts with no choices";
+    EXPECT_TRUE(model.plottedKeys().isEmpty())
+        << "a new set starts with no choices";
 }
 
 /* The chart keeps a peak (ADR-0005's appendix): the vehicle fixture's

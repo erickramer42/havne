@@ -385,6 +385,18 @@ Signals beyond the built-in profiles come as **plugins**: a package someone made
 
 **Add a signal**, under **Your own signals**, writes one signal at a time into the vehicle's own plugin ("Daily driver signals"). **Edit** changes a saved one; a new name keeps every gauge that shows the signal bound to it.
 
+**A computed signal** is a number worked out from other signals, such as boost as manifold pressure less barometric pressure. In Add a signal, set the type to computed.
+
+1. Give it a name. Its key is made from the name once and kept when you rename it, so a gauge or an alert that reads it stays bound. A name whose key would start with a digit is refused: an expression reads a leading digit as a number.
+2. Type the expression: `+ - * /`, brackets, numbers, and the functions `min`, `max`, `abs`, `clamp`, `round` and `if`. **Insert signal** lists what the expression can read, with a filter; a tap puts the signal's name at the cursor (`obd2.map` for one of obd2's signals, the key for one of your own), and the chips put a function's start there. A signal an expression can't read by name (obd2's computed Boost: read its inputs, `obd2.map` and `obd2.baro`, instead) is listed dimmed, with the reason.
+3. The form checks the expression as you type with the rules the loader uses, and says what is wrong, with the character marked under the field. Under it, "Reads" lists each signal the expression uses with its unit.
+4. To try it, type a value for each signal it reads, in the units signals are decoded in, as a gauge's levels are, to see the value it gives or why there is none: a signal with no value, one too old, or a division by zero. While connected, **Use the session's values** fills them from the session ("Filled N of M from the session"; a signal with no value yet is left empty).
+5. Unit and decimals are optional. Save writes the signal into the vehicle's own signals.
+
+Save may add a note. "This file now needs Havne 0.8.0 or newer" means the expression uses a function, a comparison or another computed signal, which a file of the older format can't hold; an older Havne can't read the file. "Your signals now read with obd2's" means the expression is the first to read one of obd2's signals, so the vehicle's signals extend obd2: the profile row shows "obd2 + <name>", and the car is asked obd2's PIDs as well as your DIDs. A name that is one of obd2's signals (Boost, for one) replaces it: the form says "Replaces obd2's Boost" before you save, and a gauge or layout that showed obd2's then shows yours.
+
+To see a computed signal move without a car, save it and connect `mock://demo`: the demo car answers obd2's PIDs. The form's last line, "Or connect the demo", names this when the expression reads an obd2 signal or the vehicle's signals extend obd2.
+
 **Look up a VIN** on the Vehicle page decodes a VIN's model year and make on the device, and marks the variants that VIN matches; the VIN isn't saved.
 
 ## The Activity page, Settings and developer mode
