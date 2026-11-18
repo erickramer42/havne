@@ -197,56 +197,11 @@ Pane {
 
     SettingsPicks { id: picker; host: page }
 
-    // SettingsPicks's members others use
-    property alias storeRev: picker.storeRev
-    property alias vinRev: picker.vinRev
-    property alias pluginList: picker.pluginList
-    property alias pluginBySha: picker.pluginBySha
-    property alias ownPlugins: picker.ownPlugins
-    property alias refusedPlugins: picker.refusedPlugins
-    property alias picks: picker.picks
-    function picksNow() { return picker.picksNow() }
-    property alias pickRows: picker.pickRows
-    property alias signalProblem: picker.signalProblem
-    property alias signalNote: picker.signalNote
-    function placeOf(profile) { return picker.placeOf(profile) }
-    function profileName(profile) { return picker.profileName(profile) }
-    property alias variantRows: picker.variantRows
-    function rowTitle(r) { return picker.rowTitle(r) }
-    function profileTitle(profile) { return picker.profileTitle(profile) }
-    function rowReads(r) { return picker.rowReads(r) }
-    property alias missingPicks: picker.missingPicks
-    function signalsSummary() { return picker.signalsSummary() }
-    function togglePick(profile) { return picker.togglePick(profile) }
-    function pickProfile(profile) { return picker.pickProfile(profile) }
+    readonly property SettingsPicks picksPart: picker
 
     SettingsImport { id: importer; host: page }
 
-    onOwnPluginsChanged: {
-        if (importInto !== "" && !ownPlugins.some(p => p.sha256 === importInto))
-            importInto = ""
-    }
-
-    // SettingsImport's members others use
-    property alias pendingImport: importer.pendingImport
-    property alias importInto: importer.importInto
-    property alias replaceTarget: importer.replaceTarget
-    function saidToo(r) { return importer.saidToo(r) }
-    function importFile(url) { return importer.importFile(url) }
-    function keepPending(into, variant, replacing) { return importer.keepPending(into, variant, replacing) }
-    function discardImport() { return importer.discardImport() }
-    function startReplace(row) { return importer.startReplace(row) }
-    function importReplaces(variant) { return importer.importReplaces(variant) }
-    property alias obdbReport: importer.obdbReport
-    property alias obdbYearFromVin: importer.obdbYearFromVin
-    property alias obdbRowsShown: importer.obdbRowsShown
-    property alias obdbShown: importer.obdbShown
-    property alias obdbReplaces: importer.obdbReplaces
-    function noteCarYear() { return importer.noteCarYear() }
-    function obdbVinYear() { return importer.obdbVinYear() }
-    function previewObdb(typing) { return importer.previewObdb(typing) }
-    function obdbSummary(r) { return importer.obdbSummary(r) }
-    function keepObdb() { return importer.keepObdb() }
+    readonly property SettingsImport importPart: importer
 
     SettingsRowActions { id: rowActions; host: page }
 
@@ -286,7 +241,7 @@ Pane {
     // variant the form writes, in a plugin of the user's own ----
     // Where the own variant is, null for none or one the store lost
     readonly property var ownPlace: pickedVehicle === null || pickedVehicle.own === "" ? null
-        : placeOf(pickedVehicle.own)
+        : picker.placeOf(pickedVehicle.own)
 
     // Its signal file as a document (SignalForm), null for none; the
     // form's choices that aren't text; what Read once last said
@@ -344,8 +299,8 @@ Pane {
           summary: (pickedVehicle !== null ? pickedVehicle.label : qsTr("None"))
                    + (vehicles.list.length > 0 ? qsTr(" · %1 saved").arg(vehicles.list.length) : "") },
         { key: "signals", title: qsTr("Signals"),
-          summary: signalsSummary(),
-          warn: missingPicks.length > 0 || refusedPlugins.length > 0 },
+          summary: picker.signalsSummary(),
+          warn: picker.missingPicks.length > 0 || picker.refusedPlugins.length > 0 },
         { key: "alerts", title: qsTr("Alerts"),
           summary: Bridge.conditionsProblem !== "" ? qsTr("doesn't load")
                    : settingsAlerts.conditions.length === 0 ? qsTr("none")
@@ -633,14 +588,14 @@ Pane {
                 page.plottedApplied = false
             // The session's VIN, read again at each, goes at its end; the
             // matches it made stay on the vehicle it identified
-            ++page.vinRev
+            ++picker.vinRev
         }
 
         function onVehicleIdentified() {
             page.recognizeVehicle()
-            ++page.vinRev
+            ++picker.vinRev
             page.noteVinMatches()
-            page.noteCarYear()
+            importer.noteCarYear()
         }
 
         function onRecordingChanged() {

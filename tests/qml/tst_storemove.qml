@@ -144,16 +144,16 @@ TestCase {
         verify(page, "Settings loads")
         page.open("signals")
         compare(page.pickedVehicle.label, "Weekend car")
-        compare(page.picks, [shared])
+        compare(page.picksPart.picks, [shared])
         compare(page.unmigratedRows, [], "every file moved")
-        compare(page.pluginList.filter(p => p.mine).map(p => p.id).sort(),
+        compare(page.picksPart.pluginList.filter(p => p.mine).map(p => p.id).sort(),
                 ["daily-driver-obdb", "daily-driver-own", "shared-pids"])
-        verify(!page.pluginList.find(p => p.id === "example-sim").mine, "the example is as it was")
-        compare(page.variantRows.filter(r => r.picked).map(r => r.profile), [shared])
+        verify(!page.picksPart.pluginList.find(p => p.id === "example-sim").mine, "the example is as it was")
+        compare(page.picksPart.variantRows.filter(r => r.picked).map(r => r.profile), [shared])
         compare(page.ownSignals, [], "this vehicle wrote none")
 
         page.pickVehicle("v1")
-        compare(page.picks, [shared, obdb, own, example])
+        compare(page.picksPart.picks, [shared, obdb, own, example])
         compare(page.pickedVehicle.own, own)
         compare(page.ownSignals.map(s => s.key), ["own_pressure"], "the form edits its file's variant")
         compare(find(find(page, "ownSignal_0"), "ownSignalText").text, "Own pressure: 22 D110 on 7E8")
@@ -164,11 +164,11 @@ TestCase {
         compare(page.standIn.profile, shared)
         compare(page.profiles.map(p => p.name), [shared, "raw", "uds-generic", obdb, own, example])
         compare(find(page, "profile_" + shared).text, "obd2 + Shared PIDs")
-        const row = page.variantRows.find(r => r.profile === own)
-        compare(page.rowTitle(row), "Daily driver own 1.0.0")
-        compare(page.rowReads(row), "obd2 + 1 signal · yours")
+        const row = page.picksPart.variantRows.find(r => r.profile === own)
+        compare(page.picksPart.rowTitle(row), "Daily driver own 1.0.0")
+        compare(page.picksPart.rowReads(row), "obd2 + 1 signal · yours")
         verify(row.forCar)
-        compare(page.pluginList.find(p => p.id === "daily-driver-own").importedFor, "v1",
+        compare(page.picksPart.pluginList.find(p => p.id === "daily-driver-own").importedFor, "v1",
                 "moved for this vehicle")
     }
 }

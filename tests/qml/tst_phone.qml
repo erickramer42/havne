@@ -3149,7 +3149,7 @@ TestCase {
     function test_theListsSayThePluginAConnectReads() {
         const main = phoneMain()
         const settings = find(main.contentItem, "settingsPage")
-        verify(settings.importFile(Harness.writeExamplePlugin("list-words.havne-plugin.json")))
+        verify(settings.importPart.importFile(Harness.writeExamplePlugin("list-words.havne-plugin.json")))
         try {
             settings.vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Desk car"),
                                                      ["plugin.example-sim.my2019"])
@@ -3174,7 +3174,7 @@ TestCase {
                     "the address Settings connects")
             tryVerify(() => !Bridge.connecting, 5000, "the desktop refuses a Bluetooth link")
         } finally {
-            for (const p of settings.pluginList)
+            for (const p of settings.picksPart.pluginList)
                 settings.removePlugin(p.sha256)
         }
     }
@@ -3912,7 +3912,7 @@ TestCase {
         verify(main, "Main loads")
         const settings = find(main.contentItem, "settingsPage")
         const dash = find(main.contentItem, "dashboardPage")
-        verify(settings.importFile(Harness.writeExamplePlugin("main-sets.havne-plugin.json")))
+        verify(settings.importPart.importFile(Harness.writeExamplePlugin("main-sets.havne-plugin.json")))
         try {
             settings.vehicles = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Desk car"),
                                                      ["plugin.example-sim.my2019"])
@@ -3922,7 +3922,7 @@ TestCase {
             compare(dash.profileNames["plugin.example-sim.base"], "Example: the simulated car")
             compare(dash.offlineUri, settings.offlineUri)
         } finally {
-            for (const p of settings.pluginList)
+            for (const p of settings.picksPart.pluginList)
                 settings.removePlugin(p.sha256)
         }
     }

@@ -170,7 +170,7 @@ TestCase {
     function importFile(page, fileName, name, did, obd2) {
         const url = Harness.writeScratchFile(fileName, signalFileText(name, did, obd2))
         verify(url.toString() !== "", "the scratch file is written")
-        return page.importFile(url) && page.keepPending("", "")
+        return page.importPart.importFile(url) && page.importPart.keepPending("", "")
     }
 
     // The example plugin's package read through Import, under version
@@ -180,18 +180,18 @@ TestCase {
             ? Harness.writeExamplePlugin("example-sim.havne-plugin.json")
             : Harness.writeExamplePlugin("example-sim-" + version + ".havne-plugin.json", version)
         verify(url.toString() !== "", "the example plugin is packed")
-        return page.importFile(url)
+        return page.importPart.importFile(url)
     }
 
     // The list's row for a profile: what the page holds, and its item
     function rowData(page, profile) {
-        const r = page.variantRows.find(e => e.profile === profile)
+        const r = page.picksPart.variantRows.find(e => e.profile === profile)
         verify(r !== undefined, profile + " is listed")
         return r
     }
 
     function rowOf(page, profile) {
-        const i = page.variantRows.findIndex(e => e.profile === profile)
+        const i = page.picksPart.variantRows.findIndex(e => e.profile === profile)
         verify(i >= 0, profile + " is listed")
         return find(page, "signalRow_" + i)
     }
@@ -207,13 +207,13 @@ TestCase {
 
     // The OBDb fixture read through Import under the year typed
     function obdbRead(page, year) {
-        if (!page.importFile(Harness.obdbFixture))
+        if (!page.importPart.importFile(Harness.obdbFixture))
             return false
         if (year !== "") {
             find(page, "obdbYearField").text = ""   // a year typed, even the one a VIN gave
             find(page, "obdbYearField").text = year
         }
-        return page.obdbReport !== null
+        return page.importPart.obdbReport !== null
     }
 
     // The Signals page's states on a phone (qml.md's density): at 384 x
@@ -246,7 +246,7 @@ TestCase {
         }
         verify(importExample(page))
         verify(importFile(page, "long.json", "A plugin of the user's own with a name that wraps"))
-        const own = page.ownPlugins[0]
+        const own = page.picksPart.ownPlugins[0]
         const theirs = "plugin.example-sim.my2019"
         if (data.tag === "open row") {
             page.openRow = theirs
@@ -254,14 +254,14 @@ TestCase {
             page.openRow = theirs
             page.copyShown = true
         } else if (data.tag === "import panel") {
-            verify(page.importFile(Harness.writeScratchFile("track.json", signalFileText("Track day", "D101"))))
-            page.importInto = own.sha256
+            verify(page.importPart.importFile(Harness.writeScratchFile("track.json", signalFileText("Track day", "D101"))))
+            page.importPart.importInto = own.sha256
         } else if (data.tag === "obdb report") {
             verify(obdbRead(page, "2021"))
         } else if (data.tag === "export note") {
             verify(obdbRead(page, "2021"))
-            verify(page.keepObdb())
-            const obdb = page.pluginList.find(p => p.obdb)
+            verify(page.importPart.keepObdb())
+            const obdb = page.picksPart.pluginList.find(p => p.obdb)
             page.openRow = obdb.profiles[0]
             verify(page.exportWaits(obdb.sha256))
         } else if (data.tag === "confirm") {
@@ -269,7 +269,7 @@ TestCase {
             verify(page.confirmingPlugin() !== null)
         } else if (data.tag === "missing pick") {
             page.saveVehicles(VehicleBook.setPicks(page.vehicles,
-                                                   page.picks.concat(["plugin.gone-from-the-store.base"])))
+                                                   page.picksPart.picks.concat(["plugin.gone-from-the-store.base"])))
         }
         page.open("signals")
         const shown = find(page, "settingsSignalsPage")
@@ -300,9 +300,9 @@ TestCase {
         press(page, "vehicleNew")
         page.open("signals")
         verify(importFile(page, "extras.json", "Extras"))
-        compare(page.pluginList[0].importedFor, "v1")
+        compare(page.picksPart.pluginList[0].importedFor, "v1")
         press(page, "vehicleDuplicate")
-        compare(page.picks, ["plugin.extras.base"], "Duplicate copies the picks")
+        compare(page.picksPart.picks, ["plugin.extras.base"], "Duplicate copies the picks")
         verify(rowData(page, "plugin.extras.base").forCar, "the copy picks it")
         pressRow(page, "plugin.extras.base")
         verify(!rowData(page, "plugin.extras.base").forCar, "imported for the first, not the copy")
@@ -310,23 +310,23 @@ TestCase {
         press(page, "vehicleConfirm")
         page.pickVehicle("v1")
         pressRow(page, "plugin.extras.base")
-        compare(page.picks, [])
+        compare(page.picksPart.picks, [])
         verify(rowData(page, "plugin.extras.base").forCar, "imported for this one, picked or not")
         press(page, "vehicleForget")
         press(page, "vehicleConfirm")
         compare(page.vehicles.list.length, 0)
-        compare(page.pluginList.length, 1, "the plugin stays")
-        compare(page.pluginList[0].importedFor, "", "but is no vehicle's import")
+        compare(page.picksPart.pluginList.length, 1, "the plugin stays")
+        compare(page.picksPart.pluginList[0].importedFor, "", "but is no vehicle's import")
         verify(find(rowOf(page, "plugin.extras.base"), "rowUnused").visible)
 
         press(page, "vehicleNew")
         verify(obdbRead(page, ""))
         press(page, "obdbKeep")
-        compare(page.pluginList.filter(p => p.importedFor !== "").length, 1)
+        compare(page.picksPart.pluginList.filter(p => p.importedFor !== "").length, 1)
         press(page, "vehicleForgetAll")
         press(page, "vehicleConfirm")
-        compare(page.pluginList.length, 2, "Forget all keeps the plugins")
-        compare(page.pluginList.filter(p => p.importedFor !== "").length, 0)
+        compare(page.picksPart.pluginList.length, 2, "Forget all keeps the plugins")
+        compare(page.picksPart.pluginList.filter(p => p.importedFor !== "").length, 0)
         verify(findChild(page, "profile_plugin.extras.base") === null, "no vehicle, no pick offered")
     }
 
@@ -410,7 +410,7 @@ TestCase {
         press(page, "vehicleNew")
         const first = page.pickedVehicle.id
         const bad = Harness.writeScratchFile("bad.json", signalFileText("Bad").replace("bits", "bitz"))
-        verify(!(page.importFile(bad) && page.keepPending("", "")))
+        verify(!(page.importPart.importFile(bad) && page.importPart.keepPending("", "")))
         verify(find(page, "signalProblem").text !== "")
         typeSignal(page, "Trans Temp", "1E1C", "16")
         press(page, "formSave")

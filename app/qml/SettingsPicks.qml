@@ -27,6 +27,10 @@ Item {
     }
     // The user's own plugins, which take a variant
     readonly property var ownPlugins: pluginList.filter(p => p.ok && p.mine)
+    onOwnPluginsChanged: {
+        if (host.importPart.importInto !== "" && !ownPlugins.some(p => p.sha256 === host.importPart.importInto))
+            host.importPart.importInto = ""
+    }
     // The copies that no longer load, each with the loader's words
     readonly property var refusedPlugins: pluginList.filter(p => !p.ok)
     readonly property var picks: picksNow()

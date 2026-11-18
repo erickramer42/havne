@@ -703,7 +703,7 @@ TestCase {
     function importFile(page, fileName, name, did, obd2) {
         const url = Harness.writeScratchFile(fileName, signalFileText(name, did, obd2))
         verify(url.toString() !== "", "the scratch file is written")
-        return page.importFile(url) && page.keepPending("", "")
+        return page.importPart.importFile(url) && page.importPart.keepPending("", "")
     }
 
     // The example plugin's package read through Import, under version
@@ -713,11 +713,11 @@ TestCase {
             ? Harness.writeExamplePlugin("example-sim.havne-plugin.json")
             : Harness.writeExamplePlugin("example-sim-" + version + ".havne-plugin.json", version)
         verify(url.toString() !== "", "the example plugin is packed")
-        return page.importFile(url)
+        return page.importPart.importFile(url)
     }
 
     function rowOf(page, profile) {
-        const i = page.variantRows.findIndex(e => e.profile === profile)
+        const i = page.picksPart.variantRows.findIndex(e => e.profile === profile)
         verify(i >= 0, profile + " is listed")
         return find(page, "signalRow_" + i)
     }
@@ -888,8 +888,8 @@ TestCase {
 
         page.chooseProfile("default")
         compare(page.uriField.text, "elm327://COM3")
-        verify(page.removePlugin(page.pluginList.find(p => p.id === "example-sim").sha256))
-        compare(page.picks, ["plugin.standin.base"], "the pick goes with the plugin")
+        verify(page.removePlugin(page.picksPart.pluginList.find(p => p.id === "example-sim").sha256))
+        compare(page.picksPart.picks, ["plugin.standin.base"], "the pick goes with the plugin")
         compare(page.offlineUri, "elm327://COM3", "and the address is listed as it is")
         page.uriField.text = ""
         compare(page.offlineUri, "mock://?profile=plugin.standin.base", "the vehicle's pick, with no address")
