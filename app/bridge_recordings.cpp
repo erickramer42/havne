@@ -137,10 +137,6 @@ QString SessionBridge::replayUriWithOwnSignals(const QString& uri)
                            : QString::fromStdString(
                                  cli::with_profile(uri8, p.toStdString()));
     };
-    // The same bytes in the store: the vehicle's own file, under its name
-    if (m_signalStore.profileOf(sha) == profile) {
-        return selecting(profile);
-    }
     auto held = m_replayFiles.find(sha);
     if (held == m_replayFiles.end()) {
         ecuio_signal_file_t* file = nullptr;

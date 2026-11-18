@@ -55,11 +55,10 @@ TestCase {
         Theme.night = "off"
         Theme.look = "dark"
         Bridge.unitSystem = 0
-        Bridge.useSignalFiles([])
-        for (const p of Bridge.plugins())     // the store starts empty
-            Bridge.removePlugin(p.sha256)
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        for (const p of Bridge.plugins())     // the store starts empty
+            Bridge.removePlugin(p.sha256)
     }
 
     function find(within, name) {

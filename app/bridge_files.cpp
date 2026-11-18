@@ -17,84 +17,6 @@
 
 using namespace bridgetext;
 
-QVariantMap SessionBridge::importSignalFile(const QUrl& url)
-{
-    // A picked file opens through openPicked: Android's content:// by the content resolver
-    QFile file;
-    QVariantMap result;
-    if (!openPicked(file, pathOfUrl(url), QIODevice::ReadOnly)) {
-        result = {{QStringLiteral("ok"), false},
-                  {QStringLiteral("words"),
-                   QStringLiteral("Couldn't read the file")}};
-    } else if (file.size() > static_cast<qint64>(ECUIO_SIGNAL_FILE_MAX_BYTES)) {
-        result = {
-            {QStringLiteral("ok"), false},
-            {QStringLiteral("words"),
-             QStringLiteral("The file is over %1 KiB, a signal file's most")
-                 .arg(ECUIO_SIGNAL_FILE_MAX_BYTES / 1024)}};
-    } else {
-        result =
-            m_signalStore.import(file.read(ECUIO_SIGNAL_FILE_MAX_BYTES + 1));
-    }
-    emit logMessage(
-        result.value(QStringLiteral("ok")).toBool()
-            ? QStringLiteral("Signal file: %1 (%2, %3)")
-                  .arg(result.value(QStringLiteral("name")).toString(),
-                       result.value(QStringLiteral("profile")).toString(),
-                       signalCountText(
-                           result.value(QStringLiteral("count")).toInt()))
-            : QStringLiteral("Signal file refused: %1")
-                  .arg(result.value(QStringLiteral("words")).toString()));
-    return result;
-}
-
-QVariantMap SessionBridge::importSignalText(const QString& text)
-{
-    const QVariantMap result = m_signalStore.import(text.toUtf8());
-    emit logMessage(
-        result.value(QStringLiteral("ok")).toBool()
-            ? QStringLiteral("Signal file saved: %1 (%2, %3)")
-                  .arg(result.value(QStringLiteral("name")).toString(),
-                       result.value(QStringLiteral("profile")).toString(),
-                       signalCountText(
-                           result.value(QStringLiteral("count")).toInt()))
-            : QStringLiteral("Signal file not saved: %1")
-                  .arg(result.value(QStringLiteral("words")).toString()));
-    return result;
-}
-
-QString SessionBridge::signalFileText(const QString& sha) const
-{
-    return SignalStore::text(sha);
-}
-
-QVariantMap SessionBridge::saveSignalFile(const QString& sha, const QUrl& url)
-{
-    QString words;
-    const QByteArray bytes = SignalStore::bytes(sha, &words);
-    const bool removable = pickedDocumentRemovable(url);
-    bool written = false;
-    if (!bytes.isEmpty()) {
-        written = writeToUrl(url, bytes);
-        if (!written) {
-            words = QStringLiteral("Couldn't write the file");
-        }
-    }
-    if (!written) {
-        dropPickedDocument(url, removable);
-    }
-    emit logMessage(
-        written ? QStringLiteral("Signal file %1 saved to a file (%2 bytes)")
-                      .arg(sha.left(12))
-                      .arg(bytes.size())
-                : QStringLiteral("Signal file %1 not saved: %2")
-                      .arg(sha.left(12), words));
-    if (!written) {
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("words"), words}};
-    }
-    return {{QStringLiteral("ok"), true}, {QStringLiteral("words"), QString()}};
-}
-
 QVariantMap SessionBridge::saveLayoutFile(const QString& text, const QUrl& url)
 {
     const QByteArray bytes = text.toUtf8();
@@ -238,26 +160,6 @@ QVariantMap SessionBridge::saveHealthReport(const QUrl& url, int filterIndex,
     return r;
 }
 
-QVariantList SessionBridge::useSignalFiles(const QStringList& shas)
-{
-    const QVariantList used = m_signalStore.use(shas);
-    for (const QVariant& v : used) {
-        const QVariantMap e = v.toMap();
-        if (!e.value(QStringLiteral("ok")).toBool()) {
-            emit logMessage(
-                QStringLiteral("Signal file %1 not offered: %2")
-                    .arg(e.value(QStringLiteral("sha256")).toString().left(12),
-                         e.value(QStringLiteral("words")).toString()));
-        }
-    }
-    return used;
-}
-
-int SessionBridge::deleteUnusedSignalFiles(const QStringList& keep)
-{
-    return m_signalStore.deleteUnused(keep);
-}
-
 QVariantMap SessionBridge::previewObdb(const QUrl& url, int modelYear,
                                        const QString& name)
 {
@@ -315,48 +217,6 @@ QVariantMap SessionBridge::previewObdbBytes(const QByteArray& bytes,
                                   : QString::number(year))
              : QStringLiteral("OBDb set refused: %1").arg(p.words));
     return ObdbImport::report(p, name, year);
-}
-
-QVariantMap SessionBridge::keepObdb(const QString& replacing)
-{
-    QVariantMap result;
-    if (m_obdbPending.isEmpty()) {
-        result = {{QStringLiteral("ok"), false},
-                  {QStringLiteral("words"),
-                   QStringLiteral("No OBDb set is waiting: import it again")}};
-    } else if (!replacing.isEmpty() && m_session != nullptr &&
-               m_signalStore.shaFor(ecuio_session_signal_set(m_session)) ==
-                   replacing) {
-        // The session decodes with the file this replaces: the import
-        // waits, so Keep works once it has disconnected
-        result = {{QStringLiteral("ok"), false},
-                  {QStringLiteral("words"),
-                   QStringLiteral("The session reads the earlier import: "
-                                  "disconnect, then keep it")}};
-    } else {
-        result = m_signalStore.import(m_obdbPending);
-        m_obdbPending.clear();
-    }
-    emit logMessage(
-        result.value(QStringLiteral("ok")).toBool()
-            ? QStringLiteral("Signal file from OBDb: %1 (%2, %3)%4")
-                  .arg(result.value(QStringLiteral("name")).toString(),
-                       result.value(QStringLiteral("profile")).toString(),
-                       signalCountText(
-                           result.value(QStringLiteral("count")).toInt()),
-                       replacing.isEmpty()
-                           ? QString()
-                           : QStringLiteral(", replacing %1")
-                                 .arg(replacing.left(12)))
-            : QStringLiteral("OBDb set not kept: %1")
-                  .arg(result.value(QStringLiteral("words")).toString()));
-    return result;
-}
-
-bool SessionBridge::isObdbImport(const QString& sha) const
-{
-    QString words;
-    return ObdbImport::isConversion(SignalStore::bytes(sha, &words));
 }
 
 int SessionBridge::vinModelYear(const QString& typedVin) const

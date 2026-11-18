@@ -5,8 +5,8 @@
 //
 // SHA-256 (FIPS 180-4), for a recording's signals.json (ADR-0051
 // section 4): its hash on events.log's header says which bytes decoded
-// the recording, and the app names its kept copies by the same hash
-// (app/signalstore.h), so the two compare as text.
+// the recording, and a replay compares it with the folder's own copy
+// (app/bridge_recordings.cpp).
 
 #ifndef ECUIO_SHA256_H
 #define ECUIO_SHA256_H

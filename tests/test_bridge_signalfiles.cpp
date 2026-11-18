@@ -1,5 +1,5 @@
 // File/layer: tests/test_bridge_signalfiles.cpp | GTest + QtCore/Network, app-layer tests
-// Testing: BRIDGE: BridgeTest.SignalFile*, Plugin*, refs and ranges, ProfileSignals*, layout files, picks (test_bridge)
+// Testing: BRIDGE: BridgeTest.Plugin*, a format 2 file, refs and ranges, ProfileSignals*, layout files, picks (test_bridge)
 //
 // Cases for signal files, plugins, refs and ranges, layout files and the pickers.
 
@@ -44,405 +44,52 @@
 #include "bridge_support.h"
 
 // ---------------------------------------------------------------------------
-// The vehicles' signal files (ADR-0051, app/signalstore.h): each case's
-// store in a HAVNE_SETTINGS_DIR of its own.
+// The vehicles' signal files (ADR-0051), kept as plugins (ADR-0064): each
+// case's store in a HAVNE_SETTINGS_DIR of its own.
 // ---------------------------------------------------------------------------
 
-/* A file that loads is kept as <sha256>.json, its bytes as given; the
- * same bytes from elsewhere reuse that copy */
-TEST(BridgeTest, SignalFileImportKeepsACopyByItsHash)
-{
-    SettingsDirScope dir;
-    ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
-    SessionBridge bridge;
-    QStringList log;
-    QObject::connect(&bridge, &SessionBridge::logMessage,
-                     [&log](const QString& line) { log << line; });
-    const QByteArray bytes = signalFile(QStringLiteral("Extras"));
-    const QString sha = sha256Of(bytes);
-
-    QVariantMap r =
-        bridge.importSignalFile(writeScratch(from.path(), "a.json", bytes));
-    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
-        << r.value(QStringLiteral("words")).toString().toStdString();
-    EXPECT_EQ(r.value(QStringLiteral("sha256")).toString(), sha);
-    EXPECT_EQ(r.value(QStringLiteral("name")).toString().toStdString(),
-              "Extras");
-    EXPECT_EQ(r.value(QStringLiteral("profile")).toString().toStdString(),
-              "user.extras");
-    EXPECT_EQ(r.value(QStringLiteral("count")).toInt(), 1);
-    EXPECT_FALSE(r.value(QStringLiteral("kept")).toBool());
-    EXPECT_EQ(storeFiles(dir.store()),
-              QStringList{sha + QStringLiteral(".json")});
-    QFile copy(dir.store() + QLatin1Char('/') + sha + QStringLiteral(".json"));
-    ASSERT_TRUE(copy.open(QIODevice::ReadOnly));
-    EXPECT_EQ(copy.readAll(), bytes);
-    EXPECT_TRUE(log.contains(
-        QStringLiteral("Signal file: Extras (user.extras, 1 signal)")))
-        << log.join(QLatin1Char('\n')).toStdString();
-    EXPECT_FALSE(registered("user.extras")) << "import registers nothing";
-
-    // The same bytes under another name, from a fresh bridge too
-    SessionBridge again;
-    r = again.importSignalFile(writeScratch(from.path(), "b.json", bytes));
-    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool());
-    EXPECT_TRUE(r.value(QStringLiteral("kept")).toBool());
-    EXPECT_EQ(storeFiles(dir.store()).size(), 1);
-}
-
-/* A format 2 file (ADR-0062) imports and is used as any: its chain counts
+/* A format 2 file (ADR-0062) is kept and used as any: its chain counts
  * among its signals, its profile registers, and a format 1 file using a
  * call or a format 3 file is refused in the loader's words */
 TEST(BridgeTest, AFormat2SignalFileImportsAndIsUsedAsAny)
 {
     SettingsDirScope dir;
     ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
     SessionBridge bridge;
-    const auto chain = [](const char* format, const char* expr) {
-        return QStringLiteral(
-                   R"({"havne_signals":%1,"name":"Chained","source":{"name":"t"},)"
-                   R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
-                   R"({"key":"a","name":"A","read":{"service":"22","number":"D100"},)"
-                   R"("field":{"byte":0,"bits":8}},)"
-                   R"({"key":"b","name":"B","kind":"computed","expr":"%2"},)"
-                   R"({"key":"c","name":"C","kind":"computed","expr":"b * 2"}]})")
-            .arg(QLatin1String(format), QLatin1String(expr))
-            .toUtf8();
+    const auto keep = [&bridge](const char* format, const char* expr) {
+        const QString text =
+            QStringLiteral(
+                R"({"havne_signals":%1,"name":"Chained","source":{"name":"t"},)"
+                R"("ecus":[{"id":"pcm","rx":"7E8"}],"signals":[)"
+                R"({"key":"a","name":"A","read":{"service":"22","number":"D100"},)"
+                R"("field":{"byte":0,"bits":8}},)"
+                R"({"key":"b","name":"B","kind":"computed","expr":"%2"},)"
+                R"({"key":"c","name":"C","kind":"computed","expr":"b * 2"}]})")
+                .arg(QLatin1String(format), QLatin1String(expr));
+        return bridge.keepSignalText(text, QString(), QString(), QString());
     };
-    const QByteArray good = chain("2", "max(a, 1)");
-    QVariantMap r =
-        bridge.importSignalFile(writeScratch(from.path(), "chain.json", good));
+    QVariantMap r = keep("2", "max(a, 1)");
     ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
         << r.value(QStringLiteral("words")).toString().toStdString();
-    EXPECT_EQ(r.value(QStringLiteral("count")).toInt(), 3);
-    EXPECT_EQ(r.value(QStringLiteral("profile")).toString().toStdString(),
-              "user.chained");
-    EXPECT_EQ(bridge.useSignalFiles({sha256Of(good)}).size(), 1);
-    EXPECT_TRUE(registered("user.chained"));
+    EXPECT_EQ(r.value(QStringLiteral("counts")).toList().value(0).toInt(), 3);
+    const QByteArray profile =
+        r.value(QStringLiteral("profiles")).toStringList().value(0).toUtf8();
+    EXPECT_TRUE(registered(profile.constData())) << profile.constData();
 
-    r = bridge.importSignalFile(
-        writeScratch(from.path(), "one.json", chain("1", "max(a, 1)")));
+    r = keep("1", "max(a, 1)");
     EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
     EXPECT_TRUE(r.value(QStringLiteral("words"))
                     .toString()
                     .contains(QStringLiteral("\"havne_signals\": 2")))
         << r.value(QStringLiteral("words")).toString().toStdString();
 
-    r = bridge.importSignalFile(
-        writeScratch(from.path(), "three.json", chain("3", "a")));
+    r = keep("3", "a");
     EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
     EXPECT_TRUE(r.value(QStringLiteral("words"))
                     .toString()
                     .contains(QStringLiteral("format 3")))
         << r.value(QStringLiteral("words")).toString().toStdString();
-    EXPECT_EQ(storeFiles(dir.store()).size(), 1);
-}
-
-/* A file says the built-in set it extends and how many of its signals
- * are its own, at import and in use: the page offers one extending obd2
- * in obd2's place (ADR-0052) */
-TEST(BridgeTest, SignalFileSaysWhatItExtendsAndHowManyAreItsOwn)
-{
-    SettingsDirScope dir;
-    ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
-    SessionBridge bridge;
-    QByteArray extending = signalFile(QStringLiteral("Plus"));
-    extending.replace(R"("source":{"name":"t"},)",
-                      R"("source":{"name":"t"},"extends":"obd2",)");
-    const QByteArray alone = signalFile(QStringLiteral("Alone"));
-    const ecuio_signal_set_t* obd2 = nullptr;
-    ASSERT_EQ(ecuio_profile_lookup("obd2", &obd2), ECUIO_OK);
-    const int base = static_cast<int>(obd2->count);
-
-    QVariantMap r = bridge.importSignalFile(
-        writeScratch(from.path(), "plus.json", extending));
-    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
-        << r.value(QStringLiteral("words")).toString().toStdString();
-    EXPECT_EQ(r.value(QStringLiteral("extends")).toString().toStdString(),
-              "obd2");
-    EXPECT_EQ(r.value(QStringLiteral("count")).toInt(), base + 1);
-    EXPECT_EQ(r.value(QStringLiteral("own")).toInt(), 1);
-    r = bridge.importSignalFile(writeScratch(from.path(), "alone.json", alone));
-    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool());
-    EXPECT_EQ(r.value(QStringLiteral("extends")).toString().toStdString(), "");
-    EXPECT_EQ(r.value(QStringLiteral("own")).toInt(), 1);
-
-    const QVariantList used =
-        bridge.useSignalFiles({sha256Of(extending), sha256Of(alone)});
-    ASSERT_EQ(used.size(), 2);
-    for (const QVariant& v : used) {
-        const QVariantMap e = v.toMap();
-        ASSERT_TRUE(e.value(QStringLiteral("ok")).toBool());
-        const bool plus =
-            e.value(QStringLiteral("sha256")).toString() == sha256Of(extending);
-        EXPECT_EQ(e.value(QStringLiteral("extends")).toString().toStdString(),
-                  plus ? "obd2" : "");
-        EXPECT_EQ(e.value(QStringLiteral("own")).toInt(), 1);
-        EXPECT_EQ(e.value(QStringLiteral("count")).toInt(),
-                  plus ? base + 1 : 1);
-    }
-    bridge.useSignalFiles({});
-}
-
-/* A refusal is the loader's words, never the path it came from; nothing
- * is kept */
-TEST(BridgeTest, SignalFileRefusalNamesNoPath)
-{
-    SettingsDirScope dir;
-    ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
-    // On Windows the scratch folder is under the account's home, so its
-    // name is in the path too
-    const QString folder = from.path() + QStringLiteral("/jdoe-private");
-    SessionBridge bridge;
-    QStringList log;
-    QObject::connect(&bridge, &SessionBridge::logMessage,
-                     [&log](const QString& line) { log << line; });
-    QByteArray bad = signalFile(QStringLiteral("Extras"));
-    bad.replace("\"bits\"", "\"bitz\"");
-    QVariantMap r =
-        bridge.importSignalFile(writeScratch(folder, "extras.json", bad));
-    EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
-    const QString words = r.value(QStringLiteral("words")).toString();
-    EXPECT_TRUE(words.contains(QStringLiteral("bitz"))) << words.toStdString();
-    EXPECT_TRUE(words.contains(QStringLiteral("line"))) << words.toStdString();
-
-    r = bridge.importSignalFile(
-        QUrl::fromLocalFile(folder + QStringLiteral("/gone.json")));
-    EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
-              "Couldn't read the file");
-
-    for (const QString& line : log + QStringList{words}) {
-        EXPECT_FALSE(line.contains(QStringLiteral("jdoe")))
-            << line.toStdString();
-        EXPECT_FALSE(line.contains(from.path())) << line.toStdString();
-        EXPECT_FALSE(line.contains(QStringLiteral("extras.json")))
-            << line.toStdString();
-    }
-    EXPECT_TRUE(storeFiles(dir.store()).isEmpty());
-}
-
-/* use() registers the files it's given and unregisters the rest */
-TEST(BridgeTest, SignalFileUseRegistersItsProfile)
-{
-    SettingsDirScope dir;
-    ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
-    SessionBridge bridge;
-    const QByteArray bytes = signalFile(QStringLiteral("Extras"));
-    const QString sha = sha256Of(bytes);
-    ASSERT_TRUE(
-        bridge.importSignalFile(writeScratch(from.path(), "a.json", bytes))
-            .value(QStringLiteral("ok"))
-            .toBool());
-    QVariantList used = bridge.useSignalFiles({sha});
-    ASSERT_EQ(used.size(), 1);
-    EXPECT_TRUE(used[0].toMap().value(QStringLiteral("ok")).toBool());
-    EXPECT_TRUE(registered("user.extras"));
-    ecuio_session_t* s = nullptr;
-    ASSERT_EQ(ecuio_session_create("mock://demo?profile=user.extras", &s),
-              ECUIO_OK)
-        << "a URI can choose it";
-    ecuio_session_destroy(s);
-
-    EXPECT_TRUE(bridge.useSignalFiles({}).isEmpty());
-    EXPECT_FALSE(registered("user.extras"));
-}
-
-/* One profile, one file: two files of one name don't both register */
-TEST(BridgeTest, SignalFileOneProfileHasOneFile)
-{
-    SettingsDirScope dir;
-    ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
-    SessionBridge bridge;
-    const QByteArray a = signalFile(QStringLiteral("Extras"));
-    const QByteArray b =
-        signalFile(QStringLiteral("Extras"), QStringLiteral("D101"));
-    ASSERT_TRUE(bridge.importSignalFile(writeScratch(from.path(), "a.json", a))
-                    .value(QStringLiteral("ok"))
-                    .toBool());
-    ASSERT_TRUE(bridge.importSignalFile(writeScratch(from.path(), "b.json", b))
-                    .value(QStringLiteral("ok"))
-                    .toBool());
-    const QVariantList used = bridge.useSignalFiles({sha256Of(a), sha256Of(b)});
-    ASSERT_EQ(used.size(), 2);
-    EXPECT_TRUE(used[0].toMap().value(QStringLiteral("ok")).toBool());
-    EXPECT_FALSE(used[1].toMap().value(QStringLiteral("ok")).toBool());
-    EXPECT_EQ(
-        used[1].toMap().value(QStringLiteral("words")).toString().toStdString(),
-        "user.extras is made by another file already (Extras)");
-    const ecuio_signal_set_t* set = nullptr;
-    ASSERT_EQ(ecuio_profile_lookup("user.extras", &set), ECUIO_OK);
-    ASSERT_NE(set, nullptr);
-    EXPECT_EQ(set->defs[0].mux_key, 0x62D100u)
-        << "the first file's, never replaced";
-}
-
-/* At start-up each copy is read again: a missing, changed or no longer
- * loading copy says so and isn't offered; a good one registers */
-TEST(BridgeTest, SignalFileThatNoLongerLoadsAtStartUpSaysSo)
-{
-    SettingsDirScope dir;
-    ASSERT_TRUE(dir.valid());
-    const QByteArray good = signalFile(QStringLiteral("Extras"));
-    QByteArray stale = signalFile(QStringLiteral("Stale"));
-    stale.replace("\"havne_signals\":1", "\"havne_signals\":9");
-    writeScratch(dir.store(), sha256Of(good) + QStringLiteral(".json"), good);
-    writeScratch(dir.store(), sha256Of(stale) + QStringLiteral(".json"), stale);
-    const QString changed = sha256Of("other bytes");
-    writeScratch(dir.store(), changed + QStringLiteral(".json"),
-                 signalFile(QStringLiteral("X")));
-    const QString missing = QString(64, QLatin1Char('e'));
-
-    SessionBridge bridge;
-    QStringList log;
-    QObject::connect(&bridge, &SessionBridge::logMessage,
-                     [&log](const QString& line) { log << line; });
-    const QVariantList used = bridge.useSignalFiles(
-        {sha256Of(stale), missing, changed, sha256Of(good)});
-    ASSERT_EQ(used.size(), 4);
-    const QString staleWords =
-        used[0].toMap().value(QStringLiteral("words")).toString();
-    EXPECT_TRUE(staleWords.startsWith(QStringLiteral("It no longer loads: ")))
-        << staleWords.toStdString();
-    EXPECT_EQ(
-        used[1].toMap().value(QStringLiteral("words")).toString().toStdString(),
-        "Its copy is missing: import the file again");
-    EXPECT_EQ(
-        used[2].toMap().value(QStringLiteral("words")).toString().toStdString(),
-        "Its copy has changed: import the file again");
-    for (int i = 0; i < 3; ++i) {
-        EXPECT_FALSE(used[i].toMap().value(QStringLiteral("ok")).toBool()) << i;
-    }
-    EXPECT_FALSE(registered("user.stale"));
-    EXPECT_TRUE(used[3].toMap().value(QStringLiteral("ok")).toBool());
-    EXPECT_TRUE(registered("user.extras"));
-    EXPECT_EQ(log.filter(QStringLiteral(" not offered: ")).size(), 3)
-        << log.join(QLatin1Char('\n')).toStdString();
-}
-
-/* A copy no vehicle keeps goes, its profile first; the folder with the
- * last one */
-TEST(BridgeTest, SignalFileIsDeletedOnlyOnceItsProfileIsUnregistered)
-{
-    SettingsDirScope dir;
-    ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
-    SessionBridge bridge;
-    const QByteArray a = signalFile(QStringLiteral("Extras"));
-    const QByteArray b = signalFile(QStringLiteral("Body"));
-    ASSERT_TRUE(bridge.importSignalFile(writeScratch(from.path(), "a.json", a))
-                    .value(QStringLiteral("ok"))
-                    .toBool());
-    ASSERT_TRUE(bridge.importSignalFile(writeScratch(from.path(), "b.json", b))
-                    .value(QStringLiteral("ok"))
-                    .toBool());
-    (void)bridge.useSignalFiles({sha256Of(a), sha256Of(b)});
-    ASSERT_TRUE(registered("user.extras"));
-
-    EXPECT_EQ(bridge.deleteUnusedSignalFiles({sha256Of(b)}), 1);
-    EXPECT_FALSE(registered("user.extras"));
-    EXPECT_TRUE(registered("user.body"));
-    EXPECT_EQ(storeFiles(dir.store()),
-              QStringList{sha256Of(b) + QStringLiteral(".json")});
-
-    EXPECT_EQ(bridge.deleteUnusedSignalFiles({}), 1);
-    EXPECT_FALSE(registered("user.body"));
-    EXPECT_FALSE(QDir(dir.store()).exists()) << "the folder with the last copy";
-}
-
-/* The form's file goes in as text and comes back as text; a refusal is
- * the loader's, nothing kept */
-TEST(BridgeTest, SignalFileTextGoesInAndComesBack)
-{
-    SettingsDirScope dir;
-    ASSERT_TRUE(dir.valid());
-    SessionBridge bridge;
-    QStringList log;
-    QObject::connect(&bridge, &SessionBridge::logMessage,
-                     [&log](const QString& line) { log << line; });
-    const QString text = QString::fromUtf8(signalFile(QStringLiteral("Mine")));
-    const QVariantMap r = bridge.importSignalText(text);
-    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
-        << r.value(QStringLiteral("words")).toString().toStdString();
-    const QString sha = r.value(QStringLiteral("sha256")).toString();
-    EXPECT_EQ(sha, sha256Of(text.toUtf8()));
-    EXPECT_EQ(bridge.signalFileText(sha), text);
-    EXPECT_TRUE(bridge.signalFileText(QString(64, QLatin1Char('e'))).isEmpty());
-    EXPECT_TRUE(log.contains(
-        QStringLiteral("Signal file saved: Mine (user.mine, 1 signal)")))
-        << log.join(QLatin1Char('\n')).toStdString();
-    /* Two signals: the count's plural */
-    QString two = QString::fromUtf8(signalFile(QStringLiteral("Pair")));
-    two.replace(QStringLiteral("}}]}"),
-                QStringLiteral("}},{\"key\":\"b\",\"name\":\"B\",\"read\":"
-                               "{\"service\":\"22\",\"number\":\"D101\"},"
-                               "\"field\":{\"byte\":0,\"bits\":8}}]}"));
-    ASSERT_TRUE(
-        bridge.importSignalText(two).value(QStringLiteral("ok")).toBool());
-    EXPECT_TRUE(log.contains(
-        QStringLiteral("Signal file saved: Pair (user.pair, 2 signals)")))
-        << log.join(QLatin1Char('\n')).toStdString();
-
-    QString bad = text;
-    bad.replace(QStringLiteral("\"bits\""), QStringLiteral("\"bitz\""));
-    const QVariantMap refused = bridge.importSignalText(bad);
-    EXPECT_FALSE(refused.value(QStringLiteral("ok")).toBool());
-    EXPECT_TRUE(refused.value(QStringLiteral("words"))
-                    .toString()
-                    .contains(QStringLiteral("bitz")));
-    EXPECT_EQ(storeFiles(dir.store()).size(), 2);
-}
-
-/* A recording of a session a vehicle's file decodes holds the store's
- * copy as signals.json, named by the copy's hash on events.log's header;
- * a session no file decodes has none (ADR-0051 section 4) */
-TEST(BridgeTest, SignalFileRecordingHoldsTheStoresCopy)
-{
-    SettingsDirScope dir;
-    ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
-    QTemporaryDir root;
-    ASSERT_TRUE(root.isValid());
-    SessionBridge bridge;
-    const QByteArray bytes = signalFile(QStringLiteral("Recorded"));
-    const QString sha = sha256Of(bytes);
-    ASSERT_TRUE(
-        bridge.importSignalFile(writeScratch(from.path(), "a.json", bytes))
-            .value(QStringLiteral("ok"))
-            .toBool());
-    ASSERT_EQ(bridge.useSignalFiles({sha}).size(), 1);
-    bridge.setRecordingsRootForTesting(root.path());
-    bridge.setRecording(true);
-
-    ASSERT_TRUE(
-        bridge
-            .connectSession(QStringLiteral("mock://rec?profile=user.recorded"))
-            .isEmpty());
-    EXPECT_TRUE(bridge.recordingActive());
-    ASSERT_TRUE(disconnectAndWait(bridge));
-    ASSERT_TRUE(
-        bridge.connectSession(QStringLiteral("mock://plain")).isEmpty());
-    EXPECT_TRUE(bridge.recordingActive());
-    ASSERT_TRUE(disconnectAndWait(bridge));
-
-    QStringList folders = recordingFolders(root.path());
-    ASSERT_EQ(folders.size(), 2);
-    folders.sort();
-    const QString first = root.path() + QStringLiteral("/") + folders[0];
-    const QString second = root.path() + QStringLiteral("/") + folders[1];
-    QFile copy(first + QStringLiteral("/signals.json"));
-    ASSERT_TRUE(copy.open(QIODevice::ReadOnly));
-    EXPECT_EQ(copy.readAll(), bytes);
-    QFile events(first + QStringLiteral("/events.log"));
-    ASSERT_TRUE(events.open(QIODevice::ReadOnly | QIODevice::Text));
-    EXPECT_TRUE(events.readAll().contains(
-        ("\nsignal file  signals.json," + sha + "\n").toUtf8()));
-    EXPECT_FALSE(QFile::exists(second + QStringLiteral("/signals.json")));
+    EXPECT_EQ(bridge.plugins().size(), 1);
 }
 
 // ---- ADR-0057's refs and ranges: the model's rows and profileSignals ----
@@ -1507,43 +1154,6 @@ TEST(BridgeTest, PluginMatchesProposeVariantsByTheVin)
 /* A copy whose bytes changed since it was kept is written again by an
  * import of the right bytes, so the next launch loads it: the words that
  * refused it say to import it again */
-TEST(BridgeTest, SignalFileImportRepairsAChangedCopy)
-{
-    SettingsDirScope dir;
-    ASSERT_TRUE(dir.valid());
-    const QByteArray good = signalFile(QStringLiteral("Extras"));
-    const QString sha = sha256Of(good);
-    writeScratch(dir.store(), sha + QStringLiteral(".json"),
-                 signalFile(QStringLiteral("X")));
-    QTemporaryDir from;
-    {
-        SessionBridge bridge;
-        const QVariantList before = bridge.useSignalFiles({sha});
-        ASSERT_EQ(before.size(), 1);
-        EXPECT_EQ(before[0]
-                      .toMap()
-                      .value(QStringLiteral("words"))
-                      .toString()
-                      .toStdString(),
-                  "Its copy has changed: import the file again");
-        const QVariantMap r =
-            bridge.importSignalFile(writeScratch(from.path(), "e.json", good));
-        EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool());
-        EXPECT_FALSE(r.value(QStringLiteral("kept")).toBool())
-            << "a copy that held other bytes is written, not kept";
-    }
-    SessionBridge later;
-    const QVariantList used = later.useSignalFiles({sha});
-    ASSERT_EQ(used.size(), 1);
-    EXPECT_TRUE(used[0].toMap().value(QStringLiteral("ok")).toBool())
-        << used[0]
-               .toMap()
-               .value(QStringLiteral("words"))
-               .toString()
-               .toStdString();
-    EXPECT_TRUE(registered("user.extras"));
-}
-
 TEST(BridgeTest, PluginImportRepairsAChangedCopy)
 {
     SettingsDirScope dir;
@@ -1652,59 +1262,6 @@ TEST(BridgeTest, AFileThatCantBeReadIsRefusedWithoutItsPath)
         EXPECT_EQ(words.toStdString(), "Couldn't read the file");
         EXPECT_FALSE(words.contains(QStringLiteral("missing")));
     }
-}
-
-/* A Save out of the app writes the store's copy byte for byte, so
- * havne-cli --signals and another vehicle read the file the vehicle has;
- * a copy changed since it was kept, a sha that isn't one and a target
- * that can't be written are each refused in words naming no path, and a
- * file already at the target is replaced whole */
-TEST(BridgeTest, SignalFileSavedOutIsItsCopyByteForByte)
-{
-    SettingsDirScope dir;
-    ASSERT_TRUE(dir.valid());
-    QTemporaryDir from;
-    QTemporaryDir out;
-    ASSERT_TRUE(out.isValid());
-    // Its own spacing and order, which a writer of its own would change
-    const QByteArray bytes =
-        signalFile(QStringLiteral("Extras")).replace(",", ",\r\n  ");
-    SessionBridge bridge;
-    const QVariantMap r =
-        bridge.importSignalFile(writeScratch(from.path(), "e.json", bytes));
-    ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
-        << r.value(QStringLiteral("words")).toString().toStdString();
-    const QString sha = r.value(QStringLiteral("sha256")).toString();
-
-    const QString target = out.path() + QStringLiteral("/extras.json");
-    writeScratch(out.path(), "extras.json", QByteArray(5000, 'x'));
-    const QVariantMap saved =
-        bridge.saveSignalFile(sha, QUrl::fromLocalFile(target));
-    EXPECT_TRUE(saved.value(QStringLiteral("ok")).toBool())
-        << saved.value(QStringLiteral("words")).toString().toStdString();
-    QFile f(target);
-    ASSERT_TRUE(f.open(QIODevice::ReadOnly));
-    EXPECT_EQ(f.readAll(), bytes) << "the copy, byte for byte, and only it";
-    f.close();
-
-    const auto refused = [&](const QString& which, const QUrl& to,
-                             const char* expected) {
-        const QVariantMap no = bridge.saveSignalFile(which, to);
-        EXPECT_FALSE(no.value(QStringLiteral("ok")).toBool()) << expected;
-        const QString words = no.value(QStringLiteral("words")).toString();
-        EXPECT_EQ(words.toStdString(), expected);
-        EXPECT_FALSE(words.contains(out.path()) || words.contains(dir.store()));
-    };
-    refused(QStringLiteral("../signals/x"), QUrl::fromLocalFile(target),
-            "No such signal file");
-    refused(QString(64, QLatin1Char('a')), QUrl::fromLocalFile(target),
-            "Its copy is missing: import the file again");
-    refused(sha, QUrl::fromLocalFile(out.path()), "Couldn't write the file");
-    writeScratch(dir.store(), sha + QStringLiteral(".json"),
-                 signalFile(QStringLiteral("X")));
-    refused(sha, QUrl::fromLocalFile(out.path() + QStringLiteral("/b.json")),
-            "Its copy has changed since it was kept: import the file again");
-    EXPECT_FALSE(QFile::exists(out.path() + QStringLiteral("/b.json")));
 }
 
 /* A layout file (ADR-0057's appendix on the layout file): the text goes out

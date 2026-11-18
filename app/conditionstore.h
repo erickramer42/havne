@@ -3,7 +3,7 @@
 //
 // The app's one set of conditions (ADR-0063 decision 4): a condition file
 // (docs/condition-files.md) kept as conditions.json in the settings folder,
-// beside the signal store. Every file is read by core's loader before it
+// beside the plugin store. Every file is read by core's loader before it
 // is kept, so the app never holds one core refuses; a save writes a
 // temporary file and renames it over the old one, so a failed write leaves
 // the old file whole.
@@ -36,7 +36,7 @@ class ConditionStore
 public:
     // <HAVNE_SETTINGS_DIR>/conditions.json when that's set (a test's or a
     // second instance's), else <AppDataLocation>/conditions.json; read at
-    // each call, as SignalStore::root is
+    // each call, as PluginStore::root is
     static QString path();
 
     // Reads the file: true with no set when there's none; false, no set

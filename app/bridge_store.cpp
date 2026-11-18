@@ -27,12 +27,6 @@ QVariantList SessionBridge::decodeProfiles()
             {QStringLiteral("profile"), QString::fromLatin1(builtIn)},
             {QStringLiteral("name"), QString()}});
     }
-    for (const QVariant& v : m_signalStore.registered()) {
-        const QVariantMap e = v.toMap();
-        out.append(QVariantMap{
-            {QStringLiteral("profile"), e.value(QStringLiteral("profile"))},
-            {QStringLiteral("name"), e.value(QStringLiteral("name"))}});
-    }
     for (const QVariant& v : m_pluginStore.all()) {
         const QVariantMap e = v.toMap();
         if (!e.value(QStringLiteral("ok")).toBool()) {

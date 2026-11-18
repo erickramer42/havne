@@ -163,7 +163,6 @@ SessionBridge::~SessionBridge()
         m_recorder = nullptr;
     }
     // Only now: no session is left to decode with the files' sets
-    m_signalStore.close();
     m_pluginStore.close();
     for (auto& held : m_replayFiles) {
         const QByteArray name = held.second.profile.toUtf8();
