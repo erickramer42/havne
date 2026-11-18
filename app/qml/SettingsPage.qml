@@ -1237,8 +1237,8 @@ Pane {
 
     // Live's ticks and unticks, the picked vehicle's from now on
     function rememberPlotting() {
-        saveVehicles(VehicleBook.rememberPlotting(vehicles, Bridge.signalModel.plottedNames(),
-                                                  Bridge.signalModel.unplottedNames()))
+        saveVehicles(VehicleBook.rememberPlotting(vehicles, Bridge.signalModel.plottedKeys(),
+                                                  Bridge.signalModel.unplottedKeys()))
     }
 
     // Said beside the vehicles while the car's VIN, not the user, made
@@ -1257,8 +1257,12 @@ Pane {
         const r = VehicleBook.recognize(doc, Bridge.vinKey(doc.salt), Bridge.currentUri)
         saveVehicles(r.doc)
         vinPickNote = VehicleBook.pickNote(r)
-        if (r.outcome === "new" && plottedApplied)
+        if (r.outcome === "new" && plottedApplied) {
+            // This session's ticks are the new vehicle's; what the one
+            // picked before kept for other sets stays its own
+            Bridge.signalModel.dropCarriedChoices()
             rememberPlotting()
+        }
         else if (r.outcome === "switched" && plottedApplied)
             Bridge.signalModel.setPlotChoices(pickedVehicle.plotted, pickedVehicle.unplotted)
         Bridge.logEvent(VehicleBook.logLine(r))

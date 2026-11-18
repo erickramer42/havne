@@ -132,12 +132,16 @@ public:
                       * (applyUnasked, ecuio_session_get_unasked_signals):
                       * Live and the Dashboard say "not asked" in place of
                       * a value */
-        HiddenWhyRole /* why a hidden row is hidden: "unsupported" (its
-                       * ECU's supported-PID list leaves it out) or
-                       * "absent" (its replies come without the field),
-                       * unsupported first when both hold; "" for a shown
-                       * row. Notified with HiddenRole, including when the
-                       * reason changes under a row that stays hidden. */
+        HiddenWhyRole, /* why a hidden row is hidden: "unsupported" (its
+                        * ECU's supported-PID list leaves it out) or
+                        * "absent" (its replies come without the field),
+                        * unsupported first when both hold; "" for a shown
+                        * row. Notified with HiddenRole, including when the
+                        * reason changes under a row that stays hidden. */
+        KeyRole        /* the key the signal is kept under (ADR-0065
+                        * section 9, ecuio_signal_set_keys with the set's
+                        * file): what a vehicle's ticks and a recording
+                        * name it by. Fixed per signal set. */
     };
 
     int rowCount(const QModelIndex& parent = {}) const override;
@@ -250,17 +254,27 @@ public:
     // clears the row's choice, so the row follows its default again. A
     // text row's tick asks it (the default pick takes it) and never plots.
     Q_INVOKABLE void toggleSubscribed(int row);
-    // A vehicle's ticked signals (ADR-0027 section 1): the names of the
-    // rows the user ticked past the default and of the numeric rows
-    // unticked from it, and setting both, which leaves every other row to
-    // its default. A name in both lists is unplotted; a text row is never
-    // unplotted, its default being unticked.
     // The hidden rows as { name, why } in set order, for Live's list of
     // them; a binding that reads hiddenCount re-runs it on every judgment
     Q_INVOKABLE QVariantList hiddenSignals() const;
-    Q_INVOKABLE QStringList plottedNames() const;
-    Q_INVOKABLE QStringList unplottedNames() const;
+    // A vehicle's ticked signals (ADR-0027 section 1), by key (ADR-0065
+    // section 9): the rows the user ticked past the default and the
+    // numeric rows unticked from it, and setting both, which leaves every
+    // other row to its default. A row in both lists is unplotted; a text
+    // row is never unplotted, its default being unticked.
+    // setPlotChoices takes each text as a key, else as a name one row has
+    // (ChoiceRows), so lists kept by name tick the same rows. A text no
+    // row answers, or one whose row has no key (core refused the keys),
+    // is carried: both lists give it back after the rows'
+    // keys, at most CarriedMax in each (the newest), so a tick outlives
+    // a session under a set without its signal. A new set carries none.
+    static constexpr int CarriedMax = 1024;
+    Q_INVOKABLE QStringList plottedKeys() const;
+    Q_INVOKABLE QStringList unplottedKeys() const;
     Q_INVOKABLE void setPlotChoices(const QStringList& plotted, const QStringList& unplotted);
+    // Forgets the carried texts, which were another vehicle's: the rows'
+    // own choices stay. No signal.
+    Q_INVOKABLE void dropCarriedChoices();
 
     // Strip-chart pull API: one map per subscribed signal with history,
     // { id, row, name, unit, decimals, value, samples: [ts, val, ...] },
@@ -313,6 +327,7 @@ private:
     struct Entry {
         uint16_t id;
         char name[32];
+        char key[ECUIO_SIGNAL_KEY_MAX + 1]; // "" when core gave none
         char unit[16];
         uint8_t decimals = 0;
         double value = 0.0;
@@ -390,6 +405,9 @@ private:
     int m_unaskedCount = 0;
     bool m_ranked = false;      // the set ranks a def (plot_rank)
     bool m_pickOnly = false;    // the session is asked only its picks
+    // The texts of the last setPlotChoices that no keyed row answered
+    QStringList m_carriedPlotted;
+    QStringList m_carriedUnplotted;
     uint32_t m_units = ECUIO_UNITS_METRIC;
     HostElapsedTimer m_clock;   // fallback stamps; restarted in setSignalSet
 };

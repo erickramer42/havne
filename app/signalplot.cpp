@@ -6,8 +6,32 @@
 
 #include "signallistmodel.h"
 
+#include "choicerows.h"
+
+#include <QSet>
+
 #include <algorithm>
 #include <vector>
+
+namespace {
+
+// texts less those in taken, each once, the newest most kept: the front,
+// since a save writes the rows' keys before the carried
+QStringList carried(const QStringList& texts, const QSet<QString>& taken,
+                    int most)
+{
+    QStringList out;
+    QSet<QString> seen;
+    for (const QString& t : texts) {
+        if (!taken.contains(t) && !seen.contains(t)) {
+            seen.insert(t);
+            out << t;
+        }
+    }
+    return out.mid(0, most);
+}
+
+} // namespace
 
 void SignalListModel::toggleSubscribed(int row)
 {
@@ -22,15 +46,15 @@ void SignalListModel::toggleSubscribed(int row)
     emit ticksChanged();
 }
 
-QStringList SignalListModel::plottedNames() const
+QStringList SignalListModel::plottedKeys() const
 {
-    QStringList names;
+    QStringList keys;
     for (const Entry& e : m_entries) {
-        if (e.choice == PlotChoice::Plotted) {
-            names << QString::fromUtf8(e.name);
+        if (e.choice == PlotChoice::Plotted && e.key[0] != 0) {
+            keys << QString::fromUtf8(e.key);
         }
     }
-    return names;
+    return keys + m_carriedPlotted;
 }
 
 std::vector<uint16_t> SignalListModel::tickedIds() const
@@ -55,28 +79,62 @@ std::vector<uint16_t> SignalListModel::plottedIds() const
     return ids;
 }
 
-QStringList SignalListModel::unplottedNames() const
+QStringList SignalListModel::unplottedKeys() const
 {
-    QStringList names;
+    QStringList keys;
     for (const Entry& e : m_entries) {
-        if (!e.isText && e.choice == PlotChoice::Unplotted) {
-            names << QString::fromUtf8(e.name);
+        if (!e.isText && e.choice == PlotChoice::Unplotted && e.key[0] != 0) {
+            keys << QString::fromUtf8(e.key);
         }
     }
-    return names;
+    return keys + m_carriedUnplotted;
 }
 
-void SignalListModel::setPlotChoices(const QStringList& plotted, const QStringList& unplotted)
+void SignalListModel::setPlotChoices(const QStringList& plotted,
+                                     const QStringList& unplotted)
 {
+    ChoiceRows rows;
+    rows.reserve(static_cast<qsizetype>(m_entries.size()));
     for (Entry& e : m_entries) {
-        const QString name = QString::fromUtf8(e.name);
-        e.choice = (!e.isText && unplotted.contains(name))
-                       ? PlotChoice::Unplotted
-                   : plotted.contains(name) ? PlotChoice::Plotted
-                                            : PlotChoice::Default;
+        rows.add(QByteArray(e.key), QByteArray(e.name));
+        e.choice = PlotChoice::Default;
     }
+    // The plotted first, so a row in both lists ends unplotted. A row with
+    // no key (core refused the keys) can't keep its text: it is carried
+    QSet<QString> answered;
+    for (const QString& text : plotted) {
+        const int row = rows.rowOf(text.toUtf8());
+        if (row >= 0) {
+            Entry& e = m_entries[static_cast<size_t>(row)];
+            if (e.key[0] != 0) {
+                answered.insert(text);
+            }
+            e.choice = PlotChoice::Plotted;
+        }
+    }
+    m_carriedPlotted = carried(plotted, answered, CarriedMax);
+    answered.clear();
+    for (const QString& text : unplotted) {
+        const int row = rows.rowOf(text.toUtf8());
+        if (row >= 0) {
+            Entry& e = m_entries[static_cast<size_t>(row)];
+            if (e.key[0] != 0) {
+                answered.insert(text);
+            }
+            if (!e.isText) {
+                e.choice = PlotChoice::Unplotted;
+            }
+        }
+    }
+    m_carriedUnplotted = carried(unplotted, answered, CarriedMax);
     judgePlotted();
     emit ticksChanged();
+}
+
+void SignalListModel::dropCarriedChoices()
+{
+    m_carriedPlotted.clear();
+    m_carriedUnplotted.clear();
 }
 
 void SignalListModel::judgePlotted()

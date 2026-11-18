@@ -22,6 +22,21 @@ void widenRows(int row, int& first, int& last)
     if (row > last) last = row;
 }
 
+// Each def's key, with the file's own for the defs it keys itself; a
+// refusal (no memory) leaves every def without one
+std::vector<ecuio_signal_key_t> keysOf(const ecuio_signal_set_t* set,
+                                       const ecuio_signal_file_t* file)
+{
+    std::vector<ecuio_signal_key_t> keys(set->count);
+    uint32_t keyed = 0;
+    if (ecuio_signal_set_keys(set, file, keys.data(), set->count, &keyed) !=
+            ECUIO_OK ||
+        keyed != set->count) {
+        keys.assign(set->count, ecuio_signal_key_t{});
+    }
+    return keys;
+}
+
 } // namespace
 
 // A value, its unit and its decimals in a unit system (ADR-0022)
@@ -115,6 +130,8 @@ QVariant SignalListModel::data(const QModelIndex& index, int role) const
             return e.facts.isEnum;
         case UnaskedRole:
             return e.unasked;
+        case KeyRole:
+            return QString::fromUtf8(e.key);
         default: return QVariant();
     }
 }
@@ -144,7 +161,8 @@ QHash<int, QByteArray> SignalListModel::roleNames() const
             {RangeHighRole, "rangeHigh"},
             {IsEnumRole, "isEnum"},
             {UnaskedRole, "unasked"},
-            {HiddenWhyRole, "hiddenWhy"}};
+            {HiddenWhyRole, "hiddenWhy"},
+            {KeyRole, "key"}};
 }
 
 const char* SignalListModel::whyWords(Entry::Why why)
@@ -219,6 +237,9 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
                                    bool pickOnly)
 {
     m_pickOnly = pickOnly;
+    // What the last set's choices left unanswered was that set's to carry
+    m_carriedPlotted.clear();
+    m_carriedUnplotted.clear();
     // NULL/empty is valid (the raw profile): clear the model rather
     // than keep the previous session's rows.
     const bool hadHidden = m_hiddenCount != 0;
@@ -254,6 +275,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
     // never on the stack or moved by a reallocation
     m_entries.reserve(set->count);
     const bool builtIn = isBuiltIn(set);
+    const std::vector<ecuio_signal_key_t> keys = keysOf(set, file);
 
     for (uint32_t i = 0; i < set->count; ++i) {
         // value-init zeroes the history ring, head, and count
@@ -261,6 +283,7 @@ void SignalListModel::setSignalSet(const ecuio_signal_set_t* set,
         Entry& e = m_entries.emplace_back();
         e.id = set->defs[i].id;
         qstrncpy(e.name, set->defs[i].name, sizeof(e.name));   // always terminates
+        qstrncpy(e.key, keys[i].text, sizeof(e.key));
         qstrncpy(e.unit, set->defs[i].unit, sizeof(e.unit));
         e.decimals = set->defs[i].decimal_places;
         e.isText = set->defs[i].kind == ECUIO_VALUE_TEXT ||

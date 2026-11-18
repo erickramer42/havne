@@ -152,11 +152,10 @@ inline void plotOnly(SignalListModel* model, const std::vector<uint16_t>& ids)
         }
         const auto id = static_cast<uint16_t>(
             model->data(i, SignalListModel::IdRole).toUInt());
-        const QString name =
-            model->data(i, SignalListModel::NameRole).toString();
+        const QString key = model->data(i, SignalListModel::KeyRole).toString();
         (std::find(ids.begin(), ids.end(), id) != ids.end() ? plotted
                                                             : unplotted)
-            << name;
+            << key;
     }
     model->setPlotChoices(plotted, unplotted);
 }
