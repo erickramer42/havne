@@ -10,6 +10,8 @@ add_library(ecuio-core STATIC
     src/export_pcapng.cpp
     src/export_wide.cpp
     src/health.cpp
+    src/health_build.cpp
+    src/health_write.cpp
     src/host_clock.cpp
     src/frames_read.cpp
     src/import.cpp
