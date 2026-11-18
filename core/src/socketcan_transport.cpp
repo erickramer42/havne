@@ -489,6 +489,7 @@ ecuio_socketcan_transport_attach(ecuio_session_t* session, const char* uri,
                 return st;
             }
             ecuio_attach_timing(r.engine, r.timing, ECUIO_TIMING_CLOCK_KERNEL);
+            r.engine.pdu_max = ECUIO_ENGINE_PDU_MAX; /* socketcan_send.h */
             const ecuio_status_t tables = ecuio_session_set_modules(
                 session, r.rx_ids, r.tx_ids, r.chan_count);
             if (tables != ECUIO_OK) {

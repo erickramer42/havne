@@ -13,6 +13,7 @@
 //          J2534HealthTest.LongRepliesArriveWhole
 //          The floor and the timer's wait: J2534HealthTest.TheFloor*,
 //          .VxTheFloorsWaitReadsNothing; ?gap=: J2534QueryParamTest
+//          A talk's request whole in one write: J2534TalkTest
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -325,16 +326,19 @@ void update_health(link_health& h, const read_outcome& o, bool reads_count)
  * a message it never sent, so it's a failed write (internal.h's
  * contract for ecuio_j2534_write_frame). */
 bool send_request(ecuio_j2534_transport* t, const ecuio_request& r,
-                  link_health& h)
+                  link_health& h, bool once = false)
 {
     const j2534_channel& ch = t->chans[r.channel];
-    uint8_t msg[J2534_ADDR_LEN + sizeof(r.bytes)];
+    uint32_t len = 0; /* a talk's whole request: the adapter segments it */
+    const uint8_t* pdu = ecuio_engine_pdu_of(t->engine.chans[r.channel].talk,
+                                             once, r.bytes, r.len, &len);
+    uint8_t msg[J2534_ADDR_LEN + ECUIO_ENGINE_PDU_MAX];
     pack_be32(msg, ch.tx_id);
-    memcpy(msg + J2534_ADDR_LEN, r.bytes, r.len);
+    memcpy(msg + J2534_ADDR_LEN, pdu, len);
     uint32_t written = 0;
     const ecuio_status_t wst = ecuio_j2534_write_frame(
-        t->handle, t->channel, msg, J2534_ADDR_LEN + r.len,
-        ch.addr_flags |   /* a 29-bit channel's CAN_29BIT_ID */
+        t->handle, t->channel, msg, J2534_ADDR_LEN + len,
+        ch.addr_flags | /* a 29-bit channel's CAN_29BIT_ID */
             ECUIO_PT_TX_ISO15765_FRAME_PAD,
         0, &written);
     const bool sent = (wst == ECUIO_OK && written >= 1);
@@ -541,8 +545,9 @@ void j2534_worker(ecuio_j2534_transport* t)
                 const int32_t r = ecuio_engine_due(&e, c, now);
                 if (r != ECUIO_ENGINE_NONE) {
                     const int64_t start = engine_now_us(t);
-                    const bool sent = send_request(
-                        t, ecuio_engine_request_of(&e, c, r), h);
+                    const bool sent =
+                        send_request(t, ecuio_engine_request_of(&e, c, r), h,
+                                     r == ECUIO_ENGINE_ONCE);
                     ecuio_engine_sent(&e, c, r, sent, engine_now_us(t), start);
                 }
             }
@@ -604,6 +609,7 @@ void j2534_worker(ecuio_j2534_transport* t)
         if (requests) {
             ecuio_take_diag_request(t->session, &e, diag_seen);
             ecuio_take_clear_requests(t->session, &e, clear_seen);
+            ecuio_take_test_talk(t->session, &e);
             ecuio_take_focus(t->session, &e, focus_seen);
         }
         for (uint32_t c = 0; requests && c < t->chan_count; ++c) {
@@ -963,6 +969,7 @@ ecuio_status_t j2534_attach(ecuio_session_t* session, const char* uri,
         return st;
     }
     ecuio_attach_timing(t->engine, t->timing, ECUIO_TIMING_CLOCK_ADAPTER);
+    t->engine.pdu_max = ECUIO_ENGINE_PDU_MAX; /* the adapter sends ISO-TP */
 
     /* Connect flags: ?flags= as given, plus CAN_29BIT_ID when the
      * channels use 29-bit IDs, so the channel opens at the width its

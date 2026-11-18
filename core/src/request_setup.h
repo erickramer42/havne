@@ -25,6 +25,7 @@
 #include "pid_support.h"
 #include "request_engine.h"
 #include "session.h"
+#include "talk_seam.h"
 #include "uri_query.h"
 
 #include <atomic>

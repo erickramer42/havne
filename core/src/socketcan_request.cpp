@@ -1,12 +1,15 @@
 // File/layer: core/src/socketcan_request.cpp | C++17, Qt-free; Linux only
 //             (ECUIO_HAVE_SOCKETCAN)
-// Testing: HARNESS: SocketCanRequestTest, SocketCanFaultTest (test_vcan)
+// Testing: HARNESS: SocketCanRequestTest, SocketCanFaultTest,
+//          SocketCanTalkTest (test_vcan)
 //
 // socketcan://'s requesting worker (ADR-0040): a session whose profile
 // requests sends each request as ISO-TP (isotp.h) through the transport's
 // CAN_RAW socket, answers each First Frame with Flow Control and
 // dispatches whole messages; the rate's proof decides when its rotation
-// starts. The transport itself is socketcan_transport.cpp's.
+// starts. A request longer than a frame (a talk, ADR-0066 section 2.4)
+// goes out by socketcan_send.h's rules. The transport itself is
+// socketcan_transport.cpp's.
 
 #include "socketcan_transport.h"
 
@@ -14,6 +17,7 @@
 
 #include "link_health.h"
 #include "request_setup.h"
+#include "socketcan_send.h"
 
 #include <errno.h>
 #include <linux/can.h>
@@ -171,6 +175,218 @@ void leave_sessions(ecuio_socketcan_transport* t)
     }
 }
 
+/* Writes f for request r of channel c: it awaits its echo, and the
+ * engine's wait runs from it, so from a long request's last frame */
+bool send_frame(ecuio_socketcan_transport* t, sent_request& pending, uint32_t c,
+                int32_t r, const isotp_can& f, int64_t now)
+{
+    if (!write_frame(t->fd, f, t->ext29[c])) {
+        return false;
+    }
+    ecuio_engine_sent(&t->engine, c, r, true, now);
+    pending.active = true;
+    pending.c = c;
+    pending.r = r;
+    pending.at_us = now;
+    pending.f = f;
+    return true;
+}
+
+/* A request that didn't get out: taken back (a talk settles unsent), a
+ * failed write for link health, the sender free for the next */
+void send_failed(ecuio_socketcan_transport* t, link_health& h,
+                 socketcan_send& send, uint32_t c, int32_t r, int64_t now)
+{
+    socketcan_send_end(send, *t->sender);
+    ecuio_engine_sent(&t->engine, c, r, false, now);
+    link_on_write(h, false);
+}
+
+/* The next request due on any channel, from next_chan on: its one frame,
+ * or the First Frame of one longer than a frame (socketcan_send.h) */
+void send_due(ecuio_socketcan_transport* t, link_health& h,
+              sent_request& pending, socketcan_send& send, uint32_t& next_chan,
+              int64_t now)
+{
+    ecuio_request_engine& e = t->engine;
+    uint32_t c = 0;
+    int32_t r = ECUIO_ENGINE_NONE;
+    for (uint32_t k = 0; k < e.chan_count && r == ECUIO_ENGINE_NONE; ++k) {
+        c = (next_chan + k) % e.chan_count;
+        r = ecuio_engine_due(&e, c, now);
+    }
+    if (r == ECUIO_ENGINE_NONE) {
+        return;
+    }
+    next_chan = (c + 1) % e.chan_count;
+    const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
+    uint32_t len = 0;
+    const uint8_t* pdu = ecuio_engine_pdu_of(
+        e.chans[c].talk, r == ECUIO_ENGINE_ONCE, q.bytes, q.len, &len);
+    isotp_can f;
+    if (socketcan_send_start(send, *t->sender, c, r, t->tx_ids[c], pdu, len,
+                             now, &f) == socketcan_send_step::failed ||
+        !send_frame(t, pending, c, r, f, now)) {
+        send_failed(t, h, send, c, r, now);
+    }
+}
+
+/* A request longer than a frame under way: its next Consecutive Frame
+ * once the frame before is echoed and the ECU's Flow Control allows it;
+ * N_Bs passing or a refused write ends it unsent. Until its last frame
+ * its wait hasn't begun, so a deadline that passes meanwhile moves on.
+ * A reply that settles the request first ends the send with it. */
+void send_on(ecuio_socketcan_transport* t, link_health& h,
+             sent_request& pending, socketcan_send& send, int64_t now)
+{
+    /* Settled mid-send (a refusal after the First Frame, a late one that
+     * names its service): a frame more would arm a one-shot nothing owns */
+    if (send.active && t->engine.chans[send.c].outstanding != send.r) {
+        socketcan_send_end(send, *t->sender);
+        return;
+    }
+    isotp_can f;
+    const socketcan_send_step step =
+        socketcan_send_next(send, *t->sender, pending.active, now, &f);
+    if (step == socketcan_send_step::failed ||
+        (step != socketcan_send_step::none &&
+         !send_frame(t, pending, send.c, send.r, f, now))) {
+        send_failed(t, h, send, send.c, send.r, now);
+    } else if (send.active && now >= t->engine.chans[send.c].deadline_us) {
+        ecuio_engine_sent(&t->engine, send.c, send.r, true, now);
+    }
+}
+
+/* A frame from channel c's ECU while a long request is under way: true
+ * when it is that send's Flow Control, which also shows an ECU answering
+ * at this rate. One that ends the send takes the request back unsent. */
+bool send_flow(ecuio_socketcan_transport* t, link_health& h,
+               socketcan_send& send, uint32_t c, const isotp_can& f,
+               int64_t now)
+{
+    socketcan_send_step step = socketcan_send_step::none;
+    if (send.c != c || !socketcan_send_flow(send, *t->sender, f, now, &step)) {
+        return false;
+    }
+    (void)socketcan_proof_settle(t->proof, now, true);
+    if (step == socketcan_send_step::failed) {
+        send_failed(t, h, send, c, send.r, now);
+    }
+    return true;
+}
+
+/* A requesting worker's sends in one place: the request awaiting its
+ * echo, a request longer than a frame under way, and what each part of
+ * a pass does with them */
+struct request_sends {
+    request_sends(ecuio_socketcan_transport* transport, link_health& health)
+        : t(transport), e(transport->engine), h(health)
+    {}
+
+    ecuio_socketcan_transport* t;
+    ecuio_request_engine& e;
+    link_health& h;
+    uint32_t next_chan = 0;
+    sent_request pending;
+    socketcan_send send; /* a request longer than a frame, under way */
+
+    /* What became of the request awaiting its echo */
+    void settle(socketcan_sent what)
+    {
+        const socketcan_proof_step step =
+            socketcan_proof_on(t->proof, what, now_us(t));
+        if (what == socketcan_sent::echoed) {
+            link_on_write(h, true);
+        } else if (pending.active) {
+            /* it never reached the bus: not sent */
+            socketcan_send_end(send, *t->sender);
+            ecuio_engine_sent(&e, pending.c, pending.r, false, now_us(t));
+            if (step == socketcan_proof_step::carry_on) {
+                link_on_write(h, false);
+            }
+        }
+        if (step == socketcan_proof_step::halt) {
+            link_on_read(h, true, false, false); /* one episode; no more sent */
+            if (send.active) {
+                send_failed(t, h, send, send.c, send.r, now_us(t));
+            }
+        }
+        pending.active = false;
+    }
+
+    /* The socket is new: nothing awaits an echo, and a send under way
+     * ended unsent */
+    void reopened()
+    {
+        pending.active = false;
+        if (send.active) {
+            send_failed(t, h, send, send.c, send.r, now_us(t));
+        }
+    }
+
+    /* The waits that ran out: each channel's but the one a send still
+     * going out keeps, then a request whose echo is late */
+    void expire(int64_t now)
+    {
+        for (uint32_t c = 0; c < e.chan_count; ++c) {
+            if (send.active && send.c == c) {
+                continue; /* still going out: send_on keeps its wait */
+            }
+            if (ecuio_engine_expire(&e, c, now)) {
+                ecuio_request_timed_out(e, h);
+            }
+        }
+        if (pending.active && now - pending.at_us > ECUIO_ISOTP_N_AS_US) {
+            settle(socketcan_sent::unechoed);
+        }
+        (void)socketcan_proof_settle(t->proof, now, false);
+    }
+
+    /* The next request due, one awaiting its echo at a time, and a send
+     * under way's next frame */
+    void send_next(int64_t now)
+    {
+        if (!t->proof.halted && !t->proof.confirming) {
+            if (!pending.active && !send.active) {
+                send_due(t, h, pending, send, next_chan, now);
+            }
+            send_on(t, h, pending, send, now);
+        }
+    }
+
+    /* How long the poll waits, in ms; *asks is whether the engine has
+     * anything to wait for */
+    int poll_wait_ms(int64_t now, bool* asks) const
+    {
+        /* Until the next event: the echo's N_As, the engine's next wait or
+         * floor, ISO-TP's N_Cr; at most one quiet window. A halted session
+         * sends nothing more, so what the engine calls due isn't one: it
+         * waits the window out, still asking, so no quiet read counts */
+        const int64_t in_us = ecuio_engine_next_event_us(&e, now);
+        const bool asking = in_us != INT64_MAX;
+        int64_t next_us = asking && !t->proof.halted ? now + in_us : INT64_MAX;
+        if (pending.active) {
+            next_us =
+                std::min(next_us, pending.at_us + ECUIO_ISOTP_N_AS_US + 1);
+        } else if (!t->proof.halted) {
+            next_us =
+                std::min(next_us, socketcan_send_due_us(send, *t->sender));
+        }
+        if (t->proof.confirming) {
+            next_us =
+                std::min(next_us, t->proof.echoed_us + t->proof.quiet_us + 1);
+        }
+        int wait_ms = kWaitMs;
+        if (next_us != INT64_MAX) {
+            const int64_t ms = (next_us - now + 999) / 1000;
+            wait_ms = static_cast<int>(
+                std::max<int64_t>(0, std::min<int64_t>(ms, kWaitMs)));
+        }
+        *asks = asking;
+        return wait_ms;
+    }
+};
+
 } // namespace
 
 namespace ecuio_socketcan {
@@ -189,7 +405,8 @@ namespace ecuio_socketcan {
  * failure; the rate's proof (socketcan_proof_on, socketcan_proof_settle)
  * decides when the rotation starts and when sending stops for the
  * session: after the first echo, nothing more is sent until a reply
- * comes or N_As passes with no error frame. */
+ * comes or N_As passes with no error frame. While a request longer than
+ * a frame is going out (send), no other request is sent on any channel. */
 void request_worker(ecuio_socketcan_transport* t)
 {
     ecuio_session_t* s = t->session;
@@ -207,9 +424,8 @@ void request_worker(ecuio_socketcan_transport* t)
     uint32_t diag_seen = 0;
     uint32_t clear_seen[ECUIO_MAX_CHANNELS] = {};
     ecuio_focus_seen focus_seen; /* what ecuio_take_focus took */
-    uint32_t next_chan = 0;
     int64_t timing_at = 0;
-    sent_request pending;
+    request_sends sends(t, h);
     alignas(struct canfd_frame) uint8_t raw[CANFD_MTU];
     alignas(struct cmsghdr)
         uint8_t control[CMSG_SPACE(sizeof(struct timespec)) +
@@ -217,27 +433,10 @@ void request_worker(ecuio_socketcan_transport* t)
     if (t->probe) {
         ecuio_engine_probe(&e, now_us(t));
     }
-    /* A focus set before start applies from the first request */
+    /* A focus set before start applies from the first request, and the
+     * seam's talk handed over before start is that request */
     ecuio_take_focus(s, &e, focus_seen);
-
-    /* What became of the request awaiting its echo */
-    const auto settle = [&](socketcan_sent what) {
-        const socketcan_proof_step step =
-            socketcan_proof_on(t->proof, what, now_us(t));
-        if (what == socketcan_sent::echoed) {
-            link_on_write(h, true);
-        } else if (pending.active) {
-            /* it never reached the bus: not sent */
-            ecuio_engine_sent(&e, pending.c, pending.r, false, now_us(t));
-            if (step == socketcan_proof_step::carry_on) {
-                link_on_write(h, false);
-            }
-        }
-        if (step == socketcan_proof_step::halt) {
-            link_on_read(h, true, false, false); /* one episode; no more sent */
-        }
-        pending.active = false;
-    };
+    ecuio_take_test_talk(s, &e);
 
     while (!t->stop.load()) {
         link_judge_waiting(h);
@@ -254,71 +453,15 @@ void request_worker(ecuio_socketcan_transport* t)
             }
             drops = 0;
             (void)isotp_end_all(iso);
-            pending.active = false;
+            sends.reopened();
         }
 
         int64_t now = now_us(t);
-        for (uint32_t c = 0; c < e.chan_count; ++c) {
-            if (ecuio_engine_expire(&e, c, now)) {
-                ecuio_request_timed_out(e, h);
-            }
-        }
-        if (pending.active && now - pending.at_us > ECUIO_ISOTP_N_AS_US) {
-            settle(socketcan_sent::unechoed);
-        }
-        (void)socketcan_proof_settle(t->proof, now, false);
+        sends.expire(now);
+        sends.send_next(now);
 
-        if (!pending.active && !t->proof.halted && !t->proof.confirming) {
-            uint32_t c = 0;
-            int32_t r = ECUIO_ENGINE_NONE;
-            for (uint32_t k = 0; k < e.chan_count && r == ECUIO_ENGINE_NONE;
-                 ++k) {
-                c = (next_chan + k) % e.chan_count;
-                r = ecuio_engine_due(&e, c, now);
-            }
-            if (r != ECUIO_ENGINE_NONE) {
-                next_chan = (c + 1) % e.chan_count;
-                const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
-                isotp_can f;
-                if (isotp_tx_start(*t->sender, t->tx_ids[c], q.bytes,
-                                   static_cast<uint16_t>(q.len), now, &f) &&
-                    t->sender->state == isotp_tx_state::idle &&
-                    write_frame(t->fd, f, t->ext29[c])) {
-                    ecuio_engine_sent(&e, c, r, true, now);
-                    pending.active = true;
-                    pending.c = c;
-                    pending.r = r;
-                    pending.at_us = now;
-                    pending.f = f;
-                } else {
-                    *t->sender = isotp_tx{};
-                    ecuio_engine_sent(&e, c, r, false, now);
-                    link_on_write(h, false);
-                }
-            }
-        }
-
-        /* Until the next event: the echo's N_As, the engine's next wait or
-         * floor, ISO-TP's N_Cr; at most one quiet window. A halted session
-         * sends nothing more, so what the engine calls due isn't one: it
-         * waits the window out, still asking, so no quiet read counts */
-        const int64_t in_us = ecuio_engine_next_event_us(&e, now);
-        const bool asking = in_us != INT64_MAX;
-        int64_t next_us = asking && !t->proof.halted ? now + in_us : INT64_MAX;
-        if (pending.active) {
-            next_us =
-                std::min(next_us, pending.at_us + ECUIO_ISOTP_N_AS_US + 1);
-        }
-        if (t->proof.confirming) {
-            next_us =
-                std::min(next_us, t->proof.echoed_us + t->proof.quiet_us + 1);
-        }
-        int wait_ms = kWaitMs;
-        if (next_us != INT64_MAX) {
-            const int64_t ms = (next_us - now + 999) / 1000;
-            wait_ms = static_cast<int>(
-                std::max<int64_t>(0, std::min<int64_t>(ms, kWaitMs)));
-        }
+        bool asking = false;
+        const int wait_ms = sends.poll_wait_ms(now, &asking);
         struct pollfd p[2] = {{t->fd, POLLIN, 0}, {t->wake_fd, POLLIN, 0}};
         const int ready = poll(p, 2, wait_ms);
         if (ready < 0) {
@@ -334,7 +477,7 @@ void request_worker(ecuio_socketcan_transport* t)
             break;
         }
         if (ready == 0) {
-            if (!asking && !pending.active) {
+            if (!asking && !sends.pending.active) {
                 if (ecuio_engine_unpicked(&e)) {
                     if (!t->proof.halted) { /* a halt's failure stays */
                         ecuio_unpicked_pass(&e, h, unpicked_check, now_us(t));
@@ -417,7 +560,7 @@ void request_worker(ecuio_socketcan_transport* t)
                 t->frame->timestamp_us = stamp;
                 ecuio_session_dispatch_callbacks(s, t->frame.get());
                 if (!t->proof.proven) {
-                    settle(socketcan_sent::error);
+                    sends.settle(socketcan_sent::error);
                 } else if (socketcan_error_is_hard(can_id)) {
                     link_on_read(h, true, false, false); /* bus-off */
                 }
@@ -432,10 +575,10 @@ void request_worker(ecuio_socketcan_transport* t)
             f.len = len;
             std::memcpy(f.data, raw + 8, len);
             if (own) {
-                if (pending.active && f.id == pending.f.id &&
-                    f.len == pending.f.len &&
-                    std::memcmp(f.data, pending.f.data, f.len) == 0) {
-                    settle(socketcan_sent::echoed);
+                if (sends.pending.active && f.id == sends.pending.f.id &&
+                    f.len == sends.pending.f.len &&
+                    std::memcmp(f.data, sends.pending.f.data, f.len) == 0) {
+                    sends.settle(socketcan_sent::echoed);
                 }
                 continue; /* a Flow Control frame's echo, or a late one */
             }
@@ -443,6 +586,9 @@ void request_worker(ecuio_socketcan_transport* t)
                 if (t->rx_ids[c] != f.id ||
                     ((can_id & CAN_EFF_FLAG) != 0) != t->ext29[c]) {
                     continue;
+                }
+                if (send_flow(t, h, sends.send, c, f, now)) {
+                    break;
                 }
                 isotp_message m;
                 const isotp_result res = isotp_take(iso, f, newest, &m);
@@ -495,6 +641,7 @@ void request_worker(ecuio_socketcan_transport* t)
         }
         ecuio_take_diag_request(s, &e, diag_seen);
         ecuio_take_clear_requests(s, &e, clear_seen);
+        ecuio_take_test_talk(s, &e);
         ecuio_take_focus(s, &e, focus_seen);
         for (uint32_t c = 0; c < t->chan_count; ++c) {
             ecuio_publish_support(s, e, c, t->rx_ids[c], published[c]);
