@@ -570,6 +570,32 @@ int run_stream(const StreamArgs& args)
     return code;
 }
 
+namespace {
+
+// The checks across stream's options: -1 to go on, else the exit code
+int check_stream_args(const StreamArgs& args)
+{
+    if (!args.uri) {
+        std::fprintf(stderr, "havne-cli: stream needs a URI\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (args.label && !args.record) {
+        std::fprintf(stderr, "havne-cli: --label names a --record's folder\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    if (args.signals != nullptr && args.plugin != nullptr) {
+        std::fprintf(stderr, "havne-cli: --signals and --plugin each give "
+                             "the profile: one at a time\n");
+        usage(stderr);
+        return kExitUsage;
+    }
+    return -1;
+}
+
+} // namespace
+
 // stream's arguments and its profile, then run_stream
 int cmd_stream(int argc, char** argv)
 {
@@ -625,21 +651,9 @@ int cmd_stream(int argc, char** argv)
             args.uri = argv[i];
         }
     }
-    if (!args.uri) {
-        std::fprintf(stderr, "havne-cli: stream needs a URI\n");
-        usage(stderr);
-        return kExitUsage;
-    }
-    if (args.label && !args.record) {
-        std::fprintf(stderr, "havne-cli: --label names a --record's folder\n");
-        usage(stderr);
-        return kExitUsage;
-    }
-    if (args.signals != nullptr && args.plugin != nullptr) {
-        std::fprintf(stderr, "havne-cli: --signals and --plugin each give "
-                             "the profile: one at a time\n");
-        usage(stderr);
-        return kExitUsage;
+    const int checked = check_stream_args(args);
+    if (checked >= 0) {
+        return checked;
     }
     std::string opened;
     const int rc =
