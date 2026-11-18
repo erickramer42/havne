@@ -19,7 +19,8 @@ import os
 import re
 import sys
 
-LOADERS = ("core/src/signal_file.cpp", "core/src/plugin_manifest.cpp", "core/src/plugin.cpp",
+LOADERS = ("core/src/signal_file.cpp", "core/src/plugin_manifest.cpp",
+           "core/src/plugin_conversation.cpp", "core/src/plugin.cpp",
            "core/src/condition_file.cpp")
 SCHEMAS = ("signal-file", "plugin-manifest", "plugin-fixtures", "condition-file")
 
@@ -45,6 +46,13 @@ CALLS = {
     ("plugin_manifest.cpp", '"a variant"', 1): ("plugin-manifest", "/$defs/variant"),
     ("plugin_manifest.cpp", '"a match"', 1): ("plugin-manifest", "/$defs/match"),
     ("plugin_manifest.cpp", '"a data file"', 1): ("plugin-manifest", "/$defs/dataFile"),
+    ("plugin_conversation.cpp", '"\\"conversation\\""', 1):
+        ("plugin-manifest", "/$defs/conversation"),
+    ("plugin_conversation.cpp", '"the conversation\'s code"', 1): ("plugin-manifest", "/$defs/code"),
+    ("plugin_conversation.cpp", '"a service"', 1): ("plugin-manifest", "/$defs/service"),
+    ("plugin_conversation.cpp", '"a security level"', 1):
+        ("plugin-manifest", "/$defs/securityLevel"),
+    ("plugin_conversation.cpp", '"a binary file"', 1): ("plugin-manifest", "/$defs/binaryFile"),
     ("plugin.cpp", '"a fixture file"', 1): ("plugin-fixtures", ""),
     ("plugin.cpp", '"a value fixture"', 1): ("plugin-fixtures", "/$defs/value"),
     ("condition_file.cpp", '"the file"', 1): ("condition-file", ""),
@@ -71,7 +79,9 @@ WORDS = [
     ("core/src/signal_file.cpp", r'extends->text != "([a-z0-9]+)"',
      ("signal-file", "/$defs/extends/enum")),
     ("core/src/plugin_manifest.cpp", r't\.text != "([a-z]+)"',
-     ("plugin-manifest", "/properties/tiers/items/const")),
+     ("plugin-manifest", "/properties/tiers/items/enum")),
+    ("core/src/plugin_conversation.cpp", r'kind\.text != "([a-z]+)"',
+     ("plugin-manifest", "/$defs/binaryFile/properties/kind/const")),
 ]
 
 # (source, a pattern whose group 1 is a list's whole body, its words the
