@@ -128,7 +128,7 @@ ColumnLayout {
                 cursorShape: Qt.PointingHandCursor
                 enabled: root.host.ownPart.idle
                 onClicked: {
-                    root.host.fillUri(row.modelData.base)
+                    root.host.uriPart.fillUri(row.modelData.base)
                     root.host.showUriField()
                 }
             }
@@ -277,7 +277,7 @@ ColumnLayout {
                          && (modelData.name !== "j2534" || root.j2534Offered)
                 enabled: root.host.ownPart.idle
                 onClicked: {
-                    root.host.fillUri(modelData.uri)
+                    root.host.uriPart.fillUri(modelData.uri)
                     root.host.showUriField()
                 }
                 // The name, and the address smaller under it. The width is

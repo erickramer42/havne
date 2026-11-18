@@ -2201,7 +2201,7 @@ TestCase {
         const dash = find(main.contentItem, "dashboardPage")
         const settings = find(main.contentItem, "settingsPage")
         settings.uriField.text = ""
-        settings.chooseProfile("obd2")
+        settings.uriPart.chooseProfile("obd2")
         dash.startEditing()
         dash.pickKind("ring")
         verify(dash.profileRows.some(r => r.ref === Bridge.gaugeSignals["speed"][1]),
@@ -2736,7 +2736,7 @@ TestCase {
         verify(find(settings, "profile_default").selected)
         find(settings, "profile_raw").clicked()
         verify(find(settings, "profile_raw").selected && !find(settings, "profile_default").selected)
-        compare(settings.profileChoice, "raw")
+        compare(settings.uriPart.profileChoice, "raw")
     }
 
     // On the tab-bar form the Diagnostics page's title is its tab's word,
@@ -2853,7 +2853,7 @@ TestCase {
         main.width = 1280
         main.height = 720
         const settings = find(main.contentItem, "settingsPage")
-        settings.recentUris = ["mock://demo"]
+        settings.connectFromPart.recentUris = ["mock://demo"]
         main.gotoPage(main.homePage)
         const header = find(main.contentItem, "disconnectButton")
         const list = find(main.contentItem, "homeConnectList")
@@ -3132,7 +3132,7 @@ TestCase {
         const dash = find(main.contentItem, "dashboardPage")
         const settings = find(main.contentItem, "settingsPage")
         dash.form = "phone"
-        settings.recentUris = uris
+        settings.connectFromPart.recentUris = uris
         tryVerify(() => findChild(dash, "dashConnectList") !== null, 2000, "the list loads")
         const list = findChild(dash, "dashConnectList")
         settings.j2534Devices = []
@@ -3189,7 +3189,7 @@ TestCase {
         const settings = find(main.contentItem, "settingsPage")
         const home = find(main.contentItem, "homePage")
         main.gotoPage(Array.from(home.parent.children).indexOf(home))
-        settings.recentUris = ["mock://demo"]
+        settings.connectFromPart.recentUris = ["mock://demo"]
         const list = find(home, "homeConnectList")
         tryCompare(list, "chosen", "mock://demo", 2000, "the recent address")
         find(list, "connectGo").clicked()
@@ -3491,7 +3491,7 @@ TestCase {
         mouseClick(find(list, "connectGo"))
         tryVerify(() => Bridge.connected, 5000, "the chosen address connects")
         compare(Bridge.currentUri, "mock://older")
-        compare(JSON.stringify(settings.recentUris), JSON.stringify(
+        compare(JSON.stringify(settings.connectFromPart.recentUris), JSON.stringify(
                     ["mock://newest", "elm327://bt:00:11:22:33:44:55", "mock://older"]),
                 "the mock is never kept: the list as it was")
         compare(find(settings, "uriField").text, "mock://older", "Settings shows it")
@@ -3584,7 +3584,7 @@ TestCase {
         settings.vehicles = vehicleWith("Weekend car", "elm327://COM9")
         tryVerify(() => rowIs(list, 0, "elm327://COM9"), 2000, "listed first when it isn't recent")
         tryCompare(list, "chosen", "elm327://COM9")
-        compare(JSON.stringify(settings.recentUris),
+        compare(JSON.stringify(settings.connectFromPart.recentUris),
                 JSON.stringify(["elm327://COM1", "elm327://COM2"]),
                 "listing it writes nothing to the recent addresses")
 
@@ -3618,7 +3618,7 @@ TestCase {
         const list = connectListOn(main, ["mock://first", "mock://second"])
         mouseClick(find(list, "connectRow_1"))
         tryVerify(() => rowIs(list, 1, "mock://second"), 2000, "the tap")
-        settings.recentUris = ["mock://third", "mock://first", "mock://second"]
+        settings.connectFromPart.recentUris = ["mock://third", "mock://first", "mock://second"]
         tryVerify(() => rowIs(list, 0, "mock://third"), 2000, "the newest again")
         compare(list.chosen, "mock://third")
     }
@@ -3756,7 +3756,7 @@ TestCase {
         mouseClick(find(list, "connectGo"))
         tryVerify(() => error.visible && error.text !== "", 5000, "the bridge's words")
         verify(!Bridge.connected)
-        compare(JSON.stringify(settings.recentUris), JSON.stringify([refused, "mock://demo"]),
+        compare(JSON.stringify(settings.connectFromPart.recentUris), JSON.stringify([refused, "mock://demo"]),
                 "a failed connect writes nothing")
         const second = find(list, "connectRow_1")
         mouseClick(second)

@@ -84,7 +84,7 @@ Item {
     // signal file's profile the vehicle doesn't pick is dropped, as the
     // field drops it, so no connect reads another vehicle's signals
     function listAddress(uri) {
-        const named = host.queryValue(host.splitUri(uri).pairs, "profile")
+        const named = host.uriPart.queryValue(host.uriPart.splitUri(uri).pairs, "profile")
         return typeof named === "string" && (named.startsWith("plugin.") || named.startsWith("user."))
                && host.picksPart.picksNow().indexOf(named) < 0 ? VehicleBook.withoutFileProfile(uri) : uri
     }
@@ -103,7 +103,7 @@ Item {
     // names its profile; "" otherwise
     function listProfileWord(uri) {
         const plain = listAddress(uri)
-        const named = host.queryValue(host.splitUri(plain).pairs, "profile")
+        const named = host.uriPart.queryValue(host.uriPart.splitUri(plain).pairs, "profile")
         if (typeof named === "string" && named.startsWith("plugin."))
             return host.picksPart.placeOf(named) !== null ? host.picksPart.profileName(named) : qsTr("a plugin not in the store")
         return listConnectUri(uri) !== plain ? qsTr("obd2 + %1").arg(host.picksPart.profileName(listStandIn.profile)) : ""

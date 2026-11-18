@@ -485,7 +485,7 @@ TestCase {
         compare(page.importPart.replaceTarget, null, "and the next Import is an import")
         // It picks nothing: a variant the vehicle doesn't pick stays so
         pressRow(page, "plugin.extras.base")
-        compare(page.profileChoice, "default")
+        compare(page.uriPart.profileChoice, "default")
         page.importPart.startReplace(rowData(page, "plugin.extras.base"))
         verify(page.importPart.importFile(Harness.writeScratchFile("third.json", signalFileText("Third", "D103"))))
         verify(!find(page, "importPanel").visible, "kept at once")
@@ -493,7 +493,7 @@ TestCase {
         verify(Bridge.pluginVariantText(page.picksPart.pluginList[0].sha256, "base").text.includes("D103"),
                "the row reads the new file")
         compare(page.picksPart.picks, ["plugin.extras.track"], "Replace picks nothing")
-        compare(page.profileChoice, "default", "and the field reads what it read")
+        compare(page.uriPart.profileChoice, "default", "and the field reads what it read")
         pressRow(page, "plugin.extras.base")
 
         // One variant of several is removed alone, its pick with it

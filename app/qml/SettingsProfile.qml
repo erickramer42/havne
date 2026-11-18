@@ -24,9 +24,9 @@ ColumnLayout {
     readonly property var segmentWords: ({ "default": qsTr("Default"), "raw": qsTr("Raw"),
                                            "uds-generic": qsTr("UDS DIDs") })
     readonly property var segmented: Theme.compact
-        ? root.host.profiles.filter(p => segmentNames.indexOf(p.name) >= 0) : []
+        ? root.host.uriPart.profiles.filter(p => segmentNames.indexOf(p.name) >= 0) : []
     readonly property var loose: Theme.compact
-        ? root.host.profiles.filter(p => segmentNames.indexOf(p.name) < 0) : root.host.profiles
+        ? root.host.uriPart.profiles.filter(p => segmentNames.indexOf(p.name) < 0) : root.host.uriPart.profiles
 
     Label {
         visible: root.segmented.length > 0
@@ -47,10 +47,10 @@ ColumnLayout {
                 labelSize: Theme.fontBody
                 text: root.segmentWords[modelData.name]
                 Accessible.name: modelData.label
-                selected: root.host.profileChoice === modelData.name
+                selected: root.host.uriPart.profileChoice === modelData.name
                 checked: selected
                 enabled: root.host.ownPart.idle
-                onClicked: root.host.chooseProfile(modelData.name)
+                onClicked: root.host.uriPart.chooseProfile(modelData.name)
             }
         }
     }
@@ -64,9 +64,9 @@ ColumnLayout {
                 objectName: "profile_" + modelData.name
                 text: modelData.label
                 checkable: true
-                checked: root.host.profileChoice === modelData.name
+                checked: root.host.uriPart.profileChoice === modelData.name
                 enabled: root.host.ownPart.idle
-                onClicked: root.host.chooseProfile(modelData.name)
+                onClicked: root.host.uriPart.chooseProfile(modelData.name)
             }
         }
     }
@@ -76,14 +76,14 @@ ColumnLayout {
         Layout.fillWidth: true
         wrapMode: Text.WordWrap
         color: Theme.textDim
-        text: root.host.profileHint()
+        text: root.host.uriPart.profileHint()
     }
 
     RowLayout {
         objectName: "didRow"
         Layout.fillWidth: true
         spacing: Theme.spacing
-        visible: root.host.profileChoice === "uds-generic"
+        visible: root.host.uriPart.profileChoice === "uds-generic"
         Label { text: qsTr("DIDs:"); color: Theme.textDim }
         ThemedTextField {
             id: didField
@@ -101,8 +101,8 @@ ColumnLayout {
             enabled: root.host.ownPart.idle
             color: Theme.text
             onTextChanged: {
-                if (!root.host.syncing && root.host.profileChoice === "uds-generic")
-                    root.host.recompose()
+                if (!root.host.uriPart.syncing && root.host.uriPart.profileChoice === "uds-generic")
+                    root.host.uriPart.recompose()
             }
             onAccepted: root.host.requestConnect(root.host.uriField.text)
         }
@@ -112,14 +112,14 @@ ColumnLayout {
         id: extBox
         objectName: "extSessionBox"
         Layout.fillWidth: true
-        visible: root.host.profileChoice === "uds-generic" && root.host.sessionOffered(root.host.uriBase())
+        visible: root.host.uriPart.profileChoice === "uds-generic" && root.host.uriPart.sessionOffered(root.host.uriPart.uriBase())
         text: qsTr("Extended session (10 03)")
-        checked: root.host.extSession
+        checked: root.host.uriPart.extSession
         enabled: root.host.ownPart.idle
         onToggled: {
-            root.host.extSession = checked
-            checked = Qt.binding(() => root.host.extSession)
-            root.host.recompose()
+            root.host.uriPart.extSession = checked
+            checked = Qt.binding(() => root.host.uriPart.extSession)
+            root.host.uriPart.recompose()
         }
         contentItem: Label {
             text: extBox.text
@@ -132,7 +132,7 @@ ColumnLayout {
     Label {
         objectName: "optionsNote"
         Layout.fillWidth: true
-        visible: root.host.profileChoice === "uds-generic"
+        visible: root.host.uriPart.profileChoice === "uds-generic"
         wrapMode: Text.WordWrap
         color: Theme.textDim
         text: qsTr("More options go after ?: see the address reference")

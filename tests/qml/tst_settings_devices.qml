@@ -171,7 +171,7 @@ TestCase {
 
         type(uri, "mock://demo?profile=uds-generic&did=1E1C:u16")
         compare(uri.text, "mock://demo?profile=uds-generic&did=1E1C:u16", "left as typed")
-        compare(page.profileChoice, "uds-generic")
+        compare(page.uriPart.profileChoice, "uds-generic")
         verify(find(page, "profile_uds-generic").checked)
         verify(!find(page, "profile_default").checked)
         verify(didRow.visible)
@@ -184,7 +184,7 @@ TestCase {
         compare(uri.text, "mock://demo?profile=uds-generic&did=1E1C:u16", "the DIDs are back")
 
         type(uri, "j2534://Vendor?profile=raw&filter=0x7E9")
-        compare(page.profileChoice, "raw")
+        compare(page.uriPart.profileChoice, "raw")
         verify(find(page, "profile_raw").checked)
         verify(!didRow.visible)
         compare(uri.text, "j2534://Vendor?profile=raw&filter=0x7E9", "left as typed")
@@ -193,12 +193,12 @@ TestCase {
 
         // A profile the row doesn't offer: no button lit, the hint says so
         type(uri, "j2534://Vendor?profile=obd2")
-        compare(page.profileChoice, "obd2")
+        compare(page.uriPart.profileChoice, "obd2")
         verify(!find(page, "profile_default").checked)
         verify(!find(page, "profile_raw").checked)
         verify(hint.text.indexOf("obd2") >= 0, "the hint names it: " + hint.text)
         type(uri, "j2534://Vendor")
-        compare(page.profileChoice, "default")
+        compare(page.uriPart.profileChoice, "default")
         verify(find(page, "profile_default").checked)
     }
 
@@ -244,7 +244,7 @@ TestCase {
         const uri = find(page, "uriField")
         type(uri, data.uri)
         compare(uri.text, data.uri, "left as typed")
-        compare(page.profileChoice, data.profile)
+        compare(page.uriPart.profileChoice, data.profile)
         // The same row clicked again changes nothing
         press(page, "profile_" + data.profile)
         compare(uri.text, data.uri, "the row's own click keeps it")
@@ -397,13 +397,13 @@ TestCase {
     // most five
     function test_recentUrisAreNewestFirstAndCapped() {
         const page = createPage()
-        sameList(page.withRecentUri([], "a"), ["a"], "the first")
-        sameList(page.withRecentUri(["a", "b"], "c"), ["c", "a", "b"], "newest first")
-        sameList(page.withRecentUri(["a", "b", "c"], "b"), ["b", "a", "c"], "a duplicate moves up")
-        sameList(page.withRecentUri(["a", "b"], "a"), ["a", "b"], "the top stays")
-        sameList(page.withRecentUri(["a", "b", "c", "d", "e"], "f"), ["f", "a", "b", "c", "d"],
+        sameList(page.connectFromPart.withRecentUri([], "a"), ["a"], "the first")
+        sameList(page.connectFromPart.withRecentUri(["a", "b"], "c"), ["c", "a", "b"], "newest first")
+        sameList(page.connectFromPart.withRecentUri(["a", "b", "c"], "b"), ["b", "a", "c"], "a duplicate moves up")
+        sameList(page.connectFromPart.withRecentUri(["a", "b"], "a"), ["a", "b"], "the top stays")
+        sameList(page.connectFromPart.withRecentUri(["a", "b", "c", "d", "e"], "f"), ["f", "a", "b", "c", "d"],
                  "the oldest goes past five")
-        sameList(page.withRecentUri(["a", "b", "c", "d", "e"], "e"), ["e", "a", "b", "c", "d"],
+        sameList(page.connectFromPart.withRecentUri(["a", "b", "c", "d", "e"], "e"), ["e", "a", "b", "c", "d"],
                  "a duplicate doesn't cost a row")
     }
 
@@ -411,13 +411,13 @@ TestCase {
     // and with none the last URI seeds it
     function test_recentUrisReadBackFromTheStoreOrTheLastUri() {
         const page = createPage()
-        sameList(page.parseRecentUris('["a","b"]', "z"), ["a", "b"], "the stored list")
-        sameList(page.parseRecentUris('[]', "z"), ["z"], "seeded from the last URI")
-        sameList(page.parseRecentUris('[]', ""), [], "nothing at all")
-        sameList(page.parseRecentUris('not json', "z"), ["z"], "damage reads as none")
-        sameList(page.parseRecentUris('{"a":1}', ""), [], "not a list")
-        sameList(page.parseRecentUris('["a",3,"",null]', ""), ["a"], "strings only")
-        sameList(page.parseRecentUris('["a","b","c","d","e","f"]', ""), ["a", "b", "c", "d", "e"],
+        sameList(page.connectFromPart.parseRecentUris('["a","b"]', "z"), ["a", "b"], "the stored list")
+        sameList(page.connectFromPart.parseRecentUris('[]', "z"), ["z"], "seeded from the last URI")
+        sameList(page.connectFromPart.parseRecentUris('[]', ""), [], "nothing at all")
+        sameList(page.connectFromPart.parseRecentUris('not json', "z"), ["z"], "damage reads as none")
+        sameList(page.connectFromPart.parseRecentUris('{"a":1}', ""), [], "not a list")
+        sameList(page.connectFromPart.parseRecentUris('["a",3,"",null]', ""), ["a"], "strings only")
+        sameList(page.connectFromPart.parseRecentUris('["a","b","c","d","e","f"]', ""), ["a", "b", "c", "d", "e"],
                  "at most five")
     }
 
@@ -425,7 +425,7 @@ TestCase {
         stored.setValue("uri", "elm327://COM1?profile=obd2")
         stored.sync()
         const page = createPage()
-        sameList(page.recentUris, ["elm327://COM1?profile=obd2"], "what session/uri holds")
+        sameList(page.connectFromPart.recentUris, ["elm327://COM1?profile=obd2"], "what session/uri holds")
     }
 
     // Only a connect that succeeded is written, the newest first, and the
@@ -434,21 +434,21 @@ TestCase {
         const emu = emulatorUri()
         const raw = emu + "?profile=raw"
         let page = createPage()
-        sameList(page.recentUris, [], "nothing yet")
+        sameList(page.connectFromPart.recentUris, [], "nothing yet")
         for (const uri of [emu, raw, emu])
             connectAndLeave(page, uri)
-        sameList(page.recentUris, [emu, raw], "newest first, once")
+        sameList(page.connectFromPart.recentUris, [emu, raw], "newest first, once")
 
         find(page, "uriField").text = emu + "?profile=uds-generic"
         press(page, "connectButton")
         tryVerify(() => find(page, "errorLabel").visible, 5000, "core refuses it: no ?did=")
-        sameList(page.recentUris, [emu, raw], "a refusal writes nothing")
+        sameList(page.connectFromPart.recentUris, [emu, raw], "a refusal writes nothing")
 
         // The page's store writes when the page goes, as at a quit
         page.destroy()
         wait(10)
         page = createPage()
-        sameList(page.recentUris, [emu, raw], "kept between runs")
+        sameList(page.connectFromPart.recentUris, [emu, raw], "kept between runs")
     }
 
     // A replay or the mock is never kept (Recordings is a replay's way
@@ -461,9 +461,9 @@ TestCase {
         stored.sync()
         let page = createPage()
         compare(find(page, "uriField").text, "", "the stored replay isn't the field's")
-        sameList(page.recentUris, [kept], "nor in the list")
-        sameList(page.parseRecentUris("[]", "mock://demo"), [], "the mock seeds nothing")
-        verify(page.keptUri("socketcan://can0") && page.keptUri("j2534://Fake"), "an adapter is kept")
+        sameList(page.connectFromPart.recentUris, [kept], "nor in the list")
+        sameList(page.connectFromPart.parseRecentUris("[]", "mock://demo"), [], "the mock seeds nothing")
+        verify(page.connectFromPart.keptUri("socketcan://can0") && page.connectFromPart.keptUri("j2534://Fake"), "an adapter is kept")
 
         const field = find(page, "uriField")
         for (const uri of ["mock://demo", replay]) {
@@ -473,7 +473,7 @@ TestCase {
             Bridge.disconnectSession()
             tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         }
-        sameList(page.recentUris, [kept], "a connect to either writes nothing")
+        sameList(page.connectFromPart.recentUris, [kept], "a connect to either writes nothing")
 
         page.destroy()
         wait(10)
@@ -800,7 +800,7 @@ TestCase {
         page.uriField.text = ""
         compare(page.offlineUri, "", "nothing typed, nothing chosen")
 
-        page.chooseProfile("obd2")
+        page.uriPart.chooseProfile("obd2")
         compare(page.uriField.text, "", "no URI is made up in the field")
         compare(page.offlineUri, "mock://?profile=obd2")
         verify(Bridge.profileSignals(page.offlineUri).some(r => r.ref === Bridge.gaugeSignals["speed"][1]),
@@ -808,14 +808,14 @@ TestCase {
 
         page.uriField.text = "mock://demo"
         compare(page.offlineUri, "mock://demo", "a typed URI is read as it is")
-        page.chooseProfile("obd2")
+        page.uriPart.chooseProfile("obd2")
         compare(page.offlineUri, "mock://demo?profile=obd2", "with the choice it composes")
 
         page.uriField.text = ""
         press(page, "vehicleNew")
         page.open("signals")
         verify(importFile(page, "offline.json", "Offline"))
-        page.chooseProfile("plugin.offline.base")
+        page.uriPart.chooseProfile("plugin.offline.base")
         compare(page.offlineUri, "mock://?profile=plugin.offline.base")
         compare(Bridge.profileSignals(page.offlineUri).map(r => r.name), ["A"],
                 "the picked vehicle's own plugin, before any connect")
@@ -830,13 +830,13 @@ TestCase {
         press(page, "vehicleNew")
         page.open("signals")
         verify(importFile(page, "fallback.json", "Fallback"))
-        page.chooseProfile("default")
+        page.uriPart.chooseProfile("default")
         compare(page.offlineUri, "mock://?profile=plugin.fallback.base", "the vehicle's pick")
         compare(Bridge.profileSignals(page.offlineUri).map(r => r.name), ["A"])
 
         verify(importExample(page))
         pressRow(page, "plugin.example-sim.my2019")
-        page.chooseProfile("default")
+        page.uriPart.chooseProfile("default")
         compare(page.offlineUri, "mock://?profile=plugin.fallback.base", "the first pick, in the picks' order")
         compare(JSON.stringify(page.pickedSets),
                 JSON.stringify([{ profile: "plugin.fallback.base", name: "Fallback", variant: "base" },
@@ -865,7 +865,7 @@ TestCase {
         page.open("signals")
         verify(importFile(page, "standin.json", "Standin"))
         page.uriField.text = "elm327://COM3"
-        compare(page.profileChoice, "default")
+        compare(page.uriPart.profileChoice, "default")
         compare(page.offlineUri, "elm327://COM3", "a pick that doesn't read obd2 stands in for nothing")
 
         verify(importExample(page))
@@ -882,11 +882,11 @@ TestCase {
         page.uriField.text = "elm327://COM3?profile=raw"
         compare(page.offlineUri, "elm327://COM3?profile=raw", "a typed profile= wins")
         page.uriField.text = "elm327://COM3"
-        page.chooseProfile("uds-generic")
+        page.uriPart.chooseProfile("uds-generic")
         compare(page.offlineUri, page.uriField.text, "the Profile row's choice wins")
         verify(page.offlineUri.indexOf("profile=uds-generic") >= 0, page.offlineUri)
 
-        page.chooseProfile("default")
+        page.uriPart.chooseProfile("default")
         compare(page.uriField.text, "elm327://COM3")
         verify(page.rowActionsPart.removePlugin(page.picksPart.pluginList.find(p => p.id === "example-sim").sha256))
         compare(page.picksPart.picks, ["plugin.standin.base"], "the pick goes with the plugin")

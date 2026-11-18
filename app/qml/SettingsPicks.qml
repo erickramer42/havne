@@ -41,7 +41,7 @@ Item {
     }
     // The picks as the bridge reads them: each one's plugin, whether the
     // store still has it and, on an adapter, the one standing in for Default
-    readonly property var pickRows: storeRev >= 0 ? Bridge.pickRow(picks, host.adapterUri) : []
+    readonly property var pickRows: storeRev >= 0 ? Bridge.pickRow(picks, host.uriPart.adapterUri) : []
     // What the last import, pick, save or removal said
     property string signalProblem: ""
     property string signalNote: ""
@@ -176,8 +176,8 @@ Item {
         signalNote = ""
         if (picks.indexOf(profile) >= 0) {
             host.saveVehicles(VehicleBook.setPicks(host.vehicles, Bridge.unpickVariant(picks, profile)))
-            if (host.profileChoice === profile)
-                host.chooseProfile("default")
+            if (host.uriPart.profileChoice === profile)
+                host.uriPart.chooseProfile("default")
             return
         }
         pickProfile(profile)
@@ -192,12 +192,12 @@ Item {
             signalProblem = r.words
             return ""
         }
-        const readsDefault = host.profileChoice === "default"
-            && host.queryValue(host.splitUri(host.uriField.text).pairs, "profile") === undefined
+        const readsDefault = host.uriPart.profileChoice === "default"
+            && host.uriPart.queryValue(host.uriPart.splitUri(host.uriField.text).pairs, "profile") === undefined
         host.saveVehicles(VehicleBook.setPicks(host.vehicles, r.picks))
         if (!readsDefault)
             return "picked"
-        host.chooseProfile(profile)
+        host.uriPart.chooseProfile(profile)
         return "read"
     }
 }

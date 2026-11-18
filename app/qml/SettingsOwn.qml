@@ -47,11 +47,11 @@ Item {
     function dropAnotherVehiclesProfile() {
         if (!idle)
             return
-        const p = host.profileChoice
+        const p = host.uriPart.profileChoice
         if (!p.startsWith("user.") && !p.startsWith("plugin."))
             return
         if (host.picksPart.picksNow().indexOf(p) < 0)
-            host.chooseProfile("default")
+            host.uriPart.chooseProfile("default")
     }
 
     function clearForm() {
@@ -258,7 +258,7 @@ Item {
         vinPickNote = ""
         host.saveVehicles(VehicleBook.pick(host.vehicles, id))
         if (host.pickedVehicle !== null && host.pickedVehicle.uri !== "")
-            host.uriField.text = host.listConnectUri(host.pickedVehicle.uri)
+            host.uriField.text = host.connectFromPart.listConnectUri(host.pickedVehicle.uri)
     }
 
     // A change of the list from the page's buttons: the field empties

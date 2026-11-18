@@ -200,67 +200,67 @@ TestCase {
                               { name: "can1", kind: "can", up: true, modes: ["listen-only"] },
                               { name: "can2", kind: "can", up: false, modes: ["one-shot"] }]
         press(page, "vehicleNew")
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "no pick, nothing composed")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "no pick, nothing composed")
         verify(importFile(page, "plain.json", "Plain"))
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "a pick that doesn't read obd2")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "a pick that doesn't read obd2")
         compare(page.connectProfileWords["elm327://COM5"], undefined)
         verify(importFile(page, "plus.json", "Plus", "D101", true))
         verify(importFile(page, "more.json", "More", "D102", true))
         const plus = "plugin.plus.base"
         compare(page.picksPart.picks, ["plugin.plain.base", plus, "plugin.more.base"])
 
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5?profile=" + plus,
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5?profile=" + plus,
                 "the first pick that reads obd2, not the last")
-        compare(page.listConnectUri("j2534://Vendor X"), "j2534://Vendor X?profile=" + plus)
-        compare(page.listConnectUri("elm327://192.168.0.10:35000?poll=0C"),
+        compare(page.connectFromPart.listConnectUri("j2534://Vendor X"), "j2534://Vendor X?profile=" + plus)
+        compare(page.connectFromPart.listConnectUri("elm327://192.168.0.10:35000?poll=0C"),
                 "elm327://192.168.0.10:35000?poll=0C&profile=" + plus,
                 "appended last, the other keys where they were")
-        compare(page.listConnectUri("elm327://COM5?profile=obd2"), "elm327://COM5?profile=obd2",
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=obd2"), "elm327://COM5?profile=obd2",
                 "an address that names a profile wins")
-        compare(page.listConnectUri("elm327://COM5?profile=raw&poll=0C"),
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=raw&poll=0C"),
                 "elm327://COM5?profile=raw&poll=0C")
-        compare(page.listConnectUri("mock://demo"), "mock://demo", "the demo's Default isn't obd2")
-        compare(page.listConnectUri("replay://C:/recordings/one"), "replay://C:/recordings/one")
+        compare(page.connectFromPart.listConnectUri("mock://demo"), "mock://demo", "the demo's Default isn't obd2")
+        compare(page.connectFromPart.listConnectUri("replay://C:/recordings/one"), "replay://C:/recordings/one")
 
-        compare(page.listConnectUri("socketcan://vcan0"), "socketcan://vcan0?profile=" + plus,
+        compare(page.connectFromPart.listConnectUri("socketcan://vcan0"), "socketcan://vcan0?profile=" + plus,
                 "a virtual bus sends")
-        compare(page.listConnectUri("socketcan://can0"), "socketcan://can0?profile=" + plus,
+        compare(page.connectFromPart.listConnectUri("socketcan://can0"), "socketcan://can0?profile=" + plus,
                 "a controller up in one-shot mode sends")
-        compare(page.listConnectUri("socketcan://can1"), "socketcan://can1", "a listener keeps listening")
-        compare(page.listConnectUri("socketcan://can2"), "socketcan://can2", "down")
-        compare(page.listConnectUri("socketcan://can9"), "socketcan://can9", "not listed")
+        compare(page.connectFromPart.listConnectUri("socketcan://can1"), "socketcan://can1", "a listener keeps listening")
+        compare(page.connectFromPart.listConnectUri("socketcan://can2"), "socketcan://can2", "down")
+        compare(page.connectFromPart.listConnectUri("socketcan://can9"), "socketcan://can9", "not listed")
 
         compare(page.connectProfileWords["elm327://COM5"], "obd2 + Plus")
         compare(page.connectProfileWords["socketcan://vcan0"], "obd2 + Plus")
         compare(page.connectProfileWords["socketcan://can1"], undefined,
                 "no word on a row that isn't composed")
-        compare(page.listProfileWord("elm327://COM5?profile=plugin.more.base"), "More",
+        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.more.base"), "More",
                 "a plugin's profile by its name")
-        compare(page.listConnectUri("elm327://COM5?profile=plugin.more.base"),
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=plugin.more.base"),
                 "elm327://COM5?profile=plugin.more.base", "a pick's profile, named, is read")
-        compare(page.listProfileWord("elm327://COM5?profile=raw"), "")
-        compare(page.listProfileWord("mock://demo"), "")
+        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=raw"), "")
+        compare(page.connectFromPart.listProfileWord("mock://demo"), "")
 
         // A pick the store lacks stands in for nothing: the next does
         page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base", "plugin.more.base"]))
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5?profile=plugin.more.base")
-        compare(page.listProfileWord("elm327://COM5?profile=plugin.gone.base"), "a plugin not in the store")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5?profile=plugin.more.base")
+        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.gone.base"), "a plugin not in the store")
         page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base"]))
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5")
 
         // A plugin's or a signal file's profile the vehicle doesn't pick is
         // dropped, as the field drops it; a built-in profile stays
         page.saveVehicles(VehicleBook.setPicks(page.vehicles, [plus]))
-        compare(page.listConnectUri("elm327://COM5?profile=plugin.more.base&poll=0C"),
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=plugin.more.base&poll=0C"),
                 "elm327://COM5?poll=0C&profile=" + plus, "the vehicle's own pick is read in its place")
-        compare(page.listProfileWord("elm327://COM5?profile=plugin.more.base"), "obd2 + Plus")
-        compare(page.listConnectUri("mock://demo?profile=plugin.more.base"), "mock://demo")
-        compare(page.listConnectUri("elm327://COM5?profile=user.old"), "elm327://COM5?profile=" + plus)
+        compare(page.connectFromPart.listProfileWord("elm327://COM5?profile=plugin.more.base"), "obd2 + Plus")
+        compare(page.connectFromPart.listConnectUri("mock://demo?profile=plugin.more.base"), "mock://demo")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=user.old"), "elm327://COM5?profile=" + plus)
         press(page, "vehicle_none")
-        compare(page.listConnectUri("elm327://COM5"), "elm327://COM5", "no vehicle, no pick")
-        compare(page.listConnectUri("elm327://COM5?profile=" + plus), "elm327://COM5",
+        compare(page.connectFromPart.listConnectUri("elm327://COM5"), "elm327://COM5", "no vehicle, no pick")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=" + plus), "elm327://COM5",
                 "nor a plugin's profile")
-        compare(page.listConnectUri("elm327://COM5?profile=raw"), "elm327://COM5?profile=raw")
+        compare(page.connectFromPart.listConnectUri("elm327://COM5?profile=raw"), "elm327://COM5?profile=raw")
         compare(page.connectProfileWords["elm327://COM5"], undefined)
     }
 
@@ -276,12 +276,12 @@ TestCase {
         const closed = "elm327://127.0.0.1:1"
         page.connectFromList(closed)
         compare(field.text, closed + "?profile=plugin.plus.base", "before the connect answers")
-        compare(page.profileChoice, "plugin.plus.base", "the row follows the field")
+        compare(page.uriPart.profileChoice, "plugin.plus.base", "the row follows the field")
         verify(find(page, "profile_plugin.plus.base").checked)
         tryVerify(() => !Bridge.connecting, 10000, "the connect ends")
         verify(!Bridge.connected, "nothing listens there")
         verify(find(page, "errorLabel").text !== "")
-        compare(page.recentUris, [], "a failed connect is no recent address")
+        compare(page.connectFromPart.recentUris, [], "a failed connect is no recent address")
         compare(page.pickedVehicle.uri, "")
 
         // The demo is left as it is
@@ -354,13 +354,13 @@ TestCase {
         page.connectFromList(uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, uri + "?profile=plugin.plus.base")
-        sameList(page.recentUris, [uri])
+        sameList(page.connectFromPart.recentUris, [uri])
         endSession()
         const raw = uri + "?profile=raw"
         find(page, "uriField").text = raw
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 10000, "connects")
-        sameList(page.recentUris, [raw, uri])
+        sameList(page.connectFromPart.recentUris, [raw, uri])
         endSession()
     }
 
@@ -378,20 +378,20 @@ TestCase {
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 10000, "connects")
         tryVerify(() => page.pickedVehicle.uri === composed, 10000, "kept as typed")
-        sameList(page.recentUris, [composed])
+        sameList(page.connectFromPart.recentUris, [composed])
         endSession()
-        compare(page.listConnectUri(composed), composed, "its vehicle picks the plugin")
+        compare(page.connectFromPart.listConnectUri(composed), composed, "its vehicle picks the plugin")
         compare(page.connectProfileWords[composed], "Plus")
 
         press(page, "vehicleNew")
-        compare(page.listConnectUri(composed), uri)
+        compare(page.connectFromPart.listConnectUri(composed), uri)
         compare(page.connectProfileWords[composed], undefined, "no word: it reads Default")
         page.connectFromList(composed)
         compare(field.text, uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, uri, "not the first vehicle's plugin")
         tryVerify(() => page.pickedVehicle.uri === uri, 10000, "nor is it remembered as this vehicle's")
-        sameList(page.recentUris, [uri, composed])
+        sameList(page.connectFromPart.recentUris, [uri, composed])
         compare(page.vehicles.list[0].uri, composed, "the first vehicle's stays")
         endSession()
     }
@@ -419,7 +419,7 @@ TestCase {
         compare(page.picksPart.picks, ["plugin.more.base"])
         sameList(page.connectUris, [uri])
         compare(page.connectProfileWords[uri], "obd2 + More")
-        compare(page.listConnectUri(plus), more, "a row that names the pick undone reads the pick of now")
+        compare(page.connectFromPart.listConnectUri(plus), more, "a row that names the pick undone reads the pick of now")
         page.connectFromList(uri)
         tryVerify(() => Bridge.connected, 10000, "connects")
         compare(Bridge.currentUri, more)
@@ -435,7 +435,7 @@ TestCase {
 
         verify(page.rowActionsPart.removePlugin(page.picksPart.pluginList.find(p => p.id === "more").sha256))
         compare(page.picksPart.picks, [])
-        compare(page.listConnectUri(uri), uri)
+        compare(page.connectFromPart.listConnectUri(uri), uri)
         compare(page.connectProfileWords[uri], undefined)
     }
 

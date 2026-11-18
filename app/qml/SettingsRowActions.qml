@@ -56,8 +56,8 @@ Item {
         if (!r.ok)
             return false
         host.saveVehicles(VehicleBook.dropProfiles(host.vehicles, [row.profile]))
-        if (host.profileChoice === row.profile)
-            host.chooseProfile("default")
+        if (host.uriPart.profileChoice === row.profile)
+            host.uriPart.chooseProfile("default")
         openRow = ""
         ++host.picksPart.storeRev
         return true
@@ -140,8 +140,8 @@ Item {
         host.picksPart.signalProblem = r.ok ? "" : r.words
         if (r.ok && profiles.length > 0) {
             host.saveVehicles(VehicleBook.dropProfiles(host.vehicles, profiles))
-            if (profiles.indexOf(host.profileChoice) >= 0)
-                host.chooseProfile("default")
+            if (profiles.indexOf(host.uriPart.profileChoice) >= 0)
+                host.uriPart.chooseProfile("default")
         }
         if (r.ok)
             openRow = ""

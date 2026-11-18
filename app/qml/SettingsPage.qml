@@ -153,7 +153,7 @@ Pane {
     function rememberVersions(uri, versions) {
         if (versions === "")
             return
-        const base = splitUri(uri).base
+        const base = uriCompose.splitUri(uri).base
         if (seenVersions[base] === versions)
             return
         const next = Object.assign({}, seenVersions)
@@ -369,11 +369,11 @@ Pane {
     }
 
     function profileLabel() {
-        for (const p of profiles) {
-            if (p.name === profileChoice)
+        for (const p of uriCompose.profiles) {
+            if (p.name === uriCompose.profileChoice)
                 return p.label
         }
-        return profileChoice
+        return uriCompose.profileChoice
     }
 
     // A replay plays a recording already, so the bridge doesn't record
@@ -400,7 +400,7 @@ Pane {
     // The row a device or recording list shows outlined: its URI is in
     // the field, whatever the query
     function isChosen(uri) {
-        return uri !== "" && splitUri(uriField.text).base === splitUri(uri).base
+        return uri !== "" && uriCompose.splitUri(uriField.text).base === uriCompose.splitUri(uri).base
     }
 
     // A row or preset fills the field: scrolls the page back to the field,
@@ -415,43 +415,24 @@ Pane {
             connectionPage.contentY = Math.max(0, top)
     }
 
-    SettingsUri { id: uriPart; host: page }
+    SettingsUri { id: uriCompose; host: page }
+
+    readonly property SettingsUri uriPart: uriCompose
 
     // SettingsUri's members others use
-    property alias profileChoice: uriPart.profileChoice
-    property alias extSession: uriPart.extSession
-    property alias profiles: uriPart.profiles
-    property alias adapterUri: uriPart.adapterUri
-    property alias standIn: uriPart.standIn
-    property alias pickedSets: uriPart.pickedSets
-    property alias profileNames: uriPart.profileNames
-    property alias offlineUri: uriPart.offlineUri
-    property alias syncing: uriPart.syncing
-    property alias composing: uriPart.composing
-    function profileHint() { return uriPart.profileHint() }
-    function splitUri(text) { return uriPart.splitUri(text) }
-    function queryValue(pairs, key) { return uriPart.queryValue(pairs, key) }
-    function uriBase() { return uriPart.uriBase() }
-    function sessionOffered(base) { return uriPart.sessionOffered(base) }
-    function fillUri(base) { return uriPart.fillUri(base) }
-    function chooseProfile(name) { return uriPart.chooseProfile(name) }
-    function recompose() { return uriPart.recompose() }
-    function readChoices() { return uriPart.readChoices() }
+    property alias pickedSets: uriCompose.pickedSets
+    property alias profileNames: uriCompose.profileNames
+    property alias offlineUri: uriCompose.offlineUri
 
     SettingsConnectFrom { id: connectFrom; host: page }
 
+    readonly property SettingsConnectFrom connectFromPart: connectFrom
+
     // SettingsConnectFrom's members others use
-    property alias connectKeeps: connectFrom.connectKeeps
     function requestConnect(uri, kept) { return connectFrom.requestConnect(uri, kept) }
-    property alias recentUris: connectFrom.recentUris
-    function keptUri(uri) { return connectFrom.keptUri(uri) }
-    function parseRecentUris(text, lastUri) { return connectFrom.parseRecentUris(text, lastUri) }
-    function withRecentUri(list, uri) { return connectFrom.withRecentUri(list, uri) }
     property alias vehicleUri: connectFrom.vehicleUri
     property alias connectUris: connectFrom.connectUris
     property alias connectAdapters: connectFrom.connectAdapters
-    function listConnectUri(uri) { return connectFrom.listConnectUri(uri) }
-    function listProfileWord(uri) { return connectFrom.listProfileWord(uri) }
     property alias connectProfileWords: connectFrom.connectProfileWords
     function connectFromList(uri) { return connectFrom.connectFromList(uri) }
 
@@ -486,15 +467,15 @@ Pane {
         refreshDevices()
         Bluetooth.refresh(false)   // asked for when Connection first opens
         // A replay or mock address an earlier version stored is dropped
-        if (!keptUri(sessionSettings.uri))
+        if (!connectFrom.keptUri(sessionSettings.uri))
             sessionSettings.uri = ""
         // Set like typed text, so the profile row and the DID field read
         // it back; as a list would connect it, like a picked vehicle's
         if (uriField.text === "")
-            uriField.text = listConnectUri(sessionSettings.uri)
-        recentUris = parseRecentUris(sessionSettings.recentUris, sessionSettings.uri)
-        if (JSON.stringify(recentUris) !== sessionSettings.recentUris)
-            sessionSettings.recentUris = JSON.stringify(recentUris)
+            uriField.text = connectFrom.listConnectUri(sessionSettings.uri)
+        connectFrom.recentUris = connectFrom.parseRecentUris(sessionSettings.recentUris, sessionSettings.uri)
+        if (JSON.stringify(connectFrom.recentUris) !== sessionSettings.recentUris)
+            sessionSettings.recentUris = JSON.stringify(connectFrom.recentUris)
         Bridge.recording = sessionSettings.recording
     }
 
@@ -506,15 +487,15 @@ Pane {
                 own.readResult = result
         }
         function onConnectResult(uri, error) {
-            const keeps = page.connectKeeps !== "" ? page.connectKeeps : uri
+            const keeps = connectFrom.connectKeeps !== "" ? connectFrom.connectKeeps : uri
             page.errorLabel.text = error
             page.errorLabel.visible = (error !== "")
             page.logExplains = (error !== "")
             if (error === "") {
-                if (page.keptUri(keeps)) {
+                if (connectFrom.keptUri(keeps)) {
                     sessionSettings.uri = keeps
-                    page.recentUris = page.withRecentUri(page.recentUris, keeps)
-                    sessionSettings.recentUris = JSON.stringify(page.recentUris)
+                    connectFrom.recentUris = connectFrom.withRecentUri(connectFrom.recentUris, keeps)
+                    sessionSettings.recentUris = JSON.stringify(connectFrom.recentUris)
                 }
                 page.rememberVersions(uri, Bridge.adapterVersions)
                 // The picked vehicle's connection and plotted signals,

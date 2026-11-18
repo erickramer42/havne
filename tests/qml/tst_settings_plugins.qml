@@ -521,7 +521,7 @@ TestCase {
         press(page, "vehicleNew")
         const field = find(page, "uriField")
         field.text = "elm327://COM9"
-        compare(page.profileChoice, "default")
+        compare(page.uriPart.profileChoice, "default")
         verify(importFile(page, "plus.json", "Plus", "D100", true))
         compare(find(page, "signalNote").text,
                 "Plus 1.0.0 added: picked for Vehicle 1, now reading obd2 + Plus")
@@ -530,7 +530,7 @@ TestCase {
         const plus = find(page, "profile_plugin.plus.base")
         compare(plus.text, "obd2 + Plus")
         verify(plus.checked)
-        compare(page.profiles.filter(p => p.name === "plugin.plus.base").length, 1,
+        compare(page.uriPart.profiles.filter(p => p.name === "plugin.plus.base").length, 1,
                 "one button for the pick: the stand-in")
         tryVerify(() => findChild(page, "profile_default") === null, 1000,
                   "the pick reads all of obd2: Default goes")
@@ -547,31 +547,31 @@ TestCase {
         compare(page.picksPart.picks, ["plugin.plus.base", "plugin.more.base"])
         compare(field.text, "elm327://COM9?profile=plugin.more.base")
         field.text = "elm327://COM9"
-        compare(page.standIn.profile, "plugin.plus.base", "the first pick, not the last")
-        compare(page.profiles.map(p => p.name),
+        compare(page.uriPart.standIn.profile, "plugin.plus.base", "the first pick, not the last")
+        compare(page.uriPart.profiles.map(p => p.name),
                 ["default", "plugin.plus.base", "raw", "uds-generic", "plugin.more.base"])
         compare(find(page, "profile_plugin.more.base").text, "obd2 + More")
 
         // The first unpicked, the next stands in
         pressRow(page, "plugin.plus.base")
-        compare(page.standIn.profile, "plugin.more.base")
+        compare(page.uriPart.standIn.profile, "plugin.more.base")
         pressRow(page, "plugin.more.base")
-        compare(page.standIn, null)
-        compare(page.profiles.map(p => p.name), ["default", "raw", "uds-generic"])
+        compare(page.uriPart.standIn, null)
+        compare(page.uriPart.profiles.map(p => p.name), ["default", "raw", "uds-generic"])
 
         // A profile the user chose stays when a pick is made
         press(page, "vehicleNew")
         field.text = "elm327://COM9?profile=raw"
         verify(importFile(page, "third.json", "Third", "D102", true))
         compare(field.text, "elm327://COM9?profile=raw")
-        compare(page.profileChoice, "raw")
+        compare(page.uriPart.profileChoice, "raw")
         compare(find(page, "signalNote").text, "Third 1.0.0 added: picked for Vehicle 2")
         compare(find(page, "profile_plugin.third.base").text, "obd2 + Third")
         tryVerify(() => findChild(page, "profile_default") === null, 1000)
 
         // On mock://, Default isn't obd2: the pick is a choice of its own
         field.text = "mock://demo"
-        compare(page.standIn, null)
+        compare(page.uriPart.standIn, null)
         compare(find(page, "profile_plugin.third.base").text, "Third")
         verify(find(page, "profile_default"))
     }
@@ -605,7 +605,7 @@ TestCase {
         verify(importFile(page, "plus.json", "Plus", "D101", true))
         page.saveVehicles(VehicleBook.setPicks(page.vehicles, ["plugin.gone.base", "plugin.plus.base"]))
         find(page, "uriField").text = "elm327://COM9"
-        compare(page.standIn.profile, "plugin.plus.base")
+        compare(page.uriPart.standIn.profile, "plugin.plus.base")
     }
 
     // The signal files the move into the plugin store left behind are

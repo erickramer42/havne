@@ -340,15 +340,15 @@ TestCase {
         const first = page.pickedVehicle.id
         verify(importFile(page, "extras.json", "Extras"))
         find(page, "uriField").text = "mock://demo"
-        page.chooseProfile("plugin.extras.base")
+        page.uriPart.chooseProfile("plugin.extras.base")
         compare(find(page, "uriField").text, "mock://demo?profile=plugin.extras.base")
         press(page, "vehicleNew")
         compare(find(page, "uriField").text, "mock://demo", "New: Default")
-        compare(page.profileChoice, "default")
+        compare(page.uriPart.profileChoice, "default")
 
         const second = page.pickedVehicle.id
         press(page, "vehicle_" + first)
-        page.chooseProfile("plugin.extras.base")
+        page.uriPart.chooseProfile("plugin.extras.base")
         press(page, "vehicleDuplicate")
         verify(page.pickedVehicle.id !== first && page.pickedVehicle.id !== second)
         compare(find(page, "uriField").text, "mock://demo?profile=plugin.extras.base",
@@ -356,7 +356,7 @@ TestCase {
         press(page, "vehicle_" + second)
         compare(find(page, "uriField").text, "mock://demo", "another's goes")
 
-        page.chooseProfile("raw")
+        page.uriPart.chooseProfile("raw")
         press(page, "vehicle_" + first)
         compare(find(page, "uriField").text, "mock://demo?profile=raw", "a built-in stays")
     }

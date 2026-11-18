@@ -577,7 +577,7 @@ TestCase {
         press(page, "vehicleNew")
         verify(importFile(page, "extras.json", "Extras"))
         find(page, "uriField").text = uri
-        page.chooseProfile("plugin.extras.base")
+        page.uriPart.chooseProfile("plugin.extras.base")
         compare(find(page, "uriField").text, uri + "?profile=plugin.extras.base")
         press(page, "connectButton")
         tryVerify(() => page.pickedVehicle.id === daily, 10000, "the VIN picks Daily driver")
@@ -586,7 +586,7 @@ TestCase {
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.connected && !Bridge.disconnecting, 5000)
         compare(find(page, "uriField").text, uri, "Default at the session's end")
-        compare(page.profileChoice, "default")
+        compare(page.uriPart.profileChoice, "default")
 
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 10000, "connects again")
@@ -611,7 +611,7 @@ TestCase {
         // Another car's VIN: the fake's is no vehicle's yet
         page.saveVehicles(VehicleBook.change(page.vehicles, v => v.vinKey = "another-cars-key"))
         find(page, "uriField").text = uri
-        page.chooseProfile("plugin.extras.base")
+        page.uriPart.chooseProfile("plugin.extras.base")
         press(page, "connectButton")
         tryVerify(() => page.pickedVehicle.id !== weekend, 30000, "the VIN adds a vehicle")
         // The connect result keeps the URI on its own turn, after the VIN

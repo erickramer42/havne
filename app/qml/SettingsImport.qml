@@ -37,7 +37,7 @@ Item {
         }
         const how = host.picksPart.pickProfile(profile)
         // The row's word where it says more than the name: obd2 + <name>
-        const shown = host.profiles.find(p => p.name === profile)
+        const shown = host.uriPart.profiles.find(p => p.name === profile)
         const label = shown !== undefined ? shown.label : ""
         host.picksPart.signalNote = how === "" ? note
                    : how === "read" && label !== "" && label !== host.picksPart.profileName(profile)
@@ -281,8 +281,8 @@ Item {
         const gone = (r.replacedProfiles !== undefined ? r.replacedProfiles : [])
             .filter(p => r.profiles.indexOf(p) < 0)
         if (gone.length > 0 && r.profiles.length === 1) {
-            if (gone.indexOf(host.profileChoice) >= 0)
-                host.chooseProfile(r.profiles[0])
+            if (gone.indexOf(host.uriPart.profileChoice) >= 0)
+                host.uriPart.chooseProfile(r.profiles[0])
             host.saveVehicles(VehicleBook.movePicks(host.vehicles, gone, r.profiles[0]))
         }
         ++host.picksPart.storeRev

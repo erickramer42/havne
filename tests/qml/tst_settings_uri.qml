@@ -631,12 +631,12 @@ TestCase {
         // requests (ADR-0040): uds-generic stays with its request keys; under
         // Default, raw there, which only listens, the request keys go
         uri.text = "j2534://?profile=uds-generic&did=1E1C:u16&identify=0&keepalive_ms=2000"
-        compare(page.profileChoice, "uds-generic")
+        compare(page.uriPart.profileChoice, "uds-generic")
         tap(find(list.itemAtIndex(0), "deviceRowArea"))
         compare(uri.text, "socketcan://vcan0?profile=uds-generic&did=1E1C:u16&identify=0&keepalive_ms=2000")
-        compare(page.profileChoice, "uds-generic")
+        compare(page.uriPart.profileChoice, "uds-generic")
         uri.text = "j2534://?identify=0&poll=0C&baud=500000"
-        compare(page.profileChoice, "default")
+        compare(page.uriPart.profileChoice, "default")
         tap(find(list.itemAtIndex(0), "deviceRowArea"))
         compare(uri.text, "socketcan://vcan0?baud=500000")
         press(page, "profile_raw")

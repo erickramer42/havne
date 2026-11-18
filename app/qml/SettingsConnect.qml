@@ -56,8 +56,8 @@ ColumnLayout {
             inputMethodHints: Qt.ImhNoAutoUppercase | Qt.ImhNoPredictiveText
             // Any text the page didn't compose is read back
             onTextChanged: {
-                if (!root.host.composing)
-                    root.host.readChoices()
+                if (!root.host.uriPart.composing)
+                    root.host.uriPart.readChoices()
             }
             onAccepted: root.host.requestConnect(text)
         }
