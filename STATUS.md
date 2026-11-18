@@ -17,7 +17,7 @@ This file is the present state: what works, how far it's verified, what's planne
 | Conditions and alerts | Condition files judged on the frames' own time; a banner, colored values and on Android a tone; armed recording that writes a window when a condition fires | [condition-files.md](docs/condition-files.md), [ADR-0063](docs/adr/0063-conditions.md) |
 | Recordings | Every frame and value, with the link's health and reply timing; a viewer with chart panes, cursors, statistics, pulls and cruises, and comparison; CSV, pcapng and folder exports, scrubbed for sharing; CSV and candump imports; a health report | [ADR-0049](docs/adr/0049-recordings-in-core.md), [ADR-0054](docs/adr/0054-exports-and-imports.md) |
 | `havne-cli` and Python | Every session, recording, export, condition and plugin command the app has, as JSON lines; Python's `havne` package over the same C ABI, as wheels for Windows, Linux and macOS | [ADR-0031](docs/adr/0031-command-line-client.md), [ADR-0053](docs/adr/0053-python-bindings.md) |
-| Platforms | Windows (zip), Linux (AppImage, `.deb` and tarball for x86_64 and 64-bit ARM), Android 12+ (APK); macOS builds in CI; iOS runs on the Simulator only | [linux.md](docs/linux.md), [docs/development.md](docs/development.md) |
+| Platforms | Windows (zip), Linux (AppImage, `.deb` and tarball for x86_64 and 64-bit ARM), Android 12+ (APK); macOS builds in CI; iOS runs on the Simulator and has launched on one iPhone (sideloaded) | [linux.md](docs/linux.md), [docs/development.md](docs/development.md) |
 
 **Verified:** 2711 tests on Windows and the cross-arch subset (111) at v0.8.0, CI on Windows, macOS and Linux with sanitizers and fuzzing ([testing.md](docs/testing.md)). On hardware: three adapters (the VX over J2534 and as an ELM327, the MX+ over Bluetooth, a USB2CAN on SocketCAN) and one car; the phone app on one phone. Not yet: 29-bit addressing, a real 64-bit J2534 driver, other vendors and cars ([bench-prep.md](docs/bench-sessions/bench-prep.md)).
 
@@ -46,7 +46,8 @@ an issue is resolved it is removed, and its number is not reused.
 - **#2. The iOS app is unvalidated, and no tests run on a phone.** CI
    cross-builds an unsigned iOS arm64 device build and, on request,
    launches the app on the Simulator and screenshots it
-   (`ios-simulator-smoke`); it has never run on a device. Each run's
+   (`ios-simulator-smoke`); it has launched on one device (a tester's
+   iPhone, sideloaded; no adapter, so no session was tried). Each run's
    `havne-ios-arm64-unsigned` artifact can be sideloaded with a
    tester's own Apple ID ([docs/ios.md](docs/ios.md)). The Android app has run on one phone (Android 16) and one
    car, with the MX+ over classic Bluetooth, in the background and with
