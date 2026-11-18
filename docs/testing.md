@@ -50,6 +50,7 @@ What isn't verified, and why it stays that way. Each line is the gap and the rea
 - The surrogate pipe's replies have no fuzz target, and its protections (DACL, first-instance flag, remote-client rejection) have no direct test.
 - The fake is simpler than J2534: its default read model, no segmented replies, no filter gating.
 - The scrub can't see a VIN sent raw in frames that aren't ISO-TP, and can refuse a folder copy whose marker label looks like a VIN.
+- No QML case pins a pick whose plugin copy doesn't load (listed, the unpick offered): the case went with a rewrite, and the bridge's test covers only the replace path.
 - The Python declarations' signedness isn't checked: the generated types are held to the headers' sizes and offsets only.
 - Warnings fail a build only where `HAVNE_WARNINGS_AS_ERRORS` is set (CI's GCC and Clang jobs): MSVC's never do, and a runner's newer compiler can fail a commit that passed.
 
