@@ -55,11 +55,10 @@ TestCase {
         Theme.night = "off"
         Theme.look = "dark"
         Bridge.unitSystem = 0
-        Bridge.useSignalFiles([])
-        for (const p of Bridge.plugins())     // the store starts empty
-            Bridge.removePlugin(p.sha256)
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        for (const p of Bridge.plugins())     // the store starts empty
+            Bridge.removePlugin(p.sha256)
     }
 
     function find(within, name) {
@@ -406,6 +405,13 @@ TestCase {
                 [11.8, 12.4, 14.8, 15.2], "no gauge: the table")
     }
 
+    // A signal file's text kept as a plugin of the user's own; profile: its one variant's
+    function keptFile(text) {
+        const r = Bridge.keepSignalText(text, "", "", "")
+        return { ok: r.ok, words: r.words, sha256: r.sha256,
+                 profile: r.ok ? r.profiles[0] : "" }
+    }
+
     // End to end: a signal file's gauge, loaded as a profile, reaches the cell
     // picked on its row, and the levels it leaves out stay unset
     function test_aSignalFilesLevelsReachTheNewCell() {
@@ -417,10 +423,8 @@ TestCase {
                                  { key: "b", name: "B", read: { service: "22", number: "D101" },
                                    field: { byte: 0, bits: 8 }, unit: "V",
                                    gauge: { min: 0, max: 50 } }] }
-        const url = Harness.writeScratchFile("gauged.json", JSON.stringify(file))
-        const r = Bridge.importSignalFile(url)
+        const r = keptFile(JSON.stringify(file))
         verify(r.ok, "the file imports")
-        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
         compare(Bridge.connectSession("mock://demo?profile=" + r.profile), "", "the file's profile connects")
         const page = pageOf({}, docOf([cellOf("A", "analog")]))
         page.startEditing()
@@ -619,9 +623,8 @@ TestCase {
         const file = { havne_signals: 1, name: "Three", source: { name: "t" },
                        ecus: [{ id: "pcm", rx: "7E8" }],
                        signals: [sig("a", "D100"), sig("b", "D101"), sig("c", "D102")] }
-        const r = Bridge.importSignalFile(Harness.writeScratchFile("three.json", JSON.stringify(file)))
+        const r = keptFile(JSON.stringify(file))
         verify(r.ok, "the file imports")
-        compare(Bridge.useSignalFiles([r.sha256]).length, 1)
         return r.profile
     }
     function test_addAllAddsTheSetsSignalsThePageLacksAsOneStep() {
