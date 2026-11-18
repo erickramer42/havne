@@ -12,6 +12,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <ecuio/plugin.h>
+
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "sessionbridge.h"
@@ -26,7 +28,8 @@ TEST(BridgeTest, PluginCopyThatNoLongerLoadsSaysSo)
     ASSERT_TRUE(dir.valid());
     QByteArray bytes = packed_plugin::example();
     ASSERT_TRUE(bytes.contains("\"havne_plugin\": 1,"));
-    bytes.replace("\"havne_plugin\": 1,", "\"havne_plugin\": 2,");
+    const QByteArray past = QByteArray::number(ECUIO_PLUGIN_FORMAT_MAX + 1);
+    bytes.replace("\"havne_plugin\": 1,", "\"havne_plugin\": " + past + ",");
     const QString sha = sha256Of(bytes);
     ASSERT_TRUE(QDir().mkpath(PluginStore::root()));
     QFile copy(PluginStore::root() + QLatin1Char('/') + sha +
@@ -44,7 +47,8 @@ TEST(BridgeTest, PluginCopyThatNoLongerLoadsSaysSo)
     const QString words = e.value(QStringLiteral("words")).toString();
     EXPECT_TRUE(words.startsWith(QStringLiteral("It no longer loads: ")))
         << words.toStdString();
-    EXPECT_TRUE(words.contains(QStringLiteral("format 2")))
+    EXPECT_TRUE(words.contains(QStringLiteral("format ") +
+                               QString::number(ECUIO_PLUGIN_FORMAT_MAX + 1)))
         << words.toStdString();
     EXPECT_FALSE(registered("plugin.example-sim.base"));
     EXPECT_TRUE(bridge.removePlugin(sha).value(QStringLiteral("ok")).toBool());
