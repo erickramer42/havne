@@ -421,3 +421,11 @@ words moved into `core/src/socketcan_wire.h` (`socketcan_refusal`,
 `.StatesAndModesHaveIpLinksNames`, `.DiscoveryListsControllersAndVcanOnly`;
 `CliCanTest.ALineSaysWhatAConnectIsJudgedOn`; `QmlTest.settings`'
 `test_canRowsFillASocketcanUri`.
+
+## Appendix: 2026-11-17, a Flow Control proves the rate
+
+A request longer than a frame (ADR-0066 section 2.4) starts with a First
+Frame, and the ECU's Flow Control is the first thing it answers with.
+Section 3 counts that Flow Control, like a reply, as an ECU's answer that
+proves the rate, so the send goes on at the pace the ECU set.
+`SocketCanTalkTest.AFlowControlProvesTheRateSoTheSendGoesOn`.

@@ -26,6 +26,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 
 ### Changed
 
+- A signal file that replaces some of obd2's signals says so in Settings' Signals list, instead of "0 signals".
 - Reset in the Page row reads "Reset all pages": a single page can now be put back with "Replace this page with...".
 
 - **A set may declare 32 modules** (`ECUIO_MAX_CHANNELS`, 4 before), so a signal file, a plugin, an OBDb import and `uds-generic`'s `?did=` take up to 32 ECUs. Every declared module is still opened when the session connects. (ADR-0065)
