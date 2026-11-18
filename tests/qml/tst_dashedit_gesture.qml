@@ -771,7 +771,8 @@ TestCase {
         const found = panelFields(page)
         const shown = found.filter(f => f.shown).map(f => f.name).sort()
         compare(shown, fieldsOfKind[data.kind].slice().sort())
-        const listed = Object.values(fieldsOfKind).reduce((all, l) => all.concat(l), [])
+        // panelRangeGuess shows only after an Add on a signal with no gauge (tst_dashedit.qml)
+        const listed = Object.values(fieldsOfKind).reduce((all, l) => all.concat(l), ["panelRangeGuess"])
         for (const f of found)
             verify(listed.indexOf(f.name) >= 0, f.name + " is in the table for some kind")
     }

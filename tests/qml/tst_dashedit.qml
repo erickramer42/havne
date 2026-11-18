@@ -445,6 +445,38 @@ TestCase {
             verify(cell.options[name] === undefined, "starts with no " + name + ": a key outside the table")
     }
 
+    // A range the unit table or the field's extremes made says so on the
+    // panel; a file's gauge range or a common signal's own does not. Setting
+    // From or To ends the note, and the layout holds no trace of it
+    function test_aGuessedRangeIsSaidOnThePanelUntilTheUserSetsOne() {
+        const file = { havne_signals: 1, name: "Guess", source: { name: "t" },
+                       ecus: [{ id: "pcm", rx: "7E8" }],
+                       signals: [{ key: "a", name: "A", read: { service: "22", number: "D100" },
+                                   field: { byte: 0, bits: 8 }, unit: "V",
+                                   gauge: { min: 10, max: 16 } },
+                                 { key: "b", name: "B", read: { service: "22", number: "D101" },
+                                   field: { byte: 0, bits: 8 }, unit: "V" }] }
+        const r = keptFile(JSON.stringify(file))
+        verify(r.ok, "the file imports")
+        compare(Bridge.connectSession("mock://demo?profile=" + r.profile), "", "the file's profile connects")
+        const page = pageOf({}, docOf([cellOf("A", "analog")]))
+        page.startEditing()
+        click(page, "dashAdd")
+        click(page, "addKind_analog")
+        click(page, "pickSignal_key:a")
+        verify(!find(page, "panelRangeGuess").visible, "the file's own range is no guess")
+        click(page, "dashAdd")
+        click(page, "addKind_analog")
+        click(page, "pickSignal_key:b")
+        const note = find(page, "panelRangeGuess")
+        verify(note.visible, "a signal with no gauge says its range is a guess")
+        compare(note.text, "Range guessed: set From and To.")
+        const stored = JSON.stringify(page.doc)
+        verify(stored.indexOf("guess") < 0, "nothing of it in the document")
+        type(find(page, "panelTo"), "12")
+        verify(!note.visible, "setting To ends the note")
+    }
+
     function test_changeSignalReplacesTheZonesWithTheNewSignalsTable() {
         compare(Bridge.connectSession("mock://demo"), "", "mock://demo connects")
         const page = pageOf({}, docOf([cellOf("A", "analog")]))
