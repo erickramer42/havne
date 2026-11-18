@@ -50,9 +50,11 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - **C API:** `ecuio_signal_file_load_with(bytes, length, flags, &file)` with `ECUIO_SIGNAL_FILE_LOAD_SET` reads a set's written copy (a recording's `signals.json`) at a set's bounds. `ecuio_signal_file_load` is the same call with no flag and keeps a data file's bounds.
 - **C API:** `ecuio_session_timing_t` gains `untimed` in its reserved room (64 bytes kept): the requests asked that have no timing row, because all 1024 rows were taken before they were first picked. `ecuio_session_get_timing`'s rows are in the order the requests were first asked.
 - **C API, changed meanings (no value or layout changed):** `ECUIO_PROFILE_MAX_REQUESTS` is the most requests a session has in its rotation at one time, and the timing rows it keeps; it no longer bounds what a set defines. `ECUIO_VALIDATE_ERR_REQUEST_COUNT` names the first def whose request is past its own module's 1024. On a session with `ECUIO_SESSION_INFO_PICK_ONLY`, a focus of count 0 leaves nothing asked but an attached condition's signals, and `ecuio_session_get_unasked_signals` lists every other signal from create on.
+- **A vehicle's ticks on Live are kept by each signal's key** (ADR-0065 section 9), not its name. Ticks saved by an earlier version are read as they are and saved by key at the next tick. A tick on a signal the connected profile lacks is no longer dropped at the next tick: it stays with the vehicle and comes back under a profile that has the signal. A version before this one reads such a vehicle's ticks as none.
 
 ### Fixed
 
+- An expression refused at a character outside ASCII (such as "a + é") shows the character in the refusal's words, not '?'.
 - Running out of memory while a session is created or a recorder attached no longer leaves an adapter's port and wire log open, and is answered as an error instead of an exception across the C API.
 - A plugin made from a signal file names the oldest Havne that reads it, not the version that made it, so the same file makes the same plugin on every version and the store keeps one copy of it. (ADR-0064)
 
