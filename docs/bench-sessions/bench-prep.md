@@ -129,6 +129,12 @@ session, the recorders on a car, a second listener):
 |---|---|---|---|
 | 36 | **The extended session on a real ECU:** a module takes `10 03` and answers `50 03` with its P2 and P2* times; `3E 00` every 2 s keeps it in the session past S3; a DID that reads only in the extended session answers there; `10 01` at the close returns the module to the default session | CONFIRMED: the entry, P2 and P2*, reads in the session, tester present in quiet gaps with no loss; STILL UNKNOWN: the module's session read back, a DID that reads only in the extended session; REFUTED: the close (the ELM327's mid-read, the J2534's late reply) | [2026-11-11-ext-session-car](2026-11-11-ext-session-car.md): `50 03 00 32 01 F4` (P2 50 ms, P2* 5000 ms) through the VX and the MX+, engine idling and off; a DID refused on 2026-11-09 read in both sessions; no `3E 00`, since the DID poll never left `keepalive_ms` quiet; a 256-DID range answered the same 3 in both sessions; J2534 wrote `10 01` at the close, while the MX+ answered the typed `1001` with `STOPPED` (3 of 3), so it never went out. [2026-11-11-quiet-session-car](2026-11-11-quiet-session-car.md): a channel left with nothing to ask sent `3E 00` every `keepalive_ms` (2 s and 4.5 s) through both adapters, each answered `7E 00`, no `7F xx 7E`/`7F` in 60 s; F186 refused in the session; the MX+'s close with nothing in flight got `50 01`; a `50 01` 14 ms after the VX's `10 01` came after its teardown and, with no node acknowledging, repeated for about 13.5 s (Known Issue #44). [2026-11-11-width-scan-car](2026-11-11-width-scan-car.md): the second module (0x7E9) entered and held it too; six 1024-DID blocks, the densest on both modules, answered the same DIDs in both sessions, every refusal `0x31` |
 
+### A request longer than a frame ([ADR-0066](../adr/0066-conversation-tier-and-write-gates.md))
+
+| # | Assumption in the code | State | Evidence |
+|---|---|---|---|
+| 37 | **A talk's reply through the VX:** a request of 18 bytes (a security key) or 60 bytes goes out in one `PassThruWriteMsgs`, the adapter segments it, and the ECU's reply arrives within the 100 ms wait that starts when the write returns, so the wait covers the adapter's whole segmented send and the reply | STILL UNKNOWN | The fake DLL never segments, so `J2534TalkTest` shows the write's shape and one write only; SocketCAN's segmented send is pinned on `vcan0` (`SocketCanTalkTest`). Only the VX against an ECU shows the reply's time from the write's return |
+
 ## Still open
 
 - **#4, 29-bit addressing:** needs a 29-bit vehicle.
@@ -148,6 +154,8 @@ session, the recorders on a car, a second listener):
   two modules, so likely another car), and both closes once the car
   re-run reads one `50 01` with a listener on the bus (Known Issue
   #44).
+- **#37, a talk's reply through the VX:** an 18-byte key and a 60-byte
+  request against an ECU, with the reply's time from the write's return.
 - **#34, a busy bus through the surrogate:** a listening session on a
   bus with heavy broadcast traffic (a car's powertrain bus, or a desk
   bus fed by `cangen` through the USB2CAN), its frame count against

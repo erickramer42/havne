@@ -1634,3 +1634,23 @@ don't say:
     session before the request's length), and only the seed asked for last
     is out. The fakes' ECU answers from the same header, with a knob for
     the delay.
+
+27. **The talk as built** (`core/src/request_talk.h`, section 2.4). A talk
+    is one request of 1 to 60 bytes (what one J2534 write holds after its
+    CAN ID) with an echo length of 1 to 3, sent through the request
+    engine's one-shot, one at a time for each channel. The offer copies
+    the request into the talk's state, so the bytes the door judged are
+    the bytes a transport sends. The engine's door refuses anything
+    outside tier 2's ceiling whatever the caller checked. A talk ends
+    once: answered, refused (with the code), unanswered or unsent, where
+    unsent means not confirmed on the bus, whole or part. Core never
+    sends it again, since a key must not go out twice for one seed; a
+    session lost under it ends it refused. Offered first it goes ahead of
+    the keep-alive and every list, behind only a due session entry, so
+    nothing comes between a seed and its key; otherwise it takes turns
+    with the DID scan. SocketCAN segments it (First Frame, Flow Control,
+    Consecutive Frames at the ECU's pace, each after its echo, nothing
+    else sent meanwhile; N_Bs 75 ms); a J2534 adapter is handed it whole;
+    an ELM327 sends a single frame, so there a talk is 7 bytes at most and
+    a longer one is refused as too long before anything is typed. Until
+    the conversation tier exists the only caller is a test seam.
