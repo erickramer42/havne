@@ -8,9 +8,10 @@
 //
 // struct ecuio_recorder and what its files share: the ring's records, the
 // caller's items and the constants its fields are sized by. Its member
-// functions live in recorder.cpp (the worker's puts, the ABI),
-// recorder_writer.cpp (the writer thread) and recorder_armed.cpp (an armed
-// recorder's windows); recorder_text.h has the text helpers. Only those
+// functions live in recorder.cpp (the worker's puts),
+// recorder_attach.cpp, recorder_control.cpp (the ABI), recorder_writer.cpp
+// (the writer thread) and recorder_armed.cpp (an armed recorder's windows);
+// recorder_text.h has the text helpers. Only those
 // files include it.
 #ifndef ECUIO_RECORDER_IMPL_H
 #define ECUIO_RECORDER_IMPL_H
@@ -132,6 +133,9 @@ struct focus_named {
         return ids == o.ids && pick == o.pick && min_sweep_ms == o.min_sweep_ms;
     }
 };
+
+/* The session's focus; the caller holds focus_mutex (recorder_control.cpp) */
+focus_named focus_now(const ecuio_session_t* session);
 
 /* What the caller's threads hand the writer; asleep is an armed writer's
  * own, held with the notes until it knows the window it falls in */
