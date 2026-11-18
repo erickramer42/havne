@@ -403,12 +403,28 @@ class Plugin:
         info.struct_size = ctypes.sizeof(info)
         check(lib.ecuio_plugin_info(self._handle, ctypes.byref(info)), "ecuio_plugin_info")
         self.id, self.name, self.version = text(info.id), text(info.name), text(info.version)
+        self._page_count = info.page_count
         self.variants = []
         for i in range(info.variant_count):
             buf = ctypes.create_string_buffer(e.ECUIO_PLUGIN_VARIANT_ID_MAX + 1)
             check(lib.ecuio_plugin_variant(self._handle, i, buf, len(buf)),
                   "ecuio_plugin_variant")
             self.variants.append(text(buf.raw))
+
+    def pages(self):
+        """The Dashboard pages the plugin carries, in the manifest's order:
+        (path, form, text) each, form "phone" or "desktop", text the page's
+        layout file as core writes it (ADR-0052's appendix on pages)"""
+        out = []
+        for index in range(self._page_count):
+            page = e.ecuio_plugin_page_t()
+            page.struct_size = ctypes.sizeof(page)
+            check(lib.ecuio_plugin_page(self._handle, index, ctypes.byref(page)),
+                  "ecuio_plugin_page")
+            form = "phone" if page.form == e.ECUIO_PLUGIN_PAGE_PHONE else "desktop"
+            out.append((text(page.path), form,
+                        text(lib.ecuio_plugin_page_text(self._handle, index))))
+        return out
 
     def variant_index(self, variant=None):
         """A variant's index by its id; the first's when None"""

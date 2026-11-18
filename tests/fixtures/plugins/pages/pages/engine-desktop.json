@@ -1,0 +1,18 @@
+{
+  "format": 2,
+  "form": "desktop",
+  "files": [],
+  "pages": [
+    {
+      "name": "Engine",
+      "cells": [
+        { "kind": "digital", "w": 3, "h": 3, "label": "Oil temp",
+          "refs": ["key:oil_temp"], "unit": "°C",
+          "options": { "from": 0, "to": 160 } },
+        { "kind": "analog", "w": 3, "h": 3, "label": "Boost",
+          "refs": ["key:boost"], "unit": "kPa",
+          "options": { "from": -100, "to": 150 } }
+      ]
+    }
+  ]
+}

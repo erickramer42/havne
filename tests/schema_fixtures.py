@@ -488,6 +488,39 @@ CONVERSATION = [
      MODULE_B64[:-3] + "x==", False),
 ]
 
+# A Dashboard page a packed plugin carries (ADR-0052's appendix on pages):
+# core's envelope, which the schema's pageFile states
+PAGE = {
+    "format": 2, "form": "phone", "files": [],
+    "pages": [{"name": "Engine", "cells": [
+        {"kind": "digital", "w": 3, "h": 9, "label": "Oil temp", "refs": ["key:oil_temp"],
+         "unit": "deg C", "options": {"from": 0, "to": 160}}]}],
+}
+PACKED_PAGE = changed(PACKED, ["pages"], ["p/phone.json"])
+PACKED_PAGE["files"]["p/phone.json"] = PAGE
+PG = ["files", "p/phone.json"]
+SEVENTEEN = changed(PACKED, ["pages"], [f"p/{n}.json" for n in range(17)])
+SEVENTEEN["files"].update({f"p/{n}.json": PAGE for n in range(17)})
+PAGES = [
+    ("a page", PACKED_PAGE, [], None, True),
+    ("a page for the desktop", PACKED_PAGE, PG + ["form"], "desktop", True),
+    ("a page with no form", PACKED_PAGE, PG + ["form"], DELETE, False),
+    ("a page for a tablet", PACKED_PAGE, PG + ["form"], "tablet", False),
+    ("a page of format 1", PACKED_PAGE, PG + ["format"], 1, False),
+    ("a page with no format", PACKED_PAGE, PG + ["format"], DELETE, False),
+    ("a page file with no page", PACKED_PAGE, PG + ["pages"], [], False),
+    ("a page file with two pages", PACKED_PAGE, PG + ["pages"], PAGE["pages"] * 2, False),
+    ("a page naming a signal file", PACKED_PAGE, PG + ["files"],
+     [{"name": "x", "sha256": "0" * 64}], False),
+    ("a page with no files key", PACKED_PAGE, PG + ["files"], DELETE, True),
+    ("a page key the envelope doesn't list", PACKED_PAGE, PG + ["theme"], "dark", True),
+    ("no pages listed", PACKED_PAGE, ["pages"], [], False),
+    ("a page listed twice", PACKED_PAGE, ["pages"], ["p/phone.json", "p/phone.json"], False),
+    ("16 pages", changed(SEVENTEEN, ["pages"], SEVENTEEN["pages"][:16]), ["files", "p/16.json"],
+     DELETE, True),
+    ("17 pages", SEVENTEEN, [], None, False),
+]
+
 class Cli:
     def __init__(self, exe, scratch):
         self.exe = exe
@@ -545,6 +578,8 @@ def main():
                   for name, s in schemas.items()}
     validators["data-file"] = jsonschema.Draft202012Validator(
         {"$ref": schemas["plugin-manifest"]["$id"] + "#/$defs/dataFile"}, registry=registry)
+    validators["page-file"] = jsonschema.Draft202012Validator(
+        {"$ref": schemas["plugin-manifest"]["$id"] + "#/$defs/pageFile"}, registry=registry)
 
     failures = []
     checked = 0
@@ -587,6 +622,8 @@ def main():
             validate("data-file", os.path.join(folder, rel))
         for rel in manifest.get("fixtures", []):
             validate("plugin-fixtures", os.path.join(folder, rel))
+        for rel in manifest.get("pages", []):
+            validate("page-file", os.path.join(folder, rel))
     for path in sorted(glob.glob(os.path.join(fixtures, "plugins", "*.json"))):
         validate("plugin-manifest", path)
 
@@ -614,7 +651,7 @@ def main():
                                     f"{'it reads' if ok else repr(detail)}, not {words!r}")
 
         # Edge cases: one verdict from both
-        cases = list(CASES) + FORMAT2 + CONDITION_CASES + CONVERSATION
+        cases = list(CASES) + FORMAT2 + CONDITION_CASES + CONVERSATION + PAGES
         for p, accepted in PATHS:
             doc = changed(PACKED, ["variants", 0, "files"], [p])
             doc["files"] = {p: PACKED["files"]["a.json"]}

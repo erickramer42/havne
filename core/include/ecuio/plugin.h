@@ -76,7 +76,8 @@ typedef struct ecuio_plugin_info {
     char name[64];
     uint32_t variant_count;
     uint32_t fixture_count; /* a folder's fixture files; 0 when packed */
-    uint32_t reserved[2];   /* zero; ABI growth space */
+    uint32_t page_count;    /* its Dashboard pages (ecuio_plugin_page) */
+    uint32_t reserved[1];   /* zero; ABI growth space */
 } ecuio_plugin_info_t;
 
 #if defined(__cplusplus)
@@ -84,6 +85,11 @@ static_assert(sizeof(ecuio_plugin_info_t) == 136,
               "ecuio_plugin_info_t size is ABI");
 static_assert(offsetof(ecuio_plugin_info_t, variant_count) == 120,
               "plugin info variant_count offset is ABI");
+static_assert(offsetof(ecuio_plugin_info_t, page_count) == 128,
+              "plugin info page_count offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(ecuio_plugin_info_t, page_count) == 128,
+               "plugin info page_count offset is ABI");
 #endif
 
 /* ECUIO_ERR_INVALID_ARGUMENT for a struct_size smaller than the struct */
@@ -182,6 +188,55 @@ ecuio_status_t ecuio_plugin_values(const ecuio_plugin_t* plugin,
                                    const char* bytes, size_t length,
                                    ecuio_plugin_value_t* values, uint32_t cap,
                                    uint32_t* count);
+
+/*
+ * Dashboard pages (ADR-0052's appendix on pages): the manifest's optional
+ * "pages" lists 1 to ECUIO_PLUGIN_MAX_PAGES paths in the package, each an
+ * ADR-0057 layout file of one page for one form: "format" 2, "form"
+ * "phone" or "desktop", "pages" holding exactly one page, and no "files"
+ * but an empty list. A packed plugin inlines each under "files" as it
+ * does a data file; a file "pages" names is never a data file. Core reads
+ * that much and nothing inside the page: its cells are the dashboard's
+ * rules, which the app and havne-cli's layout check judge.
+ */
+#define ECUIO_PLUGIN_MAX_PAGES      16u
+#define ECUIO_PLUGIN_PAGE_MAX_BYTES 82400u /* read and as written */
+#define ECUIO_PLUGIN_PAGE_PHONE     1u
+#define ECUIO_PLUGIN_PAGE_DESKTOP   2u
+
+typedef struct ecuio_plugin_page {
+    uint32_t struct_size; /* the caller's sizeof, at least this one's */
+    uint32_t form;        /* ECUIO_PLUGIN_PAGE_PHONE or _DESKTOP */
+    uint32_t text_bytes;  /* the text's length, its NUL left out */
+    uint32_t reserved[3]; /* zero; ABI growth space */
+    char path[ECUIO_PLUGIN_PATH_MAX + 1]; /* its path in the package */
+} ecuio_plugin_page_t;
+
+#if defined(__cplusplus)
+static_assert(sizeof(ecuio_plugin_page_t) == 152,
+              "ecuio_plugin_page_t size is ABI");
+static_assert(offsetof(ecuio_plugin_page_t, path) == 24,
+              "plugin page path offset is ABI");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(ecuio_plugin_page_t) == 152,
+               "ecuio_plugin_page_t size is ABI");
+_Static_assert(offsetof(ecuio_plugin_page_t, path) == 24,
+               "plugin page path offset is ABI");
+#endif
+
+/* Page index's form, path and text length, in the manifest's order.
+ * ECUIO_ERR_NULL_ARGUMENT for a NULL plugin or out;
+ * ECUIO_ERR_INVALID_ARGUMENT for a struct_size smaller than the struct or
+ * an index past info's page_count, out untouched. */
+ecuio_status_t ecuio_plugin_page(const ecuio_plugin_t* plugin, uint32_t index,
+                                 ecuio_plugin_page_t* out);
+
+/* Page index's layout file as core writes it (two spaces a level, UTF-8
+ * kept), the same for a folder and its packed form: NUL-terminated,
+ * text_bytes long, valid until the plugin is freed. NULL for a NULL
+ * plugin or an index past the count. */
+const char* ecuio_plugin_page_text(const ecuio_plugin_t* plugin,
+                                   uint32_t index);
 
 /* The variants the VIN's manufacturer code and model year fall in: one
  * of the manifest's "match" entries covers it and the variant's own

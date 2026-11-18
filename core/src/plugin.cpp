@@ -197,6 +197,7 @@ ecuio_status_t ecuio_plugin_info(const ecuio_plugin_t* plugin,
     copy_field(info.name, sizeof info.name, plugin->name);
     info.variant_count = static_cast<uint32_t>(plugin->variants.size());
     info.fixture_count = static_cast<uint32_t>(plugin->fixtures.size());
+    info.page_count = static_cast<uint32_t>(plugin->pages.size());
     *out = info;
     return ECUIO_OK;
 }

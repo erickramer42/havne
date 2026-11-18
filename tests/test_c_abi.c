@@ -228,6 +228,12 @@ typedef char abi_vin_size_check[(sizeof(ecuio_vin_info_t) == 32) ? 1 : -1];
 typedef char abi_vin_wmi_check[(offsetof(ecuio_vin_info_t, wmi) == 8) ? 1 : -1];
 typedef char abi_plugin_info_size_check[(sizeof(ecuio_plugin_info_t) == 136) ? 1 : -1];
 typedef char abi_plugin_info_count_check[(offsetof(ecuio_plugin_info_t, variant_count) == 120) ? 1 : -1];
+typedef char abi_plugin_info_pages_check
+    [(offsetof(ecuio_plugin_info_t, page_count) == 128) ? 1 : -1];
+typedef char
+    abi_plugin_page_size_check[(sizeof(ecuio_plugin_page_t) == 152) ? 1 : -1];
+typedef char abi_plugin_page_path_check
+    [(offsetof(ecuio_plugin_page_t, path) == 24) ? 1 : -1];
 typedef char abi_plugin_conversation_size_check
     [(sizeof(ecuio_plugin_conversation_t) == 64) ? 1 : -1];
 typedef char abi_plugin_conversation_budget_check
@@ -1172,6 +1178,8 @@ int main(void)
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recorder_signal_file(NULL, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_plugin_variant_file(NULL, 0) != NULL ||
+        ecuio_plugin_page(NULL, 0, NULL) != ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_plugin_page_text(NULL, 0) != NULL ||
         ecuio_plugin_lineage(NULL, NULL, 0) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_plugin_wrap(NULL, 0, NULL, NULL, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||
