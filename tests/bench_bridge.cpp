@@ -33,9 +33,9 @@
 // nothing. The looping run and the 100x pass run again recorded through
 // core's recorder (ADR-0049): the looping pair twice, unrecorded and
 // recorded alternated, the faster recorded run at least
-// kMinRecordedLoopShare of the faster unrecorded one (0.7 on Linux, 0.6
-// on Windows); the 100x one writing every frame and value with
-// no record dropped. Exit status 1 on any failed check.
+// kMinRecordedLoopShare of the faster unrecorded one (0.6); the 100x one
+// writing every frame and value with no record dropped. Exit status 1 on
+// any failed check.
 //
 // --record measures the recorder (ADR-0049 section 9): the bridge's
 // looping run, recorded and unrecorded alternated on three physical
@@ -321,18 +321,13 @@ constexpr double kMinDecodingShare = 0.5;
 // in-flight gate, so holding the worker to a core of its own moved the
 // share above 1 rather than steadying it (0.94 to 1.13 on two of the dev
 // machine's cores). Over 63 CI runs each, Linux read 0.79 to 0.95
-// (median 0.89) and Windows 0.68 to
-// 0.95 (median 0.80, 4 under 0.75, one under 0.70), most of the spread
-// runner to runner: a job's two recorded runs agree within a few
-// percent. Windows' bound sits about two standard deviations under its
-// median and still fails a cost of about 2 us a frame on its typical
-// runner (220,000 frames a second unrecorded), 1 us on its fastest;
-// Linux's, at 0.7, about 1 us
-#if defined(_WIN32)
+// (median 0.89) and Windows 0.68 to 0.95 (median 0.80, 4 under 0.75, one
+// under 0.70), most of the spread runner to runner: a job's two recorded
+// runs agree within a few percent. A loaded Linux runner has read 0.67.
+// The 0.6 floor leaves room for that load, and a 25% loss from a typical
+// figure still trips it: about 2 us a frame on Windows' typical runner
+// (220,000 frames a second unrecorded), 1 us on its fastest.
 constexpr double kMinRecordedLoopShare = 0.6;
-#else
-constexpr double kMinRecordedLoopShare = 0.7;
-#endif
 constexpr int kDecodeFrames = 100000;
 
 std::string typicalConditions();

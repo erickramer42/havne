@@ -291,6 +291,7 @@ ECUIO_RECORDING_FIND_RISING = 1
 ECUIO_RECORDING_FIND_THRESHOLD = 1
 ECUIO_RECORDING_FORMAT_CORE = 2
 ECUIO_RECORDING_FORMAT_ENUMS = 3
+ECUIO_RECORDING_FORMAT_KEYS = 4
 ECUIO_RECORDING_FORMAT_OLDER = 1
 ECUIO_RECORDING_FORMAT_UNKNOWN = 0
 ECUIO_RECORDING_INFO_CONDITIONS_CUT = 4
@@ -1284,7 +1285,7 @@ ecuio_recording_signal_t._fields_ = [
     ('highest', c_double),
     ('first_us', c_uint64),
     ('last_us', c_uint64),
-    ('reserved', (c_uint64 * 4)),
+    ('key', (c_char * 32)),
 ]
 ecuio_recording_signals_t._fields_ = [
     ('flags', c_uint32),
@@ -1616,6 +1617,7 @@ FUNCTIONS = {
     'ecuio_recording_close': (None, [POINTER(ecuio_recording_t)]),  # recording.h
     'ecuio_recording_enum_label': (c_char_p, [POINTER(ecuio_recording_t), c_uint32, c_uint32]),  # recording.h
     'ecuio_recording_find': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_find_t), c_uint64, POINTER(c_uint64)]),  # recording.h
+    'ecuio_recording_find_signal': (c_int, [POINTER(ecuio_recording_t), c_char_p, POINTER(c_uint32)]),  # recording.h
     'ecuio_recording_find_with': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_find_t), c_uint64, ecuio_cancel_t, c_void_p, POINTER(c_uint64)]),  # recording.h
     'ecuio_recording_get_condition_event': (c_int, [POINTER(ecuio_recording_t), c_uint64, POINTER(ecuio_recording_condition_event_t)]),  # recording.h
     'ecuio_recording_get_conditions': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_conditions_t)]),  # recording.h
@@ -1626,6 +1628,7 @@ FUNCTIONS = {
     'ecuio_recording_get_signals': (c_int, [POINTER(ecuio_recording_t), POINTER(ecuio_recording_signals_t)]),  # recording.h
     'ecuio_recording_open': (c_int, [c_char_p, ecuio_open_progress_t, c_void_p, POINTER(POINTER(ecuio_recording_t))]),  # recording.h
     'ecuio_recording_open_frames': (c_int, [c_char_p, POINTER(ecuio_signal_set_t), ecuio_open_progress_t, c_void_p, POINTER(POINTER(ecuio_recording_t))]),  # recording.h
+    'ecuio_recording_open_frames_with': (c_int, [c_char_p, POINTER(ecuio_signal_set_t), POINTER(ecuio_signal_file_t), ecuio_open_progress_t, c_void_p, POINTER(POINTER(ecuio_recording_t))]),  # recording.h
     'ecuio_recording_query': (c_int, [POINTER(ecuio_recording_t), POINTER(c_uint32), c_uint32, c_uint64, c_uint64, POINTER(ecuio_recording_column_t), c_uint32]),  # recording.h
     'ecuio_recording_read_frames': (c_int, [c_char_p, c_uint64, c_uint64, ecuio_frame_row_callback_t, c_void_p, POINTER(ecuio_frames_read_t)]),  # recording.h
     'ecuio_recording_role_signal': (c_int, [POINTER(ecuio_recording_t), c_uint32, POINTER(c_uint32)]),  # recording.h

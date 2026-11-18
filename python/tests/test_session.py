@@ -410,7 +410,11 @@ def test_a_default_pick_is_named_pick_in_a_recording(tmp_path):
     assert ended(folder)
     with open(os.path.join(folder, "events.log"), encoding="utf-8") as f:
         events = f.read()
-    assert f"\npick  {name}\n" in events
+    # The pick names the signal by its key, which the reader gives by name
+    with havne.Recording(folder) as r:
+        key = r.signal(name).key
+    assert key
+    assert f"\npick  {key}\n" in events
     assert "\nfocus  " not in events
 
 

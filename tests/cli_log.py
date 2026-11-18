@@ -66,6 +66,8 @@ sys.dont_write_bytecode = True  # no __pycache__ beside the tests
 import golden  # noqa: E402
 
 PICKS = ["Vehicle Speed", "RPM"]
+# The keys a recording keeps PICKS under: the mock's 0x0C0 bytes 3 and 0-1
+PICK_KEYS = ["0C0::3.0:8", "0C0::0.0:16"]
 HEAD = "Time (ms),Vehicle Speed (km/h),RPM (RPM)"
 
 
@@ -220,7 +222,7 @@ def demo(cli):
             print(f"FAIL  the end line's readout {json.dumps(end)}")
             return 1
         events = (folder / "events.log").read_bytes().decode("utf-8")
-        want = "focus  " + ",".join(PICKS)
+        want = "focus  " + ",".join(PICK_KEYS)
         if want not in events.splitlines():
             print(f"FAIL  events.log has no line {want!r}")
             return 1
@@ -568,6 +570,11 @@ def session_line(cli, dll, golden_file, update):
 OBD2_PICK = ["Engine Load", "Coolant Temp", "RPM", "Vehicle Speed",
              "Intake Air Temp", "Fuel Level", "Battery Voltage", "MAF",
              "Engine Oil Temp"]
+# Their keys, which a recording's pick line lists: each PID's reply from
+# 0x7E8, its value from byte 2
+OBD2_PICK_KEYS = ["7E8:4104:2.0:8", "7E8:4105:2.0:8", "7E8:410C:2.0:16",
+                  "7E8:410D:2.0:8", "7E8:410F:2.0:8", "7E8:412F:2.0:8",
+                  "7E8:4142:2.0:16", "7E8:4110:2.0:16", "7E8:415C:2.0:8"]
 
 
 def header_lines(folder, word):
@@ -612,7 +619,7 @@ def pick_cases(cli, elm):
         print(f"FAIL  the pick's focus line {focus}, exit {code}\n{err}")
         return 1
     if len(header["pick"]) != 1 or header["focus"] or \
-            not header["pick"][0].startswith("pick  " + ",".join(OBD2_PICK)):
+            not header["pick"][0].startswith("pick  " + ",".join(OBD2_PICK_KEYS)):
         print(f"FAIL  the header's pick {header!r}")
         return 1
 
@@ -672,8 +679,22 @@ def pick_cases(cli, elm):
         print(f"FAIL  stream's lines {types!r}, exit {code}\n{err}")
         return 1
     if len(header["pick"]) != 1 or \
-            not header["pick"][0].startswith("pick  Engine Load,"):
+            not header["pick"][0].startswith("pick  " + OBD2_PICK_KEYS[0] + ","):
         print(f"FAIL  stream's recording names {header!r}")
+        return 1
+
+    # Through a signal file a signal the file keys itself (the later of two
+    # at one address) has that key on the line, the others their address
+    extras = Path(__file__).resolve().parent / "fixtures" / "signals" / "extras.json"
+    code, rows, err, header = pick_run(cli, [
+        "stream", elm + "?identify=0&diagnose=0&probe=0", "--signals",
+        str(extras), "--seconds", "1", "--pick", "ranked"])
+    keys = {s["name"]: s["key"]
+            for s in (focus_of(rows) or {}).get("signals", [])}
+    if code != 0 or keys.get("Road Speed") != "road_speed" or \
+            keys.get("RPM") != OBD2_PICK_KEYS[2]:
+        print(f"FAIL  stream's keys through a signal file {keys!r}, "
+              f"exit {code}\n{err}")
         return 1
 
     # A pick core refuses (?poll= asks none of the ranked ones) leaves the
@@ -812,7 +833,7 @@ def pick_only_cases(cli, elm):
                 [s["name"] for s in focus["signals"]] != ["Sig A 7"] or \
                 "--pick ranked adds none" not in err or \
                 len(header["pick"]) != 1 or \
-                not header["pick"][0].startswith("pick  Sig A 7"):
+                not header["pick"][0].startswith("pick  7E8:621007:3.0:8"):
             print(f"FAIL  a pick-only log with --pick ranked: {focus}, "
                   f"exit {code}, {err!r}, {header!r}")
             return 1

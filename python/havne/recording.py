@@ -32,9 +32,10 @@ from .conditions import ConditionSet
 from .errors import Error
 
 Signal = namedtuple("Signal", "index name unit kind samples lowest highest first_us last_us "
-                              "decimal_places group")
+                              "decimal_places group key")
 Signal.__doc__ = ("A recording's signal: kind 'number', 'text' or 'enum'; a number's range; "
-                  "first_us and last_us None without samples")
+                  "first_us and last_us None without samples; key what its values are kept "
+                  "under (ADR-0065 section 9), '' in a recording older than format 4")
 Marker = namedtuple("Marker", "host_us label")
 Column = namedtuple("Column", "lowest highest samples")
 Imported = namedtuple("Imported", "folder lines frames error_frames interfaces values "
@@ -107,7 +108,7 @@ class Recording:
     """The recording in folder, opened once. With profile (a registered
     profile's name) or signals (a SignalFile), its values are decoded from
     its frames.csv through that set instead of read from signals.csv
-    (ecuio_recording_open_frames). folder is the folder as given, as a str
+    (ecuio_recording_open_frames_with). folder is the folder as given, as a str
     (what the export functions take). A context manager."""
 
     def __init__(self, folder, profile=None, signals=None):
@@ -128,10 +129,11 @@ class Recording:
                 sset = ctypes.POINTER(e.ecuio_signal_set_t)()
                 check(lib.ecuio_profile_lookup(utf8(profile), ctypes.byref(sset)),
                       "ecuio_profile_lookup")
-            rc = lib.ecuio_recording_open_frames(utf8(str(folder)), sset,
-                                                 e.ecuio_open_progress_t(0), None,
-                                                 ctypes.byref(self._r))
-            check(rc, "ecuio_recording_open_frames")
+            # With the file, a computed signal's key is its author's
+            rc = lib.ecuio_recording_open_frames_with(
+                utf8(str(folder)), sset, signals._handle if signals is not None else None,
+                e.ecuio_open_progress_t(0), None, ctypes.byref(self._r))
+            check(rc, "ecuio_recording_open_frames_with")
         # Left unclosed, closed when collected or at the interpreter's exit
         self._finalizer = weakref.finalize(self, _close, self._r)
         self.info = e.ecuio_recording_info_t()
@@ -170,7 +172,7 @@ class Recording:
         none = s.samples == 0
         return Signal(i, text(s.name), text(s.unit), kind, s.samples, s.lowest, s.highest,
                       None if none else s.first_us, None if none else s.last_us,
-                      s.decimal_places, s.group)
+                      s.decimal_places, s.group, text(s.key))
 
     def _marker(self, i):
         m = e.ecuio_recording_marker_t()
@@ -222,13 +224,34 @@ class Recording:
         return ConditionSet(data)
 
     def signal(self, name_or_index):
-        """A signal by its name or index"""
+        """A signal by its index, its key, or a name one signal has
+        (ecuio_recording_find_signal). KeyError with core's words for
+        text no signal has and for a name several have, which lists
+        their keys. A closed recording answers from the signals it
+        read, by the same rule."""
         if isinstance(name_or_index, int):
             return self.signals[name_or_index]
-        for s in self.signals:
-            if s.name == name_or_index:
-                return s
-        raise KeyError(f"the recording has no signal {name_or_index!r}")
+        if self._r is None:
+            found = [s for s in self.signals if s.key and s.key == name_or_index] or \
+                    [s for s in self.signals if s.name == name_or_index]
+            if len(found) == 1:
+                return found[0]
+            if not found:
+                raise KeyError(f"no signal with the key or name '{name_or_index}'")
+            raise KeyError(f"{len(found)} signals are named '{name_or_index}': name one "
+                           f"by its key ({', '.join(s.key for s in found)})")
+        index = ctypes.c_uint32()
+        try:
+            check(lib.ecuio_recording_find_signal(self._r, utf8(name_or_index),
+                                                  ctypes.byref(index)),
+                  "ecuio_recording_find_signal")
+        except Error as refused:
+            # Only "no such signal" and "several of that name" are a key
+            # that isn't there; any other refusal is the call's own
+            if refused.name != "INVALID_ARGUMENT":
+                raise
+            raise KeyError(refused.detail) from None
+        return self.signals[index.value]
 
     def query(self, signals, t0_us, t1_us, columns):
         """columns columns over [t0_us, t1_us) for each signal (names or

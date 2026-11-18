@@ -29,10 +29,10 @@ def recorded(tmp_path, seconds=1.2):
     return folder
 
 
-def last_row(folder, signal):
-    """(value, host_us) of the signal's last row in signals.csv"""
+def last_row(folder, key):
+    """(value, host_us) of the last row signals.csv keeps under key"""
     with open(os.path.join(folder, "signals.csv"), encoding="utf-8-sig", newline="") as f:
-        rows = [r for r in csv.DictReader(f) if r["signal"] == signal]
+        rows = [r for r in csv.DictReader(f) if r["signal"] == key]
     return rows[-1]["value"], int(rows[-1]["host_us"])
 
 
@@ -45,6 +45,11 @@ def test_a_recorded_session_reads_back(tmp_path):
         rpm = r.signal("RPM")
         assert rpm.kind == "number" and rpm.samples > 10
         assert rpm.unit == "RPM"
+        assert rpm.key == "0C0::0.0:16"
+        assert r.signal(rpm.key) == rpm, "by its key as by its name"
+        with pytest.raises(KeyError) as none:
+            r.signal("no such signal")
+        assert "no signal with the key or name 'no such signal'" in str(none.value)
         assert [m.label for m in r.markers] == ["half way"]
         assert r.find_marker("half way") == r.markers[0].host_us
         assert r.find_marker("no such marker") is None
@@ -52,11 +57,17 @@ def test_a_recorded_session_reads_back(tmp_path):
         assert len(cols) == 2 and all(len(c) == 4 for c in cols)
         assert sum(c.samples for c in cols[0]) == rpm.samples
         value, at = r.text_at("RPM", rpm.last_us)
-        assert (value, at) == last_row(folder, "RPM")
+        assert (value, at) == last_row(folder, rpm.key)
         assert at == rpm.last_us
         assert r.text_at("RPM", 0)[1] in (None, 0)
         coolant = r.signal("Coolant Temp")
         assert r.find_threshold("Coolant Temp", coolant.highest + 1000) is None
+    # Closed, a signal is still found among those read, by the same rule
+    assert r.signal("RPM") == rpm and r.signal(rpm.key) == rpm
+    assert r.signal(rpm.index) == rpm
+    with pytest.raises(KeyError) as gone:
+        r.signal("no such signal")
+    assert str(gone.value) == repr("no signal with the key or name 'no such signal'")
 
 
 def test_a_recording_decodes_again_from_its_frames(tmp_path):

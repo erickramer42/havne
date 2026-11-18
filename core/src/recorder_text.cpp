@@ -9,6 +9,7 @@
 
 #include "ecuio/signals.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
@@ -54,24 +55,22 @@ std::tm utc_tm(std::time_t t)
     return tm;
 }
 
-/* focus_parts_with over a set's defs */
-std::vector<std::string> focus_parts(const ecuio_signal_set_t* set,
+/* focus_parts_with over a recorder's defs, sorted by id: each pick's key */
+std::vector<std::string> focus_parts(const std::vector<def_entry>& defs,
                                      const std::vector<uint16_t>& ids,
                                      size_t* named)
 {
     return focus_parts_with(
         ids,
-        [set](uint16_t id, std::string* name) {
-            for (uint32_t i = 0;
-                 set != nullptr && set->defs != nullptr && i < set->count;
-                 ++i) {
-                const ecuio_signal_def_t& d = set->defs[i];
-                if (d.id == id) {
-                    *name = csv_quoted(d.name, strnlen(d.name, sizeof d.name));
-                    return true;
-                }
+        [&defs](uint16_t id, std::string* name) {
+            const auto it = std::lower_bound(
+                defs.begin(), defs.end(), id,
+                [](const def_entry& d, uint16_t v) { return d.id < v; });
+            if (it == defs.end() || it->id != id) {
+                return false;
             }
-            return false;
+            *name = it->key;
+            return true;
         },
         named);
 }
@@ -114,16 +113,16 @@ std::string one_line(const char* text)
 }
 
 /*
- * An enum def's label lines for events.log's header (format 3): "label
- * <name>,<raw>,<label>" per entry, raw values ascending as the set holds
- * them. The name and the label are CSV-quoted, so a comma or a quote in
- * either reads back, and a line break is a space, keeping the label
- * within its 27 bytes. A label can't start a formula: the set's
- * validator refuses one that would (ADR-0049 section 8), so none reaches
- * a file. name is the CSV-quoted name.
+ * An enum def's label lines for events.log's header: "label
+ * <key>,<raw>,<label>" per entry, raw values ascending as the set holds
+ * them. The label is CSV-quoted, so a comma or a quote in it reads
+ * back, and a line break is a space, keeping the label within its 27
+ * bytes. A label can't start a formula: the set's validator refuses one
+ * that would (ADR-0049 section 8), so none reaches a file. key is the
+ * signal's key.
  */
 std::string label_lines(const ecuio_signal_set_t* set,
-                        const ecuio_signal_def_t& d, const std::string& name)
+                        const ecuio_signal_def_t& d, const std::string& key)
 {
     if (d.kind != ECUIO_VALUE_ENUM || set->enums == nullptr ||
         uint32_t{d.table_first} + d.table_count > set->enum_count) {
@@ -133,7 +132,7 @@ std::string label_lines(const ecuio_signal_set_t* set,
     for (uint32_t k = 0; k < d.table_count; ++k) {
         const ecuio_enum_entry_t& e = set->enums[d.table_first + k];
         const std::string label(e.label, strnlen(e.label, sizeof e.label));
-        lines += "label  " + name + "," + std::to_string(e.raw) + "," +
+        lines += "label  " + key + "," + std::to_string(e.raw) + "," +
                  csv_quoted(label.data(), label.size()) + "\n";
     }
     return lines;

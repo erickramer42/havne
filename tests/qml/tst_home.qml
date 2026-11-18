@@ -138,6 +138,23 @@ TestCase {
         compare(page.profileOf("mock://demo"), "default")
     }
 
+    // A plugin's session reads as the vehicle then the plugin; any other
+    // keeps "Profile X" and the vehicle after it
+    function test_theSessionDetailNamesTheVehicleAndPlugin() {
+        const page = createPage(1280, 720)
+        const card = find(page, "homeSession")
+        const detail = find(card, "homeSessionDetail")
+        page.profileNames = { "mock": "Daily driver extras" }
+        Bridge.vehicleLabel = "Project car"
+        compare(Bridge.connectSession("mock://demo?profile=mock"), "", "connects")
+        tryVerify(() => card.visible, 5000, "the card")
+        verify(detail.text.startsWith("Project car · Daily driver extras · since "), detail.text)
+        verify(!detail.text.includes("Profile"), detail.text)
+        page.profileNames = ({})
+        tryVerify(() => detail.text.startsWith("Profile mock · Project car · since "), 2000, detail.text)
+        Bridge.vehicleLabel = ""
+    }
+
     // Connect hands Main the chosen row; a tapped one is the choice
     function test_homeConnectsTheChosenRow() {
         const page = createPage(1280, 720)

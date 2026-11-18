@@ -488,7 +488,7 @@ void poll_refused(Output& out, const ecuio_signal_set_t* set,
     write_line(out, b.line);
 }
 
-// The session's signals: each def's id, name, unit, decimals and group,
+// The session's signals: each def's id, name, key, unit, decimals and group,
 // its "gauge" when the session's signal file gives one, then for an enum
 // "enum":true and its "labels" ({"<raw>": label}, as a signal file's
 // "values"), for a computed def "computed":true
@@ -496,7 +496,8 @@ void write_signals(Output& out, const ecuio_signal_set_t* set,
                    const ecuio_signal_file_t* file)
 {
     const uint32_t count = set ? set->count : 0;
-    size_t bytes = 256 + size_t{count} * 512;
+    const std::vector<ecuio_signal_key_t> keys = cli::set_keys(set, file);
+    size_t bytes = 256 + size_t{count} * (512 + cli::kKeyFieldBytes);
     for (uint32_t i = 0; i < count; ++i) {
         uint32_t labels = 0;
         cli::def_labels(*set, set->defs[i], &labels);
@@ -520,6 +521,8 @@ void write_signals(Output& out, const ecuio_signal_set_t* set,
         l.u64(d.id);
         l.key("name");
         l.string(d.name, sizeof d.name);
+        cli::key_field(l, i < keys.size() ? keys[i].text : nullptr,
+                       sizeof keys[i].text);
         l.key("unit");
         l.string(d.unit, sizeof d.unit);
         l.key("decimals");

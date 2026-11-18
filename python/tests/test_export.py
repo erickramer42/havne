@@ -162,6 +162,13 @@ def test_a_wide_csv_of_named_columns_names_the_missing_one(tmp_path, car):
         head = f.readline().rstrip("\r\n").split(",")
     assert head[0] == "Time (ms)" and head[1].startswith(names[0])
     assert head[2].startswith(names[1]) and head[3].startswith("No Such Signal")
+    # Named by its key a column is the same column, and not a missing one
+    with havne.Recording(car) as r:
+        keys = [r.signal(n).key for n in picks(car)]
+    assert all(keys)
+    by_key = havne.export_csv(car, tmp_path / "key.csv", signals=keys + ["No Such Signal"])
+    assert by_key.missing == ("No Such Signal",)
+    assert tree(tmp_path / "key.csv") == tree(tmp_path / "py.csv")
 
 
 def test_a_csv_on_a_grid_in_imperial_is_the_clis(tmp_path, car):
@@ -191,7 +198,7 @@ def test_the_long_csv_is_the_clis(tmp_path, car):
     assert got.values > 0 and got.rows == 0
     with open(tmp_path / "py.csv", encoding="utf-8") as f:
         f.readline()
-        assert f.readline().rstrip("\r\n") == "time_s,signal,unit,value"
+        assert f.readline().rstrip("\r\n") == "time_s,signal,unit,value,key"
 
 
 def test_a_text_signal_is_left_out_of_a_csv_and_refused_as_a_column(tmp_path, values_only):

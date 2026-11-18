@@ -1047,7 +1047,8 @@ TEST(RecordingViewTest, AStopInAPassesSecondCallEndsIt)
 }
 
 // A close during the asks' hold: the statistics and step reads taken
-// before it are never made, and none is answered
+// before it are never made, the means pass under way ends, and none is
+// answered
 TEST(RecordingViewTest, AClosedOpensStatsAndStepAreNotRead)
 {
     RecordingView v;
@@ -1060,20 +1061,29 @@ TEST(RecordingViewTest, AClosedOpensStatsAndStepAreNotRead)
                      [&](int, const QVariantList&) { ++answers; });
     QObject::connect(&v, &RecordingView::stepReady,
                      [&](int, double) { ++answers; });
+    QObject::connect(&v, &RecordingView::columnMeansReady,
+                     [&](int, const QVariantList&) { ++answers; });
     const int hold = 300;
     v.setAsksHoldForTesting(hold);
     QElapsedTimer timer;
     timer.start();
+    // The task takes the means pass alone and holds, so the two asks queue
+    // behind it and its next turn takes them together
+    ASSERT_GT(v.columnMeans({rpm}, 0, 30000, 64), 0);
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
     ASSERT_GT(v.stats({rpm}, 0, 30000), 0);
     ASSERT_GT(v.step(rpm, 100, true), 0);
-    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() > 0; }));
+    ASSERT_EQ(v.meansYieldsForTesting(), 0)
+        << "the pass gave way before both asks were queued";
+    ASSERT_TRUE(waitFor([&] { return v.asksHeldForTesting() >= 2; }));
     v.close();
     EXPECT_EQ(v.readsStoppedForTesting(), 0) << "nothing stopped yet";
+    // The step and statistics calls not made, and the means pass ended
     ASSERT_TRUE(
-        waitFor([&] { return v.readsStoppedForTesting() == 2; }, hold + 2000));
-    EXPECT_LT(timer.elapsed(), hold + 1000);
+        waitFor([&] { return v.readsStoppedForTesting() == 3; }, hold + 2000));
+    EXPECT_LT(timer.elapsed(), 2 * hold + 1000);
     EXPECT_FALSE(waitFor([&] { return answers > 0; }, 300));
-    EXPECT_EQ(v.readsStoppedForTesting(), 2);
+    EXPECT_EQ(v.readsStoppedForTesting(), 3);
 }
 
 // A file changed since the open: the ask says it failed, with no stretch,

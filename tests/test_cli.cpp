@@ -1432,6 +1432,7 @@ TEST(CliViewTest, AStatsLineHoldsTheSpanAndNullsWhatIsntThere)
     char buf[1024];
     ecuio_recording_signal_t rpm{};
     std::strcpy(rpm.name, "RPM");
+    std::strcpy(rpm.key, "7E8:410C:2.0:16");
     cli::Span span;
     span.from_us = -1000000;
     span.to_us = 2500000;
@@ -1448,18 +1449,22 @@ TEST(CliViewTest, AStatsLineHoldsTheSpanAndNullsWhatIsntThere)
     cli::stats_line(l, 1, rpm, span, st);
     EXPECT_EQ(std::string(l.data(), l.size()),
               "{\"type\":\"stats\",\"recording\":1,\"signal\":\"RPM\","
+              "\"key\":\"7E8:410C:2.0:16\","
               "\"from_us\":-1000000,\"to_us\":2500000,\"samples\":3,"
               "\"first\":812.5,\"last\":900,\"lowest\":800,"
               "\"lowest_us\":400000,\"highest\":null,\"highest_us\":2000000,"
               "\"mean\":null}");
+    /* A recording older than format 4 keeps no key: null */
+    rpm.key[0] = 0;
     cli::Line e(buf, sizeof buf);
     cli::stats_line(e, 0, rpm, span, cli::no_stats());
-    EXPECT_EQ(std::string(e.data(), e.size()),
-              "{\"type\":\"stats\",\"recording\":0,\"signal\":\"RPM\","
-              "\"from_us\":-1000000,\"to_us\":2500000,\"samples\":0,"
-              "\"first\":null,\"last\":null,\"lowest\":null,"
-              "\"lowest_us\":null,\"highest\":null,\"highest_us\":null,"
-              "\"mean\":null}");
+    EXPECT_EQ(
+        std::string(e.data(), e.size()),
+        "{\"type\":\"stats\",\"recording\":0,\"signal\":\"RPM\",\"key\":null,"
+        "\"from_us\":-1000000,\"to_us\":2500000,\"samples\":0,"
+        "\"first\":null,\"last\":null,\"lowest\":null,"
+        "\"lowest_us\":null,\"highest\":null,\"highest_us\":null,"
+        "\"mean\":null}");
 }
 
 TEST(CliViewTest, AStretchLevelIsAKeyAndAValueInItsUnits)
@@ -1586,17 +1591,23 @@ TEST(CliViewTest, TheRolesAndStretchLinesSayWhatWasFoundAndWith)
     s.end = 113.5;
     s.flags = ECUIO_RECORDING_STRETCH_BY_ENGINE_SPEED |
               ECUIO_RECORDING_STRETCH_CUT_END;
+    std::strcpy(rpm.key, "7E8:410C:2.0:16");
     cli::Line sl(buf, sizeof buf);
     cli::stretch_line(sl, 0, s, rpm, -14600000);
     EXPECT_EQ(std::string(sl.data(), sl.size()),
               "{\"type\":\"stretch\",\"recording\":0,\"kind\":\"pull\","
               "\"from_us\":-600000,\"to_us\":4900000,\"length_us\":5500000,"
-              "\"signal\":\"RPM\",\"start\":40,\"end\":113.5,"
+              "\"signal\":\"RPM\",\"key\":\"7E8:410C:2.0:16\","
+              "\"start\":40,\"end\":113.5,"
               "\"by_load\":false,\"by_engine_speed\":true,"
               "\"no_throttle\":false,\"cut_start\":false,\"cut_end\":true}");
     s.kind = ECUIO_RECORDING_STRETCH_CRUISE;
     cli::Line cl(buf, sizeof buf);
     cli::stretch_line(cl, 0, s, speed, 0);
+    EXPECT_NE(std::string(cl.data(), cl.size())
+                  .find("\"signal\":\"Vehicle Speed\",\"key\":null,"),
+              std::string::npos)
+        << "no key in a recording older than format 4";
     EXPECT_NE(std::string(cl.data(), cl.size()).find("\"kind\":\"cruise\""),
               std::string::npos);
 }
@@ -1813,10 +1824,13 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_ENUMS), "core")
         << "format 3 is core's, its enums on their signal lines";
     EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_CORE), "core");
+    EXPECT_STREQ(cli::format_word(ECUIO_RECORDING_FORMAT_KEYS), "core")
+        << "format 4 is core's too, each signal under its key";
     EXPECT_STREQ(cli::format_word(99), "unknown");
 
     ecuio_recording_signal_t s{};
     std::strcpy(s.name, "RPM");
+    std::strcpy(s.key, "7E8:410C:2.0:16");
     std::strcpy(s.unit, "rpm");
     s.plot_rank = 1;
     s.group = ECUIO_SIGNAL_GROUP_ENGINE;
@@ -1830,6 +1844,7 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     EXPECT_EQ(
         std::string(n.data(), n.size()),
         "{\"type\":\"signal\",\"recording\":0,\"index\":3,\"name\":\"RPM\","
+        "\"key\":\"7E8:410C:2.0:16\","
         "\"unit\":\"rpm\",\"text\":false,\"decimals\":0,\"rank\":1,"
         "\"group\":\"Engine\",\"samples\":2,\"lowest\":800,"
         "\"highest\":2512.5,\"first_us\":100,\"last_us\":200,"
@@ -1877,13 +1892,15 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     std::strcpy(labels[1].label, "Say \"fault\"");
     cli::Line en(buf, sizeof buf);
     cli::signal_line(en, 0, 5, fuel, labels, 2);
-    EXPECT_EQ(std::string(en.data(), en.size()),
-              "{\"type\":\"signal\",\"recording\":0,\"index\":5,\"name\":\"Fuel\","
-              "\"unit\":\"\",\"text\":false,\"enum\":true,\"labels\":{\"1\":"
-              "\"Open loop, cold\",\"4294967295\":\"Say \\\"fault\\\"\"},"
-              "\"decimals\":0,\"rank\":0,\"group\":\"Other\",\"samples\":2,"
-              "\"lowest\":1,\"highest\":4,\"first_us\":100,\"last_us\":200,"
-              "\"rate_hz\":10000}");
+    EXPECT_EQ(
+        std::string(en.data(), en.size()),
+        "{\"type\":\"signal\",\"recording\":0,\"index\":5,\"name\":\"Fuel\","
+        "\"key\":null,"
+        "\"unit\":\"\",\"text\":false,\"enum\":true,\"labels\":{\"1\":"
+        "\"Open loop, cold\",\"4294967295\":\"Say \\\"fault\\\"\"},"
+        "\"decimals\":0,\"rank\":0,\"group\":\"Other\",\"samples\":2,"
+        "\"lowest\":1,\"highest\":4,\"first_us\":100,\"last_us\":200,"
+        "\"rate_hz\":10000}");
     cli::Line bare(buf, sizeof buf);
     cli::signal_line(bare, 0, 5, fuel);
     EXPECT_NE(std::string(bare.data(), bare.size())
@@ -1922,6 +1939,7 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     cli::columns_line(c, 0, s, w, 4, cols, means);
     EXPECT_EQ(std::string(c.data(), c.size()),
               "{\"type\":\"columns\",\"recording\":0,\"signal\":\"RPM\","
+              "\"key\":\"7E8:410C:2.0:16\","
               "\"samples\":[0,0,3,0],\"lowest\":[null,null,1,null],"
               "\"highest\":[null,null,2.5,null],"
               "\"mean\":[null,null,1.75,null]}");
@@ -1931,6 +1949,7 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
     cli::columns_line(cd, 2, s, w, 4, cols, means, delta, 1);
     EXPECT_EQ(std::string(cd.data(), cd.size()),
               "{\"type\":\"columns\",\"recording\":2,\"signal\":\"RPM\","
+              "\"key\":\"7E8:410C:2.0:16\","
               "\"samples\":[0,0,3,0],\"lowest\":[null,null,1,null],"
               "\"highest\":[null,null,2.5,null],"
               "\"mean\":[null,null,1.75,null],\"delta_from\":1,"
@@ -1939,19 +1958,22 @@ TEST(CliViewTest, TheLinesCarryWhatTheReaderHolds)
         << "room for five entries a column";
     cli::Line ct(buf, sizeof buf);
     cli::columns_line(ct, 0, vin, w, 2, nullptr);
-    EXPECT_EQ(std::string(ct.data(), ct.size()),
-              "{\"type\":\"columns\",\"recording\":0,\"signal\":\"VIN\","
-              "\"samples\":[0,0]}");
+    EXPECT_EQ(
+        std::string(ct.data(), ct.size()),
+        "{\"type\":\"columns\",\"recording\":0,\"signal\":\"VIN\",\"key\":null,"
+        "\"samples\":[0,0]}");
 
     cli::Line at(buf, sizeof buf);
     cli::at_begin(at, 1, -2000000);
     cli::at_value(at, true, s, 300, "2512.5");
     cli::at_value(at, false, vin, ECUIO_RECORDING_NONE, "");
     cli::at_end(at);
-    EXPECT_EQ(std::string(at.data(), at.size()),
-              "{\"type\":\"at\",\"recording\":1,\"t_us\":-2000000,\"values\":"
-              "[{\"signal\":\"RPM\",\"host_us\":300,\"text\":\"2512.5\"},"
-              "{\"signal\":\"VIN\",\"host_us\":null,\"text\":\"\"}]}");
+    EXPECT_EQ(
+        std::string(at.data(), at.size()),
+        "{\"type\":\"at\",\"recording\":1,\"t_us\":-2000000,\"values\":"
+        "[{\"signal\":\"RPM\",\"key\":\"7E8:410C:2.0:16\",\"host_us\":300,"
+        "\"text\":\"2512.5\"},"
+        "{\"signal\":\"VIN\",\"key\":null,\"host_us\":null,\"text\":\"\"}]}");
 }
 
 TEST(CliInfoTest, RateDropIsAMultipleOverOne)

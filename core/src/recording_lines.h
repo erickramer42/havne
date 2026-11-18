@@ -57,6 +57,19 @@ inline std::string signal_line(const std::string& quoted_name,
            std::to_string(group) + "\n";
 }
 
+/* Format 4's "signal  <key>,<name>,<number|text|enum>,...": signal_line
+ * with the signal's key before its name. A key needs no quotes. */
+inline std::string
+keyed_signal_line(const char* key, const std::string& quoted_name,
+                  const char* kind_word, const std::string& quoted_unit,
+                  unsigned decimals, unsigned rank, unsigned group)
+{
+    return "signal  " + std::string(key) + "," +
+           signal_line(quoted_name, kind_word, quoted_unit, decimals, rank,
+                       group)
+               .substr(8);
+}
+
 } // namespace ecuio_recording_lines
 
 #endif /* ECUIO_RECORDING_LINES_H */

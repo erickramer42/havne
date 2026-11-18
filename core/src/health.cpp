@@ -1275,6 +1275,7 @@ baseline_facts read_baseline(const std::string& folder)
             const size_t older = std::strlen(rows::kFormat1End);
             if (too_long || !(rows::equals(line, len, rows::kFormat2) ||
                               rows::equals(line, len, rows::kFormat3) ||
+                              rows::equals(line, len, rows::kFormat4) ||
                               (len >= older &&
                                std::memcmp(line + len - older,
                                            rows::kFormat1End, older) == 0))) {
@@ -1451,8 +1452,9 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
         const ecuio_status_t st =
             has_values
                 ? ecuio_recording_open(folder.c_str(), open_asked, &c, &opened)
-                : ecuio_recording_open_frames(folder.c_str(), set, open_asked,
-                                              &c, &opened);
+                : ecuio_recording_open_frames_with(folder.c_str(), set,
+                                                   set_of.file(), open_asked,
+                                                   &c, &opened);
         if (st == ECUIO_ERR_CANCELED && c.stopped) {
             return canceled(status);
         }
@@ -1481,18 +1483,25 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
     const uint64_t to_us = o.to_us != 0 ? (std::min)(o.to_us, end_us) : end_us;
 
     /* The value in force at to_us of each number def the recording holds
-     * a signal of by its name */
+     * a signal of: by its key where the signals have one, else its name */
     std::vector<ecuio_health_value_t> values;
     if (rec && set != nullptr) {
         ecuio_recording_info_t info{};
         (void)ecuio_recording_get_info(rec.get(), &info);
+        const bool keyed = info.format == ECUIO_RECORDING_FORMAT_KEYS ||
+                           (info.flags & ECUIO_RECORDING_INFO_FRAMES) != 0;
+        const std::vector<std::string> row_ids =
+            rs::def_ids(set, set_of.file(), keyed);
         std::unordered_map<std::string, uint32_t> by_name;
         for (uint32_t i = 0; i < info.signal_count; ++i) {
             ecuio_recording_signal_t sig{};
             if (ecuio_recording_get_signal(rec.get(), i, &sig) == ECUIO_OK &&
                 (sig.flags & ECUIO_RECORDING_SIGNAL_TEXT) == 0) {
                 by_name.emplace(
-                    std::string(sig.name, strnlen(sig.name, sizeof sig.name)),
+                    keyed
+                        ? std::string(sig.key, strnlen(sig.key, sizeof sig.key))
+                        : std::string(sig.name,
+                                      strnlen(sig.name, sizeof sig.name)),
                     i);
             }
         }
@@ -1501,8 +1510,7 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
         std::vector<char> text(ecuio_recording_rows::kRowMax + 1);
         for (uint32_t i = 0; i < set->count; ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
-            const auto it = by_name.find(
-                std::string(d.name, strnlen(d.name, sizeof d.name)));
+            const auto it = by_name.find(row_ids[i]);
             if (!numeric(d) || it == by_name.end()) {
                 continue;
             }

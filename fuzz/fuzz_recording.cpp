@@ -8,6 +8,7 @@
 
 #include "recording_aids.h" /* core/src: pure, the stretches' rules */
 #include "recording_check.h" /* core/src: pure, iso15765_id */
+#include "recording_keys.h"  /* core/src: the formats, a keyed signal line */
 #include "recording_rows.h" /* core/src: pure */
 #include "sha256.h"         /* core/src: pure */
 
@@ -135,6 +136,20 @@ void one_line(const char* p, size_t n)
     }
     if (s.text && s.enumeration) {
         abort(); /* one kind */
+    }
+
+    /* Format 4's signal line: a key of 1 to 31 bytes, then the same */
+    std::string key;
+    rows::header_signal ks;
+    why = nullptr;
+    if (ecuio_recording_keys::parse_keyed_signal(p, n, &key, ks, &why)) {
+        if (key.empty() || key.size() > ECUIO_SIGNAL_KEY_MAX ||
+            ks.name.empty() || ks.name.size() > rows::kNameMax ||
+            ks.unit.size() > rows::kUnitMax || ks.decimal_places > 3) {
+            abort();
+        }
+    } else if (why == nullptr) {
+        abort();
     }
 
     /* Format 3's label line: a name within 31 bytes, a label of 1 to 27 */
@@ -375,8 +390,9 @@ wanted want_conditions(const char* log, size_t log_len, bool log_present,
         }
         if (line_no == 1) {
             const size_t bom = rows::bom_length(l.data(), l.size());
-            format3 = rows::equals(l.data() + bom, l.size() - bom,
-                                   rows::kFormat3);
+            format3 =
+                ecuio_recording_keys::has_enums(ecuio_recording_keys::format_of(
+                    l.data() + bom, l.size() - bom));
             in_header = format3;
             if (format3) {
                 continue;
@@ -695,6 +711,25 @@ opened open_and_query(const ecuio_signal_set_t* set)
             memchr(s.name, '\0', sizeof s.name) == nullptr ||
             memchr(s.unit, '\0', sizeof s.unit) == nullptr ||
             s.decimal_places > 3) {
+            abort();
+        }
+        /* A key only where the recording keeps one: terminated, zero
+         * after it, and the find gives this signal for it */
+        const size_t key_len = strnlen(s.key, sizeof s.key);
+        const bool keyed = o.info.format == ECUIO_RECORDING_FORMAT_KEYS ||
+                           (o.info.flags & ECUIO_RECORDING_INFO_FRAMES) != 0;
+        if (key_len == sizeof s.key || (key_len > 0) != keyed) {
+            abort();
+        }
+        for (size_t z = key_len; z < sizeof s.key; ++z) {
+            if (s.key[z] != '\0') {
+                abort();
+            }
+        }
+        uint32_t found = UINT32_MAX;
+        if (keyed &&
+            (ecuio_recording_find_signal(r, s.key, &found) != ECUIO_OK ||
+             found != k)) {
             abort();
         }
         /* Labels only on an enum, at most a def's, raw ascending, each
@@ -1285,9 +1320,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
         stretches(data + 1, size - 1);
         return 0;
     }
-    /* 'F' a folder; '3' a folder whose events.log starts with format 3's
-     * first line, so its header's label lines are reached */
-    const bool format3 = data[0] == '3';
+    /* 'F' a folder; '3' or '4' a folder whose events.log starts with
+     * that format's first line, so its header's label lines (and format
+     * 4's keyed signal lines) are reached */
+    const bool format3 = data[0] == '3' || data[0] == '4';
     if (data[0] != 'F' && !format3) {
         each_line(data + 1, size - 1);
         return 0;
@@ -1308,7 +1344,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     }
     std::string events;
     if (format3 && count > 0) {
-        events = std::string(rows::kFormat3) + "\n" +
+        events = std::string(data[0] == '4' ? rows::kFormat4 : rows::kFormat3) +
+                 "\n" +
                  std::string(reinterpret_cast<const char*>(parts[0]), lens[0]);
         parts[0] = reinterpret_cast<const uint8_t*>(events.data());
         lens[0] = events.size();

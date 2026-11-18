@@ -10,9 +10,10 @@
 # down to structs that:
 #   - keep their size;
 #   - change or delete no member but one named reserved (an array that
-#     shrinks or moves, a one-element array taken whole as its element
-#     under a new name, or a scalar that goes), or one whose type change
-#     is a struct that grew this way (a pointer to it, as a set's defs);
+#     shrinks or moves, an array taken whole by one field of any type
+#     under a new name, at its offset and its size, or a scalar that
+#     goes), or one whose type change is a struct that grew this way (a
+#     pointer to it, as a set's defs);
 #   - otherwise only gain members (insertions).
 # So no field outside the reserved room moves, resizes or changes type.
 # Anything else in a changed function (an enum, a return type, a struct
@@ -46,9 +47,14 @@ ARRAY_DETAIL = re.compile(
     r"|upper bound of '.*' change from '\d+' to '\d+')$"
 )
 OFFSET_TAIL = re.compile(r"^and offset changed from \d+ to \d+ \(in bits\) \(by [+-]\d+ bits\)$")
-# A one-element reserved array taken whole: its element's type, the same
-# bytes at the same offset, and the new name abidiff gives after it
-ONE_TAKEN = re.compile(r"^entity changed from '(\w+)\[1\]' to '(?:typedef )?(\w+)'$")
+# A reserved array taken whole by one field, the same bytes at the same
+# offset. A field that isn't an array is an entity change, with a size
+# line under it only when the size differs; an array of another element
+# type says the element changed and that the whole kept its size. The
+# new name comes after either
+WHOLE_TAKEN = re.compile(r"^entity changed from '\w+\[\d+\]' to '[^']+'$")
+ELEMENT_CHANGED = re.compile(r"^array element type '[^']*' changed:$")
+SIZE_KEPT = "type size hasn't changed"
 RESERVED_RENAMED = re.compile(rf"^and name of '[\w:]*::{RESERVED}' changed to '[\w:]*::\w+'$")
 
 
@@ -73,13 +79,23 @@ def tree(lines):
     return root.children
 
 
+def moved(members, i):
+    """True when the member change at i carries an offset change after it"""
+    for later in members[i + 1:]:
+        if not later.text.startswith("and "):
+            return False
+        if OFFSET_TAIL.match(later.text):
+            return True
+    return False
+
+
 def struct_grew_into_reserved(node, grown, why):
     """node: a struct-changed line; True when its change is reserved-room growth"""
     name = STRUCT_LINE.match(node.text).group(1)
     size_kept = False
     for child in node.children:
         t = child.text
-        if t == "type size hasn't changed":
+        if t == SIZE_KEPT:
             size_kept = True
         elif re.match(r"^\d+ data member insertions?:$", t):
             if not all(INSERTED.match(c.text) for c in child.children):
@@ -91,7 +107,7 @@ def struct_grew_into_reserved(node, grown, why):
                     why.append(f"{name}: a member other than reserved deleted: {c.text}")
                     return False
         elif re.match(r"^\d+ data member changes?:$", t):
-            for c in child.children:
+            for i, c in enumerate(child.children):
                 if OFFSET_TAIL.match(c.text):
                     continue  # the reserved member's own move, after its type
                 if RESERVED_RENAMED.match(c.text):
@@ -107,13 +123,21 @@ def struct_grew_into_reserved(node, grown, why):
                 if not MEMBER_TYPE_CHANGE.match(c.text):
                     why.append(f"{name}: {c.text}")
                     return False
+                retyped = any(ELEMENT_CHANGED.match(d.text) for d in c.children)
+                kept = any(d.text == SIZE_KEPT for d in c.children)
+                whole = retyped and kept
                 for detail in c.children:
-                    taken = ONE_TAKEN.match(detail.text)
-                    if taken and taken.group(1) == taken.group(2):
+                    if WHOLE_TAKEN.match(detail.text):
+                        whole = True
+                        continue
+                    if whole and (ELEMENT_CHANGED.match(detail.text) or detail.text == SIZE_KEPT):
                         continue
                     if not ARRAY_DETAIL.match(detail.text):
                         why.append(f"{name}: the reserved member changed otherwise: {detail.text}")
                         return False
+                if whole and moved(child.children, i):
+                    why.append(f"{name}: a reserved member taken whole moved: {c.text}")
+                    return False
         else:
             why.append(f"{name}: {t}")
             return False
@@ -272,7 +296,31 @@ Variables changes summary: 0 Removed, 0 Changed, 0 Added variable
 
   [A] 'function ecuio_status_t ecuio_session_clear_diagnostics_with(ecuio_session_t*, uint32_t, uint32_t, uint32_t)'    {ecuio_session_clear_diagnostics_with}
 """
-SCALAR = """          type size hasn't changed
+# A reserved array taken whole by an array of another element type, as
+# ecuio_recording_signal's key stands where reserved[4] did (abidiff's
+# own lines)
+RETYPED = """Functions changes summary: 0 Removed, 1 Changed, 0 Added function
+Variables changes summary: 0 Removed, 0 Changed, 0 Added variable
+
+1 function with some indirect sub-type change:
+
+  [C] 'function ecuio_status_t ecuio_recording_get_signal(const ecuio_recording_t*, uint32_t, ecuio_recording_signal_t*)' has some indirect sub-type changes:
+    parameter 3 of type 'ecuio_recording_signal_t*' has sub-type changes:
+      in pointed to type 'typedef ecuio_recording_signal_t':
+        underlying type 'struct ecuio_recording_signal' changed:
+          type size hasn't changed
+          1 data member change:
+            type of 'uint64_t reserved[4]' changed:
+              array element type 'typedef uint64_t' changed:
+                entity changed from 'typedef uint64_t' to 'char'
+                type size changed from 64 to 8 (in bits)
+              type name changed from 'uint64_t[4]' to 'char[32]'
+              type size hasn't changed
+              array subrange changed:
+                upper bound of '<anonymous range>[4]' change from '3' to '31'
+            and name of 'ecuio_recording_signal::reserved' changed to 'ecuio_recording_signal::key'
+"""
+SCALAR ="""          type size hasn't changed
           1 data member deletion:
             'uint32_t reserved', at offset 32896 (in bits)
           1 data member insertion:
@@ -280,13 +328,38 @@ SCALAR = """          type size hasn't changed
 """
 
 
+def field(to, size=""):
+    """TAKEN, its one-element array a longer one taken by a field of type
+    to that isn't an array; size the line abidiff adds under it when the
+    field's size isn't the array's"""
+    return TAKEN.replace(
+        "            type of 'uint8_t reserved0[1]' changed:\n"
+        "              entity changed from 'uint8_t[1]' to 'typedef uint8_t'\n",
+        "            type of 'uint8_t reserved0[4]' changed:\n"
+        f"              entity changed from 'uint8_t[4]' to '{to}'\n{size}")
+
+
 def selftest():
     cases = [
         ("growth into reserved[] passes", HEAD + ROOM, True),
         ("a reserved scalar replaced passes", HEAD + SCALAR, True),
         ("a one-element reserved array taken whole passes", TAKEN, True),
-        ("a one-element reserved array taken as another type fails", TAKEN.replace(
-            "to 'typedef uint8_t'", "to 'typedef uint16_t'"), False),
+        ("a reserved array taken whole by a scalar passes", field("typedef uint32_t"), True),
+        ("a reserved array taken whole by a struct passes", field("struct ecuio_span"), True),
+        ("a reserved array taken whole by a pointer passes", field("const char*"), True),
+        ("a reserved array taken by a field of another size fails", field(
+            "typedef uint8_t", "              type size changed from 32 to 8 (in bits)\n"), False),
+        ("a reserved array taken whole by a field that moved fails", field("typedef uint32_t").replace(
+            "            and name of 'ecuio_channel_diagnostics::reserved0' changed to 'ecuio_channel_diagnostics::cycle'\n",
+            "            and name of 'ecuio_channel_diagnostics::reserved0' changed to 'ecuio_channel_diagnostics::cycle'\n"
+            "            and offset changed from 192 to 224 (in bits) (by +32 bits)\n"), False),
+        ("a reserved array taken whole by another element type passes", RETYPED, True),
+        ("a reserved array of another element type and size fails", RETYPED.replace(
+            "              type size hasn't changed\n",
+            "              array type size changed from 256 to 128\n"), False),
+        ("a reserved array of another element type that moved fails", RETYPED
+         + "            and offset changed from 768 to 832 (in bits) (by +64 bits)\n", False),
+        ("a member that isn't reserved retyped at its size fails", RETYPED.replace("reserved", "name"), False),
         ("a member outside the room renamed fails", TAKEN.replace(
             "            and name of 'ecuio_channel_diagnostics::reserved0' changed to 'ecuio_channel_diagnostics::cycle'\n",
             "            and name of 'ecuio_channel_diagnostics::reserved0' changed to 'ecuio_channel_diagnostics::cycle'\n"

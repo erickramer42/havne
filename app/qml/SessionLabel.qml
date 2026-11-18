@@ -18,4 +18,14 @@ QtObject {
         return kept.length > 0 ? label.slice(0, at + 1) + kept.join("&")
                                : label.slice(0, at)
     }
+
+    // What a session reads, by names: the picked vehicle then the plugin's
+    // name. "" unless the profile is a plugin's (profileNames has it), so
+    // a built-in profile keeps its own words.
+    function reads(profile, profileNames, vehicleLabel) {
+        const plugin = profileNames[profile]
+        if (plugin === undefined)
+            return ""
+        return vehicleLabel !== "" ? vehicleLabel + " · " + plugin : plugin
+    }
 }

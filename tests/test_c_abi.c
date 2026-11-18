@@ -996,6 +996,8 @@ int main(void)
         sizeof(ecuio_recording_signal_t) != 128 ||
         offsetof(ecuio_recording_signal_t, samples) != 56 ||
         offsetof(ecuio_recording_signal_t, group) != 54 ||
+        offsetof(ecuio_recording_signal_t, key) != 96 ||
+        sizeof reading_signal.key != ECUIO_SIGNAL_KEY_LEN ||
         offsetof(ecuio_recording_marker_t, label_utf8) != 32 ||
         sizeof(ecuio_recording_column_t) != 24 ||
         offsetof(ecuio_recording_find_t, label_utf8) != 64 ||
@@ -1092,6 +1094,10 @@ int main(void)
         ecuio_plugin_requires_core(NULL, &core_major, &core_minor,
                                    &core_patch) != ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_get_signal(NULL, 0, &reading_signal) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_find_signal(NULL, "x", &reading_pick) !=
+            ECUIO_ERR_NULL_ARGUMENT ||
+        ecuio_recording_open_frames_with(NULL, NULL, NULL, NULL, NULL, NULL) !=
             ECUIO_ERR_NULL_ARGUMENT ||
         ecuio_recording_get_marker(NULL, 0, &reading_marker) !=
             ECUIO_ERR_NULL_ARGUMENT ||
