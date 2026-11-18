@@ -346,9 +346,9 @@ each one covers are listed in [testing.md](testing.md).
 the `app_ui` library, against a real bridge. Each
 `tests/qml/tst_*.qml` file is one ctest case, `QmlTest.<name>`, in a
 process of its own, except the slowest (`tst_dashboard.qml`,
-`tst_dashedit.qml`, `tst_driveview.qml`, `tst_phone.qml`), which run as
+`tst_driveview.qml`, `tst_phone.qml`), which run as
 several cases each, `QmlTest.<name>-1of<n>` to `-<n>of<n>`, every nth
-case (three, five for `tst_phone.qml` and four for `tst_dashedit.qml`);
+case (three, five for `tst_phone.qml`);
 each carries its measured seconds as a ctest `COST`, so a tree with no
 cost history starts the long ones first. A new file is picked up at the
 next configure.

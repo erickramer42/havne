@@ -453,7 +453,7 @@ no `filter` key).
 - **Tests:** `J2534AdoptionTest.RawListensToTheEngineEcu`, the verbatim
   path through a passive custom profile
   (`J2534StreamTest.DirectLoadUriDeliversInjectedFramesExactly`), and
-  `QmlTest.settings`' `test_noSchemesKeysAddedOrTaken`.
+  `QmlTest.settings_devices`' `test_noSchemesKeysAddedOrTaken`.
 
 ## Appendix: 2026-11-05, the plugin seam
 

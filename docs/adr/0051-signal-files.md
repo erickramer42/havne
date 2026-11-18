@@ -650,8 +650,8 @@ Section 7's import reaches the app, so a set needs no `havne-cli`:
   kept waiting for the disconnect.
 
 Tested at the bridge (`ObdbImportTest`, `BridgeTest.Obdb*`, on
-`tests/fixtures/obdb/`) and in QML (`QmlTest.settings`,
-`QmlTest.vehiclebook`).
+`tests/fixtures/obdb/`) and in QML (`QmlTest.settings_listobdb`,
+`QmlTest.settings_plugins`, `QmlTest.vehiclebook`).
 
 ## Appendix: a signal's gauge (2026-11-09)
 
