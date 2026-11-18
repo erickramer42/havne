@@ -78,9 +78,9 @@ TestCase {
         main.font.pixelSize = 16
         const dash = find(main.contentItem, "dashboardPage")
         dash.form = "phone"
-        dash.driveWindow = createTemporaryObject(windowComponent, testCase)
+        dash.drivePart.driveWindow = createTemporaryObject(windowComponent, testCase)
         verify(waitForPolish(main), "laid out")
-        return { main: main, dash: dash, stand: dash.driveWindow }
+        return { main: main, dash: dash, stand: dash.drivePart.driveWindow }
     }
 
     function connect(uri) {
@@ -109,7 +109,7 @@ TestCase {
         // under load decides), so only the end state is judged; a fault
         // up at the entry has its own case
         tryCompare(Bridge, "linkState", "fault", 5000)
-        tryVerify(() => s.dash.barsUp, 2000, "the fault raises them")
+        tryVerify(() => s.dash.drivePart.barsUp, 2000, "the fault raises them")
         return s
     }
 
@@ -130,7 +130,7 @@ TestCase {
     }
 
     function enterOn(s) {
-        s.dash.enterDrive()
+        s.dash.drivePart.enterDrive()
         verify(s.dash.driving, "the view is on")
         verify(waitForPolish(s.main), "laid out")
     }
@@ -142,8 +142,8 @@ TestCase {
     }
 
     function revealedOn(s) {
-        s.dash.driveTap()
-        verify(s.dash.barsUp, "revealed")
+        s.dash.drivePart.driveTap()
+        verify(s.dash.drivePart.barsUp, "revealed")
         tryCompare(s.dash, "barsShown", 1, 2000, "slid in")
     }
 
@@ -177,7 +177,7 @@ TestCase {
         compare(drive.enabled, false)
         compare(drive.text, "Connect first", "and it says what it waits for")
         compare(drive.Accessible.name, "Connect first: a session shows the gauges full screen")
-        s.dash.enterDrive()
+        s.dash.drivePart.enterDrive()
         compare(s.dash.driving, false, "and nothing else enters it")
     }
 
@@ -195,7 +195,7 @@ TestCase {
         connect("mock://demo")
         wait(50)
         compare(s.dash.driving, false, "a remembered view stays on the phone")
-        s.dash.enterDrive()
+        s.dash.drivePart.enterDrive()
         compare(s.dash.driving, false, "and nothing else enters it")
     }
 
@@ -342,7 +342,7 @@ TestCase {
         enterOn(s)
         revealedOn(s)
         verify(!find(s.dash, "dashEdit").visible, "Edit isn't offered")
-        s.dash.driveTap()    // back to the gauges alone
+        s.dash.drivePart.driveTap()    // back to the gauges alone
         tryCompare(s.dash, "barsShown", 0, 2000)
         const cell = find(s.dash, "dashCell_0_0")
         verify(waitForPolish(s.main))
@@ -351,7 +351,7 @@ TestCase {
         compare(s.dash.held, -1, "the hold lifts nothing")
         mouseRelease(cell)
         compare(s.dash.panel, "", "and opens no menu")
-        verify(!s.dash.barsUp, "nor counts as a tap")
+        verify(!s.dash.drivePart.barsUp, "nor counts as a tap")
     }
 
     // ---- The status line (section 2)
@@ -415,7 +415,7 @@ TestCase {
         Bridge.stopLog()
         tryCompare(run, "text", qsTr("Log ended"), 5000)
         verify(run.visible, "it shows")
-        verify(!s.dash.barsUp, "hidden bars stay hidden")
+        verify(!s.dash.drivePart.barsUp, "hidden bars stay hidden")
         compare(Bridge.logNotice, "", "no notice to dismiss")
         const timer = find(s.dash, "driveLogEndedTimer")
         compare(timer.interval, s.dash.driveHideMs, "for as long as the bars would stay")
@@ -434,8 +434,8 @@ TestCase {
         const timer = find(s.dash, "driveLogEndedTimer")
         const run = find(s.dash, "driveStatusRun")
         mouseClick(find(s.dash, "driveStopLog"))
-        tryVerify(() => s.dash.driveLogEnded, 5000, "said")
-        verify(s.dash.barsUp, "the bars stay")
+        tryVerify(() => s.dash.drivePart.driveLogEnded, 5000, "said")
+        verify(s.dash.drivePart.barsUp, "the bars stay")
         verify(timer.running, "its time runs while the bars are up")
         compare(run.text, qsTr("Log ended"))
         verify(run.visible)
@@ -448,13 +448,13 @@ TestCase {
         tryVerify(() => Bridge.signalModel.subscribedCount > 0, 3000, "signals ticked")
         compare(Bridge.startLog(), true)
         tryCompare(Bridge, "logActive", true, 3000)
-        verify(!s.dash.barsUp, "hidden at first")
+        verify(!s.dash.drivePart.barsUp, "hidden at first")
         Harness.failRecordingWrites()
         tryCompare(Bridge, "logActive", false, 5000)
         compare(Bridge.logNotice, "Log ended: the disk is full")
-        tryVerify(() => s.dash.barsUp, 2000, "the notice raises them")
-        verify(s.dash.barsHeld, "and holds them")
-        verify(!s.dash.driveLogEnded, "the status line's words are for Stop log")
+        tryVerify(() => s.dash.drivePart.barsUp, 2000, "the notice raises them")
+        verify(s.dash.drivePart.barsHeld, "and holds them")
+        verify(!s.dash.drivePart.driveLogEnded, "the status line's words are for Stop log")
         compare(s.main.currentPage, s.main.dashboardPage)
         verify(s.dash.driving, "the view stays on")
     }
@@ -462,9 +462,9 @@ TestCase {
     function test_leavingClearsTheWords() {
         const s = driven()
         enterOn(s)
-        s.dash.driveLogEnded = true
+        s.dash.drivePart.driveLogEnded = true
         s.dash.leaveDrive(true)
-        compare(s.dash.driveLogEnded, false)
+        compare(s.dash.drivePart.driveLogEnded, false)
     }
 
     function test_theStatusLineShowsARecordingAndItsMarks() {
@@ -504,7 +504,7 @@ TestCase {
         const height = swipe.height
         const b = bars(s)
         mouseClick(find(s.dash, "dashCell_0_0"))
-        verify(s.dash.barsUp, "a tap on a gauge reveals")
+        verify(s.dash.drivePart.barsUp, "a tap on a gauge reveals")
         tryCompare(s.dash, "barsShown", 1, 2000)
         verify(b.tab.visible && b.tools.visible, "the tab bar and the sheet show")
         verify(!b.head.visible, "the header stays hidden")
@@ -520,7 +520,7 @@ TestCase {
         const area = find(s.dash, "driveTapArea")
         tryVerify(() => area.height > 200, 2000, "laid out")
         mouseClick(area, area.width - 12, area.height - 12)
-        verify(s.dash.barsUp, "the bottom of an emptier page")
+        verify(s.dash.drivePart.barsUp, "the bottom of an emptier page")
     }
 
     function test_theBarsHideAfterTheDelay() {
@@ -531,7 +531,7 @@ TestCase {
         verify(timer.running, "the delay runs")
         compare(timer.interval, 4000, "the default")
         timer.triggered()
-        verify(!s.dash.barsUp, "they slide out")
+        verify(!s.dash.drivePart.barsUp, "they slide out")
         tryCompare(s.dash, "barsShown", 0, 2000)
     }
 
@@ -550,11 +550,11 @@ TestCase {
         mouseClick(reset)
         compare(resets, 1, "the press went on to Reset peaks")
         verify(s.dash.driving, "which is no exit")
-        compare(s.dash.barTouches, 1, "a touch on the bars")
+        compare(s.dash.drivePart.barTouches, 1, "a touch on the bars")
         compare(spy.count, 2, "the delay stopped and started again at the touch")
         verify(timer.running)
         timer.interval = 20
-        tryCompare(s.dash, "barsUp", false, 2000, "and ended after it")
+        tryCompare(s.dash.drivePart, "barsUp", false, 2000, "and ended after it")
     }
 
     // The gaps in the bars aren't gauges: no toggle, and the delay starts again
@@ -564,14 +564,14 @@ TestCase {
         revealedOn(s)
         const b = bars(s)
         mouseClick(b.tab, b.tab.width / 2, b.tab.height - 3)
-        verify(s.dash.barsUp, "below the tabs")
+        verify(s.dash.drivePart.barsUp, "below the tabs")
         const backdrop = find(s.dash, "driveToolsBackdrop")
-        const before = s.dash.barTouches
+        const before = s.dash.drivePart.barTouches
         const spy = createTemporaryObject(spyComponent, testCase,
                                           { target: hideTimer(s), signalName: "runningChanged" })
         mouseClick(backdrop, backdrop.width / 2, 1)
-        verify(s.dash.barsUp, "around the tools")
-        compare(s.dash.barTouches, before + 1, "a touch on the bars")
+        verify(s.dash.drivePart.barsUp, "around the tools")
+        compare(s.dash.drivePart.barTouches, before + 1, "a touch on the bars")
         compare(spy.count, 2, "the delay started again")
     }
 
@@ -581,11 +581,11 @@ TestCase {
         revealedOn(s)
         const b = bars(s)
         verify(waitForPolish(s.main), "laid out")
-        const before = s.dash.barTouches
+        const before = s.dash.drivePart.barTouches
         mouseClick(b.sheet, b.sheet.width / 2, 2)
-        compare(s.dash.barTouches, before + 1, "the sheet")
+        compare(s.dash.drivePart.barTouches, before + 1, "the sheet")
         mouseClick(b.tab, b.tab.width / 2, b.tab.height - 3)
-        compare(s.dash.barTouches, before + 2, "the tab bar")
+        compare(s.dash.drivePart.barTouches, before + 2, "the tab bar")
         verify(s.dash.driving, "neither is an exit")
     }
 
@@ -597,7 +597,7 @@ TestCase {
         enterOn(s)
         revealedOn(s)
         verify(!hideTimer(s).running, "no delay to run")
-        verify(s.dash.barsUp)
+        verify(s.dash.drivePart.barsUp)
     }
 
     function test_theDelayIsSettings() {
@@ -614,16 +614,16 @@ TestCase {
 
     function test_aFaultTappedAwayStaysAway() {
         const s = faulted()
-        s.dash.driveTap()
-        verify(!s.dash.barsUp, "tapped away")
-        verify(!s.dash.barsHeld, "the hold ends with it")
+        s.dash.drivePart.driveTap()
+        verify(!s.dash.drivePart.barsUp, "tapped away")
+        verify(!s.dash.drivePart.barsHeld, "the hold ends with it")
     }
 
     function test_aRepeatedTapStartsTheDelayAfterAFault() {
         const s = faulted()
-        s.dash.driveTap()
-        s.dash.driveTap()
-        verify(s.dash.barsUp, "revealed by hand")
+        s.dash.drivePart.driveTap()
+        s.dash.drivePart.driveTap()
+        verify(s.dash.drivePart.barsUp, "revealed by hand")
         verify(hideTimer(s).running, "a tap's reveal has the delay, fault or no fault")
     }
 
@@ -631,13 +631,13 @@ TestCase {
         const s = driven()
         enterOn(s)
         raiseANotice()
-        tryCompare(s.dash, "barsUp", true, 2000, "a notice raises them")
+        tryCompare(s.dash.drivePart, "barsUp", true, 2000, "a notice raises them")
         verify(!hideTimer(s).running, "held")
         tryCompare(s.dash, "barsShown", 1, 2000)
         verify(find(s.dash, "driveLogNotice").visible, "with its row and Dismiss, in the sheet")
         verify(find(s.dash, "driveLogNoticeDismiss").visible)
         Bridge.clearLogNotice()
-        tryCompare(s.dash, "barsHeld", false, 2000, "its end lets the delay run")
+        tryCompare(s.dash.drivePart, "barsHeld", false, 2000, "its end lets the delay run")
         verify(hideTimer(s).running)
     }
 
@@ -645,8 +645,8 @@ TestCase {
         const s = drivenOnTheFake("ECUIO_FAKE_READ_STATUS", "7", "?profile=raw&filter=0x7E8")
         tryCompare(Bridge, "linkState", "fault", 5000)
         enterOn(s)
-        verify(s.dash.barsUp, "not hidden behind the view")
-        verify(s.dash.barsHeld, "and held")
+        verify(s.dash.drivePart.barsUp, "not hidden behind the view")
+        verify(s.dash.drivePart.barsHeld, "and held")
         verify(!hideTimer(s).running)
     }
 
@@ -654,7 +654,7 @@ TestCase {
         const s = driven()
         raiseANotice()
         enterOn(s)
-        verify(s.dash.barsUp, "not hidden behind the view")
+        verify(s.dash.drivePart.barsUp, "not hidden behind the view")
     }
 
     function test_onlyAFaultRaisesTheBars_data() {
@@ -666,7 +666,7 @@ TestCase {
     }
     function test_onlyAFaultRaisesTheBars(data) {
         const s = phoneMain()
-        compare(s.dash.raisesBars(data.state), data.want)
+        compare(s.dash.drivePart.raisesBars(data.state), data.want)
     }
 
     function test_quietDoesntReveal() {
@@ -674,7 +674,7 @@ TestCase {
         enterOn(s)
         tryCompare(Bridge, "linkState", "quiet", 5000)
         wait(20)
-        verify(!s.dash.barsUp, "the status line says it")
+        verify(!s.dash.drivePart.barsUp, "the status line says it")
         verify(s.dash.driving)
     }
 
@@ -983,7 +983,7 @@ TestCase {
         const s = driven()
         enterOn(s)
         compare(back(s), true, "taken, never the launcher")
-        verify(s.dash.barsUp, "hidden bars: back reveals")
+        verify(s.dash.drivePart.barsUp, "hidden bars: back reveals")
         verify(s.dash.driving)
         compare(back(s), true)
         compare(s.dash.driving, false, "revealed bars: back leaves")
@@ -1044,8 +1044,8 @@ TestCase {
         dashStore.setValue("phoneDrive", true)
         dashStore.sync()
         const s = phoneMain()
-        verify(s.dash.isReplay("REPLAY://x"), "whatever its case")
-        verify(!s.dash.isReplay("mock://demo"))
+        verify(s.dash.drivePart.isReplay("REPLAY://x"), "whatever its case")
+        verify(!s.dash.drivePart.isReplay("mock://demo"))
         connect(replayUri())
         wait(50)
         compare(s.dash.driving, false)
@@ -1077,11 +1077,11 @@ TestCase {
         const s = driven()
         const hint = find(s.dash, "driveHint")
         for (let i = 1; i <= 3; ++i) {
-            s.dash.enterDrive()
+            s.dash.drivePart.enterDrive()
             verify(hint.visible, "entry " + i)
             s.dash.leaveDrive(true)
         }
-        s.dash.enterDrive()
+        s.dash.drivePart.enterDrive()
         verify(!hint.visible, "not on the fourth")
     }
 
@@ -1094,7 +1094,7 @@ TestCase {
         uiStore.setValue("driveHideMs", data.ms)
         uiStore.sync()
         const s = driven()
-        s.dash.enterDrive()
+        s.dash.drivePart.enterDrive()
         compare(find(s.dash, "driveHintTimer").interval, data.want)
     }
 
@@ -1102,14 +1102,14 @@ TestCase {
         dashStore.setValue("driveHints", 0)
         dashStore.sync()
         const s = driven()
-        s.dash.enterDrive()
+        s.dash.drivePart.enterDrive()
         const hint = find(s.dash, "driveHint")
         find(s.dash, "driveHintTimer").triggered()
         verify(!hint.visible, "its time")
         s.dash.leaveDrive(true)
         dashStore.setValue("driveHints", 0)
-        s.dash.enterDrive()
-        s.dash.driveTap()
+        s.dash.drivePart.enterDrive()
+        s.dash.drivePart.driveTap()
         verify(!hint.visible, "a tap")
     }
 
@@ -1120,7 +1120,7 @@ TestCase {
         uiStore.sync()
         const s = driven()
         compare(PhoneWindow.orientation, "follow", "before")
-        s.dash.enterDrive()
+        s.dash.drivePart.enterDrive()
         compare(PhoneWindow.orientation, "side", "held while the view is on")
         s.dash.leaveDrive(true)
         compare(PhoneWindow.orientation, "follow", "released on leaving")
@@ -1246,10 +1246,10 @@ TestCase {
         const s = driven()
         enterOn(s)
         compare(Harness.pressBack(s.main), true)
-        verify(s.dash.barsUp, "the press reveals")
+        verify(s.dash.drivePart.barsUp, "the press reveals")
         compare(Harness.pressBack(s.main, true), true, "the repeat is taken, or the system would act on it")
         verify(s.dash.driving, "and doesn't go on to leave")
-        verify(s.dash.barsUp)
+        verify(s.dash.drivePart.barsUp)
     }
 
     function test_backFromAnOpenRecordingGoesToTheList() {
@@ -1362,7 +1362,7 @@ TestCase {
         compare(band.mapToItem(s.dash, 0, 0).y, status.y + status.height, "under the status line")
         verify(band.z > pages.z, "over the gauges")
         compare(pages.mapToItem(s.main.contentItem, 0, 0).y, before, "the gauges didn't move")
-        verify(!s.dash.barsUp && !s.dash.barsHeld, "an alert raises no bars")
+        verify(!s.dash.drivePart.barsUp && !s.dash.drivePart.barsHeld, "an alert raises no bars")
         s.dash.leaveDrive(true)
         verify(waitForPolish(s.main), "laid out")
         verify(!band.visible, "the view's band goes with it")

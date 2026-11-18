@@ -21,9 +21,9 @@ GaugeCard {
                                       : signalCard.host.selectedCell ? signalCard.host.selectedCell.kind : ""
     // The listed profile's rows; every filter property shares one change
     // signal, so reading active re-filters on any change
-    readonly property var offered: signalCard.host.pickable(signalCard.kindNow)
+    readonly property var offered: signalCard.host.addFlowPart.pickable(signalCard.kindNow)
     // The vehicle's picked sets' own signals: sections of their own, first
-    readonly property var ownSets: signalCard.host.pickedOwnRows(signalCard.kindNow)
+    readonly property var ownSets: signalCard.host.addFlowPart.pickedOwnRows(signalCard.kindNow)
     // A section's open state once the user has pressed its header
     property var toggled: ({})
     // Sections [{ key, title, rows, open, hiddenFrom }]: each picked set,
@@ -97,13 +97,13 @@ GaugeCard {
         // Every signal of the listed set at once, with Add's kind
         ThemedButton {
             objectName: "addAllSignals"
-            readonly property var plan: signalCard.host.addKind !== "" ? signalCard.host.addAllPlan(signalCard.host.addKind)
+            readonly property var plan: signalCard.host.addKind !== "" ? signalCard.host.addFlowPart.addAllPlan(signalCard.host.addKind)
                                                              : ({ own: 0, missing: 0, adding: [] })
             visible: plan.own > 1 && plan.adding.length > 0
             Layout.fillWidth: true
             Layout.maximumWidth: implicitWidth
-            text: signalCard.host.addAllWords(plan)
-            onClicked: signalCard.host.addAllSignals()
+            text: signalCard.host.addFlowPart.addAllWords(plan)
+            onClicked: signalCard.host.addFlowPart.addAllSignals()
         }
         // The text alone: a Popup doesn't take the page's zoom, and
         // Plotted only means nothing to a gauge
@@ -163,7 +163,7 @@ GaugeCard {
                             opacity: section.modelData.hiddenFrom >= 0 && chip.index >= section.modelData.hiddenFrom ? 0.5 : 1
                             text: modelData.unit !== "" && modelData.unit !== modelData.name ? qsTr("%1 (%2)").arg(modelData.name).arg(modelData.unit)
                                                         : modelData.name
-                            onClicked: signalCard.host.pickSignal(modelData)
+                            onClicked: signalCard.host.addFlowPart.pickSignal(modelData)
                         }
                     }
                 }

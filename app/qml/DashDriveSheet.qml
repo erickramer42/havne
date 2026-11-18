@@ -60,7 +60,7 @@ Rectangle {
                 objectName: "driveStartLog"
                 highlighted: true
                 visible: Bridge.connected && !Bridge.recordingActive
-                         && !driveSheet.host.isReplay(Bridge.currentUri)
+                         && !driveSheet.host.drivePart.isReplay(Bridge.currentUri)
                 enabled: !Bridge.disconnecting && Bridge.signalModel.tickedCount > 0
                 text: qsTr("Start log")
                 Accessible.name: qsTr("Start a log of the ticked signals")
@@ -96,7 +96,7 @@ Rectangle {
                 objectName: "driveArmedHost"
                 visible: Bridge.connected && !Bridge.logActive
                          && (Bridge.armedActive || !Bridge.recordingActive)
-                         && !driveSheet.host.isReplay(Bridge.currentUri)
+                         && !driveSheet.host.drivePart.isReplay(Bridge.currentUri)
                 implicitWidth: driveArmedButton.implicitWidth
                 implicitHeight: driveArmedButton.implicitHeight
                 Layout.minimumWidth: Theme.touchTarget

@@ -62,7 +62,7 @@ ColumnLayout {
             Accessible.name: !Bridge.connected ? qsTr("Connect first: a session shows the gauges full screen")
                            : topBar.host.driving ? qsTr("Exit drive: leave the full-screen gauges")
                                           : qsTr("Drive: show the gauges full screen")
-            onClicked: topBar.host.driving ? topBar.host.leaveDrive(true) : topBar.host.enterDrive()
+            onClicked: topBar.host.driving ? topBar.host.leaveDrive(true) : topBar.host.drivePart.enterDrive()
         }
         Item {
             objectName: "toolRowStart"
@@ -133,18 +133,18 @@ ColumnLayout {
         ThemedButton {
             objectName: "dashUndo"
             flat: true
-            enabled: topBar.host.canUndo
+            enabled: topBar.host.historyPart.canUndo
             text: qsTr("Undo")
-            Accessible.name: topBar.host.canUndo ? qsTr("Undo: %1").arg(topBar.host.undoWords) : qsTr("Undo")
-            onClicked: topBar.host.undo()
+            Accessible.name: topBar.host.historyPart.canUndo ? qsTr("Undo: %1").arg(topBar.host.historyPart.undoWords) : qsTr("Undo")
+            onClicked: topBar.host.historyPart.undo()
         }
         ThemedButton {
             objectName: "dashRedo"
             flat: true
-            enabled: topBar.host.canRedo
+            enabled: topBar.host.historyPart.canRedo
             text: qsTr("Redo")
-            Accessible.name: topBar.host.canRedo ? qsTr("Redo: %1").arg(topBar.host.redoWords) : qsTr("Redo")
-            onClicked: topBar.host.redo()
+            Accessible.name: topBar.host.historyPart.canRedo ? qsTr("Redo: %1").arg(topBar.host.historyPart.redoWords) : qsTr("Redo")
+            onClicked: topBar.host.historyPart.redo()
         }
         Item { Layout.fillWidth: true }
         ThemedButton {
@@ -153,7 +153,7 @@ ColumnLayout {
             enabled: DashboardBook.canAddCell(topBar.host.doc, topBar.host.pageIndex)
             text: topBar.host.compact ? qsTr("Add") : qsTr("Add gauge")
             Accessible.name: qsTr("Add a gauge")
-            onClicked: topBar.host.startAdd()
+            onClicked: topBar.host.addFlowPart.startAdd()
         }
         ThemedButton {
             objectName: "dashMore"
@@ -253,7 +253,7 @@ ColumnLayout {
             placeholderText: qsTr("Page name")
             Accessible.name: qsTr("This page's name")
             onEditingFinished: {
-                topBar.host.renamePage(text)
+                topBar.host.editsPart.renamePage(text)
                 text = Qt.binding(() => topBar.host.pages[topBar.host.pageIndex]
                                         ? topBar.host.pages[topBar.host.pageIndex].name : "")
             }
@@ -266,13 +266,13 @@ ColumnLayout {
             enabled: DashboardBook.canAddPage(topBar.host.doc)
             text: qsTr("Add page")
             Accessible.name: qsTr("Add a page: choose a blank page or a preset")
-            onClicked: topBar.host.openPresets("add")
+            onClicked: topBar.host.editsPart.openPresets("add")
         }
         ThemedButton {
             id: moreReplace
             objectName: "moreReplace"
             text: qsTr("Replace this page with...")
-            onClicked: topBar.host.openPresets("replace")
+            onClicked: topBar.host.editsPart.openPresets("replace")
         }
         // Nothing to move with one page
         ThemedButton {
@@ -281,7 +281,7 @@ ColumnLayout {
             visible: topBar.host.pages.length > 1
             enabled: topBar.host.pageIndex > 0
             text: qsTr("Move page left")
-            onClicked: topBar.host.movePage(-1)
+            onClicked: topBar.host.editsPart.movePage(-1)
         }
         ThemedButton {
             id: moreRight
@@ -289,7 +289,7 @@ ColumnLayout {
             visible: topBar.host.pages.length > 1
             enabled: topBar.host.pageIndex < topBar.host.pages.length - 1
             text: qsTr("Move page right")
-            onClicked: topBar.host.movePage(1)
+            onClicked: topBar.host.editsPart.movePage(1)
         }
         ThemedButton {
             id: moreRemovePage
@@ -303,7 +303,7 @@ ColumnLayout {
             objectName: "moreExport"
             text: qsTr("Export layout")
             onClicked: {
-                topBar.host.noteLayout("")
+                topBar.host.layoutFilePart.noteLayout("")
                 layoutSaveDialog.open()
             }
         }
@@ -313,7 +313,7 @@ ColumnLayout {
             text: qsTr("Load layout (all pages)")
             Accessible.name: qsTr("Load a layout from a file: it replaces every page")
             onClicked: {
-                topBar.host.noteLayout("")
+                topBar.host.layoutFilePart.noteLayout("")
                 topBar.host.fileAdds = false
                 layoutOpenDialog.open()
             }
@@ -352,14 +352,14 @@ ColumnLayout {
     }
     Label {
         objectName: "dashLayoutNote"
-        visible: topBar.host.editing && topBar.host.layoutNote !== ""
-                 && (topBar.host.moreShown || topBar.host.layoutNoteBad)
+        visible: topBar.host.editing && topBar.host.layoutFilePart.layoutNote !== ""
+                 && (topBar.host.moreShown || topBar.host.layoutFilePart.layoutNoteBad)
         Layout.fillWidth: true
         Layout.preferredWidth: 0
         wrapMode: Text.WordWrap
-        color: topBar.host.layoutNoteBad ? Theme.danger : Theme.textDim
+        color: topBar.host.layoutFilePart.layoutNoteBad ? Theme.danger : Theme.textDim
         font.pixelSize: Theme.fontCaption
-        text: topBar.host.layoutNote
+        text: topBar.host.layoutFilePart.layoutNote
     }
     DocumentSaveDialog {
         id: layoutSaveDialog
@@ -369,9 +369,9 @@ ColumnLayout {
         nameFilters: [qsTr("Layout files (*.json)"), qsTr("All files (*)")]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         currentFile: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-                     + "/" + topBar.host.layoutFileName()
-        onAccepted: topBar.host.exportLayoutTo(layoutSaveDialog.selectedFile)
-        onFailed: words => topBar.host.noteLayout(qsTr("Not saved: %1").arg(words), true)
+                     + "/" + topBar.host.layoutFilePart.layoutFileName()
+        onAccepted: topBar.host.layoutFilePart.exportLayoutTo(layoutSaveDialog.selectedFile)
+        onFailed: words => topBar.host.layoutFilePart.noteLayout(qsTr("Not saved: %1").arg(words), true)
     }
     DocumentOpenDialog {
         id: layoutOpenDialog
@@ -382,12 +382,12 @@ ColumnLayout {
         onAccepted: {
             const adds = topBar.host.fileAdds
             topBar.host.fileAdds = false
-            topBar.host.loadLayoutFrom(layoutOpenDialog.selectedFile, adds)
+            topBar.host.layoutFilePart.loadLayoutFrom(layoutOpenDialog.selectedFile, adds)
         }
         onRejected: topBar.host.fileAdds = false
         onFailed: words => {
             topBar.host.fileAdds = false
-            topBar.host.noteLayout(words, true)
+            topBar.host.layoutFilePart.noteLayout(words, true)
         }
     }
     RowLayout {
@@ -410,7 +410,7 @@ ColumnLayout {
             objectName: "removePageConfirm"
             compact: topBar.host.form === "phone"
             text: qsTr("Remove")
-            onClicked: topBar.host.removePage()
+            onClicked: topBar.host.editsPart.removePage()
         }
         ThemedButton {
             objectName: "removePageKeep"
@@ -442,7 +442,7 @@ ColumnLayout {
             enabled: DashboardBook.canAddPage(topBar.host.doc)
             text: qsTr("Blank page")
             Accessible.name: qsTr("Add a blank page")
-            onClicked: topBar.host.addBlankPage()
+            onClicked: topBar.host.editsPart.addBlankPage()
         }
         Repeater {
             model: DashboardBook.presets
@@ -455,8 +455,8 @@ ColumnLayout {
                 Accessible.name: presetFlow.adding
                     ? qsTr("Add the %1 preset as a new page").arg(modelData.label)
                     : qsTr("Replace this page with the %1 preset").arg(modelData.label)
-                onClicked: presetFlow.adding ? topBar.host.addPresetPage(modelData.key)
-                                             : topBar.host.replaceChosen(modelData.key)
+                onClicked: presetFlow.adding ? topBar.host.editsPart.addPresetPage(modelData.key)
+                                             : topBar.host.editsPart.replaceChosen(modelData.key)
             }
         }
         ThemedButton {
@@ -466,7 +466,7 @@ ColumnLayout {
             enabled: DashboardBook.canAddPage(topBar.host.doc)
             text: qsTr("From a file...")
             onClicked: {
-                topBar.host.noteLayout("")
+                topBar.host.layoutFilePart.noteLayout("")
                 topBar.host.fileAdds = true
                 layoutOpenDialog.open()
             }
@@ -476,7 +476,7 @@ ColumnLayout {
             compact: topBar.host.form === "phone"
             flat: true
             text: qsTr("Cancel")
-            onClicked: topBar.host.closePresets()
+            onClicked: topBar.host.editsPart.closePresets()
         }
     }
     RowLayout {
@@ -494,13 +494,13 @@ ColumnLayout {
             font.pixelSize: Theme.fontCaption
             text: qsTr("Replace the gauges of the page \"%1\" with the %2 preset? They aren't kept.")
                   .arg(topBar.host.pages[topBar.host.pageIndex] ? topBar.host.pages[topBar.host.pageIndex].name : "")
-                  .arg(topBar.host.presetLabel(topBar.host.confirmReplaceKey))
+                  .arg(topBar.host.editsPart.presetLabel(topBar.host.confirmReplaceKey))
         }
         ThemedButton {
             objectName: "replaceConfirm"
             compact: topBar.host.form === "phone"
             text: qsTr("Replace")
-            onClicked: topBar.host.replaceWithPreset(topBar.host.confirmReplaceKey)
+            onClicked: topBar.host.editsPart.replaceWithPreset(topBar.host.confirmReplaceKey)
         }
         ThemedButton {
             objectName: "replaceKeep"
@@ -527,7 +527,7 @@ ColumnLayout {
             objectName: "resetConfirm"
             compact: topBar.host.form === "phone"
             text: qsTr("Reset all")
-            onClicked: topBar.host.resetForm()
+            onClicked: topBar.host.layoutFilePart.resetForm()
         }
         ThemedButton {
             objectName: "resetKeep"
@@ -582,11 +582,11 @@ ColumnLayout {
                 canAddPage: DashboardBook.canAddPage(topBar.host.doc)
                 hairlineWidth: topBar.host.hairlineWidth
                 onPageChosen: (i) => topBar.host.goTo(i)
-                onAddRequested: topBar.host.openPresets("add")
+                onAddRequested: topBar.host.editsPart.openPresets("add")
                 onRenamed: (i, name) => {
                     if (i !== topBar.host.pageIndex)
                         topBar.host.goTo(i)
-                    topBar.host.renamePage(name)
+                    topBar.host.editsPart.renamePage(name)
                 }
             }
         }

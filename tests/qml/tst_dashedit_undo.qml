@@ -195,38 +195,38 @@ TestCase {
     // (the document, the stored text and the page shown) and then redone
     function test_undoRestoresEachStep_data() {
         return [
-            { tag: "add a blank", words: "added Blank", make: p => { p.startAdd(); p.pickKind("blank") } },
+            { tag: "add a blank", words: "added Blank", make: p => { p.addFlowPart.startAdd(); p.addFlowPart.pickKind("blank") } },
             { tag: "add a signal", words: "added Speed",
-              make: p => { p.addKind = "digital"; p.pickSignal(speedRow) } },
-            { tag: "remove", words: "removed B", make: p => p.removeCell(1) },
-            { tag: "move earlier", words: "moved B", make: p => { p.select(1); p.moveTo(0) } },
-            { tag: "move later", words: "moved B", make: p => { p.select(1); p.moveTo(2) } },
-            { tag: "to the start", words: "moved C", make: p => { p.select(2); p.moveTo(0) } },
-            { tag: "to the end", words: "moved A", make: p => { p.select(0); p.moveTo(3) } },
+              make: p => { p.addKind = "digital"; p.addFlowPart.pickSignal(speedRow) } },
+            { tag: "remove", words: "removed B", make: p => p.editsPart.removeCell(1) },
+            { tag: "move earlier", words: "moved B", make: p => { p.select(1); p.editsPart.moveTo(0) } },
+            { tag: "move later", words: "moved B", make: p => { p.select(1); p.editsPart.moveTo(2) } },
+            { tag: "to the start", words: "moved C", make: p => { p.select(2); p.editsPart.moveTo(0) } },
+            { tag: "to the end", words: "moved A", make: p => { p.select(0); p.editsPart.moveTo(3) } },
             { tag: "drop", words: "moved A", make: p => {
                 p.held = 0
                 p.dropAt = 2
                 find(p, "dashPage_0").letGo(false)
             } },
-            { tag: "resize", words: "resized A", make: p => { p.select(0); p.resize(3, 4) } },
-            { tag: "resize a tall cell", words: "resized T", make: p => { p.select(3); p.resize(1, 19) } },
+            { tag: "resize", words: "resized A", make: p => { p.select(0); p.editsPart.resize(3, 4) } },
+            { tag: "resize a tall cell", words: "resized T", make: p => { p.select(3); p.editsPart.resize(1, 19) } },
             { tag: "a stepped option", words: "changed A's decimals",
-              make: p => { p.select(0); p.setOptions({ decimals: 2 }) } },
+              make: p => { p.select(0); p.editsPart.setOptions({ decimals: 2 }) } },
             { tag: "a typed option", words: "changed A's range",
-              make: p => { p.select(0); p.setOptions({ from: 100 }) } },
+              make: p => { p.select(0); p.editsPart.setOptions({ from: 100 }) } },
             { tag: "zones", words: "changed A's zones",
-              make: p => { p.select(0); p.setOptions({ warnFrom: 6000 }) } },
-            { tag: "the label", words: "changed A's label", make: p => { p.select(0); p.setLabel("Z") } },
+              make: p => { p.select(0); p.editsPart.setOptions({ warnFrom: 6000 }) } },
+            { tag: "the label", words: "changed A's label", make: p => { p.select(0); p.editsPart.setLabel("Z") } },
             { tag: "another signal", words: "changed A's signal",
-              make: p => { p.select(0); p.addKind = ""; p.pickSignal(speedRow) } },
+              make: p => { p.select(0); p.addKind = ""; p.addFlowPart.pickSignal(speedRow) } },
             { tag: "paste", words: "pasted A",
               make: p => { p.select(0); p.copySelected(); p.pasteAfter(0) } },
-            { tag: "add a page", words: "added a page", pageAfter: 2, make: p => p.addPage() },
-            { tag: "rename the page", words: "renamed the page", make: p => p.renamePage("New") },
-            { tag: "move the page", words: "moved the page", pageAfter: 1, make: p => p.movePage(1) },
+            { tag: "add a page", words: "added a page", pageAfter: 2, make: p => p.editsPart.addPage() },
+            { tag: "rename the page", words: "renamed the page", make: p => p.editsPart.renamePage("New") },
+            { tag: "move the page", words: "moved the page", pageAfter: 1, make: p => p.editsPart.movePage(1) },
             { tag: "remove a page", words: "removed the page Two", page: 1,
-              make: p => { p.goTo(1); p.removePage() } },
-            { tag: "reset", words: "reset the layout", make: p => p.resetForm() }
+              make: p => { p.goTo(1); p.editsPart.removePage() } },
+            { tag: "reset", words: "reset the layout", make: p => p.layoutFilePart.resetForm() }
         ]
     }
     function test_undoRestoresEachStep(data) {
@@ -238,23 +238,23 @@ TestCase {
         const afterText = storedText(page)
         const afterDoc = DashboardBook.serialize(page.doc)
         verify(afterDoc !== startDoc, "the step changed the document")
-        compare(page.undoStack.length, 1, "one step")
-        compare(page.undoWords, data.words)
-        verify(page.undoLine === "", "edit mode shows no line for a step")
+        compare(page.historyPart.undoStack.length, 1, "one step")
+        compare(page.historyPart.undoWords, data.words)
+        verify(page.historyPart.undoLine === "", "edit mode shows no line for a step")
 
         click(page, "dashUndo")
         compare(DashboardBook.serialize(page.doc), startDoc, "undone")
         compare(storedText(page), startText, "the text from before is stored")
         compare(page.pageIndex, data.page ?? 0, "the step's page shows")
-        compare(page.undoLine, "Undid: " + data.words)
-        verify(!page.canUndo)
+        compare(page.historyPart.undoLine, "Undid: " + data.words)
+        verify(!page.historyPart.canUndo)
 
         click(page, "dashRedo")
         compare(DashboardBook.serialize(page.doc), afterDoc, "redone")
         compare(storedText(page), afterText, "the text after it is stored")
         compare(page.pageIndex, data.pageAfter ?? 0, "the page after it shows")
-        compare(page.undoLine, "Redid: " + data.words)
-        verify(page.canUndo && !page.canRedo)
+        compare(page.historyPart.undoLine, "Redid: " + data.words)
+        verify(page.historyPart.canUndo && !page.historyPart.canRedo)
     }
 
     // A field still open commits as its own step, which Undo then takes
@@ -263,25 +263,25 @@ TestCase {
         const page = storedPageOf({}, twoPages())
         page.startEditing()
         page.select(0)
-        page.resize(3, 4)
+        page.editsPart.resize(3, 4)
         const field = find(page, "panelLabel")
         field.forceActiveFocus()
         field.text = "Typed"
-        page.undo()
+        page.historyPart.undo()
         compare(labels(page), ["A", "B", "C", "T"], "the label committed, then undone")
         compare(page.doc.pages[0].cells[0].w, 3, "the resize stays")
-        compare(page.undoWords, "resized A")
-        compare(page.redoWords, "changed A's label")
+        compare(page.historyPart.undoWords, "resized A")
+        compare(page.historyPart.redoWords, "changed A's label")
     }
 
     function test_aNewStepClearsRedo() {
         const page = storedPageOf({}, twoPages())
         page.startEditing()
-        page.removeCell(0)
-        page.undo()
-        verify(page.canRedo)
-        page.removeCell(1)
-        verify(!page.canRedo, "a new step after an undo")
+        page.editsPart.removeCell(0)
+        page.historyPart.undo()
+        verify(page.historyPart.canRedo)
+        page.editsPart.removeCell(1)
+        verify(!page.historyPart.canRedo, "a new step after an undo")
         compare(labels(page), ["A", "C", "T"])
     }
 
@@ -294,9 +294,9 @@ TestCase {
         const start = storedText(page)
         for (let v = 1; v <= 5; ++v)
             spin(find(page, "panelDecimals"), v)
-        compare(page.undoStack.length, 1, "five steps, one run")
+        compare(page.historyPart.undoStack.length, 1, "five steps, one run")
         compare(page.doc.pages[0].cells[0].options.decimals, 5)
-        page.undo()
+        page.historyPart.undo()
         compare(storedText(page), start, "one Undo back to the start")
         compare(page.selected, 0, "the panel stays on its cell")
 
@@ -305,7 +305,7 @@ TestCase {
         spin(find(page, "panelDecimals"), 1)
         page.select(0)
         spin(find(page, "panelDecimals"), 2)
-        compare(page.undoStack.length, 3, "a step on another cell between them")
+        compare(page.historyPart.undoStack.length, 3, "a step on another cell between them")
 
         page.stopEditing()
         page.startEditing()
@@ -313,17 +313,17 @@ TestCase {
         // From 3: the cell's decimals are 2 here, and a run back to them leaves nothing
         for (let v = 3; v <= 7; ++v) {
             if (v === 5)
-                page.lastAt -= page.groupMs + 1
+                page.historyPart.lastAt -= page.historyPart.groupMs + 1
             spin(find(page, "panelDecimals"), v)
         }
-        compare(page.undoStack.length, 2, "quiet past the group's time")
+        compare(page.historyPart.undoStack.length, 2, "quiet past the group's time")
 
         page.stopEditing()
         page.startEditing()
         page.select(0)
         type(find(page, "panelFrom"), "100")
         type(find(page, "panelFrom"), "200")
-        compare(page.undoStack.length, 2, "a typed field commits once each time")
+        compare(page.historyPart.undoStack.length, 2, "a typed field commits once each time")
     }
 
     // A run back where it began leaves no step, since its Undo would change nothing
@@ -334,11 +334,11 @@ TestCase {
         page.startEditing()
         page.select(0)
         spin(find(page, "panelDecimals"), 3)
-        verify(page.canUndo)
+        verify(page.historyPart.canUndo)
         spin(find(page, "panelDecimals"), 2)
-        verify(!page.canUndo, "back where it began")
+        verify(!page.historyPart.canUndo, "back where it began")
         spin(find(page, "panelDecimals"), 3)
-        compare(page.undoStack.length, 1, "a later step starts a run of its own")
+        compare(page.historyPart.undoStack.length, 1, "a later step starts a run of its own")
     }
 
     // Standing up changes the span and the option in one write: one Undo
@@ -350,9 +350,9 @@ TestCase {
         click(page, "panelVertical")
         const c = page.doc.pages[0].cells[2]
         compare([c.w, c.h, c.options.vertical], [1, 4, true])
-        compare(page.undoStack.length, 1)
-        compare(page.undoWords, "changed C's standing up")
-        page.undo()
+        compare(page.historyPart.undoStack.length, 1)
+        compare(page.historyPart.undoWords, "changed C's standing up")
+        page.historyPart.undo()
         compare(storedText(page), start, "the span and the option both back")
     }
 
@@ -361,13 +361,13 @@ TestCase {
     function test_doneEndsTheHistory() {
         const page = storedPageOf({}, twoPages())
         page.startEditing()
-        page.removeCell(0)
-        page.removeCell(0)
-        page.undo()
-        verify(page.canUndo && page.canRedo)
+        page.editsPart.removeCell(0)
+        page.editsPart.removeCell(0)
+        page.historyPart.undo()
+        verify(page.historyPart.canUndo && page.historyPart.canRedo)
         click(page, "dashDone")
-        verify(!page.canUndo && !page.canRedo, "Done empties both")
-        compare(page.undoLine, "", "and the line")
+        verify(!page.historyPart.canUndo && !page.historyPart.canRedo, "Done empties both")
+        compare(page.historyPart.undoLine, "", "and the line")
 
         page.select(0)
         click(page, "panelLater")
@@ -384,12 +384,12 @@ TestCase {
         const page = storedPageOf({}, twoPages())
         page.select(0)
         click(page, "panelLater")
-        verify(page.canUndo, "the menu's step is undoable")
+        verify(page.historyPart.canUndo, "the menu's step is undoable")
         page.visible = false
-        verify(!page.canUndo && !page.canRedo, "hidden: nothing to undo")
-        compare(page.undoLine, "")
+        verify(!page.historyPart.canUndo && !page.historyPart.canRedo, "hidden: nothing to undo")
+        compare(page.historyPart.undoLine, "")
         page.visible = true
-        verify(!page.canUndo, "and still none when it comes back")
+        verify(!page.historyPart.canUndo, "and still none when it comes back")
     }
 
     // Edit mode stays open while the page is hidden, so its history does too
@@ -398,12 +398,12 @@ TestCase {
         page.startEditing()
         page.select(0)
         click(page, "panelLater")
-        verify(page.canUndo, "an edit step")
+        verify(page.historyPart.canUndo, "an edit step")
         page.visible = false
         verify(page.editing, "edit mode stays open")
-        verify(page.canUndo, "and its history")
+        verify(page.historyPart.canUndo, "and its history")
         page.visible = true
-        verify(page.editing && page.canUndo, "back to the bar with Undo enabled")
+        verify(page.editing && page.historyPart.canUndo, "back to the bar with Undo enabled")
         verify(findChild(page, "dashUndo").enabled, "Undo's button is on")
         page.stopEditing()
     }
@@ -412,12 +412,12 @@ TestCase {
         const page = storedPageOf({}, twoPages())
         page.startEditing()
         for (let i = 1; i <= 51; ++i)
-            page.renamePage("N" + i)
-        compare(page.undoStack.length, page.undoLimit)
+            page.editsPart.renamePage("N" + i)
+        compare(page.historyPart.undoStack.length, page.historyPart.undoLimit)
         for (let i = 0; i < 50; ++i)
-            page.undo()
+            page.historyPart.undo()
         compare(page.doc.pages[0].name, "N1", "back to the first rename, not before it")
-        verify(!page.canUndo)
+        verify(!page.historyPart.canUndo)
     }
 
     // On a fresh install nothing is stored: undoing the first change stores
@@ -427,12 +427,12 @@ TestCase {
         compare(storedText(page), "")
         const builtIn = DashboardBook.serialize(page.doc)
         page.startEditing()
-        page.removeCell(0)
+        page.editsPart.removeCell(0)
         verify(storedText(page) !== "")
-        page.undo()
+        page.historyPart.undo()
         compare(storedText(page), "", "nothing stored")
         compare(DashboardBook.serialize(page.doc), builtIn, "the built-in layout shows")
-        page.redo()
+        page.historyPart.redo()
         compare(storedText(page), DashboardBook.serialize(page.doc), "the change stored again")
     }
 
@@ -442,32 +442,32 @@ TestCase {
         const page = storedPageOf({}, twoPages())
         page.startEditing()
         page.select(1)
-        page.resize(3, 4)
-        page.undo()
+        page.editsPart.resize(3, 4)
+        page.historyPart.undo()
         compare([page.panel, page.selected], ["cell", 1], "an undone resize keeps the panel")
 
         page.select(0)
-        page.moveTo(2)
+        page.editsPart.moveTo(2)
         compare(page.selected, 2)
-        page.undo()
+        page.historyPart.undo()
         compare([page.panel, page.selected], ["cell", 0], "an undone move follows its cell")
-        page.redo()
+        page.historyPart.redo()
         compare([page.panel, page.selected], ["cell", 2], "and a redone one")
 
         page.select(2)
-        page.removeCell(0)
+        page.editsPart.removeCell(0)
         compare(page.selected, 1)
-        page.undo()
+        page.historyPart.undo()
         compare([page.panel, page.selected], ["", -1], "an undone Remove of another cell closes it")
 
-        page.startAdd()
-        page.pickKind("blank")
+        page.addFlowPart.startAdd()
+        page.addFlowPart.pickKind("blank")
         compare(page.panel, "cell")
-        page.undo()
+        page.historyPart.undo()
         compare([page.panel, page.selected], ["", -1], "an undone Add closes it")
 
-        page.startAdd()
-        page.undo()
+        page.addFlowPart.startAdd()
+        page.historyPart.undo()
         compare(page.panel, "", "an undo closes Add's panel")
     }
 
@@ -487,11 +487,11 @@ TestCase {
         click(page, "dashUndoLineUndo")
         compare(labels(page), ["A", "B", "C", "T"])
         compare(find(page, "dashUndoLineText").text, "Undid: moved A")
-        page.undoLineMs = 300
+        page.historyPart.undoLineMs = 300
         tryVerify(() => !line.visible, 3000, "the line hides after its time")
 
         page.startEditing()
-        page.removeCell(0)
+        page.editsPart.removeCell(0)
         verify(!line.visible, "a step in edit mode shows none")
         click(page, "dashUndo")
         verify(line.visible)
@@ -512,11 +512,11 @@ TestCase {
         const at = () => cell.mapToItem(page, 0, 0).y
         const before = at()
         verify(!line.visible)
-        page.showLine("Undid: removed A")
+        page.historyPart.showLine("Undid: removed A")
         verify(line.visible)
         verify(waitForPolish(page.Window.window), "laid out")
         compare(at(), before, "no jump with the line")
-        page.undoLine = ""
+        page.historyPart.undoLine = ""
         verify(waitForPolish(page.Window.window), "laid out")
         compare(at(), before, "no jump without it")
     }
@@ -580,7 +580,7 @@ TestCase {
         const page = storedPageOf({}, twoPages())
         page.forceActiveFocus()
         page.startEditing()
-        page.removeCell(0)
+        page.editsPart.removeCell(0)
         keyClick("z", Qt.ControlModifier)
         compare(labels(page), ["A", "B", "C", "T"], "Ctrl+Z")
         keyClick("z", Qt.ControlModifier | Qt.ShiftModifier)
@@ -591,13 +591,13 @@ TestCase {
         page.stopEditing()
 
         page.select(0)
-        page.moveTo(1)
+        page.editsPart.moveTo(1)
         page.closePanel()
         keyClick("z", Qt.ControlModifier)
         compare(labels(page), ["B", "C", "T"], "outside edit mode")
 
         page.startEditing()
-        page.removeCell(0)
+        page.editsPart.removeCell(0)
         page.select(0)
         const field = find(page, "panelLabel")
         field.forceActiveFocus()
@@ -610,8 +610,8 @@ TestCase {
         const phone = storedPageOf({ form: "phone", width: 384, height: 832 }, twoPages())
         page.visible = false
         phone.forceActiveFocus()
-        phone.removeCell(0)
-        verify(phone.canUndo)
+        phone.editsPart.removeCell(0)
+        verify(phone.historyPart.canUndo)
         keyClick("z", Qt.ControlModifier)
         compare(labels(phone), ["B", "C", "T"], "no keys on the phone form")
     }
@@ -629,7 +629,7 @@ TestCase {
         verify(undo.visible && !undo.enabled && redo.visible && !redo.enabled, "shown and off")
         compare(redo.opacity, 0.45)
         compare(undo.Accessible.name, "Undo")
-        page.removeCell(0)
+        page.editsPart.removeCell(0)
         compare(undo.Accessible.name, "Undo: removed A")
         click(page, "dashUndo")
         compare(redo.Accessible.name, "Redo: removed A")
@@ -660,7 +660,7 @@ TestCase {
         verify(plus.width < box.width && paste.x >= plus.width, "split in two")
         click(page, "dashPasteCell_0")
         compare(labels(page), ["A", "B", "C", "T", "A"], "appended")
-        compare(page.undoWords, "pasted A")
+        compare(page.historyPart.undoWords, "pasted A")
     }
 
     // ---- The desktop edits the phone's layout (B1)
@@ -675,7 +675,7 @@ TestCase {
     }
     function phoneSwitchOn(page) {
         page.startEditing()
-        page.showStoredLayout()
+        page.historyPart.showStoredLayout()
         verify(page.phoneSwitchShown)
         click(page, "dashPhoneSwitch")
         verify(page.phoneEdit)
@@ -700,7 +700,7 @@ TestCase {
     function test_theSwitchShowsThePhoneDocumentAndOffReturnsTheDesktopsUntouched() {
         const page = bothFormsPage()
         page.startEditing()
-        page.showStoredLayout()
+        page.historyPart.showStoredLayout()
         const desktopText = find(page, "dashStore").desktop
         compare(labels(page), ["DesktopCell"])
         phoneSwitchOn(page)
@@ -719,7 +719,7 @@ TestCase {
         const store = find(page, "dashStore")
         const desktopText = store.desktop
         const phoneText = store.phone
-        page.renamePage("Renamed")
+        page.editsPart.renamePage("Renamed")
         verify(store.phone !== phoneText, "the phone's text changed")
         compare(store.desktop, desktopText)
     }
@@ -739,18 +739,18 @@ TestCase {
     function test_switchingDropsTheHistoryTheSelectionTheListAndTheQuestions() {
         const page = bothFormsPage()
         page.startEditing()
-        page.showStoredLayout()
-        page.renamePage("Changed")
-        verify(page.canUndo)
+        page.historyPart.showStoredLayout()
+        page.editsPart.renamePage("Changed")
+        verify(page.historyPart.canUndo)
         page.selected = 0
         page.panel = "cell"
         page.confirmReset = true
         click(page, "dashPhoneSwitch")
-        verify(!page.canUndo, "the history is the form's own")
+        verify(!page.historyPart.canUndo, "the history is the form's own")
         compare(page.selected, -1)
         compare(page.panel, "")
         verify(!page.confirmReset)
-        page.openPresets("add")
+        page.editsPart.openPresets("add")
         click(page, "dashPhoneSwitch")
         compare(page.presetList, "")
     }
@@ -784,7 +784,7 @@ TestCase {
         store.phone = DashboardBook.serialize(phoneDoc)
         store.phonePage = 0
         page.startEditing()
-        page.showStoredLayout()
+        page.historyPart.showStoredLayout()
         page.goTo(2)
         compare(page.pageIndex, 2)
         click(page, "dashPhoneSwitch")
@@ -800,19 +800,19 @@ TestCase {
         phoneSwitchOn(page)
         click(page, "dashMore")
         const url = layoutUrl("layout-frame-phone.json")
-        verify(page.exportLayoutTo(url), page.layoutNote)
-        verify(page.layoutNote.indexOf("It's a phone layout") >= 0, page.layoutNote)
+        verify(page.layoutFilePart.exportLayoutTo(url), page.layoutFilePart.layoutNote)
+        verify(page.layoutFilePart.layoutNote.indexOf("It's a phone layout") >= 0, page.layoutFilePart.layoutNote)
         const text = Bridge.layoutFileText(url).text
         compare(JSON.parse(text).form, "phone")
-        page.renamePage("Other")
-        verify(page.loadLayoutFrom(url), page.layoutNote)
+        page.editsPart.renamePage("Other")
+        verify(page.layoutFilePart.loadLayoutFrom(url), page.layoutFilePart.layoutNote)
         const desktopUrl = layoutUrl("layout-frame-desktop.json")
         const other = bothFormsPage()
         other.startEditing()
-        verify(other.exportLayoutTo(desktopUrl))
+        verify(other.layoutFilePart.exportLayoutTo(desktopUrl))
         other.destroy()
-        verify(!page.loadLayoutFrom(desktopUrl))
-        verify(page.layoutNote.indexOf("is a desktop layout") >= 0, page.layoutNote)
+        verify(!page.layoutFilePart.loadLayoutFrom(desktopUrl))
+        verify(page.layoutFilePart.layoutNote.indexOf("is a desktop layout") >= 0, page.layoutFilePart.layoutNote)
     }
 
     function test_aConnectedDesktopInTheFrameNeverEntersTheDriveView() {
@@ -822,12 +822,12 @@ TestCase {
         compare(Bridge.connectSession("mock://demo"), "")
         tryVerify(() => Bridge.connected, 5000)
         wait(100)
-        page.enterDrive()
+        page.drivePart.enterDrive()
         verify(!page.driving, "editing is an editor")
         // The gate's own term: the frame still on with editing already off
         page.editing = false
         verify(page.phoneEdit)
-        page.enterDrive()
+        page.drivePart.enterDrive()
         verify(!page.driving, "the frame is an editor")
         page.editing = true
         page.stopEditing()

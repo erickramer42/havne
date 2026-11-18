@@ -37,7 +37,7 @@ GaugeCard {
                 text: addCard.host.changingKind ? qsTr("Back") : qsTr("Close")
                 onClicked: {
                     if (addCard.host.changingKind) {
-                        addCard.host.leaveKindList()
+                        addCard.host.addFlowPart.leaveKindList()
                         return
                     }
                     addCard.host.commitTyping()
@@ -102,7 +102,7 @@ GaugeCard {
                                                         && addCard.host.selectedCell.kind === kindTile.modelData
                         checkable: current
                         checked: current
-                        onClicked: addCard.host.pickKind(kindTile.modelData)
+                        onClicked: addCard.host.addFlowPart.pickKind(kindTile.modelData)
                     }
                 }
             }

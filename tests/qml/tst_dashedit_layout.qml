@@ -181,24 +181,24 @@ TestCase {
         const first = docOf([cellOf("A", "analog"), cellOf("B")])
         const url = layoutUrl("layout-roundtrip.json")
         let page = storedPageOf({}, first)
-        verify(page.exportLayoutTo(url), page.layoutNote)
+        verify(page.layoutFilePart.exportLayoutTo(url), page.layoutFilePart.layoutNote)
         const raw = JSON.parse(Bridge.layoutFileText(url).text)
         compare(raw.form, "desktop")
         compare(raw.files, [])
-        compare(page.layoutNote, "Saved this layout to a file. It's a desktop layout: it loads on a desktop, "
+        compare(page.layoutFilePart.layoutNote, "Saved this layout to a file. It's a desktop layout: it loads on a desktop, "
                 + "not on a phone. A layout isn't scaled between forms.")
         page.destroy()
 
         const second = docOf([cellOf("X")])
         page = storedPageOf({}, second)
         page.startEditing()
-        verify(page.loadLayoutFrom(url), page.layoutNote)
+        verify(page.layoutFilePart.loadLayoutFrom(url), page.layoutFilePart.layoutNote)
         compare(page.doc, first, "the file's layout, with no form or files key")
         compare(storedText(page), DashboardBook.serialize(first), "stored as an edit would store it")
-        compare(page.undoWords, "load a layout")
-        page.undo()
+        compare(page.historyPart.undoWords, "load a layout")
+        page.historyPart.undo()
         compare(page.doc, second, "one Undo takes the whole load back")
-        verify(!page.canUndo, "and it was one step")
+        verify(!page.historyPart.canUndo, "and it was one step")
     }
 
     // Load layout through the phone's picker: a pick of
@@ -208,10 +208,10 @@ TestCase {
         const plainUrl = layoutUrl("layout-picked.json")
         const parenUrl = layoutUrl("layout-picked (1).json")
         let src = storedPageOf({}, docOf([cellOf("Plain")]))
-        verify(src.exportLayoutTo(plainUrl), src.layoutNote)
+        verify(src.layoutFilePart.exportLayoutTo(plainUrl), src.layoutFilePart.layoutNote)
         src.destroy()
         src = storedPageOf({}, docOf([cellOf("Paren")]))
-        verify(src.exportLayoutTo(parenUrl), src.layoutNote)
+        verify(src.layoutFilePart.exportLayoutTo(parenUrl), src.layoutFilePart.layoutNote)
         src.destroy()
 
         const page = storedPageOf({}, docOf([cellOf("X")]))
@@ -226,8 +226,8 @@ TestCase {
         compare(labels(page), ["Paren"], "the second pick's file")
         dialog.open()
         DocumentPicker.deliver(dialog.request, -1, "", "")
-        compare(page.layoutNote, "The picker returned no document")
-        verify(page.layoutNoteBad)
+        compare(page.layoutFilePart.layoutNote, "The picker returned no document")
+        verify(page.layoutFilePart.layoutNoteBad)
         compare(labels(page), ["Paren"], "nothing read")
     }
 
@@ -242,20 +242,20 @@ TestCase {
         DocumentPicker.setPickerForTesting(true)
         const url = layoutUrl("layout-save-picked.json")
         dialog.open()
-        compare(DocumentPicker.titleForTesting(), page.layoutFileName())
+        compare(DocumentPicker.titleForTesting(), page.layoutFilePart.layoutFileName())
         compare(DocumentPicker.mimeTypeForTesting(), "application/json")
         DocumentPicker.deliver(dialog.request, -1, url.toString(), "89", -1)
-        verify(!page.layoutNoteBad, page.layoutNote)
+        verify(!page.layoutFilePart.layoutNoteBad, page.layoutFilePart.layoutNote)
         const reader = storedPageOf({}, docOf([cellOf("X")]))
-        reader.loadLayoutFrom(url)
+        reader.layoutFilePart.loadLayoutFrom(url)
         compare(labels(reader), ["Saved"], "the picked document holds the layout")
 
         dialog.open()
-        compare(DocumentPicker.titleForTesting(), page.layoutFileName(),
+        compare(DocumentPicker.titleForTesting(), page.layoutFilePart.layoutFileName(),
                 "the page's name again, never the last answer's")
         DocumentPicker.deliver(dialog.request, -1, "", "")
-        compare(page.layoutNote, "Not saved: The picker returned no document")
-        verify(page.layoutNoteBad)
+        compare(page.layoutFilePart.layoutNote, "Not saved: The picker returned no document")
+        verify(page.layoutFilePart.layoutNoteBad)
     }
 
     // A layout the page can't write as a file is refused before the bridge's
@@ -273,7 +273,7 @@ TestCase {
         dialog.open()
         DocumentPicker.deliver(dialog.request, -1, uri, "bad-layout.json",
                                DocumentPicker.launchedMsForTesting() + 50)
-        compare(page.layoutNote, "Not saved: this layout can't be written as a file")
+        compare(page.layoutFilePart.layoutNote, "Not saved: this layout can't be written as a file")
         compare(DocumentPicker.verdictOfForTesting(uri), 0, "the refusal took the verdict")
     }
 
@@ -283,38 +283,38 @@ TestCase {
         const urlA = layoutUrl("layout-quick-a.json")
         const urlB = layoutUrl("layout-quick-b.json")
         let src = storedPageOf({}, a)
-        verify(src.exportLayoutTo(urlA), src.layoutNote)
+        verify(src.layoutFilePart.exportLayoutTo(urlA), src.layoutFilePart.layoutNote)
         src.destroy()
         src = storedPageOf({}, b)
-        verify(src.exportLayoutTo(urlB), src.layoutNote)
+        verify(src.layoutFilePart.exportLayoutTo(urlB), src.layoutFilePart.layoutNote)
         src.destroy()
         const start = docOf([cellOf("S")])
         const page = storedPageOf({}, start)
         page.startEditing()
-        verify(page.loadLayoutFrom(urlA), page.layoutNote)
-        verify(page.loadLayoutFrom(urlB), page.layoutNote)
-        page.undo()
+        verify(page.layoutFilePart.loadLayoutFrom(urlA), page.layoutFilePart.layoutNote)
+        verify(page.layoutFilePart.loadLayoutFrom(urlB), page.layoutFilePart.layoutNote)
+        page.historyPart.undo()
         compare(page.doc, a, "the first Undo takes back the second load only")
-        page.undo()
+        page.historyPart.undo()
         compare(page.doc, start, "the second takes back the first")
-        verify(!page.canUndo)
+        verify(!page.historyPart.canUndo)
     }
 
     function test_aPhoneLayoutIsNotLoadedOnTheDesktopForm() {
         const url = layoutUrl("layout-phone.json")
         const phone = storedPageOf({ form: "phone" }, docOf([cellOf("P")]))
-        verify(phone.exportLayoutTo(url), phone.layoutNote)
+        verify(phone.layoutFilePart.exportLayoutTo(url), phone.layoutFilePart.layoutNote)
         compare(JSON.parse(Bridge.layoutFileText(url).text).form, "phone")
         phone.destroy()
         const desktop = docOf([cellOf("D")])
         const page = storedPageOf({}, desktop)
         page.startEditing()
-        verify(!page.loadLayoutFrom(url))
-        verify(page.layoutNoteBad)
-        verify(page.layoutNote.indexOf("phone layout") >= 0 && page.layoutNote.indexOf("desktop form") >= 0,
-               page.layoutNote)
+        verify(!page.layoutFilePart.loadLayoutFrom(url))
+        verify(page.layoutFilePart.layoutNoteBad)
+        verify(page.layoutFilePart.layoutNote.indexOf("phone layout") >= 0 && page.layoutFilePart.layoutNote.indexOf("desktop form") >= 0,
+               page.layoutFilePart.layoutNote)
         compare(page.doc, desktop, "nothing changed")
-        verify(!page.canUndo)
+        verify(!page.historyPart.canUndo)
         compare(find(page, "dashStore").desktopUnread, "", "the unread text is never touched")
     }
 
@@ -333,9 +333,9 @@ TestCase {
         const src = storedPageOf(props, docOf([cellOf("A")]))
         src.startEditing()
         click(src, "dashMore")
-        verify(src.exportLayoutTo(url), src.layoutNote)
-        verify(!src.layoutNoteBad)
-        compare(src.layoutNote, "Saved this layout to a file. It's a " + data.form + " layout: it loads on a "
+        verify(src.layoutFilePart.exportLayoutTo(url), src.layoutFilePart.layoutNote)
+        verify(!src.layoutFilePart.layoutNoteBad)
+        compare(src.layoutFilePart.layoutNote, "Saved this layout to a file. It's a " + data.form + " layout: it loads on a "
                 + data.form + ", not on a " + data.other + ". A layout isn't scaled between forms.")
         const note = find(src, "dashLayoutNote")
         verify(note.visible, "the note shows in the More row")
@@ -345,9 +345,9 @@ TestCase {
         src.destroy()
         const page = storedPageOf({ form: data.other }, docOf([cellOf("B")]))
         page.startEditing()
-        verify(!page.loadLayoutFrom(url))
-        verify(page.layoutNote.indexOf("is a " + data.form + " layout") >= 0
-               && page.layoutNote.indexOf("A layout isn't scaled between forms") >= 0, page.layoutNote)
+        verify(!page.layoutFilePart.loadLayoutFrom(url))
+        verify(page.layoutFilePart.layoutNote.indexOf("is a " + data.form + " layout") >= 0
+               && page.layoutFilePart.layoutNote.indexOf("A layout isn't scaled between forms") >= 0, page.layoutFilePart.layoutNote)
     }
 
     function test_aDamagedOrNewerOrEmptyFileIsRefusedInWords_data() {
@@ -364,19 +364,19 @@ TestCase {
         const own = docOf([cellOf("A")])
         const page = storedPageOf({}, own)
         page.startEditing()
-        verify(!page.loadLayoutFrom(url))
-        verify(page.layoutNoteBad)
-        verify(page.layoutNote.indexOf(data.words) >= 0, page.layoutNote)
+        verify(!page.layoutFilePart.loadLayoutFrom(url))
+        verify(page.layoutFilePart.layoutNoteBad)
+        verify(page.layoutFilePart.layoutNote.indexOf(data.words) >= 0, page.layoutFilePart.layoutNote)
         compare(page.doc, own)
         compare(storedText(page), DashboardBook.serialize(own))
-        verify(!page.canUndo)
+        verify(!page.historyPart.canUndo)
     }
 
     function test_aMissingFileIsRefusedInWords() {
         const page = storedPageOf({}, docOf([cellOf("A")]))
         page.startEditing()
-        verify(!page.loadLayoutFrom(Qt.resolvedUrl("no-such-layout.json")))
-        verify(page.layoutNote.indexOf("Couldn't read the file") >= 0, page.layoutNote)
+        verify(!page.layoutFilePart.loadLayoutFrom(Qt.resolvedUrl("no-such-layout.json")))
+        verify(page.layoutFilePart.layoutNote.indexOf("Couldn't read the file") >= 0, page.layoutFilePart.layoutNote)
     }
 
     function test_aFileWithDroppedGaugesSaysSoAndLoadsTheRest() {
@@ -385,10 +385,10 @@ TestCase {
         const url = Harness.writeScratchFile("layout-dropped.json", text)
         const page = storedPageOf({}, docOf([cellOf("A")]))
         page.startEditing()
-        verify(page.loadLayoutFrom(url), page.layoutNote)
+        verify(page.layoutFilePart.loadLayoutFrom(url), page.layoutFilePart.layoutNote)
         compare(labels(page), ["Good"])
-        verify(page.layoutNote.indexOf("1 gauge left out") >= 0, page.layoutNote)
-        verify(!page.layoutNoteBad)
+        verify(page.layoutFilePart.layoutNote.indexOf("1 gauge left out") >= 0, page.layoutFilePart.layoutNote)
+        verify(!page.layoutFilePart.layoutNoteBad)
     }
 
     function test_aFileWithNoFormIsReadAsThisFormAndSaysSo() {
@@ -396,9 +396,9 @@ TestCase {
                                              JSON.stringify({ format: 2, pages: [{ name: "T", cells: [cellOf("Good")] }] }))
         const page = storedPageOf({}, docOf([cellOf("A")]))
         page.startEditing()
-        verify(page.loadLayoutFrom(url), page.layoutNote)
-        verify(page.layoutNote.indexOf("named no form") >= 0 && page.layoutNote.indexOf("desktop form") >= 0,
-               page.layoutNote)
+        verify(page.layoutFilePart.loadLayoutFrom(url), page.layoutFilePart.layoutNote)
+        verify(page.layoutFilePart.layoutNote.indexOf("named no form") >= 0 && page.layoutFilePart.layoutNote.indexOf("desktop form") >= 0,
+               page.layoutFilePart.layoutNote)
     }
 
     function test_theSameLayoutLoadedAgainChangesNothing() {
@@ -406,10 +406,10 @@ TestCase {
         const url = layoutUrl("layout-same.json")
         const page = storedPageOf({}, own)
         page.startEditing()
-        verify(page.exportLayoutTo(url))
-        verify(!page.loadLayoutFrom(url))
-        verify(page.layoutNote.indexOf("already shown") >= 0, page.layoutNote)
-        verify(!page.canUndo)
+        verify(page.layoutFilePart.exportLayoutTo(url))
+        verify(!page.layoutFilePart.loadLayoutFrom(url))
+        verify(page.layoutFilePart.layoutNote.indexOf("already shown") >= 0, page.layoutFilePart.layoutNote)
+        verify(!page.historyPart.canUndo)
     }
 
     function test_noLoadPastAnOpenQuestion() {
@@ -417,15 +417,15 @@ TestCase {
         const own = docOf([cellOf("A")])
         const page = storedPageOf({}, own)
         page.startEditing()
-        verify(page.exportLayoutTo(url))
+        verify(page.layoutFilePart.exportLayoutTo(url))
         page.doc = docOf([cellOf("Other")])
         page.confirmReset = true
-        verify(!page.loadLayoutFrom(url))
-        verify(page.layoutNoteBad)
+        verify(!page.layoutFilePart.loadLayoutFrom(url))
+        verify(page.layoutFilePart.layoutNoteBad)
         compare(labels(page), ["Other"], "the question stands and nothing loaded")
         page.confirmReset = false
         page.confirmRemovePage = true
-        verify(!page.loadLayoutFrom(url))
+        verify(!page.layoutFilePart.loadLayoutFrom(url))
         compare(labels(page), ["Other"])
     }
 
@@ -457,35 +457,35 @@ TestCase {
         const own = docOf([cellOf("A"), Object.assign(cellOf("Boosty"), { refs: ["key:boosty"] })])
         const url = layoutUrl("layout-needs.json")
         let page = storedPageOf({ vehicles: vehicles }, own)
-        verify(page.exportLayoutTo(url), page.layoutNote)
+        verify(page.layoutFilePart.exportLayoutTo(url), page.layoutFilePart.layoutNote)
         const raw = JSON.parse(Bridge.layoutFileText(url).text)
         compare(raw.files, [{ name: "Boosty", sha256: picked[0].sha256 }],
                 "the pick the layout needs, by name and its written file's hash")
-        compare(page.layoutNote, "Saved this layout to a file. It's a desktop layout: it loads on a desktop, "
+        compare(page.layoutFilePart.layoutNote, "Saved this layout to a file. It's a desktop layout: it loads on a desktop, "
                 + "not on a phone. A layout isn't scaled between forms. It needs the plugin Boosty.")
-        compare(page.layoutFileName(), "dashboard-test-car-desktop.json")
+        compare(page.layoutFilePart.layoutFileName(), "dashboard-test-car-desktop.json")
         page.destroy()
 
         // A layout of cells that read no pick names none
         page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("A")]))
         const noneUrl = layoutUrl("layout-needs-none.json")
-        verify(page.exportLayoutTo(noneUrl))
+        verify(page.layoutFilePart.exportLayoutTo(noneUrl))
         compare(JSON.parse(Bridge.layoutFileText(noneUrl).text).files, [])
         page.destroy()
 
         // Loaded where the vehicle doesn't pick it: the load names it
         page = storedPageOf({}, docOf([cellOf("X")]))
         page.startEditing()
-        verify(page.loadLayoutFrom(url), page.layoutNote)
-        verify(page.layoutNote.indexOf("plugins this vehicle doesn't pick: Boosty") >= 0, page.layoutNote)
+        verify(page.layoutFilePart.loadLayoutFrom(url), page.layoutFilePart.layoutNote)
+        verify(page.layoutFilePart.layoutNote.indexOf("plugins this vehicle doesn't pick: Boosty") >= 0, page.layoutFilePart.layoutNote)
         compare(page.doc.pages[0].cells.length, 2, "the layout loads whole")
         page.destroy()
 
         // And where it picks it, nothing is said
         page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
         page.startEditing()
-        verify(page.loadLayoutFrom(url), page.layoutNote)
-        verify(page.layoutNote.indexOf("doesn't pick") < 0, page.layoutNote)
+        verify(page.layoutFilePart.loadLayoutFrom(url), page.layoutFilePart.layoutNote)
+        verify(page.layoutFilePart.layoutNote.indexOf("doesn't pick") < 0, page.layoutFilePart.layoutNote)
         page.destroy()
 
         // A file an earlier version saved names the signal file itself
@@ -496,8 +496,8 @@ TestCase {
         const oldUrl = Harness.writeScratchFile("layout-earlier.json", text)
         page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
         page.startEditing()
-        verify(page.loadLayoutFrom(oldUrl), page.layoutNote)
-        verify(page.layoutNote.indexOf("doesn't pick") < 0, page.layoutNote)
+        verify(page.layoutFilePart.loadLayoutFrom(oldUrl), page.layoutFilePart.layoutNote)
+        verify(page.layoutFilePart.layoutNote.indexOf("doesn't pick") < 0, page.layoutFilePart.layoutNote)
         page.destroy()
 
         // The pick's variant replaced since the layout was saved: the pick
@@ -507,8 +507,8 @@ TestCase {
         verify(Bridge.pickFiles([profile])[0].sha256 !== picked[0].sha256, "another written file")
         page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
         page.startEditing()
-        verify(page.loadLayoutFrom(url), page.layoutNote)
-        compare(page.layoutNote, "Loaded the layout. it was saved with another version of Boosty: a gauge "
+        verify(page.layoutFilePart.loadLayoutFrom(url), page.layoutFilePart.layoutNote)
+        compare(page.layoutFilePart.layoutNote, "Loaded the layout. it was saved with another version of Boosty: a gauge "
                 + "reading a signal the picked version lacks reads not in profile")
     }
 
@@ -530,15 +530,15 @@ TestCase {
         const url = layoutUrl("layout-long-name.json")
         let page = storedPageOf({ vehicles: vehicles },
                                 docOf([Object.assign(cellOf("Longer"), { refs: ["key:longer"] })]))
-        verify(page.exportLayoutTo(url), page.layoutNote)
+        verify(page.layoutFilePart.exportLayoutTo(url), page.layoutFilePart.layoutNote)
         compare(JSON.parse(Bridge.layoutFileText(url).text).files,
                 [{ name: "N".repeat(51) + "...: " + variant, sha256: picked[0].sha256 }])
         page.destroy()
 
         page = storedPageOf({ vehicles: vehicles }, docOf([cellOf("X")]))
         page.startEditing()
-        verify(page.loadLayoutFrom(url), page.layoutNote)
-        compare(page.layoutNote, "Loaded the layout", "the pick is found by its hash")
+        verify(page.layoutFilePart.loadLayoutFrom(url), page.layoutFilePart.layoutNote)
+        compare(page.layoutFilePart.layoutNote, "Loaded the layout", "the pick is found by its hash")
     }
 
     // A pick no plugin here has gives no references, so a layout can't
@@ -548,17 +548,17 @@ TestCase {
                                               ["plugin.gone.base"])
         const own = docOf([cellOf("A"), Object.assign(cellOf("Gone"), { refs: ["key:gone"] })])
         const page = storedPageOf({ vehicles: vehicles }, own)
-        verify(page.exportLayoutTo(layoutUrl("layout-unloaded.json")), page.layoutNote)
-        verify(page.layoutNote.indexOf("plugin.gone.base") >= 0, page.layoutNote)
-        verify(page.layoutNote.indexOf("aren't in the store") >= 0, page.layoutNote)
-        verify(!page.layoutNoteBad, "a note, not a refusal")
+        verify(page.layoutFilePart.exportLayoutTo(layoutUrl("layout-unloaded.json")), page.layoutFilePart.layoutNote)
+        verify(page.layoutFilePart.layoutNote.indexOf("plugin.gone.base") >= 0, page.layoutFilePart.layoutNote)
+        verify(page.layoutFilePart.layoutNote.indexOf("aren't in the store") >= 0, page.layoutFilePart.layoutNote)
+        verify(!page.layoutFilePart.layoutNoteBad, "a note, not a refusal")
         // A vehicle whose picks are all here says nothing of the kind
         const good = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Good car"),
                                           [keptPlugin("Loads", "loads", "D101").profiles[0]])
         const plain = storedPageOf({ vehicles: good },
                                    docOf([cellOf("A"), Object.assign(cellOf("Loads"), { refs: ["key:loads"] })]))
-        verify(plain.exportLayoutTo(layoutUrl("layout-plain.json")), plain.layoutNote)
-        verify(plain.layoutNote.indexOf("aren't in the store") < 0, plain.layoutNote)
+        verify(plain.layoutFilePart.exportLayoutTo(layoutUrl("layout-plain.json")), plain.layoutFilePart.layoutNote)
+        verify(plain.layoutFilePart.layoutNote.indexOf("aren't in the store") < 0, plain.layoutFilePart.layoutNote)
     }
 
     // A gauge reading a plugin's signal the vehicle's picks don't give (no
@@ -568,20 +568,20 @@ TestCase {
         const own = docOf([cellOf("A"), Object.assign(cellOf("Loose"), { refs: ["key:loose"] }),
                            Object.assign(cellOf("Loose 2"), { refs: ["key:loose2"] })])
         const none = storedPageOf({}, own)
-        verify(none.exportLayoutTo(layoutUrl("layout-unbound.json")), none.layoutNote)
-        verify(none.layoutNote.indexOf("2 gauges read signals none of the vehicle's picked plugins has") >= 0,
-               none.layoutNote)
-        verify(!none.layoutNoteBad, "a note, not a refusal")
+        verify(none.layoutFilePart.exportLayoutTo(layoutUrl("layout-unbound.json")), none.layoutFilePart.layoutNote)
+        verify(none.layoutFilePart.layoutNote.indexOf("2 gauges read signals none of the vehicle's picked plugins has") >= 0,
+               none.layoutFilePart.layoutNote)
+        verify(!none.layoutFilePart.layoutNoteBad, "a note, not a refusal")
         const one = storedPageOf({}, docOf([cellOf("A"), Object.assign(cellOf("Loose"), { refs: ["key:loose"] })]))
-        verify(one.exportLayoutTo(layoutUrl("layout-unbound-one.json")), one.layoutNote)
-        verify(one.layoutNote.indexOf("1 gauge reads a signal none of") >= 0, one.layoutNote)
+        verify(one.layoutFilePart.exportLayoutTo(layoutUrl("layout-unbound-one.json")), one.layoutFilePart.layoutNote)
+        verify(one.layoutFilePart.layoutNote.indexOf("1 gauge reads a signal none of") >= 0, one.layoutFilePart.layoutNote)
         // A pick that gives the key says nothing of the kind
         const good = VehicleBook.setPicks(VehicleBook.add(VehicleBook.empty(), "Good car"),
                                           [keptPlugin("Loads", "loads", "D101").profiles[0]])
         const bound = storedPageOf({ vehicles: good },
                                    docOf([cellOf("A"), Object.assign(cellOf("Loads"), { refs: ["key:loads"] })]))
-        verify(bound.exportLayoutTo(layoutUrl("layout-bound.json")), bound.layoutNote)
-        verify(bound.layoutNote.indexOf("none of the vehicle's picked plugins") < 0, bound.layoutNote)
+        verify(bound.layoutFilePart.exportLayoutTo(layoutUrl("layout-bound.json")), bound.layoutFilePart.layoutNote)
+        verify(bound.layoutFilePart.layoutNote.indexOf("none of the vehicle's picked plugins") < 0, bound.layoutFilePart.layoutNote)
     }
 
     function test_theLayoutButtonsAreInTheMoreRow() {
@@ -589,10 +589,10 @@ TestCase {
         page.startEditing()
         click(page, "dashMore")
         verify(find(page, "moreExport").visible && find(page, "moreLoad").visible)
-        page.noteLayout("Saved", false)
+        page.layoutFilePart.noteLayout("Saved", false)
         verify(find(page, "dashLayoutNote").visible)
         page.stopEditing()
-        compare(page.layoutNote, "", "the note goes with edit mode")
+        compare(page.layoutFilePart.layoutNote, "", "the note goes with edit mode")
     }
 
     // ---- Presets: the "+" tab and Add page's list, Replace this page with...
@@ -626,10 +626,10 @@ TestCase {
         compare(DashboardBook.canonical(page.doc.pages[1].cells),
                 DashboardBook.canonical(DashboardBook.presetPage("temperatures", page.form).cells))
         compare(storedText(page), DashboardBook.serialize(page.doc))
-        compare(page.undoWords, "added the page Temperatures")
-        page.undo()
+        compare(page.historyPart.undoWords, "added the page Temperatures")
+        page.historyPart.undo()
         compare(page.doc.pages.map(p => p.name), ["Test", "Last"], "one Undo takes the page back")
-        verify(!page.canUndo, "and it was one step")
+        verify(!page.historyPart.canUndo, "and it was one step")
     }
     function test_aBlankPageStillComesFromTheList() {
         const page = pageOf({}, docOf([cellOf("A")]))
@@ -695,15 +695,15 @@ TestCase {
         compare(DashboardBook.canonical(page.doc.pages[0].cells),
                 DashboardBook.canonical(DashboardBook.presetPage("standard", "desktop").cells))
         compare(storedText(page), DashboardBook.serialize(page.doc))
-        compare(page.undoWords, "replaced the page with Standard")
-        page.undo()
+        compare(page.historyPart.undoWords, "replaced the page with Standard")
+        page.historyPart.undo()
         compare(labels(page), ["A"], "one Undo takes it back")
-        verify(!page.canUndo)
+        verify(!page.historyPart.canUndo)
     }
     function test_replacingAPresetPageAsksNothing() {
         const page = storedPageOf({}, docOf([cellOf("A")]))
         page.startEditing()
-        page.replaceWithPreset("standard")
+        page.editsPart.replaceWithPreset("standard")
         click(page, "dashMore")
         click(page, "moreReplace")
         click(page, "preset_showcase")
@@ -713,8 +713,8 @@ TestCase {
     }
     function test_theUndoLineShowsAReplaceOutsideEditMode() {
         const page = storedPageOf({ undoLineMs: 60000 }, docOf([cellOf("A")]))
-        page.replaceWithPreset("standard")
-        compare(page.undoLine, "Replaced the page with Standard")
+        page.editsPart.replaceWithPreset("standard")
+        compare(page.historyPart.undoLine, "Replaced the page with Standard")
         verify(find(page, "dashUndoLine").visible, "the line shows with edit mode off")
     }
     function test_replaceOnlyChangesTheShownPage() {
@@ -722,7 +722,7 @@ TestCase {
         d.pages.push({ name: "Two", cells: [cellOf("B")] })
         const page = pageOf({}, d)
         page.goTo(1)
-        page.replaceWithPreset("temperatures")
+        page.editsPart.replaceWithPreset("temperatures")
         compare(page.doc.pages[0].cells.map(c => c.label), ["A"])
         compare(page.doc.pages[1].cells[0].label, "Coolant")
         compare(page.pageIndex, 1)
@@ -734,8 +734,8 @@ TestCase {
         click(page, "moreReplace")
         click(page, "preset_standard")
         verify(!find(page, "dashMoreRow").visible, "the row waits for the answer")
-        verify(!page.loadLayoutFrom(layoutUrl("never.json")), "a load waits too")
-        compare(page.layoutNote, "Answer the question first")
+        verify(!page.layoutFilePart.loadLayoutFrom(layoutUrl("never.json")), "a load waits too")
+        compare(page.layoutFilePart.layoutNote, "Answer the question first")
     }
 
     function test_resetReadsAllPages() {
@@ -752,31 +752,31 @@ TestCase {
     function test_aFilesPagesAreAddedAfterTheShownPage() {
         const src = storedPageOf({}, docOf([cellOf("X")]))
         const url = layoutUrl("layout-add-pages.json")
-        verify(src.exportLayoutTo(url), src.layoutNote)
+        verify(src.layoutFilePart.exportLayoutTo(url), src.layoutFilePart.layoutNote)
         src.destroy()
         const page = storedPageOf({}, docOf([cellOf("A")]))
         page.startEditing()
-        verify(page.loadLayoutFrom(url, true), page.layoutNote)
+        verify(page.layoutFilePart.loadLayoutFrom(url, true), page.layoutFilePart.layoutNote)
         compare(page.doc.pages.length, 2)
         compare(page.doc.pages[0].cells.map(c => c.label), ["A"], "the page stays")
         compare(page.doc.pages[1].cells.map(c => c.label), ["X"])
         compare(page.pageIndex, 1)
-        compare(page.undoWords, "added pages from a file")
-        page.undo()
+        compare(page.historyPart.undoWords, "added pages from a file")
+        page.historyPart.undo()
         compare(page.doc.pages.length, 1)
-        verify(!page.canUndo)
+        verify(!page.historyPart.canUndo)
     }
     function test_aFileIsNotAddedPastTheFormsPages() {
         const src = storedPageOf({}, docOf([cellOf("X")]))
         const url = layoutUrl("layout-add-full.json")
-        verify(src.exportLayoutTo(url), src.layoutNote)
+        verify(src.layoutFilePart.exportLayoutTo(url), src.layoutFilePart.layoutNote)
         src.destroy()
         let d = docOf([cellOf("A")])
         while (d.pages.length < DashboardBook.maxPages)
             d = DashboardBook.addPage(d, "P" + d.pages.length)
         const page = storedPageOf({}, d)
-        verify(!page.loadLayoutFrom(url, true))
-        verify(page.layoutNote.indexOf("Not added") === 0, page.layoutNote)
+        verify(!page.layoutFilePart.loadLayoutFrom(url, true))
+        verify(page.layoutFilePart.layoutNote.indexOf("Not added") === 0, page.layoutFilePart.layoutNote)
         compare(page.doc.pages.length, DashboardBook.maxPages)
     }
 
@@ -817,18 +817,18 @@ TestCase {
         const page = storedPageOf({}, docOf([cellOf("A")]))
         page.startEditing()
         openPresetList(page)
-        verify(!page.addPresetPage("nope"))
+        verify(!page.editsPart.addPresetPage("nope"))
         verify(!find(page, "dashPresetList").visible, "the list shuts")
-        compare(page.layoutNote, "The preset couldn't be read")
-        verify(page.layoutNoteBad)
+        compare(page.layoutFilePart.layoutNote, "The preset couldn't be read")
+        verify(page.layoutFilePart.layoutNoteBad)
         verify(find(page, "dashLayoutNote").visible, "said in the page, with the More row shut")
         compare(page.doc.pages.length, 1)
-        page.noteLayout("")
-        verify(!page.replaceWithPreset("nope"))
-        compare(page.layoutNote, "The preset couldn't be read")
-        page.noteLayout("")
-        page.replaceChosen("nope")
-        compare(page.layoutNote, "The preset couldn't be read")
+        page.layoutFilePart.noteLayout("")
+        verify(!page.editsPart.replaceWithPreset("nope"))
+        compare(page.layoutFilePart.layoutNote, "The preset couldn't be read")
+        page.layoutFilePart.noteLayout("")
+        page.editsPart.replaceChosen("nope")
+        compare(page.layoutFilePart.layoutNote, "The preset couldn't be read")
         verify(page.confirmReplaceKey === "", "no question over a preset that isn't there")
         compare(labels(page), ["A"])
     }
@@ -836,15 +836,15 @@ TestCase {
     function test_aFileThatDoesntFitSaysSoAlone() {
         const src = storedPageOf({}, docOf([cellOf("X")]))
         const url = layoutUrl("layout-add-note.json")
-        verify(src.exportLayoutTo(url), src.layoutNote)
+        verify(src.layoutFilePart.exportLayoutTo(url), src.layoutFilePart.layoutNote)
         src.destroy()
         let d = docOf([cellOf("A")])
         while (d.pages.length < DashboardBook.maxPages)
             d = DashboardBook.addPage(d, "P" + d.pages.length)
         const page = storedPageOf({}, d)
-        verify(!page.loadLayoutFrom(url, true))
-        compare(page.layoutNote, "Not added: a form holds 10 pages at most")
-        verify(page.layoutNoteBad)
+        verify(!page.layoutFilePart.loadLayoutFrom(url, true))
+        compare(page.layoutFilePart.layoutNote, "Not added: a form holds 10 pages at most")
+        verify(page.layoutFilePart.layoutNoteBad)
     }
 
     function test_theFilePickIsForgottenWhenItIsCancelled() {
@@ -870,11 +870,11 @@ TestCase {
         click(page, "dashMore")
         click(page, "moreReset")
         verify(find(page, "dashResetConfirm").visible)
-        page.openPresets("add")
+        page.editsPart.openPresets("add")
         verify(!find(page, "dashResetConfirm").visible, "Reset's question goes")
         verify(find(page, "dashPresetList").visible)
         page.confirmRemovePage = true
-        page.openPresets("replace")
+        page.editsPart.openPresets("replace")
         verify(!page.confirmRemovePage, "so does Remove's")
     }
 
@@ -884,10 +884,10 @@ TestCase {
             d = DashboardBook.addPage(d, "P" + d.pages.length)
         const page = pageOf({}, d)
         page.startEditing()
-        page.openPresets("add")
+        page.editsPart.openPresets("add")
         for (const n of ["preset_blank", "preset_standard", "preset_temperatures", "preset_showcase", "preset_file"])
             verify(!find(page, n).enabled, n + " is off with " + DashboardBook.maxPages + " pages")
-        page.openPresets("replace")
+        page.editsPart.openPresets("replace")
         verify(find(page, "preset_standard").enabled, "a replace adds no page")
     }
 

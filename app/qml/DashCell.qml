@@ -272,7 +272,7 @@ GaugeCard {
             if (strayed)
                 return
             if (card.host.driving) {
-                card.host.driveTap()
+                card.host.drivePart.driveTap()
                 return
             }
             if (card.kind === "analog" && card.showPeak && gauge.item)
@@ -327,7 +327,7 @@ GaugeCard {
             text: "\u00D7"
             Accessible.name: card.kind === "blank" ? qsTr("Remove blank cell")
                                                  : qsTr("Remove %1").arg(card.host.cellName(card.cell))
-            onClicked: card.host.removeCell(card.cellIndex)
+            onClicked: card.host.editsPart.removeCell(card.cellIndex)
             // A touch's size drawn as a smaller raised square with an edge:
             // a button, not an empty tile, and inside a short cell
             background: Item {
