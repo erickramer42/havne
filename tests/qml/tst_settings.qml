@@ -4520,9 +4520,9 @@ TestCase {
             { target: page, signalName: "vehiclesChanged" })
         Bridge.signalModel.toggleSubscribed(0)   // DID F190, a text row
         compare(Bridge.signalModel.subscribedCount, plotted, "it plots nothing")
-        const names = Bridge.signalModel.plottedNames()
-        compare(names.length, 1)
-        compare(page.pickedVehicle.plotted, names, "the tick is kept")
+        const keys = Bridge.signalModel.plottedKeys()
+        compare(keys.length, 1)
+        compare(page.pickedVehicle.plotted, keys, "the tick is kept")
         compare(writes.count, 1, "one write for the text row's tick")
         // A number's untick changes both counts, and is still one write
         Bridge.signalModel.toggleSubscribed(1)   // DID 1E1C
@@ -4552,22 +4552,82 @@ TestCase {
         verify(!JSON.stringify(page.vehicles).includes("FAKEJ2534VIN"), "no VIN in the store")
 
         Bridge.signalModel.toggleSubscribed(1)   // Coolant Temp: plotted by rank
-        const unticked = Bridge.signalModel.unplottedNames()
-        compare(unticked, ["Coolant Temp"])
+        const unticked = Bridge.signalModel.unplottedKeys()
+        compare(unticked, ["7E8:4105:2.0:8"], "by its key")
         compare(page.pickedVehicle.unplotted, unticked, "an untick is kept")
         Bridge.signalModel.toggleSubscribed(5)   // Throttle Position: unranked
-        compare(Bridge.signalModel.plottedNames(), ["Throttle Position"])
-        compare(page.pickedVehicle.plotted, ["Throttle Position"], "a tick past the default too")
+        compare(Bridge.signalModel.plottedKeys(), ["7E8:4111:2.0:8"])
+        compare(page.pickedVehicle.plotted, ["7E8:4111:2.0:8"], "a tick past the default too")
 
         Bridge.disconnectSession()
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         log = []
         press(page, "connectButton")
         tryVerify(() => Bridge.connected, 10000, "connects again")
-        compare(Bridge.signalModel.unplottedNames(), unticked, "the untick comes back")
-        compare(Bridge.signalModel.plottedNames(), ["Throttle Position"], "and the tick")
+        compare(Bridge.signalModel.unplottedKeys(), unticked, "the untick comes back")
+        compare(Bridge.signalModel.plottedKeys(), ["7E8:4111:2.0:8"], "and the tick")
         tryVerify(() => log.includes("Vehicle: Daily driver"), 5000, "recognized: " + log.join("\n"))
         Bridge.logMessage.disconnect(collect)
+    }
+
+    // ADR-0065 section 9: a vehicle's ticks are kept by key. A book written
+    // with names ticks the same rows and is written by key at the next
+    // tick, and a tick whose signal this set lacks stays in the book
+    function test_ticksKeptByNameAreReadAndRewrittenByKey() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        find(page, "vehicleLabelField").text = "Daily driver"
+        press(page, "vehicleNew")
+        const elsewhere = "7E9:62F410:3.0:16"   // another plugin's signal
+        page.saveVehicles(VehicleBook.rememberPlotting(page.vehicles,
+            ["Throttle Position", elsewhere], ["Coolant Temp"]))
+        find(page, "uriField").text = "j2534://" + Harness.fakeDllPath
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "the fake connects")
+        tryVerify(() => page.plottedApplied, 5000, "the vehicle's choices applied")
+        compare(Bridge.signalModel.unplottedKeys(), ["7E8:4105:2.0:8"], "the name's row is unticked")
+        compare(Bridge.signalModel.plottedKeys(), ["7E8:4111:2.0:8", elsewhere],
+                "the name's row ticked, the other carried")
+        compare(page.pickedVehicle.plotted, ["Throttle Position", elsewhere],
+                "the book is as it was until a tick")
+
+        Bridge.signalModel.toggleSubscribed(2)   // RPM: plotted by rank
+        compare(page.pickedVehicle.unplotted, ["7E8:4105:2.0:8", "7E8:410C:2.0:16"],
+                "written by key")
+        compare(page.pickedVehicle.plotted, ["7E8:4111:2.0:8", elsewhere],
+                "and the tick no row answers is still the vehicle's")
+
+        Bridge.disconnectSession()
+        tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "connects again")
+        tryVerify(() => page.plottedApplied, 5000, "the vehicle's choices applied")
+        compare(Bridge.signalModel.unplottedKeys(), ["7E8:4105:2.0:8", "7E8:410C:2.0:16"])
+        compare(Bridge.signalModel.plottedKeys(), ["7E8:4111:2.0:8", elsewhere])
+    }
+
+    // A car whose VIN makes a new vehicle: the session's own ticks are the
+    // new vehicle's, and the ticks the vehicle picked before kept for
+    // other sets stay with that one
+    function test_aNewVehicleTakesNoTicksCarriedForAnother() {
+        if (Harness.fakeDllPath === "")
+            skip("needs the fake J2534 DLL (Windows)")
+        const page = createPage()
+        find(page, "vehicleLabelField").text = "Another car"
+        press(page, "vehicleNew")
+        const elsewhere = "7E9:62F410:3.0:16"
+        const doc = VehicleBook.rememberPlotting(page.vehicles, ["Throttle Position", elsewhere], [])
+        page.saveVehicles(VehicleBook.change(doc, v => v.vinKey = "another car's"))
+        const other = page.pickedVehicle.id
+        find(page, "uriField").text = "j2534://" + Harness.fakeDllPath
+        press(page, "connectButton")
+        tryVerify(() => Bridge.connected, 10000, "the fake connects")
+        tryVerify(() => page.pickedVehicle !== null && page.pickedVehicle.id !== other, 5000,
+                  "the VIN made a vehicle")
+        compare(page.pickedVehicle.plotted, ["7E8:4111:2.0:8"], "the session's tick, by key")
+        const kept = page.vehicles.list.find(v => v.id === other)
+        compare(kept.plotted, ["Throttle Position", elsewhere], "the other's ticks are its own")
     }
 
     // A vehicle with no VIN picked on a car another vehicle is saved with:

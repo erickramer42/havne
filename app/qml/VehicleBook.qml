@@ -8,7 +8,9 @@ import QtQml
 // { format, salt, picked, list: [{ id, label, vinKey, uri, plotted,
 // unplotted, picks, own, vinMatches, baseline, unmigrated }], unmigrated }:
 // plotted and unplotted are the rows ticked past Live's default and
-// unticked from it (ADR-0039 section 8).
+// unticked from it (ADR-0039 section 8), each by its signal's key
+// (ADR-0065 section 9); a list kept by name is read as it stands and
+// written by key at the next tick (SignalListModel::setPlotChoices).
 // picks are the plugin variants picked for the vehicle, by their profiles
 // (plugin.<id>.<variant>), in the order picked; the plugins themselves are
 // the app's, not a vehicle's. own is the profile of the variant the
