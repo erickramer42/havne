@@ -1978,6 +1978,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         ../app/adapterrelay.cpp
         ../app/windowtheme.cpp
         bridge_support.h
+        old_state.h
         fake_bt_socket.h
         fake_theme.h
     )
