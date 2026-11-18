@@ -63,7 +63,7 @@ public:
             if (s_[pos_] == ',' && format_ >= 2) {
                 fail(pos_, "has ',' outside a call");
             }
-            fail(pos_, "has " + q(s_.substr(pos_, 1)) +
+            fail(pos_, "has " + q(glyph()) +
                            " where an operator or the end should be");
         }
         if (whole.truth) {
@@ -95,6 +95,14 @@ private:
     [[noreturn]] void fail(size_t at, const std::string& words)
     {
         throw expr_refused{at, words};
+    }
+
+    /* the whole UTF-8 character at pos_; an invalid byte alone */
+    std::string glyph() const
+    {
+        const auto* p = reinterpret_cast<const unsigned char*>(s_.data());
+        const size_t n = ecuio_json::utf8_length(p + pos_, p + s_.size());
+        return s_.substr(pos_, n != 0 ? n : 1);
     }
 
     void skip()
@@ -383,7 +391,7 @@ private:
                 if (pos_ >= s_.size()) {
                     fail(pos_, "has no ')' to close its " + name + "(");
                 }
-                fail(pos_, "has " + q(s_.substr(pos_, 1)) +
+                fail(pos_, "has " + q(glyph()) +
                                " where ',' or ')' should be");
             }
         }
@@ -549,7 +557,7 @@ private:
             r.at = start;
             return r;
         }
-        fail(pos_, "has " + q(s_.substr(pos_, 1)) + " where a value should be");
+        fail(pos_, "has " + q(glyph()) + " where a value should be");
     }
 
     const std::string& s_;

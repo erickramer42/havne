@@ -662,6 +662,34 @@ TEST(SignalExprTest, ACheckRefusesItsArgumentsApartFromTheExpression)
                  "the expression ends where a value should be");
 }
 
+// A byte that is not UTF-8 (a load never meets one: the JSON reader refuses it
+// first) is quoted alone, as '?'
+TEST(SignalExprTest, AnInvalidByteIsQuotedAsAQuestionMark)
+{
+    File f = load(file_of(2));
+    ASSERT_NE(f, nullptr) << ecuio_last_error_detail();
+    const struct {
+        std::string expr;
+        std::string words;
+    } cases[] = {
+        {"a + \xFF", "has '?' where a value should be"},
+        {"a \xFF", "has '?' where an operator or the end should be"},
+        {"max(a \xFF)", "has '?' where ',' or ')' should be"},
+        {"a + \xC3", "has '?' where a value should be"},
+    };
+    for (const auto& c : cases) {
+        ecuio_expr_check_t out{};
+        out.struct_size = sizeof out;
+        EXPECT_EQ(ecuio_signal_file_check_expr(f.get(), "", c.expr.data(),
+                                               c.expr.size(), &out),
+                  ECUIO_ERR_INVALID_ARGUMENT)
+            << c.expr;
+        EXPECT_NE(std::string(ecuio_last_error_detail()).find(c.words),
+                  std::string::npos)
+            << ecuio_last_error_detail();
+    }
+}
+
 // Made-up expressions, most of them wrong somewhere: a check and a load
 // of the file with the expression in it agree on each, in its words, its
 // character and its program
