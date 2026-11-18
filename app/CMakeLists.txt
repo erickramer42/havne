@@ -150,6 +150,8 @@ qt_add_qml_module(app_ui
         qml/SettingsConnect.qml
         qml/SettingsDisplay.qml
         qml/SettingsOwnSignals.qml
+        qml/SettingsUri.qml
+        qml/SettingsConnectFrom.qml
         qml/SettingsPicks.qml
         qml/SettingsImport.qml
         qml/SettingsRowActions.qml
