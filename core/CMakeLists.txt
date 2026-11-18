@@ -34,6 +34,7 @@ add_library(ecuio-core STATIC
     src/socketcan_interfaces.cpp
     src/socketcan_request.cpp
     src/socketcan_transport.cpp
+    src/talk_seam.cpp
     src/signals.cpp
     src/signal_file.cpp
     src/signal_expr.cpp

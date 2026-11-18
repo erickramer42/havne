@@ -125,7 +125,8 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # INTERNAL: ecuio-core's PUBLIC include dirs cover only core/include,
 # and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
-    test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp)
+    test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
+    test_engine_talk.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -155,8 +156,9 @@ gtest_discover_tests(test_obd2 DISCOVERY_TIMEOUT 60)
 # internal.h's port opener, and on POSIX the OS's port over a
 # pseudo-terminal (elm327_port.h); it holds the binary's new_counter.h.
 # test_serial_ports.cpp: serial-port discovery (serial.h, serial_ports.h).
+# test_elm327_talk.cpp: a talk through the test seam, against the fake.
 add_executable(test_elm327 test_elm327.cpp test_elm327_session.cpp
-    test_serial_ports.cpp)
+    test_serial_ports.cpp test_elm327_talk.cpp)
 target_include_directories(test_elm327 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
 )
@@ -191,7 +193,8 @@ gtest_discover_tests(test_sandbox DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 60)
 # socketcan_wire.h is internal and portable (the kernel's values mirrored),
 # so its rules test everywhere; the transport on a bus is test_vcan's.
 # test_isotp.cpp: isotp.h, the ISO-TP that SocketCAN requests run on.
-add_executable(test_socketcan test_socketcan.cpp test_isotp.cpp)
+add_executable(test_socketcan test_socketcan.cpp test_isotp.cpp
+    test_socketcan_send.cpp)
 target_include_directories(test_socketcan PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_link_libraries(test_socketcan PRIVATE ecuio-core GTest::gtest_main)
 # the simulated ECU loads the replay fixture (SimTest, Linux)
@@ -212,11 +215,15 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 # (vcan_recording_ecu.h, ADR-0041 section 4, SocketCanFaultTest).
 # test_vcan_isotp.cpp: core's ISO-TP against the kernel's
 # (IsoTpConformanceTest).
+# test_vcan_talk.cpp: a request longer than a frame through a requesting
+# session, to the kernel's ISO-TP and the simulated ECU's (ADR-0066
+# section 2.4, SocketCanTalkTest).
 # RUN_SERIAL: the cases share the bus, and an error frame passes every
 # session's ID filter.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
-                   test_vcan_requests.cpp test_vcan_isotp.cpp)
+                   test_vcan_requests.cpp test_vcan_isotp.cpp
+                   test_vcan_talk.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
     )
@@ -2422,14 +2429,21 @@ endif()
 
 # J2534 link-health tests (Win32-only, HARNESS tier): every case runs a
 # session through the surrogate: in this tree the x64 one beside the
-# test, in the cross-arch run the Win32 tree's.
+# test, in the cross-arch run the Win32 tree's. test_j2534_talk.cpp's
+# cases (a request longer than a frame, through the test seam) run the
+# same way.
 if(WIN32)
     add_executable(test_j2534_health
         test_j2534_health.cpp
+        test_j2534_talk.cpp
     )
     target_link_libraries(test_j2534_health PRIVATE
         ecuio-core
         GTest::gtest_main
+    )
+    # core/src: sim_security.h, whose key the talk cases compute
+    target_include_directories(test_j2534_health PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/src
     )
     target_compile_definitions(test_j2534_health PRIVATE
         FAKE_J2534_DLL_PATH="$<TARGET_FILE:fake_j2534>"

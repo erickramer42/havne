@@ -3,7 +3,7 @@
 //             profile_registry.cpp (the request limit)
 // C++17, Qt-free, no platform headers.
 // Testing: UNIT: RequestEngineTest, RequestTableTest, DiagnosticsTest,
-//          ClearTest, SessionControlTest (test_obd2);
+//          ClearTest, SessionControlTest, EngineTalkTest (test_obd2);
 //          HARNESS: J2534AdoptionTest (test_j2534_stream); J2534HealthTest
 //          (test_j2534_health); BENCH
 
@@ -16,6 +16,7 @@
 #include "diagnostics.h"
 #include "obd2_reply.h"
 #include "pid_support.h"
+#include "request_talk.h"
 #include "request_timing.h"
 
 #include <algorithm>
@@ -369,6 +370,10 @@ struct ecuio_engine_channel {
      * keeps its own next request below, so starting a walk never touches
      * a slot that's taken. */
     ecuio_request once = {};
+    /* A talk (request_talk.h): while talk.out the one-shot carries its
+     * echo bytes, and the transport reads its whole request through
+     * ecuio_engine_pdu_of */
+    ecuio_engine_talk_state talk;
     /* The supported-PID walk. Bits for PID p sit as the bitmaps carry
      * them: bit 0x80 >> ((p - 1) % 8) of byte (p - 1) / 8. */
     bool walking = false;       /* the walk has a bitmap to ask */
@@ -529,6 +534,9 @@ struct ecuio_request_engine {
     bool stamp_set = false;
     int64_t stamp_us = 0;
     uint32_t stamp_breaks = 0;
+    /* The longest request the transport sends, a talk's bound: attach
+     * sets ECUIO_ENGINE_PDU_MAX where a request goes out as ISO-TP */
+    uint32_t pdu_max = ECUIO_ENGINE_PDU_SINGLE;
 };
 
 /* Whether request r is asked in the rotation: not dropped by the probe
@@ -2274,6 +2282,9 @@ inline bool ecuio_engine_session_reenter(ecuio_request_engine* e, uint32_t c,
     }
     ch.identifying = false; /* the item is still unasked */
     ch.diagnosing = false;
+    if (ch.talk.out) { /* not asked again: its unlock went with the session */
+        ecuio_talk_settle(ch.talk, ecuio_talk_end::refused, code);
+    }
     return true;
 }
 
@@ -2350,12 +2361,33 @@ inline void ecuio_engine_count_sweep(ecuio_request_engine* e, uint32_t c,
     }
 }
 
+/* Whether a talk offered first goes now: ahead of the keep-alive and
+ * every list, and behind a session entry that is due */
+inline bool ecuio_engine_talk_first(const ecuio_request_engine* e,
+                                    ecuio_engine_channel& ch, int64_t now_us)
+{
+    const bool entering = ecuio_engine_session_live(e, ch) &&
+                          (ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
+                           now_us - ch.last_sent_us >= ECUIO_ENGINE_S3_US);
+    return !entering && ecuio_talk_turn(ch.talk, true, false);
+}
+
+/* The offered talk takes channel c's one-shot */
+inline int32_t ecuio_engine_talk_slot(ecuio_engine_channel& ch, uint32_t c)
+{
+    ch.once = ecuio_request{};
+    ch.once.len = ecuio_talk_take_slot(ch.talk, ch.once.bytes);
+    ch.once.channel = static_cast<uint8_t>(c);
+    return ECUIO_ENGINE_ONCE;
+}
+
 /* What channel c sends next: ECUIO_ENGINE_ONCE for an identification
  * item, a diagnostics item, a clear's request or a scanned DID already
- * in the one-shot (its write failed), then while its walk has a bitmap
+ * in the one-shot (its write failed), then for a talk offered first,
+ * then while its walk has a bitmap
  * to ask, then, taking turns with the rotation, for a clear's next
  * request, the next identification item, then the next diagnostics
- * item, then the next scanned DID, else the next
+ * item, then a talk and the next scanned DID in turns, else the next
  * request of its rotation, or ECUIO_ENGINE_NONE while
  * one is outstanding, before the floor, or when there is nothing to
  * send; the rotation's own turn also waits for a focus's next sweep. A
@@ -2371,8 +2403,11 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
     /* Taken before a probe started the walk: it goes first, so its reply
      * settles it and no other request's reply does. */
     if (ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
-        ch.sessioning) {
+        ch.sessioning || ch.talk.out) {
         return ECUIO_ENGINE_ONCE;
+    }
+    if (ecuio_engine_talk_first(e, ch, now_us)) {
+        return ecuio_engine_talk_slot(ch, c);
     }
     /* ADR-0060: the session first; while 10 03 is due nothing else goes */
     if (ecuio_engine_session_due(e, c, now_us)) {
@@ -2442,6 +2477,10 @@ inline int32_t ecuio_engine_due(ecuio_request_engine* e, uint32_t c,
             return ECUIO_ENGINE_ONCE;
         }
         ch.diag_pending = 0; /* the count had drifted; nothing is unasked */
+    }
+    if (once_turn && ecuio_talk_turn(ch.talk, false, ch.scan_pending > 0)) {
+        ch.scan_turn = false;
+        return ecuio_engine_talk_slot(ch, c);
     }
     if (ch.scan_pending > 0 && once_turn) {
         const int32_t i = ecuio_engine_scan_next(e, c);
@@ -2518,6 +2557,9 @@ inline void ecuio_engine_sent(ecuio_request_engine* e, uint32_t c, int32_t r,
                               bool sent, int64_t now_us, int64_t start_us = -1)
 {
     ecuio_engine_channel& ch = e->chans[c];
+    if (!sent && r == ECUIO_ENGINE_ONCE && ch.talk.out) {
+        ecuio_talk_settle(ch.talk, ecuio_talk_end::unsent, 0); /* never twice */
+    }
     ch.outstanding = sent ? r : ECUIO_ENGINE_NONE;
     ch.deadline_us = now_us + ECUIO_ENGINE_WAIT_US;
     if (sent) {
@@ -2592,6 +2634,8 @@ inline bool ecuio_engine_expire(ecuio_request_engine* e, uint32_t c,
         ecuio_engine_diag_settle(e, c, ECUIO_DIAG_UNANSWERED, 0, nullptr, 0);
     } else if (once && ch.scanning) {
         ecuio_engine_scan_settle(e, c, ECUIO_SCAN_UNANSWERED, 0);
+    } else if (once && ch.talk.out) {
+        ecuio_talk_settle(ch.talk, ecuio_talk_end::unanswered, 0);
     } else if (once) {
         if (ch.walk_stray && !ch.walk_reasked && now_us < e->walk_until_us) {
             ch.walk_reasked = true; /* due asks the same bitmap again */
@@ -2777,6 +2821,8 @@ inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
             ecuio_engine_diag_settle(e, c, ECUIO_DIAG_ANSWERED, 0, data, len);
         } else if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
             ecuio_engine_scan_settle(e, c, ECUIO_SCAN_FOUND, 0);
+        } else if (out == ECUIO_ENGINE_ONCE && ch.talk.out) {
+            ecuio_talk_settle(ch.talk, ecuio_talk_end::answered, 0);
         } else if (out == ECUIO_ENGINE_ONCE) {
             if (len >= ECUIO_BITMAP_REPLY_LEN) {
                 ecuio_engine_take_bitmap(e, c, data, now_us);
@@ -2788,7 +2834,8 @@ inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
     }
     if (out == ECUIO_ENGINE_ONCE && ch.walking && !ch.identifying &&
         !ch.diagnosing && !ch.scanning && !ch.clearing && !ch.sessioning &&
-        len >= 2 && data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40)) {
+        !ch.talk.out && len >= 2 &&
+        data[0] == static_cast<uint8_t>(r.bytes[0] + 0x40)) {
         ch.walk_stray = true; /* another PID's answer, not the bitmap's */
     }
     if (ecuio_engine_scan_late(e, c, data, len)) {
@@ -2820,8 +2867,9 @@ inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
                                 now_us);
     }
     const uint8_t service = r.bytes[0];
-    const uint8_t reason = (e->probe && ch.in_step)
-                               ? ecuio_engine_drop_reason(code) : 0;
+    const bool talk = out == ECUIO_ENGINE_ONCE && ch.talk.out;
+    const uint8_t reason =
+        (e->probe && ch.in_step && !talk) ? ecuio_engine_drop_reason(code) : 0;
     if (reason == ECUIO_DROP_SERVICE) {
         for (uint32_t i = 0; i < e->count; ++i) {
             if (e->requests[i].channel == c &&
@@ -2841,6 +2889,8 @@ inline ecuio_reply ecuio_engine_take_frame(ecuio_request_engine* e, uint32_t c,
         ecuio_engine_diag_settle(e, c, ECUIO_DIAG_REFUSED, code, nullptr, 0);
     } else if (out == ECUIO_ENGINE_ONCE && ch.scanning) {
         ecuio_engine_scan_settle(e, c, ECUIO_SCAN_REFUSED, code);
+    } else if (talk) {
+        ecuio_talk_settle(ch.talk, ecuio_talk_end::refused, code);
     } else if (out == ECUIO_ENGINE_ONCE) {
         ecuio_engine_end_walk(e, c);
     }
@@ -2865,7 +2915,8 @@ inline bool ecuio_engine_once_waiting(const ecuio_engine_channel& ch)
     return ch.walking || ch.scan_pending > 0 || ch.ident_pending > 0 ||
            ch.diag_pending > 0 || ch.clear_step != ECUIO_CLEAR_STEP_NONE ||
            ch.identifying || ch.diagnosing || ch.scanning || ch.clearing ||
-           ch.sessioning || ch.session_step == ECUIO_SESSION_STATE_ENTERING;
+           ch.sessioning || ch.session_step == ECUIO_SESSION_STATE_ENTERING ||
+           ch.talk.offered || ch.talk.out;
 }
 
 /* Microseconds until the engine next has something to do: a wait
@@ -2881,14 +2932,14 @@ inline int64_t ecuio_engine_next_event_us(const ecuio_request_engine* e,
         if (ch.outstanding == ECUIO_ENGINE_NONE && ch.requests == 0 &&
             !ch.walking && ch.scan_pending == 0 && ch.ident_pending == 0 &&
             ch.diag_pending == 0 && ch.clear_step == ECUIO_CLEAR_STEP_NONE &&
-            !ecuio_engine_session_live(e, ch)) {
+            !ch.talk.offered && !ecuio_engine_session_live(e, ch)) {
             continue;
         }
         int64_t at = (ch.outstanding != ECUIO_ENGINE_NONE) ? ch.deadline_us
                                                            : ch.next_send_us;
         const bool asks_more = ch.requests > 0 || ch.scan_pending > 0 ||
                                ch.ident_pending > 0 || ch.diag_pending > 0 ||
-                               ch.walking ||
+                               ch.walking || ch.talk.offered ||
                                ch.clear_step != ECUIO_CLEAR_STEP_NONE;
         if (ch.outstanding == ECUIO_ENGINE_NONE && e->min_sweep_us > 0 &&
             !ecuio_engine_once_waiting(ch) && ch.next_sweep_us > at) {

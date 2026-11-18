@@ -1,7 +1,7 @@
 // File/layer: core/src/elm327_transport.cpp | C++17, Qt-free, every
 //             platform (ADR-0026)
 // Testing: HARNESS: Elm327SessionTest, Elm327PortTest, Elm327TcpTest,
-//          Elm327StreamTest (test_elm327); BENCH
+//          Elm327StreamTest, Elm327TalkTest (test_elm327); BENCH
 
 #include "ecuio/core.h"
 #include "ecuio/internal.h"
@@ -839,16 +839,22 @@ elm327_io ask(transport* t, uint32_t c, int32_t r, reply_seen& seen)
     }
     const ecuio_request& q = ecuio_engine_request_of(&e, c, r);
     const bool pack = r == ECUIO_ENGINE_PACK;
+    /* A talk: its whole request, no response count, never taken back */
+    const bool talk = r == ECUIO_ENGINE_ONCE && e.chans[c].talk.out;
+    uint32_t len = 0;
+    const uint8_t* pdu =
+        ecuio_engine_pdu_of(e.chans[c].talk, talk, q.bytes, q.len, &len);
     const uint8_t count =
-        pack ? elm327_pack_count(q.reply_len, t->tx_ids[c])
-             : elm327_response_count(q.bytes, q.len, t->tx_ids[c], t->one_frame,
-                                     t->long_dids);
+        pack   ? elm327_pack_count(q.reply_len, t->tx_ids[c])
+        : talk ? uint8_t{0}
+               : elm327_response_count(q.bytes, q.len, t->tx_ids[c],
+                                       t->one_frame, t->long_dids);
     /* The one-shot settles in the reply */
     const uint8_t pid = q.bytes[1];
-    const bool did_ask = !pack && q.len == 3 && q.bytes[0] == 0x22;
+    const bool did_ask = !pack && !talk && q.len == 3 && q.bytes[0] == 0x22;
     const auto did = static_cast<uint16_t>((q.bytes[1] << 8) | q.bytes[2]);
     char cmd[ELM327_CMD_MAX];
-    if (elm327_format_request(q.bytes, q.len, count, cmd, sizeof(cmd)) == 0) {
+    if (elm327_format_request(pdu, len, count, cmd, sizeof(cmd)) == 0) {
         return unsent(elm327_io::prompt); /* never: 1 to 7 bytes */
     }
     ecuio_engine_sent(&e, c, r, true, now_us(t));
@@ -1501,6 +1507,7 @@ void elm327_worker(transport* t)
         }
         ecuio_take_diag_request(t->session, &e, diag_seen);
         ecuio_take_clear_requests(t->session, &e, clear_seen);
+        ecuio_take_test_talk(t->session, &e);
         ecuio_take_focus(t->session, &e, focus_seen);
         for (uint32_t c = 0; c < t->chan_count; ++c) {
             ecuio_publish_support(t->session, e, c, t->rx_ids[c], published[c]);
