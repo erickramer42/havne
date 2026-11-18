@@ -40,6 +40,7 @@
 #include "storemigration.h"
 #include <ecuio/core.h>
 #include <ecuio/plugin.h>
+#include <ecuio/profile.h>
 #include <ecuio/signals.h>
 
 #ifndef ECUIO_VEHICLEBOOK_CORPUS
@@ -1408,14 +1409,51 @@ TEST(BridgeTest, OneStoreMigrationEveryRowKeepsItsRef)
     const QByteArray file =
         readBytes(corpus(QStringLiteral("signals/daily-driver-obdb.json")));
     ASSERT_FALSE(file.isEmpty());
+    ASSERT_EQ(QString::fromLatin1(
+                  QCryptographicHash::hash(file, QCryptographicHash::Sha256)
+                      .toHex()),
+              kObdbSha);
+    // As an older Havne kept and read it: its copy in signals/, loaded and
+    // registered under the file's own profile
+    writeBytes(old.signalsRoot() + QLatin1Char('/') + kObdbSha +
+                   QStringLiteral(".json"),
+               file);
+    struct Older {
+        ecuio_signal_file_t* file = nullptr;
+        ~Older()
+        {
+            (void)ecuio_profile_unregister("user.daily-driver-obdb");
+            ecuio_signal_file_free(file);
+        }
+    } older;
+    ASSERT_EQ(ecuio_signal_file_load(file.constData(),
+                                     static_cast<size_t>(file.size()),
+                                     &older.file),
+              ECUIO_OK)
+        << ecuio_last_error_detail();
+    ASSERT_STREQ(ecuio_signal_file_profile(older.file),
+                 "user.daily-driver-obdb");
+    ASSERT_EQ(ecuio_profile_register("user.daily-driver-obdb",
+                                     ecuio_signal_file_set(older.file), nullptr),
+              ECUIO_OK);
     SessionBridge bridge;
-    const QVariantMap kept = bridge.importSignalText(QString::fromUtf8(file));
-    ASSERT_TRUE(kept.value(QStringLiteral("ok")).toBool());
-    ASSERT_EQ(kept.value(QStringLiteral("sha256")).toString(), kObdbSha);
-    (void)bridge.useSignalFiles({kObdbSha});
-    const QVariantList before = bridge.profileSignals(
+    QVariantList before = bridge.profileSignals(
         QStringLiteral("mock://?profile=user.daily-driver-obdb"));
     ASSERT_GT(before.size(), 7) << "obd2's rows and the file's own";
+    // Its refs by ADR-0057's rule, which the bridge gives only a file it
+    // holds: a def of the file's own by its key, the base's by its ID
+    const ecuio_signal_set_t* set = ecuio_signal_file_set(older.file);
+    ASSERT_EQ(before.size(), static_cast<qsizetype>(set->count));
+    for (qsizetype i = 0; i < before.size(); ++i) {
+        const ecuio_signal_def_t& def = set->defs[i];
+        const char* key = ecuio_signal_file_key(older.file, &def);
+        QVariantMap row = before.at(i).toMap();
+        row.insert(QStringLiteral("ref"),
+                   key != nullptr && key[0] != '\0'
+                       ? QStringLiteral("key:") + QString::fromUtf8(key)
+                       : QStringLiteral("id:%1").arg(def.id));
+        before[i] = row;
+    }
 
     old.set(
         kOldBook,

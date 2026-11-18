@@ -192,7 +192,7 @@ TEST(BridgeTest, ObdbYearComesFromTheTypedVinOrTheSessions)
 }
 
 /* Preview converts and holds the file; only keep puts it in the store,
- * once, as any signal file's copy */
+ * once, as a plugin of the user's own */
 TEST(BridgeTest, ObdbPreviewKeepsNothingUntilKept)
 {
     SettingsDirScope dir;
@@ -210,32 +210,28 @@ TEST(BridgeTest, ObdbPreviewKeepsNothingUntilKept)
               "Daily driver OBDb");
     EXPECT_EQ(r.value(QStringLiteral("year")).toInt(), 2021);
     EXPECT_EQ(r.value(QStringLiteral("converted")).toInt(), 7);
-    EXPECT_TRUE(storeFiles(dir.store()).isEmpty()) << "nothing kept yet";
+    EXPECT_TRUE(bridge.plugins().isEmpty()) << "nothing kept yet";
     EXPECT_TRUE(log.contains(QStringLiteral(
         "OBDb set read for Daily driver OBDb: 7 converted, 6 fields differ, "
         "5 left out (model year 2021)")))
         << log.join(QLatin1Char('\n')).toStdString();
 
-    r = bridge.keepObdb(QString());
+    r = bridge.keepObdbPlugin(QString(), false);
     ASSERT_TRUE(r.value(QStringLiteral("ok")).toBool())
         << r.value(QStringLiteral("words")).toString().toStdString();
-    const QString sha = r.value(QStringLiteral("sha256")).toString();
-    EXPECT_EQ(r.value(QStringLiteral("profile")).toString().toStdString(),
-              "user.daily-driver-obdb");
-    EXPECT_EQ(r.value(QStringLiteral("extends")).toString().toStdString(),
-              "obd2");
-    EXPECT_EQ(r.value(QStringLiteral("own")).toInt(), 7);
-    EXPECT_EQ(storeFiles(dir.store()),
-              QStringList{sha + QStringLiteral(".json")});
-    EXPECT_TRUE(bridge.isObdbImport(sha));
+    EXPECT_EQ(r.value(QStringLiteral("profiles")).toStringList(),
+              QStringList{QStringLiteral("plugin.daily-driver-obdb.base")});
+    EXPECT_EQ(r.value(QStringLiteral("extends")).toStringList(),
+              QStringList{QStringLiteral("obd2")});
+    EXPECT_TRUE(r.value(QStringLiteral("obdb")).toBool());
+    EXPECT_EQ(bridge.plugins().size(), 1);
     EXPECT_TRUE(log.contains(
-        QStringLiteral("Signal file from OBDb: Daily driver OBDb "
-                       "(user.daily-driver-obdb, %1 signals)")
-            .arg(r.value(QStringLiteral("count")).toInt())))
+        QStringLiteral("Plugin from OBDb: Daily driver OBDb 1.0.0 "
+                       "(plugin.daily-driver-obdb.base)")))
         << log.join(QLatin1Char('\n')).toStdString();
 
     // Kept once: a second keep, or one after a drop, has nothing to keep
-    r = bridge.keepObdb(QString());
+    r = bridge.keepObdbPlugin(QString(), false);
     EXPECT_FALSE(r.value(QStringLiteral("ok")).toBool());
     EXPECT_EQ(r.value(QStringLiteral("words")).toString().toStdString(),
               "No OBDb set is waiting: import it again");
@@ -244,8 +240,9 @@ TEST(BridgeTest, ObdbPreviewKeepsNothingUntilKept)
             .value(QStringLiteral("ok"))
             .toBool());
     bridge.dropObdb();
-    EXPECT_FALSE(
-        bridge.keepObdb(QString()).value(QStringLiteral("ok")).toBool());
+    EXPECT_FALSE(bridge.keepObdbPlugin(QString(), false)
+                     .value(QStringLiteral("ok"))
+                     .toBool());
     // A refused preview leaves none pending either
     ASSERT_TRUE(
         bridge.previewObdb(obdbUrl(), 2019, QStringLiteral("Other OBDb"))
@@ -257,10 +254,10 @@ TEST(BridgeTest, ObdbPreviewKeepsNothingUntilKept)
                                   QStringLiteral("Other OBDb"))
                      .value(QStringLiteral("ok"))
                      .toBool());
-    EXPECT_FALSE(
-        bridge.keepObdb(QString()).value(QStringLiteral("ok")).toBool());
-    EXPECT_EQ(storeFiles(dir.store()).size(), 1);
-    EXPECT_FALSE(bridge.isObdbImport(QString(64, QLatin1Char('a'))));
+    EXPECT_FALSE(bridge.keepObdbPlugin(QString(), false)
+                     .value(QStringLiteral("ok"))
+                     .toBool());
+    EXPECT_EQ(bridge.plugins().size(), 1);
 }
 
 /* A refusal is core's words or the bridge's, never the path */

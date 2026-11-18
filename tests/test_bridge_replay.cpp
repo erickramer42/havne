@@ -993,43 +993,27 @@ TEST(BridgeTest, ReplayUriLabelKeepsTheRecordingsName)
 }
 
 /* A replay decodes with the recording's own signals.json (ADR-0051
- * section 4): under the recorded profile while the store registers the
- * same bytes there, and as rec.<16 hex> once the vehicle's file has been
- * removed or changed, so the replay still decodes what was recorded */
+ * section 4) under its own name, rec.<16 hex>, whether the store still
+ * holds the variant or not, so the replay decodes what was recorded */
 TEST(BridgeTest, ReplayDecodesWithTheRecordingsOwnSignalFile)
 {
     SettingsDirScope dir;
     ASSERT_TRUE(dir.valid());
     QTemporaryDir root;
-    QTemporaryDir from;
     ASSERT_TRUE(root.isValid());
     SessionBridge bridge;
     QStringList log;
     QObject::connect(&bridge, &SessionBridge::logMessage,
                      [&log](const QString& line) { log << line; });
     const QByteArray v1 = signalFile(QStringLiteral("Recorded"));
-    const QString sha1 = sha256Of(v1);
-    const QString own = QStringLiteral("rec.") + sha1.left(16);
     const QString folder = recordWithSignalFile(bridge, root.path(), v1);
     ASSERT_FALSE(folder.isEmpty());
+    const QByteArray copy = readFile(folder + QStringLiteral("/signals.json"));
+    ASSERT_FALSE(copy.isEmpty());
+    const QString own = QStringLiteral("rec.") + sha256Of(copy).left(16);
 
-    /* The same bytes in the store: its profile, as recorded */
-    ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
-    EXPECT_TRUE(bridge.currentUri().endsWith(
-        QStringLiteral("?profile=user.recorded&speed=max")))
-        << bridge.currentUri().toStdString();
-    EXPECT_FALSE(registered(own.toUtf8().constData()));
-    ASSERT_TRUE(disconnectAndWait(bridge));
-
-    /* The file changed under the same name (another DID, which the
-     * recording's frames don't hold): the copy, under its own name */
-    const QByteArray v2 =
-        signalFile(QStringLiteral("Recorded"), QStringLiteral("D101"));
-    ASSERT_TRUE(bridge.importSignalFile(writeScratch(from.path(), "b.json", v2))
-                    .value(QStringLiteral("ok"))
-                    .toBool());
-    ASSERT_EQ(bridge.useSignalFiles({sha256Of(v2)}).size(), 1);
-    ASSERT_TRUE(registered("user.recorded"));
+    /* The same variant in the store: the copy, under its own name */
+    ASSERT_TRUE(registered("plugin.recorded.base"));
     ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
     EXPECT_TRUE(bridge.currentUri().endsWith(
         QStringLiteral("?speed=max&profile=") + own))
@@ -1042,22 +1026,25 @@ TEST(BridgeTest, ReplayDecodesWithTheRecordingsOwnSignalFile)
         << log.join(QLatin1Char('\n')).toStdString();
     ASSERT_TRUE(disconnectAndWait(bridge));
 
-    /* The file removed: the copy again, and a replay of the replay holds
+    /* The plugin removed: the copy again, and a replay of the replay holds
      * the copy as its own signals.json */
-    EXPECT_GE(bridge.deleteUnusedSignalFiles({}), 1);
-    ASSERT_FALSE(registered("user.recorded"));
+    EXPECT_EQ(removeEveryPlugin(bridge), 1);
+    ASSERT_FALSE(registered("plugin.recorded.base"));
     QTemporaryDir again;
     ASSERT_TRUE(again.isValid());
     bridge.setRecordingsRootForTesting(again.path());
     bridge.setRecordReplaysForTesting(true);
     bridge.setRecording(true);
     ASSERT_TRUE(replayFolder(bridge, folder).isEmpty());
+    EXPECT_TRUE(bridge.currentUri().endsWith(
+        QStringLiteral("?speed=max&profile=") + own))
+        << bridge.currentUri().toStdString();
     ASSERT_TRUE(disconnectAndWait(bridge));
     const QStringList replayed = recordingFolders(again.path());
     ASSERT_EQ(replayed.size(), 1);
     EXPECT_EQ(readFile(again.path() + QLatin1Char('/') + replayed.first() +
                        QStringLiteral("/signals.json")),
-              v1);
+              copy);
 
     /* Its own name, as the URI the last replay left in the field */
     bridge.setRecording(false);
@@ -1084,12 +1071,13 @@ TEST(BridgeTest, ReplayDecodesWithACopyPastAWrittenFilesBytes)
 
     /* The copy with a megabyte of spaces before its last brace, and the
      * header naming its hash */
-    QByteArray big = v1.trimmed();
+    const QByteArray copy = readFile(folder + QStringLiteral("/signals.json"));
+    QByteArray big = copy.trimmed();
     ASSERT_TRUE(big.endsWith('}'));
     big.insert(big.size() - 1, QByteArray(ECUIO_SIGNAL_FILE_MAX_BYTES, ' '));
     QByteArray events = readFile(folder + QStringLiteral("/events.log"));
-    ASSERT_TRUE(events.contains(sha256Of(v1).toLatin1()));
-    events.replace(sha256Of(v1).toLatin1(), sha256Of(big).toLatin1());
+    ASSERT_TRUE(events.contains(sha256Of(copy).toLatin1()));
+    events.replace(sha256Of(copy).toLatin1(), sha256Of(big).toLatin1());
     for (const auto& file :
          {std::make_pair(QStringLiteral("/signals.json"), big),
           std::make_pair(QStringLiteral("/events.log"), events)}) {
@@ -1122,25 +1110,29 @@ TEST(BridgeTest, ReplayOfAChangedSignalFileCopyDecodesAsLoaded)
     const QByteArray v1 = signalFile(QStringLiteral("Recorded"));
     const QString folder = recordWithSignalFile(bridge, root.path(), v1);
     ASSERT_FALSE(folder.isEmpty());
+    const QByteArray written =
+        readFile(folder + QStringLiteral("/signals.json"));
+    ASSERT_FALSE(written.isEmpty());
     {
         QFile copy(folder + QStringLiteral("/signals.json"));
         ASSERT_TRUE(copy.open(QIODevice::Append));
         copy.write(" ");
     }
-    EXPECT_GE(bridge.deleteUnusedSignalFiles({}), 1);
+    EXPECT_EQ(removeEveryPlugin(bridge), 1);
     const QString err = replayFolder(bridge, folder, false);
-    EXPECT_FALSE(err.isEmpty()) << "user.recorded is registered by nothing";
+    EXPECT_FALSE(err.isEmpty())
+        << "plugin.recorded.base is registered by nothing";
     EXPECT_FALSE(
-        registered(("rec." + sha256Of(v1).left(16)).toUtf8().constData()));
+        registered(("rec." + sha256Of(written).left(16)).toUtf8().constData()));
     EXPECT_TRUE(log.contains(QStringLiteral(
         "Replay: the recording's signals.json doesn't match its hash; "
-        "decoding with user.recorded as loaded now")))
+        "decoding with plugin.recorded.base as loaded now")))
         << log.join(QLatin1Char('\n')).toStdString();
 
     QFile::remove(folder + QStringLiteral("/signals.json"));
     (void)replayFolder(bridge, folder, false);
     EXPECT_TRUE(log.contains(
         QStringLiteral("Replay: the recording's signals.json is missing; "
-                       "decoding with user.recorded as loaded now")))
+                       "decoding with plugin.recorded.base as loaded now")))
         << log.join(QLatin1Char('\n')).toStdString();
 }

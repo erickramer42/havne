@@ -52,7 +52,8 @@ TestCase {
         tryVerify(() => !Bridge.disconnecting, 5000, "disconnect ends")
         Bridge.saveConditions('{"havne_conditions":1,"conditions":[]}')
         Harness.clearFakeKnobs()
-        Bridge.deleteUnusedSignalFiles([])
+        for (const p of Bridge.plugins())     // the store starts empty
+            Bridge.removePlugin(p.sha256)
         Theme.night = "off"
         Theme.nightStyle = "amber"
         Theme.look = "dark"
@@ -562,10 +563,9 @@ TestCase {
             signals: [{ key: "mode", name: "Mode", read: { service: "22", number: "1E1C" },
                         field: { byte: 0, bits: 8 }, kind: "enum", values: values }]
         }
-        const r = Bridge.importSignalText(JSON.stringify(file))
+        const r = Bridge.keepSignalText(JSON.stringify(file), "", "", "")
         verify(r.ok, "the file loads: " + r.words)
-        verify(Bridge.useSignalFiles([r.sha256])[0].ok, "its profile registers")
-        compare(Bridge.connectSession("mock://demo?profile=" + r.profile), "",
+        compare(Bridge.connectSession("mock://demo?profile=" + r.profiles[0]), "",
                 "the file's profile connects")
         const list = findChild(page, "signalList")
         compare(list.count, 1, "the file's one signal")
@@ -649,14 +649,13 @@ TestCase {
     // A row the recording never holds keeps its dash while the replay plays
     // and reads "Not in this recording" once the last frame has played
     function test_aRowTheRecordingNeverHoldsSaysSoAtTheReplaysEnd() {
-        const r = Bridge.importSignalText(JSON.stringify({
+        const r = Bridge.keepSignalText(JSON.stringify({
             havne_signals: 1, name: "Never recorded", source: { name: "t" }, extends: "obd2",
             ecus: [{ id: "pcm", rx: "7E8" }],
             signals: [{ key: "never", name: "Never", read: { service: "22", number: "F1FE" },
                         field: { byte: 0, bits: 8 } }]
-        }))
+        }), "", "", "")
         verify(r.ok, r.words)
-        Bridge.useSignalFiles([r.sha256])
         const page = createTemporaryObject(pageComponent, testCase.Window.window.contentItem)
         const list = findChild(page, "signalList")
         const valueOf = name => {
@@ -669,7 +668,7 @@ TestCase {
             return "no row " + name
         }
         compare(Bridge.connectSession("replay://" + Harness.replayFixtures
-                                      + "/2026-10-25-engine-start?profile=" + r.profile
+                                      + "/2026-10-25-engine-start?profile=" + r.profiles[0]
                                       + "&speed=max"), "", "the replay connects")
         tryCompare(Bridge, "replayFinished", true, 10000)
         tryCompare({ get v() { return valueOf("Never") } }, "v", "Not in this recording", 5000)

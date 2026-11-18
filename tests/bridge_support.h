@@ -382,25 +382,24 @@ inline double liveValue(SessionBridge& bridge, const QString& name)
     return std::nan("");
 }
 
-/* A mock session decoded by the store's file `bytes` (profile
- * user.recorded), recorded under root until signal A has a value; the
- * recording's folder */
+/* A mock session decoded by `bytes` (a file named "Recorded") kept as a
+ * plugin of the user's own, profile plugin.recorded.base, recorded under
+ * root until signal A has a value; the recording's folder, whose
+ * signals.json is the variant's written file */
 inline QString recordWithSignalFile(SessionBridge& bridge, const QString& root,
                              const QByteArray& bytes)
 {
-    QTemporaryDir from;
-    const QString sha = sha256Of(bytes);
-    EXPECT_TRUE(
-        bridge.importSignalFile(writeScratch(from.path(), "a.json", bytes))
-            .value(QStringLiteral("ok"))
-            .toBool());
-    EXPECT_EQ(bridge.useSignalFiles({sha}).size(), 1);
+    const QVariantMap kept = bridge.keepSignalText(
+        QString::fromUtf8(bytes), QString(), QString(), QString());
+    EXPECT_EQ(kept.value(QStringLiteral("profiles")).toStringList(),
+              QStringList{QStringLiteral("plugin.recorded.base")})
+        << kept.value(QStringLiteral("words")).toString().toStdString();
     bridge.setRecordingsRootForTesting(root);
     bridge.setRecording(true);
-    EXPECT_TRUE(
-        bridge
-            .connectSession(QStringLiteral("mock://rec?profile=user.recorded"))
-            .isEmpty());
+    EXPECT_TRUE(bridge
+                    .connectSession(QStringLiteral(
+                        "mock://rec?profile=plugin.recorded.base"))
+                    .isEmpty());
     EXPECT_TRUE(spinUntil(
         [&bridge]() {
             return !std::isnan(liveValue(bridge, QStringLiteral("A")));
@@ -414,6 +413,22 @@ inline QString recordWithSignalFile(SessionBridge& bridge, const QString& root,
                              : root + QLatin1Char('/') + folders.first();
 }
 
+/* Every plugin the store keeps removed, as Remove does: how many went */
+inline int removeEveryPlugin(SessionBridge& bridge)
+{
+    int gone = 0;
+    for (const QVariant& p : bridge.plugins()) {
+        gone += bridge
+                        .removePlugin(
+                            p.toMap().value(QStringLiteral("sha256")).toString())
+                        .value(QStringLiteral("ok"))
+                        .toBool()
+                    ? 1
+                    : 0;
+    }
+    return gone;
+}
+
 /* The app's Replay of folder, at max speed: connected, and signal A
  * given a value, or the connect's error */
 inline QString replayFolder(SessionBridge& bridge, const QString& folder,
@@ -421,7 +436,7 @@ inline QString replayFolder(SessionBridge& bridge, const QString& folder,
 {
     const QString uri =
         SessionBridge::replayUriFor(
-            folder, QStringLiteral("mock://rec?profile=user.recorded")) +
+            folder, QStringLiteral("mock://rec?profile=plugin.recorded.base")) +
         QStringLiteral("&speed=max");
     const QString err = bridge.connectSession(uri);
     if (err.isEmpty() && expectValue) {
