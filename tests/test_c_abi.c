@@ -228,6 +228,25 @@ typedef char abi_vin_size_check[(sizeof(ecuio_vin_info_t) == 32) ? 1 : -1];
 typedef char abi_vin_wmi_check[(offsetof(ecuio_vin_info_t, wmi) == 8) ? 1 : -1];
 typedef char abi_plugin_info_size_check[(sizeof(ecuio_plugin_info_t) == 136) ? 1 : -1];
 typedef char abi_plugin_info_count_check[(offsetof(ecuio_plugin_info_t, variant_count) == 120) ? 1 : -1];
+typedef char abi_plugin_conversation_size_check
+    [(sizeof(ecuio_plugin_conversation_t) == 64) ? 1 : -1];
+typedef char abi_plugin_conversation_budget_check
+    [(offsetof(ecuio_plugin_conversation_t, budget) == 40) ? 1 : -1];
+typedef char abi_plugin_conversation_ecu_size_check
+    [(sizeof(ecuio_plugin_conversation_ecu_t) == 64) ? 1 : -1];
+typedef char abi_plugin_conversation_ecu_id_check
+    [(offsetof(ecuio_plugin_conversation_ecu_t, id) == 12) ? 1 : -1];
+typedef char abi_plugin_conversation_ecu_flags_check
+    [(offsetof(ecuio_plugin_conversation_ecu_t, flags) == 44) ? 1 : -1];
+typedef char
+    abi_plugin_service_size_check[(sizeof(ecuio_plugin_service_t) == 24) ? 1
+                                                                         : -1];
+typedef char abi_plugin_service_subs_check
+    [(offsetof(ecuio_plugin_service_t, subs) == 2) ? 1 : -1];
+typedef char abi_plugin_level_size_check
+    [(sizeof(ecuio_plugin_security_level_t) == 32) ? 1 : -1];
+typedef char abi_plugin_level_delay_check
+    [(offsetof(ecuio_plugin_security_level_t, delay_ms) == 8) ? 1 : -1];
 typedef char abi_plugin_value_line_check[(offsetof(ecuio_plugin_value_t, line) == 12) ? 1 : -1];
 typedef char abi_plugin_value_signal_check[(offsetof(ecuio_plugin_value_t, signal) == 16) ? 1 : -1];
 typedef char abi_plugin_value_def_check[(offsetof(ecuio_plugin_value_t, def) == 64) ? 1 : -1];
@@ -804,6 +823,75 @@ int main(void)
             return 1;
         }
         if (ecuio_plugin_free(plugin) != ECUIO_OK) {
+            return 1;
+        }
+    }
+    {
+        /* A format 2 plugin's conversation tier read from C (ADR-0066):
+         * the module's size, the ECU, each service and the level, and
+         * each getter's refusal past its count. The module is
+         * tests/fixtures/plugins/conversation.json's. */
+        static const char kTalker[] =
+            "{\"havne_plugin\":2,\"id\":\"c-abi-talker\",\"name\":\"C ABI t"
+            "alker\",\"version\":\"1.0.0\",\"requires\":{\"core\":\"0.1.0\""
+            "},\"source\":{\"name\":\"Havne's tests\"},\"tiers\":[\"data\","
+            "\"conversation\"],\"ecus\":[{\"id\":\"pcm\",\"rx\":\"7E8\"}],"
+            "\"variants\":[{\"id\":\"base\",\"files\":[\"a.json\"]}],\"conv"
+            "ersation\":{\"code\":{\"file\":\"guest.wasm\",\"sha256\":\"3d3"
+            "854650ca1a655ba8aac88c18eb14befa0e552fc65033127dbd2a2e3a8428a"
+            "\"},\"budget\":1000,\"ecus\":[\"pcm\"],\"services\":[{\"sid\":"
+            "\"22\"},{\"sid\":\"27\",\"sub\":[\"03\",\"04\"]}],\"security\""
+            ":[{\"ecu\":\"pcm\",\"level\":\"03\",\"seed_bytes\":4,\"key_byt"
+            "es\":8,\"delay_ms\":10000,\"key_window_ms\":500}]},\"files\":{"
+            "\"a.json\":{\"havne_signals\":1,\"signals\":[{\"key\":\"rpm\","
+            "\"name\":\"Engine Speed\",\"ecu\":\"pcm\",\"read\":{\"service"
+            "\":\"22\",\"number\":\"F40C\"},\"field\":{\"byte\":0,\"bits\":"
+            "16},\"unit\":\"rpm\"}]},\"guest.wasm\":{\"kind\":\"wasm\",\"ba"
+            "se64\":\"AGFzbQEAAAABDgNgAAF/YAJ/fwF/YAAAAwcGAAABAAECBQQBAQEBB"
+            "0IGCWVjdWlvX2FiaQAADGVjdWlvX2J1ZmZlcgABBWJlZ2luAAIMbmV4dF9yZXF"
+            "1ZXN0AAMGYWNjZXB0AAQDZW5kAAUKHgYEAEEBCwUAQYAICwQAQQALBABBAAsEA"
+            "EEACwIACw==\"}}}";
+        ecuio_plugin_t* plugin = NULL;
+        ecuio_plugin_info_t about;
+        ecuio_plugin_conversation_t talk;
+        ecuio_plugin_service_t service;
+        ecuio_plugin_security_level_t level;
+        ecuio_plugin_conversation_ecu_t ecu;
+        int ok = 0;
+        memset(&ecu, 0, sizeof ecu);
+        ecu.struct_size = sizeof ecu;
+        memset(&about, 0, sizeof about);
+        about.struct_size = sizeof about;
+        memset(&talk, 0, sizeof talk);
+        talk.struct_size = sizeof talk;
+        if (ecuio_plugin_load(kTalker, sizeof kTalker - 1, NULL, NULL,
+                              &plugin) != ECUIO_OK) {
+            return 1;
+        }
+        ok = ecuio_plugin_info(plugin, &about) == ECUIO_OK &&
+             about.tiers ==
+                 (ECUIO_PLUGIN_TIER_DATA | ECUIO_PLUGIN_TIER_CONVERSATION) &&
+             ecuio_plugin_conversation(plugin, &talk) == ECUIO_OK &&
+             talk.code_bytes == 139u && talk.budget == 1000u &&
+             talk.ecu_count == 1u && talk.service_count == 2u &&
+             talk.level_count == 1u &&
+             ecuio_plugin_conversation_ecu(plugin, 0, &ecu) == ECUIO_OK &&
+             ecu.rx_id == 0x7E8u && ecu.tx_id == 0x7E0u &&
+             strcmp(ecu.id, "pcm") == 0 &&
+             ecuio_plugin_conversation_ecu(plugin, 1, &ecu) ==
+                 ECUIO_ERR_INVALID_ARGUMENT &&
+             ecuio_plugin_service(plugin, 1, &service) == ECUIO_OK &&
+             service.sid == 0x27u && service.sub_count == 2u &&
+             service.subs[0] == 0x03u && service.subs[1] == 0x04u &&
+             ecuio_plugin_service(plugin, 2, &service) ==
+                 ECUIO_ERR_INVALID_ARGUMENT &&
+             ecuio_plugin_security_level(plugin, 0, &level) == ECUIO_OK &&
+             level.rx_id == 0x7E8u && level.level == 0x03u &&
+             level.seed_bytes == 4u && level.key_bytes == 8u &&
+             level.delay_ms == 10000u && level.key_window_ms == 500u &&
+             ecuio_plugin_security_level(plugin, 1, &level) ==
+                 ECUIO_ERR_INVALID_ARGUMENT;
+        if (ecuio_plugin_free(plugin) != ECUIO_OK || !ok) {
             return 1;
         }
     }

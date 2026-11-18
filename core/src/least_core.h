@@ -74,9 +74,14 @@ static_assert(sizeof kSignalFormatSince / sizeof kSignalFormatSince[0] ==
               "a new signal-file format needs its row in kSignalFormatSince");
 
 /* Each "havne_plugin" by its number: [0] stands for none */
-inline constexpr version kPluginFormatSince[] = {kPackage, kPackage};
+/* A plugin of format 2 (ADR-0066): the conversation tier, its keys and a
+ * binary file. An older core refuses the format whole. */
+inline constexpr version kPluginFormat2 = {{0, 9, 0}};
+
+inline constexpr version kPluginFormatSince[] = {kPackage, kPackage,
+                                                 kPluginFormat2};
 static_assert(sizeof kPluginFormatSince / sizeof kPluginFormatSince[0] ==
-                  ECUIO_PLUGIN_FORMAT + 1,
+                  ECUIO_PLUGIN_FORMAT_MAX + 1,
               "a new plugin format needs its row in kPluginFormatSince");
 
 /* The bounds an older core refuses past, as the rows know them: a

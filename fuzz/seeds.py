@@ -30,6 +30,7 @@
 #   python3 fuzz/seeds.py corpus
 #   ./build-fuzz/fuzz/fuzz_signal_file corpus/fuzz_signal_file -max_total_time=60
 
+import base64
 import glob
 import hashlib
 import json
@@ -236,6 +237,13 @@ def main(argv):
     packed["files"] = {p: json.loads(read(plugin + "/" + p)) for p in data_files}
     text = json.dumps(packed, ensure_ascii=False, indent=1).encode("utf-8")
     write(out, "fuzz_plugin_manifest", "packed_example-sim", b"\x00" + text + after)
+    # The conversation tier (format 2): a packed package with its module
+    # a binary file, the same as a folder (the module a piece of its own),
+    # then one whose hash is another module's, one whose module imports,
+    # and one whose security level the services don't declare
+    for name, data in conversation_seeds().items():
+        write(out, "fuzz_plugin_manifest", name, data)
+    talker = conversation_seeds()["packed_conversation"][1:]
 
     # Making and changing a packed plugin: a switches byte, then a signal
     # file to wrap, 0x1E and a signal file to put into the result; with
@@ -252,6 +260,7 @@ def main(argv):
         write(out, "fuzz_plugin_wrap", "wrap_options_" + name, b"\x0f" + data)
         write(out, "fuzz_plugin_wrap", "packed_put_" + name, b"\x40" + text + SEP + data)
         write(out, "fuzz_plugin_wrap", "packed_slug_" + name, b"\x50" + text + SEP + data)
+        write(out, "fuzz_plugin_wrap", "conversation_put_" + name, b"\x40" + talker + SEP + data)
         for other, second in wrap_files:
             write(out, "fuzz_plugin_wrap", "put_" + name + "_" + other,
                   b"\x00" + data + SEP + second)
@@ -656,6 +665,60 @@ def wasm_module(funcs, memory=b"\x01\x01\x01", table=b"", global_=b"", element=b
     if data:
         out += wasm_section(11, b"\x01" + data)
     return out + tail
+
+
+def guest_module(buffer_at=1024, imports=b""):
+    """The least module the guest ABI takes (core/src/guest_abi.h): its six
+    exports, each returning a constant, and one page of memory"""
+    const = lambda v: b"\x41" + sleb(v)   # i32.const
+    return wasm_module([("ecuio_abi", "", "i", const(1)),
+                        ("ecuio_buffer", "", "i", const(buffer_at)),
+                        ("begin", "ii", "i", const(0)),
+                        ("next_request", "", "i", const(0)),
+                        ("accept", "ii", "i", const(0)),
+                        ("end", "", "", b"")], imports=imports)
+
+
+def conversation_seeds():
+    """fuzz_plugin_manifest's seeds for a format 2 plugin with the
+    conversation tier, by name"""
+    data = {"havne_signals": 1, "signals": [
+        {"key": "oil_temp", "name": "Oil Temp", "ecu": "pcm",
+         "read": {"service": "22", "number": "F40D"}, "field": {"byte": 0}}]}
+
+    def plugin(module, packed, sha=None, level="01"):
+        doc = {"havne_plugin": 2, "id": "talker", "name": "Talker", "version": "1.0.0",
+               "requires": {"core": "0.1.0"}, "source": {"name": "Havne's fuzz seeds"},
+               "tiers": ["data", "conversation"],
+               "ecus": [{"id": "pcm", "rx": "7E8"}, {"id": "tcm", "rx": "7E9"}],
+               "variants": [{"id": "base", "files": ["a.json"]}]}
+        if packed:
+            doc["files"] = {"a.json": data, "guest.wasm": {
+                "kind": "wasm", "base64": base64.b64encode(module).decode()}}
+        doc["conversation"] = {
+            "code": {"file": "guest.wasm",
+                     "sha256": sha or hashlib.sha256(module).hexdigest()},
+            "budget": 100000, "ecus": ["pcm", "tcm"],
+            "services": [{"sid": "10", "sub": ["03"]}, {"sid": "22"}, {"sid": "19"},
+                         {"sid": "27", "sub": ["01", "02", "03", "04"]},
+                         {"sid": "2C", "sub": ["01", "03"]}, {"sid": "3E", "sub": ["00"]}],
+            "security": [{"ecu": "pcm", "level": level, "seed_bytes": 4, "key_bytes": 4},
+                         {"ecu": "tcm", "level": "03", "seed_bytes": 16, "key_bytes": 16,
+                          "delay_ms": 30000, "key_window_ms": 250}]}
+        return json.dumps(doc, indent=1).encode()
+
+    module = guest_module()
+    plain = guest_module(buffer_at=0)   # no 0x1E byte: a folder's piece
+    assert SEP not in plain
+    importing = guest_module(imports=wasm_name("env") + wasm_name("now") + b"\x00\x00")
+    return {
+        "packed_conversation": b"\x00" + plugin(module, True),
+        "folder_conversation": b"\x01" + plugin(plain, False) + SEP +
+                               json.dumps(data).encode() + SEP + plain,
+        "packed_conversation_other_hash": b"\x00" + plugin(module, True, sha="0" * 64),
+        "packed_conversation_imports": b"\x00" + plugin(importing, True),
+        "packed_conversation_undeclared_level": b"\x00" + plugin(module, True, level="05"),
+    }
 
 
 def wasm_seeds():

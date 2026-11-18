@@ -96,7 +96,8 @@ add_executable(test_signals test_signals.cpp test_signal_tables.cpp test_compute
     test_signal_keys.cpp
     test_computed_grammar.cpp
     test_plugin.cpp test_plugin_wrap.cpp test_plugin_put.cpp
-    test_plugin_least_core.cpp
+    test_plugin_least_core.cpp test_plugin_conversation.cpp
+    test_plugin_conversation_rules.cpp test_base64.cpp
     test_condition_file.cpp test_condition_eval.cpp)
 
 # test_signal_tables.cpp and test_computed.cpp check computed.h, the
@@ -991,6 +992,19 @@ if(TARGET havne-cli)
         app_cli_golden(PluginsCheckWarnsOfAFormat2FileOnAnOlderCore
             plugins-check-format2.jsonl
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/format2)
+        # A format 2 plugin with the conversation tier (ADR-0066): what its
+        # manifest lets its module cause to be sent, after the plugin line;
+        # then the same plugin as a folder with its module a file, a
+        # changed module, a put and a drop refused, and every bound at once
+        app_cli_golden(PluginsCheckSaysWhatAConversationDeclares
+            plugins-check-conversation.jsonl
+            -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/conversation.json)
+        add_test(NAME CliPluginConversationTest.AFolderReadsAsItsPackedForm
+            COMMAND ${Python3_EXECUTABLE}
+                    ${CMAKE_CURRENT_SOURCE_DIR}/cli_plugin_conversation.py
+                    $<TARGET_FILE:havne-cli> ${_cli_plugins}/conversation.json)
+        set_tests_properties(CliPluginConversationTest.AFolderReadsAsItsPackedForm
+            PROPERTIES TIMEOUT 120)
         app_cli_golden(PluginsCheckNamesARefusedFixtureFile
             plugins-check-bad-fixture.jsonl --exit 1
             -- $<TARGET_FILE:havne-cli> plugins check ${_cli_plugins}/bad-fixture)

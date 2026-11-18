@@ -1,11 +1,12 @@
 // File/layer: core/src/plugin_loader.h | internal, C++17, Qt-free, every
 //             platform
-// Testing: UNIT: PluginTest, PluginWrapTest (test_signals); FUZZ:
-//          fuzz_plugin_manifest
+// Testing: UNIT: PluginTest, PluginWrapTest, PluginConversationTest
+//          (test_signals); FUZZ: fuzz_plugin_manifest
 //
 // The plugin loader's parts (ADR-0052): what a loaded plugin holds, and
 // the loader that reads a manifest into one. plugin_manifest.cpp reads
-// the manifest's keys and the package's files, plugin_merge.cpp merges a
+// the manifest's keys and the package's files, plugin_conversation.cpp
+// the conversation tier's keys and its module, plugin_merge.cpp merges a
 // variant's files into its set, and plugin.cpp holds the C API.
 
 #ifndef ECUIO_PLUGIN_LOADER_H
@@ -21,6 +22,7 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ecuio_plugin_loader {
@@ -73,6 +75,31 @@ struct data_file {
     uint32_t format = 0;          /* its "havne_signals", once checked */
 };
 
+/* A packed package's binary file: a "files" entry with a "kind" */
+struct binary_file {
+    std::string path;
+    const Value* root = nullptr; /* into the manifest */
+    bool read = false;           /* something in the manifest names it */
+};
+
+/* An ECU the conversation's module talks to: the manifest's, by its id */
+struct conversation_ecu {
+    std::string id;
+    uint32_t rx = 0;
+    uint32_t tx = 0;
+};
+
+/* The conversation tier's part of a plugin (ADR-0066), as its manifest
+ * declares it and its module's bytes, checked */
+struct conversation {
+    std::vector<uint8_t> code;
+    uint8_t sha256[32] = {};
+    uint32_t budget = ECUIO_PLUGIN_BUDGET_MAX;
+    std::vector<conversation_ecu> ecus;
+    std::vector<ecuio_plugin_service_t> services;
+    std::vector<ecuio_plugin_security_level_t> levels;
+};
+
 } // namespace ecuio_plugin_loader
 
 struct ecuio_plugin {
@@ -83,7 +110,10 @@ struct ecuio_plugin {
     /* The least core that reads the manifest and every variant's files */
     ecuio_least::version least = ecuio_least::kPackage;
     std::string lineage; /* "" for none */
+    uint32_t format = ECUIO_PLUGIN_FORMAT; /* its "havne_plugin" */
     uint32_t tiers = 0;
+    /* NULL without the conversation tier */
+    std::unique_ptr<ecuio_plugin_loader::conversation> conversation;
     std::vector<ecuio_plugin_loader::match_rule> match;
     std::vector<ecuio_plugin_loader::variant> variants;
     std::vector<std::string> fixtures;
@@ -101,6 +131,12 @@ struct placed {
 /* A JSON refusal, placed after prefix: out of memory when the reader ran
  * out, never because the input's own words say so */
 placed placed_json(const std::string& prefix, const ecuio_json::Error& error);
+
+/* Whether p is a path in a package: relative, forward slashes, no "."
+ * or ".." part, no empty part, 1 to ECUIO_PLUGIN_PATH_MAX printable
+ * ASCII bytes but backslash and colon. path_of reads one from v. */
+bool path_ok(const std::string& p);
+const std::string& path_of(const Value& v, const std::string& what);
 
 class loader
 {
@@ -125,7 +161,13 @@ private:
     void read_tiers(const Value& root, ecuio_plugin& p);
     void read_match(const Value& root, ecuio_plugin& p);
     void read_fixtures(const Value& root, ecuio_plugin& p);
-    void read_files(const Value& root);
+    void read_files(const Value& root, const ecuio_plugin& p);
+    void read_conversation(const Value& root, ecuio_plugin& p);
+    void read_code(const Value& code, conversation& c);
+    void packed_code(const Value& file, const std::string& path,
+                     conversation& c);
+    void folder_code(const Value& file, const std::string& path,
+                     conversation& c);
     std::vector<std::vector<const data_file*>> read_variants(const Value& root,
                                                              ecuio_plugin& p);
     const data_file* file_at(const Value& at, const std::string& path);
@@ -145,6 +187,7 @@ private:
     size_t total_ = 0;
     Value manifest_;
     std::deque<data_file> files_; /* a deque: chosen lists point into it */
+    std::vector<binary_file> binaries_; /* a packed package's */
 };
 
 } // namespace ecuio_plugin_loader

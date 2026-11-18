@@ -137,7 +137,15 @@ void check_packed(const char* packed, size_t length, const char* prefix)
         ecuio_detail_set("%s%s", prefix, words.c_str());
         throw passed{s};
     }
+    ecuio_plugin_info_t info{};
+    info.struct_size = sizeof info;
+    (void)ecuio_plugin_info(p, &info);
     ecuio_plugin_free(p);
+    if ((info.tiers & ECUIO_PLUGIN_TIER_CONVERSATION) != 0) {
+        throw refusal{"the plugin has the conversation tier, which a put or "
+                      "a drop doesn't carry over: change its folder and pack "
+                      "it again"};
+    }
 }
 
 /* Whether ecuio_plugin_load takes text; when not, *why is its reason

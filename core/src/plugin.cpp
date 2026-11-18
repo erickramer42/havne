@@ -1,6 +1,7 @@
 // File/layer: core/src/plugin.cpp | C++17, Qt-free, every platform
-// Testing: UNIT: PluginTest, PluginWrapTest (test_signals); HARNESS: RecorderTest
-//          (test_core); FUZZ: fuzz_plugin_manifest
+// Testing: UNIT: PluginTest, PluginWrapTest, PluginConversationTest
+//          (test_signals); HARNESS: RecorderTest (test_core); FUZZ:
+//          fuzz_plugin_manifest
 //
 // The plugin loader's C API (ADR-0052's data tier): a plugin loaded
 // (plugin_loader.h), its parts read back, its value fixtures, its variants
@@ -278,6 +279,80 @@ ecuio_plugin_variant_find(const ecuio_plugin_t* plugin, uint32_t index,
         return nullptr;
     }
     return ecuio_signal_file_find(plugin->variants[index].file.get(), key);
+}
+
+ecuio_status_t ecuio_plugin_conversation(const ecuio_plugin_t* plugin,
+                                         ecuio_plugin_conversation_t* out)
+{
+    if (plugin == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (plugin->conversation == nullptr ||
+        out->struct_size < sizeof(ecuio_plugin_conversation_t)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const conversation& c = *plugin->conversation;
+    ecuio_plugin_conversation_t info{};
+    info.struct_size = sizeof(ecuio_plugin_conversation_t);
+    info.code_bytes = static_cast<uint32_t>(c.code.size());
+    std::memcpy(info.code_sha256, c.sha256, sizeof info.code_sha256);
+    info.budget = c.budget;
+    info.ecu_count = static_cast<uint32_t>(c.ecus.size());
+    info.service_count = static_cast<uint32_t>(c.services.size());
+    info.level_count = static_cast<uint32_t>(c.levels.size());
+    *out = info;
+    return ECUIO_OK;
+}
+
+ecuio_status_t
+ecuio_plugin_conversation_ecu(const ecuio_plugin_t* plugin, uint32_t index,
+                              ecuio_plugin_conversation_ecu_t* out)
+{
+    if (plugin == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (plugin->conversation == nullptr ||
+        index >= plugin->conversation->ecus.size() ||
+        out->struct_size < sizeof(ecuio_plugin_conversation_ecu_t)) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    const conversation_ecu& from = plugin->conversation->ecus[index];
+    ecuio_plugin_conversation_ecu_t ecu{};
+    ecu.struct_size = sizeof(ecuio_plugin_conversation_ecu_t);
+    ecu.rx_id = from.rx;
+    ecu.tx_id = from.tx;
+    copy_field(ecu.id, sizeof ecu.id, from.id);
+    *out = ecu;
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_plugin_service(const ecuio_plugin_t* plugin,
+                                    uint32_t index, ecuio_plugin_service_t* out)
+{
+    if (plugin == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (plugin->conversation == nullptr ||
+        index >= plugin->conversation->services.size()) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *out = plugin->conversation->services[index];
+    return ECUIO_OK;
+}
+
+ecuio_status_t ecuio_plugin_security_level(const ecuio_plugin_t* plugin,
+                                           uint32_t index,
+                                           ecuio_plugin_security_level_t* out)
+{
+    if (plugin == nullptr || out == nullptr) {
+        return ECUIO_ERR_NULL_ARGUMENT;
+    }
+    if (plugin->conversation == nullptr ||
+        index >= plugin->conversation->levels.size()) {
+        return ECUIO_ERR_INVALID_ARGUMENT;
+    }
+    *out = plugin->conversation->levels[index];
+    return ECUIO_OK;
 }
 
 ecuio_status_t ecuio_plugin_values(const ecuio_plugin_t* plugin,

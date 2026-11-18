@@ -252,17 +252,24 @@ ECUIO_OBDB_NOTE_CHANGED = 1
 ECUIO_OBDB_NOTE_CONVERTED = 0
 ECUIO_OBDB_NOTE_FILE = 3
 ECUIO_OBDB_NOTE_SKIPPED = 2
+ECUIO_PLUGIN_BUDGET_MAX = 0xf4240
 ECUIO_PLUGIN_FIXTURES_FORMAT = 1
 ECUIO_PLUGIN_FORMAT = 1
+ECUIO_PLUGIN_FORMAT_MAX = 2
 ECUIO_PLUGIN_ID_MAX = 31
+ECUIO_PLUGIN_KEY_MAX = 58
 ECUIO_PLUGIN_LINEAGE_LEN = 32
 ECUIO_PLUGIN_MANIFEST_MAX = 0x100000
 ECUIO_PLUGIN_MAX_FILES = 64
 ECUIO_PLUGIN_MAX_FIXTURES = 16
+ECUIO_PLUGIN_MAX_LEVELS = 32
+ECUIO_PLUGIN_MAX_SERVICES = 16
+ECUIO_PLUGIN_MAX_SUBS = 14
 ECUIO_PLUGIN_MAX_VALUES = 0x1000
 ECUIO_PLUGIN_MAX_VARIANTS = 32
 ECUIO_PLUGIN_PACKAGE_MAX = 0x1000000
 ECUIO_PLUGIN_PATH_MAX = 127
+ECUIO_PLUGIN_TIER_CONVERSATION = 2
 ECUIO_PLUGIN_TIER_DATA = 1
 ECUIO_PLUGIN_VARIANT_ID_MAX = 24
 ECUIO_PROFILE_MAX_REQUESTS = 0x400
@@ -622,7 +629,19 @@ class ecuio_obdb_note_t(Structure):
 class ecuio_obdb_options_t(Structure):
     pass
 
+class ecuio_plugin_conversation_ecu_t(Structure):
+    pass
+
+class ecuio_plugin_conversation_t(Structure):
+    pass
+
 class ecuio_plugin_info_t(Structure):
+    pass
+
+class ecuio_plugin_security_level_t(Structure):
+    pass
+
+class ecuio_plugin_service_t(Structure):
     pass
 
 class ecuio_plugin_t(Structure):
@@ -1155,6 +1174,24 @@ ecuio_obdb_options_t._fields_ = [
     ('url', c_char_p),
     ('commit', c_char_p),
 ]
+ecuio_plugin_conversation_ecu_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('rx_id', c_uint32),
+    ('tx_id', c_uint32),
+    ('id', (c_char * 32)),
+    ('flags', c_uint32),
+    ('reserved', (c_uint32 * 4)),
+]
+ecuio_plugin_conversation_t._fields_ = [
+    ('struct_size', c_uint32),
+    ('code_bytes', c_uint32),
+    ('code_sha256', (c_uint8 * 32)),
+    ('budget', c_uint32),
+    ('ecu_count', c_uint32),
+    ('service_count', c_uint32),
+    ('level_count', c_uint32),
+    ('reserved', (c_uint32 * 2)),
+]
 ecuio_plugin_info_t._fields_ = [
     ('struct_size', c_uint32),
     ('tiers', c_uint32),
@@ -1163,6 +1200,22 @@ ecuio_plugin_info_t._fields_ = [
     ('name', (c_char * 64)),
     ('variant_count', c_uint32),
     ('fixture_count', c_uint32),
+    ('reserved', (c_uint32 * 2)),
+]
+ecuio_plugin_security_level_t._fields_ = [
+    ('rx_id', c_uint32),
+    ('level', c_uint8),
+    ('seed_bytes', c_uint8),
+    ('key_bytes', c_uint8),
+    ('reserved0', c_uint8),
+    ('delay_ms', c_uint32),
+    ('key_window_ms', c_uint32),
+    ('reserved', (c_uint32 * 4)),
+]
+ecuio_plugin_service_t._fields_ = [
+    ('sid', c_uint8),
+    ('sub_count', c_uint8),
+    ('subs', (c_uint8 * 14)),
     ('reserved', (c_uint32 * 2)),
 ]
 ecuio_plugin_value_t._fields_ = [
@@ -1581,6 +1634,8 @@ FUNCTIONS = {
     'ecuio_obd2_signal_set': (POINTER(ecuio_signal_set_t), []),  # signals.h
     'ecuio_obdb_free': (None, [POINTER(c_char)]),  # obdb.h
     'ecuio_obdb_import': (c_int, [c_char_p, c_size_t, POINTER(ecuio_obdb_options_t), ecuio_obdb_note_fn, c_void_p, POINTER(POINTER(c_char)), POINTER(c_size_t)]),  # obdb.h
+    'ecuio_plugin_conversation': (c_int, [POINTER(ecuio_plugin_t), POINTER(ecuio_plugin_conversation_t)]),  # plugin.h
+    'ecuio_plugin_conversation_ecu': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_conversation_ecu_t)]),  # plugin.h
     'ecuio_plugin_drop_variant': (c_int, [c_char_p, c_size_t, c_char_p, POINTER(POINTER(c_char)), POINTER(c_size_t)]),  # plugin.h
     'ecuio_plugin_fixture': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_char_p, c_size_t]),  # plugin.h
     'ecuio_plugin_free': (c_int, [POINTER(ecuio_plugin_t)]),  # plugin.h
@@ -1591,6 +1646,8 @@ FUNCTIONS = {
     'ecuio_plugin_put_variant': (c_int, [c_char_p, c_size_t, c_char_p, c_char_p, c_size_t, POINTER(POINTER(c_char)), POINTER(c_size_t)]),  # plugin.h
     'ecuio_plugin_register': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_char_p, c_size_t]),  # plugin.h
     'ecuio_plugin_requires_core': (c_int, [POINTER(ecuio_plugin_t), POINTER(c_uint16), POINTER(c_uint16), POINTER(c_uint16)]),  # plugin.h
+    'ecuio_plugin_security_level': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_security_level_t)]),  # plugin.h
+    'ecuio_plugin_service': (c_int, [POINTER(ecuio_plugin_t), c_uint32, POINTER(ecuio_plugin_service_t)]),  # plugin.h
     'ecuio_plugin_text_free': (None, [POINTER(c_char)]),  # plugin.h
     'ecuio_plugin_values': (c_int, [POINTER(ecuio_plugin_t), c_char_p, c_size_t, POINTER(ecuio_plugin_value_t), c_uint32, POINTER(c_uint32)]),  # plugin.h
     'ecuio_plugin_variant': (c_int, [POINTER(ecuio_plugin_t), c_uint32, c_char_p, c_size_t]),  # plugin.h

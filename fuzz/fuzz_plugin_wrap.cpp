@@ -309,6 +309,28 @@ void put_and_drop(const std::string& packed, uint8_t switches,
           ECUIO_ERR_INVALID_ARGUMENT);
 }
 
+/* Frees p, the packed plugin loaded. True when it has the conversation
+ * tier: a put and a drop carry no module over, so both refuse it, in the
+ * same words */
+bool freed_with_the_tier(ecuio_plugin_t* p, const std::string& packed,
+                         const std::string& file)
+{
+    ecuio_plugin_info_t info{};
+    info.struct_size = sizeof info;
+    check(ecuio_plugin_info(p, &info) == ECUIO_OK);
+    check(ecuio_plugin_free(p) == ECUIO_OK);
+    if ((info.tiers & ECUIO_PLUGIN_TIER_CONVERSATION) == 0) {
+        return false;
+    }
+    const answer a = put(packed, "other", file);
+    const answer d = drop(packed, "base");
+    check(a.status == ECUIO_ERR_INVALID_ARGUMENT &&
+          d.status == ECUIO_ERR_INVALID_ARGUMENT);
+    check(a.words == d.words &&
+          a.words.find("the conversation tier") != std::string::npos);
+    return true;
+}
+
 } // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
@@ -335,7 +357,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
             check(d.status != ECUIO_OK && d.words == why);
             return 0;
         }
-        check(ecuio_plugin_free(p) == ECUIO_OK);
+        if (freed_with_the_tier(p, first, second)) {
+            return 0;
+        }
         put_and_drop(first, switches, second);
         return 0;
     }

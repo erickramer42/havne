@@ -2,15 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/erickramer42/havne/main/schema/plugin-manifest.schema.json",
   "title": "Havne plugin manifest",
-  "description": "A Havne plugin's manifest (format 1, ADR-0052): a folder's manifest.json, or a packed plugin, one file holding the manifest and its data files under \"files\". A folder's data files take this schema's #/$defs/dataFile. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
-  "$comment": "The loader (core/src/plugin_manifest.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets, and the signals are signal-file.schema.json's. The loader alone checks: \"havne_plugin\" and a data file's \"havne_signals\" as the first key; the sizes (1 MiB a manifest or a data file, 16 MiB a package) and JSON's rules; lengths in UTF-8 bytes; whole numbers written with no fraction or exponent; which form a manifest is (\"files\" only in a packed plugin and required there, \"fixtures\" only in a folder's); every packed file in a variant, and every variant's file in \"files\" or in the folder; \"requires.core\" no later than the core reading it; a year range's first year no later than its last; variant ids given once each; the profile name made from \"name\" at most 63 characters; a data file's signals naming the manifest's ECUs, \"extends\" in a variant's first file only, a key once in each data file, a variant's merged signals passing every rule of a signal file (at most 1024, one signal file of at most 1 MiB written out); everything signal-file.schema.json leaves to its loader.",
+  "description": "A Havne plugin's manifest (formats 1 and 2, ADR-0052 and ADR-0066): a folder's manifest.json, or a packed plugin, one file holding the manifest and its files under \"files\". Format 2 adds the conversation tier: a WebAssembly module that asks an ECU within the services its manifest declares. A folder's data files take this schema's #/$defs/dataFile. Map this schema to your files in your editor's settings: the loader refuses a \"$schema\" key, as it refuses every key it doesn't know.",
+  "$comment": "The loader (core/src/plugin_manifest.cpp, core/src/plugin_conversation.cpp) is the truth; tests/schema_keys.py keeps each object's keys equal to its only_keys sets, and the signals are signal-file.schema.json's. The loader alone checks: \"havne_plugin\" and a data file's \"havne_signals\" as the first key; the sizes (1 MiB a manifest or a data file, 16 MiB a package) and JSON's rules; lengths in UTF-8 bytes; whole numbers written with no fraction or exponent; which form a manifest is (\"files\" only in a packed plugin and required there, \"fixtures\" only in a folder's); every packed file in a variant, and every variant's file in \"files\" or in the folder; \"requires.core\" no later than the core reading it; a year range's first year no later than its last; variant ids given once each; the profile name made from \"name\" at most 63 characters; a data file's signals naming the manifest's ECUs, \"extends\" in a variant's first file only, a key once in each data file, a variant's merged signals passing every rule of a signal file (at most 1024, one signal file of at most 1 MiB written out); everything signal-file.schema.json leaves to its loader; the conversation's ECUs each one of \"ecus\"; a service given once; a security level's ECU one of the conversation's, a level once for an ECU, and service 27 declared with the level's sub-function and the next; the code's file a binary file in a packed plugin's \"files\" or a file in the folder, at most 1 MiB, its SHA-256 the one stated, and a module the sandbox takes (one memory of a fixed size up to 16 pages, no import, no start function, the guest ABI's six exports); every binary file named by the manifest.",
   "type": "object",
   "required": ["havne_plugin", "id", "name", "version", "requires", "source", "tiers", "variants"],
   "properties": {
     "havne_plugin": {
       "title": "Format",
-      "description": "The manifest format's version, and the manifest's first key. This Havne reads format 1.",
-      "const": 1
+      "description": "The manifest format's version, and the manifest's first key. This Havne reads formats 1 and 2; the conversation tier and a binary file are format 2's, and a plugin of format 2 names a core that reads it (0.9.0 or later) in requires.core.",
+      "enum": [1, 2]
     },
     "id": {
       "title": "Plugin id",
@@ -56,11 +56,12 @@
     "source": { "$ref": "signal-file.schema.json#/$defs/source" },
     "tiers": {
       "title": "Tiers",
-      "description": "What the plugin holds: [\"data\"] (signal files) is the only tier this Havne runs, and a plugin naming another is refused.",
+      "description": "What the plugin holds: \"data\" (signal files), which every plugin lists, and in format 2 \"conversation\" (a module that asks, described by \"conversation\"). A plugin naming another tier is refused.",
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": { "const": "data" }
+      "items": { "enum": ["data", "conversation"] },
+      "contains": { "const": "data" }
     },
     "match": {
       "title": "Match",
@@ -91,12 +92,17 @@
     },
     "files": {
       "title": "Files",
-      "description": "A packed plugin's data files, at most 64, each by the path its variants name. A folder's manifest takes none.",
+      "description": "A packed plugin's files, at most 64, each by the path the manifest names it by: a data file, or in format 2 a binary file (an object with \"kind\"). A folder's manifest takes none.",
       "type": "object",
       "maxProperties": 64,
       "propertyNames": { "$ref": "#/$defs/path" },
-      "additionalProperties": { "$ref": "#/$defs/dataFile" }
+      "additionalProperties": {
+        "if": { "type": "object", "required": ["kind"] },
+        "then": { "$ref": "#/$defs/binaryFile" },
+        "else": { "$ref": "#/$defs/dataFile" }
+      }
     },
+    "conversation": { "$ref": "#/$defs/conversation" },
     "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
   },
   "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
@@ -105,6 +111,27 @@
     "$comment": "A packed plugin carries no fixtures, and only a packed one has files",
     "required": ["files", "fixtures"]
   },
+  "allOf": [
+    {
+      "$comment": "The conversation tier and \"conversation\" come together, in format 2",
+      "if": {
+        "properties": { "tiers": { "contains": { "const": "conversation" } } },
+        "required": ["tiers"]
+      },
+      "then": {
+        "properties": { "havne_plugin": { "const": 2 } },
+        "required": ["conversation"]
+      },
+      "else": { "not": { "required": ["conversation"] } }
+    },
+    {
+      "$comment": "A binary file is format 2's",
+      "if": { "properties": { "havne_plugin": { "const": 1 } } },
+      "then": {
+        "properties": { "files": { "additionalProperties": { "$ref": "#/$defs/dataFile" } } }
+      }
+    }
+  ],
   "$defs": {
     "version": {
       "type": "string",
@@ -210,6 +237,202 @@
           "type": "array",
           "maxItems": 1024,
           "items": { "$ref": "signal-file.schema.json#/$defs/signal" }
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "binaryFile": {
+      "title": "Binary file",
+      "description": "A packed plugin's binary file (format 2): its bytes as RFC 4648 base64 with the standard alphabet, padded, with no white space and the padding's unused bits zero.",
+      "type": "object",
+      "required": ["kind", "base64"],
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "description": "What the bytes are: \"wasm\", a WebAssembly module.",
+          "const": "wasm"
+        },
+        "base64": {
+          "title": "Bytes",
+          "description": "The file's bytes, at most 1 MiB of them.",
+          "type": "string",
+          "maxLength": 1398104,
+          "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$"
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "hexByte": {
+      "title": "Byte",
+      "description": "A byte as two hex digits, the letters in upper case.",
+      "type": "string",
+      "pattern": "^[0-9A-F]{2}$"
+    },
+    "conversation": {
+      "title": "Conversation",
+      "description": "The conversation tier (format 2, ADR-0066): the module that asks, the ECUs it talks to and everything it may cause to be sent. Havne sends nothing for a module that its manifest doesn't declare here, and nothing outside the tier's own ceiling whatever is declared: the extended session, tester present, security access and reads.",
+      "type": "object",
+      "required": ["code", "ecus", "services"],
+      "properties": {
+        "code": { "$ref": "#/$defs/code" },
+        "budget": {
+          "title": "Budget",
+          "description": "The most instructions one call into the module may run, 1 to 1000000 (the default).",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "ecus": {
+          "title": "ECUs",
+          "description": "The modules the code talks to, 1 to 32 of the manifest's \"ecus\" by id, each once.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z0-9_]{1,31}$" }
+        },
+        "services": {
+          "title": "Services",
+          "description": "The services the code may cause to be sent, 1 to 16, each once.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/service" }
+        },
+        "security": {
+          "title": "Security levels",
+          "description": "The security-access levels the code computes a key for, at most 32.",
+          "type": "array",
+          "maxItems": 32,
+          "items": { "$ref": "#/$defs/securityLevel" }
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "code": {
+      "title": "Code",
+      "description": "The conversation's module: a WebAssembly file of at most 1 MiB, and the SHA-256 of its bytes, which the loader compares.",
+      "type": "object",
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/path",
+          "description": "The module's path: a binary file of a packed plugin's \"files\", or a file in the folder."
+        },
+        "sha256": {
+          "title": "SHA-256",
+          "description": "The SHA-256 of the module's bytes, 64 hex digits in lower case.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false
+    },
+    "service": {
+      "title": "Service",
+      "description": "A service the code may cause to be sent. The services whose sub-functions differ in what they do (10, 27, 2C, 3E) are declared with the sub-functions; the reads (19, 22, 2A) without.",
+      "type": "object",
+      "required": ["sid"],
+      "properties": {
+        "sid": {
+          "title": "Service ID",
+          "description": "The service, two hex digits: 10 (session control), 19 (read DTC information), 22 (read data by identifier), 27 (security access), 2A (read data by periodic identifier), 2C (dynamically define data identifier), 3E (tester present).",
+          "enum": ["10", "19", "22", "27", "2A", "2C", "3E"]
+        },
+        "sub": {
+          "title": "Sub-functions",
+          "description": "The sub-functions declared, 1 to 14, each once: 03 for 10; 00 for 3E; 01 and 03 for 2C; 01 to 7E but 5F and 60 for 27, a level's seed request and the key request after it.",
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 14,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/hexByte" }
+        },
+        "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
+      },
+      "patternProperties": { "^x-": { "$ref": "signal-file.schema.json#/$defs/tool" } },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "sid": { "enum": ["10", "27", "2C", "3E"] } } },
+          "then": { "required": ["sub"] },
+          "else": { "not": { "required": ["sub"] } }
+        },
+        {
+          "if": { "properties": { "sid": { "const": "10" } } },
+          "then": { "properties": { "sub": { "items": { "const": "03" } } } }
+        },
+        {
+          "if": { "properties": { "sid": { "const": "3E" } } },
+          "then": { "properties": { "sub": { "items": { "const": "00" } } } }
+        },
+        {
+          "if": { "properties": { "sid": { "const": "2C" } } },
+          "then": { "properties": { "sub": { "items": { "enum": ["01", "03"] } } } }
+        },
+        {
+          "if": { "properties": { "sid": { "const": "27" } } },
+          "then": {
+            "properties": {
+              "sub": { "items": { "pattern": "^(?!00|5F|60|7F)[0-7][0-9A-F]$" } }
+            }
+          }
+        }
+      ]
+    },
+    "securityLevel": {
+      "title": "Security level",
+      "description": "A security-access level the code computes a key for, on one of the conversation's ECUs. Havne asks the seed, hands it to the module, and sends the key the module gives, holding both to the lengths here; the services declare 27 with this level's sub-function and the next.",
+      "type": "object",
+      "required": ["ecu", "level", "seed_bytes", "key_bytes"],
+      "properties": {
+        "ecu": {
+          "title": "ECU",
+          "description": "The module, one of the conversation's \"ecus\".",
+          "type": "string",
+          "pattern": "^[a-z0-9_]{1,31}$"
+        },
+        "level": {
+          "title": "Level",
+          "description": "The seed request's sub-function, two hex digits: odd, 01 to 7D, never 5F. The key request's is the next.",
+          "type": "string",
+          "pattern": "^(?!5F|7F)[0-7][13579BDF]$"
+        },
+        "seed_bytes": {
+          "title": "Seed length",
+          "description": "The seed's length in bytes, 1 to 255.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        },
+        "key_bytes": {
+          "title": "Key length",
+          "description": "The key's length in bytes, 1 to 58.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 58
+        },
+        "delay_ms": {
+          "title": "Delay",
+          "description": "The least wait after a key the ECU refused, in milliseconds: 1000 to 3600000, 10000 when left out.",
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 3600000
+        },
+        "key_window_ms": {
+          "title": "Key window",
+          "description": "How long the module has to give the key after its seed, in milliseconds: 50 to 4000, 1000 when left out.",
+          "type": "integer",
+          "minimum": 50,
+          "maximum": 4000
         },
         "notes": { "$ref": "signal-file.schema.json#/$defs/notes" }
       },
