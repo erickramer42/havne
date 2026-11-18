@@ -237,7 +237,8 @@ Page {
     }
     readonly property string viewName: recording.state === RecordingView.Open ? viewNameOf(recording.folder) : ""
     readonly property var viewEntry: viewName !== "" ? viewsBook[viewName] : undefined
-    // Signal name -> pane key, and pane count -> heights' shares
+    // Pane id (paneIdOf; a name an earlier version kept) -> pane key, and
+    // pane count -> heights' shares
     readonly property var viewAssign: viewEntry !== undefined ? viewEntry.assign : ({})
     readonly property var paneShares: viewEntry !== undefined ? viewEntry.shares : ({})
     function writeView(patch) {
@@ -246,24 +247,43 @@ Page {
         viewerSettings.views = JSON.stringify(ChartLayout.viewsWith(viewsBook, viewName, patch, Date.now()))
         chart.requestPaint()
     }
+    // A signal's id: its key, or its name where the open has none (an
+    // older recording's values as recorded, which has names alone)
+    function idOf(s) {
+        return s.key !== undefined && s.key !== "" ? s.key : s.name
+    }
+    // A format 4 recording keeps a pane by key; an older one by name, which
+    // its values and its frames opens share
+    readonly property bool panesByKey: recording.info.format >= 4
+    function paneIdOf(s) {
+        return panesByKey ? idOf(s) : s.name
+    }
+    // A signal's kept pane key: by its pane id, else by its name
+    function paneOf(s) {
+        const kept = viewAssign[paneIdOf(s)]
+        return kept !== undefined ? kept : viewAssign[s.name]
+    }
     // The assignment as the layout reads it: signal index -> pane key, the
-    // names the recording lacks passed by
+    // signals the recording lacks passed by
     function assignRows() {
         const out = {}
         for (const s of recording.signalList) {
-            const key = viewAssign[s.name]
+            const key = paneOf(s)
             if (key !== undefined)
                 out[s.index] = key
         }
         return out
     }
-    // A signal's pane, "" for the one its unit makes
-    function setPaneOf(name, key) {
+    // A signal's pane, "" for the one its unit makes; kept by its pane id,
+    // any entry by its name dropped
+    function setPaneOf(s, key) {
+        const id = paneIdOf(s)
         const next = Object.assign({}, viewAssign)
+        delete next[s.name]
         if (key === "")
-            delete next[name]
+            delete next[id]
         else
-            next[name] = key
+            next[id] = key
         writeView({ assign: next })
     }
     // The panes a signal can join: each ordinary pane now drawn, named by the
@@ -315,14 +335,14 @@ Page {
     }
     // The menu's entries for one signal: [{ text, key, checked }], key "" for
     // the unit's own pane, "new" for a pane of its own
-    property string paneMenuName: ""
+    property var paneMenuSignal: ({ key: "", name: "" })
     property var paneMenuItems: []
     function openPaneMenu(index, anchor) {
         const s = recording.signalList.find(x => x.index === index)
         if (s === undefined || s.isText || plotted[index] !== true)
             return
-        paneMenuName = s.name
-        const here = viewAssign[s.name]
+        paneMenuSignal = { key: s.key, name: s.name }
+        const here = paneOf(s)
         const items = [{ text: qsTr("By unit"), key: "", checked: here === undefined }]
         for (const c of paneChoices())
             items.push({ text: qsTr("With %1").arg(c.label), key: c.key, checked: here === c.key })
@@ -331,7 +351,7 @@ Page {
         paneMenu.popup(anchor)
     }
     function choosePane(key) {
-        setPaneOf(paneMenuName, key === "new" ? newPaneKey() : key)
+        setPaneOf(paneMenuSignal, key === "new" ? newPaneKey() : key)
     }
     // The signal whose value label lies at (x, y) in the chart, -1 for none
     function labelRowAt(x, y) {
@@ -1952,8 +1972,10 @@ Page {
     property bool exportOpen: false
     readonly property bool exportShown: exportOpen && recording.state === RecordingView.Open
                                         && !chartMaximized
+    // The export's columns name each signal by its id: a key or a name one
+    // signal has, as core takes them
     readonly property var plottedNames: recording.signalList
-        .filter(s => !s.isText && root.plotted[s.index] === true).map(s => s.name)
+        .filter(s => !s.isText && root.plotted[s.index] === true).map(s => root.idOf(s))
     // The plotted signals, when none of them draws: no values in this
     // recording, nor in the compared one's signal of the same name. The
     // chart then has nothing to draw and says so

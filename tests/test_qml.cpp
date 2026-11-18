@@ -32,6 +32,7 @@
 #include "packed_plugin.h"
 #include "pluginstore.h"
 #include "recordingexport.h"
+#include "recording_frameset.h"
 #include "recordingimport.h"
 #include "recordingview.h"
 #include "signalstore.h"
@@ -747,6 +748,11 @@ public slots:
         m_bridge->setRecordingsRootForTesting(m_recordingsDir.path());
         m_harness.setRecordingsRoot(m_recordingsDir.path());
         BridgeSingleton::instance = m_bridge.get();
+        SessionBridge* bridge = m_bridge.get();
+        RecordingFrameSet::setSignalFileText(
+            [bridge](const ecuio_signal_set_t* set) {
+                return bridge->signalFileTextOfSet(set);
+            });
         // As main() wires it: a bt: URI is refused before core is asked
         m_bluetooth = std::make_unique<BluetoothDevices>();
         BluetoothDevices::instance = m_bluetooth.get();
@@ -762,6 +768,7 @@ public slots:
     void cleanupTestCase()
     {
         m_harness.clearFakeKnobs();
+        RecordingFrameSet::setSignalFileText({});
         m_bridge.reset();   // ends a session a test left up, joining its threads
         BridgeSingleton::instance = nullptr;
         m_bluetooth.reset(); // after the bridge: its sessions are closed

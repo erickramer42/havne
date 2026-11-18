@@ -1949,6 +1949,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_recorder.cpp
         test_bridge_conditions.cpp
         test_recording_view.cpp
+        test_recording_view_keys.cpp
         test_viewer_frames.cpp
         test_recording_import.cpp
         test_recording_export.cpp
@@ -1956,6 +1957,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_bridge_variantshape.cpp
         test_store_migration.cpp
         ../app/recordingview.cpp
+        ../app/recording_frameset.cpp
         ../app/recordingexport.cpp
         ../app/recordingframes.cpp
         ${APP_BRIDGE_SOURCES}

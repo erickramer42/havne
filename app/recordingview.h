@@ -20,6 +20,8 @@
 #include "ecuio/recording.h"
 #include "ecuio/signals.h"
 
+struct RecordingFrameSet;
+
 // One recording opened for the viewer (ADR-0049 step 5): core's reader
 // and the frames check, run once on a thread of its own so a long
 // recording's pass never holds the GUI thread, then everything the page
@@ -56,10 +58,12 @@ class RecordingView : public QObject
     //   words), conditionEventsLost (the events the recorder had no room
     //   for and never wrote: an entry may be missing or run past its end) }
     Q_PROPERTY(QVariantMap info READ info NOTIFY stateChanged)
-    // One map per signal, in the reader's order: { index, name, unit,
-    // decimals, isText, plotRank, plotted (the default), samples,
-    // lowest, highest, firstMs, lastMs (-1 with no samples) }. Not named
-    // "signals", which Qt's macro takes.
+    // One map per signal, in the reader's order: { index, key (what its
+    // values are kept under; "" for a recording older than format 4 read
+    // from signals.csv, which has names alone), name, unit, decimals,
+    // isText, plotRank, plotted (the default), samples, lowest, highest,
+    // firstMs, lastMs (-1 with no samples) }. Not named "signals", which
+    // Qt's macro takes.
     Q_PROPERTY(QVariantList signalList READ signalList NOTIFY signalListChanged)
     // { timeMs, label }, in time order
     Q_PROPERTY(QVariantList markers READ markers NOTIFY stateChanged)
@@ -187,6 +191,11 @@ public:
     // else the profile it was recorded under. The set is copied here, on
     // the GUI thread where the stores change it, before the open's thread
     // starts. A profile that can't decode is Failed at once, with words.
+    // The open is keyed by the set's signal file where there is one (the
+    // recording's own, or the registered profile's through
+    // RecordingFrameSet::setSignalFileText), so each signal has the key a
+    // recording of that file is written under: a computed signal its
+    // author's key.
     Q_INVOKABLE void openFrames(const QString& folder, const QString& profile);
     // Stops an open under way (Failed, "canceled") or closes the one open
     Q_INVOKABLE void close();
@@ -414,7 +423,6 @@ private:
         std::atomic<int> stretchesHeld{0};
     };
 
-    struct FrameSet;
     struct ConditionSpan;
     // Pairs the open reader's condition events into res's entries
     static void pairConditions(Result& res, const QString& folder,
@@ -422,8 +430,9 @@ private:
     static void run(const std::shared_ptr<Result>& res,
                     std::atomic<bool>* cancel, RecordingView* view,
                     quint64 generation, const QString& folder,
-                    const std::shared_ptr<FrameSet>& frames);
-    void start(const QString& folder, const std::shared_ptr<FrameSet>& frames);
+                    const std::shared_ptr<RecordingFrameSet>& frames);
+    void start(const QString& folder,
+               const std::shared_ptr<RecordingFrameSet>& frames);
     void readHeader(const QString& folder);
     void fail(const QString& folder, const QString& words);
     void finish(const std::shared_ptr<Result>& res, quint64 generation);
