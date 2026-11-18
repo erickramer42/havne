@@ -109,7 +109,7 @@ corrupt stored value leaves the default.
 - One place holds the factors, and `SignalsTest.DisplayConvert*` pins
   each one exactly. `BridgeTest.UnitSystem*` pins the round trip
   through the model, the chart's history and the recording;
-  `QmlTest.dashboard` and `QmlTest.settings` the gauges' scales and the
+  `QmlTest.dashboard` and `QmlTest.settings_uri` the gauges' scales and the
   Units row.
 - A unit spelled differently (`degC`, `kph`) doesn't convert. The
   built-in sets share their spellings (`SignalsTest.MockAndObd2ShareDisplayNamesAndUnits`),

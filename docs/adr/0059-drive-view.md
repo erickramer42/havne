@@ -256,7 +256,7 @@ control and a destroyed one. A fault and a quiet bus come from the fake
 J2534 DLL (Windows). `QmlTest.driveplatform` runs section 6's table,
 the flag, the power timer, the full-screen window's visibility kept and
 put back, and the orientation's words. `QmlTest.phone`
-(`test_theDriveSettingsFitAPhone`) and `QmlTest.settings` (the recent
+(`test_theDriveSettingsFitAPhone`) and `QmlTest.settings_devices` (the recent
 addresses) cover sections 7 and 9. The platform calls (the full-screen
 window, the power reading, the flag, the lock) are checked on the test
 phone, not in CI; iOS's have no device to run on.

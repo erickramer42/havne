@@ -419,7 +419,7 @@ words moved into `core/src/socketcan_wire.h` (`socketcan_refusal`,
 `.ADriverWithoutTheModeANeedsIsRefusedFirst`,
 `.ARefusalNamesOnlyTheModesTheDriverOffers`,
 `.StatesAndModesHaveIpLinksNames`, `.DiscoveryListsControllersAndVcanOnly`;
-`CliCanTest.ALineSaysWhatAConnectIsJudgedOn`; `QmlTest.settings`'
+`CliCanTest.ALineSaysWhatAConnectIsJudgedOn`; `QmlTest.settings_uri`'
 `test_canRowsFillASocketcanUri`.
 
 ## Appendix: 2026-11-17, a Flow Control proves the rate

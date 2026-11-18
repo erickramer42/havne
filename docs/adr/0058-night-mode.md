@@ -375,7 +375,7 @@ stay as they are, the open item from the themes handover.)
 - the danger-hue test stays a Dark test (in Night, Red every color is
   near the danger hue by design).
 
-`QmlTest.settings`: the Night and Night style buttons set and highlight;
+`QmlTest.settings_uri`: the Night and Night style buttons set and highlight;
 the schedule fields store a valid time and refuse a bad one with the
 words; the Scheduled row shows the fields and Off hides them; the list's
 summary words.
