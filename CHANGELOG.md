@@ -58,6 +58,7 @@ way, is in [docs/engineering-log.md](docs/engineering-log.md).
 - An expression refused at a character outside ASCII (such as "a + é") shows the character in the refusal's words, not '?'.
 - Running out of memory while a session is created or a recorder attached no longer leaves an adapter's port and wire log open, and is answered as an error instead of an exception across the C API.
 - A plugin made from a signal file names the oldest Havne that reads it, not the version that made it, so the same file makes the same plugin on every version and the store keeps one copy of it. (ADR-0064)
+- **A pick spread over several ECUs no longer stalls through an ELM327 adapter.** The adapter asks one ECU at a time, and it gave each ECU the same share of its exchanges, so one signal on a second module was asked as often as all of the engine's together, and the engine's values went stale (dimmed) every few seconds. Now each ECU is asked each of its requests once in turn, under one header switch. Each ECU's supported-PID check (the walk) now has its own second, so with several ECUs the engine's no longer stops at the first range and leaves the PIDs above 0x20 asked one per request.
 
 ## [0.8.0] - 2026-11-15
 

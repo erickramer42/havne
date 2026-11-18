@@ -442,6 +442,12 @@ worker. These are the choices it makes where section 4 left room:
   drops 0x5C and nothing else. The second vehicle session checks it on
   the car.
 
+Note of 2026-11-18: the budget is each channel's own, from its first
+bitmap, and an adapter that asks one channel at a time leaves a walking
+channel the turn until its walk ends (the appendix "turns on an adapter
+that asks one channel at a time"). With one budget for every channel,
+set at the probe, other channels' turns through an ELM327 used it up.
+
 ## Appendix: the Service 09 record (2026-10-23)
 
 The text values this record's scope left to a record of their own have
@@ -465,6 +471,10 @@ recovery, so an item held in "response pending" for longer ends that
 walk unjudged, and the next recovery resumes it.
 `RequestEngineTest.RecoveryWalkWaitsForTheItemOut` and
 `.RecoveryWalkWaitsForAnUnsentItem` pin both.
+
+Note of 2026-11-18: the walk's second now starts at its first bitmap
+after the recovery, not at the recovery, so the walk waits behind an
+item held in "response pending" and then has its whole second.
 
 ## Appendix: nothing left to ask (2026-10-24)
 
@@ -527,3 +537,80 @@ The request table is sized from the set at attach (its derived requests
 and each DID a scan can find) and never grows. Registration counts each
 module's requests with no table built (`ecuio_engine_plan`), and refuses
 the first def past a module's `ECUIO_MODULE_MAX_REQUESTS` (ADR-0065).
+
+## Appendix: turns on an adapter that asks one channel at a time (2026-11-18)
+
+Section 1 has channels progress independently, a PCM and a TCM served
+in parallel. J2534 does that, and so does SocketCAN once its rate is
+proven (a send waits only for the one before's echo, so each channel's
+one outstanding request overlaps the others'). An ELM327 takes the next
+command only after its prompt, so its worker asks one channel at a time
+([ADR-0026](0026-elm327-transport.md) section 3), and the engine's
+choice of what each channel asks next left open which channel asks.
+
+The worker took turns by channel: each channel with something due, one
+exchange each. On the test car through the MX+, a Dashboard pick of 24
+signals on four ECUs (most on the engine ECU, one DID on the TCM, one
+silent module) gave the TCM's one DID every other exchange, each costing
+an `AT SH` switch: the engine ECU's values came every 3.4 s, past the
+3 s at which Live and the Dashboard dim them. And the walk's one budget
+for every channel, set at the probe, ran out while the other channels
+took their turns: the engine ECU's walk stopped at 0x20 on every
+connect, so nothing above 0x20 was packed.
+
+**Turns by request** (`core/src/request_turns.h`, pure,
+`ecuio_engine_take_turn`). The channel holding the turn keeps it, one
+exchange after another, until:
+
+1. it has asked as many rotation rows as its rotation held when the
+   turn began, a pack counting each of its rows and a one-shot (the
+   walk, identification, diagnostics, a scanned DID, a clear, a talk, a
+   session request) none, so each row is asked about once a lap,
+   whichever channel it's on, and a channel's rows go without a header
+   switch between them;
+2. it has nothing due but for a wait, a focus's gap between sweeps or
+   nothing to ask. Its own floor ends the turn only when another channel
+   asks before the floor passes and the floor's rest is longer than the
+   default 20 ms: a fast adapter's exchange can be shorter than the
+   default floor, and a long `?gap=` mustn't leave the adapter idle while
+   another ECU could be asked. A channel asking its walk always waits its
+   floor out;
+3. the turn has lasted `ECUIO_ENGINE_TURN_US` (1 s), unless the channel
+   is asking its walk (not a one-shot holding the slot ahead of it), so a
+   large table or a long scan holds another channel's clear, talk or
+   identification a second at most. The channel's cursors stay where they
+   stopped, so its next turn goes on from there;
+4. another channel's session entry or keep-alive is due
+   ([ADR-0060](0060-extended-session-reads.md)), so a lap never runs
+   past S3.
+
+Then the next channel in order with something due takes it; a channel
+the worker holds (a cut reply's rest still coming) is passed over.
+
+**Each channel's walk has its own second**, from its first bitmap
+(`ecuio_engine_channel::walk_until_us`), and keeps the turn until it
+ends, so its budget holds only its own exchanges, eight bitmaps at a
+full wait each, whatever the other channels ask. A recovery's probe
+starts the second again: a walk with no bitmap sent since is inside its
+budget, so a bitmap held pending across the recovery and answered late
+carries the walk on. The rest of the walk is as the appendix "the probe
+as built" says: no bitmap after the budget, one already out waited for,
+silence or a refusal ending it, a recovery resuming it. A walk that
+reaches the last bitmap reads "supports N PIDs" in the session's line,
+with no "up to"; one that ended early reads "supports N PIDs up to
+<last>, no answer past that". On J2534 the channels walk in parallel
+from the worker's start, so starting each second at the channel's own
+first bitmap changes nothing there.
+
+Not chosen: interleaving the same shares (the engine ECU's rows, then
+the TCM's, one at a time) gives each value the same interval and costs
+a header switch on each side of every TCM ask; resuming an unfinished
+walk on a timer, since with its own second a walk ends early only on
+silence, a refusal or a reply held pending a second, none of which a
+minute changes.
+
+`RequestTurnsTest` (test_obd2) pins each rule with the time passed in,
+the test car's four channels among them; `Elm327TurnsTest` (test_elm327)
+the order and the walk through the fake ELM327;
+`SocketCanTurnsTest` (test_vcan) the overlap that makes SocketCAN need
+none of this.
