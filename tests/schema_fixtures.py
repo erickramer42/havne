@@ -118,6 +118,13 @@ CONDITION_FILE = {
     ],
 }
 
+def ecus(n):
+    """n modules: the engine ECU, then made-up 11-bit pairs"""
+    return [{"id": "pcm", "rx": "7E8"}] + [
+        {"id": "m%d" % i, "rx": "%03X" % (0x640 + i), "tx": "%03X" % (0x600 + i)}
+        for i in range(1, n)]
+
+
 S0 = ["signals", 0]
 S1 = ["signals", 1]
 S3 = ["signals", 3]
@@ -135,6 +142,10 @@ CASES = [
     ("an rx that isn't hex", SIGNAL_FILE, ["ecus", 0, "rx"], "7G8", False),
     ("an rx the standard gives no tx", SIGNAL_FILE, ["ecus", 0, "rx"], "7B8", False),
     ("an ECU id with a dash", SIGNAL_FILE, ["ecus", 0, "id"], "p-cm", False),
+    ("32 ECUs", SIGNAL_FILE, ["ecus"], ecus(32), True),
+    ("33 ECUs", SIGNAL_FILE, ["ecus"], ecus(33), False),
+    ("a plugin of 32 ECUs", PACKED, ["ecus"], ecus(32), True),
+    ("a plugin of 33 ECUs", PACKED, ["ecus"], ecus(33), False),
     ("a file name with no letter or digit", SIGNAL_FILE, ["name"], "--", False),
     ("a file name of 64 bytes", SIGNAL_FILE, ["name"], "n" * 64, False),
     ("a gauge with both levels", SIGNAL_FILE, S0 + ["gauge"],

@@ -72,7 +72,7 @@
     },
     "ecus": {
       "$ref": "signal-file.schema.json#/$defs/ecus",
-      "description": "The modules the data files' signals read, named by id; a data file declares none of its own. The base set's count toward 4 in all, of one ID width."
+      "description": "The modules the data files' signals read, named by id; a data file declares none of its own. The base set's count toward 32 in all, of one ID width."
     },
     "variants": {
       "title": "Variants",

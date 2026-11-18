@@ -117,9 +117,9 @@
     },
     "ecus": {
       "title": "ECUs",
-      "description": "The modules the file's signals read, the base set's counted toward 4 in all, of one ID width.",
+      "description": "The modules the file's signals read, the base set's counted toward 32 in all, of one ID width.",
       "type": "array",
-      "maxItems": 4,
+      "maxItems": 32,
       "items": { "$ref": "#/$defs/ecu" }
     },
     "ecu": {
