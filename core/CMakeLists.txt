@@ -44,6 +44,7 @@ add_library(ecuio-core STATIC
     src/elm327_log.cpp
     src/serial_ports.cpp
     src/sim.cpp
+    src/sim_bus.cpp
     src/socketcan_interfaces.cpp
     src/socketcan_request.cpp
     src/socketcan_transport.cpp

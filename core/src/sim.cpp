@@ -1,36 +1,27 @@
-// File/layer: core/src/sim.cpp | C++17, Qt-free; the bus side Linux only
-//             (SocketCAN), a refusal elsewhere; the unbound sim everywhere
+// File/layer: core/src/sim.cpp | C++17, Qt-free, every platform; the bus
+//             is sim_bus.cpp's (Linux), a refusal elsewhere
 // Testing: UNIT: SimTest (test_socketcan); SimRecordingTest, SimAskTest
 //          (test_obd2); HARNESS: SimBusTest (test_vcan)
 //
-// The simulated ECU on a virtual bus (ADR-0046): a CAN_RAW socket on a
-// vcan interface hearing 0x7DF and 0x7E0 (and with modules=2 0x7E1, or
-// with profile= each of the profile's channels' request IDs),
-// requests through each ECU's own ISO-TP receiver, each answered by
-// sim_ecu.h and sent through that ECU's ISO-TP sender as 0x7E8 (or
-// 0x7E9), broken as the faults say. One worker thread ticks the
-// ECU's clock (and the mock's drive cycle) every 50 ms, reads, answers
-// and sends; it allocates nothing. A replay:// recording is read whole at
-// create (ecuio_sim_load_recording, every platform; a stretch of it alone
-// under from= and to=, recording_stretch.h) and only read after.
+// The simulated ECU (ADR-0046): its URI and profile planned, its ECUs
+// built (the engine ECU, then modules=2's module or the profile's, a node
+// each), what a node answers and the fate a fault gives it. A replay://
+// recording is read whole at create (ecuio_sim_load_recording; a stretch
+// of it alone under from= and to=, recording_stretch.h) and only read
+// after.
 //
 // An unbound sim (ecuio_sim_create_unbound, ADR-0055) has the same ECUs
 // and answers with no bus, worker or socket: ecuio_sim_ask ticks its
 // clock to the caller's time and returns each ECU's whole reply, its
 // fate as the time it starts and a flag.
 
-#include "ecuio/sim.h"
+#include "sim_impl.h"
 
-#include "ecuio/internal.h" /* ECUIO_HAVE_SOCKETCAN */
 #include "error_detail.h"
 #include "frames_csv.h"
-#include "profile_hold.h"
 #include "sim_dids.h"
-#include "sim_ecu.h"
 
 #include "ecuio/profile.h"
-
-#include "isotp.h"
 
 #include <atomic>
 #include <chrono>
@@ -41,99 +32,7 @@
 #include <string>
 #include <vector>
 
-#if ECUIO_HAVE_SOCKETCAN
-
-#include "socketcan_netlink.h"
-#include "socketcan_wire.h"
-
-#include <thread>
-
-#include <errno.h>
-#include <fcntl.h>
-#include <linux/can.h>
-#include <linux/can/raw.h>
-#include <poll.h>
-#include <sys/eventfd.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
-#endif
-
-/* A reply waiting for its time (late, pending), or under way through the
- * sender */
-struct sim_sending {
-    uint8_t data[ECUIO_SIM_REPLY_MAX] = {};
-    uint32_t len = 0;
-    ecuio_sim_fate fate = ecuio_sim_fate::intact;
-    bool waiting = false; /* late or pending: not started yet */
-    int64_t start_us = 0;
-    bool active = false; /* through the sender, Flow Control or frames due */
-    bool held = false;   /* stalled: the last frame put off once */
-};
-
-/* One ECU on the bus: the IDs it hears and answers on, its own ISO-TP
- * receiver and sender, and its reply, so two modules answering one
- * functional request never share a message's state */
-struct sim_node {
-    uint32_t request_id = ECUIO_SIM_REQUEST_ID;
-    uint32_t reply_id = ECUIO_SIM_REPLY_ID;
-    /* 0 the engine ECU, 1 another module (its faults counted with every
-     * other module's) */
-    int module = 0;
-    /* Answers the profile's DIDs (sim_dids.h): Service 22 on the engine
-     * ECU, everything on another module */
-    bool from_set = false;
-    /* The diagnostic session (ADR-0060): only the engine ECU with no
-     * profile has an extended session; a profile's nodes and modules=2's
-     * module refuse 10 03 */
-    ecuio_sim_session session;
-    isotp_rx rx;
-    isotp_tx tx;
-    sim_sending r;
-};
-
-static_assert(ECUIO_SIM_MAX_REPLIES >= 2 * (1 + ECUIO_MAX_CHANNELS),
-              "every ECU's reply, each with a 7F xx 78 ahead of it");
-
-struct ecuio_sim {
-    /* The registry's set, held from create (profile_hold.h); first, so
-     * it's released after every member that reads it */
-    ecuio_profile_hold profile_hold;
-    std::atomic<uint64_t> requests{0};
-    std::atomic<uint64_t> replies{0};
-    std::atomic<uint64_t> refused{0};
-    std::atomic<uint64_t> silent{0};
-    std::atomic<uint64_t> late{0};
-    std::atomic<uint64_t> bad_sequence{0};
-    std::atomic<uint64_t> stalled{0};
-    std::atomic<uint64_t> unflowed{0};
-    std::atomic<uint64_t> clears{0};
-    std::atomic<uint64_t> pending{0};
-    std::atomic<uint32_t> flags{0};
-    /* profile=: the set whose DIDs the ECUs answer (the registry's
-     * pointer, valid while the sim is), and each def's physical value,
-     * set from any thread (ecuio_sim_set_value) and read by the worker */
-    const ecuio_signal_set_t* set = nullptr;
-    std::unique_ptr<std::atomic<double>[]> values;
-    ecuio_sim_recording recording; /* replay://: the ECU's replies */
-    ecuio_sim_ecu ecu;
-    /* the engine ECU, then modules=2's module or the profile's: as many
-     * as answer, sized by build_sim and never after */
-    std::unique_ptr<sim_node[]> nodes;
-    int node_count = 1;
-    /* ecuio_sim_create_unbound: no bus; ecuio_sim_ask answers, ticking
-     * the clock to the time it's given (its ticks never go back) */
-    bool unbound = false;
-    std::chrono::steady_clock::time_point created =
-        std::chrono::steady_clock::now();
-#if ECUIO_HAVE_SOCKETCAN
-    int fd = -1;
-    int stop_fd = -1;
-    std::thread worker;
-#endif
-};
-
-namespace {
+namespace ecuio_sim_impl {
 
 /* The reply's send is over: count it */
 void sent(ecuio_sim* s, const sim_sending& r)
@@ -212,334 +111,7 @@ ecuio_sim_fate decide(ecuio_sim* s, const sim_node& n, const uint8_t* req,
     return fate;
 }
 
-} // namespace
-
-#if ECUIO_HAVE_SOCKETCAN
-
-namespace {
-
-constexpr int64_t kTickUs = ECUIO_SIM_TICK_US;
-static_assert(kTickUs == static_cast<int64_t>(ecuio_mock::kTickS * 1e6f + 0.5f),
-              "one drive cycle step per tick");
-
-int64_t now_us()
-{
-    return std::chrono::duration_cast<std::chrono::microseconds>(
-               std::chrono::steady_clock::now().time_since_epoch())
-        .count();
-}
-
-/* One frame out; vcan has no flow control, so a full send queue says
- * ENOBUFS and the write is tried again shortly. False when the bus
- * failed. */
-bool put(int fd, const isotp_can& f)
-{
-    struct can_frame c;
-    std::memset(&c, 0, sizeof c);
-    c.can_id = f.id;
-    c.can_dlc = f.len;
-    std::memcpy(c.data, f.data, f.len);
-    for (int tries = 0; tries < 1000; ++tries) {
-        if (write(fd, &c, sizeof c) == static_cast<ssize_t>(sizeof c)) {
-            return true;
-        }
-        if (errno != ENOBUFS && errno != EINTR) {
-            return false;
-        }
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
-    }
-    return false;
-}
-
-/* Starts n's reply at now: its Single Frame (the send is over) or its
- * First Frame. False when the bus failed. */
-bool start(ecuio_sim* s, sim_node& n, int64_t now)
-{
-    sim_sending& r = n.r;
-    isotp_can f;
-    r.waiting = false;
-    if (!isotp_tx_start(n.tx, n.reply_id, r.data, static_cast<uint16_t>(r.len),
-                        now, &f)) {
-        return true; /* a send under way: dropped, as a busy ECU would */
-    }
-    if (!put(s->fd, f)) {
-        return false;
-    }
-    if (n.tx.state == isotp_tx_state::idle) {
-        sent(s, r);
-    } else {
-        r.active = true;
-        r.held = false;
-    }
-    return true;
-}
-
-/* Sends what n's sender has due at now. False when the bus failed. */
-bool pump(ecuio_sim* s, sim_node& n, int64_t now)
-{
-    sim_sending& r = n.r;
-    while (r.active) {
-        const bool last =
-            n.tx.state == isotp_tx_state::sending && n.tx.len - n.tx.sent <= 7;
-        if (last && r.fate == ecuio_sim_fate::stalled && !r.held) {
-            r.held = true;
-            n.tx.due_us = now + ECUIO_SIM_STALLED_US;
-        }
-        isotp_can f;
-        const uint8_t seq = n.tx.seq;
-        switch (isotp_tx_next(n.tx, now, &f)) {
-        case isotp_tx_step::frame:
-            if (n.tx.state == isotp_tx_state::idle &&
-                r.fate == ecuio_sim_fate::bad_sequence) {
-                f.data[0] = static_cast<uint8_t>(0x20 | ((seq + 1) & 0x0F));
-            }
-            if (!put(s->fd, f)) {
-                return false;
-            }
-            if (n.tx.state == isotp_tx_state::idle) {
-                r.active = false;
-                sent(s, r);
-            }
-            break;
-        case isotp_tx_step::timed_out:
-            s->unflowed.fetch_add(1, std::memory_order_relaxed);
-            r.active = false;
-            break;
-        case isotp_tx_step::later:
-        case isotp_tx_step::idle:
-            return true;
-        }
-    }
-    return true;
-}
-
-bool yielded(const ecuio_sim* s)
-{
-    return (s->flags.load(std::memory_order_relaxed) & ECUIO_SIM_YIELDED) != 0;
-}
-
-/* Another node sent on a reply ID: an ECU answers there already, so
- * the sim goes silent for good, every reply under way or waiting
- * dropped */
-void yield(ecuio_sim* s)
-{
-    s->flags.fetch_or(ECUIO_SIM_YIELDED, std::memory_order_release);
-    for (int i = 0; i < s->node_count; ++i) {
-        sim_node& n = s->nodes[i];
-        n.r.waiting = false;
-        n.r.active = false;
-        n.tx.state = isotp_tx_state::idle;
-    }
-}
-
-/* A whole request to n: answered, its fate decided, its send started or
- * put off. False when the bus failed. */
-bool take(ecuio_sim* s, sim_node& n, const isotp_message& m, int64_t now)
-{
-    sim_sending& r = n.r;
-    s->requests.fetch_add(1, std::memory_order_relaxed);
-    if (yielded(s) || r.active || r.waiting) {
-        /* silent, or busy with a reply: a tester sends one at a time */
-        return true;
-    }
-    const bool functional = m.id == ECUIO_SIM_FUNCTIONAL_ID;
-    r.len = answer(s, n, m.data, m.len, functional, r.data);
-    if (r.len == 0) {
-        return true;
-    }
-    r.fate = decide(s, n, m.data, m.len, r.data, r.len);
-    switch (r.fate) {
-    case ecuio_sim_fate::silent:
-        return true;
-    case ecuio_sim_fate::late:
-        r.waiting = true;
-        r.start_us = now + ECUIO_SIM_LATE_US;
-        return true;
-    case ecuio_sim_fate::pending: {
-        /* 7F <service> 78 now, a Single Frame; the reply itself later,
-         * whole */
-        const uint8_t wait[3] = {0x7F, m.data[0], 0x78};
-        isotp_can f;
-        if (isotp_tx_start(n.tx, n.reply_id, wait, 3, now, &f) &&
-            !put(s->fd, f)) {
-            return false;
-        }
-        r.fate = ecuio_sim_fate::intact;
-        r.waiting = true;
-        r.start_us = now + ECUIO_SIM_PENDING_US;
-        return true;
-    }
-    case ecuio_sim_fate::bad_sequence:
-    case ecuio_sim_fate::stalled:
-    case ecuio_sim_fate::intact:
-        break;
-    }
-    return start(s, n, now);
-}
-
-/* One frame for n (its own request ID, or the functional one): through
- * its receiver, a Flow Control sent for a First Frame, a whole request
- * answered. False when the bus failed. */
-bool feed(ecuio_sim* s, sim_node& n, const isotp_can& f, int64_t now)
-{
-    isotp_message m;
-    switch (isotp_take(n.rx, f, now, &m)) {
-    case isotp_result::first:
-        if (yielded(s)) {
-            break; /* silent: no Flow Control either */
-        }
-        if (!put(s->fd, isotp_flow_control(n.reply_id))) {
-            return false;
-        }
-        break;
-    case isotp_result::complete:
-        if (!take(s, n, m, now)) {
-            return false;
-        }
-        break;
-    default:
-        break;
-    }
-    return true;
-}
-
-/* Reads every frame waiting. False when the bus failed. */
-bool drain(ecuio_sim* s)
-{
-    for (;;) {
-        struct can_frame c;
-        const ssize_t got = read(s->fd, &c, sizeof c);
-        if (got < 0) {
-            return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
-        }
-        if (got != static_cast<ssize_t>(sizeof c)) {
-            continue;
-        }
-        const int64_t now = now_us();
-        isotp_can f;
-        f.id = c.can_id & CAN_SFF_MASK;
-        f.len = c.can_dlc <= 8 ? c.can_dlc : 8;
-        std::memcpy(f.data, c.data, f.len);
-        bool replied_on = false;
-        for (int i = 0; i < s->node_count; ++i) {
-            replied_on = replied_on || f.id == s->nodes[i].reply_id;
-        }
-        if (replied_on) {
-            /* never its own: a CAN_RAW socket isn't sent what it wrote */
-            yield(s);
-            continue;
-        }
-        for (int i = 0; i < s->node_count; ++i) {
-            sim_node& n = s->nodes[i];
-            if (isotp_kind(f) == isotp_pci::flow) {
-                if (f.id == n.request_id) {
-                    const isotp_flow_result fr = isotp_tx_flow(n.tx, f, now);
-                    if (fr == isotp_flow_result::overflow ||
-                        fr == isotp_flow_result::abandoned) {
-                        n.r.active = false;
-                    }
-                }
-            } else if ((f.id == n.request_id ||
-                        f.id == ECUIO_SIM_FUNCTIONAL_ID) &&
-                       !feed(s, n, f, now)) {
-                return false;
-            }
-            if (!pump(s, n, now_us())) {
-                return false;
-            }
-        }
-    }
-}
-
-void run(ecuio_sim* s)
-{
-    int64_t next_tick = now_us();
-    for (;;) {
-        int64_t now = now_us();
-        while (now >= next_tick) {
-            ecuio_sim_tick(s->ecu);
-            next_tick += kTickUs;
-            if (now - next_tick > 1000000) {
-                next_tick = now + kTickUs; /* held up: no catching up */
-            }
-        }
-        int64_t due = next_tick;
-        bool failed = false;
-        for (int i = 0; i < s->node_count && !failed; ++i) {
-            sim_node& n = s->nodes[i];
-            if (n.r.waiting && now >= n.r.start_us && !start(s, n, now)) {
-                failed = true;
-            } else if (!pump(s, n, now)) {
-                failed = true;
-            }
-            (void)isotp_expire(n.rx, now);
-            if (n.r.waiting && n.r.start_us < due) {
-                due = n.r.start_us;
-            }
-            if (n.r.active && n.tx.due_us < due) {
-                due = n.tx.due_us;
-            }
-        }
-        if (failed) {
-            break;
-        }
-        const int64_t wait_us = due > now ? due - now : 0;
-        struct pollfd p[2] = {{s->fd, POLLIN, 0}, {s->stop_fd, POLLIN, 0}};
-        const int got = poll(p, 2, static_cast<int>((wait_us + 999) / 1000));
-        if (got < 0 && errno != EINTR) {
-            break;
-        }
-        if (p[1].revents != 0) {
-            return; /* destroy */
-        }
-        if ((p[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-            break;
-        }
-        if ((p[0].revents & POLLIN) != 0 && !drain(s)) {
-            break;
-        }
-    }
-    s->flags.fetch_or(ECUIO_SIM_FAILED, std::memory_order_release);
-}
-
-/* A CAN_RAW socket on ifindex hearing the functional request ID and each
- * node's request and reply IDs (another node answering), 11-bit data
- * frames only, non-blocking; -1 with errno */
-int open_socket(int32_t ifindex, const sim_node* nodes, int count)
-{
-    const int fd =
-        socket(PF_CAN, SOCK_RAW | SOCK_NONBLOCK | SOCK_CLOEXEC, CAN_RAW);
-    if (fd < 0) {
-        return -1;
-    }
-    struct can_filter f[1 + 2 * (1 + ECUIO_MAX_CHANNELS)];
-    int k = 0;
-    f[k++].can_id = ECUIO_SIM_FUNCTIONAL_ID;
-    for (int i = 0; i < count; ++i) {
-        f[k++].can_id = nodes[i].request_id;
-        f[k++].can_id = nodes[i].reply_id;
-    }
-    for (int i = 0; i < k; ++i) {
-        f[i].can_mask = CAN_SFF_MASK | CAN_EFF_FLAG | CAN_RTR_FLAG;
-    }
-    struct sockaddr_can addr;
-    std::memset(&addr, 0, sizeof addr);
-    addr.can_family = AF_CAN;
-    addr.can_ifindex = ifindex;
-    if (setsockopt(fd, SOL_CAN_RAW, CAN_RAW_FILTER, f,
-                   static_cast<socklen_t>(k * sizeof f[0])) != 0 ||
-        bind(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof addr) != 0) {
-        const int err = errno;
-        close(fd);
-        errno = err;
-        return -1;
-    }
-    return fd;
-}
-
-} // namespace
-
-#endif /* ECUIO_HAVE_SOCKETCAN */
+} // namespace ecuio_sim_impl
 
 namespace {
 
@@ -807,45 +379,9 @@ ecuio_status_t ecuio_sim_create_with(const char* uri, const char* ifname,
     if (built != ECUIO_OK) {
         return built;
     }
-    if (!socketcan_name_ok(ifname, std::strlen(ifname))) {
-        ecuio_detail_set("'%.20s' isn't an interface name", ifname);
-        return ECUIO_ERR_LOAD_FAILED;
-    }
-    socketcan_link link;
-    bool found = false;
-    if (!socketcan_find_link(ifname, &link, &found)) {
-        ecuio_detail_set("couldn't list the network interfaces");
-        return ECUIO_ERR_LOAD_FAILED;
-    }
-    if (!found) {
-        ecuio_detail_set("no interface %s (sudo ip link add dev %s type vcan)",
-                         ifname, ifname);
-        return ECUIO_ERR_LOAD_FAILED;
-    }
-    const socketcan_sim_verdict v =
-        socketcan_judge_sim(link, (options & ECUIO_SIM_ALLOW_DESK_BUS) != 0);
-    if (v != socketcan_sim_verdict::ok) {
-        char refusal[512];
-        socketcan_sim_refusal(link, v, refusal, sizeof refusal);
-        ecuio_detail_set("%s", refusal);
-        return ECUIO_ERR_LOAD_FAILED;
-    }
-    s->fd = open_socket(link.index, s->nodes.get(), s->node_count);
-    s->stop_fd = s->fd >= 0 ? eventfd(0, EFD_CLOEXEC) : -1;
-    if (s->fd < 0 || s->stop_fd < 0) {
-        ecuio_detail_set("%s: the socket wouldn't open (%s)", ifname,
-                         std::strerror(errno));
-        if (s->fd >= 0) {
-            close(s->fd);
-        }
-        return ECUIO_ERR_LOAD_FAILED;
-    }
-    try {
-        s->worker = std::thread(run, s.get());
-    } catch (...) {
-        close(s->fd);
-        close(s->stop_fd);
-        return ECUIO_ERR_OUT_OF_MEMORY;
+    const ecuio_status_t opened = open_bus(s.get(), ifname, options);
+    if (opened != ECUIO_OK) {
+        return opened;
     }
     *out = s.release();
     return ECUIO_OK;
@@ -1029,13 +565,7 @@ void ecuio_sim_destroy(ecuio_sim_t* sim)
     }
 #if ECUIO_HAVE_SOCKETCAN
     if (!sim->unbound) {
-        const uint64_t one = 1;
-        (void)!write(sim->stop_fd, &one, sizeof one);
-        if (sim->worker.joinable()) {
-            sim->worker.join();
-        }
-        close(sim->fd);
-        close(sim->stop_fd);
+        close_bus(sim);
     }
 #endif
     delete sim;
