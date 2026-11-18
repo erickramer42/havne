@@ -28,6 +28,8 @@
 #include <QWindow>
 #include <QtQuickTest>
 
+#include <ecuio/plugin.h>
+
 #include "conditionstore.h"
 #include "packed_plugin.h"
 #include "pluginstore.h"
@@ -421,6 +423,12 @@ public:
                    : writeScratchFile(name, QString::fromUtf8(bytes));
     }
 
+    // The first plugin format this Havne doesn't read
+    Q_INVOKABLE int pluginFormatPast() const
+    {
+        return ECUIO_PLUGIN_FORMAT_MAX + 1;
+    }
+
     // The plugin store's copies, by file name
     Q_INVOKABLE QStringList storedPlugins() const
     {
@@ -668,6 +676,26 @@ void stageOldStores(const QString& settingsDir)
     (void)store.import(packed_plugin::example());
 }
 
+// The example plugin's kept copy as a Havne past this one's format would
+// have left it: named by its own hash, a format core no longer loads. The
+// store reads its copies once, at its first list, so this runs before the
+// bridge is made
+void stageUnloadablePluginCopy()
+{
+    QByteArray bytes = packed_plugin::example();
+    bytes.replace("\"havne_plugin\": 1,",
+                  "\"havne_plugin\": " +
+                      QByteArray::number(ECUIO_PLUGIN_FORMAT_MAX + 1) + ",");
+    const QString sha = QString::fromLatin1(
+        QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex());
+    QDir().mkpath(PluginStore::root());
+    QFile copy(PluginStore::root() + QLatin1Char('/') + sha +
+               QStringLiteral(".havne-plugin.json"));
+    if (copy.open(QIODevice::WriteOnly)) {
+        copy.write(bytes);
+    }
+}
+
 // The relay's adapter as main() makes it on the phone, opening at once:
 // with it the relay is available, and Settings shows its box
 class OpenAdapter : public RelayAdapter
@@ -726,6 +754,11 @@ public slots:
             });
         if (staged) {
             stageOldStores(m_settingsDir.path());
+        }
+        if (std::any_of(args.begin(), args.end(), [](const QString& a) {
+                return a.endsWith(QStringLiteral("tst_settings_unloadable.qml"));
+            })) {
+            stageUnloadablePluginCopy();
         }
 
         m_bridge = std::make_unique<SessionBridge>();
