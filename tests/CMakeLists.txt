@@ -227,9 +227,10 @@ gtest_discover_tests(test_socketcan DISCOVERY_TIMEOUT 60)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_vcan test_vcan.cpp test_vcan_socketcan.cpp
                    test_vcan_requests.cpp test_vcan_isotp.cpp
-                   test_vcan_talk.cpp test_vcan_turns.cpp)
+                   test_vcan_talk.cpp test_vcan_turns.cpp test_vcan_car.cpp)
     target_compile_definitions(test_vcan PRIVATE
         ECUIO_REPLAY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/replay"
+        ECUIO_PLUGINS_DIR="${CMAKE_SOURCE_DIR}/plugins"
     )
     find_package(Threads REQUIRED)
     target_link_libraries(test_vcan PRIVATE ecuio-core GTest::gtest_main Threads::Threads)
@@ -412,6 +413,8 @@ if(TARGET havne-cli)
         app_cli_elm327(ASecondModulesDidAnswers modules)
         app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
         app_cli_elm327(AFaultAimedAtOneModuleSilencesItAlone aimed)
+        app_cli_elm327(TheMadeUpCarsModulesAllAnswer car)
+        set_tests_properties(CliElm327RunTest.TheMadeUpCarsModulesAllAnswer PROPERTIES TIMEOUT 180)
         app_cli_elm327(PythonObdReadsIt python-obd)
         set_tests_properties(CliElm327RunTest.PythonObdReadsIt PROPERTIES COST 13)
         # A clear (ADR-0038's appendix of 2026-11-06): the mock's report

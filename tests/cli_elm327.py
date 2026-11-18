@@ -7,6 +7,7 @@
 #   python tests/cli_elm327.py modules <havne-cli>
 #   python tests/cli_elm327.py plugin <havne-cli> <plugins/example-sim>
 #   python tests/cli_elm327.py aimed <havne-cli> <plugins/example-sim>
+#   python tests/cli_elm327.py car <havne-cli> <plugins/example-sim>
 #   python tests/cli_elm327.py python-obd <havne-cli>
 #
 # havne-cli sim's ELM327 emulator (ADR-0055) on a port the system picks
@@ -26,9 +27,12 @@
 # by a session through the same plugin: each answers raw 0, its offset.
 # aimed: the same, with a fault aimed at the tcm alone (silent:1@7E9):
 # the pcm's values come, the tcm's never do.
+# car: the made-up whole car (plugins/example-car, beside example-sim)
+# through the emulator: every one of its 18 modules answers its name.
 # python-obd: python-OBD reads it (skip 77 without the package).
 
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -255,6 +259,25 @@ def aimed(cli, package):
     emu.end()
 
 
+def car(cli, package):
+    package = os.path.join(os.path.dirname(package.rstrip("/\\")), "example-car")
+    profile = "plugin.example-car.whole"
+    emu = Emulator(cli, "mock://emu?profile=" + profile, seconds=90,
+                   extra=["--plugin", package])
+    uri = "elm327://127.0.0.1:%d?profile=%s&identify=0&diagnose=0" % (
+        emu.port, profile)
+    lines = stream(cli, uri, ["--values", "--seconds", "20", "--plugin", package])
+    names = {}
+    for l in lines:
+        if l["type"] == "signals":
+            names = {d["id"]: d["name"] for d in l["signals"]}
+    named = {l["id"] for l in lines if l["type"] == "values"
+             for v in l["values"] if names.get(v["id"], "").endswith("Module Name")}
+    want = {"0x7E8"} | {"0x%X" % (0x520 + n) for n in range(17)}
+    expect(named == want, "every module's name: missing %r" % sorted(want - named))
+    emu.end()
+
+
 def python_obd(cli):
     try:
         import obd  # noqa: F401  (python-OBD, a test-only package)
@@ -280,8 +303,8 @@ def python_obd(cli):
 
 def main():
     mode, cli = sys.argv[1], sys.argv[2]
-    if mode in ("plugin", "aimed"):
-        rc = {"plugin": plugin, "aimed": aimed}[mode](cli, sys.argv[3])
+    if mode in ("plugin", "aimed", "car"):
+        rc = {"plugin": plugin, "aimed": aimed, "car": car}[mode](cli, sys.argv[3])
     else:
         rc = {"adapter": adapter, "reconnect": reconnect, "session": session,
               "modules": modules,
