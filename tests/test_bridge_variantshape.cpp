@@ -2,7 +2,7 @@
 // Testing: BRIDGE: BridgeTest.VariantShape* (test_bridge)
 //
 // What a file on obd2 adds and what it replaces (app/variantshape.h), as
-// both stores say it for the Signals list's rows.
+// the plugin store says it for the Signals list's rows.
 
 #include <gtest/gtest.h>
 
@@ -49,21 +49,8 @@ struct Seen
     int count = -1;
     int own = -1;
     QStringList replaced;
+    QString extends;
 };
-
-Seen viaSignalStore(const QByteArray& bytes)
-{
-    SettingsDirScope dir;
-    QTemporaryDir from;
-    SessionBridge bridge;
-    const QVariantMap r = bridge.importSignalFile(
-        writeScratch(from.path(), QStringLiteral("f.json"), bytes));
-    EXPECT_TRUE(r.value(QStringLiteral("ok")).toBool())
-        << r.value(QStringLiteral("words")).toString().toStdString();
-    return {r.value(QStringLiteral("count")).toInt(),
-            r.value(QStringLiteral("own")).toInt(),
-            r.value(QStringLiteral("replacedNames")).toStringList()};
-}
 
 Seen viaPluginStore(const QByteArray& bytes)
 {
@@ -79,7 +66,11 @@ Seen viaPluginStore(const QByteArray& bytes)
         << r.value(QStringLiteral("words")).toString().toStdString();
     return {r.value(QStringLiteral("counts")).toList().value(0).toInt(),
             r.value(QStringLiteral("owns")).toList().value(0).toInt(),
-            r.value(QStringLiteral("replacedNames")).toList().value(0).toStringList()};
+            r.value(QStringLiteral("replacedNames"))
+                .toList()
+                .value(0)
+                .toStringList(),
+            r.value(QStringLiteral("extends")).toList().value(0).toString()};
 }
 
 int obd2Count()
@@ -92,31 +83,32 @@ int obd2Count()
 } // namespace
 
 /* A signal named as one of obd2's takes its place: the set's count then
- * no longer says what the file added, so each store names the replaced and
+ * no longer says what the file added, so the store names the replaced and
  * counts the rest */
 TEST(BridgeTest, VariantShapeAFileThatOnlyAddsOrOnlyReplacesOrBoth)
 {
     const int base = obd2Count();
-    for (const auto& store : {viaSignalStore, viaPluginStore}) {
-        Seen s = store(fileOf(QStringLiteral("Adds"), {QStringLiteral("Mine")}));
-        EXPECT_EQ(s.count, base + 1);
-        EXPECT_EQ(s.own, 1);
-        EXPECT_TRUE(s.replaced.isEmpty());
+    Seen s = viaPluginStore(
+        fileOf(QStringLiteral("Adds"), {QStringLiteral("Mine")}));
+    EXPECT_EQ(s.count, base + 1);
+    EXPECT_EQ(s.own, 1);
+    EXPECT_TRUE(s.replaced.isEmpty());
+    EXPECT_EQ(s.extends.toStdString(), "obd2");
 
-        s = store(fileOf(QStringLiteral("Swaps"), {QStringLiteral("RPM")}));
-        EXPECT_EQ(s.count, base) << "one out, one in";
-        EXPECT_EQ(s.own, 0) << "nothing beyond what it replaced";
-        EXPECT_EQ(s.replaced, QStringList{QStringLiteral("RPM")});
+    s = viaPluginStore(
+        fileOf(QStringLiteral("Swaps"), {QStringLiteral("RPM")}));
+    EXPECT_EQ(s.count, base) << "one out, one in";
+    EXPECT_EQ(s.own, 0) << "nothing beyond what it replaced";
+    EXPECT_EQ(s.replaced, QStringList{QStringLiteral("RPM")});
 
-        s = store(fileOf(QStringLiteral("Both"),
-                         {QStringLiteral("Mine"), QStringLiteral("RPM"),
-                          QStringLiteral("Vehicle Speed")}));
-        EXPECT_EQ(s.count, base + 1);
-        EXPECT_EQ(s.own, 1);
-        EXPECT_EQ(s.replaced,
-                  (QStringList{QStringLiteral("RPM"), QStringLiteral("Vehicle Speed")}))
-            << "in the file's order";
-    }
+    s = viaPluginStore(fileOf(QStringLiteral("Both"),
+                              {QStringLiteral("Mine"), QStringLiteral("RPM"),
+                               QStringLiteral("Vehicle Speed")}));
+    EXPECT_EQ(s.count, base + 1);
+    EXPECT_EQ(s.own, 1);
+    EXPECT_EQ(s.replaced, (QStringList{QStringLiteral("RPM"),
+                                       QStringLiteral("Vehicle Speed")}))
+        << "in the file's order";
 }
 
 /* A file that extends nothing has no base to replace: all its signals are
@@ -125,12 +117,11 @@ TEST(BridgeTest, VariantShapeAFileOnNoBaseAddsEverySignal)
 {
     QByteArray alone = fileOf(QStringLiteral("Alone"), {QStringLiteral("RPM")});
     alone.replace(R"("extends":"obd2",)", "");
-    for (const auto& store : {viaSignalStore, viaPluginStore}) {
-        const Seen s = store(alone);
-        EXPECT_EQ(s.count, 1);
-        EXPECT_EQ(s.own, 1);
-        EXPECT_TRUE(s.replaced.isEmpty());
-    }
+    const Seen s = viaPluginStore(alone);
+    EXPECT_EQ(s.count, 1);
+    EXPECT_EQ(s.own, 1);
+    EXPECT_TRUE(s.replaced.isEmpty());
+    EXPECT_TRUE(s.extends.isEmpty()) << s.extends.toStdString();
 }
 
 /* sameDef reads everything the decoder and a display use: a copy of a

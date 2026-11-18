@@ -34,7 +34,6 @@
 #include "recordingexport.h"
 #include "recordingimport.h"
 #include "recordingview.h"
-#include "signalstore.h"
 #include "storemigration.h"
 #include "windowtheme.h"
 
@@ -410,13 +409,6 @@ public:
         return ecuio_import(&o, &r) == ECUIO_OK ? folder : QString();
     }
 
-    // The signal store's copies (SignalStore::root, the test's settings
-    // folder), by file name
-    Q_INVOKABLE QStringList storedSignalFiles() const
-    {
-        return QDir(SignalStore::root()).entryList(QDir::Files, QDir::Name);
-    }
-
     // The repository's example plugin, packed as a phone imports it
     // (tests/packed_plugin.h), written as a scratch file named name: its
     // URL, empty when it can't be; version replaces its own when given
@@ -719,7 +711,7 @@ public slots:
         QCoreApplication::setOrganizationName(QStringLiteral("Havne"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_settingsDir.path());
-        // The vehicles' signal files there too (SignalStore::root), as
+        // The plugin store there too (PluginStore::root), as
         // HAVNE_SETTINGS_DIR puts a second instance's
         qputenv("HAVNE_SETTINGS_DIR", m_settingsDir.path().toUtf8());
         QQuickStyle::setStyle(QStringLiteral("Basic"));   // as main() sets it

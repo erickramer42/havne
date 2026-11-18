@@ -32,7 +32,7 @@
 int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);   // ONE instance, lives for the process
-    // Every bridge's signal store (SignalStore::root) in a scratch folder,
+    // Every bridge's settings folder (its stores) in a scratch folder,
     // never the user's app data; a case that reads one sets its own
     QTemporaryDir settings;
     if (!settings.isValid()) {

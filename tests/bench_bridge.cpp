@@ -53,8 +53,8 @@
 // section 3), so the worker's callback and the tick's are measured too:
 // scripts/bench_ab.py's load kind runs one tree with and without it.
 // Every run's settings folder is a scratch one, so a saved set of the
-// user's is never attached. It holds the plugin and signal stores too, so
-// an A/B against a tree built before it reads other stores.
+// user's is never attached. It holds the plugin store too, so an A/B
+// against a tree built before it reads another store.
 //
 // Run: build/tests/Release/bench_bridge.exe [frames per run, default 20000]
 //      build/tests/Release/bench_bridge.exe --load [--conditions

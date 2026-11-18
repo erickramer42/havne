@@ -2,7 +2,7 @@
 // Testing: the helpers more than one test_bridge file uses (test_bridge)
 //
 // What the BridgeTest files share: waiting on the GUI thread, files and
-// folders, the fake J2534 DLL's control page, and the signal store's scratch
+// folders, the fake J2534 DLL's control page, and the settings' scratch
 // folders. Each is inline, so every file that includes this keeps its own
 // copy and an unused one costs nothing.
 
@@ -315,7 +315,6 @@ public:
     SettingsDirScope& operator=(const SettingsDirScope&) = delete;
 
     bool valid() const { return m_dir.isValid(); }
-    QString store() const { return m_dir.path() + QStringLiteral("/signals"); }
 
 private:
     QTemporaryDir m_dir;
@@ -355,11 +354,6 @@ inline bool registered(const char* profile)
 {
     const ecuio_signal_set_t* set = nullptr;
     return ecuio_profile_lookup(profile, &set) == ECUIO_OK;
-}
-
-inline QStringList storeFiles(const QString& store)
-{
-    return QDir(store).entryList(QDir::Files, QDir::Name);
 }
 
 /* The value Live shows for the signal named name, NaN with no row or no
