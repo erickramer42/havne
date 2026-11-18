@@ -348,8 +348,8 @@ int validated(const uint8_t* data, size_t size)
         if (v1.index >= channel_count) abort();
         break;
 
-    /* Names a def: every per-def code, plus DUPLICATE_ID's and
-     * DUPLICATE_NAME's second of the pair */
+    /* Names a def: every per-def code, plus DUPLICATE_ID's second of
+     * the pair */
     case ECUIO_VALIDATE_ERR_BIT_LENGTH:
     case ECUIO_VALIDATE_ERR_BIT_OFFSET:
     case ECUIO_VALIDATE_ERR_NAME:
@@ -364,7 +364,6 @@ int validated(const uint8_t* data, size_t size)
     case ECUIO_VALIDATE_ERR_BYTE_ORDER:
     case ECUIO_VALIDATE_ERR_FORMULA:
     case ECUIO_VALIDATE_ERR_DUPLICATE_ID:
-    case ECUIO_VALIDATE_ERR_DUPLICATE_NAME:
         if (v1.index >= count) abort();
         break;
 
@@ -375,8 +374,8 @@ int validated(const uint8_t* data, size_t size)
     return rc1;
 }
 
-/* The harness still reaches a set of several defs that passes, the
- * duplicate name's refusal through its repeat bit, a channel's reserved
+/* The harness still reaches a set of several defs that passes, one
+ * that repeats a name (taken) through its repeat bit, a channel's reserved
  * fields through theirs, and one channel more than a set holds */
 bool reaches_several_defs()
 {
@@ -385,8 +384,7 @@ bool reaches_several_defs()
     uint8_t repeated[sizeof kTwoDefs];
     memcpy(repeated, kTwoDefs, sizeof kTwoDefs);
     repeated[kHeadBytes + kDefBytes + 4] |= 0x80u;
-    if (validated(repeated, sizeof repeated) !=
-        ECUIO_VALIDATE_ERR_DUPLICATE_NAME) {
+    if (validated(repeated, sizeof repeated) != ECUIO_VALIDATE_OK) {
         abort();
     }
     /* One channel, 0x7E8 and 0x6E8: taken plain, refused with either bit */
