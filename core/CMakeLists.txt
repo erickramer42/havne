@@ -5,6 +5,8 @@ add_library(ecuio-core STATIC
     src/dtc_titles.cpp
     src/export.cpp
     src/health.cpp
+    src/health_build.cpp
+    src/health_write.cpp
     src/host_clock.cpp
     src/frames_read.cpp
     src/import.cpp
