@@ -1119,7 +1119,12 @@ TEST(BridgeTest, OneStoreMigrationEveryRowKeepsItsRef)
     EXPECT_EQ(own, 7) << "the file's own rows are referenced by their keys";
     {
         QSettings prefs(old.prefsPath(), QSettings::IniFormat);
-        EXPECT_TRUE(bridge.migrateStores(prefs).isEmpty()) << "done once";
+        EXPECT_EQ(bridge.migrateStores(prefs),
+                  (QStringList{QStringLiteral("The earlier version's vehicle "
+                                              "list removed"),
+                               QStringLiteral("The earlier version's signal "
+                                              "files removed: 1")}))
+            << "done once; the next start removes the earlier data";
     }
 }
 

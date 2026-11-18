@@ -1954,6 +1954,7 @@ if(NOT HAVNE_BUILD_CORE_ONLY)
         test_one_store.cpp
         test_bridge_variantshape.cpp
         test_store_migration.cpp
+        test_store_removal.cpp
         ../app/recordingview.cpp
         ../app/recordingexport.cpp
         ../app/recordingframes.cpp

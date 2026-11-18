@@ -1,5 +1,5 @@
 // File/layer: app/storemigration.cpp | Qt6 Core, app layer, C++17
-// Testing: BRIDGE: BridgeTest.OneStoreMigration* (test_bridge)
+// Testing: BRIDGE: BridgeTest.OneStoreMigration*, .OneStoreRemoval* (test_bridge)
 
 #include "storemigration.h"
 
@@ -7,12 +7,14 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
 #include <QSaveFile>
+#include <QSet>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QVariantList>
@@ -57,7 +59,8 @@ int g_stopFile = 0;
 // Whether the seam ends the run here; it ends one run
 bool stopsAfter(Step step, int file = 0)
 {
-    if (g_stopStep != step || (step == Step::File && g_stopFile != file)) {
+    const bool counted = step == Step::File || step == Step::OldCopy;
+    if (g_stopStep != step || (counted && g_stopFile != file)) {
         return false;
     }
     g_stopStep = Step::None;
@@ -332,7 +335,8 @@ Bytes keepBytes(const QString& sha)
 {
     QFile from(oldPath(sha));
     if (!from.open(QIODevice::ReadOnly)) {
-        return Bytes::None;
+        // A copy held open elsewhere is there still: its record says so
+        return QFileInfo::exists(oldPath(sha)) ? Bytes::NotKept : Bytes::None;
     }
     if (from.size() > kKeptMaxBytes) {
         return Bytes::NotKept;
@@ -353,8 +357,8 @@ struct NotMoved {
     QStringList loose;
 };
 
-// A file that didn't move as the book records it. kept false: its bytes
-// are only in the old folder, which that folder's removal must spare
+// A file that didn't move as the book records it. kept false: its copy is
+// there and its bytes are only in the old folder
 QJsonObject record(const QString& sha, const QString& name,
                    const NotMoved& left)
 {
@@ -552,6 +556,71 @@ bool renameAddresses(QSettings& prefs, const QHash<QString, QString>& renames,
     return prefs.status() == QSettings::NoError;
 }
 
+// The hashes of the book's records whose bytes are nowhere but the old
+// folder: kept false, or none in plugins/unmigrated. False for a book this
+// version doesn't judge (no text, text that isn't an object, a format
+// other than 2), which removes nothing
+bool sparedBy(const QSettings& prefs, QSet<QString>* spared)
+{
+    QJsonParseError error{};
+    const QJsonDocument doc =
+        QJsonDocument::fromJson(textOf(prefs, kBook).toUtf8(), &error);
+    const QJsonObject book = doc.object();
+    const QJsonValue format = book.value(QStringLiteral("format"));
+    if (error.error != QJsonParseError::NoError || !doc.isObject() ||
+        format.toInt(-1) != 2) {
+        return false;
+    }
+    const auto take = [spared](const QJsonValue& records) {
+        const QJsonArray list = records.toArray();
+        for (const auto& v : list) {
+            const QJsonObject r = v.toObject();
+            const QString sha = r.value(kSha).toString();
+            if (!isSha(sha)) {
+                continue;
+            }
+            const bool kept =
+                r.value(QStringLiteral("kept")) != QJsonValue(false) &&
+                QFileInfo::exists(unmigratedPath(sha));
+            if (!kept) {
+                spared->insert(sha);
+            }
+        }
+    };
+    take(book.value(kUnmigrated));
+    const QJsonArray entries = book.value(kList).toArray();
+    for (const auto& entry : entries) {
+        take(entry.toObject().value(kUnmigrated));
+    }
+    return true;
+}
+
+// The removal's lines: what went, and only then what stayed for Save
+QStringList removalLines(const StoreMigration::Removal& r)
+{
+    QStringList lines;
+    if (r.oldBook) {
+        lines << QStringLiteral("The earlier version's vehicle list removed");
+    }
+    if (r.removed > 0) {
+        lines << QStringLiteral("The earlier version's signal files removed: "
+                                "%1")
+                     .arg(r.removed);
+    }
+    if (r.spared > 0 && (r.oldBook || r.removed > 0)) {
+        lines << QStringLiteral("Signal files that weren't moved, kept in "
+                                "the earlier version's folder for Save: %1")
+                     .arg(r.spared);
+    }
+    if (r.stuck > 0) {
+        lines << QStringLiteral("The earlier version's signal files that "
+                                "couldn't be removed: %1, tried again at the "
+                                "next start")
+                     .arg(r.stuck);
+    }
+    return lines;
+}
+
 } // namespace
 
 QString StoreMigration::oldSignalsRoot()
@@ -614,6 +683,56 @@ QByteArray StoreMigration::oldCopy(const QString& sha, QString* words)
         *words = QStringLiteral("Its copy is empty");
     }
     return bytes;
+}
+
+StoreMigration::Removal StoreMigration::removeOld(QSettings& prefs,
+                                                 PluginStore& store)
+{
+    Removal r;
+    const QString root = oldSignalsRoot();
+    const bool oldBook = prefs.contains(kOldBook);
+    QSet<QString> spared;
+    if ((!oldBook && !QFileInfo(root).isDir()) || !store.migrated() ||
+        !sparedBy(prefs, &spared)) {
+        return r;
+    }
+    // The old book first: once it is gone an older Havne shows no
+    // vehicles, never vehicles whose files went missing
+    if (oldBook) {
+        prefs.remove(kOldBook);
+        prefs.sync();
+        // The registry's failed delete sets no status; a fallback's key stays
+        if (prefs.status() != QSettings::NoError || prefs.contains(kOldBook)) {
+            r.lines << QStringLiteral("The earlier version's vehicle list "
+                                      "couldn't be removed: it is tried "
+                                      "again at the next start");
+            return r;
+        }
+        r.oldBook = true;
+    }
+    if (stopsAfter(Step::OldBook)) {
+        r.stopped = true;
+        return r;
+    }
+    for (const QString& sha : shasIn(root)) {
+        if (spared.contains(sha)) {
+            ++r.spared;
+            continue;
+        }
+        if (!QFile::remove(oldPath(sha)) && QFile::exists(oldPath(sha))) {
+            ++r.stuck;
+            continue;
+        }
+        ++r.removed;
+        if (stopsAfter(Step::OldCopy, r.removed)) {
+            r.stopped = true;
+            return r;
+        }
+    }
+    // rmdir removes only an empty folder
+    (void)QDir().rmdir(root);
+    r.lines = removalLines(r);
+    return r;
 }
 
 void StoreMigration::stopAfterForTesting(Step step, int file)
