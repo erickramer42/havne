@@ -346,7 +346,7 @@ int run_stream(const StreamArgs& args)
                          pick_only ? "no" : "every", ecuio_last_error_detail());
         } else {
             BigLine b(cli::focus_line_bytes(ids.size()));
-            cli::focus_line(b.line, set, ids, 0, true);
+            cli::focus_line(b.line, set, ids, 0, true, session_signal_file());
             write_line(out, b.line);
         }
     } else if (session_pick_only(session)) {

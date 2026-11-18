@@ -101,6 +101,7 @@ bool missing_columns(const cli::ExportArgs& ex, bool* asked,
             std::memset(&s, 0, sizeof s);
             if (ecuio_recording_get_signal(r, i, &s) == ECUIO_OK) {
                 recorded.emplace_back(s.name, strnlen(s.name, sizeof s.name));
+                recorded.emplace_back(s.key, strnlen(s.key, sizeof s.key));
             }
         }
     }

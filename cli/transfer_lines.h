@@ -51,7 +51,9 @@ struct ExportArgs {
 };
 
 // The named columns the recording has no values for, in their order: a
-// typo stays an empty column (core's call), so havne-cli says so
+// typo stays an empty column (core's call), so havne-cli says so.
+// recorded holds each recorded signal's name and its key: a column is
+// named by either.
 inline std::vector<const char*>
 missing_names(const std::vector<const char*>& named,
               const std::vector<std::string>& recorded)
