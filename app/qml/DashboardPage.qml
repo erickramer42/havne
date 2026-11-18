@@ -1,5 +1,5 @@
 // File/layer: app/qml/DashboardPage.qml | Qt6 Quick, UI layer
-// Testing: QML: QmlTest.dashboard, QmlTest.dashedit, QmlTest.phone,
+// Testing: QML: QmlTest.dashboard, QmlTest.dashedit and its parts (QmlTest.dashedit_*), QmlTest.phone,
 //          QmlTest.linkhealth, QmlTest.driveview (test_qml); BENCH, Manual smoke
 
 import QtCore
@@ -68,6 +68,16 @@ Page {
     SignalHub { id: hub }
     // The hub, for the page's parts
     readonly property SignalHub signalHub: hub
+    // The page's own objects, for its parts
+    readonly property var layoutStore: store
+    readonly property DashHistory historyPart: history
+    readonly property DashLayoutFile layoutFilePart: layoutFile
+    readonly property DashAddFlow addFlowPart: addFlow
+    readonly property DashEdits editsPart: edits
+    readonly property DashDrive drivePart: drive
+    readonly property Item topBarItem: topBar
+    readonly property Item driveStatusItem: driveStatus
+    readonly property Item indicatorItem: indicator
 
     // One document per form, and the page last shown on each
     Settings {
@@ -218,149 +228,29 @@ Page {
     readonly property bool canPaste: copied !== null && copied.form === form
                                      && DashboardBook.canAddCell(doc, pageIndex)
 
-    // ---- Undo (ADR-0057's appendix "undo in edit mode as built"). An
-    // entry keeps the text stored before its step, so an undo stores what
-    // was there: "" (nothing, the built-in layout) included
-
-    property var undoStack: []       // [{ text, step }], the newest last
-    property var redoStack: []
-    property string lastKey: ""      // the last step's grouping key
-    property double lastAt: 0        // when it was made (Date.now())
-    readonly property int undoLimit: 50
-    readonly property int groupMs: 1500
-    property int undoLineMs: 5000    // the line's time; a test shortens it
-    property string undoLine: ""     // the line's words; "" hides it
-    readonly property bool canUndo: undoStack.length > 0
-    readonly property bool canRedo: redoStack.length > 0
-    readonly property string undoWords: canUndo ? undoStack[undoStack.length - 1].step.words : ""
-    readonly property string redoWords: canRedo ? redoStack[redoStack.length - 1].step.words : ""
-    // The options whose control steps or toggles: a run of them is one step
-    readonly property var steppedOptions: ["decimals", "peak", "cells", "digits", "window",
-                                           "count", "marks", "vertical"]
-    // An option's word in a step's words, as its caption on the panel says it
-    readonly property var optionWords: ({
-        "from": qsTr("range"), "to": qsTr("range"), "coldBelow": qsTr("zones"),
-        "warnFrom": qsTr("zones"), "dangerFrom": qsTr("zones"), "warnBelow": qsTr("zones"),
-        "dangerBelow": qsTr("zones"), "decimals": qsTr("decimals"),
-        "peak": qsTr("peak hold"), "color": qsTr("color"), "majorStep": qsTr("major step"),
-        "minorStep": qsTr("major step"), "labelDivisor": qsTr("major step"),
-        "caption": qsTr("caption"), "description": qsTr("description"), "cells": qsTr("cells"),
-        "rise": qsTr("curve"), "digits": qsTr("digits"), "window": qsTr("window"),
-        "vertical": qsTr("standing up"), "marks": qsTr("scale marks"), "count": qsTr("lights")
-    })
-    onFormChanged: clearHistory()
-
-    // A step on the page shown: its grouping key ("" never groups), its
-    // words, and its cell before and after (-1 for none)
-    function stepOf(key, words, cell, cellAfter, pageAfter) {
-        return { key: key, words: words, page: pageIndex,
-                 pageAfter: pageAfter ?? pageIndex, cell: cell, cellAfter: cellAfter }
+    DashHistory {
+        id: history
+        host: root
     }
+    readonly property alias canRedo: history.canRedo
+    readonly property alias canUndo: history.canUndo
+    readonly property alias groupMs: history.groupMs
+    property alias lastAt: history.lastAt
+    readonly property alias redoWords: history.redoWords
+    readonly property alias undoLimit: history.undoLimit
+    property alias undoLine: history.undoLine
+    property alias undoLineMs: history.undoLineMs
+    property alias undoStack: history.undoStack
+    readonly property alias undoWords: history.undoWords
+    function redo() { return history.redo() }
+    function showLine(words) { return history.showLine(words) }
+    function showStoredLayout() { return history.showStoredLayout() }
+    function undo() { return history.undo() }
+    onFormChanged: history.clearHistory()
+
     // A cell's name in a step's words: its label, or its kind's name
     function cellName(c) {
         return c && c.label ? c.label : c ? (kindNames[c.kind] ?? c.kind) : ""
-    }
-    // The text the store holds for what's shown
-    function shownText() {
-        return store[formKey] === "" ? "" : DashboardBook.serialize(doc)
-    }
-    function record(before, after, step) {
-        const now = Date.now()
-        const n = undoStack.length
-        if (n > 0 && step.key !== "" && step.key === lastKey && now - lastAt <= groupMs) {
-            // A run: the top already holds the text from before it
-            const top = undoStack[n - 1]
-            const rest = undoStack.slice(0, n - 1)
-            if (after === top.text) {
-                // Back where the run began, so an Undo would change nothing
-                undoStack = rest
-                lastKey = ""
-            } else {
-                undoStack = rest.concat([{ text: top.text, step: Object.assign({}, top.step,
-                    { pageAfter: step.pageAfter, cellAfter: step.cellAfter }) }])
-                lastKey = step.key
-            }
-        } else {
-            undoStack = undoStack.concat([{ text: before, step: step }]).slice(-undoLimit)
-            lastKey = step.key
-        }
-        lastAt = now
-        redoStack = []
-        // Edit mode's bar has Undo; outside it the line is the only way back
-        if (editing)
-            undoLine = ""
-        else
-            showLine(step.words.charAt(0).toUpperCase() + step.words.slice(1))
-    }
-    function restore(text) {
-        store[formKey] = text
-        if (text === "")
-            showStoredLayout()
-        else
-            doc = DashboardBook.parse(text, form).doc
-    }
-    // With nothing stored the document is the stored read itself, so the
-    // built-in layout is drawn as at first run (builtInShown)
-    function showStoredLayout() {
-        doc = Qt.binding(() => root.parsed.doc)
-    }
-    // An undo or a redo goes from (page, cell) to (toPage, toCell). The
-    // cell panel follows only when it was on the step's cell, so it never
-    // shows another cell at a moved index; Add's and a signal's close
-    function travel(text, page, cell, toPage, toCell) {
-        const shown = panel
-        const follows = selected >= 0 && selected === cell && page === pageIndex
-                        && (shown === "cell" || shown === "")
-        restore(text)
-        goTo(toPage)
-        if (follows && toCell >= 0 && toCell < shownCells.length) {
-            selected = toCell
-            panel = shown
-            return
-        }
-        panel = ""
-        addKind = ""
-        selected = -1
-    }
-    function undo() {
-        // A field still open commits as its own step, which this then takes back
-        commitTyping()
-        if (!canUndo)
-            return
-        const top = undoStack[undoStack.length - 1]
-        const s = top.step
-        undoStack = undoStack.slice(0, -1)
-        redoStack = redoStack.concat([{ text: shownText(), step: s }])
-        travel(top.text, s.pageAfter, s.cellAfter, s.page, s.cell)
-        lastKey = ""
-        showLine(qsTr("Undid: %1").arg(s.words))
-    }
-    function redo() {
-        commitTyping()
-        if (!canRedo)
-            return
-        const top = redoStack[redoStack.length - 1]
-        const s = top.step
-        redoStack = redoStack.slice(0, -1)
-        undoStack = undoStack.concat([{ text: shownText(), step: s }])
-        travel(top.text, s.page, s.cell, s.pageAfter, s.cellAfter)
-        lastKey = ""
-        showLine(qsTr("Redid: %1").arg(s.words))
-    }
-    function clearHistory() {
-        undoStack = []
-        redoStack = []
-        lastKey = ""
-        undoLine = ""
-    }
-    function showLine(words) {
-        undoLine = words
-        undoLineTimer.restart()
-    }
-    Timer {
-        id: undoLineTimer
-        interval: root.undoLineMs
-        onTriggered: root.undoLine = ""
     }
 
     // The kinds this page draws, in the order Add offers them, and the
@@ -433,7 +323,7 @@ Page {
         presetList = ""
         confirmReplaceKey = ""
         noteLayout("")
-        clearHistory()
+        history.clearHistory()
         goTo(form === "phone" ? store.phonePage : store.desktopPage)
         restored = true
     }
@@ -450,7 +340,7 @@ Page {
         presetList = ""
         confirmReplaceKey = ""
         noteLayout("")
-        clearHistory()
+        history.clearHistory()
     }
 
     // Takes the focus off a text field, so the field commits what was
@@ -480,7 +370,7 @@ Page {
         if (after === now)
             return false
         if (step)
-            record(store[formKey] === "" || problem !== "" ? "" : now, after, step)
+            history.record(store[formKey] === "" || problem !== "" ? "" : now, after, step)
         const texts = DashboardBook.saveTexts(problem, store[formKey], next)
         if (texts.unread !== "")
             store[formKey + "Unread"] = texts.unread
@@ -489,177 +379,23 @@ Page {
         return true
     }
 
-    // ---- The layout file (ADR-0057's appendix on the layout file)
-
-    // What the last export or load said, in words; layoutNoteBad when it
-    // is a refusal
-    property string layoutNote: ""
-    property bool layoutNoteBad: false
-    function noteLayout(words, bad) {
-        layoutNote = words
-        layoutNoteBad = bad === true
+    DashLayoutFile {
+        id: layoutFile
+        host: root
     }
-    // A form's name in the export's note and the load's words, so the two agree
-    function formWord(f) {
-        return f === "phone" ? qsTr("phone") : qsTr("desktop")
-    }
-    // The picked vehicle's picks the store has, each as the file a layout
-    // names (ADR-0064, "Dashboards") with the references its profile
-    // gives: [{ name, sha256, from, profile, refs }]. sha256 is the
-    // variant's written file's; from the hashes of the signal files it was
-    // made from, which a layout saved by an earlier version names
-    function vehicleFiles() {
-        const v = VehicleBook.picked(vehicles)
-        if (!v)
-            return []
-        return Bridge.pickFiles(v.picks).map(f => ({
-            name: f.name, sha256: f.sha256, from: f.from, profile: f.profile,
-            refs: Bridge.profileSignals("mock://?profile=" + f.profile).map(r => r.ref) }))
-    }
-    // The name a layout file is offered under
-    function layoutFileName() {
-        const v = VehicleBook.picked(vehicles)
-        const slug = v ? v.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") : ""
-        return "dashboard-" + (slug !== "" ? slug + "-" : "") + form + ".json"
-    }
-    // Writes this form's layout, and the picks' files it needs by name,
-    // to the file at url. A pick no plugin here has gives no references,
-    // so the layout can't say it needs it: the note names the pick, and
-    // counts the gauges no pick gives a key for
-    function exportLayoutTo(url) {
-        commitTyping()
-        const files = vehicleFiles()
-        const needed = DashboardBook.neededFiles(doc, files)
-        const v = VehicleBook.picked(vehicles)
-        const unloaded = (v ? v.picks : []).filter(p => !files.some(f => f.profile === p))
-        const unbound = DashboardBook.unboundKeyCells(doc, files)
-        const text = DashboardBook.exportText(doc, form, needed)
-        if (text === "") {
-            Bridge.dropPicked(url)
-            noteLayout(qsTr("Not saved: this layout can't be written as a file"), true)
-            return false
-        }
-        const r = Bridge.saveLayoutFile(text, url)
-        if (!r.ok) {
-            noteLayout(qsTr("Not saved: %1").arg(r.words), true)
-            return false
-        }
-        noteLayout(qsTr("Saved this layout to a file. It's a %1 layout: it loads on a %1, not on a %2. "
-                        + "A layout isn't scaled between forms")
-                       .arg(formWord(form)).arg(formWord(form === "phone" ? "desktop" : "phone"))
-                   + (needed.length === 0 ? ""
-                      : (needed.length === 1 ? qsTr(". It needs the plugin %1") : qsTr(". It needs the plugins %1"))
-                            .arg(needed.map(f => f.name).join(", ")))
-                   + (unloaded.length === 0 ? ""
-                      : qsTr(". The vehicle's picks %1 aren't in the store, so a gauge reading them isn't listed as needing them")
-                            .arg(unloaded.join(", ")))
-                   + (unbound === 0 ? ""
-                      : (unbound === 1 ? qsTr(". 1 gauge reads a signal none of the vehicle's picked plugins has, so the file can't name a plugin for it")
-                                       : qsTr(". %1 gauges read signals none of the vehicle's picked plugins has, so the file can't name a plugin for them").arg(unbound)))
-                   + ".")
-        return true
-    }
-    // Loads a layout file as this form's layout, one undo step. Refused in
-    // words for a file that can't be read, a newer one and one of the other
-    // form; never while Reset's or Remove's question is open
-    function loadLayoutFrom(url, adding) {
-        if (confirmReset || confirmRemovePage || confirmReplaceKey !== "") {
-            noteLayout(qsTr("Answer the question first"), true)
-            return false
-        }
-        const r = Bridge.layoutFileText(url)
-        if (!r.ok) {
-            noteLayout(qsTr("Not loaded: %1").arg(r.words), true)
-            return false
-        }
-        // A pick is found by its written file's hash, or by the hash of a
-        // signal file it was made from
-        const files = vehicleFiles()
-        const have = []
-        for (const f of files) {
-            have.push(f.sha256)
-            for (let i = 0; i < f.from.length; ++i)
-                have.push(f.from[i])
-        }
-        const read = DashboardBook.importProblem(r.text, form, have)
-        if (read.problem === "none") {
-            noteLayout(qsTr("Not loaded: the file is empty"), true)
-        } else if (read.problem === "damaged") {
-            noteLayout(qsTr("Not loaded: the file isn't a dashboard layout this version can read"), true)
-        } else if (read.problem === "newer") {
-            noteLayout(qsTr("Not loaded: the file was made by a newer version of Havne"), true)
-        } else if (read.problem === "otherform") {
-            noteLayout(qsTr("Not loaded: the file is a %1 layout and this is the %2 form. "
-                            + "A layout isn't scaled between forms")
-                       .arg(formWord(read.form)).arg(formWord(form)), true)
-        } else {
-            commitTyping()
-            cancelHold()
-            selected = -1
-            panel = ""
-            const words = [adding === true ? qsTr("Added the file's pages") : qsTr("Loaded the layout")]
-            if (read.problem === "dropped")
-                words.push(qsTr("%1 left out because they couldn't be read").arg(droppedText(read.dropped)))
-            if (read.notes.indexOf("no-form") >= 0)
-                words.push(qsTr("the file named no form, so it was read as the %1 form").arg(formWord(form)))
-            // A pick changed since the save (Replace, an edit in the form)
-            // is picked still: only its file is another
-            const changedPicks = DashboardBook.changedFiles(read.missing, files)
-            const absent = read.missing.filter(m => changedPicks.indexOf(m) < 0)
-            if (changedPicks.length > 0)
-                words.push(qsTr("it was saved with another version of %1: a gauge reading a signal the "
-                                + "picked version lacks reads not in profile")
-                           .arg(changedPicks.map(f => f.name).join(", ")))
-            if (absent.length > 0)
-                words.push(qsTr("it needs plugins this vehicle doesn't pick: %1. Import or pick them under "
-                                + "Signals; until then those gauges read not in profile")
-                           .arg(absent.map(f => f.name).join(", ")))
-            let changed
-            if (adding === true) {
-                presetList = ""
-                const after = pageIndex
-                changed = edit(DashboardBook.insertPages(doc, after, read.doc.pages),
-                               stepOf("", qsTr("added pages from a file"), -1, -1, after + 1))
-                if (!changed) {
-                    noteLayout(qsTr("Not added: a form holds %1 pages at most").arg(DashboardBook.maxPages), true)
-                    return false
-                }
-                goTo(after + 1)
-            } else {
-                changed = edit(read.doc, stepOf("", qsTr("load a layout"), -1, -1, 0))
-                if (!changed)
-                    words[0] = qsTr("The file holds the layout already shown")
-                else
-                    goTo(0)
-            }
-            noteLayout(words.join(". "))
-            return changed
-        }
-        return false
-    }
-
-    // Back to the built-in layout: nothing stored, so a later version's
-    // built-in layout reaches it. Undo stores the replaced pages again
-    function resetForm() {
-        if (store[formKey] !== "")
-            record(shownText(), "", stepOf("", qsTr("reset the layout"), -1, -1, 0))
-        const texts = DashboardBook.saveTexts(problem, store[formKey], doc)
-        if (texts.unread !== "")
-            store[formKey + "Unread"] = texts.unread
-        store[formKey] = ""
-        showStoredLayout()
-        confirmReset = false
-        moreShown = false
-        selected = -1
-        panel = ""
-        goTo(0)
-    }
+    function exportLayoutTo(url) { return layoutFile.exportLayoutTo(url) }
+    function layoutFileName() { return layoutFile.layoutFileName() }
+    property alias layoutNote: layoutFile.layoutNote
+    property alias layoutNoteBad: layoutFile.layoutNoteBad
+    function loadLayoutFrom(url, adding) { return layoutFile.loadLayoutFrom(url, adding) }
+    function noteLayout(words, bad) { return layoutFile.noteLayout(words, bad) }
+    function resetForm() { return layoutFile.resetForm() }
 
     function select(i) {
         commitTyping()
         selected = i
         // The cell's panel takes its decimals from the listed rows with no session
-        if (!Bridge.connected && (profileRows.length === 0 || rowsFor !== offlineUri))
+        if (!Bridge.connected && (profileRows.length === 0 || addFlow.rowsFor !== offlineUri))
             refreshRows()
         panel = "cell"
     }
@@ -704,149 +440,31 @@ Page {
     property string alertNote: ""
     onSelectedChanged: alertNote = ""
 
-    // ---- The drive view (ADR-0059): this page with every bar hidden
-
-    property bool driving: false
-    property bool barsUp: false          // the reveal
-    property bool barsHeld: false        // a fault or a log's notice keeps them up
-    // What Main hands over: Settings' two values, the tab bar's height (the
-    // sheet rises above it) and the system's insets
-    property int driveHideMs: 4000
-    property string driveOrientation: "follow"
-    property real driveTabBarHeight: 0
-    property real driveInsetTop: 0
-    property real driveInsetBottom: 0
-    property string driveLogTime: ""
-    property string driveLogSize: ""   // "" until the header shows one
-    // The window made full screen; a test's stand-in keeps it off the desktop
-    property var driveWindow: Window.window
-
-    // How far the bars are in: 0 hidden, 1 revealed. Main's bars follow it
-    property real barsShown: driving && barsUp ? 1 : 0
-    Behavior on barsShown { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-
-    property bool driveHintUp: false
-    function isReplay(uri) { return uri.toLowerCase().startsWith("replay://") }
-
-    function enterDrive() {
-        if (driving || !phoneForm || !Bridge.connected || editing || phoneEdit)
-            return
-        closePanel()
-        cancelHold()
-        barsUp = false
-        barsHeld = false
-        // A fault or a notice already up raises the bars through their handlers
-        driving = true
-        store.phoneDrive = true
-        Immersive.enter(driveWindow, form)
-        PhoneWindow.lockOrientation(driveOrientation)
-        if (store.driveHints < 3) {
-            ++store.driveHints
-            driveHintUp = true
-        }
+    DashDrive {
+        id: drive
+        host: root
     }
-    // Exit drive and a tab are for good; a session's end comes back at the next connect
-    function leaveDrive(forGood) {
-        if (!driving)
-            return
-        driving = false
-        barsUp = false
-        barsHeld = false
-        driveHintUp = false
-        driveLogEnded = false
-        if (forGood)
-            store.phoneDrive = false
-        Immersive.leave()
-        PhoneWindow.lockOrientation("follow")
-    }
-    Component.onDestruction: leaveDrive(false)
-
-    // A tap on the gauges: the bars in or out, and a held reveal is over
-    function driveTap() {
-        barsUp = !barsUp
-        barsHeld = false
-        driveHintUp = false
-    }
-    // Android's Back in the view: the bars first, then out for good
-    function driveBack() {
-        if (!driving)
-            return false
-        if (barsUp)
-            leaveDrive(true)
-        else
-            barsUp = true
-        return true
-    }
-    // Android's Back on Dash: the drive view, a gauge's panel, then edit
-    // mode; false leaves it to the system
-    function goBack() {
-        if (driveBack())
-            return true
-        if (panel !== "") {
-            closePanel()
-            return true
-        }
-        if (editing) {
-            stopEditing()
-            return true
-        }
-        return false
-    }
-    function raiseBars(attention) {
-        if (!driving)
-            return
-        if (attention) {
-            barsUp = true
-            barsHeld = true
-        } else if (!driveFault && !driveNotice) {
-            barsHeld = false
-        }
-    }
-    // A fault may need Retry or Disconnect; the other states are for the status line
-    function raisesBars(state) { return state === "fault" }
-    readonly property bool driveFault: driving && raisesBars(Bridge.linkState)
-    readonly property bool driveNotice: driving && Bridge.logNotice !== ""
-    onDriveFaultChanged: raiseBars(driveFault)
-    onDriveNoticeChanged: raiseBars(driveNotice)
-
-    Timer {
-        id: driveHideTimer
-        objectName: "driveHideTimer"
-        interval: root.driveHideMs
-        running: root.driving && root.barsUp && !root.barsHeld && root.driveHideMs > 0
-        onTriggered: root.barsUp = false
-    }
-    // A touch on a bar starts its delay again
-    function barTouched() {
-        ++barTouches
-        if (driveHideTimer.running)
-            driveHideTimer.restart()
-    }
-    property int barTouches: 0    // counted for the tests
-    Timer {
-        objectName: "driveHintTimer"
-        interval: root.driveHideMs > 0 ? root.driveHideMs : 4000
-        running: root.driveHintUp
-        onTriggered: root.driveHintUp = false
-    }
-    // Stop log stays in the view, so the status line says it ended; the bars
-    // stay as they are, since the driver asked for it
-    property bool driveLogEnded: false
-    Connections {
-        target: Bridge
-        function onLogStopped(folder, byUser) {
-            if (root.driving && byUser)
-                root.driveLogEnded = true
-        }
-    }
-    // The bars rise from the bottom, so the status line is never covered
-    Timer {
-        objectName: "driveLogEndedTimer"
-        interval: root.driveHideMs > 0 ? root.driveHideMs : 4000
-        running: root.driveLogEnded
-        onTriggered: root.driveLogEnded = false
-    }
-
+    function barTouched() { return drive.barTouched() }
+    property alias barTouches: drive.barTouches
+    property alias barsHeld: drive.barsHeld
+    property alias barsShown: drive.barsShown
+    property alias barsUp: drive.barsUp
+    property alias driveHideMs: drive.driveHideMs
+    property alias driveInsetBottom: drive.driveInsetBottom
+    property alias driveInsetTop: drive.driveInsetTop
+    property alias driveLogEnded: drive.driveLogEnded
+    property alias driveLogSize: drive.driveLogSize
+    property alias driveLogTime: drive.driveLogTime
+    property alias driveOrientation: drive.driveOrientation
+    property alias driveTabBarHeight: drive.driveTabBarHeight
+    function driveTap() { return drive.driveTap() }
+    property alias driveWindow: drive.driveWindow
+    property alias driving: drive.driving
+    function enterDrive() { return drive.enterDrive() }
+    function goBack() { return drive.goBack() }
+    function isReplay(uri) { return drive.isReplay(uri) }
+    function leaveDrive(forGood) { return drive.leaveDrive(forGood) }
+    function raisesBars(state) { return drive.raisesBars(state) }
     // ---- Copy and paste (section 5)
 
     function copySelected() {
@@ -859,95 +477,28 @@ Page {
             return
         commitTyping()
         edit(DashboardBook.pasteCell(doc, pageIndex, i, copied.cell),
-             stepOf("", qsTr("pasted %1").arg(cellName(copied.cell)), -1, i + 1))
+             history.stepOf("", qsTr("pasted %1").arg(cellName(copied.cell)), -1, i + 1))
     }
 
-    // ---- Add: a kind, then a signal
-
-    property var profileRows: []
-    // The address the rows were listed for with no session
-    property string rowsFor: ""
-    function refreshRows() {
-        rowsFor = offlineUri
-        profileRows = Bridge.profileSignals(Bridge.connected ? Bridge.currentUri : offlineUri)
+    DashAddFlow {
+        id: addFlow
+        host: root
     }
-    // The rows a gauge of `kind` can show: numbers with references, an
-    // enumeration only on a digital tile
-    function pickable(kind) {
-        return profileRows.filter(r => r.ref !== "" && !r.isText && (!r.isEnum || kind === "digital"))
-    }
-    // The picked sets' own signals a gauge of `kind` can show, one entry for
-    // each set that has any ([{ title, rows }], the plugin first): offered
-    // with or without a session, whatever profile the session reads
-    function pickedOwnRows(kind) {
-        const out = []
-        for (const s of pickedSets) {
-            const rows = Bridge.profileSignals("mock://?profile=" + s.profile)
-                .filter(r => r.ref.startsWith("key:") && !r.isText && (!r.isEnum || kind === "digital"))
-            if (rows.length === 0)
-                continue
-            // A plugin with several variants picked is told apart by its variant
-            const twin = pickedSets.some(o => o !== s && o.name === s.name)
-            out.push({ title: twin && s.variant ? qsTr("%1: %2").arg(s.name).arg(s.variant) : s.name,
-                       rows: rows })
-        }
-        return out
-    }
-    function startAdd() {
-        if (!DashboardBook.canAddCell(doc, pageIndex))
-            return
-        commitTyping()
-        selected = -1
-        addKind = ""
-        changingKind = false
-        panel = "add"
-    }
-    // The cell's own kind list, Add's with the cell's kind marked
-    function changeKind() {
-        commitTyping()
-        addKind = ""
-        changingKind = true
-        panel = "add"
-    }
-    function pickKind(kind) {
-        if (changingKind) {
-            if (selected < 0)
-                return
-            let next = DashboardBook.setKind(doc, pageIndex, selected, kind)
-            // A shift band isn't a dial's range: on an rpm signal, going to
-            // Shift lights takes the band and leaving takes the default range
-            // (another signal keeps its range both ways)
-            if ((kind === "shift-light") !== (selectedCell.kind === "shift-light")
-                    && (selectedCell.unit ?? "").toLowerCase() === "rpm") {
-                const range = kind === "shift-light" ? Object.assign({}, DashboardBook.shiftBand)
-                                                     : DashboardBook.defaultRange(selectedCell.unit)
-                next = DashboardBook.setOptions(next, pageIndex, selected, range)
-            }
-            if (edit(next, stepOf("", qsTr("changed %1's kind").arg(cellName(selectedCell)),
-                                  selected, selected)))
-                leaveKindList()
-            return
-        }
-        if (kind === "blank") {
-            const span = newSpans[kind]
-            if (edit(DashboardBook.addCell(doc, pageIndex, { kind: kind, w: span[0], h: span[1], refs: [] }),
-                     stepOf("", qsTr("added %1").arg(kindNames[kind]), -1, shownCells.length)))
-                select(shownCells.length - 1)
-            return
-        }
-        addKind = kind
-        refreshRows()
-        panel = "signal"
-    }
-    function leaveKindList() {
-        changingKind = false
-        panel = "cell"
-    }
-    function changeSignal() {
-        addKind = ""
-        refreshRows()
-        panel = "signal"
-    }
+    function changeKind() { return addFlow.changeKind() }
+    function changeSignal() { return addFlow.changeSignal() }
+    function leaveKindList() { return addFlow.leaveKindList() }
+    function pickKind(kind) { return addFlow.pickKind(kind) }
+    function pickable(kind) { return addFlow.pickable(kind) }
+    function pickedOwnRows(kind) { return addFlow.pickedOwnRows(kind) }
+    property alias profileRows: addFlow.profileRows
+    function refreshRows() { return addFlow.refreshRows() }
+    function startAdd() { return addFlow.startAdd() }
+    function addAllPlan(kind) { return addFlow.addAllPlan(kind) }
+    function addAllSignals() { return addFlow.addAllSignals() }
+    function addAllWords(plan) { return addFlow.addAllWords(plan) }
+    function newCell(kind, row) { return addFlow.newCell(kind, row) }
+    function pickSignal(row) { return addFlow.pickSignal(row) }
+    function startOptions(kind, row) { return addFlow.startOptions(kind, row) }
     // Bridge.alertLevels copied once per change, by def id: a bridge map read
     // in each cell's binding makes a JS wrapper per read (the Qt 6.12 sweep)
     property var alertLevels: {
@@ -971,256 +522,26 @@ Page {
     function keyOfRef(ref) {
         return DashboardBook.keyOfRef(ref, gaugeSets)
     }
-    // What a gauge on this row starts with, in the unit the cell stores: the
-    // signal file's own gauge (its range and levels), else the row's range
-    // and, for a common signal, the zones of DashboardBook's table; a shift
-    // light on engine speed starts from the shift band. All of it is written
-    // into the cell, so the panel shows ordinary values to type over or clear
-    function startOptions(kind, row) {
-        const g = row.gauge ?? ({})
-        const hasGauge = g.min !== undefined && g.max !== undefined
-        const r = DashboardBook.defaultRange(row.decodedUnit, row.decodedLow, row.decodedHigh)
-        const options = hasGauge ? { from: g.min, to: g.max } : { from: r.from, to: r.to }
-        const key = keyOfRef(row.ref)
-        if (kind === "shift-light") {
-            if (key === "rpm")
-                Object.assign(options, DashboardBook.shiftBand)
-            return options
-        }
-        if (g.warnLow !== undefined || g.warnHigh !== undefined) {
-            if (g.warnLow !== undefined)
-                options.warnBelow = g.warnLow
-            if (g.warnHigh !== undefined)
-                options.warnFrom = g.warnHigh
-        } else {
-            Object.assign(options, DashboardBook.zonesFor(key))
-        }
-        return options
+    DashEdits {
+        id: edits
+        host: root
     }
-    // A new gauge's cell (section 5): the row's name, its unit and what a
-    // gauge on it starts with (startOptions); decimals follow the row
-    function newCell(kind, row) {
-        const span = newSpans[kind] ?? [1, 4]
-        return { kind: kind, w: span[0], h: span[1], label: labelFor(row),
-                 refs: counterparts(row.ref), unit: row.decodedUnit,
-                 options: startOptions(kind, row) }
-    }
-    function pickSignal(row) {
-        if (addKind !== "") {
-            const cell = newCell(addKind, row)
-            if (edit(DashboardBook.addCell(doc, pageIndex, cell),
-                     stepOf("", qsTr("added %1").arg(cellName(cell)), -1, shownCells.length))) {
-                addKind = ""
-                select(shownCells.length - 1)
-            }
-            return
-        }
-        if (selected < 0)
-            return
-        // Another signal: its name, unit, range and zones as a new gauge on
-        // it would start, and none of the old signal's steps, words or
-        // decimals, which were its own
-        let next = DashboardBook.setCell(doc, pageIndex, selected, {
-            refs: counterparts(row.ref), unit: row.decodedUnit, label: labelFor(row) })
-        const cleared = {
-            majorStep: null, minorStep: null, labelDivisor: null, caption: null,
-            description: null, peakLabel: null, decimals: null }
-        for (const zone of DashboardBook.zoneOptions)
-            cleared[zone] = null
-        next = DashboardBook.setOptions(next, pageIndex, selected,
-                                        Object.assign(cleared, startOptions(selectedCell.kind, row)))
-        edit(next, stepOf("", qsTr("changed %1's signal").arg(cellName(selectedCell)), selected, selected))
-        panel = "cell"
-    }
-
-    // Add's every signal of a set: the listed profile's own rows (a signal
-    // file's or a plugin's, by key) that a gauge of `kind` can show, and of
-    // those the ones this page doesn't show yet, as many as it has room for
-    readonly property string listedName: {
-        const uri = Bridge.connected ? Bridge.currentUri : offlineUri
-        return uri === "" ? "" : profileName(profileOf(uri))
-    }
-    function addAllPlan(kind) {
-        const own = pickable(kind).filter(r => r.ref.startsWith("key:"))
-        let shown = []
-        for (const c of shownCells)
-            shown = shown.concat(Array.isArray(c.refs) ? c.refs : [])
-        const missing = own.filter(r => shown.indexOf(r.ref) < 0)
-        const room = Math.max(0, DashboardBook.maxCells - shownCells.length)
-        return { own: own.length, missing: missing.length, adding: missing.slice(0, room) }
-    }
-    // The button's words: all, the rest, or as many as the page has room for
-    function addAllWords(plan) {
-        if (plan.adding.length < plan.missing)
-            return qsTr("Add %1 of the %2 missing signals of %3: a page holds %4 cells")
-                       .arg(plan.adding.length).arg(plan.missing).arg(listedName).arg(DashboardBook.maxCells)
-        return plan.adding.length === plan.own
-               ? qsTr("Add all %1 signals of %2").arg(plan.own).arg(listedName)
-               : qsTr("Add %1 more of the %2 signals of %3").arg(plan.adding.length).arg(plan.own).arg(listedName)
-    }
-    function addAllSignals() {
-        const plan = addAllPlan(addKind)
-        if (addKind === "" || plan.adding.length === 0)
-            return
-        const cells = plan.adding.map(r => newCell(addKind, r))
-        const words = cells.length === 1 ? qsTr("added 1 signal of %1").arg(listedName)
-                                         : qsTr("added %1 signals of %2").arg(cells.length).arg(listedName)
-        if (edit(DashboardBook.addCells(doc, pageIndex, cells), stepOf("", words, -1, -1))) {
-            addKind = ""
-            panel = ""
-        }
-    }
-    Connections {
-        target: Bridge
-        enabled: root.panel === "signal"
-        function onConnectedChanged() { root.refreshRows() }
-        function onUnitSystemChanged() { root.refreshRows() }
-    }
-
-    // ---- The cell's panel
-
-    // The selected cell's options, on `base` when given (a write already
-    // composed for the same step). A run of a stepped option on one cell
-    // is one undo step; a typed one never groups, since a field commits once
-    function setOptions(changes, base) {
-        const names = Object.keys(changes).sort()
-        const key = names.every(n => steppedOptions.indexOf(n) >= 0)
-            ? "opt/" + pageIndex + "/" + selected + "/" + names.join(",") : ""
-        const word = optionWords[names[0]] ?? names[0]
-        return edit(DashboardBook.setOptions(base ?? doc, pageIndex, selected, changes),
-                    stepOf(key, qsTr("changed %1's %2").arg(cellName(selectedCell)).arg(word),
-                           selected, selected))
-    }
-    function setLabel(text) {
-        return edit(DashboardBook.setCell(doc, pageIndex, selected,
-                                          { label: text === "" ? null : text }),
-                    stepOf("", qsTr("changed %1's label").arg(cellName(selectedCell)), selected, selected))
-    }
-    function resize(w, h) {
-        return edit(DashboardBook.resizeCell(doc, pageIndex, selected, w, h),
-                    stepOf("size/" + pageIndex + "/" + selected,
-                           qsTr("resized %1").arg(cellName(selectedCell)), selected, selected))
-    }
-    // Earlier, later, to the start and to the end: the cell's place in
-    // the order, which both forms' grids follow
-    function moveTo(to) {
-        const t = Math.max(0, Math.min(shownCells.length - 1, to))
-        if (edit(DashboardBook.moveCell(doc, pageIndex, selected, t),
-                 stepOf("", qsTr("moved %1").arg(cellName(selectedCell)), selected, t)))
-            selected = t
-    }
-    function removeCell(i) {
-        commitTyping()
-        if (!edit(DashboardBook.removeCell(doc, pageIndex, i),
-                  stepOf("", qsTr("removed %1").arg(cellName(shownCells[i])), i, -1)))
-            return
-        if (selected === i) {
-            selected = -1
-            panel = ""
-        } else if (selected > i) {
-            --selected
-        }
-    }
-
-    // ---- The pages' edits
-
-    function addPage() {
-        if (edit(DashboardBook.addPage(doc, qsTr("Page %1").arg(pages.length + 1)),
-                 stepOf("", qsTr("added a page"), -1, -1, pages.length))) {
-            goTo(pages.length - 1)
-            askForPageName()
-        }
-    }
-    // The new page's name is the first thing to type: the Page row opens on it
-    function askForPageName() {
-        moreShown = true
-        pageNameWanted()
-    }
-    // The preset list (the "+" tab, Add page, Replace this page with...)
-    function openPresets(mode) {
-        commitTyping()
-        confirmReset = false
-        confirmRemovePage = false
-        confirmReplaceKey = ""
-        presetList = mode
-    }
-    function closePresets() {
-        presetList = ""
-        confirmReplaceKey = ""
-    }
-    function addBlankPage() {
-        presetList = ""
-        addPage()
-    }
-    // A preset as a new page after the shown one; one undo step
-    function addPresetPage(key) {
-        const page = DashboardBook.presetPage(key, formKey)
-        presetList = ""
-        if (page === null) {
-            noteLayout(qsTr("The preset couldn't be read"), true)
-            return false
-        }
-        const after = pageIndex
-        if (!edit(DashboardBook.insertPages(doc, after, [page]),
-                  stepOf("", qsTr("added the page %1").arg(page.name), -1, -1, after + 1)))
-            return false
-        goTo(after + 1)
-        askForPageName()
-        return true
-    }
-    // True when the shown page's gauges are one preset's: replacing them
-    // loses nothing a preset doesn't give back
-    function shownPageIsPreset() {
-        return DashboardBook.losesNothing(pages[pageIndex], formKey)
-    }
-    function replaceChosen(key) {
-        presetList = ""
-        if (DashboardBook.presetPage(key, formKey) === null)
-            noteLayout(qsTr("The preset couldn't be read"), true)
-        else if (shownPageIsPreset())
-            replaceWithPreset(key)
-        else
-            confirmReplaceKey = key
-    }
-    function replaceWithPreset(key) {
-        confirmReplaceKey = ""
-        presetList = ""
-        const page = DashboardBook.presetPage(key, formKey)
-        if (page === null) {
-            noteLayout(qsTr("The preset couldn't be read"), true)
-            return false
-        }
-        selected = -1
-        panel = ""
-        addKind = ""
-        return edit(DashboardBook.replacePage(doc, pageIndex, page),
-                    stepOf("", qsTr("replaced the page with %1").arg(page.name), -1, -1))
-    }
-    function presetLabel(key) {
-        const p = DashboardBook.presets.find(q => q.key === key)
-        return p ? p.label : key
-    }
-    function movePage(by) {
-        const to = pageIndex + by
-        if (edit(DashboardBook.movePage(doc, pageIndex, to), stepOf("", qsTr("moved the page"), -1, -1, to)))
-            goTo(to)
-    }
-    function renamePage(name) {
-        edit(DashboardBook.renamePage(doc, pageIndex, name), stepOf("", qsTr("renamed the page"), -1, -1))
-    }
-    // Another page takes this one's index, so nothing stays selected
-    function removePage() {
-        confirmRemovePage = false
-        selected = -1
-        panel = ""
-        addKind = ""
-        const p = pages[pageIndex]
-        const name = p && p.name ? p.name : qsTr("Page %1").arg(pageIndex + 1)
-        edit(DashboardBook.removePage(doc, pageIndex),
-             stepOf("", qsTr("removed the page %1").arg(name), -1, -1,
-                    Math.max(0, Math.min(pageIndex, pages.length - 2))))
-    }
-
+    function addBlankPage() { return edits.addBlankPage() }
+    function addPage() { return edits.addPage() }
+    function addPresetPage(key) { return edits.addPresetPage(key) }
+    function closePresets() { return edits.closePresets() }
+    function movePage(by) { return edits.movePage(by) }
+    function moveTo(to) { return edits.moveTo(to) }
+    function openPresets(mode) { return edits.openPresets(mode) }
+    function presetLabel(key) { return edits.presetLabel(key) }
+    function removeCell(i) { return edits.removeCell(i) }
+    function removePage() { return edits.removePage() }
+    function renamePage(name) { return edits.renamePage(name) }
+    function replaceChosen(key) { return edits.replaceChosen(key) }
+    function replaceWithPreset(key) { return edits.replaceWithPreset(key) }
+    function resize(w, h) { return edits.resize(w, h) }
+    function setLabel(text) { return edits.setLabel(text) }
+    function setOptions(changes, base) { return edits.setOptions(changes, base) }
     // ---- Pages
 
     property int pageIndex: 0
@@ -1325,7 +646,7 @@ Page {
         if (!visible) {
             leaveDrive(true)
             if (!editing)
-                clearHistory()
+                history.clearHistory()
         }
     }
     Component.onCompleted: {
@@ -1377,24 +698,10 @@ Page {
 
     // ---- Edit mode's panels
 
-    Component {
-        id: cellPanel
-        DashCellPanel { host: root }
+    DashPages {
+        id: swipe
+        host: root
     }
-
-    // Add's kinds, each with a still preview
-    Component {
-        id: addPanel
-        DashAddPanel { host: root }
-    }
-
-    // A signal for Add's kind, or the edited cell's new one: the session's
-    // rows with references, or those of the profile Settings has chosen
-    Component {
-        id: signalPanel
-        DashSignalPanel { host: root }
-    }
-
     // No session on the phone: the connect list, in the panel's place above
     // the gauges, on every page. Settings owns connecting; ConnectList the
     // chosen row and the last failure's words
@@ -1411,23 +718,6 @@ Page {
     signal connectListShown()
     onConnectUrisChanged: connectTapped = ""
     onConnectVehicleUriChanged: connectTapped = ""
-    Component {
-        id: connectPanel
-        ConnectList {
-            objectName: "dashConnectList"
-            recents: root.connectUris
-            vehicleUri: root.connectVehicleUri
-            adapters: root.connectAdapters
-            profileWords: root.connectProfileWords
-            tapped: root.connectTapped
-            onPicked: uri => root.connectTapped = uri
-            onConnectTo: uri => root.connectToUri(uri)
-            onOtherAddress: root.otherAddressRequested()
-            onShowLog: root.logRequested()
-            onShown: root.connectListShown()
-        }
-    }
-
     Component { id: analogKind; AnalogGauge {} }
     Component { id: ringKind; RingGauge {} }
     Component { id: barKind; BarGauge {} }
@@ -1552,376 +842,6 @@ Page {
     // ---- The pages: one SwipeView, swiped on the phone form, moved by
     // the strip's tabs and the keys on the desktop form
 
-    SwipeView {
-        id: swipe
-        objectName: "dashPages"
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: root.driving ? driveStatus.bottom : topBar.bottom
-        anchors.bottom: indicator.visible ? indicator.top : parent.bottom
-        anchors.bottomMargin: root.driving ? root.driveInsetBottom : 0
-        clip: true
-        interactive: root.form === "phone" && root.held < 0
-        // The page shown goes in once every page is in: the first page
-        // added makes the index 0, which would override a stored one
-        onCountChanged: {
-            if (count === root.pages.length && currentIndex !== root.pageIndex)
-                setCurrentIndex(root.pageIndex)
-        }
-        onCurrentIndexChanged: {
-            if (count === root.pages.length && currentIndex >= 0) {
-                if (currentIndex !== root.pageIndex)
-                    root.commitTyping()
-                root.pageIndex = currentIndex
-            }
-        }
-
-        Repeater {
-            model: root.pages.length
-
-            Flickable {
-                id: pageView
-                required property int index
-                readonly property var page: root.pages[index]
-                readonly property var cells: page && Array.isArray(page.cells) ? page.cells : []
-                objectName: "dashPage_" + index
-                clip: true
-                Connections {
-                    target: root
-                    function onRevealRequested(cell) {
-                        if (!pageView.shown)
-                            return
-                        const item = cellRepeater.itemAt(cell)
-                        if (!item)
-                            return
-                        const top = grid.y + item.y
-                        const bottom = top + item.height
-                        const max = Math.max(0, pageView.contentHeight - pageView.height)
-                        if (top < pageView.contentY || bottom > pageView.contentY + pageView.height)
-                            pageView.contentY = Math.max(0, Math.min(max, top - root.panelMargin))
-                    }
-                }
-                contentWidth: width
-                contentHeight: grid.y + grid.height + root.panelMargin
-                interactive: root.held < 0
-                // Shown whenever there's more below, not only while
-                // scrolling, so a short window says it scrolls
-                ScrollBar.vertical: ScrollBar {
-                    policy: pageView.contentHeight > pageView.height ? ScrollBar.AlwaysOn
-                                                                     : ScrollBar.AsNeeded
-                }
-
-                // The grid (section 4): the phone's 6 columns upright and
-                // 12 on its side, the desktop's one per 220 px from 2 to 12
-                readonly property real fullGridWidth: Math.max(0, width - 2 * root.panelMargin)
-                // Counted on the full width, so opening a panel narrows the cells and moves none
-                readonly property int columns: root.form === "phone"
-                    ? (root.width > root.height ? 12 : 6)
-                    : Math.max(2, Math.min(12, Math.round(fullGridWidth / 220)))
-                readonly property real sideGridWidth:
-                    Math.max(0, fullGridWidth - root.sideColumnWidth - root.panelMargin)
-                readonly property bool sideColumn: !root.phoneForm && !root.driving && panelHost.active
-                    && (sideGridWidth - (columns - 1) * root.cellGap) / columns >= root.sideCellMinWidth
-                readonly property real gridWidth: sideColumn ? sideGridWidth : fullGridWidth
-                readonly property real columnWidth: Math.max(0, (gridWidth - (columns - 1)
-                                                                 * root.cellGap) / columns)
-                readonly property bool shown: index === root.pageIndex
-                // In edit mode the page ends with a "+" cell while it has room
-                readonly property bool addCell: root.editing && shown
-                                                && DashboardBook.canAddCell(root.doc, index)
-                // While a held cell moves, the order its drop would make
-                readonly property bool reflowing: shown && root.dropAt >= 0
-                readonly property var ordered: reflowing
-                    ? DashboardBook.reordered(cells, root.held, root.dropAt) : cells
-                readonly property var placed: addCell
-                    ? ordered.concat([{ w: root.spanScale, h: 2 * root.spanScale }]) : ordered
-                // Edit mode and a held cell show the true sizes
-                readonly property var boxes: {
-                    const b = DashboardBook.place(placed, columns)
-                    return root.joined && !root.editing && root.held < 0
-                        ? DashboardBook.stretched(placed, b, columns, root.builtInShown) : b
-                }
-                readonly property var seams: root.joined
-                    ? DashboardBook.seams(placed, boxes, columns) : []
-                readonly property int tallest: placed.reduce((m, c) => Math.max(m, c.h), 1)
-                // The row unit is a quarter of a column, so h = 4w is
-                // square; never so tall that the tallest cell overflows
-                // what the page shows, down to a floor of 160 px, below
-                // which the page scrolls instead
-                readonly property real squarePitch: (columnWidth + root.cellGap) / 4
-                readonly property real pagePitch: Math.max(1, Math.min(squarePitch,
-                    (Math.max(160, height - root.gridTop - root.panelMargin) + root.cellGap) / tallest))
-                // The drive view's panel reaches the screen's foot, its rows
-                // up to twice the square; a page that already scrolls keeps its pitch
-                readonly property bool fills: root.driving && root.phoneForm && rows > 0
-                readonly property real pitch: fills
-                    ? Math.max(pagePitch, Math.min(2 * squarePitch,
-                                                   (height - root.gridTop + root.cellGap) / rows))
-                    : pagePitch
-                readonly property int rows: boxes.reduce((m, b) => Math.max(m, b.y + b.h), 0)
-                // The drop's places are measured on this grid
-                onColumnsChanged: root.cancelHold()
-                onPitchChanged: root.cancelHold()
-
-                function boxLeft(b) { return b.x * (columnWidth + root.cellGap) }
-                function boxTop(b) { return b.y * pitch }
-                function boxWidth(b) { return b.w * columnWidth + (b.w - 1) * root.cellGap }
-                function boxHeight(b) { return Math.max(0, b.h * pitch - root.cellGap) }
-
-                // ---- The held cell (section 4)
-
-                property var dropCenters: []     // the held cell's center at each place
-                property size heldSize: Qt.size(0, 0)
-                property point grab: Qt.point(0, 0)      // the finger within the cell
-                property point pressedAt: Qt.point(0, 0)
-                property point finger: Qt.point(0, 0)
-                property real dragX: 0
-                property real dragY: 0
-                property bool leftHome: false    // the drop place went past the cell's own
-
-                function lift(i, scene) {
-                    root.commitTyping()
-                    const at = grid.mapFromItem(null, scene.x, scene.y)
-                    const b = DashboardBook.place(placed, columns)[i]
-                    heldSize = Qt.size(boxWidth(b), boxHeight(b))
-                    // A press on the stretched part lifts the cell under
-                    // the finger at its true size, not past its edge
-                    grab = Qt.point(Math.max(0, Math.min(at.x - boxLeft(b), heldSize.width)),
-                                    Math.max(0, Math.min(at.y - boxTop(b), heldSize.height)))
-                    pressedAt = scene
-                    finger = scene
-                    leftHome = false
-                    dropCenters = DashboardBook.dropBoxes(cells, i, columns).map(
-                        d => ({ x: boxLeft(d) + boxWidth(d) / 2, y: boxTop(d) + boxHeight(d) / 2 }))
-                    root.held = i
-                }
-                function follow(scene) {
-                    finger = scene
-                    if (root.dropAt < 0 && Math.hypot(scene.x - pressedAt.x, scene.y - pressedAt.y)
-                            <= Application.styleHints.startDragDistance)
-                        return
-                    const at = grid.mapFromItem(null, scene.x, scene.y)
-                    dragX = at.x - grab.x
-                    dragY = at.y - grab.y
-                    root.dropAt = DashboardBook.nearest(dropCenters, dragX + heldSize.width / 2,
-                                                        dragY + heldSize.height / 2)
-                    if (root.dropAt !== root.held)
-                        leftHome = true
-                }
-                function letGo(canceled) {
-                    const from = root.held, to = root.dropAt, strayed = leftHome
-                    root.cancelHold()
-                    if (canceled)
-                        return
-                    // A tremble past the slop that never left its own place: the
-                    // menu; a drag elsewhere and back changes nothing
-                    if (to < 0 || (to === from && !strayed))
-                        root.select(from)
-                    else if (root.edit(DashboardBook.moveCell(root.doc, root.pageIndex, from, to),
-                                       root.stepOf("", qsTr("moved %1").arg(root.cellName(pageView.cells[from])),
-                                                   from, to))
-                             && root.selected >= 0)
-                        root.selected = DashboardBook.movedIndex(root.selected, from, to)
-                }
-                // Near the view's top or bottom edge the page scrolls, at
-                // up to a quarter of the edge's width per tick
-                function scrollAtTheEdge() {
-                    const y = mapFromItem(null, finger.x, finger.y).y
-                    const edge = Theme.touchTarget
-                    const by = y < edge ? y - edge : y > height - edge ? y - (height - edge) : 0
-                    if (by === 0)
-                        return
-                    const bottom = Math.max(0, contentHeight - height)
-                    contentY = Math.max(0, Math.min(bottom,
-                        contentY + Math.max(-edge, Math.min(edge, by)) / 4))
-                    follow(finger)
-                }
-                Timer {
-                    interval: 16
-                    repeat: true
-                    running: pageView.reflowing
-                    onTriggered: pageView.scrollAtTheEdge()
-                }
-
-                // A tap between the cells reveals the drive view's bars too
-                MouseArea {
-                    objectName: "driveTapArea"
-                    enabled: root.driving
-                    width: pageView.width
-                    height: Math.max(pageView.height, pageView.contentHeight)
-                    onClicked: root.driveTap()
-                }
-
-                // The edit panel, in the page above its grid (never a Popup)
-                // The side column: the panel in a column of its own, as high as
-                // the page's view and held there while the grid scrolls
-                Flickable {
-                    id: sideHost
-                    objectName: "dashSidePanel"
-                    visible: pageView.sideColumn
-                    x: pageView.width - root.panelMargin - root.sideColumnWidth
-                    y: pageView.contentY
-                    z: 1
-                    width: root.sideColumnWidth
-                    height: pageView.height
-                    clip: true
-                    contentWidth: width
-                    contentHeight: panelHost.item
-                        ? root.gridTop + (panelHost.item as Item).height + root.panelMargin : 0
-                    ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
-                }
-
-                Loader {
-                    id: panelHost
-                    objectName: "dashPanel"
-                    parent: pageView.sideColumn ? sideHost.contentItem : pageView.contentItem
-                    x: pageView.sideColumn ? 0 : (pageView.width - width) / 2
-                    y: root.gridTop
-                    width: pageView.sideColumn ? root.sideColumnWidth : pageView.fullGridWidth
-                    active: (pageView.shown && root.panel !== "") || root.connectShown
-                    sourceComponent: root.panel === "cell" ? cellPanel
-                                   : root.panel === "add" ? addPanel
-                                   : root.panel === "signal" ? signalPanel
-                                   : root.connectShown ? connectPanel : null
-                    onLoaded: {
-                        pageView.contentY = 0
-                        sideHost.contentY = 0
-                    }
-                }
-
-                Label {
-                    objectName: "dashEmptyPage"
-                    visible: pageView.cells.length === 0 && !root.editing && !root.connectShown
-                    x: root.margin
-                    y: root.topGap
-                    width: pageView.gridWidth
-                    wrapMode: Text.WordWrap
-                    color: Theme.textDim
-                    text: qsTr("No gauges on this page. Edit adds them.")
-                }
-
-                Item {
-                    id: grid
-                    // On whole pixels of the display, so the seams snapped inside it are
-                    x: root.snap(pageView.sideColumn ? root.panelMargin : (pageView.width - width) / 2)
-                    y: root.snap(swipe.y + root.gridTop + (panelHost.item && !pageView.sideColumn
-                        ? (panelHost.item as Item).height + root.gap : 0)) - swipe.y
-                    width: pageView.gridWidth
-                    height: Math.max(0, pageView.rows * pageView.pitch - root.cellGap)
-
-                    // The joined panel, under its cells: the flat surface
-                    // with its edge, and the hairlines between neighbors
-                    Rectangle {
-                        objectName: "dashPanelSurface"
-                        anchors.fill: parent
-                        visible: root.joined && pageView.rows > 0
-                        color: Theme.surface
-                        radius: root.driving ? 0 : Theme.radiusCard
-                        // Under the first tab while it's shown: its sheet runs straight in
-                        topLeftRadius: root.stripMeetsPanel && root.pageIndex === 0 ? 0 : radius
-                        border.color: Theme.hairline
-                        border.width: root.driving ? 0 : root.hairlineWidth
-                    }
-                    Repeater {
-                        model: pageView.seams
-                        Rectangle {
-                            required property var modelData
-                            readonly property real along: modelData.vertical
-                                ? modelData.y * pageView.pitch : modelData.x * pageView.columnWidth
-                            readonly property real across: root.snap((modelData.vertical
-                                ? modelData.x * pageView.columnWidth : modelData.y * pageView.pitch)
-                                - root.hairlineWidth / 2)
-                            readonly property real run: modelData.length
-                                * (modelData.vertical ? pageView.pitch : pageView.columnWidth)
-                            objectName: "dashSeam"
-                            x: modelData.vertical ? across : along
-                            y: modelData.vertical ? along : across
-                            width: modelData.vertical ? root.hairlineWidth : run
-                            height: modelData.vertical ? run : root.hairlineWidth
-                            color: Theme.hairline
-                        }
-                    }
-
-                    Repeater {
-                        id: cellRepeater
-                        model: pageView.cells.length
-
-                        DashCell {
-                            id: placedCell
-                            host: root
-                            required property int index
-                            readonly property var box: pageView.boxes[pageView.reflowing
-                                ? DashboardBook.movedIndex(index, root.held, root.dropAt) : index]
-                            readonly property bool carried: pageView.reflowing && root.held === index
-                            objectName: "dashCell_" + pageView.index + "_" + index
-                            cell: pageView.cells[index]
-                            pageNo: pageView.index
-                            cellIndex: index
-                            later: pageView !== null && Math.abs(pageView.index - root.pageIndex) > 1
-                            // qmllint disable missing-property
-                            shown: pageView !== null && pageView.index === root.pageIndex
-                                   && Qt.application.state !== Qt.ApplicationSuspended
-                                   && Qt.application.state !== Qt.ApplicationHidden
-                            // qmllint enable missing-property
-                            x: carried ? pageView.dragX : box ? pageView.boxLeft(box) : 0
-                            y: carried ? pageView.dragY : box ? pageView.boxTop(box) : 0
-                            width: box ? pageView.boxWidth(box) : 0
-                            height: box ? pageView.boxHeight(box) : 0
-                            Behavior on x {
-                                enabled: pageView.reflowing && !placedCell.carried
-                                NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
-                            }
-                            Behavior on y {
-                                enabled: pageView.reflowing && !placedCell.carried
-                                NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
-                            }
-                            onHoldStarted: (scene) => pageView.lift(index, scene)
-                            onHoldMoved: (scene) => pageView.follow(scene)
-                            onHoldEnded: (canceled) => pageView.letGo(canceled)
-                        }
-                    }
-
-                    // The "+" cell, split with Paste while a copy exists
-                    Item {
-                        id: addBox
-                        readonly property var box: pageView.boxes[pageView.cells.length]
-                        // Off the joined panel's hairlines
-                        readonly property real inset: root.joined ? 4 : 0
-                        readonly property bool split: root.copied !== null
-                        readonly property real half: (width - 8) / 2
-                        objectName: "dashAddCellBox_" + pageView.index
-                        visible: pageView.addCell
-                        x: box ? pageView.boxLeft(box) + inset : 0
-                        y: box ? pageView.boxTop(box) + inset : 0
-                        width: box ? pageView.boxWidth(box) - 2 * inset : 0
-                        height: box ? Math.max(Theme.touchTarget,
-                                               pageView.boxHeight(box) - 2 * inset) : 0
-                        ThemedButton {
-                            objectName: "dashAddCell_" + pageView.index
-                            width: addBox.split ? addBox.half : addBox.width
-                            height: addBox.height
-                            text: "+"
-                            font.pixelSize: Theme.fontHero
-                            Accessible.name: qsTr("Add a gauge")
-                            onClicked: root.startAdd()
-                        }
-                        ThemedButton {
-                            objectName: "dashPasteCell_" + pageView.index
-                            visible: addBox.split
-                            x: addBox.width - width
-                            width: addBox.half
-                            height: addBox.height
-                            enabled: root.canPaste
-                            text: qsTr("Paste")
-                            Accessible.name: qsTr("Paste the copied gauge")
-                            onClicked: root.pasteAfter(root.shownCells.length - 1)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     PageIndicator {
         id: indicator
         objectName: "dashIndicator"
@@ -1935,7 +855,7 @@ Page {
     // The first entries' hint: over the gauges, and it takes no touch
     Rectangle {
         objectName: "driveHint"
-        visible: root.driving && root.driveHintUp
+        visible: root.driving && drive.driveHintUp
         z: 1
         anchors.centerIn: swipe
         width: driveHintText.implicitWidth + 24
