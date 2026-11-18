@@ -1604,3 +1604,33 @@ don't say:
     (`apply --check -R`) proves it took. Each half was shown alone: with
     the ceiling the patch applies; with the ceiling taken out the dry run
     stops the script.
+
+25. **The ceiling as built** (`core/src/tier2_ceiling.h`). Section 1 lists
+    the services; the build fixes what it left open. Security access
+    admits sub-functions 01 to 7E, less 5F and 60 (ISO 26021's end-of-life
+    activation of pyrotechnic devices, no reader's business), and never
+    one with bit 7, which suppresses the positive reply core counts an
+    attempt by. `3E` is 00 only, for the same reason: core reads the reply
+    to know the session stands. `19`, `22` and `2A` take any second byte.
+    The default session's `10 01` is outside the ceiling though core sends
+    it at a close: the close and the keep-alive are the engine's own
+    requests (ADR-0060), built by core for itself, and the ceiling is what
+    a plugin's code may cause. A plugin's own request (`next_request`) is
+    narrower than the ceiling: `19`, `22`, `2C 01` and `2C 03`.
+
+26. **The simulated ECU's security access as built**
+    (`core/src/sim_security.h`). Section 2.7 asks for a level; the build
+    has two, 01 with 4 bytes and 03 with 16, so that a key's request
+    longer than one CAN frame exists to test the multi-frame send (section
+    2.4) with no car. The transform is the seed's bytes in reverse, each
+    XORed with a letter of "HAVNE". The lockout is the third wrong key
+    (`7F 27 36`), the delay 10 s on the ECU's clock (`7F 27 37` to every
+    27 with a level of the ECU's), and after it the count stands one short
+    of the lockout, so one more wrong key locks again and only a right key
+    zeroes it; the two levels share one count. The unlock belongs to the
+    session: `10 03` entered anew, `10 01` and S3's lapse each lock, while
+    the count and a delay outlast them. The gated DID is D210. The
+    refusals follow ISO 14229-1's general order (the service in the active
+    session before the request's length), and only the seed asked for last
+    is out. The fakes' ECU answers from the same header, with a knob for
+    the delay.
