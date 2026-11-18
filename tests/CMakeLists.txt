@@ -127,7 +127,7 @@ gtest_discover_tests(test_signals DISCOVERY_TIMEOUT 60)
 # and the engine is deliberately not part of the public tree.
 add_executable(test_obd2 test_obd2.cpp test_session_control.cpp
     test_request_table.cpp test_tier2_ceiling.cpp test_sim_security.cpp
-    test_engine_talk.cpp test_request_turns.cpp)
+    test_engine_talk.cpp test_request_turns.cpp test_sim_car.cpp)
 
 target_include_directories(test_obd2 PRIVATE
     ${CMAKE_SOURCE_DIR}/core/src
@@ -411,6 +411,7 @@ if(TARGET havne-cli)
         app_cli_elm327(CoresOwnSessionReadsTheSimulatedCar session)
         app_cli_elm327(ASecondModulesDidAnswers modules)
         app_cli_elm327(APluginsDidsAnswerOnBothEcus plugin)
+        app_cli_elm327(AFaultAimedAtOneModuleSilencesItAlone aimed)
         app_cli_elm327(PythonObdReadsIt python-obd)
         set_tests_properties(CliElm327RunTest.PythonObdReadsIt PROPERTIES COST 13)
         # A clear (ADR-0038's appendix of 2026-11-06): the mock's report

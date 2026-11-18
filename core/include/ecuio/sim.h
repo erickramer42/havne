@@ -23,9 +23,9 @@ extern "C" {
  *
  * The URI, one of:
  *   mock://<label>[?values=drive|canned][&modules=1|2][&profile=<name>]
- *          [&vin=<VIN>][&faults=<f>:<n>[,...]]
+ *          [&vin=<VIN>][&faults=<f>:<n>[@<reply ID>][,...]]
  *   replay://<absolute path>[?loop=0|1][&from=<s>][&to=<s>][&vin=<VIN>]
- *            [&faults=<f>:<n>[,...]]
+ *            [&faults=<f>:<n>[@<reply ID>][,...]]
  * mock://, the mock's car. values: drive (the default) answers Service 01
  * from the mock's drive cycle, canned the fakes' one reading per linear
  * J1979 PID. modules=2: a second module too, on 0x7E1 answering as
@@ -56,7 +56,10 @@ extern "C" {
  * 09 02 answers instead of the recording's.
  * faults, both: silent, late, pending (7F <service> 78 first, the reply
  * 300 ms later), bad_sequence and stalled, each every nth reply
- * (1-10000) of each module, the bitmaps never broken.
+ * (1-10000) of each module, on that module's own count, the bitmaps
+ * never broken. @<reply ID> (11-bit hex) aims a fault at the module
+ * answering on it alone (faults=late:3@7EA), in place of that fault
+ * for every module; at most 32 aims.
  *
  * A real controller answers only under ECUIO_SIM_ALLOW_DESK_BUS
  * (ecuio_sim_create_with): a desk bus, with a tester and no car.
@@ -131,6 +134,9 @@ _Static_assert(offsetof(ecuio_sim_stats_t, pending) == 80,
  *   with a 29-bit channel, one on 0x7DF, or one sharing an ID with the
  *   engine ECU's pair but not the pair itself, ECUIO_ERR_INVALID_ARGUMENT;
  *   both on every platform, after the URI and before NO_TRANSPORT.
+ * - faults= aiming at a reply ID none of the sim's ECUs answers on:
+ *   ECUIO_ERR_BAD_URI, the detail naming the IDs they do; after the
+ *   profile, whose modules it needs, and before NO_TRANSPORT.
  * - Whatever the bus, a frame another node sends on 0x7E8 silences it
  *   for good (ECUIO_SIM_YIELDED): an ECU already answers there.
  */

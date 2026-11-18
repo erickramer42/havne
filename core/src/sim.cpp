@@ -81,14 +81,14 @@ uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
 }
 
 /* The fate of n's reply to req, a clear and the fault counted */
-ecuio_sim_fate decide(ecuio_sim* s, const sim_node& n, const uint8_t* req,
+ecuio_sim_fate decide(ecuio_sim* s, sim_node& n, const uint8_t* req,
                       uint32_t len, const uint8_t* reply, uint32_t reply_len)
 {
     if (n.module == 0 && reply[0] == 0x44) {
         s->clears.fetch_add(1, std::memory_order_relaxed);
     }
     const ecuio_sim_fate fate =
-        ecuio_sim_next_fate(s->ecu, req, len, reply_len, n.module);
+        ecuio_sim_next_fate(n.faults, n.counts, req, len, reply_len);
     switch (fate) {
     case ecuio_sim_fate::silent:
         s->silent.fetch_add(1, std::memory_order_relaxed);
@@ -149,9 +149,63 @@ ecuio_status_t plan_sim(const char* uri, sim_plan* p)
             return ECUIO_ERR_INVALID_ARGUMENT;
         }
     }
+    /* An aim needs the modules, known only once the profile is */
+    uint32_t ids[1 + ECUIO_MAX_CHANNELS] = {ECUIO_SIM_REPLY_ID};
+    uint32_t count = 1;
+    if (p->config.second_module) {
+        ids[count++] = ECUIO_SIM_MODULE_REPLY_ID;
+    }
+    for (uint32_t i = 0; i < p->modules.count; ++i) {
+        ids[count++] = p->modules.rx[i];
+    }
+    if (!ecuio_sim_aims_land(p->config.aimed, ids, count, why, sizeof why)) {
+        ecuio_detail_set("%s", why);
+        return ECUIO_ERR_BAD_URI;
+    }
     p->config.profile = nullptr; /* the URI's, gone after create */
     p->config.profile_len = 0;
     return ECUIO_OK;
+}
+
+/* s's ECUs as p plans them: the engine ECU, then modules=2's module or
+ * the profile's, each with its faults; false out of memory */
+bool build_nodes(ecuio_sim* s, const sim_plan& p)
+{
+    const ecuio_sim_config& config = p.config;
+    const uint32_t nodes = p.set != nullptr       ? 1 + p.modules.count
+                           : config.second_module ? 2u
+                                                  : 1u;
+    s->nodes.reset(new (std::nothrow) sim_node[nodes]);
+    if (s->nodes == nullptr) {
+        return false;
+    }
+    s->nodes[0].rx.timed = true;
+    if (config.second_module) {
+        sim_node& m = s->nodes[1];
+        m.request_id = ECUIO_SIM_MODULE_REQUEST_ID;
+        m.reply_id = ECUIO_SIM_MODULE_REPLY_ID;
+        m.module = 1;
+        m.rx.timed = true;
+        s->node_count = 2;
+    }
+    if (p.set != nullptr) {
+        s->nodes[0].from_set = p.modules.engine;
+        for (uint32_t i = 0; i < p.modules.count; ++i) {
+            sim_node& m = s->nodes[1 + i];
+            m.request_id = p.modules.tx[i];
+            m.reply_id = p.modules.rx[i];
+            m.module = 1;
+            m.from_set = true;
+            m.rx.timed = true;
+        }
+        s->node_count = 1 + static_cast<int>(p.modules.count);
+    }
+    for (int i = 0; i < s->node_count; ++i) {
+        sim_node& n = s->nodes[i];
+        n.faults =
+            ecuio_sim_faults_for(config.faults, config.aimed, n.reply_id);
+    }
+    return true;
 }
 
 /* The sim p plans, on no bus yet: its values, its recording and its
@@ -203,33 +257,8 @@ ecuio_status_t build_sim(sim_plan& p, std::unique_ptr<ecuio_sim>* out)
     config.path = nullptr; /* the URI's, gone after create */
     config.path_len = 0;
     s->ecu.config = config;
-    const uint32_t nodes = set != nullptr         ? 1 + p.modules.count
-                           : config.second_module ? 2u
-                                                  : 1u;
-    s->nodes.reset(new (std::nothrow) sim_node[nodes]);
-    if (s->nodes == nullptr) {
+    if (!build_nodes(s.get(), p)) {
         return ECUIO_ERR_OUT_OF_MEMORY;
-    }
-    s->nodes[0].rx.timed = true;
-    if (config.second_module) {
-        sim_node& m = s->nodes[1];
-        m.request_id = ECUIO_SIM_MODULE_REQUEST_ID;
-        m.reply_id = ECUIO_SIM_MODULE_REPLY_ID;
-        m.module = 1;
-        m.rx.timed = true;
-        s->node_count = 2;
-    }
-    if (set != nullptr) {
-        s->nodes[0].from_set = p.modules.engine;
-        for (uint32_t i = 0; i < p.modules.count; ++i) {
-            sim_node& m = s->nodes[1 + i];
-            m.request_id = p.modules.tx[i];
-            m.reply_id = p.modules.rx[i];
-            m.module = 1;
-            m.from_set = true;
-            m.rx.timed = true;
-        }
-        s->node_count = 1 + static_cast<int>(p.modules.count);
     }
     *out = std::move(s);
     return ECUIO_OK;

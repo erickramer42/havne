@@ -102,7 +102,8 @@ struct ecuio_sim_config {
     ecuio_sim_values values = ecuio_sim_values::drive;
     char vin[ECUIO_VIN_LEN + 1] = {};
     bool vin_given = false; /* replay: 09 02 answers it, not the car's */
-    ecuio_sim_faults faults;
+    ecuio_sim_faults faults;    /* every module's, each on its own count */
+    ecuio_sim_aims aimed;       /* faults aimed at one module each */
     bool second_module = false; /* mock: modules=2 */
     /* mock: profile=, a registered profile whose set's DIDs the ECUs
      * answer (sim_dids.h), a view into the URI parsed (valid while it
@@ -125,10 +126,6 @@ struct ecuio_sim_ecu {
     ecuio_mock::DriveCycle car; /* values=drive: stepped by the bus side */
     float engine_s = 0.0f;      /* time since the engine last started */
     bool cleared = false;       /* a 04 was obeyed */
-    uint32_t singles = 0;       /* replies counted for the faults */
-    uint32_t segmented = 0;
-    uint32_t module_singles = 0; /* the second module's, counted apart */
-    uint32_t module_segmented = 0;
 };
 
 /* One tick (kTickS of the ECU's time): its clock runs; the mock's drive
@@ -580,24 +577,20 @@ inline uint32_t ecuio_sim_module_answer(const uint8_t* req, uint32_t len,
     return n;
 }
 
-/* The fate of the next reply, counting it: bitmaps are never broken,
- * single-frame and segmented replies are counted apart (and each
- * module's apart from the other's: module 1 is the second), and the two
- * frame faults take segmented replies only */
-inline ecuio_sim_fate ecuio_sim_next_fate(ecuio_sim_ecu& e, const uint8_t* req,
-                                          uint32_t req_len, uint32_t reply_len,
-                                          int module = 0)
+/* The fate of a module's next reply from its periods f, counting it in
+ * c: bitmaps are never broken, single-frame and segmented replies are
+ * counted apart, and the two frame faults take segmented replies only */
+inline ecuio_sim_fate ecuio_sim_next_fate(const ecuio_sim_faults& f,
+                                          ecuio_sim_counts& c,
+                                          const uint8_t* req, uint32_t req_len,
+                                          uint32_t reply_len)
 {
     if (req_len == 2 && req[0] == 0x01 &&
         ecuio_sim_detail::bitmap_pid(req[1])) {
         return ecuio_sim_fate::intact;
     }
     const bool segmented = reply_len > 7;
-    uint32_t& count = module == 0
-                          ? (segmented ? e.segmented : e.singles)
-                          : (segmented ? e.module_segmented : e.module_singles);
-    const uint32_t k = ++count;
-    const ecuio_sim_faults& f = e.config.faults;
+    const uint32_t k = ++(segmented ? c.segmented : c.singles);
     const auto every = [k](uint32_t n) { return n != 0 && k % n == 0; };
     if (every(f.silent)) {
         return ecuio_sim_fate::silent;
@@ -755,8 +748,8 @@ inline ecuio_sim_uri_result ecuio_sim_parse_uri(const char* uri,
                 return ecuio_sim_uri_result::bad;
             }
         } else if (p.is("faults")) {
-            if (!ecuio_sim_parse_faults(p.val, p.val_len, &out->faults, why,
-                                        why_cap)) {
+            if (!ecuio_sim_parse_faults(p.val, p.val_len, &out->faults,
+                                        &out->aimed, why, why_cap)) {
                 return ecuio_sim_uri_result::bad;
             }
         }

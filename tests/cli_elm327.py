@@ -6,6 +6,7 @@
 #   python tests/cli_elm327.py session <havne-cli>
 #   python tests/cli_elm327.py modules <havne-cli>
 #   python tests/cli_elm327.py plugin <havne-cli> <plugins/example-sim>
+#   python tests/cli_elm327.py aimed <havne-cli> <plugins/example-sim>
 #   python tests/cli_elm327.py python-obd <havne-cli>
 #
 # havne-cli sim's ELM327 emulator (ADR-0055) on a port the system picks
@@ -23,6 +24,8 @@
 # (D101, the gear, 03).
 # plugin: the example plugin's DIDs (sim --plugin), on both its ECUs, read
 # by a session through the same plugin: each answers raw 0, its offset.
+# aimed: the same, with a fault aimed at the tcm alone (silent:1@7E9):
+# the pcm's values come, the tcm's never do.
 # python-obd: python-OBD reads it (skip 77 without the package).
 
 import json
@@ -239,6 +242,19 @@ def plugin(cli, package):
     emu.end()
 
 
+def aimed(cli, package):
+    profile = "plugin.example-sim.base"
+    emu = Emulator(cli, "mock://emu?profile=%s&faults=silent:1@7E9" % profile,
+                   extra=["--plugin", package])
+    uri = "elm327://127.0.0.1:%d?profile=%s&identify=0&diagnose=0" % (
+        emu.port, profile)
+    lines = stream(cli, uri, ["--values", "--seconds", "4", "--plugin", package])
+    ids = {l["id"] for l in lines if l["type"] == "values"}
+    expect("0x7E8" in ids, "pcm answers: %r" % lines[-5:])
+    expect("0x7E9" not in ids, "tcm silenced by its aim alone: %r" % sorted(ids))
+    emu.end()
+
+
 def python_obd(cli):
     try:
         import obd  # noqa: F401  (python-OBD, a test-only package)
@@ -264,8 +280,8 @@ def python_obd(cli):
 
 def main():
     mode, cli = sys.argv[1], sys.argv[2]
-    if mode == "plugin":
-        rc = plugin(cli, sys.argv[3])
+    if mode in ("plugin", "aimed"):
+        rc = {"plugin": plugin, "aimed": aimed}[mode](cli, sys.argv[3])
     else:
         rc = {"adapter": adapter, "reconnect": reconnect, "session": session,
               "modules": modules,

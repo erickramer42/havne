@@ -53,6 +53,7 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
     e.config = config;
     e.recording = rec;
     ecuio_sim_session session;
+    ecuio_sim_counts counts;
     size_t at = 0;
     while (at < size) {
         const size_t len = (data[at] & 0x0F) + ((data[at] & 0x20) ? 16u : 0u);
@@ -86,8 +87,9 @@ void run(const ecuio_sim_config& config, const ecuio_sim_recording* rec,
                          : reply[0] != (data[at] | 0x40)) {
                 abort();
             }
-            const ecuio_sim_fate fate = ecuio_sim_next_fate(
-                e, data + at, static_cast<uint32_t>(len), n);
+            const ecuio_sim_fate fate =
+                ecuio_sim_next_fate(e.config.faults, counts, data + at,
+                                    static_cast<uint32_t>(len), n);
             if (static_cast<uint8_t>(fate) >
                 static_cast<uint8_t>(ecuio_sim_fate::stalled)) {
                 abort();
@@ -127,8 +129,18 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
              config.faults.silent > ECUIO_SIM_FAULT_MAX ||
              config.faults.late > ECUIO_SIM_FAULT_MAX ||
              config.faults.bad_sequence > ECUIO_SIM_FAULT_MAX ||
-             config.faults.stalled > ECUIO_SIM_FAULT_MAX)) {
+             config.faults.stalled > ECUIO_SIM_FAULT_MAX ||
+             config.aimed.count > ECUIO_SIM_AIMED_MAX)) {
             abort();
+        }
+        /* Each aim one 11-bit module's, its period as a fault's */
+        for (uint32_t i = 0;
+             r == ecuio_sim_uri_result::ok && i < config.aimed.count; ++i) {
+            const ecuio_sim_aim& a = config.aimed.items[i];
+            if (a.reply_id > 0x7FFu || a.every == 0 ||
+                a.every > ECUIO_SIM_FAULT_MAX) {
+                abort();
+            }
         }
         return 0;
     }

@@ -38,14 +38,15 @@ struct sim_sending {
 };
 
 /* One ECU on the bus: the IDs it hears and answers on, its own ISO-TP
- * receiver and sender, and its reply, so two modules answering one
- * functional request never share a message's state */
+ * receiver and sender, its reply, and its faults' periods and counts, so
+ * two modules answering one functional request never share a message's
+ * state or a fault's count */
 struct sim_node {
     uint32_t request_id = ECUIO_SIM_REQUEST_ID;
     uint32_t reply_id = ECUIO_SIM_REPLY_ID;
-    /* 0 the engine ECU, 1 another module (its faults counted with every
-     * other module's) */
-    int module = 0;
+    int module = 0;          /* 0 the engine ECU, 1 another module */
+    ecuio_sim_faults faults; /* every module's, with those aimed at it */
+    ecuio_sim_counts counts;
     /* Answers the profile's DIDs (sim_dids.h): Service 22 on the engine
      * ECU, everything on another module */
     bool from_set = false;
@@ -104,7 +105,7 @@ namespace ecuio_sim_impl {
 void sent(ecuio_sim* s, const sim_sending& r);
 uint32_t answer(ecuio_sim* s, sim_node& n, const uint8_t* req, uint32_t len,
                 bool functional, uint8_t* out);
-ecuio_sim_fate decide(ecuio_sim* s, const sim_node& n, const uint8_t* req,
+ecuio_sim_fate decide(ecuio_sim* s, sim_node& n, const uint8_t* req,
                       uint32_t len, const uint8_t* reply, uint32_t reply_len);
 
 #if ECUIO_HAVE_SOCKETCAN
