@@ -8,6 +8,11 @@
 *.desktop text eol=lf
 *.pc.in text eol=lf
 
+# Read by libabigail from this tree (scripts/abi-check.sh, also run in WSL
+# over a synced Windows checkout): a CR after a suppression's name keeps
+# the suppression from applying
+abi/* text eol=lf
+
 # A recording's header names the SHA-256 of these copies: their bytes are
 # checked out as committed, never with a Windows checkout's CRLF
 tests/fixtures/recording/*/conditions.json -text

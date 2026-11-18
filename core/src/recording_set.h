@@ -62,7 +62,7 @@ struct header {
     /* A signal's name for what signals.csv names it by: its signal line's
      * for a key (the first line's, as the reader keeps it), else the text
      * itself (a name, or a key no line declares) */
-    const std::string& shown(const std::string& id) const
+    std::string shown(const std::string& id) const
     {
         const auto it =
             std::lower_bound(names.begin(), names.end(), id,

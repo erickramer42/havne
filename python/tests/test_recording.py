@@ -62,6 +62,12 @@ def test_a_recorded_session_reads_back(tmp_path):
         assert r.text_at("RPM", 0)[1] in (None, 0)
         coolant = r.signal("Coolant Temp")
         assert r.find_threshold("Coolant Temp", coolant.highest + 1000) is None
+    # Closed, a signal is still found among those read, by the same rule
+    assert r.signal("RPM") == rpm and r.signal(rpm.key) == rpm
+    assert r.signal(rpm.index) == rpm
+    with pytest.raises(KeyError) as gone:
+        r.signal("no such signal")
+    assert str(gone.value) == repr("no signal with the key or name 'no such signal'")
 
 
 def test_a_recording_decodes_again_from_its_frames(tmp_path):
