@@ -1,6 +1,6 @@
 // File/layer: cli/cmd_log.cpp | havne-cli, log (ADR-0056 section 7)
 // Testing: UNIT: CliLogRunTest, CliGoldenTest, CliUsageTest (ctest);
-//          CliLogTest (test_cli)
+//          CliLogTest, CliSummaryTest (test_cli)
 //
 // Public headers only: what any program linking core can do.
 
@@ -9,6 +9,7 @@
 #include "jsonl.h"
 #include "scan_line.h"
 #include "sleep_watch.h"
+#include "summary_lines.h"
 
 #include "commands.h"
 #include "profile_source.h"
@@ -57,15 +58,54 @@ uint64_t folder_bytes(const std::string& folder)
 }
 
 // log's frame callback: the frames seen, for a replay's end (stream
-// counts them as it writes them; log writes none)
+// counts them as it writes them; log writes none), and the summary's
+// tally, which the main thread reads once the close has joined the worker
 struct LogFrames {
     std::atomic<uint64_t> covered{0};
+    cli::SummaryTally* tally = nullptr;
 };
 
 void on_log_frame(const ecuio_frame_t*, void* user)
 {
-    static_cast<LogFrames*>(user)->covered.fetch_add(1,
-                                                     std::memory_order_release);
+    auto* f = static_cast<LogFrames*>(user);
+    f->tally->on_frame();
+    f->covered.fetch_add(1, std::memory_order_release);
+}
+
+void on_log_values(const ecuio_value_batch_t* batch, void* user)
+{
+    static_cast<cli::SummaryTally*>(user)->on_batch(*batch);
+}
+
+// The interval line of each signal in the window, in the set's order,
+// then the summary line: built after the close joined the worker and
+// before the destroy frees the set
+std::vector<std::string> summary_lines(const ecuio_signal_set_t* set,
+                                       const std::vector<uint16_t>& picks,
+                                       const cli::SummaryTally& tally)
+{
+    std::vector<std::string> lines;
+    const std::vector<ecuio_signal_key_t> keys =
+        cli::set_keys(set, session_signal_file());
+    const std::vector<cli::SignalTally>& all = tally.tallies();
+    for (size_t i = 0; i < all.size(); ++i) {
+        if (!cli::in_window(all[i], tally.epoch())) {
+            continue;
+        }
+        BigLine b(cli::interval_line_bytes());
+        cli::interval_line(b.line, set->defs[i],
+                           i < keys.size() ? keys[i].text : nullptr,
+                           sizeof(ecuio_signal_key_t::text), all[i]);
+        if (b.line.finish()) {
+            lines.emplace_back(b.line.data(), b.line.size());
+        }
+    }
+    BigLine b(cli::summary_line_bytes());
+    cli::summary_line(b.line, set, keys, picks, tally);
+    if (b.line.finish()) {
+        lines.emplace_back(b.line.data(), b.line.size());
+    }
+    return lines;
 }
 
 // What the log and end lines say: session time since start in whole
@@ -155,6 +195,7 @@ struct LogRun {
     std::string folder;
     cli::ArmedSeen armed_seen;
     LogFrames frames;
+    cli::SummaryTally tally{nullptr}; /* made for the focus before start */
     uint64_t started = 0;
     const char* reason = nullptr;
 };
@@ -342,14 +383,18 @@ int log_recording(Output& out, const cli::LogArgs& args, LogRun& r)
     return kGoOn;
 }
 
-// The frame callback and the start
+// The frame and values callbacks, the summary's tally for the focus, and
+// the start
 int log_start(Output& out, const cli::LogArgs&, LogRun& r)
 {
     ecuio_session_t* session = r.session;
     ecuio_recorder_t*& recorder = r.recorder;
     bool& recording_failed = r.recording_failed;
     LogFrames& frames = r.frames;
+    r.tally = cli::SummaryTally(r.set, r.ids);
+    frames.tally = &r.tally;
     ecuio_register_frame_callback(session, on_log_frame, &frames);
+    ecuio_register_values_callback(session, on_log_values, &r.tally);
     install_handlers();
     const ecuio_status_t st = ecuio_session_start(session);
     if (st != ECUIO_OK) {
@@ -497,11 +542,16 @@ int log_end(Output& out, const cli::LogArgs& args, LogRun& r)
         const std::string text(noted.data(), noted.size());
         ecuio_recorder_note(recorder, text.c_str());
     }
+    const std::vector<std::string> summary =
+        summary_lines(r.set, r.ids, r.tally);
     ecuio_session_destroy(session);
     const std::string why_closed = std::string("havne-cli: ") + reason;
     close_recording(out, &recorder, why_closed.c_str(), &recording_failed,
                     args.armed);
     if (!out.failed) {
+        for (const std::string& text : summary) {
+            out.write(text.data(), text.size());
+        }
         write_line(out, end.line);
         out.flush();
     }
@@ -521,7 +571,9 @@ int log_end(Output& out, const cli::LogArgs& args, LogRun& r)
 // often as the bus allows), a recorder attached before start so the
 // folder's header carries the focus, and a log line each period of
 // session time with the recording's size; no frame or values lines, the
-// folder is the output. The names are checked against the session's set
+// folder is the output. After the close, an interval line for each signal
+// and a summary line (cli/summary_lines.h) say what the log reached.
+// The names are checked against the session's set
 // before any line is written, so a typo is usage: exit 2, nothing on
 // stdout. Ends at Ctrl+C, --seconds, a failed recording (exit 1) or a
 // replay's last frame; a lost link is logged in health lines and waited
