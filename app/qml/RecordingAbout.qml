@@ -223,8 +223,10 @@ ColumnLayout {
             objectName: "alignSignal"
             visible: root.host.alignOn === "rise" || root.host.alignOn === "fall"
             width: 150
-            model: root.host.recording.state === RecordingView.Open ? root.host.numberNames() : []
-            onActivated: root.host.alignSignal = currentText
+            model: root.host.recording.state === RecordingView.Open
+                   ? ComparePairs.numbers(root.host.recording.signalList) : []
+            textRole: "name"
+            onActivated: index => root.host.chooseAlignSignal(model[index])
         }
         ThemedTextField {
             objectName: "alignLevel"

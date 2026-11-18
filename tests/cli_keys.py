@@ -5,6 +5,7 @@
 #   python tests/cli_keys.py recording <havne-cli>
 #   python tests/cli_keys.py log <havne-cli>
 #   python tests/cli_keys.py file <havne-cli>
+#   python tests/cli_keys.py delta <havne-cli>
 #
 # recording: a format 4 recording written here, two signals named RPM on
 # two modules and one under its author's key. view shows a signal named by
@@ -21,6 +22,11 @@
 # --frames gives those keys for the recording's own signals.json and for
 # a --signals file; a mock session logged through plugins/example-sim
 # takes its computed signal by key, and view --frames --plugin gives it.
+# delta: view's delta pairs a signal across recordings by its key, else
+# by a name each recording has once (cli/signal_pairs.h): two modules'
+# RPM each with its own, none with an older recording's one RPM, an
+# address another recording has under another key by its name, an
+# "id:<n>" never by its number, and a number never from a text.
 
 import json
 import subprocess
@@ -256,10 +262,97 @@ def file(cli):
     return 1 if bad else 0
 
 
+def write_values(folder, fmt, signals):
+    """A recording of signals (key, name, unit, first, second) at 1 s and
+    2 s, in format 4 (by key) or 3 (by name, no keys); the unit "text"
+    makes a text signal"""
+    folder.mkdir()
+    lines = [f"ecuio session recording, format {fmt} (ADR-0049)",
+             "started  2026-11-05 12:00:00.000 (local time)",
+             "utc  2026-11-05T18:00:00.000Z", "core  0.9.0",
+             "uri  mock://x", "profile  test", "frame flags  complete"]
+    for n, (key, name, unit, _, _) in enumerate(signals):
+        head = f"{key},{name}" if fmt == 4 else name
+        kind = "text,," if unit == "text" else f"number,{unit},"
+        lines.append(f"signal  {head},{kind}1,{n + 1},1")
+    lines += ["columns  local time, seconds since the recording started", "",
+              "12:00:03.000  +3.000  end  the test ended"]
+    (folder / "events.log").write_bytes(("\n".join(lines) + "\n").encode())
+    rows = ["\ufeffhost_us,signal,value,unit"]
+    for at, place in ((1000000, 3), (2000000, 4)):
+        for sig in signals:
+            rows.append(f"{at},{sig[0] if fmt == 4 else sig[1]},"
+                        f"{sig[place]},{'' if sig[2] == 'text' else sig[2]}")
+    (folder / "signals.csv").write_bytes(("\n".join(rows) + "\n").encode())
+
+
+def delta(cli):
+    bad = 0
+
+    def fail(what):
+        nonlocal bad
+        print(f"FAIL  {what}")
+        bad += 1
+
+    def deltas(folders, names):
+        args = [a for n in names for a in ("--signal", n)]
+        code, rows, err = run(cli, ["view"] + [str(f) for f in folders]
+                              + ["--columns", "1"] + args)
+        if code != 0:
+            fail(f"view {names}: exit {code}, {err!r}")
+        return {(r["key"] or r["signal"]): (r.get("delta_from"),
+                                            r.get("delta", [None])[0])
+                for r in rows if r["type"] == "columns" and r["recording"] == 1}
+
+    rpm3 = "7E0:22F40C:4.0:16"
+    with tempfile.TemporaryDirectory(prefix="havne-cli-keys-") as root:
+        here, there, older, other, one = (Path(root) / n for n in (
+            "here", "there", "older", "other", "one"))
+        write_values(here, 4, [(RPM1, "RPM", "rpm", 800, 810),
+                               (RPM2, "RPM", "rpm", 900, 910),
+                               ("boost", "Boost", "kPa", 12, 13),
+                               ("id:5", "Load", "%", 40, 40),
+                               ("gear", "Gear", "", 3, 4)])
+        write_values(there, 4, [(RPM1, "RPM", "rpm", 850, 860),
+                                (RPM2, "RPM", "rpm", 1000, 1010),
+                                ("boost", "Boost", "kPa", 20, 21),
+                                ("id:5", "Fuel", "%", 7, 7)])
+        write_values(older, 3, [("", "RPM", "rpm", 700, 700),
+                                ("", "Boost", "kPa", 10, 10),
+                                ("", "Gear", "text", "N", "D")])
+        write_values(other, 4, [(rpm3, "RPM", "rpm", 600, 600)])
+        write_values(one, 4, [(RPM1, "RPM", "rpm", 650, 650)])
+
+        got = deltas([here, there], [RPM1, RPM2, "boost", "Load", "Fuel"])
+        want = {RPM1: (0, 50), RPM2: (0, 100), "boost": (0, 8),
+                "id:5": (None, None)}
+        if got != want:
+            fail(f"two format 4 recordings by key: {got}, not {want}")
+
+        # No --signal: each shows its ranked signals, every one here
+        got = deltas([here, older], [])
+        want = {"Boost": (0, -2.5), "RPM": (None, None), "Gear": (None, None)}
+        if got != want:
+            fail(f"an older recording after: {got}, not {want}")
+        got = deltas([older, here], [])
+        want = {"boost": (0, 2.5), RPM1: (None, None), RPM2: (None, None),
+                "id:5": (None, None), "gear": (None, None)}
+        if got != want:
+            fail(f"an older recording first: {got}, not {want}")
+
+        got = deltas([other, one], ["RPM"])
+        if got != {RPM1: (0, 50)}:
+            fail(f"one RPM each under two keys: {got}")
+    if bad == 0:
+        print("ok    a delta pairs by key, else by a name each has once")
+    return 1 if bad else 0
+
+
 def main(argv):
-    modes = {"recording": recording, "log": log, "file": file}
+    modes = {"recording": recording, "log": log, "file": file,
+             "delta": delta}
     if len(argv) != 3 or argv[1] not in modes:
-        print("usage: cli_keys.py recording|log|file <havne-cli>",
+        print("usage: cli_keys.py recording|log|file|delta <havne-cli>",
               file=sys.stderr)
         return 2
     return modes[argv[1]](argv[2])

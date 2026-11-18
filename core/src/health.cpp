@@ -186,6 +186,21 @@ bool canceled(ecuio_status_t* status)
     return false;
 }
 
+/* Whether each def's rows can be told by its id: by key always; by name,
+ * a name two defs have can't say whose its rows are */
+std::vector<bool> told_apart(const std::vector<std::string>& ids, bool keyed)
+{
+    std::unordered_map<std::string, uint32_t> named;
+    for (size_t i = 0; !keyed && i < ids.size(); ++i) {
+        ++named[ids[i]];
+    }
+    std::vector<bool> out(ids.size(), true);
+    for (size_t i = 0; !keyed && i < ids.size(); ++i) {
+        out[i] = named[ids[i]] == 1;
+    }
+    return out;
+}
+
 /* A recording's report: each ECU's reports from the replies in frames.csv
  * that end in the range (health_replies.h), and each of the set's number
  * defs the value in force at the range's end, aged from it: signals.csv's,
@@ -340,13 +355,14 @@ bool from_folder(const ecuio_health_options_t& o, ecuio_health_report_t& r,
                     i);
             }
         }
+        const std::vector<bool> readable = told_apart(row_ids, keyed);
         /* a whole row's room: a value text_at cut to a buffer would read
          * as another number */
         std::vector<char> text(ecuio_recording_rows::kRowMax + 1);
         for (uint32_t i = 0; i < set->count; ++i) {
             const ecuio_signal_def_t& d = set->defs[i];
             const auto it = by_name.find(row_ids[i]);
-            if (!numeric(d) || it == by_name.end()) {
+            if (!numeric(d) || it == by_name.end() || !readable[i]) {
                 continue;
             }
             text[0] = 0;
