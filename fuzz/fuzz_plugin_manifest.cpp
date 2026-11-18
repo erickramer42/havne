@@ -237,10 +237,6 @@ std::vector<uint32_t> check_ecus(const ecuio_plugin_t* a, uint32_t count,
     return ecus;
 }
 
-/* The conversation tier's part, read from both plugins alike: none
- * without the tier; with it, everything inside plugin.h's bounds and
- * tier 2's ceiling, each ECU, service and level once, each level's pair
- * declared, and every getter refusing past its count */
 /* Each page: its form, its text within the bound, the same for both
  * loads, and written again by core to the same bytes */
 void check_pages(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
@@ -268,6 +264,10 @@ void check_pages(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
     }
 }
 
+/* The conversation tier's part, read from both plugins alike: none
+ * without the tier; with it, everything inside plugin.h's bounds and
+ * tier 2's ceiling, each ECU, service and level once, each level's pair
+ * declared, and every getter refusing past its count */
 void check_conversation(const ecuio_plugin_t* a, const ecuio_plugin_t* b,
                         uint32_t tiers, uint32_t variants)
 {

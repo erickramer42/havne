@@ -227,14 +227,14 @@ _Static_assert(offsetof(ecuio_plugin_page_t, path) == 24,
 /* Page index's form, path and text length, in the manifest's order.
  * ECUIO_ERR_NULL_ARGUMENT for a NULL plugin or out;
  * ECUIO_ERR_INVALID_ARGUMENT for a struct_size smaller than the struct or
- * an index past info's page_count, out untouched. */
+ * an index at or past info's page_count, out untouched. */
 ecuio_status_t ecuio_plugin_page(const ecuio_plugin_t* plugin, uint32_t index,
                                  ecuio_plugin_page_t* out);
 
 /* Page index's layout file as core writes it (two spaces a level, UTF-8
  * kept), the same for a folder and its packed form: NUL-terminated,
  * text_bytes long, valid until the plugin is freed. NULL for a NULL
- * plugin or an index past the count. */
+ * plugin or an index at or past the count. */
 const char* ecuio_plugin_page_text(const ecuio_plugin_t* plugin,
                                    uint32_t index);
 

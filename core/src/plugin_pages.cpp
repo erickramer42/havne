@@ -16,6 +16,51 @@
 
 namespace ecuio_plugin_loader {
 
+namespace {
+
+/* The bytes ecuio_json::write gives for v at depth, but a number's
+ * digits past one and a string's escapes, counted only until they pass
+ * limit: a large page is refused before it is written */
+size_t written_at_least(const Value& v, size_t depth, size_t limit)
+{
+    switch (v.type) {
+    case Type::string:
+        return v.text.size() + 2;
+    case Type::null:
+        return 4;
+    case Type::boolean:
+        return v.boolean ? 4 : 5;
+    case Type::number:
+        return 1;
+    default:
+        break;
+    }
+    const size_t count = v.items.size() + v.members.size();
+    if (count == 0) {
+        return 2;
+    }
+    /* Each item's indented line and its end, the commas, "[\n" and the
+     * close's own indented line */
+    const size_t line = 2 * (depth + 1) + 1;
+    size_t n = 2 + (count - 1) + 2 * depth + 1;
+    for (const Value& item : v.items) {
+        n += line + written_at_least(item, depth + 1, limit);
+        if (n > limit) {
+            return n;
+        }
+    }
+    for (const Member& m : v.members) {
+        n += line + m.key.size() + 4 +
+             written_at_least(m.value, depth + 1, limit);
+        if (n > limit) {
+            return n;
+        }
+    }
+    return n;
+}
+
+} // namespace
+
 /* "pages": each path once, each file's envelope, in the manifest's order.
  * A packed page leaves files_ here, before the variants read it */
 void loader::read_pages(const Value& root, ecuio_plugin& p)
@@ -135,10 +180,15 @@ void loader::check_page(const Value& root, page& out)
                            std::to_string(pages->items.size()));
     }
     expect(pages->items.front(), Type::object, "a page");
+    const char* const over = "a page file is over 82,400 bytes as written";
+    /* The writing ends in a newline */
+    if (written_at_least(root, 0, ECUIO_PLUGIN_PAGE_MAX_BYTES) + 1 >
+        ECUIO_PLUGIN_PAGE_MAX_BYTES) {
+        refuse(root, over);
+    }
     out.text = ecuio_json::write(root);
     if (out.text.size() > ECUIO_PLUGIN_PAGE_MAX_BYTES) {
-        refuse(root, "a page file is " + std::to_string(out.text.size()) +
-                         " bytes as written, over 82,400");
+        refuse(root, over);
     }
 }
 

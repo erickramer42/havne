@@ -345,10 +345,47 @@ TEST(PluginPagesTest, APageFileIsBoundedAsReadAndAsWritten)
     k.pages[0].second = with_pad(fits + 1);
     Loaded written_past = load_packed(k);
     EXPECT_EQ(written_past.status, ECUIO_ERR_INVALID_ARGUMENT);
-    EXPECT_NE(written_past.detail.find("a page file is 82401 bytes as written, "
-                                       "over 82,400"),
-              std::string::npos)
+    EXPECT_NE(
+        written_past.detail.find("a page file is over 82,400 bytes as written"),
+        std::string::npos)
         << written_past.detail;
+}
+
+// The count that refuses a large page before writing it never exceeds the
+// writing: a page of nested lists and objects, keys and every kind of value
+// written to exactly the bound loads (the count is exact for it, so a
+// count one byte over refuses it), and a compact one past the bound once
+// indented is refused
+TEST(PluginPagesTest, APageIsJudgedByItsWritingBeforeItIsWritten)
+{
+    const auto shaped = [](size_t n) {
+        return R"({"format": 2, "form": "desktop", "x-deep": [[1, true, false, null],)"
+               R"( {"a": {"b": [{}, [], "cd"]}}], "x-pad": ")" +
+               std::string(n, 'a') +
+               R"(", "pages": [{"name": "E", "cells": [{"w": 3, "h": 3}]}]})";
+    };
+    const size_t base = written(shaped(0)).size();
+    Package k;
+    k.pages = {{"p.json", shaped(ECUIO_PLUGIN_PAGE_MAX_BYTES - base)}};
+    Loaded at = load_packed(k);
+    ASSERT_TRUE(at.plugin) << at.detail;
+    EXPECT_EQ(page_of(at.plugin.get(), 0).text_bytes,
+              ECUIO_PLUGIN_PAGE_MAX_BYTES);
+
+    std::string zeros;
+    for (int i = 0; i < 20000; ++i) {
+        zeros += i == 0 ? "0" : ",0";
+    }
+    k.pages[0].second = R"({"format": 2, "form": "phone", "x-pad": [)" + zeros +
+                        R"(], "pages": [{"name": "E"}]})";
+    ASSERT_LT(k.pages[0].second.size(), ECUIO_PLUGIN_PAGE_MAX_BYTES);
+    const Loaded both[] = {load_folder(k), load_packed(k)};
+    for (const Loaded& l : both) {
+        EXPECT_EQ(l.status, ECUIO_ERR_INVALID_ARGUMENT);
+        EXPECT_NE(l.detail.find("a page file is over 82,400 bytes as written"),
+                  std::string::npos)
+            << l.detail;
+    }
 }
 
 // A packed "files" holds 64 data files and 16 pages; past either, refused
