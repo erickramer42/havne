@@ -98,8 +98,9 @@ void only_keys(const Value& obj, std::initializer_list<const char*> allowed,
 
 /* A string of lo to hi bytes holding no NUL */
 const std::string& text_of(const Value& v, size_t lo, size_t hi,
-                           const std::string& what)
+                           std::string_view what_view)
 {
+    const std::string what(what_view);
     expect(v, Type::string, what);
     if (v.text.size() < lo || v.text.size() > hi) {
         refuse(v, what + " is " + std::to_string(v.text.size()) +

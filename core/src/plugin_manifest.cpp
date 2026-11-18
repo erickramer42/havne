@@ -43,12 +43,12 @@ bool path_ok(const std::string& p)
     return true;
 }
 
-const std::string& path_of(const Value& v, const std::string& what)
+const std::string& path_of(const Value& v, std::string_view what)
 {
     const std::string& p = text_of(v, 1, ECUIO_PLUGIN_PATH_MAX, what);
     if (!path_ok(p)) {
         refuse(v,
-               what + " " + q(p) +
+               std::string(what) + " " + q(p) +
                    " isn't a path in the package: relative, forward slashes, "
                    "no \".\" or \"..\" part");
     }

@@ -134,9 +134,10 @@ placed placed_json(const std::string& prefix, const ecuio_json::Error& error);
 
 /* Whether p is a path in a package: relative, forward slashes, no "."
  * or ".." part, no empty part, 1 to ECUIO_PLUGIN_PATH_MAX printable
- * ASCII bytes but backslash and colon. path_of reads one from v. */
+ * ASCII bytes but backslash and colon. path_of reads one from v (what a
+ * view, as text_of's). */
 bool path_ok(const std::string& p);
-const std::string& path_of(const Value& v, const std::string& what);
+const std::string& path_of(const Value& v, std::string_view what);
 
 class loader
 {

@@ -23,6 +23,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -66,11 +67,12 @@ uint8_t byte_of(const Value& v, const std::string& what)
     return static_cast<uint8_t>(hi * 16 + lo);
 }
 
-const Value& needed(const Value& in, const char* key, const std::string& words)
+/* words a view, as text_of's what */
+const Value& needed(const Value& in, const char* key, std::string_view words)
 {
     const Value* v = in.find(key);
     if (v == nullptr) {
-        refuse(in, words);
+        refuse(in, std::string(words));
     }
     return *v;
 }
