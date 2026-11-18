@@ -369,6 +369,14 @@ the name each signal is read by: a file's own key, or `obd2.rpm` and its
 kin in a file that extends `obd2`. A plugin's variant is checked the same
 with `--plugin <pkg> --variant <id>`.
 
+**In the app.** Settings, Signals, Add a signal has a computed type that
+writes the signal for you ([user-guide.md](user-guide.md)). It writes
+`kind`, `expr`, `unit`, `decimals` and `group` and no `read` or `field`,
+and raises `havne_signals` to 2 when the expression needs it. A computed
+signal whose key starts with a digit loads, but another expression can't
+read it by that key (an expression reads a leading digit as a number), so
+the form refuses such a name for a new signal.
+
 ### Units
 
 A unit is shown exactly as written. These convert when the imperial

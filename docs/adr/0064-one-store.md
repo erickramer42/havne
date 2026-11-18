@@ -446,6 +446,10 @@ sees an empty store.
    form's code keeps its document; only where the text goes changes.
 4. An unmigrated file (Q6) saves its kept bytes, as now.
 
+Amended 2026-11-17: the form's kinds gain `computed`
+([ADR-0062](0062-computed-grammar.md)'s appendix of 2026-11-17); it saves
+through the same `put_variant`.
+
 ### Q8. A plugin extending another plugin's variant
 
 **Options:** (a) now: a data file's `extends` names

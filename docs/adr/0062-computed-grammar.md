@@ -862,3 +862,20 @@ without an older one passing it by.
 
 All four calls only read the file, so any thread may call them while it
 lives.
+
+## Appendix: the editor and where a computed signal is kept (2026-11-17)
+
+The signal form writes a computed signal into the vehicle's own variant
+through `ecuio_plugin_put_variant` ([ADR-0064](0064-one-store.md) Q7.3),
+checking it as typed with the calls of the appendix above. A channel over
+another plugin's signals waits for a plugin that extends another's variant
+(ADR-0064 Q8).
+
+- **Not taken:** a layer for each vehicle merged by core (a second store,
+  a profile or URI key, a CLI flag), and a second data file in the picked
+  variant kept across re-imports.
+- **The first `obd2.` input adds `extends: "obd2"`** to the own variant, so
+  a vehicle's signals read with obd2's from the save that needs it; every
+  own plugin extending obd2 from its first save was the other pick.
+- **The preview is typed values, not a live timer.** The form can fill
+  them once from the connected session; nothing re-evaluates by itself.
